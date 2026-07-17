@@ -11,7 +11,7 @@
       <!-- Custom Logo or Default Logo -->
       <router-link
         :to="homePath"
-        class="sidebar-logo flex h-9 w-9 items-center justify-center overflow-hidden rounded-xl shadow-glow transition-opacity hover:opacity-80"
+        class="sidebar-logo flex h-9 w-9 items-center justify-center overflow-hidden rounded-[10px] bg-white ring-1 ring-gray-200/80 transition-opacity hover:opacity-80 dark:bg-dark-800 dark:ring-dark-700"
         @click="handleMenuItemClick(homePath)"
       >
         <img v-if="settingsLoaded" :src="siteLogo || '/logo.png'" alt="Logo" class="h-full w-full object-contain" />
@@ -19,7 +19,7 @@
       <div class="sidebar-brand" :class="{ 'sidebar-brand-collapsed': sidebarCollapsed }" :aria-hidden="sidebarCollapsed ? 'true' : 'false'">
         <router-link
           :to="homePath"
-          class="sidebar-brand-title text-lg font-bold text-gray-900 transition-colors hover:text-primary-600 dark:text-white dark:hover:text-primary-400"
+          class="sidebar-brand-title text-base font-semibold tracking-tight text-gray-950 transition-colors hover:text-primary-700 dark:text-white dark:hover:text-primary-400"
           @click="handleMenuItemClick(homePath)"
         >
           {{ siteName }}
@@ -148,7 +148,7 @@
     </nav>
 
     <!-- Bottom Section -->
-    <div class="mt-auto border-t border-gray-100 p-3 dark:border-dark-800">
+    <div class="sidebar-footer mt-auto border-t border-gray-100 p-3 dark:border-dark-800">
       <!-- Theme Toggle -->
       <button
         @click="toggleTheme"
@@ -181,7 +181,7 @@
   <transition name="fade">
     <div
       v-if="mobileOpen"
-      class="fixed inset-0 z-30 bg-black/50 lg:hidden"
+      class="fixed inset-0 z-30 bg-gray-950/40 backdrop-blur-[2px] lg:hidden"
       @click="closeMobile"
     ></div>
   </transition>
@@ -945,6 +945,16 @@ onBeforeUnmount(() => {
 </script>
 
 <style scoped>
+.sidebar {
+  @apply border-gray-100 bg-white dark:border-dark-800 dark:bg-dark-900;
+  box-shadow: 4px 0 24px rgb(15 23 42 / 0.025);
+  transition-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.sidebar-header {
+  @apply border-gray-100 px-4 dark:border-dark-800;
+}
+
 .sidebar-logo {
   flex: 0 0 2.25rem;
   min-width: 2.25rem;
@@ -954,6 +964,35 @@ onBeforeUnmount(() => {
   gap: 0;
   padding-left: 1.125rem;
   padding-right: 1.125rem;
+}
+
+.sidebar-nav {
+  @apply px-3 py-3;
+}
+
+.sidebar-section {
+  @apply mb-5;
+}
+
+.sidebar-link {
+  min-height: 2.5rem;
+  border-radius: 0.625rem;
+  transition-property: color, background-color, box-shadow;
+  transition-timing-function: ease-out;
+}
+
+.sidebar-link:focus-visible {
+  outline: 2px solid rgb(20 184 166 / 0.45);
+  outline-offset: 2px;
+}
+
+.sidebar-link-active {
+  @apply bg-primary-50/80 text-primary-700 hover:bg-primary-100/80 dark:bg-primary-900/20 dark:text-primary-300 dark:hover:bg-primary-900/30;
+  box-shadow: inset 0 0 0 1px rgb(20 184 166 / 0.08);
+}
+
+.sidebar-footer {
+  @apply bg-white dark:bg-dark-900;
 }
 
 .sidebar-brand {
@@ -983,6 +1022,7 @@ onBeforeUnmount(() => {
 }
 
 .sidebar-link-collapsed {
+  justify-content: center;
   gap: 0;
   padding-left: 0.875rem;
   padding-right: 0.875rem;
@@ -993,6 +1033,12 @@ onBeforeUnmount(() => {
   display: flex;
   align-items: center;
   min-height: 1.25rem;
+  margin-bottom: 0.5rem;
+  @apply text-gray-500 dark:text-dark-400;
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0;
+  text-transform: none;
   overflow: hidden;
   white-space: nowrap;
 }
@@ -1020,7 +1066,7 @@ onBeforeUnmount(() => {
   transition: opacity 0.18s ease;
 }
 
-.dark .sidebar-section-title::after {
+:global(.dark) .sidebar-section-title::after {
   background: rgb(55 65 81);
 }
 
@@ -1070,5 +1116,15 @@ onBeforeUnmount(() => {
   display: block;
   width: 1.25rem;
   height: 1.25rem;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sidebar,
+  .sidebar-brand,
+  .sidebar-label,
+  .sidebar-section-title-text,
+  .sidebar-section-title::after {
+    transition-duration: 0.01ms;
+  }
 }
 </style>

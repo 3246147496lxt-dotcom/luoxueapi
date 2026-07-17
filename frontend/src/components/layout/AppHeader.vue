@@ -1,28 +1,35 @@
 <template>
-  <header class="glass sticky top-0 z-30 border-b border-gray-200/50 dark:border-dark-700/50">
-    <div class="flex h-16 items-center justify-between px-4 md:px-6">
+  <header
+    class="sticky top-0 z-30 h-16 border-b border-gray-100 bg-white px-4 sm:px-5 md:px-6 lg:px-8 dark:border-dark-800 dark:bg-dark-900"
+  >
+    <div
+      class="mx-auto flex h-full w-full max-w-[1600px] items-center justify-between gap-3"
+    >
       <!-- Left: Mobile Menu Toggle + Page Title -->
-      <div class="flex items-center gap-4">
+      <div class="flex min-w-0 flex-1 items-center gap-3">
         <button
           @click="toggleMobileSidebar"
-          class="btn-ghost btn-icon lg:hidden"
+          class="btn-ghost btn-icon -ml-1 flex-shrink-0 rounded-lg lg:hidden"
           aria-label="Toggle Menu"
         >
           <Icon name="menu" size="md" />
         </button>
 
-        <div class="hidden lg:block">
-          <h1 class="text-lg font-semibold text-gray-900 dark:text-white">
+        <div class="hidden min-w-0 sm:block">
+          <h1 class="truncate text-base font-semibold tracking-tight text-gray-950 dark:text-white">
             {{ pageTitle }}
           </h1>
-          <p v-if="pageDescription" class="text-xs text-gray-500 dark:text-dark-400">
+          <p
+            v-if="pageDescription"
+            class="hidden max-w-xl truncate text-xs text-gray-500 dark:text-dark-400 xl:block"
+          >
             {{ pageDescription }}
           </p>
         </div>
       </div>
 
       <!-- Right: Announcements + Docs + Language + Subscriptions + Balance + User Dropdown -->
-      <div class="flex items-center gap-3">
+      <div class="flex flex-shrink-0 items-center gap-1 sm:gap-1.5">
         <!-- Announcement Bell -->
         <AnnouncementBell v-if="user" />
 
@@ -32,7 +39,7 @@
           :href="docUrl"
           target="_blank"
           rel="noopener noreferrer"
-          class="flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-sm font-medium text-gray-600 transition-colors hover:bg-gray-100 hover:text-gray-900 dark:text-dark-400 dark:hover:bg-dark-800 dark:hover:text-white"
+          class="flex h-9 items-center gap-1.5 rounded-lg border border-transparent px-2.5 text-sm font-medium text-gray-600 transition-colors hover:border-gray-200 hover:bg-gray-50 hover:text-gray-950 dark:text-dark-300 dark:hover:border-dark-700 dark:hover:bg-dark-800 dark:hover:text-white"
         >
           <Icon name="book" size="sm" />
           <span class="hidden sm:inline">{{ t('nav.docs') }}</span>
@@ -47,7 +54,7 @@
         <!-- Balance Display -->
         <div
           v-if="user"
-          class="group relative hidden items-center gap-2 rounded-xl bg-primary-50 px-3 py-1.5 dark:bg-primary-900/20 sm:flex"
+          class="group relative hidden h-9 items-center gap-2 rounded-lg border border-primary-100 bg-primary-50/80 px-3 dark:border-primary-900/50 dark:bg-primary-900/20 xl:flex"
         >
           <svg
             class="h-4 w-4 text-primary-600 dark:text-primary-400"
@@ -72,7 +79,7 @@
             {{ balanceFrozenLabel }}
           </span>
           <div
-            class="pointer-events-none absolute right-0 top-full mt-2 hidden w-56 rounded-lg border border-gray-200 bg-white p-3 text-xs shadow-lg group-hover:block dark:border-dark-700 dark:bg-dark-800"
+            class="pointer-events-none absolute right-0 top-full mt-2 hidden w-56 rounded-xl border border-gray-200 bg-white p-3 text-xs shadow-[0_12px_32px_rgba(15,23,42,0.10)] group-hover:block dark:border-dark-700 dark:bg-dark-800 dark:shadow-black/30"
           >
             <div class="flex items-center justify-between">
               <span class="text-gray-500 dark:text-dark-400">{{ balanceAvailableText }}</span>
@@ -92,13 +99,21 @@
         </div>
 
         <!-- User Dropdown -->
-        <div v-if="user" class="relative" ref="dropdownRef">
+        <div
+          v-if="user"
+          ref="dropdownRef"
+          class="relative sm:ml-1 sm:border-l sm:border-gray-200 sm:pl-2 dark:sm:border-dark-700"
+        >
           <button
             @click="toggleDropdown"
-            class="flex items-center gap-2 rounded-xl p-1.5 transition-colors hover:bg-gray-100 dark:hover:bg-dark-800"
+            class="flex h-10 items-center gap-2 rounded-lg px-1.5 transition-colors hover:bg-gray-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500/40 dark:hover:bg-dark-800"
             aria-label="User Menu"
+            aria-haspopup="menu"
+            :aria-expanded="dropdownOpen"
           >
-            <div class="flex h-8 w-8 items-center justify-center overflow-hidden rounded-xl bg-gradient-to-br from-primary-500 to-primary-600 text-sm font-medium text-white shadow-sm">
+            <div
+              class="flex h-8 w-8 items-center justify-center overflow-hidden rounded-lg bg-primary-600 text-sm font-semibold text-white ring-1 ring-primary-700/20 dark:bg-primary-500 dark:ring-white/10"
+            >
               <img
                 v-if="avatarUrl"
                 :src="avatarUrl"
@@ -120,7 +135,11 @@
 
           <!-- Dropdown Menu -->
           <transition name="dropdown">
-            <div v-if="dropdownOpen" class="dropdown right-0 mt-2 w-56">
+            <div
+              v-if="dropdownOpen"
+              class="header-dropdown dropdown right-0 mt-2 w-64"
+              role="menu"
+            >
               <!-- User Info -->
               <div class="border-b border-gray-100 px-4 py-3 dark:border-dark-700">
                 <div class="text-sm font-medium text-gray-900 dark:text-white">
@@ -372,12 +391,28 @@ onBeforeUnmount(() => {
 <style scoped>
 .dropdown-enter-active,
 .dropdown-leave-active {
-  transition: all 0.2s ease;
+  transition:
+    opacity 0.18s ease-out,
+    transform 0.18s ease-out;
 }
 
 .dropdown-enter-from,
 .dropdown-leave-to {
   opacity: 0;
   transform: scale(0.95) translateY(-4px);
+}
+
+.header-dropdown {
+  border-radius: 0.875rem;
+  box-shadow:
+    0 18px 40px rgb(15 23 42 / 0.12),
+    0 2px 8px rgb(15 23 42 / 0.06);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dropdown-enter-active,
+  .dropdown-leave-active {
+    transition-duration: 0.01ms;
+  }
 }
 </style>

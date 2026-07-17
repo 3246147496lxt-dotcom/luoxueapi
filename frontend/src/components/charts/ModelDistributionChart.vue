@@ -1,7 +1,7 @@
 <template>
-  <div class="card p-4">
-    <div class="mb-4 flex items-center justify-between gap-3">
-      <h3 class="text-sm font-semibold text-gray-900 dark:text-white">
+  <div class="card h-full p-5 md:p-6">
+    <div class="mb-5 flex items-center justify-between gap-3">
+      <h3 class="text-base font-semibold text-gray-900 dark:text-white">
         {{ !enableRankingView || activeView === 'model_distribution'
           ? t('admin.dashboard.modelDistribution')
           : t('admin.dashboard.spendingRankingTitle') }}

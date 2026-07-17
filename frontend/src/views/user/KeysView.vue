@@ -1900,7 +1900,7 @@ const executeCcsImport = (row: ApiKey, clientType: CcSwitchClientType) => {
       };
     }
   })`
-  const providerName = (publicSettings.value?.site_name || 'sub2api').trim() || 'sub2api'
+  const providerName = (publicSettings.value?.site_name || '落雪API').trim() || '落雪API'
   const deeplink = buildCcSwitchImportDeeplink({
     baseUrl,
     platform,

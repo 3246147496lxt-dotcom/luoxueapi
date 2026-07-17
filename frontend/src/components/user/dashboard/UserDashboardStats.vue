@@ -1,195 +1,273 @@
 <template>
-  <!-- Row 1: Core Stats -->
-  <div class="grid grid-cols-2 gap-4 lg:grid-cols-4">
-    <!-- Balance -->
-    <div v-if="!isSimple" class="card p-4">
-      <div class="flex items-center gap-3">
-        <div class="rounded-lg bg-emerald-100 p-2 dark:bg-emerald-900/30">
-          <svg class="h-5 w-5 text-emerald-600 dark:text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.25 18.75a60.07 60.07 0 0115.797 2.101c.727.198 1.453-.342 1.453-1.096V18.75M3.75 4.5v.75A.75.75 0 013 6h-.75m0 0v-.375c0-.621.504-1.125 1.125-1.125H20.25M2.25 6v9m18-10.5v.75c0 .414.336.75.75.75h.75m-1.5-1.5h.375c.621 0 1.125.504 1.125 1.125v9.75c0 .621-.504 1.125-1.125 1.125h-.375m1.5-1.5H21a.75.75 0 00-.75.75v.75m0 0H3.75m0 0h-.375a1.125 1.125 0 01-1.125-1.125V15m1.5 1.5v-.75A.75.75 0 003 15h-.75M15 10.5a3 3 0 11-6 0 3 3 0 016 0zm3 0h.008v.008H18V10.5zm-12 0h.008v.008H6V10.5z" />
-          </svg>
-        </div>
-        <div>
-          <p class="text-xs font-medium text-gray-500 dark:text-gray-400">{{ t('dashboard.balance') }}</p>
-          <p class="text-xl font-bold text-emerald-600 dark:text-emerald-400">${{ formatBalance(balance) }}</p>
-          <p class="text-xs text-gray-500 dark:text-gray-400">{{ t('common.available') }}</p>
-        </div>
+  <!-- Core metrics: one continuous horizontal strip instead of separate statistic cards. -->
+  <section
+    class="card grid grid-cols-1 gap-px overflow-hidden bg-gray-100 sm:grid-cols-2 dark:bg-dark-700"
+    :class="isSimple ? 'xl:grid-cols-3' : 'xl:grid-cols-4'"
+  >
+    <div v-if="!isSimple" class="min-w-0 bg-white p-5 md:p-6 dark:bg-dark-800">
+      <div class="flex items-center justify-between gap-4">
+        <p class="text-sm font-medium text-gray-500 dark:text-gray-400">{{ t('dashboard.balance') }}</p>
+        <span class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary-50 text-primary-700 dark:bg-primary-900/30 dark:text-primary-300">
+          <Icon name="dollar" size="sm" :stroke-width="1.75" />
+        </span>
       </div>
+      <p class="mt-5 truncate text-3xl font-semibold tracking-tight text-gray-950 dark:text-white">
+        ${{ formatBalance(balance) }}
+      </p>
+      <p class="mt-2 text-xs font-medium text-primary-700 dark:text-primary-300">{{ t('common.available') }}</p>
     </div>
 
-    <!-- API Keys -->
-    <div class="card p-4">
-      <div class="flex items-center gap-3">
-        <div class="rounded-lg bg-blue-100 p-2 dark:bg-blue-900/30">
-          <Icon name="key" size="md" class="text-blue-600 dark:text-blue-400" :stroke-width="2" />
-        </div>
-        <div>
-          <p class="text-xs font-medium text-gray-500 dark:text-gray-400">{{ t('dashboard.apiKeys') }}</p>
-          <p class="text-xl font-bold text-gray-900 dark:text-white">{{ stats?.total_api_keys || 0 }}</p>
-          <p class="text-xs text-green-600 dark:text-green-400">{{ stats?.active_api_keys || 0 }} {{ t('common.active') }}</p>
-        </div>
+    <div class="min-w-0 bg-white p-5 md:p-6 dark:bg-dark-800">
+      <div class="flex items-center justify-between gap-4">
+        <p class="text-sm font-medium text-gray-500 dark:text-gray-400">{{ t('dashboard.apiKeys') }}</p>
+        <span class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary-50 text-primary-700 dark:bg-primary-900/30 dark:text-primary-300">
+          <Icon name="key" size="sm" :stroke-width="1.75" />
+        </span>
       </div>
+      <p class="mt-5 text-3xl font-semibold tracking-tight text-gray-950 dark:text-white">
+        {{ stats?.total_api_keys || 0 }}
+      </p>
+      <p class="mt-2 text-xs font-medium text-primary-700 dark:text-primary-300">
+        {{ stats?.active_api_keys || 0 }} {{ t('common.active') }}
+      </p>
     </div>
 
-    <!-- Today Requests -->
-    <div class="card p-4">
-      <div class="flex items-center gap-3">
-        <div class="rounded-lg bg-green-100 p-2 dark:bg-green-900/30">
-          <Icon name="chart" size="md" class="text-green-600 dark:text-green-400" :stroke-width="2" />
-        </div>
-        <div>
-          <p class="text-xs font-medium text-gray-500 dark:text-gray-400">{{ t('dashboard.todayRequests') }}</p>
-          <p class="text-xl font-bold text-gray-900 dark:text-white">{{ stats?.today_requests || 0 }}</p>
-          <p class="text-xs text-gray-500 dark:text-gray-400">{{ t('common.total') }}: {{ formatNumber(stats?.total_requests || 0) }}</p>
-        </div>
+    <div class="min-w-0 bg-white p-5 md:p-6 dark:bg-dark-800">
+      <div class="flex items-center justify-between gap-4">
+        <p class="text-sm font-medium text-gray-500 dark:text-gray-400">{{ t('dashboard.todayRequests') }}</p>
+        <span class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-primary-50 text-primary-700 dark:bg-primary-900/30 dark:text-primary-300">
+          <Icon name="chart" size="sm" :stroke-width="1.75" />
+        </span>
       </div>
+      <p class="mt-5 text-3xl font-semibold tracking-tight text-gray-950 dark:text-white">
+        {{ formatNumber(stats?.today_requests || 0) }}
+      </p>
+      <p class="mt-2 text-xs text-gray-500 dark:text-gray-400">
+        {{ t('common.total') }}: {{ formatNumber(stats?.total_requests || 0) }}
+      </p>
     </div>
 
-    <!-- Today Cost -->
-    <div class="card p-4">
-      <div class="flex items-center gap-3">
-        <div class="rounded-lg bg-purple-100 p-2 dark:bg-purple-900/30">
-          <Icon name="dollar" size="md" class="text-purple-600 dark:text-purple-400" :stroke-width="2" />
-        </div>
-        <div>
-          <p class="text-xs font-medium text-gray-500 dark:text-gray-400">{{ t('dashboard.todayCost') }}</p>
-          <p class="text-xl font-bold text-gray-900 dark:text-white">
-            <span class="text-purple-600 dark:text-purple-400" :title="t('dashboard.actual')">${{ formatCost(stats?.today_actual_cost || 0) }}</span>
-            <span class="text-sm font-normal text-gray-400 dark:text-gray-500" :title="t('dashboard.standard')"> / ${{ formatCost(stats?.today_cost || 0) }}</span>
-          </p>
-          <p class="text-xs">
-            <span class="text-gray-500 dark:text-gray-400">{{ t('common.total') }}: </span>
-            <span class="text-purple-600 dark:text-purple-400" :title="t('dashboard.actual')">${{ formatCost(stats?.total_actual_cost || 0) }}</span>
-            <span class="text-gray-400 dark:text-gray-500" :title="t('dashboard.standard')"> / ${{ formatCost(stats?.total_cost || 0) }}</span>
-          </p>
-        </div>
+    <div class="min-w-0 bg-white p-5 md:p-6 dark:bg-dark-800">
+      <div class="flex items-center justify-between gap-4">
+        <p class="text-sm font-medium text-gray-500 dark:text-gray-400">{{ t('dashboard.todayCost') }}</p>
+        <span class="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-amber-50 text-amber-700 dark:bg-amber-900/20 dark:text-amber-300">
+          <Icon name="dollar" size="sm" :stroke-width="1.75" />
+        </span>
+      </div>
+      <p class="mt-5 truncate text-3xl font-semibold tracking-tight text-gray-950 dark:text-white" :title="t('dashboard.actual')">
+        ${{ formatCost(stats?.today_actual_cost || 0) }}
+      </p>
+      <div class="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
+        <span class="text-gray-500 dark:text-gray-400" :title="t('dashboard.standard')">
+          {{ t('dashboard.standard') }} ${{ formatCost(stats?.today_cost || 0) }}
+        </span>
+        <span class="text-gray-300 dark:text-dark-600">·</span>
+        <span class="text-primary-700 dark:text-primary-300" :title="t('dashboard.actual')">
+          {{ t('common.total') }} ${{ formatCost(stats?.total_actual_cost || 0) }}
+        </span>
+        <span class="text-gray-400 dark:text-gray-500" :title="t('dashboard.standard')">
+          / ${{ formatCost(stats?.total_cost || 0) }}
+        </span>
       </div>
     </div>
-  </div>
+  </section>
 
-  <!-- Row 2: Token Stats -->
-  <div class="grid grid-cols-2 gap-4 lg:grid-cols-4">
-    <!-- Today Tokens -->
-    <div class="card p-4">
-      <div class="flex items-center gap-3">
-        <div class="rounded-lg bg-amber-100 p-2 dark:bg-amber-900/30">
-          <Icon name="cube" size="md" class="text-amber-600 dark:text-amber-400" :stroke-width="2" />
-        </div>
-        <div>
-          <p class="text-xs font-medium text-gray-500 dark:text-gray-400">{{ t('dashboard.todayTokens') }}</p>
-          <p class="text-xl font-bold text-gray-900 dark:text-white">{{ formatTokens(stats?.today_tokens || 0) }}</p>
-          <p class="text-xs text-gray-500 dark:text-gray-400">{{ t('dashboard.input') }}: {{ formatTokens(stats?.today_input_tokens || 0) }} / {{ t('dashboard.output') }}: {{ formatTokens(stats?.today_output_tokens || 0) }}</p>
-        </div>
-      </div>
-    </div>
-
-    <!-- Total Tokens -->
-    <div class="card p-4">
-      <div class="flex items-center gap-3">
-        <div class="rounded-lg bg-indigo-100 p-2 dark:bg-indigo-900/30">
-          <Icon name="database" size="md" class="text-indigo-600 dark:text-indigo-400" :stroke-width="2" />
-        </div>
-        <div>
-          <p class="text-xs font-medium text-gray-500 dark:text-gray-400">{{ t('dashboard.totalTokens') }}</p>
-          <p class="text-xl font-bold text-gray-900 dark:text-white">{{ formatTokens(stats?.total_tokens || 0) }}</p>
-          <p class="text-xs text-gray-500 dark:text-gray-400">{{ t('dashboard.input') }}: {{ formatTokens(stats?.total_input_tokens || 0) }} / {{ t('dashboard.output') }}: {{ formatTokens(stats?.total_output_tokens || 0) }}</p>
-        </div>
-      </div>
-    </div>
-
-    <!-- Performance (RPM/TPM) -->
-    <div class="card p-4">
-      <div class="flex items-center gap-3">
-        <div class="rounded-lg bg-violet-100 p-2 dark:bg-violet-900/30">
-          <Icon name="bolt" size="md" class="text-violet-600 dark:text-violet-400" :stroke-width="2" />
-        </div>
-        <div class="flex-1">
-          <p class="text-xs font-medium text-gray-500 dark:text-gray-400">{{ t('dashboard.performance') }}</p>
-          <div class="flex items-baseline gap-2">
-            <p class="text-xl font-bold text-gray-900 dark:text-white">{{ formatTokens(stats?.rpm || 0) }}</p>
-            <span class="text-xs text-gray-500 dark:text-gray-400">RPM</span>
-          </div>
-          <div class="flex items-baseline gap-2">
-            <p class="text-sm font-semibold text-violet-600 dark:text-violet-400">{{ formatTokens(stats?.tpm || 0) }}</p>
-            <span class="text-xs text-gray-500 dark:text-gray-400">TPM</span>
+  <!-- Token composition and performance are paired as a primary instrument + summary. -->
+  <div class="grid grid-cols-1 gap-5 xl:grid-cols-[minmax(0,1.7fr)_minmax(17rem,0.8fr)]">
+    <section class="card p-5 md:p-6">
+      <div class="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+        <div class="flex items-center gap-3">
+          <span class="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-primary-50 text-primary-700 dark:bg-primary-900/30 dark:text-primary-300">
+            <Icon name="cube" size="md" :stroke-width="1.75" />
+          </span>
+          <div>
+            <p class="text-sm font-medium text-gray-500 dark:text-gray-400">{{ t('dashboard.todayTokens') }}</p>
+            <p class="mt-0.5 text-3xl font-semibold tracking-tight text-gray-950 dark:text-white">
+              {{ formatTokens(stats?.today_tokens || 0) }}
+            </p>
           </div>
         </div>
+        <div class="sm:text-right">
+          <p class="text-xs text-gray-500 dark:text-gray-400">{{ t('dashboard.totalTokens') }}</p>
+          <p class="mt-1 flex items-center gap-2 text-lg font-semibold text-gray-900 sm:justify-end dark:text-white">
+            <Icon name="database" size="sm" :stroke-width="1.75" class="text-gray-400" />
+            {{ formatTokens(stats?.total_tokens || 0) }}
+          </p>
+          <p class="mt-1 text-[11px] text-gray-400 dark:text-gray-500">
+            {{ t('dashboard.input') }} {{ formatTokens(stats?.total_input_tokens || 0) }} ·
+            {{ t('dashboard.output') }} {{ formatTokens(stats?.total_output_tokens || 0) }}
+          </p>
+        </div>
       </div>
-    </div>
 
-    <!-- Avg Response Time -->
-    <div class="card p-4">
-      <div class="flex items-center gap-3">
-        <div class="rounded-lg bg-rose-100 p-2 dark:bg-rose-900/30">
-          <Icon name="clock" size="md" class="text-rose-600 dark:text-rose-400" :stroke-width="2" />
+      <div class="mt-8 grid gap-6 md:grid-cols-[8.5rem_minmax(0,1fr)] md:items-center">
+        <div class="md:border-r md:border-gray-100 md:pr-6 dark:md:border-dark-700">
+          <p class="text-5xl font-semibold tracking-tight text-gray-950 dark:text-white">
+            {{ Math.round(todayTokenComposition.inputShare) }}<span class="ml-1 text-lg font-medium text-gray-400">%</span>
+          </p>
+          <p class="mt-2 text-sm text-gray-500 dark:text-gray-400">{{ t('dashboard.input') }}</p>
         </div>
-        <div>
-          <p class="text-xs font-medium text-gray-500 dark:text-gray-400">{{ t('dashboard.avgResponse') }}</p>
-          <p class="text-xl font-bold text-gray-900 dark:text-white">{{ formatDuration(stats?.average_duration_ms || 0) }}</p>
-          <p class="text-xs text-gray-500 dark:text-gray-400">{{ t('dashboard.averageTime') }}</p>
+
+        <div class="min-w-0">
+          <div
+            class="flex h-4 w-full overflow-hidden rounded-full bg-gray-100 dark:bg-dark-700"
+            role="img"
+            :aria-label="`${t('dashboard.input')} ${Math.round(todayTokenComposition.inputShare)}%, ${t('dashboard.output')} ${Math.round(todayTokenComposition.outputShare)}%, ${t('dashboard.cache')} ${Math.round(todayTokenComposition.cacheShare)}%`"
+          >
+            <span
+              class="h-full bg-primary-500"
+              :style="{ width: `${todayTokenComposition.inputShare}%` }"
+              :title="`${t('dashboard.input')}: ${formatTokens(todayTokenComposition.input)}`"
+            />
+            <span
+              class="h-full bg-amber-200 dark:bg-amber-400"
+              :style="{ width: `${todayTokenComposition.outputShare}%` }"
+              :title="`${t('dashboard.output')}: ${formatTokens(todayTokenComposition.output)}`"
+            />
+            <span
+              class="h-full bg-gray-300 dark:bg-dark-500"
+              :style="{ width: `${todayTokenComposition.cacheShare}%` }"
+              :title="`${t('dashboard.cache')}: ${formatTokens(todayTokenComposition.cache)}`"
+            />
+          </div>
+
+          <dl class="mt-5 grid grid-cols-1 gap-3 sm:grid-cols-3">
+            <div class="min-w-0">
+              <dt class="flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400">
+                <span class="h-2 w-2 rounded-full bg-primary-500" />
+                {{ t('dashboard.input') }}
+              </dt>
+              <dd class="mt-1 truncate font-mono text-sm font-semibold text-gray-900 dark:text-white">
+                {{ formatTokens(todayTokenComposition.input) }}
+              </dd>
+            </div>
+            <div class="min-w-0">
+              <dt class="flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400">
+                <span class="h-2 w-2 rounded-full bg-amber-200 dark:bg-amber-400" />
+                {{ t('dashboard.output') }}
+              </dt>
+              <dd class="mt-1 truncate font-mono text-sm font-semibold text-gray-900 dark:text-white">
+                {{ formatTokens(todayTokenComposition.output) }}
+              </dd>
+            </div>
+            <div class="min-w-0">
+              <dt class="flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400">
+                <span class="h-2 w-2 rounded-full bg-gray-300 dark:bg-dark-500" />
+                {{ t('dashboard.cache') }}
+              </dt>
+              <dd class="mt-1 truncate font-mono text-sm font-semibold text-gray-900 dark:text-white">
+                {{ formatTokens(todayTokenComposition.cache) }}
+              </dd>
+            </div>
+          </dl>
         </div>
       </div>
-    </div>
+    </section>
+
+    <section class="card overflow-hidden">
+      <div class="flex items-center justify-between border-b border-primary-100 bg-primary-50/70 px-5 py-4 dark:border-primary-900/40 dark:bg-primary-950/30">
+        <div>
+          <h3 class="text-sm font-semibold text-gray-900 dark:text-white">{{ t('dashboard.performance') }}</h3>
+          <p class="mt-1 text-xs text-primary-700 dark:text-primary-300">RPM · TPM</p>
+        </div>
+        <span class="flex h-9 w-9 items-center justify-center rounded-full bg-white text-primary-700 dark:bg-dark-800 dark:text-primary-300">
+          <Icon name="bolt" size="md" :stroke-width="1.75" />
+        </span>
+      </div>
+      <dl class="divide-y divide-gray-100 dark:divide-dark-700">
+        <div class="flex items-end justify-between gap-4 px-5 py-4">
+          <dt class="text-sm text-gray-500 dark:text-gray-400">RPM</dt>
+          <dd class="font-mono text-2xl font-semibold tracking-tight text-gray-950 dark:text-white">
+            {{ formatTokens(stats?.rpm || 0) }}
+          </dd>
+        </div>
+        <div class="flex items-end justify-between gap-4 px-5 py-4">
+          <dt class="text-sm text-gray-500 dark:text-gray-400">TPM</dt>
+          <dd class="font-mono text-2xl font-semibold tracking-tight text-gray-950 dark:text-white">
+            {{ formatTokens(stats?.tpm || 0) }}
+          </dd>
+        </div>
+        <div class="flex items-center justify-between gap-4 px-5 py-4">
+          <dt>
+            <p class="text-sm text-gray-500 dark:text-gray-400">{{ t('dashboard.avgResponse') }}</p>
+            <p class="mt-1 text-xs text-gray-400 dark:text-gray-500">{{ t('dashboard.averageTime') }}</p>
+          </dt>
+          <dd class="flex items-center gap-2 font-mono text-xl font-semibold text-gray-950 dark:text-white">
+            <Icon name="clock" size="sm" :stroke-width="1.75" class="text-gray-400" />
+            {{ formatDuration(stats?.average_duration_ms || 0) }}
+          </dd>
+        </div>
+      </dl>
+    </section>
   </div>
 
-  <!-- Row 3: Per-platform breakdown -->
-  <div v-if="!isSimple && platformCards.length > 0" class="card p-4">
-    <div class="mb-3 flex items-center justify-between">
+  <!-- Per-platform usage: a dense, scan-friendly list with dividers. -->
+  <section v-if="!isSimple && platformCards.length > 0" class="card overflow-hidden">
+    <div class="flex items-center justify-between gap-4 px-5 py-5 md:px-6">
       <h3 class="text-sm font-semibold text-gray-900 dark:text-white">{{ t('dashboard.platformBreakdown') }}</h3>
-      <span class="text-xs text-gray-500 dark:text-gray-400">
+      <span class="rounded-full bg-primary-50 px-3 py-1 text-xs font-medium text-primary-700 dark:bg-primary-900/30 dark:text-primary-300">
         {{ t('dashboard.platformCount', { count: sortedPlatforms.length }) }}
       </span>
     </div>
-    <div class="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
-      <div
-        v-for="item in platformCards"
-        :key="item.platform"
-        :class="[
-          'rounded-lg border p-3',
-          item.isOther
-            ? 'border-dashed border-gray-300 bg-gray-50 dark:border-dark-500 dark:bg-dark-700/30'
-            : 'border-gray-200 dark:border-dark-600'
-        ]"
-      >
-        <div class="flex items-center justify-between">
-          <span class="text-sm font-semibold text-gray-900 dark:text-white">
-            {{ item.isOther ? t('dashboard.platformOther') : platformLabel(item.platform) }}
-          </span>
-          <span class="font-mono text-sm text-purple-600 dark:text-purple-400" :title="t('dashboard.actual')">
-            ${{ formatCost(item.total_actual_cost) }}
-          </span>
-        </div>
-        <div class="mt-2 space-y-1 text-xs">
-          <div class="flex items-center justify-between">
-            <span class="text-gray-500 dark:text-gray-400">{{ t('dashboard.todayCost') }}</span>
-            <span class="font-mono text-gray-900 dark:text-white">${{ formatCost(item.today_actual_cost) }}</span>
+
+    <div class="divide-y divide-gray-100 border-t border-gray-100 dark:divide-dark-700 dark:border-dark-700">
+      <div v-for="item in platformCards" :key="item.platform" class="px-5 py-5 md:px-6">
+        <div class="grid gap-5 lg:grid-cols-[minmax(10rem,0.8fr)_minmax(0,2.2fr)] lg:items-center">
+          <div class="min-w-0">
+            <div class="flex items-center gap-2">
+              <span
+                class="h-2.5 w-2.5 shrink-0 rounded-full"
+                :class="item.isOther ? 'bg-gray-300 dark:bg-dark-500' : 'bg-primary-400'"
+              />
+              <p class="truncate text-base font-semibold text-gray-950 dark:text-white">
+                {{ item.isOther ? t('dashboard.platformOther') : platformLabel(item.platform) }}
+              </p>
+            </div>
+            <p v-if="hasAnyLimit(item.quota) && !item.isOther" class="mt-2 text-xs text-gray-500 dark:text-gray-400">
+              {{ t('dashboard.platformQuota.title') }}
+            </p>
           </div>
-          <div class="flex items-center justify-between">
-            <span class="text-gray-500 dark:text-gray-400">{{ t('dashboard.requests') }}</span>
-            <span class="font-mono text-gray-700 dark:text-gray-300">
-              {{ item.total_requests > 0 ? formatNumber(item.total_requests) : '-' }}
-            </span>
-          </div>
-          <div class="flex items-center justify-between">
-            <span class="text-gray-500 dark:text-gray-400">{{ t('dashboard.tokens') }}</span>
-            <span class="font-mono text-gray-700 dark:text-gray-300">
-              {{ item.total_tokens > 0 ? formatTokens(item.total_tokens) : '-' }}
-            </span>
-          </div>
+
+          <dl class="grid grid-cols-2 gap-x-6 gap-y-4 sm:grid-cols-4">
+            <div class="min-w-0">
+              <dt class="text-xs text-gray-500 dark:text-gray-400">{{ t('common.total') }}</dt>
+              <dd class="mt-1 truncate font-mono text-sm font-semibold text-primary-700 dark:text-primary-300" :title="t('dashboard.actual')">
+                ${{ formatCost(item.total_actual_cost) }}
+              </dd>
+            </div>
+            <div class="min-w-0">
+              <dt class="text-xs text-gray-500 dark:text-gray-400">{{ t('dashboard.todayCost') }}</dt>
+              <dd class="mt-1 truncate font-mono text-sm font-semibold text-gray-900 dark:text-white">
+                ${{ formatCost(item.today_actual_cost) }}
+              </dd>
+            </div>
+            <div class="min-w-0">
+              <dt class="text-xs text-gray-500 dark:text-gray-400">{{ t('dashboard.requests') }}</dt>
+              <dd class="mt-1 truncate font-mono text-sm font-medium text-gray-700 dark:text-gray-300">
+                {{ item.total_requests > 0 ? formatNumber(item.total_requests) : '-' }}
+              </dd>
+            </div>
+            <div class="min-w-0">
+              <dt class="text-xs text-gray-500 dark:text-gray-400">{{ t('dashboard.tokens') }}</dt>
+              <dd class="mt-1 truncate font-mono text-sm font-medium text-gray-700 dark:text-gray-300">
+                {{ item.total_tokens > 0 ? formatTokens(item.total_tokens) : '-' }}
+              </dd>
+            </div>
+          </dl>
         </div>
 
         <!-- Quota 区：仅当 quota 配置存在、非 __other__ 且至少有一个窗口配了 limit 时显示 -->
-        <div v-if="hasAnyLimit(item.quota) && !item.isOther" class="mt-3 space-y-1.5 border-t border-gray-200 pt-2 dark:border-dark-700">
-          <p class="text-[10px] uppercase tracking-wide text-gray-400">
-            {{ t('dashboard.platformQuota.title') }}
-          </p>
+        <div
+          v-if="hasAnyLimit(item.quota) && !item.isOther"
+          class="mt-5 grid grid-cols-1 gap-4 border-t border-dashed border-gray-200 pt-4 sm:grid-cols-2 xl:grid-cols-3 dark:border-dark-600"
+        >
           <template v-for="w in (['daily', 'weekly', 'monthly'] as const)" :key="w">
-            <div v-if="quotaVal(item.quota, `${w}_limit_usd`) != null" class="space-y-0.5">
+            <div v-if="quotaVal(item.quota, `${w}_limit_usd`) != null" class="min-w-0 space-y-2">
               <!-- limit=0：完全禁用 -->
               <template v-if="(quotaVal(item.quota, `${w}_limit_usd`) as number) === 0">
-                <div class="flex items-center justify-between text-xs">
-                  <span class="text-gray-600 dark:text-gray-300">{{ t(`dashboard.platformQuota.${w}`) }}</span>
-                  <span class="font-mono text-red-500">{{ t('dashboard.platformQuota.disabled') }}</span>
+                <div class="flex items-center justify-between gap-3 text-xs">
+                  <span class="truncate text-gray-600 dark:text-gray-300">{{ t(`dashboard.platformQuota.${w}`) }}</span>
+                  <span class="shrink-0 font-mono text-red-500">{{ t('dashboard.platformQuota.disabled') }}</span>
                 </div>
                 <div class="h-1.5 w-full overflow-hidden rounded-full bg-gray-200 dark:bg-dark-700">
                   <div class="h-full w-full rounded-full bg-red-500" />
@@ -197,9 +275,9 @@
               </template>
               <!-- limit>0：正常用量进度条 -->
               <template v-else>
-                <div class="flex items-center justify-between text-xs">
-                  <span class="text-gray-600 dark:text-gray-300">{{ t(`dashboard.platformQuota.${w}`) }}</span>
-                  <span class="font-mono text-gray-700 dark:text-gray-200">
+                <div class="flex items-center justify-between gap-3 text-xs">
+                  <span class="truncate text-gray-600 dark:text-gray-300">{{ t(`dashboard.platformQuota.${w}`) }}</span>
+                  <span class="shrink-0 font-mono text-gray-700 dark:text-gray-200">
                     ${{ formatUsd((quotaVal(item.quota, `${w}_usage_usd`) as number) ?? 0) }} / ${{ formatUsd(quotaVal(item.quota, `${w}_limit_usd`) as number) }}
                   </span>
                 </div>
@@ -219,7 +297,7 @@
         </div>
       </div>
     </div>
-  </div>
+  </section>
 </template>
 
 <script setup lang="ts">
@@ -259,6 +337,27 @@ const platformLabel = (p: string) => PLATFORM_LABELS[p] ?? p
 const sortedPlatforms = computed(() => {
   const list = props.stats?.by_platform ?? []
   return [...list].sort((a, b) => b.total_actual_cost - a.total_actual_cost)
+})
+
+// 仅用于仪表展示：将今日 Token 拆成输入、输出与两类缓存的合计占比。
+const todayTokenComposition = computed(() => {
+  const input = Math.max(0, props.stats?.today_input_tokens ?? 0)
+  const output = Math.max(0, props.stats?.today_output_tokens ?? 0)
+  const cache = Math.max(
+    0,
+    (props.stats?.today_cache_creation_tokens ?? 0) + (props.stats?.today_cache_read_tokens ?? 0)
+  )
+  const total = input + output + cache
+  const share = (value: number) => (total > 0 ? (value / total) * 100 : 0)
+
+  return {
+    input,
+    output,
+    cache,
+    inputShare: share(input),
+    outputShare: share(output),
+    cacheShare: share(cache)
+  }
 })
 
 // 处理"各平台之和 < 总值"的差值：后端按平台聚合时过滤了无法归属平台的行
