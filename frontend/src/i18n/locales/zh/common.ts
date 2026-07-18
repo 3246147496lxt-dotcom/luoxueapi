@@ -106,7 +106,7 @@ export default {
     riskNotice: '本确认用于以清晰、显著、可留痕的方式提示自部署实例的合规义务与运营风险。',
     version: '协议版本',
     openDocument: '在 GitHub 查看协议文件',
-    documentSource: '协议正文来自本项目仓库中的 Markdown 文件。修改协议内容时必须同步递增协议版本；已确认的旧版本将失效，控制台使用者须重新确认。',
+    documentSource: '协议正文保留自上游 Sub2API 项目。落雪API暂时保留其原始名称与协议版本，以维持既有确认记录；修改协议内容时必须同步递增版本并重新确认。',
     inputLabel: '请逐字输入以下确认短语',
     inputPlaceholder: '输入确认短语以继续',
     inputMismatch: '确认短语不匹配，请逐字输入提示内容。',

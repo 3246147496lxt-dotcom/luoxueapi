@@ -1,4 +1,4 @@
-# Sub2API
+# LuoxueAPI
 
 <div align="center">
 
@@ -8,15 +8,15 @@
 [![Redis](https://img.shields.io/badge/Redis-7+-DC382D.svg)](https://redis.io/)
 [![Docker](https://img.shields.io/badge/Docker-Ready-2496ED.svg)](https://www.docker.com/)
 
-<a href="https://trendshift.io/repositories/21823" target="_blank"><img src="https://trendshift.io/api/badge/repositories/21823" alt="Wei-Shaw%2Fsub2api | Trendshift" width="250" height="55"/></a>
-
 **サブスクリプションクォータ配分のための AI API ゲートウェイプラットフォーム**
 
 [English](README.md) | [中文](README_CN.md) | 日本語
 
 </div>
 
-## ⚠️ 重要なお知らせ
+> **プロジェクトの由来:** LuoxueAPI は [Wei-Shaw/Sub2API](https://github.com/Wei-Shaw/sub2api) をベースにしたカスタムディストリビューションです。以下の上流プロジェクトのお知らせ、スポンサー情報、エコシステム、指標は帰属表示のために保持しており、LuoxueAPI 自体へのスポンサー提供や商用許諾を示すものではありません。
+
+## ⚠️ 上流プロジェクトの重要なお知らせ
 
 本プロジェクトをご利用になる前に、以下の内容を必ずよくお読みください：
 
@@ -25,9 +25,9 @@
 - **📖 免責事項**：本プロジェクトは技術的な学習および研究の目的でのみ提供されます。本プロジェクトの使用により生じたアカウントの停止、サービスの中断、データの損失、その他一切の直接的または間接的な損害について、作者は一切の責任を負いません。
 - **🚫 商用利用の非許諾**：本プロジェクトの開発者は、いかなる個人または組織に対しても、本プロジェクトを利用したいかなる形態の商業運営も一切許諾していません。本プロジェクトの名義で、または本プロジェクトに基づいて行われる商業行為はすべて本プロジェクトおよびその開発者とは無関係であり、それにより生じる一切の紛争、損失、法的責任は行為者自身が負うものとします。
 
-## ❤️ スポンサー
+## ❤️ 上流プロジェクトのスポンサー
 
-> [こちらに掲載しませんか？](mailto:support@sub2api.org)
+> [上流プロジェクトのスポンサー窓口](mailto:support@sub2api.org)
 
 <table>
 
@@ -171,7 +171,11 @@
 
 ## 概要
 
-Sub2API は、AI 製品のサブスクリプションから API クォータを配分・管理するために設計された AI API ゲートウェイプラットフォームです。ユーザーはプラットフォームが生成した API キーを通じて上流の AI サービスにアクセスでき、プラットフォームは認証、課金、負荷分散、リクエスト転送を処理します。
+LuoxueAPI（落雪API）は、AI 製品のサブスクリプションから API クォータを配分・管理するために設計された AI API ゲートウェイプラットフォームです。ユーザーはプラットフォームが生成した API キーを通じて上流の AI サービスにアクセスでき、プラットフォームは認証、課金、負荷分散、リクエスト転送を処理します。
+
+> **互換性に関する注意:** 既存環境を安全にインプレースアップグレードできるよう、実行ファイル、systemd サービス、コンテナイメージ、データベース、設定パスでは当面 `sub2api` の技術識別子を維持します。公開製品ブランドは **LuoxueAPI（落雪API）** です。
+>
+> 現在、この Fork と GHCR パッケージは非公開のため、公開ワンラインインストーラーと Docker の例では引き続き上流 Sub2API の配布物を使用します。LuoxueAPI 固有のコードをデプロイする場合は、リポジトリアクセス権を持つアカウントで、下記のソースビルド手順を使用してください。
 
 ## 機能
 
@@ -185,9 +189,9 @@ Sub2API は、AI 製品のサブスクリプションから API クォータを�
 - **管理ダッシュボード** - 監視・管理のための Web インターフェース
 - **外部システム連携** - 外部システム（チケット管理など）を iframe 経由で管理ダッシュボードに埋め込み可能
 
-## エコシステム
+## 上流プロジェクトのエコシステム
 
-Sub2API を拡張・統合するコミュニティプロジェクト:
+上流の Sub2API を拡張・統合するコミュニティプロジェクト:
 
 | プロジェクト | 説明 | 機能 |
 |---------|-------------|----------|
@@ -207,7 +211,7 @@ Sub2API を拡張・統合するコミュニティプロジェクト:
 
 ## Nginx リバースプロキシに関する注意
 
-Sub2API（または CRS）を Nginx でリバースプロキシし、Codex CLI と組み合わせて使用する場合、Nginx の `http` ブロックに以下の設定を追加してください:
+LuoxueAPI（または CRS）を Nginx でリバースプロキシし、Codex CLI と組み合わせて使用する場合、Nginx の `http` ブロックに以下の設定を追加してください:
 
 ```nginx
 underscores_in_headers on;
@@ -303,7 +307,7 @@ PostgreSQL と Redis のコンテナを含む Docker Compose でデプロイし�
 
 ```bash
 # デプロイ用ディレクトリを作成
-mkdir -p sub2api-deploy && cd sub2api-deploy
+mkdir -p luoxueapi-deploy && cd luoxueapi-deploy
 
 # デプロイ準備スクリプトをダウンロードして実行
 curl -sSL https://raw.githubusercontent.com/Wei-Shaw/sub2api/main/deploy/docker-deploy.sh | bash
@@ -328,8 +332,8 @@ docker compose logs -f sub2api
 
 ```bash
 # 1. リポジトリをクローン
-git clone https://github.com/Wei-Shaw/sub2api.git
-cd sub2api/deploy
+git clone https://github.com/3246147496lxt-dotcom/luoxueapi.git
+cd luoxueapi/deploy
 
 # 2. 環境設定ファイルをコピー
 cp .env.example .env
@@ -423,14 +427,14 @@ docker compose -f docker-compose.local.yml up -d
 # 移行元サーバーにて
 docker compose -f docker-compose.local.yml down
 cd ..
-tar czf sub2api-complete.tar.gz sub2api-deploy/
+tar czf luoxueapi-complete.tar.gz luoxueapi-deploy/
 
 # 新しいサーバーに転送
-scp sub2api-complete.tar.gz user@new-server:/path/
+scp luoxueapi-complete.tar.gz user@new-server:/path/
 
 # 移行先サーバーにて
-tar xzf sub2api-complete.tar.gz
-cd sub2api-deploy/
+tar xzf luoxueapi-complete.tar.gz
+cd luoxueapi-deploy/
 docker compose -f docker-compose.local.yml up -d
 ```
 
@@ -455,11 +459,11 @@ rm -rf data/ postgres_data/ redis_data/
 
 ### 方法3: Apple container（macOS）
 
-Apple シリコン搭載 Mac と macOS 26 では、Apple `container` 1.1.0 以降を使用して Sub2API、PostgreSQL、Redis の完全なスタックを実行できます:
+Apple シリコン搭載 Mac と macOS 26 では、Apple `container` 1.1.0 以降を使用して LuoxueAPI、PostgreSQL、Redis の完全なスタックを実行できます:
 
 ```bash
-git clone https://github.com/Wei-Shaw/sub2api.git
-cd sub2api/deploy
+git clone https://github.com/3246147496lxt-dotcom/luoxueapi.git
+cd luoxueapi/deploy
 ./apple-container.sh init
 ./apple-container.sh up
 ./apple-container.sh status
@@ -484,8 +488,8 @@ cd sub2api/deploy
 
 ```bash
 # 1. リポジトリをクローン
-git clone https://github.com/Wei-Shaw/sub2api.git
-cd sub2api
+git clone https://github.com/3246147496lxt-dotcom/luoxueapi.git
+cd luoxueapi
 
 # 2. pnpm をインストール（未インストールの場合）
 npm install -g pnpm
@@ -660,7 +664,7 @@ go generate ./cmd/server
 
 ## Antigravity サポート
 
-Sub2API は [Antigravity](https://antigravity.so/) アカウントをサポートしています。認証後、Claude および Gemini モデル用の専用エンドポイントが利用可能になります。
+LuoxueAPI は [Antigravity](https://antigravity.so/) アカウントをサポートしています。認証後、Claude および Gemini モデル用の専用エンドポイントが利用可能になります。
 
 ### 専用エンドポイント
 
@@ -687,7 +691,7 @@ Antigravity アカウントはオプションの**ハイブリッドスケジュ
 ## プロジェクト構成
 
 ```
-sub2api/
+luoxueapi/
 ├── backend/                  # Go バックエンドサービス
 │   ├── cmd/server/           # アプリケーションエントリ
 │   ├── internal/             # 内部モジュール
@@ -712,7 +716,7 @@ sub2api/
     └── install.sh            # ワンクリックインストールスクリプト
 ```
 
-## スター履歴
+## 上流プロジェクトのスター履歴
 
 <a href="https://star-history.com/#Wei-Shaw/sub2api&Date">
  <picture>

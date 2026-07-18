@@ -1,4 +1,4 @@
-# Sub2API
+# 落雪API
 
 <div align="center">
 
@@ -8,16 +8,15 @@
 [![Redis](https://img.shields.io/badge/Redis-7+-DC382D.svg)](https://redis.io/)
 [![Docker](https://img.shields.io/badge/Docker-Ready-2496ED.svg)](https://www.docker.com/)
 
-<a href="https://trendshift.io/repositories/21823" target="_blank"><img src="https://trendshift.io/api/badge/repositories/21823" alt="Wei-Shaw%2Fsub2api | Trendshift" width="250" height="55"/></a>
-
 **AI API 网关平台 - 订阅配额分发管理**
 
 [English](README.md) | 中文 | [日本語](README_JA.md)
 
 </div>
 
+> **项目来源：** 落雪API 是基于 [Wei-Shaw/Sub2API](https://github.com/Wei-Shaw/sub2api) 的定制版本。下方的上游声明、赞助信息、生态项目与指标仅用于保留来源归属；它们描述的是上游项目，不代表落雪API获得相同赞助或沿用上游的商业授权政策。
 
-## ⚠️ 重要提醒
+## ⚠️ 上游项目重要提醒
 
 使用本项目前，请务必仔细阅读以下内容：
 
@@ -26,9 +25,9 @@
 - **📖 免责声明**：本项目仅供技术学习与研究使用，作者不对因使用本项目导致的账户封禁、服务中断、数据丢失或其他任何直接或间接损失承担责任。
 - **🚫 无商业授权**：本项目从未授权任何个人或组织基于本项目开展任何形式的商业化运营。任何以本项目名义或基于本项目从事的商业行为均与本项目及其开发者无关，由此产生的一切纠纷、损失和法律责任由行为主体自行承担。
 
-## ❤️ 赞助商
+## ❤️ 上游项目赞助商
 
-> [想出现在这里？](mailto:support@sub2api.org)
+> [联系上游项目申请赞助展示](mailto:support@sub2api.org)
 
 <table>
 
@@ -176,7 +175,11 @@
 
 ## 项目概述
 
-Sub2API 是一个 AI API 网关平台，用于分发和管理 AI 产品订阅的 API 配额。用户通过平台生成的 API Key 调用上游 AI 服务，平台负责鉴权、计费、负载均衡和请求转发。
+落雪API（LuoxueAPI）是一个 AI API 网关平台，用于分发和管理 AI 产品订阅的 API 配额。用户通过平台生成的 API Key 调用上游 AI 服务，平台负责鉴权、计费、负载均衡和请求转发。
+
+> **兼容性说明：** 为保证现有部署可以安全原地升级，二进制、systemd 服务、容器镜像、数据库和配置路径暂时保留 `sub2api` 技术标识；中文品牌为 **落雪API**，英文品牌为 **LuoxueAPI**。
+>
+> 当前 Fork 及其 GHCR 包仍为私有，因此公开的一键安装与 Docker 示例继续使用上游 Sub2API 发行物。若要部署落雪API的定制代码，请使用有仓库权限的账号按下方“源码编译”流程部署。
 
 ## 核心功能
 
@@ -190,9 +193,9 @@ Sub2API 是一个 AI API 网关平台，用于分发和管理 AI 产品订阅的
 - **管理后台** - Web 界面进行监控和管理
 - **外部系统集成** - 支持通过 iframe 嵌入外部系统（如工单等），扩展管理后台功能
 
-## 生态项目
+## 上游生态项目
 
-围绕 Sub2API 的社区扩展与集成项目：
+围绕上游 Sub2API 的社区扩展与集成项目：
 
 | 项目 | 说明 | 功能 |
 |------|------|------|
@@ -212,7 +215,7 @@ Sub2API 是一个 AI API 网关平台，用于分发和管理 AI 产品订阅的
 
 ## Nginx 反向代理注意事项
 
-通过 Nginx 反向代理 Sub2API（或 CRS 服务）并搭配 Codex CLI 使用时，需要在 Nginx 配置的 `http` 块中添加：
+通过 Nginx 反向代理 落雪API（或 CRS 服务）并搭配 Codex CLI 使用时，需要在 Nginx 配置的 `http` 块中添加：
 
 ```nginx
 underscores_in_headers on;
@@ -308,7 +311,7 @@ curl -sSL https://raw.githubusercontent.com/Wei-Shaw/sub2api/main/deploy/install
 
 ```bash
 # 创建部署目录
-mkdir -p sub2api-deploy && cd sub2api-deploy
+mkdir -p luoxueapi-deploy && cd luoxueapi-deploy
 
 # 下载并运行部署准备脚本
 curl -sSL https://raw.githubusercontent.com/Wei-Shaw/sub2api/main/deploy/docker-deploy.sh | bash
@@ -333,8 +336,8 @@ docker compose logs -f sub2api
 
 ```bash
 # 1. 克隆仓库
-git clone https://github.com/Wei-Shaw/sub2api.git
-cd sub2api/deploy
+git clone https://github.com/3246147496lxt-dotcom/luoxueapi.git
+cd luoxueapi/deploy
 
 # 2. 复制环境配置文件
 cp .env.example .env
@@ -440,14 +443,14 @@ docker compose -f docker-compose.local.yml up -d
 # 源服务器
 docker compose -f docker-compose.local.yml down
 cd ..
-tar czf sub2api-complete.tar.gz sub2api-deploy/
+tar czf luoxueapi-complete.tar.gz luoxueapi-deploy/
 
 # 传输到新服务器
-scp sub2api-complete.tar.gz user@new-server:/path/
+scp luoxueapi-complete.tar.gz user@new-server:/path/
 
 # 新服务器
-tar xzf sub2api-complete.tar.gz
-cd sub2api-deploy/
+tar xzf luoxueapi-complete.tar.gz
+cd luoxueapi-deploy/
 docker compose -f docker-compose.local.yml up -d
 ```
 
@@ -472,11 +475,11 @@ rm -rf data/ postgres_data/ redis_data/
 
 ### 方式三：Apple container（macOS）
 
-Apple 芯片 Mac 在 macOS 26 上可使用 Apple `container` 1.1.0 或更高版本运行完整的 Sub2API、PostgreSQL 和 Redis：
+Apple 芯片 Mac 在 macOS 26 上可使用 Apple `container` 1.1.0 或更高版本运行完整的 落雪API、PostgreSQL 和 Redis：
 
 ```bash
-git clone https://github.com/Wei-Shaw/sub2api.git
-cd sub2api/deploy
+git clone https://github.com/3246147496lxt-dotcom/luoxueapi.git
+cd luoxueapi/deploy
 ./apple-container.sh init
 ./apple-container.sh up
 ./apple-container.sh status
@@ -501,8 +504,8 @@ cd sub2api/deploy
 
 ```bash
 # 1. 克隆仓库
-git clone https://github.com/Wei-Shaw/sub2api.git
-cd sub2api
+git clone https://github.com/3246147496lxt-dotcom/luoxueapi.git
+cd luoxueapi
 
 # 2. 安装 pnpm（如果还没有安装）
 npm install -g pnpm
@@ -729,7 +732,7 @@ go generate ./cmd/server
 
 ## Antigravity 使用说明
 
-Sub2API 支持 [Antigravity](https://antigravity.so/) 账户，授权后可通过专用端点访问 Claude 和 Gemini 模型。
+落雪API 支持 [Antigravity](https://antigravity.so/) 账户，授权后可通过专用端点访问 Claude 和 Gemini 模型。
 
 ### 专用端点
 
@@ -756,7 +759,7 @@ Antigravity 账户支持可选的**混合调度**功能。开启后，通用端�
 ## 项目结构
 
 ```
-sub2api/
+luoxueapi/
 ├── backend/                  # Go 后端服务
 │   ├── cmd/server/           # 应用入口
 │   ├── internal/             # 内部模块
@@ -781,7 +784,7 @@ sub2api/
     └── install.sh            # 一键安装脚本
 ```
 
-## Star History
+## 上游项目 Star History
 
 <a href="https://star-history.com/#Wei-Shaw/sub2api&Date">
  <picture>

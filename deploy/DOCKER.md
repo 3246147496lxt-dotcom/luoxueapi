@@ -1,6 +1,8 @@
-# Sub2API Docker Image
+# LuoxueAPI Docker Image
 
-Sub2API is an AI API Gateway Platform for distributing and managing AI product subscription API quotas.
+LuoxueAPI is an AI API Gateway Platform for distributing and managing AI product subscription API quotas.
+
+> The image shown below is the public upstream compatibility image. This private Fork's GHCR package is not anonymously pullable; build the repository locally or authenticate to its private registry to deploy LuoxueAPI-specific changes.
 
 ## Quick Start
 

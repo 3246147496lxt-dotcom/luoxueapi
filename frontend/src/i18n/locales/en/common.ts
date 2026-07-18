@@ -106,7 +106,7 @@ export default {
     riskNotice: 'This acknowledgment provides clear, conspicuous, and reproducible notice of compliance obligations and operation risks for self-hosted instances.',
     version: 'Document Version',
     openDocument: 'Open the GitHub document',
-    documentSource: 'The agreement text comes from Markdown files in this project repository. When the agreement content changes, the document version must be incremented; acknowledgments of older versions become invalid and console users must acknowledge again.',
+    documentSource: 'The agreement is retained from the upstream Sub2API project. LuoxueAPI keeps its original name and version for acknowledgment compatibility; changing the text requires a new version and renewed acknowledgment.',
     inputLabel: 'Type the following confirmation phrase exactly',
     inputPlaceholder: 'Type the confirmation phrase to continue',
     inputMismatch: 'The confirmation phrase does not match. Type the displayed text exactly.',
