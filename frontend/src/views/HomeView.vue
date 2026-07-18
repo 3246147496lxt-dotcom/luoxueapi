@@ -293,64 +293,36 @@
         </div>
 
         <div class="mb-16 flex flex-wrap items-center justify-center gap-4">
-          <!-- Claude - Supported -->
           <div
-            class="flex items-center gap-2 rounded-xl border border-primary-200 bg-white/60 px-5 py-3 ring-1 ring-primary-500/20 backdrop-blur-sm dark:border-primary-800 dark:bg-dark-800/60"
+            v-for="provider in homeProviders"
+            :key="provider.id"
+            :data-provider="provider.id"
+            :data-provider-status="provider.supported ? 'supported' : 'unsupported'"
+            :aria-label="`${t(provider.labelKey)}：${t(provider.supported ? 'home.providers.supported' : 'home.providers.unsupported')}`"
+            :class="[
+              'flex items-center gap-2 rounded-xl border px-5 py-3 backdrop-blur-sm',
+              provider.supported
+                ? 'border-primary-200 bg-white/60 ring-1 ring-primary-500/20 dark:border-primary-800 dark:bg-dark-800/60'
+                : 'border-gray-200/50 bg-white/40 opacity-60 dark:border-dark-700/50 dark:bg-dark-800/40'
+            ]"
           >
             <div
-              class="flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br from-orange-400 to-orange-500"
+              :class="[
+                'flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br',
+                provider.iconClass
+              ]"
             >
-              <span class="text-xs font-bold text-white">C</span>
+              <span class="text-xs font-bold text-white">{{ provider.initial }}</span>
             </div>
-            <span class="text-sm font-medium text-gray-700 dark:text-dark-200">{{ t('home.providers.claude') }}</span>
+            <span class="text-sm font-medium text-gray-700 dark:text-dark-200">{{ t(provider.labelKey) }}</span>
             <span
-              class="rounded bg-primary-100 px-1.5 py-0.5 text-[10px] font-medium text-primary-600 dark:bg-primary-900/30 dark:text-primary-400"
-              >{{ t('home.providers.supported') }}</span
-            >
-          </div>
-          <!-- GPT - Supported -->
-          <div
-            class="flex items-center gap-2 rounded-xl border border-primary-200 bg-white/60 px-5 py-3 ring-1 ring-primary-500/20 backdrop-blur-sm dark:border-primary-800 dark:bg-dark-800/60"
-          >
-            <div
-              class="flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br from-green-500 to-green-600"
-            >
-              <span class="text-xs font-bold text-white">G</span>
-            </div>
-            <span class="text-sm font-medium text-gray-700 dark:text-dark-200">GPT</span>
-            <span
-              class="rounded bg-primary-100 px-1.5 py-0.5 text-[10px] font-medium text-primary-600 dark:bg-primary-900/30 dark:text-primary-400"
-              >{{ t('home.providers.supported') }}</span
-            >
-          </div>
-          <!-- Gemini - Supported -->
-          <div
-            class="flex items-center gap-2 rounded-xl border border-primary-200 bg-white/60 px-5 py-3 ring-1 ring-primary-500/20 backdrop-blur-sm dark:border-primary-800 dark:bg-dark-800/60"
-          >
-            <div
-              class="flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br from-blue-500 to-blue-600"
-            >
-              <span class="text-xs font-bold text-white">G</span>
-            </div>
-            <span class="text-sm font-medium text-gray-700 dark:text-dark-200">{{ t('home.providers.gemini') }}</span>
-            <span
-              class="rounded bg-primary-100 px-1.5 py-0.5 text-[10px] font-medium text-primary-600 dark:bg-primary-900/30 dark:text-primary-400"
-              >{{ t('home.providers.supported') }}</span
-            >
-          </div>
-          <!-- Antigravity - Supported -->
-          <div
-            class="flex items-center gap-2 rounded-xl border border-primary-200 bg-white/60 px-5 py-3 ring-1 ring-primary-500/20 backdrop-blur-sm dark:border-primary-800 dark:bg-dark-800/60"
-          >
-            <div
-              class="flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br from-rose-500 to-pink-600"
-            >
-              <span class="text-xs font-bold text-white">A</span>
-            </div>
-            <span class="text-sm font-medium text-gray-700 dark:text-dark-200">{{ t('home.providers.antigravity') }}</span>
-            <span
-              class="rounded bg-primary-100 px-1.5 py-0.5 text-[10px] font-medium text-primary-600 dark:bg-primary-900/30 dark:text-primary-400"
-              >{{ t('home.providers.supported') }}</span
+              :class="[
+                'rounded px-1.5 py-0.5 text-[10px] font-medium',
+                provider.supported
+                  ? 'bg-primary-100 text-primary-600 dark:bg-primary-900/30 dark:text-primary-400'
+                  : 'bg-gray-100 text-gray-500 dark:bg-dark-700 dark:text-dark-400'
+              ]"
+              >{{ t(provider.supported ? 'home.providers.supported' : 'home.providers.unsupported') }}</span
             >
           </div>
           <!-- More - Coming Soon -->
@@ -435,6 +407,38 @@ const isDark = ref(document.documentElement.classList.contains('dark'))
 
 // GitHub URL
 const githubUrl = 'https://github.com/Wei-Shaw/sub2api'
+
+// 首页模型状态：后续开放新模型时，只需把对应 supported 改为 true。
+const homeProviders = [
+  {
+    id: 'claude',
+    labelKey: 'home.providers.claude',
+    initial: 'C',
+    iconClass: 'from-orange-400 to-orange-500',
+    supported: false
+  },
+  {
+    id: 'gpt',
+    labelKey: 'home.providers.gpt',
+    initial: 'G',
+    iconClass: 'from-green-500 to-green-600',
+    supported: true
+  },
+  {
+    id: 'gemini',
+    labelKey: 'home.providers.gemini',
+    initial: 'G',
+    iconClass: 'from-blue-500 to-blue-600',
+    supported: false
+  },
+  {
+    id: 'antigravity',
+    labelKey: 'home.providers.antigravity',
+    initial: 'A',
+    iconClass: 'from-rose-500 to-pink-600',
+    supported: false
+  }
+] as const
 
 // Auth state
 const isAuthenticated = computed(() => authStore.isAuthenticated)

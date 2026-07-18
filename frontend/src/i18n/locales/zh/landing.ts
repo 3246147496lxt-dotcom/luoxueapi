@@ -94,11 +94,13 @@ export default {
       }
     },
     providers: {
-      title: '已支持的 AI 模型',
-      description: '一个 API，多种选择',
+      title: 'AI 模型支持情况',
+      description: 'GPT 已支持，其他模型暂未开放',
       supported: '已支持',
+      unsupported: '暂不支持',
       soon: '即将推出',
       claude: 'Claude',
+      gpt: 'GPT',
       gemini: 'Gemini',
       antigravity: 'Antigravity',
       more: '更多'

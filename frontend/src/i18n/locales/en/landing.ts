@@ -94,11 +94,13 @@ export default {
       }
     },
     providers: {
-      title: 'Supported AI Models',
-      description: 'One API, Multiple Choices',
+      title: 'AI Model Availability',
+      description: 'GPT is supported. Other models are not available yet.',
       supported: 'Supported',
+      unsupported: 'Not supported yet',
       soon: 'Soon',
       claude: 'Claude',
+      gpt: 'GPT',
       gemini: 'Gemini',
       antigravity: 'Antigravity',
       more: 'More'
