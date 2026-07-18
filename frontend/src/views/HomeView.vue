@@ -1,649 +1,1692 @@
 <template>
   <!-- Custom Home Content: Full Page Mode -->
-  <div v-if="homeContent" class="min-h-screen">
-    <!-- iframe mode -->
+  <div v-if="hasHomeContent" class="min-h-screen">
     <iframe
       v-if="isHomeContentUrl"
       :src="homeContent.trim()"
+      :title="`${siteName} ${t('home.nav.ariaLabel')}`"
       class="h-screen w-full border-0"
       allowfullscreen
     ></iframe>
-    <!-- HTML mode - SECURITY: homeContent is admin-only setting, XSS risk is acceptable -->
+    <!-- SECURITY: homeContent is an administrator-only setting. -->
     <div v-else v-html="homeContent"></div>
   </div>
 
-  <!-- Default Home Page -->
-  <div
-    v-else
-    class="relative flex min-h-screen flex-col overflow-hidden bg-gradient-to-br from-gray-50 via-primary-50/30 to-gray-100 dark:from-dark-950 dark:via-dark-900 dark:to-dark-950"
-  >
-    <!-- Background Decorations -->
-    <div class="pointer-events-none absolute inset-0 overflow-hidden">
-      <div
-        class="absolute -right-40 -top-40 h-96 w-96 rounded-full bg-primary-400/20 blur-3xl"
-      ></div>
-      <div
-        class="absolute -bottom-40 -left-40 h-96 w-96 rounded-full bg-primary-500/15 blur-3xl"
-      ></div>
-      <div
-        class="absolute left-1/3 top-1/4 h-72 w-72 rounded-full bg-primary-300/10 blur-3xl"
-      ></div>
-      <div
-        class="absolute bottom-1/4 right-1/4 h-64 w-64 rounded-full bg-primary-400/10 blur-3xl"
-      ></div>
-      <div
-        class="absolute inset-0 bg-[linear-gradient(rgba(20,184,166,0.03)_1px,transparent_1px),linear-gradient(90deg,rgba(20,184,166,0.03)_1px,transparent_1px)] bg-[size:64px_64px]"
-      ></div>
-    </div>
+  <div v-else class="home-page" :class="{ 'home-page--dark': isDark }">
+    <header class="home-header" :class="{ 'home-header--elevated': isHeaderElevated }">
+      <nav class="home-nav" :aria-label="t('home.nav.ariaLabel')">
+        <a href="#top" class="brand-link" @click="closeMobileMenu()">
+          <span class="brand-mark">
+            <img :src="siteLogo || '/logo.png'" :alt="siteName" width="40" height="40" />
+          </span>
+          <span class="brand-name">{{ siteName }}</span>
+        </a>
 
-    <!-- Header -->
-    <header class="relative z-20 px-6 py-4">
-      <nav class="mx-auto flex max-w-6xl items-center justify-between">
-        <!-- Logo -->
-        <div class="flex items-center">
-          <div class="h-10 w-10 overflow-hidden rounded-xl shadow-md">
-            <img :src="siteLogo || '/logo.png'" alt="Logo" class="h-full w-full object-contain" />
-          </div>
+        <div class="desktop-nav-links">
+          <a v-for="item in navItems" :key="item.href" :href="item.href">
+            {{ t(item.labelKey) }}
+          </a>
+          <a v-if="tutorialUrl" :href="tutorialUrl">{{ t('home.nav.tutorial') }}</a>
         </div>
 
-        <!-- Nav Actions -->
-        <div class="flex items-center gap-3">
-          <!-- Language Switcher -->
-          <LocaleSwitcher />
+        <div class="header-actions">
+          <div class="desktop-action"><LocaleSwitcher /></div>
 
-          <!-- Doc Link -->
-          <a
-            v-if="docUrl"
-            :href="docUrl"
-            target="_blank"
-            rel="noopener noreferrer"
-            class="rounded-lg p-2 text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-700 dark:text-dark-400 dark:hover:bg-dark-800 dark:hover:text-white"
-            :title="t('home.viewDocs')"
-          >
-            <Icon name="book" size="md" />
-          </a>
-
-          <!-- Theme Toggle -->
           <button
-            @click="toggleTheme"
-            class="rounded-lg p-2 text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-700 dark:text-dark-400 dark:hover:bg-dark-800 dark:hover:text-white"
+            type="button"
+            class="icon-button"
             :title="isDark ? t('home.switchToLight') : t('home.switchToDark')"
+            :aria-label="isDark ? t('home.switchToLight') : t('home.switchToDark')"
+            :aria-pressed="isDark"
+            @click="toggleTheme"
           >
-            <Icon v-if="isDark" name="sun" size="md" />
-            <Icon v-else name="moon" size="md" />
+            <Icon v-if="isDark" name="sun" size="md" aria-hidden="true" />
+            <Icon v-else name="moon" size="md" aria-hidden="true" />
           </button>
 
-          <!-- Login / Dashboard Button -->
-          <router-link
-            v-if="isAuthenticated"
-            :to="dashboardPath"
-            class="inline-flex items-center gap-1.5 rounded-full bg-gray-900 py-1 pl-1 pr-2.5 transition-colors hover:bg-gray-800 dark:bg-gray-800 dark:hover:bg-gray-700"
-          >
-            <span
-              class="flex h-5 w-5 items-center justify-center rounded-full bg-gradient-to-br from-primary-400 to-primary-600 text-[10px] font-semibold text-white"
-            >
-              {{ userInitial }}
-            </span>
-            <span class="text-xs font-medium text-white">{{ t('home.dashboard') }}</span>
-            <svg
-              class="h-3 w-3 text-gray-400"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-              stroke-width="2"
-            >
-              <path
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                d="M4.5 19.5l15-15m0 0H8.25m11.25 0v11.25"
-              />
-            </svg>
+          <router-link class="header-account-link desktop-action" :to="headerAccountPath">
+            {{ headerAccountLabel }}
+            <Icon name="arrowRight" size="sm" aria-hidden="true" />
           </router-link>
-          <router-link
-            v-else
-            to="/login"
-            class="inline-flex items-center rounded-full bg-gray-900 px-3 py-1 text-xs font-medium text-white transition-colors hover:bg-gray-800 dark:bg-gray-800 dark:hover:bg-gray-700"
+
+          <button
+            ref="mobileMenuButtonRef"
+            type="button"
+            class="icon-button mobile-menu-button"
+            aria-controls="home-mobile-menu"
+            :aria-expanded="mobileMenuOpen"
+            :aria-label="mobileMenuOpen ? t('home.nav.closeMenu') : t('home.nav.openMenu')"
+            @click="mobileMenuOpen = !mobileMenuOpen"
           >
-            {{ t('home.login') }}
-          </router-link>
+            <Icon :name="mobileMenuOpen ? 'x' : 'menu'" size="md" aria-hidden="true" />
+          </button>
         </div>
       </nav>
-    </header>
 
-    <!-- Main Content -->
-    <main class="relative z-10 flex-1 px-6 py-16">
-      <div class="mx-auto max-w-6xl">
-        <!-- Hero Section - Left/Right Layout -->
-        <div class="mb-12 flex flex-col items-center justify-between gap-12 lg:flex-row lg:gap-16">
-          <!-- Left: Text Content -->
-          <div class="flex-1 text-center lg:text-left">
-            <h1
-              class="mb-4 text-4xl font-bold text-gray-900 dark:text-white md:text-5xl lg:text-6xl"
+      <transition name="mobile-menu">
+        <div v-if="mobileMenuOpen" id="home-mobile-menu" class="mobile-menu-panel">
+          <div class="mobile-menu-inner">
+            <a
+              v-for="item in navItems"
+              :key="item.href"
+              :href="item.href"
+              @click="closeMobileMenu()"
             >
-              {{ siteName }}
-            </h1>
-            <p class="mb-8 text-lg text-gray-600 dark:text-dark-300 md:text-xl">
-              {{ siteSubtitle }}
-            </p>
-
-            <!-- CTA Button -->
-            <div>
-              <router-link
-                :to="isAuthenticated ? dashboardPath : '/login'"
-                class="btn btn-primary px-8 py-3 text-base shadow-lg shadow-primary-500/30"
-              >
-                {{ isAuthenticated ? t('home.goToDashboard') : t('home.getStarted') }}
-                <Icon name="arrowRight" size="md" class="ml-2" :stroke-width="2" />
+              {{ t(item.labelKey) }}
+            </a>
+            <a v-if="tutorialUrl" :href="tutorialUrl" @click="closeMobileMenu()">
+              {{ t('home.nav.tutorial') }}
+            </a>
+            <div class="mobile-menu-footer">
+              <LocaleSwitcher />
+              <router-link :to="headerAccountPath" @click="closeMobileMenu()">
+                {{ headerAccountLabel }}
+                <Icon name="arrowRight" size="sm" aria-hidden="true" />
               </router-link>
             </div>
           </div>
+        </div>
+      </transition>
+    </header>
 
-          <!-- Right: Terminal Animation -->
-          <div class="flex flex-1 justify-center lg:justify-end">
-            <div class="terminal-container">
-              <div class="terminal-window">
-                <!-- Window header -->
-                <div class="terminal-header">
-                  <div class="terminal-buttons">
-                    <span class="btn-close"></span>
-                    <span class="btn-minimize"></span>
-                    <span class="btn-maximize"></span>
-                  </div>
-                  <span class="terminal-title">terminal</span>
+    <main id="top">
+      <section class="hero-section" aria-labelledby="home-hero-title">
+        <div class="content-shell hero-layout">
+          <div class="hero-copy">
+            <p class="status-line">
+              <span class="status-dot" aria-hidden="true"></span>
+              {{ t('home.hero.status') }}
+            </p>
+            <h1 id="home-hero-title">{{ t('home.hero.title') }}</h1>
+            <p class="hero-description">{{ t('home.hero.description') }}</p>
+            <div class="hero-actions">
+              <router-link
+                data-testid="hero-primary-cta"
+                :to="primaryCta.to"
+                class="primary-button"
+              >
+                {{ primaryCta.label }}
+                <Icon name="arrowRight" size="sm" aria-hidden="true" />
+              </router-link>
+              <a v-if="tutorialUrl" :href="tutorialUrl" class="secondary-button">
+                {{ t('home.hero.tutorial') }}
+              </a>
+            </div>
+          </div>
+
+          <div class="code-showcase" aria-labelledby="code-example-title">
+            <div class="code-copy">
+              <h2 id="code-example-title">{{ t('home.codeExample.title') }}</h2>
+              <p>{{ t('home.codeExample.description') }}</p>
+            </div>
+
+            <div class="code-window">
+              <div class="code-toolbar">
+                <div
+                  class="code-tabs"
+                  role="tablist"
+                  aria-orientation="horizontal"
+                  :aria-label="t('home.codeExample.title')"
+                >
+                  <button
+                    v-for="(tab, index) in codeTabs"
+                    :id="`code-tab-${tab.id}`"
+                    :key="tab.id"
+                    ref="codeTabRefs"
+                    type="button"
+                    role="tab"
+                    :aria-selected="activeCode === tab.id"
+                    :aria-controls="`code-panel-${tab.id}`"
+                    :tabindex="activeCode === tab.id ? 0 : -1"
+                    :class="{ 'is-active': activeCode === tab.id }"
+                    @click="selectCodeTab(tab.id)"
+                    @keydown="handleCodeTabKeydown($event, index)"
+                  >
+                    {{ t(tab.labelKey) }}
+                  </button>
                 </div>
-                <!-- Terminal content -->
-                <div class="terminal-body">
-                  <div class="code-line line-1">
-                    <span class="code-prompt">$</span>
-                    <span class="code-cmd">curl</span>
-                    <span class="code-flag">-X POST</span>
-                    <span class="code-url">/v1/messages</span>
-                  </div>
-                  <div class="code-line line-2">
-                    <span class="code-comment"># Routing to upstream...</span>
-                  </div>
-                  <div class="code-line line-3">
-                    <span class="code-success">200 OK</span>
-                    <span class="code-response">{ "content": "Hello!" }</span>
-                  </div>
-                  <div class="code-line line-4">
-                    <span class="code-prompt">$</span>
-                    <span class="cursor"></span>
-                  </div>
-                </div>
+                <button
+                  type="button"
+                  class="copy-button"
+                  :aria-label="copyAriaLabel"
+                  @click="copyActiveCode"
+                >
+                  <Icon :name="copyStatus === 'copied' ? 'check' : 'copy'" size="sm" aria-hidden="true" />
+                  {{ copyButtonLabel }}
+                </button>
               </div>
-            </div>
-          </div>
-        </div>
-
-        <!-- Feature Tags - Centered -->
-        <div class="mb-12 flex flex-wrap items-center justify-center gap-4 md:gap-6">
-          <div
-            class="inline-flex items-center gap-2.5 rounded-full border border-gray-200/50 bg-white/80 px-5 py-2.5 shadow-sm backdrop-blur-sm dark:border-dark-700/50 dark:bg-dark-800/80"
-          >
-            <Icon name="swap" size="sm" class="text-primary-500" />
-            <span class="text-sm font-medium text-gray-700 dark:text-dark-200">{{
-              t('home.tags.subscriptionToApi')
-            }}</span>
-          </div>
-          <div
-            class="inline-flex items-center gap-2.5 rounded-full border border-gray-200/50 bg-white/80 px-5 py-2.5 shadow-sm backdrop-blur-sm dark:border-dark-700/50 dark:bg-dark-800/80"
-          >
-            <Icon name="shield" size="sm" class="text-primary-500" />
-            <span class="text-sm font-medium text-gray-700 dark:text-dark-200">{{
-              t('home.tags.stickySession')
-            }}</span>
-          </div>
-          <div
-            class="inline-flex items-center gap-2.5 rounded-full border border-gray-200/50 bg-white/80 px-5 py-2.5 shadow-sm backdrop-blur-sm dark:border-dark-700/50 dark:bg-dark-800/80"
-          >
-            <Icon name="chart" size="sm" class="text-primary-500" />
-            <span class="text-sm font-medium text-gray-700 dark:text-dark-200">{{
-              t('home.tags.realtimeBilling')
-            }}</span>
-          </div>
-        </div>
-
-        <!-- Features Grid -->
-        <div class="mb-12 grid gap-6 md:grid-cols-3">
-          <!-- Feature 1: Unified Gateway -->
-          <div
-            class="group rounded-2xl border border-gray-200/50 bg-white/60 p-6 backdrop-blur-sm transition-all duration-300 hover:shadow-xl hover:shadow-primary-500/10 dark:border-dark-700/50 dark:bg-dark-800/60"
-          >
-            <div
-              class="mb-4 flex h-12 w-12 items-center justify-center rounded-xl bg-gradient-to-br from-blue-500 to-blue-600 shadow-lg shadow-blue-500/30 transition-transform group-hover:scale-110"
-            >
-              <Icon name="server" size="lg" class="text-white" />
-            </div>
-            <h3 class="mb-2 text-lg font-semibold text-gray-900 dark:text-white">
-              {{ t('home.features.unifiedGateway') }}
-            </h3>
-            <p class="text-sm leading-relaxed text-gray-600 dark:text-dark-400">
-              {{ t('home.features.unifiedGatewayDesc') }}
-            </p>
-          </div>
-
-          <!-- Feature 2: Account Pool -->
-          <div
-            class="group rounded-2xl border border-gray-200/50 bg-white/60 p-6 backdrop-blur-sm transition-all duration-300 hover:shadow-xl hover:shadow-primary-500/10 dark:border-dark-700/50 dark:bg-dark-800/60"
-          >
-            <div
-              class="mb-4 flex h-12 w-12 items-center justify-center rounded-xl bg-gradient-to-br from-primary-500 to-primary-600 shadow-lg shadow-primary-500/30 transition-transform group-hover:scale-110"
-            >
-              <svg
-                class="h-6 w-6 text-white"
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-                stroke-width="1.5"
+              <div
+                :id="`code-panel-${activeCode}`"
+                role="tabpanel"
+                :aria-labelledby="`code-tab-${activeCode}`"
+                class="code-scroll"
               >
-                <path
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                  d="M18 18.72a9.094 9.094 0 003.741-.479 3 3 0 00-4.682-2.72m.94 3.198l.001.031c0 .225-.012.447-.037.666A11.944 11.944 0 0112 21c-2.17 0-4.207-.576-5.963-1.584A6.062 6.062 0 016 18.719m12 0a5.971 5.971 0 00-.941-3.197m0 0A5.995 5.995 0 0012 12.75a5.995 5.995 0 00-5.058 2.772m0 0a3 3 0 00-4.681 2.72 8.986 8.986 0 003.74.477m.94-3.197a5.971 5.971 0 00-.94 3.197M15 6.75a3 3 0 11-6 0 3 3 0 016 0zm6 3a2.25 2.25 0 11-4.5 0 2.25 2.25 0 014.5 0zm-13.5 0a2.25 2.25 0 11-4.5 0 2.25 2.25 0 014.5 0z"
-                />
-              </svg>
+                <pre><code data-testid="active-code-example" v-text="activeCodeSnippet"></code></pre>
+              </div>
+              <p class="sr-only" aria-live="polite">{{ copyLiveMessage }}</p>
             </div>
-            <h3 class="mb-2 text-lg font-semibold text-gray-900 dark:text-white">
-              {{ t('home.features.multiAccount') }}
-            </h3>
-            <p class="text-sm leading-relaxed text-gray-600 dark:text-dark-400">
-              {{ t('home.features.multiAccountDesc') }}
-            </p>
-          </div>
-
-          <!-- Feature 3: Billing & Quota -->
-          <div
-            class="group rounded-2xl border border-gray-200/50 bg-white/60 p-6 backdrop-blur-sm transition-all duration-300 hover:shadow-xl hover:shadow-primary-500/10 dark:border-dark-700/50 dark:bg-dark-800/60"
-          >
-            <div
-              class="mb-4 flex h-12 w-12 items-center justify-center rounded-xl bg-gradient-to-br from-purple-500 to-purple-600 shadow-lg shadow-purple-500/30 transition-transform group-hover:scale-110"
-            >
-              <svg
-                class="h-6 w-6 text-white"
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-                stroke-width="1.5"
-              >
-                <path
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                  d="M2.25 18.75a60.07 60.07 0 0115.797 2.101c.727.198 1.453-.342 1.453-1.096V18.75M3.75 4.5v.75A.75.75 0 013 6h-.75m0 0v-.375c0-.621.504-1.125 1.125-1.125H20.25M2.25 6v9m18-10.5v.75c0 .414.336.75.75.75h.75m-1.5-1.5h.375c.621 0 1.125.504 1.125 1.125v9.75c0 .621-.504 1.125-1.125 1.125h-.375m1.5-1.5H21a.75.75 0 00-.75.75v.75m0 0H3.75m0 0h-.375a1.125 1.125 0 01-1.125-1.125V15m1.5 1.5v-.75A.75.75 0 003 15h-.75M15 10.5a3 3 0 11-6 0 3 3 0 016 0zm3 0h.008v.008H18V10.5zm-12 0h.008v.008H6V10.5z"
-                />
-              </svg>
-            </div>
-            <h3 class="mb-2 text-lg font-semibold text-gray-900 dark:text-white">
-              {{ t('home.features.balanceQuota') }}
-            </h3>
-            <p class="text-sm leading-relaxed text-gray-600 dark:text-dark-400">
-              {{ t('home.features.balanceQuotaDesc') }}
-            </p>
           </div>
         </div>
+      </section>
 
-        <!-- Supported Providers -->
-        <div class="mb-8 text-center">
-          <h2 class="mb-3 text-2xl font-bold text-gray-900 dark:text-white">
-            {{ t('home.providers.title') }}
-          </h2>
-          <p class="text-sm text-gray-600 dark:text-dark-400">
-            {{ t('home.providers.description') }}
-          </p>
-        </div>
-
-        <div class="mb-16 flex flex-wrap items-center justify-center gap-4">
-          <div
-            v-for="provider in homeProviders"
-            :key="provider.id"
-            :data-provider="provider.id"
-            :data-provider-status="provider.supported ? 'supported' : 'unsupported'"
-            :aria-label="`${t(provider.labelKey)}：${t(provider.supported ? 'home.providers.supported' : 'home.providers.unsupported')}`"
-            :class="[
-              'flex items-center gap-2 rounded-xl border px-5 py-3 backdrop-blur-sm',
-              provider.supported
-                ? 'border-primary-200 bg-white/60 ring-1 ring-primary-500/20 dark:border-primary-800 dark:bg-dark-800/60'
-                : 'border-gray-200/50 bg-white/40 opacity-60 dark:border-dark-700/50 dark:bg-dark-800/40'
-            ]"
-          >
-            <div
-              :class="[
-                'flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br',
-                provider.iconClass
-              ]"
-            >
-              <span class="text-xs font-bold text-white">{{ provider.initial }}</span>
-            </div>
-            <span class="text-sm font-medium text-gray-700 dark:text-dark-200">{{ t(provider.labelKey) }}</span>
-            <span
-              :class="[
-                'rounded px-1.5 py-0.5 text-[10px] font-medium',
-                provider.supported
-                  ? 'bg-primary-100 text-primary-600 dark:bg-primary-900/30 dark:text-primary-400'
-                  : 'bg-gray-100 text-gray-500 dark:bg-dark-700 dark:text-dark-400'
-              ]"
-              >{{ t(provider.supported ? 'home.providers.supported' : 'home.providers.unsupported') }}</span
-            >
-          </div>
-          <!-- More - Coming Soon -->
-          <div
-            class="flex items-center gap-2 rounded-xl border border-gray-200/50 bg-white/40 px-5 py-3 opacity-60 backdrop-blur-sm dark:border-dark-700/50 dark:bg-dark-800/40"
-          >
-            <div
-              class="flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br from-gray-500 to-gray-600"
-            >
-              <span class="text-xs font-bold text-white">+</span>
-            </div>
-            <span class="text-sm font-medium text-gray-700 dark:text-dark-200">{{ t('home.providers.more') }}</span>
-            <span
-              class="rounded bg-gray-100 px-1.5 py-0.5 text-[10px] font-medium text-gray-500 dark:bg-dark-700 dark:text-dark-400"
-              >{{ t('home.providers.soon') }}</span
-            >
-          </div>
-        </div>
+      <div class="content-shell">
+        <ul class="fact-rail" :aria-label="t('home.hero.status')">
+          <li v-for="fact in factItems" :key="fact.labelKey">
+            <Icon :name="fact.icon" size="sm" aria-hidden="true" />
+            <span>{{ t(fact.labelKey) }}</span>
+          </li>
+        </ul>
       </div>
+
+      <section id="capabilities" class="home-section capability-section" aria-labelledby="capabilities-title">
+        <div class="content-shell capability-layout">
+          <figure class="dashboard-figure">
+            <img
+              src="/brand/home-dashboard.webp"
+              :alt="t('home.capabilities.imageAlt')"
+              width="1600"
+              height="757"
+              loading="lazy"
+              decoding="async"
+            />
+          </figure>
+
+          <div class="capability-copy">
+            <div class="section-intro section-intro--left">
+              <h2 id="capabilities-title">{{ t('home.capabilities.title') }}</h2>
+              <p>{{ t('home.capabilities.description') }}</p>
+            </div>
+            <ul class="capability-list">
+              <li v-for="item in capabilityItems" :key="item.titleKey">
+                <span class="capability-marker" aria-hidden="true">
+                  <Icon :name="item.icon" size="sm" />
+                </span>
+                <div>
+                  <h3>{{ t(item.titleKey) }}</h3>
+                  <p>{{ t(item.descriptionKey) }}</p>
+                </div>
+              </li>
+            </ul>
+          </div>
+        </div>
+      </section>
+
+      <section id="steps" class="home-section steps-section" aria-labelledby="steps-title">
+        <div class="content-shell">
+          <div class="section-intro">
+            <h2 id="steps-title">{{ t('home.steps.title') }}</h2>
+            <p>{{ t('home.steps.description') }}</p>
+          </div>
+
+          <ol class="steps-list">
+            <li v-for="(step, index) in stepItems" :key="step.titleKey">
+              <span class="step-number" aria-hidden="true">{{ index + 1 }}</span>
+              <h3>{{ t(step.titleKey) }}</h3>
+              <p>{{ t(step.descriptionKey) }}</p>
+            </li>
+          </ol>
+
+          <div class="section-action">
+            <a v-if="tutorialUrl" :href="tutorialUrl" class="text-link">
+              {{ t('home.steps.tutorial') }}
+              <Icon name="externalLink" size="sm" aria-hidden="true" />
+            </a>
+          </div>
+        </div>
+      </section>
+
+      <section id="providers" class="home-section provider-section" aria-labelledby="providers-title">
+        <div class="content-shell">
+          <div class="section-intro">
+            <h2 id="providers-title">{{ t('home.providers.title') }}</h2>
+            <p>{{ t('home.providers.description') }}</p>
+          </div>
+
+          <div class="provider-grid" role="list">
+            <div
+              v-for="provider in homeProviders"
+              :key="provider.id"
+              role="listitem"
+              :data-provider="provider.id"
+              :data-provider-status="provider.supported ? 'supported' : 'unsupported'"
+              :aria-label="`${t(provider.labelKey)}：${t(provider.supported ? 'home.providers.supported' : 'home.providers.unsupported')}`"
+              class="provider-card"
+              :class="provider.supported ? 'provider-card--supported' : 'provider-card--unsupported'"
+            >
+              <span class="provider-icon" aria-hidden="true">
+                <PlatformIcon :platform="provider.platform" size="lg" />
+              </span>
+              <span class="provider-name">{{ t(provider.labelKey) }}</span>
+              <span class="provider-status">
+                {{ t(provider.supported ? 'home.providers.supported' : 'home.providers.unsupported') }}
+              </span>
+            </div>
+          </div>
+
+          <p class="provider-note">{{ t('home.providers.note') }}</p>
+        </div>
+      </section>
+
+      <section id="faq" class="home-section faq-section" aria-labelledby="faq-title">
+        <div class="content-shell faq-layout">
+          <div class="section-intro section-intro--left faq-heading">
+            <h2 id="faq-title">{{ t('home.faq.title') }}</h2>
+            <p>{{ t('home.faq.description') }}</p>
+          </div>
+
+          <div class="faq-list">
+            <details v-for="item in faqItems" :key="item.questionKey">
+              <summary>
+                <span>{{ t(item.questionKey) }}</span>
+                <Icon name="plus" size="sm" aria-hidden="true" />
+              </summary>
+              <p>{{ t(item.answerKey) }}</p>
+            </details>
+          </div>
+        </div>
+      </section>
+
+      <section class="home-section final-cta-section" aria-labelledby="final-cta-title">
+        <div class="content-shell">
+          <div class="final-cta-panel">
+            <div>
+              <h2 id="final-cta-title">{{ t('home.cta.title') }}</h2>
+              <p>{{ t('home.cta.description') }}</p>
+            </div>
+            <div class="final-cta-actions">
+              <router-link
+                data-testid="final-primary-cta"
+                :to="primaryCta.to"
+                class="primary-button primary-button--light"
+              >
+                {{ t('home.cta.button') }}
+                <Icon name="arrowRight" size="sm" aria-hidden="true" />
+              </router-link>
+              <a v-if="tutorialUrl" :href="tutorialUrl" class="cta-text-link">
+                {{ t('home.cta.tutorial') }}
+              </a>
+            </div>
+          </div>
+        </div>
+      </section>
     </main>
 
-    <!-- Footer -->
-    <footer class="relative z-10 border-t border-gray-200/50 px-6 py-8 dark:border-dark-800/50">
-      <div
-        class="mx-auto flex max-w-6xl flex-col items-center justify-center gap-4 text-center sm:flex-row sm:text-left"
-      >
-        <p class="text-sm text-gray-500 dark:text-dark-400">
-          &copy; {{ currentYear }} {{ siteName }}. {{ t('home.footer.allRightsReserved') }}
-        </p>
-        <div class="flex items-center gap-4">
-          <a
-            v-if="docUrl"
-            :href="docUrl"
-            target="_blank"
-            rel="noopener noreferrer"
-            class="text-sm text-gray-500 transition-colors hover:text-gray-700 dark:text-dark-400 dark:hover:text-white"
-          >
-            {{ t('home.docs') }}
-          </a>
-          <a
-            :href="githubUrl"
-            target="_blank"
-            rel="noopener noreferrer"
-            class="text-sm text-gray-500 transition-colors hover:text-gray-700 dark:text-dark-400 dark:hover:text-white"
-          >
-            GitHub
-          </a>
-        </div>
+    <footer class="home-footer">
+      <div class="content-shell footer-layout">
+        <p>&copy; {{ currentYear }} {{ siteName }}. {{ t('home.footer.allRightsReserved') }}</p>
+        <nav :aria-label="t('home.nav.ariaLabel')">
+          <a v-if="tutorialUrl" :href="tutorialUrl">{{ t('home.footer.tutorial') }}</a>
+          <a v-if="docUrl" :href="docUrl">{{ t('home.footer.apiDocs') }}</a>
+          <router-link to="/monitor">{{ t('home.footer.channelStatus') }}</router-link>
+        </nav>
       </div>
     </footer>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAuthStore, useAppStore } from '@/stores'
 import LocaleSwitcher from '@/components/common/LocaleSwitcher.vue'
+import PlatformIcon from '@/components/common/PlatformIcon.vue'
 import Icon from '@/components/icons/Icon.vue'
+import { useClipboard } from '@/composables/useClipboard'
 import { sanitizeUrl } from '@/utils/url'
+import type { GroupPlatform } from '@/types'
+
+type CodeTab = 'curl' | 'python'
+type CopyStatus = 'idle' | 'copied' | 'failed'
 
 const { t } = useI18n()
-
 const authStore = useAuthStore()
 const appStore = useAppStore()
+const { copyToClipboard } = useClipboard()
 
-// Site settings - directly from appStore (already initialized from injected config)
 const siteName = computed(() => appStore.cachedPublicSettings?.site_name || appStore.siteName || '落雪API')
 const siteLogo = computed(() => sanitizeUrl(appStore.cachedPublicSettings?.site_logo || appStore.siteLogo || '', { allowRelative: true, allowDataUrl: true }))
-const siteSubtitle = computed(() => appStore.cachedPublicSettings?.site_subtitle || 'AI API Gateway Platform')
 const docUrl = computed(() => sanitizeUrl(appStore.cachedPublicSettings?.doc_url || appStore.docUrl || ''))
+const apiBaseUrl = computed(() => appStore.cachedPublicSettings?.api_base_url || appStore.apiBaseUrl || '')
 const homeContent = computed(() => appStore.cachedPublicSettings?.home_content || '')
+const hasHomeContent = computed(() => homeContent.value.trim().length > 0)
+const isHomeContentUrl = computed(() => /^https?:\/\//i.test(homeContent.value.trim()))
 
-// Check if homeContent is a URL (for iframe display)
-const isHomeContentUrl = computed(() => {
-  const content = homeContent.value.trim()
-  return content.startsWith('http://') || content.startsWith('https://')
+const tutorialUrl = computed(() => {
+  const base = (docUrl.value || '/tutorial-docs/').replace(/#.*$/, '')
+  return `${base}#quick-start`
 })
 
-// Theme
-const isDark = ref(document.documentElement.classList.contains('dark'))
+function normalizeApiV1Base(value: string): string {
+  const fallback = typeof window === 'undefined' ? 'https://luoxueapi.cc' : window.location.origin
+  const base = value.trim().replace(/\/+$/, '') || fallback
+  return /\/v1$/i.test(base) ? base : `${base}/v1`
+}
 
-// GitHub URL
-const githubUrl = 'https://github.com/Wei-Shaw/sub2api'
+const apiV1Base = computed(() => normalizeApiV1Base(apiBaseUrl.value))
+const chatCompletionsUrl = computed(() => `${apiV1Base.value}/chat/completions`)
+const codeExamples = computed<Record<CodeTab, string>>(() => ({
+  curl: `curl "${chatCompletionsUrl.value}" \\
+  -H "Authorization: Bearer <YOUR_API_KEY>" \\
+  -H "Content-Type: application/json" \\
+  -d '{
+    "model": "<YOUR_MODEL>",
+    "messages": [{"role": "user", "content": "你好"}]
+  }'`,
+  python: `from openai import OpenAI
 
-// 首页模型状态：后续开放新模型时，只需把对应 supported 改为 true。
-const homeProviders = [
+client = OpenAI(
+    api_key="<YOUR_API_KEY>",
+    base_url="${apiV1Base.value}",
+)
+
+response = client.chat.completions.create(
+    model="<YOUR_MODEL>",
+    messages=[{"role": "user", "content": "你好"}],
+)
+
+print(response.choices[0].message.content)`
+}))
+
+const navItems = [
+  { href: '#capabilities', labelKey: 'home.nav.capabilities' },
+  { href: '#steps', labelKey: 'home.nav.steps' },
+  { href: '#providers', labelKey: 'home.nav.providers' },
+  { href: '#faq', labelKey: 'home.nav.faq' }
+] as const
+
+const codeTabs = [
+  { id: 'curl', labelKey: 'home.codeExample.tabs.curl' },
+  { id: 'python', labelKey: 'home.codeExample.tabs.python' }
+] as const
+
+const factItems = [
+  { labelKey: 'home.facts.gpt', icon: 'checkCircle' },
+  { labelKey: 'home.facts.usage', icon: 'chart' },
+  { labelKey: 'home.facts.quota', icon: 'key' }
+] as const
+
+const capabilityItems = [
   {
-    id: 'claude',
-    labelKey: 'home.providers.claude',
-    initial: 'C',
-    iconClass: 'from-orange-400 to-orange-500',
-    supported: false
+    titleKey: 'home.capabilities.items.usage.title',
+    descriptionKey: 'home.capabilities.items.usage.description',
+    icon: 'chart'
   },
   {
-    id: 'gpt',
-    labelKey: 'home.providers.gpt',
-    initial: 'G',
-    iconClass: 'from-green-500 to-green-600',
-    supported: true
+    titleKey: 'home.capabilities.items.keys.title',
+    descriptionKey: 'home.capabilities.items.keys.description',
+    icon: 'key'
   },
   {
-    id: 'gemini',
-    labelKey: 'home.providers.gemini',
-    initial: 'G',
-    iconClass: 'from-blue-500 to-blue-600',
-    supported: false
-  },
-  {
-    id: 'antigravity',
-    labelKey: 'home.providers.antigravity',
-    initial: 'A',
-    iconClass: 'from-rose-500 to-pink-600',
-    supported: false
+    titleKey: 'home.capabilities.items.diagnostics.title',
+    descriptionKey: 'home.capabilities.items.diagnostics.description',
+    icon: 'shield'
   }
 ] as const
 
-// Auth state
+const stepItems = [
+  {
+    titleKey: 'home.steps.items.account.title',
+    descriptionKey: 'home.steps.items.account.description'
+  },
+  {
+    titleKey: 'home.steps.items.key.title',
+    descriptionKey: 'home.steps.items.key.description'
+  },
+  {
+    titleKey: 'home.steps.items.client.title',
+    descriptionKey: 'home.steps.items.client.description'
+  }
+] as const
+
+const faqItems = ['models', 'group', 'endpoint', 'billing', 'client'].map((id) => ({
+  questionKey: `home.faq.items.${id}.question`,
+  answerKey: `home.faq.items.${id}.answer`
+}))
+
+const homeProviders: ReadonlyArray<{
+  id: string
+  labelKey: string
+  platform: GroupPlatform
+  supported: boolean
+}> = [
+  { id: 'gpt', labelKey: 'home.providers.gpt', platform: 'openai', supported: true },
+  { id: 'claude', labelKey: 'home.providers.claude', platform: 'anthropic', supported: false },
+  { id: 'gemini', labelKey: 'home.providers.gemini', platform: 'gemini', supported: false },
+  {
+    id: 'antigravity',
+    labelKey: 'home.providers.antigravity',
+    platform: 'antigravity',
+    supported: false
+  }
+]
+
 const isAuthenticated = computed(() => authStore.isAuthenticated)
 const isAdmin = computed(() => authStore.isAdmin)
-const dashboardPath = computed(() => isAdmin.value ? '/admin/dashboard' : '/dashboard')
-const userInitial = computed(() => {
-  const user = authStore.user
-  if (!user || !user.email) return ''
-  return user.email.charAt(0).toUpperCase()
+const dashboardPath = computed(() => (isAdmin.value ? '/admin/dashboard' : '/dashboard'))
+const registrationEnabled = computed(
+  () => appStore.cachedPublicSettings?.registration_enabled === true
+)
+const primaryCta = computed(() => {
+  if (isAuthenticated.value) {
+    return { to: '/keys', label: t('home.hero.createKey') }
+  }
+  if (registrationEnabled.value) {
+    return { to: '/register', label: t('home.hero.register') }
+  }
+  return { to: '/login', label: t('home.hero.login') }
 })
+const headerAccountPath = computed(() => (isAuthenticated.value ? dashboardPath.value : '/login'))
+const headerAccountLabel = computed(() =>
+  isAuthenticated.value ? t('home.dashboard') : t('home.login')
+)
 
-// Current year for footer
+const isDark = ref(document.documentElement.classList.contains('dark'))
+const isHeaderElevated = ref(false)
+const mobileMenuOpen = ref(false)
+const mobileMenuButtonRef = ref<HTMLButtonElement | null>(null)
+const codeTabRefs = ref<HTMLButtonElement[]>([])
+const activeCode = ref<CodeTab>('curl')
+const copyStatus = ref<CopyStatus>('idle')
+let copyResetTimer: ReturnType<typeof setTimeout> | undefined
+
+const activeCodeSnippet = computed(() => codeExamples.value[activeCode.value])
+const activeCodeLanguage = computed(() =>
+  t(activeCode.value === 'curl' ? 'home.codeExample.tabs.curl' : 'home.codeExample.tabs.python')
+)
+const copyButtonLabel = computed(() => {
+  if (copyStatus.value === 'copied') return t('home.codeExample.copied')
+  if (copyStatus.value === 'failed') return t('home.codeExample.copyFailed')
+  return t('home.codeExample.copy')
+})
+const copyAriaLabel = computed(() =>
+  t(copyStatus.value === 'copied' ? 'home.codeExample.copiedAria' : 'home.codeExample.copyAria', {
+    language: activeCodeLanguage.value
+  })
+)
+const copyLiveMessage = computed(() => (copyStatus.value === 'idle' ? '' : copyButtonLabel.value))
 const currentYear = computed(() => new Date().getFullYear())
 
-// Toggle theme
+function selectCodeTab(tab: CodeTab) {
+  activeCode.value = tab
+  copyStatus.value = 'idle'
+}
+
+function handleCodeTabKeydown(event: KeyboardEvent, currentIndex: number) {
+  let nextIndex: number | undefined
+
+  switch (event.key) {
+    case 'ArrowRight':
+      nextIndex = (currentIndex + 1) % codeTabs.length
+      break
+    case 'ArrowLeft':
+      nextIndex = (currentIndex - 1 + codeTabs.length) % codeTabs.length
+      break
+    case 'Home':
+      nextIndex = 0
+      break
+    case 'End':
+      nextIndex = codeTabs.length - 1
+      break
+    default:
+      return
+  }
+
+  event.preventDefault()
+  selectCodeTab(codeTabs[nextIndex].id)
+  codeTabRefs.value[nextIndex]?.focus()
+}
+
+async function copyActiveCode() {
+  if (copyResetTimer) clearTimeout(copyResetTimer)
+  const didCopy = await copyToClipboard(activeCodeSnippet.value, t('home.codeExample.copied'))
+  copyStatus.value = didCopy ? 'copied' : 'failed'
+  copyResetTimer = setTimeout(() => {
+    copyStatus.value = 'idle'
+  }, 2000)
+}
+
 function toggleTheme() {
   isDark.value = !isDark.value
   document.documentElement.classList.toggle('dark', isDark.value)
   localStorage.setItem('theme', isDark.value ? 'dark' : 'light')
 }
 
-// Initialize theme
-function initTheme() {
-  const savedTheme = localStorage.getItem('theme')
-  if (
-    savedTheme === 'dark' ||
-    (!savedTheme && window.matchMedia('(prefers-color-scheme: dark)').matches)
-  ) {
-    isDark.value = true
-    document.documentElement.classList.add('dark')
-  }
+function closeMobileMenu(restoreFocus = false) {
+  mobileMenuOpen.value = false
+  if (restoreFocus) requestAnimationFrame(() => mobileMenuButtonRef.value?.focus())
+}
+
+function handleGlobalKeydown(event: KeyboardEvent) {
+  if (event.key === 'Escape' && mobileMenuOpen.value) closeMobileMenu(true)
+}
+
+function handleScroll() {
+  isHeaderElevated.value = window.scrollY > 12
 }
 
 onMounted(() => {
-  initTheme()
+  handleScroll()
+  window.addEventListener('scroll', handleScroll, { passive: true })
+  window.addEventListener('keydown', handleGlobalKeydown)
+})
 
-  // Check auth state
-  authStore.checkAuth()
-
-  // Ensure public settings are loaded (will use cache if already loaded from injected config)
-  if (!appStore.publicSettingsLoaded) {
-    appStore.fetchPublicSettings()
-  }
+onBeforeUnmount(() => {
+  window.removeEventListener('scroll', handleScroll)
+  window.removeEventListener('keydown', handleGlobalKeydown)
+  if (copyResetTimer) clearTimeout(copyResetTimer)
 })
 </script>
 
 <style scoped>
-/* Terminal Container */
-.terminal-container {
-  position: relative;
-  display: inline-block;
+.home-page {
+  --page: #ffffff;
+  --surface: #ffffff;
+  --surface-soft: #f4f7f5;
+  --surface-accent: #f0fdfa;
+  --ink: #0f172a;
+  --copy: #475569;
+  --muted: #64748b;
+  --border: #dde4e0;
+  --accent: #0f766e;
+  --accent-strong: #0b5f59;
+  --accent-ink: #115e59;
+  --code: #101713;
+  --code-toolbar: #17201c;
+  --code-copy: #dff4ed;
+  min-height: 100vh;
+  overflow-x: clip;
+  background: var(--page);
+  color: var(--ink);
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
+    "Microsoft YaHei", sans-serif;
 }
 
-/* Terminal Window */
-.terminal-window {
-  width: 420px;
-  background: linear-gradient(145deg, #1e293b 0%, #0f172a 100%);
-  border-radius: 14px;
-  box-shadow:
-    0 25px 50px -12px rgba(0, 0, 0, 0.4),
-    0 0 0 1px rgba(255, 255, 255, 0.1),
-    inset 0 1px 0 rgba(255, 255, 255, 0.1);
+.home-page.home-page--dark {
+  --page: #0e1211;
+  --surface: #111816;
+  --surface-soft: #1a211e;
+  --surface-accent: #17312e;
+  --ink: #f4f7f5;
+  --copy: #c1cbc6;
+  --muted: #9aa6a0;
+  --border: #28312c;
+  --accent: #5eead4;
+  --accent-strong: #99f6e4;
+  --accent-ink: #99f6e4;
+  --code: #090d0b;
+  --code-toolbar: #111816;
+  --code-copy: #dff4ed;
+}
+
+.home-page :where(a, button, summary):focus-visible {
+  outline: 3px solid color-mix(in srgb, var(--accent) 72%, white);
+  outline-offset: 3px;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
   overflow: hidden;
-  transform: perspective(1000px) rotateX(2deg) rotateY(-2deg);
-  transition: transform 0.3s ease;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
 }
 
-.terminal-window:hover {
-  transform: perspective(1000px) rotateX(0deg) rotateY(0deg) translateY(-4px);
+.content-shell,
+.home-nav,
+.mobile-menu-inner {
+  width: min(1120px, calc(100% - 48px));
+  margin-inline: auto;
 }
 
-/* Terminal Header */
-.terminal-header {
+.home-header {
+  position: sticky;
+  top: 0;
+  z-index: 40;
+  border-bottom: 1px solid transparent;
+  background: var(--page);
+  transition:
+    border-color 170ms ease,
+    box-shadow 170ms ease;
+}
+
+.home-header--elevated {
+  border-bottom-color: var(--border);
+  box-shadow: 0 12px 32px rgba(15, 23, 42, 0.08);
+}
+
+.home-page--dark .home-header--elevated {
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.34);
+}
+
+.home-nav {
+  min-height: 72px;
   display: flex;
   align-items: center;
-  padding: 12px 16px;
-  background: rgba(30, 41, 59, 0.8);
-  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  justify-content: space-between;
+  gap: 24px;
 }
 
-.terminal-buttons {
+.brand-link,
+.header-actions,
+.desktop-nav-links,
+.hero-actions,
+.final-cta-actions,
+.mobile-menu-footer,
+.header-account-link,
+.primary-button,
+.secondary-button,
+.text-link,
+.cta-text-link {
   display: flex;
-  gap: 8px;
+  align-items: center;
 }
 
-.terminal-buttons span {
-  width: 12px;
-  height: 12px;
-  border-radius: 50%;
+.brand-link {
+  min-height: 44px;
+  min-width: 0;
+  gap: 12px;
+  color: var(--ink);
+  text-decoration: none;
 }
 
-.btn-close {
-  background: #ef4444;
-}
-.btn-minimize {
-  background: #eab308;
-}
-.btn-maximize {
-  background: #22c55e;
-}
-
-.terminal-title {
-  flex: 1;
-  text-align: center;
-  font-size: 12px;
-  font-family: ui-monospace, monospace;
-  color: #64748b;
-  margin-right: 52px;
+.brand-mark {
+  width: 40px;
+  height: 40px;
+  flex: 0 0 auto;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
 }
 
-/* Terminal Body */
-.terminal-body {
-  padding: 20px 24px;
-  font-family: ui-monospace, 'Fira Code', monospace;
+.brand-mark img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.brand-name {
+  overflow: hidden;
+  color: var(--ink);
+  font-size: 17px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.desktop-nav-links {
+  gap: clamp(18px, 2vw, 30px);
+}
+
+.desktop-nav-links a,
+.mobile-menu-panel a,
+.home-footer a {
+  color: var(--copy);
+  text-decoration: none;
+  transition: color 150ms ease;
+}
+
+.desktop-nav-links a {
+  padding-block: 12px;
   font-size: 14px;
-  line-height: 2;
-}
-
-.code-line {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
-  opacity: 0;
-  animation: line-appear 0.5s ease forwards;
-}
-
-.line-1 {
-  animation-delay: 0.3s;
-}
-.line-2 {
-  animation-delay: 1s;
-}
-.line-3 {
-  animation-delay: 1.8s;
-}
-.line-4 {
-  animation-delay: 2.5s;
-}
-
-@keyframes line-appear {
-  from {
-    opacity: 0;
-    transform: translateY(5px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
-.code-prompt {
-  color: #22c55e;
-  font-weight: bold;
-}
-.code-cmd {
-  color: #38bdf8;
-}
-.code-flag {
-  color: #a78bfa;
-}
-.code-url {
-  color: #14b8a6;
-}
-.code-comment {
-  color: #64748b;
-  font-style: italic;
-}
-.code-success {
-  color: #22c55e;
-  background: rgba(34, 197, 94, 0.15);
-  padding: 2px 8px;
-  border-radius: 4px;
   font-weight: 600;
 }
-.code-response {
-  color: #fbbf24;
+
+.desktop-nav-links a:hover,
+.mobile-menu-panel a:hover,
+.home-footer a:hover {
+  color: var(--accent-ink);
 }
 
-/* Blinking Cursor */
-.cursor {
-  display: inline-block;
-  width: 8px;
-  height: 16px;
-  background: #22c55e;
-  animation: blink 1s step-end infinite;
+.header-actions {
+  flex: 0 0 auto;
+  gap: 8px;
 }
 
-@keyframes blink {
-  0%,
-  50% {
-    opacity: 1;
+.icon-button {
+  width: 44px;
+  height: 44px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--copy);
+  cursor: pointer;
+  transition:
+    background-color 150ms ease,
+    border-color 150ms ease,
+    color 150ms ease;
+}
+
+.icon-button:hover {
+  border-color: var(--border);
+  background: var(--surface-soft);
+  color: var(--ink);
+}
+
+.header-account-link {
+  min-height: 44px;
+  gap: 7px;
+  border-radius: 10px;
+  background: var(--ink);
+  color: var(--page);
+  padding: 0 16px;
+  font-size: 13px;
+  font-weight: 700;
+  text-decoration: none;
+  transition: transform 150ms ease;
+}
+
+.header-account-link:hover {
+  transform: translateY(-1px);
+}
+
+.mobile-menu-button,
+.mobile-menu-panel {
+  display: none;
+}
+
+.hero-section {
+  padding-block: clamp(72px, 9vw, 112px) clamp(56px, 7vw, 88px);
+}
+
+.hero-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 0.82fr) minmax(520px, 1.18fr);
+  align-items: center;
+  gap: clamp(48px, 7vw, 88px);
+}
+
+.hero-copy,
+.code-showcase,
+.capability-copy,
+.dashboard-figure,
+.faq-heading,
+.faq-list {
+  min-width: 0;
+}
+
+.status-line {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0 0 20px;
+  color: var(--accent-ink);
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.status-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 999px;
+  background: var(--accent);
+  box-shadow: 0 0 0 5px var(--surface-accent);
+}
+
+.hero-copy h1 {
+  max-width: 11ch;
+  margin: 0;
+  color: var(--ink);
+  font-size: clamp(2.5rem, 5.1vw, 4rem);
+  font-weight: 760;
+  letter-spacing: -0.038em;
+  line-height: 1.08;
+  text-wrap: balance;
+}
+
+.hero-description {
+  max-width: 35rem;
+  margin: 26px 0 0;
+  color: var(--copy);
+  font-size: 17px;
+  line-height: 1.85;
+  text-wrap: pretty;
+}
+
+.hero-actions {
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 34px;
+}
+
+.primary-button,
+.secondary-button {
+  min-height: 48px;
+  justify-content: center;
+  gap: 9px;
+  border-radius: 10px;
+  padding: 0 20px;
+  font-size: 14px;
+  font-weight: 700;
+  text-decoration: none;
+  transition:
+    transform 150ms ease,
+    background-color 150ms ease,
+    border-color 150ms ease;
+}
+
+.primary-button {
+  border: 1px solid var(--ink);
+  background: var(--ink);
+  color: var(--page);
+}
+
+.primary-button:hover,
+.secondary-button:hover {
+  transform: translateY(-2px);
+}
+
+.secondary-button {
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--ink);
+}
+
+.secondary-button:hover {
+  border-color: var(--accent);
+}
+
+.code-showcase {
+  display: grid;
+  gap: 20px;
+}
+
+.code-copy h2 {
+  margin: 0;
+  color: var(--ink);
+  font-size: 18px;
+  font-weight: 720;
+  letter-spacing: -0.02em;
+}
+
+.code-copy p {
+  max-width: 46rem;
+  margin: 8px 0 0;
+  color: var(--copy);
+  font-size: 14px;
+  line-height: 1.65;
+}
+
+.code-window {
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid #28312c;
+  border-radius: 14px;
+  background: var(--code);
+  box-shadow: 0 22px 54px rgba(15, 23, 42, 0.18);
+}
+
+.home-page--dark .code-window {
+  box-shadow: 0 22px 54px rgba(0, 0, 0, 0.38);
+}
+
+.code-toolbar {
+  min-height: 54px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  border-bottom: 1px solid #28312c;
+  background: var(--code-toolbar);
+  padding: 7px 10px 7px 14px;
+}
+
+.code-tabs {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.code-tabs button,
+.copy-button {
+  min-height: 44px;
+  border: 0;
+  border-radius: 8px;
+  color: #9fb1a9;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.code-tabs button {
+  background: transparent;
+  padding-inline: 12px;
+}
+
+.code-tabs button.is-active {
+  background: #26322d;
+  color: #ffffff;
+}
+
+.copy-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: #26322d;
+  padding-inline: 11px;
+  white-space: nowrap;
+}
+
+.code-scroll {
+  max-width: 100%;
+  overflow-x: auto;
+  overscroll-behavior-inline: contain;
+}
+
+.code-scroll pre {
+  min-width: 540px;
+  margin: 0;
+  padding: 24px;
+}
+
+.code-scroll code {
+  display: block;
+  color: var(--code-copy);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 13px;
+  line-height: 1.75;
+  white-space: pre;
+}
+
+.fact-rail {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  margin: 0;
+  border-block: 1px solid var(--border);
+  padding: 0;
+  list-style: none;
+}
+
+.fact-rail li {
+  min-height: 86px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  color: var(--ink);
+  font-size: 14px;
+  font-weight: 680;
+}
+
+.fact-rail li + li {
+  border-left: 1px solid var(--border);
+}
+
+.fact-rail svg {
+  color: var(--accent);
+}
+
+.home-section {
+  scroll-margin-top: 84px;
+  padding-block: clamp(76px, 9vw, 108px);
+}
+
+.section-intro {
+  max-width: 680px;
+  margin: 0 auto 48px;
+  text-align: center;
+}
+
+.section-intro--left {
+  margin-inline: 0;
+  text-align: left;
+}
+
+.section-intro h2,
+.final-cta-panel h2 {
+  margin: 0;
+  color: var(--ink);
+  font-size: clamp(2rem, 3.7vw, 2.8rem);
+  font-weight: 740;
+  letter-spacing: -0.035em;
+  line-height: 1.18;
+  text-wrap: balance;
+}
+
+.section-intro p,
+.final-cta-panel p {
+  max-width: 65ch;
+  margin: 18px auto 0;
+  color: var(--copy);
+  font-size: 16px;
+  line-height: 1.75;
+  text-wrap: pretty;
+}
+
+.section-intro--left p {
+  margin-inline: 0;
+}
+
+.capability-section,
+.provider-section {
+  background: var(--surface-soft);
+}
+
+.capability-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.14fr) minmax(340px, 0.86fr);
+  align-items: center;
+  gap: clamp(44px, 7vw, 86px);
+}
+
+.dashboard-figure {
+  margin: 0;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: #ffffff;
+}
+
+.dashboard-figure img {
+  width: 100%;
+  height: auto;
+  display: block;
+}
+
+.capability-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.capability-list li {
+  display: grid;
+  grid-template-columns: 38px minmax(0, 1fr);
+  gap: 15px;
+  border-top: 1px solid var(--border);
+  padding-block: 22px;
+}
+
+.capability-list li:last-child {
+  border-bottom: 1px solid var(--border);
+}
+
+.capability-marker {
+  width: 36px;
+  height: 36px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  background: var(--surface-accent);
+  color: var(--accent-ink);
+}
+
+.capability-list h3,
+.steps-list h3 {
+  margin: 0;
+  color: var(--ink);
+  font-size: 16px;
+  font-weight: 720;
+  line-height: 1.5;
+}
+
+.capability-list p,
+.steps-list p {
+  margin: 6px 0 0;
+  color: var(--copy);
+  font-size: 14px;
+  line-height: 1.7;
+}
+
+.steps-list {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin: 0;
+  border-block: 1px solid var(--border);
+  padding: 0;
+  list-style: none;
+}
+
+.steps-list li {
+  min-width: 0;
+  padding: 32px clamp(22px, 3vw, 38px) 36px;
+}
+
+.steps-list li + li {
+  border-left: 1px solid var(--border);
+}
+
+.step-number {
+  width: 36px;
+  height: 36px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-bottom: 24px;
+  border-radius: 999px;
+  background: var(--ink);
+  color: var(--page);
+  font-size: 13px;
+  font-weight: 760;
+}
+
+.section-action {
+  display: flex;
+  justify-content: center;
+  margin-top: 32px;
+}
+
+.text-link,
+.cta-text-link {
+  min-height: 44px;
+  gap: 7px;
+  color: var(--accent-ink);
+  font-size: 14px;
+  font-weight: 700;
+  text-decoration: none;
+}
+
+.text-link:hover,
+.cta-text-link:hover {
+  text-decoration: underline;
+  text-underline-offset: 4px;
+}
+
+.provider-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.provider-card {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: 42px minmax(0, 1fr);
+  align-items: center;
+  gap: 2px 12px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+  padding: 18px;
+}
+
+.provider-card--supported {
+  border-color: color-mix(in srgb, var(--accent) 48%, var(--border));
+  background: var(--surface-accent);
+}
+
+.provider-icon {
+  grid-row: span 2;
+  width: 42px;
+  height: 42px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  color: var(--ink);
+}
+
+.provider-card--unsupported .provider-icon {
+  filter: grayscale(1);
+  opacity: 0.58;
+}
+
+.provider-name {
+  overflow: hidden;
+  color: var(--ink);
+  font-size: 14px;
+  font-weight: 720;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.provider-status {
+  color: var(--copy);
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.provider-card--supported .provider-status {
+  color: var(--accent-ink);
+}
+
+.provider-note {
+  margin: 24px 0 0;
+  color: var(--copy);
+  font-size: 13px;
+  line-height: 1.7;
+  text-align: center;
+}
+
+.faq-layout {
+  display: grid;
+  grid-template-columns: minmax(260px, 0.7fr) minmax(0, 1.3fr);
+  align-items: start;
+  gap: clamp(48px, 8vw, 104px);
+}
+
+.faq-heading {
+  position: sticky;
+  top: 112px;
+  margin-bottom: 0;
+}
+
+.faq-list {
+  border-top: 1px solid var(--border);
+}
+
+.faq-list details {
+  border-bottom: 1px solid var(--border);
+}
+
+.faq-list summary {
+  min-height: 78px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  color: var(--ink);
+  cursor: pointer;
+  font-size: 16px;
+  font-weight: 690;
+  list-style: none;
+}
+
+.faq-list summary::-webkit-details-marker {
+  display: none;
+}
+
+.faq-list summary svg {
+  flex: 0 0 auto;
+  color: var(--accent-ink);
+  transition: transform 180ms ease;
+}
+
+.faq-list details[open] summary svg {
+  transform: rotate(45deg);
+}
+
+.faq-list details > p {
+  max-width: 68ch;
+  margin: -4px 0 0;
+  padding: 0 42px 24px 0;
+  color: var(--copy);
+  font-size: 14px;
+  line-height: 1.78;
+}
+
+.final-cta-section {
+  padding-top: 32px;
+}
+
+.final-cta-panel {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 40px;
+  border-radius: 16px;
+  background: #0f172a;
+  padding: clamp(36px, 6vw, 64px);
+}
+
+.final-cta-panel h2 {
+  color: #ffffff;
+}
+
+.final-cta-panel p {
+  margin-inline: 0;
+  color: #cbd5e1;
+}
+
+.final-cta-actions {
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 12px 20px;
+}
+
+.primary-button--light {
+  border-color: #ffffff;
+  background: #ffffff;
+  color: #0f172a;
+}
+
+.cta-text-link {
+  color: #ccfbf1;
+}
+
+.home-footer {
+  border-top: 1px solid var(--border);
+  padding-block: 30px;
+}
+
+.footer-layout {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+}
+
+.home-footer p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.home-footer nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 20px;
+}
+
+.home-footer a {
+  min-height: 44px;
+  display: inline-flex;
+  align-items: center;
+  font-size: 13px;
+  font-weight: 620;
+}
+
+.mobile-menu-enter-active,
+.mobile-menu-leave-active {
+  transition:
+    opacity 170ms ease,
+    transform 170ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.mobile-menu-enter-from,
+.mobile-menu-leave-to {
+  opacity: 0;
+  transform: translateY(-8px);
+}
+
+@media (max-width: 1023px) {
+  .desktop-nav-links,
+  .desktop-action {
+    display: none;
   }
-  51%,
-  100% {
-    opacity: 0;
+
+  .mobile-menu-button {
+    display: inline-flex;
+  }
+
+  .mobile-menu-panel {
+    position: absolute;
+    top: 100%;
+    right: 0;
+    left: 0;
+    display: block;
+    border-bottom: 1px solid var(--border);
+    background: var(--page);
+    box-shadow: 0 20px 34px rgba(15, 23, 42, 0.1);
+  }
+
+  .mobile-menu-inner {
+    display: grid;
+    padding-block: 12px 20px;
+  }
+
+  .mobile-menu-inner > a {
+    min-height: 52px;
+    display: flex;
+    align-items: center;
+    border-bottom: 1px solid var(--border);
+    font-size: 15px;
+    font-weight: 650;
+  }
+
+  .mobile-menu-footer {
+    justify-content: space-between;
+    gap: 16px;
+    padding-top: 16px;
+  }
+
+  .mobile-menu-footer > a {
+    min-height: 44px;
+    gap: 7px;
+    border-radius: 10px;
+    background: var(--ink);
+    color: var(--page);
+    padding-inline: 16px;
+    font-size: 13px;
+    font-weight: 700;
+  }
+
+  .hero-layout,
+  .capability-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .hero-copy {
+    max-width: 760px;
+  }
+
+  .hero-copy h1 {
+    max-width: 13ch;
+  }
+
+  .code-showcase {
+    width: 100%;
+  }
+
+  .capability-copy {
+    display: grid;
+    grid-template-columns: minmax(230px, 0.7fr) minmax(0, 1.3fr);
+    gap: 48px;
+  }
+
+  .provider-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 
-/* Dark mode adjustments */
-:deep(.dark) .terminal-window {
-  box-shadow:
-    0 25px 50px -12px rgba(0, 0, 0, 0.6),
-    0 0 0 1px rgba(20, 184, 166, 0.2),
-    0 0 40px rgba(20, 184, 166, 0.1),
-    inset 0 1px 0 rgba(255, 255, 255, 0.1);
+@media (max-width: 767px) {
+  .content-shell,
+  .home-nav,
+  .mobile-menu-inner {
+    width: min(100% - 32px, 1120px);
+  }
+
+  .home-nav {
+    min-height: 64px;
+  }
+
+  .brand-link {
+    gap: 9px;
+  }
+
+  .brand-mark {
+    width: 38px;
+    height: 38px;
+  }
+
+  .brand-name {
+    max-width: 128px;
+    font-size: 16px;
+  }
+
+  .hero-section {
+    padding-block: 58px 52px;
+  }
+
+  .hero-layout {
+    gap: 48px;
+  }
+
+  .hero-copy h1 {
+    max-width: 12ch;
+    font-size: clamp(2.25rem, 10vw, 2.5rem);
+    line-height: 1.12;
+  }
+
+  .hero-description {
+    margin-top: 22px;
+    font-size: 15px;
+    line-height: 1.8;
+  }
+
+  .hero-actions {
+    align-items: stretch;
+    margin-top: 28px;
+  }
+
+  .hero-actions .primary-button,
+  .hero-actions .secondary-button {
+    flex: 1 1 190px;
+  }
+
+  .code-toolbar {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 8px;
+    padding: 10px;
+  }
+
+  .code-tabs button {
+    flex: 1;
+  }
+
+  .code-tabs,
+  .copy-button {
+    width: 100%;
+  }
+
+  .copy-button {
+    min-height: 44px;
+    justify-content: center;
+  }
+
+  .code-scroll pre {
+    min-width: 510px;
+    padding: 20px;
+  }
+
+  .fact-rail {
+    grid-template-columns: 1fr;
+  }
+
+  .fact-rail li {
+    min-height: 62px;
+    justify-content: flex-start;
+    padding-inline: 8px;
+  }
+
+  .fact-rail li + li {
+    border-top: 1px solid var(--border);
+    border-left: 0;
+  }
+
+  .home-section {
+    padding-block: 68px;
+  }
+
+  .section-intro {
+    margin-bottom: 36px;
+    text-align: left;
+  }
+
+  .section-intro h2,
+  .final-cta-panel h2 {
+    font-size: clamp(1.8rem, 8vw, 2.25rem);
+  }
+
+  .section-intro p,
+  .final-cta-panel p {
+    margin-inline: 0;
+    font-size: 15px;
+  }
+
+  .capability-copy {
+    display: block;
+  }
+
+  .capability-copy .section-intro {
+    margin-top: 38px;
+  }
+
+  .steps-list {
+    grid-template-columns: 1fr;
+  }
+
+  .steps-list li {
+    padding-inline: 8px;
+  }
+
+  .steps-list li + li {
+    border-top: 1px solid var(--border);
+    border-left: 0;
+  }
+
+  .provider-grid {
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  }
+
+  .provider-card {
+    padding: 15px;
+  }
+
+  .faq-layout {
+    grid-template-columns: 1fr;
+    gap: 20px;
+  }
+
+  .faq-heading {
+    position: static;
+  }
+
+  .faq-list summary {
+    min-height: 72px;
+    font-size: 15px;
+  }
+
+  .faq-list details > p {
+    padding-right: 0;
+  }
+
+  .final-cta-section {
+    padding-top: 10px;
+  }
+
+  .final-cta-panel {
+    align-items: stretch;
+    flex-direction: column;
+    padding: 32px 24px;
+  }
+
+  .final-cta-actions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .footer-layout {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+}
+
+@media (max-width: 359px) {
+  .brand-name {
+    max-width: 92px;
+  }
+
+  .header-actions {
+    gap: 2px;
+  }
+
+  .provider-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .home-page *,
+  .home-page *::before,
+  .home-page *::after {
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+  }
 }
 </style>

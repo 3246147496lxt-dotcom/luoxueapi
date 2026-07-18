@@ -5,113 +5,145 @@ export default {
   },
   // Home Page
   home: {
-    viewOnGithub: 'View on GitHub',
-    viewDocs: 'View Documentation',
+    // KeyUsageView also reuses these base keys.
+    viewDocs: 'View documentation',
     docs: 'Docs',
-    switchToLight: 'Switch to Light Mode',
-    switchToDark: 'Switch to Dark Mode',
+    switchToLight: 'Switch to light mode',
+    switchToDark: 'Switch to dark mode',
     dashboard: 'Dashboard',
-    login: 'Login',
-    getStarted: 'Get Started',
-    goToDashboard: 'Go to Dashboard',
-    // User-focused value proposition
-    heroSubtitle: 'One Key, All AI Models',
-    heroDescription: 'No need to manage multiple subscriptions. Access Claude, GPT, Gemini and more with a single API key',
-    tags: {
-      subscriptionToApi: 'Subscription to API',
-      stickySession: 'Session Persistence',
-      realtimeBilling: 'Pay As You Go'
+    login: 'Sign in',
+    nav: {
+      ariaLabel: 'Home navigation',
+      capabilities: 'Capabilities',
+      steps: 'Get started',
+      providers: 'Model status',
+      faq: 'FAQ',
+      tutorial: 'Tutorial',
+      openMenu: 'Open menu',
+      closeMenu: 'Close menu'
     },
-    // Pain points section
-    painPoints: {
-      title: 'Sound Familiar?',
-      items: {
-        expensive: {
-          title: 'High Subscription Costs',
-          desc: 'Paying for multiple AI subscriptions that add up every month'
-        },
-        complex: {
-          title: 'Account Chaos',
-          desc: 'Managing scattered accounts and API keys across different platforms'
-        },
-        unstable: {
-          title: 'Service Interruptions',
-          desc: 'Single accounts hitting rate limits and disrupting your workflow'
-        },
-        noControl: {
-          title: 'No Usage Control',
-          desc: "Can't track where your money goes or limit team member usage"
-        }
-      }
+    hero: {
+      status: 'GPT supported · Other models not supported yet',
+      title: 'Reliable GPT API access with usage-based billing',
+      description:
+        'Create an API key and choose a group to connect OpenAI-compatible clients. View request logs, token usage, and costs in the dashboard.',
+      register: 'Sign up to start',
+      login: 'Sign in to dashboard',
+      createKey: 'Create an API key',
+      tutorial: 'View the beginner tutorial'
     },
-    // Solutions section
-    solutions: {
-      title: 'We Solve These Problems',
-      subtitle: 'Three simple steps to stress-free AI access'
-    },
-    features: {
-      unifiedGateway: 'One-Click Access',
-      unifiedGatewayDesc: 'Get a single API key to call all connected AI models. No separate applications needed.',
-      multiAccount: 'Always Reliable',
-      multiAccountDesc: 'Smart routing across multiple upstream accounts with automatic failover. Say goodbye to errors.',
-      balanceQuota: 'Pay What You Use',
-      balanceQuotaDesc: 'Usage-based billing with quota limits. Full visibility into team consumption.'
-    },
-    // Comparison section
-    comparison: {
-      title: 'Why Choose Us?',
-      headers: {
-        feature: 'Comparison',
-        official: 'Official Subscriptions',
-        us: 'Our Platform'
+    codeExample: {
+      title: 'Send a request through an OpenAI-compatible API',
+      description:
+        'The endpoint comes from the current site configuration. Use the API key and model ID shown in the dashboard.',
+      tabs: {
+        curl: 'cURL',
+        python: 'Python'
       },
+      copy: 'Copy',
+      copied: 'Copied',
+      copyFailed: 'Copy failed. Please copy the code manually.',
+      copyAria: 'Copy the {language} example',
+      copiedAria: '{language} example copied'
+    },
+    facts: {
+      gpt: 'GPT supported',
+      usage: 'Detailed usage records',
+      quota: 'Controllable key limits'
+    },
+    capabilities: {
+      title: 'Manage requests and API keys in one place',
+      description: 'Review usage records, key limits, and channel status from the dashboard.',
+      imageAlt:
+        'Luoxue API dashboard showing balance, API keys, request volume, and cost overview',
       items: {
-        pricing: {
-          feature: 'Pricing',
-          official: 'Fixed monthly fee, pay even if unused',
-          us: 'Pay only for what you use'
+        usage: {
+          title: 'Review usage details',
+          description: 'View requests by time and model, including token usage and costs.'
         },
-        models: {
-          feature: 'Model Selection',
-          official: 'Single provider only',
-          us: 'Switch between models freely'
+        keys: {
+          title: 'Control API key usage',
+          description: 'Disable keys and configure limits such as spending quotas when needed.'
         },
-        management: {
-          feature: 'Account Management',
-          official: 'Manage each service separately',
-          us: 'Unified key, one dashboard'
-        },
-        stability: {
-          feature: 'Stability',
-          official: 'Single account rate limits',
-          us: 'Multi-account pool, auto-failover'
-        },
-        control: {
-          feature: 'Usage Control',
-          official: 'Not available',
-          us: 'Quotas & detailed analytics'
+        diagnostics: {
+          title: 'Troubleshoot faster',
+          description:
+            'Use request records and channel status to narrow down the cause of failed calls.'
         }
       }
+    },
+    steps: {
+      title: 'Connect in three steps',
+      description: 'Create a key, import the configuration, and enable it in order.',
+      items: {
+        account: {
+          title: 'Sign up or sign in',
+          description: 'Open the dashboard and confirm that your account and main controls are available.'
+        },
+        key: {
+          title: 'Create an API key and choose a valid group',
+          description: 'Enter a name and select an available group. Do not choose default or leave it blank.'
+        },
+        client: {
+          title: 'Import into CC Switch and enable it',
+          description:
+            'Follow the beginner tutorial to import the configuration, enable it, and restart Codex.'
+        }
+      },
+      tutorial: 'View the complete tutorial'
     },
     providers: {
-      title: 'AI Model Availability',
-      description: 'GPT is supported. Other models are not available yet.',
+      title: 'Model availability',
+      description: 'GPT is supported. Other models are not supported yet.',
       supported: 'Supported',
       unsupported: 'Not supported yet',
-      soon: 'Soon',
+      note: 'Check the dashboard for the latest available model IDs and multipliers.',
       claude: 'Claude',
       gpt: 'GPT',
       gemini: 'Gemini',
-      antigravity: 'Antigravity',
-      more: 'More'
+      antigravity: 'Antigravity'
     },
-    // CTA section
+    faq: {
+      title: 'Frequently asked questions',
+      description: 'Key details to check before connecting a client.',
+      items: {
+        models: {
+          question: 'Which models are currently supported?',
+          answer:
+            'GPT is currently the only model family marked as supported. Claude, Gemini, and Antigravity are not supported yet. Check the dashboard for the latest model IDs and multipliers.'
+        },
+        group: {
+          question: 'Why do I need to choose a group?',
+          answer:
+            'The group determines which platforms, models, and billing scope the key can use. Select a valid group when creating the key; do not choose default or leave it blank.'
+        },
+        endpoint: {
+          question: 'Where can I find the endpoint and model ID?',
+          answer:
+            'The code example uses the API endpoint configured for this site. Use a model ID shown in the dashboard.'
+        },
+        billing: {
+          question: 'Where can I review usage and costs?',
+          answer:
+            'After signing in, open Usage Records to review requests, token usage, and cost details.'
+        },
+        client: {
+          question: 'How do I import into CC Switch, and what if a call fails?',
+          answer:
+            'Follow the beginner tutorial to import and enable the configuration, then restart Codex. If calls still fail, check the API key, group, and model, then review Usage Records and Channel Status.'
+        }
+      }
+    },
     cta: {
-      title: 'Ready to Get Started?',
-      description: 'Sign up now and get free trial credits to experience seamless AI access',
-      button: 'Sign Up Free'
+      title: 'Ready to connect GPT?',
+      description: 'Create an API key and follow the beginner tutorial to configure your client.',
+      button: 'Start using GPT',
+      tutorial: 'View the beginner tutorial'
     },
     footer: {
+      tutorial: 'Tutorial',
+      apiDocs: 'API docs',
+      channelStatus: 'Channel status',
       allRightsReserved: 'All rights reserved.'
     }
   },
