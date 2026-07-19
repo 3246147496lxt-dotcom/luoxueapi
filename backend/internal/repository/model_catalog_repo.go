@@ -215,7 +215,7 @@ func (r *modelCatalogRepository) list(ctx context.Context, query string) ([]serv
 	if err != nil {
 		return nil, fmt.Errorf("list model catalog entries: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	out := make([]service.ModelCatalogModel, 0)
 	for rows.Next() {
 		model, err := scanModelCatalogModel(rows)
