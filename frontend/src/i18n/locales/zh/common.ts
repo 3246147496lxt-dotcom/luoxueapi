@@ -147,6 +147,7 @@ export default {
 
   // Navigation
   nav: {
+    home: '首页',
     dashboard: '仪表盘',
     adminDashboard: '数据看板',
     announcements: '公告',
@@ -165,6 +166,8 @@ export default {
     channels: '渠道管理',
     availableChannels: '可用渠道',
     modelCatalog: '模型广场',
+    contactUs: '联系我们',
+    quickLinks: '快捷入口',
     subscriptions: '订阅管理',
     accounts: '账号管理',
     proxies: 'IP管理',
@@ -182,6 +185,8 @@ export default {
     mySubscriptions: '我的订阅',
     buySubscription: '钱包',
     docs: '文档',
+    docsTutorial: '文档教程',
+    documentationManagement: '文档管理',
     myOrders: '我的订单',
     orderManagement: '订单管理',
     paymentDashboard: '支付概览',

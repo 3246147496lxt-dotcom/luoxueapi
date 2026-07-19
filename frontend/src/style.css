@@ -3,6 +3,14 @@
 @tailwind utilities;
 
 @layer base {
+  :root {
+    --luoxue-navy-rgb: 14 46 89;
+    --luoxue-blue-rgb: 11 139 237;
+    --luoxue-blue-deep-rgb: 7 89 133;
+    --luoxue-blue-light-rgb: 141 204 255;
+    --luoxue-ice-rgb: 234 245 255;
+  }
+
   * {
     @apply border-gray-200 dark:border-dark-700;
   }
@@ -14,12 +22,12 @@
   body {
     @apply text-gray-900 dark:text-gray-100;
     @apply min-h-screen;
-    background: #eef1ef;
+    background: #f5f7fb;
     font-variant-numeric: tabular-nums;
   }
 
   .dark body {
-    background: #0e1211;
+    background: #0f1115;
   }
 
   /* 自定义滚动条 - 仅针对 Firefox，避免 Chrome 取消 webkit 的全局定制 */

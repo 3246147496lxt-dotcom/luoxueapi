@@ -16,13 +16,14 @@ vi.mock('vue-i18n', async () => {
 import AnnouncementBell from '../AnnouncementBell.vue'
 import { useAnnouncementStore } from '@/stores/announcements'
 
-function mountAnnouncementBell() {
+function mountAnnouncementBell(compact = false) {
   const pinia = createPinia()
   setActivePinia(pinia)
 
   return {
     store: useAnnouncementStore(),
     wrapper: mount(AnnouncementBell, {
+      props: { compact },
       attachTo: document.body,
       global: { plugins: [pinia] },
     }),
@@ -69,6 +70,23 @@ describe('AnnouncementBell notification icon', () => {
     expect(trigger.classes()).toEqual(expect.arrayContaining(['text-blue-600', 'dark:text-blue-400']))
     expect(trigger.find('.bg-red-500').exists()).toBe(true)
     expect(trigger.get('svg.announcement-bell-icon').get('path').attributes('fill')).toBe('currentColor')
+
+    wrapper.unmount()
+  })
+
+  it('matches the compact header icon proportions and hover treatment', () => {
+    const { wrapper } = mountAnnouncementBell(true)
+    const trigger = wrapper.get('button')
+    const icon = trigger.get('svg.announcement-bell-icon')
+
+    expect(trigger.classes()).toEqual(expect.arrayContaining([
+      'h-8',
+      'w-8',
+      'text-[#007bff]',
+      'hover:bg-[rgba(46,50,56,0.05)]',
+    ]))
+    expect(trigger.classes()).not.toContain('min-h-11')
+    expect(icon.classes()).toEqual(expect.arrayContaining(['h-[18px]', 'w-[18px]']))
 
     wrapper.unmount()
   })

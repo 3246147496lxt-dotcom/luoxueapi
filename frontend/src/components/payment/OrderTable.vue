@@ -18,8 +18,18 @@
         <span v-if="row.fee_rate > 0" class="ml-1 text-xs text-gray-400" :title="t('payment.orders.fee') + ': ' + row.fee_rate + '%'">
           ({{ t('payment.orders.fee') }} {{ row.fee_rate }}%)
         </span>
-        <div v-if="row.amount !== row.pay_amount" class="text-xs text-gray-500">
-          {{ t('payment.orders.creditedAmount') }}: {{ creditedAmountSymbol }}{{ row.amount.toFixed(2) }}
+        <div
+          v-if="row.order_type === 'balance' || row.amount !== row.pay_amount"
+          class="mt-0.5 flex items-center gap-1 text-xs text-gray-500"
+        >
+          <span>{{ t(row.order_type === 'balance' ? 'payment.orders.creditedAmount' : 'payment.orders.baseAmount') }}:</span>
+          <CreditAmount
+            v-if="row.order_type === 'balance'"
+            :value="row.amount.toFixed(2)"
+            icon-size="xs"
+            :label="`${t('payment.orders.creditedAmount')} ${row.amount.toFixed(2)}`"
+          />
+          <span v-else>{{ subscriptionBaseAmountSymbol }}{{ row.amount.toFixed(2) }}</span>
         </div>
       </div>
     </template>
@@ -44,6 +54,7 @@ import { useI18n } from 'vue-i18n'
 import type { PaymentOrder } from '@/types/payment'
 import type { Column } from '@/components/common/types'
 import DataTable from '@/components/common/DataTable.vue'
+import CreditAmount from '@/components/common/CreditAmount.vue'
 import OrderStatusBadge from '@/components/payment/OrderStatusBadge.vue'
 import { currencySymbol } from '@/components/payment/currency'
 
@@ -57,7 +68,7 @@ const props = defineProps<{
 
 function formatDate(dateStr: string) { return new Date(dateStr).toLocaleString() }
 
-const creditedAmountSymbol = currencySymbol('USD')
+const subscriptionBaseAmountSymbol = currencySymbol('USD')
 
 function paymentAmountSymbol(order: PaymentOrder): string {
   return currencySymbol(order.currency)

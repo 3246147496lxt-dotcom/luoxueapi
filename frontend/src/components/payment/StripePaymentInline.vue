@@ -23,7 +23,14 @@
               </div>
               <div v-if="amount > 0" class="flex justify-between">
                 <span class="text-gray-500 dark:text-gray-400">{{ t('payment.orders.amount') }}</span>
-                <span class="font-medium text-gray-900 dark:text-white">{{ creditedAmountSymbol }}{{ amount.toFixed(2) }}</span>
+                <CreditAmount
+                  v-if="orderType === 'balance'"
+                  class="font-medium text-gray-900 dark:text-white"
+                  :value="amount.toFixed(2)"
+                  icon-size="sm"
+                  :label="`${t('payment.orders.amount')} ${amount.toFixed(2)}`"
+                />
+                <span v-else class="font-medium text-gray-900 dark:text-white">{{ subscriptionBaseAmountSymbol }}{{ amount.toFixed(2) }}</span>
               </div>
               <div class="flex justify-between">
                 <span class="text-gray-500 dark:text-gray-400">{{ t('payment.orders.payAmount') }}</span>
@@ -73,6 +80,7 @@ import { useAppStore } from '@/stores'
 import { getPaymentPopupFeatures } from '@/components/payment/providerConfig'
 import { currencySymbol } from '@/components/payment/currency'
 import type { Stripe, StripeElements } from '@stripe/stripe-js'
+import CreditAmount from '@/components/common/CreditAmount.vue'
 import Icon from '@/components/icons/Icon.vue'
 
 // Stripe payment methods that open a popup (redirect or QR code)
@@ -103,7 +111,7 @@ const cancelling = ref(false)
 const success = ref(false)
 const ready = ref(false)
 const selectedType = ref('')
-const creditedAmountSymbol = currencySymbol('USD')
+const subscriptionBaseAmountSymbol = currencySymbol('USD')
 const paymentAmountSymbol = computed(() => currencySymbol(props.currency))
 
 let stripeInstance: Stripe | null = null

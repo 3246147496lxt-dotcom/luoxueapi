@@ -1,6 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, shallowMount } from '@vue/test-utils'
 import PaymentView from '../PaymentView.vue'
+import CreditAmount from '@/components/common/CreditAmount.vue'
+import AmountInput from '@/components/payment/AmountInput.vue'
 import { PAYMENT_RECOVERY_STORAGE_KEY } from '@/components/payment/paymentFlow'
 import { formatPaymentAmount } from '@/components/payment/currency'
 import type { CheckoutInfoResponse, MethodLimit, SubscriptionPlan } from '@/types/payment'
@@ -20,8 +22,15 @@ const showError = vi.hoisted(() => vi.fn())
 const showInfo = vi.hoisted(() => vi.fn())
 const showWarning = vi.hoisted(() => vi.fn())
 const getCheckoutInfo = vi.hoisted(() => vi.fn())
+const getDashboardStats = vi.hoisted(() => vi.fn())
 const bridgeInvoke = vi.hoisted(() => vi.fn())
 const publicSettings = vi.hoisted(() => ({ payment_enabled: true }))
+const authUser = vi.hoisted(() => ({
+  username: 'demo-user',
+  email: 'demo@example.com',
+  balance: 0,
+  role: 'user' as 'admin' | 'user',
+}))
 
 vi.mock('vue-router', async () => {
   const actual = await vi.importActual<typeof import('vue-router')>('vue-router')
@@ -48,10 +57,7 @@ vi.mock('vue-i18n', async () => {
 
 vi.mock('@/stores/auth', () => ({
   useAuthStore: () => ({
-    user: {
-      username: 'demo-user',
-      balance: 0,
-    },
+    user: authUser,
     refreshUser,
   }),
 }))
@@ -81,6 +87,12 @@ vi.mock('@/stores', () => ({
 vi.mock('@/api/payment', () => ({
   paymentAPI: {
     getCheckoutInfo,
+  },
+}))
+
+vi.mock('@/api/usage', () => ({
+  usageAPI: {
+    getDashboardStats,
   },
 }))
 
@@ -201,8 +213,14 @@ function oauthOrderFixture() {
   }
 }
 
+beforeEach(() => {
+  getDashboardStats.mockReset().mockResolvedValue({ total_actual_cost: 25.34 })
+})
+
 describe('PaymentView integrated purchase surface', () => {
   beforeEach(() => {
+    authUser.username = 'demo-user'
+    authUser.role = 'user'
     publicSettings.payment_enabled = true
     routeState.path = '/purchase'
     routeState.query = {}
@@ -246,6 +264,94 @@ describe('PaymentView integrated purchase surface', () => {
     expect(tabs).toHaveLength(2)
     expect(tabs[0].attributes('aria-selected')).toBe('true')
     expect(tabs[1].attributes('aria-selected')).toBe('false')
+  })
+
+  it('uses snowflake credits for balances while keeping recharge amounts in CNY', async () => {
+    getCheckoutInfo.mockResolvedValue(checkoutInfoFixture({
+      methods: {
+        wxpay: {
+          ...checkoutInfoFixture().data.methods.wxpay,
+          currency: 'CNY',
+        },
+      },
+    }))
+    const wrapper = shallowMount(PaymentView, {
+      global: {
+        stubs: {
+          AppLayout: { template: '<div><slot /></div>' },
+          Teleport: true,
+          Transition: false,
+        },
+      },
+    })
+    await flushPromises()
+
+    expect(wrapper.get('[data-testid="payment-current-balance"]').findComponent(CreditAmount).props('value')).toBe('0.00')
+    expect(wrapper.get('[data-testid="payment-credited-balance"]').findComponent(CreditAmount).props('value')).toBe('0.00')
+    expect(wrapper.findComponent(AmountInput).props('currency')).toBe('CNY')
+    expect(wrapper.text()).toContain(formatPaymentAmount(0, 'CNY'))
+  })
+
+  it('shows the streamlined recharge heading, account identity, and real historical spend', async () => {
+    const wrapper = shallowMount(PaymentView, {
+      global: {
+        stubs: {
+          AppLayout: { template: '<div><slot /></div>' },
+          Teleport: true,
+          Transition: false,
+        },
+      },
+    })
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('payment.checkoutTitle')
+    expect(wrapper.text()).toContain('payment.checkoutDescription')
+    expect(wrapper.get('[data-testid="payment-account-identity"]').text()).toContain('demo-user (payment.userTypeRegular)')
+    const mobileIdentity = wrapper.get('[data-testid="payment-account-identity-mobile"]')
+    expect(mobileIdentity.text()).toContain('payment.rechargeAccount · demo-user')
+    expect(mobileIdentity.classes()).toContain('md:hidden')
+    expect(mobileIdentity.classes()).not.toContain('hidden')
+    expect(wrapper.text()).toContain('dashboard.lifetimeSpend')
+    expect(wrapper.get('[data-testid="payment-historical-spend"]').findComponent(CreditAmount).props('value')).toBe('25.3400')
+    expect(getDashboardStats).toHaveBeenCalledOnce()
+  })
+
+  it('labels administrator accounts without changing the username', async () => {
+    authUser.role = 'admin'
+    const wrapper = shallowMount(PaymentView, {
+      global: {
+        stubs: {
+          AppLayout: { template: '<div><slot /></div>' },
+          Teleport: true,
+          Transition: false,
+        },
+      },
+    })
+    await flushPromises()
+
+    const identity = wrapper.get('[data-testid="payment-account-identity"]').text()
+    expect(identity).toContain('demo-user (payment.userTypeAdmin)')
+    expect(identity).not.toContain('payment.userTypeRegular')
+  })
+
+  it('uses one row-based order summary instead of four disconnected metric cards', async () => {
+    const wrapper = shallowMount(PaymentView, {
+      global: {
+        stubs: {
+          AppLayout: { template: '<div><slot /></div>' },
+          Teleport: true,
+          Transition: false,
+        },
+      },
+    })
+    await flushPromises()
+
+    const summary = wrapper.get('[data-testid="payment-order-summary"]')
+    expect(summary.findAll('dl > div')).toHaveLength(4)
+    expect(summary.text()).toContain('payment.amountLabel')
+    expect(summary.text()).toContain('payment.creditedBalance')
+    expect(summary.text()).toContain('payment.fee')
+    expect(summary.text()).toContain('payment.actualPay')
   })
 })
 

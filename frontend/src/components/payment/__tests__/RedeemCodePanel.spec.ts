@@ -81,6 +81,20 @@ describe('RedeemCodePanel', () => {
     expect(wrapper.get('button[type="submit"]').attributes()).toHaveProperty('disabled')
   })
 
+  it('uses the compact embedded layout without description or activity history', async () => {
+    const wrapper = mount(RedeemCodePanel, { props: { embedded: true } })
+    await flushPromises()
+
+    expect(getHistory).not.toHaveBeenCalled()
+    expect(wrapper.text()).toContain('redeem.quickRedeemTitle')
+    expect(wrapper.text()).not.toContain('redeem.quickRedeemDescription')
+    expect(wrapper.text()).not.toContain('redeem.recentActivity')
+    expect(wrapper.find('details').exists()).toBe(false)
+    expect(wrapper.get('label').classes()).toContain('sr-only')
+    expect(wrapper.get('input').element.parentElement?.parentElement?.classList.contains('space-y-3')).toBe(true)
+    expect(wrapper.get('button[type="submit"]').element.parentElement?.classList.contains('space-y-3')).toBe(true)
+  })
+
   it('trims the code, refreshes the account, and renders a live success result', async () => {
     redeem.mockResolvedValue(redeemResult())
     const wrapper = mount(RedeemCodePanel)
@@ -92,8 +106,10 @@ describe('RedeemCodePanel', () => {
 
     expect(redeem).toHaveBeenCalledWith('CODE-001')
     expect(refreshUser).toHaveBeenCalledTimes(1)
-    expect(wrapper.get('[role="status"]').text()).toContain('redeem.balanceRedeemSummary')
-    expect(wrapper.get('[role="status"]').text()).toContain('"balance":"15.00"')
+    expect(wrapper.get('[role="status"]').text()).toContain('redeem.balanceAddedAmount')
+    expect(wrapper.get('[role="status"]').text()).toContain('redeem.currentBalance')
+    expect(wrapper.get('[role="status"]').findAll('[data-testid="credit-amount"]')).toHaveLength(2)
+    expect(wrapper.get('[role="status"]').text()).not.toContain('$')
     expect(wrapper.get('input').element.value).toBe('')
     expect(showSuccess).toHaveBeenCalledWith('redeem.codeRedeemSuccess')
   })
@@ -126,7 +142,8 @@ describe('RedeemCodePanel', () => {
     await wrapper.get('form').trigger('submit')
     await flushPromises()
 
-    expect(wrapper.get('[role="status"]').text()).toContain('redeem.balanceRedeemSummary')
+    expect(wrapper.get('[role="status"]').text()).toContain('redeem.balanceAddedAmount')
+    expect(wrapper.get('[role="status"]').findAll('[data-testid="credit-amount"]')).toHaveLength(2)
     expect(showSuccess).toHaveBeenCalledWith('redeem.codeRedeemSuccess')
     expect(showWarning).toHaveBeenCalledWith('redeem.accountRefreshFailed')
     expect(showError).not.toHaveBeenCalled()

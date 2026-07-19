@@ -71,11 +71,21 @@ describe('AppSidebar navigation shell', () => {
     expect(componentSource).toContain('gap: 0.625rem;')
     expect(componentSource).toContain('padding-top: 0.25rem;')
     expect(componentSource).toContain('line-height: 1.5rem;')
+    expect(componentSource).toContain('color: rgb(0 132 255);')
     expect(componentSource).toContain('background: rgb(234 245 255);')
+    expect(componentSource).toContain('background: rgb(0 132 255);')
+    expect(componentSource).toContain('background: rgb(71 160 255 / 0.18);')
+    expect(componentSource).toContain('rgb(167 139 250 / 0.1)')
     expect(componentSource).toContain('width: 2px;')
     expect(componentSource).toContain('height: 1rem;')
     expect(componentSource).toContain('font-size: 0.75rem;')
     expect(componentSource).toContain('font-weight: 400;')
+  })
+
+  it('pins expandable group chevrons to the trailing edge', () => {
+    expect(componentSource).toContain('.sidebar-label-flex {')
+    expect(componentSource).toContain('flex: 1 1 auto;')
+    expect(componentSource).toContain('justify-content: space-between;')
   })
 })
 
@@ -84,5 +94,45 @@ describe('AppSidebar utility actions', () => {
     expect(componentSource).not.toContain('toggleTheme')
     expect(componentSource).not.toContain("t('nav.lightMode')")
     expect(componentSource).not.toContain("t('nav.darkMode')")
+  })
+})
+
+describe('AppSidebar pinned destinations', () => {
+  it('keeps the destination block outside the scrolling navigation region', () => {
+    const navEnd = componentSource.indexOf('</nav>')
+    const destinations = componentSource.indexOf('data-testid="sidebar-destination-links"')
+
+    expect(navEnd).toBeGreaterThan(-1)
+    expect(destinations).toBeGreaterThan(navEnd)
+    expect(componentSource).toContain('.sidebar-destination-links {')
+    expect(componentSource).toContain('flex: 0 0 auto;')
+  })
+
+  it('matches the compact reference rhythm and keeps a visible keyboard focus state', () => {
+    expect(componentSource).toContain('min-height: 2.25rem;')
+    expect(componentSource).toContain('padding: 0.5rem 0.75rem;')
+    expect(componentSource).toContain('border-radius: 0.625rem;')
+    expect(componentSource).toContain('font-size: 0.8125rem;')
+    expect(componentSource).toContain('.sidebar-destination-link:focus-visible')
+  })
+
+  it('matches the reference hover lift and recolors both destination glyphs', () => {
+    expect(componentSource).toMatch(
+      /\.sidebar-destination-link:hover,\s*\.sidebar-destination-link:focus-visible\s*\{[^}]*color:\s*rgb\(0 132 255\)[^}]*background:\s*rgb\(0 132 255 \/ 0\.08\)[^}]*box-shadow:\s*0 2px 8px rgb\(0 132 255 \/ 0\.06\)[^}]*transform:\s*translateY\(-1px\) scale\(1\.03\)/s,
+    )
+    expect(componentSource).toMatch(
+      /\.sidebar-destination-link:hover \.sidebar-destination-leading > :deep\(svg\)[\s\S]*?color:\s*rgb\(0 132 255\)/,
+    )
+    expect(componentSource).toContain('.sidebar-destination-label {')
+    expect(componentSource).toContain('color: inherit;')
+  })
+
+  it('disables the destination lift when reduced motion is requested', () => {
+    expect(componentSource).toMatch(
+      /@media \(prefers-reduced-motion: reduce\)[\s\S]*\.sidebar-destination-leading > :deep\(svg\)[\s\S]*transition-duration:\s*0\.01ms/,
+    )
+    expect(componentSource).toMatch(
+      /@media \(prefers-reduced-motion: reduce\)[\s\S]*\.sidebar-destination-link:hover,[\s\S]*transform:\s*none/,
+    )
   })
 })

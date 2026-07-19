@@ -152,4 +152,24 @@ describe('LocaleSwitcher', () => {
 
     wrapper.unmount()
   })
+
+  it('matches the compact header action proportions and blue icon treatment', () => {
+    const wrapper = mount(LocaleSwitcher, {
+      props: { compact: true },
+      attachTo: document.body,
+    })
+    const trigger = wrapper.get('button')
+    const icon = trigger.get('svg.locale-switcher-icon')
+
+    expect(trigger.classes()).toEqual(expect.arrayContaining([
+      'h-8',
+      'w-8',
+      'text-[#007bff]',
+      'hover:bg-[rgba(46,50,56,0.05)]',
+    ]))
+    expect(trigger.classes()).not.toContain('min-h-11')
+    expect(icon.classes()).toEqual(expect.arrayContaining(['h-5', 'w-5']))
+
+    wrapper.unmount()
+  })
 })

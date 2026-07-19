@@ -226,11 +226,11 @@
                       }"
                     ></div>
                   </div>
-                  <span class="usage-amount">
-                    ${{ row.daily_usage_usd?.toFixed(2) || '0.00' }}
-                    <span class="text-gray-400">/</span>
-                    ${{ row.group?.daily_limit_usd?.toFixed(2) }}
-                  </span>
+                  <CreditAmount
+                    class="usage-amount"
+                    :value="`${row.daily_usage_usd?.toFixed(2) || '0.00'} / ${row.group?.daily_limit_usd?.toFixed(2)}`"
+                    icon-size="xs"
+                  />
                 </div>
                 <div class="reset-info" v-if="row.daily_window_start">
                   <svg
@@ -263,11 +263,11 @@
                       }"
                     ></div>
                   </div>
-                  <span class="usage-amount">
-                    ${{ row.weekly_usage_usd?.toFixed(2) || '0.00' }}
-                    <span class="text-gray-400">/</span>
-                    ${{ row.group?.weekly_limit_usd?.toFixed(2) }}
-                  </span>
+                  <CreditAmount
+                    class="usage-amount"
+                    :value="`${row.weekly_usage_usd?.toFixed(2) || '0.00'} / ${row.group?.weekly_limit_usd?.toFixed(2)}`"
+                    icon-size="xs"
+                  />
                 </div>
                 <div class="reset-info" v-if="row.weekly_window_start">
                   <svg
@@ -300,11 +300,11 @@
                       }"
                     ></div>
                   </div>
-                  <span class="usage-amount">
-                    ${{ row.monthly_usage_usd?.toFixed(2) || '0.00' }}
-                    <span class="text-gray-400">/</span>
-                    ${{ row.group?.monthly_limit_usd?.toFixed(2) }}
-                  </span>
+                  <CreditAmount
+                    class="usage-amount"
+                    :value="`${row.monthly_usage_usd?.toFixed(2) || '0.00'} / ${row.group?.monthly_limit_usd?.toFixed(2)}`"
+                    icon-size="xs"
+                  />
                 </div>
                 <div class="reset-info" v-if="row.monthly_window_start">
                   <svg
@@ -776,6 +776,7 @@ import EmptyState from '@/components/common/EmptyState.vue'
 import Select from '@/components/common/Select.vue'
 import GroupBadge from '@/components/common/GroupBadge.vue'
 import GroupOptionItem from '@/components/common/GroupOptionItem.vue'
+import CreditAmount from '@/components/common/CreditAmount.vue'
 import Icon from '@/components/icons/Icon.vue'
 import { getRemainingDurationParts, isOneTimeDailyQuota, type RemainingDurationParts } from '@/utils/subscriptionQuota'
 

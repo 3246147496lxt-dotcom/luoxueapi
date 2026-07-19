@@ -20,9 +20,29 @@ describe('AmountInput', () => {
 
     const choices = wrapper.findAll('[role="radio"]')
     expect(choices).toHaveLength(4)
+    expect(wrapper.get('#amount-panel-preset').text()).toContain('payment.chooseAmountTitle')
     expect(choices[0].text()).toContain('$10')
+    expect(wrapper.get('#amount-panel-preset [role="radiogroup"]').classes()).toEqual(expect.arrayContaining([
+      'overflow-x-auto',
+      'sm:grid',
+      'sm:grid-cols-4',
+    ]))
+    expect(choices[0].classes()).toEqual(expect.arrayContaining(['min-w-28', 'snap-start', 'sm:min-w-0']))
     await choices[1].trigger('click')
     expect(wrapper.emitted('update:modelValue')?.[0]).toEqual([20])
+  })
+
+  it('renders the amount modes as compact flat controls', () => {
+    const wrapper = mount(AmountInput, {
+      props: { modelValue: null, currency: 'CNY', locale: 'zh-CN' },
+    })
+
+    expect(wrapper.text()).toContain('payment.amountType')
+    const tabs = wrapper.findAll('[role="tab"]')
+    expect(tabs).toHaveLength(2)
+    expect(tabs[0].classes()).toEqual(expect.arrayContaining(['min-h-9', 'bg-primary-50']))
+    expect(tabs[0].classes()).not.toContain('shadow-sm')
+    expect(tabs[1].classes()).toContain('bg-gray-100')
   })
 
   it('switches to a focused custom input without showing both modes at once', async () => {

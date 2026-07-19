@@ -62,7 +62,14 @@
           </div>
           <div class="mt-2 flex justify-between text-sm">
             <span class="text-gray-500 dark:text-gray-400">{{ t('payment.orders.amount') }}</span>
-            <span class="text-gray-900 dark:text-white">${{ refundTarget.amount.toFixed(2) }}</span>
+            <CreditAmount
+              v-if="refundTarget.order_type === 'balance'"
+              class="text-gray-900 dark:text-white"
+              :value="refundTarget.amount.toFixed(2)"
+              icon-size="sm"
+              :label="`${t('payment.orders.amount')} ${refundTarget.amount.toFixed(2)}`"
+            />
+            <span v-else class="text-gray-900 dark:text-white">${{ refundTarget.amount.toFixed(2) }}</span>
           </div>
         </div>
         <div>
@@ -91,6 +98,7 @@ import type { PaymentOrder } from '@/types/payment'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import Pagination from '@/components/common/Pagination.vue'
 import BaseDialog from '@/components/common/BaseDialog.vue'
+import CreditAmount from '@/components/common/CreditAmount.vue'
 import Select from '@/components/common/Select.vue'
 import Icon from '@/components/icons/Icon.vue'
 import OrderTable from '@/components/payment/OrderTable.vue'

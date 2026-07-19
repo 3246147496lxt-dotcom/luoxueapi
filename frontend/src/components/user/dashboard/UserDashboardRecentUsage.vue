@@ -70,7 +70,11 @@
                   class="mt-0.5 block truncate text-sm font-semibold text-primary-700 dark:text-primary-300"
                   :title="t('dashboard.actual')"
                 >
-                  ${{ formatCost(log.actual_cost) }}
+                  <CreditAmount
+                    :value="formatCost(log.actual_cost)"
+                    icon-size="sm"
+                    :label="`${t('dashboard.actual')} ${formatCost(log.actual_cost)}`"
+                  />
                 </span>
               </div>
 
@@ -105,6 +109,7 @@
 import { useI18n } from 'vue-i18n'
 import LoadingSpinner from '@/components/common/LoadingSpinner.vue'
 import EmptyState from '@/components/common/EmptyState.vue'
+import CreditAmount from '@/components/common/CreditAmount.vue'
 import Icon from '@/components/icons/Icon.vue'
 import { formatDateTime } from '@/utils/format'
 import type { UsageLog } from '@/types'

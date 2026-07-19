@@ -57,6 +57,26 @@ jobs:
       - name: Frontend typecheck and critical vitest
         run: make test-frontend
 
+  docs-site:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: docs-site/package-lock.json
+      - name: Install documentation site dependencies
+        working-directory: docs-site
+        run: npm ci
+      - name: Test and build documentation site
+        working-directory: docs-site
+        run: |
+          npm test
+          npm run build
+          npm run verify:build
+
   golangci-lint:
     runs-on: ubuntu-latest
     steps:

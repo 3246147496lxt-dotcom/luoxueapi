@@ -66,21 +66,81 @@
               </div>
             </template>
             <!-- Normal item (no children) -->
+            <template v-else>
+              <a
+                v-if="item.href"
+                :href="item.href"
+                class="sidebar-link mb-1"
+                :class="{ 'sidebar-link-collapsed': sidebarCollapsed }"
+                :title="sidebarCollapsed ? item.label : undefined"
+                data-testid="sidebar-docs-tutorial"
+                target="_blank"
+                rel="noopener noreferrer"
+                @click="handleMenuItemClick(item.path)"
+              >
+                <component :is="item.icon" class="h-5 w-5 flex-shrink-0" />
+                <span class="sidebar-label" :class="{ 'sidebar-label-collapsed': sidebarCollapsed }" :aria-hidden="sidebarCollapsed ? 'true' : 'false'">{{ item.label }}</span>
+              </a>
+              <router-link
+                v-else
+                :to="item.path"
+                class="sidebar-link mb-1"
+                :class="{ 'sidebar-link-active': isActive(item.path), 'sidebar-link-collapsed': sidebarCollapsed }"
+                :title="sidebarCollapsed ? item.label : undefined"
+                :id="
+                  item.path === '/admin/accounts'
+                    ? 'sidebar-channel-manage'
+                    : item.path === '/admin/groups'
+                      ? 'sidebar-group-manage'
+                      : item.path === '/admin/redeem'
+                        ? 'sidebar-wallet'
+                        : undefined
+                "
+                @click="handleMenuItemClick(item.path)"
+              >
+                <span
+                  v-if="item.iconSvg"
+                  class="h-5 w-5 flex-shrink-0 sidebar-svg-icon"
+                  :class="{ 'sidebar-api-key-icon': item.path === '/keys' }"
+                  v-html="sanitizeSvg(item.iconSvg)"
+                ></span>
+                <component v-else :is="item.icon" class="h-5 w-5 flex-shrink-0" />
+                <span class="sidebar-label" :class="{ 'sidebar-label-collapsed': sidebarCollapsed }" :aria-hidden="sidebarCollapsed ? 'true' : 'false'">{{ item.label }}</span>
+              </router-link>
+            </template>
+          </template>
+        </div>
+
+        <!-- Personal Section for Admin (hidden in simple mode) -->
+        <div v-if="!authStore.isSimpleMode" class="sidebar-section">
+          <div class="sidebar-section-title" :class="{ 'sidebar-section-title-collapsed': sidebarCollapsed }" :aria-hidden="sidebarCollapsed ? 'true' : 'false'">
+            <span class="sidebar-section-title-text" :class="{ 'sidebar-section-title-text-collapsed': sidebarCollapsed }">
+              {{ t('nav.myAccount') }}
+            </span>
+          </div>
+
+          <template v-for="item in personalNavItems" :key="item.path">
+            <a
+              v-if="item.href"
+              :href="item.href"
+              class="sidebar-link mb-1"
+              :class="{ 'sidebar-link-collapsed': sidebarCollapsed }"
+              :title="sidebarCollapsed ? item.label : undefined"
+              data-testid="sidebar-docs-tutorial"
+              target="_blank"
+              rel="noopener noreferrer"
+              @click="handleMenuItemClick(item.path)"
+            >
+              <component :is="item.icon" class="h-5 w-5 flex-shrink-0" />
+              <span class="sidebar-label" :class="{ 'sidebar-label-collapsed': sidebarCollapsed }" :aria-hidden="sidebarCollapsed ? 'true' : 'false'">{{ item.label }}</span>
+            </a>
             <router-link
               v-else
               :to="item.path"
               class="sidebar-link mb-1"
               :class="{ 'sidebar-link-active': isActive(item.path), 'sidebar-link-collapsed': sidebarCollapsed }"
               :title="sidebarCollapsed ? item.label : undefined"
-              :id="
-                item.path === '/admin/accounts'
-                  ? 'sidebar-channel-manage'
-                  : item.path === '/admin/groups'
-                    ? 'sidebar-group-manage'
-                    : item.path === '/admin/redeem'
-                      ? 'sidebar-wallet'
-                      : undefined
-              "
+              :data-tour="item.path === '/keys' ? 'sidebar-my-keys' : undefined"
               @click="handleMenuItemClick(item.path)"
             >
               <span
@@ -94,62 +154,203 @@
             </router-link>
           </template>
         </div>
-
-        <!-- Personal Section for Admin (hidden in simple mode) -->
-        <div v-if="!authStore.isSimpleMode" class="sidebar-section">
-          <div class="sidebar-section-title" :class="{ 'sidebar-section-title-collapsed': sidebarCollapsed }" :aria-hidden="sidebarCollapsed ? 'true' : 'false'">
-            <span class="sidebar-section-title-text" :class="{ 'sidebar-section-title-text-collapsed': sidebarCollapsed }">
-              {{ t('nav.myAccount') }}
-            </span>
-          </div>
-
-          <router-link
-            v-for="item in personalNavItems"
-            :key="item.path"
-            :to="item.path"
-            class="sidebar-link mb-1"
-            :class="{ 'sidebar-link-active': isActive(item.path), 'sidebar-link-collapsed': sidebarCollapsed }"
-            :title="sidebarCollapsed ? item.label : undefined"
-            :data-tour="item.path === '/keys' ? 'sidebar-my-keys' : undefined"
-            @click="handleMenuItemClick(item.path)"
-          >
-            <span
-              v-if="item.iconSvg"
-              class="h-5 w-5 flex-shrink-0 sidebar-svg-icon"
-              :class="{ 'sidebar-api-key-icon': item.path === '/keys' }"
-              v-html="sanitizeSvg(item.iconSvg)"
-            ></span>
-            <component v-else :is="item.icon" class="h-5 w-5 flex-shrink-0" />
-            <span class="sidebar-label" :class="{ 'sidebar-label-collapsed': sidebarCollapsed }" :aria-hidden="sidebarCollapsed ? 'true' : 'false'">{{ item.label }}</span>
-          </router-link>
-        </div>
       </template>
 
       <!-- Regular User View -->
       <template v-else-if="!appStore.backendModeEnabled">
         <div class="sidebar-section">
-          <router-link
-            v-for="item in userNavItems"
-            :key="item.path"
-            :to="item.path"
-            class="sidebar-link mb-1"
-            :class="{ 'sidebar-link-active': isActive(item.path), 'sidebar-link-collapsed': sidebarCollapsed }"
-            :title="sidebarCollapsed ? item.label : undefined"
-            :data-tour="item.path === '/keys' ? 'sidebar-my-keys' : undefined"
-            @click="handleMenuItemClick(item.path)"
-          >
-            <span
-              v-if="item.iconSvg"
-              class="h-5 w-5 flex-shrink-0 sidebar-svg-icon"
-              :class="{ 'sidebar-api-key-icon': item.path === '/keys' }"
-              v-html="sanitizeSvg(item.iconSvg)"
-            ></span>
-            <component v-else :is="item.icon" class="h-5 w-5 flex-shrink-0" />
-            <span class="sidebar-label" :class="{ 'sidebar-label-collapsed': sidebarCollapsed }" :aria-hidden="sidebarCollapsed ? 'true' : 'false'">{{ item.label }}</span>
-          </router-link>
+          <template v-for="item in userNavItems" :key="item.path">
+            <a
+              v-if="item.href"
+              :href="item.href"
+              class="sidebar-link mb-1"
+              :class="{ 'sidebar-link-collapsed': sidebarCollapsed }"
+              :title="sidebarCollapsed ? item.label : undefined"
+              data-testid="sidebar-docs-tutorial"
+              target="_blank"
+              rel="noopener noreferrer"
+              @click="handleMenuItemClick(item.path)"
+            >
+              <component :is="item.icon" class="h-5 w-5 flex-shrink-0" />
+              <span class="sidebar-label" :class="{ 'sidebar-label-collapsed': sidebarCollapsed }" :aria-hidden="sidebarCollapsed ? 'true' : 'false'">{{ item.label }}</span>
+            </a>
+            <router-link
+              v-else
+              :to="item.path"
+              class="sidebar-link mb-1"
+              :class="{ 'sidebar-link-active': isActive(item.path), 'sidebar-link-collapsed': sidebarCollapsed }"
+              :title="sidebarCollapsed ? item.label : undefined"
+              :data-tour="item.path === '/keys' ? 'sidebar-my-keys' : undefined"
+              @click="handleMenuItemClick(item.path)"
+            >
+              <span
+                v-if="item.iconSvg"
+                class="h-5 w-5 flex-shrink-0 sidebar-svg-icon"
+                :class="{ 'sidebar-api-key-icon': item.path === '/keys' }"
+                v-html="sanitizeSvg(item.iconSvg)"
+              ></span>
+              <component v-else :is="item.icon" class="h-5 w-5 flex-shrink-0" />
+              <span class="sidebar-label" :class="{ 'sidebar-label-collapsed': sidebarCollapsed }" :aria-hidden="sidebarCollapsed ? 'true' : 'false'">{{ item.label }}</span>
+            </router-link>
+          </template>
         </div>
       </template>
     </nav>
+
+    <div
+      class="sidebar-destination-links"
+      data-testid="sidebar-destination-links"
+      :aria-label="t('nav.quickLinks')"
+    >
+      <a
+        href="/home"
+        class="sidebar-destination-link"
+        :class="{ 'sidebar-destination-link-collapsed': sidebarCollapsed }"
+        data-destination="home"
+        :aria-label="t('nav.home')"
+        :title="sidebarCollapsed ? t('nav.home') : undefined"
+        target="_blank"
+        rel="noopener noreferrer"
+        @click="handleMenuItemClick('/home')"
+      >
+        <span class="sidebar-destination-leading">
+          <Icon
+            name="destinationHome"
+            size="sm"
+            :stroke-width="1.75"
+            data-role="destination-icon"
+            data-icon-name="destinationHome"
+            aria-hidden="true"
+          />
+          <span
+            class="sidebar-destination-label"
+            data-role="destination-label"
+            :aria-hidden="sidebarCollapsed ? 'true' : 'false'"
+          >{{ t('nav.home') }}</span>
+        </span>
+        <Icon
+          name="destinationArrowUpRight"
+          size="sm"
+          :stroke-width="1.75"
+          class="sidebar-destination-jump"
+          data-role="destination-jump"
+          data-icon-name="destinationArrowUpRight"
+          aria-hidden="true"
+        />
+      </a>
+
+      <a
+        v-if="showPublicModelCatalog"
+        href="/models.html"
+        class="sidebar-destination-link"
+        :class="{ 'sidebar-destination-link-collapsed': sidebarCollapsed }"
+        data-destination="models"
+        :aria-label="t('nav.modelCatalog')"
+        :title="sidebarCollapsed ? t('nav.modelCatalog') : undefined"
+        target="_blank"
+        rel="noopener noreferrer"
+        @click="handleMenuItemClick('/models.html')"
+      >
+        <span class="sidebar-destination-leading">
+          <Icon
+            name="destinationModels"
+            size="sm"
+            :stroke-width="1.75"
+            data-role="destination-icon"
+            data-icon-name="destinationModels"
+            aria-hidden="true"
+          />
+          <span
+            class="sidebar-destination-label"
+            data-role="destination-label"
+            :aria-hidden="sidebarCollapsed ? 'true' : 'false'"
+          >{{ t('nav.modelCatalog') }}</span>
+        </span>
+        <Icon
+          name="destinationArrowUpRight"
+          size="sm"
+          :stroke-width="1.75"
+          class="sidebar-destination-jump"
+          data-role="destination-jump"
+          data-icon-name="destinationArrowUpRight"
+          aria-hidden="true"
+        />
+      </a>
+
+      <a
+        :href="contactUrl"
+        class="sidebar-destination-link"
+        :class="{ 'sidebar-destination-link-collapsed': sidebarCollapsed }"
+        data-destination="contact"
+        :aria-label="t('nav.contactUs')"
+        :title="sidebarCollapsed ? t('nav.contactUs') : undefined"
+        target="_blank"
+        rel="noopener noreferrer"
+        @click="handleMenuItemClick('/profile')"
+      >
+        <span class="sidebar-destination-leading">
+          <Icon
+            name="destinationContact"
+            size="sm"
+            :stroke-width="1.75"
+            data-role="destination-icon"
+            data-icon-name="destinationContact"
+            aria-hidden="true"
+          />
+          <span
+            class="sidebar-destination-label"
+            data-role="destination-label"
+            :aria-hidden="sidebarCollapsed ? 'true' : 'false'"
+          >{{ t('nav.contactUs') }}</span>
+        </span>
+        <Icon
+          name="destinationArrowUpRight"
+          size="sm"
+          :stroke-width="1.75"
+          class="sidebar-destination-jump"
+          data-role="destination-jump"
+          data-icon-name="destinationArrowUpRight"
+          aria-hidden="true"
+        />
+      </a>
+
+      <a
+        :href="documentationUrl"
+        class="sidebar-destination-link"
+        :class="{ 'sidebar-destination-link-collapsed': sidebarCollapsed }"
+        data-destination="docs"
+        :aria-label="t('nav.docsTutorial')"
+        :title="sidebarCollapsed ? t('nav.docsTutorial') : undefined"
+        target="_blank"
+        rel="noopener noreferrer"
+        @click="handleMenuItemClick('/tutorial-docs/')"
+      >
+        <span class="sidebar-destination-leading">
+          <Icon
+            name="destinationDocument"
+            size="sm"
+            :stroke-width="1.75"
+            data-role="destination-icon"
+            data-icon-name="destinationDocument"
+            aria-hidden="true"
+          />
+          <span
+            class="sidebar-destination-label"
+            data-role="destination-label"
+            :aria-hidden="sidebarCollapsed ? 'true' : 'false'"
+          >{{ t('nav.docsTutorial') }}</span>
+        </span>
+        <Icon
+          name="destinationArrowUpRight"
+          size="sm"
+          :stroke-width="1.75"
+          class="sidebar-destination-jump"
+          data-role="destination-jump"
+          data-icon-name="destinationArrowUpRight"
+          aria-hidden="true"
+        />
+      </a>
+    </div>
 
   </aside>
 
@@ -169,9 +370,11 @@ import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useAdminSettingsStore, useAppStore, useAuthStore, useOnboardingStore } from '@/stores'
 import { sanitizeSvg } from '@/utils/sanitize'
+import { sanitizeUrl } from '@/utils/url'
 import { FeatureFlags, makeSidebarFlag } from '@/utils/featureFlags'
 import { useBatchImageAccess } from '@/composables/useBatchImageAccess'
 import keyOutlineIconSvg from '@/assets/icons/key-outline.svg?raw'
+import { Icon } from '@/components/icons'
 import NotificationIcon from '@/components/icons/NotificationIcon.vue'
 
 interface NavItem {
@@ -179,6 +382,7 @@ interface NavItem {
   label: string
   icon: unknown
   iconSvg?: string
+  href?: string
   hideInSimpleMode?: boolean
   children?: NavItem[]
   /**
@@ -223,7 +427,31 @@ const { canUseBatchImage, refreshBatchImageAccess } = useBatchImageAccess()
 const sidebarCollapsed = computed(() => appStore.sidebarCollapsed)
 const mobileOpen = computed(() => appStore.mobileOpen)
 const isAdmin = computed(() => authStore.isAdmin)
+const showPublicModelCatalog = computed(
+  () =>
+    appStore.cachedPublicSettings?.public_model_catalog_enabled === true
+    && !appStore.backendModeEnabled,
+)
 const sidebarNavRef = ref<HTMLElement | null>(null)
+const DEFAULT_DOCUMENTATION_URL = 'https://luoxueapi.cc/tutorial-docs/'
+const documentationUrl = computed(
+  () =>
+    sanitizeUrl(
+      appStore.cachedPublicSettings?.doc_url || appStore.docUrl || DEFAULT_DOCUMENTATION_URL,
+      { allowRelative: true },
+    ) || DEFAULT_DOCUMENTATION_URL,
+)
+const contactUrl = computed(
+  () => {
+    const configuredContactUrl = sanitizeUrl(
+      appStore.cachedPublicSettings?.contact_info || appStore.contactInfo,
+      { allowRelative: true },
+    )
+    if (configuredContactUrl) return configuredContactUrl
+
+    return `${documentationUrl.value.replace(/#.*$/, '')}#recharge`
+  },
+)
 
 // Track which parent nav groups are expanded
 const expandedGroups = ref<Set<string>>(new Set())
@@ -539,6 +767,21 @@ const PriceTagIcon = {
     )
 }
 
+const BookIcon = {
+  render: () =>
+    h(
+      'svg',
+      { fill: 'none', viewBox: '0 0 24 24', stroke: 'currentColor', 'stroke-width': '1.5' },
+      [
+        h('path', {
+          'stroke-linecap': 'round',
+          'stroke-linejoin': 'round',
+          d: 'M12 6.042A8.967 8.967 0 006 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 016 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 016-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0018 18a8.967 8.967 0 00-6 2.292m0-14.25v14.25',
+        }),
+      ],
+    ),
+}
+
 const ChevronDownIcon = {
   render: () =>
     h(
@@ -644,6 +887,7 @@ const adminNavItems = computed((): NavItem[] => {
       ],
     },
     { path: '/admin/model-catalog', label: t('nav.modelCatalog'), icon: GlobeIcon, hideInSimpleMode: true },
+    { path: '/admin/documentation', label: t('nav.documentationManagement'), icon: BookIcon, hideInSimpleMode: true },
     { path: '/admin/subscriptions', label: t('nav.subscriptions'), icon: CreditCardIcon, hideInSimpleMode: true },
     { path: '/admin/accounts', label: t('nav.accounts'), icon: GlobeIcon },
     { path: '/admin/announcements', label: t('nav.announcements'), icon: NotificationIcon },
@@ -826,8 +1070,8 @@ onBeforeUnmount(() => {
     0 1px 2px rgb(15 23 42 / 0.04),
     0 6px 16px -4px rgb(15 23 42 / 0.08),
     0 18px 40px -12px rgb(15 23 42 / 0.18);
-  backdrop-filter: saturate(170%) blur(36px);
-  -webkit-backdrop-filter: saturate(170%) blur(36px);
+  backdrop-filter: saturate(1.7) blur(36px);
+  -webkit-backdrop-filter: saturate(1.7) blur(36px);
   transition-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
 }
 
@@ -855,22 +1099,138 @@ onBeforeUnmount(() => {
 }
 
 :global(.dark .sidebar) {
-  border-color: rgb(255 255 255 / 0.08);
+  border-color: rgb(255 255 255 / 0.08) rgb(255 255 255 / 0.06) rgb(255 255 255 / 0.06);
   background: rgb(11 15 26) !important;
   box-shadow:
     inset 0 1px 0 rgb(255 255 255 / 0.04),
     0 1px 2px rgb(0 0 0 / 0.4),
     0 8px 24px -8px rgb(0 0 0 / 0.5);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
 }
 
 :global(.dark .sidebar::after) {
-  background: linear-gradient(to right, transparent, rgb(255 255 255 / 0.12), transparent);
+  background: linear-gradient(to right, transparent, rgb(255 255 255 / 0.85), transparent);
 }
 
 .sidebar-nav {
   position: relative;
   z-index: 1;
   @apply px-2 py-3;
+}
+
+.sidebar-destination-links {
+  position: relative;
+  z-index: 1;
+  flex: 0 0 auto;
+  padding: 0.25rem 0.5rem 0.5rem;
+}
+
+.sidebar-destination-link {
+  display: flex;
+  min-height: 2.25rem;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.5rem 0.75rem;
+  border-radius: 0.625rem;
+  color: rgb(28 31 35 / 0.88);
+  text-decoration: none;
+  transform-origin: center;
+  transition:
+    color 0.2s ease,
+    background-color 0.2s ease,
+    box-shadow 0.2s ease,
+    transform 0.2s ease;
+}
+
+.sidebar-destination-leading {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.sidebar-destination-leading > :deep(svg) {
+  width: 1.125rem;
+  height: 1.125rem;
+  flex: 0 0 auto;
+  color: rgb(71 85 105 / 0.82);
+  transform-origin: center;
+  transition: color 0.2s ease;
+}
+
+.sidebar-destination-label {
+  overflow: hidden;
+  color: inherit;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  line-height: 1.25rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sidebar-destination-jump {
+  width: 0.875rem !important;
+  height: 0.875rem !important;
+  flex: 0 0 auto;
+  color: rgb(100 116 139 / 0.72);
+  transition:
+    color 0.2s ease,
+    transform 0.2s ease;
+}
+
+.sidebar-destination-link:hover,
+.sidebar-destination-link:focus-visible {
+  color: rgb(0 132 255);
+  background: rgb(0 132 255 / 0.08);
+  box-shadow: 0 2px 8px rgb(0 132 255 / 0.06);
+  transform: translateY(-1px) scale(1.03);
+}
+
+.sidebar-destination-link:hover .sidebar-destination-leading > :deep(svg),
+.sidebar-destination-link:hover .sidebar-destination-jump,
+.sidebar-destination-link:focus-visible .sidebar-destination-leading > :deep(svg),
+.sidebar-destination-link:focus-visible .sidebar-destination-jump {
+  color: rgb(0 132 255);
+}
+
+.sidebar-destination-link:focus-visible {
+  outline: 2px solid rgb(0 132 255 / 0.5);
+  outline-offset: 1px;
+}
+
+.sidebar-destination-link-collapsed {
+  min-height: 2.75rem;
+  justify-content: center;
+  padding-right: 0;
+  padding-left: 0;
+}
+
+.sidebar-destination-link-collapsed .sidebar-destination-label,
+.sidebar-destination-link-collapsed .sidebar-destination-jump {
+  display: none;
+}
+
+:global(.dark .sidebar-destination-link) {
+  color: rgb(235 235 235 / 0.82);
+}
+
+:global(.dark .sidebar-destination-leading > svg),
+:global(.dark .sidebar-destination-jump) {
+  color: rgb(235 235 235 / 0.58);
+}
+
+:global(.dark .sidebar-destination-link:hover) {
+  color: rgb(71 160 255);
+  background: rgb(71 160 255 / 0.12);
+  box-shadow: 0 2px 8px rgb(71 160 255 / 0.08);
+}
+
+:global(.dark .sidebar-destination-link:hover .sidebar-destination-leading > svg),
+:global(.dark .sidebar-destination-link:hover .sidebar-destination-jump),
+:global(.dark .sidebar-destination-link:focus-visible .sidebar-destination-leading > svg),
+:global(.dark .sidebar-destination-link:focus-visible .sidebar-destination-jump) {
+  color: rgb(71 160 255);
 }
 
 .sidebar-section {
@@ -898,15 +1258,13 @@ onBeforeUnmount(() => {
 .sidebar-link > :deep(svg),
 .sidebar-link > .sidebar-svg-icon {
   color: rgb(28 31 35 / 0.62);
-  transition:
-    color 0.2s ease,
-    transform 0.2s ease;
+  transition: color 0.2s ease;
 }
 
 .sidebar-link:hover {
   color: rgb(0 132 255);
   background: rgb(0 132 255 / 0.08);
-  box-shadow: 0 2px 8px rgb(0 132 255 / 0.06);
+  box-shadow: 0 2px 8px rgb(0 132 255 / 0.045);
 }
 
 .sidebar-link:hover > :deep(svg),
@@ -915,7 +1273,7 @@ onBeforeUnmount(() => {
 }
 
 .sidebar-link:focus-visible {
-  outline: 2px solid rgb(0 132 255 / 0.45);
+  outline: 2px solid rgb(0 132 255 / 0.5);
   outline-offset: 2px;
 }
 
@@ -940,7 +1298,6 @@ onBeforeUnmount(() => {
 .sidebar-link-active > :deep(svg),
 .sidebar-link-active > .sidebar-svg-icon {
   color: rgb(0 100 250);
-  transform: scale(1.05);
 }
 
 .sidebar-link-active:hover {
@@ -958,19 +1315,23 @@ onBeforeUnmount(() => {
 }
 
 :global(.dark .sidebar-link:hover) {
-  color: rgb(102 181 255);
+  color: rgb(71 160 255);
   background: rgb(71 160 255 / 0.12);
 }
 
 :global(.dark .sidebar-link-active),
 :global(.dark .sidebar-link-active:hover) {
-  color: rgb(102 181 255);
+  color: rgb(0 132 255);
   background: rgb(71 160 255 / 0.18);
 }
 
 :global(.dark .sidebar-link-active > svg),
 :global(.dark .sidebar-link-active > .sidebar-svg-icon) {
-  color: rgb(102 181 255);
+  color: rgb(71 160 255);
+}
+
+:global(.dark .sidebar-link-active::before) {
+  background: rgb(71 160 255);
 }
 
 .sidebar-link-collapsed {
@@ -1034,6 +1395,7 @@ onBeforeUnmount(() => {
 
 .sidebar-label-flex {
   display: flex;
+  flex: 1 1 auto;
   align-items: center;
   justify-content: space-between;
   gap: 0.5rem;
@@ -1065,8 +1427,16 @@ onBeforeUnmount(() => {
 @media (prefers-reduced-motion: reduce) {
   .sidebar,
   .sidebar-label,
-  .sidebar-section-title-text {
+  .sidebar-section-title-text,
+  .sidebar-destination-link,
+  .sidebar-destination-leading > :deep(svg),
+  .sidebar-destination-jump {
     transition-duration: 0.01ms;
+  }
+
+  .sidebar-destination-link:hover,
+  .sidebar-destination-link:focus-visible {
+    transform: none;
   }
 }
 
@@ -1094,11 +1464,15 @@ onBeforeUnmount(() => {
     height: auto;
     border-width: 1px;
     border-radius: 1rem;
-    background: rgb(255 255 255 / 0.94) !important;
+    background: linear-gradient(rgb(248 251 255 / 0.32), rgb(235 242 252 / 0.1)) !important;
   }
 
   :global(.dark .sidebar) {
-    background: rgb(11 15 26 / 0.96) !important;
+    background: rgb(11 15 26) !important;
+  }
+
+  .sidebar-destination-link {
+    min-height: 2.75rem;
   }
 
   .sidebar-mobile-hidden {

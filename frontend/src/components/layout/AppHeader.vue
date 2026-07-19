@@ -5,10 +5,10 @@
   >
     <div
       data-testid="header-surface"
-      class="flex h-[65px] w-full items-center justify-between rounded-2xl border border-white/80 bg-white/95 pr-2 shadow-[inset_0_1px_0_rgba(255,255,255,0.65),0_2px_8px_-2px_rgba(15,23,42,0.06),0_8px_20px_-8px_rgba(15,23,42,0.08)] backdrop-blur-xl dark:border-dark-700/80 dark:bg-dark-900/95 dark:shadow-[inset_0_1px_0_rgba(255,255,255,0.04),0_2px_8px_-2px_rgba(0,0,0,0.25),0_8px_20px_-8px_rgba(0,0,0,0.32)]"
+      class="topup-header-surface relative isolate flex h-[65px] w-full items-center justify-between overflow-visible rounded-2xl border pr-2"
     >
       <!-- Left: brand, sidebar controls, and page context -->
-      <div class="flex min-w-0 flex-1 items-center gap-0 lg:gap-2">
+      <div class="relative z-[1] flex min-w-0 flex-1 items-center gap-0 lg:gap-2">
         <button
           type="button"
           @click="toggleMobileSidebar"
@@ -33,7 +33,7 @@
           <router-link
             :to="homePath"
             data-testid="header-brand"
-            class="flex h-10 w-full min-w-0 items-center justify-center gap-2 rounded-xl transition-colors hover:bg-gray-100/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 md:h-16 dark:hover:bg-dark-800"
+            class="flex h-10 w-full min-w-0 items-center justify-center gap-2 rounded-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 md:h-16"
             :class="
               sidebarCollapsed
                 ? 'lg:w-[60px]'
@@ -41,14 +41,43 @@
             "
             :aria-label="siteName"
           >
-            <span class="flex h-10 w-10 flex-shrink-0 items-center justify-center overflow-hidden rounded-[10px] bg-white ring-1 ring-gray-200/80 md:h-12 md:w-12 dark:bg-dark-800 dark:ring-dark-700">
-              <img :src="siteLogo || '/logo.png'" alt="" class="h-full w-full object-contain">
+            <span
+              data-testid="header-brand-logo"
+              class="brand-logo-frame flex h-10 w-10 flex-shrink-0 items-center justify-center md:h-12 md:w-12"
+            >
+              <img
+                :src="siteLogo || '/logo.png'"
+                alt=""
+                class="brand-logo-image block h-full w-full max-w-none object-contain"
+                :class="{ 'brand-logo-image-luoxue': isLuoxueLogo }"
+              >
             </span>
             <span
-              class="hidden min-w-0 truncate text-[22px] font-bold tracking-tight text-gray-950 md:block dark:text-white"
-              :class="sidebarCollapsed ? 'md:hidden' : 'md:block'"
+              data-testid="header-brand-wordmark"
+              class="header-brand-wordmark hidden min-w-0 truncate text-[22px] font-bold leading-7 text-[#1c1f23] md:block dark:text-[#f9f9f9]"
+              :class="[
+                sidebarCollapsed ? 'md:hidden' : 'md:block',
+                { 'header-brand-wordmark-luoxue': isLuoxueBrand }
+              ]"
             >
-              {{ siteName }}
+              <span
+                v-if="brandNameParts.suffix"
+                class="inline-flex items-baseline gap-1.5 whitespace-nowrap"
+              >
+                <span
+                  data-testid="header-brand-name"
+                  :class="{ 'header-brand-name-luoxue': isLuoxueBrand }"
+                >{{ brandNameParts.name }}</span>
+                <span
+                  data-testid="header-brand-suffix"
+                  :class="{ 'header-brand-suffix-luoxue': isLuoxueBrand }"
+                >{{ brandNameParts.suffix }}</span>
+              </span>
+              <span
+                v-else
+                data-testid="header-brand-name"
+                :class="{ 'header-brand-name-luoxue': isLuoxueBrand }"
+              >{{ brandNameParts.name }}</span>
             </span>
           </router-link>
         </div>
@@ -56,7 +85,7 @@
         <button
           type="button"
           data-testid="header-sidebar-toggle"
-          class="relative hidden h-8 w-8 flex-shrink-0 items-center justify-center rounded-[10px] text-gray-500 transition-colors after:absolute after:-inset-1.5 after:content-[''] hover:bg-gray-100 hover:text-gray-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 focus-visible:ring-offset-2 lg:-ml-px lg:flex dark:text-dark-300 dark:hover:bg-dark-800 dark:hover:text-white dark:focus-visible:ring-offset-dark-900"
+          class="relative hidden h-8 w-8 flex-shrink-0 items-center justify-center rounded-[10px] text-gray-500 transition-colors after:absolute after:-inset-1.5 after:content-[''] hover:bg-[rgba(46,50,56,0.05)] hover:text-gray-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 focus-visible:ring-offset-2 lg:flex dark:text-dark-300 dark:hover:bg-white/[0.08] dark:hover:text-white dark:focus-visible:ring-offset-dark-900"
           :title="sidebarCollapsed ? t('nav.expand') : t('nav.collapse')"
           :aria-label="sidebarCollapsed ? t('nav.expand') : t('nav.collapse')"
           aria-controls="app-sidebar"
@@ -78,7 +107,7 @@
       </div>
 
       <!-- Right: utility icons + supporting status + account pill -->
-      <div class="flex flex-shrink-0 items-center gap-2 md:gap-3">
+      <div class="relative z-[1] flex flex-shrink-0 items-center gap-2 md:gap-3">
         <div
           data-testid="header-utility-actions"
           class="hidden items-center gap-3 md:flex"
@@ -90,7 +119,7 @@
           <button
             type="button"
             data-testid="header-theme-toggle"
-            class="relative flex h-8 w-8 items-center justify-center rounded-full text-gray-600 transition-colors duration-200 after:absolute after:-inset-1.5 after:content-[''] hover:bg-gray-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 focus-visible:ring-offset-2 dark:text-gray-300 dark:hover:bg-dark-800 dark:focus-visible:ring-offset-dark-900"
+            class="brand-utility-icon relative flex h-8 w-8 items-center justify-center rounded-full transition-colors duration-200 after:absolute after:-inset-1.5 after:content-[''] hover:bg-[rgba(46,50,56,0.05)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 focus-visible:ring-offset-2 dark:hover:bg-white/[0.08] dark:focus-visible:ring-offset-dark-900"
             :title="isDark ? t('nav.lightMode') : t('nav.darkMode')"
             :aria-label="isDark ? t('nav.lightMode') : t('nav.darkMode')"
             @click="toggleTheme"
@@ -99,7 +128,6 @@
               :name="isDark ? 'sun' : 'moon'"
               size="sm"
               class="!h-[18px] !w-[18px]"
-              :class="{ 'text-amber-500': isDark }"
               aria-hidden="true"
             />
           </button>
@@ -130,43 +158,53 @@
           v-if="user"
           class="group relative hidden h-9 items-center gap-2 rounded-lg border border-primary-100 bg-primary-50/80 px-3 dark:border-primary-900/50 dark:bg-primary-900/20 2xl:flex"
         >
-          <svg
-            class="h-4 w-4 text-primary-600 dark:text-primary-400"
-            fill="none"
-            viewBox="0 0 24 24"
-            stroke="currentColor"
-            stroke-width="1.5"
-          >
-            <path
-              stroke-linecap="round"
-              stroke-linejoin="round"
-              d="M2.25 18.75a60.07 60.07 0 0115.797 2.101c.727.198 1.453-.342 1.453-1.096V18.75M3.75 4.5v.75A.75.75 0 013 6h-.75m0 0v-.375c0-.621.504-1.125 1.125-1.125H20.25M2.25 6v9m18-10.5v.75c0 .414.336.75.75.75h.75m-1.5-1.5h.375c.621 0 1.125.504 1.125 1.125v9.75c0 .621-.504 1.125-1.125 1.125h-.375m1.5-1.5H21a.75.75 0 00-.75.75v.75m0 0H3.75m0 0h-.375a1.125 1.125 0 01-1.125-1.125V15m1.5 1.5v-.75A.75.75 0 003 15h-.75M15 10.5a3 3 0 11-6 0 3 3 0 016 0zm3 0h.008v.008H18V10.5zm-12 0h.008v.008H6V10.5z"
-            />
-          </svg>
-          <span class="text-sm font-semibold text-primary-700 dark:text-primary-300">
-            {{ formatHeaderMoney(availableBalance) }}
-          </span>
+          <CreditAmount
+            class="text-sm font-semibold text-primary-700 dark:text-primary-300"
+            :value="formatHeaderCredit(availableBalance)"
+            icon-size="sm"
+            :label="`${balanceAvailableText} ${formatHeaderCredit(availableBalance)}`"
+          />
           <span
             v-if="frozenBalance > 0"
-            class="rounded-full bg-amber-100 px-1.5 py-0.5 text-xs font-medium text-amber-700 dark:bg-amber-900/40 dark:text-amber-200"
+            class="inline-flex items-center gap-1 rounded-full bg-amber-100 px-1.5 py-0.5 text-xs font-medium text-amber-700 dark:bg-amber-900/40 dark:text-amber-200"
           >
-            {{ balanceFrozenLabel }}
+            <span>{{ balanceFrozenText }}</span>
+            <CreditAmount
+              :value="formatHeaderCredit(frozenBalance)"
+              icon-size="xs"
+              :label="`${balanceFrozenText} ${formatHeaderCredit(frozenBalance)}`"
+            />
           </span>
           <div
             class="pointer-events-none absolute right-0 top-full mt-2 hidden w-56 rounded-xl border border-gray-200 bg-white p-3 text-xs shadow-[0_12px_32px_rgba(15,23,42,0.10)] group-hover:block dark:border-dark-700 dark:bg-dark-800 dark:shadow-black/30"
           >
             <div class="flex items-center justify-between">
               <span class="text-gray-500 dark:text-dark-400">{{ balanceAvailableText }}</span>
-              <span class="font-medium text-gray-900 dark:text-white">{{ formatHeaderMoney(availableBalance) }}</span>
+              <CreditAmount
+                class="font-medium text-gray-900 dark:text-white"
+                :value="formatHeaderCredit(availableBalance)"
+                icon-size="xs"
+                :label="`${balanceAvailableText} ${formatHeaderCredit(availableBalance)}`"
+              />
             </div>
             <div class="mt-2 flex items-center justify-between">
               <span class="text-gray-500 dark:text-dark-400">{{ balanceFrozenText }}</span>
-              <span class="font-medium text-amber-700 dark:text-amber-200">{{ formatHeaderMoney(frozenBalance) }}</span>
+              <CreditAmount
+                class="font-medium text-amber-700 dark:text-amber-200"
+                :value="formatHeaderCredit(frozenBalance)"
+                icon-size="xs"
+                :label="`${balanceFrozenText} ${formatHeaderCredit(frozenBalance)}`"
+              />
             </div>
             <div class="mt-2 border-t border-gray-100 pt-2 dark:border-dark-700">
               <div class="flex items-center justify-between">
                 <span class="text-gray-500 dark:text-dark-400">{{ balanceTotalText }}</span>
-                <span class="font-semibold text-gray-900 dark:text-white">{{ formatHeaderMoney(totalBalance) }}</span>
+                <CreditAmount
+                  class="font-semibold text-gray-900 dark:text-white"
+                  :value="formatHeaderCredit(totalBalance)"
+                  icon-size="xs"
+                  :label="`${balanceTotalText} ${formatHeaderCredit(totalBalance)}`"
+                />
               </div>
             </div>
           </div>
@@ -183,7 +221,7 @@
             @click="toggleDropdown"
             @keydown.esc.stop.prevent="closeDropdown"
             data-testid="header-account-trigger"
-            class="relative flex h-8 items-center gap-1.5 rounded-full bg-gray-950/[0.04] p-1 transition-colors after:absolute after:-inset-y-1.5 after:-inset-x-1 after:content-[''] hover:bg-gray-950/[0.08] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 focus-visible:ring-offset-2 dark:bg-white/[0.06] dark:hover:bg-white/[0.10] dark:focus-visible:ring-offset-dark-900"
+            class="relative flex h-8 items-center gap-0 rounded-full bg-slate-900/[0.04] p-1 transition-colors after:absolute after:-inset-y-1.5 after:-inset-x-1 after:content-[''] hover:bg-slate-900/[0.08] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 focus-visible:ring-offset-2 dark:bg-white/[0.06] dark:hover:bg-white/[0.10] dark:focus-visible:ring-offset-dark-900"
             :class="{
               'bg-primary-50 dark:bg-primary-900/25': dropdownOpen
             }"
@@ -194,7 +232,7 @@
           >
             <div
               data-testid="header-account-avatar"
-              class="flex h-6 w-6 flex-shrink-0 items-center justify-center overflow-hidden rounded-full bg-primary-600 text-xs font-semibold text-white ring-1 ring-primary-700/20 dark:bg-primary-500 dark:ring-white/10"
+              class="mr-1 flex h-6 w-6 flex-shrink-0 items-center justify-center overflow-hidden rounded-full bg-primary-600 text-[10px] font-semibold text-white ring-1 ring-primary-700/20 dark:bg-primary-500 dark:ring-white/10"
             >
               <img
                 v-if="avatarUrl"
@@ -240,10 +278,19 @@
                   {{ t('common.balance') }}
                 </div>
                 <div class="text-sm font-semibold text-primary-600 dark:text-primary-400">
-                  {{ formatHeaderMoney(availableBalance) }}
+                  <CreditAmount
+                    :value="formatHeaderCredit(availableBalance)"
+                    icon-size="sm"
+                    :label="`${balanceAvailableText} ${formatHeaderCredit(availableBalance)}`"
+                  />
                 </div>
-                <div v-if="frozenBalance > 0" class="mt-1 text-xs text-amber-600 dark:text-amber-300">
-                  {{ balanceFrozenText }} {{ formatHeaderMoney(frozenBalance) }}
+                <div v-if="frozenBalance > 0" class="mt-1 flex items-center gap-1 text-xs text-amber-600 dark:text-amber-300">
+                  <span>{{ balanceFrozenText }}</span>
+                  <CreditAmount
+                    :value="formatHeaderCredit(frozenBalance)"
+                    icon-size="xs"
+                    :label="`${balanceFrozenText} ${formatHeaderCredit(frozenBalance)}`"
+                  />
                 </div>
               </div>
 
@@ -332,6 +379,7 @@ import { useI18n } from 'vue-i18n'
 import { useAppStore, useAuthStore, useOnboardingStore } from '@/stores'
 import { useAdminSettingsStore } from '@/stores/adminSettings'
 import LocaleSwitcher from '@/components/common/LocaleSwitcher.vue'
+import CreditAmount from '@/components/common/CreditAmount.vue'
 import SubscriptionProgressMini from '@/components/common/SubscriptionProgressMini.vue'
 import AnnouncementBell from '@/components/common/AnnouncementBell.vue'
 import Icon from '@/components/icons/Icon.vue'
@@ -355,10 +403,30 @@ const dropdownRef = ref<HTMLElement | null>(null)
 const contactInfo = computed(() => appStore.contactInfo)
 const docUrl = computed(() => sanitizeUrl(appStore.docUrl))
 const siteName = computed(() => appStore.siteName || '落雪API')
+const isLuoxueBrand = computed(() => /^落雪\s*API$/i.test(siteName.value.trim()))
+const brandNameParts = computed(() => {
+  const value = siteName.value.trim()
+  const match = value.match(/^(.*?)(API)$/i)
+
+  if (!match?.[1]?.trim()) {
+    return { name: value, suffix: '' }
+  }
+
+  return {
+    name: match[1].trim(),
+    suffix: match[2].toUpperCase(),
+  }
+})
 const siteLogo = computed(() => sanitizeUrl(appStore.siteLogo || '', {
   allowRelative: true,
   allowDataUrl: true,
 }))
+const isLuoxueLogo = computed(() => {
+  if (!isLuoxueBrand.value) return false
+
+  return siteLogo.value.startsWith('data:image/svg+xml')
+    || /luoxue-snowflake-cloud-palette\.(?:png|svg)(?:[?#].*)?$/i.test(siteLogo.value)
+})
 const homePath = computed(() => (authStore.isAdmin ? '/admin/dashboard' : '/dashboard'))
 const avatarUrl = computed(() => user.value?.avatar_url?.trim() || '')
 const availableBalance = computed(() => Number(user.value?.balance || 0))
@@ -367,7 +435,6 @@ const totalBalance = computed(() => availableBalance.value + frozenBalance.value
 const balanceAvailableText = computed(() => t('common.availableBalance') === 'common.availableBalance' ? '可用余额' : t('common.availableBalance'))
 const balanceFrozenText = computed(() => t('common.frozenBalance') === 'common.frozenBalance' ? '冻结金额' : t('common.frozenBalance'))
 const balanceTotalText = computed(() => t('common.totalBalance') === 'common.totalBalance' ? '总余额' : t('common.totalBalance'))
-const balanceFrozenLabel = computed(() => `${balanceFrozenText.value} ${formatHeaderMoney(frozenBalance.value)}`)
 
 // 只在标准模式的管理员下显示新手引导按钮
 const showOnboardingButton = computed(() => {
@@ -450,9 +517,9 @@ function handleReplayGuide() {
   onboardingStore.replay()
 }
 
-function formatHeaderMoney(value: number) {
-  if (!Number.isFinite(value)) return '$0.00'
-  return `$${value.toFixed(2)}`
+function formatHeaderCredit(value: number) {
+  if (!Number.isFinite(value)) return '0.00'
+  return value.toFixed(2)
 }
 
 function handleClickOutside(event: MouseEvent) {
@@ -471,6 +538,114 @@ onBeforeUnmount(() => {
 </script>
 
 <style scoped>
+.brand-logo-frame {
+  position: relative;
+}
+
+.brand-logo-image-luoxue {
+  transform: scale(1.13);
+  transform-origin: center;
+}
+
+.header-brand-name-luoxue {
+  color: rgb(var(--luoxue-navy-rgb));
+}
+
+.header-brand-suffix-luoxue,
+.brand-utility-icon {
+  color: rgb(var(--luoxue-blue-rgb));
+}
+
+:global(html.dark .header-brand-name-luoxue) {
+  color: rgb(248 251 255);
+}
+
+:global(html.dark .header-brand-suffix-luoxue),
+:global(html.dark .brand-utility-icon) {
+  color: rgb(var(--luoxue-blue-light-rgb));
+}
+
+:global(html.dark .brand-logo-image-luoxue) {
+  filter:
+    drop-shadow(0 0 0.75px rgb(255 255 255 / 0.95))
+    drop-shadow(0 0 5px rgb(var(--luoxue-blue-rgb) / 0.22));
+}
+
+.header-brand-wordmark {
+  font-family:
+    Inter,
+    -apple-system,
+    BlinkMacSystemFont,
+    "Segoe UI",
+    "PingFang SC",
+    "Hiragino Sans GB",
+    "Microsoft YaHei",
+    "Helvetica Neue",
+    Helvetica,
+    Arial,
+    sans-serif;
+  letter-spacing: normal;
+}
+
+.topup-header-surface {
+  border-width: 1px 1px 0;
+  border-color: rgb(255 255 255 / 0.65) rgb(255 255 255 / 0.36) transparent;
+  background: linear-gradient(rgb(248 251 255 / 0.32), rgb(235 242 252 / 0.1));
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.65),
+    0 2px 8px -2px rgb(15 23 42 / 0.06),
+    0 8px 20px -8px rgb(15 23 42 / 0.08);
+  backdrop-filter: saturate(1.7) blur(36px);
+  -webkit-backdrop-filter: saturate(1.7) blur(36px);
+}
+
+.topup-header-surface::before,
+.topup-header-surface::after {
+  position: absolute;
+  pointer-events: none;
+  content: '';
+}
+
+.topup-header-surface > div {
+  transform: translateY(0.5px);
+}
+
+.topup-header-surface::before {
+  inset: 0;
+  z-index: -1;
+  border-radius: 1rem;
+  background:
+    radial-gradient(60% 100% at 10% 0%, rgb(96 165 250 / 0.1) 0%, transparent 70%),
+    radial-gradient(60% 100% at 90% 0%, rgb(167 139 250 / 0.1) 0%, transparent 70%);
+}
+
+.topup-header-surface::after {
+  inset: 0 12% auto;
+  height: 1px;
+  background: linear-gradient(to right, transparent, rgb(255 255 255 / 0.85), transparent);
+}
+
+:global(html.dark .topup-header-surface) {
+  border-color: rgb(255 255 255 / 0.12) rgb(255 255 255 / 0.09) transparent;
+  background: linear-gradient(rgb(10 12 18 / 0.92), rgb(8 10 16 / 0.82));
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.08),
+    0 2px 8px -2px rgb(0 0 0 / 0.18),
+    0 8px 20px -8px rgb(0 0 0 / 0.28);
+  backdrop-filter: saturate(1.6) blur(40px);
+  -webkit-backdrop-filter: saturate(1.6) blur(40px);
+}
+
+:global(html.dark .topup-header-surface::before) {
+  background:
+    radial-gradient(60% 100% at 10% 0%, rgb(59 130 246 / 0.08) 0%, transparent 70%),
+    radial-gradient(60% 100% at 90% 0%, rgb(139 92 246 / 0.07) 0%, transparent 70%);
+}
+
+:global(html.dark .topup-header-surface::after) {
+  background: linear-gradient(to right, transparent, rgb(255 255 255 / 0.12), transparent);
+}
+
 .dropdown-enter-active,
 .dropdown-leave-active {
   transition:

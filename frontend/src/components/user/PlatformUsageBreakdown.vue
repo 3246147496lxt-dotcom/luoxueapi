@@ -2,7 +2,7 @@
   <div class="group/usage relative text-sm">
     <div class="flex items-center gap-1.5">
       <span class="text-gray-500 dark:text-gray-400">{{ t('admin.users.today') }}:</span>
-      <span class="font-medium text-gray-900 dark:text-white">${{ today.toFixed(4) }}</span>
+      <CreditAmount class="font-medium text-gray-900 dark:text-white" :value="today.toFixed(4)" icon-size="xs" />
       <Icon
         v-if="hasBreakdown"
         name="infoCircle"
@@ -12,7 +12,7 @@
     </div>
     <div class="mt-0.5 flex items-center gap-1.5">
       <span class="text-gray-500 dark:text-gray-400">{{ t('admin.users.total') }}:</span>
-      <span class="font-medium text-gray-900 dark:text-white">${{ total.toFixed(4) }}</span>
+      <CreditAmount class="font-medium text-gray-900 dark:text-white" :value="total.toFixed(4)" icon-size="xs" />
     </div>
 
     <div
@@ -32,10 +32,10 @@
         <span class="capitalize">
           {{ item.isOther ? t('admin.users.platformOther') : platformLabel(item.platform) }}
         </span>
-        <span class="font-mono">
-          ${{ item.today_actual_cost.toFixed(4) }}
+        <span class="inline-flex items-center gap-1 font-mono">
+          <CreditAmount :value="item.today_actual_cost.toFixed(4)" icon-size="xs" />
           <span class="opacity-50">/</span>
-          ${{ item.total_actual_cost.toFixed(4) }}
+          <CreditAmount :value="item.total_actual_cost.toFixed(4)" icon-size="xs" />
         </span>
       </div>
     </div>
@@ -45,6 +45,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
+import CreditAmount from '@/components/common/CreditAmount.vue'
 import Icon from '@/components/icons/Icon.vue'
 import type { PlatformUsage } from '@/api/admin/dashboard'
 

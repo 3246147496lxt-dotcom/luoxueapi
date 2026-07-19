@@ -156,9 +156,11 @@
           </template>
 
           <template #cell-cost="{ row }">
-            <span class="block text-center text-sm text-gray-700 dark:text-gray-300">
-              {{ costLabel(displayJob(row)) }}
-            </span>
+            <CreditAmount
+              class="justify-center text-sm text-gray-700 dark:text-gray-300"
+              :value="costLabel(displayJob(row))"
+              icon-size="xs"
+            />
           </template>
 
           <template #cell-downloaded="{ row }">
@@ -346,7 +348,11 @@
             </div>
             <div class="min-w-0 text-center">
               <p class="text-xs text-gray-500 dark:text-gray-400">费用</p>
-              <p class="mt-1 truncate font-medium text-gray-900 dark:text-white">{{ costLabel(currentDisplayJob || currentJob) }}</p>
+              <CreditAmount
+                class="mt-1 justify-center font-medium text-gray-900 dark:text-white"
+                :value="costLabel(currentDisplayJob || currentJob)"
+                icon-size="xs"
+              />
             </div>
             <div class="min-w-0 text-center">
               <p class="text-xs text-gray-500 dark:text-gray-400">下载状态</p>
@@ -743,6 +749,7 @@
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import AppLayout from '@/components/layout/AppLayout.vue'
+import CreditAmount from '@/components/common/CreditAmount.vue'
 import TablePageLayout from '@/components/layout/TablePageLayout.vue'
 import DataTable from '@/components/common/DataTable.vue'
 import BaseDialog from '@/components/common/BaseDialog.vue'
@@ -2371,8 +2378,8 @@ function friendlyItemError(error: BatchImageItem['error']) {
 }
 
 function formatMoney(value: number | null | undefined) {
-  if (value === null || value === undefined || Number.isNaN(Number(value))) return '$0.00'
-  return `$${Number(value).toFixed(2)}`
+  if (value === null || value === undefined || Number.isNaN(Number(value))) return '0.00'
+  return Number(value).toFixed(2)
 }
 
 function terminalZeroCost(job: Pick<BatchImageJob, 'status' | 'actual_cost'>) {

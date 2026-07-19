@@ -71,6 +71,10 @@
           :balance="user?.balance || 0"
           :is-simple="authStore.isSimpleMode"
           :range-metrics="rangeMetrics"
+          :trend="trendData"
+          :start-date="startDate"
+          :end-date="endDate"
+          :granularity="granularity"
         />
 
         <div class="grid items-stretch gap-4 xl:grid-cols-[minmax(0,3fr)_minmax(17.5rem,1fr)]">
@@ -345,18 +349,17 @@ onBeforeUnmount(() => {
   height: 2.25rem;
   align-items: center;
   justify-content: center;
-  border: 1px solid rgb(229 231 235 / 0.82);
+  border: 0;
   border-radius: 10px;
   color: rgb(107 114 128);
-  background: rgb(255 255 255);
-  box-shadow: 0 2px 8px rgb(15 23 42 / 0.05);
-  transition: color 150ms ease, border-color 150ms ease, background-color 150ms ease;
+  background: transparent;
+  box-shadow: none;
+  transition: color 150ms ease, background-color 150ms ease;
 }
 
 .dashboard-icon-button:hover:not(:disabled) {
   color: rgb(79 105 224);
-  border-color: rgb(199 210 254);
-  background: rgb(248 250 255);
+  background: transparent;
 }
 
 .dashboard-icon-button:focus-visible {
@@ -369,8 +372,7 @@ onBeforeUnmount(() => {
   opacity: 0.6;
 }
 
-:global(.dark) .dashboard-panel,
-:global(.dark) .dashboard-icon-button {
+:global(.dark) .dashboard-panel {
   border-color: rgb(51 65 85 / 0.86);
   background: rgb(30 41 59);
   box-shadow: 0 0 1px rgb(0 0 0 / 0.45), 0 7px 20px rgb(0 0 0 / 0.2);
@@ -378,11 +380,12 @@ onBeforeUnmount(() => {
 
 :global(.dark) .dashboard-icon-button {
   color: rgb(148 163 184);
+  background: transparent;
+  box-shadow: none;
 }
 
 :global(.dark) .dashboard-icon-button:hover:not(:disabled) {
   color: rgb(165 180 252);
-  border-color: rgb(67 56 202 / 0.75);
-  background: rgb(49 46 129 / 0.3);
+  background: transparent;
 }
 </style>

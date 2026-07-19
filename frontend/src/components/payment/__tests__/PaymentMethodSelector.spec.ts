@@ -20,6 +20,9 @@ describe('PaymentMethodSelector', () => {
     expect(wrapper.text()).toContain('LDC Pay')
     expect(wrapper.text()).not.toContain('ldc')
     expect(wrapper.text()).not.toContain('payment.methods.ldc')
+    expect(wrapper.get('button').classes()).toEqual(expect.arrayContaining(['min-h-[66px]', 'rounded-xl']))
+    expect(wrapper.get('button').classes()).not.toContain('rounded-2xl')
+    expect(wrapper.get('img').classes()).toEqual(expect.arrayContaining(['h-5', 'w-5']))
   })
 
   it('uses the generic selected style for custom methods that contain built-in names', () => {

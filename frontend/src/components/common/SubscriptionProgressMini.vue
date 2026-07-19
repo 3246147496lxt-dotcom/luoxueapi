@@ -93,11 +93,11 @@
                       }"
                     ></div>
                   </div>
-                  <span class="w-24 flex-shrink-0 text-right text-[10px] text-gray-500">
-                    {{
-                      formatUsage(subscription.daily_usage_usd, subscription.group?.daily_limit_usd)
-                    }}
-                  </span>
+                  <CreditAmount
+                    class="w-24 flex-shrink-0 justify-end text-right text-[10px] text-gray-500"
+                    :value="formatUsage(subscription.daily_usage_usd, subscription.group?.daily_limit_usd)"
+                    icon-size="xs"
+                  />
                 </div>
 
                 <div v-if="subscription.group?.weekly_limit_usd" class="flex items-center gap-2">
@@ -121,11 +121,11 @@
                       }"
                     ></div>
                   </div>
-                  <span class="w-24 flex-shrink-0 text-right text-[10px] text-gray-500">
-                    {{
-                      formatUsage(subscription.weekly_usage_usd, subscription.group?.weekly_limit_usd)
-                    }}
-                  </span>
+                  <CreditAmount
+                    class="w-24 flex-shrink-0 justify-end text-right text-[10px] text-gray-500"
+                    :value="formatUsage(subscription.weekly_usage_usd, subscription.group?.weekly_limit_usd)"
+                    icon-size="xs"
+                  />
                 </div>
 
                 <div v-if="subscription.group?.monthly_limit_usd" class="flex items-center gap-2">
@@ -149,14 +149,11 @@
                       }"
                     ></div>
                   </div>
-                  <span class="w-24 flex-shrink-0 text-right text-[10px] text-gray-500">
-                    {{
-                      formatUsage(
-                        subscription.monthly_usage_usd,
-                        subscription.group?.monthly_limit_usd
-                      )
-                    }}
-                  </span>
+                  <CreditAmount
+                    class="w-24 flex-shrink-0 justify-end text-right text-[10px] text-gray-500"
+                    :value="formatUsage(subscription.monthly_usage_usd, subscription.group?.monthly_limit_usd)"
+                    icon-size="xs"
+                  />
                 </div>
               </template>
             </div>
@@ -180,6 +177,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import { useI18n } from 'vue-i18n'
+import CreditAmount from '@/components/common/CreditAmount.vue'
 import Icon from '@/components/icons/Icon.vue'
 import { useSubscriptionStore } from '@/stores'
 import type { UserSubscription } from '@/types'
@@ -254,7 +252,7 @@ function getProgressWidth(used: number | undefined, limit: number | null | undef
 function formatUsage(used: number | undefined, limit: number | null | undefined): string {
   const usedValue = (used || 0).toFixed(2)
   const limitValue = limit?.toFixed(2) || '∞'
-  return `$${usedValue}/$${limitValue}`
+  return `${usedValue}/${limitValue}`
 }
 
 function formatDaysRemaining(expiresAt: string): string {

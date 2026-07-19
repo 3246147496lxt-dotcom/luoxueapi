@@ -147,6 +147,7 @@ export default {
 
   // Navigation
   nav: {
+    home: 'Home',
     dashboard: 'Dashboard',
     adminDashboard: 'Data Dashboard',
     announcements: 'Announcements',
@@ -165,6 +166,8 @@ export default {
     channels: 'Channels',
     availableChannels: 'Available Channels',
     modelCatalog: 'Model Catalog',
+    contactUs: 'Contact Us',
+    quickLinks: 'Quick Links',
     subscriptions: 'Subscriptions',
     accounts: 'Accounts',
     proxies: 'Proxies',
@@ -182,6 +185,8 @@ export default {
     mySubscriptions: 'My Subscriptions',
     buySubscription: 'Wallet',
     docs: 'Docs',
+    docsTutorial: 'Documentation',
+    documentationManagement: 'Documentation',
     myOrders: 'My Orders',
     orderManagement: 'Orders',
     paymentDashboard: 'Payment Dashboard',

@@ -1,5 +1,5 @@
 <template>
-  <div class="min-h-screen bg-[#eef1ef] pt-[81px] dark:bg-[#0e1211]">
+  <div class="min-h-screen bg-[#f5f7fb] pt-[81px] dark:bg-[#0f1115]">
     <!-- Global Header -->
     <AppHeader />
 
@@ -9,7 +9,7 @@
     <!-- Main Content Area -->
     <div
       data-testid="app-main-shell"
-      class="relative min-h-[calc(100vh-81px)] bg-[#eef1ef] transition-[margin] duration-300 ease-out motion-reduce:transition-none dark:bg-[#0e1211]"
+      class="relative min-h-[calc(100vh-81px)] bg-[#f5f7fb] transition-[margin] duration-300 ease-out motion-reduce:transition-none dark:bg-[#0f1115]"
       :class="[
         sidebarCollapsed
           ? 'lg:ml-[68px]'

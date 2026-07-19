@@ -1,7 +1,7 @@
 <template>
   <AppLayout>
     <div class="space-y-6">
-      <UsageStatsCards :stats="usageStats" :show-account-cost="false" :strike-standard-cost="true" />
+      <UsageStatsCards :stats="usageStats" :show-account-cost="false" :strike-standard-cost="true" credit-mode />
 
       <div class="space-y-4">
         <div class="card p-4">
@@ -178,6 +178,7 @@
           :server-side-sort="true"
           :show-account-billing="false"
           :show-upstream-endpoint="false"
+          credit-mode
           default-sort-key="created_at"
           default-sort-order="desc"
           @sort="handleSort"

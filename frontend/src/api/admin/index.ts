@@ -35,6 +35,7 @@ import riskControlAPI from './riskControl'
 import adminComplianceAPI from './compliance'
 import auditAPI from './audit'
 import modelCatalogAPI from './modelCatalog'
+import documentationAPI from './documentation'
 
 /**
  * Unified admin API object for convenient access
@@ -71,7 +72,8 @@ export const adminAPI = {
   riskControl: riskControlAPI,
   compliance: adminComplianceAPI,
   audit: auditAPI,
-  modelCatalog: modelCatalogAPI
+  modelCatalog: modelCatalogAPI,
+  documentation: documentationAPI
 }
 
 export {
@@ -106,7 +108,8 @@ export {
   riskControlAPI,
   adminComplianceAPI,
   auditAPI,
-  modelCatalogAPI
+  modelCatalogAPI,
+  documentationAPI
 }
 
 export default adminAPI
@@ -131,3 +134,19 @@ export type {
   ModelCatalogValidation,
   UpdateModelCatalogRequest,
 } from './modelCatalog'
+export type {
+  AdminDocumentationState,
+  DocumentationCode,
+  DocumentationContent,
+  DocumentationImage,
+  DocumentationIconKey,
+  DocumentationLink,
+  DocumentationNote,
+  DocumentationNotePlacement,
+  DocumentationNoteTone,
+  DocumentationRevision,
+  DocumentationRevisionList,
+  DocumentationSnapshot,
+  DocumentationStep,
+  DocumentationTutorial,
+} from './documentation'

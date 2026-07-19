@@ -12,15 +12,27 @@
       <span class="w-20 shrink-0 font-mono text-gray-700 dark:text-gray-300">{{ row.platform }}</span>
       <span class="text-gray-500 dark:text-gray-400">
         {{ t('admin.users.platformQuota.windowDaily') }}
-        <span class="text-gray-900 dark:text-white">{{ fmtUsd(row.daily_usage_usd) }}/{{ fmtLimit(row.daily_limit_usd) }}</span>
+        <CreditAmount
+          class="ml-0.5 text-gray-900 dark:text-white"
+          :value="`${fmtCredit(row.daily_usage_usd)}/${fmtLimit(row.daily_limit_usd)}`"
+          icon-size="xs"
+        />
       </span>
       <span class="text-gray-500 dark:text-gray-400">
         {{ t('admin.users.platformQuota.windowWeekly') }}
-        <span class="text-gray-900 dark:text-white">{{ fmtUsd(row.weekly_usage_usd) }}/{{ fmtLimit(row.weekly_limit_usd) }}</span>
+        <CreditAmount
+          class="ml-0.5 text-gray-900 dark:text-white"
+          :value="`${fmtCredit(row.weekly_usage_usd)}/${fmtLimit(row.weekly_limit_usd)}`"
+          icon-size="xs"
+        />
       </span>
       <span class="text-gray-500 dark:text-gray-400">
         {{ t('admin.users.platformQuota.windowMonthly') }}
-        <span class="text-gray-900 dark:text-white">{{ fmtUsd(row.monthly_usage_usd) }}/{{ fmtLimit(row.monthly_limit_usd) }}</span>
+        <CreditAmount
+          class="ml-0.5 text-gray-900 dark:text-white"
+          :value="`${fmtCredit(row.monthly_usage_usd)}/${fmtLimit(row.monthly_limit_usd)}`"
+          icon-size="xs"
+        />
       </span>
     </div>
   </div>
@@ -29,6 +41,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
+import CreditAmount from '@/components/common/CreditAmount.vue'
 import type { PlatformQuotaItem, PlatformQuotaPlatform } from '@/api/admin/users'
 
 const props = defineProps<{ quotas?: PlatformQuotaItem[] }>()
@@ -51,11 +64,11 @@ const configured = computed(() => {
 })
 
 // 去尾零、最多 2 位小数：100→"100"，90.5→"90.5"，0.42→"0.42"
-function fmtUsd(n: number): string {
+function fmtCredit(n: number): string {
   if (n == null || Number.isNaN(n)) return '0'
   return String(Math.round(n * 100) / 100)
 }
 function fmtLimit(n: number | null): string {
-  return n == null ? '—' : fmtUsd(n)
+  return n == null ? '—' : fmtCredit(n)
 }
 </script>

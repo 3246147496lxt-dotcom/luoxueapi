@@ -1,7 +1,7 @@
 <template>
-  <div class="flex items-start gap-4">
+  <div :class="showPreview ? 'flex items-start gap-4' : ''">
     <!-- Preview Box -->
-    <div class="flex-shrink-0">
+    <div v-if="showPreview" class="flex-shrink-0">
       <div
         class="flex items-center justify-center overflow-hidden rounded-xl border-2 border-dashed border-gray-300 bg-gray-50 dark:border-dark-600 dark:bg-dark-800"
         :class="[previewSizeClass, { 'border-solid': !!modelValue }]"
@@ -81,6 +81,9 @@ const props = withDefaults(defineProps<{
   removeLabel?: string
   hint?: string
   maxSize?: number // bytes
+  maxSizeErrorMessage?: string
+  readErrorMessage?: string
+  showPreview?: boolean
 }>(), {
   mode: 'image',
   size: 'md',
@@ -88,6 +91,9 @@ const props = withDefaults(defineProps<{
   removeLabel: 'Remove',
   hint: '',
   maxSize: 300 * 1024,
+  maxSizeErrorMessage: '',
+  readErrorMessage: '',
+  showPreview: true,
 })
 
 const emit = defineEmits<{
@@ -114,7 +120,8 @@ function handleUpload(event: Event) {
   if (!file) return
 
   if (props.maxSize && file.size > props.maxSize) {
-    error.value = `File too large (${(file.size / 1024).toFixed(1)} KB), max ${(props.maxSize / 1024).toFixed(0)} KB`
+    error.value = props.maxSizeErrorMessage
+      || `File too large (${(file.size / 1024).toFixed(1)} KB), max ${(props.maxSize / 1024).toFixed(0)} KB`
     input.value = ''
     return
   }
@@ -139,7 +146,7 @@ function handleUpload(event: Event) {
   }
 
   reader.onerror = () => {
-    error.value = 'Failed to read file'
+    error.value = props.readErrorMessage || 'Failed to read file'
   }
   input.value = ''
 }

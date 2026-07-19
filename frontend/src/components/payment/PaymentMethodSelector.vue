@@ -17,7 +17,7 @@
         :aria-disabled="!method.available"
         :disabled="!method.available"
         :class="[
-          'relative flex min-h-[84px] w-full flex-col items-center justify-center rounded-2xl border px-3 py-3 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500/40 focus-visible:ring-offset-2 dark:focus-visible:ring-offset-dark-900',
+          'relative flex min-h-[66px] w-full flex-col items-center justify-center rounded-xl border px-3 py-2.5 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500/40 focus-visible:ring-offset-2 dark:focus-visible:ring-offset-dark-900',
           !method.available
             ? 'cursor-not-allowed border-gray-200 bg-gray-50 opacity-50 dark:border-dark-700 dark:bg-dark-800/50'
             : selected === method.type
@@ -27,9 +27,9 @@
         @click="method.available && emit('select', method.type)"
       >
         <span class="flex items-center gap-2">
-          <img :src="methodIcon(method.type)" alt="" aria-hidden="true" class="h-7 w-7 object-contain" />
+          <img :src="methodIcon(method.type)" alt="" aria-hidden="true" class="h-5 w-5 object-contain" />
           <span class="flex min-w-0 flex-col items-start leading-none">
-            <span class="max-w-full truncate text-sm font-semibold sm:text-base">{{ methodLabel(method) }}</span>
+            <span class="max-w-full truncate text-sm font-semibold">{{ methodLabel(method) }}</span>
             <span
               v-if="method.fee_rate > 0"
               class="text-[10px] tracking-wide text-gray-500 dark:text-dark-400"

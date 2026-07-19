@@ -48,7 +48,8 @@ export default {
     },
     calendarSummary: '{days} active days · {requests} requests',
     calendarRequests: '{count} requests',
-    analysisTotalCost: '${value} actual spend in range',
+    analysisTotalCost: '{value} Snow credits spent in range',
+    creditUnit: 'Snow credits',
     analysisTotalRequests: '{value} requests in range',
     actualCost: 'Actual cost',
     apiInfo: {
@@ -316,14 +317,14 @@ export default {
     },
     // Quota and expiration
     quotaLimit: 'Quota Limit',
-    quotaAmount: 'Quota Amount (USD)',
-    quotaAmountPlaceholder: 'Enter quota limit in USD',
+    quotaAmount: 'Quota Amount (Snow credits)',
+    quotaAmountPlaceholder: 'Enter a Snow credit limit',
     quotaAmountHint: 'Set the maximum amount this key can spend. 0 = unlimited.',
     quotaUsed: 'Quota Used',
     reset: 'Reset',
     resetQuotaUsed: 'Reset used quota to 0',
     resetQuotaTitle: 'Confirm Reset Quota',
-    resetQuotaConfirmMessage: 'Are you sure you want to reset the used quota (${used}) for key "{name}" to 0? This action cannot be undone.',
+    resetQuotaConfirmMessage: 'Are you sure you want to reset the used quota ({used} Snow credits) for key "{name}" to 0? This action cannot be undone.',
     quotaResetSuccess: 'Quota reset successfully',
     failedToResetQuota: 'Failed to reset quota',
     rateLimitColumn: 'Rate Limit',
@@ -650,7 +651,7 @@ export default {
       button: 'Transfer to Balance',
       transferring: 'Transferring...',
       empty: 'No available rebate quota',
-      success: '{amount} has been transferred to your balance'
+      success: '{amount} Snow credits have been transferred to your balance'
     },
     invitees: {
       title: 'Invited Users',
@@ -679,7 +680,8 @@ export default {
     quickRedeemTitle: 'Recharge with a redeem code',
     quickRedeemDescription: 'Codes may grant balance, concurrency, or subscription access. Account details refresh immediately after redemption.',
     supportContact: 'Support: {contact}',
-    balanceRedeemSummary: 'Added ${added}. Current balance: ${balance}.',
+    balanceRedeemSummary: 'Added {added} Snow credits. Current balance: {balance} Snow credits.',
+    balanceAddedAmount: 'Balance added',
     concurrencyRedeemSummary: 'Added {added} concurrent requests. Current concurrency: {concurrency}.',
     subscriptionRedeemSummary: 'Claimed {group} for {days} days.',
     currentBalance: 'Current Balance',

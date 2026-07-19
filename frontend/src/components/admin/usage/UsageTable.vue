@@ -173,7 +173,14 @@
         <template #cell-cost="{ row }">
           <div class="text-sm">
             <div class="flex items-center gap-1.5">
-              <span class="font-medium text-green-600 dark:text-green-400">${{ row.actual_cost?.toFixed(6) || '0.000000' }}</span>
+              <CreditAmount
+                v-if="creditMode"
+                class="font-medium text-green-600 dark:text-green-400"
+                :value="row.actual_cost?.toFixed(6) || '0.000000'"
+                icon-size="xs"
+                :label="`${t('usage.userBilled')} ${row.actual_cost?.toFixed(6) || '0.000000'}`"
+              />
+              <span v-else class="font-medium text-green-600 dark:text-green-400">${{ row.actual_cost?.toFixed(6) || '0.000000' }}</span>
               <span
                 v-if="row.long_context_billing_applied"
                 data-testid="long-context-billing-marker"
@@ -434,7 +441,14 @@
           </div>
           <div class="flex items-center justify-between gap-6">
             <span class="text-gray-400">{{ t('usage.userBilled') }}</span>
-            <span class="font-semibold text-green-400">${{ tooltipData?.actual_cost?.toFixed(6) || '0.000000' }}</span>
+            <CreditAmount
+              v-if="creditMode"
+              class="font-semibold text-green-400"
+              :value="tooltipData?.actual_cost?.toFixed(6) || '0.000000'"
+              icon-size="xs"
+              :label="`${t('usage.userBilled')} ${tooltipData?.actual_cost?.toFixed(6) || '0.000000'}`"
+            />
+            <span v-else class="font-semibold text-green-400">${{ tooltipData?.actual_cost?.toFixed(6) || '0.000000' }}</span>
           </div>
           <!-- Account billing (separated from user billing) -->
           <template v-if="showAccountBilling">
@@ -507,6 +521,7 @@ function accountBilled(row: { total_cost?: number | null; account_stats_cost?: n
 
 
 import DataTable from '@/components/common/DataTable.vue'
+import CreditAmount from '@/components/common/CreditAmount.vue'
 import EmptyState from '@/components/common/EmptyState.vue'
 import IpGeoCell from '@/components/common/IpGeoCell.vue'
 import Icon from '@/components/icons/Icon.vue'
@@ -523,6 +538,7 @@ interface Props {
   defaultSortOrder?: 'asc' | 'desc'
   showAccountBilling?: boolean
   showUpstreamEndpoint?: boolean
+  creditMode?: boolean
   /** 嵌入统一卡片内使用：去掉自身卡片外观 */
   flat?: boolean
 }
@@ -534,6 +550,7 @@ const props = withDefaults(defineProps<Props>(), {
   defaultSortOrder: 'asc',
   showAccountBilling: true,
   showUpstreamEndpoint: true,
+  creditMode: false,
   flat: false
 })
 const emit = defineEmits<{
@@ -544,6 +561,7 @@ const emit = defineEmits<{
 const { t } = useI18n()
 const showAccountBilling = props.showAccountBilling
 const showUpstreamEndpoint = props.showUpstreamEndpoint
+const creditMode = props.creditMode
 const ipGeoBatchLoading = ref(false)
 
 const showIpGeoToolbar = computed(() => props.columns.some((col) => col.key === 'ip_address'))

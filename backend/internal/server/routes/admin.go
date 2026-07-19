@@ -105,6 +105,9 @@ func RegisterAdminRoutes(
 		// 公开模型广场编目
 		registerModelCatalogRoutes(admin, h)
 
+		// 文档教程内容管理
+		registerDocumentationRoutes(admin, h)
+
 		// 渠道监控
 		registerChannelMonitorRoutes(admin, h)
 
@@ -116,6 +119,18 @@ func RegisterAdminRoutes(
 
 		// 操作审计日志
 		registerAuditLogRoutes(admin, h, stepUpAuth)
+	}
+}
+
+func registerDocumentationRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
+	documentation := admin.Group("/documentation")
+	{
+		documentation.GET("", h.Admin.Documentation.Get)
+		documentation.PUT("/draft", h.Admin.Documentation.SaveDraft)
+		documentation.POST("/publish", h.Admin.Documentation.Publish)
+		documentation.GET("/revisions", h.Admin.Documentation.ListRevisions)
+		documentation.POST("/revisions/:id/restore", h.Admin.Documentation.RestoreRevision)
+		documentation.POST("/assets", h.Admin.Documentation.UploadAsset)
 	}
 }
 

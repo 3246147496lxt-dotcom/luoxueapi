@@ -186,6 +186,8 @@ describe('ProfileInfoCard', () => {
 
     expect(wrapper.get('[data-testid="profile-overview-hero"]').text()).toContain('alice@example.com')
     expect(wrapper.get('[data-testid="profile-overview-metric-balance"]').text()).toContain('Account Balance')
+    expect(wrapper.get('[data-testid="profile-overview-metric-balance"] [data-testid="snowflake-credit-icon"]').exists()).toBe(true)
+    expect(wrapper.get('[data-testid="profile-overview-metric-balance"]').text()).not.toContain('$10.00')
     expect(wrapper.get('[data-testid="profile-overview-metric-concurrency"]').text()).toContain('Concurrency Limit')
     expect(wrapper.get('[data-testid="profile-overview-metric-member-since"]').text()).toContain('Member Since')
     expect(wrapper.find('[data-testid="profile-info-summary-grid"]').exists()).toBe(false)

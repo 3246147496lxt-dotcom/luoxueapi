@@ -6,6 +6,7 @@ import ops from './ops'
 import settings from './settings'
 import audit from './audit'
 import modelCatalog from './modelCatalog'
+import documentation from './documentation'
 
 export default {
   ...overview,
@@ -16,4 +17,5 @@ export default {
   ...settings,
   ...audit,
   ...modelCatalog,
+  ...documentation,
 }

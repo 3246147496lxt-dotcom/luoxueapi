@@ -1,31 +1,36 @@
 <template>
   <section
     id="redeem"
-    class="scroll-mt-24 overflow-hidden rounded-2xl border border-gray-200 bg-white dark:border-dark-700 dark:bg-dark-800"
+    :class="embedded
+      ? 'overflow-hidden rounded-2xl border border-gray-200 bg-white dark:border-dark-700 dark:bg-dark-800'
+      : 'scroll-mt-24 overflow-hidden rounded-2xl border border-gray-200 bg-white dark:border-dark-700 dark:bg-dark-800'"
     aria-labelledby="redeem-panel-title"
   >
-    <div class="border-b border-gray-100 px-5 py-5 dark:border-dark-700 sm:px-6">
-      <div class="flex items-start gap-3">
-        <span class="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-primary-50 text-primary-700 dark:bg-primary-950/60 dark:text-primary-300">
-          <Icon name="gift" size="md" />
+    <div :class="embedded ? 'px-5 pt-5' : 'border-b border-gray-100 px-5 py-5 dark:border-dark-700 sm:px-6'">
+      <div :class="['flex gap-3', embedded ? 'items-center' : 'items-start']">
+        <span :class="[
+          'flex shrink-0 items-center justify-center bg-primary-50 text-primary-700 dark:bg-primary-950/60 dark:text-primary-300',
+          embedded ? 'h-8 w-8 rounded-lg' : 'h-10 w-10 rounded-xl',
+        ]">
+          <Icon name="gift" :size="embedded ? 'sm' : 'md'" />
         </span>
         <div>
           <h2 id="redeem-panel-title" class="text-base font-semibold text-gray-950 dark:text-white">
             {{ t('redeem.quickRedeemTitle') }}
           </h2>
-          <p class="mt-1 text-sm leading-6 text-gray-500 dark:text-gray-400">
+          <p v-if="!embedded" class="mt-1 text-sm leading-6 text-gray-500 dark:text-gray-400">
             {{ t('redeem.quickRedeemDescription') }}
           </p>
         </div>
       </div>
     </div>
 
-    <div class="space-y-5 p-5 sm:p-6">
+    <div :class="embedded ? 'space-y-4 px-5 pb-5 pt-4' : 'space-y-5 p-5 sm:p-6'">
       <form :aria-busy="submitting" @submit.prevent="handleRedeem">
-        <label for="integrated-redeem-code" class="input-label">
+        <label for="integrated-redeem-code" :class="embedded ? 'sr-only' : 'input-label'">
           {{ t('redeem.redeemCodeLabel') }}
         </label>
-        <div class="mt-2 grid gap-3 sm:grid-cols-[minmax(0,1fr)_10rem]">
+        <div :class="embedded ? 'space-y-3' : 'mt-2 grid gap-3 sm:grid-cols-[minmax(0,1fr)_10rem]'">
           <div class="relative">
             <span class="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-4">
               <Icon name="gift" size="sm" class="text-gray-400 dark:text-gray-500" />
@@ -56,7 +61,7 @@
             <span>{{ submitting ? t('redeem.redeeming') : t('redeem.redeemButton') }}</span>
           </button>
         </div>
-        <p class="mt-2 text-xs text-gray-500 dark:text-gray-400">
+        <p v-if="!embedded" class="mt-2 text-xs text-gray-500 dark:text-gray-400">
           {{ t('redeem.redeemCodeHint') }}
           <span v-if="contactInfo"> · {{ t('redeem.supportContact', { contact: contactInfo }) }}</span>
         </p>
@@ -73,7 +78,13 @@
         <Icon name="checkCircle" size="md" class="mt-0.5 shrink-0 text-emerald-600 dark:text-emerald-400" />
         <div class="min-w-0">
           <p class="text-sm font-semibold">{{ t('redeem.redeemSuccess') }}</p>
-          <p class="mt-1 text-sm leading-6">{{ redeemResultSummary }}</p>
+          <p v-if="redeemResult.type === 'balance'" class="mt-1 flex flex-wrap items-center gap-x-1.5 gap-y-1 text-sm leading-6">
+            <span>{{ t('redeem.balanceAddedAmount') }}</span>
+            <CreditAmount :value="redeemResult.value.toFixed(2)" icon-size="xs" />
+            <span>· {{ t('redeem.currentBalance') }}</span>
+            <CreditAmount :value="Number(authStore.user?.balance || 0).toFixed(2)" icon-size="xs" />
+          </p>
+          <p v-else class="mt-1 text-sm leading-6">{{ redeemResultSummary }}</p>
         </div>
       </div>
 
@@ -89,7 +100,7 @@
         </div>
       </div>
 
-      <details class="group border-t border-gray-100 pt-4 dark:border-dark-700">
+      <details v-if="!embedded" class="group border-t border-gray-100 pt-4 dark:border-dark-700">
         <summary class="flex min-h-11 cursor-pointer list-none items-center justify-between gap-3 rounded-lg px-1 text-sm font-semibold text-gray-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500/40 dark:text-gray-200">
           <span class="flex items-center gap-2">
             <Icon name="clock" size="sm" class="text-gray-400" />
@@ -121,7 +132,14 @@
                   <span v-if="!isAdminAdjustment(item.type) && item.code"> · {{ item.code.slice(0, 8) }}…</span>
                 </p>
               </div>
-              <span :class="['text-sm font-semibold tabular-nums', historyValueClass(item)]">
+              <CreditAmount
+                v-if="isBalanceType(item.type)"
+                :class="['text-sm font-semibold', historyValueClass(item)]"
+                :value="formatHistoryValue(item)"
+                icon-size="xs"
+                :label="`${getHistoryItemTitle(item)} ${formatHistoryValue(item)}`"
+              />
+              <span v-else :class="['text-sm font-semibold tabular-nums', historyValueClass(item)]">
                 {{ formatHistoryValue(item) }}
               </span>
             </div>
@@ -144,7 +162,14 @@ import { useSubscriptionStore } from '@/stores/subscriptions'
 import { redeemAPI, type RedeemHistoryItem, type RedeemResult } from '@/api/redeem'
 import { extractI18nErrorMessage } from '@/utils/apiError'
 import { formatDateTime } from '@/utils/format'
+import CreditAmount from '@/components/common/CreditAmount.vue'
 import Icon from '@/components/icons/Icon.vue'
+
+const props = withDefaults(defineProps<{
+  embedded?: boolean
+}>(), {
+  embedded: false,
+})
 
 const emit = defineEmits<{
   redeemed: [result: RedeemResult]
@@ -211,7 +236,7 @@ function getHistoryItemTitle(item: RedeemHistoryItem) {
 }
 
 function formatHistoryValue(item: RedeemHistoryItem) {
-  if (isBalanceType(item.type)) return `${item.value >= 0 ? '+' : ''}$${item.value.toFixed(2)}`
+  if (isBalanceType(item.type)) return `${item.value >= 0 ? '+' : ''}${item.value.toFixed(2)}`
   if (isSubscriptionType(item.type)) {
     const days = item.validity_days || Math.round(item.value)
     return item.group?.name ? `${days}${t('redeem.days')} · ${item.group.name}` : `${days}${t('redeem.days')}`
@@ -261,7 +286,7 @@ async function handleRedeem() {
         appStore.showWarning(t('redeem.subscriptionRefreshFailed'))
       }
     }
-    await fetchHistory()
+    if (!props.embedded) await fetchHistory()
     emit('redeemed', result)
     appStore.showSuccess(t('redeem.codeRedeemSuccess'))
     await nextTick()
@@ -274,5 +299,7 @@ async function handleRedeem() {
   }
 }
 
-onMounted(fetchHistory)
+onMounted(() => {
+  if (!props.embedded) void fetchHistory()
+})
 </script>

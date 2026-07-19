@@ -105,6 +105,7 @@ describe('admin order currency display', () => {
         orders: [
           orderFactory({ id: 1, currency: 'USD', amount: 100, pay_amount: 108 }),
           orderFactory({ id: 2, currency: 'CNY', amount: 100, pay_amount: 108 }),
+          orderFactory({ id: 3, order_type: 'balance', currency: 'CNY', amount: 80, pay_amount: 88 }),
         ],
         loading: false,
         showUser: true,
@@ -121,6 +122,8 @@ describe('admin order currency display', () => {
     expect(text).toContain('$108.00')
     expect(text).toContain('¥108.00')
     expect(text).toContain('$100.00')
+    expect(wrapper.findAll('[data-testid="credit-amount"]')).toHaveLength(1)
+    expect(wrapper.find('[data-testid="credit-amount"]').text()).toContain('80.00')
   })
 
   it('renders payment currency consistently in the admin order table', () => {

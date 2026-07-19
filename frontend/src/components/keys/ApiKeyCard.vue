@@ -49,21 +49,23 @@
             </div>
 
             <div class="flex w-full max-w-[340px] flex-wrap justify-end gap-x-3 gap-y-1 text-xs tabular-nums text-gray-500 dark:text-gray-400">
-              <span>
-                {{ t('keys.today') }}
-                {{ hasUsage ? `$${todayCost.toFixed(4)}` : '—' }}
+              <span class="inline-flex items-center gap-1">
+                <span>{{ t('keys.today') }}</span>
+                <CreditAmount v-if="hasUsage" :value="todayCost.toFixed(4)" icon-size="xs" />
+                <span v-else>—</span>
               </span>
-              <span>
-                {{ t('keys.total') }}
-                {{ hasUsage ? `$${totalCost.toFixed(4)}` : '—' }}
+              <span class="inline-flex items-center gap-1">
+                <span>{{ t('keys.total') }}</span>
+                <CreditAmount v-if="hasUsage" :value="totalCost.toFixed(4)" icon-size="xs" />
+                <span v-else>—</span>
               </span>
             </div>
 
             <div class="w-full max-w-[340px] text-right text-xs tabular-nums text-gray-500 dark:text-gray-400">
               <template v-if="quotaValue > 0">
-                <span class="font-semibold text-gray-700 dark:text-gray-200">${{ quotaUsedValue.toFixed(2) }}</span>
+                <CreditAmount class="font-semibold text-gray-700 dark:text-gray-200" :value="quotaUsedValue.toFixed(2)" icon-size="xs" />
                 <span class="mx-1.5 text-gray-300 dark:text-dark-500">/</span>
-                <span>${{ quotaValue.toFixed(2) }}</span>
+                <CreditAmount :value="quotaValue.toFixed(2)" icon-size="xs" />
               </template>
               <span v-else>{{ t('keys.unlimitedQuota') }}</span>
             </div>
@@ -175,9 +177,11 @@
             <div v-for="limit in rateLimits" :key="limit.label" class="rate-limit-card">
               <div class="flex items-center justify-between gap-3 text-xs">
                 <span class="font-semibold text-gray-600 dark:text-gray-300">{{ limit.label }}</span>
-                <span class="tabular-nums text-gray-700 dark:text-gray-200">
-                  ${{ limit.used.toFixed(2) }} / ${{ limit.total.toFixed(2) }}
-                </span>
+                <CreditAmount
+                  class="text-gray-700 dark:text-gray-200"
+                  :value="`${limit.used.toFixed(2)} / ${limit.total.toFixed(2)}`"
+                  icon-size="xs"
+                />
               </div>
               <div
                 class="mt-2 h-1 overflow-hidden rounded-full bg-gray-200 dark:bg-dark-600"
@@ -278,6 +282,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
+import CreditAmount from '@/components/common/CreditAmount.vue'
 import Icon from '@/components/icons/Icon.vue'
 import GroupBadge from '@/components/common/GroupBadge.vue'
 import type { ApiKey } from '@/types'

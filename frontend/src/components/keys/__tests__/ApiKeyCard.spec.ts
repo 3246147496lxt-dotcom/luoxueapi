@@ -125,9 +125,11 @@ describe('ApiKeyCard', () => {
     const wrapper = mountCard()
 
     expect(wrapper.text()).toContain('Enabled')
-    expect(wrapper.text()).toContain('$1.2500')
-    expect(wrapper.text()).toContain('$4.7500')
-    expect(wrapper.text()).toContain('$5.00/$10.00')
+    expect(wrapper.text()).toContain('1.2500')
+    expect(wrapper.text()).toContain('4.7500')
+    expect(wrapper.text()).toContain('5.00/10.00')
+    expect(wrapper.findAll('[data-testid="credit-amount"]')).toHaveLength(4)
+    expect(wrapper.text()).not.toContain('$')
     expect(wrapper.get('[data-test="key-status-switch-7"]').attributes('aria-checked')).toBe('true')
     expect(wrapper.get('[data-test="key-quota-progress-7"]').attributes('aria-valuenow')).toBe('50')
   })
@@ -183,7 +185,8 @@ describe('ApiKeyCard', () => {
       reset_5h_at: '2026-07-20T00:00:00Z',
     }), { now: new Date('2026-07-19T00:00:00Z') })
 
-    expect(wrapper.text()).toContain('$2.50 / $5.00')
+    expect(wrapper.text()).toContain('2.50 / 5.00')
+    expect(wrapper.findAll('[data-testid="credit-amount"]').length).toBeGreaterThanOrEqual(5)
     expect(wrapper.find('[role="progressbar"][aria-label="5h Rate limit usage"]').exists()).toBe(true)
     const reset = wrapper.findAll('button').find((button) => button.text().includes('Reset'))
     expect(reset).toBeDefined()

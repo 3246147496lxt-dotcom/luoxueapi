@@ -43,6 +43,7 @@ func ProvideAdminHandlers(
 	complianceHandler *admin.ComplianceHandler,
 	auditLogHandler *admin.AuditLogHandler,
 	modelCatalogHandler *admin.ModelCatalogHandler,
+	documentationHandler *admin.DocumentationHandler,
 	upstreamBillingProbe *service.UpstreamBillingProbeService,
 ) *AdminHandlers {
 	accountHandler.SetUpstreamBillingProbeService(upstreamBillingProbe)
@@ -81,6 +82,7 @@ func ProvideAdminHandlers(
 		Compliance:             complianceHandler,
 		AuditLog:               auditLogHandler,
 		ModelCatalog:           modelCatalogHandler,
+		Documentation:          documentationHandler,
 	}
 }
 
@@ -124,6 +126,7 @@ func ProvideHandlers(
 	asyncImageHandler *AsyncImageHandler,
 	batchImageHandler *BatchImageHandler,
 	modelCatalogHandler *ModelCatalogHandler,
+	documentationHandler *DocumentationHandler,
 	_ *service.IdempotencyCoordinator,
 	_ *service.IdempotencyCleanupService,
 ) *Handlers {
@@ -147,6 +150,7 @@ func ProvideHandlers(
 		AsyncImage:       asyncImageHandler,
 		BatchImage:       batchImageHandler,
 		ModelCatalog:     modelCatalogHandler,
+		Documentation:    documentationHandler,
 	}
 }
 
@@ -171,6 +175,7 @@ var ProviderSet = wire.NewSet(
 	NewAsyncImageHandler,
 	NewBatchImageHandler,
 	NewModelCatalogHandler,
+	NewDocumentationHandler,
 
 	// Admin handlers
 	admin.NewDashboardHandler,
@@ -207,6 +212,7 @@ var ProviderSet = wire.NewSet(
 	admin.NewComplianceHandler,
 	admin.NewAuditLogHandler,
 	admin.NewModelCatalogHandler,
+	admin.NewDocumentationHandler,
 
 	// AdminHandlers and Handlers constructors
 	ProvideAdminHandlers,

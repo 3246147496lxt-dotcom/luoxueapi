@@ -3,7 +3,7 @@
     <!-- 铃铛按钮 -->
     <button
       @click="openModal"
-      class="relative flex items-center justify-center rounded-full text-gray-600 transition-colors duration-200 after:absolute after:-inset-1.5 after:content-[''] hover:bg-gray-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 focus-visible:ring-offset-2 dark:text-gray-400 dark:hover:bg-dark-800 dark:focus-visible:ring-offset-dark-900"
+      class="relative flex items-center justify-center rounded-full text-[#007bff] transition-colors duration-200 after:absolute after:-inset-1.5 after:content-[''] hover:bg-[rgba(46,50,56,0.05)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 focus-visible:ring-offset-2 dark:text-[#5aa2ff] dark:hover:bg-white/[0.08] dark:focus-visible:ring-offset-dark-900"
       :class="[
         compact
           ? 'h-8 w-8'

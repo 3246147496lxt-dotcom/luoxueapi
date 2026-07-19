@@ -398,13 +398,13 @@
           <div class="space-y-4">
             <div>
               <div class="relative">
-                <span class="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500">$</span>
+                <SnowflakeCreditIcon class="absolute left-3 top-1/2 -translate-y-1/2" size="sm" />
                 <input
                   v-model.number="formData.quota"
                   type="number"
                   step="0.01"
                   min="0"
-                  class="input pl-7"
+                  class="input pl-10"
                   :placeholder="t('keys.quotaAmountPlaceholder')"
                 />
               </div>
@@ -416,13 +416,17 @@
               <label class="input-label">{{ t('keys.quotaUsed') }}</label>
               <div class="flex items-center gap-2">
                 <div class="flex-1 rounded-lg bg-gray-100 px-3 py-2 dark:bg-dark-700">
-                  <span class="font-medium text-gray-900 dark:text-white">
-                    ${{ selectedKey.quota_used?.toFixed(4) || '0.0000' }}
-                  </span>
+                  <CreditAmount
+                    class="font-medium text-gray-900 dark:text-white"
+                    :value="selectedKey.quota_used?.toFixed(4) || '0.0000'"
+                    icon-size="xs"
+                  />
                   <span class="mx-2 text-gray-400">/</span>
-                  <span class="text-gray-500 dark:text-gray-400">
-                    ${{ selectedKey.quota?.toFixed(2) || '0.00' }}
-                  </span>
+                  <CreditAmount
+                    class="text-gray-500 dark:text-gray-400"
+                    :value="selectedKey.quota?.toFixed(2) || '0.00'"
+                    icon-size="xs"
+                  />
                 </div>
                 <button
                   type="button"
@@ -464,13 +468,13 @@
             <div>
               <label class="input-label">{{ t('keys.rateLimit5h') }}</label>
               <div class="relative">
-                <span class="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500">$</span>
+                <SnowflakeCreditIcon class="absolute left-3 top-1/2 -translate-y-1/2" size="sm" />
                 <input
                   v-model.number="formData.rate_limit_5h"
                   type="number"
                   step="0.01"
                   min="0"
-                  class="input pl-7"
+                  class="input pl-10"
                   :placeholder="'0'"
                 />
               </div>
@@ -478,18 +482,22 @@
               <div v-if="showEditModal && selectedKey && selectedKey.rate_limit_5h > 0" class="mt-2">
                 <div class="flex items-center gap-2">
                   <div class="flex-1 rounded-lg bg-gray-100 px-3 py-2 dark:bg-dark-700 text-sm">
-                    <span :class="[
+                    <CreditAmount
+                      :value="selectedKey.usage_5h?.toFixed(4) || '0.0000'"
+                      icon-size="xs"
+                      :class="[
                       'font-medium',
                       selectedKey.usage_5h >= selectedKey.rate_limit_5h ? 'text-red-500' :
                       selectedKey.usage_5h >= selectedKey.rate_limit_5h * 0.8 ? 'text-yellow-500' :
                       'text-gray-900 dark:text-white'
-                    ]">
-                      ${{ selectedKey.usage_5h?.toFixed(4) || '0.0000' }}
-                    </span>
+                    ]"
+                    />
                     <span class="mx-2 text-gray-400">/</span>
-                    <span class="text-gray-500 dark:text-gray-400">
-                      ${{ selectedKey.rate_limit_5h?.toFixed(2) || '0.00' }}
-                    </span>
+                    <CreditAmount
+                      class="text-gray-500 dark:text-gray-400"
+                      :value="selectedKey.rate_limit_5h?.toFixed(2) || '0.00'"
+                      icon-size="xs"
+                    />
                   </div>
                 </div>
                 <div class="mt-1 h-1.5 w-full overflow-hidden rounded-full bg-gray-200 dark:bg-dark-600">
@@ -510,13 +518,13 @@
             <div>
               <label class="input-label">{{ t('keys.rateLimit1d') }}</label>
               <div class="relative">
-                <span class="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500">$</span>
+                <SnowflakeCreditIcon class="absolute left-3 top-1/2 -translate-y-1/2" size="sm" />
                 <input
                   v-model.number="formData.rate_limit_1d"
                   type="number"
                   step="0.01"
                   min="0"
-                  class="input pl-7"
+                  class="input pl-10"
                   :placeholder="'0'"
                 />
               </div>
@@ -524,18 +532,22 @@
               <div v-if="showEditModal && selectedKey && selectedKey.rate_limit_1d > 0" class="mt-2">
                 <div class="flex items-center gap-2">
                   <div class="flex-1 rounded-lg bg-gray-100 px-3 py-2 dark:bg-dark-700 text-sm">
-                    <span :class="[
+                    <CreditAmount
+                      :value="selectedKey.usage_1d?.toFixed(4) || '0.0000'"
+                      icon-size="xs"
+                      :class="[
                       'font-medium',
                       selectedKey.usage_1d >= selectedKey.rate_limit_1d ? 'text-red-500' :
                       selectedKey.usage_1d >= selectedKey.rate_limit_1d * 0.8 ? 'text-yellow-500' :
                       'text-gray-900 dark:text-white'
-                    ]">
-                      ${{ selectedKey.usage_1d?.toFixed(4) || '0.0000' }}
-                    </span>
+                    ]"
+                    />
                     <span class="mx-2 text-gray-400">/</span>
-                    <span class="text-gray-500 dark:text-gray-400">
-                      ${{ selectedKey.rate_limit_1d?.toFixed(2) || '0.00' }}
-                    </span>
+                    <CreditAmount
+                      class="text-gray-500 dark:text-gray-400"
+                      :value="selectedKey.rate_limit_1d?.toFixed(2) || '0.00'"
+                      icon-size="xs"
+                    />
                   </div>
                 </div>
                 <div class="mt-1 h-1.5 w-full overflow-hidden rounded-full bg-gray-200 dark:bg-dark-600">
@@ -556,13 +568,13 @@
             <div>
               <label class="input-label">{{ t('keys.rateLimit7d') }}</label>
               <div class="relative">
-                <span class="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500">$</span>
+                <SnowflakeCreditIcon class="absolute left-3 top-1/2 -translate-y-1/2" size="sm" />
                 <input
                   v-model.number="formData.rate_limit_7d"
                   type="number"
                   step="0.01"
                   min="0"
-                  class="input pl-7"
+                  class="input pl-10"
                   :placeholder="'0'"
                 />
               </div>
@@ -570,18 +582,22 @@
               <div v-if="showEditModal && selectedKey && selectedKey.rate_limit_7d > 0" class="mt-2">
                 <div class="flex items-center gap-2">
                   <div class="flex-1 rounded-lg bg-gray-100 px-3 py-2 dark:bg-dark-700 text-sm">
-                    <span :class="[
+                    <CreditAmount
+                      :value="selectedKey.usage_7d?.toFixed(4) || '0.0000'"
+                      icon-size="xs"
+                      :class="[
                       'font-medium',
                       selectedKey.usage_7d >= selectedKey.rate_limit_7d ? 'text-red-500' :
                       selectedKey.usage_7d >= selectedKey.rate_limit_7d * 0.8 ? 'text-yellow-500' :
                       'text-gray-900 dark:text-white'
-                    ]">
-                      ${{ selectedKey.usage_7d?.toFixed(4) || '0.0000' }}
-                    </span>
+                    ]"
+                    />
                     <span class="mx-2 text-gray-400">/</span>
-                    <span class="text-gray-500 dark:text-gray-400">
-                      ${{ selectedKey.rate_limit_7d?.toFixed(2) || '0.00' }}
-                    </span>
+                    <CreditAmount
+                      class="text-gray-500 dark:text-gray-400"
+                      :value="selectedKey.rate_limit_7d?.toFixed(2) || '0.00'"
+                      icon-size="xs"
+                    />
                   </div>
                 </div>
                 <div class="mt-1 h-1.5 w-full overflow-hidden rounded-full bg-gray-200 dark:bg-dark-600">
@@ -909,6 +925,8 @@ import { getPersistedPageSize } from '@/composables/usePersistedPageSize'
 const { t } = useI18n()
 import { keysAPI, authAPI, usageAPI, userGroupsAPI } from '@/api'
 import AppLayout from '@/components/layout/AppLayout.vue'
+	import CreditAmount from '@/components/common/CreditAmount.vue'
+	import SnowflakeCreditIcon from '@/components/icons/SnowflakeCreditIcon.vue'
 	import Pagination from '@/components/common/Pagination.vue'
 	import BaseDialog from '@/components/common/BaseDialog.vue'
 	import ConfirmDialog from '@/components/common/ConfirmDialog.vue'

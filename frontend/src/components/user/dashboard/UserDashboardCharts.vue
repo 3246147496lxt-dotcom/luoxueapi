@@ -6,7 +6,7 @@
     <div class="border-b border-gray-100 px-5 py-4 dark:border-dark-700 md:px-6">
       <div class="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
         <div class="flex items-center gap-2 text-sm font-medium text-gray-800 dark:text-gray-100">
-          <Icon name="chart" size="sm" :stroke-width="1.8" />
+          <Icon name="chartPie" size="sm" :stroke-width="2" />
           <span>{{ t('dashboard.modelAnalysis') }}</span>
         </div>
 
@@ -294,7 +294,7 @@ const costDoughnutOptions: any = {
     ...doughnutBaseOptions.plugins,
     tooltip: {
       callbacks: {
-        label: (context: any) => `${context.label}: $${formatCost(Number(context.parsed) || 0)}`,
+        label: (context: any) => `${context.label}: ${t('dashboard.creditUnit')} ${formatCost(Number(context.parsed) || 0)}`,
       },
     },
   },

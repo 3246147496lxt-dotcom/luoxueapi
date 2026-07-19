@@ -60,11 +60,19 @@
     </div>
     <div class="card p-4 flex items-center gap-3">
       <div class="rounded-lg bg-green-100 p-2 dark:bg-green-900/30 text-green-600">
-        <Icon name="dollar" size="md" />
+        <SnowflakeCreditIcon v-if="creditMode" size="md" />
+        <Icon v-else name="dollar" size="md" />
       </div>
       <div class="min-w-0 flex-1">
         <p class="text-xs font-medium text-gray-500">{{ t('usage.totalCost') }}</p>
-        <p class="text-xl font-bold text-green-600">
+        <CreditAmount
+          v-if="creditMode"
+          class="text-xl font-bold text-green-600"
+          :value="(stats?.total_actual_cost || 0).toFixed(4)"
+          icon-size="md"
+          :label="`${t('usage.totalCost')} ${(stats?.total_actual_cost || 0).toFixed(4)}`"
+        />
+        <p v-else class="text-xl font-bold text-green-600">
           ${{ (stats?.total_actual_cost || 0).toFixed(4) }}
         </p>
         <p class="text-xs text-gray-400">
@@ -93,15 +101,19 @@ import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { AdminUsageStatsResponse } from '@/api/admin/usage'
 import type { UsageStatsResponse } from '@/types'
+import CreditAmount from '@/components/common/CreditAmount.vue'
 import Icon from '@/components/icons/Icon.vue'
+import SnowflakeCreditIcon from '@/components/icons/SnowflakeCreditIcon.vue'
 
 const props = withDefaults(defineProps<{
   stats: (AdminUsageStatsResponse | UsageStatsResponse) | null
   showAccountCost?: boolean
   strikeStandardCost?: boolean
+  creditMode?: boolean
 }>(), {
   showAccountCost: true,
   strikeStandardCost: false,
+  creditMode: false,
 })
 
 const { t } = useI18n()
@@ -112,6 +124,7 @@ const totalAccountCost = computed(() => {
 })
 const showAccountCost = computed(() => props.showAccountCost)
 const strikeStandardCost = computed(() => props.strikeStandardCost)
+const creditMode = computed(() => props.creditMode)
 
 const formatDuration = (ms: number) =>
   ms < 1000 ? `${ms.toFixed(0)}ms` : `${(ms / 1000).toFixed(2)}s`

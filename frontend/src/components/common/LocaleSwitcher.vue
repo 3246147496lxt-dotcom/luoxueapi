@@ -7,7 +7,7 @@
       @click="toggleDropdown"
       @keydown="handleTriggerKeydown"
       :disabled="switching"
-      class="relative flex items-center justify-center rounded-full text-blue-500 transition-colors duration-200 after:absolute after:-inset-1.5 after:content-[''] hover:bg-gray-100 active:bg-gray-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60 dark:text-blue-400 dark:hover:bg-dark-800 dark:active:bg-dark-700 dark:focus-visible:ring-offset-dark-900"
+      class="relative flex items-center justify-center rounded-full text-[#007bff] transition-colors duration-200 after:absolute after:-inset-1.5 after:content-[''] hover:bg-[rgba(46,50,56,0.05)] active:bg-gray-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60 dark:text-[#5aa2ff] dark:hover:bg-white/[0.08] dark:active:bg-dark-700 dark:focus-visible:ring-offset-dark-900"
       :class="[
         compact
           ? 'h-8 w-8'

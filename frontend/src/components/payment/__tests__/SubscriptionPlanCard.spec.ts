@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { createPinia } from "pinia";
 import { createI18n } from "vue-i18n";
 import SubscriptionPlanCard from "../SubscriptionPlanCard.vue";
+import CreditAmount from "@/components/common/CreditAmount.vue";
 
 const i18n = createI18n({
   legacy: false,
@@ -61,5 +62,33 @@ describe("SubscriptionPlanCard", () => {
     expect(text).toContain("Claude");
     expect(text).toContain("Gemini");
     expect(text).toContain("Imagen");
+  });
+
+  it("keeps the plan price monetary while showing quota limits as snowflake credits", () => {
+    const wrapper = mount(SubscriptionPlanCard, {
+      props: {
+        plan: {
+          id: 2,
+          group_id: 10,
+          group_platform: "openai",
+          name: "Quota Plan",
+          price: 10,
+          features: [],
+          rate_multiplier: 1,
+          validity_days: 30,
+          validity_unit: "day",
+          daily_limit_usd: 5,
+          weekly_limit_usd: 20,
+          monthly_limit_usd: 50,
+        },
+      },
+      global: { plugins: [i18n, createPinia()] },
+    });
+
+    expect(wrapper.text()).toContain("$10");
+    expect(wrapper.findAllComponents(CreditAmount).map(component => component.props("value"))).toEqual([5, 20, 50]);
+    expect(wrapper.text()).not.toContain("$5");
+    expect(wrapper.text()).not.toContain("$20");
+    expect(wrapper.text()).not.toContain("$50");
   });
 });

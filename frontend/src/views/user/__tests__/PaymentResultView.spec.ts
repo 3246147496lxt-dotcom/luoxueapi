@@ -193,6 +193,9 @@ describe('PaymentResultView', () => {
     expect(wrapper.text()).toContain('payment.result.success')
     expect(wrapper.text()).toContain('103.00')
     expect(wrapper.text()).toContain('100.00')
+    expect(wrapper.find('[data-testid="credit-amount"]').text()).toContain('100.00')
+    expect(wrapper.text()).toContain('¥103.00')
+    expect(wrapper.text()).not.toContain('$100.00')
     expect(window.localStorage.getItem(PAYMENT_RECOVERY_STORAGE_KEY)).toBeNull()
   })
 

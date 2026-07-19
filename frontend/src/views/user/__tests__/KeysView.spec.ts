@@ -260,9 +260,11 @@ describe('user KeysView responsive key layout', () => {
     expect(wrapper.find('[data-test="api-key-card-1"]').exists()).toBe(true)
     expect(wrapper.get('[data-test="key-table-status-switch-1"]').attributes('aria-checked')).toBe('true')
     expect(wrapper.get('[data-test="key-status-switch-1"]').attributes('aria-checked')).toBe('true')
-    expect(wrapper.text()).toContain('$0.2500')
-    expect(wrapper.text()).toContain('$1.5000')
-    expect(wrapper.text()).toContain('$2.00/$10.00')
+    expect(wrapper.text()).toContain('0.2500')
+    expect(wrapper.text()).toContain('1.5000')
+    expect(wrapper.text()).toContain('2.00/10.00')
+    expect(wrapper.findAll('[data-testid="credit-amount"]').length).toBeGreaterThanOrEqual(8)
+    expect(wrapper.text()).not.toContain('$')
   })
 
   it('keeps low-frequency fields hidden and can reveal them from detail settings', async () => {

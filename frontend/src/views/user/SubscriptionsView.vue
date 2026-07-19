@@ -106,11 +106,11 @@
                 <span class="text-sm font-medium text-gray-700 dark:text-gray-300">
                   {{ t('userSubscriptions.daily') }}
                 </span>
-                <span class="text-sm text-gray-500 dark:text-dark-400">
-                  ${{ (subscription.daily_usage_usd || 0).toFixed(2) }} / ${{
-                    subscription.group.daily_limit_usd.toFixed(2)
-                  }}
-                </span>
+                <CreditAmount
+                  class="text-sm text-gray-500 dark:text-dark-400"
+                  :value="formatCreditUsage(subscription.daily_usage_usd, subscription.group.daily_limit_usd)"
+                  icon-size="sm"
+                />
               </div>
               <div class="relative h-2 overflow-hidden rounded-full bg-gray-200 dark:bg-dark-600">
                 <div
@@ -143,11 +143,11 @@
                 <span class="text-sm font-medium text-gray-700 dark:text-gray-300">
                   {{ t('userSubscriptions.weekly') }}
                 </span>
-                <span class="text-sm text-gray-500 dark:text-dark-400">
-                  ${{ (subscription.weekly_usage_usd || 0).toFixed(2) }} / ${{
-                    subscription.group.weekly_limit_usd.toFixed(2)
-                  }}
-                </span>
+                <CreditAmount
+                  class="text-sm text-gray-500 dark:text-dark-400"
+                  :value="formatCreditUsage(subscription.weekly_usage_usd, subscription.group.weekly_limit_usd)"
+                  icon-size="sm"
+                />
               </div>
               <div class="relative h-2 overflow-hidden rounded-full bg-gray-200 dark:bg-dark-600">
                 <div
@@ -184,11 +184,11 @@
                 <span class="text-sm font-medium text-gray-700 dark:text-gray-300">
                   {{ t('userSubscriptions.monthly') }}
                 </span>
-                <span class="text-sm text-gray-500 dark:text-dark-400">
-                  ${{ (subscription.monthly_usage_usd || 0).toFixed(2) }} / ${{
-                    subscription.group.monthly_limit_usd.toFixed(2)
-                  }}
-                </span>
+                <CreditAmount
+                  class="text-sm text-gray-500 dark:text-dark-400"
+                  :value="formatCreditUsage(subscription.monthly_usage_usd, subscription.group.monthly_limit_usd)"
+                  icon-size="sm"
+                />
               </div>
               <div class="relative h-2 overflow-hidden rounded-full bg-gray-200 dark:bg-dark-600">
                 <div
@@ -255,6 +255,7 @@ import { useAppStore } from '@/stores/app'
 import subscriptionsAPI from '@/api/subscriptions'
 import type { UserSubscription } from '@/types'
 import AppLayout from '@/components/layout/AppLayout.vue'
+import CreditAmount from '@/components/common/CreditAmount.vue'
 import Icon from '@/components/icons/Icon.vue'
 import { formatDateOnly } from '@/utils/format'
 import { hasPeakRate, formatPeakRateWindow, serverTimezoneLabel } from '@/utils/peak-rate'
@@ -302,6 +303,10 @@ function getProgressWidth(used: number | undefined, limit: number | null | undef
   if (!limit || limit === 0) return '0%'
   const percentage = Math.min(((used || 0) / limit) * 100, 100)
   return `${percentage}%`
+}
+
+function formatCreditUsage(used: number | undefined, limit: number): string {
+  return `${(used || 0).toFixed(2)} / ${limit.toFixed(2)}`
 }
 
 function getProgressBarClass(used: number | undefined, limit: number | null | undefined): string {

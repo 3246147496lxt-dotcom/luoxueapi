@@ -1,39 +1,44 @@
 <template>
   <div class="space-y-5">
-    <div
-      class="inline-flex rounded-xl border border-gray-200 bg-gray-50 p-1 dark:border-dark-700 dark:bg-dark-900"
-      role="tablist"
-      :aria-label="t('payment.amountType')"
-      @keydown="handleModeKeydown"
-    >
-      <button
-        id="amount-mode-preset"
-        type="button"
-        role="tab"
-        :aria-selected="mode === 'preset'"
-        :tabindex="mode === 'preset' ? 0 : -1"
-        class="min-h-10 rounded-lg px-4 text-sm font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500/40"
-        :class="mode === 'preset'
-          ? 'bg-white text-gray-950 shadow-sm dark:bg-dark-700 dark:text-white'
-          : 'text-gray-500 hover:text-gray-800 dark:text-gray-400 dark:hover:text-gray-200'"
-        @click="setMode('preset')"
+    <div class="space-y-3">
+      <p class="text-sm font-semibold text-gray-800 dark:text-gray-200">
+        {{ t('payment.amountType') }}
+      </p>
+      <div
+        class="flex flex-wrap items-center gap-2"
+        role="tablist"
+        :aria-label="t('payment.amountType')"
+        @keydown="handleModeKeydown"
       >
-        {{ t('payment.fixedAmount') }}
-      </button>
-      <button
-        id="amount-mode-custom"
-        type="button"
-        role="tab"
-        :aria-selected="mode === 'custom'"
-        :tabindex="mode === 'custom' ? 0 : -1"
-        class="min-h-10 rounded-lg px-4 text-sm font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500/40"
-        :class="mode === 'custom'
-          ? 'bg-white text-gray-950 shadow-sm dark:bg-dark-700 dark:text-white'
-          : 'text-gray-500 hover:text-gray-800 dark:text-gray-400 dark:hover:text-gray-200'"
-        @click="setMode('custom')"
-      >
-        {{ t('payment.customAmount') }}
-      </button>
+        <button
+          id="amount-mode-preset"
+          type="button"
+          role="tab"
+          :aria-selected="mode === 'preset'"
+          :tabindex="mode === 'preset' ? 0 : -1"
+          class="min-h-9 rounded-lg px-4 text-sm font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500/40"
+          :class="mode === 'preset'
+            ? 'bg-primary-50 text-primary-700 dark:bg-primary-950/60 dark:text-primary-300'
+            : 'bg-gray-100 text-gray-500 hover:text-gray-800 dark:bg-dark-700 dark:text-gray-400 dark:hover:text-gray-200'"
+          @click="setMode('preset')"
+        >
+          {{ t('payment.fixedAmount') }}
+        </button>
+        <button
+          id="amount-mode-custom"
+          type="button"
+          role="tab"
+          :aria-selected="mode === 'custom'"
+          :tabindex="mode === 'custom' ? 0 : -1"
+          class="min-h-9 rounded-lg px-4 text-sm font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500/40"
+          :class="mode === 'custom'
+            ? 'bg-primary-50 text-primary-700 dark:bg-primary-950/60 dark:text-primary-300'
+            : 'bg-gray-100 text-gray-500 hover:text-gray-800 dark:bg-dark-700 dark:text-gray-400 dark:hover:text-gray-200'"
+          @click="setMode('custom')"
+        >
+          {{ t('payment.customAmount') }}
+        </button>
+      </div>
     </div>
 
     <div
@@ -42,8 +47,11 @@
       role="tabpanel"
       aria-labelledby="amount-mode-preset"
     >
+      <p class="mb-3 text-sm font-semibold text-gray-800 dark:text-gray-200">
+        {{ t('payment.chooseAmountTitle') }}
+      </p>
       <div
-        class="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4"
+        class="-mx-1 flex snap-x snap-mandatory gap-3 overflow-x-auto px-1 pb-2 sm:mx-0 sm:grid sm:grid-cols-4 sm:overflow-visible sm:px-0 sm:pb-0"
         role="radiogroup"
         :aria-label="t('payment.quickAmounts')"
       >
@@ -54,7 +62,7 @@
           role="radio"
           :aria-checked="modelValue === amt"
           :class="[
-            'flex min-h-[92px] flex-col items-center justify-center rounded-2xl border px-3 py-4 text-center transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500/40 focus-visible:ring-offset-2 dark:focus-visible:ring-offset-dark-900',
+            'flex min-h-[76px] min-w-28 snap-start flex-col items-center justify-center rounded-2xl border px-3 py-3 text-center transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500/40 focus-visible:ring-offset-2 sm:min-h-[92px] sm:min-w-0 dark:focus-visible:ring-offset-dark-900',
             modelValue === amt
               ? 'border-primary-500 bg-primary-50 text-primary-800 dark:border-primary-400 dark:bg-primary-950/50 dark:text-primary-200'
               : 'border-gray-200 bg-white text-gray-700 hover:border-primary-200 hover:bg-primary-50/40 dark:border-dark-600 dark:bg-dark-800 dark:text-gray-200 dark:hover:border-primary-800 dark:hover:bg-primary-950/20',

@@ -6,6 +6,7 @@ import { describe, expect, it } from 'vitest'
 
 const dir = dirname(fileURLToPath(import.meta.url))
 const headerSource = readFileSync(resolve(dir, '../AppHeader.vue'), 'utf8')
+const sidebarSource = readFileSync(resolve(dir, '../AppSidebar.vue'), 'utf8')
 const homeViewSource = readFileSync(resolve(dir, '../../../views/HomeView.vue'), 'utf8')
 const keyUsageViewSource = readFileSync(resolve(dir, '../../../views/KeyUsageView.vue'), 'utf8')
 
@@ -16,6 +17,14 @@ describe('doc_url sanitization', () => {
 
   it('AppHeader applies sanitizeUrl to docUrl', () => {
     expect(headerSource).toContain('sanitizeUrl(appStore.docUrl)')
+  })
+
+  it('AppSidebar sanitizes the configured documentation URL and keeps a canonical fallback', () => {
+    expect(sidebarSource).toContain("import { sanitizeUrl } from '@/utils/url'")
+    expect(sidebarSource).toContain("const DEFAULT_DOCUMENTATION_URL = 'https://luoxueapi.cc/tutorial-docs/'")
+    expect(sidebarSource).toContain('appStore.cachedPublicSettings?.doc_url || appStore.docUrl || DEFAULT_DOCUMENTATION_URL')
+    expect(sidebarSource).toContain("{ allowRelative: true }")
+    expect(sidebarSource).toContain('|| DEFAULT_DOCUMENTATION_URL')
   })
 
   it('HomeView imports sanitizeUrl', () => {
