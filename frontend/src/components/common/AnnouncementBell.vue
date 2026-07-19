@@ -3,17 +3,25 @@
     <!-- 铃铛按钮 -->
     <button
       @click="openModal"
-      class="relative flex h-9 w-9 items-center justify-center rounded-lg text-gray-600 transition-all hover:bg-gray-100 hover:scale-105 dark:text-gray-400 dark:hover:bg-dark-800"
-      :class="{ 'text-blue-600 dark:text-blue-400': unreadCount > 0 }"
+      class="relative flex items-center justify-center rounded-full text-gray-600 transition-colors duration-200 after:absolute after:-inset-1.5 after:content-[''] hover:bg-gray-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 focus-visible:ring-offset-2 dark:text-gray-400 dark:hover:bg-dark-800 dark:focus-visible:ring-offset-dark-900"
+      :class="[
+        compact
+          ? 'h-8 w-8'
+          : 'h-11 min-h-11 w-11 min-w-11',
+        { 'text-blue-600 dark:text-blue-400': unreadCount > 0 }
+      ]"
       :aria-label="t('announcements.title')"
     >
-      <Icon name="bell" size="md" />
+      <NotificationIcon
+        class="announcement-bell-icon"
+        :class="compact ? 'h-[18px] w-[18px]' : 'h-5 w-5'"
+      />
       <!-- 未读红点 -->
       <span
         v-if="unreadCount > 0"
-        class="absolute right-1 top-1 flex h-2 w-2"
+        class="absolute right-2 top-2 flex h-2 w-2"
       >
-        <span class="absolute inline-flex h-full w-full animate-ping rounded-full bg-red-500 opacity-75"></span>
+        <span class="absolute inline-flex h-full w-full animate-ping rounded-full bg-red-500 opacity-75 motion-reduce:animate-none"></span>
         <span class="relative inline-flex h-2 w-2 rounded-full bg-red-500"></span>
       </span>
     </button>
@@ -322,6 +330,13 @@ import { useAnnouncementStore } from '@/stores/announcements'
 import { formatRelativeTime, formatRelativeWithDateTime } from '@/utils/format'
 import type { UserAnnouncement } from '@/types'
 import Icon from '@/components/icons/Icon.vue'
+import NotificationIcon from '@/components/icons/NotificationIcon.vue'
+
+withDefaults(defineProps<{
+  compact?: boolean
+}>(), {
+  compact: false,
+})
 
 const { t } = useI18n()
 const appStore = useAppStore()

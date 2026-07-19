@@ -19,7 +19,7 @@ describe('OpenAI Fast/Flex policy locale keys', () => {
   it('exposes user scope copy at the runtime en path', () => {
     expect(en.admin.settings.openaiFastPolicy).toMatchObject({
       userIds: 'Specific users',
-      userIdsHint: 'Type any part of a user email to search. Leave empty to apply to all 落雪API users. Selected users match requests from their API keys and take precedence over global rules.',
+      userIdsHint: 'Type any part of a user email to search. Leave empty to apply to all LuoxueAPI users. Selected users match requests from their API keys and take precedence over global rules.',
       userSearchPlaceholder: 'Search by user email',
       userSearchEmpty: 'No matching users found',
       userDeleted: '(deleted)',

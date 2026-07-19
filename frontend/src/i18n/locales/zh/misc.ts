@@ -61,10 +61,10 @@ export default {
   // Recharge / Subscription Page
   purchase: {
     title: '充值/订阅',
-    description: '通过内嵌页面完成充值/订阅',
+    description: '充值余额、购买订阅或使用兑换码',
     openInNewTab: '新窗口打开',
     notEnabledTitle: '该功能未开启',
-    notEnabledDesc: '管理员暂未开启充值/订阅入口，请联系管理员。',
+    notEnabledDesc: '在线支付暂未开启，您仍可在下方使用兑换码。',
     notConfiguredTitle: '充值/订阅链接未配置',
     notConfiguredDesc: '管理员已开启入口，但尚未配置充值/订阅链接，请联系管理员。'
   },
@@ -310,6 +310,22 @@ export default {
   // Payment System
   payment: {
     title: '充值/订阅',
+    checkoutTitle: '账户充值与订阅',
+    checkoutDescription: '选择充值金额或订阅套餐，确认支付方式后即可完成购买。兑换码也已整合在本页。',
+    purchaseOptions: '充值或订阅',
+    chooseAmountTitle: '选择充值金额',
+    chooseAmountDescription: '选择常用金额，或切换为自定义金额。页面只展示系统真实的到账与实付结果。',
+    amountType: '金额输入方式',
+    fixedAmount: '固定金额',
+    selectThisAmount: '选择此金额',
+    customAmountLabel: '输入自定义金额',
+    customAmountHint: '请输入大于 0 的充值金额',
+    amountRange: '可充值范围：{min} 至 {max}',
+    minimumAmount: '最低充值金额：{amount}',
+    maximumAmount: '最高充值金额：{amount}',
+    orderSummary: '充值明细',
+    choosePlanTitle: '选择订阅套餐',
+    choosePlanDescription: '套餐价格、倍率和额度均以当前展示为准。',
     amountLabel: '充值金额',
     paymentAmount: '支付金额',
     creditedBalance: '到账余额',

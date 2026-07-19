@@ -5,18 +5,19 @@ import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 
 const dir = dirname(fileURLToPath(import.meta.url))
-const sidebarSource = readFileSync(resolve(dir, '../AppSidebar.vue'), 'utf8')
-const homeViewSource = readFileSync(resolve(dir, '../../../views/HomeView.vue'), 'utf8')
+const headerSource = readFileSync(resolve(dir, '../AppHeader.vue'), 'utf8')
+const publicSiteLayoutSource = readFileSync(resolve(dir, '../../public/PublicSiteLayout.vue'), 'utf8')
 const keyUsageViewSource = readFileSync(resolve(dir, '../../../views/KeyUsageView.vue'), 'utf8')
 
 describe('site_logo sanitization', () => {
-  it('AppSidebar imports sanitizeUrl and applies it to siteLogo', () => {
-    expect(sidebarSource).toContain("import { sanitizeUrl } from '@/utils/url'")
-    expect(sidebarSource).toContain('sanitizeUrl(appStore.siteLogo')
+  it('AppHeader imports sanitizeUrl and applies it to siteLogo', () => {
+    expect(headerSource).toContain("import { sanitizeUrl } from '@/utils/url'")
+    expect(headerSource).toContain("sanitizeUrl(appStore.siteLogo || ''")
   })
 
-  it('HomeView applies sanitizeUrl to siteLogo', () => {
-    expect(homeViewSource).toContain('sanitizeUrl(appStore.cachedPublicSettings?.site_logo || appStore.siteLogo')
+  it('the shared public site layout applies sanitizeUrl to siteLogo', () => {
+    expect(publicSiteLayoutSource).toContain('sanitizeUrl(')
+    expect(publicSiteLayoutSource).toContain('appStore.cachedPublicSettings?.site_logo || appStore.siteLogo')
   })
 
   it('KeyUsageView applies sanitizeUrl to siteLogo', () => {
@@ -24,7 +25,7 @@ describe('site_logo sanitization', () => {
   })
 
   it('all three pass allowRelative and allowDataUrl options', () => {
-    for (const src of [sidebarSource, homeViewSource, keyUsageViewSource]) {
+    for (const src of [headerSource, publicSiteLayoutSource, keyUsageViewSource]) {
       expect(src).toContain('allowRelative: true')
       expect(src).toContain('allowDataUrl: true')
     }

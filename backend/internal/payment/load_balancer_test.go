@@ -494,10 +494,11 @@ func TestDecryptConfig_PlaintextAndLegacyCompat(t *testing.T) {
 	}
 
 	tests := []struct {
-		name   string
-		stored string
-		key    []byte
-		want   map[string]string
+		name    string
+		stored  string
+		key     []byte
+		want    map[string]string
+		wantErr bool
 	}{
 		{
 			name:   "empty stored returns nil map",
@@ -524,22 +525,22 @@ func TestDecryptConfig_PlaintextAndLegacyCompat(t *testing.T) {
 			want:   map[string]string{"appId": "app-123", "secret": "sec-xyz"},
 		},
 		{
-			name:   "legacy ciphertext with no key treated as empty",
-			stored: legacyEncrypted,
-			key:    nil,
-			want:   nil,
+			name:    "ciphertext with no key is rejected",
+			stored:  legacyEncrypted,
+			key:     nil,
+			wantErr: true,
 		},
 		{
-			name:   "legacy ciphertext with wrong key treated as empty",
-			stored: legacyEncrypted,
-			key:    wrongKey,
-			want:   nil,
+			name:    "ciphertext with wrong key is rejected",
+			stored:  legacyEncrypted,
+			key:     wrongKey,
+			wantErr: true,
 		},
 		{
-			name:   "garbage data treated as empty",
-			stored: "not-json-and-not-ciphertext",
-			key:    key,
-			want:   nil,
+			name:    "garbage data is rejected",
+			stored:  "not-json-and-not-ciphertext",
+			key:     key,
+			wantErr: true,
 		},
 	}
 
@@ -548,6 +549,12 @@ func TestDecryptConfig_PlaintextAndLegacyCompat(t *testing.T) {
 			t.Parallel()
 			lb := NewDefaultLoadBalancer(nil, tt.key)
 			got, err := lb.decryptConfig(tt.stored)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatal("decryptConfig expected error, got nil")
+				}
+				return
+			}
 			if err != nil {
 				t.Fatalf("decryptConfig unexpected error: %v", err)
 			}

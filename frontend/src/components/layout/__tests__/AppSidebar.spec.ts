@@ -6,8 +6,6 @@ import { describe, expect, it } from 'vitest'
 
 const componentPath = resolve(dirname(fileURLToPath(import.meta.url)), '../AppSidebar.vue')
 const componentSource = readFileSync(componentPath, 'utf8')
-const stylePath = resolve(dirname(fileURLToPath(import.meta.url)), '../../../style.css')
-const styleSource = readFileSync(stylePath, 'utf8')
 
 describe('AppSidebar custom SVG styles', () => {
   it('does not override uploaded SVG fill or stroke colors', () => {
@@ -42,14 +40,49 @@ describe('AppSidebar scroll position persistence', () => {
   })
 })
 
-describe('AppSidebar header styles', () => {
-  it('does not clip the version badge dropdown', () => {
-    const sidebarHeaderBlockMatch = styleSource.match(/\.sidebar-header\s*\{[\s\S]*?\n {2}\}/)
-    const sidebarBrandBlockMatch = componentSource.match(/\.sidebar-brand\s*\{[\s\S]*?\n\}/)
+describe('AppSidebar navigation shell', () => {
+  it('exposes a stable aria target without duplicating the header brand or collapse control', () => {
+    expect(componentSource).toContain('id="app-sidebar"')
+    expect(componentSource).toContain('aria-label="Sidebar"')
+    expect(componentSource).not.toContain('sidebar-header')
+    expect(componentSource).not.toContain('sidebar-brand')
+    expect(componentSource).not.toContain('VersionBadge')
+    expect(componentSource).not.toContain('sidebar-footer')
+    expect(componentSource).not.toContain('toggleSidebar')
+  })
 
-    expect(sidebarHeaderBlockMatch).not.toBeNull()
-    expect(sidebarBrandBlockMatch).not.toBeNull()
-    expect(sidebarHeaderBlockMatch?.[0]).not.toContain('@apply overflow-hidden;')
-    expect(sidebarBrandBlockMatch?.[0]).not.toContain('overflow: hidden;')
+  it('uses compact and expanded widths inside a floating rounded desktop shell', () => {
+    expect(componentSource).toContain("? 'w-[60px]'\n        : 'w-44 min-[1025px]:w-[188px] min-[1281px]:w-[200px]'")
+    expect(componentSource.match(/top: 5\.0625rem;/g)).toHaveLength(2)
+    expect(componentSource).toContain('@apply px-2 py-3;')
+    expect(componentSource).toContain('min-height: 2rem;')
+    expect(componentSource).toContain('padding-left: 0.75rem;')
+    expect(componentSource).toContain('padding-right: 0.75rem;')
+    expect(componentSource).toContain('min-height: 2.75rem;')
+    expect(componentSource).toContain('right: auto;')
+    expect(componentSource.match(/bottom: 1rem;/g)).toHaveLength(2)
+    expect(componentSource).toContain('left: 0.5rem;')
+    expect(componentSource).toContain('border-radius: 1rem;')
+    expect(componentSource).toContain("{ 'sidebar-mobile-hidden': !mobileOpen }")
+    expect(componentSource).toContain('transform: translateX(calc(-100% - 0.5rem));')
+  })
+
+  it('matches the reference menu rhythm and selected state', () => {
+    expect(componentSource).toContain('gap: 0.625rem;')
+    expect(componentSource).toContain('padding-top: 0.25rem;')
+    expect(componentSource).toContain('line-height: 1.5rem;')
+    expect(componentSource).toContain('background: rgb(234 245 255);')
+    expect(componentSource).toContain('width: 2px;')
+    expect(componentSource).toContain('height: 1rem;')
+    expect(componentSource).toContain('font-size: 0.75rem;')
+    expect(componentSource).toContain('font-weight: 400;')
+  })
+})
+
+describe('AppSidebar utility actions', () => {
+  it('does not render or manage the theme toggle', () => {
+    expect(componentSource).not.toContain('toggleTheme')
+    expect(componentSource).not.toContain("t('nav.lightMode')")
+    expect(componentSource).not.toContain("t('nav.darkMode')")
   })
 })

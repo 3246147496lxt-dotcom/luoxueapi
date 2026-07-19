@@ -40,6 +40,17 @@ const routes: RouteRecordRaw[] = [
     }
   },
   {
+    path: '/models.html',
+    name: 'PublicModelCatalog',
+    component: () => import('@/views/public/ModelCatalogView.vue'),
+    meta: {
+      requiresAuth: false,
+      requiresPublicModelCatalog: true,
+      title: 'Model Catalog',
+      titleKey: 'modelCatalog.meta.title'
+    }
+  },
+  {
     path: '/login',
     name: 'Login',
     component: () => import('@/views/auth/LoginView.vue'),
@@ -234,6 +245,7 @@ const routes: RouteRecordRaw[] = [
     path: '/redeem',
     name: 'Redeem',
     component: () => import('@/views/user/RedeemView.vue'),
+    beforeEnter: () => ({ path: '/purchase', hash: '#redeem' }),
     meta: {
       requiresAuth: true,
       requiresAdmin: false,
@@ -299,8 +311,7 @@ const routes: RouteRecordRaw[] = [
       requiresAdmin: false,
       title: 'Purchase Subscription',
       titleKey: 'nav.buySubscription',
-      descriptionKey: 'purchase.description',
-      requiresPayment: true
+      descriptionKey: 'purchase.description'
     }
   },
   {
@@ -477,6 +488,18 @@ const routes: RouteRecordRaw[] = [
       title: 'Channel Monitor',
       titleKey: 'admin.channelMonitor.title',
       descriptionKey: 'admin.channelMonitor.description'
+    }
+  },
+  {
+    path: '/admin/model-catalog',
+    name: 'AdminModelCatalog',
+    component: () => import('@/views/admin/ModelCatalogView.vue'),
+    meta: {
+      requiresAuth: true,
+      requiresAdmin: true,
+      title: 'Model Catalog',
+      titleKey: 'admin.modelCatalog.title',
+      descriptionKey: 'admin.modelCatalog.description'
     }
   },
   {
@@ -794,6 +817,27 @@ router.beforeEach(async (to, _from, next) => {
       next(authStore.isAdmin ? '/admin/dashboard' : '/dashboard')
       return
     }
+
+    // The anonymous catalog is an opt-in surface. Resolve public settings
+    // before rendering so older deployments cannot accidentally expose a new
+    // navigation target during an async settings refresh.
+    if (to.meta.requiresPublicModelCatalog) {
+      if (!appStore.publicSettingsLoaded) {
+        try {
+          await appStore.fetchPublicSettings()
+        } catch (error) {
+          console.warn('Failed to load public model catalog setting', error)
+        }
+      }
+      if (
+        appStore.cachedPublicSettings?.public_model_catalog_enabled !== true
+        || appStore.backendModeEnabled
+      ) {
+        next('/home')
+        return
+      }
+    }
+
     // Backend mode: block public pages for unauthenticated users (except login, key-usage, setup)
     if (appStore.backendModeEnabled && !authStore.isAuthenticated) {
       const isAllowed = isBackendModePublicRouteAllowed(to.path, authStore.hasPendingAuthSession)
@@ -876,6 +920,7 @@ router.beforeEach(async (to, _from, next) => {
       '/admin/subscriptions',
       '/admin/redeem',
       '/subscriptions',
+      '/purchase',
       '/redeem'
     ]
 

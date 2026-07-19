@@ -56,6 +56,12 @@ declare module 'vue-router' {
     requiresRiskControl?: boolean
 
     /**
+     * Whether the anonymous model catalog opt-in flag must be enabled.
+     * @default false
+     */
+    requiresPublicModelCatalog?: boolean
+
+    /**
      * i18n key for the page title
      */
     titleKey?: string

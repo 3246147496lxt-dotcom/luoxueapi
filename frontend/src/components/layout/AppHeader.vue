@@ -1,37 +1,112 @@
 <template>
   <header
-    class="sticky top-0 z-30 h-16 border-b border-gray-100 bg-white px-4 sm:px-5 md:px-6 lg:px-8 dark:border-dark-800 dark:bg-dark-900"
+    data-testid="app-header"
+    class="fixed inset-x-0 top-0 z-50 h-[81px] bg-transparent p-2"
   >
     <div
-      class="mx-auto flex h-full w-full max-w-[1600px] items-center justify-between gap-3"
+      data-testid="header-surface"
+      class="flex h-[65px] w-full items-center justify-between rounded-2xl border border-white/80 bg-white/95 pr-2 shadow-[inset_0_1px_0_rgba(255,255,255,0.65),0_2px_8px_-2px_rgba(15,23,42,0.06),0_8px_20px_-8px_rgba(15,23,42,0.08)] backdrop-blur-xl dark:border-dark-700/80 dark:bg-dark-900/95 dark:shadow-[inset_0_1px_0_rgba(255,255,255,0.04),0_2px_8px_-2px_rgba(0,0,0,0.25),0_8px_20px_-8px_rgba(0,0,0,0.32)]"
     >
-      <!-- Left: Mobile Menu Toggle + Page Title -->
-      <div class="flex min-w-0 flex-1 items-center gap-3">
+      <!-- Left: brand, sidebar controls, and page context -->
+      <div class="flex min-w-0 flex-1 items-center gap-0 lg:gap-2">
         <button
+          type="button"
           @click="toggleMobileSidebar"
-          class="btn-ghost btn-icon -ml-1 flex-shrink-0 rounded-lg lg:hidden"
-          aria-label="Toggle Menu"
+          data-testid="header-mobile-menu"
+          class="relative flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-[10px] text-gray-600 transition-colors after:absolute after:-inset-1.5 after:content-[''] hover:bg-gray-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 focus-visible:ring-offset-2 lg:hidden dark:text-dark-300 dark:hover:bg-dark-800 dark:focus-visible:ring-offset-dark-900"
+          :aria-label="mobileOpen ? t('nav.collapse') : t('nav.expand')"
+          aria-controls="app-sidebar"
+          :aria-expanded="mobileOpen"
         >
           <Icon name="menu" size="md" />
         </button>
 
-        <div class="hidden min-w-0 sm:block">
+        <div
+          data-testid="header-brand-slot"
+          class="flex w-10 min-w-0 flex-shrink-0 items-center justify-center transition-[width] duration-300 ease-out motion-reduce:transition-none lg:justify-start"
+          :class="
+            sidebarCollapsed
+              ? 'md:w-[68px]'
+              : 'md:w-[196px] lg:w-[184px] min-[1025px]:w-[196px] min-[1281px]:w-[208px]'
+          "
+        >
+          <router-link
+            :to="homePath"
+            data-testid="header-brand"
+            class="flex h-10 w-full min-w-0 items-center justify-center gap-2 rounded-xl transition-colors hover:bg-gray-100/80 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 md:h-16 dark:hover:bg-dark-800"
+            :class="
+              sidebarCollapsed
+                ? 'lg:w-[60px]'
+                : 'lg:w-44 min-[1025px]:w-[188px] min-[1281px]:w-[200px]'
+            "
+            :aria-label="siteName"
+          >
+            <span class="flex h-10 w-10 flex-shrink-0 items-center justify-center overflow-hidden rounded-[10px] bg-white ring-1 ring-gray-200/80 md:h-12 md:w-12 dark:bg-dark-800 dark:ring-dark-700">
+              <img :src="siteLogo || '/logo.png'" alt="" class="h-full w-full object-contain">
+            </span>
+            <span
+              class="hidden min-w-0 truncate text-[22px] font-bold tracking-tight text-gray-950 md:block dark:text-white"
+              :class="sidebarCollapsed ? 'md:hidden' : 'md:block'"
+            >
+              {{ siteName }}
+            </span>
+          </router-link>
+        </div>
+
+        <button
+          type="button"
+          data-testid="header-sidebar-toggle"
+          class="relative hidden h-8 w-8 flex-shrink-0 items-center justify-center rounded-[10px] text-gray-500 transition-colors after:absolute after:-inset-1.5 after:content-[''] hover:bg-gray-100 hover:text-gray-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 focus-visible:ring-offset-2 lg:-ml-px lg:flex dark:text-dark-300 dark:hover:bg-dark-800 dark:hover:text-white dark:focus-visible:ring-offset-dark-900"
+          :title="sidebarCollapsed ? t('nav.expand') : t('nav.collapse')"
+          :aria-label="sidebarCollapsed ? t('nav.expand') : t('nav.collapse')"
+          aria-controls="app-sidebar"
+          :aria-expanded="!sidebarCollapsed"
+          @click="toggleSidebar"
+        >
+          <SidebarCollapseIcon
+            data-testid="header-sidebar-toggle-icon"
+            class="h-5 w-5 transition-transform duration-200 motion-reduce:transition-none"
+            :class="{ 'rotate-180': sidebarCollapsed }"
+          />
+        </button>
+
+        <div class="hidden min-w-0 lg:block">
           <h1 class="truncate text-base font-semibold tracking-tight text-gray-950 dark:text-white">
             {{ pageTitle }}
           </h1>
-          <p
-            v-if="pageDescription"
-            class="hidden max-w-xl truncate text-xs text-gray-500 dark:text-dark-400 xl:block"
-          >
-            {{ pageDescription }}
-          </p>
         </div>
       </div>
 
-      <!-- Right: Announcements + Docs + Language + Subscriptions + Balance + User Dropdown -->
-      <div class="flex flex-shrink-0 items-center gap-1 sm:gap-1.5">
-        <!-- Announcement Bell -->
-        <AnnouncementBell v-if="user" />
+      <!-- Right: utility icons + supporting status + account pill -->
+      <div class="flex flex-shrink-0 items-center gap-2 md:gap-3">
+        <div
+          data-testid="header-utility-actions"
+          class="hidden items-center gap-3 md:flex"
+        >
+          <!-- Announcement Bell -->
+          <AnnouncementBell v-if="user" compact />
+
+          <!-- Theme Toggle -->
+          <button
+            type="button"
+            data-testid="header-theme-toggle"
+            class="relative flex h-8 w-8 items-center justify-center rounded-full text-gray-600 transition-colors duration-200 after:absolute after:-inset-1.5 after:content-[''] hover:bg-gray-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 focus-visible:ring-offset-2 dark:text-gray-300 dark:hover:bg-dark-800 dark:focus-visible:ring-offset-dark-900"
+            :title="isDark ? t('nav.lightMode') : t('nav.darkMode')"
+            :aria-label="isDark ? t('nav.lightMode') : t('nav.darkMode')"
+            @click="toggleTheme"
+          >
+            <Icon
+              :name="isDark ? 'sun' : 'moon'"
+              size="sm"
+              class="!h-[18px] !w-[18px]"
+              :class="{ 'text-amber-500': isDark }"
+              aria-hidden="true"
+            />
+          </button>
+
+          <!-- Language Switcher -->
+          <LocaleSwitcher compact />
+        </div>
 
         <!-- Docs Link -->
         <a
@@ -39,22 +114,21 @@
           :href="docUrl"
           target="_blank"
           rel="noopener noreferrer"
-          class="flex h-9 items-center gap-1.5 rounded-lg border border-transparent px-2.5 text-sm font-medium text-gray-600 transition-colors hover:border-gray-200 hover:bg-gray-50 hover:text-gray-950 dark:text-dark-300 dark:hover:border-dark-700 dark:hover:bg-dark-800 dark:hover:text-white"
+          class="hidden h-9 items-center gap-1.5 rounded-lg border border-transparent px-2.5 text-sm font-medium text-gray-600 transition-colors hover:border-gray-200 hover:bg-gray-50 hover:text-gray-950 2xl:flex dark:text-dark-300 dark:hover:border-dark-700 dark:hover:bg-dark-800 dark:hover:text-white"
         >
           <Icon name="book" size="sm" />
-          <span class="hidden sm:inline">{{ t('nav.docs') }}</span>
+          <span>{{ t('nav.docs') }}</span>
         </a>
 
-        <!-- Language Switcher -->
-        <LocaleSwitcher />
-
         <!-- Subscription Progress (for users with active subscriptions) -->
-        <SubscriptionProgressMini v-if="user" />
+        <div v-if="user" class="hidden 2xl:block">
+          <SubscriptionProgressMini />
+        </div>
 
         <!-- Balance Display -->
         <div
           v-if="user"
-          class="group relative hidden h-9 items-center gap-2 rounded-lg border border-primary-100 bg-primary-50/80 px-3 dark:border-primary-900/50 dark:bg-primary-900/20 xl:flex"
+          class="group relative hidden h-9 items-center gap-2 rounded-lg border border-primary-100 bg-primary-50/80 px-3 dark:border-primary-900/50 dark:bg-primary-900/20 2xl:flex"
         >
           <svg
             class="h-4 w-4 text-primary-600 dark:text-primary-400"
@@ -102,17 +176,25 @@
         <div
           v-if="user"
           ref="dropdownRef"
-          class="relative sm:ml-1 sm:border-l sm:border-gray-200 sm:pl-2 dark:sm:border-dark-700"
+          class="relative"
         >
           <button
+            type="button"
             @click="toggleDropdown"
-            class="flex h-10 items-center gap-2 rounded-lg px-1.5 transition-colors hover:bg-gray-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500/40 dark:hover:bg-dark-800"
-            aria-label="User Menu"
+            @keydown.esc.stop.prevent="closeDropdown"
+            data-testid="header-account-trigger"
+            class="relative flex h-8 items-center gap-1.5 rounded-full bg-gray-950/[0.04] p-1 transition-colors after:absolute after:-inset-y-1.5 after:-inset-x-1 after:content-[''] hover:bg-gray-950/[0.08] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 focus-visible:ring-offset-2 dark:bg-white/[0.06] dark:hover:bg-white/[0.10] dark:focus-visible:ring-offset-dark-900"
+            :class="{
+              'bg-primary-50 dark:bg-primary-900/25': dropdownOpen
+            }"
+            :aria-label="`${displayName} · ${t('nav.profile')}`"
             aria-haspopup="menu"
             :aria-expanded="dropdownOpen"
+            aria-controls="header-account-menu"
           >
             <div
-              class="flex h-8 w-8 items-center justify-center overflow-hidden rounded-lg bg-primary-600 text-sm font-semibold text-white ring-1 ring-primary-700/20 dark:bg-primary-500 dark:ring-white/10"
+              data-testid="header-account-avatar"
+              class="flex h-6 w-6 flex-shrink-0 items-center justify-center overflow-hidden rounded-full bg-primary-600 text-xs font-semibold text-white ring-1 ring-primary-700/20 dark:bg-primary-500 dark:ring-white/10"
             >
               <img
                 v-if="avatarUrl"
@@ -122,34 +204,38 @@
               >
               <span v-else>{{ userInitials }}</span>
             </div>
-            <div class="hidden text-left md:block">
-              <div class="text-sm font-medium text-gray-900 dark:text-white">
+            <div class="hidden min-w-0 max-w-24 text-left md:block">
+              <div class="truncate text-xs font-medium text-gray-900 dark:text-white">
                 {{ displayName }}
               </div>
-              <div class="text-xs capitalize text-gray-500 dark:text-dark-400">
-                {{ user.role }}
-              </div>
             </div>
-            <Icon name="chevronDown" size="sm" class="hidden text-gray-400 md:block" />
+            <Icon
+              name="chevronDown"
+              size="sm"
+              class="!h-3.5 !w-3.5 text-gray-400 transition-transform duration-200 motion-reduce:transition-none dark:text-dark-400"
+              :class="{ 'rotate-180': dropdownOpen }"
+              aria-hidden="true"
+            />
           </button>
 
           <!-- Dropdown Menu -->
           <transition name="dropdown">
             <div
               v-if="dropdownOpen"
-              class="header-dropdown dropdown right-0 mt-2 w-64"
+              id="header-account-menu"
+              class="header-dropdown dropdown right-0 mt-2 w-56 max-w-[calc(100vw-2rem)]"
               role="menu"
             >
               <!-- User Info -->
-              <div class="border-b border-gray-100 px-4 py-3 dark:border-dark-700">
+              <div class="border-b border-gray-100 px-3 py-2 dark:border-dark-700">
                 <div class="text-sm font-medium text-gray-900 dark:text-white">
                   {{ displayName }}
                 </div>
-                <div class="text-xs text-gray-500 dark:text-dark-400">{{ user.email }}</div>
+                <div class="truncate text-xs text-gray-500 dark:text-dark-400">{{ user.email }}</div>
               </div>
 
               <!-- Balance (mobile only) -->
-              <div class="border-b border-gray-100 px-4 py-2 dark:border-dark-700 sm:hidden">
+              <div class="border-b border-gray-100 px-3 py-2 dark:border-dark-700 sm:hidden">
                 <div class="text-xs text-gray-500 dark:text-dark-400">
                   {{ t('common.balance') }}
                 </div>
@@ -171,31 +257,12 @@
                   <Icon name="key" size="sm" />
                   {{ t('nav.apiKeys') }}
                 </router-link>
-
-                <a
-                  v-if="authStore.isAdmin"
-                  href="https://github.com/Wei-Shaw/sub2api"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  @click="closeDropdown"
-                  class="dropdown-item"
-                >
-                  <svg class="h-4 w-4" fill="currentColor" viewBox="0 0 24 24">
-                    <path
-                      fill-rule="evenodd"
-                      clip-rule="evenodd"
-                      d="M12 2C6.477 2 2 6.477 2 12c0 4.42 2.865 8.17 6.839 9.49.5.092.682-.217.682-.482 0-.237-.008-.866-.013-1.7-2.782.604-3.369-1.34-3.369-1.34-.454-1.156-1.11-1.464-1.11-1.464-.908-.62.069-.608.069-.608 1.003.07 1.531 1.03 1.531 1.03.892 1.529 2.341 1.087 2.91.831.092-.646.35-1.086.636-1.336-2.22-.253-4.555-1.11-4.555-4.943 0-1.091.39-1.984 1.029-2.683-.103-.253-.446-1.27.098-2.647 0 0 .84-.269 2.75 1.025A9.578 9.578 0 0112 6.836c.85.004 1.705.114 2.504.336 1.909-1.294 2.747-1.025 2.747-1.025.546 1.377.203 2.394.1 2.647.64.699 1.028 1.592 1.028 2.683 0 3.842-2.339 4.687-4.566 4.935.359.309.678.919.678 1.852 0 1.336-.012 2.415-.012 2.743 0 .267.18.578.688.48C19.138 20.167 22 16.418 22 12c0-5.523-4.477-10-10-10z"
-                    />
-                  </svg>
-                  {{ t('nav.github') }}
-                </a>
-
               </div>
 
               <!-- Contact Support (only show if configured) -->
               <div
                 v-if="contactInfo"
-                class="border-t border-gray-100 px-4 py-2.5 dark:border-dark-700"
+                class="border-t border-gray-100 px-3 py-2 dark:border-dark-700"
               >
                 <div class="flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400">
                   <svg
@@ -268,6 +335,7 @@ import LocaleSwitcher from '@/components/common/LocaleSwitcher.vue'
 import SubscriptionProgressMini from '@/components/common/SubscriptionProgressMini.vue'
 import AnnouncementBell from '@/components/common/AnnouncementBell.vue'
 import Icon from '@/components/icons/Icon.vue'
+import SidebarCollapseIcon from '@/components/icons/SidebarCollapseIcon.vue'
 import { sanitizeUrl } from '@/utils/url'
 
 const router = useRouter()
@@ -279,10 +347,19 @@ const adminSettingsStore = useAdminSettingsStore()
 const onboardingStore = useOnboardingStore()
 
 const user = computed(() => authStore.user)
+const sidebarCollapsed = computed(() => appStore.sidebarCollapsed)
+const mobileOpen = computed(() => appStore.mobileOpen)
+const isDark = ref(document.documentElement.classList.contains('dark'))
 const dropdownOpen = ref(false)
 const dropdownRef = ref<HTMLElement | null>(null)
 const contactInfo = computed(() => appStore.contactInfo)
 const docUrl = computed(() => sanitizeUrl(appStore.docUrl))
+const siteName = computed(() => appStore.siteName || '落雪API')
+const siteLogo = computed(() => sanitizeUrl(appStore.siteLogo || '', {
+  allowRelative: true,
+  allowDataUrl: true,
+}))
+const homePath = computed(() => (authStore.isAdmin ? '/admin/dashboard' : '/dashboard'))
 const avatarUrl = computed(() => user.value?.avatar_url?.trim() || '')
 const availableBalance = computed(() => Number(user.value?.balance || 0))
 const frozenBalance = computed(() => Number(user.value?.frozen_balance || 0))
@@ -301,12 +378,12 @@ const userInitials = computed(() => {
   if (!user.value) return ''
   // Prefer username, fallback to email
   if (user.value.username) {
-    return user.value.username.substring(0, 2).toUpperCase()
+    return user.value.username.substring(0, 1).toUpperCase()
   }
   if (user.value.email) {
-    // Get the part before @ and take first 2 chars
+    // Get the part before @ and take its first character
     const localPart = user.value.email.split('@')[0]
-    return localPart.substring(0, 2).toUpperCase()
+    return localPart.substring(0, 1).toUpperCase()
   }
   return ''
 })
@@ -332,16 +409,21 @@ const pageTitle = computed(() => {
   return (route.meta.title as string) || ''
 })
 
-const pageDescription = computed(() => {
-  const descKey = route.meta.descriptionKey as string
-  if (descKey) {
-    return t(descKey)
-  }
-  return (route.meta.description as string) || ''
-})
-
 function toggleMobileSidebar() {
+  if (!mobileOpen.value) {
+    appStore.setSidebarCollapsed(false)
+  }
   appStore.toggleMobileSidebar()
+}
+
+function toggleSidebar() {
+  appStore.toggleSidebar()
+}
+
+function toggleTheme() {
+  isDark.value = !isDark.value
+  document.documentElement.classList.toggle('dark', isDark.value)
+  localStorage.setItem('theme', isDark.value ? 'dark' : 'light')
 }
 
 function toggleDropdown() {
@@ -407,6 +489,21 @@ onBeforeUnmount(() => {
   box-shadow:
     0 18px 40px rgb(15 23 42 / 0.12),
     0 2px 8px rgb(15 23 42 / 0.06);
+}
+
+.header-dropdown .dropdown-item {
+  min-height: 2.75rem;
+  padding: 0.6875rem 0.75rem;
+  font-size: 0.875rem;
+  line-height: 1.25rem;
+}
+
+@media (min-width: 640px) {
+  .header-dropdown .dropdown-item {
+    min-height: 2.25rem;
+    padding: 0.4375rem 0.75rem;
+    font-size: 0.8125rem;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {

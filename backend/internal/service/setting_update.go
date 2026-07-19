@@ -334,6 +334,7 @@ func (s *SettingService) buildSystemSettingsUpdates(ctx context.Context, setting
 
 	// Available channels feature switch
 	updates[SettingKeyAvailableChannelsEnabled] = strconv.FormatBool(settings.AvailableChannelsEnabled)
+	updates[SettingKeyPublicModelCatalogEnabled] = strconv.FormatBool(settings.PublicModelCatalogEnabled)
 
 	// Affiliate (邀请返利) feature switch
 	updates[SettingKeyAffiliateEnabled] = strconv.FormatBool(settings.AffiliateEnabled)
@@ -500,6 +501,20 @@ func (s *SettingService) refreshCachedSettings(settings *SystemSettings) {
 	if settings == nil {
 		return
 	}
+
+	// The public catalog guard runs before anonymous rate limiting. Refresh its
+	// short-lived process cache immediately after a successful settings write so
+	// both enable and disable operations take effect without waiting for expiry.
+	s.publicModelCatalogRuntimeMu.Lock()
+	s.publicModelCatalogRuntimeSF.Forget("public_model_catalog_runtime")
+	s.publicModelCatalogRuntimeCache.Store(&cachedPublicModelCatalogRuntime{
+		value: PublicModelCatalogRuntime{
+			Enabled:     settings.PublicModelCatalogEnabled,
+			BackendMode: settings.BackendModeEnabled,
+		},
+		expiresAt: time.Now().Add(publicModelCatalogRuntimeCacheTTL).UnixNano(),
+	})
+	s.publicModelCatalogRuntimeMu.Unlock()
 
 	// 先使 inflight singleflight 失效，再刷新缓存，缩小旧值覆盖新值的竞态窗口
 	versionBoundsSF.Forget("version_bounds")

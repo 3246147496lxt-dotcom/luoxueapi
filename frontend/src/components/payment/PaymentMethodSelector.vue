@@ -3,14 +3,21 @@
     <label class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
       {{ t('payment.paymentMethod') }}
     </label>
-    <div class="grid grid-cols-2 gap-3 sm:flex">
+    <div
+      :class="['grid gap-3', methodGridClass]"
+      role="radiogroup"
+      :aria-label="t('payment.paymentMethod')"
+    >
       <button
         v-for="method in sortedMethods"
         :key="method.type"
         type="button"
+        role="radio"
+        :aria-checked="selected === method.type"
+        :aria-disabled="!method.available"
         :disabled="!method.available"
         :class="[
-          'relative flex h-[60px] flex-col items-center justify-center rounded-lg border px-3 transition-all sm:flex-1',
+          'relative flex min-h-[84px] w-full flex-col items-center justify-center rounded-2xl border px-3 py-3 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500/40 focus-visible:ring-offset-2 dark:focus-visible:ring-offset-dark-900',
           !method.available
             ? 'cursor-not-allowed border-gray-200 bg-gray-50 opacity-50 dark:border-dark-700 dark:bg-dark-800/50'
             : selected === method.type
@@ -20,9 +27,9 @@
         @click="method.available && emit('select', method.type)"
       >
         <span class="flex items-center gap-2">
-          <img :src="methodIcon(method.type)" :alt="methodLabel(method)" class="h-7 w-7 object-contain" />
-          <span class="flex flex-col items-start leading-none">
-            <span class="text-base font-semibold">{{ methodLabel(method) }}</span>
+          <img :src="methodIcon(method.type)" alt="" aria-hidden="true" class="h-7 w-7 object-contain" />
+          <span class="flex min-w-0 flex-col items-start leading-none">
+            <span class="max-w-full truncate text-sm font-semibold sm:text-base">{{ methodLabel(method) }}</span>
             <span
               v-if="method.fee_rate > 0"
               class="text-[10px] tracking-wide text-gray-500 dark:text-dark-400"
@@ -79,6 +86,14 @@ const sortedMethods = computed(() => {
     const bi = order.indexOf(b.type)
     return (ai === -1 ? 999 : ai) - (bi === -1 ? 999 : bi)
   })
+})
+
+const methodGridClass = computed(() => {
+  const count = sortedMethods.value.length
+  if (count <= 1) return 'grid-cols-1'
+  if (count === 2) return 'grid-cols-2'
+  if (count === 3) return 'grid-cols-2 sm:grid-cols-3'
+  return 'grid-cols-2 lg:grid-cols-4'
 })
 
 function methodIcon(type: string): string {

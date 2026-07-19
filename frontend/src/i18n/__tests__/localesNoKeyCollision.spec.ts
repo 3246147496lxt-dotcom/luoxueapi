@@ -80,3 +80,12 @@ describe.each(Object.keys(roots))('locale %s spread assembly', (locale) => {
     expect(collisions(admins[locale])).toEqual([])
   })
 })
+
+describe('shared navigation copy', () => {
+  it('uses the same profile settings terminology as the profile page title', () => {
+    expect(zhCommon.nav.profile).toBe('个人设置')
+    expect(zhCommon.nav.profile).toBe(zhDashboard.profile.title)
+    expect(enCommon.nav.profile).toBe('Profile Settings')
+    expect(enCommon.nav.profile).toBe(enDashboard.profile.title)
+  })
+})

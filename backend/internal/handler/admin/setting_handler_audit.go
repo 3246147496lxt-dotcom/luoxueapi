@@ -516,6 +516,9 @@ func diffSettings(before *service.SystemSettings, after *service.SystemSettings,
 	if before.AvailableChannelsEnabled != after.AvailableChannelsEnabled {
 		changed = append(changed, "available_channels_enabled")
 	}
+	if before.PublicModelCatalogEnabled != after.PublicModelCatalogEnabled {
+		changed = append(changed, service.SettingKeyPublicModelCatalogEnabled)
+	}
 	if before.AffiliateEnabled != after.AffiliateEnabled {
 		changed = append(changed, "affiliate_enabled")
 	}

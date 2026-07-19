@@ -142,6 +142,142 @@ export default {
     }
   },
 
+  modelCatalog: {
+    navLabel: '模型广场',
+    title: '模型广场',
+    description: '无需登录即可查看已上架模型的模型 ID、能力范围和公开标准价格。',
+    publicPriceNote: '这里展示所有注册用户可使用的公开标准价，不包含专属分组、订阅优惠或用户个性倍率。最终费用以实际调用记录为准。',
+    modelCount: '{count} 个模型',
+    pricingUpdatedAt: '价格更新于 {time}',
+    searchLabel: '搜索模型',
+    searchPlaceholder: '搜索模型名称、模型 ID 或能力',
+    filters: {
+      ariaLabel: '模型筛选',
+      provider: '厂商',
+      category: '类型',
+      all: '全部'
+    },
+    resultsTitle: '公开模型',
+    resultCount: '显示 {count} 个结果',
+    loading: '正在加载模型',
+    featured: '推荐',
+    copy: '复制',
+    copied: '已复制',
+    copySuccess: '模型 ID 已复制',
+    copyModelAria: '复制模型 ID：{model}',
+    contextWindow: '上下文窗口',
+    maxOutput: '最大输出',
+    capabilities: '模型能力',
+    unavailable: {
+      title: '模型广场暂未开放',
+      description: '当前站点尚未启用公开模型广场，或暂时没有可公开展示的目录。'
+    },
+    error: {
+      title: '模型目录加载失败',
+      description: '暂时无法获取模型与价格信息，请稍后重试。',
+      retry: '重新加载'
+    },
+    empty: {
+      title: '暂未上架公开模型',
+      description: '管理员完成模型审核并发布后，模型会显示在这里。'
+    },
+    noResults: {
+      title: '没有匹配的模型',
+      description: '换一个关键词，或清除厂商和类型筛选后再试。',
+      clear: '清除筛选'
+    },
+    providers: {
+      openai: 'OpenAI',
+      anthropic: 'Anthropic',
+      google: 'Google',
+      gemini: 'Google',
+      deepseek: 'DeepSeek',
+      moonshot: 'Kimi',
+      kimi: 'Kimi',
+      zhipu: '智谱 AI',
+      alibaba: '阿里云',
+      qwen: '通义千问',
+      xai: 'xAI',
+      mistral: 'Mistral AI',
+      meta: 'Meta'
+    },
+    categories: {
+      chat: '文本对话',
+      text: '文本对话',
+      text_chat: '文本对话',
+      reasoning: '推理',
+      code: '代码',
+      embedding: '嵌入',
+      image: '图像',
+      audio: '语音',
+      video: '视频',
+      multimodal: '多模态',
+      other: '其他'
+    },
+    capabilityLabels: {
+      vision: '视觉理解',
+      image_input: '图像输入',
+      reasoning: '深度推理',
+      tools: '工具调用',
+      tool_calling: '工具调用',
+      function_calling: '函数调用',
+      prompt_caching: '提示词缓存',
+      caching: '缓存',
+      cache: '缓存',
+      pdf: 'PDF',
+      web_search: '联网搜索',
+      structured_output: '结构化输出',
+      audio_input: '语音输入',
+      audio_output: '语音输出',
+      video: '视频'
+    },
+    pricing: {
+      publicLabel: '公开标准价',
+      details: '价格详情',
+      dialogTitle: '公开价格详情',
+      dialogDescription: '所有价格均为美元。Token 模型按每百万 Token 展示；0 表示免费，“—”表示暂未提供该项价格。',
+      billingMode: '计费方式',
+      billingModes: {
+        token: '按 Token 计费',
+        perRequest: '按次计费',
+        image: '按图计费'
+      },
+      input: '输入',
+      output: '输出',
+      cacheWrite: '缓存写入',
+      cacheWrite1h: '缓存写入（1 小时）',
+      cacheRead: '缓存读取',
+      priorityInput: 'Priority 输入',
+      priorityOutput: 'Priority 输出',
+      priorityCacheWrite: 'Priority 缓存写入',
+      priorityCacheRead: 'Priority 缓存读取',
+      imageInput: '图像输入',
+      imageOutput: '图像输出',
+      request: '单次请求',
+      image: '单张图片',
+      perMillionTokens: '/ 百万 Token',
+      perRequest: '/ 次',
+      perImage: '/ 张',
+      intervalTitle: '区间价格',
+      longContext: '长上下文价格',
+      peakRate: '高峰时段 {start}–{end}（{timezone}）按 {multiplier} 倍计费。',
+      unknown: '暂未提供价格'
+    },
+    cta: {
+      title: '选好模型后，进入控制台完成接入',
+      description: '创建 API 密钥并选择有效分组，再将模型 ID 填入你的客户端配置。',
+      register: '注册并使用',
+      login: '登录控制台',
+      dashboard: '进入控制台',
+      availableChannels: '查看我的可用渠道',
+      tutorial: '查看使用教程'
+    },
+    meta: {
+      title: '模型广场',
+      description: '查看落雪API已公开上架的模型、能力、上下文窗口和公开标准价格。'
+    }
+  },
+
   // Key Usage Query Page
   keyUsage: {
     title: 'API Key 用量查询',

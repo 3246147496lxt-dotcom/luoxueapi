@@ -69,7 +69,7 @@
       <button
         type="button"
         class="group flex min-h-[184px] w-full flex-col rounded-[24px] border border-[#eee2ad] bg-[#fff8d8] p-5 text-left transition-colors duration-200 hover:border-amber-300 hover:bg-[#fff4c5] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/40 focus-visible:ring-offset-2 dark:border-[#4d4424] dark:bg-[#302c1d] dark:hover:border-amber-800 dark:hover:bg-[#38321f]"
-        @click="router.push('/redeem')"
+        @click="router.push({ path: '/purchase', hash: '#redeem' })"
       >
         <div class="flex items-start justify-between gap-4">
           <div

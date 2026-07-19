@@ -234,6 +234,18 @@ func TestFrontendServer_InjectSettings(t *testing.T) {
 
 		assert.Contains(t, string(result), `window.__APP_CONFIG__={"nested":{"array":[1,2,3]},"special":"<>&"};`)
 	})
+
+	t.Run("injects_route_specific_model_catalog_metadata", func(t *testing.T) {
+		provider := &mockSettingsProvider{settings: map[string]string{"site_name": "落雪API"}}
+		server, err := NewFrontendServer(provider)
+		require.NoError(t, err)
+
+		result := server.injectSettingsForPath([]byte(`{"site_name":"落雪API"}`), "/models.html")
+
+		assert.Contains(t, string(result), "<title>模型广场 · 落雪API</title>")
+		assert.Contains(t, string(result), `<meta name="description"`)
+		assert.Contains(t, string(result), `<link rel="canonical" href="/models.html" />`)
+	})
 }
 
 func TestFrontendServer_ServeIndexHTML(t *testing.T) {
@@ -843,6 +855,19 @@ func TestHTMLCache(t *testing.T) {
 		assert.True(t, strings.HasSuffix(result.ETag, `"`))
 		// Should contain dash separator
 		assert.Contains(t, result.ETag[1:len(result.ETag)-1], "-")
+	})
+
+	t.Run("keeps_route_specific_documents_isolated", func(t *testing.T) {
+		cache := NewHTMLCache()
+		cache.SetBaseHTML([]byte("<html></html>"))
+		settings := []byte(`{"site_name":"落雪API"}`)
+
+		cache.SetForKey("", []byte("home"), settings)
+		cache.SetForKey(modelCatalogHTMLCacheKey, []byte("models"), settings)
+
+		assert.Equal(t, []byte("home"), cache.GetForKey("").Content)
+		assert.Equal(t, []byte("models"), cache.GetForKey(modelCatalogHTMLCacheKey).Content)
+		assert.NotEqual(t, cache.GetForKey("").ETag, cache.GetForKey(modelCatalogHTMLCacheKey).ETag)
 	})
 }
 

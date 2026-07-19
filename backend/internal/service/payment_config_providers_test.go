@@ -7,6 +7,7 @@ import (
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/x509"
+	"encoding/json"
 	"encoding/pem"
 	"strconv"
 	"testing"
@@ -18,6 +19,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+const paymentProviderConfigTestKey = "0123456789abcdef0123456789abcdef"
 
 func TestValidateProviderRequest(t *testing.T) {
 	t.Parallel()
@@ -257,6 +260,125 @@ func TestIsSensitiveProviderConfigField(t *testing.T) {
 			assert.Equal(t, tc.wantSen, got, "isSensitiveProviderConfigField(%q, %q)", tc.providerKey, tc.field)
 		})
 	}
+}
+
+func TestPaymentProviderConfigEncryptedStorageAndMasking(t *testing.T) {
+	t.Parallel()
+
+	svc := &PaymentConfigService{encryptionKey: []byte(paymentProviderConfigTestKey)}
+	config := map[string]string{
+		"secretKey":      "stripe-secret-value",
+		"webhookSecret":  "stripe-webhook-value",
+		"publishableKey": "stripe-publishable-value",
+		"currency":       "CNY",
+	}
+
+	stored, err := svc.encryptConfig(config)
+	require.NoError(t, err)
+	require.False(t, json.Valid([]byte(stored)), "provider config must not be stored as plaintext JSON")
+	require.NotContains(t, stored, config["secretKey"])
+	require.NotContains(t, stored, config["webhookSecret"])
+
+	decrypted, err := svc.decryptConfig(stored)
+	require.NoError(t, err)
+	require.Equal(t, config, decrypted)
+
+	masked, err := svc.decryptAndMaskConfig(payment.TypeStripe, stored)
+	require.NoError(t, err)
+	require.NotContains(t, masked, "secretKey")
+	require.NotContains(t, masked, "webhookSecret")
+	require.Equal(t, config["publishableKey"], masked["publishableKey"])
+	require.Equal(t, config["currency"], masked["currency"])
+}
+
+func TestPaymentProviderConfigPlaintextCompatibility(t *testing.T) {
+	t.Parallel()
+
+	legacyPlaintext := `{"secretKey":"legacy-secret","publishableKey":"legacy-public","currency":"CNY"}`
+	svc := &PaymentConfigService{}
+
+	config, err := svc.decryptConfig(legacyPlaintext)
+	require.NoError(t, err)
+	require.Equal(t, "legacy-secret", config["secretKey"])
+	require.Equal(t, "legacy-public", config["publishableKey"])
+}
+
+func TestPaymentProviderConfigRejectsUnsafeWriteAndUnreadableCiphertext(t *testing.T) {
+	t.Parallel()
+
+	withoutKey := &PaymentConfigService{}
+	stored, err := withoutKey.encryptConfig(map[string]string{"secretKey": "must-not-leak"})
+	require.ErrorContains(t, err, "TOTP_ENCRYPTION_KEY is not configured")
+	require.Equal(t, "PAYMENT_ENCRYPTION_KEY_NOT_CONFIGURED", infraerrors.Reason(err))
+	require.Empty(t, stored)
+
+	ciphertext, err := payment.Encrypt(`{"secretKey":"protected"}`, []byte(paymentProviderConfigTestKey))
+	require.NoError(t, err)
+	_, err = withoutKey.decryptConfig(ciphertext)
+	require.ErrorContains(t, err, "TOTP_ENCRYPTION_KEY is not configured")
+	require.Equal(t, "PAYMENT_ENCRYPTION_KEY_NOT_CONFIGURED", infraerrors.Reason(err))
+
+	wrongKey := &PaymentConfigService{encryptionKey: []byte("abcdef0123456789abcdef0123456789")}
+	_, err = wrongKey.decryptConfig(ciphertext)
+	require.ErrorContains(t, err, "decrypt payment provider config")
+}
+
+func TestUpdateProviderInstanceMigratesPlaintextConfigOnMetadataSave(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	client := newPaymentConfigServiceTestClient(t)
+	legacyPlaintext := `{"secretKey":"legacy-secret","publishableKey":"legacy-public","currency":"CNY"}`
+	instance, err := client.PaymentProviderInstance.Create().
+		SetProviderKey(payment.TypeStripe).
+		SetName("legacy provider").
+		SetConfig(legacyPlaintext).
+		SetSupportedTypes(payment.TypeStripe).
+		SetEnabled(false).
+		Save(ctx)
+	require.NoError(t, err)
+
+	svc := &PaymentConfigService{entClient: client, encryptionKey: []byte(paymentProviderConfigTestKey)}
+	updatedName := "migrated provider"
+	_, err = svc.UpdateProviderInstance(ctx, instance.ID, UpdateProviderInstanceRequest{Name: &updatedName})
+	require.NoError(t, err)
+
+	saved, err := client.PaymentProviderInstance.Get(ctx, instance.ID)
+	require.NoError(t, err)
+	require.Equal(t, updatedName, saved.Name)
+	require.False(t, json.Valid([]byte(saved.Config)), "metadata save must migrate plaintext config to ciphertext")
+	require.NotContains(t, saved.Config, "legacy-secret")
+
+	config, err := svc.decryptConfig(saved.Config)
+	require.NoError(t, err)
+	require.Equal(t, "legacy-secret", config["secretKey"])
+	require.Equal(t, "legacy-public", config["publishableKey"])
+}
+
+func TestUpdateProviderInstanceDoesNotOverwritePlaintextWithoutEncryptionKey(t *testing.T) {
+	t.Parallel()
+
+	ctx := context.Background()
+	client := newPaymentConfigServiceTestClient(t)
+	legacyPlaintext := `{"secretKey":"legacy-secret","publishableKey":"legacy-public","currency":"CNY"}`
+	instance, err := client.PaymentProviderInstance.Create().
+		SetProviderKey(payment.TypeStripe).
+		SetName("legacy provider").
+		SetConfig(legacyPlaintext).
+		SetSupportedTypes(payment.TypeStripe).
+		SetEnabled(false).
+		Save(ctx)
+	require.NoError(t, err)
+
+	svc := &PaymentConfigService{entClient: client}
+	updatedName := "must not persist"
+	_, err = svc.UpdateProviderInstance(ctx, instance.ID, UpdateProviderInstanceRequest{Name: &updatedName})
+	require.ErrorContains(t, err, "TOTP_ENCRYPTION_KEY is not configured")
+
+	saved, err := client.PaymentProviderInstance.Get(ctx, instance.ID)
+	require.NoError(t, err)
+	require.Equal(t, "legacy provider", saved.Name)
+	require.Equal(t, legacyPlaintext, saved.Config)
 }
 
 func TestJoinTypes(t *testing.T) {

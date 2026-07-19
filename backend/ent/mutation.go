@@ -30,6 +30,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/ent/group"
 	"github.com/Wei-Shaw/sub2api/ent/idempotencyrecord"
 	"github.com/Wei-Shaw/sub2api/ent/identityadoptiondecision"
+	"github.com/Wei-Shaw/sub2api/ent/modelcatalogmodel"
 	"github.com/Wei-Shaw/sub2api/ent/paymentauditlog"
 	"github.com/Wei-Shaw/sub2api/ent/paymentorder"
 	"github.com/Wei-Shaw/sub2api/ent/paymentproviderinstance"
@@ -81,6 +82,7 @@ const (
 	TypeGroup                         = "Group"
 	TypeIdempotencyRecord             = "IdempotencyRecord"
 	TypeIdentityAdoptionDecision      = "IdentityAdoptionDecision"
+	TypeModelCatalogModel             = "ModelCatalogModel"
 	TypePaymentAuditLog               = "PaymentAuditLog"
 	TypePaymentOrder                  = "PaymentOrder"
 	TypePaymentProviderInstance       = "PaymentProviderInstance"
@@ -26927,6 +26929,1715 @@ func (m *IdentityAdoptionDecisionMutation) ResetEdge(name string) error {
 		return nil
 	}
 	return fmt.Errorf("unknown IdentityAdoptionDecision edge %s", name)
+}
+
+// ModelCatalogModelMutation represents an operation that mutates the ModelCatalogModel nodes in the graph.
+type ModelCatalogModelMutation struct {
+	config
+	op                   Op
+	typ                  string
+	id                   *int64
+	slug                 *string
+	model                *string
+	platform             *string
+	metadata_model_id    *string
+	display_name_zh      *string
+	display_name_en      *string
+	summary_zh           *string
+	summary_en           *string
+	provider             *string
+	logo_key             *string
+	category             *string
+	tags                 *[]string
+	appendtags           []string
+	capabilities         *[]string
+	appendcapabilities   []string
+	context_window       *int64
+	addcontext_window    *int64
+	max_output_tokens    *int64
+	addmax_output_tokens *int64
+	public_group_id      *int64
+	addpublic_group_id   *int64
+	status               *string
+	featured             *bool
+	sort_order           *int
+	addsort_order        *int
+	published_at         *time.Time
+	created_at           *time.Time
+	updated_at           *time.Time
+	clearedFields        map[string]struct{}
+	done                 bool
+	oldValue             func(context.Context) (*ModelCatalogModel, error)
+	predicates           []predicate.ModelCatalogModel
+}
+
+var _ ent.Mutation = (*ModelCatalogModelMutation)(nil)
+
+// modelcatalogmodelOption allows management of the mutation configuration using functional options.
+type modelcatalogmodelOption func(*ModelCatalogModelMutation)
+
+// newModelCatalogModelMutation creates new mutation for the ModelCatalogModel entity.
+func newModelCatalogModelMutation(c config, op Op, opts ...modelcatalogmodelOption) *ModelCatalogModelMutation {
+	m := &ModelCatalogModelMutation{
+		config:        c,
+		op:            op,
+		typ:           TypeModelCatalogModel,
+		clearedFields: make(map[string]struct{}),
+	}
+	for _, opt := range opts {
+		opt(m)
+	}
+	return m
+}
+
+// withModelCatalogModelID sets the ID field of the mutation.
+func withModelCatalogModelID(id int64) modelcatalogmodelOption {
+	return func(m *ModelCatalogModelMutation) {
+		var (
+			err   error
+			once  sync.Once
+			value *ModelCatalogModel
+		)
+		m.oldValue = func(ctx context.Context) (*ModelCatalogModel, error) {
+			once.Do(func() {
+				if m.done {
+					err = errors.New("querying old values post mutation is not allowed")
+				} else {
+					value, err = m.Client().ModelCatalogModel.Get(ctx, id)
+				}
+			})
+			return value, err
+		}
+		m.id = &id
+	}
+}
+
+// withModelCatalogModel sets the old ModelCatalogModel of the mutation.
+func withModelCatalogModel(node *ModelCatalogModel) modelcatalogmodelOption {
+	return func(m *ModelCatalogModelMutation) {
+		m.oldValue = func(context.Context) (*ModelCatalogModel, error) {
+			return node, nil
+		}
+		m.id = &node.ID
+	}
+}
+
+// Client returns a new `ent.Client` from the mutation. If the mutation was
+// executed in a transaction (ent.Tx), a transactional client is returned.
+func (m ModelCatalogModelMutation) Client() *Client {
+	client := &Client{config: m.config}
+	client.init()
+	return client
+}
+
+// Tx returns an `ent.Tx` for mutations that were executed in transactions;
+// it returns an error otherwise.
+func (m ModelCatalogModelMutation) Tx() (*Tx, error) {
+	if _, ok := m.driver.(*txDriver); !ok {
+		return nil, errors.New("ent: mutation is not running in a transaction")
+	}
+	tx := &Tx{config: m.config}
+	tx.init()
+	return tx, nil
+}
+
+// ID returns the ID value in the mutation. Note that the ID is only available
+// if it was provided to the builder or after it was returned from the database.
+func (m *ModelCatalogModelMutation) ID() (id int64, exists bool) {
+	if m.id == nil {
+		return
+	}
+	return *m.id, true
+}
+
+// IDs queries the database and returns the entity ids that match the mutation's predicate.
+// That means, if the mutation is applied within a transaction with an isolation level such
+// as sql.LevelSerializable, the returned ids match the ids of the rows that will be updated
+// or updated by the mutation.
+func (m *ModelCatalogModelMutation) IDs(ctx context.Context) ([]int64, error) {
+	switch {
+	case m.op.Is(OpUpdateOne | OpDeleteOne):
+		id, exists := m.ID()
+		if exists {
+			return []int64{id}, nil
+		}
+		fallthrough
+	case m.op.Is(OpUpdate | OpDelete):
+		return m.Client().ModelCatalogModel.Query().Where(m.predicates...).IDs(ctx)
+	default:
+		return nil, fmt.Errorf("IDs is not allowed on %s operations", m.op)
+	}
+}
+
+// SetSlug sets the "slug" field.
+func (m *ModelCatalogModelMutation) SetSlug(s string) {
+	m.slug = &s
+}
+
+// Slug returns the value of the "slug" field in the mutation.
+func (m *ModelCatalogModelMutation) Slug() (r string, exists bool) {
+	v := m.slug
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldSlug returns the old "slug" field's value of the ModelCatalogModel entity.
+// If the ModelCatalogModel object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *ModelCatalogModelMutation) OldSlug(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldSlug is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldSlug requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldSlug: %w", err)
+	}
+	return oldValue.Slug, nil
+}
+
+// ResetSlug resets all changes to the "slug" field.
+func (m *ModelCatalogModelMutation) ResetSlug() {
+	m.slug = nil
+}
+
+// SetModel sets the "model" field.
+func (m *ModelCatalogModelMutation) SetModel(s string) {
+	m.model = &s
+}
+
+// Model returns the value of the "model" field in the mutation.
+func (m *ModelCatalogModelMutation) Model() (r string, exists bool) {
+	v := m.model
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldModel returns the old "model" field's value of the ModelCatalogModel entity.
+// If the ModelCatalogModel object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *ModelCatalogModelMutation) OldModel(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldModel is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldModel requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldModel: %w", err)
+	}
+	return oldValue.Model, nil
+}
+
+// ResetModel resets all changes to the "model" field.
+func (m *ModelCatalogModelMutation) ResetModel() {
+	m.model = nil
+}
+
+// SetPlatform sets the "platform" field.
+func (m *ModelCatalogModelMutation) SetPlatform(s string) {
+	m.platform = &s
+}
+
+// Platform returns the value of the "platform" field in the mutation.
+func (m *ModelCatalogModelMutation) Platform() (r string, exists bool) {
+	v := m.platform
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldPlatform returns the old "platform" field's value of the ModelCatalogModel entity.
+// If the ModelCatalogModel object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *ModelCatalogModelMutation) OldPlatform(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldPlatform is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldPlatform requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldPlatform: %w", err)
+	}
+	return oldValue.Platform, nil
+}
+
+// ResetPlatform resets all changes to the "platform" field.
+func (m *ModelCatalogModelMutation) ResetPlatform() {
+	m.platform = nil
+}
+
+// SetMetadataModelID sets the "metadata_model_id" field.
+func (m *ModelCatalogModelMutation) SetMetadataModelID(s string) {
+	m.metadata_model_id = &s
+}
+
+// MetadataModelID returns the value of the "metadata_model_id" field in the mutation.
+func (m *ModelCatalogModelMutation) MetadataModelID() (r string, exists bool) {
+	v := m.metadata_model_id
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldMetadataModelID returns the old "metadata_model_id" field's value of the ModelCatalogModel entity.
+// If the ModelCatalogModel object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *ModelCatalogModelMutation) OldMetadataModelID(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldMetadataModelID is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldMetadataModelID requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldMetadataModelID: %w", err)
+	}
+	return oldValue.MetadataModelID, nil
+}
+
+// ResetMetadataModelID resets all changes to the "metadata_model_id" field.
+func (m *ModelCatalogModelMutation) ResetMetadataModelID() {
+	m.metadata_model_id = nil
+}
+
+// SetDisplayNameZh sets the "display_name_zh" field.
+func (m *ModelCatalogModelMutation) SetDisplayNameZh(s string) {
+	m.display_name_zh = &s
+}
+
+// DisplayNameZh returns the value of the "display_name_zh" field in the mutation.
+func (m *ModelCatalogModelMutation) DisplayNameZh() (r string, exists bool) {
+	v := m.display_name_zh
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldDisplayNameZh returns the old "display_name_zh" field's value of the ModelCatalogModel entity.
+// If the ModelCatalogModel object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *ModelCatalogModelMutation) OldDisplayNameZh(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldDisplayNameZh is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldDisplayNameZh requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldDisplayNameZh: %w", err)
+	}
+	return oldValue.DisplayNameZh, nil
+}
+
+// ResetDisplayNameZh resets all changes to the "display_name_zh" field.
+func (m *ModelCatalogModelMutation) ResetDisplayNameZh() {
+	m.display_name_zh = nil
+}
+
+// SetDisplayNameEn sets the "display_name_en" field.
+func (m *ModelCatalogModelMutation) SetDisplayNameEn(s string) {
+	m.display_name_en = &s
+}
+
+// DisplayNameEn returns the value of the "display_name_en" field in the mutation.
+func (m *ModelCatalogModelMutation) DisplayNameEn() (r string, exists bool) {
+	v := m.display_name_en
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldDisplayNameEn returns the old "display_name_en" field's value of the ModelCatalogModel entity.
+// If the ModelCatalogModel object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *ModelCatalogModelMutation) OldDisplayNameEn(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldDisplayNameEn is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldDisplayNameEn requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldDisplayNameEn: %w", err)
+	}
+	return oldValue.DisplayNameEn, nil
+}
+
+// ResetDisplayNameEn resets all changes to the "display_name_en" field.
+func (m *ModelCatalogModelMutation) ResetDisplayNameEn() {
+	m.display_name_en = nil
+}
+
+// SetSummaryZh sets the "summary_zh" field.
+func (m *ModelCatalogModelMutation) SetSummaryZh(s string) {
+	m.summary_zh = &s
+}
+
+// SummaryZh returns the value of the "summary_zh" field in the mutation.
+func (m *ModelCatalogModelMutation) SummaryZh() (r string, exists bool) {
+	v := m.summary_zh
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldSummaryZh returns the old "summary_zh" field's value of the ModelCatalogModel entity.
+// If the ModelCatalogModel object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *ModelCatalogModelMutation) OldSummaryZh(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldSummaryZh is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldSummaryZh requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldSummaryZh: %w", err)
+	}
+	return oldValue.SummaryZh, nil
+}
+
+// ResetSummaryZh resets all changes to the "summary_zh" field.
+func (m *ModelCatalogModelMutation) ResetSummaryZh() {
+	m.summary_zh = nil
+}
+
+// SetSummaryEn sets the "summary_en" field.
+func (m *ModelCatalogModelMutation) SetSummaryEn(s string) {
+	m.summary_en = &s
+}
+
+// SummaryEn returns the value of the "summary_en" field in the mutation.
+func (m *ModelCatalogModelMutation) SummaryEn() (r string, exists bool) {
+	v := m.summary_en
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldSummaryEn returns the old "summary_en" field's value of the ModelCatalogModel entity.
+// If the ModelCatalogModel object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *ModelCatalogModelMutation) OldSummaryEn(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldSummaryEn is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldSummaryEn requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldSummaryEn: %w", err)
+	}
+	return oldValue.SummaryEn, nil
+}
+
+// ResetSummaryEn resets all changes to the "summary_en" field.
+func (m *ModelCatalogModelMutation) ResetSummaryEn() {
+	m.summary_en = nil
+}
+
+// SetProvider sets the "provider" field.
+func (m *ModelCatalogModelMutation) SetProvider(s string) {
+	m.provider = &s
+}
+
+// Provider returns the value of the "provider" field in the mutation.
+func (m *ModelCatalogModelMutation) Provider() (r string, exists bool) {
+	v := m.provider
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldProvider returns the old "provider" field's value of the ModelCatalogModel entity.
+// If the ModelCatalogModel object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *ModelCatalogModelMutation) OldProvider(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldProvider is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldProvider requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldProvider: %w", err)
+	}
+	return oldValue.Provider, nil
+}
+
+// ResetProvider resets all changes to the "provider" field.
+func (m *ModelCatalogModelMutation) ResetProvider() {
+	m.provider = nil
+}
+
+// SetLogoKey sets the "logo_key" field.
+func (m *ModelCatalogModelMutation) SetLogoKey(s string) {
+	m.logo_key = &s
+}
+
+// LogoKey returns the value of the "logo_key" field in the mutation.
+func (m *ModelCatalogModelMutation) LogoKey() (r string, exists bool) {
+	v := m.logo_key
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldLogoKey returns the old "logo_key" field's value of the ModelCatalogModel entity.
+// If the ModelCatalogModel object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *ModelCatalogModelMutation) OldLogoKey(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldLogoKey is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldLogoKey requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldLogoKey: %w", err)
+	}
+	return oldValue.LogoKey, nil
+}
+
+// ResetLogoKey resets all changes to the "logo_key" field.
+func (m *ModelCatalogModelMutation) ResetLogoKey() {
+	m.logo_key = nil
+}
+
+// SetCategory sets the "category" field.
+func (m *ModelCatalogModelMutation) SetCategory(s string) {
+	m.category = &s
+}
+
+// Category returns the value of the "category" field in the mutation.
+func (m *ModelCatalogModelMutation) Category() (r string, exists bool) {
+	v := m.category
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldCategory returns the old "category" field's value of the ModelCatalogModel entity.
+// If the ModelCatalogModel object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *ModelCatalogModelMutation) OldCategory(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldCategory is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldCategory requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldCategory: %w", err)
+	}
+	return oldValue.Category, nil
+}
+
+// ResetCategory resets all changes to the "category" field.
+func (m *ModelCatalogModelMutation) ResetCategory() {
+	m.category = nil
+}
+
+// SetTags sets the "tags" field.
+func (m *ModelCatalogModelMutation) SetTags(s []string) {
+	m.tags = &s
+	m.appendtags = nil
+}
+
+// Tags returns the value of the "tags" field in the mutation.
+func (m *ModelCatalogModelMutation) Tags() (r []string, exists bool) {
+	v := m.tags
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldTags returns the old "tags" field's value of the ModelCatalogModel entity.
+// If the ModelCatalogModel object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *ModelCatalogModelMutation) OldTags(ctx context.Context) (v []string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldTags is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldTags requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldTags: %w", err)
+	}
+	return oldValue.Tags, nil
+}
+
+// AppendTags adds s to the "tags" field.
+func (m *ModelCatalogModelMutation) AppendTags(s []string) {
+	m.appendtags = append(m.appendtags, s...)
+}
+
+// AppendedTags returns the list of values that were appended to the "tags" field in this mutation.
+func (m *ModelCatalogModelMutation) AppendedTags() ([]string, bool) {
+	if len(m.appendtags) == 0 {
+		return nil, false
+	}
+	return m.appendtags, true
+}
+
+// ResetTags resets all changes to the "tags" field.
+func (m *ModelCatalogModelMutation) ResetTags() {
+	m.tags = nil
+	m.appendtags = nil
+}
+
+// SetCapabilities sets the "capabilities" field.
+func (m *ModelCatalogModelMutation) SetCapabilities(s []string) {
+	m.capabilities = &s
+	m.appendcapabilities = nil
+}
+
+// Capabilities returns the value of the "capabilities" field in the mutation.
+func (m *ModelCatalogModelMutation) Capabilities() (r []string, exists bool) {
+	v := m.capabilities
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldCapabilities returns the old "capabilities" field's value of the ModelCatalogModel entity.
+// If the ModelCatalogModel object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *ModelCatalogModelMutation) OldCapabilities(ctx context.Context) (v []string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldCapabilities is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldCapabilities requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldCapabilities: %w", err)
+	}
+	return oldValue.Capabilities, nil
+}
+
+// AppendCapabilities adds s to the "capabilities" field.
+func (m *ModelCatalogModelMutation) AppendCapabilities(s []string) {
+	m.appendcapabilities = append(m.appendcapabilities, s...)
+}
+
+// AppendedCapabilities returns the list of values that were appended to the "capabilities" field in this mutation.
+func (m *ModelCatalogModelMutation) AppendedCapabilities() ([]string, bool) {
+	if len(m.appendcapabilities) == 0 {
+		return nil, false
+	}
+	return m.appendcapabilities, true
+}
+
+// ResetCapabilities resets all changes to the "capabilities" field.
+func (m *ModelCatalogModelMutation) ResetCapabilities() {
+	m.capabilities = nil
+	m.appendcapabilities = nil
+}
+
+// SetContextWindow sets the "context_window" field.
+func (m *ModelCatalogModelMutation) SetContextWindow(i int64) {
+	m.context_window = &i
+	m.addcontext_window = nil
+}
+
+// ContextWindow returns the value of the "context_window" field in the mutation.
+func (m *ModelCatalogModelMutation) ContextWindow() (r int64, exists bool) {
+	v := m.context_window
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldContextWindow returns the old "context_window" field's value of the ModelCatalogModel entity.
+// If the ModelCatalogModel object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *ModelCatalogModelMutation) OldContextWindow(ctx context.Context) (v *int64, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldContextWindow is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldContextWindow requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldContextWindow: %w", err)
+	}
+	return oldValue.ContextWindow, nil
+}
+
+// AddContextWindow adds i to the "context_window" field.
+func (m *ModelCatalogModelMutation) AddContextWindow(i int64) {
+	if m.addcontext_window != nil {
+		*m.addcontext_window += i
+	} else {
+		m.addcontext_window = &i
+	}
+}
+
+// AddedContextWindow returns the value that was added to the "context_window" field in this mutation.
+func (m *ModelCatalogModelMutation) AddedContextWindow() (r int64, exists bool) {
+	v := m.addcontext_window
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// ClearContextWindow clears the value of the "context_window" field.
+func (m *ModelCatalogModelMutation) ClearContextWindow() {
+	m.context_window = nil
+	m.addcontext_window = nil
+	m.clearedFields[modelcatalogmodel.FieldContextWindow] = struct{}{}
+}
+
+// ContextWindowCleared returns if the "context_window" field was cleared in this mutation.
+func (m *ModelCatalogModelMutation) ContextWindowCleared() bool {
+	_, ok := m.clearedFields[modelcatalogmodel.FieldContextWindow]
+	return ok
+}
+
+// ResetContextWindow resets all changes to the "context_window" field.
+func (m *ModelCatalogModelMutation) ResetContextWindow() {
+	m.context_window = nil
+	m.addcontext_window = nil
+	delete(m.clearedFields, modelcatalogmodel.FieldContextWindow)
+}
+
+// SetMaxOutputTokens sets the "max_output_tokens" field.
+func (m *ModelCatalogModelMutation) SetMaxOutputTokens(i int64) {
+	m.max_output_tokens = &i
+	m.addmax_output_tokens = nil
+}
+
+// MaxOutputTokens returns the value of the "max_output_tokens" field in the mutation.
+func (m *ModelCatalogModelMutation) MaxOutputTokens() (r int64, exists bool) {
+	v := m.max_output_tokens
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldMaxOutputTokens returns the old "max_output_tokens" field's value of the ModelCatalogModel entity.
+// If the ModelCatalogModel object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *ModelCatalogModelMutation) OldMaxOutputTokens(ctx context.Context) (v *int64, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldMaxOutputTokens is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldMaxOutputTokens requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldMaxOutputTokens: %w", err)
+	}
+	return oldValue.MaxOutputTokens, nil
+}
+
+// AddMaxOutputTokens adds i to the "max_output_tokens" field.
+func (m *ModelCatalogModelMutation) AddMaxOutputTokens(i int64) {
+	if m.addmax_output_tokens != nil {
+		*m.addmax_output_tokens += i
+	} else {
+		m.addmax_output_tokens = &i
+	}
+}
+
+// AddedMaxOutputTokens returns the value that was added to the "max_output_tokens" field in this mutation.
+func (m *ModelCatalogModelMutation) AddedMaxOutputTokens() (r int64, exists bool) {
+	v := m.addmax_output_tokens
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// ClearMaxOutputTokens clears the value of the "max_output_tokens" field.
+func (m *ModelCatalogModelMutation) ClearMaxOutputTokens() {
+	m.max_output_tokens = nil
+	m.addmax_output_tokens = nil
+	m.clearedFields[modelcatalogmodel.FieldMaxOutputTokens] = struct{}{}
+}
+
+// MaxOutputTokensCleared returns if the "max_output_tokens" field was cleared in this mutation.
+func (m *ModelCatalogModelMutation) MaxOutputTokensCleared() bool {
+	_, ok := m.clearedFields[modelcatalogmodel.FieldMaxOutputTokens]
+	return ok
+}
+
+// ResetMaxOutputTokens resets all changes to the "max_output_tokens" field.
+func (m *ModelCatalogModelMutation) ResetMaxOutputTokens() {
+	m.max_output_tokens = nil
+	m.addmax_output_tokens = nil
+	delete(m.clearedFields, modelcatalogmodel.FieldMaxOutputTokens)
+}
+
+// SetPublicGroupID sets the "public_group_id" field.
+func (m *ModelCatalogModelMutation) SetPublicGroupID(i int64) {
+	m.public_group_id = &i
+	m.addpublic_group_id = nil
+}
+
+// PublicGroupID returns the value of the "public_group_id" field in the mutation.
+func (m *ModelCatalogModelMutation) PublicGroupID() (r int64, exists bool) {
+	v := m.public_group_id
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldPublicGroupID returns the old "public_group_id" field's value of the ModelCatalogModel entity.
+// If the ModelCatalogModel object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *ModelCatalogModelMutation) OldPublicGroupID(ctx context.Context) (v *int64, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldPublicGroupID is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldPublicGroupID requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldPublicGroupID: %w", err)
+	}
+	return oldValue.PublicGroupID, nil
+}
+
+// AddPublicGroupID adds i to the "public_group_id" field.
+func (m *ModelCatalogModelMutation) AddPublicGroupID(i int64) {
+	if m.addpublic_group_id != nil {
+		*m.addpublic_group_id += i
+	} else {
+		m.addpublic_group_id = &i
+	}
+}
+
+// AddedPublicGroupID returns the value that was added to the "public_group_id" field in this mutation.
+func (m *ModelCatalogModelMutation) AddedPublicGroupID() (r int64, exists bool) {
+	v := m.addpublic_group_id
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// ClearPublicGroupID clears the value of the "public_group_id" field.
+func (m *ModelCatalogModelMutation) ClearPublicGroupID() {
+	m.public_group_id = nil
+	m.addpublic_group_id = nil
+	m.clearedFields[modelcatalogmodel.FieldPublicGroupID] = struct{}{}
+}
+
+// PublicGroupIDCleared returns if the "public_group_id" field was cleared in this mutation.
+func (m *ModelCatalogModelMutation) PublicGroupIDCleared() bool {
+	_, ok := m.clearedFields[modelcatalogmodel.FieldPublicGroupID]
+	return ok
+}
+
+// ResetPublicGroupID resets all changes to the "public_group_id" field.
+func (m *ModelCatalogModelMutation) ResetPublicGroupID() {
+	m.public_group_id = nil
+	m.addpublic_group_id = nil
+	delete(m.clearedFields, modelcatalogmodel.FieldPublicGroupID)
+}
+
+// SetStatus sets the "status" field.
+func (m *ModelCatalogModelMutation) SetStatus(s string) {
+	m.status = &s
+}
+
+// Status returns the value of the "status" field in the mutation.
+func (m *ModelCatalogModelMutation) Status() (r string, exists bool) {
+	v := m.status
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldStatus returns the old "status" field's value of the ModelCatalogModel entity.
+// If the ModelCatalogModel object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *ModelCatalogModelMutation) OldStatus(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldStatus is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldStatus requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldStatus: %w", err)
+	}
+	return oldValue.Status, nil
+}
+
+// ResetStatus resets all changes to the "status" field.
+func (m *ModelCatalogModelMutation) ResetStatus() {
+	m.status = nil
+}
+
+// SetFeatured sets the "featured" field.
+func (m *ModelCatalogModelMutation) SetFeatured(b bool) {
+	m.featured = &b
+}
+
+// Featured returns the value of the "featured" field in the mutation.
+func (m *ModelCatalogModelMutation) Featured() (r bool, exists bool) {
+	v := m.featured
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldFeatured returns the old "featured" field's value of the ModelCatalogModel entity.
+// If the ModelCatalogModel object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *ModelCatalogModelMutation) OldFeatured(ctx context.Context) (v bool, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldFeatured is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldFeatured requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldFeatured: %w", err)
+	}
+	return oldValue.Featured, nil
+}
+
+// ResetFeatured resets all changes to the "featured" field.
+func (m *ModelCatalogModelMutation) ResetFeatured() {
+	m.featured = nil
+}
+
+// SetSortOrder sets the "sort_order" field.
+func (m *ModelCatalogModelMutation) SetSortOrder(i int) {
+	m.sort_order = &i
+	m.addsort_order = nil
+}
+
+// SortOrder returns the value of the "sort_order" field in the mutation.
+func (m *ModelCatalogModelMutation) SortOrder() (r int, exists bool) {
+	v := m.sort_order
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldSortOrder returns the old "sort_order" field's value of the ModelCatalogModel entity.
+// If the ModelCatalogModel object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *ModelCatalogModelMutation) OldSortOrder(ctx context.Context) (v int, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldSortOrder is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldSortOrder requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldSortOrder: %w", err)
+	}
+	return oldValue.SortOrder, nil
+}
+
+// AddSortOrder adds i to the "sort_order" field.
+func (m *ModelCatalogModelMutation) AddSortOrder(i int) {
+	if m.addsort_order != nil {
+		*m.addsort_order += i
+	} else {
+		m.addsort_order = &i
+	}
+}
+
+// AddedSortOrder returns the value that was added to the "sort_order" field in this mutation.
+func (m *ModelCatalogModelMutation) AddedSortOrder() (r int, exists bool) {
+	v := m.addsort_order
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// ResetSortOrder resets all changes to the "sort_order" field.
+func (m *ModelCatalogModelMutation) ResetSortOrder() {
+	m.sort_order = nil
+	m.addsort_order = nil
+}
+
+// SetPublishedAt sets the "published_at" field.
+func (m *ModelCatalogModelMutation) SetPublishedAt(t time.Time) {
+	m.published_at = &t
+}
+
+// PublishedAt returns the value of the "published_at" field in the mutation.
+func (m *ModelCatalogModelMutation) PublishedAt() (r time.Time, exists bool) {
+	v := m.published_at
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldPublishedAt returns the old "published_at" field's value of the ModelCatalogModel entity.
+// If the ModelCatalogModel object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *ModelCatalogModelMutation) OldPublishedAt(ctx context.Context) (v *time.Time, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldPublishedAt is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldPublishedAt requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldPublishedAt: %w", err)
+	}
+	return oldValue.PublishedAt, nil
+}
+
+// ClearPublishedAt clears the value of the "published_at" field.
+func (m *ModelCatalogModelMutation) ClearPublishedAt() {
+	m.published_at = nil
+	m.clearedFields[modelcatalogmodel.FieldPublishedAt] = struct{}{}
+}
+
+// PublishedAtCleared returns if the "published_at" field was cleared in this mutation.
+func (m *ModelCatalogModelMutation) PublishedAtCleared() bool {
+	_, ok := m.clearedFields[modelcatalogmodel.FieldPublishedAt]
+	return ok
+}
+
+// ResetPublishedAt resets all changes to the "published_at" field.
+func (m *ModelCatalogModelMutation) ResetPublishedAt() {
+	m.published_at = nil
+	delete(m.clearedFields, modelcatalogmodel.FieldPublishedAt)
+}
+
+// SetCreatedAt sets the "created_at" field.
+func (m *ModelCatalogModelMutation) SetCreatedAt(t time.Time) {
+	m.created_at = &t
+}
+
+// CreatedAt returns the value of the "created_at" field in the mutation.
+func (m *ModelCatalogModelMutation) CreatedAt() (r time.Time, exists bool) {
+	v := m.created_at
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldCreatedAt returns the old "created_at" field's value of the ModelCatalogModel entity.
+// If the ModelCatalogModel object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *ModelCatalogModelMutation) OldCreatedAt(ctx context.Context) (v time.Time, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldCreatedAt is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldCreatedAt requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldCreatedAt: %w", err)
+	}
+	return oldValue.CreatedAt, nil
+}
+
+// ResetCreatedAt resets all changes to the "created_at" field.
+func (m *ModelCatalogModelMutation) ResetCreatedAt() {
+	m.created_at = nil
+}
+
+// SetUpdatedAt sets the "updated_at" field.
+func (m *ModelCatalogModelMutation) SetUpdatedAt(t time.Time) {
+	m.updated_at = &t
+}
+
+// UpdatedAt returns the value of the "updated_at" field in the mutation.
+func (m *ModelCatalogModelMutation) UpdatedAt() (r time.Time, exists bool) {
+	v := m.updated_at
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldUpdatedAt returns the old "updated_at" field's value of the ModelCatalogModel entity.
+// If the ModelCatalogModel object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *ModelCatalogModelMutation) OldUpdatedAt(ctx context.Context) (v time.Time, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldUpdatedAt is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldUpdatedAt requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldUpdatedAt: %w", err)
+	}
+	return oldValue.UpdatedAt, nil
+}
+
+// ResetUpdatedAt resets all changes to the "updated_at" field.
+func (m *ModelCatalogModelMutation) ResetUpdatedAt() {
+	m.updated_at = nil
+}
+
+// Where appends a list predicates to the ModelCatalogModelMutation builder.
+func (m *ModelCatalogModelMutation) Where(ps ...predicate.ModelCatalogModel) {
+	m.predicates = append(m.predicates, ps...)
+}
+
+// WhereP appends storage-level predicates to the ModelCatalogModelMutation builder. Using this method,
+// users can use type-assertion to append predicates that do not depend on any generated package.
+func (m *ModelCatalogModelMutation) WhereP(ps ...func(*sql.Selector)) {
+	p := make([]predicate.ModelCatalogModel, len(ps))
+	for i := range ps {
+		p[i] = ps[i]
+	}
+	m.Where(p...)
+}
+
+// Op returns the operation name.
+func (m *ModelCatalogModelMutation) Op() Op {
+	return m.op
+}
+
+// SetOp allows setting the mutation operation.
+func (m *ModelCatalogModelMutation) SetOp(op Op) {
+	m.op = op
+}
+
+// Type returns the node type of this mutation (ModelCatalogModel).
+func (m *ModelCatalogModelMutation) Type() string {
+	return m.typ
+}
+
+// Fields returns all fields that were changed during this mutation. Note that in
+// order to get all numeric fields that were incremented/decremented, call
+// AddedFields().
+func (m *ModelCatalogModelMutation) Fields() []string {
+	fields := make([]string, 0, 22)
+	if m.slug != nil {
+		fields = append(fields, modelcatalogmodel.FieldSlug)
+	}
+	if m.model != nil {
+		fields = append(fields, modelcatalogmodel.FieldModel)
+	}
+	if m.platform != nil {
+		fields = append(fields, modelcatalogmodel.FieldPlatform)
+	}
+	if m.metadata_model_id != nil {
+		fields = append(fields, modelcatalogmodel.FieldMetadataModelID)
+	}
+	if m.display_name_zh != nil {
+		fields = append(fields, modelcatalogmodel.FieldDisplayNameZh)
+	}
+	if m.display_name_en != nil {
+		fields = append(fields, modelcatalogmodel.FieldDisplayNameEn)
+	}
+	if m.summary_zh != nil {
+		fields = append(fields, modelcatalogmodel.FieldSummaryZh)
+	}
+	if m.summary_en != nil {
+		fields = append(fields, modelcatalogmodel.FieldSummaryEn)
+	}
+	if m.provider != nil {
+		fields = append(fields, modelcatalogmodel.FieldProvider)
+	}
+	if m.logo_key != nil {
+		fields = append(fields, modelcatalogmodel.FieldLogoKey)
+	}
+	if m.category != nil {
+		fields = append(fields, modelcatalogmodel.FieldCategory)
+	}
+	if m.tags != nil {
+		fields = append(fields, modelcatalogmodel.FieldTags)
+	}
+	if m.capabilities != nil {
+		fields = append(fields, modelcatalogmodel.FieldCapabilities)
+	}
+	if m.context_window != nil {
+		fields = append(fields, modelcatalogmodel.FieldContextWindow)
+	}
+	if m.max_output_tokens != nil {
+		fields = append(fields, modelcatalogmodel.FieldMaxOutputTokens)
+	}
+	if m.public_group_id != nil {
+		fields = append(fields, modelcatalogmodel.FieldPublicGroupID)
+	}
+	if m.status != nil {
+		fields = append(fields, modelcatalogmodel.FieldStatus)
+	}
+	if m.featured != nil {
+		fields = append(fields, modelcatalogmodel.FieldFeatured)
+	}
+	if m.sort_order != nil {
+		fields = append(fields, modelcatalogmodel.FieldSortOrder)
+	}
+	if m.published_at != nil {
+		fields = append(fields, modelcatalogmodel.FieldPublishedAt)
+	}
+	if m.created_at != nil {
+		fields = append(fields, modelcatalogmodel.FieldCreatedAt)
+	}
+	if m.updated_at != nil {
+		fields = append(fields, modelcatalogmodel.FieldUpdatedAt)
+	}
+	return fields
+}
+
+// Field returns the value of a field with the given name. The second boolean
+// return value indicates that this field was not set, or was not defined in the
+// schema.
+func (m *ModelCatalogModelMutation) Field(name string) (ent.Value, bool) {
+	switch name {
+	case modelcatalogmodel.FieldSlug:
+		return m.Slug()
+	case modelcatalogmodel.FieldModel:
+		return m.Model()
+	case modelcatalogmodel.FieldPlatform:
+		return m.Platform()
+	case modelcatalogmodel.FieldMetadataModelID:
+		return m.MetadataModelID()
+	case modelcatalogmodel.FieldDisplayNameZh:
+		return m.DisplayNameZh()
+	case modelcatalogmodel.FieldDisplayNameEn:
+		return m.DisplayNameEn()
+	case modelcatalogmodel.FieldSummaryZh:
+		return m.SummaryZh()
+	case modelcatalogmodel.FieldSummaryEn:
+		return m.SummaryEn()
+	case modelcatalogmodel.FieldProvider:
+		return m.Provider()
+	case modelcatalogmodel.FieldLogoKey:
+		return m.LogoKey()
+	case modelcatalogmodel.FieldCategory:
+		return m.Category()
+	case modelcatalogmodel.FieldTags:
+		return m.Tags()
+	case modelcatalogmodel.FieldCapabilities:
+		return m.Capabilities()
+	case modelcatalogmodel.FieldContextWindow:
+		return m.ContextWindow()
+	case modelcatalogmodel.FieldMaxOutputTokens:
+		return m.MaxOutputTokens()
+	case modelcatalogmodel.FieldPublicGroupID:
+		return m.PublicGroupID()
+	case modelcatalogmodel.FieldStatus:
+		return m.Status()
+	case modelcatalogmodel.FieldFeatured:
+		return m.Featured()
+	case modelcatalogmodel.FieldSortOrder:
+		return m.SortOrder()
+	case modelcatalogmodel.FieldPublishedAt:
+		return m.PublishedAt()
+	case modelcatalogmodel.FieldCreatedAt:
+		return m.CreatedAt()
+	case modelcatalogmodel.FieldUpdatedAt:
+		return m.UpdatedAt()
+	}
+	return nil, false
+}
+
+// OldField returns the old value of the field from the database. An error is
+// returned if the mutation operation is not UpdateOne, or the query to the
+// database failed.
+func (m *ModelCatalogModelMutation) OldField(ctx context.Context, name string) (ent.Value, error) {
+	switch name {
+	case modelcatalogmodel.FieldSlug:
+		return m.OldSlug(ctx)
+	case modelcatalogmodel.FieldModel:
+		return m.OldModel(ctx)
+	case modelcatalogmodel.FieldPlatform:
+		return m.OldPlatform(ctx)
+	case modelcatalogmodel.FieldMetadataModelID:
+		return m.OldMetadataModelID(ctx)
+	case modelcatalogmodel.FieldDisplayNameZh:
+		return m.OldDisplayNameZh(ctx)
+	case modelcatalogmodel.FieldDisplayNameEn:
+		return m.OldDisplayNameEn(ctx)
+	case modelcatalogmodel.FieldSummaryZh:
+		return m.OldSummaryZh(ctx)
+	case modelcatalogmodel.FieldSummaryEn:
+		return m.OldSummaryEn(ctx)
+	case modelcatalogmodel.FieldProvider:
+		return m.OldProvider(ctx)
+	case modelcatalogmodel.FieldLogoKey:
+		return m.OldLogoKey(ctx)
+	case modelcatalogmodel.FieldCategory:
+		return m.OldCategory(ctx)
+	case modelcatalogmodel.FieldTags:
+		return m.OldTags(ctx)
+	case modelcatalogmodel.FieldCapabilities:
+		return m.OldCapabilities(ctx)
+	case modelcatalogmodel.FieldContextWindow:
+		return m.OldContextWindow(ctx)
+	case modelcatalogmodel.FieldMaxOutputTokens:
+		return m.OldMaxOutputTokens(ctx)
+	case modelcatalogmodel.FieldPublicGroupID:
+		return m.OldPublicGroupID(ctx)
+	case modelcatalogmodel.FieldStatus:
+		return m.OldStatus(ctx)
+	case modelcatalogmodel.FieldFeatured:
+		return m.OldFeatured(ctx)
+	case modelcatalogmodel.FieldSortOrder:
+		return m.OldSortOrder(ctx)
+	case modelcatalogmodel.FieldPublishedAt:
+		return m.OldPublishedAt(ctx)
+	case modelcatalogmodel.FieldCreatedAt:
+		return m.OldCreatedAt(ctx)
+	case modelcatalogmodel.FieldUpdatedAt:
+		return m.OldUpdatedAt(ctx)
+	}
+	return nil, fmt.Errorf("unknown ModelCatalogModel field %s", name)
+}
+
+// SetField sets the value of a field with the given name. It returns an error if
+// the field is not defined in the schema, or if the type mismatched the field
+// type.
+func (m *ModelCatalogModelMutation) SetField(name string, value ent.Value) error {
+	switch name {
+	case modelcatalogmodel.FieldSlug:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetSlug(v)
+		return nil
+	case modelcatalogmodel.FieldModel:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetModel(v)
+		return nil
+	case modelcatalogmodel.FieldPlatform:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetPlatform(v)
+		return nil
+	case modelcatalogmodel.FieldMetadataModelID:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetMetadataModelID(v)
+		return nil
+	case modelcatalogmodel.FieldDisplayNameZh:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetDisplayNameZh(v)
+		return nil
+	case modelcatalogmodel.FieldDisplayNameEn:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetDisplayNameEn(v)
+		return nil
+	case modelcatalogmodel.FieldSummaryZh:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetSummaryZh(v)
+		return nil
+	case modelcatalogmodel.FieldSummaryEn:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetSummaryEn(v)
+		return nil
+	case modelcatalogmodel.FieldProvider:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetProvider(v)
+		return nil
+	case modelcatalogmodel.FieldLogoKey:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetLogoKey(v)
+		return nil
+	case modelcatalogmodel.FieldCategory:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetCategory(v)
+		return nil
+	case modelcatalogmodel.FieldTags:
+		v, ok := value.([]string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetTags(v)
+		return nil
+	case modelcatalogmodel.FieldCapabilities:
+		v, ok := value.([]string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetCapabilities(v)
+		return nil
+	case modelcatalogmodel.FieldContextWindow:
+		v, ok := value.(int64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetContextWindow(v)
+		return nil
+	case modelcatalogmodel.FieldMaxOutputTokens:
+		v, ok := value.(int64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetMaxOutputTokens(v)
+		return nil
+	case modelcatalogmodel.FieldPublicGroupID:
+		v, ok := value.(int64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetPublicGroupID(v)
+		return nil
+	case modelcatalogmodel.FieldStatus:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetStatus(v)
+		return nil
+	case modelcatalogmodel.FieldFeatured:
+		v, ok := value.(bool)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetFeatured(v)
+		return nil
+	case modelcatalogmodel.FieldSortOrder:
+		v, ok := value.(int)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetSortOrder(v)
+		return nil
+	case modelcatalogmodel.FieldPublishedAt:
+		v, ok := value.(time.Time)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetPublishedAt(v)
+		return nil
+	case modelcatalogmodel.FieldCreatedAt:
+		v, ok := value.(time.Time)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetCreatedAt(v)
+		return nil
+	case modelcatalogmodel.FieldUpdatedAt:
+		v, ok := value.(time.Time)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetUpdatedAt(v)
+		return nil
+	}
+	return fmt.Errorf("unknown ModelCatalogModel field %s", name)
+}
+
+// AddedFields returns all numeric fields that were incremented/decremented during
+// this mutation.
+func (m *ModelCatalogModelMutation) AddedFields() []string {
+	var fields []string
+	if m.addcontext_window != nil {
+		fields = append(fields, modelcatalogmodel.FieldContextWindow)
+	}
+	if m.addmax_output_tokens != nil {
+		fields = append(fields, modelcatalogmodel.FieldMaxOutputTokens)
+	}
+	if m.addpublic_group_id != nil {
+		fields = append(fields, modelcatalogmodel.FieldPublicGroupID)
+	}
+	if m.addsort_order != nil {
+		fields = append(fields, modelcatalogmodel.FieldSortOrder)
+	}
+	return fields
+}
+
+// AddedField returns the numeric value that was incremented/decremented on a field
+// with the given name. The second boolean return value indicates that this field
+// was not set, or was not defined in the schema.
+func (m *ModelCatalogModelMutation) AddedField(name string) (ent.Value, bool) {
+	switch name {
+	case modelcatalogmodel.FieldContextWindow:
+		return m.AddedContextWindow()
+	case modelcatalogmodel.FieldMaxOutputTokens:
+		return m.AddedMaxOutputTokens()
+	case modelcatalogmodel.FieldPublicGroupID:
+		return m.AddedPublicGroupID()
+	case modelcatalogmodel.FieldSortOrder:
+		return m.AddedSortOrder()
+	}
+	return nil, false
+}
+
+// AddField adds the value to the field with the given name. It returns an error if
+// the field is not defined in the schema, or if the type mismatched the field
+// type.
+func (m *ModelCatalogModelMutation) AddField(name string, value ent.Value) error {
+	switch name {
+	case modelcatalogmodel.FieldContextWindow:
+		v, ok := value.(int64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.AddContextWindow(v)
+		return nil
+	case modelcatalogmodel.FieldMaxOutputTokens:
+		v, ok := value.(int64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.AddMaxOutputTokens(v)
+		return nil
+	case modelcatalogmodel.FieldPublicGroupID:
+		v, ok := value.(int64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.AddPublicGroupID(v)
+		return nil
+	case modelcatalogmodel.FieldSortOrder:
+		v, ok := value.(int)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.AddSortOrder(v)
+		return nil
+	}
+	return fmt.Errorf("unknown ModelCatalogModel numeric field %s", name)
+}
+
+// ClearedFields returns all nullable fields that were cleared during this
+// mutation.
+func (m *ModelCatalogModelMutation) ClearedFields() []string {
+	var fields []string
+	if m.FieldCleared(modelcatalogmodel.FieldContextWindow) {
+		fields = append(fields, modelcatalogmodel.FieldContextWindow)
+	}
+	if m.FieldCleared(modelcatalogmodel.FieldMaxOutputTokens) {
+		fields = append(fields, modelcatalogmodel.FieldMaxOutputTokens)
+	}
+	if m.FieldCleared(modelcatalogmodel.FieldPublicGroupID) {
+		fields = append(fields, modelcatalogmodel.FieldPublicGroupID)
+	}
+	if m.FieldCleared(modelcatalogmodel.FieldPublishedAt) {
+		fields = append(fields, modelcatalogmodel.FieldPublishedAt)
+	}
+	return fields
+}
+
+// FieldCleared returns a boolean indicating if a field with the given name was
+// cleared in this mutation.
+func (m *ModelCatalogModelMutation) FieldCleared(name string) bool {
+	_, ok := m.clearedFields[name]
+	return ok
+}
+
+// ClearField clears the value of the field with the given name. It returns an
+// error if the field is not defined in the schema.
+func (m *ModelCatalogModelMutation) ClearField(name string) error {
+	switch name {
+	case modelcatalogmodel.FieldContextWindow:
+		m.ClearContextWindow()
+		return nil
+	case modelcatalogmodel.FieldMaxOutputTokens:
+		m.ClearMaxOutputTokens()
+		return nil
+	case modelcatalogmodel.FieldPublicGroupID:
+		m.ClearPublicGroupID()
+		return nil
+	case modelcatalogmodel.FieldPublishedAt:
+		m.ClearPublishedAt()
+		return nil
+	}
+	return fmt.Errorf("unknown ModelCatalogModel nullable field %s", name)
+}
+
+// ResetField resets all changes in the mutation for the field with the given name.
+// It returns an error if the field is not defined in the schema.
+func (m *ModelCatalogModelMutation) ResetField(name string) error {
+	switch name {
+	case modelcatalogmodel.FieldSlug:
+		m.ResetSlug()
+		return nil
+	case modelcatalogmodel.FieldModel:
+		m.ResetModel()
+		return nil
+	case modelcatalogmodel.FieldPlatform:
+		m.ResetPlatform()
+		return nil
+	case modelcatalogmodel.FieldMetadataModelID:
+		m.ResetMetadataModelID()
+		return nil
+	case modelcatalogmodel.FieldDisplayNameZh:
+		m.ResetDisplayNameZh()
+		return nil
+	case modelcatalogmodel.FieldDisplayNameEn:
+		m.ResetDisplayNameEn()
+		return nil
+	case modelcatalogmodel.FieldSummaryZh:
+		m.ResetSummaryZh()
+		return nil
+	case modelcatalogmodel.FieldSummaryEn:
+		m.ResetSummaryEn()
+		return nil
+	case modelcatalogmodel.FieldProvider:
+		m.ResetProvider()
+		return nil
+	case modelcatalogmodel.FieldLogoKey:
+		m.ResetLogoKey()
+		return nil
+	case modelcatalogmodel.FieldCategory:
+		m.ResetCategory()
+		return nil
+	case modelcatalogmodel.FieldTags:
+		m.ResetTags()
+		return nil
+	case modelcatalogmodel.FieldCapabilities:
+		m.ResetCapabilities()
+		return nil
+	case modelcatalogmodel.FieldContextWindow:
+		m.ResetContextWindow()
+		return nil
+	case modelcatalogmodel.FieldMaxOutputTokens:
+		m.ResetMaxOutputTokens()
+		return nil
+	case modelcatalogmodel.FieldPublicGroupID:
+		m.ResetPublicGroupID()
+		return nil
+	case modelcatalogmodel.FieldStatus:
+		m.ResetStatus()
+		return nil
+	case modelcatalogmodel.FieldFeatured:
+		m.ResetFeatured()
+		return nil
+	case modelcatalogmodel.FieldSortOrder:
+		m.ResetSortOrder()
+		return nil
+	case modelcatalogmodel.FieldPublishedAt:
+		m.ResetPublishedAt()
+		return nil
+	case modelcatalogmodel.FieldCreatedAt:
+		m.ResetCreatedAt()
+		return nil
+	case modelcatalogmodel.FieldUpdatedAt:
+		m.ResetUpdatedAt()
+		return nil
+	}
+	return fmt.Errorf("unknown ModelCatalogModel field %s", name)
+}
+
+// AddedEdges returns all edge names that were set/added in this mutation.
+func (m *ModelCatalogModelMutation) AddedEdges() []string {
+	edges := make([]string, 0, 0)
+	return edges
+}
+
+// AddedIDs returns all IDs (to other nodes) that were added for the given edge
+// name in this mutation.
+func (m *ModelCatalogModelMutation) AddedIDs(name string) []ent.Value {
+	return nil
+}
+
+// RemovedEdges returns all edge names that were removed in this mutation.
+func (m *ModelCatalogModelMutation) RemovedEdges() []string {
+	edges := make([]string, 0, 0)
+	return edges
+}
+
+// RemovedIDs returns all IDs (to other nodes) that were removed for the edge with
+// the given name in this mutation.
+func (m *ModelCatalogModelMutation) RemovedIDs(name string) []ent.Value {
+	return nil
+}
+
+// ClearedEdges returns all edge names that were cleared in this mutation.
+func (m *ModelCatalogModelMutation) ClearedEdges() []string {
+	edges := make([]string, 0, 0)
+	return edges
+}
+
+// EdgeCleared returns a boolean which indicates if the edge with the given name
+// was cleared in this mutation.
+func (m *ModelCatalogModelMutation) EdgeCleared(name string) bool {
+	return false
+}
+
+// ClearEdge clears the value of the edge with the given name. It returns an error
+// if that edge is not defined in the schema.
+func (m *ModelCatalogModelMutation) ClearEdge(name string) error {
+	return fmt.Errorf("unknown ModelCatalogModel unique edge %s", name)
+}
+
+// ResetEdge resets all changes to the edge with the given name in this mutation.
+// It returns an error if the edge is not defined in the schema.
+func (m *ModelCatalogModelMutation) ResetEdge(name string) error {
+	return fmt.Errorf("unknown ModelCatalogModel edge %s", name)
 }
 
 // PaymentAuditLogMutation represents an operation that mutates the PaymentAuditLog nodes in the graph.

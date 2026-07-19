@@ -587,6 +587,18 @@ func TestPaymentAmountToleranceForThreeDecimalCurrency(t *testing.T) {
 	assert.InDelta(t, 0.0005, paymentAmountToleranceForCurrency("KWD"), 1e-12)
 }
 
+func TestProviderAmountMatchesOrderAmountRequiresExactMinorUnits(t *testing.T) {
+	t.Parallel()
+
+	assert.True(t, providerAmountMatchesOrderAmount(100, 100, "CNY"))
+	assert.False(t, providerAmountMatchesOrderAmount(99.99, 100, "CNY"), "one-cent underpayment must be rejected")
+	assert.False(t, providerAmountMatchesOrderAmount(100.01, 100, "CNY"), "one-cent overpayment must be rejected")
+	assert.False(t, providerAmountMatchesOrderAmount(99, 100, "JPY"), "one-yen underpayment must be rejected")
+	assert.True(t, providerAmountMatchesOrderAmount(1.234, 1.234, "KWD"))
+	assert.False(t, providerAmountMatchesOrderAmount(1.233, 1.234, "KWD"), "one-fils underpayment must be rejected")
+	assert.False(t, providerAmountMatchesOrderAmount(99.999, 100, "CNY"), "amounts beyond currency precision must be rejected")
+}
+
 func TestRetryFulfillmentRejectsFreshRechargingLease(t *testing.T) {
 	ctx := context.Background()
 	client := newPaymentConfigServiceTestClient(t)

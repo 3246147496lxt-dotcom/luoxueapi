@@ -1,39 +1,20 @@
 <template>
   <aside
+    id="app-sidebar"
+    aria-label="Sidebar"
     class="sidebar"
     :class="[
-      sidebarCollapsed ? 'w-[72px]' : 'w-64',
-      { '-translate-x-full lg:translate-x-0': !mobileOpen }
+      sidebarCollapsed
+        ? 'w-[60px]'
+        : 'w-44 min-[1025px]:w-[188px] min-[1281px]:w-[200px]',
+      { 'sidebar-mobile-hidden': !mobileOpen }
     ]"
   >
-    <!-- Logo/Brand -->
-    <div class="sidebar-header" :class="{ 'sidebar-header-collapsed': sidebarCollapsed }">
-      <!-- Custom Logo or Default Logo -->
-      <router-link
-        :to="homePath"
-        class="sidebar-logo flex h-9 w-9 items-center justify-center overflow-hidden rounded-[10px] bg-white ring-1 ring-gray-200/80 transition-opacity hover:opacity-80 dark:bg-dark-800 dark:ring-dark-700"
-        @click="handleMenuItemClick(homePath)"
-      >
-        <img v-if="settingsLoaded" :src="siteLogo || '/logo.png'" alt="Logo" class="h-full w-full object-contain" />
-      </router-link>
-      <div class="sidebar-brand" :class="{ 'sidebar-brand-collapsed': sidebarCollapsed }" :aria-hidden="sidebarCollapsed ? 'true' : 'false'">
-        <router-link
-          :to="homePath"
-          class="sidebar-brand-title text-base font-semibold tracking-tight text-gray-950 transition-colors hover:text-primary-700 dark:text-white dark:hover:text-primary-400"
-          @click="handleMenuItemClick(homePath)"
-        >
-          {{ siteName }}
-        </router-link>
-        <!-- Version Badge -->
-        <VersionBadge :version="siteVersion" />
-      </div>
-    </div>
-
     <!-- Navigation -->
     <nav ref="sidebarNavRef" class="sidebar-nav scrollbar-hide">
       <!-- Admin View: Admin menu first, then personal menu -->
       <template v-if="isAdmin">
-        <!-- Admin Section -->
+        <!-- Admin navigation -->
         <div class="sidebar-section">
           <template v-for="item in adminNavItems" :key="item.path">
             <!-- Collapsible group (has children) -->
@@ -42,10 +23,12 @@
                 type="button"
                 class="sidebar-link mb-1 w-full"
                 :class="{
-                  'sidebar-link-active': isGroupActive(item) && !isGroupExpanded(item),
+                  'sidebar-link-active': isGroupActive(item) && (sidebarCollapsed || !isGroupExpanded(item)),
                   'sidebar-link-collapsed': sidebarCollapsed
                 }"
                 :title="sidebarCollapsed ? item.label : undefined"
+                :aria-expanded="!sidebarCollapsed && isGroupExpanded(item)"
+                :aria-controls="groupPanelId(item)"
                 @click="handleGroupClick(item)"
               >
                 <component :is="item.icon" class="h-5 w-5 flex-shrink-0" />
@@ -62,13 +45,19 @@
                 </span>
               </button>
               <!-- Children -->
-              <div v-if="!sidebarCollapsed && isGroupExpanded(item)" class="mb-1 ml-4 border-l border-gray-200 pl-2 dark:border-dark-600">
+              <div
+                v-if="!sidebarCollapsed && isGroupExpanded(item)"
+                :id="groupPanelId(item)"
+                class="mb-1 ml-3 border-l border-gray-200 pl-2 dark:border-dark-600"
+                role="group"
+                :aria-label="item.label"
+              >
                 <router-link
                   v-for="child in item.children"
                   :key="child.path"
                   :to="child.path"
                   class="sidebar-link mb-0.5 py-1.5 text-sm"
-                  :class="{ 'sidebar-link-active': route.path === child.path }"
+                  :class="{ 'sidebar-link-active': isActive(child.path) }"
                   @click="handleMenuItemClick(child.path)"
                 >
                   <component :is="child.icon" class="h-4 w-4 flex-shrink-0" />
@@ -94,7 +83,12 @@
               "
               @click="handleMenuItemClick(item.path)"
             >
-              <span v-if="item.iconSvg" class="h-5 w-5 flex-shrink-0 sidebar-svg-icon" v-html="sanitizeSvg(item.iconSvg)"></span>
+              <span
+                v-if="item.iconSvg"
+                class="h-5 w-5 flex-shrink-0 sidebar-svg-icon"
+                :class="{ 'sidebar-api-key-icon': item.path === '/keys' }"
+                v-html="sanitizeSvg(item.iconSvg)"
+              ></span>
               <component v-else :is="item.icon" class="h-5 w-5 flex-shrink-0" />
               <span class="sidebar-label" :class="{ 'sidebar-label-collapsed': sidebarCollapsed }" :aria-hidden="sidebarCollapsed ? 'true' : 'false'">{{ item.label }}</span>
             </router-link>
@@ -119,7 +113,12 @@
             :data-tour="item.path === '/keys' ? 'sidebar-my-keys' : undefined"
             @click="handleMenuItemClick(item.path)"
           >
-            <span v-if="item.iconSvg" class="h-5 w-5 flex-shrink-0 sidebar-svg-icon" v-html="sanitizeSvg(item.iconSvg)"></span>
+            <span
+              v-if="item.iconSvg"
+              class="h-5 w-5 flex-shrink-0 sidebar-svg-icon"
+              :class="{ 'sidebar-api-key-icon': item.path === '/keys' }"
+              v-html="sanitizeSvg(item.iconSvg)"
+            ></span>
             <component v-else :is="item.icon" class="h-5 w-5 flex-shrink-0" />
             <span class="sidebar-label" :class="{ 'sidebar-label-collapsed': sidebarCollapsed }" :aria-hidden="sidebarCollapsed ? 'true' : 'false'">{{ item.label }}</span>
           </router-link>
@@ -139,7 +138,12 @@
             :data-tour="item.path === '/keys' ? 'sidebar-my-keys' : undefined"
             @click="handleMenuItemClick(item.path)"
           >
-            <span v-if="item.iconSvg" class="h-5 w-5 flex-shrink-0 sidebar-svg-icon" v-html="sanitizeSvg(item.iconSvg)"></span>
+            <span
+              v-if="item.iconSvg"
+              class="h-5 w-5 flex-shrink-0 sidebar-svg-icon"
+              :class="{ 'sidebar-api-key-icon': item.path === '/keys' }"
+              v-html="sanitizeSvg(item.iconSvg)"
+            ></span>
             <component v-else :is="item.icon" class="h-5 w-5 flex-shrink-0" />
             <span class="sidebar-label" :class="{ 'sidebar-label-collapsed': sidebarCollapsed }" :aria-hidden="sidebarCollapsed ? 'true' : 'false'">{{ item.label }}</span>
           </router-link>
@@ -147,41 +151,13 @@
       </template>
     </nav>
 
-    <!-- Bottom Section -->
-    <div class="sidebar-footer mt-auto border-t border-gray-100 p-3 dark:border-dark-800">
-      <!-- Theme Toggle -->
-      <button
-        @click="toggleTheme"
-        class="sidebar-link mb-2 w-full"
-        :class="{ 'sidebar-link-collapsed': sidebarCollapsed }"
-        :title="sidebarCollapsed ? (isDark ? t('nav.lightMode') : t('nav.darkMode')) : undefined"
-      >
-        <SunIcon v-if="isDark" class="h-5 w-5 flex-shrink-0 text-amber-500" />
-        <MoonIcon v-else class="h-5 w-5 flex-shrink-0" />
-        <span class="sidebar-label" :class="{ 'sidebar-label-collapsed': sidebarCollapsed }" :aria-hidden="sidebarCollapsed ? 'true' : 'false'">{{
-          isDark ? t('nav.lightMode') : t('nav.darkMode')
-        }}</span>
-      </button>
-
-      <!-- Collapse Button -->
-      <button
-        @click="toggleSidebar"
-        class="sidebar-link w-full"
-        :class="{ 'sidebar-link-collapsed': sidebarCollapsed }"
-        :title="sidebarCollapsed ? t('nav.expand') : t('nav.collapse')"
-      >
-        <ChevronDoubleLeftIcon v-if="!sidebarCollapsed" class="h-5 w-5 flex-shrink-0" />
-        <ChevronDoubleRightIcon v-else class="h-5 w-5 flex-shrink-0" />
-        <span class="sidebar-label" :class="{ 'sidebar-label-collapsed': sidebarCollapsed }" :aria-hidden="sidebarCollapsed ? 'true' : 'false'">{{ t('nav.collapse') }}</span>
-      </button>
-    </div>
   </aside>
 
   <!-- Mobile Overlay -->
   <transition name="fade">
     <div
       v-if="mobileOpen"
-      class="fixed inset-0 z-30 bg-gray-950/40 backdrop-blur-[2px] lg:hidden"
+      class="fixed inset-0 z-30 bg-gray-950/5 backdrop-blur-[1px] lg:hidden dark:bg-black/20"
       @click="closeMobile"
     ></div>
   </transition>
@@ -192,11 +168,11 @@ import { computed, h, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'v
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useAdminSettingsStore, useAppStore, useAuthStore, useOnboardingStore } from '@/stores'
-import VersionBadge from '@/components/common/VersionBadge.vue'
 import { sanitizeSvg } from '@/utils/sanitize'
-import { sanitizeUrl } from '@/utils/url'
 import { FeatureFlags, makeSidebarFlag } from '@/utils/featureFlags'
 import { useBatchImageAccess } from '@/composables/useBatchImageAccess'
+import keyOutlineIconSvg from '@/assets/icons/key-outline.svg?raw'
+import NotificationIcon from '@/components/icons/NotificationIcon.vue'
 
 interface NavItem {
   path: string
@@ -248,18 +224,9 @@ const sidebarCollapsed = computed(() => appStore.sidebarCollapsed)
 const mobileOpen = computed(() => appStore.mobileOpen)
 const isAdmin = computed(() => authStore.isAdmin)
 const sidebarNavRef = ref<HTMLElement | null>(null)
-const isDark = ref(document.documentElement.classList.contains('dark'))
-
-const homePath = computed(() => (isAdmin.value ? '/admin/dashboard' : '/dashboard'))
 
 // Track which parent nav groups are expanded
 const expandedGroups = ref<Set<string>>(new Set())
-
-// Site settings from appStore (cached, no flicker)
-const siteName = computed(() => appStore.siteName)
-const siteLogo = computed(() => sanitizeUrl(appStore.siteLogo || '', { allowRelative: true, allowDataUrl: true }))
-const siteVersion = computed(() => appStore.siteVersion)
-const settingsLoaded = computed(() => appStore.publicSettingsLoaded)
 
 // SVG Icon Components
 const DashboardIcon = {
@@ -272,21 +239,6 @@ const DashboardIcon = {
           'stroke-linecap': 'round',
           'stroke-linejoin': 'round',
           d: 'M3.75 6A2.25 2.25 0 016 3.75h2.25A2.25 2.25 0 0110.5 6v2.25a2.25 2.25 0 01-2.25 2.25H6a2.25 2.25 0 01-2.25-2.25V6zM3.75 15.75A2.25 2.25 0 016 13.5h2.25a2.25 2.25 0 012.25 2.25V18a2.25 2.25 0 01-2.25 2.25H6A2.25 2.25 0 013.75 18v-2.25zM13.5 6a2.25 2.25 0 012.25-2.25H18A2.25 2.25 0 0120.25 6v2.25A2.25 2.25 0 0118 10.5h-2.25a2.25 2.25 0 01-2.25-2.25V6zM13.5 15.75a2.25 2.25 0 012.25-2.25H18a2.25 2.25 0 012.25 2.25V18A2.25 2.25 0 0118 20.25h-2.25A2.25 2.25 0 0113.5 18v-2.25z'
-        })
-      ]
-    )
-}
-
-const KeyIcon = {
-  render: () =>
-    h(
-      'svg',
-      { fill: 'none', viewBox: '0 0 24 24', stroke: 'currentColor', 'stroke-width': '1.5' },
-      [
-        h('path', {
-          'stroke-linecap': 'round',
-          'stroke-linejoin': 'round',
-          d: 'M15.75 5.25a3 3 0 013 3m3 0a6 6 0 01-7.029 5.912c-.563-.097-1.159.026-1.563.43L10.5 17.25H8.25v2.25H6v2.25H2.25v-2.818c0-.597.237-1.17.659-1.591l6.499-6.499c.404-.404.527-1 .43-1.563A6 6 0 1121.75 8.25z'
         })
       ]
     )
@@ -472,21 +424,6 @@ const ServerIcon = {
     )
 }
 
-const BellIcon = {
-  render: () =>
-    h(
-      'svg',
-      { fill: 'none', viewBox: '0 0 24 24', stroke: 'currentColor', 'stroke-width': '1.5' },
-      [
-        h('path', {
-          'stroke-linecap': 'round',
-          'stroke-linejoin': 'round',
-          d: 'M14.857 17.082a23.848 23.848 0 005.454-1.31A8.967 8.967 0 0118 9.75V9a6 6 0 10-12 0v.75a8.967 8.967 0 01-2.312 6.022c1.733.64 3.56 1.085 5.455 1.31m5.714 0a24.255 24.255 0 01-5.714 0m5.714 0a3 3 0 11-5.714 0'
-        })
-      ]
-    )
-}
-
 const TicketIcon = {
   render: () =>
     h(
@@ -522,51 +459,6 @@ const CogIcon = {
     )
 }
 
-const SunIcon = {
-  render: () =>
-    h(
-      'svg',
-      { fill: 'none', viewBox: '0 0 24 24', stroke: 'currentColor', 'stroke-width': '1.5' },
-      [
-        h('path', {
-          'stroke-linecap': 'round',
-          'stroke-linejoin': 'round',
-          d: 'M12 3v2.25m6.364.386l-1.591 1.591M21 12h-2.25m-.386 6.364l-1.591-1.591M12 18.75V21m-4.773-4.227l-1.591 1.591M5.25 12H3m4.227-4.773L5.636 5.636M15.75 12a3.75 3.75 0 11-7.5 0 3.75 3.75 0 017.5 0z'
-        })
-      ]
-    )
-}
-
-const MoonIcon = {
-  render: () =>
-    h(
-      'svg',
-      { fill: 'none', viewBox: '0 0 24 24', stroke: 'currentColor', 'stroke-width': '1.5' },
-      [
-        h('path', {
-          'stroke-linecap': 'round',
-          'stroke-linejoin': 'round',
-          d: 'M21.752 15.002A9.718 9.718 0 0118 15.75c-5.385 0-9.75-4.365-9.75-9.75 0-1.33.266-2.597.748-3.752A9.753 9.753 0 003 11.25C3 16.635 7.365 21 12.75 21a9.753 9.753 0 009.002-5.998z'
-        })
-      ]
-    )
-}
-
-const ChevronDoubleLeftIcon = {
-  render: () =>
-    h(
-      'svg',
-      { fill: 'none', viewBox: '0 0 24 24', stroke: 'currentColor', 'stroke-width': '1.5' },
-      [
-        h('path', {
-          'stroke-linecap': 'round',
-          'stroke-linejoin': 'round',
-          d: 'm18.75 4.5-7.5 7.5 7.5 7.5m-6-15L5.25 12l7.5 7.5'
-        })
-      ]
-    )
-}
-
 const OrderIcon = {
   render: () =>
     h(
@@ -592,21 +484,6 @@ const OrderListIcon = {
           'stroke-linecap': 'round',
           'stroke-linejoin': 'round',
           d: 'M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z'
-        })
-      ]
-    )
-}
-
-const ChevronDoubleRightIcon = {
-  render: () =>
-    h(
-      'svg',
-      { fill: 'none', viewBox: '0 0 24 24', stroke: 'currentColor', 'stroke-width': '1.5' },
-      [
-        h('path', {
-          'stroke-linecap': 'round',
-          'stroke-linejoin': 'round',
-          d: 'm5.25 4.5 7.5 7.5-7.5 7.5m6-15 7.5 7.5-7.5 7.5'
         })
       ]
     )
@@ -692,7 +569,7 @@ const flagBatchImageAccess = () => canUseBatchImage.value
 // buildSelfNavItems 构造用户自己的导航项（用户端主菜单和管理员的"我的账户"子菜单共享这组声明）。
 // withDashboard=true 时包含仪表盘（用户端），false 时不含（管理员的个人区已经有独立仪表盘入口）。
 //
-// 条目顺序：密钥 → 用量 → 可用渠道 → 渠道状态 → 订阅/支付 → 兑换/资料。
+// 条目顺序：密钥 → 用量 → 可用渠道 → 渠道状态 → 订阅/支付/兑换 → 资料。
 // 可用渠道紧挨渠道状态之上，让用户"先看自己能用什么、再看对应状态"。
 function buildSelfNavItems(withDashboard: boolean): NavItem[] {
   const items: NavItem[] = []
@@ -700,15 +577,14 @@ function buildSelfNavItems(withDashboard: boolean): NavItem[] {
     items.push({ path: '/dashboard', label: t('nav.dashboard'), icon: DashboardIcon })
   }
   items.push(
-    { path: '/keys', label: t('nav.apiKeys'), icon: KeyIcon },
+    { path: '/keys', label: t('nav.apiKeys'), icon: null, iconSvg: keyOutlineIconSvg },
     { path: '/batch-image', label: t('nav.batchImage'), icon: BatchImageIcon, hideInSimpleMode: true, featureFlag: flagBatchImageAccess },
     { path: '/usage', label: t('nav.usage'), icon: ChartIcon, hideInSimpleMode: true },
     { path: '/available-channels', label: t('nav.availableChannels'), icon: ChannelIcon, hideInSimpleMode: true, featureFlag: flagAvailableChannels },
     { path: '/monitor', label: t('nav.channelStatus'), icon: SignalIcon, featureFlag: flagChannelMonitor },
     { path: '/subscriptions', label: t('nav.mySubscriptions'), icon: CreditCardIcon, hideInSimpleMode: true },
-    { path: '/purchase', label: t('nav.buySubscription'), icon: RechargeSubscriptionIcon, hideInSimpleMode: true, featureFlag: flagPayment },
+    { path: '/purchase', label: t('nav.buySubscription'), icon: RechargeSubscriptionIcon, hideInSimpleMode: true },
     { path: '/orders', label: t('nav.myOrders'), icon: OrderListIcon, hideInSimpleMode: true, featureFlag: flagPayment },
-    { path: '/redeem', label: t('nav.redeem'), icon: GiftIcon, hideInSimpleMode: true },
     { path: '/affiliate', label: t('nav.affiliate'), icon: UsersIcon, hideInSimpleMode: true, featureFlag: flagAffiliate },
     { path: '/profile', label: t('nav.profile'), icon: UserIcon },
     ...customMenuItemsForUser.value.map((item): NavItem => ({
@@ -752,7 +628,7 @@ const customMenuItemsForAdmin = computed(() => {
 // Admin navigation items
 const adminNavItems = computed((): NavItem[] => {
   const baseItems: NavItem[] = [
-    { path: '/admin/dashboard', label: t('nav.dashboard'), icon: DashboardIcon },
+    { path: '/admin/dashboard', label: t('nav.adminDashboard'), icon: DashboardIcon },
     { path: '/admin/ops', label: t('nav.ops'), icon: ChartIcon, featureFlag: flagOpsMonitoring },
     { path: '/admin/users', label: t('nav.users'), icon: UsersIcon, hideInSimpleMode: true },
     { path: '/admin/groups', label: t('nav.groups'), icon: FolderIcon, hideInSimpleMode: true },
@@ -767,9 +643,10 @@ const adminNavItems = computed((): NavItem[] => {
         { path: '/admin/channels/monitor', label: t('nav.channelMonitor'), icon: SignalIcon, featureFlag: flagChannelMonitor },
       ],
     },
+    { path: '/admin/model-catalog', label: t('nav.modelCatalog'), icon: GlobeIcon, hideInSimpleMode: true },
     { path: '/admin/subscriptions', label: t('nav.subscriptions'), icon: CreditCardIcon, hideInSimpleMode: true },
     { path: '/admin/accounts', label: t('nav.accounts'), icon: GlobeIcon },
-    { path: '/admin/announcements', label: t('nav.announcements'), icon: BellIcon },
+    { path: '/admin/announcements', label: t('nav.announcements'), icon: NotificationIcon },
     { path: '/admin/proxies', label: t('nav.proxies'), icon: ServerIcon },
     { path: '/admin/risk-control', label: t('nav.riskControl'), icon: ShieldIcon, hideInSimpleMode: true, featureFlag: flagRiskControl },
     { path: '/admin/redeem', label: t('nav.redeemCodes'), icon: TicketIcon, hideInSimpleMode: true },
@@ -809,7 +686,7 @@ const adminNavItems = computed((): NavItem[] => {
   // 简单模式下，在系统设置前插入 API密钥
   if (authStore.isSimpleMode) {
     const filtered = visible.filter(item => !item.hideInSimpleMode)
-    filtered.push({ path: '/keys', label: t('nav.apiKeys'), icon: KeyIcon })
+    filtered.push({ path: '/keys', label: t('nav.apiKeys'), icon: null, iconSvg: keyOutlineIconSvg })
     filtered.push({ path: '/admin/settings', label: t('nav.settings'), icon: CogIcon })
     for (const cm of customMenuItemsForAdmin.value) {
       filtered.push({ path: `/custom/${cm.id}`, label: cm.label, icon: null, iconSvg: cm.icon_svg })
@@ -823,16 +700,6 @@ const adminNavItems = computed((): NavItem[] => {
   }
   return visible
 })
-
-function toggleSidebar() {
-  appStore.toggleSidebar()
-}
-
-function toggleTheme() {
-  isDark.value = !isDark.value
-  document.documentElement.classList.toggle('dark', isDark.value)
-  localStorage.setItem('theme', isDark.value ? 'dark' : 'light')
-}
 
 function closeMobile() {
   appStore.setMobileOpen(false)
@@ -862,9 +729,17 @@ function isActive(path: string): boolean {
   return route.path === path || route.path.startsWith(path + '/')
 }
 
+function isNavItemActive(item: NavItem): boolean {
+  return isActive(item.path) || Boolean(item.children?.some(child => isNavItemActive(child)))
+}
+
 function isGroupActive(item: NavItem): boolean {
-  if (!item.children) return false
-  return item.children.some(child => route.path === child.path)
+  return Boolean(item.children?.some(child => isNavItemActive(child)))
+}
+
+function groupPanelId(item: NavItem): string {
+  const key = item.path.replace(/[^a-zA-Z0-9_-]+/g, '-').replace(/^-|-$/g, '')
+  return `sidebar-group-${key}`
 }
 
 function isGroupExpanded(item: NavItem): boolean {
@@ -881,13 +756,17 @@ function toggleGroup(item: NavItem) {
 
 /**
  * Click handler for collapsible parent items.
- * - When sidebar is collapsed: do nothing (children are not visible).
+ * - When sidebar is collapsed: expand it and open the selected group.
  * - When `expandOnly` is true: only toggle expand state.
  * - Otherwise (default, e.g. /admin/orders): navigate to the parent path
  *   (router-link semantics) and ensure the group is expanded.
  */
 function handleGroupClick(item: NavItem) {
-  if (sidebarCollapsed.value) return
+  if (sidebarCollapsed.value) {
+    appStore.setSidebarCollapsed(false)
+    expandedGroups.value.add(item.path)
+    return
+  }
   if (item.expandOnly) {
     toggleGroup(item)
     return
@@ -899,16 +778,6 @@ function handleGroupClick(item: NavItem) {
   if (!expandedGroups.value.has(item.path)) {
     expandedGroups.value.add(item.path)
   }
-}
-
-// Initialize theme
-const savedTheme = localStorage.getItem('theme')
-if (
-  savedTheme === 'dark' ||
-  (!savedTheme && window.matchMedia('(prefers-color-scheme: dark)').matches)
-) {
-  isDark.value = true
-  document.documentElement.classList.add('dark')
 }
 
 // Fetch admin settings (for feature-gated nav items like Ops).
@@ -946,97 +815,183 @@ onBeforeUnmount(() => {
 
 <style scoped>
 .sidebar {
-  @apply border-gray-100 bg-white dark:border-dark-800 dark:bg-dark-900;
-  box-shadow: 4px 0 24px rgb(15 23 42 / 0.025);
+  @apply border-gray-100 bg-white;
+  isolation: isolate;
+  overflow: hidden;
+  border-color: rgb(255 255 255 / 0.65) rgb(255 255 255 / 0.36) rgb(255 255 255 / 0.36);
+  background: linear-gradient(rgb(248 251 255 / 0.32), rgb(235 242 252 / 0.1)) !important;
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.65),
+    inset 0 -1px 0 rgb(15 23 42 / 0.04),
+    0 1px 2px rgb(15 23 42 / 0.04),
+    0 6px 16px -4px rgb(15 23 42 / 0.08),
+    0 18px 40px -12px rgb(15 23 42 / 0.18);
+  backdrop-filter: saturate(170%) blur(36px);
+  -webkit-backdrop-filter: saturate(170%) blur(36px);
   transition-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
 }
 
-.sidebar-header {
-  @apply border-gray-100 px-4 dark:border-dark-800;
+.sidebar::before,
+.sidebar::after {
+  content: '';
+  position: absolute;
+  pointer-events: none;
 }
 
-.sidebar-logo {
-  flex: 0 0 2.25rem;
-  min-width: 2.25rem;
+.sidebar::before {
+  inset: 0;
+  z-index: -1;
+  background:
+    radial-gradient(80% 50% at 50% 0%, rgb(96 165 250 / 0.1) 0%, transparent 70%),
+    radial-gradient(80% 50% at 50% 100%, rgb(167 139 250 / 0.1) 0%, transparent 70%);
 }
 
-.sidebar-header-collapsed {
-  gap: 0;
-  padding-left: 1.125rem;
-  padding-right: 1.125rem;
+.sidebar::after {
+  top: 0;
+  right: 12%;
+  left: 12%;
+  height: 1px;
+  background: linear-gradient(to right, transparent, rgb(255 255 255 / 0.85), transparent);
+}
+
+:global(.dark .sidebar) {
+  border-color: rgb(255 255 255 / 0.08);
+  background: rgb(11 15 26) !important;
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 0.04),
+    0 1px 2px rgb(0 0 0 / 0.4),
+    0 8px 24px -8px rgb(0 0 0 / 0.5);
+}
+
+:global(.dark .sidebar::after) {
+  background: linear-gradient(to right, transparent, rgb(255 255 255 / 0.12), transparent);
 }
 
 .sidebar-nav {
-  @apply px-3 py-3;
+  position: relative;
+  z-index: 1;
+  @apply px-2 py-3;
 }
 
 .sidebar-section {
-  @apply mb-5;
+  margin-bottom: 0;
 }
 
 .sidebar-link {
-  min-height: 2.5rem;
+  position: relative;
+  min-height: 2rem;
+  gap: 0.625rem;
+  padding-top: 0.25rem;
+  padding-right: 0.75rem;
+  padding-bottom: 0.25rem;
+  padding-left: 0.75rem;
   border-radius: 0.625rem;
+  color: rgb(28 31 35);
+  font-size: 0.875rem;
+  font-weight: 500;
+  line-height: 1.5rem;
   transition-property: color, background-color, box-shadow;
-  transition-timing-function: ease-out;
+  transition-duration: 0.2s;
+  transition-timing-function: ease;
+}
+
+.sidebar-link > :deep(svg),
+.sidebar-link > .sidebar-svg-icon {
+  color: rgb(28 31 35 / 0.62);
+  transition:
+    color 0.2s ease,
+    transform 0.2s ease;
+}
+
+.sidebar-link:hover {
+  color: rgb(0 132 255);
+  background: rgb(0 132 255 / 0.08);
+  box-shadow: 0 2px 8px rgb(0 132 255 / 0.06);
+}
+
+.sidebar-link:hover > :deep(svg),
+.sidebar-link:hover > .sidebar-svg-icon {
+  color: rgb(0 132 255);
 }
 
 .sidebar-link:focus-visible {
-  outline: 2px solid rgb(20 184 166 / 0.45);
+  outline: 2px solid rgb(0 132 255 / 0.45);
   outline-offset: 2px;
 }
 
 .sidebar-link-active {
-  @apply bg-primary-50/80 text-primary-700 hover:bg-primary-100/80 dark:bg-primary-900/20 dark:text-primary-300 dark:hover:bg-primary-900/30;
-  box-shadow: inset 0 0 0 1px rgb(20 184 166 / 0.08);
+  color: rgb(0 132 255);
+  background: rgb(234 245 255);
+  box-shadow: none;
 }
 
-.sidebar-footer {
-  @apply bg-white dark:bg-dark-900;
+.sidebar-link-active::before {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 0;
+  width: 2px;
+  height: 1rem;
+  border-radius: 2px;
+  background: rgb(0 132 255);
+  transform: translateY(-50%);
 }
 
-.sidebar-brand {
-  min-width: 0;
-  flex: 1 1 auto;
-  white-space: nowrap;
-  transition:
-    max-width 0.22s ease,
-    opacity 0.14s ease,
-    transform 0.14s ease;
-  max-width: 12rem;
+.sidebar-link-active > :deep(svg),
+.sidebar-link-active > .sidebar-svg-icon {
+  color: rgb(0 100 250);
+  transform: scale(1.05);
 }
 
-.sidebar-brand-collapsed {
-  max-width: 0;
-  overflow: hidden;
-  opacity: 0;
-  transform: translateX(-4px);
-  pointer-events: none;
+.sidebar-link-active:hover {
+  color: rgb(0 132 255);
+  background: rgb(234 245 255);
 }
 
-.sidebar-brand-title {
-  display: block;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+:global(.dark .sidebar-link) {
+  color: rgb(235 235 235 / 0.82);
+}
+
+:global(.dark .sidebar-link > svg),
+:global(.dark .sidebar-link > .sidebar-svg-icon) {
+  color: rgb(235 235 235 / 0.62);
+}
+
+:global(.dark .sidebar-link:hover) {
+  color: rgb(102 181 255);
+  background: rgb(71 160 255 / 0.12);
+}
+
+:global(.dark .sidebar-link-active),
+:global(.dark .sidebar-link-active:hover) {
+  color: rgb(102 181 255);
+  background: rgb(71 160 255 / 0.18);
+}
+
+:global(.dark .sidebar-link-active > svg),
+:global(.dark .sidebar-link-active > .sidebar-svg-icon) {
+  color: rgb(102 181 255);
 }
 
 .sidebar-link-collapsed {
+  min-height: 2.75rem;
   justify-content: center;
   gap: 0;
-  padding-left: 0.875rem;
-  padding-right: 0.875rem;
+  padding-left: 0;
+  padding-right: 0;
 }
 
 .sidebar-section-title {
   position: relative;
   display: flex;
   align-items: center;
-  min-height: 1.25rem;
-  margin-bottom: 0.5rem;
-  @apply text-gray-500 dark:text-dark-400;
-  font-size: 0.6875rem;
-  font-weight: 600;
+  min-height: 1.5625rem;
+  margin: 0;
+  padding: 0.1875rem 1rem 0.25rem;
+  color: rgb(156 163 175);
+  font-size: 0.75rem;
+  font-weight: 400;
+  line-height: 1.125rem;
   letter-spacing: 0;
   text-transform: none;
   overflow: hidden;
@@ -1053,31 +1008,15 @@ onBeforeUnmount(() => {
     transform 0.16s ease;
 }
 
-.sidebar-section-title::after {
-  content: '';
-  position: absolute;
-  left: 0.75rem;
-  right: 0.75rem;
-  top: 50%;
-  height: 1px;
-  background: rgb(229 231 235);
-  opacity: 0;
-  transform: translateY(-50%);
-  transition: opacity 0.18s ease;
-}
-
-:global(.dark) .sidebar-section-title::after {
-  background: rgb(55 65 81);
-}
-
 .sidebar-section-title-text-collapsed {
   opacity: 0;
   transform: translateX(-4px);
 }
 
-.sidebar-section-title-collapsed::after {
-  opacity: 1;
-  transition-delay: 0.08s;
+.sidebar-section-title-collapsed {
+  min-height: 0;
+  height: 0;
+  padding: 0;
 }
 
 .sidebar-label {
@@ -1112,6 +1051,11 @@ onBeforeUnmount(() => {
   color: currentColor;
 }
 
+.sidebar-api-key-icon {
+  --key-icon-color: currentColor;
+  --key-icon-dot-color: currentColor;
+}
+
 .sidebar-svg-icon :deep(svg) {
   display: block;
   width: 1.25rem;
@@ -1120,11 +1064,45 @@ onBeforeUnmount(() => {
 
 @media (prefers-reduced-motion: reduce) {
   .sidebar,
-  .sidebar-brand,
   .sidebar-label,
-  .sidebar-section-title-text,
-  .sidebar-section-title::after {
+  .sidebar-section-title-text {
     transition-duration: 0.01ms;
+  }
+}
+
+@media (min-width: 1024px) {
+  .sidebar {
+    top: 5.0625rem;
+    right: auto;
+    bottom: 1rem;
+    left: 0.5rem;
+    height: auto;
+    border-width: 1px;
+    border-radius: 1rem;
+  }
+
+  .sidebar-mobile-hidden {
+    transform: translateX(0);
+  }
+}
+
+@media (max-width: 1023px) {
+  .sidebar {
+    top: 5.0625rem;
+    bottom: 1rem;
+    left: 0.5rem;
+    height: auto;
+    border-width: 1px;
+    border-radius: 1rem;
+    background: rgb(255 255 255 / 0.94) !important;
+  }
+
+  :global(.dark .sidebar) {
+    background: rgb(11 15 26 / 0.96) !important;
+  }
+
+  .sidebar-mobile-hidden {
+    transform: translateX(calc(-100% - 0.5rem));
   }
 }
 </style>

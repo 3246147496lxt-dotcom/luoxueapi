@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync"
 	"sync/atomic"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
@@ -61,6 +62,14 @@ type SettingService struct {
 
 	cyberSessionBlockRuntimeCache atomic.Value // *cachedCyberSessionBlockRuntime
 	cyberSessionBlockRuntimeSF    singleflight.Group
+
+	// publicModelCatalogRuntimeCache keeps the anonymous feature gate off the
+	// settings database hot path. It deliberately caches the disabled state too:
+	// the guard runs before the public limiter so disabled deployments must not
+	// turn an unauthenticated request flood into a database request flood.
+	publicModelCatalogRuntimeCache atomic.Pointer[cachedPublicModelCatalogRuntime]
+	publicModelCatalogRuntimeSF    singleflight.Group
+	publicModelCatalogRuntimeMu    sync.Mutex
 
 	// openAIQuotaAutoPauseSettingsCache holds the most recently observed quota auto-pause
 	// settings. GetOpenAIQuotaAutoPauseSettings reads this atomic.Value on the request hot

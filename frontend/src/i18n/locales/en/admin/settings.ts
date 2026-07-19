@@ -30,6 +30,13 @@ export default {
           enabled: 'Enable Available Channels',
           enabledHint: 'When off, the sidebar entry is hidden and the endpoint returns an empty list.',
         },
+        publicModelCatalog: {
+          title: 'Public Model Catalog',
+          description: 'Control the model catalog that can be viewed without signing in. Only explicitly published models that still pass pricing validation are shown. Disabled by default.',
+          configureLink: 'Review and publish models in Model Catalog',
+          enabled: 'Enable Public Model Catalog',
+          enabledHint: 'When off, the public page and anonymous endpoint return 404 while catalog drafts and publication state remain saved.',
+        },
         riskControl: {
           title: 'Risk Control',
           description: 'Enable the content moderation menu and gateway audit entry point. Disabled by default.',

@@ -46,6 +46,39 @@ func TestParsePricingData_ParsesPriorityAndServiceTierFields(t *testing.T) {
 	require.True(t, pricing.SupportsServiceTier)
 }
 
+func TestGetExactModelPricing_DoesNotUseAliasesOrGenericPathSegments(t *testing.T) {
+	svc := &PricingService{pricingData: map[string]*LiteLLMModelPricing{
+		"gpt-5.6-sol":    {InputCostPerToken: 1},
+		"foo":            {InputCostPerToken: 2},
+		"gemini-2.5-pro": {InputCostPerToken: 3},
+	}}
+
+	_, pricing := svc.GetExactModelPricing("gpt-5.6")
+	require.Nil(t, pricing, "an OpenAI alias must not become a public exact price")
+	_, pricing = svc.GetExactModelPricing("vendor/foo")
+	require.Nil(t, pricing, "an arbitrary path must not match by last segment")
+
+	modelID, pricing := svc.GetExactModelPricing("models/foo")
+	require.Equal(t, "foo", modelID)
+	require.NotNil(t, pricing)
+	modelID, pricing = svc.GetExactModelPricing("projects/demo/locations/us/publishers/google/models/gemini-2.5-pro")
+	require.Equal(t, "gemini-2.5-pro", modelID)
+	require.NotNil(t, pricing)
+}
+
+func TestParsePricingData_PreservesExplicitZeroPresence(t *testing.T) {
+	svc := &PricingService{}
+	data, err := svc.parsePricingData([]byte(`{
+		"free-model": {"input_cost_per_token": 0, "output_cost_per_token": 0},
+		"input-only": {"input_cost_per_token": 0}
+	}`))
+	require.NoError(t, err)
+	require.True(t, data["free-model"].InputCostPerTokenSet)
+	require.True(t, data["free-model"].OutputCostPerTokenSet)
+	require.True(t, data["input-only"].InputCostPerTokenSet)
+	require.False(t, data["input-only"].OutputCostPerTokenSet)
+}
+
 func TestBillingService_GPT56CacheWritePricingUsesOfficialMultiplier(t *testing.T) {
 	tests := []struct {
 		model             string

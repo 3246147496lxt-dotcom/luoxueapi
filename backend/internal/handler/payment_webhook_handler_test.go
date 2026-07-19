@@ -3,10 +3,12 @@
 package handler
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -141,10 +143,25 @@ func TestWebhookConstants(t *testing.T) {
 	t.Run("maxWebhookBodySize is 1MB", func(t *testing.T) {
 		assert.Equal(t, int64(1<<20), int64(maxWebhookBodySize))
 	})
+}
 
-	t.Run("webhookLogTruncateLen is 200", func(t *testing.T) {
-		assert.Equal(t, 200, webhookLogTruncateLen)
-	})
+func TestLogPaymentWebhookVerifyFailureOmitsRawBody(t *testing.T) {
+	var output bytes.Buffer
+	previous := slog.Default()
+	slog.SetDefault(slog.New(slog.NewJSONHandler(&output, nil)))
+	t.Cleanup(func() { slog.SetDefault(previous) })
+
+	const sensitiveBody = "out_trade_no=sub2_42&buyer_email=secret%40example.com&sign=private-signature"
+	logPaymentWebhookVerifyFailure(payment.TypeAlipay, http.MethodPost, sensitiveBody, errors.New("invalid signature"))
+
+	logged := output.String()
+	assert.Contains(t, logged, `"provider":"alipay"`)
+	assert.Contains(t, logged, `"bodyLen":`)
+	assert.NotContains(t, logged, "rawBody")
+	assert.NotContains(t, logged, sensitiveBody)
+	assert.NotContains(t, logged, "secret%40example.com")
+	assert.NotContains(t, logged, "secret@example.com")
+	assert.NotContains(t, logged, "private-signature")
 }
 
 func TestExtractOutTradeNo(t *testing.T) {

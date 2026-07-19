@@ -1,0 +1,148 @@
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { flushPromises, mount } from '@vue/test-utils'
+import RedeemCodePanel from '../RedeemCodePanel.vue'
+
+const redeem = vi.hoisted(() => vi.fn())
+const getHistory = vi.hoisted(() => vi.fn())
+const refreshUser = vi.hoisted(() => vi.fn())
+const fetchActiveSubscriptions = vi.hoisted(() => vi.fn())
+const showSuccess = vi.hoisted(() => vi.fn())
+const showError = vi.hoisted(() => vi.fn())
+const showWarning = vi.hoisted(() => vi.fn())
+const user = vi.hoisted(() => ({ balance: 5, concurrency: 2 }))
+
+vi.mock('vue-i18n', async () => {
+  const actual = await vi.importActual<typeof import('vue-i18n')>('vue-i18n')
+  return {
+    ...actual,
+    useI18n: () => ({
+      t: (key: string, params?: Record<string, unknown>) => params ? `${key}:${JSON.stringify(params)}` : key,
+    }),
+  }
+})
+
+vi.mock('@/stores/auth', () => ({
+  useAuthStore: () => ({ user, refreshUser }),
+}))
+
+vi.mock('@/stores/app', () => ({
+  useAppStore: () => ({
+    contactInfo: 'support@example.com',
+    cachedPublicSettings: null,
+    showSuccess,
+    showError,
+    showWarning,
+  }),
+}))
+
+vi.mock('@/stores/subscriptions', () => ({
+  useSubscriptionStore: () => ({ fetchActiveSubscriptions }),
+}))
+
+vi.mock('@/api/redeem', () => ({
+  redeemAPI: { redeem, getHistory },
+}))
+
+function redeemResult(overrides: Record<string, unknown> = {}) {
+  return {
+    id: 1,
+    code: 'CODE-001',
+    type: 'balance',
+    value: 10,
+    status: 'used',
+    used_at: '2026-07-19T00:00:00Z',
+    created_at: '2026-07-18T00:00:00Z',
+    ...overrides,
+  }
+}
+
+describe('RedeemCodePanel', () => {
+  beforeEach(() => {
+    user.balance = 5
+    user.concurrency = 2
+    redeem.mockReset()
+    getHistory.mockReset().mockResolvedValue([])
+    refreshUser.mockReset().mockImplementation(async () => {
+      user.balance = 15
+    })
+    fetchActiveSubscriptions.mockReset().mockResolvedValue(undefined)
+    showSuccess.mockReset()
+    showError.mockReset()
+    showWarning.mockReset()
+  })
+
+  it('loads history independently and exposes an accessible redemption form', async () => {
+    const wrapper = mount(RedeemCodePanel)
+    await flushPromises()
+
+    expect(getHistory).toHaveBeenCalledTimes(1)
+    expect(wrapper.get('section').attributes('aria-labelledby')).toBe('redeem-panel-title')
+    expect(wrapper.get('input').attributes('spellcheck')).toBe('false')
+    expect(wrapper.get('button[type="submit"]').attributes()).toHaveProperty('disabled')
+  })
+
+  it('trims the code, refreshes the account, and renders a live success result', async () => {
+    redeem.mockResolvedValue(redeemResult())
+    const wrapper = mount(RedeemCodePanel)
+    await flushPromises()
+
+    await wrapper.get('input').setValue('  CODE-001  ')
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+
+    expect(redeem).toHaveBeenCalledWith('CODE-001')
+    expect(refreshUser).toHaveBeenCalledTimes(1)
+    expect(wrapper.get('[role="status"]').text()).toContain('redeem.balanceRedeemSummary')
+    expect(wrapper.get('[role="status"]').text()).toContain('"balance":"15.00"')
+    expect(wrapper.get('input').element.value).toBe('')
+    expect(showSuccess).toHaveBeenCalledWith('redeem.codeRedeemSuccess')
+  })
+
+  it('refreshes active subscriptions after redeeming a subscription code', async () => {
+    redeem.mockResolvedValue(redeemResult({
+      type: 'subscription',
+      value: 30,
+      validity_days: 30,
+      group: { id: 3, name: 'Pro' },
+    }))
+    const wrapper = mount(RedeemCodePanel)
+    await flushPromises()
+
+    await wrapper.get('input').setValue('SUB-001')
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+
+    expect(fetchActiveSubscriptions).toHaveBeenCalledWith(true)
+    expect(wrapper.get('[role="status"]').text()).toContain('redeem.subscriptionRedeemSummary')
+  })
+
+  it('keeps a successful redemption when refreshing the account fails', async () => {
+    redeem.mockResolvedValue(redeemResult())
+    refreshUser.mockRejectedValue(new Error('temporary refresh failure'))
+    const wrapper = mount(RedeemCodePanel)
+    await flushPromises()
+
+    await wrapper.get('input').setValue('CODE-001')
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+
+    expect(wrapper.get('[role="status"]').text()).toContain('redeem.balanceRedeemSummary')
+    expect(showSuccess).toHaveBeenCalledWith('redeem.codeRedeemSuccess')
+    expect(showWarning).toHaveBeenCalledWith('redeem.accountRefreshFailed')
+    expect(showError).not.toHaveBeenCalled()
+  })
+
+  it('keeps the entered code and shows the normalized backend message on failure', async () => {
+    redeem.mockRejectedValue({ message: '兑换码已被使用' })
+    const wrapper = mount(RedeemCodePanel)
+    await flushPromises()
+
+    await wrapper.get('input').setValue('USED-001')
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+
+    expect(wrapper.get('[role="alert"]').text()).toContain('兑换码已被使用')
+    expect(wrapper.get('input').element.value).toBe('USED-001')
+    expect(showError).toHaveBeenCalledWith('redeem.redeemFailed')
+  })
+})

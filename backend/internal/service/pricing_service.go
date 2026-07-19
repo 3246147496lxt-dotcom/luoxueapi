@@ -126,6 +126,37 @@ type LiteLLMModelPricing struct {
 	OutputCostPerImage                  float64 `json:"output_cost_per_image"`       // 图片生成模型每张图片价格
 	OutputCostPerImageToken             float64 `json:"output_cost_per_image_token"` // 图片输出 token 价格
 	InputCostPerImageToken              float64 `json:"input_cost_per_image_token"`  // 图片输入 token 价格（如 gpt-image-2 图片编辑）
+	MaxInputTokens                      int64   `json:"max_input_tokens,omitempty"`
+	MaxOutputTokens                     int64   `json:"max_output_tokens,omitempty"`
+	SupportsFunctionCalling             bool    `json:"supports_function_calling"`
+	SupportsParallelFunctionCalling     bool    `json:"supports_parallel_function_calling"`
+	SupportsVision                      bool    `json:"supports_vision"`
+	SupportsReasoning                   bool    `json:"supports_reasoning"`
+	SupportsPDFInput                    bool    `json:"supports_pdf_input"`
+	SupportsToolChoice                  bool    `json:"supports_tool_choice"`
+	SupportsResponseSchema              bool    `json:"supports_response_schema"`
+	SupportsWebSearch                   bool    `json:"supports_web_search"`
+	SupportsComputerUse                 bool    `json:"supports_computer_use"`
+	SupportsAudioInput                  bool    `json:"supports_audio_input"`
+	SupportsAudioOutput                 bool    `json:"supports_audio_output"`
+	SupportsVideoInput                  bool    `json:"supports_video_input"`
+	SupportsCodeExecution               bool    `json:"supports_code_execution"`
+	SupportsFileSearch                  bool    `json:"supports_file_search"`
+	SupportsURLContext                  bool    `json:"supports_url_context"`
+	SupportsSystemMessages              bool    `json:"supports_system_messages"`
+
+	// Presence bits preserve the difference between an explicitly free price
+	// (JSON value 0) and a price field omitted by the upstream metadata source.
+	// Existing billing code continues to use the numeric fields; the public
+	// catalog uses these bits so it never labels an unknown price as free (or
+	// rejects an explicitly free model as unpriced).
+	InputCostPerTokenSet           bool `json:"-"`
+	OutputCostPerTokenSet          bool `json:"-"`
+	CacheCreationInputTokenCostSet bool `json:"-"`
+	CacheReadInputTokenCostSet     bool `json:"-"`
+	OutputCostPerImageSet          bool `json:"-"`
+	OutputCostPerImageTokenSet     bool `json:"-"`
+	InputCostPerImageTokenSet      bool `json:"-"`
 
 	// TokenPricingAbsent 表示源数据中 input/output token 价格均缺失（仅有图片价）。
 	// 此类条目只可用于图片计费，token 计费必须回退到 fallback 或 fail-closed，
@@ -160,6 +191,24 @@ type LiteLLMRawEntry struct {
 	OutputCostPerImage                  *float64 `json:"output_cost_per_image"`
 	OutputCostPerImageToken             *float64 `json:"output_cost_per_image_token"`
 	InputCostPerImageToken              *float64 `json:"input_cost_per_image_token"`
+	MaxInputTokens                      *int64   `json:"max_input_tokens"`
+	MaxOutputTokens                     *int64   `json:"max_output_tokens"`
+	SupportsFunctionCalling             bool     `json:"supports_function_calling"`
+	SupportsParallelFunctionCalling     bool     `json:"supports_parallel_function_calling"`
+	SupportsVision                      bool     `json:"supports_vision"`
+	SupportsReasoning                   bool     `json:"supports_reasoning"`
+	SupportsPDFInput                    bool     `json:"supports_pdf_input"`
+	SupportsToolChoice                  bool     `json:"supports_tool_choice"`
+	SupportsResponseSchema              bool     `json:"supports_response_schema"`
+	SupportsWebSearch                   bool     `json:"supports_web_search"`
+	SupportsComputerUse                 bool     `json:"supports_computer_use"`
+	SupportsAudioInput                  bool     `json:"supports_audio_input"`
+	SupportsAudioOutput                 bool     `json:"supports_audio_output"`
+	SupportsVideoInput                  bool     `json:"supports_video_input"`
+	SupportsCodeExecution               bool     `json:"supports_code_execution"`
+	SupportsFileSearch                  bool     `json:"supports_file_search"`
+	SupportsURLContext                  bool     `json:"supports_url_context"`
+	SupportsSystemMessages              bool     `json:"supports_system_messages"`
 }
 
 // PricingService 动态价格服务
@@ -174,6 +223,16 @@ type PricingService struct {
 	// 停止信号
 	stopCh chan struct{}
 	wg     sync.WaitGroup
+}
+
+// LastUpdated returns the timestamp of the exact metadata/pricing snapshot.
+func (s *PricingService) LastUpdated() time.Time {
+	if s == nil {
+		return time.Time{}
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.lastUpdated
 }
 
 // NewPricingService 创建价格服务
@@ -442,11 +501,40 @@ func (s *PricingService) parsePricingData(body []byte) (map[string]*LiteLLMModel
 		}
 
 		pricing := &LiteLLMModelPricing{
-			LiteLLMProvider:       entry.LiteLLMProvider,
-			Mode:                  entry.Mode,
-			SupportsPromptCaching: entry.SupportsPromptCaching,
-			SupportsServiceTier:   entry.SupportsServiceTier,
-			TokenPricingAbsent:    entry.InputCostPerToken == nil && entry.OutputCostPerToken == nil,
+			LiteLLMProvider:                 entry.LiteLLMProvider,
+			Mode:                            entry.Mode,
+			SupportsPromptCaching:           entry.SupportsPromptCaching,
+			SupportsServiceTier:             entry.SupportsServiceTier,
+			SupportsFunctionCalling:         entry.SupportsFunctionCalling,
+			SupportsParallelFunctionCalling: entry.SupportsParallelFunctionCalling,
+			SupportsVision:                  entry.SupportsVision,
+			SupportsReasoning:               entry.SupportsReasoning,
+			SupportsPDFInput:                entry.SupportsPDFInput,
+			SupportsToolChoice:              entry.SupportsToolChoice,
+			SupportsResponseSchema:          entry.SupportsResponseSchema,
+			SupportsWebSearch:               entry.SupportsWebSearch,
+			SupportsComputerUse:             entry.SupportsComputerUse,
+			SupportsAudioInput:              entry.SupportsAudioInput,
+			SupportsAudioOutput:             entry.SupportsAudioOutput,
+			SupportsVideoInput:              entry.SupportsVideoInput,
+			SupportsCodeExecution:           entry.SupportsCodeExecution,
+			SupportsFileSearch:              entry.SupportsFileSearch,
+			SupportsURLContext:              entry.SupportsURLContext,
+			SupportsSystemMessages:          entry.SupportsSystemMessages,
+			TokenPricingAbsent:              entry.InputCostPerToken == nil && entry.OutputCostPerToken == nil,
+			InputCostPerTokenSet:            entry.InputCostPerToken != nil,
+			OutputCostPerTokenSet:           entry.OutputCostPerToken != nil,
+			CacheCreationInputTokenCostSet:  entry.CacheCreationInputTokenCost != nil,
+			CacheReadInputTokenCostSet:      entry.CacheReadInputTokenCost != nil,
+			OutputCostPerImageSet:           entry.OutputCostPerImage != nil,
+			OutputCostPerImageTokenSet:      entry.OutputCostPerImageToken != nil,
+			InputCostPerImageTokenSet:       entry.InputCostPerImageToken != nil,
+		}
+		if entry.MaxInputTokens != nil {
+			pricing.MaxInputTokens = *entry.MaxInputTokens
+		}
+		if entry.MaxOutputTokens != nil {
+			pricing.MaxOutputTokens = *entry.MaxOutputTokens
 		}
 
 		if entry.InputCostPerToken != nil {
@@ -687,6 +775,120 @@ func (s *PricingService) GetModelPricing(modelName string) *LiteLLMModelPricing 
 	}
 
 	return nil
+}
+
+// GetExactModelPricing resolves only canonical spelling/prefix variants. It
+// intentionally never strips version suffixes or falls back to a model family,
+// making it safe for public capability/context metadata.
+func (s *PricingService) GetExactModelPricing(modelName string) (string, *LiteLLMModelPricing) {
+	if s == nil || strings.TrimSpace(modelName) == "" {
+		return "", nil
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	modelLower := strings.ToLower(strings.TrimSpace(modelName))
+	for _, candidate := range buildExactModelLookupCandidates(modelLower) {
+		if pricing, ok := s.pricingData[candidate]; ok {
+			clone := *pricing
+			return candidate, applyModelSpecificLiteLLMPolicy(candidate, &clone)
+		}
+	}
+	return "", nil
+}
+
+func applyModelSpecificLiteLLMPolicy(model string, pricing *LiteLLMModelPricing) *LiteLLMModelPricing {
+	if pricing == nil {
+		return nil
+	}
+	before := modelSpecificPricingPolicyValues{
+		InputPrice: pricing.InputCostPerToken, InputPricePriority: pricing.InputCostPerTokenPriority,
+		CacheCreationPrice:          pricing.CacheCreationInputTokenCost,
+		CacheCreationPricePriority:  pricing.CacheCreationInputTokenCostPriority,
+		LongContextInputThreshold:   pricing.LongContextInputTokenThreshold,
+		LongContextInputMultiplier:  pricing.LongContextInputCostMultiplier,
+		LongContextOutputMultiplier: pricing.LongContextOutputCostMultiplier,
+	}
+	after := applyModelSpecificPricingPolicyValues(model, before)
+	if after == before {
+		return pricing
+	}
+	pricing.CacheCreationInputTokenCost = after.CacheCreationPrice
+	pricing.CacheCreationInputTokenCostPriority = after.CacheCreationPricePriority
+	pricing.LongContextInputTokenThreshold = after.LongContextInputThreshold
+	pricing.LongContextInputCostMultiplier = after.LongContextInputMultiplier
+	pricing.LongContextOutputCostMultiplier = after.LongContextOutputMultiplier
+	if after.CacheCreationPrice != before.CacheCreationPrice {
+		pricing.CacheCreationInputTokenCostSet = true
+	}
+	return pricing
+}
+
+// buildExactModelLookupCandidates permits only spelling-preserving resource
+// wrappers. It intentionally excludes OpenAI alias canonicalization and generic
+// last-path-segment matching, both of which are useful for resilient billing
+// fallback but too broad for a price published as belonging to an exact model.
+func buildExactModelLookupCandidates(modelLower string) []string {
+	modelLower = strings.ToLower(strings.TrimSpace(modelLower))
+	if modelLower == "" {
+		return nil
+	}
+	candidates := []string{modelLower}
+	if strings.HasPrefix(modelLower, "models/") {
+		candidates = append(candidates, strings.TrimPrefix(modelLower, "models/"))
+	}
+	const vertexPrefix = "publishers/google/models/"
+	if strings.HasPrefix(modelLower, vertexPrefix) {
+		candidates = append(candidates, strings.TrimPrefix(modelLower, vertexPrefix))
+	} else if marker := "/" + vertexPrefix; strings.Contains(modelLower, marker) {
+		idx := strings.LastIndex(modelLower, marker)
+		candidates = append(candidates, modelLower[idx+len(marker):])
+	}
+	seen := make(map[string]struct{}, len(candidates))
+	out := make([]string, 0, len(candidates))
+	for _, candidate := range candidates {
+		candidate = strings.TrimSpace(candidate)
+		if candidate == "" {
+			continue
+		}
+		if _, exists := seen[candidate]; exists {
+			continue
+		}
+		seen[candidate] = struct{}{}
+		out = append(out, candidate)
+	}
+	return out
+}
+
+// CapabilityNames exposes stable, frontend-oriented keys for exact model
+// metadata. False/unknown fields are omitted rather than inferred.
+func (p *LiteLLMModelPricing) CapabilityNames() []string {
+	if p == nil {
+		return []string{}
+	}
+	capabilities := make([]string, 0, 12)
+	appendIf := func(enabled bool, name string) {
+		if enabled {
+			capabilities = append(capabilities, name)
+		}
+	}
+	appendIf(p.SupportsReasoning, "reasoning")
+	appendIf(p.SupportsVision, "vision")
+	appendIf(p.SupportsFunctionCalling, "function_calling")
+	appendIf(p.SupportsParallelFunctionCalling, "parallel_function_calling")
+	appendIf(p.SupportsToolChoice, "tool_choice")
+	appendIf(p.SupportsPromptCaching, "prompt_caching")
+	appendIf(p.SupportsPDFInput, "pdf_input")
+	appendIf(p.SupportsWebSearch, "web_search")
+	appendIf(p.SupportsComputerUse, "computer_use")
+	appendIf(p.SupportsResponseSchema, "response_schema")
+	appendIf(p.SupportsAudioInput, "audio_input")
+	appendIf(p.SupportsAudioOutput, "audio_output")
+	appendIf(p.SupportsVideoInput, "video_input")
+	appendIf(p.SupportsCodeExecution, "code_execution")
+	appendIf(p.SupportsFileSearch, "file_search")
+	appendIf(p.SupportsURLContext, "url_context")
+	appendIf(p.SupportsSystemMessages, "system_messages")
+	return capabilities
 }
 
 func (s *PricingService) buildModelLookupCandidates(modelLower string) []string {

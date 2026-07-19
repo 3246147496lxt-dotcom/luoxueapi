@@ -102,6 +102,9 @@ func RegisterAdminRoutes(
 		// 渠道管理
 		registerChannelRoutes(admin, h)
 
+		// 公开模型广场编目
+		registerModelCatalogRoutes(admin, h)
+
 		// 渠道监控
 		registerChannelMonitorRoutes(admin, h)
 
@@ -113,6 +116,19 @@ func RegisterAdminRoutes(
 
 		// 操作审计日志
 		registerAuditLogRoutes(admin, h, stepUpAuth)
+	}
+}
+
+func registerModelCatalogRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
+	catalog := admin.Group("/model-catalog")
+	{
+		catalog.GET("/candidates", h.Admin.ModelCatalog.Candidates)
+		catalog.GET("", h.Admin.ModelCatalog.List)
+		catalog.POST("", h.Admin.ModelCatalog.Create)
+		catalog.GET("/:id", h.Admin.ModelCatalog.Get)
+		catalog.PUT("/:id", h.Admin.ModelCatalog.Update)
+		catalog.POST("/:id/publish", h.Admin.ModelCatalog.Publish)
+		catalog.POST("/:id/unpublish", h.Admin.ModelCatalog.Unpublish)
 	}
 }
 

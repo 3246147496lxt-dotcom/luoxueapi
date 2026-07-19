@@ -148,6 +148,142 @@ export default {
     }
   },
 
+  modelCatalog: {
+    navLabel: 'Models',
+    title: 'Model Catalog',
+    description: 'Browse published model IDs, capabilities, and public standard pricing without signing in.',
+    publicPriceNote: 'Prices shown here are public standard rates available to all registered users. Exclusive groups, subscription discounts, and user-specific multipliers are not included. Actual usage records are authoritative.',
+    modelCount: '{count} models',
+    pricingUpdatedAt: 'Pricing updated {time}',
+    searchLabel: 'Search models',
+    searchPlaceholder: 'Search by name, model ID, or capability',
+    filters: {
+      ariaLabel: 'Model filters',
+      provider: 'Provider',
+      category: 'Type',
+      all: 'All'
+    },
+    resultsTitle: 'Public models',
+    resultCount: '{count} results',
+    loading: 'Loading models',
+    featured: 'Featured',
+    copy: 'Copy',
+    copied: 'Copied',
+    copySuccess: 'Model ID copied',
+    copyModelAria: 'Copy model ID: {model}',
+    contextWindow: 'Context window',
+    maxOutput: 'Max output',
+    capabilities: 'Model capabilities',
+    unavailable: {
+      title: 'The model catalog is not available',
+      description: 'This site has not enabled the public model catalog, or there is no public catalog to display yet.'
+    },
+    error: {
+      title: 'Could not load the model catalog',
+      description: 'Model and pricing information is temporarily unavailable. Please try again.',
+      retry: 'Reload'
+    },
+    empty: {
+      title: 'No public models yet',
+      description: 'Models will appear here after an administrator reviews and publishes them.'
+    },
+    noResults: {
+      title: 'No matching models',
+      description: 'Try another keyword or clear the provider and type filters.',
+      clear: 'Clear filters'
+    },
+    providers: {
+      openai: 'OpenAI',
+      anthropic: 'Anthropic',
+      google: 'Google',
+      gemini: 'Google',
+      deepseek: 'DeepSeek',
+      moonshot: 'Kimi',
+      kimi: 'Kimi',
+      zhipu: 'Zhipu AI',
+      alibaba: 'Alibaba Cloud',
+      qwen: 'Qwen',
+      xai: 'xAI',
+      mistral: 'Mistral AI',
+      meta: 'Meta'
+    },
+    categories: {
+      chat: 'Text chat',
+      text: 'Text chat',
+      text_chat: 'Text chat',
+      reasoning: 'Reasoning',
+      code: 'Code',
+      embedding: 'Embedding',
+      image: 'Image',
+      audio: 'Audio',
+      video: 'Video',
+      multimodal: 'Multimodal',
+      other: 'Other'
+    },
+    capabilityLabels: {
+      vision: 'Vision',
+      image_input: 'Image input',
+      reasoning: 'Reasoning',
+      tools: 'Tool calling',
+      tool_calling: 'Tool calling',
+      function_calling: 'Function calling',
+      prompt_caching: 'Prompt caching',
+      caching: 'Caching',
+      cache: 'Caching',
+      pdf: 'PDF',
+      web_search: 'Web search',
+      structured_output: 'Structured output',
+      audio_input: 'Audio input',
+      audio_output: 'Audio output',
+      video: 'Video'
+    },
+    pricing: {
+      publicLabel: 'Public standard price',
+      details: 'Pricing details',
+      dialogTitle: 'Public pricing details',
+      dialogDescription: 'All prices are in USD. Token-based models are shown per million tokens. 0 means free; “—” means that price is not available.',
+      billingMode: 'Billing mode',
+      billingModes: {
+        token: 'Per token',
+        perRequest: 'Per request',
+        image: 'Per image'
+      },
+      input: 'Input',
+      output: 'Output',
+      cacheWrite: 'Cache write',
+      cacheWrite1h: 'Cache write (1 hour)',
+      cacheRead: 'Cache read',
+      priorityInput: 'Priority input',
+      priorityOutput: 'Priority output',
+      priorityCacheWrite: 'Priority cache write',
+      priorityCacheRead: 'Priority cache read',
+      imageInput: 'Image input',
+      imageOutput: 'Image output',
+      request: 'Request',
+      image: 'Image',
+      perMillionTokens: '/ 1M tokens',
+      perRequest: '/ request',
+      perImage: '/ image',
+      intervalTitle: 'Tiered pricing',
+      longContext: 'Long-context pricing',
+      peakRate: 'Peak hours {start}–{end} ({timezone}) are billed at {multiplier}×.',
+      unknown: 'Pricing not available'
+    },
+    cta: {
+      title: 'Found a model? Finish setup in the dashboard',
+      description: 'Create an API key, choose a valid group, and use the model ID in your client configuration.',
+      register: 'Sign up to use',
+      login: 'Sign in',
+      dashboard: 'Open dashboard',
+      availableChannels: 'View my available channels',
+      tutorial: 'View the tutorial'
+    },
+    meta: {
+      title: 'Model Catalog',
+      description: 'Browse published Luoxue API models, capabilities, context windows, and public standard pricing.'
+    }
+  },
+
   // Key Usage Query Page
   keyUsage: {
     title: 'API Key Usage',

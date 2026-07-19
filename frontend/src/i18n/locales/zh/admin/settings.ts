@@ -30,6 +30,13 @@ export default {
           enabled: '启用可用渠道',
           enabledHint: '关闭后用户端侧边栏入口隐藏，接口返回空数组。',
         },
+        publicModelCatalog: {
+          title: '公开模型广场',
+          description: '控制无需登录即可访问的公开模型目录。目录只展示管理员明确发布且仍通过报价校验的模型。默认关闭。',
+          configureLink: '前往 模型广场 审核并发布模型',
+          enabled: '启用公开模型广场',
+          enabledHint: '关闭后公开页面和匿名接口返回 404；后台草稿与发布状态仍会保留。',
+        },
         riskControl: {
           title: '风控中心',
           description: '启用内容审计菜单和全端点请求审核入口。默认关闭。',

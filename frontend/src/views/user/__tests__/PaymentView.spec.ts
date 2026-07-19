@@ -21,6 +21,7 @@ const showInfo = vi.hoisted(() => vi.fn())
 const showWarning = vi.hoisted(() => vi.fn())
 const getCheckoutInfo = vi.hoisted(() => vi.fn())
 const bridgeInvoke = vi.hoisted(() => vi.fn())
+const publicSettings = vi.hoisted(() => ({ payment_enabled: true }))
 
 vi.mock('vue-router', async () => {
   const actual = await vi.importActual<typeof import('vue-router')>('vue-router')
@@ -70,6 +71,7 @@ vi.mock('@/stores/subscriptions', () => ({
 
 vi.mock('@/stores', () => ({
   useAppStore: () => ({
+    cachedPublicSettings: publicSettings,
     showError,
     showInfo,
     showWarning,
@@ -198,6 +200,54 @@ function oauthOrderFixture() {
     },
   }
 }
+
+describe('PaymentView integrated purchase surface', () => {
+  beforeEach(() => {
+    publicSettings.payment_enabled = true
+    routeState.path = '/purchase'
+    routeState.query = {}
+    getCheckoutInfo.mockReset().mockResolvedValue(checkoutInfoFixture())
+    fetchActiveSubscriptions.mockReset().mockResolvedValue(undefined)
+    showError.mockReset()
+  })
+
+  it('keeps the redeem panel available when online payment is disabled', async () => {
+    publicSettings.payment_enabled = false
+    const wrapper = shallowMount(PaymentView, {
+      global: {
+        stubs: {
+          AppLayout: { template: '<div><slot /></div>' },
+          RedeemCodePanel: { template: '<div data-test="redeem-panel" />' },
+          Teleport: true,
+          Transition: false,
+        },
+      },
+    })
+    await flushPromises()
+
+    expect(wrapper.find('[data-testid="payment-disabled-notice"]').exists()).toBe(true)
+    expect(wrapper.find('[data-test="redeem-panel"]').exists()).toBe(true)
+    publicSettings.payment_enabled = true
+  })
+
+  it('exposes the recharge and subscription switch as an accessible tablist', async () => {
+    const wrapper = shallowMount(PaymentView, {
+      global: {
+        stubs: {
+          AppLayout: { template: '<div><slot /></div>' },
+          Teleport: true,
+          Transition: false,
+        },
+      },
+    })
+    await flushPromises()
+
+    const tabs = wrapper.findAll('[role="tab"]')
+    expect(tabs).toHaveLength(2)
+    expect(tabs[0].attributes('aria-selected')).toBe('true')
+    expect(tabs[1].attributes('aria-selected')).toBe('false')
+  })
+})
 
 async function mountSubscriptionConfirm(options: Parameters<typeof checkoutInfoWithPlansFixture>[0] = {}) {
   vi.useRealTimers()

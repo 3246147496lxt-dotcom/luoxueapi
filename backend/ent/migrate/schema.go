@@ -1001,6 +1001,55 @@ var (
 			},
 		},
 	}
+	// ModelCatalogModelsColumns holds the columns for the "model_catalog_models" table.
+	ModelCatalogModelsColumns = []*schema.Column{
+		{Name: "id", Type: field.TypeInt64, Increment: true},
+		{Name: "slug", Type: field.TypeString, Unique: true, Size: 160},
+		{Name: "model", Type: field.TypeString, Size: 255},
+		{Name: "platform", Type: field.TypeString, Size: 64},
+		{Name: "metadata_model_id", Type: field.TypeString, Size: 255, Default: ""},
+		{Name: "display_name_zh", Type: field.TypeString, Size: 160, Default: ""},
+		{Name: "display_name_en", Type: field.TypeString, Size: 160, Default: ""},
+		{Name: "summary_zh", Type: field.TypeString, Default: "", SchemaType: map[string]string{"postgres": "text"}},
+		{Name: "summary_en", Type: field.TypeString, Default: "", SchemaType: map[string]string{"postgres": "text"}},
+		{Name: "provider", Type: field.TypeString, Size: 80, Default: ""},
+		{Name: "logo_key", Type: field.TypeString, Size: 80, Default: ""},
+		{Name: "category", Type: field.TypeString, Size: 80, Default: ""},
+		{Name: "tags", Type: field.TypeJSON},
+		{Name: "capabilities", Type: field.TypeJSON},
+		{Name: "context_window", Type: field.TypeInt64, Nullable: true},
+		{Name: "max_output_tokens", Type: field.TypeInt64, Nullable: true},
+		{Name: "public_group_id", Type: field.TypeInt64, Nullable: true},
+		{Name: "status", Type: field.TypeString, Size: 20, Default: "draft"},
+		{Name: "featured", Type: field.TypeBool, Default: false},
+		{Name: "sort_order", Type: field.TypeInt, Default: 0},
+		{Name: "published_at", Type: field.TypeTime, Nullable: true, SchemaType: map[string]string{"postgres": "timestamptz"}},
+		{Name: "created_at", Type: field.TypeTime, SchemaType: map[string]string{"postgres": "timestamptz"}},
+		{Name: "updated_at", Type: field.TypeTime, SchemaType: map[string]string{"postgres": "timestamptz"}},
+	}
+	// ModelCatalogModelsTable holds the schema information for the "model_catalog_models" table.
+	ModelCatalogModelsTable = &schema.Table{
+		Name:       "model_catalog_models",
+		Columns:    ModelCatalogModelsColumns,
+		PrimaryKey: []*schema.Column{ModelCatalogModelsColumns[0]},
+		Indexes: []*schema.Index{
+			{
+				Name:    "modelcatalogmodel_platform_model",
+				Unique:  true,
+				Columns: []*schema.Column{ModelCatalogModelsColumns[3], ModelCatalogModelsColumns[2]},
+			},
+			{
+				Name:    "modelcatalogmodel_status_featured_sort_order_id",
+				Unique:  false,
+				Columns: []*schema.Column{ModelCatalogModelsColumns[17], ModelCatalogModelsColumns[18], ModelCatalogModelsColumns[19], ModelCatalogModelsColumns[0]},
+			},
+			{
+				Name:    "modelcatalogmodel_public_group_id",
+				Unique:  false,
+				Columns: []*schema.Column{ModelCatalogModelsColumns[16]},
+			},
+		},
+	}
 	// PaymentAuditLogsColumns holds the columns for the "payment_audit_logs" table.
 	PaymentAuditLogsColumns = []*schema.Column{
 		{Name: "id", Type: field.TypeInt64, Increment: true},
@@ -2007,6 +2056,7 @@ var (
 		GroupsTable,
 		IdempotencyRecordsTable,
 		IdentityAdoptionDecisionsTable,
+		ModelCatalogModelsTable,
 		PaymentAuditLogsTable,
 		PaymentOrdersTable,
 		PaymentProviderInstancesTable,
@@ -2099,6 +2149,9 @@ func init() {
 	IdentityAdoptionDecisionsTable.ForeignKeys[1].RefTable = PendingAuthSessionsTable
 	IdentityAdoptionDecisionsTable.Annotation = &entsql.Annotation{
 		Table: "identity_adoption_decisions",
+	}
+	ModelCatalogModelsTable.Annotation = &entsql.Annotation{
+		Table: "model_catalog_models",
 	}
 	PaymentAuditLogsTable.Annotation = &entsql.Annotation{
 		Table: "payment_audit_logs",

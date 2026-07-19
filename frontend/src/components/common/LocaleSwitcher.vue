@@ -7,14 +7,20 @@
       @click="toggleDropdown"
       @keydown="handleTriggerKeydown"
       :disabled="switching"
-      class="flex h-11 min-h-11 w-11 min-w-11 items-center justify-center rounded-full bg-gray-100 text-blue-500 transition-colors hover:bg-gray-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60 dark:bg-dark-800 dark:text-blue-400 dark:hover:bg-dark-700 dark:focus-visible:ring-offset-dark-900"
+      class="relative flex items-center justify-center rounded-full text-blue-500 transition-colors duration-200 after:absolute after:-inset-1.5 after:content-[''] hover:bg-gray-100 active:bg-gray-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60 dark:text-blue-400 dark:hover:bg-dark-800 dark:active:bg-dark-700 dark:focus-visible:ring-offset-dark-900"
+      :class="[
+        compact
+          ? 'h-8 w-8'
+          : 'h-11 min-h-11 w-11 min-w-11',
+        { 'bg-gray-100 dark:bg-dark-800': isOpen }
+      ]"
       :title="currentLocale?.name"
       :aria-label="currentLocale?.name"
       aria-haspopup="menu"
       :aria-expanded="isOpen"
       :aria-controls="menuId"
     >
-      <Icon class="locale-switcher-icon" name="globe" size="md" aria-hidden="true" />
+      <LanguageIcon class="locale-switcher-icon h-5 w-5" />
     </button>
 
     <transition name="dropdown">
@@ -64,7 +70,14 @@
 import { ref, computed, nextTick, onMounted, onBeforeUnmount } from 'vue'
 import { useI18n } from 'vue-i18n'
 import Icon from '@/components/icons/Icon.vue'
+import LanguageIcon from '@/components/icons/LanguageIcon.vue'
 import { setLocale, availableLocales } from '@/i18n'
+
+withDefaults(defineProps<{
+  compact?: boolean
+}>(), {
+  compact: false,
+})
 
 const { locale } = useI18n()
 

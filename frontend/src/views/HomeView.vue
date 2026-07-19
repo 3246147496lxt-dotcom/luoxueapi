@@ -12,83 +12,7 @@
     <div v-else v-html="homeContent"></div>
   </div>
 
-  <div v-else class="home-page" :class="{ 'home-page--dark': isDark }">
-    <header class="home-header" :class="{ 'home-header--elevated': isHeaderElevated }">
-      <nav class="home-nav" :aria-label="t('home.nav.ariaLabel')">
-        <a href="#top" class="brand-link" @click="closeMobileMenu()">
-          <span class="brand-mark">
-            <img :src="siteLogo || '/logo.png'" :alt="siteName" width="40" height="40" />
-          </span>
-          <span class="brand-name">{{ siteName }}</span>
-        </a>
-
-        <div class="desktop-nav-links">
-          <a v-for="item in navItems" :key="item.href" :href="item.href">
-            {{ t(item.labelKey) }}
-          </a>
-          <a v-if="tutorialUrl" :href="tutorialUrl">{{ t('home.nav.tutorial') }}</a>
-        </div>
-
-        <div class="header-actions">
-          <div class="desktop-action"><LocaleSwitcher /></div>
-
-          <button
-            type="button"
-            class="icon-button"
-            :title="isDark ? t('home.switchToLight') : t('home.switchToDark')"
-            :aria-label="isDark ? t('home.switchToLight') : t('home.switchToDark')"
-            :aria-pressed="isDark"
-            @click="toggleTheme"
-          >
-            <Icon v-if="isDark" name="sun" size="md" aria-hidden="true" />
-            <Icon v-else name="moon" size="md" aria-hidden="true" />
-          </button>
-
-          <router-link class="header-account-link desktop-action" :to="headerAccountPath">
-            {{ headerAccountLabel }}
-            <Icon name="arrowRight" size="sm" aria-hidden="true" />
-          </router-link>
-
-          <button
-            ref="mobileMenuButtonRef"
-            type="button"
-            class="icon-button mobile-menu-button"
-            aria-controls="home-mobile-menu"
-            :aria-expanded="mobileMenuOpen"
-            :aria-label="mobileMenuOpen ? t('home.nav.closeMenu') : t('home.nav.openMenu')"
-            @click="mobileMenuOpen = !mobileMenuOpen"
-          >
-            <Icon :name="mobileMenuOpen ? 'x' : 'menu'" size="md" aria-hidden="true" />
-          </button>
-        </div>
-      </nav>
-
-      <transition name="mobile-menu">
-        <div v-if="mobileMenuOpen" id="home-mobile-menu" class="mobile-menu-panel">
-          <div class="mobile-menu-inner">
-            <a
-              v-for="item in navItems"
-              :key="item.href"
-              :href="item.href"
-              @click="closeMobileMenu()"
-            >
-              {{ t(item.labelKey) }}
-            </a>
-            <a v-if="tutorialUrl" :href="tutorialUrl" @click="closeMobileMenu()">
-              {{ t('home.nav.tutorial') }}
-            </a>
-            <div class="mobile-menu-footer">
-              <LocaleSwitcher />
-              <router-link :to="headerAccountPath" @click="closeMobileMenu()">
-                {{ headerAccountLabel }}
-                <Icon name="arrowRight" size="sm" aria-hidden="true" />
-              </router-link>
-            </div>
-          </div>
-        </div>
-      </transition>
-    </header>
-
+  <PublicSiteLayout v-else class="home-page" page="home">
     <main id="top">
       <section class="hero-section" aria-labelledby="home-hero-title">
         <div class="content-shell hero-layout">
@@ -311,26 +235,16 @@
       </section>
     </main>
 
-    <footer class="home-footer">
-      <div class="content-shell footer-layout">
-        <p>&copy; {{ currentYear }} {{ siteName }}. {{ t('home.footer.allRightsReserved') }}</p>
-        <nav :aria-label="t('home.nav.ariaLabel')">
-          <a v-if="tutorialUrl" :href="tutorialUrl">{{ t('home.footer.tutorial') }}</a>
-          <a v-if="docUrl" :href="docUrl">{{ t('home.footer.apiDocs') }}</a>
-          <router-link to="/monitor">{{ t('home.footer.channelStatus') }}</router-link>
-        </nav>
-      </div>
-    </footer>
-  </div>
+  </PublicSiteLayout>
 </template>
 
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAuthStore, useAppStore } from '@/stores'
-import LocaleSwitcher from '@/components/common/LocaleSwitcher.vue'
 import PlatformIcon from '@/components/common/PlatformIcon.vue'
 import Icon from '@/components/icons/Icon.vue'
+import PublicSiteLayout from '@/components/public/PublicSiteLayout.vue'
 import { useClipboard } from '@/composables/useClipboard'
 import { sanitizeUrl } from '@/utils/url'
 import type { GroupPlatform } from '@/types'
@@ -344,7 +258,6 @@ const appStore = useAppStore()
 const { copyToClipboard } = useClipboard()
 
 const siteName = computed(() => appStore.cachedPublicSettings?.site_name || appStore.siteName || '落雪API')
-const siteLogo = computed(() => sanitizeUrl(appStore.cachedPublicSettings?.site_logo || appStore.siteLogo || '', { allowRelative: true, allowDataUrl: true }))
 const docUrl = computed(() => sanitizeUrl(appStore.cachedPublicSettings?.doc_url || appStore.docUrl || ''))
 const apiBaseUrl = computed(() => appStore.cachedPublicSettings?.api_base_url || appStore.apiBaseUrl || '')
 const homeContent = computed(() => appStore.cachedPublicSettings?.home_content || '')
@@ -386,13 +299,6 @@ response = client.chat.completions.create(
 
 print(response.choices[0].message.content)`
 }))
-
-const navItems = [
-  { href: '#capabilities', labelKey: 'home.nav.capabilities' },
-  { href: '#steps', labelKey: 'home.nav.steps' },
-  { href: '#providers', labelKey: 'home.nav.providers' },
-  { href: '#faq', labelKey: 'home.nav.faq' }
-] as const
 
 const codeTabs = [
   { id: 'curl', labelKey: 'home.codeExample.tabs.curl' },
@@ -461,8 +367,6 @@ const homeProviders: ReadonlyArray<{
 ]
 
 const isAuthenticated = computed(() => authStore.isAuthenticated)
-const isAdmin = computed(() => authStore.isAdmin)
-const dashboardPath = computed(() => (isAdmin.value ? '/admin/dashboard' : '/dashboard'))
 const registrationEnabled = computed(
   () => appStore.cachedPublicSettings?.registration_enabled === true
 )
@@ -475,15 +379,6 @@ const primaryCta = computed(() => {
   }
   return { to: '/login', label: t('home.hero.login') }
 })
-const headerAccountPath = computed(() => (isAuthenticated.value ? dashboardPath.value : '/login'))
-const headerAccountLabel = computed(() =>
-  isAuthenticated.value ? t('home.dashboard') : t('home.login')
-)
-
-const isDark = ref(document.documentElement.classList.contains('dark'))
-const isHeaderElevated = ref(false)
-const mobileMenuOpen = ref(false)
-const mobileMenuButtonRef = ref<HTMLButtonElement | null>(null)
 const codeTabRefs = ref<HTMLButtonElement[]>([])
 const activeCode = ref<CodeTab>('curl')
 const copyStatus = ref<CopyStatus>('idle')
@@ -504,7 +399,6 @@ const copyAriaLabel = computed(() =>
   })
 )
 const copyLiveMessage = computed(() => (copyStatus.value === 'idle' ? '' : copyButtonLabel.value))
-const currentYear = computed(() => new Date().getFullYear())
 
 function selectCodeTab(tab: CodeTab) {
   activeCode.value = tab
@@ -545,34 +439,7 @@ async function copyActiveCode() {
   }, 2000)
 }
 
-function toggleTheme() {
-  isDark.value = !isDark.value
-  document.documentElement.classList.toggle('dark', isDark.value)
-  localStorage.setItem('theme', isDark.value ? 'dark' : 'light')
-}
-
-function closeMobileMenu(restoreFocus = false) {
-  mobileMenuOpen.value = false
-  if (restoreFocus) requestAnimationFrame(() => mobileMenuButtonRef.value?.focus())
-}
-
-function handleGlobalKeydown(event: KeyboardEvent) {
-  if (event.key === 'Escape' && mobileMenuOpen.value) closeMobileMenu(true)
-}
-
-function handleScroll() {
-  isHeaderElevated.value = window.scrollY > 12
-}
-
-onMounted(() => {
-  handleScroll()
-  window.addEventListener('scroll', handleScroll, { passive: true })
-  window.addEventListener('keydown', handleGlobalKeydown)
-})
-
 onBeforeUnmount(() => {
-  window.removeEventListener('scroll', handleScroll)
-  window.removeEventListener('keydown', handleGlobalKeydown)
   if (copyResetTimer) clearTimeout(copyResetTimer)
 })
 </script>
@@ -601,7 +468,7 @@ onBeforeUnmount(() => {
     "Microsoft YaHei", sans-serif;
 }
 
-.home-page.home-page--dark {
+.home-page.public-site-page--dark {
   --page: #0e1211;
   --surface: #111816;
   --surface-soft: #1a211e;
@@ -658,7 +525,7 @@ onBeforeUnmount(() => {
   box-shadow: 0 12px 32px rgba(15, 23, 42, 0.08);
 }
 
-.home-page--dark .home-header--elevated {
+.public-site-page--dark .home-header--elevated {
   box-shadow: 0 12px 32px rgba(0, 0, 0, 0.34);
 }
 
@@ -924,7 +791,7 @@ onBeforeUnmount(() => {
   box-shadow: 0 22px 54px rgba(15, 23, 42, 0.18);
 }
 
-.home-page--dark .code-window {
+.public-site-page--dark .code-window {
   box-shadow: 0 22px 54px rgba(0, 0, 0, 0.38);
 }
 

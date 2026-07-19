@@ -375,6 +375,10 @@ const (
 	// sidebar entry is hidden. Defaults to false (opt-in feature).
 	SettingKeyAvailableChannelsEnabled = "available_channels_enabled"
 
+	// SettingKeyPublicModelCatalogEnabled controls the anonymous model marketplace.
+	// It defaults to false and is evaluated together with backend_mode_enabled.
+	SettingKeyPublicModelCatalogEnabled = "public_model_catalog_enabled"
+
 	// SettingKeyUpstreamBillingProbeSettings stores the global enable switch and interval
 	// for probing remote Sub2API API-key billing metadata.
 	SettingKeyUpstreamBillingProbeSettings = "upstream_billing_probe_settings"

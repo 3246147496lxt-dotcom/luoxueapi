@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/timezone"
 )
@@ -220,6 +221,7 @@ func (s *SettingService) GetPublicSettings(ctx context.Context) (*PublicSettings
 		SettingKeyChannelMonitorEnabled,
 		SettingKeyChannelMonitorDefaultIntervalSeconds,
 		SettingKeyAvailableChannelsEnabled,
+		SettingKeyPublicModelCatalogEnabled,
 		SettingKeyAffiliateEnabled,
 		SettingKeyRiskControlEnabled,
 		SettingKeyAllowUserViewErrorRequests,
@@ -279,6 +281,7 @@ func (s *SettingService) GetPublicSettings(ctx context.Context) (*PublicSettings
 	if v, err := strconv.ParseFloat(settings[SettingKeyBalanceLowNotifyThreshold], 64); err == nil && v >= 0 {
 		balanceLowNotifyThreshold = v
 	}
+	backendModeEnabled := settings[SettingKeyBackendModeEnabled] == "true"
 
 	return &PublicSettings{
 		RegistrationEnabled:              settings[SettingKeyRegistrationEnabled] == "true",
@@ -316,7 +319,7 @@ func (s *SettingService) GetPublicSettings(ctx context.Context) (*PublicSettings
 		WeChatOAuthOpenEnabled:           weChatOpenEnabled,
 		WeChatOAuthMPEnabled:             weChatMPEnabled,
 		WeChatOAuthMobileEnabled:         weChatMobileEnabled,
-		BackendModeEnabled:               settings[SettingKeyBackendModeEnabled] == "true",
+		BackendModeEnabled:               backendModeEnabled,
 		PaymentEnabled:                   settings[SettingPaymentEnabled] == "true",
 		OIDCOAuthEnabled:                 oidcEnabled,
 		OIDCOAuthProviderName:            oidcProviderName,
@@ -330,7 +333,8 @@ func (s *SettingService) GetPublicSettings(ctx context.Context) (*PublicSettings
 		ChannelMonitorEnabled:                !isFalseSettingValue(settings[SettingKeyChannelMonitorEnabled]),
 		ChannelMonitorDefaultIntervalSeconds: parseChannelMonitorInterval(settings[SettingKeyChannelMonitorDefaultIntervalSeconds]),
 
-		AvailableChannelsEnabled: settings[SettingKeyAvailableChannelsEnabled] == "true",
+		AvailableChannelsEnabled:  settings[SettingKeyAvailableChannelsEnabled] == "true",
+		PublicModelCatalogEnabled: settings[SettingKeyPublicModelCatalogEnabled] == "true" && !backendModeEnabled,
 
 		AffiliateEnabled: settings[SettingKeyAffiliateEnabled] == "true",
 
@@ -399,6 +403,68 @@ func (s *SettingService) GetChannelMonitorRuntime(ctx context.Context) ChannelMo
 // switch consumed by the user-facing handler.
 type AvailableChannelsRuntime struct {
 	Enabled bool
+}
+
+// PublicModelCatalogRuntime is the fail-closed anonymous model-catalog gate.
+type PublicModelCatalogRuntime struct {
+	Enabled     bool
+	BackendMode bool
+}
+
+type cachedPublicModelCatalogRuntime struct {
+	value     PublicModelCatalogRuntime
+	expiresAt int64
+}
+
+const (
+	// Keep this deliberately short so out-of-band setting changes converge
+	// quickly while still bounding disabled anonymous traffic to one settings
+	// read per process and TTL window.
+	publicModelCatalogRuntimeCacheTTL  = 5 * time.Second
+	publicModelCatalogRuntimeDBTimeout = 2 * time.Second
+)
+
+func (s *SettingService) GetPublicModelCatalogRuntime(ctx context.Context) PublicModelCatalogRuntime {
+	if s == nil || s.settingRepo == nil {
+		return PublicModelCatalogRuntime{}
+	}
+	now := time.Now().UnixNano()
+	if cached := s.publicModelCatalogRuntimeCache.Load(); cached != nil && now < cached.expiresAt {
+		return cached.value
+	}
+
+	result, _, _ := s.publicModelCatalogRuntimeSF.Do("public_model_catalog_runtime", func() (any, error) {
+		s.publicModelCatalogRuntimeMu.Lock()
+		defer s.publicModelCatalogRuntimeMu.Unlock()
+
+		now := time.Now().UnixNano()
+		if cached := s.publicModelCatalogRuntimeCache.Load(); cached != nil && now < cached.expiresAt {
+			return cached.value, nil
+		}
+
+		dbCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), publicModelCatalogRuntimeDBTimeout)
+		defer cancel()
+		values, err := s.settingRepo.GetMultiple(dbCtx, []string{
+			SettingKeyPublicModelCatalogEnabled,
+			SettingKeyBackendModeEnabled,
+		})
+		runtime := PublicModelCatalogRuntime{}
+		if err == nil {
+			runtime.Enabled = values[SettingKeyPublicModelCatalogEnabled] == "true"
+			runtime.BackendMode = values[SettingKeyBackendModeEnabled] == "true"
+		}
+		// Errors are also cached as disabled. The gate is fail-closed, and an
+		// unhealthy settings store must not be amplified by anonymous traffic.
+		s.publicModelCatalogRuntimeCache.Store(&cachedPublicModelCatalogRuntime{
+			value:     runtime,
+			expiresAt: time.Now().Add(publicModelCatalogRuntimeCacheTTL).UnixNano(),
+		})
+		return runtime, nil
+	})
+	if runtime, ok := result.(PublicModelCatalogRuntime); ok {
+		return runtime
+	}
+	return PublicModelCatalogRuntime{}
 }
 
 // GetAvailableChannelsRuntime reads the available-channels feature switch directly
@@ -494,6 +560,7 @@ type PublicSettingsInjectionPayload struct {
 	ChannelMonitorEnabled                bool `json:"channel_monitor_enabled"`
 	ChannelMonitorDefaultIntervalSeconds int  `json:"channel_monitor_default_interval_seconds"`
 	AvailableChannelsEnabled             bool `json:"available_channels_enabled"`
+	PublicModelCatalogEnabled            bool `json:"public_model_catalog_enabled"`
 	AffiliateEnabled                     bool `json:"affiliate_enabled"`
 	RiskControlEnabled                   bool `json:"risk_control_enabled"`
 	AllowUserViewErrorRequests           bool `json:"allow_user_view_error_requests"`
@@ -559,6 +626,7 @@ func (s *SettingService) GetPublicSettingsForInjection(ctx context.Context) (any
 		ChannelMonitorEnabled:                settings.ChannelMonitorEnabled,
 		ChannelMonitorDefaultIntervalSeconds: settings.ChannelMonitorDefaultIntervalSeconds,
 		AvailableChannelsEnabled:             settings.AvailableChannelsEnabled,
+		PublicModelCatalogEnabled:            settings.PublicModelCatalogEnabled,
 		AffiliateEnabled:                     settings.AffiliateEnabled,
 		RiskControlEnabled:                   settings.RiskControlEnabled,
 		AllowUserViewErrorRequests:           settings.AllowUserViewErrorRequests,

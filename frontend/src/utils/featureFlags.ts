@@ -104,6 +104,11 @@ export const FeatureFlags = {
     mode: 'opt-in',
     label: 'Available Channels',
   }),
+  publicModelCatalog: defineFlag({
+    key: 'public_model_catalog_enabled',
+    mode: 'opt-in',
+    label: 'Public Model Catalog',
+  }),
   payment: defineFlag({
     key: 'payment_enabled',
     mode: 'opt-out',

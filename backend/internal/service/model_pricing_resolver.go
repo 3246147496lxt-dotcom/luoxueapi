@@ -291,19 +291,38 @@ func intervalToModelPricing(iv *PricingInterval, supportsCacheBreakdown bool, ch
 
 // GetRequestTierPrice 根据层级标签获取按次价格
 func (r *ModelPricingResolver) GetRequestTierPrice(resolved *ResolvedPricing, tierLabel string) float64 {
+	price, _ := r.FindRequestTierPrice(resolved, tierLabel)
+	return price
+}
+
+// FindRequestTierPrice 返回按次价格及是否精确命中。found 用来区分
+// “显式免费”与“未配置”，避免零价 tier 被当成 miss 后回退到默认价。
+func (r *ModelPricingResolver) FindRequestTierPrice(resolved *ResolvedPricing, tierLabel string) (float64, bool) {
+	if resolved == nil {
+		return 0, false
+	}
 	for _, tier := range resolved.RequestTiers {
 		if tier.TierLabel == tierLabel && tier.PerRequestPrice != nil {
-			return *tier.PerRequestPrice
+			return *tier.PerRequestPrice, true
 		}
 	}
-	return 0
+	return 0, false
 }
 
 // GetRequestTierPriceByContext 根据 context token 数获取按次价格
 func (r *ModelPricingResolver) GetRequestTierPriceByContext(resolved *ResolvedPricing, totalContextTokens int) float64 {
+	price, _ := r.FindRequestTierPriceByContext(resolved, totalContextTokens)
+	return price
+}
+
+// FindRequestTierPriceByContext 与 FindRequestTierPrice 一样保留显式零价的存在性。
+func (r *ModelPricingResolver) FindRequestTierPriceByContext(resolved *ResolvedPricing, totalContextTokens int) (float64, bool) {
+	if resolved == nil {
+		return 0, false
+	}
 	iv := FindMatchingInterval(resolved.RequestTiers, totalContextTokens)
 	if iv != nil && iv.PerRequestPrice != nil {
-		return *iv.PerRequestPrice
+		return *iv.PerRequestPrice, true
 	}
-	return 0
+	return 0, false
 }

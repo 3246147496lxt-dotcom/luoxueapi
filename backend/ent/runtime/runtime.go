@@ -23,6 +23,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/ent/group"
 	"github.com/Wei-Shaw/sub2api/ent/idempotencyrecord"
 	"github.com/Wei-Shaw/sub2api/ent/identityadoptiondecision"
+	"github.com/Wei-Shaw/sub2api/ent/modelcatalogmodel"
 	"github.com/Wei-Shaw/sub2api/ent/paymentauditlog"
 	"github.com/Wei-Shaw/sub2api/ent/paymentorder"
 	"github.com/Wei-Shaw/sub2api/ent/paymentproviderinstance"
@@ -1155,6 +1156,138 @@ func init() {
 	identityadoptiondecisionDescDecidedAt := identityadoptiondecisionFields[4].Descriptor()
 	// identityadoptiondecision.DefaultDecidedAt holds the default value on creation for the decided_at field.
 	identityadoptiondecision.DefaultDecidedAt = identityadoptiondecisionDescDecidedAt.Default.(func() time.Time)
+	modelcatalogmodelFields := schema.ModelCatalogModel{}.Fields()
+	_ = modelcatalogmodelFields
+	// modelcatalogmodelDescSlug is the schema descriptor for slug field.
+	modelcatalogmodelDescSlug := modelcatalogmodelFields[0].Descriptor()
+	// modelcatalogmodel.SlugValidator is a validator for the "slug" field. It is called by the builders before save.
+	modelcatalogmodel.SlugValidator = func() func(string) error {
+		validators := modelcatalogmodelDescSlug.Validators
+		fns := [...]func(string) error{
+			validators[0].(func(string) error),
+			validators[1].(func(string) error),
+		}
+		return func(slug string) error {
+			for _, fn := range fns {
+				if err := fn(slug); err != nil {
+					return err
+				}
+			}
+			return nil
+		}
+	}()
+	// modelcatalogmodelDescModel is the schema descriptor for model field.
+	modelcatalogmodelDescModel := modelcatalogmodelFields[1].Descriptor()
+	// modelcatalogmodel.ModelValidator is a validator for the "model" field. It is called by the builders before save.
+	modelcatalogmodel.ModelValidator = func() func(string) error {
+		validators := modelcatalogmodelDescModel.Validators
+		fns := [...]func(string) error{
+			validators[0].(func(string) error),
+			validators[1].(func(string) error),
+		}
+		return func(model string) error {
+			for _, fn := range fns {
+				if err := fn(model); err != nil {
+					return err
+				}
+			}
+			return nil
+		}
+	}()
+	// modelcatalogmodelDescPlatform is the schema descriptor for platform field.
+	modelcatalogmodelDescPlatform := modelcatalogmodelFields[2].Descriptor()
+	// modelcatalogmodel.PlatformValidator is a validator for the "platform" field. It is called by the builders before save.
+	modelcatalogmodel.PlatformValidator = func() func(string) error {
+		validators := modelcatalogmodelDescPlatform.Validators
+		fns := [...]func(string) error{
+			validators[0].(func(string) error),
+			validators[1].(func(string) error),
+		}
+		return func(platform string) error {
+			for _, fn := range fns {
+				if err := fn(platform); err != nil {
+					return err
+				}
+			}
+			return nil
+		}
+	}()
+	// modelcatalogmodelDescMetadataModelID is the schema descriptor for metadata_model_id field.
+	modelcatalogmodelDescMetadataModelID := modelcatalogmodelFields[3].Descriptor()
+	// modelcatalogmodel.DefaultMetadataModelID holds the default value on creation for the metadata_model_id field.
+	modelcatalogmodel.DefaultMetadataModelID = modelcatalogmodelDescMetadataModelID.Default.(string)
+	// modelcatalogmodel.MetadataModelIDValidator is a validator for the "metadata_model_id" field. It is called by the builders before save.
+	modelcatalogmodel.MetadataModelIDValidator = modelcatalogmodelDescMetadataModelID.Validators[0].(func(string) error)
+	// modelcatalogmodelDescDisplayNameZh is the schema descriptor for display_name_zh field.
+	modelcatalogmodelDescDisplayNameZh := modelcatalogmodelFields[4].Descriptor()
+	// modelcatalogmodel.DefaultDisplayNameZh holds the default value on creation for the display_name_zh field.
+	modelcatalogmodel.DefaultDisplayNameZh = modelcatalogmodelDescDisplayNameZh.Default.(string)
+	// modelcatalogmodel.DisplayNameZhValidator is a validator for the "display_name_zh" field. It is called by the builders before save.
+	modelcatalogmodel.DisplayNameZhValidator = modelcatalogmodelDescDisplayNameZh.Validators[0].(func(string) error)
+	// modelcatalogmodelDescDisplayNameEn is the schema descriptor for display_name_en field.
+	modelcatalogmodelDescDisplayNameEn := modelcatalogmodelFields[5].Descriptor()
+	// modelcatalogmodel.DefaultDisplayNameEn holds the default value on creation for the display_name_en field.
+	modelcatalogmodel.DefaultDisplayNameEn = modelcatalogmodelDescDisplayNameEn.Default.(string)
+	// modelcatalogmodel.DisplayNameEnValidator is a validator for the "display_name_en" field. It is called by the builders before save.
+	modelcatalogmodel.DisplayNameEnValidator = modelcatalogmodelDescDisplayNameEn.Validators[0].(func(string) error)
+	// modelcatalogmodelDescSummaryZh is the schema descriptor for summary_zh field.
+	modelcatalogmodelDescSummaryZh := modelcatalogmodelFields[6].Descriptor()
+	// modelcatalogmodel.DefaultSummaryZh holds the default value on creation for the summary_zh field.
+	modelcatalogmodel.DefaultSummaryZh = modelcatalogmodelDescSummaryZh.Default.(string)
+	// modelcatalogmodelDescSummaryEn is the schema descriptor for summary_en field.
+	modelcatalogmodelDescSummaryEn := modelcatalogmodelFields[7].Descriptor()
+	// modelcatalogmodel.DefaultSummaryEn holds the default value on creation for the summary_en field.
+	modelcatalogmodel.DefaultSummaryEn = modelcatalogmodelDescSummaryEn.Default.(string)
+	// modelcatalogmodelDescProvider is the schema descriptor for provider field.
+	modelcatalogmodelDescProvider := modelcatalogmodelFields[8].Descriptor()
+	// modelcatalogmodel.DefaultProvider holds the default value on creation for the provider field.
+	modelcatalogmodel.DefaultProvider = modelcatalogmodelDescProvider.Default.(string)
+	// modelcatalogmodel.ProviderValidator is a validator for the "provider" field. It is called by the builders before save.
+	modelcatalogmodel.ProviderValidator = modelcatalogmodelDescProvider.Validators[0].(func(string) error)
+	// modelcatalogmodelDescLogoKey is the schema descriptor for logo_key field.
+	modelcatalogmodelDescLogoKey := modelcatalogmodelFields[9].Descriptor()
+	// modelcatalogmodel.DefaultLogoKey holds the default value on creation for the logo_key field.
+	modelcatalogmodel.DefaultLogoKey = modelcatalogmodelDescLogoKey.Default.(string)
+	// modelcatalogmodel.LogoKeyValidator is a validator for the "logo_key" field. It is called by the builders before save.
+	modelcatalogmodel.LogoKeyValidator = modelcatalogmodelDescLogoKey.Validators[0].(func(string) error)
+	// modelcatalogmodelDescCategory is the schema descriptor for category field.
+	modelcatalogmodelDescCategory := modelcatalogmodelFields[10].Descriptor()
+	// modelcatalogmodel.DefaultCategory holds the default value on creation for the category field.
+	modelcatalogmodel.DefaultCategory = modelcatalogmodelDescCategory.Default.(string)
+	// modelcatalogmodel.CategoryValidator is a validator for the "category" field. It is called by the builders before save.
+	modelcatalogmodel.CategoryValidator = modelcatalogmodelDescCategory.Validators[0].(func(string) error)
+	// modelcatalogmodelDescTags is the schema descriptor for tags field.
+	modelcatalogmodelDescTags := modelcatalogmodelFields[11].Descriptor()
+	// modelcatalogmodel.DefaultTags holds the default value on creation for the tags field.
+	modelcatalogmodel.DefaultTags = modelcatalogmodelDescTags.Default.([]string)
+	// modelcatalogmodelDescCapabilities is the schema descriptor for capabilities field.
+	modelcatalogmodelDescCapabilities := modelcatalogmodelFields[12].Descriptor()
+	// modelcatalogmodel.DefaultCapabilities holds the default value on creation for the capabilities field.
+	modelcatalogmodel.DefaultCapabilities = modelcatalogmodelDescCapabilities.Default.([]string)
+	// modelcatalogmodelDescStatus is the schema descriptor for status field.
+	modelcatalogmodelDescStatus := modelcatalogmodelFields[16].Descriptor()
+	// modelcatalogmodel.DefaultStatus holds the default value on creation for the status field.
+	modelcatalogmodel.DefaultStatus = modelcatalogmodelDescStatus.Default.(string)
+	// modelcatalogmodel.StatusValidator is a validator for the "status" field. It is called by the builders before save.
+	modelcatalogmodel.StatusValidator = modelcatalogmodelDescStatus.Validators[0].(func(string) error)
+	// modelcatalogmodelDescFeatured is the schema descriptor for featured field.
+	modelcatalogmodelDescFeatured := modelcatalogmodelFields[17].Descriptor()
+	// modelcatalogmodel.DefaultFeatured holds the default value on creation for the featured field.
+	modelcatalogmodel.DefaultFeatured = modelcatalogmodelDescFeatured.Default.(bool)
+	// modelcatalogmodelDescSortOrder is the schema descriptor for sort_order field.
+	modelcatalogmodelDescSortOrder := modelcatalogmodelFields[18].Descriptor()
+	// modelcatalogmodel.DefaultSortOrder holds the default value on creation for the sort_order field.
+	modelcatalogmodel.DefaultSortOrder = modelcatalogmodelDescSortOrder.Default.(int)
+	// modelcatalogmodelDescCreatedAt is the schema descriptor for created_at field.
+	modelcatalogmodelDescCreatedAt := modelcatalogmodelFields[20].Descriptor()
+	// modelcatalogmodel.DefaultCreatedAt holds the default value on creation for the created_at field.
+	modelcatalogmodel.DefaultCreatedAt = modelcatalogmodelDescCreatedAt.Default.(func() time.Time)
+	// modelcatalogmodelDescUpdatedAt is the schema descriptor for updated_at field.
+	modelcatalogmodelDescUpdatedAt := modelcatalogmodelFields[21].Descriptor()
+	// modelcatalogmodel.DefaultUpdatedAt holds the default value on creation for the updated_at field.
+	modelcatalogmodel.DefaultUpdatedAt = modelcatalogmodelDescUpdatedAt.Default.(func() time.Time)
+	// modelcatalogmodel.UpdateDefaultUpdatedAt holds the default value on update for the updated_at field.
+	modelcatalogmodel.UpdateDefaultUpdatedAt = modelcatalogmodelDescUpdatedAt.UpdateDefault.(func() time.Time)
 	paymentauditlogFields := schema.PaymentAuditLog{}.Fields()
 	_ = paymentauditlogFields
 	// paymentauditlogDescOrderID is the schema descriptor for order_id field.

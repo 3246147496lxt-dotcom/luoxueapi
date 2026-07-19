@@ -44,7 +44,13 @@ describe('LocaleSwitcher', () => {
     expect(trigger.attributes('aria-expanded')).toBe('false')
     expect(trigger.attributes('aria-controls')).toBeTruthy()
     expect(trigger.classes()).toEqual(expect.arrayContaining(['min-h-11', 'min-w-11']))
-    expect(trigger.find('.locale-switcher-icon').exists()).toBe(true)
+    expect(trigger.classes()).not.toEqual(expect.arrayContaining(['bg-gray-100', 'dark:bg-dark-800']))
+    const languageIcon = trigger.get('svg.locale-switcher-icon')
+    expect(languageIcon.attributes('viewBox')).toBe('0 0 1024 1024')
+    expect(languageIcon.attributes('aria-hidden')).toBe('true')
+    expect(languageIcon.findAll('path')).toHaveLength(3)
+    expect(languageIcon.findAll('path').every(path => path.attributes('fill') === 'currentColor')).toBe(true)
+    expect(languageIcon.find('script, foreignObject, [href], [xlink\\:href]').exists()).toBe(false)
     expect(trigger.text()).not.toContain('EN')
 
     await trigger.trigger('click')
@@ -52,6 +58,7 @@ describe('LocaleSwitcher', () => {
 
     const menu = wrapper.get('[role="menu"]')
     expect(trigger.attributes('aria-expanded')).toBe('true')
+    expect(trigger.classes()).toEqual(expect.arrayContaining(['bg-gray-100', 'dark:bg-dark-800']))
     expect(menu.attributes('id')).toBe(trigger.attributes('aria-controls'))
     expect(menu.attributes('aria-labelledby')).toBe(trigger.attributes('id'))
 

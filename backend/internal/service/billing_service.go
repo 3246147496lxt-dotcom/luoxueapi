@@ -1085,18 +1085,19 @@ func (s *BillingService) calculatePerRequestCost(resolved *ResolvedPricing, inpu
 	}
 
 	var unitPrice float64
+	var found bool
 
 	if input.SizeTier != "" {
-		unitPrice = input.Resolver.GetRequestTierPrice(resolved, input.SizeTier)
+		unitPrice, found = input.Resolver.FindRequestTierPrice(resolved, input.SizeTier)
 	}
 
-	if unitPrice == 0 {
+	if !found {
 		totalContext := input.Tokens.InputTokens + input.Tokens.CacheCreationTokens + input.Tokens.CacheReadTokens
-		unitPrice = input.Resolver.GetRequestTierPriceByContext(resolved, totalContext)
+		unitPrice, found = input.Resolver.FindRequestTierPriceByContext(resolved, totalContext)
 	}
 
 	// 回退到默认按次价格
-	if unitPrice == 0 {
+	if !found {
 		unitPrice = resolved.DefaultPerRequestPrice
 	}
 
@@ -1154,43 +1155,75 @@ func (s *BillingService) calculateCostInternalWithPolicy(
 	return s.computeTokenBreakdown(pricing, tokens, rateMultiplier, serviceTier, longContextBillingEnabled), nil
 }
 
-func (s *BillingService) applyModelSpecificPricingPolicy(model string, pricing *ModelPricing) *ModelPricing {
-	if pricing == nil {
-		return nil
-	}
+type modelSpecificPricingPolicyValues struct {
+	InputPrice                  float64
+	InputPricePriority          float64
+	CacheCreationPrice          float64
+	CacheCreationPricePriority  float64
+	CacheCreationPriceExplicit  bool
+	LongContextInputThreshold   int
+	LongContextInputMultiplier  float64
+	LongContextOutputMultiplier float64
+}
+
+func applyModelSpecificPricingPolicyValues(model string, values modelSpecificPricingPolicyValues) modelSpecificPricingPolicyValues {
 	normalized := normalizeKnownOpenAICodexModel(model)
 	isGPT56 := isOpenAIGPT56Model(normalized)
 	usesLegacyLongContextPricing := usesOpenAILegacyLongContextPricing(normalized)
 	if !isGPT56 && !usesLegacyLongContextPricing {
-		return pricing
+		return values
 	}
 	needsLongContextPolicy := (isGPT56 || usesLegacyLongContextPricing) &&
-		(pricing.LongContextInputThreshold <= 0 || pricing.LongContextInputMultiplier <= 0 || pricing.LongContextOutputMultiplier <= 0)
-	needsCacheCreationPolicy := isGPT56 && !pricing.CacheCreationPriceExplicit && (pricing.CacheCreationPricePerToken <= 0 ||
-		(pricing.InputPricePerTokenPriority > 0 && pricing.CacheCreationPricePerTokenPriority <= 0))
+		(values.LongContextInputThreshold <= 0 || values.LongContextInputMultiplier <= 0 || values.LongContextOutputMultiplier <= 0)
+	needsCacheCreationPolicy := isGPT56 && !values.CacheCreationPriceExplicit && (values.CacheCreationPrice <= 0 ||
+		(values.InputPricePriority > 0 && values.CacheCreationPricePriority <= 0))
 	if !needsLongContextPolicy && !needsCacheCreationPolicy {
-		return pricing
+		return values
 	}
-	cloned := *pricing
-	if isGPT56 && !cloned.CacheCreationPriceExplicit {
-		if cloned.CacheCreationPricePerToken <= 0 {
-			cloned.CacheCreationPricePerToken = cloned.InputPricePerToken * 1.25
+	if isGPT56 && !values.CacheCreationPriceExplicit {
+		if values.CacheCreationPrice <= 0 {
+			values.CacheCreationPrice = values.InputPrice * 1.25
 		}
-		if cloned.CacheCreationPricePerTokenPriority <= 0 {
-			cloned.CacheCreationPricePerTokenPriority = cloned.InputPricePerTokenPriority * 1.25
+		if values.CacheCreationPricePriority <= 0 {
+			values.CacheCreationPricePriority = values.InputPricePriority * 1.25
 		}
 	}
 	if isGPT56 || usesLegacyLongContextPricing {
-		if cloned.LongContextInputThreshold <= 0 {
-			cloned.LongContextInputThreshold = openAIGPT54LongContextInputThreshold
+		if values.LongContextInputThreshold <= 0 {
+			values.LongContextInputThreshold = openAIGPT54LongContextInputThreshold
 		}
-		if cloned.LongContextInputMultiplier <= 0 {
-			cloned.LongContextInputMultiplier = openAIGPT54LongContextInputMultiplier
+		if values.LongContextInputMultiplier <= 0 {
+			values.LongContextInputMultiplier = openAIGPT54LongContextInputMultiplier
 		}
-		if cloned.LongContextOutputMultiplier <= 0 {
-			cloned.LongContextOutputMultiplier = openAIGPT54LongContextOutputMultiplier
+		if values.LongContextOutputMultiplier <= 0 {
+			values.LongContextOutputMultiplier = openAIGPT54LongContextOutputMultiplier
 		}
 	}
+	return values
+}
+
+func (s *BillingService) applyModelSpecificPricingPolicy(model string, pricing *ModelPricing) *ModelPricing {
+	if pricing == nil {
+		return nil
+	}
+	before := modelSpecificPricingPolicyValues{
+		InputPrice: pricing.InputPricePerToken, InputPricePriority: pricing.InputPricePerTokenPriority,
+		CacheCreationPrice: pricing.CacheCreationPricePerToken, CacheCreationPricePriority: pricing.CacheCreationPricePerTokenPriority,
+		CacheCreationPriceExplicit:  pricing.CacheCreationPriceExplicit,
+		LongContextInputThreshold:   pricing.LongContextInputThreshold,
+		LongContextInputMultiplier:  pricing.LongContextInputMultiplier,
+		LongContextOutputMultiplier: pricing.LongContextOutputMultiplier,
+	}
+	after := applyModelSpecificPricingPolicyValues(model, before)
+	if after == before {
+		return pricing
+	}
+	cloned := *pricing
+	cloned.CacheCreationPricePerToken = after.CacheCreationPrice
+	cloned.CacheCreationPricePerTokenPriority = after.CacheCreationPricePriority
+	cloned.LongContextInputThreshold = after.LongContextInputThreshold
+	cloned.LongContextInputMultiplier = after.LongContextInputMultiplier
+	cloned.LongContextOutputMultiplier = after.LongContextOutputMultiplier
 	return &cloned
 }
 
@@ -1469,6 +1502,20 @@ func (s *BillingService) CalculateVideoCost(model string, resolution string, vid
 
 // getImageUnitPrice 获取图片单价
 func (s *BillingService) getImageUnitPrice(model string, imageSize string, groupConfig *ImagePriceConfig) float64 {
+	return resolveImageUnitPrice(model, imageSize, groupConfig, func(model string) *LiteLLMModelPricing {
+		if s == nil || s.pricingService == nil {
+			return nil
+		}
+		return s.pricingService.GetModelPricing(model)
+	})
+}
+
+type imageModelPricingLookup func(model string) *LiteLLMModelPricing
+
+// resolveImageUnitPrice is the single source of truth for image size pricing.
+// Callers choose the lookup contract: billing uses its resilient lookup, while
+// the public catalog supplies a strict exact-only lookup.
+func resolveImageUnitPrice(model string, imageSize string, groupConfig *ImagePriceConfig, lookup imageModelPricingLookup) float64 {
 	// 优先使用分组配置的价格
 	if groupConfig != nil {
 		switch imageSize {
@@ -1488,7 +1535,7 @@ func (s *BillingService) getImageUnitPrice(model string, imageSize string, group
 	}
 
 	// 回退到 LiteLLM 默认价格
-	return s.getDefaultImagePrice(model, imageSize)
+	return resolveDefaultImagePrice(model, imageSize, lookup)
 }
 
 func (s *BillingService) getVideoUnitPrice(model string, resolution string, groupConfig *VideoPriceConfig) float64 {
@@ -1514,6 +1561,15 @@ func (s *BillingService) getVideoUnitPrice(model string, resolution string, grou
 
 // getDefaultImagePrice 获取 LiteLLM 默认图片价格
 func (s *BillingService) getDefaultImagePrice(model string, imageSize string) float64 {
+	return resolveDefaultImagePrice(model, imageSize, func(model string) *LiteLLMModelPricing {
+		if s == nil || s.pricingService == nil {
+			return nil
+		}
+		return s.pricingService.GetModelPricing(model)
+	})
+}
+
+func resolveDefaultImagePrice(model string, imageSize string, lookup imageModelPricingLookup) float64 {
 	if price, ok := getDefaultGrokImagineImagePrice(model, imageSize); ok {
 		return price
 	}
@@ -1521,8 +1577,8 @@ func (s *BillingService) getDefaultImagePrice(model string, imageSize string) fl
 	basePrice := 0.0
 
 	// 从 PricingService 获取 output_cost_per_image
-	if s.pricingService != nil {
-		pricing := s.pricingService.GetModelPricing(model)
+	if lookup != nil {
+		pricing := lookup(model)
 		if pricing != nil && pricing.OutputCostPerImage > 0 {
 			basePrice = pricing.OutputCostPerImage
 		}

@@ -62,10 +62,10 @@ export default {
   // Recharge / Subscription Page
   purchase: {
     title: 'Recharge / Subscription',
-    description: 'Recharge balance or purchase subscription via the embedded page',
+    description: 'Recharge balance, purchase a subscription, or redeem a code',
     openInNewTab: 'Open in new tab',
     notEnabledTitle: 'Feature not enabled',
-    notEnabledDesc: 'The administrator has not enabled the recharge/subscription entry. Please contact admin.',
+    notEnabledDesc: 'Online payment is not enabled. You can still redeem a code below.',
     notConfiguredTitle: 'Recharge / Subscription URL not configured',
     notConfiguredDesc:
       'The administrator enabled the entry but has not configured a recharge/subscription URL. Please contact admin.'
@@ -286,6 +286,22 @@ export default {
   // Payment System
   payment: {
     title: 'Recharge / Subscription',
+    checkoutTitle: 'Recharge & Subscriptions',
+    checkoutDescription: 'Choose a recharge amount or subscription plan, then confirm a payment method. Redeem codes are available on this page too.',
+    purchaseOptions: 'Recharge or subscribe',
+    chooseAmountTitle: 'Choose recharge amount',
+    chooseAmountDescription: 'Pick a common amount or switch to a custom amount. Only the actual credited and payable amounts are shown.',
+    amountType: 'Amount entry mode',
+    fixedAmount: 'Fixed amount',
+    selectThisAmount: 'Select amount',
+    customAmountLabel: 'Enter a custom amount',
+    customAmountHint: 'Enter a recharge amount greater than zero',
+    amountRange: 'Available range: {min} to {max}',
+    minimumAmount: 'Minimum recharge: {amount}',
+    maximumAmount: 'Maximum recharge: {amount}',
+    orderSummary: 'Recharge summary',
+    choosePlanTitle: 'Choose a subscription plan',
+    choosePlanDescription: 'The displayed price, rate, and quota are the current terms.',
     amountLabel: 'Amount',
     paymentAmount: 'Payment Amount',
     creditedBalance: 'Credited Balance',

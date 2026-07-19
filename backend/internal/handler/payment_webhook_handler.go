@@ -26,9 +26,6 @@ type PaymentWebhookHandler struct {
 // maxWebhookBodySize is the maximum allowed webhook request body size (1 MB).
 const maxWebhookBodySize = 1 << 20
 
-// webhookLogTruncateLen is the maximum length of raw body logged on verify failure.
-const webhookLogTruncateLen = 200
-
 // NewPaymentWebhookHandler creates a new PaymentWebhookHandler.
 func NewPaymentWebhookHandler(paymentService *service.PaymentService, registry *payment.Registry) *PaymentWebhookHandler {
 	return &PaymentWebhookHandler{
@@ -105,12 +102,7 @@ func (h *PaymentWebhookHandler) handleNotify(c *gin.Context, providerKey string)
 
 	resolvedProviderKey, notification, err := verifyNotificationWithProviders(c.Request.Context(), providers, rawBody, headers)
 	if err != nil {
-		truncatedBody := rawBody
-		if len(truncatedBody) > webhookLogTruncateLen {
-			truncatedBody = truncatedBody[:webhookLogTruncateLen] + "...(truncated)"
-		}
-		slog.Error("[Payment Webhook] verify failed", "provider", providerKey, "error", err, "method", c.Request.Method, "bodyLen", len(rawBody))
-		slog.Debug("[Payment Webhook] verify failed body", "provider", providerKey, "rawBody", truncatedBody)
+		logPaymentWebhookVerifyFailure(providerKey, c.Request.Method, rawBody, err)
 		c.String(http.StatusBadRequest, "verify failed")
 		return
 	}
@@ -142,6 +134,18 @@ func (h *PaymentWebhookHandler) handleNotify(c *gin.Context, providerKey string)
 	}
 
 	writeSuccessResponse(c, resolvedProviderKey)
+}
+
+// logPaymentWebhookVerifyFailure deliberately records only request metadata.
+// Callback bodies can contain payer details, provider identifiers, and signed
+// parameters, so they must not be emitted even when debug logging is enabled.
+func logPaymentWebhookVerifyFailure(providerKey, method, rawBody string, err error) {
+	slog.Error("[Payment Webhook] verify failed",
+		"provider", providerKey,
+		"error", err,
+		"method", method,
+		"bodyLen", len(rawBody),
+	)
 }
 
 // extractOutTradeNo parses the webhook body to find the out_trade_no.
