@@ -169,7 +169,7 @@ export default {
     contactUs: 'Contact Us',
     quickLinks: 'Quick Links',
     subscriptions: 'Subscriptions',
-    accounts: 'Accounts',
+    accounts: 'Account Pool',
     proxies: 'Proxies',
     redeemCodes: 'Redeem Codes',
     ops: 'Ops',

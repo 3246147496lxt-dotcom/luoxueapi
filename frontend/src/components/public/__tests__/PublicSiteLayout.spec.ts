@@ -93,6 +93,23 @@ beforeEach(() => {
 })
 
 describe('PublicSiteLayout', () => {
+  it('scopes the clay shell to home without changing the models page shell', () => {
+    const homeWrapper = mountLayout('home')
+
+    expect(homeWrapper.classes()).toContain('public-site-page--home')
+    expect(homeWrapper.classes()).not.toContain('public-site-page--models')
+    expect(homeWrapper.get('[data-testid="public-site-brand-logo"]').attributes('src'))
+      .toBe('/brand/luoxue-snowflake-cloud-palette-light.svg')
+
+    homeWrapper.unmount()
+    const modelsWrapper = mountLayout('models')
+
+    expect(modelsWrapper.classes()).toContain('public-site-page--models')
+    expect(modelsWrapper.classes()).not.toContain('public-site-page--home')
+    expect(modelsWrapper.get('[data-testid="public-site-brand-logo"]').attributes('src'))
+      .toBe('/logo.png')
+  })
+
   it('uses cross-page home anchors and hides the catalog entry while disabled', () => {
     const wrapper = mountLayout()
     const hrefs = wrapper.findAll('.public-site-desktop-nav > a')
@@ -109,9 +126,22 @@ describe('PublicSiteLayout', () => {
     const wrapper = mountLayout()
 
     expect(wrapper.findAll('[data-to="/models.html"]')).toHaveLength(2)
-    await wrapper.get('.public-site-mobile-menu-button').trigger('click')
+    await wrapper.get('[data-testid="mobile-menu-toggle"]').trigger('click')
     expect(wrapper.findAll('[data-to="/models.html"]')).toHaveLength(3)
-    expect(wrapper.get('.public-site-mobile-menu-button').attributes('aria-expanded')).toBe('true')
+    expect(wrapper.get('[data-testid="mobile-menu-toggle"]').attributes('aria-expanded')).toBe('true')
+  })
+
+  it('provides a locale switcher in the compact home menu', async () => {
+    const wrapper = mountLayout('home')
+
+    expect(wrapper.find('[data-testid="mobile-locale-switcher"]').exists()).toBe(false)
+
+    await wrapper.get('[data-testid="mobile-menu-toggle"]').trigger('click')
+
+    const localeSwitcher = wrapper.get('[data-testid="mobile-locale-switcher"]')
+    expect(localeSwitcher.element.closest('.public-site-mobile-footer')).not.toBeNull()
+    expect(localeSwitcher.attributes('icon-variant') ?? localeSwitcher.attributes('iconvariant'))
+      .toBe('lucide')
   })
 
   it('hides every catalog entry in backend mode even when the feature is enabled', () => {
@@ -133,12 +163,21 @@ describe('PublicSiteLayout', () => {
 
   it('persists theme changes through the shared header', async () => {
     const wrapper = mountLayout()
-    const themeButton = wrapper.findAll('.public-site-icon-button')[0]
+    const themeButton = wrapper.get('[data-testid="theme-toggle"]')
+
+    const localeSwitcher = wrapper.get('.public-site-desktop-action locale-switcher-stub')
+    expect(localeSwitcher.attributes('icon-variant') ?? localeSwitcher.attributes('iconvariant'))
+      .toBe('lucide')
+    const lightThemeIcon = themeButton.get('icon-stub')
+    expect(lightThemeIcon.attributes('name')).toBe('lucideMoon')
+    expect(lightThemeIcon.attributes('stroke-width') ?? lightThemeIcon.attributes('strokewidth'))
+      .toBe('2')
 
     await themeButton.trigger('click')
 
     expect(document.documentElement.classList.contains('dark')).toBe(true)
     expect(localStorage.getItem('theme')).toBe('dark')
     expect(wrapper.classes()).toContain('public-site-page--dark')
+    expect(themeButton.get('icon-stub').attributes('name')).toBe('lucideSun')
   })
 })

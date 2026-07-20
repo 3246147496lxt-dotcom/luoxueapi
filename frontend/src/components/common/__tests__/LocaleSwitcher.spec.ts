@@ -172,4 +172,24 @@ describe('LocaleSwitcher', () => {
 
     wrapper.unmount()
   })
+
+  it('renders the original Lucide languages outline for the clay public header', () => {
+    const wrapper = mount(LocaleSwitcher, {
+      props: { iconVariant: 'lucide' },
+      attachTo: document.body,
+    })
+    const icon = wrapper.get('button svg.locale-switcher-icon')
+
+    expect(icon.attributes()).toMatchObject({
+      viewBox: '0 0 24 24',
+      fill: 'none',
+      stroke: 'currentColor',
+      'stroke-width': '2',
+      'aria-hidden': 'true',
+    })
+    expect(icon.get('path').attributes('d'))
+      .toBe('M5 8l6 6M4 14l6-6 2-3M2 5h12M7 2h1M22 22l-5-10-5 10M14 18h6')
+
+    wrapper.unmount()
+  })
 })

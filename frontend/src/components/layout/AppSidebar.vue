@@ -158,8 +158,29 @@
 
       <!-- Regular User View -->
       <template v-else-if="!appStore.backendModeEnabled">
-        <div class="sidebar-section">
-          <template v-for="item in userNavItems" :key="item.path">
+        <div
+          v-for="section in userNavSections"
+          :key="section.id"
+          class="sidebar-section"
+          :data-testid="`sidebar-user-${section.id}-section`"
+          :role="section.label ? 'group' : undefined"
+          :aria-label="section.label"
+        >
+          <div
+            v-if="section.label"
+            class="sidebar-section-title"
+            :class="{ 'sidebar-section-title-collapsed': sidebarCollapsed }"
+            aria-hidden="true"
+          >
+            <span
+              class="sidebar-section-title-text"
+              :class="{ 'sidebar-section-title-text-collapsed': sidebarCollapsed }"
+            >
+              {{ section.label }}
+            </span>
+          </div>
+
+          <template v-for="item in section.items" :key="item.path">
             <a
               v-if="item.href"
               :href="item.href"
@@ -373,7 +394,11 @@ import { sanitizeSvg } from '@/utils/sanitize'
 import { sanitizeUrl } from '@/utils/url'
 import { FeatureFlags, makeSidebarFlag } from '@/utils/featureFlags'
 import { useBatchImageAccess } from '@/composables/useBatchImageAccess'
+import accountPoolIconSvg from '@/assets/icons/account-pool.svg?raw'
+import auditLogIconSvg from '@/assets/icons/audit-log.svg?raw'
 import keyOutlineIconSvg from '@/assets/icons/key-outline.svg?raw'
+import modelMarketplaceIconSvg from '@/assets/icons/model-marketplace.svg?raw'
+import reportDashboardIconSvg from '@/assets/icons/report-dashboard.svg?raw'
 import { Icon } from '@/components/icons'
 import NotificationIcon from '@/components/icons/NotificationIcon.vue'
 
@@ -397,6 +422,12 @@ interface NavItem {
    * 开关切换时菜单自动更新。
    */
   featureFlag?: () => boolean | undefined
+}
+
+interface NavSection {
+  id: 'main' | 'personal' | 'custom'
+  label?: string
+  items: NavItem[]
 }
 
 // applyFeatureFlags 递归过滤掉 featureFlag() === false 的节点（含子节点）。
@@ -622,21 +653,6 @@ const RechargeSubscriptionIcon = {
     )
 }
 
-const GlobeIcon = {
-  render: () =>
-    h(
-      'svg',
-      { fill: 'none', viewBox: '0 0 24 24', stroke: 'currentColor', 'stroke-width': '1.5' },
-      [
-        h('path', {
-          'stroke-linecap': 'round',
-          'stroke-linejoin': 'round',
-          d: 'M12 21a9.004 9.004 0 008.716-6.747M12 21a9.004 9.004 0 01-8.716-6.747M12 21c2.485 0 4.5-4.03 4.5-9S14.485 3 12 3m0 18c-2.485 0-4.5-4.03-4.5-9S9.515 3 12 3m0 0a8.997 8.997 0 017.843 4.582M12 3a8.997 8.997 0 00-7.843 4.582m15.686 0A11.953 11.953 0 0112 10.5c-2.998 0-5.74-1.1-7.843-2.918m15.686 0A8.959 8.959 0 0121 12c0 .778-.099 1.533-.284 2.253m0 0A17.919 17.919 0 0112 16.5c-3.162 0-6.133-.815-8.716-2.247m0 0A9.015 9.015 0 013 12c0-1.605.42-3.113 1.157-4.418'
-        })
-      ]
-    )
-}
-
 const ServerIcon = {
   render: () =>
     h(
@@ -849,6 +865,38 @@ function finalizeNav(items: NavItem[]): NavItem[] {
 // User navigation items (for regular users)
 const userNavItems = computed((): NavItem[] => finalizeNav(buildSelfNavItems(true)))
 
+const USER_PERSONAL_NAV_PATHS = new Set(['/subscriptions', '/purchase', '/orders', '/profile'])
+
+const userNavSections = computed((): NavSection[] => {
+  const personalItems = userNavItems.value.filter((item) => USER_PERSONAL_NAV_PATHS.has(item.path))
+  const customItems = userNavItems.value.filter((item) => item.path.startsWith('/custom/'))
+  const sections: NavSection[] = [
+    {
+      id: 'main',
+      items: userNavItems.value.filter(
+        (item) => !USER_PERSONAL_NAV_PATHS.has(item.path) && !item.path.startsWith('/custom/'),
+      ),
+    },
+  ]
+
+  if (personalItems.length > 0) {
+    sections.push({
+      id: 'personal',
+      label: t('nav.myAccount'),
+      items: personalItems,
+    })
+  }
+
+  if (customItems.length > 0) {
+    sections.push({
+      id: 'custom',
+      items: customItems,
+    })
+  }
+
+  return sections
+})
+
 // Personal navigation items (for admin's "My Account" section, without Dashboard).
 // Admins access 可用渠道 from this section just like regular users — there is no
 // separate admin entry, since the page is purely a user-facing view.
@@ -871,7 +919,12 @@ const customMenuItemsForAdmin = computed(() => {
 // Admin navigation items
 const adminNavItems = computed((): NavItem[] => {
   const baseItems: NavItem[] = [
-    { path: '/admin/dashboard', label: t('nav.adminDashboard'), icon: DashboardIcon },
+    {
+      path: '/admin/dashboard',
+      label: t('nav.adminDashboard'),
+      icon: null,
+      iconSvg: reportDashboardIconSvg,
+    },
     { path: '/admin/ops', label: t('nav.ops'), icon: ChartIcon, featureFlag: flagOpsMonitoring },
     { path: '/admin/users', label: t('nav.users'), icon: UsersIcon, hideInSimpleMode: true },
     { path: '/admin/groups', label: t('nav.groups'), icon: FolderIcon, hideInSimpleMode: true },
@@ -886,10 +939,21 @@ const adminNavItems = computed((): NavItem[] => {
         { path: '/admin/channels/monitor', label: t('nav.channelMonitor'), icon: SignalIcon, featureFlag: flagChannelMonitor },
       ],
     },
-    { path: '/admin/model-catalog', label: t('nav.modelCatalog'), icon: GlobeIcon, hideInSimpleMode: true },
+    {
+      path: '/admin/model-catalog',
+      label: t('nav.modelCatalog'),
+      icon: null,
+      iconSvg: modelMarketplaceIconSvg,
+      hideInSimpleMode: true,
+    },
     { path: '/admin/documentation', label: t('nav.documentationManagement'), icon: BookIcon, hideInSimpleMode: true },
     { path: '/admin/subscriptions', label: t('nav.subscriptions'), icon: CreditCardIcon, hideInSimpleMode: true },
-    { path: '/admin/accounts', label: t('nav.accounts'), icon: GlobeIcon },
+    {
+      path: '/admin/accounts',
+      label: t('nav.accounts'),
+      icon: null,
+      iconSvg: accountPoolIconSvg,
+    },
     { path: '/admin/announcements', label: t('nav.announcements'), icon: NotificationIcon },
     { path: '/admin/proxies', label: t('nav.proxies'), icon: ServerIcon },
     { path: '/admin/risk-control', label: t('nav.riskControl'), icon: ShieldIcon, hideInSimpleMode: true, featureFlag: flagRiskControl },
@@ -922,7 +986,13 @@ const adminNavItems = computed((): NavItem[] => {
       ],
     },
     { path: '/admin/usage', label: t('nav.usage'), icon: ChartIcon },
-    { path: '/admin/audit-logs', label: t('nav.auditLogs'), icon: ShieldIcon, hideInSimpleMode: true }
+    {
+      path: '/admin/audit-logs',
+      label: t('nav.auditLogs'),
+      icon: null,
+      iconSvg: auditLogIconSvg,
+      hideInSimpleMode: true,
+    }
   ]
 
   const visible = applyFeatureFlags(baseItems)
@@ -1349,7 +1419,7 @@ onBeforeUnmount(() => {
   min-height: 1.5625rem;
   margin: 0;
   padding: 0.1875rem 1rem 0.25rem;
-  color: rgb(156 163 175);
+  color: rgb(100 116 139);
   font-size: 0.75rem;
   font-weight: 400;
   line-height: 1.125rem;
@@ -1357,6 +1427,10 @@ onBeforeUnmount(() => {
   text-transform: none;
   overflow: hidden;
   white-space: nowrap;
+}
+
+:global(.dark .sidebar-section-title) {
+  color: rgb(156 163 175);
 }
 
 .sidebar-section-title-text {

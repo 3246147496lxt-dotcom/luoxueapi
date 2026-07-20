@@ -20,7 +20,15 @@
       :aria-expanded="isOpen"
       :aria-controls="menuId"
     >
-      <LanguageIcon class="locale-switcher-icon h-5 w-5" />
+      <Icon
+        v-if="iconVariant === 'lucide'"
+        name="lucideLanguages"
+        size="md"
+        :stroke-width="2"
+        class="locale-switcher-icon"
+        aria-hidden="true"
+      />
+      <LanguageIcon v-else class="locale-switcher-icon h-5 w-5" />
     </button>
 
     <transition name="dropdown">
@@ -75,8 +83,10 @@ import { setLocale, availableLocales } from '@/i18n'
 
 withDefaults(defineProps<{
   compact?: boolean
+  iconVariant?: 'brand' | 'lucide'
 }>(), {
   compact: false,
+  iconVariant: 'brand',
 })
 
 const { locale } = useI18n()

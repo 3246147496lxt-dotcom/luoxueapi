@@ -169,7 +169,7 @@ export default {
     contactUs: '联系我们',
     quickLinks: '快捷入口',
     subscriptions: '订阅管理',
-    accounts: '账号管理',
+    accounts: '账号池',
     proxies: 'IP管理',
     redeemCodes: '兑换码',
     ops: '运维监控',

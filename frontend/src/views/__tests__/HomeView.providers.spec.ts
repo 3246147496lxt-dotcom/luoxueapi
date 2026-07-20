@@ -133,6 +133,19 @@ beforeEach(() => {
 })
 
 describe('HomeView provider availability', () => {
+  it('uses the matching Lucide fact icons from the tutorial design', () => {
+    const wrapper = mountHomeView()
+    const icons = wrapper.findAll('.fact-rail icon-stub')
+
+    expect(icons.map((icon) => icon.attributes('name'))).toEqual([
+      'lucideCheckCircle',
+      'lucideBarChart3',
+      'lucideShieldCheck'
+    ])
+    expect(icons.every((icon) => icon.attributes('size') === 'lg')).toBe(true)
+    expect(icons.every((icon) => icon.attributes('strokewidth') === '2')).toBe(true)
+  })
+
   it('shows GPT as the only supported provider', () => {
     const wrapper = mountHomeView()
     const supportedProviders = wrapper.findAll('[data-provider-status="supported"]')
@@ -153,6 +166,37 @@ describe('HomeView provider availability', () => {
   })
 })
 
+describe('HomeView clay composition', () => {
+  it('omits the hero status and decorative image while keeping product imagery', () => {
+    const wrapper = mountHomeView()
+    const dashboard = wrapper.get('.dashboard-figure img')
+
+    expect(wrapper.find('.status-badge').exists()).toBe(false)
+    expect(wrapper.find('.status-dot').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="hero-snowflake"]').exists()).toBe(false)
+    expect(wrapper.find('.hero-stage img').exists()).toBe(false)
+    expect(dashboard.attributes()).toMatchObject({
+      src: '/brand/home-dashboard.webp',
+      width: '1600',
+      height: '757',
+      loading: 'lazy'
+    })
+  })
+
+  it('keeps one page heading and all navigation anchor targets labeled', () => {
+    const wrapper = mountHomeView()
+
+    expect(wrapper.findAll('h1')).toHaveLength(1)
+    for (const id of ['capabilities', 'steps', 'providers', 'faq']) {
+      const section = wrapper.get(`#${id}`)
+      const headingId = section.attributes('aria-labelledby')
+
+      expect(headingId).toBeTruthy()
+      expect(wrapper.find(`#${headingId}`).exists()).toBe(true)
+    }
+  })
+})
+
 describe('HomeView primary actions', () => {
   it.each([
     { registration: true, authenticated: false, path: '/register', label: '注册并开始' },
@@ -169,6 +213,7 @@ describe('HomeView primary actions', () => {
 
     expect(heroCta.attributes('data-to')).toBe(path)
     expect(heroCta.text()).toContain(label)
+    expect(heroCta.get('icon-stub').attributes('name')).toBe('lucideSparkles')
     expect(finalCta.attributes('data-to')).toBe(path)
   })
 
@@ -182,6 +227,17 @@ describe('HomeView primary actions', () => {
 })
 
 describe('HomeView code examples', () => {
+  it('keeps both tabs connected to one focusable code panel', () => {
+    const wrapper = mountHomeView()
+    const panel = wrapper.get('#code-example-panel')
+
+    expect(wrapper.get('#code-tab-curl').attributes('aria-controls')).toBe('code-example-panel')
+    expect(wrapper.get('#code-tab-python').attributes('aria-controls')).toBe('code-example-panel')
+    expect(panel.attributes('role')).toBe('tabpanel')
+    expect(panel.attributes('tabindex')).toBe('0')
+    expect(panel.attributes('aria-labelledby')).toBe('code-tab-curl')
+  })
+
   it.each([
     ['https://api.example.com', 'https://api.example.com/v1/chat/completions'],
     ['https://api.example.com/', 'https://api.example.com/v1/chat/completions'],
@@ -202,11 +258,17 @@ describe('HomeView code examples', () => {
   it('copies the active example and shows success feedback', async () => {
     const wrapper = mountHomeView()
     const snippet = wrapper.get('[data-testid="active-code-example"]').text()
+    const copyButton = wrapper.get('[data-testid="copy-code-button"]')
 
-    await wrapper.get('.copy-button').trigger('click')
+    expect(copyButton.get('icon-stub').attributes()).toMatchObject({
+      name: 'lucideCopy',
+      size: 'xs'
+    })
+
+    await copyButton.trigger('click')
 
     expect(testState.clipboard.copyToClipboard).toHaveBeenCalledWith(snippet, '已复制')
-    expect(wrapper.get('.copy-button').text()).toContain('已复制')
+    expect(copyButton.text()).toContain('已复制')
   })
 
   it('supports arrow, Home, and End keys in the code tab list', async () => {
@@ -215,6 +277,7 @@ describe('HomeView code examples', () => {
 
     await curlTab.trigger('keydown', { key: 'ArrowRight' })
     expect(wrapper.get('#code-tab-python').attributes('aria-selected')).toBe('true')
+    expect(wrapper.get('#code-example-panel').attributes('aria-labelledby')).toBe('code-tab-python')
     expect(wrapper.get('[data-testid="active-code-example"]').text()).toContain('from openai import OpenAI')
 
     await wrapper.get('#code-tab-python').trigger('keydown', { key: 'Home' })

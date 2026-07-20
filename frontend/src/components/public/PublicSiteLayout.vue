@@ -1,10 +1,24 @@
 <template>
-  <div class="public-site-page" :class="{ 'public-site-page--dark': isDark }">
+  <div
+    class="public-site-page"
+    :class="{
+      'public-site-page--dark': isDark,
+      'public-site-page--home': page === 'home',
+      'public-site-page--models': page === 'models'
+    }"
+  >
     <header class="public-site-header" :class="{ 'public-site-header--elevated': isHeaderElevated }">
       <nav class="public-site-nav" :aria-label="t('home.nav.ariaLabel')">
         <a href="/home#top" class="public-site-brand" @click="closeMobileMenu()">
           <span class="public-site-brand-mark">
-            <img :src="siteLogo || '/logo.png'" :alt="siteName" width="40" height="40" />
+            <img
+              data-testid="public-site-brand-logo"
+              :src="displayLogo"
+              alt=""
+              width="40"
+              height="40"
+              aria-hidden="true"
+            />
           </span>
           <span class="public-site-brand-name">{{ siteName }}</span>
         </a>
@@ -28,29 +42,40 @@
         </div>
 
         <div class="public-site-actions">
-          <div class="public-site-desktop-action"><LocaleSwitcher /></div>
+          <div class="public-site-desktop-action">
+            <LocaleSwitcher :icon-variant="page === 'home' ? 'lucide' : 'brand'" />
+          </div>
 
           <button
             type="button"
             class="public-site-icon-button"
+            data-testid="theme-toggle"
             :title="isDark ? t('home.switchToLight') : t('home.switchToDark')"
             :aria-label="isDark ? t('home.switchToLight') : t('home.switchToDark')"
             :aria-pressed="isDark"
             @click="toggleTheme"
           >
-            <Icon v-if="isDark" name="sun" size="md" aria-hidden="true" />
+            <Icon
+              v-if="page === 'home'"
+              :name="isDark ? 'lucideSun' : 'lucideMoon'"
+              size="md"
+              :stroke-width="2"
+              aria-hidden="true"
+            />
+            <Icon v-else-if="isDark" name="sun" size="md" aria-hidden="true" />
             <Icon v-else name="moon" size="md" aria-hidden="true" />
           </button>
 
           <router-link class="public-site-account-link public-site-desktop-action" :to="headerAccountPath">
             {{ headerAccountLabel }}
-            <Icon name="arrowRight" size="sm" aria-hidden="true" />
+            <Icon v-if="page !== 'home'" name="arrowRight" size="sm" aria-hidden="true" />
           </router-link>
 
           <button
             ref="mobileMenuButtonRef"
             type="button"
             class="public-site-icon-button public-site-mobile-menu-button"
+            data-testid="mobile-menu-toggle"
             aria-controls="public-site-mobile-menu"
             :aria-expanded="mobileMenuOpen"
             :aria-label="mobileMenuOpen ? t('home.nav.closeMenu') : t('home.nav.openMenu')"
@@ -84,7 +109,10 @@
               {{ t('home.nav.tutorial') }}
             </a>
             <div class="public-site-mobile-footer">
-              <LocaleSwitcher />
+              <LocaleSwitcher
+                data-testid="mobile-locale-switcher"
+                :icon-variant="page === 'home' ? 'lucide' : 'brand'"
+              />
               <router-link :to="headerAccountPath" @click="closeMobileMenu()">
                 {{ headerAccountLabel }}
                 <Icon name="arrowRight" size="sm" aria-hidden="true" />
@@ -99,7 +127,12 @@
 
     <footer class="public-site-footer">
       <div class="public-site-shell public-site-footer-layout">
-        <p>&copy; {{ currentYear }} {{ siteName }}. {{ t('home.footer.allRightsReserved') }}</p>
+        <div class="public-site-footer-brand">
+          <span v-if="page === 'home'" class="public-site-footer-mark" aria-hidden="true">
+            <img :src="displayLogo" alt="" width="36" height="36" />
+          </span>
+          <p>&copy; {{ currentYear }} {{ siteName }}. {{ t('home.footer.allRightsReserved') }}</p>
+        </div>
         <nav :aria-label="t('home.nav.ariaLabel')">
           <router-link v-if="catalogEntryVisible" to="/models.html">
             {{ t('modelCatalog.navLabel') }}
@@ -137,6 +170,12 @@ const siteName = computed(() => appStore.cachedPublicSettings?.site_name || appS
 const siteLogo = computed(() => sanitizeUrl(
   appStore.cachedPublicSettings?.site_logo || appStore.siteLogo || '',
   { allowRelative: true, allowDataUrl: true }
+))
+const displayLogo = computed(() => (
+  siteLogo.value
+  || (props.page === 'home'
+    ? '/brand/luoxue-snowflake-cloud-palette-light.svg'
+    : '/logo.png')
 ))
 const docUrl = computed(() => sanitizeUrl(appStore.cachedPublicSettings?.doc_url || appStore.docUrl || ''))
 const tutorialUrl = computed(() => {
@@ -402,6 +441,27 @@ onBeforeUnmount(() => {
   gap: 24px;
 }
 
+.public-site-footer-brand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.public-site-footer-mark {
+  width: 36px;
+  height: 36px;
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+}
+
+.public-site-footer-mark img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
 .public-site-footer p {
   margin: 0;
   color: var(--muted);
@@ -542,6 +602,439 @@ onBeforeUnmount(() => {
     transition-duration: 0.01ms !important;
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
+  }
+}
+
+/* Exact public shell from “Candy Clay Snowflake Stage - Refined Fidelity”. */
+.public-site-page--home {
+  --page: #f4f1fa;
+  --surface: #ffffff;
+  --surface-soft: #efebf5;
+  --surface-accent: #ffffff;
+  --ink: #332f3a;
+  --copy: #635f69;
+  --muted: #635f69;
+  --border: rgba(91, 80, 112, 0.14);
+  --accent: #7c3aed;
+  --accent-strong: #7c3aed;
+  --accent-ink: #7c3aed;
+  --surface-elevated: rgba(255, 255, 255, 0.76);
+  --primary-violet: #7c3aed;
+  --violet-highlight: #a78bfa;
+  --action-violet-start: #7c3aed;
+  --action-violet-end: #5b21b6;
+  min-height: 100vh;
+  color: var(--ink);
+  background-color: var(--page);
+  background-image:
+    radial-gradient(circle at 15% 15%, rgba(124, 58, 237, 0.08) 0%, transparent 40%),
+    radial-gradient(circle at 85% 20%, rgba(11, 139, 237, 0.08) 0%, transparent 40%);
+  font-family: "DM Sans", "PingFang SC", "Microsoft YaHei", sans-serif;
+}
+
+.public-site-page--home.public-site-page--dark {
+  --page: #17131f;
+  --surface: #251e2f;
+  --surface-soft: #120f18;
+  --surface-accent: #251e2f;
+  --ink: #f8f5fc;
+  --copy: #c5bccf;
+  --muted: #c5bccf;
+  --border: rgba(255, 255, 255, 0.12);
+  --accent: #a78bfa;
+  --accent-strong: #a78bfa;
+  --accent-ink: #a78bfa;
+  --surface-elevated: rgba(39, 31, 50, 0.84);
+  --primary-violet: #a78bfa;
+  --action-violet-start: #7c3aed;
+  --action-violet-end: #5b21b6;
+}
+
+.public-site-page--home .public-site-header,
+.public-site-page--home .public-site-header--elevated {
+  top: 24px;
+  padding: 0;
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+}
+
+.public-site-page--home .public-site-nav,
+.public-site-page--home .public-site-header--elevated .public-site-nav,
+.public-site-page--home.public-site-page--dark .public-site-header--elevated .public-site-nav {
+  width: min(1192px, calc(100% - 48px));
+  min-height: 80px;
+  height: 80px;
+  padding: 0 32px;
+  background: var(--surface-elevated);
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  box-shadow:
+    16px 16px 32px rgba(160, 150, 180, 0.2),
+    -10px -10px 24px rgba(255, 255, 255, 0.9),
+    inset 6px 6px 12px rgba(139, 92, 246, 0.03),
+    inset -6px -6px 12px rgba(255, 255, 255, 1);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  transform: none;
+}
+
+.public-site-page--home .public-site-brand {
+  gap: 12px;
+}
+
+.public-site-page--home .public-site-brand-mark,
+.public-site-page--home.public-site-page--dark .public-site-brand-mark {
+  display: flex;
+  width: 48px;
+  height: 48px;
+  align-items: center;
+  justify-content: center;
+  padding: 8px;
+  overflow: hidden;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 32px;
+  box-shadow:
+    16px 16px 32px rgba(160, 150, 180, 0.2),
+    -10px -10px 24px rgba(255, 255, 255, 0.9),
+    inset 6px 6px 12px rgba(139, 92, 246, 0.03),
+    inset -6px -6px 12px rgba(255, 255, 255, 1);
+}
+
+.public-site-page--home .public-site-brand-name {
+  max-width: none;
+  color: var(--ink);
+  font-family: "Nunito", sans-serif;
+  font-size: 24px;
+  font-weight: 900;
+  letter-spacing: 0;
+}
+
+.public-site-page--home .public-site-desktop-nav {
+  gap: 32px;
+}
+
+.public-site-page--home .public-site-desktop-nav a {
+  padding: 12px 0;
+  color: var(--copy);
+  background: transparent;
+  border-radius: 0;
+  box-shadow: none;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.public-site-page--home .public-site-desktop-nav a:hover,
+.public-site-page--home .public-site-desktop-nav a[aria-current="page"],
+.public-site-page--home.public-site-page--dark .public-site-desktop-nav a:hover,
+.public-site-page--home.public-site-page--dark .public-site-desktop-nav a[aria-current="page"] {
+  color: var(--primary-violet);
+  background: transparent;
+  box-shadow: none;
+}
+
+.public-site-page--home .public-site-actions {
+  gap: 8px;
+}
+
+.public-site-page--home .public-site-icon-button,
+.public-site-page--home .public-site-desktop-action :deep(button[aria-haspopup="menu"]),
+.public-site-page--home.public-site-page--dark .public-site-icon-button,
+.public-site-page--home.public-site-page--dark .public-site-desktop-action :deep(button[aria-haspopup="menu"]) {
+  width: 44px;
+  min-width: 44px;
+  height: 44px;
+  min-height: 44px;
+  padding: 0;
+  color: var(--copy) !important;
+  background: var(--surface-soft);
+  border: 0;
+  border-radius: 20px;
+  box-shadow:
+    inset 10px 10px 20px rgba(91, 80, 112, 0.1),
+    inset -10px -10px 20px rgba(255, 255, 255, 0.8);
+}
+
+.public-site-page--home .public-site-icon-button:hover,
+.public-site-page--home .public-site-desktop-action :deep(button[aria-haspopup="menu"]):hover {
+  color: var(--primary-violet) !important;
+  background: var(--surface-soft);
+}
+
+.public-site-page--home .public-site-account-link {
+  min-height: 44px;
+  height: 44px;
+  gap: 0;
+  padding: 0 24px;
+  color: #ffffff;
+  background: linear-gradient(135deg, var(--action-violet-start), var(--action-violet-end));
+  border-radius: 20px;
+  box-shadow:
+    12px 12px 24px rgba(139, 92, 246, 0.3),
+    -8px -8px 16px rgba(255, 255, 255, 0.4),
+    inset 4px 4px 8px rgba(255, 255, 255, 0.4),
+    inset -4px -4px 8px rgba(0, 0, 0, 0.1);
+  font-size: 14px;
+  font-weight: 700;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.public-site-page--home .public-site-account-link:hover {
+  transform: translateY(-4px);
+  box-shadow:
+    16px 16px 32px rgba(139, 92, 246, 0.4),
+    -8px -8px 16px rgba(255, 255, 255, 0.4);
+}
+
+.public-site-page--home .public-site-account-link:active {
+  transform: scale(0.92);
+}
+
+.public-site-page--home .public-site-footer {
+  padding: 64px 0;
+  background: transparent;
+  border-top: 1px solid var(--border);
+}
+
+.public-site-page--home .public-site-shell {
+  width: min(1192px, calc(100% - 48px));
+}
+
+.public-site-page--home .public-site-footer-layout {
+  gap: 32px;
+}
+
+.public-site-page--home .public-site-footer-brand {
+  gap: 12px;
+}
+
+.public-site-page--home .public-site-footer-mark,
+.public-site-page--home.public-site-page--dark .public-site-footer-mark {
+  display: flex;
+  width: 40px;
+  height: 40px;
+  align-items: center;
+  justify-content: center;
+  padding: 6px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 32px;
+  box-shadow:
+    16px 16px 32px rgba(160, 150, 180, 0.2),
+    -10px -10px 24px rgba(255, 255, 255, 0.9),
+    inset 6px 6px 12px rgba(139, 92, 246, 0.03),
+    inset -6px -6px 12px rgba(255, 255, 255, 1);
+}
+
+.public-site-page--home .public-site-footer p {
+  color: var(--copy);
+  font-size: 14px;
+  font-style: italic;
+  font-weight: 700;
+}
+
+.public-site-page--home .public-site-footer nav {
+  gap: 32px;
+}
+
+.public-site-page--home .public-site-footer a {
+  padding: 0;
+  color: var(--copy);
+  background: transparent;
+  border-radius: 0;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.public-site-page--home .public-site-footer a:hover {
+  color: var(--primary-violet);
+  background: transparent;
+}
+
+.public-site-page--home.public-site-page--dark .public-site-nav,
+.public-site-page--home.public-site-page--dark .public-site-header--elevated .public-site-nav,
+.public-site-page--home.public-site-page--dark .public-site-brand-mark,
+.public-site-page--home.public-site-page--dark .public-site-footer-mark {
+  box-shadow:
+    16px 16px 32px rgba(0, 0, 0, 0.34),
+    -10px -10px 24px rgba(255, 255, 255, 0.025),
+    inset 6px 6px 12px rgba(255, 255, 255, 0.02);
+}
+
+.public-site-page--home.public-site-page--dark .public-site-icon-button,
+.public-site-page--home.public-site-page--dark .public-site-desktop-action :deep(button[aria-haspopup="menu"]) {
+  box-shadow:
+    inset 10px 10px 20px rgba(0, 0, 0, 0.34),
+    inset -10px -10px 20px rgba(255, 255, 255, 0.025);
+}
+
+.public-site-page--home.public-site-page--dark .public-site-account-link {
+  box-shadow:
+    12px 12px 24px rgba(0, 0, 0, 0.32),
+    -8px -8px 16px rgba(255, 255, 255, 0.025),
+    inset 4px 4px 8px rgba(255, 255, 255, 0.08),
+    inset -4px -4px 8px rgba(0, 0, 0, 0.22);
+}
+
+@media (max-width: 1023px) {
+  .public-site-page--home .public-site-header,
+  .public-site-page--home .public-site-header--elevated {
+    top: 16px;
+  }
+
+  .public-site-page--home .public-site-nav,
+  .public-site-page--home .public-site-header--elevated .public-site-nav,
+  .public-site-page--home.public-site-page--dark .public-site-header--elevated .public-site-nav {
+    width: calc(100% - 32px);
+    min-height: 72px;
+    height: 72px;
+    padding: 0 20px;
+  }
+
+  .public-site-page--home .public-site-desktop-action {
+    display: flex;
+  }
+
+  .public-site-page--home .public-site-mobile-panel {
+    top: calc(100% + 12px);
+    right: 16px;
+    left: 16px;
+    overflow: visible;
+    background: var(--surface-elevated);
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    box-shadow:
+      16px 16px 32px rgba(160, 150, 180, 0.2),
+      -10px -10px 24px rgba(255, 255, 255, 0.9),
+      inset 6px 6px 12px rgba(139, 92, 246, 0.03),
+      inset -6px -6px 12px rgba(255, 255, 255, 1);
+    backdrop-filter: blur(20px);
+  }
+
+  .public-site-page--home.public-site-page--dark .public-site-mobile-panel {
+    box-shadow:
+      16px 16px 32px rgba(0, 0, 0, 0.34),
+      -10px -10px 24px rgba(255, 255, 255, 0.025),
+      inset 6px 6px 12px rgba(255, 255, 255, 0.02);
+  }
+
+  .public-site-page--home .public-site-mobile-inner {
+    width: auto;
+    margin: 0;
+    padding: 14px;
+  }
+
+  .public-site-page--home .public-site-mobile-inner > a {
+    min-height: 52px;
+    padding: 0 12px;
+    color: var(--copy);
+    border-color: var(--border);
+    border-radius: 12px;
+    font-weight: 700;
+  }
+
+  .public-site-page--home .public-site-mobile-inner > a:hover {
+    color: var(--primary-violet);
+    background: var(--surface-soft);
+  }
+
+  .public-site-page--home .public-site-mobile-footer {
+    display: none;
+  }
+}
+
+@media (max-width: 767px) {
+  .public-site-page--home .public-site-header,
+  .public-site-page--home .public-site-header--elevated {
+    top: 12px;
+  }
+
+  .public-site-page--home .public-site-nav,
+  .public-site-page--home .public-site-header--elevated .public-site-nav,
+  .public-site-page--home.public-site-page--dark .public-site-header--elevated .public-site-nav {
+    width: calc(100% - 24px);
+    min-height: 64px;
+    height: 64px;
+    padding: 0 10px;
+  }
+
+  .public-site-page--home .public-site-brand {
+    gap: 0;
+  }
+
+  .public-site-page--home .public-site-brand-mark,
+  .public-site-page--home.public-site-page--dark .public-site-brand-mark {
+    width: 42px;
+    height: 42px;
+    padding: 7px;
+  }
+
+  .public-site-page--home .public-site-brand-name {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+  }
+
+  .public-site-page--home .public-site-actions {
+    gap: 5px;
+  }
+
+  .public-site-page--home .public-site-icon-button,
+  .public-site-page--home .public-site-desktop-action :deep(button[aria-haspopup="menu"]),
+  .public-site-page--home.public-site-page--dark .public-site-icon-button,
+  .public-site-page--home.public-site-page--dark .public-site-desktop-action :deep(button[aria-haspopup="menu"]) {
+    width: 44px;
+    min-width: 44px;
+    height: 44px;
+    min-height: 44px;
+  }
+
+  .public-site-page--home .public-site-account-link {
+    min-height: 44px;
+    height: 44px;
+    padding: 0 12px;
+    font-size: 12px;
+  }
+
+  .public-site-page--home .public-site-mobile-panel {
+    right: 12px;
+    left: 12px;
+  }
+
+  .public-site-page--home .public-site-footer {
+    padding: 64px 0;
+  }
+
+  .public-site-page--home .public-site-shell {
+    width: calc(100% - 32px);
+  }
+
+  .public-site-page--home .public-site-footer-layout {
+    align-items: flex-start;
+    gap: 24px;
+  }
+
+  .public-site-page--home .public-site-footer nav {
+    gap: 12px 24px;
+  }
+}
+
+@media (max-width: 420px) {
+  .public-site-page--home .public-site-desktop-action:first-child {
+    display: none;
+  }
+
+  .public-site-page--home .public-site-mobile-footer {
+    display: flex;
+    justify-content: flex-end;
+  }
+
+  .public-site-page--home .public-site-mobile-footer > a {
+    display: none;
   }
 }
 </style>

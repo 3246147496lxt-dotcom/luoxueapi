@@ -1,16 +1,16 @@
 <template>
-  <AuthLayout>
-    <div class="w-full space-y-8">
-      <div class="text-left">
-        <h2 class="text-3xl font-semibold tracking-[-0.035em] text-gray-950 dark:text-white sm:text-[2rem]">
+  <AuthLayout variant="snow">
+    <div class="login-shell w-full space-y-8">
+      <div class="login-heading text-left">
+        <h1 class="login-title text-3xl font-semibold tracking-[-0.035em] text-gray-950 dark:text-white sm:text-[2rem]">
           {{ t('auth.welcomeBack') }}
-        </h2>
-        <p class="mt-2.5 text-sm leading-6 text-gray-500 dark:text-dark-400">
+        </h1>
+        <p class="login-description mt-2.5 text-sm leading-6 text-gray-500 dark:text-dark-400">
           {{ t('auth.signInToAccount') }}
         </p>
       </div>
 
-      <form @submit.prevent="handleLogin" class="space-y-6">
+      <form @submit.prevent="handleLogin" class="login-form space-y-6">
         <div class="space-y-2">
           <label for="email" class="mb-0 block text-sm font-medium text-gray-700 dark:text-gray-300">
             {{ t('auth.emailLabel') }}
@@ -27,7 +27,7 @@
               autofocus
               autocomplete="email"
               :disabled="authActionDisabled"
-              class="input h-14 rounded-2xl bg-[#f7f8f7] pl-12 pr-4 text-base shadow-none placeholder:text-gray-500 focus:bg-white dark:bg-dark-800 dark:placeholder:text-dark-400 dark:focus:bg-dark-800"
+              class="input login-input h-14 rounded-[20px] bg-[#f7f8f7] pl-12 pr-4 text-base shadow-none placeholder:text-gray-500 focus:bg-white dark:bg-dark-800 dark:placeholder:text-dark-400 dark:focus:bg-dark-800"
               :class="{ 'input-error': errors.email }"
               :placeholder="t('auth.emailPlaceholder')"
             />
@@ -42,7 +42,7 @@
             <router-link
               v-if="passwordResetEnabled && !backendModeEnabled"
               to="/forgot-password"
-              class="whitespace-nowrap text-sm font-medium text-primary-700 transition-colors hover:text-primary-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500/50 dark:text-primary-300 dark:hover:text-primary-200"
+              class="login-link whitespace-nowrap text-sm font-medium text-primary-700 transition-colors hover:text-primary-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500/50 dark:text-primary-300 dark:hover:text-primary-200"
             >
               {{ t('auth.forgotPassword') }}
             </router-link>
@@ -58,7 +58,7 @@
               required
               autocomplete="current-password"
               :disabled="authActionDisabled"
-              class="input h-14 rounded-2xl bg-[#f7f8f7] pl-12 pr-12 text-base shadow-none placeholder:text-gray-500 focus:bg-white dark:bg-dark-800 dark:placeholder:text-dark-400 dark:focus:bg-dark-800"
+              class="input login-input h-14 rounded-[20px] bg-[#f7f8f7] pl-12 pr-12 text-base shadow-none placeholder:text-gray-500 focus:bg-white dark:bg-dark-800 dark:placeholder:text-dark-400 dark:focus:bg-dark-800"
               :class="{ 'input-error': errors.password }"
               :placeholder="t('auth.passwordPlaceholder')"
             />
@@ -68,7 +68,7 @@
               :disabled="authActionDisabled"
               :aria-label="t('auth.passwordLabel')"
               :aria-pressed="showPassword"
-              class="absolute inset-y-0 right-0 flex items-center px-4 text-gray-500 transition-colors hover:text-gray-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary-500/50 disabled:cursor-not-allowed disabled:opacity-50 dark:text-dark-400 dark:hover:text-dark-200"
+              class="login-reveal absolute inset-y-0 right-0 flex items-center px-4 text-gray-500 transition-colors hover:text-gray-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary-500/50 disabled:cursor-not-allowed disabled:opacity-50 dark:text-dark-400 dark:hover:text-dark-200"
             >
               <Icon v-if="showPassword" name="eyeOff" size="md" />
               <Icon v-else name="eye" size="md" />
@@ -89,7 +89,7 @@
         <button
           type="submit"
           :disabled="authActionDisabled || (turnstileEnabled && !turnstileToken)"
-          class="btn btn-primary h-14 w-full rounded-2xl px-5 text-base shadow-none"
+          class="btn btn-primary login-submit h-14 w-full rounded-[20px] px-5 text-base"
         >
           <Icon v-if="isLoading" name="refresh" size="md" class="motion-safe:animate-spin" />
           <Icon v-else name="login" size="md" class="mr-2" />
@@ -110,11 +110,11 @@
 
         <div v-if="showOAuthLogin" class="space-y-4 pt-1">
           <div class="flex items-center gap-3">
-            <div class="h-px flex-1 bg-gray-100 dark:bg-dark-700"></div>
-            <span class="text-xs text-gray-500 dark:text-dark-400">
+            <div class="login-divider h-px flex-1 bg-gray-100 dark:bg-dark-700"></div>
+            <span class="login-oauth-label text-xs text-gray-500 dark:text-dark-400">
               {{ t('auth.oauthOrContinue') }}
             </span>
-            <div class="h-px flex-1 bg-gray-100 dark:bg-dark-700"></div>
+            <div class="login-divider h-px flex-1 bg-gray-100 dark:bg-dark-700"></div>
           </div>
 
           <EmailOAuthButtons
@@ -151,11 +151,11 @@
 
     <!-- Footer -->
     <template v-if="!backendModeEnabled" #footer>
-      <p class="text-gray-500 dark:text-dark-400">
+      <p class="login-footer text-gray-500 dark:text-dark-400">
         {{ t('auth.dontHaveAccount') }}
         <router-link
           to="/register"
-          class="ml-1 font-semibold text-primary-700 transition-colors hover:text-primary-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500/50 dark:text-primary-300 dark:hover:text-primary-200"
+          class="login-link ml-1 font-semibold text-primary-700 transition-colors hover:text-primary-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500/50 dark:text-primary-300 dark:hover:text-primary-200"
         >
           {{ t('auth.signUp') }}
         </router-link>
@@ -530,6 +530,194 @@ function handle2FACancel(): void {
 </script>
 
 <style scoped>
+.login-shell {
+  --login-text: #332f3a;
+  --login-copy: #635f69;
+  --login-field: #efebf5;
+  --login-border: rgba(91, 80, 112, 0.16);
+  --login-violet: #7c3aed;
+  --login-action-start: #7c3aed;
+  --login-action-end: #5b21b6;
+  color: var(--login-text);
+}
+
+.login-title {
+  color: var(--login-text);
+  font-family: "Nunito", "DM Sans", sans-serif;
+  font-size: clamp(2.25rem, 3.5vw, 2.75rem);
+  font-weight: 900;
+  line-height: 1.08;
+  letter-spacing: -0.025em;
+}
+
+.login-description,
+.login-footer,
+.login-oauth-label {
+  color: var(--login-copy);
+}
+
+.login-form label {
+  color: var(--login-text);
+  font-weight: 700;
+}
+
+.login-input {
+  border: 1px solid var(--login-border);
+  color: var(--login-text);
+  background: var(--login-field);
+  box-shadow:
+    inset 8px 8px 16px rgba(91, 80, 112, 0.09),
+    inset -8px -8px 16px rgba(255, 255, 255, 0.8);
+  transition:
+    border-color 180ms ease,
+    box-shadow 180ms ease,
+    background-color 180ms ease;
+}
+
+.login-input::placeholder {
+  color: #6f6977;
+}
+
+.login-input:-webkit-autofill,
+.login-input:-webkit-autofill:hover,
+.login-input:-webkit-autofill:focus {
+  -webkit-text-fill-color: var(--login-text);
+  caret-color: var(--login-text);
+  box-shadow: inset 0 0 0 1000px var(--login-field);
+}
+
+.login-input:focus {
+  border-color: color-mix(in srgb, var(--login-violet) 55%, transparent);
+  outline: none;
+  background: #ffffff;
+  box-shadow:
+    0 0 0 4px color-mix(in srgb, var(--login-violet) 16%, transparent),
+    inset 4px 4px 10px rgba(91, 80, 112, 0.05);
+}
+
+.login-input.input-error {
+  border-color: #dc2626;
+}
+
+.login-link {
+  color: var(--login-violet);
+  text-underline-offset: 3px;
+}
+
+.login-link:hover {
+  color: #5b21b6;
+  text-decoration: underline;
+}
+
+.login-reveal {
+  color: var(--login-copy);
+}
+
+.login-divider {
+  background: var(--login-border);
+}
+
+.login-submit {
+  border: 0;
+  color: #ffffff;
+  background: linear-gradient(135deg, var(--login-action-start), var(--login-action-end));
+  box-shadow:
+    12px 12px 24px rgba(139, 92, 246, 0.28),
+    -8px -8px 16px rgba(255, 255, 255, 0.34),
+    inset 4px 4px 8px rgba(255, 255, 255, 0.35),
+    inset -4px -4px 8px rgba(0, 0, 0, 0.1);
+  transition:
+    transform 180ms cubic-bezier(0.22, 1, 0.36, 1),
+    box-shadow 180ms cubic-bezier(0.22, 1, 0.36, 1),
+    opacity 180ms ease;
+}
+
+.login-submit:hover:not(:disabled) {
+  transform: translateY(-3px);
+  box-shadow:
+    15px 15px 28px rgba(139, 92, 246, 0.36),
+    -8px -8px 16px rgba(255, 255, 255, 0.32),
+    inset 4px 4px 8px rgba(255, 255, 255, 0.38);
+}
+
+.login-submit:active:not(:disabled) {
+  transform: translateY(0) scale(0.98);
+  box-shadow:
+    inset 7px 7px 14px rgba(61, 27, 114, 0.2),
+    inset -5px -5px 12px rgba(255, 255, 255, 0.2);
+}
+
+.login-submit:disabled {
+  cursor: not-allowed;
+  opacity: 0.58;
+  box-shadow: none;
+}
+
+.login-shell :deep(.btn-secondary) {
+  min-height: 52px;
+  border-color: var(--login-border);
+  border-radius: 18px;
+  color: var(--login-text);
+  background: rgba(255, 255, 255, 0.64);
+  box-shadow:
+    6px 6px 14px rgba(91, 80, 112, 0.08),
+    -6px -6px 14px rgba(255, 255, 255, 0.7);
+}
+
+.login-shell :deep(.btn-secondary:hover:not(:disabled)) {
+  color: var(--login-violet);
+  border-color: color-mix(in srgb, var(--login-violet) 28%, var(--login-border));
+  transform: translateY(-2px);
+}
+
+.login-shell :deep(.btn-secondary:active:not(:disabled)) {
+  transform: translateY(0) scale(0.98);
+}
+
+:global(html.dark .login-shell) {
+  --login-text: #f8f5fc;
+  --login-copy: #c5bccf;
+  --login-field: #120f18;
+  --login-border: rgba(255, 255, 255, 0.12);
+  --login-violet: #a78bfa;
+  --login-action-start: #7c3aed;
+  --login-action-end: #5b21b6;
+}
+
+:global(html.dark .login-input),
+:global(html.dark .login-input:focus) {
+  color: var(--login-text);
+  background: var(--login-field);
+  box-shadow:
+    inset 8px 8px 16px rgba(0, 0, 0, 0.32),
+    inset -8px -8px 16px rgba(255, 255, 255, 0.025);
+}
+
+:global(html.dark .login-input::placeholder) {
+  color: #aaa0b5;
+}
+
+:global(html.dark .login-link:hover) {
+  color: #ddd6fe;
+}
+
+@media (max-width: 639px) {
+  .login-shell {
+    padding-block: 4px;
+  }
+
+  .login-title {
+    font-size: 2.1rem;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .login-submit,
+  .login-input {
+    transition-duration: 0.01ms;
+  }
+}
+
 .fade-enter-active,
 .fade-leave-active {
   transition: all 0.3s ease;

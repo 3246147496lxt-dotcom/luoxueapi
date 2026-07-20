@@ -101,10 +101,24 @@ describe('AppSidebar flattened admin navigation', () => {
 
   it('renders admin navigation directly without the operations wrapper', () => {
     const wrapper = mountSidebar()
+    const dashboardIcon = wrapper.get('a[href="/admin/dashboard"] .sidebar-svg-icon svg')
+    const accountPoolIcon = wrapper.get('a[href="/admin/accounts"] .sidebar-svg-icon svg')
+    const auditLogIcon = wrapper.get('a[href="/admin/audit-logs"] .sidebar-svg-icon svg')
+    const modelMarketplaceIcon = wrapper.get('a[href="/admin/model-catalog"] .sidebar-svg-icon svg')
 
     expect(wrapper.find('#sidebar-admin-operations-toggle').exists()).toBe(false)
     expect(wrapper.find('#sidebar-admin-operations').exists()).toBe(false)
     expect(wrapper.get('a[href="/admin/dashboard"]').text()).toContain('nav.adminDashboard')
+    expect(dashboardIcon.attributes('viewBox')).toBe('0 0 1024 1024')
+    expect(dashboardIcon.get('path').attributes('fill')).toBe('currentColor')
+    expect(accountPoolIcon.attributes('viewBox')).toBe('-112 -112 1248 1248')
+    expect(accountPoolIcon.get('path').attributes('fill')).toBe('currentColor')
+    expect(auditLogIcon.attributes('viewBox')).toBe('-32 -32 1088 1088')
+    expect(auditLogIcon.findAll('path')).toHaveLength(5)
+    expect(auditLogIcon.get('path').attributes('fill')).toBe('currentColor')
+    expect(modelMarketplaceIcon.attributes('viewBox')).toBe('0 0 1024 1024')
+    expect(modelMarketplaceIcon.attributes('fill')).toBe('currentColor')
+    expect(modelMarketplaceIcon.findAll('path')).toHaveLength(3)
     expect(wrapper.text()).not.toContain('nav.operationsManagement')
   })
 
@@ -159,6 +173,72 @@ describe('AppSidebar flattened admin navigation', () => {
 
     expect(wrapper.find('#sidebar-admin-operations-toggle').exists()).toBe(false)
     expect(wrapper.find('a[href="/admin/dashboard"]').exists()).toBe(false)
+  })
+
+  it('groups regular-user account links under the personal-center heading', () => {
+    const wrapper = mountSidebar('user')
+    const mainSection = wrapper.get('[data-testid="sidebar-user-main-section"]')
+    const personalSection = wrapper.get('[data-testid="sidebar-user-personal-section"]')
+
+    expect(personalSection.attributes('role')).toBe('group')
+    expect(personalSection.attributes('aria-label')).toBe('个人中心')
+    expect(personalSection.get('.sidebar-section-title').text()).toBe('个人中心')
+    expect(personalSection.get('.sidebar-section-title').attributes('aria-hidden')).toBe('true')
+    expect(mainSection.findAll('a').map((link) => link.attributes('href'))).toEqual([
+      '/dashboard',
+      '/keys',
+      '/usage',
+      '/monitor',
+    ])
+    expect(personalSection.findAll('a').map((link) => link.attributes('href'))).toEqual([
+      '/subscriptions',
+      '/purchase',
+      '/orders',
+      '/profile',
+    ])
+  })
+
+  it('keeps custom user links after the personal-center section', () => {
+    const appStore = useAppStore()
+    appStore.cachedPublicSettings = {
+      custom_menu_items: [
+        {
+          id: 'support-center',
+          label: '支持中心',
+          icon_svg: '<svg viewBox="0 0 24 24"><path d="M4 4h16v16H4z" /></svg>',
+          url: '',
+          visibility: 'user',
+          sort_order: 1,
+        },
+      ],
+    } as PublicSettings
+    const wrapper = mountSidebar('user')
+    const sections = wrapper.get('nav.sidebar-nav').findAll('[data-testid^="sidebar-user-"]')
+
+    expect(sections.map((section) => section.attributes('data-testid'))).toEqual([
+      'sidebar-user-main-section',
+      'sidebar-user-personal-section',
+      'sidebar-user-custom-section',
+    ])
+    expect(wrapper.get('[data-testid="sidebar-user-custom-section"] a').attributes('href')).toBe(
+      '/custom/support-center',
+    )
+  })
+
+  it('keeps the remaining account links grouped when payments are disabled', () => {
+    const appStore = useAppStore()
+    appStore.cachedPublicSettings = {
+      custom_menu_items: [],
+      payment_enabled: false,
+    } as PublicSettings
+    const wrapper = mountSidebar('user')
+    const personalSection = wrapper.get('[data-testid="sidebar-user-personal-section"]')
+
+    expect(personalSection.findAll('a').map((link) => link.attributes('href'))).toEqual([
+      '/subscriptions',
+      '/purchase',
+      '/profile',
+    ])
   })
 
   it('links regular users to the configured documentation center', () => {
