@@ -1,12 +1,12 @@
 <template>
-  <AuthLayout>
-    <div class="space-y-6">
+  <AuthLayout variant="snow">
+    <div class="register-shell w-full space-y-8">
       <!-- Title -->
-      <div class="text-center">
-        <h2 class="text-2xl font-bold text-gray-900 dark:text-white">
+      <div class="register-heading text-left">
+        <h1 class="register-title text-3xl font-semibold tracking-[-0.035em] text-gray-950 dark:text-white sm:text-[2rem]">
           {{ t('auth.createAccount') }}
-        </h2>
-        <p class="mt-2 text-sm text-gray-500 dark:text-dark-400">
+        </h1>
+        <p class="register-description mt-2.5 text-sm leading-6 text-gray-500 dark:text-dark-400">
           {{ t('auth.signUpToStart', { siteName }) }}
         </p>
       </div>
@@ -27,15 +27,15 @@
       </div>
 
       <!-- Registration Form -->
-      <form v-else @submit.prevent="handleRegister" class="space-y-5">
+      <form v-else @submit.prevent="handleRegister" class="register-form space-y-6">
         <!-- Email Input -->
-        <div>
-          <label for="email" class="input-label">
+        <div class="space-y-2">
+          <label for="email" class="mb-0 block text-sm font-medium text-gray-700 dark:text-gray-300">
             {{ t('auth.emailLabel') }}
           </label>
           <div class="relative">
-            <div class="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3.5">
-              <Icon name="mail" size="md" class="text-gray-400 dark:text-dark-500" />
+            <div class="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-4">
+              <Icon name="mail" size="md" class="text-gray-500 dark:text-dark-400" />
             </div>
             <input
               id="email"
@@ -45,7 +45,7 @@
               autofocus
               autocomplete="email"
               :disabled="registrationActionDisabled"
-              class="input pl-11"
+              class="input register-input h-14 rounded-[20px] bg-[#f7f8f7] pl-12 pr-4 text-base shadow-none placeholder:text-gray-500 focus:bg-white dark:bg-dark-800 dark:placeholder:text-dark-400 dark:focus:bg-dark-800"
               :class="{ 'input-error': errors.email }"
               :placeholder="t('auth.emailPlaceholder')"
             />
@@ -53,13 +53,13 @@
         </div>
 
         <!-- Password Input -->
-        <div>
-          <label for="password" class="input-label">
+        <div class="space-y-2">
+          <label for="password" class="mb-0 block text-sm font-medium text-gray-700 dark:text-gray-300">
             {{ t('auth.passwordLabel') }}
           </label>
           <div class="relative">
-            <div class="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3.5">
-              <Icon name="lock" size="md" class="text-gray-400 dark:text-dark-500" />
+            <div class="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-4">
+              <Icon name="lock" size="md" class="text-gray-500 dark:text-dark-400" />
             </div>
             <input
               id="password"
@@ -68,7 +68,7 @@
               required
               autocomplete="new-password"
               :disabled="registrationActionDisabled"
-              class="input pl-11 pr-11"
+              class="input register-input h-14 rounded-[20px] bg-[#f7f8f7] pl-12 pr-12 text-base shadow-none placeholder:text-gray-500 focus:bg-white dark:bg-dark-800 dark:placeholder:text-dark-400 dark:focus:bg-dark-800"
               :class="{ 'input-error': errors.password }"
               :placeholder="t('auth.createPasswordPlaceholder')"
             />
@@ -76,24 +76,26 @@
               type="button"
               :disabled="registrationActionDisabled"
               @click="showPassword = !showPassword"
-              class="absolute inset-y-0 right-0 flex items-center pr-3.5 text-gray-400 transition-colors hover:text-gray-600 dark:hover:text-dark-300"
+              :aria-label="t('auth.passwordLabel')"
+              :aria-pressed="showPassword"
+              class="register-reveal absolute inset-y-0 right-0 flex items-center px-4 text-gray-500 transition-colors hover:text-gray-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-primary-500/50 disabled:cursor-not-allowed disabled:opacity-50 dark:text-dark-400 dark:hover:text-dark-200"
             >
               <Icon v-if="showPassword" name="eyeOff" size="md" />
               <Icon v-else name="eye" size="md" />
             </button>
           </div>
-          <p class="input-hint">
+          <p class="register-hint text-sm leading-5">
             {{ t('auth.passwordHint') }}
           </p>
         </div>
 
         <!-- Invitation Code Input (Required when enabled) -->
-        <div v-if="invitationCodeEnabled">
-          <label for="invitation_code" class="input-label">
+        <div v-if="invitationCodeEnabled" class="space-y-2">
+          <label for="invitation_code" class="mb-0 block text-sm font-medium text-gray-700 dark:text-gray-300">
             {{ t('auth.invitationCodeLabel') }}
           </label>
           <div class="relative">
-            <div class="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3.5">
+            <div class="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-4">
               <Icon name="key" size="md" :class="invitationValidation.valid ? 'text-green-500' : 'text-gray-400 dark:text-dark-500'" />
             </div>
             <input
@@ -101,25 +103,22 @@
               v-model="formData.invitation_code"
               type="text"
               :disabled="registrationActionDisabled"
-              class="input pl-11 pr-10"
+              class="input register-input h-14 rounded-[20px] bg-[#f7f8f7] pl-12 pr-12 text-base shadow-none placeholder:text-gray-500 focus:bg-white dark:bg-dark-800 dark:placeholder:text-dark-400 dark:focus:bg-dark-800"
               :class="{
-                'border-green-500 focus:border-green-500 focus:ring-green-500': invitationValidation.valid,
-                'border-red-500 focus:border-red-500 focus:ring-red-500': invitationValidation.invalid || errors.invitation_code
+                'register-input-valid': invitationValidation.valid,
+                'input-error': invitationValidation.invalid || errors.invitation_code
               }"
               :placeholder="t('auth.invitationCodePlaceholder')"
               @input="handleInvitationCodeInput"
             />
             <!-- Validation indicator -->
-            <div v-if="invitationValidating" class="absolute inset-y-0 right-0 flex items-center pr-3.5">
-              <svg class="h-4 w-4 animate-spin text-gray-400" fill="none" viewBox="0 0 24 24">
-                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-              </svg>
+            <div v-if="invitationValidating" class="absolute inset-y-0 right-0 flex items-center pr-4">
+              <Icon name="refresh" size="sm" class="text-gray-500 motion-safe:animate-spin dark:text-dark-400" />
             </div>
-            <div v-else-if="invitationValidation.valid" class="absolute inset-y-0 right-0 flex items-center pr-3.5">
+            <div v-else-if="invitationValidation.valid" class="absolute inset-y-0 right-0 flex items-center pr-4">
               <Icon name="checkCircle" size="md" class="text-green-500" />
             </div>
-            <div v-else-if="invitationValidation.invalid || errors.invitation_code" class="absolute inset-y-0 right-0 flex items-center pr-3.5">
+            <div v-else-if="invitationValidation.invalid || errors.invitation_code" class="absolute inset-y-0 right-0 flex items-center pr-4">
               <Icon name="exclamationCircle" size="md" class="text-red-500" />
             </div>
           </div>
@@ -135,13 +134,13 @@
         </div>
 
         <!-- Promo Code Input (Optional) -->
-        <div v-if="promoCodeEnabled">
-          <label for="promo_code" class="input-label">
+        <div v-if="promoCodeEnabled" class="space-y-2">
+          <label for="promo_code" class="mb-0 block text-sm font-medium text-gray-700 dark:text-gray-300">
             {{ t('auth.promoCodeLabel') }}
             <span class="ml-1 text-xs font-normal text-gray-400 dark:text-dark-500">({{ t('common.optional') }})</span>
           </label>
           <div class="relative">
-            <div class="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-3.5">
+            <div class="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-4">
               <Icon name="gift" size="md" :class="promoValidation.valid ? 'text-green-500' : 'text-gray-400 dark:text-dark-500'" />
             </div>
             <input
@@ -149,25 +148,22 @@
               v-model="formData.promo_code"
               type="text"
               :disabled="registrationActionDisabled"
-              class="input pl-11 pr-10"
+              class="input register-input h-14 rounded-[20px] bg-[#f7f8f7] pl-12 pr-12 text-base shadow-none placeholder:text-gray-500 focus:bg-white dark:bg-dark-800 dark:placeholder:text-dark-400 dark:focus:bg-dark-800"
               :class="{
-                'border-green-500 focus:border-green-500 focus:ring-green-500': promoValidation.valid,
-                'border-red-500 focus:border-red-500 focus:ring-red-500': promoValidation.invalid
+                'register-input-valid': promoValidation.valid,
+                'input-error': promoValidation.invalid
               }"
               :placeholder="t('auth.promoCodePlaceholder')"
               @input="handlePromoCodeInput"
             />
             <!-- Validation indicator -->
-            <div v-if="promoValidating" class="absolute inset-y-0 right-0 flex items-center pr-3.5">
-              <svg class="h-4 w-4 animate-spin text-gray-400" fill="none" viewBox="0 0 24 24">
-                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-              </svg>
+            <div v-if="promoValidating" class="absolute inset-y-0 right-0 flex items-center pr-4">
+              <Icon name="refresh" size="sm" class="text-gray-500 motion-safe:animate-spin dark:text-dark-400" />
             </div>
-            <div v-else-if="promoValidation.valid" class="absolute inset-y-0 right-0 flex items-center pr-3.5">
+            <div v-else-if="promoValidation.valid" class="absolute inset-y-0 right-0 flex items-center pr-4">
               <Icon name="checkCircle" size="md" class="text-green-500" />
             </div>
-            <div v-else-if="promoValidation.invalid" class="absolute inset-y-0 right-0 flex items-center pr-3.5">
+            <div v-else-if="promoValidation.invalid" class="absolute inset-y-0 right-0 flex items-center pr-4">
               <Icon name="exclamationCircle" size="md" class="text-red-500" />
             </div>
           </div>
@@ -183,7 +179,7 @@
         </div>
 
         <!-- Turnstile Widget -->
-        <div v-if="turnstileEnabled && turnstileSiteKey">
+        <div v-if="turnstileEnabled && turnstileSiteKey" class="overflow-hidden rounded-2xl">
           <TurnstileWidget
             ref="turnstileRef"
             :site-key="turnstileSiteKey"
@@ -209,28 +205,9 @@
         <button
           type="submit"
           :disabled="registrationActionDisabled || (turnstileEnabled && !turnstileToken)"
-          class="btn btn-primary w-full"
+          class="btn btn-primary register-submit h-14 w-full rounded-[20px] px-5 text-base"
         >
-          <svg
-            v-if="isLoading"
-            class="-ml-1 mr-2 h-4 w-4 animate-spin text-white"
-            fill="none"
-            viewBox="0 0 24 24"
-          >
-            <circle
-              class="opacity-25"
-              cx="12"
-              cy="12"
-              r="10"
-              stroke="currentColor"
-              stroke-width="4"
-            ></circle>
-            <path
-              class="opacity-75"
-              fill="currentColor"
-              d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-            ></path>
-          </svg>
+          <Icon v-if="isLoading" name="refresh" size="md" class="motion-safe:animate-spin" />
           <Icon v-else name="userPlus" size="md" class="mr-2" />
           {{
             isLoading
@@ -243,13 +220,13 @@
 
       </form>
 
-      <div v-if="showOAuthLogin" class="space-y-3 pt-1">
+      <div v-if="showOAuthLogin" class="space-y-4 pt-1">
         <div class="flex items-center gap-3">
-          <div class="h-px flex-1 bg-gray-200 dark:bg-dark-700"></div>
-          <span class="text-xs text-gray-500 dark:text-dark-400">
+          <div class="register-divider h-px flex-1 bg-gray-100 dark:bg-dark-700"></div>
+          <span class="register-oauth-label text-xs text-gray-500 dark:text-dark-400">
             {{ t('auth.oauthOrContinue') }}
           </span>
-          <div class="h-px flex-1 bg-gray-200 dark:bg-dark-700"></div>
+          <div class="register-divider h-px flex-1 bg-gray-100 dark:bg-dark-700"></div>
         </div>
 
         <EmailOAuthButtons
@@ -284,11 +261,11 @@
 
     <!-- Footer -->
     <template #footer>
-      <p class="text-gray-500 dark:text-dark-400">
+      <p class="register-footer text-gray-500 dark:text-dark-400">
         {{ t('auth.alreadyHaveAccount') }}
         <router-link
           to="/login"
-          class="font-medium text-primary-600 transition-colors hover:text-primary-500 dark:text-primary-400 dark:hover:text-primary-300"
+          class="register-link ml-1 font-semibold text-primary-700 transition-colors hover:text-primary-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500/50 dark:text-primary-300 dark:hover:text-primary-200"
         >
           {{ t('auth.signIn') }}
         </router-link>
@@ -918,6 +895,205 @@ async function handleRegister(): Promise<void> {
 </script>
 
 <style scoped>
+.register-shell {
+  --register-text: #332f3a;
+  --register-copy: #635f69;
+  --register-field: #efebf5;
+  --register-border: rgba(91, 80, 112, 0.16);
+  --register-violet: #7c3aed;
+  --register-action-start: #7c3aed;
+  --register-action-end: #5b21b6;
+  --register-secondary-bg: rgba(255, 255, 255, 0.64);
+  --register-secondary-shadow-dark: rgba(91, 80, 112, 0.08);
+  --register-secondary-shadow-light: rgba(255, 255, 255, 0.7);
+  color: var(--register-text);
+}
+
+.register-title {
+  color: var(--register-text);
+  font-family: "Nunito", "DM Sans", sans-serif;
+  font-size: clamp(2.25rem, 3.5vw, 2.75rem);
+  font-weight: 900;
+  line-height: 1.08;
+  letter-spacing: -0.025em;
+}
+
+.register-description,
+.register-footer,
+.register-oauth-label,
+.register-hint {
+  color: var(--register-copy);
+}
+
+.register-form label {
+  color: var(--register-text);
+  font-weight: 700;
+}
+
+.register-input {
+  border: 1px solid var(--register-border);
+  color: var(--register-text);
+  background: var(--register-field);
+  box-shadow:
+    inset 8px 8px 16px rgba(91, 80, 112, 0.09),
+    inset -8px -8px 16px rgba(255, 255, 255, 0.8);
+  transition:
+    border-color 180ms ease,
+    box-shadow 180ms ease,
+    background-color 180ms ease;
+}
+
+.register-input::placeholder {
+  color: #6f6977;
+}
+
+.register-input:-webkit-autofill,
+.register-input:-webkit-autofill:hover,
+.register-input:-webkit-autofill:focus {
+  -webkit-text-fill-color: var(--register-text);
+  caret-color: var(--register-text);
+  box-shadow: inset 0 0 0 1000px var(--register-field);
+}
+
+.register-input:focus {
+  border-color: color-mix(in srgb, var(--register-violet) 55%, transparent);
+  outline: none;
+  background: #ffffff;
+  box-shadow:
+    0 0 0 4px color-mix(in srgb, var(--register-violet) 16%, transparent),
+    inset 4px 4px 10px rgba(91, 80, 112, 0.05);
+}
+
+.register-input.input-error {
+  border-color: #dc2626;
+}
+
+.register-input.register-input-valid {
+  border-color: #16a34a;
+}
+
+.register-link {
+  color: var(--register-violet);
+  text-underline-offset: 3px;
+}
+
+.register-link:hover {
+  color: #5b21b6;
+  text-decoration: underline;
+}
+
+.register-reveal {
+  color: var(--register-copy);
+}
+
+.register-divider {
+  background: var(--register-border);
+}
+
+.register-submit {
+  border: 0;
+  color: #ffffff;
+  background: linear-gradient(135deg, var(--register-action-start), var(--register-action-end));
+  box-shadow:
+    12px 12px 24px rgba(139, 92, 246, 0.28),
+    -8px -8px 16px rgba(255, 255, 255, 0.34),
+    inset 4px 4px 8px rgba(255, 255, 255, 0.35),
+    inset -4px -4px 8px rgba(0, 0, 0, 0.1);
+  transition:
+    transform 180ms cubic-bezier(0.22, 1, 0.36, 1),
+    box-shadow 180ms cubic-bezier(0.22, 1, 0.36, 1),
+    opacity 180ms ease;
+}
+
+.register-submit:hover:not(:disabled) {
+  transform: translateY(-3px);
+  box-shadow:
+    15px 15px 28px rgba(139, 92, 246, 0.36),
+    -8px -8px 16px rgba(255, 255, 255, 0.32),
+    inset 4px 4px 8px rgba(255, 255, 255, 0.38);
+}
+
+.register-submit:active:not(:disabled) {
+  transform: translateY(0) scale(0.98);
+  box-shadow:
+    inset 7px 7px 14px rgba(61, 27, 114, 0.2),
+    inset -5px -5px 12px rgba(255, 255, 255, 0.2);
+}
+
+.register-submit:disabled {
+  cursor: not-allowed;
+  opacity: 0.58;
+  box-shadow: none;
+}
+
+.register-shell :deep(.btn-secondary) {
+  min-height: 52px;
+  border-color: var(--register-border);
+  border-radius: 18px;
+  color: var(--register-text);
+  background: var(--register-secondary-bg);
+  box-shadow:
+    6px 6px 14px var(--register-secondary-shadow-dark),
+    -6px -6px 14px var(--register-secondary-shadow-light);
+}
+
+.register-shell :deep(.btn-secondary:hover:not(:disabled)) {
+  color: var(--register-violet);
+  border-color: color-mix(in srgb, var(--register-violet) 28%, var(--register-border));
+  transform: translateY(-2px);
+}
+
+.register-shell :deep(.btn-secondary:active:not(:disabled)) {
+  transform: translateY(0) scale(0.98);
+}
+
+:global(html.dark .register-shell) {
+  --register-text: #f8f5fc;
+  --register-copy: #c5bccf;
+  --register-field: #120f18;
+  --register-border: rgba(255, 255, 255, 0.12);
+  --register-violet: #a78bfa;
+  --register-action-start: #7c3aed;
+  --register-action-end: #5b21b6;
+  --register-secondary-bg: rgba(37, 30, 47, 0.92);
+  --register-secondary-shadow-dark: rgba(0, 0, 0, 0.32);
+  --register-secondary-shadow-light: rgba(255, 255, 255, 0.025);
+}
+
+:global(html.dark .register-input),
+:global(html.dark .register-input:focus) {
+  color: var(--register-text);
+  background: var(--register-field);
+  box-shadow:
+    inset 8px 8px 16px rgba(0, 0, 0, 0.32),
+    inset -8px -8px 16px rgba(255, 255, 255, 0.025);
+}
+
+:global(html.dark .register-input::placeholder) {
+  color: #aaa0b5;
+}
+
+:global(html.dark .register-link:hover) {
+  color: #ddd6fe;
+}
+
+@media (max-width: 639px) {
+  .register-shell {
+    padding-block: 4px;
+  }
+
+  .register-title {
+    font-size: 2.1rem;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .register-submit,
+  .register-input {
+    transition-duration: 0.01ms;
+  }
+}
+
 .fade-enter-active,
 .fade-leave-active {
   transition: all 0.3s ease;
