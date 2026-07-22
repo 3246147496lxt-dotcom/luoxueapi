@@ -125,19 +125,13 @@ describe('AppHeader theme toggle', () => {
 })
 
 describe('AppHeader global navigation shell', () => {
-  it('keeps configured first-party docs on the local docs server and hides an empty entry', async () => {
+  it('keeps documentation access out of the top header', async () => {
     const wrapper = mountHeader()
     const appStore = useAppStore()
 
     expect(wrapper.find('[data-testid="header-docs-link"]').exists()).toBe(false)
 
     appStore.docUrl = '/tutorial-docs/?source=header#quick-start'
-    await wrapper.vm.$nextTick()
-
-    expect(wrapper.get('[data-testid="header-docs-link"]').attributes('href'))
-      .toBe('http://127.0.0.1:4179/tutorial-docs/?source=header#quick-start')
-
-    appStore.docUrl = ''
     await wrapper.vm.$nextTick()
     expect(wrapper.find('[data-testid="header-docs-link"]').exists()).toBe(false)
   })
@@ -146,6 +140,9 @@ describe('AppHeader global navigation shell', () => {
     const wrapper = mountHeader()
 
     expect(wrapper.findAll('[data-testid="snowflake-credit-icon"]').length).toBeGreaterThan(0)
+    expect(wrapper.get('[data-testid="credit-amount"]').classes()).toEqual(
+      expect.arrayContaining(['text-primary-700', 'dark:text-primary-300']),
+    )
     expect(wrapper.text()).toContain('10.00')
     expect(wrapper.text()).not.toContain('$10.00')
   })
@@ -384,7 +381,18 @@ describe('AppHeader global navigation shell', () => {
     expect(trigger.text()).toContain('header-user')
     const avatar = trigger.get('[data-testid="header-account-avatar"]')
     expect(avatar.text()).toBe('H')
-    expect(avatar.classes()).toEqual(expect.arrayContaining(['mr-1', 'h-6', 'w-6', 'text-[10px]']))
+    expect(avatar.classes()).toEqual(expect.arrayContaining([
+      'header-account-avatar',
+      'mr-1',
+      'h-6',
+      'w-6',
+      'text-[10px]',
+    ]))
+    expect(avatar.classes()).not.toEqual(expect.arrayContaining([
+      'bg-primary-600',
+      'dark:bg-primary-500',
+      'ring-1',
+    ]))
     expect(trigger.get('.text-left').classes()).toContain('md:block')
     expect(trigger.attributes('aria-expanded')).toBe('false')
     expect(trigger.attributes('aria-controls')).toBe('header-account-menu')

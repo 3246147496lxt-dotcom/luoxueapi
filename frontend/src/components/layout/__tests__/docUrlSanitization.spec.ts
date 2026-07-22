@@ -12,10 +12,9 @@ const homeViewSource = readFileSync(resolve(dir, '../../../views/HomeView.vue'),
 const keyUsageViewSource = readFileSync(resolve(dir, '../../../views/KeyUsageView.vue'), 'utf8')
 
 describe('doc_url sanitization', () => {
-  it('AppHeader uses the shared environment-aware documentation URL resolver', () => {
-    expect(headerSource).toContain("import { resolveDocumentationUrl } from '@/utils/documentationUrl'")
-    expect(headerSource).toContain('appStore.cachedPublicSettings?.doc_url || appStore.docUrl')
-    expect(headerSource).toContain('resolveDocumentationUrl(configuredDocUrl.value)')
+  it('AppHeader leaves documentation navigation to the sidebar', () => {
+    expect(headerSource).not.toContain('data-testid="header-docs-link"')
+    expect(headerSource).not.toContain("import { resolveDocumentationUrl } from '@/utils/documentationUrl'")
   })
 
   it('AppSidebar uses the shared environment-aware documentation URL resolver', () => {
