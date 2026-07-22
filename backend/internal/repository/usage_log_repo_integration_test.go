@@ -690,6 +690,40 @@ func (s *UsageLogRepoSuite) TestListWithFilters() {
 
 // --- GetDashboardStats ---
 
+func (s *UsageLogRepoSuite) TestDashboardUserStats_CurrentPreviousAndSoftDeleted() {
+	loc := timezone.Location()
+	now := time.Date(2030, 7, 21, 15, 4, 5, 0, loc)
+	windows := newDashboardDayComparisonWindow(now, loc)
+
+	base := &DashboardStats{}
+	s.Require().NoError(s.repo.fillDashboardUserStats(s.ctx, base, now), "fillDashboardUserStats base")
+
+	mustCreateUser(s.T(), s.client, &service.User{
+		Email:     "dashboard-current-" + uuid.NewString() + "@example.com",
+		CreatedAt: windows.currentStart.Add(time.Hour),
+		UpdatedAt: windows.currentStart.Add(time.Hour),
+	})
+	mustCreateUser(s.T(), s.client, &service.User{
+		Email:     "dashboard-previous-" + uuid.NewString() + "@example.com",
+		CreatedAt: windows.previousStart.Add(time.Hour),
+		UpdatedAt: windows.previousStart.Add(time.Hour),
+	})
+	deleted := mustCreateUser(s.T(), s.client, &service.User{
+		Email:     "dashboard-deleted-" + uuid.NewString() + "@example.com",
+		CreatedAt: windows.currentStart.Add(2 * time.Hour),
+		UpdatedAt: windows.currentStart.Add(2 * time.Hour),
+	})
+	_, err := s.client.User.UpdateOneID(deleted.ID).SetDeletedAt(now).Save(s.ctx)
+	s.Require().NoError(err, "soft delete comparison fixture")
+
+	stats := &DashboardStats{}
+	s.Require().NoError(s.repo.fillDashboardUserStats(s.ctx, stats, now), "fillDashboardUserStats")
+	s.Require().Equal(base.TotalUsers+2, stats.TotalUsers, "soft-deleted users must not count toward total users")
+	s.Require().Equal(base.CurrentDayNewUsers+1, stats.CurrentDayNewUsers, "current period mismatch")
+	s.Require().Equal(base.PreviousDaySamePeriodNewUsers+1, stats.PreviousDaySamePeriodNewUsers, "previous period mismatch")
+	s.Require().Equal(stats.CurrentDayNewUsers, stats.TodayNewUsers, "legacy main value must match comparison numerator")
+}
+
 func (s *UsageLogRepoSuite) TestDashboardStats_TodayTotalsAndPerformance() {
 	now := time.Now().UTC()
 	todayStart := truncateToDayUTC(now)
@@ -716,6 +750,17 @@ func (s *UsageLogRepoSuite) TestDashboardStats_TodayTotalsAndPerformance() {
 	mustCreateAccount(s.T(), s.client, &service.Account{Name: "a-error", Status: service.StatusError, Schedulable: true})
 	mustCreateAccount(s.T(), s.client, &service.Account{Name: "a-rl", RateLimitedAt: &now, RateLimitResetAt: &resetAt, Schedulable: true})
 	mustCreateAccount(s.T(), s.client, &service.Account{Name: "a-ov", OverloadUntil: &resetAt, Schedulable: true})
+	accTemp := mustCreateAccount(s.T(), s.client, &service.Account{Name: "a-temp", Schedulable: true})
+	_, err = s.client.Account.UpdateOneID(accTemp.ID).
+		SetTempUnschedulableUntil(resetAt).
+		Save(s.ctx)
+	s.Require().NoError(err, "set active temp-unschedulable window")
+	accExpired := mustCreateAccount(s.T(), s.client, &service.Account{Name: "a-expired", Schedulable: true})
+	_, err = s.client.Account.UpdateOneID(accExpired.ID).
+		SetAutoPauseOnExpired(true).
+		SetExpiresAt(now.Add(-time.Minute)).
+		Save(s.ctx)
+	s.Require().NoError(err, "set expired auto-paused account")
 
 	d1, d2, d3 := 100, 200, 300
 	logToday := &service.UsageLog{
@@ -776,10 +821,13 @@ func (s *UsageLogRepoSuite) TestDashboardStats_TodayTotalsAndPerformance() {
 
 	s.Require().Equal(baseStats.TotalUsers+2, stats.TotalUsers, "TotalUsers mismatch")
 	s.Require().Equal(baseStats.TodayNewUsers+1, stats.TodayNewUsers, "TodayNewUsers mismatch")
+	s.Require().Equal(stats.TodayNewUsers, stats.CurrentDayNewUsers, "TodayNewUsers must match the live comparison numerator")
 	s.Require().Equal(baseStats.ActiveUsers+1, stats.ActiveUsers, "ActiveUsers mismatch")
 	s.Require().Equal(baseStats.TotalAPIKeys+2, stats.TotalAPIKeys, "TotalAPIKeys mismatch")
 	s.Require().Equal(baseStats.ActiveAPIKeys+1, stats.ActiveAPIKeys, "ActiveAPIKeys mismatch")
-	s.Require().Equal(baseStats.TotalAccounts+4, stats.TotalAccounts, "TotalAccounts mismatch")
+	s.Require().Equal(baseStats.TotalAccounts+6, stats.TotalAccounts, "TotalAccounts mismatch")
+	s.Require().Equal(baseStats.NormalAccounts+5, stats.NormalAccounts, "NormalAccounts legacy semantics changed")
+	s.Require().Equal(baseStats.HealthyAccounts+1, stats.HealthyAccounts, "HealthyAccounts must exclude rate-limit, overload, temp cooldown and auto-paused expiry")
 	s.Require().Equal(baseStats.ErrorAccounts+1, stats.ErrorAccounts, "ErrorAccounts mismatch")
 	s.Require().Equal(baseStats.RateLimitAccounts+1, stats.RateLimitAccounts, "RateLimitAccounts mismatch")
 	s.Require().Equal(baseStats.OverloadAccounts+1, stats.OverloadAccounts, "OverloadAccounts mismatch")
@@ -795,6 +843,11 @@ func (s *UsageLogRepoSuite) TestDashboardStats_TodayTotalsAndPerformance() {
 	// account_cost falls back to total_cost when account_stats_cost is NULL
 	s.Require().Equal(baseStats.TotalAccountCost+2.3, stats.TotalAccountCost, "TotalAccountCost mismatch")
 	s.Require().GreaterOrEqual(stats.TodayRequests, int64(1), "expected TodayRequests >= 1")
+	s.Require().Equal(stats.TodayRequests, stats.CurrentDayRequests, "TodayRequests must match the live comparison numerator")
+	s.Require().NotEmpty(stats.CurrentDayStartAt)
+	s.Require().NotEmpty(stats.CurrentDayEndAt)
+	s.Require().NotEmpty(stats.PreviousDaySamePeriodStartAt)
+	s.Require().NotEmpty(stats.PreviousDaySamePeriodEndAt)
 	s.Require().GreaterOrEqual(stats.TodayCost, 0.0, "expected TodayCost >= 0")
 	s.Require().GreaterOrEqual(stats.TodayAccountCost, 0.0, "expected TodayAccountCost >= 0")
 

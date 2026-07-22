@@ -1,5 +1,7 @@
 # Layout Component Examples
 
+> **Deprecated visual examples (2026-07-21):** these snippets retain legacy Tailwind/indigo styling for historical reference. Do not copy their palette or surface treatment into new work. The canonical design language is Luoxue Snow Clay in `.superdesign/design-system.md`, with runtime values in `frontend/src/styles/luoxue-clay-tokens.css`.
+
 ## Example 1: Dashboard Page
 
 ```vue

@@ -7,7 +7,7 @@
       @click="toggleDropdown"
       @keydown="handleTriggerKeydown"
       :disabled="switching"
-      class="relative flex items-center justify-center rounded-full text-[#007bff] transition-colors duration-200 after:absolute after:-inset-1.5 after:content-[''] hover:bg-[rgba(46,50,56,0.05)] active:bg-gray-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60 dark:text-[#5aa2ff] dark:hover:bg-white/[0.08] dark:active:bg-dark-700 dark:focus-visible:ring-offset-dark-900"
+      class="locale-switcher-trigger relative flex items-center justify-center rounded-full text-[#007bff] transition-colors duration-200 after:absolute after:-inset-1.5 after:content-[''] hover:bg-[rgba(46,50,56,0.05)] active:bg-gray-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-60 dark:text-[#5aa2ff] dark:hover:bg-white/[0.08] dark:active:bg-dark-700 dark:focus-visible:ring-offset-dark-900"
       :class="[
         compact
           ? 'h-8 w-8'
@@ -39,7 +39,7 @@
         role="menu"
         aria-orientation="vertical"
         :aria-labelledby="triggerId"
-        class="absolute right-0 z-50 mt-1 w-36 overflow-hidden rounded-lg border border-gray-200 bg-white p-1 shadow-lg dark:border-dark-700 dark:bg-dark-800"
+        class="absolute right-0 z-50 mt-1 grid w-36 gap-0.5 overflow-hidden rounded-lg border border-gray-200 bg-white p-1 shadow-lg dark:border-dark-700 dark:bg-dark-800"
         @keydown="handleMenuKeydown"
       >
         <button
@@ -53,21 +53,21 @@
           :disabled="switching"
           @click="selectLocale(locale.code)"
           @focus="focusedIndex = index"
-          class="flex min-h-11 w-full items-center gap-2 rounded-md px-3 text-left text-sm text-gray-700 transition-colors hover:bg-gray-100 focus-visible:bg-gray-100 focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-60 dark:text-gray-200 dark:hover:bg-dark-700 dark:focus-visible:bg-dark-700"
+          class="grid min-h-11 w-full grid-cols-[minmax(0,1fr)_1.25rem] items-center gap-3 rounded-md px-3 text-left text-sm text-gray-700 transition-colors hover:bg-gray-100 focus-visible:bg-gray-100 focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-60 dark:text-gray-200 dark:hover:bg-dark-700 dark:focus-visible:bg-dark-700"
           :class="{
             'bg-primary-50 text-primary-600 dark:bg-primary-900/20 dark:text-primary-400':
               locale.code === currentLocaleCode
           }"
         >
-          <span class="text-base" aria-hidden="true">{{ locale.flag }}</span>
-          <span>{{ locale.name }}</span>
-          <Icon
-            v-if="locale.code === currentLocaleCode"
-            name="check"
-            size="sm"
-            class="ml-auto text-primary-500"
-            aria-hidden="true"
-          />
+          <span class="min-w-0 truncate whitespace-nowrap leading-5">{{ locale.name }}</span>
+          <span class="flex h-5 w-5 items-center justify-center" aria-hidden="true">
+            <Icon
+              v-if="locale.code === currentLocaleCode"
+              name="check"
+              size="sm"
+              class="text-primary-500"
+            />
+          </span>
         </button>
       </div>
     </transition>

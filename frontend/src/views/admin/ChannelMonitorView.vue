@@ -1,6 +1,13 @@
 <template>
-  <AppLayout>
+  <AppLayout variant="home-clay">
     <TablePageLayout>
+      <template #header>
+        <AdminPageHeader
+          :title="t('admin.channelMonitor.title')"
+          :description="t('admin.channelMonitor.description')"
+        />
+      </template>
+
       <template #filters>
         <MonitorFiltersBar
           v-model:search="searchQuery"
@@ -126,6 +133,7 @@ import type {
 } from '@/api/admin/channelMonitor'
 import type { Column } from '@/components/common/types'
 import AppLayout from '@/components/layout/AppLayout.vue'
+import AdminPageHeader from '@/components/layout/AdminPageHeader.vue'
 import TablePageLayout from '@/components/layout/TablePageLayout.vue'
 import DataTable from '@/components/common/DataTable.vue'
 import Pagination from '@/components/common/Pagination.vue'

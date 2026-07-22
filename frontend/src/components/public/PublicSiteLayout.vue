@@ -1,6 +1,6 @@
 <template>
   <div
-    class="public-site-page"
+    class="public-site-page public-site-page--snow"
     :class="{
       'public-site-page--dark': isDark,
       'public-site-page--home': page === 'home',
@@ -9,7 +9,12 @@
   >
     <header class="public-site-header" :class="{ 'public-site-header--elevated': isHeaderElevated }">
       <nav class="public-site-nav" :aria-label="t('home.nav.ariaLabel')">
-        <a href="/home#top" class="public-site-brand" @click="closeMobileMenu()">
+        <a
+          href="/home#top"
+          class="public-site-brand"
+          :aria-label="siteName"
+          @click="closeMobileMenu()"
+        >
           <span class="public-site-brand-mark">
             <img
               data-testid="public-site-brand-logo"
@@ -20,7 +25,12 @@
               aria-hidden="true"
             />
           </span>
-          <span class="public-site-brand-name">{{ siteName }}</span>
+          <span class="public-site-brand-name" aria-hidden="true">
+            <span v-if="brandNameParts.base">{{ brandNameParts.base }}</span>
+            <span v-if="brandNameParts.apiSuffix" class="public-site-brand-api">
+              {{ brandNameParts.apiSuffix }}
+            </span>
+          </span>
         </a>
 
         <div class="public-site-desktop-nav">
@@ -43,7 +53,7 @@
 
         <div class="public-site-actions">
           <div class="public-site-desktop-action">
-            <LocaleSwitcher :icon-variant="page === 'home' ? 'lucide' : 'brand'" />
+            <LocaleSwitcher icon-variant="lucide" />
           </div>
 
           <button
@@ -56,19 +66,15 @@
             @click="toggleTheme"
           >
             <Icon
-              v-if="page === 'home'"
               :name="isDark ? 'lucideSun' : 'lucideMoon'"
               size="md"
               :stroke-width="2"
               aria-hidden="true"
             />
-            <Icon v-else-if="isDark" name="sun" size="md" aria-hidden="true" />
-            <Icon v-else name="moon" size="md" aria-hidden="true" />
           </button>
 
           <router-link class="public-site-account-link public-site-desktop-action" :to="headerAccountPath">
             {{ headerAccountLabel }}
-            <Icon v-if="page !== 'home'" name="arrowRight" size="sm" aria-hidden="true" />
           </router-link>
 
           <button
@@ -111,7 +117,7 @@
             <div class="public-site-mobile-footer">
               <LocaleSwitcher
                 data-testid="mobile-locale-switcher"
-                :icon-variant="page === 'home' ? 'lucide' : 'brand'"
+                icon-variant="lucide"
               />
               <router-link :to="headerAccountPath" @click="closeMobileMenu()">
                 {{ headerAccountLabel }}
@@ -128,17 +134,21 @@
     <footer class="public-site-footer">
       <div class="public-site-shell public-site-footer-layout">
         <div class="public-site-footer-brand">
-          <span v-if="page === 'home'" class="public-site-footer-mark" aria-hidden="true">
+          <span class="public-site-footer-mark" aria-hidden="true">
             <img :src="displayLogo" alt="" width="36" height="36" />
           </span>
           <p>&copy; {{ currentYear }} {{ siteName }}. {{ t('home.footer.allRightsReserved') }}</p>
         </div>
-        <nav :aria-label="t('home.nav.ariaLabel')">
+        <nav :aria-label="t('home.footer.ariaLabel')">
           <router-link v-if="catalogEntryVisible" to="/models.html">
             {{ t('modelCatalog.navLabel') }}
           </router-link>
           <a v-if="tutorialUrl" :href="tutorialUrl">{{ t('home.footer.tutorial') }}</a>
-          <a v-if="docUrl" :href="docUrl">{{ t('home.footer.apiDocs') }}</a>
+          <a
+            v-if="docUrl"
+            :href="docUrl"
+            data-testid="public-api-docs-link"
+          >{{ t('home.footer.apiDocs') }}</a>
           <router-link to="/monitor">{{ t('home.footer.channelStatus') }}</router-link>
         </nav>
       </div>
@@ -152,6 +162,8 @@ import { useI18n } from 'vue-i18n'
 import { useAppStore, useAuthStore } from '@/stores'
 import LocaleSwitcher from '@/components/common/LocaleSwitcher.vue'
 import Icon from '@/components/icons/Icon.vue'
+import { splitBrandApiSuffix } from '@/utils/brand'
+import { resolveDocumentationUrl, resolveTutorialUrl } from '@/utils/documentationUrl'
 import { sanitizeUrl } from '@/utils/url'
 
 const props = withDefaults(defineProps<{
@@ -167,21 +179,22 @@ const appStore = useAppStore()
 const authStore = useAuthStore()
 
 const siteName = computed(() => appStore.cachedPublicSettings?.site_name || appStore.siteName || '落雪API')
+const brandNameParts = computed(() => splitBrandApiSuffix(siteName.value))
 const siteLogo = computed(() => sanitizeUrl(
   appStore.cachedPublicSettings?.site_logo || appStore.siteLogo || '',
   { allowRelative: true, allowDataUrl: true }
 ))
 const displayLogo = computed(() => (
-  siteLogo.value
-  || (props.page === 'home'
-    ? '/brand/luoxue-snowflake-cloud-palette-light.svg'
-    : '/logo.png')
+  siteLogo.value || '/brand/luoxue-snowpuff-extracted.svg'
 ))
-const docUrl = computed(() => sanitizeUrl(appStore.cachedPublicSettings?.doc_url || appStore.docUrl || ''))
-const tutorialUrl = computed(() => {
-  const base = (docUrl.value || '/tutorial-docs/').replace(/#.*$/, '')
-  return `${base}#quick-start`
-})
+const configuredDocUrl = computed(() => sanitizeUrl(
+  appStore.cachedPublicSettings?.doc_url || appStore.docUrl || '',
+  { allowRelative: true },
+))
+const docUrl = computed(() => (
+  configuredDocUrl.value ? resolveDocumentationUrl(configuredDocUrl.value) : ''
+))
+const tutorialUrl = computed(() => resolveTutorialUrl(configuredDocUrl.value))
 const catalogEntryVisible = computed(() => (
   !appStore.backendModeEnabled
   && (
@@ -192,8 +205,8 @@ const catalogEntryVisible = computed(() => (
 ))
 
 const navItems = [
-  { href: '/home#capabilities', labelKey: 'home.nav.capabilities' },
   { href: '/home#steps', labelKey: 'home.nav.steps' },
+  { href: '/home#capabilities', labelKey: 'home.nav.capabilities' },
   { href: '/home#providers', labelKey: 'home.nav.providers' },
   { href: '/home#faq', labelKey: 'home.nav.faq' }
 ] as const
@@ -229,51 +242,42 @@ function handleScroll() {
   isHeaderElevated.value = window.scrollY > 12
 }
 
+function handleViewportChange() {
+  if (window.innerWidth >= 1024) closeMobileMenu()
+}
+
 onMounted(() => {
   handleScroll()
   window.addEventListener('scroll', handleScroll, { passive: true })
   window.addEventListener('keydown', handleGlobalKeydown)
+  window.addEventListener('resize', handleViewportChange)
 })
 
 onBeforeUnmount(() => {
   window.removeEventListener('scroll', handleScroll)
   window.removeEventListener('keydown', handleGlobalKeydown)
+  window.removeEventListener('resize', handleViewportChange)
 })
 </script>
 
 <style scoped>
 .public-site-page {
-  --page: #ffffff;
-  --surface: #ffffff;
-  --surface-soft: #f4f7f5;
-  --surface-accent: #f0fdfa;
-  --ink: #0f172a;
-  --copy: #475569;
-  --muted: #64748b;
-  --border: #dde4e0;
-  --accent: #0f766e;
-  --accent-strong: #0b5f59;
-  --accent-ink: #115e59;
+  --page: var(--lx-clay-canvas);
+  --surface: var(--lx-clay-surface);
+  --surface-soft: var(--lx-clay-recessed);
+  --surface-accent: var(--lx-clay-surface);
+  --ink: var(--lx-clay-text);
+  --copy: var(--lx-clay-text-secondary);
+  --muted: var(--lx-clay-text-secondary);
+  --border: var(--lx-clay-border);
+  --accent: var(--lx-clay-accent);
+  --accent-strong: var(--lx-clay-accent);
+  --accent-ink: var(--lx-clay-accent);
   min-height: 100vh;
   overflow-x: clip;
   background: var(--page);
   color: var(--ink);
-  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC",
-    "Microsoft YaHei", sans-serif;
-}
-
-.public-site-page--dark {
-  --page: #0e1211;
-  --surface: #111816;
-  --surface-soft: #1a211e;
-  --surface-accent: #17312e;
-  --ink: #f4f7f5;
-  --copy: #c1cbc6;
-  --muted: #9aa6a0;
-  --border: #28312c;
-  --accent: #5eead4;
-  --accent-strong: #99f6e4;
-  --accent-ink: #99f6e4;
+  font-family: var(--lx-clay-font-ui);
 }
 
 .public-site-page :where(a, button):focus-visible {
@@ -509,6 +513,9 @@ onBeforeUnmount(() => {
     right: 0;
     left: 0;
     display: block;
+    max-height: calc(100dvh - 100px);
+    overflow-y: auto;
+    overscroll-behavior: contain;
     border-bottom: 1px solid var(--border);
     background: var(--page);
     box-shadow: 0 20px 34px rgba(15, 23, 42, 0.1);
@@ -606,52 +613,23 @@ onBeforeUnmount(() => {
 }
 
 /* Exact public shell from “Candy Clay Snowflake Stage - Refined Fidelity”. */
-.public-site-page--home {
-  --page: #f4f1fa;
-  --surface: #ffffff;
-  --surface-soft: #efebf5;
-  --surface-accent: #ffffff;
-  --ink: #332f3a;
-  --copy: #635f69;
-  --muted: #635f69;
-  --border: rgba(91, 80, 112, 0.14);
-  --accent: #7c3aed;
-  --accent-strong: #7c3aed;
-  --accent-ink: #7c3aed;
-  --surface-elevated: rgba(255, 255, 255, 0.76);
-  --primary-violet: #7c3aed;
-  --violet-highlight: #a78bfa;
-  --action-violet-start: #7c3aed;
-  --action-violet-end: #5b21b6;
+.public-site-page--snow {
+  --surface-elevated: var(--lx-clay-surface-elevated);
+  --primary-violet: var(--lx-clay-accent);
+  --violet-highlight: var(--lx-clay-accent-highlight);
+  --action-violet-start: var(--lx-clay-light-accent);
+  --action-violet-end: var(--lx-clay-light-accent-deep);
   min-height: 100vh;
   color: var(--ink);
   background-color: var(--page);
   background-image:
-    radial-gradient(circle at 15% 15%, rgba(124, 58, 237, 0.08) 0%, transparent 40%),
-    radial-gradient(circle at 85% 20%, rgba(11, 139, 237, 0.08) 0%, transparent 40%);
-  font-family: "DM Sans", "PingFang SC", "Microsoft YaHei", sans-serif;
+    radial-gradient(circle at 15% 15%, color-mix(in srgb, var(--lx-clay-light-accent) 8%, transparent) 0%, transparent 40%),
+    radial-gradient(circle at 85% 20%, color-mix(in srgb, var(--lx-clay-light-info) 8%, transparent) 0%, transparent 40%);
+  font-family: var(--lx-clay-font-ui);
 }
 
-.public-site-page--home.public-site-page--dark {
-  --page: #17131f;
-  --surface: #251e2f;
-  --surface-soft: #120f18;
-  --surface-accent: #251e2f;
-  --ink: #f8f5fc;
-  --copy: #c5bccf;
-  --muted: #c5bccf;
-  --border: rgba(255, 255, 255, 0.12);
-  --accent: #a78bfa;
-  --accent-strong: #a78bfa;
-  --accent-ink: #a78bfa;
-  --surface-elevated: rgba(39, 31, 50, 0.84);
-  --primary-violet: #a78bfa;
-  --action-violet-start: #7c3aed;
-  --action-violet-end: #5b21b6;
-}
-
-.public-site-page--home .public-site-header,
-.public-site-page--home .public-site-header--elevated {
+.public-site-page--snow .public-site-header,
+.public-site-page--snow .public-site-header--elevated {
   top: 24px;
   padding: 0;
   background: transparent;
@@ -659,9 +637,9 @@ onBeforeUnmount(() => {
   box-shadow: none;
 }
 
-.public-site-page--home .public-site-nav,
-.public-site-page--home .public-site-header--elevated .public-site-nav,
-.public-site-page--home.public-site-page--dark .public-site-header--elevated .public-site-nav {
+.public-site-page--snow .public-site-nav,
+.public-site-page--snow .public-site-header--elevated .public-site-nav,
+.public-site-page--snow.public-site-page--dark .public-site-header--elevated .public-site-nav {
   width: min(1192px, calc(100% - 48px));
   min-height: 80px;
   height: 80px;
@@ -679,30 +657,29 @@ onBeforeUnmount(() => {
   transform: none;
 }
 
-.public-site-page--home .public-site-brand {
+.public-site-page--snow .public-site-brand {
   gap: 12px;
 }
 
-.public-site-page--home .public-site-brand-mark,
-.public-site-page--home.public-site-page--dark .public-site-brand-mark {
+.public-site-page--snow .public-site-brand-mark,
+.public-site-page--snow.public-site-page--dark .public-site-brand-mark {
   display: flex;
   width: 48px;
   height: 48px;
   align-items: center;
   justify-content: center;
-  padding: 8px;
-  overflow: hidden;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 32px;
-  box-shadow:
-    16px 16px 32px rgba(160, 150, 180, 0.2),
-    -10px -10px 24px rgba(255, 255, 255, 0.9),
-    inset 6px 6px 12px rgba(139, 92, 246, 0.03),
-    inset -6px -6px 12px rgba(255, 255, 255, 1);
+  padding: 0;
+  overflow: visible;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
 }
 
-.public-site-page--home .public-site-brand-name {
+.public-site-page--snow .public-site-brand-name {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.24em;
   max-width: none;
   color: var(--ink);
   font-family: "Nunito", sans-serif;
@@ -711,11 +688,19 @@ onBeforeUnmount(() => {
   letter-spacing: 0;
 }
 
-.public-site-page--home .public-site-desktop-nav {
+.public-site-page--snow .public-site-brand-api {
+  color: var(--lx-clay-light-info);
+}
+
+.public-site-page--snow.public-site-page--dark .public-site-brand-api {
+  color: var(--lx-clay-dark-info-deep);
+}
+
+.public-site-page--snow .public-site-desktop-nav {
   gap: 32px;
 }
 
-.public-site-page--home .public-site-desktop-nav a {
+.public-site-page--snow .public-site-desktop-nav a {
   padding: 12px 0;
   color: var(--copy);
   background: transparent;
@@ -725,23 +710,23 @@ onBeforeUnmount(() => {
   font-weight: 700;
 }
 
-.public-site-page--home .public-site-desktop-nav a:hover,
-.public-site-page--home .public-site-desktop-nav a[aria-current="page"],
-.public-site-page--home.public-site-page--dark .public-site-desktop-nav a:hover,
-.public-site-page--home.public-site-page--dark .public-site-desktop-nav a[aria-current="page"] {
+.public-site-page--snow .public-site-desktop-nav a:hover,
+.public-site-page--snow .public-site-desktop-nav a[aria-current="page"],
+.public-site-page--snow.public-site-page--dark .public-site-desktop-nav a:hover,
+.public-site-page--snow.public-site-page--dark .public-site-desktop-nav a[aria-current="page"] {
   color: var(--primary-violet);
   background: transparent;
   box-shadow: none;
 }
 
-.public-site-page--home .public-site-actions {
+.public-site-page--snow .public-site-actions {
   gap: 8px;
 }
 
-.public-site-page--home .public-site-icon-button,
-.public-site-page--home .public-site-desktop-action :deep(button[aria-haspopup="menu"]),
-.public-site-page--home.public-site-page--dark .public-site-icon-button,
-.public-site-page--home.public-site-page--dark .public-site-desktop-action :deep(button[aria-haspopup="menu"]) {
+.public-site-page--snow .public-site-icon-button,
+.public-site-page--snow .public-site-desktop-action :deep(button[aria-haspopup="menu"]),
+.public-site-page--snow.public-site-page--dark .public-site-icon-button,
+.public-site-page--snow.public-site-page--dark .public-site-desktop-action :deep(button[aria-haspopup="menu"]) {
   width: 44px;
   min-width: 44px;
   height: 44px;
@@ -756,13 +741,13 @@ onBeforeUnmount(() => {
     inset -10px -10px 20px rgba(255, 255, 255, 0.8);
 }
 
-.public-site-page--home .public-site-icon-button:hover,
-.public-site-page--home .public-site-desktop-action :deep(button[aria-haspopup="menu"]):hover {
+.public-site-page--snow .public-site-icon-button:hover,
+.public-site-page--snow .public-site-desktop-action :deep(button[aria-haspopup="menu"]):hover {
   color: var(--primary-violet) !important;
   background: var(--surface-soft);
 }
 
-.public-site-page--home .public-site-account-link {
+.public-site-page--snow .public-site-account-link {
   min-height: 44px;
   height: 44px;
   gap: 0;
@@ -780,65 +765,61 @@ onBeforeUnmount(() => {
   transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
-.public-site-page--home .public-site-account-link:hover {
+.public-site-page--snow .public-site-account-link:hover {
   transform: translateY(-4px);
   box-shadow:
     16px 16px 32px rgba(139, 92, 246, 0.4),
     -8px -8px 16px rgba(255, 255, 255, 0.4);
 }
 
-.public-site-page--home .public-site-account-link:active {
+.public-site-page--snow .public-site-account-link:active {
   transform: scale(0.92);
 }
 
-.public-site-page--home .public-site-footer {
+.public-site-page--snow .public-site-footer {
   padding: 64px 0;
   background: transparent;
   border-top: 1px solid var(--border);
 }
 
-.public-site-page--home .public-site-shell {
+.public-site-page--snow .public-site-shell {
   width: min(1192px, calc(100% - 48px));
 }
 
-.public-site-page--home .public-site-footer-layout {
+.public-site-page--snow .public-site-footer-layout {
   gap: 32px;
 }
 
-.public-site-page--home .public-site-footer-brand {
+.public-site-page--snow .public-site-footer-brand {
   gap: 12px;
 }
 
-.public-site-page--home .public-site-footer-mark,
-.public-site-page--home.public-site-page--dark .public-site-footer-mark {
+.public-site-page--snow .public-site-footer-mark,
+.public-site-page--snow.public-site-page--dark .public-site-footer-mark {
   display: flex;
   width: 40px;
   height: 40px;
   align-items: center;
   justify-content: center;
-  padding: 6px;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: 32px;
-  box-shadow:
-    16px 16px 32px rgba(160, 150, 180, 0.2),
-    -10px -10px 24px rgba(255, 255, 255, 0.9),
-    inset 6px 6px 12px rgba(139, 92, 246, 0.03),
-    inset -6px -6px 12px rgba(255, 255, 255, 1);
+  padding: 0;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
 }
 
-.public-site-page--home .public-site-footer p {
+.public-site-page--snow .public-site-footer p {
   color: var(--copy);
   font-size: 14px;
-  font-style: italic;
+  font-style: normal;
   font-weight: 700;
 }
 
-.public-site-page--home .public-site-footer nav {
+.public-site-page--snow .public-site-footer nav {
   gap: 32px;
 }
 
-.public-site-page--home .public-site-footer a {
+.public-site-page--snow .public-site-footer a {
   padding: 0;
   color: var(--copy);
   background: transparent;
@@ -847,29 +828,27 @@ onBeforeUnmount(() => {
   font-weight: 700;
 }
 
-.public-site-page--home .public-site-footer a:hover {
+.public-site-page--snow .public-site-footer a:hover {
   color: var(--primary-violet);
   background: transparent;
 }
 
-.public-site-page--home.public-site-page--dark .public-site-nav,
-.public-site-page--home.public-site-page--dark .public-site-header--elevated .public-site-nav,
-.public-site-page--home.public-site-page--dark .public-site-brand-mark,
-.public-site-page--home.public-site-page--dark .public-site-footer-mark {
+.public-site-page--snow.public-site-page--dark .public-site-nav,
+.public-site-page--snow.public-site-page--dark .public-site-header--elevated .public-site-nav {
   box-shadow:
     16px 16px 32px rgba(0, 0, 0, 0.34),
     -10px -10px 24px rgba(255, 255, 255, 0.025),
     inset 6px 6px 12px rgba(255, 255, 255, 0.02);
 }
 
-.public-site-page--home.public-site-page--dark .public-site-icon-button,
-.public-site-page--home.public-site-page--dark .public-site-desktop-action :deep(button[aria-haspopup="menu"]) {
+.public-site-page--snow.public-site-page--dark .public-site-icon-button,
+.public-site-page--snow.public-site-page--dark .public-site-desktop-action :deep(button[aria-haspopup="menu"]) {
   box-shadow:
     inset 10px 10px 20px rgba(0, 0, 0, 0.34),
     inset -10px -10px 20px rgba(255, 255, 255, 0.025);
 }
 
-.public-site-page--home.public-site-page--dark .public-site-account-link {
+.public-site-page--snow.public-site-page--dark .public-site-account-link {
   box-shadow:
     12px 12px 24px rgba(0, 0, 0, 0.32),
     -8px -8px 16px rgba(255, 255, 255, 0.025),
@@ -878,29 +857,31 @@ onBeforeUnmount(() => {
 }
 
 @media (max-width: 1023px) {
-  .public-site-page--home .public-site-header,
-  .public-site-page--home .public-site-header--elevated {
+  .public-site-page--snow .public-site-header,
+  .public-site-page--snow .public-site-header--elevated {
     top: 16px;
   }
 
-  .public-site-page--home .public-site-nav,
-  .public-site-page--home .public-site-header--elevated .public-site-nav,
-  .public-site-page--home.public-site-page--dark .public-site-header--elevated .public-site-nav {
+  .public-site-page--snow .public-site-nav,
+  .public-site-page--snow .public-site-header--elevated .public-site-nav,
+  .public-site-page--snow.public-site-page--dark .public-site-header--elevated .public-site-nav {
     width: calc(100% - 32px);
     min-height: 72px;
     height: 72px;
     padding: 0 20px;
   }
 
-  .public-site-page--home .public-site-desktop-action {
+  .public-site-page--snow .public-site-desktop-action {
     display: flex;
   }
 
-  .public-site-page--home .public-site-mobile-panel {
+  .public-site-page--snow .public-site-mobile-panel {
     top: calc(100% + 12px);
     right: 16px;
     left: 16px;
-    overflow: visible;
+    max-height: calc(100dvh - 104px);
+    overflow-x: hidden;
+    overflow-y: auto;
     background: var(--surface-elevated);
     border: 1px solid var(--border);
     border-radius: 20px;
@@ -912,20 +893,20 @@ onBeforeUnmount(() => {
     backdrop-filter: blur(20px);
   }
 
-  .public-site-page--home.public-site-page--dark .public-site-mobile-panel {
+  .public-site-page--snow.public-site-page--dark .public-site-mobile-panel {
     box-shadow:
       16px 16px 32px rgba(0, 0, 0, 0.34),
       -10px -10px 24px rgba(255, 255, 255, 0.025),
       inset 6px 6px 12px rgba(255, 255, 255, 0.02);
   }
 
-  .public-site-page--home .public-site-mobile-inner {
+  .public-site-page--snow .public-site-mobile-inner {
     width: auto;
     margin: 0;
     padding: 14px;
   }
 
-  .public-site-page--home .public-site-mobile-inner > a {
+  .public-site-page--snow .public-site-mobile-inner > a {
     min-height: 52px;
     padding: 0 12px;
     color: var(--copy);
@@ -934,43 +915,43 @@ onBeforeUnmount(() => {
     font-weight: 700;
   }
 
-  .public-site-page--home .public-site-mobile-inner > a:hover {
+  .public-site-page--snow .public-site-mobile-inner > a:hover {
     color: var(--primary-violet);
     background: var(--surface-soft);
   }
 
-  .public-site-page--home .public-site-mobile-footer {
+  .public-site-page--snow .public-site-mobile-footer {
     display: none;
   }
 }
 
 @media (max-width: 767px) {
-  .public-site-page--home .public-site-header,
-  .public-site-page--home .public-site-header--elevated {
+  .public-site-page--snow .public-site-header,
+  .public-site-page--snow .public-site-header--elevated {
     top: 12px;
   }
 
-  .public-site-page--home .public-site-nav,
-  .public-site-page--home .public-site-header--elevated .public-site-nav,
-  .public-site-page--home.public-site-page--dark .public-site-header--elevated .public-site-nav {
+  .public-site-page--snow .public-site-nav,
+  .public-site-page--snow .public-site-header--elevated .public-site-nav,
+  .public-site-page--snow.public-site-page--dark .public-site-header--elevated .public-site-nav {
     width: calc(100% - 24px);
     min-height: 64px;
     height: 64px;
     padding: 0 10px;
   }
 
-  .public-site-page--home .public-site-brand {
+  .public-site-page--snow .public-site-brand {
     gap: 0;
   }
 
-  .public-site-page--home .public-site-brand-mark,
-  .public-site-page--home.public-site-page--dark .public-site-brand-mark {
+  .public-site-page--snow .public-site-brand-mark,
+  .public-site-page--snow.public-site-page--dark .public-site-brand-mark {
     width: 42px;
     height: 42px;
-    padding: 7px;
+    padding: 0;
   }
 
-  .public-site-page--home .public-site-brand-name {
+  .public-site-page--snow .public-site-brand-name {
     position: absolute;
     width: 1px;
     height: 1px;
@@ -979,61 +960,61 @@ onBeforeUnmount(() => {
     white-space: nowrap;
   }
 
-  .public-site-page--home .public-site-actions {
+  .public-site-page--snow .public-site-actions {
     gap: 5px;
   }
 
-  .public-site-page--home .public-site-icon-button,
-  .public-site-page--home .public-site-desktop-action :deep(button[aria-haspopup="menu"]),
-  .public-site-page--home.public-site-page--dark .public-site-icon-button,
-  .public-site-page--home.public-site-page--dark .public-site-desktop-action :deep(button[aria-haspopup="menu"]) {
+  .public-site-page--snow .public-site-icon-button,
+  .public-site-page--snow .public-site-desktop-action :deep(button[aria-haspopup="menu"]),
+  .public-site-page--snow.public-site-page--dark .public-site-icon-button,
+  .public-site-page--snow.public-site-page--dark .public-site-desktop-action :deep(button[aria-haspopup="menu"]) {
     width: 44px;
     min-width: 44px;
     height: 44px;
     min-height: 44px;
   }
 
-  .public-site-page--home .public-site-account-link {
+  .public-site-page--snow .public-site-account-link {
     min-height: 44px;
     height: 44px;
     padding: 0 12px;
     font-size: 12px;
   }
 
-  .public-site-page--home .public-site-mobile-panel {
+  .public-site-page--snow .public-site-mobile-panel {
     right: 12px;
     left: 12px;
   }
 
-  .public-site-page--home .public-site-footer {
+  .public-site-page--snow .public-site-footer {
     padding: 64px 0;
   }
 
-  .public-site-page--home .public-site-shell {
+  .public-site-page--snow .public-site-shell {
     width: calc(100% - 32px);
   }
 
-  .public-site-page--home .public-site-footer-layout {
+  .public-site-page--snow .public-site-footer-layout {
     align-items: flex-start;
     gap: 24px;
   }
 
-  .public-site-page--home .public-site-footer nav {
+  .public-site-page--snow .public-site-footer nav {
     gap: 12px 24px;
   }
 }
 
 @media (max-width: 420px) {
-  .public-site-page--home .public-site-desktop-action:first-child {
+  .public-site-page--snow .public-site-desktop-action:first-child {
     display: none;
   }
 
-  .public-site-page--home .public-site-mobile-footer {
+  .public-site-page--snow .public-site-mobile-footer {
     display: flex;
     justify-content: flex-end;
   }
 
-  .public-site-page--home .public-site-mobile-footer > a {
+  .public-site-page--snow .public-site-mobile-footer > a {
     display: none;
   }
 }

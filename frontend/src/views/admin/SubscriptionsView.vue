@@ -1,6 +1,13 @@
 <template>
-  <AppLayout>
+  <AppLayout variant="home-clay">
     <TablePageLayout>
+      <template #header>
+        <AdminPageHeader
+          :title="t('admin.subscriptions.title')"
+          :description="t('admin.subscriptions.description')"
+        />
+      </template>
+
       <template #filters>
         <!-- Top Toolbar: Left (search + filters) / Right (actions) -->
         <div class="flex flex-wrap items-start justify-between gap-4">
@@ -331,7 +338,7 @@
                   !row.group?.weekly_limit_usd &&
                   !row.group?.monthly_limit_usd
                 "
-                class="flex items-center gap-2 rounded-lg bg-gradient-to-r from-emerald-50 to-teal-50 px-3 py-2 dark:from-emerald-900/20 dark:to-teal-900/20"
+                class="flex items-center gap-2 rounded-lg bg-[var(--lx-clay-success-soft)] px-3 py-2"
               >
                 <span class="text-lg text-emerald-600 dark:text-emerald-400">∞</span>
                 <span class="text-xs font-medium text-emerald-700 dark:text-emerald-300">
@@ -767,6 +774,7 @@ import type { Column } from '@/components/common/types'
 import { formatDateOnly } from '@/utils/format'
 import { getPersistedPageSize } from '@/composables/usePersistedPageSize'
 import AppLayout from '@/components/layout/AppLayout.vue'
+import AdminPageHeader from '@/components/layout/AdminPageHeader.vue'
 import TablePageLayout from '@/components/layout/TablePageLayout.vue'
 import DataTable from '@/components/common/DataTable.vue'
 import Pagination from '@/components/common/Pagination.vue'

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   BookOpen,
   Boxes,
@@ -19,6 +19,7 @@ import {
   X,
 } from "lucide-react";
 import { readStoredAuth, verifyAuthState } from "./auth-state.js";
+import { loadPublicBrandSettings, splitBrandApiSuffix } from "./brand-settings.js";
 import { siteConfig, tutorials } from "./content.js";
 import {
   loadPublishedDocumentation,
@@ -70,6 +71,51 @@ function getInitialTheme() {
   const saved = window.localStorage.getItem("docs-theme");
   if (saved === "light" || saved === "dark") return saved;
   return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+}
+
+function usePublicBrand() {
+  const [brand, setBrand] = useState(() => ({
+    name: siteConfig.brandName,
+    logo: siteConfig.logo,
+  }));
+  const latestBrand = useRef(brand);
+
+  useEffect(() => {
+    let disposed = false;
+    let activeController = null;
+
+    async function refreshBrand() {
+      activeController?.abort();
+      const controller = new AbortController();
+      activeController = controller;
+
+      const nextBrand = await loadPublicBrandSettings({
+        fetchImpl: window.fetch.bind(window),
+        // Keep the last known-good identity if a background refresh fails.
+        fallback: latestBrand.current,
+        signal: controller.signal,
+      });
+
+      if (!disposed && activeController === controller && !controller.signal.aborted) {
+        latestBrand.current = nextBrand;
+        setBrand(nextBrand);
+      }
+    }
+
+    function handleVisibilityChange() {
+      if (document.visibilityState === "visible") void refreshBrand();
+    }
+
+    void refreshBrand();
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    return () => {
+      disposed = true;
+      activeController?.abort();
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+    };
+  }, []);
+
+  return brand;
 }
 
 function useDocumentAuth() {
@@ -230,14 +276,25 @@ function StepNote({ note }) {
   );
 }
 
-function Header({ authState, theme, onToggleTheme, menuOpen, onToggleMenu, scrolled }) {
+function BrandWordmark({ name }) {
+  const { base, apiSuffix } = splitBrandApiSuffix(name);
+
+  return (
+    <span className="brand-name" aria-hidden="true">
+      {base ? <span>{base}</span> : null}
+      {apiSuffix ? <span className="brand-name-api">{apiSuffix}</span> : null}
+    </span>
+  );
+}
+
+function Header({ authState, brand, theme, onToggleTheme, menuOpen, onToggleMenu, scrolled }) {
   return (
     <header className={`site-header ${scrolled ? "is-scrolled" : ""}`}>
       <div className="header-frame">
         <nav className="top-nav" aria-label="主导航">
-          <a className="brand" href={siteConfig.mainSiteUrl}>
-            <img src={siteConfig.logo} alt="" />
-            <span>{siteConfig.brandName}</span>
+          <a className="brand" href={siteConfig.mainSiteUrl} aria-label={brand.name}>
+            <img src={brand.logo} alt="" />
+            <BrandWordmark name={brand.name} />
           </a>
 
           <div className="desktop-nav">
@@ -263,7 +320,14 @@ function Header({ authState, theme, onToggleTheme, menuOpen, onToggleMenu, scrol
             <button className="icon-button" type="button" onClick={onToggleTheme} aria-label="切换主题">
               {theme === "dark" ? <Sun size={19} /> : <Moon size={19} />}
             </button>
-            <button className="icon-button menu-button" type="button" onClick={onToggleMenu} aria-label="切换导航菜单">
+            <button
+              className="icon-button menu-button"
+              type="button"
+              onClick={onToggleMenu}
+              aria-label="切换导航菜单"
+              aria-expanded={menuOpen}
+              aria-controls="mobile-navigation"
+            >
               {menuOpen ? <X size={22} /> : <Menu size={22} />}
             </button>
           </div>
@@ -275,7 +339,11 @@ function Header({ authState, theme, onToggleTheme, menuOpen, onToggleMenu, scrol
 
 function MobileMenu({ authState, open, onNavigate }) {
   return (
-    <div className={`mobile-menu ${open ? "open" : ""}`} aria-hidden={!open}>
+    <div
+      id="mobile-navigation"
+      className={`mobile-menu ${open ? "open" : ""}`}
+      aria-hidden={!open}
+    >
       <nav aria-label="手机导航">
         {siteConfig.navigation.map((item, index) => (
           <a
@@ -296,9 +364,13 @@ function MobileMenu({ authState, open, onNavigate }) {
   );
 }
 
-function Step({ step, index }) {
+function Step({ step, index, tutorialId }) {
   return (
-    <li className="tutorial-step">
+    <li
+      id={`${tutorialId}-step-${index + 1}`}
+      className="tutorial-step"
+      data-step-index={index}
+    >
       <div className="step-number" aria-hidden="true">{index + 1}</div>
       <div className="step-body">
         <h2>{step.title}</h2>
@@ -341,10 +413,61 @@ function TutorialPanel({ tutorial }) {
       </div>
       <ol className="step-list">
         {tutorial.steps.map((step, index) => (
-          <Step key={`${tutorial.id}-${step.title}`} step={step} index={index} />
+          <Step
+            key={`${tutorial.id}-step-${index}`}
+            step={step}
+            index={index}
+            tutorialId={tutorial.id}
+          />
         ))}
       </ol>
     </section>
+  );
+}
+
+function StepOutline({ tutorial, activeIndex, onSelect }) {
+  return (
+    <aside className="step-outline desktop-step-outline">
+      <nav aria-label="本页导览">
+        <p>本页导览</p>
+        <ol>
+          {tutorial.steps.map((step, index) => (
+            <li key={`${tutorial.id}-outline-${index}`}>
+              <button
+                type="button"
+                className={index === activeIndex ? "active" : ""}
+                aria-current={index === activeIndex ? "step" : undefined}
+                onClick={() => onSelect(index)}
+                title={step.title}
+              >
+                <span>{index + 1}.</span>
+                <span>{step.title}</span>
+              </button>
+            </li>
+          ))}
+        </ol>
+      </nav>
+    </aside>
+  );
+}
+
+function MobileStepOutline({ tutorial, activeIndex, onSelect }) {
+  return (
+    <div className="mobile-step-outline">
+      <label htmlFor="mobile-step-select">本页导览</label>
+      <select
+        id="mobile-step-select"
+        aria-label="本页导览，当前步骤"
+        value={activeIndex}
+        onChange={(event) => onSelect(Number(event.target.value))}
+      >
+        {tutorial.steps.map((step, index) => (
+          <option key={`${tutorial.id}-mobile-outline-${index}`} value={index}>
+            {index + 1}. {step.title}
+          </option>
+        ))}
+      </select>
+    </div>
   );
 }
 
@@ -367,6 +490,7 @@ function SupportContact() {
 
 export function App() {
   const authState = useDocumentAuth();
+  const brand = usePublicBrand();
   const [documentation, setDocumentation] = useState(() => ({
     tutorials,
     source: "bundled",
@@ -379,6 +503,7 @@ export function App() {
   const [activeId, setActiveId] = useState(() => window.location.hash.replace(/^#/, ""));
   const [menuOpen, setMenuOpen] = useState(false);
   const [scrolled, setScrolled] = useState(false);
+  const [activeStepIndex, setActiveStepIndex] = useState(0);
 
   const activeTutorial = useMemo(
     () => visibleTutorials.find((tutorial) => tutorial.id === activeId) || visibleTutorials[0],
@@ -423,6 +548,23 @@ export function App() {
   }, [theme]);
 
   useEffect(() => {
+    document.title = `${siteConfig.pageTitle} · ${brand.name}`;
+
+    let favicon = document.querySelector('link[rel="icon"]');
+    if (!favicon) {
+      favicon = document.createElement("link");
+      favicon.rel = "icon";
+      document.head.appendChild(favicon);
+    }
+    favicon.type = brand.logo.startsWith("data:image/svg+xml") || /\.svg(?:[?#].*)?$/iu.test(brand.logo)
+      ? "image/svg+xml"
+      : brand.logo.startsWith("data:image/png") || /\.png(?:[?#].*)?$/iu.test(brand.logo)
+        ? "image/png"
+        : "image/x-icon";
+    favicon.href = brand.logo;
+  }, [brand]);
+
+  useEffect(() => {
     function handleScroll() {
       setScrolled(window.scrollY > 18);
     }
@@ -435,6 +577,56 @@ export function App() {
     document.body.classList.toggle("menu-open", menuOpen);
     return () => document.body.classList.remove("menu-open");
   }, [menuOpen]);
+
+  useEffect(() => {
+    document.getElementById(`tab-${activeTutorial.id}`)?.scrollIntoView({
+      behavior: "auto",
+      block: "nearest",
+      inline: "nearest",
+    });
+  }, [activeTutorial.id]);
+
+  useEffect(() => {
+    setActiveStepIndex(0);
+
+    const stepElements = activeTutorial.steps
+      .map((_, index) => document.getElementById(`${activeTutorial.id}-step-${index + 1}`))
+      .filter(Boolean);
+    if (stepElements.length === 0) return undefined;
+
+    let frameId = 0;
+    function syncActiveStep() {
+      frameId = 0;
+      const configuredGuideLine = Number.parseFloat(
+        window.getComputedStyle(document.documentElement)
+          .getPropertyValue("--docs-step-anchor-offset"),
+      );
+      const guideLine = Number.isFinite(configuredGuideLine) ? configuredGuideLine : 140;
+      const atPageEnd = window.scrollY + window.innerHeight >= document.documentElement.scrollHeight - 4;
+      let nextIndex = 0;
+
+      stepElements.forEach((element, index) => {
+        if (element.getBoundingClientRect().top <= guideLine) nextIndex = index;
+      });
+
+      if (atPageEnd) nextIndex = stepElements.length - 1;
+      setActiveStepIndex(nextIndex);
+    }
+
+    function requestSync() {
+      if (frameId) return;
+      frameId = window.requestAnimationFrame(syncActiveStep);
+    }
+
+    syncActiveStep();
+    window.addEventListener("scroll", requestSync, { passive: true });
+    window.addEventListener("resize", requestSync);
+    return () => {
+      window.removeEventListener("scroll", requestSync);
+      window.removeEventListener("resize", requestSync);
+      if (frameId) window.cancelAnimationFrame(frameId);
+    };
+  }, [activeTutorial.id, activeTutorial.steps]);
 
   function selectTutorial(id) {
     setActiveId(id);
@@ -454,13 +646,25 @@ export function App() {
 
     const nextTutorial = visibleTutorials[nextIndex];
     selectTutorial(nextTutorial.id);
-    document.getElementById(`tab-${nextTutorial.id}`)?.focus();
+    const nextTab = document.getElementById(`tab-${nextTutorial.id}`);
+    nextTab?.focus();
+    nextTab?.scrollIntoView({ behavior: "auto", block: "nearest", inline: "nearest" });
+  }
+
+  function scrollToStep(index) {
+    const step = document.getElementById(`${activeTutorial.id}-step-${index + 1}`);
+    if (!step) return;
+
+    setActiveStepIndex(index);
+    const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    step.scrollIntoView({ behavior: reduceMotion ? "auto" : "smooth", block: "start" });
   }
 
   return (
     <div className="app-shell">
       <Header
         authState={authState}
+        brand={brand}
         theme={theme}
         onToggleTheme={() => setTheme(theme === "dark" ? "light" : "dark")}
         menuOpen={menuOpen}
@@ -498,12 +702,29 @@ export function App() {
             })}
           </div>
 
-          <TutorialPanel tutorial={activeTutorial} />
+          <div className="reading-grid">
+            <StepOutline
+              tutorial={activeTutorial}
+              activeIndex={activeStepIndex}
+              onSelect={scrollToStep}
+            />
+
+            <div className="reading-column">
+              <MobileStepOutline
+                tutorial={activeTutorial}
+                activeIndex={activeStepIndex}
+                onSelect={scrollToStep}
+              />
+              <TutorialPanel tutorial={activeTutorial} />
+            </div>
+
+            <div className="reading-balance" aria-hidden="true" />
+          </div>
 
           <footer className="docs-footer">
             <div>
-              <img src={siteConfig.logo} alt="" />
-              <p>{siteConfig.footerText}</p>
+              <img src={brand.logo} alt="" />
+              <p>{brand.name} 新用户接入与使用指南。</p>
             </div>
             <SupportContact />
           </footer>

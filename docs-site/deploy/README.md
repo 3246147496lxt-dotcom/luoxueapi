@@ -1,4 +1,4 @@
-# `/tutorial-docs/` 同域部署
+# `/tutorial-docs/` 随主服务发布
 
 文档站的正式地址是：
 
@@ -6,32 +6,65 @@
 https://luoxueapi.cc/tutorial-docs/
 ```
 
-静态文件仍放在 `/srv/luoxue-docs`。Caddy 使用 `handle_path` 去掉 `/tutorial-docs` 前缀后读取该目录；其他主域请求继续反向代理到 `127.0.0.1:8080`。旧地址 `docs.luoxueapi.cc` 最终会以 301 跳转到主域下的对应文档路径。
+文档站不是独立部署单元。正式 Docker 构建和 GitHub Release 会先构建
+`docs-site`，再把 `dist/` 放入后端嵌入目录的 `tutorial-docs/` 子目录，最终随
+Go 二进制和主站一起进入同一个镜像。因此主站、登录注册页、控制台和文档站
+始终来自同一个版本，不再依赖 `/srv/luoxue-docs`、静态目录软链接或
+`deploy/luoxue-docs-site.tar.gz`。
 
-## 1. 构建和发布静态文件
+## 正式构建
 
-在 `docs-site` 目录执行：
+仓库根目录的 `Dockerfile` 和 `deploy/Dockerfile` 都会执行以下流程：
+
+1. 构建主前端。
+2. 使用 `docs-site/package-lock.json` 冻结安装并构建文档站。
+3. 运行 `npm run verify:build`，确认资源基路径是 `/tutorial-docs/`。
+4. 将文档产物复制到 `backend/internal/web/dist/tutorial-docs/`。
+5. 以 `-tags embed` 编译包含两套前端资源的 Go 二进制。
+
+本地构建正式镜像：
 
 ```bash
-npm ci
-npm run build
+docker build -t luoxueapi:local -f Dockerfile .
 ```
 
-确认 `dist/index.html` 内的脚本、样式和图标 URL 均以 `/tutorial-docs/` 开头，再将 `dist/` 中的全部文件解压到一个新的版本目录。第一阶段不要切换 `/srv/luoxue-docs` 软链接；旧子域仍需要它指向旧版本。不要覆盖或删除上一个版本目录，它是静态文件的回滚点。
+Release 工作流使用相同布局，并在 GoReleaser 前运行嵌入路由测试。不要手工上传
+`docs-site/dist/`；只部署通过验证的完整镜像。
 
-## 2. 分两阶段切换 Caddy
+## Caddy 路由
 
-`Caddyfile.production` 是最终完整配置，`Caddyfile` 内容与其一致，可作为合并参考。上线前先备份线上 Caddyfile。
+Caddy 必须把主域的所有路径（包括 `/tutorial-docs/`）反向代理到后端：
 
-第一阶段先合并 `luoxueapi.cc` 中的 `/tutorial-docs` 路由，让该路由的 `root` 临时指向刚解压的新版本绝对路径；同时保留线上现有的 `docs.luoxueapi.cc` 静态站点块和旧软链接。这样可以先验证新地址，同时旧地址仍可用。每次修改后都执行：
+```caddyfile
+luoxueapi.cc {
+	encode zstd gzip
 
-```bash
-caddy fmt --diff /etc/caddy/Caddyfile
-caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
-systemctl reload caddy
+	@tutorial_docs path /tutorial-docs /tutorial-docs/*
+	header @tutorial_docs {
+		Cross-Origin-Opener-Policy "same-origin"
+		Cross-Origin-Resource-Policy "same-origin"
+		Permissions-Policy "camera=(), geolocation=(), microphone=()"
+		Strict-Transport-Security "max-age=31536000"
+	}
+
+	reverse_proxy 127.0.0.1:8080
+}
 ```
 
-验证新地址成功并更新后台链接后，先原子切换 `/srv/luoxue-docs` 到新版本，再安装 `Caddyfile.production`。最终配置会让主域文档重新读取软链接，并将旧子域站点块替换为：
+不要保留旧的 `handle_path /tutorial-docs/*` 静态文件规则，否则它会在请求到达
+新镜像前拦截路径，继续显示 `/srv/luoxue-docs` 中的旧版本。
+文档路径仍由 Caddy 补充 HSTS、Permissions Policy、COOP 和 CORP；CSP 与缓存
+策略由后端统一返回，Caddy 不覆盖它们。
+
+后端负责文档路径语义：
+
+- `/tutorial-docs` 永久跳转到 `/tutorial-docs/`。
+- `/tutorial-docs/` 返回文档入口。
+- `/tutorial-docs/orders` 等无扩展名深链回退到文档入口，而不是主站入口。
+- 不存在的 JS、CSS、图片等资源返回 404。
+- 带 Vite 内容哈希的资源使用一年期 `immutable` 缓存，HTML 使用 `no-cache`。
+
+旧文档子域可以继续保留为兼容跳转：
 
 ```caddyfile
 docs.luoxueapi.cc {
@@ -39,70 +72,34 @@ docs.luoxueapi.cc {
 }
 ```
 
-重新校验并 reload。Cloudflare 中现有 `docs.luoxueapi.cc` DNS 记录应保留，才能让旧链接继续跳转。
-
-## 3. 缓存和安全策略
-
-- `/tutorial-docs` 精确请求以 301 规范到 `/tutorial-docs/`。
-- HTML 和未哈希资源返回 `Cache-Control: no-cache`。
-- 构建生成且文件名包含至少 8 位 Vite 内容哈希的 JS、CSS 和字体返回一年期 `immutable` 缓存；可替换的教程截图不使用长期缓存。
-- CSP 仅允许同源脚本和 API 请求；头像允许 HTTPS 图片，脚本不允许第三方来源。
-- 文档禁止被 iframe 嵌入，并启用 HSTS、`nosniff`、权限限制等响应头。
-
-若以后增加第三方脚本、字体或 API，不要直接放宽 `default-src`；只在对应 CSP 指令中加入经过确认的具体域名。
-
-## 4. 更新后台文档链接
-
-先备份设置：
+修改线上 Caddyfile 后先执行：
 
 ```bash
-psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f deploy/backup-doc-settings.sql
+caddy fmt --diff /etc/caddy/Caddyfile
+caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
+systemctl reload caddy
 ```
 
-确认新地址可访问后执行：
-
-```bash
-psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f deploy/activate-doc-link.sql
-```
-
-脚本会把 `doc_url` 设为 `https://luoxueapi.cc/tutorial-docs/`，并删除旧的 `md:guide` 重复菜单项。现有前端仍会在新标签页打开文档。
-
-## 5. 验证清单
+## 上线验证
 
 ```bash
 curl -I https://luoxueapi.cc/tutorial-docs
 curl -I https://luoxueapi.cc/tutorial-docs/
-curl -I https://docs.luoxueapi.cc/
+curl -I https://luoxueapi.cc/tutorial-docs/orders
 curl -I https://luoxueapi.cc/dashboard
-curl -I https://luoxueapi.cc/api/v1/auth/me
+curl -I https://luoxueapi.cc/api/v1/settings/public
+curl -I https://docs.luoxueapi.cc/
 ```
 
-确认精确路径返回 301、带斜杠路径返回文档、旧子域返回 301，且主站与 API 没有被静态路由拦截。再用浏览器覆盖未登录、已登录、过期 Token、跨标签登录/退出、桌面端与移动端。
+确认精确路径跳转、文档首页和深链返回 HTML、主站与 API 正常、旧子域跳转。
+浏览器中还要确认文档脚本和样式来自 `/tutorial-docs/assets/`，品牌设置能从
+`/api/v1/settings/public` 同步，控制台没有新增错误。
 
 ## 回滚
 
-1. 将 `/srv/luoxue-docs` 软链接切回上一版本，确认旧静态包可读取。
-2. 恢复部署前备份的 Caddyfile，执行 `caddy validate` 后 reload，使 `docs.luoxueapi.cc` 恢复独立托管。
-3. 从 `backup-doc-settings.sql` 生成的 CSV 恢复 `doc_url` 和 `custom_menu_items`；不要只恢复其中一个键：
-
-```sql
-BEGIN;
-CREATE TEMP TABLE restored_doc_settings (
-  key text,
-  value text,
-  updated_at timestamptz
-);
-COPY restored_doc_settings (key, value, updated_at)
-FROM '/tmp/luoxue-doc-settings-before-same-origin.csv'
-WITH (FORMAT csv, HEADER true);
-INSERT INTO settings (key, value, updated_at)
-SELECT key, value, updated_at FROM restored_doc_settings
-ON CONFLICT (key) DO UPDATE
-SET value = EXCLUDED.value,
-    updated_at = EXCLUDED.updated_at;
-COMMIT;
-```
-
-4. 验证后台文档入口重新打开旧地址、主站和 API 正常后，再清理失败版本。不要提前删除上一版本、Caddy 备份或设置 CSV。
+文档与主站现在共用发布单元，回滚时应把应用镜像整体切回部署前记录的镜像
+ID，并等待容器健康检查通过。不要只恢复旧静态目录，否则会形成主站与文档
+版本不一致。若线上曾配置独立文档静态路由，也要确认回滚后的 Caddy 配置与
+目标镜像相匹配。
 
 服务器密码、Cloudflare Token、数据库连接串和私钥不得写入聊天记录或仓库。

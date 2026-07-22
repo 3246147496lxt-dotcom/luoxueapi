@@ -51,9 +51,10 @@
         {{ t('payment.chooseAmountTitle') }}
       </p>
       <div
-        class="-mx-1 flex snap-x snap-mandatory gap-3 overflow-x-auto px-1 pb-2 sm:mx-0 sm:grid sm:grid-cols-4 sm:overflow-visible sm:px-0 sm:pb-0"
+        class="grid min-w-0 grid-cols-2 gap-3 sm:grid-cols-4"
         role="radiogroup"
         :aria-label="t('payment.quickAmounts')"
+        data-testid="preset-amount-grid"
       >
         <button
           v-for="amt in filteredAmounts"
@@ -62,14 +63,19 @@
           role="radio"
           :aria-checked="modelValue === amt"
           :class="[
-            'flex min-h-[76px] min-w-28 snap-start flex-col items-center justify-center rounded-2xl border px-3 py-3 text-center transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500/40 focus-visible:ring-offset-2 sm:min-h-[92px] sm:min-w-0 dark:focus-visible:ring-offset-dark-900',
+            'flex min-h-[76px] min-w-0 flex-col items-center justify-center rounded-2xl border px-2 py-3 text-center transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500/40 focus-visible:ring-offset-2 sm:min-h-[92px] sm:px-3 dark:focus-visible:ring-offset-dark-900',
             modelValue === amt
               ? 'border-primary-500 bg-primary-50 text-primary-800 dark:border-primary-400 dark:bg-primary-950/50 dark:text-primary-200'
               : 'border-gray-200 bg-white text-gray-700 hover:border-primary-200 hover:bg-primary-50/40 dark:border-dark-600 dark:bg-dark-800 dark:text-gray-200 dark:hover:border-primary-800 dark:hover:bg-primary-950/20',
           ]"
           @click="selectAmount(amt)"
         >
-          <span class="text-lg font-bold tabular-nums sm:text-xl">{{ formatAmount(amt) }}</span>
+          <span
+            class="max-w-full text-base font-bold tabular-nums [overflow-wrap:anywhere] sm:text-xl"
+            data-testid="preset-amount-value"
+          >
+            {{ formatAmount(amt) }}
+          </span>
           <span class="mt-1 text-xs font-medium text-gray-400 dark:text-gray-500">
             {{ t('payment.selectThisAmount') }}
           </span>

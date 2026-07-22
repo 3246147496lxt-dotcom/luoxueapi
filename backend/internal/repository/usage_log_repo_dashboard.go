@@ -81,12 +81,15 @@ type DashboardStats = usagestats.DashboardStats
 func (r *usageLogRepository) GetDashboardStats(ctx context.Context) (*DashboardStats, error) {
 	stats := &DashboardStats{}
 	now := timezone.Now()
-	todayStart := timezone.Today()
+	todayStart := timezone.StartOfDay(now)
 
-	if err := r.fillDashboardEntityStats(ctx, stats, todayStart, now); err != nil {
+	if err := r.fillDashboardSharedStats(ctx, stats, now); err != nil {
 		return nil, err
 	}
 	if err := r.fillDashboardUsageStatsAggregated(ctx, stats, todayStart, now); err != nil {
+		return nil, err
+	}
+	if err := r.fillDashboardDayRequestComparison(ctx, stats, now); err != nil {
 		return nil, err
 	}
 
@@ -109,12 +112,15 @@ func (r *usageLogRepository) GetDashboardStatsWithRange(ctx context.Context, sta
 
 	stats := &DashboardStats{}
 	now := timezone.Now()
-	todayStart := timezone.Today()
+	todayStart := timezone.StartOfDay(now)
 
-	if err := r.fillDashboardEntityStats(ctx, stats, todayStart, now); err != nil {
+	if err := r.fillDashboardSharedStats(ctx, stats, now); err != nil {
 		return nil, err
 	}
 	if err := r.fillDashboardUsageStatsFromUsageLogs(ctx, stats, startUTC, endUTC, todayStart, now); err != nil {
+		return nil, err
+	}
+	if err := r.fillDashboardDayRequestComparison(ctx, stats, now); err != nil {
 		return nil, err
 	}
 
@@ -128,22 +134,212 @@ func (r *usageLogRepository) GetDashboardStatsWithRange(ctx context.Context, sta
 	return stats, nil
 }
 
-func (r *usageLogRepository) fillDashboardEntityStats(ctx context.Context, stats *DashboardStats, todayUTC, now time.Time) error {
-	userStatsQuery := `
-		SELECT
-			COUNT(*) as total_users,
-			COUNT(CASE WHEN created_at >= $1 THEN 1 END) as today_new_users
-		FROM users
-		WHERE deleted_at IS NULL
-	`
+type dashboardActiveAPIKeyWeekWindow struct {
+	currentStart  time.Time
+	currentEnd    time.Time
+	previousStart time.Time
+	previousEnd   time.Time
+}
+
+type dashboardDayComparisonWindow struct {
+	currentStart  time.Time
+	currentEnd    time.Time
+	previousStart time.Time
+	previousEnd   time.Time
+}
+
+const dashboardDayRequestComparisonQuery = `
+	SELECT
+		COUNT(*) FILTER (
+			WHERE created_at >= $1 AND created_at < $2
+		) AS current_day_requests,
+		COUNT(*) FILTER (
+			WHERE created_at >= $3 AND created_at < $4
+		) AS previous_day_same_period_requests
+	FROM usage_logs
+	WHERE (
+		(created_at >= $1 AND created_at < $2)
+		OR (created_at >= $3 AND created_at < $4)
+	)
+`
+
+func newDashboardDayComparisonWindow(now time.Time, loc *time.Location) dashboardDayComparisonWindow {
+	if loc == nil {
+		loc = time.Local
+	}
+	localNow := now.In(loc)
+	currentStart := time.Date(localNow.Year(), localNow.Month(), localNow.Day(), 0, 0, 0, 0, loc)
+
+	return dashboardDayComparisonWindow{
+		currentStart:  currentStart,
+		currentEnd:    localNow,
+		previousStart: currentStart.AddDate(0, 0, -1),
+		previousEnd:   localNow.AddDate(0, 0, -1),
+	}
+}
+
+func (r *usageLogRepository) fillDashboardDayRequestComparison(ctx context.Context, stats *DashboardStats, now time.Time) error {
+	windows := newDashboardDayComparisonWindow(now, timezone.Location())
 	if err := scanSingleRow(
 		ctx,
 		r.sql,
-		userStatsQuery,
-		[]any{todayUTC},
-		&stats.TotalUsers,
-		&stats.TodayNewUsers,
+		dashboardDayRequestComparisonQuery,
+		[]any{
+			windows.currentStart,
+			windows.currentEnd,
+			windows.previousStart,
+			windows.previousEnd,
+		},
+		&stats.CurrentDayRequests,
+		&stats.PreviousDaySamePeriodRequests,
 	); err != nil {
+		return err
+	}
+
+	// today_requests historically counts every usage_logs row in the site's
+	// natural day. Keep the public main value and its comparison numerator on
+	// the same real-time query so aggregation lag cannot make them disagree.
+	stats.TodayRequests = stats.CurrentDayRequests
+	stats.CurrentDayStartAt = windows.currentStart.Format(time.RFC3339Nano)
+	stats.CurrentDayEndAt = windows.currentEnd.Format(time.RFC3339Nano)
+	stats.PreviousDaySamePeriodStartAt = windows.previousStart.Format(time.RFC3339Nano)
+	stats.PreviousDaySamePeriodEndAt = windows.previousEnd.Format(time.RFC3339Nano)
+	stats.StatsTimezone = timezone.Name()
+	return nil
+}
+
+const dashboardActiveAPIKeyWeekStatsQuery = `
+	SELECT
+		COUNT(DISTINCT ul.api_key_id) FILTER (
+			WHERE ul.created_at >= $1 AND ul.created_at < $2
+		) AS current_week_active_api_keys,
+		COUNT(DISTINCT ul.api_key_id) FILTER (
+			WHERE ul.created_at >= $3 AND ul.created_at < $4
+		) AS previous_week_same_period_active_api_keys
+	FROM usage_logs ul
+	WHERE (
+		(ul.created_at >= $1 AND ul.created_at < $2)
+		OR (ul.created_at >= $3 AND ul.created_at < $4)
+	)
+		AND ul.actual_cost > 0
+`
+
+func newDashboardActiveAPIKeyWeekWindow(now time.Time, loc *time.Location) dashboardActiveAPIKeyWeekWindow {
+	if loc == nil {
+		loc = time.Local
+	}
+	localNow := now.In(loc)
+	daysSinceMonday := (int(localNow.Weekday()) + 6) % 7
+	currentStart := time.Date(localNow.Year(), localNow.Month(), localNow.Day(), 0, 0, 0, 0, loc).
+		AddDate(0, 0, -daysSinceMonday)
+
+	return dashboardActiveAPIKeyWeekWindow{
+		currentStart:  currentStart,
+		currentEnd:    localNow,
+		previousStart: currentStart.AddDate(0, 0, -7),
+		previousEnd:   localNow.AddDate(0, 0, -7),
+	}
+}
+
+func (r *usageLogRepository) fillDashboardSharedStats(ctx context.Context, stats *DashboardStats, now time.Time) error {
+	if err := r.fillDashboardEntityStats(ctx, stats, now); err != nil {
+		return err
+	}
+	return r.fillDashboardActiveAPIKeyWeekStats(ctx, stats, now)
+}
+
+func (r *usageLogRepository) fillDashboardActiveAPIKeyWeekStats(ctx context.Context, stats *DashboardStats, now time.Time) error {
+	windows := newDashboardActiveAPIKeyWeekWindow(now, timezone.Location())
+	if err := scanSingleRow(
+		ctx,
+		r.sql,
+		dashboardActiveAPIKeyWeekStatsQuery,
+		[]any{
+			windows.currentStart,
+			windows.currentEnd,
+			windows.previousStart,
+			windows.previousEnd,
+		},
+		&stats.CurrentWeekActiveAPIKeys,
+		&stats.PreviousWeekSamePeriodActiveAPIKeys,
+	); err != nil {
+		return err
+	}
+
+	stats.CurrentWeekStartAt = windows.currentStart.Format(time.RFC3339Nano)
+	stats.CurrentWeekEndAt = windows.currentEnd.Format(time.RFC3339Nano)
+	stats.PreviousWeekSamePeriodStartAt = windows.previousStart.Format(time.RFC3339Nano)
+	stats.PreviousWeekSamePeriodEndAt = windows.previousEnd.Format(time.RFC3339Nano)
+	stats.StatsTimezone = timezone.Name()
+	return nil
+}
+
+// dashboardAccountStatsQuery intentionally keeps normal_accounts on its legacy
+// active+schedulable definition. healthy_accounts additionally mirrors every
+// scheduler exclusion backed by dedicated relational columns. Account quota
+// windows live in polymorphic extra JSON and are deliberately not approximated
+// here because their rolling/fixed reset semantics cannot be expressed safely by
+// a simple aggregate predicate.
+const dashboardAccountStatsQuery = `
+		SELECT
+			COUNT(*) as total_accounts,
+			COUNT(CASE WHEN status = $1 AND schedulable = true THEN 1 END) as normal_accounts,
+			COUNT(CASE WHEN
+				status = $1
+				AND schedulable = true
+				AND (rate_limit_reset_at IS NULL OR rate_limit_reset_at <= $3)
+				AND (overload_until IS NULL OR overload_until <= $3)
+				AND (temp_unschedulable_until IS NULL OR temp_unschedulable_until <= $3)
+				AND (auto_pause_on_expired = false OR expires_at IS NULL OR expires_at > $3)
+			THEN 1 END) as healthy_accounts,
+			COUNT(CASE WHEN status = $2 THEN 1 END) as error_accounts,
+			COUNT(CASE WHEN rate_limited_at IS NOT NULL AND rate_limit_reset_at > $3 THEN 1 END) as ratelimit_accounts,
+			COUNT(CASE WHEN overload_until IS NOT NULL AND overload_until > $4 THEN 1 END) as overload_accounts
+		FROM accounts
+		WHERE deleted_at IS NULL
+	`
+
+const dashboardUserStatsQuery = `
+		SELECT
+			COUNT(*) as total_users,
+			COUNT(*) FILTER (
+				WHERE created_at >= $1 AND created_at < $2
+			) as current_day_new_users,
+			COUNT(*) FILTER (
+				WHERE created_at >= $3 AND created_at < $4
+			) as previous_day_same_period_new_users
+		FROM users
+		WHERE deleted_at IS NULL
+	`
+
+func (r *usageLogRepository) fillDashboardUserStats(ctx context.Context, stats *DashboardStats, now time.Time) error {
+	windows := newDashboardDayComparisonWindow(now, timezone.Location())
+	if err := scanSingleRow(
+		ctx,
+		r.sql,
+		dashboardUserStatsQuery,
+		[]any{
+			windows.currentStart,
+			windows.currentEnd,
+			windows.previousStart,
+			windows.previousEnd,
+		},
+		&stats.TotalUsers,
+		&stats.CurrentDayNewUsers,
+		&stats.PreviousDaySamePeriodNewUsers,
+	); err != nil {
+		return err
+	}
+
+	// today_new_users historically counts non-deleted users created during the
+	// site's natural day. Keep the legacy main value and comparison numerator
+	// on the same real-time query so they cannot drift apart.
+	stats.TodayNewUsers = stats.CurrentDayNewUsers
+	return nil
+}
+
+func (r *usageLogRepository) fillDashboardEntityStats(ctx context.Context, stats *DashboardStats, now time.Time) error {
+	if err := r.fillDashboardUserStats(ctx, stats, now); err != nil {
 		return err
 	}
 
@@ -165,23 +361,14 @@ func (r *usageLogRepository) fillDashboardEntityStats(ctx context.Context, stats
 		return err
 	}
 
-	accountStatsQuery := `
-		SELECT
-			COUNT(*) as total_accounts,
-			COUNT(CASE WHEN status = $1 AND schedulable = true THEN 1 END) as normal_accounts,
-			COUNT(CASE WHEN status = $2 THEN 1 END) as error_accounts,
-			COUNT(CASE WHEN rate_limited_at IS NOT NULL AND rate_limit_reset_at > $3 THEN 1 END) as ratelimit_accounts,
-			COUNT(CASE WHEN overload_until IS NOT NULL AND overload_until > $4 THEN 1 END) as overload_accounts
-		FROM accounts
-		WHERE deleted_at IS NULL
-	`
 	if err := scanSingleRow(
 		ctx,
 		r.sql,
-		accountStatsQuery,
+		dashboardAccountStatsQuery,
 		[]any{service.StatusActive, service.StatusError, now, now},
 		&stats.TotalAccounts,
 		&stats.NormalAccounts,
+		&stats.HealthyAccounts,
 		&stats.ErrorAccounts,
 		&stats.RateLimitAccounts,
 		&stats.OverloadAccounts,
@@ -280,7 +467,7 @@ func (r *usageLogRepository) fillDashboardUsageStatsAggregated(ctx context.Conte
 }
 
 func (r *usageLogRepository) fillDashboardUsageStatsFromUsageLogs(ctx context.Context, stats *DashboardStats, startUTC, endUTC, todayUTC, now time.Time) error {
-	todayEnd := todayUTC.Add(24 * time.Hour)
+	todayEnd := todayUTC.AddDate(0, 0, 1)
 	combinedStatsQuery := `
 		WITH scoped AS (
 			SELECT

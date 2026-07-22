@@ -9,12 +9,14 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/pkg/usagestats"
 )
 
+const dashboardQueryCacheTTL = 30 * time.Second
+
 var (
-	dashboardTrendCache        = newSnapshotCache(30 * time.Second)
-	dashboardModelStatsCache   = newSnapshotCache(30 * time.Second)
-	dashboardGroupStatsCache   = newSnapshotCache(30 * time.Second)
-	dashboardUsersTrendCache   = newSnapshotCache(30 * time.Second)
-	dashboardAPIKeysTrendCache = newSnapshotCache(30 * time.Second)
+	dashboardTrendCache        = newSnapshotCache(dashboardQueryCacheTTL)
+	dashboardModelStatsCache   = newSnapshotCache(dashboardQueryCacheTTL)
+	dashboardGroupStatsCache   = newSnapshotCache(dashboardQueryCacheTTL)
+	dashboardUsersTrendCache   = newSnapshotCache(dashboardQueryCacheTTL)
+	dashboardAPIKeysTrendCache = newSnapshotCache(dashboardQueryCacheTTL)
 )
 
 type dashboardTrendCacheKey struct {

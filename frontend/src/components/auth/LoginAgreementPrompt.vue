@@ -37,13 +37,13 @@
 
   <div
     v-else-if="!accepted && documents.length > 0"
-    class="rounded-lg border border-primary-100 bg-primary-50/70 p-3 text-sm text-primary-900 dark:border-primary-500/20 dark:bg-primary-500/10 dark:text-primary-100"
+    class="info-surface rounded-lg border p-3 text-sm"
   >
     <div class="flex items-start gap-3">
-      <Icon name="shield" size="sm" class="mt-0.5 flex-shrink-0 text-primary-600 dark:text-primary-300" />
+      <Icon name="shield" size="sm" class="info-emphasis mt-0.5 flex-shrink-0" />
       <div class="min-w-0 flex-1">
         <p class="font-medium">{{ t('legal.loginAgreementPrompt.noticeTitle') }}</p>
-        <p class="mt-1 text-primary-700 dark:text-primary-200/80">
+        <p class="info-muted mt-1">
           {{ t('legal.loginAgreementPrompt.noticeDescription') }}
         </p>
       </div>

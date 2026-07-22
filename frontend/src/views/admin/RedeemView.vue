@@ -1,6 +1,13 @@
 <template>
-  <AppLayout>
+  <AppLayout variant="home-clay">
     <TablePageLayout>
+      <template #header>
+        <AdminPageHeader
+          :title="t('admin.redeem.title')"
+          :description="t('admin.redeem.description')"
+        />
+      </template>
+
       <template #filters>
         <div class="flex flex-wrap items-center gap-3">
           <!-- Left: Search + Filters -->
@@ -626,6 +633,7 @@ import type {
 } from '@/types'
 import type { Column } from '@/components/common/types'
 import AppLayout from '@/components/layout/AppLayout.vue'
+import AdminPageHeader from '@/components/layout/AdminPageHeader.vue'
 import TablePageLayout from '@/components/layout/TablePageLayout.vue'
 import DataTable from '@/components/common/DataTable.vue'
 import Pagination from '@/components/common/Pagination.vue'

@@ -173,4 +173,22 @@ describe('AccountActionMenu — spark shadow 按钮可见性', () => {
 
     wrapper.unmount()
   })
+
+  it('keeps destructive deletion in the progressive action menu on mobile', async () => {
+    const account = makeAccount({ platform: 'openai', type: 'oauth' })
+    const wrapper = mount(AccountActionMenu, {
+      props: { show: true, account, position },
+      attachTo: document.body,
+    })
+
+    const deleteBtn = getBodyButtons().find(button => button.textContent?.includes('common.delete'))
+    expect(deleteBtn).toBeDefined()
+    expect(deleteBtn!.classList.contains('lg:hidden')).toBe(true)
+
+    deleteBtn!.click()
+    await wrapper.vm.$nextTick()
+
+    expect(wrapper.emitted('delete')?.[0]?.[0]).toMatchObject({ id: account.id })
+    wrapper.unmount()
+  })
 })

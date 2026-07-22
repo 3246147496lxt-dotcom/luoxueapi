@@ -1,6 +1,13 @@
 <template>
-  <AppLayout>
+  <AppLayout variant="home-clay">
     <TablePageLayout>
+      <template #header>
+        <AdminPageHeader
+          :title="t(pageHeader.titleKey)"
+          :description="t(pageHeader.descriptionKey)"
+        />
+      </template>
+
       <template #filters>
         <div class="flex flex-wrap items-center gap-3">
           <div class="relative w-full md:w-80">
@@ -145,6 +152,7 @@
 import { computed, defineComponent, h, onMounted, reactive, ref, type PropType } from 'vue'
 import { useI18n } from 'vue-i18n'
 import AppLayout from '@/components/layout/AppLayout.vue'
+import AdminPageHeader from '@/components/layout/AdminPageHeader.vue'
 import TablePageLayout from '@/components/layout/TablePageLayout.vue'
 import DataTable from '@/components/common/DataTable.vue'
 import Pagination from '@/components/common/Pagination.vue'
@@ -167,6 +175,20 @@ const props = defineProps<{
 
 const { t } = useI18n()
 const appStore = useAppStore()
+const pageHeader = computed(() => ({
+  invites: {
+    titleKey: 'nav.affiliateInviteRecords',
+    descriptionKey: 'admin.affiliates.invitesDescription'
+  },
+  rebates: {
+    titleKey: 'nav.affiliateRebateRecords',
+    descriptionKey: 'admin.affiliates.rebatesDescription'
+  },
+  transfers: {
+    titleKey: 'nav.affiliateTransferRecords',
+    descriptionKey: 'admin.affiliates.transfersDescription'
+  }
+})[props.type])
 const loading = ref(false)
 const records = ref<AffiliateRecord[]>([])
 const filters = reactive({ search: '', start_at: '', end_at: '' })

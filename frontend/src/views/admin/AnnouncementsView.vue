@@ -1,6 +1,13 @@
 <template>
-  <AppLayout>
+  <AppLayout variant="home-clay">
     <TablePageLayout>
+      <template #header>
+        <AdminPageHeader
+          :title="t('admin.announcements.title')"
+          :description="t('admin.announcements.description')"
+        />
+      </template>
+
       <template #filters>
         <div class="flex flex-wrap items-center gap-3">
           <!-- Left: Search + Filters -->
@@ -254,6 +261,7 @@ import type { AdminGroup, Announcement, AnnouncementTargeting } from '@/types'
 import type { Column } from '@/components/common/types'
 
 import AppLayout from '@/components/layout/AppLayout.vue'
+import AdminPageHeader from '@/components/layout/AdminPageHeader.vue'
 import TablePageLayout from '@/components/layout/TablePageLayout.vue'
 import DataTable from '@/components/common/DataTable.vue'
 import Pagination from '@/components/common/Pagination.vue'

@@ -30,7 +30,7 @@
       </header>
 
       <div v-if="loading && !stats" class="space-y-4" aria-live="polite">
-        <div class="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
+        <div class="grid grid-cols-1 gap-3 min-[360px]:grid-cols-2 sm:gap-4 xl:grid-cols-4">
           <div v-for="index in 4" :key="index" class="dashboard-panel min-h-[205px] p-5">
             <div class="skeleton h-5 w-28"></div>
             <div class="mt-8 space-y-5">
@@ -337,10 +337,10 @@ onBeforeUnmount(() => {
 
 <style scoped>
 .dashboard-panel {
-  border: 1px solid rgb(229 231 235 / 0.78);
-  border-radius: 16px;
-  background: rgb(255 255 255);
-  box-shadow: 0 0 1px rgb(15 23 42 / 0.16), 0 7px 18px rgb(15 23 42 / 0.07);
+  border: 1px solid var(--lx-clay-border);
+  border-radius: var(--lx-clay-radius-surface);
+  background: var(--lx-clay-surface);
+  box-shadow: var(--lx-clay-shadow-form);
 }
 
 .dashboard-icon-button {
@@ -370,12 +370,6 @@ onBeforeUnmount(() => {
 .dashboard-icon-button:disabled {
   cursor: wait;
   opacity: 0.6;
-}
-
-:global(.dark) .dashboard-panel {
-  border-color: rgb(51 65 85 / 0.86);
-  background: rgb(30 41 59);
-  box-shadow: 0 0 1px rgb(0 0 0 / 0.45), 0 7px 20px rgb(0 0 0 / 0.2);
 }
 
 :global(.dark) .dashboard-icon-button {

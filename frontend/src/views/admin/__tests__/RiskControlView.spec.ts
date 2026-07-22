@@ -12,6 +12,8 @@ const {
   getStatus,
   listLogs,
   getGroups,
+  deleteFlaggedHashApi,
+  clearFlaggedHashesApi,
   showError,
   showSuccess,
 } = vi.hoisted(() => ({
@@ -20,6 +22,8 @@ const {
   getStatus: vi.fn(),
   listLogs: vi.fn(),
   getGroups: vi.fn(),
+  deleteFlaggedHashApi: vi.fn(),
+  clearFlaggedHashesApi: vi.fn(),
   showError: vi.fn(),
   showSuccess: vi.fn(),
 }))
@@ -32,8 +36,8 @@ vi.mock('@/api/admin', () => ({
       getStatus,
       listLogs,
       testAPIKeys: vi.fn(),
-      deleteFlaggedHash: vi.fn(),
-      clearFlaggedHashes: vi.fn(),
+      deleteFlaggedHash: deleteFlaggedHashApi,
+      clearFlaggedHashes: clearFlaggedHashesApi,
       unbanUser: vi.fn(),
     },
     groups: {
@@ -61,6 +65,12 @@ vi.mock('vue-i18n', async () => {
       t: (key: string, params?: Record<string, string | number>) => {
         if (key === 'admin.riskControl.preBlockAPIKeyLoadSummary') {
           return `同步并发 ${params?.active} / 可用 Key ${params?.available}，累计 ${params?.total} 次，worker：${params?.workerActive} / ${params?.workerTotal}`
+        }
+        if (key === 'admin.riskControl.clearFlaggedHashesConfirmWithCount') {
+          return `clear ${params?.count} hashes`
+        }
+        if (key === 'admin.riskControl.deleteFlaggedHashConfirm') {
+          return `delete ${params?.hash}`
         }
         return key.replace(/\{(\w+)\}/g, (_, token) => String(params?.[token] ?? `{${token}}`))
       },
@@ -148,6 +158,22 @@ const BaseDialogStub = defineComponent({
   },
   template: '<div v-if="show"><slot /><slot name="footer" /></div>',
 })
+const ConfirmDialogStub = defineComponent({
+  props: {
+    show: { type: Boolean, default: false },
+    title: { type: String, default: '' },
+    message: { type: String, default: '' },
+  },
+  emits: ['confirm', 'cancel'],
+  template: `
+    <div v-if="show" data-test="confirm-dialog">
+      <h2>{{ title }}</h2>
+      <p>{{ message }}</p>
+      <button type="button" data-test="confirm-dialog-confirm" @click="$emit('confirm')">confirm</button>
+      <button type="button" data-test="confirm-dialog-cancel" @click="$emit('cancel')">cancel</button>
+    </div>
+  `,
+})
 const ModelWhitelistSelectorStub = defineComponent({
   props: {
     modelValue: {
@@ -191,6 +217,8 @@ describe('admin RiskControlView', () => {
     getStatus.mockReset()
     listLogs.mockReset()
     getGroups.mockReset()
+    deleteFlaggedHashApi.mockReset()
+    clearFlaggedHashesApi.mockReset()
     showError.mockReset()
     showSuccess.mockReset()
 
@@ -208,6 +236,8 @@ describe('admin RiskControlView', () => {
       api_key_masks: [],
       api_key_statuses: [],
     }))
+    deleteFlaggedHashApi.mockResolvedValue({ deleted: true })
+    clearFlaggedHashesApi.mockResolvedValue({ deleted: 0 })
   })
 
   it('saves the selected model filter mode and models', async () => {
@@ -216,6 +246,7 @@ describe('admin RiskControlView', () => {
         stubs: {
           AppLayout: AppLayoutStub,
           BaseDialog: BaseDialogStub,
+          ConfirmDialog: ConfirmDialogStub,
           Icon: true,
           Select: true,
           Toggle: true,
@@ -249,6 +280,7 @@ describe('admin RiskControlView', () => {
         stubs: {
           AppLayout: AppLayoutStub,
           BaseDialog: BaseDialogStub,
+          ConfirmDialog: ConfirmDialogStub,
           Icon: true,
           Select: true,
           Toggle: true,
@@ -289,6 +321,7 @@ describe('admin RiskControlView', () => {
         stubs: {
           AppLayout: AppLayoutStub,
           BaseDialog: BaseDialogStub,
+          ConfirmDialog: ConfirmDialogStub,
           Icon: true,
           Select: true,
           Toggle: true,
@@ -356,6 +389,7 @@ describe('admin RiskControlView', () => {
         stubs: {
           AppLayout: AppLayoutStub,
           BaseDialog: BaseDialogStub,
+          ConfirmDialog: ConfirmDialogStub,
           Icon: true,
           Select: true,
           Toggle: true,
@@ -403,5 +437,71 @@ describe('admin RiskControlView', () => {
       'max-h-[280px]',
       'overflow-y-auto',
     ]))
+  })
+
+  it('requires an explicit danger confirmation before clearing all flagged hashes', async () => {
+    getStatus.mockResolvedValue({ ...runtimeStatus(), flagged_hash_count: 3 })
+    clearFlaggedHashesApi.mockResolvedValue({ deleted: 3 })
+
+    const wrapper = mount(RiskControlView, {
+      global: {
+        stubs: {
+          AppLayout: AppLayoutStub,
+          BaseDialog: BaseDialogStub,
+          ConfirmDialog: ConfirmDialogStub,
+          Icon: true,
+          Select: true,
+          Toggle: true,
+          Pagination: true,
+          ModelWhitelistSelector: ModelWhitelistSelectorStub,
+        },
+      },
+    })
+
+    await flushPromises()
+    await findButtonByText(wrapper, 'admin.riskControl.openSettings').trigger('click')
+    await findButtonByText(wrapper, 'admin.riskControl.tabs.runtime').trigger('click')
+    await findButtonByText(wrapper, 'admin.riskControl.clearFlaggedHashes').trigger('click')
+
+    expect(clearFlaggedHashesApi).not.toHaveBeenCalled()
+    expect(wrapper.get('[data-test="confirm-dialog"]').text()).toContain('3')
+
+    await wrapper.get('[data-test="confirm-dialog-confirm"]').trigger('click')
+    await flushPromises()
+
+    expect(clearFlaggedHashesApi).toHaveBeenCalledTimes(1)
+  })
+
+  it('requires confirmation before deleting one flagged hash', async () => {
+    const hash = 'a'.repeat(64)
+
+    const wrapper = mount(RiskControlView, {
+      global: {
+        stubs: {
+          AppLayout: AppLayoutStub,
+          BaseDialog: BaseDialogStub,
+          ConfirmDialog: ConfirmDialogStub,
+          Icon: true,
+          Select: true,
+          Toggle: true,
+          Pagination: true,
+          ModelWhitelistSelector: ModelWhitelistSelectorStub,
+        },
+      },
+    })
+
+    await flushPromises()
+    await findButtonByText(wrapper, 'admin.riskControl.openSettings').trigger('click')
+    await findButtonByText(wrapper, 'admin.riskControl.tabs.runtime').trigger('click')
+    await wrapper.get('input[placeholder="admin.riskControl.flaggedHashPlaceholder"]').setValue(hash)
+    await findButtonByText(wrapper, 'admin.riskControl.deleteFlaggedHash').trigger('click')
+
+    expect(deleteFlaggedHashApi).not.toHaveBeenCalled()
+    expect(wrapper.get('[data-test="confirm-dialog"]').text()).toContain(hash)
+
+    await wrapper.get('[data-test="confirm-dialog-confirm"]').trigger('click')
+    await flushPromises()
+
+    expect(deleteFlaggedHashApi).toHaveBeenCalledWith(hash)
   })
 })

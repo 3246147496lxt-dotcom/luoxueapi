@@ -1,6 +1,12 @@
 // Export all common components
 export { default as DataTable } from './DataTable.vue'
 export { default as Pagination } from './Pagination.vue'
+export { default as Input } from './Input.vue'
+export { default as TextArea } from './TextArea.vue'
+export { default as SearchInput } from './SearchInput.vue'
+export { default as Select } from './Select.vue'
+export { default as Toggle } from './Toggle.vue'
+export { default as StatusBadge } from './StatusBadge.vue'
 export { default as BaseDialog } from './BaseDialog.vue'
 export { default as ConfirmDialog } from './ConfirmDialog.vue'
 export { default as StatCard } from './StatCard.vue'

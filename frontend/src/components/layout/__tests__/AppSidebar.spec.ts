@@ -67,15 +67,20 @@ describe('AppSidebar navigation shell', () => {
     expect(componentSource).toContain('transform: translateX(calc(-100% - 0.5rem));')
   })
 
-  it('matches the reference menu rhythm and selected state', () => {
+  it('matches the original production mobile overlay and keeps the glass drawer above it', () => {
+    expect(componentSource).toContain(
+      'class="fixed inset-0 z-30 border-0 bg-gray-950/5 p-0 backdrop-blur-[1px] lg:hidden dark:bg-black/20"',
+    )
+    expect(componentSource).not.toContain('sidebar-mobile-overlay')
+    expect(componentSource).toContain('backdrop-filter: saturate(1.7) blur(36px);')
+  })
+
+  it('matches the original production menu rhythm and selected state', () => {
     expect(componentSource).toContain('gap: 0.625rem;')
     expect(componentSource).toContain('padding-top: 0.25rem;')
     expect(componentSource).toContain('line-height: 1.5rem;')
     expect(componentSource).toContain('color: rgb(0 132 255);')
     expect(componentSource).toContain('background: rgb(234 245 255);')
-    expect(componentSource).toContain('background: rgb(0 132 255);')
-    expect(componentSource).toContain('background: rgb(71 160 255 / 0.18);')
-    expect(componentSource).toContain('rgb(167 139 250 / 0.1)')
     expect(componentSource).toContain('width: 2px;')
     expect(componentSource).toContain('height: 1rem;')
     expect(componentSource).toContain('font-size: 0.75rem;')
@@ -116,9 +121,9 @@ describe('AppSidebar pinned destinations', () => {
     expect(componentSource).toContain('.sidebar-destination-link:focus-visible')
   })
 
-  it('matches the reference hover lift and recolors both destination glyphs', () => {
+  it('uses the original blue hover contract and recolors both destination glyphs', () => {
     expect(componentSource).toMatch(
-      /\.sidebar-destination-link:hover,\s*\.sidebar-destination-link:focus-visible\s*\{[^}]*color:\s*rgb\(0 132 255\)[^}]*background:\s*rgb\(0 132 255 \/ 0\.08\)[^}]*box-shadow:\s*0 2px 8px rgb\(0 132 255 \/ 0\.06\)[^}]*transform:\s*translateY\(-1px\) scale\(1\.03\)/s,
+      /\.sidebar-destination-link:hover,\s*\.sidebar-destination-link:focus-visible\s*\{[^}]*color:\s*rgb\(0 132 255\)[^}]*background:\s*rgb\(0 132 255 \/ 0\.08\)/s,
     )
     expect(componentSource).toMatch(
       /\.sidebar-destination-link:hover \.sidebar-destination-leading > :deep\(svg\)[\s\S]*?color:\s*rgb\(0 132 255\)/,

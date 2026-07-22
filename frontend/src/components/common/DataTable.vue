@@ -1,23 +1,48 @@
 <template>
-  <div v-if="!isDesktopViewport" class="space-y-3">
+  <div
+    v-if="!isDesktopViewport"
+    class="data-table data-table--mobile space-y-3"
+    data-ui-component="data-table"
+    data-ui-mode="mobile"
+  >
     <template v-if="loading">
-      <div v-for="i in 5" :key="i" class="rounded-lg border border-gray-200 bg-white p-4 dark:border-dark-700 dark:bg-dark-900">
-        <div class="space-y-3">
-          <div v-for="column in dataColumns" :key="column.key" class="flex justify-between">
-            <div class="h-4 w-20 animate-pulse rounded bg-gray-200 dark:bg-dark-700"></div>
-            <div class="h-4 w-32 animate-pulse rounded bg-gray-200 dark:bg-dark-700"></div>
+      <div v-for="i in 5" :key="i" class="data-table-mobile-card data-table-loading-card rounded-lg border border-gray-200 bg-white p-4 dark:border-dark-700 dark:bg-dark-900">
+        <div class="data-table-mobile-fields space-y-3">
+          <div
+            v-if="mobileCardConfigured && mobilePrimaryColumn"
+            class="data-table-mobile-primary data-table-mobile-primary--loading"
+          >
+            <div class="data-table-loading-value h-5 w-40 animate-pulse rounded bg-gray-200 dark:bg-dark-700"></div>
           </div>
-          <div v-if="hasActionsColumn" class="border-t border-gray-200 pt-3 dark:border-dark-700">
-            <div class="h-8 w-full animate-pulse rounded bg-gray-200 dark:bg-dark-700"></div>
+          <div v-for="column in dataColumns" :key="column.key" class="data-table-mobile-field flex justify-between">
+            <div class="data-table-loading-label h-4 w-20 animate-pulse rounded bg-gray-200 dark:bg-dark-700"></div>
+            <div class="data-table-loading-value h-4 w-32 animate-pulse rounded bg-gray-200 dark:bg-dark-700"></div>
+          </div>
+          <div v-if="hasActionsColumn" class="data-table-mobile-actions border-t border-gray-200 pt-3 dark:border-dark-700">
+            <div class="data-table-loading-actions h-8 w-full animate-pulse rounded bg-gray-200 dark:bg-dark-700"></div>
           </div>
         </div>
       </div>
     </template>
 
+    <template v-else-if="error">
+      <div
+        class="data-table-mobile-card data-table-error-card rounded-lg border border-red-200 bg-red-50 p-8 text-center dark:border-red-900/60 dark:bg-red-950/20"
+        role="alert"
+      >
+        <slot name="error" :message="error">
+          <div class="data-table-error-state flex flex-col items-center">
+            <Icon name="exclamationTriangle" size="xl" class="mb-3 h-10 w-10 text-red-500 dark:text-red-400" />
+            <p class="text-sm font-medium text-red-700 dark:text-red-300">{{ error }}</p>
+          </div>
+        </slot>
+      </div>
+    </template>
+
     <template v-else-if="!data || data.length === 0">
-      <div class="rounded-lg border border-gray-200 bg-white p-12 text-center dark:border-dark-700 dark:bg-dark-900">
+      <div class="data-table-mobile-card data-table-empty-card rounded-lg border border-gray-200 bg-white p-12 text-center dark:border-dark-700 dark:bg-dark-900">
         <slot name="empty">
-          <div class="flex flex-col items-center">
+          <div class="data-table-empty-state flex flex-col items-center">
             <Icon
               name="inbox"
               size="xl"
@@ -35,26 +60,69 @@
       <div
         v-for="(row, index) in sortedData"
         :key="resolveRowKey(row, index)"
-        class="rounded-lg border border-gray-200 bg-white p-4 dark:border-dark-700 dark:bg-dark-900"
+        class="data-table-mobile-card data-table-mobile-row rounded-lg border border-gray-200 bg-white p-4 dark:border-dark-700 dark:bg-dark-900"
         :class="{ 'cursor-pointer': clickableRows }"
+        :role="clickableRows ? 'button' : undefined"
+        :tabindex="clickableRows ? 0 : undefined"
+        :aria-label="clickableRows ? getRowAriaLabel(row) : undefined"
         @click="clickableRows && emit('rowClick', row)"
+        @keydown="handleRowKeydown($event, row)"
       >
-        <div class="space-y-3">
+        <div class="data-table-mobile-fields space-y-3">
+          <div
+            v-if="mobileCardConfigured && (mobileSelectColumn || mobilePrimaryColumn)"
+            class="data-table-mobile-primary"
+            data-mobile-primary
+          >
+            <div v-if="mobileSelectColumn" class="data-table-mobile-select" @click.stop>
+              <slot
+                :name="`cell-${mobileSelectColumn.key}`"
+                :row="row"
+                :value="row[mobileSelectColumn.key]"
+                :expanded="actionsExpanded"
+              >
+                {{ mobileSelectColumn.formatter
+                  ? mobileSelectColumn.formatter(row[mobileSelectColumn.key], row)
+                  : row[mobileSelectColumn.key] }}
+              </slot>
+            </div>
+
+            <div v-if="mobilePrimaryColumn" class="data-table-mobile-primary-content">
+              <span class="data-table-mobile-primary-label">
+                {{ mobilePrimaryColumn.label }}
+              </span>
+              <div class="data-table-mobile-primary-value">
+                <slot
+                  :name="`cell-${mobilePrimaryColumn.key}`"
+                  :row="row"
+                  :value="row[mobilePrimaryColumn.key]"
+                  :expanded="actionsExpanded"
+                >
+                  {{ mobilePrimaryColumn.formatter
+                    ? mobilePrimaryColumn.formatter(row[mobilePrimaryColumn.key], row)
+                    : row[mobilePrimaryColumn.key] }}
+                </slot>
+              </div>
+            </div>
+          </div>
+
           <div
             v-for="column in dataColumns"
             :key="column.key"
-            class="flex items-start justify-between gap-4"
+            class="data-table-mobile-field flex items-start justify-between gap-4"
+            data-mobile-field
+            :data-mobile-field-key="column.key"
           >
-            <span class="text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-dark-400">
+            <span class="data-table-mobile-label text-xs font-medium text-gray-500 dark:text-dark-400">
               {{ column.label }}
             </span>
-            <div class="text-right text-sm text-gray-900 dark:text-gray-100">
+            <div class="data-table-mobile-value text-right text-sm text-gray-900 dark:text-gray-100">
               <slot :name="`cell-${column.key}`" :row="row" :value="row[column.key]" :expanded="actionsExpanded">
                 {{ column.formatter ? column.formatter(row[column.key], row) : row[column.key] }}
               </slot>
             </div>
           </div>
-          <div v-if="hasActionsColumn" class="border-t border-gray-200 pt-3 dark:border-dark-700">
+          <div v-if="hasActionsColumn" class="data-table-mobile-actions border-t border-gray-200 pt-3 dark:border-dark-700">
             <slot name="cell-actions" :row="row" :value="row['actions']" :expanded="actionsExpanded"></slot>
           </div>
         </div>
@@ -65,28 +133,33 @@
   <div
     v-else
     ref="tableWrapperRef"
-    class="table-wrapper"
+    class="data-table data-table--desktop table-wrapper"
+    data-ui-component="data-table"
+    data-ui-mode="desktop"
     :class="{
       'actions-expanded': actionsExpanded,
       'is-scrollable': isScrollable
     }"
   >
-    <table class="w-full min-w-max divide-y divide-gray-200 dark:divide-dark-700">
-      <thead class="table-header bg-gray-50 dark:bg-dark-800">
-        <tr>
+    <table class="data-table-table w-full min-w-max divide-y divide-gray-200 dark:divide-dark-700">
+      <thead class="data-table-header table-header bg-gray-50 dark:bg-dark-800">
+        <tr class="data-table-header-row">
           <th
             v-for="(column, index) in columns"
             :key="column.key"
             scope="col"
             :aria-sort="column.sortable ? getColumnAriaSort(column.key) : undefined"
+            :tabindex="column.sortable ? 0 : undefined"
             :class="[
-              'sticky-header-cell py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-dark-400',
+              'data-table-header-cell sticky-header-cell py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-dark-400',
               getAdaptivePaddingClass(),
               { 'cursor-pointer hover:bg-gray-100 dark:hover:bg-dark-700': column.sortable },
               getStickyColumnClass(column, index),
               column.class
             ]"
             @click="column.sortable && handleSort(column.key)"
+            @keydown.enter.prevent="column.sortable && handleSort(column.key)"
+            @keydown.space.prevent="column.sortable && handleSort(column.key)"
           >
             <slot
               :name="`header-${column.key}`"
@@ -94,11 +167,11 @@
               :sort-key="sortKey"
               :sort-order="sortOrder"
             >
-              <div :class="['flex items-center space-x-1', getHeaderContentAlignmentClass(column)]">
+              <div :class="['data-table-header-content flex items-center space-x-1', getHeaderContentAlignmentClass(column)]">
                 <span>{{ column.label }}</span>
                 <span
                   v-if="column.sortable"
-                  class="inline-flex h-5 w-4 flex-col items-center justify-center"
+                  class="data-table-sort-indicator inline-flex h-5 w-4 flex-col items-center justify-center"
                   aria-hidden="true"
                 >
                   <svg
@@ -123,24 +196,40 @@
           </th>
         </tr>
       </thead>
-      <tbody class="table-body divide-y divide-gray-200 bg-white dark:divide-dark-700 dark:bg-dark-900">
+      <tbody class="data-table-body table-body divide-y divide-gray-200 bg-white dark:divide-dark-700 dark:bg-dark-900">
         <!-- Loading skeleton -->
-        <tr v-if="loading" v-for="i in 5" :key="i">
-          <td v-for="column in columns" :key="column.key" :class="['whitespace-nowrap py-4', getAdaptivePaddingClass()]">
-            <div class="animate-pulse">
-              <div class="h-4 w-3/4 rounded bg-gray-200 dark:bg-dark-700"></div>
+        <tr v-if="loading" v-for="i in 5" :key="i" class="data-table-loading-row">
+          <td v-for="column in columns" :key="column.key" :class="['data-table-loading-cell whitespace-nowrap py-4', getAdaptivePaddingClass()]">
+            <div class="data-table-loading-pulse animate-pulse">
+              <div class="data-table-loading-line h-4 w-3/4 rounded bg-gray-200 dark:bg-dark-700"></div>
             </div>
           </td>
         </tr>
 
-        <!-- Empty state -->
-        <tr v-else-if="!data || data.length === 0">
+        <!-- Error state -->
+        <tr v-else-if="error" class="data-table-error-row">
           <td
             :colspan="columns.length"
-            :class="['py-12 text-center text-gray-500 dark:text-dark-400', getAdaptivePaddingClass()]"
+            :class="['data-table-error-cell py-12 text-center', getAdaptivePaddingClass()]"
+            role="alert"
+          >
+            <slot name="error" :message="error">
+              <div class="data-table-error-state flex flex-col items-center">
+                <Icon name="exclamationTriangle" size="xl" class="mb-3 h-10 w-10 text-red-500 dark:text-red-400" />
+                <p class="text-sm font-medium text-red-700 dark:text-red-300">{{ error }}</p>
+              </div>
+            </slot>
+          </td>
+        </tr>
+
+        <!-- Empty state -->
+        <tr v-else-if="!data || data.length === 0" class="data-table-empty-row">
+          <td
+            :colspan="columns.length"
+            :class="['data-table-empty-cell py-12 text-center text-gray-500 dark:text-dark-400', getAdaptivePaddingClass()]"
           >
             <slot name="empty">
-              <div class="flex flex-col items-center">
+              <div class="data-table-empty-state flex flex-col items-center">
                 <Icon
                   name="inbox"
                   size="xl"
@@ -156,7 +245,7 @@
 
         <!-- Data rows: windowed when large, fully rendered when small (shared row/cell template) -->
         <template v-else>
-          <tr v-if="virtualPaddingTop > 0" aria-hidden="true">
+          <tr v-if="virtualPaddingTop > 0" class="data-table-virtual-spacer data-table-virtual-spacer--top" aria-hidden="true">
             <td :colspan="columns.length"
                 :style="{ height: virtualPaddingTop + 'px', padding: 0, border: 'none' }">
             </td>
@@ -167,15 +256,18 @@
             :data-row-id="resolveRowKey(item.row, item.index)"
             :data-index="item.index"
             :ref="item.measure ? measureElement : undefined"
-            class="hover:bg-gray-50 dark:hover:bg-dark-800"
+            class="data-table-row hover:bg-gray-50 dark:hover:bg-dark-800"
             :class="{ 'cursor-pointer': clickableRows }"
+            :tabindex="clickableRows ? 0 : undefined"
+            :aria-label="clickableRows ? getRowAriaLabel(item.row) : undefined"
             @click="clickableRows && emit('rowClick', item.row)"
+            @keydown="handleRowKeydown($event, item.row)"
           >
             <td
               v-for="(column, colIndex) in columns"
               :key="column.key"
               :class="[
-                'whitespace-nowrap py-4 text-sm text-gray-900 dark:text-gray-100',
+                'data-table-cell whitespace-nowrap py-4 text-sm text-gray-900 dark:text-gray-100',
                 getAdaptivePaddingClass(),
                 getStickyColumnClass(column, colIndex),
                 column.class
@@ -191,7 +283,7 @@
               </slot>
             </td>
           </tr>
-          <tr v-if="virtualPaddingBottom > 0" aria-hidden="true">
+          <tr v-if="virtualPaddingBottom > 0" class="data-table-virtual-spacer data-table-virtual-spacer--bottom" aria-hidden="true">
             <td :colspan="columns.length"
                 :style="{ height: virtualPaddingBottom + 'px', padding: 0, border: 'none' }">
             </td>
@@ -211,7 +303,9 @@ import Icon from '@/components/icons/Icon.vue'
 
 const { t } = useI18n()
 
-const desktopViewportQuery = '(min-width: 768px)'
+// Match TablePageLayout's structural breakpoint so tablet widths never mix
+// the mobile page shell with the desktop table implementation.
+const desktopViewportQuery = '(min-width: 1024px)'
 const isDesktopViewport = ref(
   typeof window === 'undefined' ? true : window.matchMedia(desktopViewportQuery).matches
 )
@@ -371,6 +465,8 @@ interface Props {
   columns: Column[]
   data: any[]
   loading?: boolean
+  /** Human-readable load error. Rendered before the empty state when present. */
+  error?: string | null
   stickyFirstColumn?: boolean
   stickyActionsColumn?: boolean
   expandableActions?: boolean
@@ -393,6 +489,18 @@ interface Props {
   serverSideSort?: boolean
   /** Emit 'rowClick' on row/card click and show pointer cursor (interactive cells should @click.stop) */
   clickableRows?: boolean
+  /** Accessible label for clickable rows/cards. Falls back to the first data column. */
+  rowAriaLabel?: (row: any) => string
+  /**
+   * Promote one column into the mobile card header. Desktop rendering is unchanged.
+   * When omitted, the legacy mobile field list is preserved.
+   */
+  mobilePrimaryKey?: string
+  /**
+   * Ordered mobile field allow-list. Selection, primary and actions columns are
+   * handled separately, so callers only list supporting information here.
+   */
+  mobileVisibleKeys?: string[]
   /** Estimated row height in px for the virtualizer (default 56) */
   estimateRowHeight?: number
   /** Number of rows to render beyond the visible area (default 5) */
@@ -407,6 +515,7 @@ interface Props {
 
 const props = withDefaults(defineProps<Props>(), {
   loading: false,
+  error: null,
   stickyFirstColumn: true,
   stickyActionsColumn: true,
   expandableActions: true,
@@ -487,8 +596,8 @@ const applySortState = (state: PersistedSortState | null) => {
 
 const getSortIndicatorClass = (key: string, order: 'asc' | 'desc') => {
   return sortKey.value === key && sortOrder.value === order
-    ? 'text-primary-600 dark:text-primary-400'
-    : 'text-gray-300 transition-colors dark:text-dark-500'
+    ? 'data-table-sort-active'
+    : 'data-table-sort-inactive transition-colors'
 }
 
 const getColumnAriaSort = (key: string) => {
@@ -564,7 +673,59 @@ const resolveStableRowKey = (row: any): string | number | undefined => {
 
 const resolveRowKey = (row: any, index: number) => resolveStableRowKey(row) ?? index
 
-const dataColumns = computed(() => props.columns.filter((column) => column.key !== 'actions'))
+const getRowAriaLabel = (row: any) => {
+  const explicitLabel = props.rowAriaLabel?.(row)?.trim()
+  if (explicitLabel) return explicitLabel
+
+  const firstColumn = props.columns.find((column) => column.key !== 'actions' && column.key !== 'select')
+  if (!firstColumn) return undefined
+  const rawValue = row?.[firstColumn.key]
+  const displayValue = firstColumn.formatter ? firstColumn.formatter(rawValue, row) : rawValue
+  return displayValue == null ? undefined : String(displayValue)
+}
+
+const handleRowKeydown = (event: KeyboardEvent, row: any) => {
+  if (!props.clickableRows || event.target !== event.currentTarget) return
+  if (event.key !== 'Enter' && event.key !== ' ') return
+  event.preventDefault()
+  emit('rowClick', row)
+}
+
+const mobileCardConfigured = computed(() =>
+  Boolean(props.mobilePrimaryKey || props.mobileVisibleKeys)
+)
+
+const mobilePrimaryColumn = computed(() => {
+  if (!mobileCardConfigured.value || !props.mobilePrimaryKey) return null
+  return props.columns.find(column => column.key === props.mobilePrimaryKey) ?? null
+})
+
+const mobileSelectColumn = computed(() => {
+  if (!mobileCardConfigured.value) return null
+  return props.columns.find(column => column.key === 'select') ?? null
+})
+
+const dataColumns = computed(() => {
+  if (!mobileCardConfigured.value) {
+    return props.columns.filter(column => column.key !== 'actions')
+  }
+
+  const excludedKeys = new Set([
+    'actions',
+    'select',
+    ...(props.mobilePrimaryKey ? [props.mobilePrimaryKey] : [])
+  ])
+
+  if (!props.mobileVisibleKeys) {
+    return props.columns.filter(column => !excludedKeys.has(column.key))
+  }
+
+  const columnsByKey = new Map(props.columns.map(column => [column.key, column]))
+  return props.mobileVisibleKeys
+    .filter(key => !excludedKeys.has(key))
+    .map(key => columnsByKey.get(key))
+    .filter((column): column is Column => Boolean(column))
+})
 const columnsSignature = computed(() =>
   props.columns.map((column) => `${column.key}:${column.sortable ? '1' : '0'}`).join('|')
 )
@@ -835,6 +996,113 @@ defineExpose({
 </script>
 
 <style scoped>
+/* Mobile cards use one clear identity row followed by a deliberately short
+   list of supporting fields. Pages opt into this structure through the mobile
+   props; legacy callers keep their previous field list unchanged. */
+.data-table--mobile {
+  min-width: 0;
+}
+
+.data-table-mobile-card {
+  min-width: 0;
+  border-color: var(--lx-clay-border);
+  border-radius: var(--lx-clay-radius-card);
+  color: var(--lx-clay-text);
+  background: var(--lx-clay-surface);
+  box-shadow: var(--lx-clay-shadow-flat);
+}
+
+.data-table-mobile-primary {
+  display: flex;
+  min-width: 0;
+  align-items: flex-start;
+  gap: 0.75rem;
+  padding-bottom: 0.75rem;
+  border-bottom: 1px solid var(--lx-clay-border);
+}
+
+.data-table-mobile-primary--loading {
+  min-height: 2.5rem;
+  align-items: center;
+}
+
+.data-table-mobile-select {
+  display: flex;
+  min-width: 2.75rem;
+  min-height: 2.75rem;
+  align-items: center;
+  justify-content: center;
+}
+
+.data-table-mobile-primary-content,
+.data-table-mobile-value {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.data-table-mobile-primary-content {
+  flex: 1;
+}
+
+.data-table-mobile-primary-label,
+.data-table-mobile-label {
+  color: var(--lx-clay-text-muted);
+}
+
+.data-table-mobile-primary-label {
+  display: block;
+  margin-bottom: 0.25rem;
+  font-size: 0.75rem;
+  font-weight: 650;
+  line-height: 1rem;
+}
+
+.data-table-mobile-primary-value {
+  min-width: 0;
+  color: var(--lx-clay-text);
+  font-size: 1rem;
+  font-weight: 750;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.data-table-mobile-field {
+  min-width: 0;
+}
+
+.data-table-mobile-label {
+  flex: 0 0 auto;
+  line-height: 1.35;
+}
+
+.data-table-mobile-actions {
+  border-color: var(--lx-clay-border);
+}
+
+@media (pointer: coarse), (max-width: 1023px) {
+  .data-table--mobile :deep(button),
+  .data-table--mobile :deep(a[role='button']) {
+    min-height: 44px;
+  }
+}
+
+@media (min-width: 768px) and (max-width: 1023px) {
+  .data-table--mobile {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.75rem;
+  }
+
+  .data-table--mobile > :not([hidden]) ~ :not([hidden]) {
+    margin-top: 0 !important;
+  }
+
+  .data-table-error-card,
+  .data-table-empty-card {
+    grid-column: 1 / -1;
+  }
+}
+
 /* 表格横向滚动 */
 .table-wrapper {
   --select-col-width: 52px; /* 勾选列宽度：px-6 (24px*2) + checkbox (16px) */
@@ -851,11 +1119,11 @@ defineExpose({
   position: sticky;
   top: 0;
   z-index: 200;
-  background-color: rgb(249 250 251);
+  background-color: var(--lx-clay-recessed);
 }
 
 .dark .table-wrapper .table-header {
-  background-color: rgb(31 41 55);
+  background-color: var(--lx-clay-recessed);
 }
 
 /* 表体保持在表头下方 */
@@ -869,11 +1137,11 @@ defineExpose({
   position: sticky;
   top: 0;
   z-index: 210; /* 必须高于所有表体内容 */
-  background-color: rgb(249 250 251);
+  background-color: var(--lx-clay-recessed);
 }
 
 .dark .sticky-header-cell {
-  background-color: rgb(31 41 55);
+  background-color: var(--lx-clay-recessed);
 }
 
 /* Sticky 列基础样式 */
@@ -909,20 +1177,20 @@ defineExpose({
 
 /* 表体 sticky 列背景 */
 tbody .sticky-col {
-  background-color: white;
+  background-color: var(--lx-clay-surface);
 }
 
 .dark tbody .sticky-col {
-  background-color: rgb(17 24 39);
+  background-color: var(--lx-clay-surface);
 }
 
 /* hover 状态保持 */
 tbody tr:hover .sticky-col {
-  background-color: rgb(249 250 251);
+  background-color: color-mix(in srgb, var(--lx-clay-surface) 90%, var(--lx-clay-accent-soft));
 }
 
 .dark tbody tr:hover .sticky-col {
-  background-color: rgb(31 41 55);
+  background-color: color-mix(in srgb, var(--lx-clay-surface) 90%, var(--lx-clay-accent-soft));
 }
 
 /* 阴影只在可滚动时显示 */
@@ -935,7 +1203,7 @@ tbody tr:hover .sticky-col {
   bottom: 0;
   width: 10px;
   transform: translateX(100%);
-  background: linear-gradient(to right, rgba(0, 0, 0, 0.08), transparent);
+  background: linear-gradient(to right, color-mix(in srgb, var(--lx-clay-text) 8%, transparent), transparent);
   pointer-events: none;
 }
 
@@ -948,7 +1216,7 @@ tbody tr:hover .sticky-col {
   bottom: 0;
   width: 10px;
   transform: translateX(100%);
-  background: linear-gradient(to right, rgba(0, 0, 0, 0.08), transparent);
+  background: linear-gradient(to right, color-mix(in srgb, var(--lx-clay-text) 8%, transparent), transparent);
   pointer-events: none;
 }
 
@@ -961,18 +1229,18 @@ tbody tr:hover .sticky-col {
   bottom: 0;
   width: 10px;
   transform: translateX(-100%);
-  background: linear-gradient(to left, rgba(0, 0, 0, 0.08), transparent);
+  background: linear-gradient(to left, color-mix(in srgb, var(--lx-clay-text) 8%, transparent), transparent);
   pointer-events: none;
 }
 
 /* 暗色模式阴影 */
 .dark .is-scrollable .sticky-col-left::after,
 .dark .is-scrollable .sticky-col-left-second::after {
-  background: linear-gradient(to right, rgba(0, 0, 0, 0.2), transparent);
+  background: linear-gradient(to right, color-mix(in srgb, var(--lx-clay-text) 12%, transparent), transparent);
 }
 
 .dark .is-scrollable .sticky-col-right::before {
-  background: linear-gradient(to left, rgba(0, 0, 0, 0.2), transparent);
+  background: linear-gradient(to left, color-mix(in srgb, var(--lx-clay-text) 12%, transparent), transparent);
 }
 </style>
 
@@ -996,41 +1264,41 @@ tbody tr:hover .sticky-col {
 }
 
 .table-wrapper::-webkit-scrollbar-track {
-  background-color: rgba(0, 0, 0, 0.03) !important;
+  background-color: var(--lx-clay-recessed) !important;
   border-radius: 6px !important;
   margin: 0 4px !important;
 }
 .dark .table-wrapper::-webkit-scrollbar-track {
-  background-color: rgba(255, 255, 255, 0.05) !important;
+  background-color: var(--lx-clay-recessed) !important;
 }
 
 /* 常驻、不透明的滑块，无视鼠标是否 hover 都在那！ */
 .table-wrapper::-webkit-scrollbar-thumb {
-  background-color: rgba(107, 114, 128, 0.75) !important; 
+  background-color: color-mix(in srgb, var(--lx-clay-text-muted) 72%, transparent) !important;
   border-radius: 6px !important;
   border: 2px solid transparent !important;
   background-clip: padding-box !important;
   -webkit-appearance: none !important;
 }
 .table-wrapper::-webkit-scrollbar-thumb:hover {
-  background-color: rgba(75, 85, 99, 0.9) !important;
+  background-color: var(--lx-clay-text-secondary) !important;
 }
 
 .dark .table-wrapper::-webkit-scrollbar-thumb {
-  background-color: rgba(156, 163, 175, 0.75) !important;
+  background-color: color-mix(in srgb, var(--lx-clay-text-muted) 72%, transparent) !important;
 }
 .dark .table-wrapper::-webkit-scrollbar-thumb:hover {
-  background-color: rgba(209, 213, 219, 0.9) !important;
+  background-color: var(--lx-clay-text-secondary) !important;
 }
 
 /* 3. 仅给真正的 Firefox 留的后路 */
 @supports (-moz-appearance:none) {
   .table-wrapper {
     scrollbar-width: thin !important;
-    scrollbar-color: rgba(156, 163, 175, 0.5) rgba(0, 0, 0, 0.03) !important;
+    scrollbar-color: var(--lx-clay-text-muted) var(--lx-clay-recessed) !important;
   }
   .dark .table-wrapper {
-    scrollbar-color: rgba(75, 85, 99, 0.5) rgba(255, 255, 255, 0.05) !important;
+    scrollbar-color: var(--lx-clay-text-muted) var(--lx-clay-recessed) !important;
   }
 }
 </style>

@@ -85,8 +85,13 @@ func (s *adminServiceImpl) CreateProxy(ctx context.Context, input *CreateProxyIn
 	if err := s.proxyRepo.Create(ctx, proxy); err != nil {
 		return nil, err
 	}
-	// Probe latency asynchronously so creation isn't blocked by network timeout.
-	go s.probeProxyLatency(context.Background(), proxy)
+	// Keep creation lightweight: batch imports call this method in a loop, so a
+	// complete multi-target quality probe here would create an unbounded outbound
+	// request burst. The enabled ProxyHealthService scheduler owns complete probes
+	// and enforces its configured concurrency limit.
+	if s.proxyProber != nil {
+		go s.probeProxyLatency(context.Background(), proxy)
+	}
 	return proxy, nil
 }
 
@@ -112,6 +117,7 @@ func (s *adminServiceImpl) UpdateProxy(ctx context.Context, id int64, input *Upd
 	if err != nil {
 		return nil, err
 	}
+	previousIdentity := proxyProbeCacheIdentityFromProxy(proxy)
 
 	if input.Name != "" {
 		proxy.Name = input.Name
@@ -143,7 +149,40 @@ func (s *adminServiceImpl) UpdateProxy(ctx context.Context, id int64, input *Upd
 	if err := s.proxyRepo.Update(ctx, proxy); err != nil {
 		return nil, err
 	}
+	if previousIdentity != proxyProbeCacheIdentityFromProxy(proxy) {
+		if s.proxyLatencyCache != nil {
+			if err := s.proxyLatencyCache.DeleteProxyLatency(ctx, id); err != nil {
+				logger.LegacyPrintf("service.admin", "Warning: invalidate proxy health cache failed: %v", err)
+			}
+		}
+		if s.proxyProber != nil && proxy.IsActive() && !proxy.IsExpired(time.Now()) {
+			go s.probeProxyLatency(context.Background(), proxy)
+		}
+	}
 	return proxy, nil
+}
+
+type proxyProbeCacheIdentity struct {
+	Protocol string
+	Host     string
+	Port     int
+	Username string
+	Password string
+	Status   string
+}
+
+func proxyProbeCacheIdentityFromProxy(proxy *Proxy) proxyProbeCacheIdentity {
+	if proxy == nil {
+		return proxyProbeCacheIdentity{}
+	}
+	return proxyProbeCacheIdentity{
+		Protocol: proxy.Protocol,
+		Host:     proxy.Host,
+		Port:     proxy.Port,
+		Username: proxy.Username,
+		Password: proxy.Password,
+		Status:   proxy.Status,
+	}
 }
 
 func (s *adminServiceImpl) DeleteProxy(ctx context.Context, id int64) error {
@@ -493,6 +532,7 @@ func (s *adminServiceImpl) saveProxyQualitySnapshot(ctx context.Context, proxyID
 		QualitySummary:   result.Summary,
 		QualityCheckedAt: &checkedAt,
 		QualityCFRay:     proxyQualityFirstCFRay(result),
+		QualityItems:     append([]ProxyQualityCheckItem(nil), result.Items...),
 		UpdatedAt:        time.Now(),
 	}
 	if result.BaseLatencyMs > 0 {
@@ -509,6 +549,10 @@ func (s *adminServiceImpl) saveProxyQualitySnapshot(ctx context.Context, proxyID
 	s.saveProxyLatency(ctx, proxyID, info)
 }
 
+// probeProxyLatency performs the legacy single-target connectivity probe used
+// after proxy creation or identity updates. Complete provider quality probes are
+// intentionally reserved for ProxyHealthService, whose scheduler is opt-in and
+// concurrency bounded.
 func (s *adminServiceImpl) probeProxyLatency(ctx context.Context, proxy *Proxy) {
 	if s.proxyProber == nil || proxy == nil {
 		return
@@ -591,13 +635,15 @@ func (s *adminServiceImpl) saveProxyLatency(ctx context.Context, proxyID int64, 
 				merged.QualityGrade == "" &&
 				merged.QualityStatus == "" &&
 				merged.QualitySummary == "" &&
-				merged.QualityCFRay == "" {
+				merged.QualityCFRay == "" &&
+				len(merged.QualityItems) == 0 {
 				merged.QualityStatus = existing.QualityStatus
 				merged.QualityScore = existing.QualityScore
 				merged.QualityGrade = existing.QualityGrade
 				merged.QualitySummary = existing.QualitySummary
 				merged.QualityCheckedAt = existing.QualityCheckedAt
 				merged.QualityCFRay = existing.QualityCFRay
+				merged.QualityItems = append([]ProxyQualityCheckItem(nil), existing.QualityItems...)
 			}
 		}
 	}

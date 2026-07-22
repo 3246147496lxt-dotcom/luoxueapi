@@ -63,6 +63,28 @@ func TestSettingService_GetPublicSettings_ExposesRegistrationEmailSuffixWhitelis
 	require.Equal(t, []string{"@example.com", "@foo.bar", "*.edu.cn"}, settings.RegistrationEmailSuffixWhitelist)
 }
 
+func TestSettingService_GetPublicSettings_DistinguishesCustomizedSiteSubtitle(t *testing.T) {
+	t.Run("system default", func(t *testing.T) {
+		svc := NewSettingService(&settingPublicRepoStub{values: map[string]string{}}, &config.Config{})
+
+		settings, err := svc.GetPublicSettings(context.Background())
+		require.NoError(t, err)
+		require.Equal(t, "Subscription to API Conversion Platform", settings.SiteSubtitle)
+		require.False(t, settings.SiteSubtitleCustomized)
+	})
+
+	t.Run("administrator configured", func(t *testing.T) {
+		svc := NewSettingService(&settingPublicRepoStub{values: map[string]string{
+			SettingKeySiteSubtitle: "Subscription to API Conversion Platform",
+		}}, &config.Config{})
+
+		settings, err := svc.GetPublicSettings(context.Background())
+		require.NoError(t, err)
+		require.Equal(t, "Subscription to API Conversion Platform", settings.SiteSubtitle)
+		require.True(t, settings.SiteSubtitleCustomized)
+	})
+}
+
 func TestSettingService_GetPublicSettings_ExposesTablePreferences(t *testing.T) {
 	repo := &settingPublicRepoStub{
 		values: map[string]string{

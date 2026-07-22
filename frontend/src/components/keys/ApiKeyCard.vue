@@ -439,9 +439,9 @@ function formatResetTime(resetAt: string | null) {
 }
 
 .key-pill-active {
-  border-color: rgb(153 246 228);
-  background: rgb(240 253 250);
-  color: rgb(15 118 110);
+  border-color: color-mix(in srgb, var(--lx-clay-accent) 24%, transparent);
+  background: var(--lx-clay-accent-soft);
+  color: var(--lx-clay-accent-deep);
 }
 
 :global(.dark) .key-pill {
@@ -450,9 +450,9 @@ function formatResetTime(resetAt: string | null) {
 }
 
 :global(.dark) .key-pill-active {
-  border-color: rgb(17 94 89);
-  background: rgb(19 78 74 / 0.35);
-  color: rgb(94 234 212);
+  border-color: color-mix(in srgb, var(--lx-clay-accent) 28%, transparent);
+  background: var(--lx-clay-accent-soft);
+  color: var(--lx-clay-accent);
 }
 
 .rate-limit-card {
@@ -481,11 +481,11 @@ function formatResetTime(resetAt: string | null) {
 
 .card-action:hover {
   background: rgb(243 244 246);
-  color: rgb(15 118 110);
+  color: var(--lx-clay-accent);
 }
 
 .card-action:focus-visible {
-  outline: 2px solid rgb(20 184 166);
+  outline: 2px solid var(--lx-clay-accent);
   outline-offset: 2px;
 }
 
@@ -500,7 +500,7 @@ function formatResetTime(resetAt: string | null) {
 
 :global(.dark) .card-action:hover {
   background: rgb(31 41 55);
-  color: rgb(94 234 212);
+  color: var(--lx-clay-accent);
 }
 
 :global(.dark) .card-action-danger:hover {

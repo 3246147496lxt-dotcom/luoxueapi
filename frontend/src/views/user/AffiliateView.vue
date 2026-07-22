@@ -85,9 +85,9 @@
             </div>
           </div>
 
-          <div class="mt-5 rounded-xl border border-primary-200 bg-primary-50 p-4 dark:border-primary-900/40 dark:bg-primary-900/20">
-            <p class="text-sm font-medium text-primary-800 dark:text-primary-200">{{ t('affiliate.tips.title') }}</p>
-            <ul class="mt-2 space-y-1 text-sm text-primary-700 dark:text-primary-300">
+          <div class="info-surface mt-5 rounded-xl border p-4">
+            <p class="info-emphasis text-sm font-medium">{{ t('affiliate.tips.title') }}</p>
+            <ul class="info-muted mt-2 space-y-1 text-sm">
               <li>1. {{ t('affiliate.tips.line1') }}</li>
               <li>2. {{ t('affiliate.tips.line2', { rate: `${formattedRebateRate}%` }) }}</li>
               <li>3. {{ t('affiliate.tips.line3') }}</li>

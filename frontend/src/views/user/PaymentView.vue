@@ -2,7 +2,7 @@
   <AppLayout>
     <div class="mx-auto max-w-6xl">
       <section
-        class="overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm dark:border-dark-700 dark:bg-dark-800"
+        class="overflow-clip rounded-2xl border border-gray-200 bg-white shadow-sm dark:border-dark-700 dark:bg-dark-800"
         data-testid="purchase-main-card"
       >
         <header class="flex items-center justify-between gap-5 border-b border-gray-100 px-5 py-5 dark:border-dark-700 sm:px-6">
@@ -184,14 +184,19 @@
                       <p class="font-medium">{{ errorMessage }}</p>
                       <p v-if="errorHintMessage" class="mt-1 text-xs">{{ errorHintMessage }}</p>
                     </div>
-                    <button
-                      :class="['btn min-h-12 w-full justify-center text-base font-semibold', paymentButtonClass]"
-                      :disabled="!canSubmit || submitting"
-                      @click="handleSubmitRecharge"
+                    <div
+                      class="payment-mobile-sticky-action"
+                      data-testid="payment-recharge-action-bar"
                     >
-                      <span v-if="submitting" class="h-4 w-4 animate-spin rounded-full border-2 border-white/40 border-t-white" aria-hidden="true"></span>
-                      <span>{{ submitting ? t('common.processing') : `${t('payment.createOrder')} · ${formatSelectedPaymentAmount(totalAmount)}` }}</span>
-                    </button>
+                      <button
+                        :class="['btn min-h-12 w-full justify-center text-base font-semibold', paymentButtonClass]"
+                        :disabled="!canSubmit || submitting"
+                        @click="handleSubmitRecharge"
+                      >
+                        <span v-if="submitting" class="h-4 w-4 animate-spin rounded-full border-2 border-white/40 border-t-white" aria-hidden="true"></span>
+                        <span class="min-w-0 [overflow-wrap:anywhere]">{{ submitting ? t('common.processing') : `${t('payment.createOrder')} · ${formatSelectedPaymentAmount(totalAmount)}` }}</span>
+                      </button>
+                    </div>
                   </div>
                 </div>
 
@@ -204,7 +209,7 @@
                   class="mt-5 space-y-5"
                 >
               <template v-if="selectedPlan">
-                <section class="overflow-hidden rounded-2xl border border-gray-200 bg-white dark:border-dark-700 dark:bg-dark-800">
+                <section class="overflow-clip rounded-2xl border border-gray-200 bg-white dark:border-dark-700 dark:bg-dark-800">
                   <div class="p-5 sm:p-6">
                     <div class="flex flex-wrap items-center gap-2">
                       <span :class="['rounded-md border px-2 py-0.5 text-xs font-medium', planBadgeClass]">
@@ -259,7 +264,7 @@
                     <PaymentMethodSelector :methods="subMethodOptions" :selected="selectedMethod" @select="selectedMethod = $event" />
                   </div>
 
-                  <div class="border-t border-gray-100 bg-gray-50/70 p-5 dark:border-dark-700 dark:bg-dark-900/50 sm:p-6">
+                  <div class="border-t border-gray-100 bg-gray-50/70 p-5 pb-0 dark:border-dark-700 dark:bg-dark-900/50 sm:p-6 sm:pb-0">
                     <dl class="divide-y divide-gray-200 dark:divide-dark-700">
                       <div class="flex items-center justify-between gap-4 py-3 text-sm">
                         <dt class="text-gray-500 dark:text-gray-400">{{ t('payment.amountLabel') }}</dt>
@@ -278,13 +283,17 @@
                       <p class="font-medium">{{ errorMessage }}</p>
                       <p v-if="errorHintMessage" class="mt-1 text-xs">{{ errorHintMessage }}</p>
                     </div>
-                    <div class="mt-5 grid gap-3 sm:grid-cols-[1fr_auto]">
-                      <button :class="['btn min-h-12 w-full justify-center text-base font-semibold', paymentButtonClass]" :disabled="!canSubmitSubscription || submitting" @click="confirmSubscribe">
-                        <span v-if="submitting" class="h-4 w-4 animate-spin rounded-full border-2 border-white/40 border-t-white" aria-hidden="true"></span>
-                        <span>{{ submitting ? t('common.processing') : `${t('payment.createOrder')} · ${formatSelectedPaymentAmount(subTotalAmount)}` }}</span>
-                      </button>
-                      <button class="btn btn-secondary min-h-12 px-6" @click="selectedPlan = null">{{ t('common.cancel') }}</button>
-                    </div>
+                  </div>
+
+                  <div
+                    class="payment-mobile-sticky-action grid grid-cols-[minmax(0,1fr)_auto] gap-3 rounded-b-2xl bg-gray-50/70 px-5 pb-5 pt-5 dark:bg-dark-900/50 sm:px-6 sm:pb-6"
+                    data-testid="payment-subscription-action-bar"
+                  >
+                    <button :class="['btn min-h-12 w-full justify-center text-base font-semibold', paymentButtonClass]" :disabled="!canSubmitSubscription || submitting" @click="confirmSubscribe">
+                      <span v-if="submitting" class="h-4 w-4 animate-spin rounded-full border-2 border-white/40 border-t-white" aria-hidden="true"></span>
+                      <span class="min-w-0 [overflow-wrap:anywhere]">{{ submitting ? t('common.processing') : `${t('payment.createOrder')} · ${formatSelectedPaymentAmount(subTotalAmount)}` }}</span>
+                    </button>
+                    <button class="btn btn-secondary min-h-12 px-4 sm:px-6" @click="selectedPlan = null">{{ t('common.cancel') }}</button>
                   </div>
                 </section>
               </template>
@@ -1332,3 +1341,19 @@ onMounted(async () => {
   await historicalSpendRequest
 })
 </script>
+
+<style scoped>
+@media (max-width: 639px) {
+  .payment-mobile-sticky-action {
+    position: sticky;
+    z-index: 20;
+    bottom: max(0.75rem, env(safe-area-inset-bottom));
+    min-width: 0;
+    padding: 0.5rem;
+    border: 1px solid var(--lx-clay-border-strong);
+    border-radius: var(--lx-clay-radius-form);
+    background: var(--lx-clay-surface);
+    box-shadow: var(--lx-clay-shadow-surface);
+  }
+}
+</style>

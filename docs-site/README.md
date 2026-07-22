@@ -47,12 +47,18 @@ npm run build
 
 构建结果位于 `dist/`。生产构建的基础路径必须是 `/tutorial-docs/`，发布前检查 `dist/index.html` 中的脚本、样式和图标地址均带有该前缀。
 
-## 接入现有中转站
+## 随主站发布
 
-1. 将 `dist/` 发布到服务器 `/srv/luoxue-docs`。
-2. 按 `deploy/README.md` 将主域 `/tutorial-docs/*` 接入 Caddy，并保留其余请求到现有主程序的反向代理。
+文档站不是独立部署单元。根目录 Dockerfile 和 GitHub Release 会构建主前端与
+`docs-site`，把两者组装进 Go 后端的嵌入资源，再生成同一个完整镜像。不要把
+`dist/` 单独上传到 `/srv/luoxue-docs`，也不要让 Caddy 用旧静态目录拦截
+`/tutorial-docs/*`。
+
+1. 构建或拉取包含主站与文档站的完整镜像。
+2. 保留当前运行镜像的不可变 ID 和回滚标签，再整体切换应用容器。
 3. 在后台“设置 → 站点设置”中将“文档链接”设为 `https://luoxueapi.cc/tutorial-docs/`。
 4. 验证登录用户在文档页显示用户信息并能进入控制台，未登录用户仍可阅读文档。
-5. 最后将 `docs.luoxueapi.cc` 改为 301 跳转，兼容旧书签和历史公告。
+5. 保留 `docs.luoxueapi.cc` 到主域文档路径的永久跳转，兼容旧书签和历史公告。
 
-完整的发布顺序、安全头、缓存规则、验证和回滚步骤见 `deploy/README.md`。
+需要回滚时，主站与文档站必须一起切回发布前记录的完整镜像，避免两套界面版本
+错配。完整的构建、Caddy、安全响应头、验证和整体回滚步骤见 `deploy/README.md`。

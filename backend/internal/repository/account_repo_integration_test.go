@@ -5,6 +5,7 @@ package repository
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -541,6 +542,51 @@ func (s *AccountRepoSuite) TestListWithFilters() {
 			},
 		},
 		{
+			name: "filter_by_status_overloaded",
+			setup: func(client *dbent.Client) {
+				mustCreateAccount(s.T(), client, &service.Account{Name: "normal", Status: service.StatusActive, Schedulable: true})
+				overloaded := mustCreateAccount(s.T(), client, &service.Account{Name: "overloaded", Status: service.StatusActive, Schedulable: true})
+				err := client.Account.UpdateOneID(overloaded.ID).
+					SetOverloadUntil(time.Now().Add(10 * time.Minute)).
+					Exec(context.Background())
+				s.Require().NoError(err)
+			},
+			status:    service.AccountListStatusOverloaded,
+			wantCount: 1,
+			validate: func(accounts []service.Account) {
+				s.Require().Equal("overloaded", accounts[0].Name)
+			},
+		},
+		{
+			name: "filter_by_status_expired",
+			setup: func(client *dbent.Client) {
+				mustCreateAccount(s.T(), client, &service.Account{Name: "not-expired", Status: service.StatusActive, Schedulable: true})
+				expired := mustCreateAccount(s.T(), client, &service.Account{Name: "expired", Status: service.StatusActive, Schedulable: false})
+				err := client.Account.UpdateOneID(expired.ID).
+					SetAutoPauseOnExpired(true).
+					SetExpiresAt(time.Now().Add(-time.Minute)).
+					Exec(context.Background())
+				s.Require().NoError(err)
+			},
+			status:    service.AccountListStatusExpired,
+			wantCount: 1,
+			validate: func(accounts []service.Account) {
+				s.Require().Equal("expired", accounts[0].Name)
+			},
+		},
+		{
+			name: "filter_by_status_quota_exhausted",
+			setup: func(client *dbent.Client) {
+				mustCreateAccount(s.T(), client, &service.Account{Name: "quota-ok", Type: service.AccountTypeAPIKey, Status: service.StatusActive, Schedulable: true, Extra: map[string]any{"quota_limit": 10.0, "quota_used": 5.0}})
+				mustCreateAccount(s.T(), client, &service.Account{Name: "quota-exhausted", Type: service.AccountTypeAPIKey, Status: service.StatusActive, Schedulable: true, Extra: map[string]any{"quota_limit": 10.0, "quota_used": 10.0}})
+			},
+			status:    service.AccountListStatusQuotaExhausted,
+			wantCount: 1,
+			validate: func(accounts []service.Account) {
+				s.Require().Equal("quota-exhausted", accounts[0].Name)
+			},
+		},
+		{
 			name: "filter_by_search",
 			setup: func(client *dbent.Client) {
 				mustCreateAccount(s.T(), client, &service.Account{Name: "alpha-account"})
@@ -618,6 +664,29 @@ func (s *AccountRepoSuite) TestListWithFilters() {
 			}
 		})
 	}
+}
+
+func (s *AccountRepoSuite) TestListWithFilters_SpecialExactSearch() {
+	tx := testEntTx(s.T())
+	client := tx.Client()
+	repo := newAccountRepositoryWithSQL(client, tx, nil)
+	ctx := context.Background()
+
+	proxy := mustCreateProxy(s.T(), client, &service.Proxy{Name: "deep-link-proxy"})
+	target := mustCreateAccount(s.T(), client, &service.Account{Name: "target", ProxyID: &proxy.ID})
+	mustCreateAccount(s.T(), client, &service.Account{Name: "contains-target-id"})
+
+	byAccountID, page, err := repo.ListWithFilters(ctx, pagination.PaginationParams{Page: 1, PageSize: 10}, "", "", "", fmt.Sprintf("#%d", target.ID), 0, "")
+	s.Require().NoError(err)
+	s.Require().Len(byAccountID, 1)
+	s.Require().Equal(target.ID, byAccountID[0].ID)
+	s.Require().Equal(int64(1), page.Total)
+
+	byProxyID, page, err := repo.ListWithFilters(ctx, pagination.PaginationParams{Page: 1, PageSize: 10}, "", "", "", fmt.Sprintf("proxy:%d", proxy.ID), 0, "")
+	s.Require().NoError(err)
+	s.Require().Len(byProxyID, 1)
+	s.Require().Equal(target.ID, byProxyID[0].ID)
+	s.Require().Equal(int64(1), page.Total)
 }
 
 // --- ListByGroup / ListActive / ListByPlatform ---

@@ -1,0 +1,553 @@
+.app-layout--home-clay {
+  --admin-clay-surface: var(--lx-clay-surface);
+  --admin-clay-surface-soft: var(--lx-clay-surface-soft);
+  --admin-clay-recessed: var(--lx-clay-recessed);
+  --admin-clay-text: var(--lx-clay-text);
+  --admin-clay-secondary: var(--lx-clay-text-secondary);
+  --admin-clay-muted: var(--lx-clay-text-muted);
+  --admin-clay-border: var(--lx-clay-border);
+  --admin-clay-border-strong: var(--lx-clay-border-strong);
+  --admin-clay-violet: var(--lx-clay-accent);
+  --admin-clay-violet-deep: var(--lx-clay-accent-deep);
+  --admin-clay-violet-soft: var(--lx-clay-accent-soft);
+  --admin-clay-shadow: var(--lx-clay-shadow-surface);
+  --admin-clay-page-surface-radius: var(--lx-clay-radius-surface);
+  --admin-clay-page-surface-radius-mobile: var(--lx-clay-radius-form);
+  --admin-clay-page-surface-shadow: var(--lx-clay-shadow-form);
+  --admin-clay-page-section-radius: var(--lx-clay-radius-form);
+  --admin-clay-page-section-shadow: var(--lx-clay-shadow-form);
+  --admin-clay-page-table-shadow: var(--lx-clay-shadow-flat);
+  --admin-clay-page-recessed-shadow: var(--lx-clay-shadow-inset);
+  color: var(--admin-clay-text);
+}
+
+/* Page density is explicit. Page roots opt in with data-admin-page-kind. */
+.app-layout--home-clay :where([data-admin-page-kind="overview"]) {
+  --admin-clay-page-surface-radius: var(--lx-clay-radius-overview);
+  --admin-clay-page-surface-radius-mobile: 22px;
+  --admin-clay-page-surface-shadow: var(--lx-clay-shadow-surface);
+  --admin-clay-page-section-radius: 20px;
+  --admin-clay-page-section-shadow: var(--lx-clay-shadow-surface);
+  --admin-clay-page-table-shadow: var(--lx-clay-shadow-raised);
+  --admin-clay-page-recessed-shadow: var(--lx-clay-shadow-inset);
+}
+
+.app-layout--home-clay :where([data-admin-page-kind="table"]) {
+  --admin-clay-page-surface-radius: var(--lx-clay-radius-table);
+  --admin-clay-page-surface-radius-mobile: var(--lx-clay-radius-table);
+  --admin-clay-page-surface-shadow: var(--lx-clay-shadow-flat);
+  --admin-clay-page-section-radius: var(--lx-clay-radius-table);
+  --admin-clay-page-section-shadow: var(--lx-clay-shadow-flat);
+  --admin-clay-page-table-shadow: var(--lx-clay-shadow-flat);
+  --admin-clay-page-recessed-shadow: none;
+}
+
+.app-layout--home-clay :where([data-admin-page-kind="form"]) {
+  --admin-clay-page-surface-radius: var(--lx-clay-radius-form);
+  --admin-clay-page-surface-radius-mobile: var(--lx-clay-radius-table);
+  --admin-clay-page-surface-shadow: var(--lx-clay-shadow-form);
+  --admin-clay-page-section-radius: var(--lx-clay-radius-form);
+  --admin-clay-page-section-shadow: var(--lx-clay-shadow-form);
+  --admin-clay-page-table-shadow: var(--lx-clay-shadow-flat);
+  --admin-clay-page-recessed-shadow: none;
+}
+
+.app-layout--home-clay :where([data-admin-page-kind="ops"]) {
+  --admin-clay-page-surface-radius: var(--lx-clay-radius-ops);
+  --admin-clay-page-surface-radius-mobile: var(--lx-clay-radius-ops);
+  --admin-clay-page-surface-shadow: none;
+  --admin-clay-page-section-radius: var(--lx-clay-radius-ops);
+  --admin-clay-page-section-shadow: none;
+  --admin-clay-page-table-shadow: none;
+  --admin-clay-page-recessed-shadow: none;
+}
+
+.app-layout--home-clay .app-main-content > div > :first-child {
+  animation: admin-clay-enter 260ms ease-out both;
+}
+
+.app-layout--home-clay :where(h1, .page-title) {
+  color: var(--admin-clay-text) !important;
+  font-family: var(--lx-clay-font-ui);
+  font-weight: 800;
+  letter-spacing: -0.025em;
+}
+
+.app-layout--home-clay :where(h2, h3) {
+  color: var(--admin-clay-text);
+  font-family: var(--lx-clay-font-ui);
+  letter-spacing: -0.01em;
+}
+
+.app-layout--home-clay :where([data-admin-page-kind="overview"]) :where(h1, h2, h3, .page-title) {
+  font-family: var(--lx-clay-font-display);
+}
+
+.app-layout--home-clay :where(.page-description, .input-hint) {
+  color: var(--admin-clay-muted) !important;
+}
+
+/* Shared surfaces */
+.app-layout--home-clay :where(.card, .glass-card, .card-glass, .table-scroll-container) {
+  border-color: var(--admin-clay-border) !important;
+  border-radius: var(--admin-clay-page-surface-radius) !important;
+  background: var(--admin-clay-surface) !important;
+  box-shadow: var(--admin-clay-page-surface-shadow);
+}
+
+.app-layout--home-clay :where(.card-hover):hover {
+  border-color: var(--admin-clay-border-strong) !important;
+  background: color-mix(in srgb, var(--admin-clay-surface) 88%, var(--admin-clay-violet-soft)) !important;
+}
+
+.app-layout--home-clay :where(.card-header, .card-footer) {
+  border-color: var(--admin-clay-border) !important;
+}
+
+/* Utility-built panels used by documentation, risk control, ops and payment pages. */
+.app-layout--home-clay :where(.bg-white) {
+  background-color: var(--admin-clay-surface) !important;
+}
+
+.app-layout--home-clay :where(.bg-gray-50, .bg-gray-50\/50, .bg-gray-50\/60, .bg-gray-50\/90, .bg-gray-100) {
+  background-color: var(--admin-clay-recessed) !important;
+}
+
+.app-layout--home-clay :where(.border-gray-100, .border-gray-200, .border-gray-300) {
+  border-color: var(--admin-clay-border) !important;
+}
+
+.app-layout--home-clay :where(
+  .rounded-lg.border.bg-white,
+  .rounded-xl.border.bg-white,
+  .rounded-2xl.border.bg-white
+) {
+  border-radius: var(--admin-clay-page-section-radius) !important;
+  box-shadow: var(--admin-clay-page-section-shadow);
+}
+
+html.dark .app-layout--home-clay :where(.dark\:bg-dark-700, .dark\:bg-dark-700\/50, .dark\:bg-dark-800, .dark\:bg-dark-900) {
+  background-color: var(--admin-clay-surface) !important;
+}
+
+html.dark .app-layout--home-clay :where(.dark\:border-dark-500, .dark\:border-dark-600, .dark\:border-dark-700, .dark\:border-dark-700\/50, .dark\:border-dark-700\/60) {
+  border-color: var(--admin-clay-border) !important;
+}
+
+/* Buttons */
+.app-layout--home-clay .btn {
+  min-height: 40px;
+  border-radius: var(--lx-clay-radius-button);
+  font-weight: 750;
+  box-shadow: none;
+  transition: border-color 150ms ease, background-color 150ms ease, box-shadow 150ms ease, color 150ms ease, transform 150ms ease;
+}
+
+.app-layout--home-clay .btn-sm {
+  min-height: 32px;
+  border-radius: 11px;
+}
+
+.app-layout--home-clay .btn-lg {
+  min-height: 46px;
+  border-radius: 16px;
+}
+
+.app-layout--home-clay .btn-primary {
+  border: 1px solid color-mix(in srgb, var(--lx-clay-on-accent) 12%, transparent);
+  color: var(--lx-clay-on-accent) !important;
+  background: linear-gradient(145deg, var(--lx-clay-accent-gradient-start), var(--admin-clay-violet-deep)) !important;
+  box-shadow: var(--lx-clay-shadow-primary);
+}
+
+.app-layout--home-clay .btn-primary:hover:not(:disabled) {
+  filter: brightness(1.06);
+}
+
+.app-layout--home-clay .btn-secondary {
+  border-color: var(--admin-clay-border) !important;
+  color: var(--admin-clay-secondary) !important;
+  background: var(--admin-clay-surface-soft) !important;
+  box-shadow: 0 5px 13px rgba(70, 55, 96, 0.06);
+}
+
+.app-layout--home-clay .btn-secondary:hover:not(:disabled),
+.app-layout--home-clay .btn-ghost:hover:not(:disabled) {
+  border-color: var(--admin-clay-border-strong) !important;
+  color: var(--admin-clay-violet-deep) !important;
+  background: var(--admin-clay-violet-soft) !important;
+}
+
+html.dark .app-layout--home-clay .btn-secondary:hover:not(:disabled),
+html.dark .app-layout--home-clay .btn-ghost:hover:not(:disabled) {
+  color: var(--admin-clay-violet) !important;
+}
+
+.app-layout--home-clay .btn-ghost {
+  color: var(--admin-clay-secondary) !important;
+}
+
+.app-layout--home-clay :where(.btn, button, [role="button"]):focus-visible {
+  outline: 3px solid color-mix(in srgb, var(--admin-clay-violet) 34%, transparent) !important;
+  outline-offset: 2px;
+}
+
+.app-layout--home-clay :where(.btn, button):disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+/* Inputs and selectors */
+.app-layout--home-clay :where(.input, .select-trigger, .date-picker-trigger, .date-picker-input, textarea) {
+  border-color: var(--admin-clay-border) !important;
+  border-radius: var(--lx-clay-radius-control) !important;
+  color: var(--admin-clay-text) !important;
+  background: var(--admin-clay-surface-soft) !important;
+  box-shadow: inset 0 1px 2px rgba(70, 55, 96, 0.025);
+}
+
+.app-layout--home-clay :where(.input, .select-trigger, .date-picker-trigger, .date-picker-input, textarea):hover:not(:disabled) {
+  border-color: var(--admin-clay-border-strong) !important;
+}
+
+.app-layout--home-clay :where(.input, .select-trigger, .date-picker-trigger, .date-picker-input, textarea):focus,
+.app-layout--home-clay :where(.select-trigger-open, .date-picker-trigger-open) {
+  border-color: var(--admin-clay-violet) !important;
+  outline: none !important;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--admin-clay-violet) 20%, transparent) !important;
+}
+
+.app-layout--home-clay :where(.input, .date-picker-input, textarea)::placeholder {
+  color: var(--admin-clay-muted) !important;
+  opacity: 0.82;
+}
+
+.app-layout--home-clay :where(.input-label, label) {
+  color: var(--admin-clay-secondary);
+}
+
+.app-layout--home-clay :where(.select-value, .date-picker-value) {
+  color: var(--admin-clay-text);
+}
+
+.app-layout--home-clay :where(.select-icon, .date-picker-icon, .date-picker-chevron) {
+  color: var(--admin-clay-muted) !important;
+}
+
+.app-layout--home-clay :where(.select-trigger-disabled, .input:disabled, textarea:disabled) {
+  color: var(--admin-clay-muted) !important;
+  background: var(--admin-clay-recessed) !important;
+}
+
+/* Table-page framing */
+.app-layout--home-clay .table-page-layout {
+  gap: 16px;
+  height: calc(100vh - 81px - 80px);
+}
+
+.app-layout--home-clay :where(.layout-section-actions, .layout-section-filters) {
+  padding: 14px 16px;
+  border: 1px solid var(--admin-clay-border);
+  border-radius: var(--admin-clay-page-section-radius);
+  background: var(--admin-clay-surface-soft);
+  box-shadow: var(--admin-clay-page-section-shadow);
+}
+
+.app-layout--home-clay .layout-section-actions:empty,
+.app-layout--home-clay .layout-section-filters:empty {
+  display: none;
+}
+
+.app-layout--home-clay .table-scroll-container {
+  box-shadow: var(--admin-clay-page-table-shadow);
+}
+
+.app-layout--home-clay .table-scroll-container :where(th, td) {
+  border-color: var(--admin-clay-border) !important;
+}
+
+.app-layout--home-clay .table-scroll-container :where(th) {
+  color: var(--admin-clay-muted) !important;
+  font-weight: 800 !important;
+  letter-spacing: 0.055em;
+}
+
+.app-layout--home-clay .table-scroll-container :where(td) {
+  color: var(--admin-clay-text) !important;
+}
+
+.app-layout--home-clay :where(.data-table-header, .data-table-header-cell) {
+  color: var(--admin-clay-muted) !important;
+  background: var(--admin-clay-recessed) !important;
+}
+
+.app-layout--home-clay :where(.data-table-body, .data-table-body .sticky-col) {
+  color: var(--admin-clay-text) !important;
+  background: var(--admin-clay-surface) !important;
+}
+
+.app-layout--home-clay .data-table-row:hover,
+.app-layout--home-clay .data-table-row:hover .sticky-col {
+  background: color-mix(in srgb, var(--admin-clay-surface) 90%, var(--admin-clay-violet-soft)) !important;
+}
+
+.app-layout--home-clay :where(.data-table-header-cell, .data-table-cell, .data-table-mobile-actions) {
+  border-color: var(--admin-clay-border) !important;
+}
+
+.app-layout--home-clay .data-table-mobile-card {
+  border-color: var(--admin-clay-border) !important;
+  border-radius: var(--admin-clay-page-surface-radius-mobile) !important;
+  color: var(--admin-clay-text);
+  background: var(--admin-clay-surface) !important;
+  box-shadow: var(--admin-clay-page-surface-shadow);
+}
+
+.app-layout--home-clay .data-table-mobile-label {
+  color: var(--admin-clay-muted) !important;
+}
+
+.app-layout--home-clay .data-table-mobile-value {
+  color: var(--admin-clay-text) !important;
+}
+
+.app-layout--home-clay .layout-section-pagination {
+  overflow: hidden;
+  border: 1px solid var(--admin-clay-border);
+  border-radius: var(--admin-clay-page-section-radius);
+  background: var(--admin-clay-surface-soft);
+  box-shadow: var(--admin-clay-page-section-shadow);
+}
+
+.app-layout--home-clay .pagination {
+  border-color: transparent !important;
+  color: var(--admin-clay-secondary);
+  background: transparent !important;
+}
+
+.app-layout--home-clay .pagination-button {
+  min-height: 36px;
+  border-color: var(--admin-clay-border) !important;
+  color: var(--admin-clay-secondary) !important;
+  background: var(--admin-clay-surface) !important;
+}
+
+.app-layout--home-clay .pagination-button:hover:not(:disabled):not(.pagination-button--ellipsis) {
+  color: var(--admin-clay-violet-deep) !important;
+  background: var(--admin-clay-violet-soft) !important;
+}
+
+.app-layout--home-clay .pagination-button--active {
+  z-index: 1;
+  border-color: var(--admin-clay-violet) !important;
+  color: var(--admin-clay-violet-deep) !important;
+  background: var(--admin-clay-violet-soft) !important;
+}
+
+html.dark .app-layout--home-clay .pagination-button--active {
+  color: var(--admin-clay-violet) !important;
+}
+
+.app-layout--home-clay :where(.pagination-summary, .pagination-status, .pagination-page-size-label, .pagination-jump-label) {
+  color: var(--admin-clay-secondary) !important;
+}
+
+/* Tabs */
+.app-layout--home-clay :where(.settings-tabs-shell, .tabs) {
+  border-color: var(--admin-clay-border) !important;
+  border-radius: var(--admin-clay-page-section-radius) !important;
+  background: var(--admin-clay-recessed) !important;
+  box-shadow: var(--admin-clay-page-recessed-shadow);
+}
+
+.app-layout--home-clay :where(.settings-tab, .tab, [data-testid="usage-detail-tab"]) {
+  border-radius: 12px;
+  color: var(--admin-clay-muted) !important;
+}
+
+.app-layout--home-clay :where(.settings-tab-active, .tab-active, [data-testid="usage-detail-tab"][class*="border-primary"]) {
+  border-color: transparent !important;
+  color: var(--admin-clay-violet-deep) !important;
+  background: var(--admin-clay-surface) !important;
+  box-shadow: var(--admin-clay-page-section-shadow);
+}
+
+html.dark .app-layout--home-clay :where(.settings-tab-active, .tab-active, [data-testid="usage-detail-tab"][class*="border-primary"]) {
+  color: var(--admin-clay-violet) !important;
+}
+
+/* Dropdowns and date range menu that remain inside the layout tree. */
+.app-layout--home-clay :where(.dropdown, .date-picker-dropdown) {
+  border-color: var(--admin-clay-border) !important;
+  border-radius: 18px !important;
+  color: var(--admin-clay-text);
+  background: var(--admin-clay-surface) !important;
+  box-shadow: var(--admin-clay-shadow);
+}
+
+.app-layout--home-clay :where(.dropdown-item, .date-picker-preset):hover {
+  color: var(--admin-clay-violet-deep) !important;
+  background: var(--admin-clay-violet-soft) !important;
+}
+
+.app-layout--home-clay :where(.date-picker-preset-active) {
+  color: var(--admin-clay-violet-deep) !important;
+  background: var(--admin-clay-violet-soft) !important;
+}
+
+.app-layout--home-clay .date-picker-apply {
+  color: var(--lx-clay-on-accent) !important;
+  background: linear-gradient(145deg, var(--lx-clay-accent-gradient-start), var(--admin-clay-violet-deep)) !important;
+}
+
+/* Status, empty and loading states */
+.app-layout--home-clay :where(.badge-primary, .badge-purple) {
+  color: var(--admin-clay-violet-deep) !important;
+  background: var(--admin-clay-violet-soft) !important;
+}
+
+html.dark .app-layout--home-clay :where(.badge-primary, .badge-purple) {
+  color: var(--admin-clay-violet) !important;
+}
+
+.app-layout--home-clay :where(.empty-state-title) {
+  color: var(--admin-clay-text) !important;
+}
+
+.app-layout--home-clay :where(.empty-state-description, .empty-state-icon) {
+  color: var(--admin-clay-muted) !important;
+}
+
+.app-layout--home-clay :where(.skeleton, .animate-pulse) {
+  animation-duration: 1.7s;
+}
+
+.app-layout--home-clay :where(.spinner) {
+  color: var(--admin-clay-violet) !important;
+}
+
+/* Teleported overlays are scoped by a marker owned and cleaned up by AppLayout. */
+body.admin-home-clay-portals {
+  --admin-portal-surface: var(--lx-clay-surface);
+  --admin-portal-surface-soft: var(--lx-clay-overlay-surface-soft);
+  --admin-portal-recessed: var(--lx-clay-canvas);
+  --admin-portal-text: var(--lx-clay-text);
+  --admin-portal-secondary: var(--lx-clay-text-secondary);
+  --admin-portal-muted: var(--lx-clay-text-muted);
+  --admin-portal-border: var(--lx-clay-border);
+  --admin-portal-violet: var(--lx-clay-accent);
+  --admin-portal-violet-deep: var(--lx-clay-accent-deep);
+  --admin-portal-violet-soft: var(--lx-clay-accent-soft);
+}
+
+/* Vue Teleport appends these utility-built menus and dialogs as direct body children. */
+body.admin-home-clay-portals > .fixed.bg-white,
+body.admin-home-clay-portals > .fixed .bg-white,
+body.admin-home-clay-portals > .modal-overlay .bg-white,
+body.admin-home-clay-portals > .dialog-overlay .bg-white {
+  background-color: var(--admin-portal-surface) !important;
+}
+
+body.admin-home-clay-portals > .fixed.bg-gray-50,
+body.admin-home-clay-portals > .fixed .bg-gray-50,
+body.admin-home-clay-portals > .fixed .bg-gray-100,
+body.admin-home-clay-portals > .modal-overlay .bg-gray-50,
+body.admin-home-clay-portals > .dialog-overlay .bg-gray-50 {
+  background-color: var(--admin-portal-recessed) !important;
+}
+
+html.dark body.admin-home-clay-portals > .fixed.dark\:bg-dark-700,
+html.dark body.admin-home-clay-portals > .fixed.dark\:bg-dark-800,
+html.dark body.admin-home-clay-portals > .fixed.dark\:bg-dark-900,
+html.dark body.admin-home-clay-portals > .fixed .dark\:bg-dark-700,
+html.dark body.admin-home-clay-portals > .fixed .dark\:bg-dark-800,
+html.dark body.admin-home-clay-portals > .fixed .dark\:bg-dark-900,
+html.dark body.admin-home-clay-portals > .modal-overlay .dark\:bg-dark-800,
+html.dark body.admin-home-clay-portals > .dialog-overlay .dark\:bg-dark-800 {
+  background-color: var(--admin-portal-surface) !important;
+}
+
+body.admin-home-clay-portals > :where(.fixed, .modal-overlay, .dialog-overlay) :where(.border-gray-100, .border-gray-200, .border-gray-300) {
+  border-color: var(--admin-portal-border) !important;
+}
+
+body.admin-home-clay-portals > :where(.fixed, .modal-overlay, .dialog-overlay) :where(.input, .select-trigger, textarea) {
+  border-color: var(--admin-portal-border) !important;
+  border-radius: var(--lx-clay-radius-control) !important;
+  color: var(--admin-portal-text) !important;
+  background: var(--admin-portal-surface-soft) !important;
+}
+
+body.admin-home-clay-portals > :where(.fixed, .modal-overlay, .dialog-overlay) :where(.input, .select-trigger, textarea):focus,
+body.admin-home-clay-portals > :where(.fixed, .modal-overlay, .dialog-overlay) .select-trigger-open {
+  border-color: var(--admin-portal-violet) !important;
+  outline: none !important;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--admin-portal-violet) 20%, transparent) !important;
+}
+
+body.admin-home-clay-portals > :where(.fixed, .modal-overlay, .dialog-overlay) .btn-primary {
+  border-color: color-mix(in srgb, var(--lx-clay-on-accent) 12%, transparent) !important;
+  color: var(--lx-clay-on-accent) !important;
+  background: linear-gradient(145deg, var(--lx-clay-accent-gradient-start), var(--admin-portal-violet-deep)) !important;
+}
+
+body.admin-home-clay-portals > :where(.fixed, .modal-overlay, .dialog-overlay) .btn-secondary {
+  border-color: var(--admin-portal-border) !important;
+  color: var(--admin-portal-secondary) !important;
+  background: var(--admin-portal-surface-soft) !important;
+}
+
+body.admin-home-clay-portals :where(.select-portal, .modal-content, .dialog-container) {
+  border: 1px solid var(--admin-portal-border) !important;
+  border-radius: var(--lx-clay-radius-overlay) !important;
+  color: var(--admin-portal-text);
+  background: var(--admin-portal-surface) !important;
+  box-shadow: var(--lx-clay-shadow-overlay) !important;
+}
+
+body.admin-home-clay-portals :where(.modal-header, .modal-footer, .dialog-header, .dialog-footer, .select-search) {
+  border-color: var(--admin-portal-border) !important;
+}
+
+body.admin-home-clay-portals .select-dropdown-portal :where(.select-option-selected, .select-option-focused, .select-option:hover) {
+  color: var(--admin-portal-violet) !important;
+  background: var(--admin-portal-violet-soft) !important;
+}
+
+body.admin-home-clay-portals .select-dropdown-portal .select-option-group {
+  color: var(--admin-portal-muted) !important;
+  background: var(--admin-portal-recessed) !important;
+}
+
+@keyframes admin-clay-enter {
+  from {
+    opacity: 0;
+    transform: translateY(5px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (max-width: 767px) {
+  .app-layout--home-clay .table-page-layout {
+    height: auto;
+  }
+
+  .app-layout--home-clay :where(.card, .glass-card, .card-glass, .table-scroll-container) {
+    border-radius: var(--admin-clay-page-surface-radius-mobile) !important;
+  }
+
+  .app-layout--home-clay :where(.layout-section-actions, .layout-section-filters) {
+    padding: 12px;
+    border-radius: var(--admin-clay-page-section-radius);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .app-layout--home-clay .app-main-content > div > :first-child {
+    animation: none;
+  }
+}

@@ -1,7 +1,7 @@
 <template>
   <header
     data-testid="app-header"
-    class="fixed inset-x-0 top-0 z-50 h-[81px] bg-transparent p-2"
+    class="app-header fixed inset-x-0 top-0 z-50 h-[81px] bg-transparent p-2"
   >
     <div
       data-testid="header-surface"
@@ -125,21 +125,22 @@
             @click="toggleTheme"
           >
             <Icon
-              :name="isDark ? 'sun' : 'moon'"
-              size="sm"
-              class="!h-[18px] !w-[18px]"
+              :name="isDark ? 'lucideSun' : 'lucideMoon'"
+              size="md"
+              :stroke-width="2"
               aria-hidden="true"
             />
           </button>
 
           <!-- Language Switcher -->
-          <LocaleSwitcher compact />
+          <LocaleSwitcher compact icon-variant="lucide" />
         </div>
 
         <!-- Docs Link -->
         <a
           v-if="docUrl"
           :href="docUrl"
+          data-testid="header-docs-link"
           target="_blank"
           rel="noopener noreferrer"
           class="hidden h-9 items-center gap-1.5 rounded-lg border border-transparent px-2.5 text-sm font-medium text-gray-600 transition-colors hover:border-gray-200 hover:bg-gray-50 hover:text-gray-950 2xl:flex dark:text-dark-300 dark:hover:border-dark-700 dark:hover:bg-dark-800 dark:hover:text-white"
@@ -384,6 +385,8 @@ import SubscriptionProgressMini from '@/components/common/SubscriptionProgressMi
 import AnnouncementBell from '@/components/common/AnnouncementBell.vue'
 import Icon from '@/components/icons/Icon.vue'
 import SidebarCollapseIcon from '@/components/icons/SidebarCollapseIcon.vue'
+import { splitBrandApiSuffix } from '@/utils/brand'
+import { resolveDocumentationUrl } from '@/utils/documentationUrl'
 import { sanitizeUrl } from '@/utils/url'
 
 const router = useRouter()
@@ -401,20 +404,21 @@ const isDark = ref(document.documentElement.classList.contains('dark'))
 const dropdownOpen = ref(false)
 const dropdownRef = ref<HTMLElement | null>(null)
 const contactInfo = computed(() => appStore.contactInfo)
-const docUrl = computed(() => sanitizeUrl(appStore.docUrl))
+const configuredDocUrl = computed(() => sanitizeUrl(
+  appStore.cachedPublicSettings?.doc_url || appStore.docUrl || '',
+  { allowRelative: true },
+))
+const docUrl = computed(() => (
+  configuredDocUrl.value ? resolveDocumentationUrl(configuredDocUrl.value) : ''
+))
 const siteName = computed(() => appStore.siteName || '落雪API')
 const isLuoxueBrand = computed(() => /^落雪\s*API$/i.test(siteName.value.trim()))
 const brandNameParts = computed(() => {
-  const value = siteName.value.trim()
-  const match = value.match(/^(.*?)(API)$/i)
-
-  if (!match?.[1]?.trim()) {
-    return { name: value, suffix: '' }
-  }
+  const { base, apiSuffix } = splitBrandApiSuffix(siteName.value)
 
   return {
-    name: match[1].trim(),
-    suffix: match[2].toUpperCase(),
+    name: base,
+    suffix: apiSuffix,
   }
 })
 const siteLogo = computed(() => sanitizeUrl(appStore.siteLogo || '', {
@@ -538,6 +542,11 @@ onBeforeUnmount(() => {
 </script>
 
 <style scoped>
+.app-header {
+  color: rgb(17 24 39);
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+}
+
 .brand-logo-frame {
   position: relative;
 }

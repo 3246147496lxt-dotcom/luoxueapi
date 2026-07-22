@@ -1,6 +1,35 @@
-// 这是文档站的主要编辑入口。以后更换域名时，只需要修改这一行。
-const MAIN_SITE_URL = "https://luoxueapi.cc";
-const DOCS_BASE_URL = import.meta.env.BASE_URL;
+export const PRODUCTION_MAIN_SITE_URL = "https://luoxueapi.cc";
+export const DEVELOPMENT_MAIN_SITE_URL = "http://127.0.0.1:4178";
+
+function normalizeMainSiteUrl(value) {
+  if (typeof value !== "string" || !value.trim()) return "";
+
+  try {
+    const parsed = new URL(value.trim());
+    if (
+      !["http:", "https:"].includes(parsed.protocol)
+      || parsed.username
+      || parsed.password
+      || parsed.search
+      || parsed.hash
+    ) {
+      return "";
+    }
+
+    return parsed.toString().replace(/\/+$/, "");
+  } catch {
+    return "";
+  }
+}
+
+export function resolveMainSiteUrl(env = {}) {
+  const fallback = env?.DEV ? DEVELOPMENT_MAIN_SITE_URL : PRODUCTION_MAIN_SITE_URL;
+  return normalizeMainSiteUrl(env?.VITE_MAIN_SITE_URL) || fallback;
+}
+
+const VITE_ENV = import.meta.env || {};
+const MAIN_SITE_URL = resolveMainSiteUrl(VITE_ENV);
+const DOCS_BASE_URL = VITE_ENV.BASE_URL || "/tutorial-docs/";
 
 const siteLink = (path = "") => `${MAIN_SITE_URL}${path}`;
 const docsAsset = (path) => `${DOCS_BASE_URL}${path.replace(/^\/+/, "")}`;
@@ -16,7 +45,6 @@ export const siteConfig = {
   profileUrl: siteLink("/profile"),
   supportContact: "客服 QQ：2456772148",
   supportValue: "2456772148",
-  footerText: "落雪API 新用户接入与使用指南。",
   navigation: [
     { label: "首页", href: siteLink("/home"), external: true },
     { label: "控制台", href: siteLink("/dashboard"), external: true },

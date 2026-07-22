@@ -57,6 +57,11 @@ vi.mock('@/stores/auth', () => ({
   useAuthStore: () => ({ token: 'test-token' })
 }))
 
+vi.mock('vue-router', () => ({
+  useRoute: () => ({ query: {} }),
+  useRouter: () => ({ replace: vi.fn().mockResolvedValue(undefined) })
+}))
+
 vi.mock('vue-i18n', async () => {
   const actual = await vi.importActual<typeof import('vue-i18n')>('vue-i18n')
   return {

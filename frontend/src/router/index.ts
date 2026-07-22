@@ -36,7 +36,8 @@ const routes: RouteRecordRaw[] = [
     component: () => import('@/views/HomeView.vue'),
     meta: {
       requiresAuth: false,
-      title: 'Home'
+      title: 'Home',
+      titleKey: 'home.hero.title'
     }
   },
   {
@@ -459,6 +460,30 @@ const routes: RouteRecordRaw[] = [
       requiresAdmin: true,
       title: 'Group Management',
       titleKey: 'admin.groups.title',
+      descriptionKey: 'admin.groups.description'
+    }
+  },
+  {
+    path: '/admin/groups/new',
+    name: 'AdminGroupCreate',
+    component: () => import('@/views/admin/GroupsView.vue'),
+    meta: {
+      requiresAuth: true,
+      requiresAdmin: true,
+      title: 'Create Group',
+      titleKey: 'admin.groups.createGroup',
+      descriptionKey: 'admin.groups.description'
+    }
+  },
+  {
+    path: '/admin/groups/:id([1-9]\\d*)/edit',
+    name: 'AdminGroupEdit',
+    component: () => import('@/views/admin/GroupsView.vue'),
+    meta: {
+      requiresAuth: true,
+      requiresAdmin: true,
+      title: 'Edit Group',
+      titleKey: 'admin.groups.editGroup',
       descriptionKey: 'admin.groups.description'
     }
   },

@@ -1,6 +1,13 @@
 <template>
-  <AppLayout>
+  <AppLayout variant="home-clay">
     <TablePageLayout>
+      <template #header>
+        <AdminPageHeader
+          :title="t('admin.audit.title')"
+          :description="t('admin.audit.description')"
+        />
+      </template>
+
       <!-- Filters -->
       <template #filters>
         <div class="card p-4 sm:p-6">
@@ -357,6 +364,7 @@ import { useI18n } from 'vue-i18n'
 import { adminAPI, type AuditLog } from '@/api/admin'
 import { totpAPI } from '@/api'
 import AppLayout from '@/components/layout/AppLayout.vue'
+import AdminPageHeader from '@/components/layout/AdminPageHeader.vue'
 import TablePageLayout from '@/components/layout/TablePageLayout.vue'
 import DataTable from '@/components/common/DataTable.vue'
 import type { Column } from '@/components/common/types'

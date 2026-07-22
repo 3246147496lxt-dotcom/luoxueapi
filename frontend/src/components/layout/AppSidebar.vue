@@ -15,8 +15,29 @@
       <!-- Admin View: Admin menu first, then personal menu -->
       <template v-if="isAdmin">
         <!-- Admin navigation -->
-        <div class="sidebar-section">
-          <template v-for="item in adminNavItems" :key="item.path">
+        <div
+          v-for="section in displayedAdminNavSections"
+          :key="section.id"
+          class="sidebar-section"
+          :data-testid="`sidebar-admin-${section.id}-section`"
+          :role="section.label ? 'group' : undefined"
+          :aria-label="section.label"
+        >
+          <div
+            v-if="section.label"
+            class="sidebar-section-title"
+            :class="{ 'sidebar-section-title-collapsed': sidebarCollapsed }"
+            aria-hidden="true"
+          >
+            <span
+              class="sidebar-section-title-text"
+              :class="{ 'sidebar-section-title-text-collapsed': sidebarCollapsed }"
+            >
+              {{ section.label }}
+            </span>
+          </div>
+
+          <template v-for="item in section.items" :key="item.path">
             <!-- Collapsible group (has children) -->
             <template v-if="item.children?.length">
               <button
@@ -31,7 +52,7 @@
                 :aria-controls="groupPanelId(item)"
                 @click="handleGroupClick(item)"
               >
-                <component :is="item.icon" class="h-5 w-5 flex-shrink-0" />
+                <component :is="item.icon" class="sidebar-nav-icon h-5 w-5 flex-shrink-0" />
                 <span
                   class="sidebar-label sidebar-label-flex"
                   :class="{ 'sidebar-label-collapsed': sidebarCollapsed }"
@@ -57,10 +78,13 @@
                   :key="child.path"
                   :to="child.path"
                   class="sidebar-link mb-0.5 py-1.5 text-sm"
-                  :class="{ 'sidebar-link-active': isActive(child.path) }"
+                  :class="{ 'sidebar-link-active': isChildActive(item, child) }"
                   @click="handleMenuItemClick(child.path)"
                 >
-                  <component :is="child.icon" class="h-4 w-4 flex-shrink-0" />
+                  <component
+                    :is="child.icon"
+                    class="sidebar-nav-icon sidebar-nav-icon--child h-4 w-4 flex-shrink-0"
+                  />
                   <span>{{ child.label }}</span>
                 </router-link>
               </div>
@@ -78,7 +102,7 @@
                 rel="noopener noreferrer"
                 @click="handleMenuItemClick(item.path)"
               >
-                <component :is="item.icon" class="h-5 w-5 flex-shrink-0" />
+                <component :is="item.icon" class="sidebar-nav-icon h-5 w-5 flex-shrink-0" />
                 <span class="sidebar-label" :class="{ 'sidebar-label-collapsed': sidebarCollapsed }" :aria-hidden="sidebarCollapsed ? 'true' : 'false'">{{ item.label }}</span>
               </a>
               <router-link
@@ -100,11 +124,11 @@
               >
                 <span
                   v-if="item.iconSvg"
-                  class="h-5 w-5 flex-shrink-0 sidebar-svg-icon"
+                  class="sidebar-nav-icon h-5 w-5 flex-shrink-0 sidebar-svg-icon"
                   :class="{ 'sidebar-api-key-icon': item.path === '/keys' }"
                   v-html="sanitizeSvg(item.iconSvg)"
                 ></span>
-                <component v-else :is="item.icon" class="h-5 w-5 flex-shrink-0" />
+                <component v-else :is="item.icon" class="sidebar-nav-icon h-5 w-5 flex-shrink-0" />
                 <span class="sidebar-label" :class="{ 'sidebar-label-collapsed': sidebarCollapsed }" :aria-hidden="sidebarCollapsed ? 'true' : 'false'">{{ item.label }}</span>
               </router-link>
             </template>
@@ -131,7 +155,7 @@
               rel="noopener noreferrer"
               @click="handleMenuItemClick(item.path)"
             >
-              <component :is="item.icon" class="h-5 w-5 flex-shrink-0" />
+              <component :is="item.icon" class="sidebar-nav-icon h-5 w-5 flex-shrink-0" />
               <span class="sidebar-label" :class="{ 'sidebar-label-collapsed': sidebarCollapsed }" :aria-hidden="sidebarCollapsed ? 'true' : 'false'">{{ item.label }}</span>
             </a>
             <router-link
@@ -145,11 +169,11 @@
             >
               <span
                 v-if="item.iconSvg"
-                class="h-5 w-5 flex-shrink-0 sidebar-svg-icon"
+                class="sidebar-nav-icon h-5 w-5 flex-shrink-0 sidebar-svg-icon"
                 :class="{ 'sidebar-api-key-icon': item.path === '/keys' }"
                 v-html="sanitizeSvg(item.iconSvg)"
               ></span>
-              <component v-else :is="item.icon" class="h-5 w-5 flex-shrink-0" />
+              <component v-else :is="item.icon" class="sidebar-nav-icon h-5 w-5 flex-shrink-0" />
               <span class="sidebar-label" :class="{ 'sidebar-label-collapsed': sidebarCollapsed }" :aria-hidden="sidebarCollapsed ? 'true' : 'false'">{{ item.label }}</span>
             </router-link>
           </template>
@@ -192,7 +216,7 @@
               rel="noopener noreferrer"
               @click="handleMenuItemClick(item.path)"
             >
-              <component :is="item.icon" class="h-5 w-5 flex-shrink-0" />
+              <component :is="item.icon" class="sidebar-nav-icon h-5 w-5 flex-shrink-0" />
               <span class="sidebar-label" :class="{ 'sidebar-label-collapsed': sidebarCollapsed }" :aria-hidden="sidebarCollapsed ? 'true' : 'false'">{{ item.label }}</span>
             </a>
             <router-link
@@ -206,11 +230,11 @@
             >
               <span
                 v-if="item.iconSvg"
-                class="h-5 w-5 flex-shrink-0 sidebar-svg-icon"
+                class="sidebar-nav-icon h-5 w-5 flex-shrink-0 sidebar-svg-icon"
                 :class="{ 'sidebar-api-key-icon': item.path === '/keys' }"
                 v-html="sanitizeSvg(item.iconSvg)"
               ></span>
-              <component v-else :is="item.icon" class="h-5 w-5 flex-shrink-0" />
+              <component v-else :is="item.icon" class="sidebar-nav-icon h-5 w-5 flex-shrink-0" />
               <span class="sidebar-label" :class="{ 'sidebar-label-collapsed': sidebarCollapsed }" :aria-hidden="sidebarCollapsed ? 'true' : 'false'">{{ item.label }}</span>
             </router-link>
           </template>
@@ -377,11 +401,13 @@
 
   <!-- Mobile Overlay -->
   <transition name="fade">
-    <div
+    <button
       v-if="mobileOpen"
-      class="fixed inset-0 z-30 bg-gray-950/5 backdrop-blur-[1px] lg:hidden dark:bg-black/20"
+      type="button"
+      class="fixed inset-0 z-30 border-0 bg-gray-950/5 p-0 backdrop-blur-[1px] lg:hidden dark:bg-black/20"
+      :aria-label="t('nav.closeNavigation')"
       @click="closeMobile"
-    ></div>
+    ></button>
   </transition>
 </template>
 
@@ -390,6 +416,7 @@ import { computed, h, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'v
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useAdminSettingsStore, useAppStore, useAuthStore, useOnboardingStore } from '@/stores'
+import { resolveDocumentationUrl } from '@/utils/documentationUrl'
 import { sanitizeSvg } from '@/utils/sanitize'
 import { sanitizeUrl } from '@/utils/url'
 import { FeatureFlags, makeSidebarFlag } from '@/utils/featureFlags'
@@ -425,7 +452,7 @@ interface NavItem {
 }
 
 interface NavSection {
-  id: 'main' | 'personal' | 'custom'
+  id: 'main' | 'personal' | 'custom' | 'overview' | 'business' | 'operations' | 'system'
   label?: string
   items: NavItem[]
 }
@@ -464,13 +491,10 @@ const showPublicModelCatalog = computed(
     && !appStore.backendModeEnabled,
 )
 const sidebarNavRef = ref<HTMLElement | null>(null)
-const DEFAULT_DOCUMENTATION_URL = 'https://luoxueapi.cc/tutorial-docs/'
 const documentationUrl = computed(
-  () =>
-    sanitizeUrl(
-      appStore.cachedPublicSettings?.doc_url || appStore.docUrl || DEFAULT_DOCUMENTATION_URL,
-      { allowRelative: true },
-    ) || DEFAULT_DOCUMENTATION_URL,
+  () => resolveDocumentationUrl(
+    appStore.cachedPublicSettings?.doc_url || appStore.docUrl,
+  ),
 )
 const contactUrl = computed(
   () => {
@@ -926,8 +950,16 @@ const adminNavItems = computed((): NavItem[] => {
       iconSvg: reportDashboardIconSvg,
     },
     { path: '/admin/ops', label: t('nav.ops'), icon: ChartIcon, featureFlag: flagOpsMonitoring },
+    { path: '/admin/usage', label: t('nav.adminUsage'), icon: ChartIcon },
     { path: '/admin/users', label: t('nav.users'), icon: UsersIcon, hideInSimpleMode: true },
     { path: '/admin/groups', label: t('nav.groups'), icon: FolderIcon, hideInSimpleMode: true },
+    {
+      path: '/admin/accounts',
+      label: t('nav.accounts'),
+      icon: null,
+      iconSvg: accountPoolIconSvg,
+    },
+    { path: '/admin/proxies', label: t('nav.proxies'), icon: ServerIcon },
     {
       path: '/admin/channels',
       label: t('nav.channelManagement'),
@@ -946,17 +978,20 @@ const adminNavItems = computed((): NavItem[] => {
       iconSvg: modelMarketplaceIconSvg,
       hideInSimpleMode: true,
     },
-    { path: '/admin/documentation', label: t('nav.documentationManagement'), icon: BookIcon, hideInSimpleMode: true },
     { path: '/admin/subscriptions', label: t('nav.subscriptions'), icon: CreditCardIcon, hideInSimpleMode: true },
     {
-      path: '/admin/accounts',
-      label: t('nav.accounts'),
-      icon: null,
-      iconSvg: accountPoolIconSvg,
+      path: '/admin/orders',
+      label: t('nav.orderManagement'),
+      icon: OrderIcon,
+      hideInSimpleMode: true,
+      expandOnly: true,
+      featureFlag: flagAdminPayment,
+      children: [
+        { path: '/admin/orders/dashboard', label: t('nav.paymentDashboard'), icon: ChartIcon },
+        { path: '/admin/orders', label: t('nav.orderManagement'), icon: OrderIcon },
+        { path: '/admin/orders/plans', label: t('nav.paymentPlans'), icon: CreditCardIcon },
+      ],
     },
-    { path: '/admin/announcements', label: t('nav.announcements'), icon: NotificationIcon },
-    { path: '/admin/proxies', label: t('nav.proxies'), icon: ServerIcon },
-    { path: '/admin/risk-control', label: t('nav.riskControl'), icon: ShieldIcon, hideInSimpleMode: true, featureFlag: flagRiskControl },
     { path: '/admin/redeem', label: t('nav.redeemCodes'), icon: TicketIcon, hideInSimpleMode: true },
     { path: '/admin/promo-codes', label: t('nav.promoCodes'), icon: GiftIcon, hideInSimpleMode: true },
     {
@@ -972,27 +1007,16 @@ const adminNavItems = computed((): NavItem[] => {
         { path: '/admin/affiliates/transfers', label: t('nav.affiliateTransferRecords'), icon: CreditCardIcon },
       ],
     },
-    {
-      path: '/admin/orders',
-      label: t('nav.orderManagement'),
-      icon: OrderIcon,
-      hideInSimpleMode: true,
-      expandOnly: true,
-      featureFlag: flagAdminPayment,
-      children: [
-        { path: '/admin/orders/dashboard', label: t('nav.paymentDashboard'), icon: ChartIcon },
-        { path: '/admin/orders', label: t('nav.orderManagement'), icon: OrderIcon },
-        { path: '/admin/orders/plans', label: t('nav.paymentPlans'), icon: CreditCardIcon },
-      ],
-    },
-    { path: '/admin/usage', label: t('nav.usage'), icon: ChartIcon },
+    { path: '/admin/announcements', label: t('nav.announcements'), icon: NotificationIcon },
+    { path: '/admin/risk-control', label: t('nav.riskControl'), icon: ShieldIcon, hideInSimpleMode: true, featureFlag: flagRiskControl },
     {
       path: '/admin/audit-logs',
       label: t('nav.auditLogs'),
       icon: null,
       iconSvg: auditLogIconSvg,
       hideInSimpleMode: true,
-    }
+    },
+    { path: '/admin/documentation', label: t('nav.documentationManagement'), icon: BookIcon, hideInSimpleMode: true },
   ]
 
   const visible = applyFeatureFlags(baseItems)
@@ -1001,18 +1025,67 @@ const adminNavItems = computed((): NavItem[] => {
   if (authStore.isSimpleMode) {
     const filtered = visible.filter(item => !item.hideInSimpleMode)
     filtered.push({ path: '/keys', label: t('nav.apiKeys'), icon: null, iconSvg: keyOutlineIconSvg })
-    filtered.push({ path: '/admin/settings', label: t('nav.settings'), icon: CogIcon })
     for (const cm of customMenuItemsForAdmin.value) {
       filtered.push({ path: `/custom/${cm.id}`, label: cm.label, icon: null, iconSvg: cm.icon_svg })
     }
+    filtered.push({ path: '/admin/settings', label: t('nav.settings'), icon: CogIcon })
     return filtered
   }
 
-  visible.push({ path: '/admin/settings', label: t('nav.settings'), icon: CogIcon })
   for (const cm of customMenuItemsForAdmin.value) {
     visible.push({ path: `/custom/${cm.id}`, label: cm.label, icon: null, iconSvg: cm.icon_svg })
   }
+  visible.push({ path: '/admin/settings', label: t('nav.settings'), icon: CogIcon })
   return visible
+})
+
+type AdminNavSectionId = 'overview' | 'business' | 'operations' | 'system'
+
+const ADMIN_NAV_SECTION_BY_PATH: Record<string, AdminNavSectionId> = {
+  '/admin/dashboard': 'overview',
+  '/admin/ops': 'overview',
+  '/admin/usage': 'overview',
+  '/admin/users': 'business',
+  '/admin/groups': 'business',
+  '/admin/accounts': 'business',
+  '/admin/proxies': 'business',
+  '/admin/channels': 'business',
+  '/admin/model-catalog': 'business',
+  '/keys': 'business',
+  '/admin/subscriptions': 'operations',
+  '/admin/orders': 'operations',
+  '/admin/redeem': 'operations',
+  '/admin/promo-codes': 'operations',
+  '/admin/affiliates': 'operations',
+  '/admin/announcements': 'operations',
+  '/admin/risk-control': 'system',
+  '/admin/audit-logs': 'system',
+  '/admin/documentation': 'system',
+  '/admin/settings': 'system',
+}
+
+const ADMIN_NAV_SECTION_CONFIG: Array<{ id: AdminNavSectionId; labelKey: string }> = [
+  { id: 'overview', labelKey: 'nav.adminSections.overview' },
+  { id: 'business', labelKey: 'nav.adminSections.business' },
+  { id: 'operations', labelKey: 'nav.adminSections.operations' },
+  { id: 'system', labelKey: 'nav.adminSections.system' },
+]
+
+const displayedAdminNavSections = computed((): NavSection[] => {
+  const grouped = new Map<AdminNavSectionId, NavItem[]>(
+    ADMIN_NAV_SECTION_CONFIG.map(({ id }) => [id, []]),
+  )
+
+  for (const item of adminNavItems.value) {
+    const sectionId = item.path.startsWith('/custom/')
+      ? 'system'
+      : (ADMIN_NAV_SECTION_BY_PATH[item.path] ?? 'system')
+    grouped.get(sectionId)?.push(item)
+  }
+
+  return ADMIN_NAV_SECTION_CONFIG
+    .map(({ id, labelKey }) => ({ id, label: t(labelKey), items: grouped.get(id) ?? [] }))
+    .filter(section => section.items.length > 0)
 })
 
 function closeMobile() {
@@ -1041,6 +1114,10 @@ function handleMenuItemClick(itemPath: string) {
 
 function isActive(path: string): boolean {
   return route.path === path || route.path.startsWith(path + '/')
+}
+
+function isChildActive(parent: NavItem, child: NavItem): boolean {
+  return child.path === parent.path ? route.path === child.path : isActive(child.path)
 }
 
 function isNavItemActive(item: NavItem): boolean {
@@ -1132,6 +1209,7 @@ onBeforeUnmount(() => {
   @apply border-gray-100 bg-white;
   isolation: isolate;
   overflow: hidden;
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
   border-color: rgb(255 255 255 / 0.65) rgb(255 255 255 / 0.36) rgb(255 255 255 / 0.36);
   background: linear-gradient(rgb(248 251 255 / 0.32), rgb(235 242 252 / 0.1)) !important;
   box-shadow:
@@ -1502,6 +1580,7 @@ onBeforeUnmount(() => {
   .sidebar,
   .sidebar-label,
   .sidebar-section-title-text,
+  .sidebar-nav-icon,
   .sidebar-destination-link,
   .sidebar-destination-leading > :deep(svg),
   .sidebar-destination-jump {

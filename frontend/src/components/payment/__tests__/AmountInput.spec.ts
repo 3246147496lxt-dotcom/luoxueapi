@@ -22,12 +22,13 @@ describe('AmountInput', () => {
     expect(choices).toHaveLength(4)
     expect(wrapper.get('#amount-panel-preset').text()).toContain('payment.chooseAmountTitle')
     expect(choices[0].text()).toContain('$10')
-    expect(wrapper.get('#amount-panel-preset [role="radiogroup"]').classes()).toEqual(expect.arrayContaining([
-      'overflow-x-auto',
-      'sm:grid',
+    expect(wrapper.get('[data-testid="preset-amount-grid"]').classes()).toEqual(expect.arrayContaining([
+      'grid',
+      'grid-cols-2',
       'sm:grid-cols-4',
     ]))
-    expect(choices[0].classes()).toEqual(expect.arrayContaining(['min-w-28', 'snap-start', 'sm:min-w-0']))
+    expect(choices[0].classes()).toEqual(expect.arrayContaining(['min-w-0']))
+    expect(choices[0].classes()).not.toEqual(expect.arrayContaining(['min-w-28', 'snap-start']))
     await choices[1].trigger('click')
     expect(wrapper.emitted('update:modelValue')?.[0]).toEqual([20])
   })
@@ -73,5 +74,23 @@ describe('AmountInput', () => {
 
     expect(wrapper.get('input').element.value).toBe('35')
     expect(wrapper.findAll('[role="tab"]')[1].attributes('aria-selected')).toBe('true')
+  })
+
+  it('keeps long preset values wrap-safe inside the two-column mobile grid', () => {
+    const wrapper = mount(AmountInput, {
+      props: {
+        modelValue: null,
+        amounts: [10, 123456789],
+        currency: 'CNY',
+        locale: 'zh-CN',
+      },
+    })
+
+    const values = wrapper.findAll('[data-testid="preset-amount-value"]')
+    expect(values).toHaveLength(2)
+    expect(values[1].classes()).toEqual(expect.arrayContaining([
+      'max-w-full',
+      '[overflow-wrap:anywhere]',
+    ]))
   })
 })

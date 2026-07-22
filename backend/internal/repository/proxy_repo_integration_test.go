@@ -4,6 +4,7 @@ package repository
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -132,6 +133,36 @@ func (s *ProxyRepoSuite) TestListWithFilters_Search() {
 	s.Require().NoError(err)
 	s.Require().Len(proxies, 1)
 	s.Require().Contains(proxies[0].Name, "production")
+}
+
+func (s *ProxyRepoSuite) TestListWithFilters_ExactIDSearch() {
+	target := s.mustCreateProxy(&service.Proxy{Name: "target-proxy", Protocol: "http", Host: "127.0.0.1", Port: 8080, Status: service.StatusActive})
+	s.mustCreateProxy(&service.Proxy{Name: fmt.Sprintf("name-containing-%d", target.ID), Protocol: "http", Host: "127.0.0.1", Port: 8081, Status: service.StatusActive})
+
+	proxies, page, err := s.repo.ListWithFiltersAndAccountCount(
+		s.ctx,
+		pagination.PaginationParams{Page: 1, PageSize: 10},
+		"",
+		"",
+		fmt.Sprintf("#%d", target.ID),
+	)
+	s.Require().NoError(err)
+	s.Require().Equal(int64(1), page.Total)
+	s.Require().Len(proxies, 1)
+	s.Require().Equal(target.ID, proxies[0].ID)
+
+	// Ordinary search remains a case-insensitive name search.
+	proxies, page, err = s.repo.ListWithFiltersAndAccountCount(
+		s.ctx,
+		pagination.PaginationParams{Page: 1, PageSize: 10},
+		"",
+		"",
+		"target",
+	)
+	s.Require().NoError(err)
+	s.Require().Equal(int64(1), page.Total)
+	s.Require().Len(proxies, 1)
+	s.Require().Equal(target.ID, proxies[0].ID)
 }
 
 // --- ListActive ---

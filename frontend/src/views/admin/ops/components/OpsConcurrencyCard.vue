@@ -25,9 +25,11 @@ const userConcurrency = ref<OpsUserConcurrencyStatsResponse | null>(null)
 // 用户视图开关
 const showByUser = ref(false)
 
-const realtimeEnabled = computed(() => {
-  return (concurrency.value?.enabled ?? true) && (availability.value?.enabled ?? true)
-})
+const realtimeEnabled = computed(() => concurrency.value?.enabled ?? true)
+// Account health now lives in the dedicated resource workspace. Keep the
+// existing row composition code temporarily compatible with the old payload,
+// while this card only requests and renders concurrency signals.
+const hasAvailability = computed(() => availability.value !== null)
 
 function safeNumber(n: unknown): number {
   return typeof n === 'number' && Number.isFinite(n) ? n : 0
@@ -268,13 +270,9 @@ async function loadData() {
       const userData = await opsAPI.getUserConcurrencyStats()
       userConcurrency.value = userData
     } else {
-      // 常规模式加载账号/平台/分组数据
-      const [concData, availData] = await Promise.all([
-        opsAPI.getConcurrencyStats(props.platformFilter, props.groupIdFilter),
-        opsAPI.getAccountAvailabilityStats(props.platformFilter, props.groupIdFilter)
-      ])
-      concurrency.value = concData
-      availability.value = availData
+      // 账号可用性已迁移到“账号/IP”工作区，这里只加载并发/排队数据。
+      concurrency.value = await opsAPI.getConcurrencyStats(props.platformFilter, props.groupIdFilter)
+      availability.value = null
     }
   } catch (err: any) {
     console.error('[OpsConcurrencyCard] Failed to load data', err)
@@ -302,10 +300,10 @@ watch(
 )
 
 function getLoadBarClass(loadPct: number): string {
-  if (loadPct >= 90) return 'bg-red-500 dark:bg-red-600'
-  if (loadPct >= 70) return 'bg-orange-500 dark:bg-orange-600'
-  if (loadPct >= 50) return 'bg-yellow-500 dark:bg-yellow-600'
-  return 'bg-green-500 dark:bg-green-600'
+  if (loadPct >= 90) return 'ops-load-bar--critical'
+  if (loadPct >= 70) return 'ops-load-bar--warning'
+  if (loadPct >= 50) return 'ops-load-bar--watch'
+  return 'ops-load-bar--normal'
 }
 
 function getLoadBarStyle(loadPct: number): string {
@@ -313,10 +311,10 @@ function getLoadBarStyle(loadPct: number): string {
 }
 
 function getLoadTextClass(loadPct: number): string {
-  if (loadPct >= 90) return 'text-red-600 dark:text-red-400'
-  if (loadPct >= 70) return 'text-orange-600 dark:text-orange-400'
-  if (loadPct >= 50) return 'text-yellow-600 dark:text-yellow-400'
-  return 'text-green-600 dark:text-green-400'
+  if (loadPct >= 90) return 'ops-load-text--critical'
+  if (loadPct >= 70) return 'ops-load-text--warning'
+  if (loadPct >= 50) return 'ops-load-text--watch'
+  return 'ops-load-text--normal'
 }
 
 function formatDuration(seconds: number): string {
@@ -341,11 +339,14 @@ watch(
 </script>
 
 <template>
-  <div class="flex h-full flex-col rounded-3xl bg-white p-6 shadow-sm ring-1 ring-gray-900/5 dark:bg-dark-800 dark:ring-dark-700">
+  <div
+    class="ops-concurrency-card flex h-full flex-col rounded-3xl bg-white p-6 shadow-sm ring-1 ring-gray-900/5 dark:bg-dark-800 dark:ring-dark-700"
+    data-testid="ops-concurrency-card"
+  >
     <!-- 头部 -->
     <div class="mb-4 flex shrink-0 items-center justify-between gap-3">
-      <h3 class="flex items-center gap-2 text-sm font-bold text-gray-900 dark:text-white">
-        <svg class="h-4 w-4 text-blue-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+      <h3 class="ops-concurrency-card__title flex items-center gap-2 text-sm font-bold text-gray-900 dark:text-white">
+        <svg class="ops-concurrency-card__icon h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z" />
         </svg>
         {{ t('admin.ops.concurrency.title') }}
@@ -353,25 +354,28 @@ watch(
       <div class="flex items-center gap-2">
         <!-- 用户视图切换按钮 -->
         <button
-          class="flex items-center justify-center rounded-lg px-2 py-1 transition-colors"
-          :class="showByUser
-            ? 'bg-blue-100 text-blue-600 dark:bg-blue-900/30 dark:text-blue-400'
-            : 'bg-gray-100 text-gray-500 hover:bg-gray-200 hover:text-gray-700 dark:bg-dark-700 dark:text-gray-400 dark:hover:bg-dark-600 dark:hover:text-gray-300'"
+          type="button"
+          class="ops-concurrency-icon-button flex items-center justify-center rounded-lg px-2 py-1 transition-colors"
+          :class="{ 'ops-concurrency-icon-button--active': showByUser }"
           :title="showByUser ? t('admin.ops.concurrency.switchToPlatform') : t('admin.ops.concurrency.switchToUser')"
+          :aria-label="showByUser ? t('admin.ops.concurrency.switchToPlatform') : t('admin.ops.concurrency.switchToUser')"
+          :aria-pressed="showByUser"
           @click="showByUser = !showByUser"
         >
-          <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
           </svg>
         </button>
         <!-- 刷新按钮 -->
         <button
-          class="flex items-center gap-1 rounded-lg bg-gray-100 px-2 py-1 text-[11px] font-semibold text-gray-700 transition-colors hover:bg-gray-200 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-dark-700 dark:text-gray-300 dark:hover:bg-dark-600"
+          type="button"
+          class="ops-concurrency-refresh-button flex items-center gap-1 rounded-lg bg-gray-100 px-2 py-1 text-[11px] font-semibold text-gray-700 transition-colors hover:bg-gray-200 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-dark-700 dark:text-gray-300 dark:hover:bg-dark-600"
           :disabled="loading"
           :title="t('common.refresh')"
+          :aria-label="t('common.refresh')"
           @click="loadData"
         >
-          <svg class="h-3 w-3" :class="{ 'animate-spin': loading }" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <svg class="h-3 w-3" :class="{ 'animate-spin': loading }" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
           </svg>
         </button>
@@ -379,7 +383,7 @@ watch(
     </div>
 
     <!-- 错误提示 -->
-    <div v-if="errorMessage" class="mb-3 shrink-0 rounded-xl bg-red-50 p-2.5 text-xs text-red-600 dark:bg-red-900/20 dark:text-red-400">
+    <div v-if="errorMessage" class="ops-concurrency-card__error mb-3 shrink-0 rounded-xl p-2.5 text-xs" role="alert">
       {{ errorMessage }}
     </div>
 
@@ -392,7 +396,7 @@ watch(
     </div>
 
     <!-- 数据展示区域 -->
-    <div v-else class="flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-gray-200 dark:border-dark-700">
+    <div v-else class="ops-concurrency-card__body flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border border-gray-200 dark:border-dark-700">
       <!-- 维度标题栏 -->
       <div class="flex shrink-0 items-center justify-between border-b border-gray-200 bg-gray-50 px-3 py-2 dark:border-dark-700 dark:bg-dark-900">
         <span class="text-[10px] font-bold uppercase tracking-wider text-gray-500 dark:text-gray-400">
@@ -410,7 +414,7 @@ watch(
 
       <!-- 用户视图 -->
       <div v-else-if="displayDimension === 'user'" class="custom-scrollbar max-h-[360px] flex-1 space-y-2 overflow-y-auto p-3">
-        <div v-for="row in (displayRows as UserRow[])" :key="row.key" class="rounded-lg bg-gray-50 p-2.5 dark:bg-dark-900">
+        <div v-for="row in (displayRows as UserRow[])" :key="row.key" class="ops-concurrency-row rounded-lg bg-gray-50 p-2.5 dark:bg-dark-900">
           <!-- 用户信息和并发 -->
           <div class="mb-1.5 flex items-center justify-between gap-2">
             <div class="flex min-w-0 flex-1 items-center gap-1.5">
@@ -443,7 +447,7 @@ watch(
 
       <!-- 汇总视图（平台/分组） -->
       <div v-else-if="displayDimension === 'platform' || displayDimension === 'group'" class="custom-scrollbar max-h-[360px] flex-1 space-y-2 overflow-y-auto p-3">
-        <div v-for="row in (displayRows as SummaryRow[])" :key="row.key" class="rounded-lg bg-gray-50 p-3 dark:bg-dark-900">
+        <div v-for="row in (displayRows as SummaryRow[])" :key="row.key" class="ops-concurrency-row rounded-lg bg-gray-50 p-3 dark:bg-dark-900">
           <!-- 标题行 -->
           <div class="mb-2 flex items-center justify-between gap-2">
             <div class="flex items-center gap-2">
@@ -472,7 +476,7 @@ watch(
           <!-- 统计信息 -->
           <div class="flex flex-wrap items-center gap-x-3 gap-y-1 text-[10px]">
             <!-- 账号统计 -->
-            <div class="flex items-center gap-1">
+            <div v-if="hasAvailability" class="flex items-center gap-1">
               <svg class="h-3 w-3 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path
                   stroke-linecap="round"
@@ -490,7 +494,7 @@ watch(
 
             <!-- 限流账号 -->
             <span
-              v-if="row.rate_limited_accounts > 0"
+              v-if="hasAvailability && row.rate_limited_accounts > 0"
               class="rounded-full bg-amber-100 px-1.5 py-0.5 font-semibold text-amber-700 dark:bg-amber-900/30 dark:text-amber-400"
             >
               {{ t('admin.ops.concurrency.rateLimited', { count: row.rate_limited_accounts }) }}
@@ -498,7 +502,7 @@ watch(
 
             <!-- 异常账号 -->
             <span
-              v-if="row.error_accounts > 0"
+              v-if="hasAvailability && row.error_accounts > 0"
               class="rounded-full bg-red-100 px-1.5 py-0.5 font-semibold text-red-700 dark:bg-red-900/30 dark:text-red-400"
             >
               {{ t('admin.ops.concurrency.errorAccounts', { count: row.error_accounts }) }}
@@ -517,7 +521,7 @@ watch(
 
       <!-- 账号详细视图 -->
       <div v-else class="custom-scrollbar max-h-[360px] flex-1 space-y-2 overflow-y-auto p-3">
-        <div v-for="row in (displayRows as AccountRow[])" :key="row.key" class="rounded-lg bg-gray-50 p-2.5 dark:bg-dark-900">
+        <div v-for="row in (displayRows as AccountRow[])" :key="row.key" class="ops-concurrency-row rounded-lg bg-gray-50 p-2.5 dark:bg-dark-900">
           <!-- 账号名称和并发 -->
           <div class="mb-1.5 flex items-center justify-between gap-2">
             <div class="min-w-0 flex-1">
@@ -531,7 +535,8 @@ watch(
             <div class="flex shrink-0 items-center gap-2">
               <!-- 并发使用 -->
               <span class="font-mono text-[11px] font-bold text-gray-900 dark:text-white"> {{ row.current_in_use }}/{{ row.max_capacity }} </span>
-              <!-- 状态徽章 -->
+              <!-- 账号健康状态已移动到资源工作区。 -->
+              <template v-if="hasAvailability">
               <span
                 v-if="row.is_available"
                 class="inline-flex items-center gap-1 rounded bg-green-100 px-1.5 py-0.5 text-[10px] font-medium text-green-700 dark:bg-green-900/30 dark:text-green-400"
@@ -579,6 +584,7 @@ watch(
               >
                 {{ t('admin.ops.accountAvailability.unavailable') }}
               </span>
+              </template>
             </div>
           </div>
 
@@ -600,9 +606,96 @@ watch(
 </template>
 
 <style scoped>
+.ops-concurrency-card {
+  border: 1px solid var(--lx-clay-border);
+  border-radius: var(--lx-clay-radius-surface);
+  color: var(--lx-clay-text);
+  background: var(--lx-clay-surface);
+  box-shadow: var(--lx-clay-shadow-flat);
+}
+
+.ops-concurrency-card__title {
+  color: var(--lx-clay-text);
+  font-family: var(--lx-clay-font-display);
+  font-weight: 850;
+}
+
+.ops-concurrency-card__icon {
+  color: var(--lx-clay-accent);
+}
+
+.ops-concurrency-icon-button,
+.ops-concurrency-refresh-button {
+  min-width: 44px;
+  min-height: 44px;
+  border: 1px solid var(--lx-clay-border);
+  color: var(--lx-clay-text-secondary);
+  background: var(--lx-clay-surface-soft);
+}
+
+.ops-concurrency-icon-button:hover,
+.ops-concurrency-refresh-button:hover:not(:disabled) {
+  border-color: var(--lx-clay-border-strong);
+  color: var(--lx-clay-accent-deep);
+  background: var(--lx-clay-accent-soft);
+}
+
+.ops-concurrency-icon-button--active {
+  border-color: color-mix(in srgb, var(--lx-clay-accent) 32%, transparent);
+  color: var(--lx-clay-accent-deep);
+  background: var(--lx-clay-accent-soft);
+}
+
+html.dark .ops-concurrency-icon-button--active {
+  color: var(--lx-clay-accent);
+}
+
+.ops-concurrency-card__error {
+  border: 1px solid color-mix(in srgb, var(--lx-clay-danger) 28%, transparent);
+  color: var(--lx-clay-danger);
+  background: var(--lx-clay-danger-soft);
+}
+
+.ops-concurrency-card__body {
+  border-color: var(--lx-clay-border);
+  background: var(--lx-clay-surface-soft);
+}
+
+.ops-concurrency-row {
+  color: var(--lx-clay-text);
+  background: var(--lx-clay-surface);
+  box-shadow: inset 0 0 0 1px var(--lx-clay-border);
+}
+
+.ops-load-bar--normal {
+  background: var(--lx-clay-success-bright);
+}
+
+.ops-load-bar--watch,
+.ops-load-bar--warning {
+  background: var(--lx-clay-warning-bright);
+}
+
+.ops-load-bar--critical {
+  background: var(--lx-clay-danger);
+}
+
+.ops-load-text--normal {
+  color: var(--lx-clay-success);
+}
+
+.ops-load-text--watch,
+.ops-load-text--warning {
+  color: var(--lx-clay-warning);
+}
+
+.ops-load-text--critical {
+  color: var(--lx-clay-danger);
+}
+
 .custom-scrollbar {
   scrollbar-width: thin;
-  scrollbar-color: rgba(156, 163, 175, 0.3) transparent;
+  scrollbar-color: var(--lx-clay-border-strong) transparent;
 }
 
 .custom-scrollbar::-webkit-scrollbar {
@@ -614,11 +707,11 @@ watch(
 }
 
 .custom-scrollbar::-webkit-scrollbar-thumb {
-  background-color: rgba(156, 163, 175, 0.3);
+  background-color: var(--lx-clay-border-strong);
   border-radius: 3px;
 }
 
 .custom-scrollbar::-webkit-scrollbar-thumb:hover {
-  background-color: rgba(156, 163, 175, 0.5);
+  background-color: var(--lx-clay-text-subtle);
 }
 </style>

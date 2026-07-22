@@ -3,7 +3,7 @@ import { flushPromises, mount } from '@vue/test-utils'
 
 import UsageView from '../UsageView.vue'
 
-const { list, getStats, getSnapshotV2, getById, getModelStats, listErrorLogs } = vi.hoisted(() => {
+const { list, getStats, getSnapshotV2, getById, getModelStats, listErrorLogs, routeQuery } = vi.hoisted(() => {
   vi.stubGlobal('localStorage', {
     getItem: vi.fn(() => null),
     setItem: vi.fn(),
@@ -17,6 +17,7 @@ const { list, getStats, getSnapshotV2, getById, getModelStats, listErrorLogs } =
     getById: vi.fn(),
     getModelStats: vi.fn(),
     listErrorLogs: vi.fn(),
+    routeQuery: {} as Record<string, string | undefined>,
   }
 })
 
@@ -85,9 +86,13 @@ vi.mock('vue-i18n', async () => {
 
 vi.mock('vue-router', () => ({
   useRoute: () => ({
-    query: {}
+    query: routeQuery
   })
 }))
+
+beforeEach(() => {
+  Object.keys(routeQuery).forEach((key) => delete routeQuery[key])
+})
 
 const AppLayoutStub = { template: '<div><slot /></div>' }
 const UsageFiltersStub = { template: '<div><slot name="after-reset" /></div>' }
@@ -96,6 +101,8 @@ const UsageTableStub = {
   template: '<div data-test="usage-table"><button class="user-click" @click="$emit(\'userClick\', 2)">user</button></div>',
 }
 const UserTokenRankingStub = {
+  name: 'UserTokenRanking',
+  props: ['initialSortBy'],
   emits: ['select-user'],
   template: '<div data-test="ranking"><button class="pick-user" @click="$emit(\'select-user\', 5, \'rank@test.com\')">pick</button></div>',
 }
@@ -378,6 +385,32 @@ describe('admin UsageView ranking tab', () => {
 
   afterEach(() => {
     vi.useRealTimers()
+  })
+
+  it('parses dashboard ranking query and forwards actual-cost as the initial ranking sort', async () => {
+    Object.assign(routeQuery, {
+      tab: 'ranking',
+      sort_by: 'actual_cost',
+      start_date: '2026-07-19',
+      end_date: '2026-07-20',
+    })
+    const wrapper = mount(UsageView, {
+      global: { stubs: {
+        AppLayout: AppLayoutStub, UsageStatsCards: true, UsageFilters: UsageFiltersStub,
+        UsageTable: true, UsageExportProgress: true, UsageCleanupDialog: true,
+        UserBalanceHistoryModal: true, Pagination: true, Select: true,
+        DateRangePicker: true, Icon: true, TokenUsageTrend: true,
+        ModelDistributionChart: true, GroupDistributionChart: true, EndpointDistributionChart: true,
+        UserTokenRanking: UserTokenRankingStub, OpsErrorLogTable: true, OpsErrorDetailModal: true,
+      } },
+    })
+    vi.advanceTimersByTime(120)
+    await flushPromises()
+
+    expect((wrapper.vm as any).activeTab).toBe('ranking')
+    expect((wrapper.vm as any).startDate).toBe('2026-07-19')
+    expect((wrapper.vm as any).endDate).toBe('2026-07-20')
+    expect(wrapper.getComponent(UserTokenRankingStub).props('initialSortBy')).toBe('actual_cost')
   })
 
   it('mounts ranking lazily and drill-down sets user filter then jumps back to usage tab', async () => {

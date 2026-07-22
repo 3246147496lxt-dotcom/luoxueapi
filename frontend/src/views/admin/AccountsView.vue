@@ -1,9 +1,17 @@
 <template>
-  <AppLayout>
+  <AppLayout variant="home-clay">
     <TablePageLayout>
+      <template #header>
+        <AdminPageHeader
+          :title="t('admin.accounts.title')"
+          :description="t('admin.accounts.description')"
+        />
+      </template>
+
       <template #filters>
-        <div class="flex flex-wrap-reverse items-start justify-between gap-3">
+        <div class="flex flex-col-reverse items-stretch gap-3 lg:flex-row lg:flex-wrap-reverse lg:items-start lg:justify-between">
           <AccountTableFilters
+            class="min-w-0 lg:w-auto lg:flex-1"
             v-model:searchQuery="params.search"
             :filters="params"
             :groups="groups"
@@ -24,11 +32,13 @@
                     showAutoRefreshDropdown = !showAutoRefreshDropdown;
                     showAccountToolsDropdown = false
                   "
-                  class="btn btn-secondary px-2 md:px-3"
+                  class="btn btn-secondary min-h-11 min-w-11 px-3"
                   :title="t('admin.accounts.autoRefresh')"
+                  :aria-expanded="showAutoRefreshDropdown"
+                  aria-controls="account-auto-refresh-menu"
                 >
-                  <Icon name="refresh" size="sm" :class="[autoRefreshEnabled ? 'animate-spin' : '']" />
-                  <span class="hidden md:inline">
+                  <Icon name="refresh" size="sm" :class="[autoRefreshEnabled ? 'animate-spin' : '', 'mr-1.5']" />
+                  <span>
                     {{
                       autoRefreshEnabled
                         ? t('admin.accounts.autoRefreshCountdown', { seconds: autoRefreshCountdown })
@@ -38,12 +48,13 @@
                 </button>
                 <div
                   v-if="showAutoRefreshDropdown"
-                  class="absolute right-0 z-50 mt-2 w-56 origin-top-right rounded-lg border border-gray-200 bg-white shadow-lg dark:border-gray-700 dark:bg-gray-800"
+                  id="account-auto-refresh-menu"
+                  class="absolute left-0 z-50 mt-2 w-56 origin-top-left rounded-lg border border-gray-200 bg-white shadow-lg lg:left-auto lg:right-0 lg:origin-top-right dark:border-gray-700 dark:bg-gray-800"
                 >
                   <div class="p-2">
                     <button
                       @click="setAutoRefreshEnabled(!autoRefreshEnabled)"
-                      class="flex w-full items-center justify-between rounded-md px-3 py-2 text-sm text-gray-700 hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-gray-700"
+                      class="flex min-h-11 w-full items-center justify-between rounded-md px-3 py-2 text-sm text-gray-700 hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-gray-700"
                     >
                       <span>{{ t('admin.accounts.enableAutoRefresh') }}</span>
                       <Icon v-if="autoRefreshEnabled" name="check" size="sm" class="text-primary-500" />
@@ -53,7 +64,7 @@
                       v-for="sec in autoRefreshIntervals"
                       :key="sec"
                       @click="setAutoRefreshInterval(sec)"
-                      class="flex w-full items-center justify-between rounded-md px-3 py-2 text-sm text-gray-700 hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-gray-700"
+                      class="flex min-h-11 w-full items-center justify-between rounded-md px-3 py-2 text-sm text-gray-700 hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-gray-700"
                     >
                       <span>{{ autoRefreshIntervalLabel(sec) }}</span>
                       <Icon v-if="autoRefreshIntervalSeconds === sec" name="check" size="sm" class="text-primary-500" />
@@ -69,15 +80,19 @@
                     showAccountToolsDropdown = !showAccountToolsDropdown;
                     showAutoRefreshDropdown = false
                   "
-                  class="btn btn-secondary px-2 md:px-3"
+                  class="btn btn-secondary min-h-11 min-w-11 px-3"
+                  data-test="account-tools-toggle"
                   :title="t('admin.accounts.moreActions')"
+                  :aria-expanded="showAccountToolsDropdown"
+                  aria-controls="account-tools-menu"
                 >
-                  <Icon name="more" size="sm" class="md:mr-1.5" />
-                  <span class="hidden md:inline">{{ t('admin.accounts.moreActions') }}</span>
-                  <Icon name="chevronDown" size="xs" class="ml-1 hidden md:inline" />
+                  <Icon name="more" size="sm" class="mr-1.5" />
+                  <span>{{ t('admin.accounts.moreActions') }}</span>
+                  <Icon name="chevronDown" size="xs" class="ml-1" />
                 </button>
                 <div
                   v-if="showAccountToolsDropdown"
+                  id="account-tools-menu"
                   class="absolute right-0 z-50 mt-2 w-[min(20rem,calc(100vw-2rem))] origin-top-right overflow-hidden rounded-lg border border-gray-200 bg-white shadow-xl dark:border-gray-700 dark:bg-gray-800"
                 >
                   <div class="max-h-[70vh] overflow-y-auto p-2">
@@ -111,6 +126,16 @@
                       >
                         {{ t('admin.accounts.selectedCount', { count: selIds.length }) }}
                       </span>
+                    </button>
+                    <button
+                      class="account-tools-menu-item"
+                      data-test="bulk-edit-filtered"
+                      @click="openBulkEditFilteredFromMenu"
+                    >
+                      <span class="account-tools-menu-icon bg-fuchsia-50 text-fuchsia-600 dark:bg-fuchsia-900/30 dark:text-fuchsia-300">
+                        <Icon name="edit" size="sm" />
+                      </span>
+                      <span class="flex-1 text-left">{{ t('admin.accounts.bulkEdit.title') }}</span>
                     </button>
 
                     <div class="my-2 border-t border-gray-100 dark:border-gray-700"></div>
@@ -157,7 +182,7 @@
                         />
                         <button
                           type="button"
-                          class="btn btn-secondary h-8 px-2"
+                          class="btn btn-secondary min-h-11 min-w-11 px-2"
                           :disabled="upstreamBillingSettingsLoading || upstreamBillingSettingsSaving"
                           :title="t('common.save')"
                           @click="saveUpstreamBillingProbeSettings"
@@ -181,7 +206,7 @@
                         v-for="col in toggleableColumns"
                         :key="col.key"
                         @click="toggleColumn(col.key)"
-                        class="flex w-full items-center justify-between rounded-md px-3 py-2 text-sm text-gray-700 transition-colors hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-gray-700"
+                        class="flex min-h-11 w-full items-center justify-between rounded-md px-3 py-2 text-sm text-gray-700 transition-colors hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-gray-700"
                       >
                         <span class="truncate">{{ col.label }}</span>
                         <Icon v-if="isColumnVisible(col.key)" name="check" size="sm" class="text-primary-500" />
@@ -208,13 +233,13 @@
       </template>
       <template #table>
         <AccountBulkActionsBar
+          v-if="selIds.length > 0"
           :selected-ids="selIds"
           @delete="handleBulkDelete"
           @reset-status="handleBulkResetStatus"
           @refresh-token="handleBulkRefreshToken"
           @probe-upstream-billing="handleBulkProbeUpstreamBilling"
           @edit-selected="openBulkEditSelected"
-          @edit-filtered="openBulkEditFiltered"
           @clear="clearSelection"
           @select-page="selectPage"
           @toggle-schedulable="handleBulkToggleSchedulable"
@@ -234,7 +259,20 @@
           :estimate-row-height="156"
           :overscan="5"
           :virtualize-threshold="50"
+          mobile-primary-key="name"
+          :mobile-visible-keys="ACCOUNT_MOBILE_VISIBLE_KEYS"
         >
+          <template #empty>
+            <div class="flex flex-col items-center px-4 py-3 text-center">
+              <span class="mb-3 inline-flex h-11 w-11 items-center justify-center rounded-xl bg-primary-50 text-primary-600 dark:bg-primary-900/30 dark:text-primary-300">
+                <Icon name="inbox" size="lg" />
+              </span>
+              <p class="font-medium text-gray-900 dark:text-white">{{ t('admin.accounts.noAccounts') }}</p>
+              <p class="mt-1 max-w-sm text-sm text-gray-500 dark:text-dark-400">
+                {{ t('admin.accounts.noAccountsDescription') }}
+              </p>
+            </div>
+          </template>
           <template #header-select>
             <input
               type="checkbox"
@@ -424,16 +462,16 @@
             </div>
           </template>
           <template #cell-actions="{ row }">
-            <div class="flex items-center gap-1">
-              <button @click="handleEdit(row)" class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-gray-100 hover:text-primary-600 dark:hover:bg-dark-700 dark:hover:text-primary-400">
+            <div class="flex w-full items-center gap-1">
+              <button @click="handleEdit(row)" class="flex min-h-11 min-w-11 flex-1 flex-col items-center justify-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-gray-100 hover:text-primary-600 lg:min-h-0 lg:min-w-0 lg:flex-none dark:hover:bg-dark-700 dark:hover:text-primary-400">
                 <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0115.75 21H5.25A2.25 2.25 0 013 18.75V8.25A2.25 2.25 0 015.25 6H10" /></svg>
                 <span class="text-xs">{{ t('common.edit') }}</span>
               </button>
-              <button @click="handleDelete(row)" class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-900/20 dark:hover:text-red-400">
+              <button @click="handleDelete(row)" class="hidden flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-red-50 hover:text-red-600 lg:flex dark:hover:bg-red-900/20 dark:hover:text-red-400">
                 <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0" /></svg>
                 <span class="text-xs">{{ t('common.delete') }}</span>
               </button>
-              <button @click="openMenu(row, $event)" class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-900 dark:hover:bg-dark-700 dark:hover:text-white">
+              <button @click="openMenu(row, $event)" class="flex min-h-11 min-w-11 flex-col items-center justify-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-900 lg:min-h-0 lg:min-w-0 dark:hover:bg-dark-700 dark:hover:text-white">
                 <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M6.75 12a.75.75 0 11-1.5 0 .75.75 0 011.5 0zM12.75 12a.75.75 0 11-1.5 0 .75.75 0 011.5 0zM18.75 12a.75.75 0 11-1.5 0 .75.75 0 011.5 0z" /></svg>
                 <span class="text-xs">{{ t('common.more') }}</span>
               </button>
@@ -450,7 +488,7 @@
     <AccountTestModal :show="showTest" :account="testingAcc" @close="closeTestModal" />
     <AccountStatsModal :show="showStats" :account="statsAcc" @close="closeStatsModal" />
     <ScheduledTestsPanel :show="showSchedulePanel" :account-id="scheduleAcc?.id ?? null" :model-options="scheduleModelOptions" @close="closeSchedulePanel" />
-    <AccountActionMenu :show="menu.show" :account="menu.acc" :position="menu.pos" @close="menu.show = false" @test="handleTest" @stats="handleViewStats" @schedule="handleSchedule" @duplicate="handleDuplicateAccount" @reauth="handleReAuth" @refresh-token="handleRefresh" @recover-state="handleRecoverState" @reset-quota="handleResetQuota" @set-privacy="handleSetPrivacy" @create-spark-shadow="handleCreateSparkShadow" />
+    <AccountActionMenu :show="menu.show" :account="menu.acc" :position="menu.pos" @close="menu.show = false" @test="handleTest" @stats="handleViewStats" @schedule="handleSchedule" @duplicate="handleDuplicateAccount" @reauth="handleReAuth" @refresh-token="handleRefresh" @recover-state="handleRecoverState" @reset-quota="handleResetQuota" @set-privacy="handleSetPrivacy" @create-spark-shadow="handleCreateSparkShadow" @delete="handleDelete" />
     <SyncFromCrsModal :show="showSync" @close="showSync = false" @synced="reload" />
     <ImportDataModal :show="showImportData" @close="showImportData = false" @imported="handleDataImported" />
     <BulkEditAccountModal
@@ -483,6 +521,7 @@
 import { ref, reactive, computed, onMounted, onUnmounted, toRaw, watch } from 'vue'
 import { useIntervalFn } from '@vueuse/core'
 import { useI18n } from 'vue-i18n'
+import { useRoute, useRouter } from 'vue-router'
 import { useAppStore } from '@/stores/app'
 import { useAuthStore } from '@/stores/auth'
 import { adminAPI } from '@/api/admin'
@@ -492,6 +531,7 @@ import { useTableSelection } from '@/composables/useTableSelection'
 import { useStepUp, isStepUpBlocked, isStepUpCancelled, stepUpBlockReason } from '@/composables/useStepUp'
 import TotpStepUpDialog from '@/components/auth/TotpStepUpDialog.vue'
 import AppLayout from '@/components/layout/AppLayout.vue'
+import AdminPageHeader from '@/components/layout/AdminPageHeader.vue'
 import TablePageLayout from '@/components/layout/TablePageLayout.vue'
 import DataTable from '@/components/common/DataTable.vue'
 import HelpTooltip from '@/components/common/HelpTooltip.vue'
@@ -524,6 +564,9 @@ import { formatDateTime, formatRelativeTime } from '@/utils/format'
 import { proxyExpiryBadgeClass, proxyExpiryLabelKey } from '@/utils/proxyExpiry'
 import { extractApiErrorMessage } from '@/utils/apiError'
 import type { Account, AccountPlatform, AccountSchedulerGroupScore, AccountType, Proxy as AccountProxy, AdminGroup, WindowStats, ClaudeModel, UpstreamBillingProbeSettings, UpstreamBillingProbeSnapshot } from '@/types'
+
+const route = useRoute()
+const router = useRouter()
 
 const { t } = useI18n()
 const appStore = useAppStore()
@@ -623,6 +666,7 @@ const HIDDEN_COLUMNS_CURRENT_VERSION = 'scheduler-score-hidden-by-default'
 
 // Sorting settings
 const ACCOUNT_SORT_STORAGE_KEY = 'account-table-sort'
+const ACCOUNT_MOBILE_VISIBLE_KEYS: string[] = ['name', 'platform_type', 'status', 'schedulable', 'groups']
 type AccountSortOrder = 'asc' | 'desc'
 type AccountSortState = {
   sort_by: string
@@ -913,6 +957,119 @@ const {
   }
 })
 
+const allowedAccountPlatforms = new Set(['anthropic', 'openai', 'gemini', 'antigravity', 'grok'])
+const allowedAccountHealthFilters = new Set([
+  'active',
+  'inactive',
+  'error',
+  'rate_limited',
+  'temp_unschedulable',
+  'unschedulable',
+  'overloaded',
+  'expired',
+  'quota_exhausted'
+])
+let syncingAccountRoute = false
+let accountRouteReady = false
+
+const accountRouteString = (key: string): string => {
+  const value = route.query[key]
+  if (typeof value === 'string') return value.trim()
+  if (Array.isArray(value) && typeof value[0] === 'string') return value[0].trim()
+  return ''
+}
+
+const positiveRouteID = (key: string): number | null => {
+  const raw = accountRouteString(key)
+  if (!raw) return null
+  const value = Number.parseInt(raw, 10)
+  return Number.isFinite(value) && value > 0 ? value : null
+}
+
+const applyAccountRouteFilters = async () => {
+  const nextQuery = { ...route.query }
+  let normalized = false
+
+  const platformQuery = accountRouteString('platform')
+  if (platformQuery && !allowedAccountPlatforms.has(platformQuery)) {
+    delete nextQuery.platform
+    normalized = true
+  }
+  params.platform = allowedAccountPlatforms.has(platformQuery) ? platformQuery : ''
+
+  const healthQuery = accountRouteString('health')
+  if (healthQuery && !allowedAccountHealthFilters.has(healthQuery)) {
+    delete nextQuery.health
+    normalized = true
+  }
+  params.status = allowedAccountHealthFilters.has(healthQuery) ? healthQuery : ''
+
+  const groupQuery = accountRouteString('group')
+  const validGroup = groupQuery === 'ungrouped' || (Number.isFinite(Number(groupQuery)) && Number(groupQuery) > 0)
+  if (groupQuery && !validGroup) {
+    delete nextQuery.group
+    normalized = true
+  }
+  params.group = validGroup ? groupQuery : ''
+
+  const accountID = positiveRouteID('account_id')
+  const proxyID = positiveRouteID('proxy_id')
+  if (accountRouteString('account_id') && accountID === null) {
+    delete nextQuery.account_id
+    normalized = true
+  }
+  if (accountRouteString('proxy_id') && proxyID === null) {
+    delete nextQuery.proxy_id
+    normalized = true
+  }
+
+  if (accountID !== null) {
+    params.search = `#${accountID}`
+  } else if (proxyID !== null) {
+    params.search = `proxy:${proxyID}`
+  } else {
+    params.search = accountRouteString('search')
+  }
+
+  if (normalized) {
+    syncingAccountRoute = true
+    try {
+      await router.replace({ query: nextQuery })
+    } finally {
+      syncingAccountRoute = false
+    }
+  }
+}
+
+const syncAccountFiltersToRoute = async () => {
+  if (syncingAccountRoute) return
+  const nextQuery: Record<string, any> = { ...route.query }
+  for (const key of ['platform', 'health', 'group', 'proxy_id', 'account_id', 'search']) delete nextQuery[key]
+
+  if (params.platform) nextQuery.platform = params.platform
+  if (params.status) nextQuery.health = params.status
+  if (params.group) nextQuery.group = params.group
+
+  const search = String(params.search || '').trim()
+  const accountMatch = search.match(/^#(\d+)$/)
+  const proxyMatch = search.match(/^proxy:(\d+)$/i)
+  if (accountMatch) nextQuery.account_id = accountMatch[1]
+  else if (proxyMatch) nextQuery.proxy_id = proxyMatch[1]
+  else if (search) nextQuery.search = search
+
+  const currentKeys = Object.keys(route.query)
+  const nextKeys = Object.keys(nextQuery)
+  const same = currentKeys.length === nextKeys.length && nextKeys.every((key) => String(route.query[key] ?? '') === String(nextQuery[key] ?? ''))
+  if (same) return
+
+  syncingAccountRoute = true
+  try {
+    await router.replace({ query: nextQuery })
+  } finally {
+    syncingAccountRoute = false
+  }
+}
+
 const {
   selectedIds: selIds,
   allVisibleSelected,
@@ -978,6 +1135,7 @@ const reload = async () => {
 
 const debouncedReload = () => {
   syncAccountListDerivedParams()
+  void syncAccountFiltersToRoute()
   hasPendingListSync.value = false
   resetAutoRefreshCache()
   pendingTodayStatsRefresh.value = true
@@ -1022,6 +1180,16 @@ watch(loading, (isLoading, wasLoading) => {
     })
   }
 })
+
+watch(
+  () => route.query,
+  async () => {
+    if (!accountRouteReady || syncingAccountRoute) return
+    await applyAccountRouteFilters()
+    pagination.page = 1
+    await reload()
+  }
+)
 
 const isAnyModalOpen = computed(() => {
   return (
@@ -1660,6 +1828,11 @@ const openBulkEditFiltered = async () => {
   showBulkEdit.value = true
 }
 
+const openBulkEditFilteredFromMenu = async () => {
+  closeAccountToolsDropdown()
+  await openBulkEditFiltered()
+}
+
 const handleBulkUpdated = () => {
   showBulkEdit.value = false
   bulkEditTarget.value = null
@@ -2037,6 +2210,8 @@ const handleClickOutside = (event: MouseEvent) => {
 }
 
 onMounted(async () => {
+  await applyAccountRouteFilters()
+  accountRouteReady = true
   load()
   loadUpstreamBillingProbeSettings()
   try {
@@ -2065,7 +2240,7 @@ onUnmounted(() => {
 
 <style scoped>
 .account-tools-menu-item {
-  @apply flex w-full items-center gap-3 rounded-md px-3 py-2 text-sm text-gray-700 transition-colors hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-gray-700;
+  @apply flex min-h-11 w-full items-center gap-3 rounded-md px-3 py-2 text-sm text-gray-700 transition-colors hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-gray-700;
 }
 
 .account-tools-menu-icon {

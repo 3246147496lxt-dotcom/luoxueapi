@@ -771,6 +771,25 @@ func (r *accountRepository) accountListFilteredQuery(platform, accountType, stat
 					))
 				}),
 			)
+		case service.AccountListStatusOverloaded:
+			q = q.Where(
+				dbaccount.StatusEQ(service.StatusActive),
+				dbaccount.SchedulableEQ(true),
+				dbaccount.OverloadUntilGT(time.Now()),
+			)
+		case service.AccountListStatusExpired:
+			q = q.Where(
+				dbaccount.AutoPauseOnExpiredEQ(true),
+				dbaccount.ExpiresAtNotNil(),
+				dbaccount.ExpiresAtLTE(time.Now()),
+			)
+		case service.AccountListStatusQuotaExhausted:
+			q = q.Where(
+				dbaccount.StatusEQ(service.StatusActive),
+				dbaccount.SchedulableEQ(true),
+				dbaccount.TypeIn(service.AccountTypeAPIKey, service.AccountTypeBedrock),
+				knownAccountQuotaExceededPredicate(),
+			)
 		case "unschedulable":
 			q = q.Where(
 				dbaccount.StatusEQ(service.StatusActive),
@@ -792,7 +811,15 @@ func (r *accountRepository) accountListFilteredQuery(platform, accountType, stat
 		}
 	}
 	if search != "" {
-		q = q.Where(dbaccount.NameContainsFold(search))
+		accountID, proxyID := parseAccountListSpecialSearch(search)
+		switch {
+		case accountID != nil:
+			q = q.Where(dbaccount.IDEQ(*accountID))
+		case proxyID != nil:
+			q = q.Where(dbaccount.ProxyIDEQ(*proxyID))
+		default:
+			q = q.Where(dbaccount.NameContainsFold(search))
+		}
 	}
 	if groupID == service.AccountListGroupUngrouped {
 		q = q.Where(dbaccount.Not(dbaccount.HasAccountGroups()))
@@ -815,6 +842,46 @@ func (r *accountRepository) accountListFilteredQuery(platform, accountType, stat
 	}
 
 	return q
+}
+
+// parseAccountListSpecialSearch supports exact, URL-safe monitor deep links
+// without expanding the long-standing account list repository signature.
+// Invalid special-looking values deliberately fall back to normal name search.
+func parseAccountListSpecialSearch(search string) (accountID, proxyID *int64) {
+	value := strings.TrimSpace(search)
+	if strings.HasPrefix(value, "#") {
+		if id, err := strconv.ParseInt(strings.TrimSpace(strings.TrimPrefix(value, "#")), 10, 64); err == nil && id > 0 {
+			return &id, nil
+		}
+	}
+	if len(value) >= len("proxy:") && strings.EqualFold(value[:len("proxy:")], "proxy:") {
+		if id, err := strconv.ParseInt(strings.TrimSpace(value[len("proxy:"):]), 10, 64); err == nil && id > 0 {
+			return nil, &id
+		}
+	}
+	return nil, nil
+}
+
+// knownAccountQuotaExceededPredicate mirrors Account.IsQuotaExceeded for the
+// three persisted quota dimensions. The period expressions are shared with the
+// atomic quota update path, keeping rolling/fixed reset semantics aligned.
+func knownAccountQuotaExceededPredicate() dbpredicate.Account {
+	return dbpredicate.Account(func(s *entsql.Selector) {
+		s.Where(entsql.P(func(b *entsql.Builder) {
+			b.WriteString(`(
+				(COALESCE((extra->>'quota_limit')::numeric, 0) > 0
+					AND COALESCE((extra->>'quota_used')::numeric, 0) >= COALESCE((extra->>'quota_limit')::numeric, 0))
+				OR
+				(COALESCE((extra->>'quota_daily_limit')::numeric, 0) > 0
+					AND NOT ` + dailyExpiredExpr + `
+					AND COALESCE((extra->>'quota_daily_used')::numeric, 0) >= COALESCE((extra->>'quota_daily_limit')::numeric, 0))
+				OR
+				(COALESCE((extra->>'quota_weekly_limit')::numeric, 0) > 0
+					AND NOT ` + weeklyExpiredExpr + `
+					AND COALESCE((extra->>'quota_weekly_used')::numeric, 0) >= COALESCE((extra->>'quota_weekly_limit')::numeric, 0))
+			)`)
+		}))
+	})
 }
 
 func (r *accountRepository) ListWithFilters(ctx context.Context, params pagination.PaginationParams, platform, accountType, status, search string, groupID int64, privacyMode string) ([]service.Account, *pagination.PaginationResult, error) {
@@ -873,14 +940,20 @@ func (r *accountRepository) ListOpsAccountsForStats(ctx context.Context, platfor
 			dbaccount.FieldID,
 			dbaccount.FieldName,
 			dbaccount.FieldPlatform,
+			dbaccount.FieldType,
+			dbaccount.FieldExtra,
+			dbaccount.FieldProxyID,
 			dbaccount.FieldConcurrency,
 			dbaccount.FieldLoadFactor,
 			dbaccount.FieldStatus,
 			dbaccount.FieldErrorMessage,
 			dbaccount.FieldSchedulable,
+			dbaccount.FieldExpiresAt,
+			dbaccount.FieldAutoPauseOnExpired,
 			dbaccount.FieldRateLimitResetAt,
 			dbaccount.FieldOverloadUntil,
 			dbaccount.FieldTempUnschedulableUntil,
+			dbaccount.FieldTempUnschedulableReason,
 		).
 		Order(dbent.Asc(dbaccount.FieldID)).
 		All(ctx)

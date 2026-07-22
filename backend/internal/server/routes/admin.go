@@ -193,6 +193,10 @@ func registerOpsRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 		ops.GET("/concurrency", h.Admin.Ops.GetConcurrencyStats)
 		ops.GET("/user-concurrency", h.Admin.Ops.GetUserConcurrencyStats)
 		ops.GET("/account-availability", h.Admin.Ops.GetAccountAvailability)
+		ops.GET("/account-pool", h.Admin.Ops.GetAccountPool)
+		ops.GET("/proxy-health", h.Admin.Ops.GetProxyHealth)
+		ops.GET("/proxy-health/:id", h.Admin.Ops.GetProxyHealthDetail)
+		ops.POST("/proxy-health/:id/reprobe", h.Admin.Ops.ReprobeProxyHealth)
 		ops.GET("/realtime-traffic", h.Admin.Ops.GetRealtimeTrafficSummary)
 
 		// Alerts (rules + events)

@@ -88,9 +88,14 @@ describe('AppHeader theme toggle', () => {
   it('renders an icon-only action between announcements and language', () => {
     const wrapper = mountHeader()
     const toggle = wrapper.get('[data-testid="header-theme-toggle"]')
+    const icon = toggle.get('svg')
 
     expect(toggle.text()).toBe('')
     expect(toggle.attributes('aria-label')).toBe('nav.darkMode')
+    expect(icon.attributes('stroke-width')).toBe('2')
+    expect(icon.classes()).toEqual(expect.arrayContaining(['h-5', 'w-5']))
+    expect(icon.get('path').attributes('d'))
+      .toBe('M20.985 12.486a9 9 0 11-9.473-9.472c.405-.022.617.46.402.803a6 6 0 008.268 8.268c.344-.215.825-.004.803.401')
     expect(toggle.element.previousElementSibling).toBe(
       wrapper.get('[data-testid="announcement-bell"]').element,
     )
@@ -108,6 +113,8 @@ describe('AppHeader theme toggle', () => {
     expect(document.documentElement.classList.contains('dark')).toBe(true)
     expect(localStorage.getItem('theme')).toBe('dark')
     expect(toggle.attributes('aria-label')).toBe('nav.lightMode')
+    expect(toggle.get('path').attributes('d'))
+      .toBe('M16 12a4 4 0 11-8 0 4 4 0 018 0M12 2v2m0 16v2M4.93 4.93l1.41 1.41m11.32 11.32l1.41 1.41M2 12h2m16 0h2M6.34 17.66l-1.41 1.41M19.07 4.93l-1.41 1.41')
 
     await toggle.trigger('click')
 
@@ -118,6 +125,23 @@ describe('AppHeader theme toggle', () => {
 })
 
 describe('AppHeader global navigation shell', () => {
+  it('keeps configured first-party docs on the local docs server and hides an empty entry', async () => {
+    const wrapper = mountHeader()
+    const appStore = useAppStore()
+
+    expect(wrapper.find('[data-testid="header-docs-link"]').exists()).toBe(false)
+
+    appStore.docUrl = '/tutorial-docs/?source=header#quick-start'
+    await wrapper.vm.$nextTick()
+
+    expect(wrapper.get('[data-testid="header-docs-link"]').attributes('href'))
+      .toBe('http://127.0.0.1:4179/tutorial-docs/?source=header#quick-start')
+
+    appStore.docUrl = ''
+    await wrapper.vm.$nextTick()
+    expect(wrapper.find('[data-testid="header-docs-link"]').exists()).toBe(false)
+  })
+
   it('uses the snowflake credit mark for account balances', () => {
     const wrapper = mountHeader()
 
@@ -220,6 +244,18 @@ describe('AppHeader global navigation shell', () => {
     expect(wrapper.find('[data-testid="header-surface"] p').exists()).toBe(false)
   })
 
+  it('keeps the new snowpuff mark free of the retired snowflake effects', async () => {
+    const wrapper = mountHeader()
+    const appStore = useAppStore()
+    const brandImage = wrapper.get('[data-testid="header-brand"] img')
+
+    appStore.siteLogo = '/brand/luoxue-snowpuff-mark.svg'
+    await wrapper.vm.$nextTick()
+
+    expect(brandImage.attributes('src')).toBe('/brand/luoxue-snowpuff-mark.svg')
+    expect(brandImage.classes()).not.toContain('brand-logo-image-luoxue')
+  })
+
   it('uses configured brand data and links administrators to their dashboard', async () => {
     const wrapper = mountHeader({ role: 'admin' })
     const appStore = useAppStore()
@@ -270,7 +306,10 @@ describe('AppHeader global navigation shell', () => {
     expect(collapseIcon.classes()).toEqual(expect.arrayContaining(['h-5', 'w-5']))
     expect(collapseIcon.classes()).not.toContain('rotate-180')
 
-    const pageContext = wrapper.get('h1').element.parentElement
+    const pageLabel = wrapper.get('[data-testid="header-surface"] h1')
+    const pageContext = pageLabel.element.parentElement
+    expect(pageLabel.text()).toBe('Groups')
+    expect(wrapper.findAll('[data-testid="header-surface"] h1')).toHaveLength(1)
     expect(toggle.element.nextElementSibling).toBe(pageContext)
     expect(toggle.element.parentElement?.querySelector('.w-px')).toBeNull()
 
@@ -330,7 +369,9 @@ describe('AppHeader global navigation shell', () => {
     expect(actions.get('[data-testid="header-theme-toggle"]').classes()).toEqual(
       expect.arrayContaining(['brand-utility-icon', 'h-8', 'w-8', 'hover:bg-[rgba(46,50,56,0.05)]']),
     )
-    expect(actions.find('[data-testid="locale-switcher"]').exists()).toBe(true)
+    const localeSwitcher = actions.get('[data-testid="locale-switcher"]')
+    expect(localeSwitcher.attributes('icon-variant') ?? localeSwitcher.attributes('iconvariant'))
+      .toBe('lucide')
   })
 
   it('uses a rounded account pill with responsive identity and accessible menu state', async () => {

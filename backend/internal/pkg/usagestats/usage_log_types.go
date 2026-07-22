@@ -28,9 +28,11 @@ func NormalizeModelSource(source string) string {
 // DashboardStats 仪表盘统计
 type DashboardStats struct {
 	// 用户统计
-	TotalUsers    int64 `json:"total_users"`
-	TodayNewUsers int64 `json:"today_new_users"` // 今日新增用户数
-	ActiveUsers   int64 `json:"active_users"`    // 今日有请求的用户数
+	TotalUsers                    int64 `json:"total_users"`
+	TodayNewUsers                 int64 `json:"today_new_users"`                    // 站点时区今日 00:00 至当前时刻新增的未删除用户数
+	CurrentDayNewUsers            int64 `json:"current_day_new_users"`              // 站点时区今日 00:00 至当前时刻新增的未删除用户数
+	PreviousDaySamePeriodNewUsers int64 `json:"previous_day_same_period_new_users"` // 昨日 00:00 至昨日同一墙钟时刻新增的未删除用户数
+	ActiveUsers                   int64 `json:"active_users"`                       // 今日有请求的用户数
 	// 小时活跃用户数（UTC 当前小时）
 	HourlyActiveUsers int64 `json:"hourly_active_users"`
 
@@ -39,12 +41,20 @@ type DashboardStats struct {
 	StatsStale     bool   `json:"stats_stale"`
 
 	// API Key 统计
-	TotalAPIKeys  int64 `json:"total_api_keys"`
-	ActiveAPIKeys int64 `json:"active_api_keys"` // 状态为 active 的 API Key 数
+	TotalAPIKeys                        int64  `json:"total_api_keys"`
+	ActiveAPIKeys                       int64  `json:"active_api_keys"`                           // 状态为 active 的 API Key 数
+	CurrentWeekActiveAPIKeys            int64  `json:"current_week_active_api_keys"`              // 本周至今产生成功业务用量的去重 API Key 数
+	PreviousWeekSamePeriodActiveAPIKeys int64  `json:"previous_week_same_period_active_api_keys"` // 上周同期产生成功业务用量的去重 API Key 数
+	CurrentWeekStartAt                  string `json:"current_week_start_at"`
+	CurrentWeekEndAt                    string `json:"current_week_end_at"`
+	PreviousWeekSamePeriodStartAt       string `json:"previous_week_same_period_start_at"`
+	PreviousWeekSamePeriodEndAt         string `json:"previous_week_same_period_end_at"`
+	StatsTimezone                       string `json:"stats_timezone"`
 
 	// 账户统计
 	TotalAccounts     int64 `json:"total_accounts"`
 	NormalAccounts    int64 `json:"normal_accounts"`    // 正常账户数 (schedulable=true, status=active)
+	HealthyAccounts   int64 `json:"healthy_accounts"`   // 基础可调度账户数（排除有效限流/过载/冷却及自动暂停到期；不含 extra JSON 配额判断）
 	ErrorAccounts     int64 `json:"error_accounts"`     // 异常账户数 (status=error)
 	RateLimitAccounts int64 `json:"ratelimit_accounts"` // 限流账户数
 	OverloadAccounts  int64 `json:"overload_accounts"`  // 过载账户数
@@ -61,15 +71,21 @@ type DashboardStats struct {
 	TotalAccountCost         float64 `json:"total_account_cost"` // 累计账号成本
 
 	// 今日 Token 使用统计
-	TodayRequests            int64   `json:"today_requests"`
-	TodayInputTokens         int64   `json:"today_input_tokens"`
-	TodayOutputTokens        int64   `json:"today_output_tokens"`
-	TodayCacheCreationTokens int64   `json:"today_cache_creation_tokens"`
-	TodayCacheReadTokens     int64   `json:"today_cache_read_tokens"`
-	TodayTokens              int64   `json:"today_tokens"`
-	TodayCost                float64 `json:"today_cost"`         // 今日标准计费
-	TodayActualCost          float64 `json:"today_actual_cost"`  // 今日实际扣除
-	TodayAccountCost         float64 `json:"today_account_cost"` // 今日账号成本
+	TodayRequests                 int64   `json:"today_requests"`
+	CurrentDayRequests            int64   `json:"current_day_requests"`              // 站点时区今日 00:00 至当前时刻的请求数
+	PreviousDaySamePeriodRequests int64   `json:"previous_day_same_period_requests"` // 昨日 00:00 至昨日同一墙钟时刻的请求数
+	CurrentDayStartAt             string  `json:"current_day_start_at"`
+	CurrentDayEndAt               string  `json:"current_day_end_at"`
+	PreviousDaySamePeriodStartAt  string  `json:"previous_day_same_period_start_at"`
+	PreviousDaySamePeriodEndAt    string  `json:"previous_day_same_period_end_at"`
+	TodayInputTokens              int64   `json:"today_input_tokens"`
+	TodayOutputTokens             int64   `json:"today_output_tokens"`
+	TodayCacheCreationTokens      int64   `json:"today_cache_creation_tokens"`
+	TodayCacheReadTokens          int64   `json:"today_cache_read_tokens"`
+	TodayTokens                   int64   `json:"today_tokens"`
+	TodayCost                     float64 `json:"today_cost"`         // 今日标准计费
+	TodayActualCost               float64 `json:"today_actual_cost"`  // 今日实际扣除
+	TodayAccountCost              float64 `json:"today_account_cost"` // 今日账号成本
 
 	// 系统运行统计
 	AverageDurationMs float64 `json:"average_duration_ms"` // 平均响应时间
@@ -149,6 +165,8 @@ type UserUsageTrendPoint struct {
 type UserSpendingRankingItem struct {
 	UserID     int64   `json:"user_id"`
 	Email      string  `json:"email"`
+	Username   string  `json:"username"`
+	MainModel  string  `json:"main_model"`
 	ActualCost float64 `json:"actual_cost"` // 实际扣除
 	Requests   int64   `json:"requests"`
 	Tokens     int64   `json:"tokens"`

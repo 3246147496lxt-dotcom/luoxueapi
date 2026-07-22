@@ -896,6 +896,17 @@ ops:
   # Other detailed settings (cleanup, aggregation, etc.) are configured in ops settings dialog
   # 其他详细设置（数据清理、预聚合等）在运维监控设置对话框中配置
   enabled: true
+  # Non-mutating proxy/IP health probes used by the resource monitoring view.
+  # 资源监控使用的只读代理/IP 健康探测。
+  proxy_health:
+    # Disabled by default to avoid outbound probes during service startup.
+    # 默认关闭，避免服务启动时主动发起外部探测。
+    enabled: false
+    base_interval: 5m
+    quality_interval: 30m
+    base_freshness: 10m
+    quality_freshness: 60m
+    max_concurrency: 3
 
 # =============================================================================
 # JWT Configuration

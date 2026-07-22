@@ -111,6 +111,14 @@ export default {
       urlCopied: '代理 URL 已复制',
       allProtocols: '全部协议',
       allStatus: '全部状态',
+      healthAll: '全部健康状态',
+      healthHealthy: '健康',
+      healthDegraded: '降级',
+      healthRestricted: '疑似受限',
+      healthFailed: '连接失败',
+      healthUnknown: '未检测',
+      healthStale: '数据陈旧',
+      healthExpiring: '即将到期',
       searchProxies: '搜索代理...',
       protocols: {
         http: 'HTTP',
@@ -548,6 +556,8 @@ export default {
         subtitle: '按当前筛选与时间范围统计每个用户的 Token 用量',
         rowHint: '点击查看该用户的用量明细',
         userCount: '共 {count} 位用户',
+        loadFailed: '用户用量排行加载失败，请重试。',
+        retry: '重新加载',
         columns: {
           user: '用户',
           requests: '请求数',

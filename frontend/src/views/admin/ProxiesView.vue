@@ -1,10 +1,17 @@
 <template>
-  <AppLayout>
+  <AppLayout variant="home-clay">
     <TablePageLayout>
+      <template #header>
+        <AdminPageHeader
+          :title="t('admin.proxies.title')"
+          :description="t('admin.proxies.description')"
+        />
+      </template>
+
       <template #filters>
-        <div class="flex flex-wrap items-center gap-3">
-          <!-- Left: Search + Filters -->
-          <div class="relative w-full sm:w-64">
+        <div class="proxy-toolbar">
+          <!-- Search stays visible at every viewport size. -->
+          <div class="proxy-search relative">
             <Icon
               name="search"
               size="md"
@@ -19,67 +26,128 @@
             />
           </div>
 
-          <div class="w-full sm:w-40">
-            <Select
-              v-model="filters.protocol"
-              :options="protocolOptions"
-              :placeholder="t('admin.proxies.allProtocols')"
-              @change="loadProxies"
-            />
-          </div>
-          <div class="w-full sm:w-36">
-            <Select
-              v-model="filters.status"
-              :options="statusOptions"
-              :placeholder="t('admin.proxies.allStatus')"
-              @change="loadProxies"
-            />
+          <button
+            type="button"
+            class="btn btn-secondary proxy-filter-toggle proxy-touch-target"
+            data-testid="proxy-filter-toggle"
+            :aria-expanded="secondaryFiltersOpen"
+            aria-controls="proxy-secondary-filters"
+            @click="secondaryFiltersOpen = !secondaryFiltersOpen"
+          >
+            <Icon name="filter" size="md" aria-hidden="true" />
+            <span>{{ t('common.filter') }}</span>
+            <span
+              v-if="activeSecondaryFilterCount > 0"
+              class="proxy-filter-count"
+              aria-hidden="true"
+            >{{ activeSecondaryFilterCount }}</span>
+          </button>
+
+          <div
+            id="proxy-secondary-filters"
+            class="proxy-secondary-filters"
+            :class="{ 'proxy-secondary-filters--open': secondaryFiltersOpen }"
+          >
+            <div class="proxy-secondary-filter proxy-secondary-filter--protocol">
+              <Select
+                v-model="filters.protocol"
+                :options="protocolOptions"
+                :placeholder="t('admin.proxies.allProtocols')"
+                @change="handleFilterChange"
+              />
+            </div>
+            <div class="proxy-secondary-filter proxy-secondary-filter--status">
+              <Select
+                v-model="filters.status"
+                :options="statusOptions"
+                :placeholder="t('admin.proxies.allStatus')"
+                @change="handleFilterChange"
+              />
+            </div>
+            <div class="proxy-secondary-filter proxy-secondary-filter--health">
+              <Select
+                v-model="filters.health"
+                :options="healthOptions"
+                :placeholder="t('admin.proxies.healthAll')"
+                @change="handleFilterChange"
+              />
+            </div>
           </div>
 
-          <!-- Right: All action buttons -->
-          <div class="flex flex-1 flex-wrap items-center justify-end gap-2">
+          <div class="proxy-toolbar-actions">
             <button
+              type="button"
               @click="loadProxies"
               :disabled="loading"
-              class="btn btn-secondary"
+              class="btn btn-secondary proxy-icon-action proxy-touch-target"
               :title="t('common.refresh')"
+              :aria-label="t('common.refresh')"
             >
               <Icon name="refresh" size="md" :class="loading ? 'animate-spin' : ''" />
             </button>
+
             <button
-              @click="handleBatchTest"
-              :disabled="batchTesting || loading"
-              class="btn btn-secondary"
-              :title="t('admin.proxies.testConnection')"
+              type="button"
+              class="btn btn-secondary proxy-more-actions-toggle proxy-touch-target"
+              data-testid="proxy-more-actions-toggle"
+              :title="t('common.more')"
+              :aria-label="t('common.more')"
+              :aria-expanded="secondaryActionsOpen"
+              aria-controls="proxy-secondary-actions"
+              @click="secondaryActionsOpen = !secondaryActionsOpen"
             >
-              <Icon name="play" size="md" class="mr-2" />
-              {{ t('admin.proxies.testConnection') }}
+              <Icon name="more" size="md" aria-hidden="true" />
             </button>
+
+            <div
+              id="proxy-secondary-actions"
+              class="proxy-secondary-actions"
+              :class="{ 'proxy-secondary-actions--open': secondaryActionsOpen }"
+            >
+              <button
+                type="button"
+                @click="handleBatchTest"
+                :disabled="batchTesting || loading"
+                class="btn btn-secondary"
+                :title="t('admin.proxies.testConnection')"
+              >
+                <Icon name="play" size="md" class="mr-2" />
+                {{ t('admin.proxies.testConnection') }}
+              </button>
+              <button
+                type="button"
+                @click="handleBatchQualityCheck"
+                :disabled="batchQualityChecking || loading"
+                class="btn btn-secondary"
+                :title="t('admin.proxies.batchQualityCheck')"
+              >
+                <Icon name="shield" size="md" class="mr-2" :class="batchQualityChecking ? 'animate-pulse' : ''" />
+                {{ t('admin.proxies.batchQualityCheck') }}
+              </button>
+              <button
+                type="button"
+                @click="openBatchDelete"
+                :disabled="selectedCount === 0"
+                class="btn btn-danger"
+                :title="t('admin.proxies.batchDeleteAction')"
+              >
+                <Icon name="trash" size="md" class="mr-2" />
+                {{ t('admin.proxies.batchDeleteAction') }}
+              </button>
+              <button type="button" @click="showImportData = true" class="btn btn-secondary">
+                {{ t('admin.proxies.dataImport') }}
+              </button>
+              <button type="button" @click="showExportDataDialog = true" class="btn btn-secondary">
+                {{ selectedCount > 0 ? t('admin.proxies.dataExportSelected') : t('admin.proxies.dataExport') }}
+              </button>
+            </div>
+
             <button
-              @click="handleBatchQualityCheck"
-              :disabled="batchQualityChecking || loading"
-              class="btn btn-secondary"
-              :title="t('admin.proxies.batchQualityCheck')"
+              type="button"
+              data-testid="proxy-create-action"
+              @click="showCreateModal = true"
+              class="btn btn-primary proxy-create-action proxy-touch-target"
             >
-              <Icon name="shield" size="md" class="mr-2" :class="batchQualityChecking ? 'animate-pulse' : ''" />
-              {{ t('admin.proxies.batchQualityCheck') }}
-            </button>
-            <button
-              @click="openBatchDelete"
-              :disabled="selectedCount === 0"
-              class="btn btn-danger"
-              :title="t('admin.proxies.batchDeleteAction')"
-            >
-              <Icon name="trash" size="md" class="mr-2" />
-              {{ t('admin.proxies.batchDeleteAction') }}
-            </button>
-            <button @click="showImportData = true" class="btn btn-secondary">
-              {{ t('admin.proxies.dataImport') }}
-            </button>
-            <button @click="showExportDataDialog = true" class="btn btn-secondary">
-              {{ selectedCount > 0 ? t('admin.proxies.dataExportSelected') : t('admin.proxies.dataExport') }}
-            </button>
-            <button @click="showCreateModal = true" class="btn btn-primary">
               <Icon name="plus" size="md" class="mr-2" />
               {{ t('admin.proxies.createProxy') }}
             </button>
@@ -96,6 +164,8 @@
           :server-side-sort="true"
           default-sort-key="id"
           default-sort-order="desc"
+          mobile-primary-key="name"
+          :mobile-visible-keys="mobileVisibleKeys"
           @sort="handleSort"
         >
           <template #header-select>
@@ -118,8 +188,12 @@
             />
           </template>
 
-          <template #cell-name="{ value }">
-            <span class="font-medium text-gray-900 dark:text-white">{{ value }}</span>
+          <template #cell-name="{ row, value }">
+            <span
+              :id="`proxy-row-${row.id}`"
+              class="rounded px-1 py-0.5 font-medium text-gray-900 dark:text-white"
+              :class="{ 'bg-primary-100 text-primary-800 ring-2 ring-primary-300 dark:bg-primary-900/30 dark:text-primary-200': focusedProxyId === row.id }"
+            >{{ value }}</span>
           </template>
 
           <template #cell-protocol="{ value }">
@@ -268,77 +342,106 @@
           </template>
 
           <template #cell-actions="{ row }">
-            <div class="flex items-center gap-1">
+            <div
+              class="proxy-row-actions"
+              :class="{ 'proxy-row-actions--open': expandedProxyActionIds.has(row.id) }"
+              :data-testid="`proxy-row-actions-${row.id}`"
+            >
               <button
-                @click="handleTestConnection(row)"
-                :disabled="testingProxyIds.has(row.id)"
-                class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-emerald-50 hover:text-emerald-600 disabled:cursor-not-allowed disabled:opacity-50 dark:hover:bg-emerald-900/20 dark:hover:text-emerald-400"
-              >
-                <svg
-                  v-if="testingProxyIds.has(row.id)"
-                  class="h-4 w-4 animate-spin"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                >
-                  <circle
-                    class="opacity-25"
-                    cx="12"
-                    cy="12"
-                    r="10"
-                    stroke="currentColor"
-                    stroke-width="4"
-                  ></circle>
-                  <path
-                    class="opacity-75"
-                    fill="currentColor"
-                    d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-                  ></path>
-                </svg>
-                <Icon v-else name="checkCircle" size="sm" />
-                <span class="text-xs">{{ t('admin.proxies.testConnection') }}</span>
-              </button>
-              <button
-                @click="handleQualityCheck(row)"
-                :disabled="qualityCheckingProxyIds.has(row.id)"
-                class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-blue-50 hover:text-blue-600 disabled:cursor-not-allowed disabled:opacity-50 dark:hover:bg-blue-900/20 dark:hover:text-blue-400"
-              >
-                <svg
-                  v-if="qualityCheckingProxyIds.has(row.id)"
-                  class="h-4 w-4 animate-spin"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                >
-                  <circle
-                    class="opacity-25"
-                    cx="12"
-                    cy="12"
-                    r="10"
-                    stroke="currentColor"
-                    stroke-width="4"
-                  ></circle>
-                  <path
-                    class="opacity-75"
-                    fill="currentColor"
-                    d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-                  ></path>
-                </svg>
-                <Icon v-else name="shield" size="sm" />
-                <span class="text-xs">{{ t('admin.proxies.qualityCheck') }}</span>
-              </button>
-              <button
+                type="button"
                 @click="handleEdit(row)"
-                class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-gray-100 hover:text-primary-600 dark:hover:bg-dark-700 dark:hover:text-primary-400"
+                class="proxy-row-edit-action flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-gray-100 hover:text-primary-600 dark:hover:bg-dark-700 dark:hover:text-primary-400"
               >
                 <Icon name="edit" size="sm" />
                 <span class="text-xs">{{ t('common.edit') }}</span>
               </button>
+
               <button
-                @click="handleDelete(row)"
-                class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-900/20 dark:hover:text-red-400"
+                type="button"
+                class="proxy-row-more-toggle flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-gray-100 hover:text-primary-600 dark:hover:bg-dark-700 dark:hover:text-primary-400"
+                :data-testid="`proxy-row-more-${row.id}`"
+                :title="t('common.more')"
+                :aria-label="t('common.more')"
+                :aria-expanded="expandedProxyActionIds.has(row.id)"
+                :aria-controls="`proxy-row-secondary-actions-${row.id}`"
+                @click="toggleProxyRowActions(row.id)"
               >
-                <Icon name="trash" size="sm" />
-                <span class="text-xs">{{ t('common.delete') }}</span>
+                <Icon name="more" size="sm" aria-hidden="true" />
+                <span class="text-xs">{{ t('common.more') }}</span>
               </button>
+
+              <div
+                :id="`proxy-row-secondary-actions-${row.id}`"
+                class="proxy-row-secondary-actions"
+                :class="{ 'proxy-row-secondary-actions--open': expandedProxyActionIds.has(row.id) }"
+              >
+                <button
+                  type="button"
+                  @click="handleTestConnection(row)"
+                  :disabled="testingProxyIds.has(row.id)"
+                  class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-emerald-50 hover:text-emerald-600 disabled:cursor-not-allowed disabled:opacity-50 dark:hover:bg-emerald-900/20 dark:hover:text-emerald-400"
+                >
+                  <svg
+                    v-if="testingProxyIds.has(row.id)"
+                    class="h-4 w-4 animate-spin"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                  >
+                    <circle
+                      class="opacity-25"
+                      cx="12"
+                      cy="12"
+                      r="10"
+                      stroke="currentColor"
+                      stroke-width="4"
+                    ></circle>
+                    <path
+                      class="opacity-75"
+                      fill="currentColor"
+                      d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                    ></path>
+                  </svg>
+                  <Icon v-else name="checkCircle" size="sm" />
+                  <span class="text-xs">{{ t('admin.proxies.testConnection') }}</span>
+                </button>
+                <button
+                  type="button"
+                  @click="handleQualityCheck(row)"
+                  :disabled="qualityCheckingProxyIds.has(row.id)"
+                  class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-blue-50 hover:text-blue-600 disabled:cursor-not-allowed disabled:opacity-50 dark:hover:bg-blue-900/20 dark:hover:text-blue-400"
+                >
+                  <svg
+                    v-if="qualityCheckingProxyIds.has(row.id)"
+                    class="h-4 w-4 animate-spin"
+                    fill="none"
+                    viewBox="0 0 24 24"
+                  >
+                    <circle
+                      class="opacity-25"
+                      cx="12"
+                      cy="12"
+                      r="10"
+                      stroke="currentColor"
+                      stroke-width="4"
+                    ></circle>
+                    <path
+                      class="opacity-75"
+                      fill="currentColor"
+                      d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
+                    ></path>
+                  </svg>
+                  <Icon v-else name="shield" size="sm" />
+                  <span class="text-xs">{{ t('admin.proxies.qualityCheck') }}</span>
+                </button>
+                <button
+                  type="button"
+                  @click="handleDelete(row)"
+                  class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-900/20 dark:hover:text-red-400"
+                >
+                  <Icon name="trash" size="sm" />
+                  <span class="text-xs">{{ t('common.delete') }}</span>
+                </button>
+              </div>
             </div>
           </template>
 
@@ -346,8 +449,6 @@
             <EmptyState
               :title="t('admin.proxies.noProxiesYet')"
               :description="t('admin.proxies.createFirstProxy')"
-              :action-text="t('admin.proxies.createProxy')"
-              @action="showCreateModal = true"
             />
           </template>
         </DataTable>
@@ -964,13 +1065,15 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed, onMounted, onUnmounted } from 'vue'
+import { ref, reactive, computed, nextTick, onMounted, onUnmounted, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { useRoute, useRouter } from 'vue-router'
 import { useAppStore } from '@/stores/app'
 import { adminAPI } from '@/api/admin'
 import type { Proxy, ProxyAccountSummary, ProxyProtocol, ProxyQualityCheckResult } from '@/types'
 import type { Column } from '@/components/common/types'
 import AppLayout from '@/components/layout/AppLayout.vue'
+import AdminPageHeader from '@/components/layout/AdminPageHeader.vue'
 import TablePageLayout from '@/components/layout/TablePageLayout.vue'
 import DataTable from '@/components/common/DataTable.vue'
 import Pagination from '@/components/common/Pagination.vue'
@@ -990,6 +1093,8 @@ import { formatDateTime } from '@/utils/format'
 import { proxyExpiryBadgeClass, proxyExpiryLabelKey } from '@/utils/proxyExpiry'
 
 const { t } = useI18n()
+const route = useRoute()
+const router = useRouter()
 const appStore = useAppStore()
 const { copyToClipboard } = useClipboard()
 
@@ -1008,6 +1113,8 @@ const columns = computed<Column[]>(() => [
   { key: 'actions', label: t('admin.proxies.columns.actions'), sortable: false }
 ])
 
+const mobileVisibleKeys = ['name', 'protocol', 'address', 'account_count', 'status']
+
 // Filter options
 const protocolOptions = computed(() => [
   { value: '', label: t('admin.proxies.allProtocols') },
@@ -1022,6 +1129,17 @@ const statusOptions = computed(() => [
   { value: 'active', label: t('admin.accounts.status.active') },
   { value: 'inactive', label: t('admin.accounts.status.inactive') },
   { value: 'expired', label: t('admin.proxies.expired') }
+])
+
+const healthOptions = computed(() => [
+  { value: '', label: t('admin.proxies.healthAll') },
+  { value: 'healthy', label: t('admin.proxies.healthHealthy') },
+  { value: 'degraded', label: t('admin.proxies.healthDegraded') },
+  { value: 'suspected_restricted', label: t('admin.proxies.healthRestricted') },
+  { value: 'failed', label: t('admin.proxies.healthFailed') },
+  { value: 'unknown', label: t('admin.proxies.healthUnknown') },
+  { value: 'stale', label: t('admin.proxies.healthStale') },
+  { value: 'expiring', label: t('admin.proxies.healthExpiring') }
 ])
 
 // Form options
@@ -1044,8 +1162,15 @@ const loading = ref(false)
 const searchQuery = ref('')
 const filters = reactive({
   protocol: '',
-  status: ''
+  status: '',
+  health: ''
 })
+const secondaryFiltersOpen = ref(false)
+const secondaryActionsOpen = ref(false)
+const activeSecondaryFilterCount = computed(() =>
+  [filters.protocol, filters.status, filters.health].filter(Boolean).length
+)
+const focusedProxyId = ref<number | null>(null)
 const pagination = reactive({
   page: 1,
   page_size: getPersistedPageSize(),
@@ -1071,6 +1196,7 @@ const submitting = ref(false)
 const exportingData = ref(false)
 const testingProxyIds = ref<Set<number>>(new Set())
 const qualityCheckingProxyIds = ref<Set<number>>(new Set())
+const expandedProxyActionIds = reactive(new Set<number>())
 const batchTesting = ref(false)
 const batchQualityChecking = ref(false)
 const proxyTableRef = ref<HTMLElement | null>(null)
@@ -1158,6 +1284,101 @@ const backupProxyOptions = (excludeId?: number) =>
     .map(p => ({ label: `${p.name} (${p.host}:${p.port})`, value: p.id }))
 
 let abortController: AbortController | null = null
+let syncingProxyRoute = false
+let proxyRouteReady = false
+const allowedProtocols = new Set(['http', 'https', 'socks5', 'socks5h'])
+const allowedProxyStatuses = new Set(['active', 'inactive', 'expired'])
+const allowedProxyHealth = new Set(['healthy', 'degraded', 'suspected_restricted', 'failed', 'unknown', 'stale', 'expiring'])
+
+const proxyRouteString = (key: string): string => {
+  const value = route.query[key]
+  if (typeof value === 'string') return value.trim()
+  if (Array.isArray(value) && typeof value[0] === 'string') return value[0].trim()
+  return ''
+}
+
+const applyProxyRouteFilters = async () => {
+  const nextQuery = { ...route.query }
+  let normalized = false
+
+  const protocol = proxyRouteString('protocol')
+  if (protocol && !allowedProtocols.has(protocol)) {
+    delete nextQuery.protocol
+    normalized = true
+  }
+  filters.protocol = allowedProtocols.has(protocol) ? protocol : ''
+
+  const status = proxyRouteString('status')
+  if (status && !allowedProxyStatuses.has(status)) {
+    delete nextQuery.status
+    normalized = true
+  }
+  filters.status = allowedProxyStatuses.has(status) ? status : ''
+
+  const health = proxyRouteString('health')
+  if (health && !allowedProxyHealth.has(health)) {
+    delete nextQuery.health
+    normalized = true
+  }
+  filters.health = allowedProxyHealth.has(health) ? health : ''
+
+  const focusRaw = proxyRouteString('focus_id')
+  const focusID = Number.parseInt(focusRaw, 10)
+  focusedProxyId.value = Number.isFinite(focusID) && focusID > 0 ? focusID : null
+  if (focusRaw && focusedProxyId.value === null) {
+    delete nextQuery.focus_id
+    delete nextQuery.open
+    normalized = true
+  }
+
+  const open = proxyRouteString('open')
+  if (open && open !== 'health') {
+    delete nextQuery.open
+    normalized = true
+  }
+
+  searchQuery.value = focusedProxyId.value === null ? proxyRouteString('search') : ''
+
+  if (normalized) {
+    syncingProxyRoute = true
+    try {
+      await router.replace({ query: nextQuery })
+    } finally {
+      syncingProxyRoute = false
+    }
+  }
+}
+
+const syncProxyFiltersToRoute = async () => {
+  if (syncingProxyRoute) return
+  const nextQuery: Record<string, any> = { ...route.query }
+  for (const key of ['protocol', 'status', 'health', 'focus_id', 'open', 'search']) delete nextQuery[key]
+
+  if (filters.protocol) nextQuery.protocol = filters.protocol
+  if (filters.status) nextQuery.status = filters.status
+  if (filters.health) nextQuery.health = filters.health
+
+  const search = searchQuery.value.trim()
+  if (focusedProxyId.value !== null && !search) {
+    nextQuery.focus_id = String(focusedProxyId.value)
+    nextQuery.open = 'health'
+  } else {
+    focusedProxyId.value = null
+    if (search) nextQuery.search = search
+  }
+
+  const currentKeys = Object.keys(route.query)
+  const nextKeys = Object.keys(nextQuery)
+  const same = currentKeys.length === nextKeys.length && nextKeys.every((key) => String(route.query[key] ?? '') === String(nextQuery[key] ?? ''))
+  if (same) return
+
+  syncingProxyRoute = true
+  try {
+    await router.replace({ query: nextQuery })
+  } finally {
+    syncingProxyRoute = false
+  }
+}
 
 const isAbortError = (error: unknown) => {
   if (!error || typeof error !== 'object') return false
@@ -1182,7 +1403,8 @@ const toggleSelectAllVisible = (event: Event) => {
 const buildProxyQueryFilters = () => ({
   protocol: filters.protocol || undefined,
   status: (filters.status || undefined) as 'active' | 'inactive' | 'expired' | undefined,
-  search: searchQuery.value || undefined,
+  health: filters.health || undefined,
+  search: focusedProxyId.value !== null ? `#${focusedProxyId.value}` : searchQuery.value || undefined,
   sort_by: sortState.sort_by,
   sort_order: sortState.sort_order
 })
@@ -1207,6 +1429,10 @@ const loadProxies = async () => {
     proxies.value = response.items
     pagination.total = response.total
     pagination.pages = response.pages
+    if (focusedProxyId.value !== null) {
+      await nextTick()
+      document.getElementById(`proxy-row-${focusedProxyId.value}`)?.scrollIntoView({ block: 'center' })
+    }
   } catch (error) {
     if (isAbortError(error)) {
       return
@@ -1224,10 +1450,26 @@ const loadProxies = async () => {
 let searchTimeout: ReturnType<typeof setTimeout>
 const handleSearch = () => {
   clearTimeout(searchTimeout)
+  focusedProxyId.value = null
   searchTimeout = setTimeout(() => {
     pagination.page = 1
+    void syncProxyFiltersToRoute()
     loadProxies()
   }, 300)
+}
+
+const handleFilterChange = () => {
+  pagination.page = 1
+  void syncProxyFiltersToRoute()
+  loadProxies()
+}
+
+const toggleProxyRowActions = (proxyID: number) => {
+  if (expandedProxyActionIds.has(proxyID)) {
+    expandedProxyActionIds.delete(proxyID)
+  } else {
+    expandedProxyActionIds.add(proxyID)
+  }
 }
 
 const handlePageChange = (page: number) => {
@@ -2053,8 +2295,20 @@ function closeCopyMenu() {
   copyMenuProxyId.value = null
 }
 
-onMounted(() => {
-  loadProxies()
+watch(
+  () => route.query,
+  async () => {
+    if (!proxyRouteReady || syncingProxyRoute) return
+    await applyProxyRouteFilters()
+    pagination.page = 1
+    await loadProxies()
+  }
+)
+
+onMounted(async () => {
+  await applyProxyRouteFilters()
+  proxyRouteReady = true
+  await loadProxies()
   loadBackupProxyOptions()
   document.addEventListener('click', closeCopyMenu)
 })
@@ -2065,3 +2319,219 @@ onUnmounted(() => {
   document.removeEventListener('click', closeCopyMenu)
 })
 </script>
+
+<style scoped>
+.proxy-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.proxy-search {
+  width: 16rem;
+}
+
+.proxy-filter-toggle,
+.proxy-more-actions-toggle {
+  display: none;
+}
+
+.proxy-secondary-filters,
+.proxy-secondary-actions,
+.proxy-toolbar-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.proxy-secondary-filter--protocol {
+  width: 10rem;
+}
+
+.proxy-secondary-filter--status {
+  width: 9rem;
+}
+
+.proxy-secondary-filter--health {
+  width: 11rem;
+}
+
+.proxy-toolbar-actions {
+  min-width: 0;
+  flex: 1 1 auto;
+  justify-content: flex-end;
+}
+
+.proxy-touch-target {
+  min-height: 44px;
+}
+
+.proxy-icon-action,
+.proxy-more-actions-toggle {
+  min-width: 44px;
+  padding-inline: 0.75rem;
+}
+
+.proxy-filter-count {
+  display: inline-flex;
+  min-width: 1.25rem;
+  height: 1.25rem;
+  align-items: center;
+  justify-content: center;
+  border-radius: 9999px;
+  background: var(--lx-clay-accent-soft);
+  padding-inline: 0.35rem;
+  color: var(--lx-clay-accent-deep);
+  font-size: 0.6875rem;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.proxy-row-actions,
+.proxy-row-secondary-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.proxy-row-more-toggle {
+  display: none;
+}
+
+@media (max-width: 1023px) {
+  .proxy-toolbar {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+  }
+
+  .proxy-search {
+    min-width: 0;
+    width: 100%;
+  }
+
+  .proxy-filter-toggle {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    white-space: nowrap;
+  }
+
+  .proxy-secondary-filters {
+    display: none;
+    grid-column: 1 / -1;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 0.75rem;
+    border: 0;
+    border-radius: var(--lx-clay-radius-control);
+    background: var(--lx-clay-recessed);
+    box-shadow: var(--lx-clay-shadow-inset);
+    padding: 0.75rem;
+  }
+
+  .proxy-secondary-filters--open {
+    display: grid;
+  }
+
+  .proxy-secondary-filter {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .proxy-toolbar-actions {
+    grid-column: 1 / -1;
+    width: 100%;
+  }
+
+  .proxy-create-action {
+    order: 1;
+    min-width: 10rem;
+    flex: 1 1 auto;
+    justify-content: center;
+  }
+
+  .proxy-icon-action {
+    order: 2;
+  }
+
+  .proxy-more-actions-toggle {
+    order: 3;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .proxy-secondary-actions {
+    order: 4;
+    display: none;
+    flex: 1 0 100%;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.5rem;
+    border: 0;
+    border-radius: var(--lx-clay-radius-control);
+    background: var(--lx-clay-recessed);
+    box-shadow: var(--lx-clay-shadow-inset);
+    padding: 0.75rem;
+  }
+
+  .proxy-secondary-actions--open {
+    display: grid;
+  }
+
+  .proxy-secondary-actions .btn {
+    min-height: 44px;
+    justify-content: center;
+  }
+
+  .proxy-row-actions {
+    width: 100%;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+  }
+
+  .proxy-row-edit-action {
+    min-height: 44px;
+    flex: 1 1 auto;
+    justify-content: center;
+    background: var(--lx-clay-accent-soft);
+    color: var(--lx-clay-accent-deep);
+  }
+
+  .proxy-row-more-toggle {
+    display: flex;
+    min-width: 44px;
+    min-height: 44px;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .proxy-row-secondary-actions {
+    display: none;
+    flex: 1 0 100%;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 0.5rem;
+    border-top: 1px solid var(--lx-clay-border);
+    padding-top: 0.5rem;
+  }
+
+  .proxy-row-secondary-actions--open {
+    display: grid;
+  }
+
+  .proxy-row-secondary-actions > button {
+    min-height: 44px;
+    justify-content: center;
+  }
+}
+
+@media (max-width: 639px) {
+  .proxy-secondary-filters,
+  .proxy-secondary-actions {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+</style>

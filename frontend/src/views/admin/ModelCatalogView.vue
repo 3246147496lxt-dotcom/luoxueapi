@@ -1,6 +1,17 @@
 <template>
-  <AppLayout>
+  <AppLayout variant="home-clay">
     <TablePageLayout>
+      <template #header>
+        <AdminPageHeader
+          :title="t('admin.modelCatalog.title')"
+          :description="t('admin.modelCatalog.description')"
+        >
+          <template #meta>
+            <span>{{ t('admin.modelCatalog.resultCount', { count: total }) }}</span>
+          </template>
+        </AdminPageHeader>
+      </template>
+
       <template #actions>
         <div
           class="flex flex-col gap-4 rounded-2xl border border-gray-200 bg-white p-5 sm:flex-row sm:items-center sm:justify-between dark:border-dark-700 dark:bg-dark-800"
@@ -64,9 +75,6 @@
             class="w-full sm:w-44"
             @change="loadModels"
           />
-          <p class="text-xs text-gray-500 sm:ml-auto dark:text-dark-400">
-            {{ t('admin.modelCatalog.resultCount', { count: total }) }}
-          </p>
         </div>
       </template>
 
@@ -234,7 +242,7 @@
         </div>
 
         <div
-          class="rounded-xl border border-primary-100 bg-primary-50/60 px-4 py-3 text-sm text-primary-900 dark:border-primary-900/50 dark:bg-primary-900/20 dark:text-primary-100"
+          class="info-surface rounded-xl border px-4 py-3 text-sm"
         >
           {{ t('admin.modelCatalog.candidatesHint') }}
         </div>
@@ -601,6 +609,7 @@ import { extractApiErrorMessage } from '@/utils/apiError'
 import { formatDateTime } from '@/utils/format'
 import type { Column } from '@/components/common/types'
 import AppLayout from '@/components/layout/AppLayout.vue'
+import AdminPageHeader from '@/components/layout/AdminPageHeader.vue'
 import TablePageLayout from '@/components/layout/TablePageLayout.vue'
 import DataTable from '@/components/common/DataTable.vue'
 import BaseDialog from '@/components/common/BaseDialog.vue'

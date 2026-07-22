@@ -86,6 +86,13 @@ temp/
 .cache/
 .dev/
 .serena/
+.playwright-cli/
+.pnpm-store/
+.npm-cache/
+.impeccable/
+.superdesign/init/
+.superdesign/tmp/
+design-qa.md
 
 # ===================
 # 构建产物

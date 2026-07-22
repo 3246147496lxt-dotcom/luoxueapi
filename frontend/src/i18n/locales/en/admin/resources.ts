@@ -78,6 +78,14 @@ export default {
       searchProxies: 'Search proxies...',
       allProtocols: 'All Protocols',
       allStatus: 'All Status',
+      healthAll: 'All health states',
+      healthHealthy: 'Healthy',
+      healthDegraded: 'Degraded',
+      healthRestricted: 'Suspected restricted',
+      healthFailed: 'Connection failed',
+      healthUnknown: 'Not checked',
+      healthStale: 'Stale data',
+      healthExpiring: 'Expiring soon',
       protocols: {
         http: 'HTTP',
         https: 'HTTPS',
@@ -551,6 +559,8 @@ export default {
         subtitle: 'Per-user token usage for the current filters and time range',
         rowHint: "Click to view this user's usage details",
         userCount: '{count} users',
+        loadFailed: 'Failed to load the user usage ranking. Try again.',
+        retry: 'Reload',
         columns: {
           user: 'User',
           requests: 'Requests',

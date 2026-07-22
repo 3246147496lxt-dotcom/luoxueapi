@@ -1,0 +1,286 @@
+/*
+ * Luoxue Snow Clay — canonical runtime design tokens.
+ *
+ * This is the only source of truth for shared product colors, typography,
+ * radii and elevation. The legacy teal primary palette (#14b8a6 / #0f766e)
+ * is not part of the active design language. Ice blue remains a scoped
+ * Luoxue brand/information color; violet owns primary interaction.
+ */
+
+@font-face {
+  font-family: "DM Sans";
+  src: url("/fonts/dm-sans-latin-variable.woff2") format("woff2");
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: Nunito;
+  src: url("/fonts/nunito-latin-variable.woff2") format("woff2");
+  font-style: normal;
+  font-weight: 200 1000;
+  font-display: swap;
+}
+
+:root {
+  /* Typography */
+  --lx-clay-font-ui: "DM Sans", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+  --lx-clay-font-display: Nunito, "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+  --lx-clay-font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  --lx-clay-accent-deepest: #5b21b6;
+
+  /* Shape */
+  --lx-clay-radius-overview: 26px;
+  --lx-clay-radius-surface: 18px;
+  --lx-clay-radius-form: 17px;
+  --lx-clay-radius-table: 14px;
+  --lx-clay-radius-ops: 12px;
+  --lx-clay-radius-control: 13px;
+  --lx-clay-radius-button: 14px;
+  --lx-clay-radius-overlay: 22px;
+
+  /* Stable light and dark ramps. Components with their own theme switch can use these directly. */
+  --lx-clay-light-canvas: #f4f1fa;
+  --lx-clay-light-surface: #ffffff;
+  --lx-clay-light-surface-soft: rgba(255, 255, 255, 0.66);
+  --lx-clay-light-surface-subtle: rgba(255, 255, 255, 0.58);
+  --lx-clay-light-surface-elevated: rgba(255, 255, 255, 0.76);
+  --lx-clay-light-overlay-surface-soft: rgba(255, 255, 255, 0.74);
+  --lx-clay-light-sidebar: rgba(255, 255, 255, 0.82);
+  --lx-clay-light-recessed: #efebf5;
+  --lx-clay-light-recessed-strong: #e8e2f0;
+  --lx-clay-light-text: #332f3a;
+  --lx-clay-light-text-secondary: #635f69;
+  --lx-clay-light-text-muted: #756e80;
+  --lx-clay-light-text-subtle: #8b8494;
+  --lx-clay-light-border: rgba(91, 80, 112, 0.14);
+  --lx-clay-light-border-strong: rgba(91, 80, 112, 0.23);
+  --lx-clay-light-accent: #7c3aed;
+  --lx-clay-light-accent-deep: #5b21b6;
+  --lx-clay-light-accent-highlight: #a78bfa;
+  --lx-clay-light-accent-gradient-start: #8b5cf6;
+  --lx-clay-light-accent-gradient-transparent: rgba(139, 92, 246, 0);
+  --lx-clay-light-accent-soft: rgba(124, 58, 237, 0.1);
+  --lx-clay-light-info: #0b8bed;
+  --lx-clay-light-info-deep: #075985;
+  --lx-clay-light-info-soft: rgba(11, 139, 237, 0.1);
+  --lx-clay-light-success: #047857;
+  --lx-clay-light-success-text: #047857;
+  --lx-clay-light-success-bright: #10b981;
+  --lx-clay-light-success-soft: rgba(16, 185, 129, 0.11);
+  --lx-clay-light-warning: #b45309;
+  --lx-clay-light-warning-bright: #f59e0b;
+  --lx-clay-light-warning-soft: rgba(245, 158, 11, 0.12);
+  --lx-clay-light-danger: #c2415b;
+  --lx-clay-light-danger-soft: rgba(220, 76, 100, 0.11);
+  --lx-clay-light-pink: #db2777;
+
+  --lx-clay-dark-canvas: #17131f;
+  --lx-clay-dark-surface: #251e2f;
+  --lx-clay-dark-surface-soft: rgba(255, 255, 255, 0.045);
+  --lx-clay-dark-surface-subtle: rgba(255, 255, 255, 0.035);
+  --lx-clay-dark-surface-elevated: rgba(39, 31, 50, 0.84);
+  --lx-clay-dark-overlay-surface-soft: rgba(255, 255, 255, 0.045);
+  --lx-clay-dark-sidebar: rgba(39, 31, 50, 0.88);
+  --lx-clay-dark-recessed: #120f18;
+  --lx-clay-dark-recessed-strong: #30263b;
+  --lx-clay-dark-text: #f8f5fc;
+  --lx-clay-dark-text-secondary: #c5bccf;
+  --lx-clay-dark-text-muted: #a89daf;
+  --lx-clay-dark-text-subtle: #94899f;
+  --lx-clay-dark-border: rgba(255, 255, 255, 0.11);
+  --lx-clay-dark-border-strong: rgba(255, 255, 255, 0.18);
+  --lx-clay-dark-accent: #a78bfa;
+  --lx-clay-dark-accent-deep: #7c3aed;
+  --lx-clay-dark-accent-highlight: #c4b5fd;
+  --lx-clay-dark-accent-gradient-start: #a78bfa;
+  --lx-clay-dark-accent-gradient-transparent: rgba(167, 139, 250, 0);
+  --lx-clay-dark-accent-soft: rgba(167, 139, 250, 0.14);
+  --lx-clay-dark-info: #38bdf8;
+  --lx-clay-dark-info-deep: #8dccff;
+  --lx-clay-dark-info-soft: rgba(56, 189, 248, 0.12);
+  --lx-clay-dark-success: #34d399;
+  --lx-clay-dark-success-text: #6ee7b7;
+  --lx-clay-dark-success-bright: #34d399;
+  --lx-clay-dark-success-soft: rgba(52, 211, 153, 0.11);
+  --lx-clay-dark-warning: #fbbf24;
+  --lx-clay-dark-warning-bright: #fbbf24;
+  --lx-clay-dark-warning-soft: rgba(251, 191, 36, 0.11);
+  --lx-clay-dark-danger: #fb7185;
+  --lx-clay-dark-danger-soft: rgba(251, 113, 133, 0.12);
+  --lx-clay-dark-pink: #f472b6;
+
+  /* Light elevation */
+  --lx-clay-light-shadow-surface: 0 15px 38px rgba(70, 55, 96, 0.085);
+  --lx-clay-light-shadow-flat: 0 1px 3px rgba(70, 55, 96, 0.09);
+  --lx-clay-light-shadow-form: 0 4px 14px rgba(70, 55, 96, 0.055);
+  --lx-clay-light-shadow-raised:
+    13px 13px 28px rgba(160, 150, 180, 0.14),
+    -8px -8px 20px rgba(255, 255, 255, 0.76);
+  --lx-clay-light-shadow-overview:
+    14px 14px 30px rgba(160, 150, 180, 0.17),
+    -9px -9px 22px rgba(255, 255, 255, 0.86),
+    inset 5px 5px 11px rgba(139, 92, 246, 0.025),
+    inset -5px -5px 11px rgba(255, 255, 255, 0.82);
+  --lx-clay-light-shadow-hero:
+    16px 16px 32px rgba(160, 150, 180, 0.2),
+    -10px -10px 24px rgba(255, 255, 255, 0.9),
+    inset 6px 6px 12px rgba(139, 92, 246, 0.03),
+    inset -6px -6px 12px rgba(255, 255, 255, 1);
+  --lx-clay-light-shadow-inset:
+    inset 6px 6px 13px rgba(91, 80, 112, 0.075),
+    inset -6px -6px 13px rgba(255, 255, 255, 0.72);
+  --lx-clay-light-shadow-overview-inset:
+    inset 7px 7px 15px rgba(91, 80, 112, 0.085),
+    inset -7px -7px 15px rgba(255, 255, 255, 0.74);
+  --lx-clay-light-shadow-primary: 0 10px 20px rgba(91, 33, 182, 0.22), inset 0 1px rgba(255, 255, 255, 0.2);
+  --lx-clay-light-shadow-overlay: 0 22px 60px rgba(48, 35, 70, 0.2);
+  --lx-clay-light-shadow-action:
+    12px 12px 24px rgba(139, 92, 246, 0.3),
+    -8px -8px 16px rgba(255, 255, 255, 0.4),
+    inset 4px 4px 8px rgba(255, 255, 255, 0.4),
+    inset -4px -4px 8px rgba(0, 0, 0, 0.1);
+  --lx-clay-light-shadow-action-hover:
+    16px 16px 32px rgba(139, 92, 246, 0.4),
+    -8px -8px 16px rgba(255, 255, 255, 0.4);
+  --lx-clay-light-shadow-recessed-deep:
+    inset 10px 10px 20px rgba(91, 80, 112, 0.1),
+    inset -10px -10px 20px rgba(255, 255, 255, 0.8);
+
+  /* Dark elevation */
+  --lx-clay-dark-shadow-surface: 0 16px 38px rgba(0, 0, 0, 0.2);
+  --lx-clay-dark-shadow-flat: 0 1px 3px rgba(0, 0, 0, 0.22);
+  --lx-clay-dark-shadow-form: 0 4px 16px rgba(0, 0, 0, 0.18);
+  --lx-clay-dark-shadow-raised:
+    13px 13px 28px rgba(0, 0, 0, 0.24),
+    -7px -7px 18px rgba(59, 48, 72, 0.32);
+  --lx-clay-dark-shadow-overview:
+    14px 14px 30px rgba(0, 0, 0, 0.26),
+    -8px -8px 20px rgba(59, 48, 72, 0.42),
+    inset 5px 5px 11px rgba(167, 139, 250, 0.025),
+    inset -5px -5px 11px rgba(0, 0, 0, 0.11);
+  --lx-clay-dark-shadow-hero:
+    16px 16px 32px rgba(0, 0, 0, 0.34),
+    -10px -10px 24px rgba(255, 255, 255, 0.025),
+    inset 6px 6px 12px rgba(255, 255, 255, 0.02);
+  --lx-clay-dark-shadow-inset:
+    inset 6px 6px 13px rgba(0, 0, 0, 0.24),
+    inset -6px -6px 13px rgba(55, 45, 67, 0.18);
+  --lx-clay-dark-shadow-overview-inset:
+    inset 7px 7px 15px rgba(0, 0, 0, 0.26),
+    inset -7px -7px 15px rgba(55, 45, 67, 0.2);
+  --lx-clay-dark-shadow-primary: 0 10px 20px rgba(0, 0, 0, 0.28), inset 0 1px rgba(255, 255, 255, 0.12);
+  --lx-clay-dark-shadow-overlay: 0 24px 68px rgba(0, 0, 0, 0.42);
+  --lx-clay-dark-shadow-action:
+    12px 12px 24px rgba(0, 0, 0, 0.32),
+    -8px -8px 16px rgba(255, 255, 255, 0.025),
+    inset 4px 4px 8px rgba(255, 255, 255, 0.08),
+    inset -4px -4px 8px rgba(0, 0, 0, 0.22);
+  --lx-clay-dark-shadow-action-hover: var(--lx-clay-dark-shadow-action);
+  --lx-clay-dark-shadow-recessed-deep:
+    inset 10px 10px 20px rgba(0, 0, 0, 0.34),
+    inset -10px -10px 20px rgba(255, 255, 255, 0.025);
+
+  /* Active theme aliases */
+  --lx-clay-canvas: var(--lx-clay-light-canvas);
+  --lx-clay-surface: var(--lx-clay-light-surface);
+  --lx-clay-surface-soft: var(--lx-clay-light-surface-soft);
+  --lx-clay-surface-subtle: var(--lx-clay-light-surface-subtle);
+  --lx-clay-surface-elevated: var(--lx-clay-light-surface-elevated);
+  --lx-clay-overlay-surface-soft: var(--lx-clay-light-overlay-surface-soft);
+  --lx-clay-sidebar: var(--lx-clay-light-sidebar);
+  --lx-clay-recessed: var(--lx-clay-light-recessed);
+  --lx-clay-recessed-strong: var(--lx-clay-light-recessed-strong);
+  --lx-clay-text: var(--lx-clay-light-text);
+  --lx-clay-text-secondary: var(--lx-clay-light-text-secondary);
+  --lx-clay-text-muted: var(--lx-clay-light-text-muted);
+  --lx-clay-text-subtle: var(--lx-clay-light-text-subtle);
+  --lx-clay-border: var(--lx-clay-light-border);
+  --lx-clay-border-strong: var(--lx-clay-light-border-strong);
+  --lx-clay-accent: var(--lx-clay-light-accent);
+  --lx-clay-accent-deep: var(--lx-clay-light-accent-deep);
+  --lx-clay-accent-highlight: var(--lx-clay-light-accent-highlight);
+  --lx-clay-accent-gradient-start: var(--lx-clay-light-accent-gradient-start);
+  --lx-clay-accent-gradient-transparent: var(--lx-clay-light-accent-gradient-transparent);
+  --lx-clay-accent-soft: var(--lx-clay-light-accent-soft);
+  --lx-clay-info: var(--lx-clay-light-info);
+  --lx-clay-info-deep: var(--lx-clay-light-info-deep);
+  --lx-clay-info-soft: var(--lx-clay-light-info-soft);
+  --lx-clay-success: var(--lx-clay-light-success);
+  --lx-clay-success-text: var(--lx-clay-light-success-text);
+  --lx-clay-success-bright: var(--lx-clay-light-success-bright);
+  --lx-clay-success-soft: var(--lx-clay-light-success-soft);
+  --lx-clay-warning: var(--lx-clay-light-warning);
+  --lx-clay-warning-bright: var(--lx-clay-light-warning-bright);
+  --lx-clay-warning-soft: var(--lx-clay-light-warning-soft);
+  --lx-clay-danger: var(--lx-clay-light-danger);
+  --lx-clay-danger-soft: var(--lx-clay-light-danger-soft);
+  --lx-clay-pink: var(--lx-clay-light-pink);
+  --lx-clay-on-accent: #ffffff;
+  --lx-clay-code-canvas: #120f18;
+  --lx-clay-code-surface: #251e2f;
+  --lx-clay-shadow-surface: var(--lx-clay-light-shadow-surface);
+  --lx-clay-shadow-flat: var(--lx-clay-light-shadow-flat);
+  --lx-clay-shadow-form: var(--lx-clay-light-shadow-form);
+  --lx-clay-shadow-raised: var(--lx-clay-light-shadow-raised);
+  --lx-clay-shadow-overview: var(--lx-clay-light-shadow-overview);
+  --lx-clay-shadow-hero: var(--lx-clay-light-shadow-hero);
+  --lx-clay-shadow-inset: var(--lx-clay-light-shadow-inset);
+  --lx-clay-shadow-overview-inset: var(--lx-clay-light-shadow-overview-inset);
+  --lx-clay-shadow-primary: var(--lx-clay-light-shadow-primary);
+  --lx-clay-shadow-overlay: var(--lx-clay-light-shadow-overlay);
+  --lx-clay-shadow-action: var(--lx-clay-light-shadow-action);
+  --lx-clay-shadow-action-hover: var(--lx-clay-light-shadow-action-hover);
+  --lx-clay-shadow-recessed-deep: var(--lx-clay-light-shadow-recessed-deep);
+}
+
+html.dark {
+  --lx-clay-canvas: var(--lx-clay-dark-canvas);
+  --lx-clay-surface: var(--lx-clay-dark-surface);
+  --lx-clay-surface-soft: var(--lx-clay-dark-surface-soft);
+  --lx-clay-surface-subtle: var(--lx-clay-dark-surface-subtle);
+  --lx-clay-surface-elevated: var(--lx-clay-dark-surface-elevated);
+  --lx-clay-overlay-surface-soft: var(--lx-clay-dark-overlay-surface-soft);
+  --lx-clay-sidebar: var(--lx-clay-dark-sidebar);
+  --lx-clay-recessed: var(--lx-clay-dark-recessed);
+  --lx-clay-recessed-strong: var(--lx-clay-dark-recessed-strong);
+  --lx-clay-text: var(--lx-clay-dark-text);
+  --lx-clay-text-secondary: var(--lx-clay-dark-text-secondary);
+  --lx-clay-text-muted: var(--lx-clay-dark-text-muted);
+  --lx-clay-text-subtle: var(--lx-clay-dark-text-subtle);
+  --lx-clay-border: var(--lx-clay-dark-border);
+  --lx-clay-border-strong: var(--lx-clay-dark-border-strong);
+  --lx-clay-accent: var(--lx-clay-dark-accent);
+  --lx-clay-accent-deep: var(--lx-clay-dark-accent-deep);
+  --lx-clay-accent-highlight: var(--lx-clay-dark-accent-highlight);
+  --lx-clay-accent-gradient-start: var(--lx-clay-dark-accent-gradient-start);
+  --lx-clay-accent-gradient-transparent: var(--lx-clay-dark-accent-gradient-transparent);
+  --lx-clay-accent-soft: var(--lx-clay-dark-accent-soft);
+  --lx-clay-info: var(--lx-clay-dark-info);
+  --lx-clay-info-deep: var(--lx-clay-dark-info-deep);
+  --lx-clay-info-soft: var(--lx-clay-dark-info-soft);
+  --lx-clay-success: var(--lx-clay-dark-success);
+  --lx-clay-success-text: var(--lx-clay-dark-success-text);
+  --lx-clay-success-bright: var(--lx-clay-dark-success-bright);
+  --lx-clay-success-soft: var(--lx-clay-dark-success-soft);
+  --lx-clay-warning: var(--lx-clay-dark-warning);
+  --lx-clay-warning-bright: var(--lx-clay-dark-warning-bright);
+  --lx-clay-warning-soft: var(--lx-clay-dark-warning-soft);
+  --lx-clay-danger: var(--lx-clay-dark-danger);
+  --lx-clay-danger-soft: var(--lx-clay-dark-danger-soft);
+  --lx-clay-pink: var(--lx-clay-dark-pink);
+  --lx-clay-shadow-surface: var(--lx-clay-dark-shadow-surface);
+  --lx-clay-shadow-flat: var(--lx-clay-dark-shadow-flat);
+  --lx-clay-shadow-form: var(--lx-clay-dark-shadow-form);
+  --lx-clay-shadow-raised: var(--lx-clay-dark-shadow-raised);
+  --lx-clay-shadow-overview: var(--lx-clay-dark-shadow-overview);
+  --lx-clay-shadow-hero: var(--lx-clay-dark-shadow-hero);
+  --lx-clay-shadow-inset: var(--lx-clay-dark-shadow-inset);
+  --lx-clay-shadow-overview-inset: var(--lx-clay-dark-shadow-overview-inset);
+  --lx-clay-shadow-primary: var(--lx-clay-dark-shadow-primary);
+  --lx-clay-shadow-overlay: var(--lx-clay-dark-shadow-overlay);
+  --lx-clay-shadow-action: var(--lx-clay-dark-shadow-action);
+  --lx-clay-shadow-action-hover: var(--lx-clay-dark-shadow-action-hover);
+  --lx-clay-shadow-recessed-deep: var(--lx-clay-dark-shadow-recessed-deep);
+}

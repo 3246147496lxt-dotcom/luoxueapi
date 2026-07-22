@@ -37,6 +37,7 @@ const messages: Record<string, string> = {
   'home.dashboard': '控制台',
   'home.login': '登录',
   'home.footer.allRightsReserved': '保留所有权利。',
+  'home.footer.ariaLabel': '页脚导航',
   'home.footer.tutorial': '使用教程',
   'home.footer.apiDocs': 'API 文档',
   'home.footer.channelStatus': '渠道状态',
@@ -86,28 +87,92 @@ function mountLayout(page: 'home' | 'models' = 'home') {
 beforeEach(() => {
   testState.authStore.isAuthenticated = false
   testState.authStore.isAdmin = false
+  testState.appStore.cachedPublicSettings.site_name = '落雪API'
+  testState.appStore.siteName = '落雪API'
+  testState.appStore.cachedPublicSettings.site_logo = ''
+  testState.appStore.siteLogo = ''
+  testState.appStore.cachedPublicSettings.doc_url = '/tutorial-docs/'
+  testState.appStore.docUrl = ''
   testState.appStore.cachedPublicSettings.public_model_catalog_enabled = false
   testState.appStore.backendModeEnabled = false
   document.documentElement.classList.remove('dark')
   localStorage.clear()
+  Object.defineProperty(window, 'innerWidth', { value: 1280, writable: true, configurable: true })
 })
 
 describe('PublicSiteLayout', () => {
-  it('scopes the clay shell to home without changing the models page shell', () => {
+  it('uses the shared docs resolver while keeping the tutorial fallback available', () => {
+    testState.appStore.cachedPublicSettings.doc_url = '/tutorial-docs/?source=public#old'
+    const wrapper = mountLayout()
+
+    expect(wrapper.get('[data-testid="public-api-docs-link"]').attributes('href'))
+      .toBe('http://127.0.0.1:4179/tutorial-docs/?source=public#old')
+    expect(wrapper.findAll('a').filter((link) => link.text() === '使用教程')
+      .every((link) => (
+        link.attributes('href') === 'http://127.0.0.1:4179/tutorial-docs/?source=public#quick-start'
+      )))
+      .toBe(true)
+
+    wrapper.unmount()
+    testState.appStore.cachedPublicSettings.doc_url = ''
+    const fallbackWrapper = mountLayout()
+
+    expect(fallbackWrapper.find('[data-testid="public-api-docs-link"]').exists()).toBe(false)
+    const tutorialLinks = fallbackWrapper.findAll('a').filter((link) => link.text() === '使用教程')
+    expect(tutorialLinks.length).toBeGreaterThan(0)
+    expect(tutorialLinks.every((link) => (
+      link.attributes('href') === 'http://127.0.0.1:4179/tutorial-docs/#quick-start'
+    ))).toBe(true)
+  })
+
+  it('uses the same Snow Clay shell while preserving each public page identity', () => {
     const homeWrapper = mountLayout('home')
 
+    expect(homeWrapper.classes()).toContain('public-site-page--snow')
     expect(homeWrapper.classes()).toContain('public-site-page--home')
     expect(homeWrapper.classes()).not.toContain('public-site-page--models')
     expect(homeWrapper.get('[data-testid="public-site-brand-logo"]').attributes('src'))
-      .toBe('/brand/luoxue-snowflake-cloud-palette-light.svg')
+      .toBe('/brand/luoxue-snowpuff-extracted.svg')
 
     homeWrapper.unmount()
     const modelsWrapper = mountLayout('models')
 
+    expect(modelsWrapper.classes()).toContain('public-site-page--snow')
     expect(modelsWrapper.classes()).toContain('public-site-page--models')
     expect(modelsWrapper.classes()).not.toContain('public-site-page--home')
     expect(modelsWrapper.get('[data-testid="public-site-brand-logo"]').attributes('src'))
-      .toBe('/logo.png')
+      .toBe('/brand/luoxue-snowpuff-extracted.svg')
+    expect(modelsWrapper.find('.public-site-footer-mark').exists()).toBe(true)
+    const localeSwitcher = modelsWrapper.get('.public-site-desktop-action locale-switcher-stub')
+    expect(localeSwitcher.attributes('icon-variant') ?? localeSwitcher.attributes('iconvariant'))
+      .toBe('lucide')
+    expect(modelsWrapper.get('[data-testid="theme-toggle"] icon-stub').attributes('name'))
+      .toBe('lucideMoon')
+  })
+
+  it('uses the configured site logo in both the header and footer', () => {
+    testState.appStore.cachedPublicSettings.site_logo = '/brand/custom-site-logo.svg'
+    testState.appStore.siteLogo = '/brand/store-logo.svg'
+
+    const wrapper = mountLayout()
+
+    expect(wrapper.get('[data-testid="public-site-brand-logo"]').attributes('src'))
+      .toBe('/brand/custom-site-logo.svg')
+    expect(wrapper.get('.public-site-footer-mark img').attributes('src'))
+      .toBe('/brand/custom-site-logo.svg')
+  })
+
+  it('renders a trailing API brand token as the ice-blue wordmark accent', () => {
+    const wrapper = mountLayout()
+
+    expect(wrapper.get('.public-site-brand-name').text()).toBe('落雪API')
+    expect(wrapper.get('.public-site-brand-api').text()).toBe('API')
+
+    testState.appStore.cachedPublicSettings.site_name = '雪落开发者平台'
+    const customWrapper = mountLayout()
+
+    expect(customWrapper.get('.public-site-brand-name').text()).toBe('雪落开发者平台')
+    expect(customWrapper.find('.public-site-brand-api').exists()).toBe(false)
   })
 
   it('uses cross-page home anchors and hides the catalog entry while disabled', () => {
@@ -117,8 +182,10 @@ describe('PublicSiteLayout', () => {
 
     expect(hrefs).toContain('/home#capabilities')
     expect(hrefs).toContain('/home#steps')
+    expect(hrefs.slice(0, 2)).toEqual(['/home#steps', '/home#capabilities'])
     expect(wrapper.find('[data-to="/models.html"]').exists()).toBe(false)
     expect(wrapper.get('[data-testid="content"]').text()).toBe('Content')
+    expect(wrapper.get('.public-site-footer nav').attributes('aria-label')).toBe('页脚导航')
   })
 
   it('shows the catalog in desktop, mobile, and footer navigation when enabled', async () => {
@@ -142,6 +209,24 @@ describe('PublicSiteLayout', () => {
     expect(localeSwitcher.element.closest('.public-site-mobile-footer')).not.toBeNull()
     expect(localeSwitcher.attributes('icon-variant') ?? localeSwitcher.attributes('iconvariant'))
       .toBe('lucide')
+  })
+
+  it('closes an open mobile menu after crossing into the desktop breakpoint', async () => {
+    Object.defineProperty(window, 'innerWidth', { value: 768, writable: true, configurable: true })
+    const wrapper = mountLayout('home')
+
+    await wrapper.get('[data-testid="mobile-menu-toggle"]').trigger('click')
+    expect(wrapper.find('#public-site-mobile-menu').exists()).toBe(true)
+
+    window.innerWidth = 1024
+    window.dispatchEvent(new Event('resize'))
+    await wrapper.vm.$nextTick()
+
+    expect(wrapper.get('[data-testid="mobile-menu-toggle"]').attributes('aria-expanded'))
+      .toBe('false')
+    await vi.waitFor(() => {
+      expect(wrapper.find('#public-site-mobile-menu').exists()).toBe(false)
+    })
   })
 
   it('hides every catalog entry in backend mode even when the feature is enabled', () => {

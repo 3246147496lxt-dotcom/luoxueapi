@@ -13,12 +13,24 @@ interface ApiErrorLike {
   reason?: string
   metadata?: Record<string, unknown>
   response?: {
+    status?: number
     data?: {
       detail?: string
       message?: string
       code?: number | string
     }
   }
+}
+
+/**
+ * Extract the HTTP-like status from both the current interceptor shape and
+ * legacy Axios errors. A status of 0 represents a network failure.
+ */
+export function extractApiErrorStatus(err: unknown): number | undefined {
+  if (!err || typeof err !== 'object') return undefined
+  const e = err as ApiErrorLike
+  const status = e.status ?? e.response?.status
+  return typeof status === 'number' && Number.isFinite(status) ? status : undefined
 }
 
 /**

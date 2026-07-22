@@ -4,6 +4,13 @@ import { flushPromises, mount } from '@vue/test-utils'
 import type { AdminGroup } from '@/types'
 import GroupsView from '../GroupsView.vue'
 
+vi.mock('vue-router', () => ({
+  onBeforeRouteLeave: vi.fn(),
+  onBeforeRouteUpdate: vi.fn(),
+  useRoute: () => ({ name: 'AdminGroups', params: {}, query: {} }),
+  useRouter: () => ({ push: vi.fn(), replace: vi.fn() }),
+}))
+
 const {
   listGroups,
   getAllGroups,

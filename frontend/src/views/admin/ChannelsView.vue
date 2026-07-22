@@ -1,6 +1,13 @@
 <template>
-  <AppLayout>
+  <AppLayout variant="home-clay">
     <TablePageLayout>
+      <template #header>
+        <AdminPageHeader
+          :title="t('admin.channels.title')"
+          :description="t('admin.channels.description')"
+        />
+      </template>
+
       <template #filters>
         <div class="flex flex-col justify-between gap-4 lg:flex-row lg:items-start">
           <!-- Left: Search + Filters -->
@@ -637,6 +644,7 @@ import type { AdminGroup, GroupPlatform } from '@/types'
 import type { Column } from '@/components/common/types'
 import { platformTextClass, platformBadgeLightClass } from '@/utils/platformColors'
 import AppLayout from '@/components/layout/AppLayout.vue'
+import AdminPageHeader from '@/components/layout/AdminPageHeader.vue'
 import TablePageLayout from '@/components/layout/TablePageLayout.vue'
 import DataTable from '@/components/common/DataTable.vue'
 import Pagination from '@/components/common/Pagination.vue'

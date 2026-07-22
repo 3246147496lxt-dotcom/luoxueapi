@@ -22,7 +22,10 @@ func TestIsFingerprintedEmbeddedAssetPath(t *testing.T) {
 		{name: "fingerprinted_url_safe_hash", path: "assets/app-aB1-2_Cd.css", want: true},
 		{name: "nested_fingerprinted_asset", path: "assets/vendor/chunk-AbCd1234.js", want: true},
 		{name: "leading_slash_fingerprinted_asset", path: "/assets/index-AbCd1234.js", want: true},
+		{name: "docs_fingerprinted_asset", path: "tutorial-docs/assets/index-AbCd1234.js", want: true},
+		{name: "leading_slash_docs_fingerprinted_asset", path: "/tutorial-docs/assets/index-AbCd1234.js", want: true},
 		{name: "unhashed_asset", path: "assets/index.js", want: false},
+		{name: "unhashed_docs_asset", path: "tutorial-docs/assets/index.js", want: false},
 		{name: "short_suffix", path: "assets/index-abc123.js", want: false},
 		{name: "logo", path: "logo.png", want: false},
 		{name: "favicon", path: "favicon.ico", want: false},
@@ -49,6 +52,13 @@ func TestApplyStaticAssetCacheHeaders(t *testing.T) {
 		t.Parallel()
 		header := make(http.Header)
 		applyStaticAssetCacheHeaders(header, "assets/index-AbCd1234.js")
+		assert.Equal(t, staticAssetsCacheControl, header.Get("Cache-Control"))
+	})
+
+	t.Run("sets_immutable_cache_for_docs_fingerprinted_asset", func(t *testing.T) {
+		t.Parallel()
+		header := make(http.Header)
+		applyStaticAssetCacheHeaders(header, "tutorial-docs/assets/index-AbCd1234.js")
 		assert.Equal(t, staticAssetsCacheControl, header.Get("Cache-Control"))
 	})
 

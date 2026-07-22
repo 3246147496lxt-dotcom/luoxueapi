@@ -353,6 +353,26 @@ describe('PaymentView integrated purchase surface', () => {
     expect(summary.text()).toContain('payment.fee')
     expect(summary.text()).toContain('payment.actualPay')
   })
+
+  it('keeps the recharge primary action in a mobile-safe sticky action region', async () => {
+    const wrapper = shallowMount(PaymentView, {
+      global: {
+        stubs: {
+          AppLayout: { template: '<div><slot /></div>' },
+          Teleport: true,
+          Transition: false,
+        },
+      },
+    })
+    await flushPromises()
+
+    const mainCard = wrapper.get('[data-testid="purchase-main-card"]')
+    const actionBar = wrapper.get('[data-testid="payment-recharge-action-bar"]')
+    expect(mainCard.classes()).not.toContain('overflow-hidden')
+    expect(mainCard.classes()).toContain('overflow-clip')
+    expect(actionBar.classes()).toContain('payment-mobile-sticky-action')
+    expect(actionBar.get('button').classes()).toEqual(expect.arrayContaining(['min-h-12', 'w-full']))
+  })
 })
 
 async function mountSubscriptionConfirm(options: Parameters<typeof checkoutInfoWithPlansFixture>[0] = {}) {
@@ -418,6 +438,11 @@ describe('PaymentView subscription confirmation amounts', () => {
     // 换算必须使用订阅汇率（×7.15），而不是余额倍率（÷0.14 = 71.36）
     expect(text).not.toContain(formatPaymentAmount(71.36, 'CNY'))
     expect(wrapper.findAll('button').some(button => button.text().includes(convertedPrice))).toBe(true)
+    const actionBar = wrapper.get('[data-testid="payment-subscription-action-bar"]')
+    expect(actionBar.classes()).toEqual(expect.arrayContaining([
+      'payment-mobile-sticky-action',
+      'grid-cols-[minmax(0,1fr)_auto]',
+    ]))
   })
 
   it('keeps plan price when the subscription rate is not configured or payment currency is not CNY', async () => {

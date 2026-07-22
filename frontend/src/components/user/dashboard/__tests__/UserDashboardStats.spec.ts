@@ -30,6 +30,43 @@ const i18n = createI18n({
 })
 
 describe('UserDashboardStats', () => {
+  it('uses a two-column compact grid while retaining the four-column desktop layout', () => {
+    const wrapper = mount(UserDashboardStats, {
+      props: {
+        stats: {
+          total_actual_cost: 25.34,
+          total_requests: 4,
+        } as never,
+        balance: 0.66,
+        isSimple: false,
+        rangeMetrics: {
+          requests: 3,
+          actualCost: 1.25,
+          tokens: 162,
+          averageRpm: 0.5,
+          averageTpm: 20,
+        },
+        trend: [],
+        startDate: '2026-07-10',
+        endDate: '2026-07-12',
+        granularity: 'day',
+      },
+      global: {
+        plugins: [i18n],
+        stubs: { Icon: true, DashboardSparkline: true },
+      },
+    })
+
+    const grid = wrapper.get('[data-testid="dashboard-metric-grid"]')
+    expect(grid.classes()).toEqual(expect.arrayContaining([
+      'grid-cols-2',
+      'md:grid-cols-2',
+      'xl:grid-cols-4',
+    ]))
+    expect(grid.classes()).not.toContain('grid-cols-1')
+    expect(grid.findAll('.dashboard-summary-card')).toHaveLength(4)
+  })
+
   it('uses snowflake credits for balance and consumption metrics', () => {
     const wrapper = mount(UserDashboardStats, {
       props: {
@@ -103,7 +140,7 @@ describe('UserDashboardStats', () => {
     const sparklines = wrapper.findAllComponents(DashboardSparkline)
     expect(sparklines).toHaveLength(5)
     expect(sparklines.map(component => component.props('color'))).toEqual([
-      '#06b6d4',
+      '#0b8bed',
       '#f59e0b',
       '#ec4899',
       '#6366f1',

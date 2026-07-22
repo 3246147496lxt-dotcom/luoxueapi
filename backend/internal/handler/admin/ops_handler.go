@@ -14,7 +14,8 @@ import (
 )
 
 type OpsHandler struct {
-	opsService *service.OpsService
+	opsService         *service.OpsService
+	proxyHealthService *service.ProxyHealthService
 }
 
 // GetErrorLogByID returns ops error log detail.
@@ -70,6 +71,12 @@ func parseOpsViewParam(c *gin.Context) string {
 
 func NewOpsHandler(opsService *service.OpsService) *OpsHandler {
 	return &OpsHandler{opsService: opsService}
+}
+
+func (h *OpsHandler) SetProxyHealthService(proxyHealthService *service.ProxyHealthService) {
+	if h != nil {
+		h.proxyHealthService = proxyHealthService
+	}
 }
 
 // GetErrorLogs lists ops error logs.

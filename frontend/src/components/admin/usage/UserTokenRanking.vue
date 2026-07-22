@@ -5,7 +5,7 @@
     <div class="flex flex-wrap items-center justify-between gap-3 border-b border-gray-100 px-4 py-3 dark:border-dark-700/50 sm:px-6">
       <p class="text-xs text-gray-400 dark:text-gray-500">{{ t('admin.usage.tokenRanking.subtitle') }}</p>
       <div class="flex items-center gap-3">
-        <span v-if="!loading && items.length > 0" class="text-xs text-gray-400 dark:text-gray-500">
+        <span v-if="!loading && !error && items.length > 0" class="text-xs text-gray-400 dark:text-gray-500">
           {{ t('admin.usage.tokenRanking.userCount', { count: items.length }) }}
         </span>
         <div class="w-28">
@@ -39,6 +39,22 @@
           <tr v-if="loading">
             <td :colspan="sortableColumns.length + 2" class="py-12 text-center">
               <LoadingSpinner />
+            </td>
+          </tr>
+          <tr v-else-if="error">
+            <td :colspan="sortableColumns.length + 2" class="px-4 py-12 text-center sm:px-6">
+              <div class="mx-auto flex max-w-sm flex-col items-center" role="alert">
+                <p class="text-sm font-medium text-gray-700 dark:text-gray-200">
+                  {{ t('admin.usage.tokenRanking.loadFailed') }}
+                </p>
+                <button
+                  type="button"
+                  class="mt-3 min-h-9 rounded-lg border border-primary-200 bg-primary-50 px-4 text-sm font-medium text-primary-700 transition-colors hover:bg-primary-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500 dark:border-primary-800 dark:bg-primary-950/40 dark:text-primary-300 dark:hover:bg-primary-900/50"
+                  @click="load"
+                >
+                  {{ t('admin.usage.tokenRanking.retry') }}
+                </button>
+              </div>
             </td>
           </tr>
           <tr v-else-if="items.length === 0">
@@ -88,18 +104,22 @@ import type { UserBreakdownItem } from '@/types'
 import Select from '@/components/common/Select.vue'
 import LoadingSpinner from '@/components/common/LoadingSpinner.vue'
 
-const props = defineProps<{
+type SortKey = NonNullable<UserBreakdownParams['sort_by']>
+
+const props = withDefaults(defineProps<{
   startDate: string
   endDate: string
   filters: Record<string, unknown>
   model?: string
-}>()
+  initialSortBy?: SortKey
+}>(), {
+  initialSortBy: 'total_tokens',
+})
 
 defineEmits<{ (e: 'select-user', userId: number, email: string): void }>()
 
 const { t } = useI18n()
 
-type SortKey = NonNullable<UserBreakdownParams['sort_by']>
 const sortableColumns: { key: SortKey; label: string }[] = [
   { key: 'requests', label: 'admin.usage.tokenRanking.columns.requests' },
   { key: 'input_tokens', label: 'admin.usage.tokenRanking.columns.inputTokens' },
@@ -125,7 +145,8 @@ const RANK_BADGE_CLASSES = [
 
 const items = ref<UserBreakdownItem[]>([])
 const loading = ref(false)
-const sortBy = ref<SortKey>('total_tokens')
+const error = ref(false)
+const sortBy = ref<SortKey>(props.initialSortBy)
 const limit = ref(50)
 let reqSeq = 0
 
@@ -141,6 +162,7 @@ const setSort = (key: SortKey) => {
 const load = async () => {
   const seq = ++reqSeq
   loading.value = true
+  error.value = false
   try {
     const params: UserBreakdownParams = {
       ...props.filters,
@@ -155,7 +177,7 @@ const load = async () => {
     items.value = res.users || []
   } catch {
     if (seq !== reqSeq) return
-    items.value = []
+    error.value = true
   } finally {
     if (seq === reqSeq) loading.value = false
   }

@@ -154,6 +154,7 @@ export default {
     apiKeys: 'API 密钥',
     batchImage: '批量生图',
     usage: '使用记录',
+    adminUsage: '全站用量',
     redeem: '兑换',
     affiliate: '邀请返利',
     affiliateManagement: '邀请返利',
@@ -168,6 +169,22 @@ export default {
     modelCatalog: '模型广场',
     contactUs: '联系我们',
     quickLinks: '快捷入口',
+    closeNavigation: '关闭导航',
+    adminSections: {
+      overview: '概览',
+      business: '用户与资源',
+      operations: '计费与运营',
+      system: '系统与审计',
+    },
+    serviceStatus: {
+      label: '会话状态',
+      readyTitle: '控制台已就绪',
+      readyDescription: '导航与配置加载完成',
+      readyValue: '已连接',
+      syncingTitle: '正在同步控制台',
+      syncingDescription: '等待服务配置加载',
+      syncingValue: '同步中',
+    },
     subscriptions: '订阅管理',
     accounts: '账号池',
     proxies: 'IP管理',
@@ -202,6 +219,7 @@ export default {
 
   // Auth
   auth: {
+    siteSubtitle: '订阅转 API 转换平台',
     welcomeBack: '欢迎回来',
     signInToAccount: '登录您的账户以继续',
     signIn: '登录',

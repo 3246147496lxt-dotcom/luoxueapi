@@ -4,12 +4,19 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/redis/go-redis/v9"
 )
 
 const proxyLatencyKeyPrefix = "proxy:latency:"
+
+// Probe snapshots are operational hints rather than durable history. Keeping a
+// bounded retention prevents abandoned proxy IDs from accumulating forever;
+// freshness for health classification is intentionally much shorter and is
+// evaluated from the embedded timestamps by ProxyHealthService.
+const proxyLatencySnapshotRetention = 7 * 24 * time.Hour
 
 func proxyLatencyKey(proxyID int64) string {
 	return fmt.Sprintf("%s%d", proxyLatencyKeyPrefix, proxyID)
@@ -70,5 +77,9 @@ func (c *proxyLatencyCache) SetProxyLatency(ctx context.Context, proxyID int64, 
 	if err != nil {
 		return err
 	}
-	return c.rdb.Set(ctx, proxyLatencyKey(proxyID), payload, 0).Err()
+	return c.rdb.Set(ctx, proxyLatencyKey(proxyID), payload, proxyLatencySnapshotRetention).Err()
+}
+
+func (c *proxyLatencyCache) DeleteProxyLatency(ctx context.Context, proxyID int64) error {
+	return c.rdb.Del(ctx, proxyLatencyKey(proxyID)).Err()
 }

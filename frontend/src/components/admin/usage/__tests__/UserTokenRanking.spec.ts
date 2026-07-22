@@ -78,4 +78,42 @@ describe('UserTokenRanking', () => {
     expect(getUserBreakdown).toHaveBeenCalledTimes(2)
     expect(getUserBreakdown).toHaveBeenLastCalledWith(expect.objectContaining({ user_id: 9 }))
   })
+
+  it('uses the requested initial sort for the first ranking request', async () => {
+    mountRanking({ initialSortBy: 'actual_cost' })
+    await flushPromises()
+
+    expect(getUserBreakdown).toHaveBeenCalledTimes(1)
+    expect(getUserBreakdown).toHaveBeenCalledWith(expect.objectContaining({
+      sort_by: 'actual_cost',
+    }))
+  })
+
+  it('shows a distinct error state and retries without presenting the failure as empty data', async () => {
+    getUserBreakdown.mockRejectedValueOnce(new Error('network unavailable'))
+    const wrapper = mountRanking()
+    await flushPromises()
+
+    const alert = wrapper.get('[role="alert"]')
+    expect(alert.text()).toContain('admin.usage.tokenRanking.loadFailed')
+    expect(wrapper.text()).not.toContain('admin.dashboard.noDataAvailable')
+
+    getUserBreakdown.mockResolvedValueOnce({ users: [item(3, 300)] })
+    await alert.get('button').trigger('click')
+    await flushPromises()
+
+    expect(getUserBreakdown).toHaveBeenCalledTimes(2)
+    expect(wrapper.find('[role="alert"]').exists()).toBe(false)
+    expect(wrapper.findAll('tbody tr')).toHaveLength(1)
+    expect(wrapper.text()).toContain('u3@test.com')
+  })
+
+  it('keeps the empty state for a successful response with no users', async () => {
+    getUserBreakdown.mockResolvedValueOnce({ users: [] })
+    const wrapper = mountRanking()
+    await flushPromises()
+
+    expect(wrapper.find('[role="alert"]').exists()).toBe(false)
+    expect(wrapper.text()).toContain('admin.dashboard.noDataAvailable')
+  })
 })

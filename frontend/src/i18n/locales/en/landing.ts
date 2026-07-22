@@ -47,7 +47,7 @@ export default {
       copiedAria: '{language} example copied'
     },
     facts: {
-      gpt: 'GPT supported',
+      gpt: 'OpenAI-compatible API',
       usage: 'Detailed usage records',
       quota: 'Controllable key limits'
     },
@@ -141,6 +141,7 @@ export default {
       tutorial: 'View the beginner tutorial'
     },
     footer: {
+      ariaLabel: 'Footer navigation',
       tutorial: 'Tutorial',
       apiDocs: 'API docs',
       channelStatus: 'Channel status',

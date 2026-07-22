@@ -1,6 +1,6 @@
 <template>
-  <AppLayout>
-    <div class="space-y-6">
+  <AppLayout variant="home-clay">
+    <div class="space-y-6" data-admin-page-kind="ops">
       <div v-if="loading" class="flex items-center justify-center py-16">
         <div class="h-8 w-8 animate-spin rounded-full border-b-2 border-primary-600"></div>
       </div>
@@ -833,7 +833,7 @@
                     type="button"
                     class="btn btn-secondary inline-flex items-center justify-center gap-2 text-red-600 hover:text-red-700 dark:text-red-300"
                     :disabled="hashActionLoading || (status?.flagged_hash_count ?? 0) === 0"
-                    @click="clearFlaggedHashes"
+                    @click="requestClearFlaggedHashes"
                   >
                     <Icon name="trash" size="sm" :class="hashActionLoading ? 'animate-pulse' : ''" />
                     {{ t('admin.riskControl.clearFlaggedHashes') }}
@@ -850,7 +850,7 @@
                     type="button"
                     class="btn btn-secondary inline-flex items-center justify-center gap-2"
                     :disabled="hashActionLoading || !isFlaggedHashInputValid"
-                    @click="deleteFlaggedHash"
+                    @click="requestDeleteFlaggedHash"
                   >
                     <Icon name="trash" size="sm" />
                     {{ t('admin.riskControl.deleteFlaggedHash') }}
@@ -1109,6 +1109,16 @@
           </div>
         </template>
       </BaseDialog>
+
+      <ConfirmDialog
+        :show="pendingHashAction !== null"
+        :title="pendingHashAction === 'clear' ? t('admin.riskControl.clearFlaggedHashes') : t('admin.riskControl.deleteFlaggedHash')"
+        :message="hashActionConfirmationMessage"
+        :confirm-text="pendingHashAction === 'clear' ? t('admin.riskControl.clearFlaggedHashes') : t('admin.riskControl.deleteFlaggedHash')"
+        danger
+        @confirm="confirmHashAction"
+        @cancel="cancelHashAction"
+      />
     </div>
   </AppLayout>
 </template>
@@ -1118,6 +1128,7 @@ import { computed, onMounted, onUnmounted, reactive, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import BaseDialog from '@/components/common/BaseDialog.vue'
+import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
 import Icon from '@/components/icons/Icon.vue'
 import Select from '@/components/common/Select.vue'
 import Toggle from '@/components/common/Toggle.vue'
@@ -1204,6 +1215,8 @@ const settingsOpen = ref(false)
 const activeSettingsTab = ref<SettingsTab>('basic')
 const groupSearch = ref('')
 const flaggedHashInput = ref('')
+const pendingHashAction = ref<'delete' | 'clear' | null>(null)
+const pendingHashValue = ref('')
 const groups = ref<AdminGroup[]>([])
 const logs = ref<ContentModerationLog[]>([])
 const status = ref<ContentModerationRuntimeStatus | null>(null)
@@ -1334,9 +1347,9 @@ type KeywordNoticeView = {
 const keywordNoticeTones = {
   info: {
     icon: 'infoCircle' as const,
-    toneClass: 'border-primary-100 bg-primary-50/60 dark:border-primary-900/40 dark:bg-primary-900/10',
-    iconClass: 'mt-0.5 flex-shrink-0 text-primary-500 dark:text-primary-300',
-    titleClass: 'text-primary-700 dark:text-primary-200',
+    toneClass: 'info-surface',
+    iconClass: 'info-emphasis mt-0.5 flex-shrink-0',
+    titleClass: 'info-emphasis',
   },
   warning: {
     icon: 'exclamationTriangle' as const,
@@ -1455,6 +1468,14 @@ const hasModerationAuditInput = computed(() => {
 })
 
 const isFlaggedHashInputValid = computed(() => /^[a-fA-F0-9]{64}$/.test(flaggedHashInput.value.trim()))
+const hashActionConfirmationMessage = computed(() => {
+  if (pendingHashAction.value === 'clear') {
+    return t('admin.riskControl.clearFlaggedHashesConfirmWithCount', {
+      count: formatNumber(status.value?.flagged_hash_count ?? 0),
+    })
+  }
+  return t('admin.riskControl.deleteFlaggedHashConfirm', { hash: pendingHashValue.value })
+})
 
 const storedApiKeyTestButtonText = computed(() => {
   if (apiKeyTesting.value) return t('admin.riskControl.testingApiKeys')
@@ -1895,25 +1916,52 @@ async function unbanUser(row: ContentModerationLog) {
   }
 }
 
-async function deleteFlaggedHash() {
+function requestDeleteFlaggedHash() {
   if (!isFlaggedHashInputValid.value || hashActionLoading.value) return
+  pendingHashValue.value = flaggedHashInput.value.trim()
+  pendingHashAction.value = 'delete'
+}
+
+function requestClearFlaggedHashes() {
+  if (hashActionLoading.value || (status.value?.flagged_hash_count ?? 0) === 0) return
+  pendingHashValue.value = ''
+  pendingHashAction.value = 'clear'
+}
+
+function cancelHashAction() {
+  if (hashActionLoading.value) return
+  pendingHashAction.value = null
+  pendingHashValue.value = ''
+}
+
+function confirmHashAction() {
+  const action = pendingHashAction.value
+  pendingHashAction.value = null
+  if (action === 'delete') {
+    void deleteFlaggedHash(pendingHashValue.value)
+  } else if (action === 'clear') {
+    void clearFlaggedHashes()
+  }
+}
+
+async function deleteFlaggedHash(hash: string) {
+  if (!/^[a-fA-F0-9]{64}$/.test(hash) || hashActionLoading.value) return
   hashActionLoading.value = true
   try {
-    const result = await adminAPI.riskControl.deleteFlaggedHash(flaggedHashInput.value)
-    flaggedHashInput.value = ''
+    const result = await adminAPI.riskControl.deleteFlaggedHash(hash)
+    if (flaggedHashInput.value.trim() === hash) flaggedHashInput.value = ''
     await loadStatus(true)
     appStore.showSuccess(result.deleted ? t('admin.riskControl.flaggedHashDeleted') : t('admin.riskControl.flaggedHashNotFound'))
   } catch (err: unknown) {
     appStore.showError(extractApiErrorMessage(err, t('admin.riskControl.flaggedHashDeleteFailed')))
   } finally {
     hashActionLoading.value = false
+    pendingHashValue.value = ''
   }
 }
 
 async function clearFlaggedHashes() {
   if (hashActionLoading.value) return
-  const confirmed = window.confirm(t('admin.riskControl.clearFlaggedHashesConfirm'))
-  if (!confirmed) return
   hashActionLoading.value = true
   try {
     const result = await adminAPI.riskControl.clearFlaggedHashes()

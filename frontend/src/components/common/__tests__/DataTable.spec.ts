@@ -1,7 +1,13 @@
+import { readFileSync } from 'node:fs'
+import { dirname, resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { mount } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import DataTable from '../DataTable.vue'
+
+const componentPath = resolve(dirname(fileURLToPath(import.meta.url)), '../DataTable.vue')
+const componentSource = readFileSync(componentPath, 'utf8')
 
 vi.mock('vue-i18n', () => ({
   useI18n: () => ({
@@ -14,6 +20,22 @@ const stubDesktopMatchMedia = () => {
     writable: true,
     value: vi.fn().mockImplementation((query: string) => ({
       matches: true,
+      media: query,
+      onchange: null,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+      dispatchEvent: vi.fn()
+    }))
+  })
+}
+
+const stubMobileMatchMedia = () => {
+  Object.defineProperty(window, 'matchMedia', {
+    writable: true,
+    value: vi.fn().mockImplementation((query: string) => ({
+      matches: false,
       media: query,
       onchange: null,
       addEventListener: vi.fn(),
@@ -52,15 +74,40 @@ describe('DataTable', () => {
     const nameHeader = wrapper.findAll('th')[0]
     expect(nameHeader.attributes('aria-sort')).toBe('ascending')
     expect(nameHeader.findAll('svg')).toHaveLength(2)
-    expect(nameHeader.findAll('svg')[0].classes()).toContain('text-primary-600')
-    expect(nameHeader.findAll('svg')[1].classes()).toContain('text-gray-300')
+    expect(nameHeader.findAll('svg')[0].classes()).toContain('data-table-sort-active')
+    expect(nameHeader.findAll('svg')[1].classes()).toContain('data-table-sort-inactive')
 
     await nameHeader.trigger('click')
     await wrapper.vm.$nextTick()
 
     expect(nameHeader.attributes('aria-sort')).toBe('descending')
-    expect(nameHeader.findAll('svg')[0].classes()).toContain('text-gray-300')
-    expect(nameHeader.findAll('svg')[1].classes()).toContain('text-primary-600')
+    expect(nameHeader.findAll('svg')[0].classes()).toContain('data-table-sort-inactive')
+    expect(nameHeader.findAll('svg')[1].classes()).toContain('data-table-sort-active')
+  })
+
+  it('allows sortable headers to be activated from the keyboard', async () => {
+    const wrapper = mount(DataTable, {
+      props: {
+        columns: [{ key: 'name', label: 'Name', sortable: true }],
+        data: [
+          { id: 1, name: 'Beta' },
+          { id: 2, name: 'Alpha' }
+        ],
+        defaultSortKey: 'name',
+        defaultSortOrder: 'asc'
+      }
+    })
+
+    await wrapper.vm.$nextTick()
+    const header = wrapper.get('th')
+    expect(header.attributes('tabindex')).toBe('0')
+    expect(header.attributes('aria-sort')).toBe('ascending')
+
+    await header.trigger('keydown', { key: 'Enter' })
+    expect(header.attributes('aria-sort')).toBe('descending')
+
+    await header.trigger('keydown', { key: ' ' })
+    expect(header.attributes('aria-sort')).toBe('ascending')
   })
 
   it('renders every row with no virtual padding spacer for small datasets (virtualization off)', async () => {
@@ -80,6 +127,85 @@ describe('DataTable', () => {
     expect(wrapper.findAll('tbody tr[data-index]')).toHaveLength(data.length)
     // …and there are no aria-hidden virtual padding spacer rows.
     expect(wrapper.findAll('tbody tr[aria-hidden="true"]')).toHaveLength(0)
+  })
+
+  it('renders a load error before the empty state', async () => {
+    const wrapper = mount(DataTable, {
+      props: {
+        columns: [{ key: 'name', label: 'Name' }],
+        data: [],
+        error: 'Unable to load records'
+      }
+    })
+
+    await wrapper.vm.$nextTick()
+
+    expect(wrapper.find('[role="alert"]').text()).toContain('Unable to load records')
+    expect(wrapper.find('.data-table-empty-row').exists()).toBe(false)
+  })
+
+  it('renders an ordered, task-focused mobile card without changing desktop columns', async () => {
+    stubMobileMatchMedia()
+    const wrapper = mount(DataTable, {
+      props: {
+        columns: [
+          { key: 'select', label: '' },
+          { key: 'name', label: 'Account' },
+          { key: 'status', label: 'Status' },
+          { key: 'balance', label: 'Balance' },
+          { key: 'notes', label: 'Notes' },
+          { key: 'actions', label: 'Actions' }
+        ],
+        data: [{ id: 1, name: 'Snow account', status: 'Healthy', balance: '¥20', notes: 'Internal' }],
+        mobilePrimaryKey: 'name',
+        mobileVisibleKeys: ['status', 'balance']
+      },
+      slots: {
+        'cell-select': '<input type="checkbox" aria-label="Select account" />',
+        'cell-name': '<strong class="account-name">Snow account</strong>',
+        'cell-actions': '<button type="button">Open actions</button>'
+      }
+    })
+
+    await wrapper.vm.$nextTick()
+
+    expect(wrapper.get('[data-ui-mode="mobile"]').exists()).toBe(true)
+    expect(wrapper.find('[data-ui-mode="desktop"]').exists()).toBe(false)
+    expect(wrapper.get('[data-mobile-primary]').text()).toContain('Snow account')
+    expect(wrapper.get('[data-mobile-primary] input').attributes('aria-label')).toBe('Select account')
+
+    const fields = wrapper.findAll('[data-mobile-field]')
+    expect(fields.map(field => field.attributes('data-mobile-field-key'))).toEqual(['status', 'balance'])
+    expect(fields.map(field => field.text())).toEqual(['StatusHealthy', 'Balance¥20'])
+    expect(wrapper.text()).not.toContain('Internal')
+    expect(wrapper.get('.data-table-mobile-actions').text()).toContain('Open actions')
+  })
+
+  it('uses a two-column card grid for the tablet range', () => {
+    expect(componentSource).toContain('@media (min-width: 768px) and (max-width: 1023px)')
+    expect(componentSource).toContain('grid-template-columns: repeat(2, minmax(0, 1fr))')
+    expect(componentSource).toContain('grid-column: 1 / -1')
+  })
+
+  it('supports keyboard activation for clickable rows', async () => {
+    const row = { id: 7, name: 'Keyboard row' }
+    const wrapper = mount(DataTable, {
+      props: {
+        columns: [{ key: 'name', label: 'Name' }],
+        data: [row],
+        clickableRows: true,
+        rowAriaLabel: (value) => `Open ${value.name}`
+      }
+    })
+
+    await wrapper.vm.$nextTick()
+
+    const interactiveRow = wrapper.find('tbody tr[data-index]')
+    expect(interactiveRow.attributes('tabindex')).toBe('0')
+    expect(interactiveRow.attributes('aria-label')).toBe('Open Keyboard row')
+
+    await interactiveRow.trigger('keydown', { key: 'Enter' })
+    expect(wrapper.emitted('rowClick')).toEqual([[row]])
   })
 
   it('switches to windowed rendering once row count exceeds virtualizeThreshold', async () => {

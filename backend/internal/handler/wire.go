@@ -45,8 +45,11 @@ func ProvideAdminHandlers(
 	modelCatalogHandler *admin.ModelCatalogHandler,
 	documentationHandler *admin.DocumentationHandler,
 	upstreamBillingProbe *service.UpstreamBillingProbeService,
+	proxyHealthService *service.ProxyHealthService,
 ) *AdminHandlers {
 	accountHandler.SetUpstreamBillingProbeService(upstreamBillingProbe)
+	proxyHandler.SetProxyHealthService(proxyHealthService)
+	opsHandler.SetProxyHealthService(proxyHealthService)
 	return &AdminHandlers{
 		Dashboard:              dashboardHandler,
 		User:                   userHandler,

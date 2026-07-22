@@ -82,6 +82,7 @@ func provideCleanup(
 	tokenRefresh *service.TokenRefreshService,
 	accountExpiry *service.AccountExpiryService,
 	proxyExpiry *service.ProxyExpiryService,
+	proxyHealth *service.ProxyHealthService,
 	subscriptionExpiry *service.SubscriptionExpiryService,
 	usageCleanup *service.UsageCleanupService,
 	idempotencyCleanup *service.IdempotencyCleanupService,
@@ -199,6 +200,12 @@ func provideCleanup(
 			}},
 			{"ProxyExpiryService", func() error {
 				proxyExpiry.Stop()
+				return nil
+			}},
+			{"ProxyHealthService", func() error {
+				if proxyHealth != nil {
+					proxyHealth.Stop()
+				}
 				return nil
 			}},
 			{"SubscriptionExpiryService", func() error {

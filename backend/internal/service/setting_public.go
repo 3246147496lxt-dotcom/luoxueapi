@@ -282,6 +282,8 @@ func (s *SettingService) GetPublicSettings(ctx context.Context) (*PublicSettings
 		balanceLowNotifyThreshold = v
 	}
 	backendModeEnabled := settings[SettingKeyBackendModeEnabled] == "true"
+	_, siteSubtitleCustomized := settings[SettingKeySiteSubtitle]
+	siteSubtitleCustomized = siteSubtitleCustomized && strings.TrimSpace(settings[SettingKeySiteSubtitle]) != ""
 
 	return &PublicSettings{
 		RegistrationEnabled:              settings[SettingKeyRegistrationEnabled] == "true",
@@ -302,6 +304,7 @@ func (s *SettingService) GetPublicSettings(ctx context.Context) (*PublicSettings
 		SiteName:                         s.getStringOrDefault(settings, SettingKeySiteName, defaultSiteName),
 		SiteLogo:                         settings[SettingKeySiteLogo],
 		SiteSubtitle:                     s.getStringOrDefault(settings, SettingKeySiteSubtitle, "Subscription to API Conversion Platform"),
+		SiteSubtitleCustomized:           siteSubtitleCustomized,
 		APIBaseURL:                       settings[SettingKeyAPIBaseURL],
 		ContactInfo:                      settings[SettingKeyContactInfo],
 		DocURL:                           settings[SettingKeyDocURL],
@@ -522,6 +525,7 @@ type PublicSettingsInjectionPayload struct {
 	SiteName                         string                   `json:"site_name"`
 	SiteLogo                         string                   `json:"site_logo"`
 	SiteSubtitle                     string                   `json:"site_subtitle"`
+	SiteSubtitleCustomized           bool                     `json:"site_subtitle_customized"`
 	APIBaseURL                       string                   `json:"api_base_url"`
 	ContactInfo                      string                   `json:"contact_info"`
 	DocURL                           string                   `json:"doc_url"`
@@ -592,6 +596,7 @@ func (s *SettingService) GetPublicSettingsForInjection(ctx context.Context) (any
 		SiteName:                         settings.SiteName,
 		SiteLogo:                         settings.SiteLogo,
 		SiteSubtitle:                     settings.SiteSubtitle,
+		SiteSubtitleCustomized:           settings.SiteSubtitleCustomized,
 		APIBaseURL:                       settings.APIBaseURL,
 		ContactInfo:                      settings.ContactInfo,
 		DocURL:                           settings.DocURL,

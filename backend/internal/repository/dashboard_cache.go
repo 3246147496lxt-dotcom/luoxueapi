@@ -10,7 +10,10 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
-const dashboardStatsCacheKey = "dashboard:stats:v1"
+// v4 invalidates cached DashboardStats payloads written before the day-user
+// comparison fields existed; otherwise missing JSON fields would be
+// indistinguishable from genuine zero new-user counts.
+const dashboardStatsCacheKey = "dashboard:stats:v4"
 
 type dashboardCache struct {
 	rdb       *redis.Client

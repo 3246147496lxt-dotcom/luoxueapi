@@ -1,155 +1,206 @@
 <template>
-  <AppLayout>
+  <AppLayout variant="home-clay">
     <TablePageLayout>
+      <template #header>
+        <AdminPageHeader
+          :title="t('admin.users.title')"
+          :description="t('admin.users.description')"
+        />
+      </template>
+
       <!-- Single Row: Search, Filters, and Actions -->
       <template #filters>
-        <div class="flex flex-wrap items-center gap-3">
-          <!-- Left: Search + Active Filters -->
-          <div class="flex flex-1 flex-wrap items-center gap-3">
-            <!-- Search Box -->
-            <div class="relative w-full md:w-64">
-              <Icon
-                name="search"
-                size="md"
-                class="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"
-              />
-              <input
-                v-model="searchQuery"
-                type="text"
-                :placeholder="t('admin.users.searchUsers')"
-                class="input pl-10"
-                @input="handleSearch"
-              />
-            </div>
-
-            <!-- Role Filter (visible when enabled) -->
-            <div v-if="visibleFilters.has('role')" class="w-full sm:w-32">
-              <Select
-                v-model="filters.role"
-                :options="[
-                  { value: '', label: t('admin.users.allRoles') },
-                  { value: 'admin', label: t('admin.users.admin') },
-                  { value: 'user', label: t('admin.users.user') }
-                ]"
-                @change="applyFilter"
-              />
-            </div>
-
-            <!-- Status Filter (visible when enabled) -->
-            <div v-if="visibleFilters.has('status')" class="w-full sm:w-32">
-              <Select
-                v-model="filters.status"
-                :options="[
-                  { value: '', label: t('admin.users.allStatus') },
-                  { value: 'active', label: t('common.active') },
-                  { value: 'disabled', label: t('admin.users.disabled') }
-                ]"
-                @change="applyFilter"
-              />
-            </div>
-
-            <!-- Group Filter (visible when enabled) -->
-            <div v-if="visibleFilters.has('group')" class="w-full sm:w-44">
-              <Select
-                v-model="filters.group"
-                :options="groupFilterOptions"
-                searchable
-                creatable
-                :creatable-prefix="t('admin.users.fuzzySearch')"
-                :search-placeholder="t('admin.users.searchAuthorizedGroups')"
-                @change="applyFilter"
-              />
-            </div>
-
-            <!-- API Key Group Filter (visible when enabled) -->
-            <div v-if="visibleFilters.has('apiKeyGroup')" class="w-full sm:w-44">
-              <Select
-                v-model="filters.apiKeyGroup"
-                :options="apiKeyGroupFilterOptions"
-                searchable
-                :search-placeholder="t('admin.users.searchApiKeyGroups')"
-                @change="applyFilter"
-              />
-            </div>
-
-            <!-- Dynamic Attribute Filters -->
-            <template v-for="(value, attrId) in activeAttributeFilters" :key="attrId">
-              <div
-                v-if="visibleFilters.has(`attr_${attrId}`)"
-                class="relative w-full sm:w-36"
-              >
-                <!-- Text/Email/URL/Textarea/Date type: styled input -->
-                <input
-                  v-if="['text', 'textarea', 'email', 'url', 'date'].includes(getAttributeDefinition(Number(attrId))?.type || 'text')"
-                  :value="value"
-                  @input="(e) => updateAttributeFilter(Number(attrId), (e.target as HTMLInputElement).value)"
-                  @keyup.enter="applyFilter"
-                  :placeholder="getAttributeDefinitionName(Number(attrId))"
-                  class="input w-full"
-                />
-                <!-- Number type: number input -->
-                <input
-                  v-else-if="getAttributeDefinition(Number(attrId))?.type === 'number'"
-                  :value="value"
-                  type="number"
-                  @input="(e) => updateAttributeFilter(Number(attrId), (e.target as HTMLInputElement).value)"
-                  @keyup.enter="applyFilter"
-                  :placeholder="getAttributeDefinitionName(Number(attrId))"
-                  class="input w-full"
-                />
-                <!-- Select/Multi-select type -->
-                <template v-else-if="['select', 'multi_select'].includes(getAttributeDefinition(Number(attrId))?.type || '')">
-                  <div class="w-full">
-                    <Select
-                      :model-value="value"
-                      :options="[
-                        { value: '', label: getAttributeDefinitionName(Number(attrId)) },
-                        ...(getAttributeDefinition(Number(attrId))?.options || [])
-                      ]"
-                      @update:model-value="(val) => { updateAttributeFilter(Number(attrId), String(val ?? '')); applyFilter() }"
-                    />
-                  </div>
-                </template>
-                <!-- Fallback -->
-                <input
-                  v-else
-                  :value="value"
-                  @input="(e) => updateAttributeFilter(Number(attrId), (e.target as HTMLInputElement).value)"
-                  @keyup.enter="applyFilter"
-                  :placeholder="getAttributeDefinitionName(Number(attrId))"
-                  class="input w-full"
-                />
-              </div>
-            </template>
+        <div
+          class="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 lg:flex lg:flex-wrap"
+        >
+          <!-- Search stays visible at every viewport width. -->
+          <div class="relative min-w-0 lg:w-64 lg:flex-none">
+            <Icon
+              name="search"
+              size="md"
+              class="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"
+            />
+            <input
+              v-model="searchQuery"
+              type="text"
+              :placeholder="t('admin.users.searchUsers')"
+              class="input min-h-11 pl-10 lg:min-h-[42px]"
+              data-test="users-search"
+              @input="handleSearch"
+            />
           </div>
 
-          <!-- Right: Actions and Settings -->
-          <div class="flex flex-wrap items-center justify-end gap-2">
-            <!-- Mobile: Secondary buttons (icon only) -->
-            <div class="flex items-center gap-2 md:contents">
+          <!-- Tablet/mobile disclosure for every secondary filter and setting. -->
+          <button
+            type="button"
+            class="btn btn-secondary min-h-11 min-w-11 px-3 lg:hidden"
+            data-test="users-mobile-filter-toggle"
+            :aria-expanded="mobileFiltersExpanded"
+            aria-controls="users-mobile-secondary-filters"
+            @click="toggleMobileFilters"
+          >
+            <Icon name="filter" size="sm" class="mr-1.5" />
+            <span>{{ t('common.filter') }}</span>
+            <Icon
+              name="chevronDown"
+              size="xs"
+              class="ml-1 transition-transform motion-reduce:transition-none"
+              :class="{ 'rotate-180': mobileFiltersExpanded }"
+            />
+          </button>
+
+          <div
+            id="users-mobile-secondary-filters"
+            data-test="users-mobile-secondary-filters"
+            :class="mobileFiltersExpanded
+              ? 'col-span-2 flex flex-col gap-3 lg:contents'
+              : 'hidden lg:contents'"
+          >
+            <!-- Active filters retain their existing desktop flex layout. -->
+            <div class="flex flex-wrap items-center gap-3 lg:min-w-0 lg:flex-1">
+              <!-- Role Filter (visible when enabled) -->
+              <div
+                v-if="visibleFilters.has('role')"
+                class="users-secondary-filter w-full sm:w-32"
+              >
+                <Select
+                  v-model="filters.role"
+                  :options="[
+                    { value: '', label: t('admin.users.allRoles') },
+                    { value: 'admin', label: t('admin.users.admin') },
+                    { value: 'user', label: t('admin.users.user') }
+                  ]"
+                  @change="applyFilter"
+                />
+              </div>
+
+              <!-- Status Filter (visible when enabled) -->
+              <div
+                v-if="visibleFilters.has('status')"
+                class="users-secondary-filter w-full sm:w-32"
+              >
+                <Select
+                  v-model="filters.status"
+                  :options="[
+                    { value: '', label: t('admin.users.allStatus') },
+                    { value: 'active', label: t('common.active') },
+                    { value: 'disabled', label: t('admin.users.disabled') }
+                  ]"
+                  @change="applyFilter"
+                />
+              </div>
+
+              <!-- Group Filter (visible when enabled) -->
+              <div
+                v-if="visibleFilters.has('group')"
+                class="users-secondary-filter w-full sm:w-44"
+              >
+                <Select
+                  v-model="filters.group"
+                  :options="groupFilterOptions"
+                  searchable
+                  creatable
+                  :creatable-prefix="t('admin.users.fuzzySearch')"
+                  :search-placeholder="t('admin.users.searchAuthorizedGroups')"
+                  @change="applyFilter"
+                />
+              </div>
+
+              <!-- API Key Group Filter (visible when enabled) -->
+              <div
+                v-if="visibleFilters.has('apiKeyGroup')"
+                class="users-secondary-filter w-full sm:w-44"
+              >
+                <Select
+                  v-model="filters.apiKeyGroup"
+                  :options="apiKeyGroupFilterOptions"
+                  searchable
+                  :search-placeholder="t('admin.users.searchApiKeyGroups')"
+                  @change="applyFilter"
+                />
+              </div>
+
+              <!-- Dynamic Attribute Filters -->
+              <template v-for="(value, attrId) in activeAttributeFilters" :key="attrId">
+                <div
+                  v-if="visibleFilters.has(`attr_${attrId}`)"
+                  class="users-secondary-filter relative w-full sm:w-36"
+                >
+                  <!-- Text/Email/URL/Textarea/Date type: styled input -->
+                  <input
+                    v-if="['text', 'textarea', 'email', 'url', 'date'].includes(getAttributeDefinition(Number(attrId))?.type || 'text')"
+                    :value="value"
+                    @input="(e) => updateAttributeFilter(Number(attrId), (e.target as HTMLInputElement).value)"
+                    @keyup.enter="applyFilter"
+                    :placeholder="getAttributeDefinitionName(Number(attrId))"
+                    class="input min-h-11 w-full lg:min-h-[42px]"
+                  />
+                  <!-- Number type: number input -->
+                  <input
+                    v-else-if="getAttributeDefinition(Number(attrId))?.type === 'number'"
+                    :value="value"
+                    type="number"
+                    @input="(e) => updateAttributeFilter(Number(attrId), (e.target as HTMLInputElement).value)"
+                    @keyup.enter="applyFilter"
+                    :placeholder="getAttributeDefinitionName(Number(attrId))"
+                    class="input min-h-11 w-full lg:min-h-[42px]"
+                  />
+                  <!-- Select/Multi-select type -->
+                  <template v-else-if="['select', 'multi_select'].includes(getAttributeDefinition(Number(attrId))?.type || '')">
+                    <div class="w-full">
+                      <Select
+                        :model-value="value"
+                        :options="[
+                          { value: '', label: getAttributeDefinitionName(Number(attrId)) },
+                          ...(getAttributeDefinition(Number(attrId))?.options || [])
+                        ]"
+                        @update:model-value="(val) => { updateAttributeFilter(Number(attrId), String(val ?? '')); applyFilter() }"
+                      />
+                    </div>
+                  </template>
+                  <!-- Fallback -->
+                  <input
+                    v-else
+                    :value="value"
+                    @input="(e) => updateAttributeFilter(Number(attrId), (e.target as HTMLInputElement).value)"
+                    @keyup.enter="applyFilter"
+                    :placeholder="getAttributeDefinitionName(Number(attrId))"
+                    class="input min-h-11 w-full lg:min-h-[42px]"
+                  />
+                </div>
+              </template>
+            </div>
+
+            <!-- Secondary actions stay available but no longer compete with the primary CTA on mobile. -->
+            <div
+              class="users-filter-actions grid grid-cols-2 items-center gap-2 sm:flex sm:flex-wrap sm:justify-end lg:flex-nowrap"
+            >
               <!-- Refresh Button -->
               <button
+                type="button"
                 @click="loadUsers"
                 :disabled="loading"
-                class="btn btn-secondary px-2 md:px-3"
+                class="btn btn-secondary min-h-11 justify-center px-2 lg:min-h-10 lg:px-3"
                 :title="t('common.refresh')"
               >
                 <Icon name="refresh" size="md" :class="loading ? 'animate-spin' : ''" />
+                <span class="ml-1.5 lg:hidden">{{ t('common.refresh') }}</span>
               </button>
               <!-- Filter Settings Dropdown -->
               <div class="relative" ref="filterDropdownRef">
                 <button
+                  type="button"
                   @click="showFilterDropdown = !showFilterDropdown"
-                  class="btn btn-secondary px-2 md:px-3"
+                  class="btn btn-secondary min-h-11 w-full justify-center px-2 lg:min-h-10 lg:px-3"
                   :title="t('admin.users.filterSettings')"
                 >
-                  <Icon name="filter" size="sm" class="md:mr-1.5" />
-                  <span class="hidden md:inline">{{ t('admin.users.filterSettings') }}</span>
+                  <Icon name="filter" size="sm" class="mr-1.5" />
+                  <span>{{ t('admin.users.filterSettings') }}</span>
                 </button>
                 <!-- Dropdown menu -->
                 <div
                   v-if="showFilterDropdown"
-                  class="absolute right-0 top-full z-50 mt-1 w-48 rounded-lg border border-gray-200 bg-white py-1 shadow-lg dark:border-dark-600 dark:bg-dark-800"
+                  class="users-touch-menu absolute right-0 top-full z-50 mt-1 w-48 rounded-lg border border-gray-200 bg-white py-1 shadow-lg dark:border-dark-600 dark:bg-dark-800"
                 >
                   <!-- Built-in filters -->
                   <button
@@ -193,19 +244,20 @@
               <!-- Column Settings Dropdown -->
               <div class="relative" ref="columnDropdownRef">
                 <button
+                  type="button"
                   @click="showColumnDropdown = !showColumnDropdown"
-                  class="btn btn-secondary px-2 md:px-3"
+                  class="btn btn-secondary min-h-11 w-full justify-center px-2 lg:min-h-10 lg:px-3"
                   :title="t('admin.users.columnSettings')"
                 >
-                  <svg class="h-4 w-4 md:mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5">
+                  <svg class="mr-1.5 h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5">
                     <path stroke-linecap="round" stroke-linejoin="round" d="M9 4.5v15m6-15v15m-10.875 0h15.75c.621 0 1.125-.504 1.125-1.125V5.625c0-.621-.504-1.125-1.125-1.125H4.125C3.504 4.5 3 5.004 3 5.625v12.75c0 .621.504 1.125 1.125 1.125z" />
                   </svg>
-                  <span class="hidden md:inline">{{ t('admin.users.columnSettings') }}</span>
+                  <span>{{ t('admin.users.columnSettings') }}</span>
                 </button>
                 <!-- Dropdown menu -->
                 <div
                   v-if="showColumnDropdown"
-                  class="absolute right-0 top-full z-50 mt-1 max-h-80 w-48 overflow-y-auto rounded-lg border border-gray-200 bg-white py-1 shadow-lg dark:border-dark-600 dark:bg-dark-800"
+                  class="users-touch-menu absolute right-0 top-full z-50 mt-1 max-h-80 w-48 overflow-y-auto rounded-lg border border-gray-200 bg-white py-1 shadow-lg dark:border-dark-600 dark:bg-dark-800"
                 >
                   <button
                     v-for="col in toggleableColumns"
@@ -233,21 +285,27 @@
               </div>
               <!-- Attributes Config Button -->
               <button
+                type="button"
                 @click="showAttributesModal = true"
-                class="btn btn-secondary px-2 md:px-3"
+                class="btn btn-secondary min-h-11 justify-center px-2 lg:min-h-10 lg:px-3"
                 :title="t('admin.users.attributes.configButton')"
               >
-                <Icon name="cog" size="sm" class="md:mr-1.5" />
-                <span class="hidden md:inline">{{ t('admin.users.attributes.configButton') }}</span>
+                <Icon name="cog" size="sm" class="mr-1.5" />
+                <span>{{ t('admin.users.attributes.configButton') }}</span>
               </button>
             </div>
-
-            <!-- Create User Button (full width on mobile, auto width on desktop) -->
-            <button @click="showCreateModal = true" class="btn btn-primary flex-1 md:flex-initial">
-              <Icon name="plus" size="md" class="mr-2" />
-              {{ t('admin.users.createUser') }}
-            </button>
           </div>
+
+          <!-- The single primary page action remains visible at every breakpoint. -->
+          <button
+            type="button"
+            class="btn btn-primary col-span-2 min-h-11 w-full lg:ml-auto lg:min-h-10 lg:w-auto lg:flex-none"
+            data-test="users-create"
+            @click="showCreateModal = true"
+          >
+            <Icon name="plus" size="md" class="mr-2" />
+            {{ t('admin.users.createUser') }}
+          </button>
         </div>
       </template>
 
@@ -258,6 +316,8 @@
           :data="sortedUsers"
           :loading="loading"
           :actions-count="7"
+          mobile-primary-key="email"
+          :mobile-visible-keys="['email', 'role', 'groups', 'status', 'balance']"
           :server-side-sort="true"
           default-sort-key="created_at"
           default-sort-order="desc"
@@ -589,7 +649,7 @@
               <!-- Edit Button -->
               <button
                 @click="handleEdit(row)"
-                class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-gray-100 hover:text-primary-600 dark:hover:bg-dark-700 dark:hover:text-primary-400"
+                class="flex min-h-11 min-w-11 flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-gray-100 hover:text-primary-600 lg:min-h-0 lg:min-w-0 dark:hover:bg-dark-700 dark:hover:text-primary-400"
               >
                 <Icon name="edit" size="sm" />
                 <span class="text-xs">{{ t('common.edit') }}</span>
@@ -600,7 +660,7 @@
                 v-if="row.role !== 'admin'"
                 @click="handleToggleStatus(row)"
                 :class="[
-                  'flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors',
+                  'hidden flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors lg:flex',
                   row.status === 'active'
                     ? 'hover:bg-orange-50 hover:text-orange-600 dark:hover:bg-orange-900/20 dark:hover:text-orange-400'
                     : 'hover:bg-green-50 hover:text-green-600 dark:hover:bg-green-900/20 dark:hover:text-green-400'
@@ -614,7 +674,7 @@
               <!-- More Actions Menu Trigger -->
               <button
                 @click="openActionMenu(row, $event)"
-                class="action-menu-trigger flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-900 dark:hover:bg-dark-700 dark:hover:text-white"
+                class="action-menu-trigger flex min-h-11 min-w-11 flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-900 lg:min-h-0 lg:min-w-0 dark:hover:bg-dark-700 dark:hover:text-white"
                 :class="{ 'bg-gray-100 text-gray-900 dark:bg-dark-700 dark:text-white': activeMenuId === row.id }"
               >
                 <Icon name="more" size="sm" />
@@ -627,8 +687,6 @@
             <EmptyState
               :title="t('admin.users.noUsersYet')"
               :description="t('admin.users.createFirstUser')"
-              :action-text="t('admin.users.createUser')"
-              @action="showCreateModal = true"
             />
           </template>
         </DataTable>
@@ -657,6 +715,21 @@
         <div class="py-1">
           <template v-for="user in users" :key="user.id">
             <template v-if="user.id === activeMenuId">
+              <!-- Status is progressive on tablet/mobile; desktop keeps the direct action. -->
+              <button
+                v-if="user.role !== 'admin'"
+                class="flex w-full items-center gap-2 px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 lg:hidden dark:text-gray-300 dark:hover:bg-dark-700"
+                @click="handleToggleStatus(user); closeActionMenu()"
+              >
+                <Icon
+                  :name="user.status === 'active' ? 'ban' : 'checkCircle'"
+                  size="sm"
+                  :class="user.status === 'active' ? 'text-orange-500' : 'text-green-500'"
+                  :stroke-width="2"
+                />
+                {{ user.status === 'active' ? t('admin.users.disable') : t('admin.users.enable') }}
+              </button>
+
               <!-- View API Keys -->
               <button
                 @click="handleViewApiKeys(user); closeActionMenu()"
@@ -767,6 +840,7 @@ import type { PlatformQuotaItem } from '@/api/admin/users'
 import type { Column } from '@/components/common/types'
 import type { SelectOption } from '@/components/common/Select.vue'
 import AppLayout from '@/components/layout/AppLayout.vue'
+import AdminPageHeader from '@/components/layout/AdminPageHeader.vue'
 import TablePageLayout from '@/components/layout/TablePageLayout.vue'
 import DataTable from '@/components/common/DataTable.vue'
 import Pagination from '@/components/common/Pagination.vue'
@@ -1099,6 +1173,15 @@ const visibleFilters = reactive<Set<string>>(new Set())
 // Dropdown states
 const showFilterDropdown = ref(false)
 const showColumnDropdown = ref(false)
+const mobileFiltersExpanded = ref(false)
+
+const toggleMobileFilters = () => {
+  mobileFiltersExpanded.value = !mobileFiltersExpanded.value
+  if (!mobileFiltersExpanded.value) {
+    showFilterDropdown.value = false
+    showColumnDropdown.value = false
+  }
+}
 
 // Dropdown refs for click outside detection
 const filterDropdownRef = ref<HTMLElement | null>(null)
@@ -1808,3 +1891,13 @@ onUnmounted(() => {
   abortController?.abort()
 })
 </script>
+
+<style scoped>
+@media (max-width: 1023px) {
+  .users-secondary-filter :deep(.select-trigger),
+  .users-touch-menu button,
+  .action-menu-content button {
+    min-height: 44px;
+  }
+}
+</style>

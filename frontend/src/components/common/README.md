@@ -2,6 +2,29 @@
 
 This directory contains reusable Vue 3 components built with Composition API, TypeScript, and TailwindCSS.
 
+## Snow Clay visual contract
+
+- Runtime values come only from `frontend/src/styles/luoxue-clay-tokens.css`.
+- Shared component states live in `frontend/src/styles/luoxue-clay-components.css`.
+- Violet is used for primary actions, focus and current selection. Ice blue is reserved for brand/information. Success, warning and danger keep their semantic colors.
+- Business and administrator-provided copy is passed through unchanged; shared components style content but never translate or rewrite it.
+- Prefer the existing `.btn`, `.input`, `.card`, `Select`, `DataTable`, `Pagination`, `Toggle` and `StatusBadge` contracts over page-local replicas.
+
+### Shared primitive imports
+
+```typescript
+import {
+  DataTable,
+  Input,
+  Pagination,
+  SearchInput,
+  Select,
+  StatusBadge,
+  TextArea,
+  Toggle
+} from '@/components/common'
+```
+
 ## Components
 
 ### DataTable.vue
@@ -73,17 +96,19 @@ Pagination component with page numbers, navigation, and page size selector.
 
 ---
 
-### Modal.vue
+### BaseDialog.vue
 
-Modal dialog with customizable size and close behavior.
+Accessible dialog foundation with focus restoration, Escape handling, body scroll locking, and customizable width.
 
 **Props:**
 
 - `show: boolean` - Control modal visibility
 - `title: string` - Modal title
-- `size?: 'sm' | 'md' | 'lg' | 'xl' | 'full'` - Modal size (default: 'md')
+- `width?: 'narrow' | 'normal' | 'wide' | 'extra-wide' | 'full'` - Dialog width (default: `normal`)
 - `closeOnEscape?: boolean` - Close on Escape key (default: true)
-- `closeOnClickOutside?: boolean` - Close on backdrop click (default: true)
+- `closeOnClickOutside?: boolean` - Close on backdrop click (default: false)
+- `showCloseButton?: boolean` - Show the header close action (default: true)
+- `zIndex?: number` - Override the default overlay layer when required
 
 **Events:**
 
@@ -97,23 +122,23 @@ Modal dialog with customizable size and close behavior.
 **Usage:**
 
 ```vue
-<Modal :show="showModal" title="Edit User" size="lg" @close="showModal = false">
+<BaseDialog :show="showDialog" title="编辑用户" width="wide" @close="showDialog = false">
   <form @submit.prevent="saveUser">
     <!-- Form content -->
   </form>
 
   <template #footer>
-    <button @click="showModal = false">Cancel</button>
-    <button @click="saveUser">Save</button>
+    <button class="btn btn-secondary" @click="showDialog = false">取消</button>
+    <button class="btn btn-primary" @click="saveUser">保存</button>
   </template>
-</Modal>
+</BaseDialog>
 ```
 
 ---
 
 ### ConfirmDialog.vue
 
-Confirmation dialog built on top of Modal component.
+Confirmation dialog built on top of `BaseDialog`.
 
 **Props:**
 
@@ -250,7 +275,7 @@ Empty state placeholder with icon, message, and optional action button.
 You can import components individually:
 
 ```typescript
-import { DataTable, Pagination, Modal } from '@/components/common'
+import { BaseDialog, DataTable, Pagination } from '@/components/common'
 ```
 
 Or import specific components:
@@ -266,6 +291,6 @@ All components include:
 - **TypeScript support** with proper type definitions
 - **Accessibility** with ARIA attributes and keyboard navigation
 - **Responsive design** with mobile-friendly layouts
-- **TailwindCSS styling** for consistent design
+- **Snow Clay semantic styling** layered over the existing Tailwind structure
 - **Vue 3 Composition API** with `<script setup>`
 - **Slot support** for customization

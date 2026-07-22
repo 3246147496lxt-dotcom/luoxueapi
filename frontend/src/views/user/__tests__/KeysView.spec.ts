@@ -35,6 +35,7 @@ const messages: Record<string, string> = {
   'common.actions': 'Actions',
   'common.delete': 'Delete',
   'common.edit': 'Edit',
+  'common.filter': 'Filter',
   'common.loading': 'Loading',
   'common.name': 'Name',
   'common.refresh': 'Refresh',
@@ -63,6 +64,7 @@ const messages: Record<string, string> = {
   'keys.noExpiration': 'Never',
   'keys.noGroup': 'No group',
   'keys.noIpRestriction': 'No restrictions',
+  'keys.noKeysYet': 'No API keys yet',
   'keys.noRateLimit': 'Not set',
   'keys.quota': 'Quota',
   'keys.rateLimitColumn': 'Rate Limit',
@@ -186,6 +188,12 @@ const IconStub = {
   template: '<span :data-icon="name">{{ name }}</span>',
 }
 
+const EmptyStateStub = {
+  name: 'EmptyState',
+  props: ['title', 'description'],
+  template: '<div data-test="empty-state"><span>{{ title }}</span><span>{{ description }}</span><slot name="action" /></div>',
+}
+
 const mountView = async (): Promise<VueWrapper> => {
   const wrapper = mount(KeysView, {
     global: {
@@ -194,7 +202,7 @@ const mountView = async (): Promise<VueWrapper> => {
         Pagination: PaginationStub,
         BaseDialog: true,
         ConfirmDialog: true,
-        EmptyState: true,
+        EmptyState: EmptyStateStub,
         Select: SelectStub,
         SearchInput: SearchInputStub,
         Icon: IconStub,
@@ -265,6 +273,47 @@ describe('user KeysView responsive key layout', () => {
     expect(wrapper.text()).toContain('2.00/10.00')
     expect(wrapper.findAll('[data-testid="credit-amount"]').length).toBeGreaterThanOrEqual(8)
     expect(wrapper.text()).not.toContain('$')
+  })
+
+  it('keeps mobile secondary filters collapsed behind an accessible 44px control', async () => {
+    const wrapper = await mountView()
+    const toggle = wrapper.get('[data-test="key-mobile-filter-toggle"]')
+    const secondaryFilters = wrapper.get('[data-test="key-mobile-secondary-filters"]')
+
+    expect(toggle.text()).toContain('Filter')
+    expect(toggle.classes()).toContain('min-h-11')
+    expect(toggle.attributes('aria-expanded')).toBe('false')
+    expect(toggle.attributes('aria-controls')).toBe('key-mobile-secondary-filters')
+    expect(secondaryFilters.attributes('id')).toBe('key-mobile-secondary-filters')
+    expect(secondaryFilters.classes()).toContain('hidden')
+    expect(secondaryFilters.classes()).toContain('md:contents')
+    expect(wrapper.findAllComponents({ name: 'Select' })).toHaveLength(3)
+
+    await toggle.trigger('click')
+
+    expect(toggle.attributes('aria-expanded')).toBe('true')
+    expect(secondaryFilters.classes()).not.toContain('hidden')
+    expect(secondaryFilters.classes()).toContain('grid')
+    expect(secondaryFilters.classes()).toContain('md:contents')
+  })
+
+  it('keeps exactly one responsive create-key CTA for the empty state', async () => {
+    listKeys.mockResolvedValue({
+      items: [],
+      total: 0,
+      page: 1,
+      page_size: 20,
+      pages: 0,
+    })
+    const wrapper = await mountView()
+
+    const headerCta = wrapper.get('[data-test="key-create-header"]')
+    const emptyCta = wrapper.get('[data-test="key-create-empty"]')
+
+    expect(wrapper.get('[data-test="empty-state"]').text()).toContain('No API keys yet')
+    expect(headerCta.classes()).toContain('key-header-create--empty')
+    expect(emptyCta.classes()).toContain('key-empty-create')
+    expect(emptyCta.classes()).toContain('min-h-11')
   })
 
   it('keeps low-frequency fields hidden and can reveal them from detail settings', async () => {

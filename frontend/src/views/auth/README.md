@@ -1,5 +1,7 @@
 # Authentication Views
 
+> **Design-system note (2026-07-21):** every view using `AuthLayout` now enters the canonical Luoxue Snow Clay system by default. The authority remains `.superdesign/design-system.md` and `frontend/src/styles/luoxue-clay-tokens.css`. Any indigo examples retained below are historical implementation notes, not the active palette. Custom administrator-provided copy must remain unchanged by locale or theme styling.
+
 This directory contains Vue 3 authentication views for the Sub2API frontend application.
 
 ## Components
@@ -166,7 +168,7 @@ Both views use:
 **Design System:**
 
 - TailwindCSS utility classes
-- Consistent color scheme (indigo primary)
+- Luoxue Snow Clay: violet primary, ice blue only for brand/information, green only for semantic success
 - Responsive design
 - Accessible form controls
 - Loading states with spinner animations

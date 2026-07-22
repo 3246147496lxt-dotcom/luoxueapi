@@ -78,17 +78,27 @@ func (h *DashboardHandler) GetStats(c *gin.Context) {
 
 	response.Success(c, gin.H{
 		// 用户统计
-		"total_users":     stats.TotalUsers,
-		"today_new_users": stats.TodayNewUsers,
-		"active_users":    stats.ActiveUsers,
+		"total_users":                        stats.TotalUsers,
+		"today_new_users":                    stats.TodayNewUsers,
+		"current_day_new_users":              stats.CurrentDayNewUsers,
+		"previous_day_same_period_new_users": stats.PreviousDaySamePeriodNewUsers,
+		"active_users":                       stats.ActiveUsers,
 
 		// API Key 统计
-		"total_api_keys":  stats.TotalAPIKeys,
-		"active_api_keys": stats.ActiveAPIKeys,
+		"total_api_keys":                            stats.TotalAPIKeys,
+		"active_api_keys":                           stats.ActiveAPIKeys,
+		"current_week_active_api_keys":              stats.CurrentWeekActiveAPIKeys,
+		"previous_week_same_period_active_api_keys": stats.PreviousWeekSamePeriodActiveAPIKeys,
+		"current_week_start_at":                     stats.CurrentWeekStartAt,
+		"current_week_end_at":                       stats.CurrentWeekEndAt,
+		"previous_week_same_period_start_at":        stats.PreviousWeekSamePeriodStartAt,
+		"previous_week_same_period_end_at":          stats.PreviousWeekSamePeriodEndAt,
+		"stats_timezone":                            stats.StatsTimezone,
 
 		// 账户统计
 		"total_accounts":     stats.TotalAccounts,
 		"normal_accounts":    stats.NormalAccounts,
+		"healthy_accounts":   stats.HealthyAccounts,
 		"error_accounts":     stats.ErrorAccounts,
 		"ratelimit_accounts": stats.RateLimitAccounts,
 		"overload_accounts":  stats.OverloadAccounts,
@@ -104,14 +114,20 @@ func (h *DashboardHandler) GetStats(c *gin.Context) {
 		"total_actual_cost":           stats.TotalActualCost, // 实际扣除
 
 		// 今日 Token 使用统计
-		"today_requests":              stats.TodayRequests,
-		"today_input_tokens":          stats.TodayInputTokens,
-		"today_output_tokens":         stats.TodayOutputTokens,
-		"today_cache_creation_tokens": stats.TodayCacheCreationTokens,
-		"today_cache_read_tokens":     stats.TodayCacheReadTokens,
-		"today_tokens":                stats.TodayTokens,
-		"today_cost":                  stats.TodayCost,       // 今日标准计费
-		"today_actual_cost":           stats.TodayActualCost, // 今日实际扣除
+		"today_requests":                    stats.TodayRequests,
+		"current_day_requests":              stats.CurrentDayRequests,
+		"previous_day_same_period_requests": stats.PreviousDaySamePeriodRequests,
+		"current_day_start_at":              stats.CurrentDayStartAt,
+		"current_day_end_at":                stats.CurrentDayEndAt,
+		"previous_day_same_period_start_at": stats.PreviousDaySamePeriodStartAt,
+		"previous_day_same_period_end_at":   stats.PreviousDaySamePeriodEndAt,
+		"today_input_tokens":                stats.TodayInputTokens,
+		"today_output_tokens":               stats.TodayOutputTokens,
+		"today_cache_creation_tokens":       stats.TodayCacheCreationTokens,
+		"today_cache_read_tokens":           stats.TodayCacheReadTokens,
+		"today_tokens":                      stats.TodayTokens,
+		"today_cost":                        stats.TodayCost,       // 今日标准计费
+		"today_actual_cost":                 stats.TodayActualCost, // 今日实际扣除
 
 		// 系统运行统计
 		"average_duration_ms": stats.AverageDurationMs,
@@ -475,7 +491,7 @@ type BatchUsersUsageRequest struct {
 	UserIDs []int64 `json:"user_ids" binding:"required"`
 }
 
-var dashboardUsersRankingCache = newSnapshotCache(5 * time.Minute)
+var dashboardUsersRankingCache = newSnapshotCache(dashboardQueryCacheTTL)
 var dashboardBatchUsersUsageCache = newSnapshotCache(30 * time.Second)
 var dashboardBatchAPIKeysUsageCache = newSnapshotCache(30 * time.Second)
 

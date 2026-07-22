@@ -5,19 +5,20 @@ export default {
   theme: {
     extend: {
       colors: {
-        // 主色调 - Teal/Cyan 青色系
+        // Snow Clay primary interaction — violet. Ice blue remains a scoped
+        // brand/information role in luoxue-clay-tokens.css.
         primary: {
-          50: '#f0fdfa',
-          100: '#ccfbf1',
-          200: '#99f6e4',
-          300: '#5eead4',
-          400: '#2dd4bf',
-          500: '#14b8a6',
-          600: '#0d9488',
-          700: '#0f766e',
-          800: '#115e59',
-          900: '#134e4a',
-          950: '#042f2e'
+          50: '#f5f3ff',
+          100: '#ede9fe',
+          200: '#ddd6fe',
+          300: '#c4b5fd',
+          400: '#a78bfa',
+          500: '#8b5cf6',
+          600: '#7c3aed',
+          700: '#6d28d9',
+          800: '#5b21b6',
+          900: '#4c1d95',
+          950: '#2e1065'
         },
         // 辅助色 - 深蓝灰
         accent: {
@@ -67,15 +68,15 @@ export default {
       boxShadow: {
         glass: '0 16px 48px rgba(15, 23, 42, 0.08)',
         'glass-sm': '0 8px 24px rgba(15, 23, 42, 0.06)',
-        glow: '0 8px 24px rgba(15, 118, 110, 0.14)',
-        'glow-lg': '0 16px 40px rgba(15, 118, 110, 0.16)',
+        glow: '0 8px 24px rgba(124, 58, 237, 0.16)',
+        'glow-lg': '0 16px 40px rgba(124, 58, 237, 0.2)',
         card: '0 1px 2px rgba(15, 23, 42, 0.04)',
         'card-hover': '0 8px 24px rgba(15, 23, 42, 0.06)',
         'inner-glow': 'inset 0 1px 0 rgba(255, 255, 255, 0.1)'
       },
       backgroundImage: {
         'gradient-radial': 'radial-gradient(var(--tw-gradient-stops))',
-        'gradient-primary': 'linear-gradient(135deg, #14b8a6 0%, #0d9488 100%)',
+        'gradient-primary': 'linear-gradient(135deg, #8b5cf6 0%, #5b21b6 100%)',
         'gradient-dark': 'linear-gradient(135deg, #1e293b 0%, #0f172a 100%)',
         'gradient-glass':
           'linear-gradient(135deg, rgba(255,255,255,0.1) 0%, rgba(255,255,255,0.05) 100%)',
@@ -117,8 +118,8 @@ export default {
           '100%': { backgroundPosition: '200% 0' }
         },
         glow: {
-          '0%': { boxShadow: '0 0 20px rgba(20, 184, 166, 0.25)' },
-          '100%': { boxShadow: '0 0 30px rgba(20, 184, 166, 0.4)' }
+          '0%': { boxShadow: '0 0 20px rgba(124, 58, 237, 0.24)' },
+          '100%': { boxShadow: '0 0 30px rgba(124, 58, 237, 0.38)' }
         }
       },
       backdropBlur: {

@@ -7,6 +7,7 @@
         :columns="columns"
         :data="rows"
         :loading="loading"
+        :row-aria-label="errorRowAriaLabel"
         clickable-rows
         server-side-sort
         default-sort-key="created_at"
@@ -206,6 +207,11 @@ import { mapErrorCategory } from '@/utils/errorCategory'
 import { mapErrorSortKey, statusCodeBadgeClass } from '@/utils/errorBadges'
 
 const { t } = useI18n()
+
+const errorRowAriaLabel = (row: OpsErrorLog) => {
+  const summary = formatSmartMessage(row.message) || row.request_id || row.client_request_id || `#${row.id}`
+  return `${t('admin.ops.errorLog.details')}: ${row.status_code || '-'} · ${summary}`
+}
 
 // 列序对齐管理端用量明细:身份(用户→Key→账号)→ 请求形态(平台→模型→端点→分组→类型)
 // → 结果(状态→消息)→ 时间→UA→IP→操作

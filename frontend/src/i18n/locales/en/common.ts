@@ -154,6 +154,7 @@ export default {
     apiKeys: 'API Keys',
     batchImage: 'Batch Images',
     usage: 'Usage',
+    adminUsage: 'Platform Usage',
     redeem: 'Redeem',
     affiliate: 'Affiliate Rebates',
     affiliateManagement: 'Affiliate Rebates',
@@ -168,6 +169,22 @@ export default {
     modelCatalog: 'Model Catalog',
     contactUs: 'Contact Us',
     quickLinks: 'Quick Links',
+    closeNavigation: 'Close navigation',
+    adminSections: {
+      overview: 'Overview',
+      business: 'Users & Resources',
+      operations: 'Billing & Operations',
+      system: 'System & Audit',
+    },
+    serviceStatus: {
+      label: 'Session status',
+      readyTitle: 'Console ready',
+      readyDescription: 'Navigation and settings loaded',
+      readyValue: 'Connected',
+      syncingTitle: 'Syncing console',
+      syncingDescription: 'Waiting for service settings',
+      syncingValue: 'Syncing',
+    },
     subscriptions: 'Subscriptions',
     accounts: 'Account Pool',
     proxies: 'Proxies',
@@ -202,6 +219,7 @@ export default {
 
   // Auth
   auth: {
+    siteSubtitle: 'Subscription to API Conversion Platform',
     welcomeBack: 'Welcome Back',
     signInToAccount: 'Sign in to your account to continue',
     signIn: 'Sign In',

@@ -82,6 +82,35 @@ func TestSettingHandler_GetPublicSettings_ExposesForceEmailOnThirdPartySignup(t 
 	require.True(t, resp.Data.ForceEmailOnThirdPartySignup)
 }
 
+func TestSettingHandler_GetPublicSettings_ExposesCustomizedSiteSubtitle(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	repo := &settingHandlerPublicRepoStub{values: map[string]string{
+		service.SettingKeySiteSubtitle: "Subscription to API Conversion Platform",
+	}}
+	h := NewSettingHandler(service.NewSettingService(repo, &config.Config{}), "test-version")
+
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodGet, "/api/v1/settings/public", nil)
+
+	h.GetPublicSettings(c)
+
+	require.Equal(t, http.StatusOK, recorder.Code)
+
+	var resp struct {
+		Code int `json:"code"`
+		Data struct {
+			SiteSubtitle           string `json:"site_subtitle"`
+			SiteSubtitleCustomized bool   `json:"site_subtitle_customized"`
+		} `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &resp))
+	require.Equal(t, 0, resp.Code)
+	require.Equal(t, "Subscription to API Conversion Platform", resp.Data.SiteSubtitle)
+	require.True(t, resp.Data.SiteSubtitleCustomized)
+}
+
 func TestSettingHandler_GetPublicSettings_ExposesWeChatOAuthModeCapabilities(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	h := NewSettingHandler(service.NewSettingService(&settingHandlerPublicRepoStub{

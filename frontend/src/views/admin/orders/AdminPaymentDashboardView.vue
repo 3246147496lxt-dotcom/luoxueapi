@@ -1,6 +1,8 @@
 <template>
-  <AppLayout>
-    <div class="space-y-6">
+  <AppLayout variant="home-clay">
+    <div class="space-y-6" data-admin-page-kind="overview">
+      <AdminPageHeader :title="t('nav.paymentDashboard')" />
+
       <!-- Header with Day Switcher -->
       <div class="flex items-center justify-end">
         <div class="flex items-center gap-2">
@@ -75,6 +77,7 @@ import { adminPaymentAPI } from '@/api/admin/payment'
 import { extractI18nErrorMessage } from '@/utils/apiError'
 import type { DashboardStats } from '@/types/payment'
 import AppLayout from '@/components/layout/AppLayout.vue'
+import AdminPageHeader from '@/components/layout/AdminPageHeader.vue'
 import LoadingSpinner from '@/components/common/LoadingSpinner.vue'
 import Icon from '@/components/icons/Icon.vue'
 import OrderStatsCards from '@/components/admin/payment/OrderStatsCards.vue'

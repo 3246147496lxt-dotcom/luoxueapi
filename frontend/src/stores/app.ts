@@ -338,6 +338,7 @@ export const useAppStore = defineStore('app', () => {
         site_name: siteName.value,
         site_logo: siteLogo.value,
         site_subtitle: '',
+        site_subtitle_customized: false,
         api_base_url: apiBaseUrl.value,
         contact_info: contactInfo.value,
         doc_url: docUrl.value,

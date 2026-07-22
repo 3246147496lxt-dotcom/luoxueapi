@@ -1,6 +1,10 @@
 <template>
-  <AppLayout>
-    <div class="space-y-6">
+  <AppLayout variant="home-clay">
+    <div class="space-y-6" data-admin-page-kind="overview">
+      <AdminPageHeader
+        :title="t('admin.usage.title')"
+        :description="t('admin.usage.description')"
+      />
       <UsageStatsCards :stats="usageStats" />
       <!-- Charts Section -->
       <div class="space-y-4">
@@ -24,6 +28,7 @@
         </div>
         <div class="grid grid-cols-1 gap-6 lg:grid-cols-2">
           <ModelDistributionChart
+            variant="home-clay"
             v-model:source="modelDistributionSource"
             v-model:metric="modelDistributionMetric"
             :model-stats="requestedModelStats"
@@ -61,7 +66,7 @@
             :end-date="endDate"
             :filters="breakdownFilters"
           />
-          <TokenUsageTrend :trend-data="trendData" :loading="chartsLoading" />
+          <TokenUsageTrend variant="home-clay" :trend-data="trendData" :loading="chartsLoading" />
         </div>
       </div>
       <!-- 明细区：tab 栏 + 筛选 + 内容收进同一张卡片，消除割裂感 -->
@@ -157,6 +162,7 @@
             :end-date="endDate"
             :filters="breakdownFilters"
             :model="filters.model"
+            :initial-sort-by="rankingInitialSortBy"
             @select-user="handleRankingSelectUser"
           />
         </div>
@@ -191,6 +197,7 @@ import { getPersistedPageSize } from '@/composables/usePersistedPageSize'
 import { formatReasoningEffort } from '@/utils/format'
 import { resolveUsageRequestType, requestTypeToLegacyStream } from '@/utils/usageRequestType'
 import AppLayout from '@/components/layout/AppLayout.vue'; import Pagination from '@/components/common/Pagination.vue'; import Select from '@/components/common/Select.vue'; import DateRangePicker from '@/components/common/DateRangePicker.vue'
+import AdminPageHeader from '@/components/layout/AdminPageHeader.vue'
 import UsageStatsCards from '@/components/admin/usage/UsageStatsCards.vue'; import UsageFilters from '@/components/admin/usage/UsageFilters.vue'
 import UsageTable from '@/components/admin/usage/UsageTable.vue'; import UsageExportProgress from '@/components/admin/usage/UsageExportProgress.vue'
 import UserTokenRanking from '@/components/admin/usage/UserTokenRanking.vue'
@@ -210,6 +217,8 @@ const appStore = useAppStore()
 type DistributionMetric = 'tokens' | 'actual_cost'
 type EndpointSource = 'inbound' | 'upstream' | 'path'
 type ModelDistributionSource = 'requested' | 'upstream' | 'mapping'
+const RANKING_SORT_KEYS = ['requests', 'input_tokens', 'output_tokens', 'cache_tokens', 'total_tokens', 'actual_cost'] as const
+type RankingSortKey = typeof RANKING_SORT_KEYS[number]
 const route = useRoute()
 const usageStats = ref<AdminUsageStatsResponse | null>(null); const usageLogs = ref<AdminUsageLog[]>([]); const loading = ref(false); const exporting = ref(false)
 const trendData = ref<TrendDataPoint[]>([]); const requestedModelStats = ref<ModelStat[]>([]); const upstreamModelStats = ref<ModelStat[]>([]); const mappingModelStats = ref<ModelStat[]>([]); const groupStats = ref<GroupStat[]>([]); const chartsLoading = ref(false); const modelStatsLoading = ref(false); const granularity = ref<'day' | 'hour'>('hour')
@@ -301,6 +310,7 @@ const sortState = reactive({
   sort_by: 'created_at',
   sort_order: 'desc' as 'asc' | 'desc'
 })
+const rankingInitialSortBy = ref<RankingSortKey>('total_tokens')
 
 const getSingleQueryValue = (value: string | null | Array<string | null> | undefined): string | undefined => {
   if (Array.isArray(value)) return value.find((item): item is string => typeof item === 'string' && item.length > 0)
@@ -314,10 +324,19 @@ const getNumericQueryValue = (value: string | null | Array<string | null> | unde
   return Number.isFinite(parsed) ? parsed : undefined
 }
 
+const getRankingSortQueryValue = (
+  value: string | null | Array<string | null> | undefined
+): RankingSortKey | undefined => {
+  const raw = getSingleQueryValue(value)
+  return RANKING_SORT_KEYS.find((key) => key === raw)
+}
+
 const applyRouteQueryFilters = () => {
   const queryStartDate = getSingleQueryValue(route.query.start_date)
   const queryEndDate = getSingleQueryValue(route.query.end_date)
   const queryUserId = getNumericQueryValue(route.query.user_id)
+  const queryTab = getSingleQueryValue(route.query.tab)
+  const queryRankingSort = getRankingSortQueryValue(route.query.sort_by)
 
   if (queryStartDate) {
     startDate.value = queryStartDate
@@ -333,6 +352,12 @@ const applyRouteQueryFilters = () => {
     end_date: endDate.value
   }
   granularity.value = getGranularityForRange(startDate.value, endDate.value)
+  rankingInitialSortBy.value = queryRankingSort ?? 'total_tokens'
+
+  if (queryTab === 'ranking') {
+    activeTab.value = 'ranking'
+    rankingMounted.value = true
+  }
 }
 
 const onDateRangeChange = (range: { startDate: string; endDate: string; preset: string | null }) => {

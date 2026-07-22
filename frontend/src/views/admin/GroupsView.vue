@@ -1,58 +1,97 @@
 <template>
-  <AppLayout>
-    <TablePageLayout>
+  <AppLayout variant="home-clay">
+    <TablePageLayout v-if="editorMode === 'list'">
+      <template #header>
+        <AdminPageHeader
+          :title="t('admin.groups.title')"
+          :description="t('admin.groups.description')"
+        />
+      </template>
+
       <template #filters>
         <div
-          class="flex flex-col justify-between gap-4 lg:flex-row lg:items-start"
+          class="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 lg:flex lg:flex-wrap"
         >
-          <!-- Left: fuzzy search + filters (can wrap to multiple lines) -->
-          <div class="flex flex-1 flex-wrap items-center gap-3">
-            <div class="relative w-full sm:w-64">
-              <Icon
-                name="search"
-                size="md"
-                class="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 dark:text-gray-500"
-              />
-              <input
-                v-model="searchQuery"
-                type="text"
-                :placeholder="t('admin.groups.searchGroups')"
-                class="input pl-10"
-                @input="handleSearch"
-              />
-            </div>
+          <!-- Search stays visible at every viewport width. -->
+          <div class="relative min-w-0 lg:w-64 lg:flex-none">
+            <Icon
+              name="search"
+              size="md"
+              class="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 dark:text-gray-500"
+            />
+            <input
+              v-model="searchQuery"
+              type="text"
+              :placeholder="t('admin.groups.searchGroups')"
+              class="input min-h-11 pl-10 lg:min-h-[42px]"
+              data-test="groups-search"
+              @input="handleSearch"
+            />
+          </div>
+
+          <button
+            type="button"
+            class="btn btn-secondary min-h-11 min-w-11 px-3 lg:hidden"
+            data-test="groups-mobile-filter-toggle"
+            :aria-expanded="mobileFiltersExpanded"
+            aria-controls="groups-mobile-secondary-filters"
+            @click="toggleMobileFilters"
+          >
+            <Icon name="filter" size="sm" class="mr-1.5" />
+            <span>{{ t("common.filter") }}</span>
+            <Icon
+              name="chevronDown"
+              size="xs"
+              class="ml-1 transition-transform motion-reduce:transition-none"
+              :class="{ 'rotate-180': mobileFiltersExpanded }"
+            />
+          </button>
+
+          <!-- Platform, status, and exclusivity are progressively disclosed below desktop. -->
+          <div
+            id="groups-mobile-secondary-filters"
+            data-test="groups-mobile-secondary-filters"
+            :class="
+              mobileFiltersExpanded
+                ? 'col-span-2 grid grid-cols-1 gap-3 sm:grid-cols-3 lg:flex lg:min-w-0 lg:flex-1'
+                : 'hidden lg:flex lg:min-w-0 lg:flex-1 lg:items-center lg:gap-3'
+            "
+          >
             <Select
               v-model="filters.platform"
               :options="platformFilterOptions"
               :placeholder="t('admin.groups.allPlatforms')"
-              class="w-44"
+              class="w-full lg:w-44"
               @change="loadGroups"
             />
             <Select
               v-model="filters.status"
               :options="statusOptions"
               :placeholder="t('admin.groups.allStatus')"
-              class="w-40"
+              class="w-full lg:w-40"
               @change="loadGroups"
             />
             <Select
               v-model="filters.is_exclusive"
               :options="exclusiveOptions"
               :placeholder="t('admin.groups.allGroups')"
-              class="w-44"
+              class="w-full lg:w-44"
               @change="loadGroups"
             />
           </div>
 
-          <!-- Right: actions -->
+          <!-- Refresh and the single primary action remain visible at every breakpoint. -->
           <div
-            class="flex w-full flex-shrink-0 flex-wrap items-center justify-end gap-3 lg:w-auto"
+            class="col-span-2 flex w-full flex-shrink-0 items-center justify-end gap-2 lg:ml-auto lg:w-auto lg:gap-3"
           >
             <button
+              type="button"
               @click="loadGroups"
               :disabled="loading"
-              class="btn btn-secondary"
+              class="btn btn-secondary min-h-11 min-w-11 justify-center px-3 lg:min-h-10"
+              data-test="groups-refresh"
               :title="t('common.refresh')"
+              :aria-label="t('common.refresh')"
             >
               <Icon
                 name="refresh"
@@ -60,8 +99,80 @@
                 :class="loading ? 'animate-spin' : ''"
               />
             </button>
-            <div class="relative" ref="columnDropdownRef">
+
+            <!-- Tablet/mobile secondary tools. -->
+            <div ref="mobileToolsRef" class="relative lg:hidden">
               <button
+                type="button"
+                class="btn btn-secondary min-h-11 min-w-11 justify-center px-3"
+                data-test="groups-mobile-more-toggle"
+                :title="t('common.more')"
+                :aria-label="t('common.more')"
+                :aria-expanded="showMobileTools"
+                aria-controls="groups-mobile-tools-menu"
+                @click="toggleMobileTools"
+              >
+                <Icon name="more" size="md" />
+              </button>
+              <div
+                v-if="showMobileTools"
+                id="groups-mobile-tools-menu"
+                data-test="groups-mobile-tools-menu"
+                class="absolute right-0 top-full z-50 mt-1 max-h-80 w-64 overflow-y-auto rounded-xl border border-gray-200 bg-white py-1 shadow-lg dark:border-dark-600 dark:bg-dark-800"
+              >
+                <button
+                  type="button"
+                  class="flex min-h-11 w-full items-center justify-between gap-3 px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-dark-700"
+                  :aria-expanded="mobileColumnSettingsExpanded"
+                  @click="mobileColumnSettingsExpanded = !mobileColumnSettingsExpanded"
+                >
+                  <span class="flex items-center gap-2">
+                    <Icon name="grid" size="sm" />
+                    {{ t("admin.groups.columnSettings") }}
+                  </span>
+                  <Icon
+                    name="chevronDown"
+                    size="xs"
+                    class="transition-transform motion-reduce:transition-none"
+                    :class="{ 'rotate-180': mobileColumnSettingsExpanded }"
+                  />
+                </button>
+                <div
+                  v-if="mobileColumnSettingsExpanded"
+                  class="border-y border-gray-100 bg-gray-50/80 py-1 dark:border-dark-700 dark:bg-dark-900/50"
+                >
+                  <button
+                    v-for="col in toggleableColumns"
+                    :key="col.key"
+                    type="button"
+                    @click="toggleColumn(col.key)"
+                    class="flex min-h-11 w-full items-center justify-between px-5 py-2 text-left text-sm text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-dark-700"
+                  >
+                    <span>{{ col.label }}</span>
+                    <Icon
+                      v-if="isColumnVisible(col.key)"
+                      name="check"
+                      size="sm"
+                      class="text-primary-500"
+                      :stroke-width="2"
+                    />
+                  </button>
+                </div>
+                <button
+                  type="button"
+                  class="flex min-h-11 w-full items-center gap-2 px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-dark-700"
+                  @click="openSortFromMobile"
+                >
+                  <Icon name="arrowsUpDown" size="sm" />
+                  {{ t("admin.groups.sortOrder") }}
+                </button>
+              </div>
+            </div>
+
+            <!-- Desktop secondary tools retain their existing behavior. -->
+            <div class="relative hidden lg:block" ref="columnDropdownRef">
+              <button
+                type="button"
                 @click="showColumnDropdown = !showColumnDropdown"
                 class="btn btn-secondary"
                 :title="t('admin.groups.columnSettings')"
@@ -93,16 +204,19 @@
               </div>
             </div>
             <button
+              type="button"
               @click="openSortModal"
-              class="btn btn-secondary"
+              class="btn btn-secondary hidden lg:inline-flex"
               :title="t('admin.groups.sortOrder')"
             >
               <Icon name="arrowsUpDown" size="md" class="mr-2" />
               {{ t("admin.groups.sortOrder") }}
             </button>
             <button
+              type="button"
               @click="openCreateModal"
-              class="btn btn-primary"
+              class="btn btn-primary min-h-11 flex-1 justify-center lg:min-h-10 lg:flex-none"
+              data-test="groups-create"
               data-tour="groups-create-btn"
             >
               <Icon name="plus" size="md" class="mr-2" />
@@ -117,6 +231,14 @@
           :columns="columns"
           :data="groups"
           :loading="loading"
+          mobile-primary-key="name"
+          :mobile-visible-keys="[
+            'platform',
+            'billing_type',
+            'account_count',
+            'capacity',
+            'status',
+          ]"
           :server-side-sort="true"
           default-sort-key="sort_order"
           default-sort-order="asc"
@@ -358,17 +480,36 @@
           </template>
 
           <template #cell-actions="{ row }">
-            <div class="flex items-center gap-1">
+            <div class="flex flex-wrap items-center gap-1">
               <button
+                type="button"
                 @click="handleEdit(row)"
-                class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-gray-100 hover:text-primary-600 dark:hover:bg-dark-700 dark:hover:text-primary-400"
+                class="flex min-h-11 min-w-11 flex-1 flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-gray-100 hover:text-primary-600 lg:min-h-0 lg:min-w-0 lg:flex-none dark:hover:bg-dark-700 dark:hover:text-primary-400"
+                data-test="groups-row-edit"
               >
                 <Icon name="edit" size="sm" />
                 <span class="text-xs">{{ t("common.edit") }}</span>
               </button>
+
               <button
+                type="button"
+                class="flex min-h-11 min-w-11 flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-900 lg:hidden dark:hover:bg-dark-700 dark:hover:text-white"
+                data-test="groups-row-more"
+                :title="t('common.more')"
+                :aria-label="t('common.more')"
+                :aria-expanded="expandedGroupActionId === row.id"
+                :aria-controls="`groups-row-secondary-actions-${row.id}`"
+                @click="toggleGroupRowActions(row.id)"
+              >
+                <Icon name="more" size="sm" />
+                <span class="text-xs">{{ t("common.more") }}</span>
+              </button>
+
+              <button
+                type="button"
                 @click="handleRateMultipliers(row)"
-                class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-gray-100 hover:text-purple-600 dark:hover:bg-dark-700 dark:hover:text-purple-400"
+                class="hidden flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-gray-100 hover:text-purple-600 lg:flex dark:hover:bg-dark-700 dark:hover:text-purple-400"
+                data-test="groups-row-rate-desktop"
               >
                 <Icon name="dollar" size="sm" />
                 <span class="text-xs">{{
@@ -376,8 +517,10 @@
                 }}</span>
               </button>
               <button
+                type="button"
                 @click="handleRPMOverrides(row)"
-                class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-gray-100 hover:text-orange-600 dark:hover:bg-dark-700 dark:hover:text-orange-400"
+                class="hidden flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-gray-100 hover:text-orange-600 lg:flex dark:hover:bg-dark-700 dark:hover:text-orange-400"
+                data-test="groups-row-rpm-desktop"
               >
                 <Icon name="bolt" size="sm" />
                 <span class="text-xs">{{
@@ -385,12 +528,46 @@
                 }}</span>
               </button>
               <button
+                type="button"
                 @click="handleDelete(row)"
-                class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-900/20 dark:hover:text-red-400"
+                class="hidden flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-red-50 hover:text-red-600 lg:flex dark:hover:bg-red-900/20 dark:hover:text-red-400"
+                data-test="groups-row-delete-desktop"
               >
                 <Icon name="trash" size="sm" />
                 <span class="text-xs">{{ t("common.delete") }}</span>
               </button>
+
+              <div
+                v-if="expandedGroupActionId === row.id"
+                :id="`groups-row-secondary-actions-${row.id}`"
+                class="grid w-full grid-cols-3 gap-1 border-t border-gray-200 pt-2 lg:hidden dark:border-dark-700"
+                data-test="groups-row-secondary-actions"
+              >
+                <button
+                  type="button"
+                  class="flex min-h-11 flex-col items-center justify-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-gray-100 hover:text-purple-600 dark:hover:bg-dark-700 dark:hover:text-purple-400"
+                  @click="closeGroupRowActions(); handleRateMultipliers(row)"
+                >
+                  <Icon name="dollar" size="sm" />
+                  <span class="text-xs">{{ t("admin.groups.rateMultipliers") }}</span>
+                </button>
+                <button
+                  type="button"
+                  class="flex min-h-11 flex-col items-center justify-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-gray-100 hover:text-orange-600 dark:hover:bg-dark-700 dark:hover:text-orange-400"
+                  @click="closeGroupRowActions(); handleRPMOverrides(row)"
+                >
+                  <Icon name="bolt" size="sm" />
+                  <span class="text-xs">{{ t("admin.groups.rpmOverrides") }}</span>
+                </button>
+                <button
+                  type="button"
+                  class="flex min-h-11 flex-col items-center justify-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-900/20 dark:hover:text-red-400"
+                  @click="closeGroupRowActions(); handleDelete(row)"
+                >
+                  <Icon name="trash" size="sm" />
+                  <span class="text-xs">{{ t("common.delete") }}</span>
+                </button>
+              </div>
             </div>
           </template>
 
@@ -398,8 +575,6 @@
             <EmptyState
               :title="t('admin.groups.noGroupsYet')"
               :description="t('admin.groups.createFirstGroup')"
-              :action-text="t('admin.groups.createGroup')"
-              @action="openCreateModal"
             />
           </template>
         </DataTable>
@@ -417,28 +592,58 @@
       </template>
     </TablePageLayout>
 
-    <!-- Create Group Modal -->
-    <BaseDialog
-      :show="showCreateModal"
+    <!-- Create Group Workspace -->
+    <GroupEditorShell
+      v-else-if="editorMode === 'create'"
       :title="t('admin.groups.createGroup')"
-      width="normal"
-      @close="closeCreateModal"
+      :description="t('admin.groups.editor.createDescription')"
+      :context-label="t('admin.groups.platforms.' + createForm.platform)"
+      :back-label="t('admin.groups.editor.backToGroups')"
+      :navigation-label="t('admin.groups.editor.navigationLabel')"
+      :sections="editorSections"
+      :active-section="activeEditorSection"
+      :loading="editorLoading"
+      :loading-label="t('admin.groups.editor.loading')"
+      :dirty="editorDirty"
+      :dirty-label="t('admin.groups.editor.dirty')"
+      :saved-label="t('admin.groups.editor.saved')"
+      @back="closeCreateModal"
+      @select-section="selectEditorSection"
     >
       <form
         id="create-group-form"
         @submit.prevent="handleCreateGroup"
         class="space-y-5"
       >
+        <section
+          v-if="activeEditorSection === 'general'"
+          id="group-editor-section-general"
+          class="space-y-5"
+          role="region"
+          aria-labelledby="group-editor-active-title"
+          data-test="group-editor-active-section"
+        >
         <div>
-          <label class="input-label">{{ t("admin.groups.form.name") }}</label>
+          <label for="create-group-name" class="input-label">{{ t("admin.groups.form.name") }}</label>
           <input
+            id="create-group-name"
             v-model="createForm.name"
             type="text"
             required
             class="input"
+            :aria-invalid="editorValidationErrorField === 'name' || undefined"
+            :aria-describedby="editorValidationErrorField === 'name' ? 'create-group-name-error' : undefined"
             :placeholder="t('admin.groups.enterGroupName')"
             data-tour="group-form-name"
+            @input="clearEditorValidationError('name')"
           />
+          <p
+            v-if="editorValidationErrorField === 'name'"
+            id="create-group-name-error"
+            class="mt-1.5 text-sm text-red-600 dark:text-red-400"
+          >
+            {{ editorValidationErrorMessage }}
+          </p>
         </div>
         <div>
           <label class="input-label">{{
@@ -553,18 +758,29 @@
           <p class="input-hint">{{ t("admin.groups.copyAccounts.hint") }}</p>
         </div>
         <div>
-          <label class="input-label">{{
+          <label for="create-group-rate-multiplier" class="input-label">{{
             t("admin.groups.form.rateMultiplier")
           }}</label>
           <input
+            id="create-group-rate-multiplier"
             v-model.number="createForm.rate_multiplier"
             type="number"
             step="0.001"
             min="0.001"
             required
             class="input"
+            :aria-invalid="editorValidationErrorField === 'rateMultiplier' || undefined"
+            :aria-describedby="editorValidationErrorField === 'rateMultiplier' ? 'create-group-rate-multiplier-error' : undefined"
             data-tour="group-form-multiplier"
+            @input="clearEditorValidationError('rateMultiplier')"
           />
+          <p
+            v-if="editorValidationErrorField === 'rateMultiplier'"
+            id="create-group-rate-multiplier-error"
+            class="mt-1.5 text-sm text-red-600 dark:text-red-400"
+          >
+            {{ editorValidationErrorMessage }}
+          </p>
           <p class="input-hint">{{ t("admin.groups.rateMultiplierHint") }}</p>
         </div>
         <div>
@@ -654,6 +870,15 @@
           </div>
         </div>
 
+        </section>
+        <section
+          v-if="activeEditorSection === 'access'"
+          id="group-editor-section-access"
+          class="space-y-5"
+          role="region"
+          aria-labelledby="group-editor-active-title"
+          data-test="group-editor-active-section"
+        >
         <!-- Subscription Configuration -->
         <div class="mt-4 border-t pt-4">
           <div>
@@ -716,6 +941,15 @@
           </div>
         </div>
 
+        </section>
+        <section
+          v-if="activeEditorSection === 'models'"
+          id="group-editor-section-models"
+          class="space-y-5"
+          role="region"
+          aria-labelledby="group-editor-active-title"
+          data-test="group-editor-active-section"
+        >
         <div class="border-t pt-4">
           <div class="mb-3 flex items-center justify-between gap-3">
             <div>
@@ -823,6 +1057,15 @@
           </div>
         </div>
 
+        </section>
+        <section
+          v-if="activeEditorSection === 'pricing'"
+          id="group-editor-section-pricing"
+          class="space-y-5"
+          role="region"
+          aria-labelledby="group-editor-active-title"
+          data-test="group-editor-active-section"
+        >
         <!-- 图片生成计费配置 -->
         <div
           v-if="supportsImagePricingPlatform(createForm.platform)"
@@ -1114,6 +1357,15 @@
           </div>
         </div>
 
+        </section>
+        <section
+          v-if="activeEditorSection === 'routing'"
+          id="group-editor-section-routing"
+          class="space-y-5"
+          role="region"
+          aria-labelledby="group-editor-active-title"
+          data-test="group-editor-active-section"
+        >
         <!-- 支持的模型系列（仅 antigravity 平台） -->
         <div v-if="createForm.platform === 'antigravity'" class="border-t pt-4">
           <div class="mb-1.5 flex items-center gap-1">
@@ -1692,6 +1944,15 @@
           </p>
         </div>
 
+        </section>
+        <section
+          v-if="activeEditorSection === 'advanced'"
+          id="group-editor-section-advanced"
+          class="space-y-5"
+          role="region"
+          aria-labelledby="group-editor-active-title"
+          data-test="group-editor-active-section"
+        >
         <!-- 模型路由配置（仅 anthropic 平台） -->
         <div v-if="createForm.platform === 'anthropic'" class="border-t pt-4">
           <div class="mb-1.5 flex items-center gap-1">
@@ -1885,6 +2146,7 @@
             {{ t("admin.groups.modelRouting.addRule") }}
           </button>
         </div>
+        </section>
       </form>
 
       <template #footer>
@@ -1927,30 +2189,83 @@
           </button>
         </div>
       </template>
-    </BaseDialog>
+    </GroupEditorShell>
 
-    <!-- Edit Group Modal -->
-    <BaseDialog
-      :show="showEditModal"
+    <!-- Edit Group Workspace -->
+    <GroupEditorShell
+      v-else
       :title="t('admin.groups.editGroup')"
-      width="normal"
-      @close="closeEditModal"
+      :description="t('admin.groups.editor.editDescription')"
+      :context-label="editorContextLabel"
+      :back-label="t('admin.groups.editor.backToGroups')"
+      :navigation-label="t('admin.groups.editor.navigationLabel')"
+      :sections="editorSections"
+      :active-section="activeEditorSection"
+      :loading="editorLoading"
+      :loading-label="t('admin.groups.editor.loading')"
+      :dirty="editorDirty"
+      :dirty-label="t('admin.groups.editor.dirty')"
+      :saved-label="t('admin.groups.editor.saved')"
+      @back="closeEditModal"
+      @select-section="selectEditorSection"
     >
+      <div
+        v-if="editorLoadError"
+        ref="editorLoadErrorRef"
+        class="rounded-2xl border border-red-200 bg-red-50 p-5 text-red-800 dark:border-red-900/60 dark:bg-red-950/30 dark:text-red-200"
+        role="alert"
+        tabindex="-1"
+        data-test="group-editor-load-error"
+      >
+        <p class="font-semibold">{{ editorLoadError }}</p>
+        <div class="mt-4 flex flex-wrap gap-3">
+          <button
+            v-if="editorLoadRetryable"
+            type="button"
+            class="btn btn-primary"
+            @click="retryEditorLoad"
+          >
+            {{ t('admin.groups.editor.retry') }}
+          </button>
+          <button type="button" class="btn btn-secondary" @click="closeEditModal">
+            {{ t('admin.groups.editor.backToGroups') }}
+          </button>
+        </div>
+      </div>
       <form
-        v-if="editingGroup"
+        v-else-if="editingGroup"
         id="edit-group-form"
         @submit.prevent="handleUpdateGroup"
         class="space-y-5"
       >
+        <section
+          v-if="activeEditorSection === 'general'"
+          id="group-editor-section-general"
+          class="space-y-5"
+          role="region"
+          aria-labelledby="group-editor-active-title"
+          data-test="group-editor-active-section"
+        >
         <div>
-          <label class="input-label">{{ t("admin.groups.form.name") }}</label>
+          <label for="edit-group-name" class="input-label">{{ t("admin.groups.form.name") }}</label>
           <input
+            id="edit-group-name"
             v-model="editForm.name"
             type="text"
             required
             class="input"
+            :aria-invalid="editorValidationErrorField === 'name' || undefined"
+            :aria-describedby="editorValidationErrorField === 'name' ? 'edit-group-name-error' : undefined"
             data-tour="edit-group-form-name"
+            @input="clearEditorValidationError('name')"
           />
+          <p
+            v-if="editorValidationErrorField === 'name'"
+            id="edit-group-name-error"
+            class="mt-1.5 text-sm text-red-600 dark:text-red-400"
+          >
+            {{ editorValidationErrorMessage }}
+          </p>
         </div>
         <div>
           <label class="input-label">{{
@@ -2066,18 +2381,29 @@
           </p>
         </div>
         <div>
-          <label class="input-label">{{
+          <label for="edit-group-rate-multiplier" class="input-label">{{
             t("admin.groups.form.rateMultiplier")
           }}</label>
           <input
+            id="edit-group-rate-multiplier"
             v-model.number="editForm.rate_multiplier"
             type="number"
             step="0.001"
             min="0.001"
             required
             class="input"
+            :aria-invalid="editorValidationErrorField === 'rateMultiplier' || undefined"
+            :aria-describedby="editorValidationErrorField === 'rateMultiplier' ? 'edit-group-rate-multiplier-error' : undefined"
             data-tour="group-form-multiplier"
+            @input="clearEditorValidationError('rateMultiplier')"
           />
+          <p
+            v-if="editorValidationErrorField === 'rateMultiplier'"
+            id="edit-group-rate-multiplier-error"
+            class="mt-1.5 text-sm text-red-600 dark:text-red-400"
+          >
+            {{ editorValidationErrorMessage }}
+          </p>
         </div>
         <div>
           <label class="input-label">{{ t("admin.groups.form.rpmLimit") }}</label>
@@ -2167,6 +2493,15 @@
           <Select v-model="editForm.status" :options="editStatusOptions" />
         </div>
 
+        </section>
+        <section
+          v-if="activeEditorSection === 'access'"
+          id="group-editor-section-access"
+          class="space-y-5"
+          role="region"
+          aria-labelledby="group-editor-active-title"
+          data-test="group-editor-active-section"
+        >
         <!-- Subscription Configuration -->
         <div class="mt-4 border-t pt-4">
           <div>
@@ -2230,6 +2565,15 @@
           </div>
         </div>
 
+        </section>
+        <section
+          v-if="activeEditorSection === 'models'"
+          id="group-editor-section-models"
+          class="space-y-5"
+          role="region"
+          aria-labelledby="group-editor-active-title"
+          data-test="group-editor-active-section"
+        >
         <div class="border-t pt-4">
           <div class="mb-3 flex items-center justify-between gap-3">
             <div>
@@ -2337,6 +2681,15 @@
           </div>
         </div>
 
+        </section>
+        <section
+          v-if="activeEditorSection === 'pricing'"
+          id="group-editor-section-pricing"
+          class="space-y-5"
+          role="region"
+          aria-labelledby="group-editor-active-title"
+          data-test="group-editor-active-section"
+        >
         <!-- 图片生成计费配置 -->
         <div
           v-if="supportsImagePricingPlatform(editForm.platform)"
@@ -2628,6 +2981,15 @@
           </div>
         </div>
 
+        </section>
+        <section
+          v-if="activeEditorSection === 'routing'"
+          id="group-editor-section-routing"
+          class="space-y-5"
+          role="region"
+          aria-labelledby="group-editor-active-title"
+          data-test="group-editor-active-section"
+        >
         <!-- 支持的模型系列（仅 antigravity 平台） -->
         <div v-if="editForm.platform === 'antigravity'" class="border-t pt-4">
           <div class="mb-1.5 flex items-center gap-1">
@@ -3202,6 +3564,15 @@
           </p>
         </div>
 
+        </section>
+        <section
+          v-if="activeEditorSection === 'advanced'"
+          id="group-editor-section-advanced"
+          class="space-y-5"
+          role="region"
+          aria-labelledby="group-editor-active-title"
+          data-test="group-editor-active-section"
+        >
         <!-- 模型路由配置（仅 anthropic 平台） -->
         <div v-if="editForm.platform === 'anthropic'" class="border-t pt-4">
           <div class="mb-1.5 flex items-center gap-1">
@@ -3394,10 +3765,11 @@
             {{ t("admin.groups.modelRouting.addRule") }}
           </button>
         </div>
+        </section>
       </form>
 
       <template #footer>
-        <div class="flex justify-end gap-3 pt-4">
+        <div v-if="editingGroup && !editorLoadError" class="flex justify-end gap-3">
           <button
             @click="closeEditModal"
             type="button"
@@ -3436,7 +3808,7 @@
           </button>
         </div>
       </template>
-    </BaseDialog>
+    </GroupEditorShell>
 
     <!-- Delete Confirmation Dialog -->
     <ConfirmDialog
@@ -3561,14 +3933,29 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed, onMounted, onUnmounted, watch } from "vue";
+import {
+  ref,
+  reactive,
+  computed,
+  nextTick,
+  onMounted,
+  onUnmounted,
+  watch,
+} from "vue";
 import { useI18n } from "vue-i18n";
+import {
+  onBeforeRouteLeave,
+  onBeforeRouteUpdate,
+  useRoute,
+  useRouter,
+} from "vue-router";
 import { useAppStore } from "@/stores/app";
 import { useOnboardingStore } from "@/stores/onboarding";
 import { adminAPI } from "@/api/admin";
 import type { AdminGroup, GroupPlatform, SubscriptionType } from "@/types";
 import type { Column } from "@/components/common/types";
 import AppLayout from "@/components/layout/AppLayout.vue";
+import AdminPageHeader from "@/components/layout/AdminPageHeader.vue";
 import TablePageLayout from "@/components/layout/TablePageLayout.vue";
 import DataTable from "@/components/common/DataTable.vue";
 import Pagination from "@/components/common/Pagination.vue";
@@ -3580,9 +3967,14 @@ import PlatformIcon from "@/components/common/PlatformIcon.vue";
 import Icon from "@/components/icons/Icon.vue";
 import GroupRateMultipliersModal from "@/components/admin/group/GroupRateMultipliersModal.vue";
 import GroupRPMOverridesModal from "@/components/admin/group/GroupRPMOverridesModal.vue";
+import GroupEditorShell from "@/components/admin/group/GroupEditorShell.vue";
 import GroupCapacityBadge from "@/components/common/GroupCapacityBadge.vue";
 import { VueDraggable } from "vue-draggable-plus";
 import { createStableObjectKeyResolver } from "@/utils/stableObjectKey";
+import {
+  extractApiErrorMessage,
+  extractApiErrorStatus,
+} from "@/utils/apiError";
 import { useKeyedDebouncedSearch } from "@/composables/useKeyedDebouncedSearch";
 import { getPersistedPageSize } from "@/composables/usePersistedPageSize";
 import {
@@ -3612,10 +4004,52 @@ import {
   supportsVideoPricingPlatform,
   videoPricingI18nKey,
 } from "./groupsImagePricing";
+import {
+  GROUP_EDITOR_SECTION_IDS,
+  isCanonicalGroupEditorSection,
+  normalizeGroupEditorSection,
+  parsePositiveGroupId,
+  type GroupEditorSectionId,
+} from "./groups/groupEditorRoute";
 
 const { t } = useI18n();
 const appStore = useAppStore();
 const onboardingStore = useOnboardingStore();
+const route = useRoute();
+const router = useRouter();
+
+type GroupEditorMode = "list" | "create" | "edit";
+
+const editorMode = computed<GroupEditorMode>(() => {
+  if (route.name === "AdminGroupCreate") return "create";
+  if (route.name === "AdminGroupEdit") return "edit";
+  return "list";
+});
+
+const activeEditorSection = computed(() =>
+  normalizeGroupEditorSection(route.query.section),
+);
+
+const editorSections = computed(() =>
+  GROUP_EDITOR_SECTION_IDS.map((id) => ({
+    id,
+    label: t(`admin.groups.editor.sections.${id}.label`),
+    description: t(`admin.groups.editor.sections.${id}.description`),
+    to: {
+      path: route.path,
+      query: { ...route.query, section: id },
+    },
+  })),
+);
+
+const editorLoading = ref(false);
+const editorLoadError = ref("");
+const editorLoadRetryable = ref(true);
+const editorLoadErrorRef = ref<HTMLElement | null>(null);
+const editorBaseline = ref("");
+type EditorValidationErrorField = "name" | "rateMultiplier";
+const editorValidationErrorField = ref<EditorValidationErrorField | null>(null);
+const editorValidationErrorMessage = ref("");
 
 const ALWAYS_VISIBLE_COLUMNS = new Set(["name", "actions"]);
 // Default hidden columns (hidden on first load / after schema bumps).
@@ -3672,6 +4106,21 @@ const toggleableColumns = computed(() =>
 const hiddenColumns = reactive<Set<string>>(new Set());
 const showColumnDropdown = ref(false);
 const columnDropdownRef = ref<HTMLElement | null>(null);
+const showMobileTools = ref(false);
+const mobileColumnSettingsExpanded = ref(false);
+const mobileToolsRef = ref<HTMLElement | null>(null);
+
+const toggleMobileTools = () => {
+  showMobileTools.value = !showMobileTools.value;
+  if (!showMobileTools.value) {
+    mobileColumnSettingsExpanded.value = false;
+  }
+};
+
+const closeMobileTools = () => {
+  showMobileTools.value = false;
+  mobileColumnSettingsExpanded.value = false;
+};
 
 const getValidHiddenColumnKeys = () =>
   new Set(toggleableColumns.value.map((col) => col.key));
@@ -3946,6 +4395,12 @@ const filters = reactive({
   status: "",
   is_exclusive: "",
 });
+const mobileFiltersExpanded = ref(false);
+
+const toggleMobileFilters = () => {
+  mobileFiltersExpanded.value = !mobileFiltersExpanded.value;
+};
+
 const pagination = reactive({
   page: 1,
   page_size: getPersistedPageSize(),
@@ -3959,8 +4414,6 @@ const sortState = reactive({
 
 let abortController: AbortController | null = null;
 
-const showCreateModal = ref(false);
-const showEditModal = ref(false);
 const showDeleteDialog = ref(false);
 const showSortModal = ref(false);
 const submitting = ref(false);
@@ -3971,6 +4424,7 @@ const showRateMultipliersModal = ref(false);
 const rateMultipliersGroup = ref<AdminGroup | null>(null);
 const showRPMOverridesModal = ref(false);
 const rpmOverridesGroup = ref<AdminGroup | null>(null);
+const expandedGroupActionId = ref<number | null>(null);
 const sortableGroups = ref<AdminGroup[]>([]);
 const createMessagesDispatchDefaults = createDefaultMessagesDispatchFormState();
 const editMessagesDispatchDefaults = createDefaultMessagesDispatchFormState();
@@ -4314,22 +4768,21 @@ const convertApiFormatToRoutingRules = async (
 ): Promise<ModelRoutingRule[]> => {
   if (!apiFormat) return [];
 
-  const rules: ModelRoutingRule[] = [];
-  for (const [pattern, accountIds] of Object.entries(apiFormat)) {
-    // 加载账号信息
-    const accounts: SimpleAccount[] = [];
-    for (const id of accountIds) {
-      try {
-        const account = await adminAPI.accounts.getById(id);
-        accounts.push({ id: account.id, name: account.name });
-      } catch {
-        // 如果账号不存在，仍然显示 ID
-        accounts.push({ id, name: `#${id}` });
-      }
-    }
-    rules.push({ pattern, accounts });
-  }
-  return rules;
+  return Promise.all(
+    Object.entries(apiFormat).map(async ([pattern, accountIds]) => {
+      const accounts = await Promise.all(
+        accountIds.map(async (id): Promise<SimpleAccount> => {
+          try {
+            const account = await adminAPI.accounts.getById(id);
+            return { id: account.id, name: account.name };
+          } catch {
+            return { id, name: `#${id}` };
+          }
+        }),
+      );
+      return { pattern, accounts };
+    }),
+  );
 };
 
 const editForm = reactive({
@@ -4390,6 +4843,81 @@ const editForm = reactive({
   copy_accounts_from_group_ids: [] as number[],
   // 分组级 RPM 限制（每用户每分钟最大请求数；0 = 不限制）
   rpm_limit: 0 as number,
+});
+
+const buildEditorSnapshot = (mode: Exclude<GroupEditorMode, "list">) => {
+  const form = mode === "create" ? createForm : editForm;
+  const modelsState =
+    mode === "create" ? createModelsListState : editModelsListState;
+  const routingRules =
+    mode === "create"
+      ? createModelRoutingRules.value
+      : editModelRoutingRules.value;
+
+  return JSON.stringify({
+    form,
+    modelsListConfig: buildModelsListConfig(modelsState),
+    modelRouting: routingRules.map((rule) => ({
+      pattern: rule.pattern,
+      accountIds: rule.accounts.map((account) => account.id),
+    })),
+  });
+};
+
+const captureEditorBaseline = async (
+  mode: Exclude<GroupEditorMode, "list">,
+) => {
+  await nextTick();
+  if (editorMode.value === mode) {
+    editorBaseline.value = buildEditorSnapshot(mode);
+  }
+};
+
+const editorDirty = computed(() => {
+  if (
+    editorMode.value === "list" ||
+    editorLoading.value ||
+    !editorBaseline.value
+  ) {
+    return false;
+  }
+  return buildEditorSnapshot(editorMode.value) !== editorBaseline.value;
+});
+
+const shouldWarnUnsavedEditor = computed(
+  () =>
+    editorMode.value !== "list" &&
+    editorDirty.value &&
+    !editorLoading.value &&
+    !submitting.value,
+);
+
+const confirmUnsavedEditorNavigation = () => {
+  if (!shouldWarnUnsavedEditor.value) return true;
+  return window.confirm(t("admin.groups.editor.leaveDirtyConfirm"));
+};
+
+const handleEditorBeforeUnload = (event: BeforeUnloadEvent) => {
+  if (!shouldWarnUnsavedEditor.value) return;
+  event.preventDefault();
+  event.returnValue = "";
+};
+
+onBeforeRouteLeave(() => confirmUnsavedEditorNavigation());
+
+onBeforeRouteUpdate((to, from) => {
+  const sameEditorIdentity =
+    to.name === from.name &&
+    String(to.params.id ?? "") === String(from.params.id ?? "");
+  if (sameEditorIdentity) return true;
+  return confirmUnsavedEditorNavigation();
+});
+
+const editorContextLabel = computed(() => {
+  if (!editingGroup.value) return "";
+  return `#${editingGroup.value.id} · ${t(
+    `admin.groups.platforms.${editingGroup.value.platform}`,
+  )}`;
 });
 
 type ImagePricingFormState = {
@@ -4620,6 +5148,23 @@ const loadGroups = async () => {
   }
 };
 
+let editorReferenceLoadId = 0;
+const loadEditorReferenceGroups = async () => {
+  const requestId = ++editorReferenceLoadId;
+  try {
+    const references = await adminAPI.groups.getAllIncludingInactive();
+    if (requestId !== editorReferenceLoadId || editorMode.value === "list") {
+      return;
+    }
+    groups.value = references;
+  } catch (error) {
+    if (requestId !== editorReferenceLoadId || editorMode.value === "list") {
+      return;
+    }
+    console.error("Error loading group editor references:", error);
+  }
+};
+
 const formatCost = (cost: number): string => {
   if (cost >= 1000) return cost.toFixed(0);
   if (cost >= 100) return cost.toFixed(1);
@@ -4731,12 +5276,13 @@ const handleSort = (key: string, order: 'asc' | 'desc') => {
 };
 
 const openCreateModal = () => {
-  showCreateModal.value = true;
-  loadModelsListCandidates("create", 0, createForm.platform);
+  void router.push({
+    name: "AdminGroupCreate",
+    query: { section: "general" },
+  });
 };
 
-const closeCreateModal = () => {
-  showCreateModal.value = false;
+const resetCreateForm = () => {
   createModelRoutingRules.value.forEach((rule) => {
     accountSearchRunner.clearKey(getCreateRuleSearchKey(rule));
   });
@@ -4775,12 +5321,17 @@ const closeCreateModal = () => {
   resetMessagesDispatchFormState(createForm);
   createForm.require_oauth_only = false;
   createForm.require_privacy_set = false;
+  createForm.model_routing_enabled = false;
   createForm.supported_model_scopes = ["claude", "gemini_text", "gemini_image"];
   createForm.mcp_xml_inject = true;
   createForm.copy_accounts_from_group_ids = [];
   createForm.rpm_limit = 0;
   resetModelsListState(createModelsListState);
   createModelRoutingRules.value = [];
+};
+
+const closeCreateModal = () => {
+  void router.push({ name: "AdminGroups" });
 };
 
 const normalizeOptionalLimit = (
@@ -4812,11 +5363,55 @@ const normalizeRateMultiplier = (
   return Number.isFinite(parsed) && parsed >= 0 ? parsed : 1;
 };
 
-const handleCreateGroup = async () => {
-  if (!createForm.name.trim()) {
-    appStore.showError(t("admin.groups.nameRequired"));
-    return;
+const clearEditorValidationError = (field?: EditorValidationErrorField) => {
+  if (field && editorValidationErrorField.value !== field) return;
+  editorValidationErrorField.value = null;
+  editorValidationErrorMessage.value = "";
+};
+
+const focusEditorValidationError = async (
+  mode: Exclude<GroupEditorMode, "list">,
+  field: EditorValidationErrorField,
+) => {
+  if (activeEditorSection.value !== "general") {
+    await router.push({
+      query: { ...route.query, section: "general" },
+    });
   }
+  await nextTick();
+  const id = `${mode}-group-${field === "name" ? "name" : "rate-multiplier"}`;
+  document.getElementById(id)?.focus();
+};
+
+const validateEditorBasics = async (
+  mode: Exclude<GroupEditorMode, "list">,
+): Promise<boolean> => {
+  const form = mode === "create" ? createForm : editForm;
+  if (!form.name.trim()) {
+    editorValidationErrorField.value = "name";
+    editorValidationErrorMessage.value = t("admin.groups.nameRequired");
+    appStore.showError(editorValidationErrorMessage.value);
+    await focusEditorValidationError(mode, "name");
+    return false;
+  }
+
+  const rateMultiplier = Number(form.rate_multiplier);
+  if (!Number.isFinite(rateMultiplier) || rateMultiplier < 0.001) {
+    editorValidationErrorField.value = "rateMultiplier";
+    editorValidationErrorMessage.value = t(
+      "admin.groups.editor.rateMultiplierInvalid",
+    );
+    appStore.showError(editorValidationErrorMessage.value);
+    await focusEditorValidationError(mode, "rateMultiplier");
+    return false;
+  }
+
+  clearEditorValidationError();
+  return true;
+};
+
+const handleCreateGroup = async () => {
+  if (!(await validateEditorBasics("create"))) return;
   submitting.value = true;
   try {
     // 构建请求数据，包含模型路由配置
@@ -4885,18 +5480,23 @@ const handleCreateGroup = async () => {
     requestData.peak_rate_multiplier = normalizeRateMultiplier(
       createForm.peak_rate_multiplier,
     );
-    await adminAPI.groups.create(requestData);
+    const created = await adminAPI.groups.create(requestData);
+    const shouldAdvanceOnboarding = onboardingStore.isCurrentStep(
+      '[data-tour="group-form-submit"]',
+    );
+    editorBaseline.value = buildEditorSnapshot("create");
     appStore.showSuccess(t("admin.groups.groupCreated"));
-    closeCreateModal();
-    loadGroups();
+    await router.replace({
+      name: "AdminGroupEdit",
+      params: { id: String(created.id) },
+      query: { ...route.query, section: activeEditorSection.value },
+    });
     // Only advance tour if active, on submit step, and creation succeeded
-    if (onboardingStore.isCurrentStep('[data-tour="group-form-submit"]')) {
+    if (shouldAdvanceOnboarding) {
       onboardingStore.nextStep(500);
     }
-  } catch (error: any) {
-    appStore.showError(
-      error.response?.data?.detail || t("admin.groups.failedToCreate"),
-    );
+  } catch (error: unknown) {
+    appStore.showError(extractApiErrorMessage(error, t("admin.groups.failedToCreate")));
     console.error("Error creating group:", error);
     // Don't advance tour on error
   } finally {
@@ -4904,7 +5504,10 @@ const handleCreateGroup = async () => {
   }
 };
 
-const handleEdit = async (group: AdminGroup) => {
+const hydrateEditGroup = async (
+  group: AdminGroup,
+  isCurrent: () => boolean = () => true,
+): Promise<boolean> => {
   editingGroup.value = group;
   editForm.name = group.name;
   editForm.description = group.description || "";
@@ -4965,19 +5568,28 @@ const handleEdit = async (group: AdminGroup) => {
   editForm.rpm_limit = group.rpm_limit ?? 0;
   resetModelsListState(editModelsListState, group.models_list_config);
   // 加载模型路由规则（异步加载账号名称）
-  editModelRoutingRules.value = await convertApiFormatToRoutingRules(
+  const routingRules = await convertApiFormatToRoutingRules(
     group.model_routing,
   );
-  loadModelsListCandidates("edit", group.id, group.platform);
-  showEditModal.value = true;
+  if (!isCurrent()) return false;
+  editModelRoutingRules.value = routingRules;
+  await loadModelsListCandidates("edit", group.id, group.platform);
+  return isCurrent();
 };
 
-const closeEditModal = () => {
+const handleEdit = (group: AdminGroup) => {
+  void router.push({
+    name: "AdminGroupEdit",
+    params: { id: String(group.id) },
+    query: { section: "general" },
+  });
+};
+
+const resetEditForm = () => {
   editModelRoutingRules.value.forEach((rule) => {
     accountSearchRunner.clearKey(getEditRuleSearchKey(rule));
   });
   clearAllAccountSearchState();
-  showEditModal.value = false;
   editingGroup.value = null;
   editModelRoutingRules.value = [];
   editForm.copy_accounts_from_group_ids = [];
@@ -4995,12 +5607,195 @@ const closeEditModal = () => {
   resetModelsListState(editModelsListState);
 };
 
-const handleUpdateGroup = async () => {
-  if (!editingGroup.value) return;
-  if (!editForm.name.trim()) {
-    appStore.showError(t("admin.groups.nameRequired"));
+const closeEditModal = () => {
+  void router.push({ name: "AdminGroups" });
+};
+
+const editorSectionAnchorId = (section: GroupEditorSectionId) =>
+  `group-editor-section-${section}`;
+
+const scrollToEditorSection = async (
+  section: GroupEditorSectionId,
+  behavior: "auto" | "smooth" = "smooth",
+) => {
+  await nextTick();
+  await new Promise<void>((resolve) => {
+    window.requestAnimationFrame(() => {
+      window.requestAnimationFrame(() => resolve());
+    });
+  });
+  const target =
+    section === "general"
+      ? document.querySelector(".group-editor-shell")
+      : document.getElementById(editorSectionAnchorId(section));
+  if (!target) return;
+  const reduceMotion =
+    typeof window !== "undefined" &&
+    window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+  const offset =
+    section === "general" ? 88 : window.innerWidth < 1024 ? 172 : 100;
+  const top = Math.max(
+    0,
+    target.getBoundingClientRect().top + window.scrollY - offset,
+  );
+  window.scrollTo({
+    top,
+    behavior: reduceMotion ? "auto" : behavior,
+  });
+};
+
+const selectEditorSection = async (section: string) => {
+  if (!isCanonicalGroupEditorSection(section)) return;
+  if (activeEditorSection.value === section) {
+    await scrollToEditorSection(section);
     return;
   }
+  await router.push({
+    query: { ...route.query, section },
+  });
+  await scrollToEditorSection(section);
+};
+
+let editorLoadRequestId = 0;
+
+const prepareCreateEditor = async () => {
+  const requestId = ++editorLoadRequestId;
+  editorLoading.value = true;
+  editorLoadError.value = "";
+  editorLoadRetryable.value = true;
+  editorBaseline.value = "";
+  clearEditorValidationError();
+  resetCreateForm();
+  await loadModelsListCandidates("create", 0, createForm.platform);
+  if (requestId !== editorLoadRequestId || editorMode.value !== "create") {
+    return;
+  }
+  editorLoading.value = false;
+  await captureEditorBaseline("create");
+  await scrollToEditorSection(activeEditorSection.value, "auto");
+};
+
+const prepareEditEditor = async () => {
+  const requestId = ++editorLoadRequestId;
+  const groupId = parsePositiveGroupId(route.params.id);
+  editorLoading.value = true;
+  editorLoadError.value = "";
+  editorLoadRetryable.value = true;
+  editorBaseline.value = "";
+  clearEditorValidationError();
+  resetEditForm();
+
+  if (groupId === null) {
+    editorLoading.value = false;
+    editorLoadRetryable.value = false;
+    editorLoadError.value = t("admin.groups.editor.notFound");
+    await nextTick();
+    editorLoadErrorRef.value?.focus();
+    return;
+  }
+
+  try {
+    const group = await adminAPI.groups.getById(groupId);
+    if (requestId !== editorLoadRequestId || editorMode.value !== "edit") {
+      return;
+    }
+    const hydrated = await hydrateEditGroup(
+      group,
+      () => requestId === editorLoadRequestId && editorMode.value === "edit",
+    );
+    if (!hydrated) {
+      return;
+    }
+    editorLoading.value = false;
+    await captureEditorBaseline("edit");
+    await scrollToEditorSection(activeEditorSection.value, "auto");
+  } catch (error) {
+    if (requestId !== editorLoadRequestId || editorMode.value !== "edit") {
+      return;
+    }
+    editorLoading.value = false;
+    const status = extractApiErrorStatus(error);
+    if (status === 403) {
+      editorLoadRetryable.value = false;
+      editorLoadError.value = t("admin.groups.editor.forbidden");
+    } else if (status === 404) {
+      editorLoadRetryable.value = false;
+      editorLoadError.value = t("admin.groups.editor.notFound");
+    } else if (status === 0) {
+      editorLoadRetryable.value = true;
+      editorLoadError.value = t("admin.groups.editor.networkError");
+    } else if (status !== undefined && status >= 500) {
+      editorLoadRetryable.value = true;
+      editorLoadError.value = t("admin.groups.editor.serverError");
+    } else {
+      editorLoadRetryable.value = true;
+      editorLoadError.value = extractApiErrorMessage(
+        error,
+        t("admin.groups.editor.loadFailed"),
+      );
+    }
+    await nextTick();
+    editorLoadErrorRef.value?.focus();
+    console.error("Error loading group editor:", error);
+  }
+};
+
+const retryEditorLoad = () => {
+  if (editorMode.value === "edit") {
+    void prepareEditEditor();
+  }
+};
+
+const editorRouteKey = computed(
+  () => `${editorMode.value}:${String(route.params.id ?? "")}`,
+);
+
+watch(
+  editorRouteKey,
+  () => {
+    if (editorMode.value === "create") {
+      void loadEditorReferenceGroups();
+      void prepareCreateEditor();
+      return;
+    }
+    if (editorMode.value === "edit") {
+      void loadEditorReferenceGroups();
+      void prepareEditEditor();
+      return;
+    }
+    editorReferenceLoadId += 1;
+    editorLoadRequestId += 1;
+    editorLoading.value = false;
+    editorLoadError.value = "";
+    editorLoadRetryable.value = true;
+    editorBaseline.value = "";
+    clearEditorValidationError();
+    resetCreateForm();
+    resetEditForm();
+    void loadGroups();
+  },
+  { immediate: true },
+);
+
+watch(
+  () => `${editorMode.value}:${String(route.query.section ?? "")}`,
+  () => {
+    if (editorMode.value === "list") return;
+    const section = route.query.section;
+    if (!isCanonicalGroupEditorSection(section)) {
+      void router.replace({
+        query: { ...route.query, section: activeEditorSection.value },
+      });
+      return;
+    }
+    void scrollToEditorSection(section, "auto");
+  },
+  { immediate: true },
+);
+
+const handleUpdateGroup = async () => {
+  if (!editingGroup.value) return;
+  if (!(await validateEditorBasics("edit"))) return;
 
   submitting.value = true;
   try {
@@ -5078,14 +5873,16 @@ const handleUpdateGroup = async () => {
     payload.peak_rate_multiplier = normalizeRateMultiplier(
       editForm.peak_rate_multiplier,
     );
-    await adminAPI.groups.update(editingGroup.value.id, payload);
+    const updated = await adminAPI.groups.update(editingGroup.value.id, payload);
+    editingGroup.value = updated;
+    await captureEditorBaseline("edit");
+    const cachedIndex = groups.value.findIndex((group) => group.id === updated.id);
+    if (cachedIndex >= 0) {
+      groups.value[cachedIndex] = updated;
+    }
     appStore.showSuccess(t("admin.groups.groupUpdated"));
-    closeEditModal();
-    loadGroups();
-  } catch (error: any) {
-    appStore.showError(
-      error.response?.data?.detail || t("admin.groups.failedToUpdate"),
-    );
+  } catch (error: unknown) {
+    appStore.showError(extractApiErrorMessage(error, t("admin.groups.failedToUpdate")));
     console.error("Error updating group:", error);
   } finally {
     submitting.value = false;
@@ -5124,6 +5921,15 @@ const handleRateMultipliers = (group: AdminGroup) => {
 const handleRPMOverrides = (group: AdminGroup) => {
   rpmOverridesGroup.value = group;
   showRPMOverridesModal.value = true;
+};
+
+const toggleGroupRowActions = (groupId: number) => {
+  expandedGroupActionId.value =
+    expandedGroupActionId.value === groupId ? null : groupId;
+};
+
+const closeGroupRowActions = () => {
+  expandedGroupActionId.value = null;
 };
 
 const handleDelete = (group: AdminGroup) => {
@@ -5191,8 +5997,10 @@ watch(
       createForm.require_privacy_set = false;
     }
     resetDisabledBatchImagePricing(createForm);
-    resetModelsListState(createModelsListState);
-    loadModelsListCandidates("create", 0, newVal);
+    if (!editorLoading.value) {
+      resetModelsListState(createModelsListState);
+      void loadModelsListCandidates("create", 0, newVal);
+    }
   },
 );
 
@@ -5224,9 +6032,9 @@ watch(
       editForm.require_privacy_set = false;
     }
     resetDisabledBatchImagePricing(editForm);
-    if (editingGroup.value) {
+    if (editingGroup.value && !editorLoading.value) {
       resetModelsListState(editModelsListState, editForm.platform === editingGroup.value.platform ? editingGroup.value.models_list_config : undefined);
-      loadModelsListCandidates("edit", editingGroup.value.id, newVal);
+      void loadModelsListCandidates("edit", editingGroup.value.id, newVal);
     }
   },
 );
@@ -5270,6 +6078,9 @@ const handleClickOutside = (event: MouseEvent) => {
   if (columnDropdownRef.value && !columnDropdownRef.value.contains(target)) {
     showColumnDropdown.value = false;
   }
+  if (mobileToolsRef.value && !mobileToolsRef.value.contains(target)) {
+    closeMobileTools();
+  }
 };
 
 // 打开排序弹窗
@@ -5286,6 +6097,11 @@ const openSortModal = async () => {
     appStore.showError(t("admin.groups.failedToLoad"));
     console.error("Error loading groups for sorting:", error);
   }
+};
+
+const openSortFromMobile = async () => {
+  closeMobileTools();
+  await openSortModal();
 };
 
 // 关闭排序弹窗
@@ -5317,12 +6133,12 @@ const saveSortOrder = async () => {
 };
 
 onMounted(() => {
-  loadGroups();
-  loadModelsListCandidates("create", 0, createForm.platform);
+  window.addEventListener("beforeunload", handleEditorBeforeUnload);
   document.addEventListener("click", handleClickOutside);
 });
 
 onUnmounted(() => {
+  window.removeEventListener("beforeunload", handleEditorBeforeUnload);
   document.removeEventListener("click", handleClickOutside);
   accountSearchRunner.clearAll();
   clearAllAccountSearchState();

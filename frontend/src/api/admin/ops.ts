@@ -412,6 +412,193 @@ export async function getAccountAvailabilityStats(platform?: string, groupId?: n
   return data
 }
 
+export type OpsResourceView = 'overview' | 'accounts' | 'proxies'
+
+export type OpsAccountPoolCategory = 'actionable' | 'auto_recovering'
+export type OpsAccountPoolReason =
+  | 'account_error'
+  | 'expired_auto_paused'
+  | 'known_quota_exhausted'
+  | 'rate_limited'
+  | 'overloaded'
+  | 'temporary_cooldown'
+
+export interface OpsAccountPoolSummary {
+  total_accounts: number
+  base_schedulable_count: number
+  actionable_count: number
+  auto_recovering_count: number
+  inactive_count: number
+  manual_unschedulable_count: number
+  quota_coverage_unknown_count: number
+  zero_capacity_group_count: number
+  low_redundancy_group_count: number
+  low_redundancy_threshold: number
+}
+
+export interface OpsAccountPoolPlatformSummary {
+  platform: string
+  total_accounts: number
+  base_schedulable_count: number
+  actionable_count: number
+  auto_recovering_count: number
+  inactive_count: number
+  manual_unschedulable_count: number
+  quota_coverage_unknown_count: number
+  zero_capacity: boolean
+  low_redundancy: boolean
+}
+
+export interface OpsAccountPoolGroupSummary extends Omit<OpsAccountPoolPlatformSummary, 'platform'> {
+  group_id: number
+  group_name: string
+  platform: string
+}
+
+export interface OpsAccountPoolAnomaly {
+  account_id: number
+  account_name: string
+  platform: string
+  proxy_id?: number
+  group_ids: number[]
+  group_names: string[]
+  status: string
+  schedulable: boolean
+  category: OpsAccountPoolCategory
+  primary_reason: OpsAccountPoolReason | string
+  reason_codes: string[]
+  detail: string
+  expires_at?: string
+  recover_at?: string
+  remaining_seconds?: number
+}
+
+export interface OpsAccountPoolResponse {
+  summary: OpsAccountPoolSummary
+  platforms: OpsAccountPoolPlatformSummary[]
+  groups: OpsAccountPoolGroupSummary[]
+  anomalies: OpsAccountPoolAnomaly[]
+  actionable_anomalies: OpsAccountPoolAnomaly[]
+  auto_recovering_anomalies: OpsAccountPoolAnomaly[]
+  group_counts_additive: boolean
+  collected_at: string
+}
+
+export type OpsProxyHealthStatus = 'healthy' | 'degraded' | 'suspected_restricted' | 'failed' | 'unknown'
+export type OpsProxyLifecycle = 'active' | 'inactive' | 'expired' | 'expiring_soon'
+export type OpsProxyHealthDataStatus = 'complete' | 'partial'
+
+export interface OpsProxyHealthPlatformImpact {
+  platform: string
+  account_count: number
+  coverage: 'supported' | 'uncovered'
+  status: 'pass' | 'warn' | 'fail' | 'challenge' | 'unknown' | 'uncovered' | string
+}
+
+export interface OpsProxyHealthTarget {
+  target: string
+  status: string
+  http_status?: number
+  latency_ms?: number
+}
+
+export interface OpsProxyHealthItem {
+  id: number
+  name: string
+  protocol: string
+  lifecycle: OpsProxyLifecycle
+  health: OpsProxyHealthStatus
+  health_reason: string
+  account_count: number
+  active_account_count: number
+  platforms: OpsProxyHealthPlatformImpact[]
+  targets?: OpsProxyHealthTarget[]
+  latency_ms?: number
+  exit_ip?: string
+  country?: string
+  country_code?: string
+  region?: string
+  city?: string
+  expires_at?: string
+  expiry_warn_days: number
+  connectivity_checked_at?: string
+  quality_checked_at?: string
+  connectivity_stale: boolean
+  quality_stale: boolean
+  quality_score?: number
+  quality_grade?: string
+}
+
+export interface OpsProxyHealthSummary {
+  total: number
+  operational: number
+  inactive: number
+  expired: number
+  expiring_soon: number
+  healthy: number
+  degraded: number
+  suspected_restricted: number
+  failed: number
+  unknown: number
+  affected_accounts: number
+}
+
+export interface OpsProxyHealthResponse {
+  summary: OpsProxyHealthSummary
+  items: OpsProxyHealthItem[]
+  generated_at: string
+  data_status: OpsProxyHealthDataStatus
+}
+
+export interface OpsProxyHealthFilters {
+  health?: OpsProxyHealthStatus
+  lifecycle?: OpsProxyLifecycle
+  protocol?: string
+}
+
+export async function getAccountPool(
+  platform?: string,
+  groupId?: number | null,
+  limit: number = 20,
+  options?: OpsRequestOptions
+): Promise<OpsAccountPoolResponse> {
+  const params: Record<string, string | number> = { limit }
+  if (platform) params.platform = platform
+  if (typeof groupId === 'number' && groupId > 0) params.group_id = groupId
+  const { data } = await apiClient.get<OpsAccountPoolResponse>('/admin/ops/account-pool', {
+    params,
+    signal: options?.signal
+  })
+  return data
+}
+
+export async function getProxyHealth(
+  filters: OpsProxyHealthFilters = {},
+  options?: OpsRequestOptions
+): Promise<OpsProxyHealthResponse> {
+  const params: Record<string, string> = {}
+  if (filters.health) params.health = filters.health
+  if (filters.lifecycle) params.lifecycle = filters.lifecycle
+  if (filters.protocol) params.protocol = filters.protocol
+  const { data } = await apiClient.get<OpsProxyHealthResponse>('/admin/ops/proxy-health', {
+    params,
+    signal: options?.signal
+  })
+  return data
+}
+
+export async function getProxyHealthDetail(proxyId: number, options?: OpsRequestOptions): Promise<OpsProxyHealthItem> {
+  const { data } = await apiClient.get<OpsProxyHealthItem>(`/admin/ops/proxy-health/${proxyId}`, {
+    signal: options?.signal
+  })
+  return data
+}
+
+export async function reprobeProxyHealth(proxyId: number): Promise<OpsProxyHealthItem> {
+  const { data } = await apiClient.post<OpsProxyHealthItem>(`/admin/ops/proxy-health/${proxyId}/reprobe`)
+  return data
+}
+
 export interface OpsRateSummary {
   current: number
   peak: number
@@ -1215,8 +1402,14 @@ export interface AlertEventsQuery {
   group_id?: number
 }
 
-export async function listAlertEvents(params: AlertEventsQuery = {}): Promise<AlertEvent[]> {
-  const { data } = await apiClient.get<AlertEvent[]>('/admin/ops/alert-events', { params })
+export async function listAlertEvents(
+  params: AlertEventsQuery = {},
+  options: OpsRequestOptions = {}
+): Promise<AlertEvent[]> {
+  const { data } = await apiClient.get<AlertEvent[]>('/admin/ops/alert-events', {
+    params,
+    signal: options.signal
+  })
   return data
 }
 
@@ -1325,6 +1518,10 @@ export const opsAPI = {
   getConcurrencyStats,
   getUserConcurrencyStats,
   getAccountAvailabilityStats,
+  getAccountPool,
+  getProxyHealth,
+  getProxyHealthDetail,
+  reprobeProxyHealth,
   getRealtimeTrafficSummary,
   subscribeQPS,
 

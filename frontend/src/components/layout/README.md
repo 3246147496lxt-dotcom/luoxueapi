@@ -1,5 +1,7 @@
 # Layout Components
 
+> **Documentation note (2026-07-21):** examples in this file predate the Luoxue Snow Clay migration and may still show centered authentication layouts or `indigo-*` utilities. They are API examples only. `AppLayout` and `AuthLayout` now enter Snow Clay by default; use `.superdesign/design-system.md` and `frontend/src/styles/luoxue-clay-tokens.css` for all current visual decisions.
+
 Vue 3 layout components for the Sub2API frontend, built with Composition API, TypeScript, and TailwindCSS.
 
 ## Components
@@ -28,6 +30,8 @@ import { AppLayout } from '@/components/layout'
 
 - Responsive sidebar (collapsible)
 - Fixed header at top
+- Snow Clay canvas, header, and sidebar are the shared default shell
+- `home-clay` is an internal admin content-density adapter, not a second theme
 - Main content area with slot
 - Automatically adjusts margin based on sidebar state
 
@@ -96,7 +100,7 @@ Top header with user info and actions.
 
 ### 4. AuthLayout.vue
 
-Simple centered layout for authentication pages (login/register).
+Responsive Snow Clay layout for login, registration, recovery, verification, and authentication callbacks.
 
 **Usage:**
 
@@ -131,9 +135,9 @@ function handleLogin() {
 
 **Features:**
 
-- Centered card container
-- Gradient background
-- Logo/brand at top
+- Snow Clay split composition on desktop and compact single-column composition on mobile
+- Shared logo, locale, and light/dark controls
+- Administrator-defined subtitle content is rendered verbatim
 - Main content slot
 - Optional footer slot for links
 - Fully responsive

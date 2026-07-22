@@ -75,3 +75,17 @@ type ProxyAccountSummary struct {
 	Type     string
 	Notes    *string
 }
+
+// ProxyAccountImpact is the non-sensitive account impact aggregate used by the
+// ops proxy health view. A single account belongs to at most one proxy, so these
+// counts can be safely summed across proxies.
+type ProxyAccountImpact struct {
+	AccountCount       int64
+	ActiveAccountCount int64
+	PlatformCounts     map[string]int64
+}
+
+type ProxyWithAccountImpact struct {
+	Proxy
+	Impact ProxyAccountImpact
+}

@@ -1,5 +1,7 @@
 # Layout Components Integration Guide
 
+> **Design-system note (2026-07-21):** the active product language is Luoxue Snow Clay. Use `.superdesign/design-system.md` for design guidance and `frontend/src/styles/luoxue-clay-tokens.css` for runtime tokens. Indigo examples in this integration guide are historical snippets, not a theme recommendation.
+
 ## Quick Start
 
 ### 1. Import Layout Components
@@ -231,12 +233,13 @@ import { AuthLayout } from '@/components/layout'
 
 ### Changing Colors
 
-The components use Tailwind's indigo color scheme by default. To change:
+Do not establish page-local palettes. New and migrated layouts must consume the canonical Snow Clay tokens:
 
-```vue
-<!-- Change all instances of indigo-* to your preferred color -->
-<div class="bg-blue-600">   <!-- Instead of bg-indigo-600 -->
-<div class="text-blue-600">  <!-- Instead of text-indigo-600 -->
+```css
+/* Shared token examples; do not hard-code a replacement palette here. */
+color: var(--lx-clay-text);
+background: var(--lx-clay-surface);
+border-color: var(--lx-clay-border);
 ```
 
 ### Adding Custom Icons

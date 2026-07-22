@@ -355,20 +355,20 @@ const empty = computed(() => events.value.length === 0 && !loading.value)
 </script>
 
 <template>
-  <div class="rounded-3xl bg-white p-6 shadow-sm ring-1 ring-gray-900/5 dark:bg-dark-800 dark:ring-dark-700">
-    <div class="mb-4 flex items-start justify-between gap-4">
-      <div>
+  <div class="rounded-3xl bg-white p-4 shadow-sm ring-1 ring-gray-900/5 dark:bg-dark-800 dark:ring-dark-700 sm:p-6">
+    <div class="mb-4 flex flex-col items-start gap-4 lg:flex-row lg:justify-between">
+      <div class="min-w-0">
         <h3 class="text-sm font-bold text-gray-900 dark:text-white">{{ t('admin.ops.alertEvents.title') }}</h3>
         <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t('admin.ops.alertEvents.description') }}</p>
       </div>
 
-      <div class="flex items-center gap-2">
-        <Select :model-value="timeRange" :options="timeRangeOptions" class="w-[120px]" @change="timeRange = String($event || '24h')" />
-        <Select :model-value="severity" :options="severityOptions" class="w-[88px]" @change="severity = String($event || '')" />
-        <Select :model-value="status" :options="statusOptions" class="w-[110px]" @change="status = String($event || '')" />
-        <Select :model-value="emailSent" :options="emailSentOptions" class="w-[110px]" @change="emailSent = String($event || '')" />
+      <div data-testid="ops-alert-filters" class="flex w-full flex-wrap items-center gap-2 lg:w-auto lg:justify-end">
+        <Select :model-value="timeRange" :options="timeRangeOptions" class="min-w-[120px] flex-1 sm:w-[120px] sm:flex-none" @change="timeRange = String($event || '24h')" />
+        <Select :model-value="severity" :options="severityOptions" class="min-w-[120px] flex-1 sm:w-[88px] sm:min-w-0 sm:flex-none" @change="severity = String($event || '')" />
+        <Select :model-value="status" :options="statusOptions" class="min-w-[120px] flex-1 sm:w-[110px] sm:flex-none" @change="status = String($event || '')" />
+        <Select :model-value="emailSent" :options="emailSentOptions" class="min-w-[120px] flex-1 sm:w-[110px] sm:flex-none" @change="emailSent = String($event || '')" />
         <button
-          class="flex items-center gap-1.5 rounded-lg bg-gray-100 px-3 py-1.5 text-xs font-bold text-gray-700 transition-colors hover:bg-gray-200 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-dark-700 dark:text-gray-300 dark:hover:bg-dark-600"
+          class="flex flex-1 items-center justify-center gap-1.5 rounded-lg bg-gray-100 px-3 py-1.5 text-xs font-bold text-gray-700 transition-colors hover:bg-gray-200 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-dark-700 dark:text-gray-300 dark:hover:bg-dark-600 sm:flex-none"
           :disabled="loading"
           @click="loadFirstPage"
         >
@@ -393,7 +393,14 @@ const empty = computed(() => events.value.length === 0 && !loading.value)
     </div>
 
     <div v-else class="overflow-hidden rounded-xl border border-gray-200 dark:border-dark-700">
-      <div class="max-h-[600px] overflow-y-auto" @scroll="onScroll">
+      <div
+        class="max-h-[600px] overflow-auto"
+        role="region"
+        tabindex="0"
+        :aria-label="t('admin.ops.alertEvents.title')"
+        data-testid="ops-alert-table-scroll"
+        @scroll="onScroll"
+      >
         <table class="min-w-full divide-y divide-gray-200 dark:divide-dark-700">
           <thead class="sticky top-0 z-10 bg-gray-50 dark:bg-dark-900">
             <tr>
@@ -451,10 +458,19 @@ const empty = computed(() => events.value.length === 0 && !loading.value)
                 <span class="font-mono">#{{ row.rule_id }}</span>
               </td>
               <td class="min-w-[260px] px-4 py-3 text-xs text-gray-700 dark:text-gray-200">
-                <div class="font-semibold truncate max-w-[360px]">{{ row.title || '-' }}</div>
-                <div v-if="row.description" class="mt-0.5 line-clamp-2 text-[11px] text-gray-500 dark:text-gray-400">
-                  {{ row.description }}
-                </div>
+                <button
+                  type="button"
+                  class="block w-full rounded-lg text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 focus-visible:ring-offset-2 dark:focus-visible:ring-offset-dark-800"
+                  :aria-label="t('admin.ops.alertEvents.detail.open', { title: row.title || `#${row.id}` })"
+                  data-testid="ops-alert-detail-trigger"
+                  :data-alert-id="row.id"
+                  @click.stop="openDetail(row)"
+                >
+                  <span class="block max-w-[360px] truncate font-semibold">{{ row.title || '-' }}</span>
+                  <span v-if="row.description" class="mt-0.5 line-clamp-2 text-[11px] text-gray-500 dark:text-gray-400">
+                    {{ row.description }}
+                  </span>
+                </button>
               </td>
               <td class="whitespace-nowrap px-4 py-3 text-xs text-gray-600 dark:text-gray-300">
                 {{ formatDurationLabel(row) }}
@@ -645,4 +661,3 @@ const empty = computed(() => events.value.length === 0 && !loading.value)
     </BaseDialog>
   </div>
 </template>
-

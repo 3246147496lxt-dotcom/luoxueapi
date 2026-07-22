@@ -11,6 +11,10 @@ export default defineConfig({
   server: {
     host: "0.0.0.0",
     allowedHosts: ["terminal.local"],
+    fs: {
+      // The docs bundle shares the canonical Snow Clay fonts with the main frontend.
+      allow: [".."],
+    },
     proxy: {
       "/api": {
         target: devProxyTarget,

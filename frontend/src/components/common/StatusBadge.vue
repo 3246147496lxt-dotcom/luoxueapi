@@ -1,12 +1,13 @@
 <template>
-  <div class="flex items-center gap-1.5">
+  <div class="status-badge flex items-center gap-1.5" :data-status="status">
     <span
       :class="[
-        'inline-block h-2 w-2 rounded-full',
+        'status-badge__dot inline-block h-2 w-2 rounded-full',
         variantClass
       ]"
+      aria-hidden="true"
     ></span>
-    <span class="text-sm text-gray-700 dark:text-gray-300">
+    <span class="status-badge__label text-sm">
       {{ label }}
     </span>
   </div>
@@ -24,16 +25,17 @@ const variantClass = computed(() => {
   switch (props.status) {
     case 'active':
     case 'success':
-      return 'bg-green-500'
+      return 'status-badge__dot--success'
     case 'disabled':
     case 'inactive':
+      return 'status-badge__dot--neutral'
     case 'warning':
-      return 'bg-yellow-500'
+      return 'status-badge__dot--warning'
     case 'error':
     case 'danger':
-      return 'bg-red-500'
+      return 'status-badge__dot--danger'
     default:
-      return 'bg-gray-400'
+      return 'status-badge__dot--neutral'
   }
 })
 </script>

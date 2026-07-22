@@ -1,9 +1,10 @@
 # =============================================================================
 # LuoxueAPI Multi-Stage Dockerfile
 # =============================================================================
-# Stage 1: Build frontend
-# Stage 2: Build Go backend with embedded frontend
-# Stage 3: Final minimal image
+# Stage 1: Build main frontend
+# Stage 2: Build documentation site
+# Stage 3: Build Go backend with embedded web assets
+# Stage 4: Final minimal image
 # =============================================================================
 
 ARG NODE_IMAGE=node:24-alpine
@@ -38,7 +39,25 @@ COPY docs/legal/ /app/docs/legal/
 RUN pnpm run build
 
 # -----------------------------------------------------------------------------
-# Stage 2: Backend Builder
+# Stage 2: Documentation Site Builder
+# -----------------------------------------------------------------------------
+FROM ${NODE_IMAGE} AS docs-builder
+
+WORKDIR /app/docs-site
+
+COPY docs-site/package.json docs-site/package-lock.json ./
+RUN npm ci
+
+# styles.css imports the canonical brand fonts from the sibling frontend tree.
+COPY frontend/public/fonts/ /app/frontend/public/fonts/
+COPY docs-site/index.html docs-site/vite.config.mjs ./
+COPY docs-site/public/ ./public/
+COPY docs-site/scripts/ ./scripts/
+COPY docs-site/src/ ./src/
+RUN npm run build && npm run verify:build
+
+# -----------------------------------------------------------------------------
+# Stage 3: Backend Builder
 # -----------------------------------------------------------------------------
 FROM ${GOLANG_IMAGE} AS backend-builder
 
@@ -66,10 +85,13 @@ COPY backend/ ./
 
 # Copy frontend dist from previous stage (must be after backend copy to avoid being overwritten)
 COPY --from=frontend-builder /app/backend/internal/web/dist ./internal/web/dist
+# Embed the documentation SPA under the same-origin production base path.
+COPY --from=docs-builder /app/docs-site/dist ./internal/web/dist/tutorial-docs
 
 # Build the binary (BuildType=release for CI builds, embed frontend)
 # Version precedence: build arg VERSION > exact git tag > cmd/server/VERSION
-RUN VERSION_VALUE="${VERSION}" && \
+RUN test -f ./internal/web/dist/tutorial-docs/index.html && \
+    VERSION_VALUE="${VERSION}" && \
     if [ -z "${VERSION_VALUE}" ]; then VERSION_VALUE="$(./scripts/resolve-version.sh)"; fi && \
     DATE_VALUE="${DATE:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}" && \
     CGO_ENABLED=0 GOOS=linux go build \
@@ -79,7 +101,7 @@ RUN VERSION_VALUE="${VERSION}" && \
     ./cmd/server
 
 # -----------------------------------------------------------------------------
-# Stage 3: Final Runtime Image
+# Stage 4: Final Runtime Image
 # -----------------------------------------------------------------------------
 FROM ${ALPINE_IMAGE}
 

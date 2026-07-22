@@ -15,13 +15,20 @@ import (
 
 // ProxyHandler handles admin proxy management
 type ProxyHandler struct {
-	adminService service.AdminService
+	adminService       service.AdminService
+	proxyHealthService *service.ProxyHealthService
 }
 
 // NewProxyHandler creates a new admin proxy handler
 func NewProxyHandler(adminService service.AdminService) *ProxyHandler {
 	return &ProxyHandler{
 		adminService: adminService,
+	}
+}
+
+func (h *ProxyHandler) SetProxyHealthService(proxyHealthService *service.ProxyHealthService) {
+	if h != nil {
+		h.proxyHealthService = proxyHealthService
 	}
 }
 
@@ -68,6 +75,11 @@ func (h *ProxyHandler) List(c *gin.Context) {
 	if len(search) > 100 {
 		search = search[:100]
 	}
+	health := strings.ToLower(strings.TrimSpace(c.Query("health")))
+	if health != "" {
+		h.listWithHealthFilter(c, page, pageSize, protocol, status, search, sortBy, sortOrder, health)
+		return
+	}
 
 	proxies, total, err := h.adminService.ListProxiesWithAccountCount(c.Request.Context(), page, pageSize, protocol, status, search, sortBy, sortOrder)
 	if err != nil {
@@ -80,6 +92,80 @@ func (h *ProxyHandler) List(c *gin.Context) {
 		out = append(out, *dto.ProxyWithAccountCountFromServiceAdmin(&proxies[i]))
 	}
 	response.Paginated(c, out, total, page, pageSize)
+}
+
+func (h *ProxyHandler) listWithHealthFilter(c *gin.Context, page, pageSize int, protocol, status, search, sortBy, sortOrder, health string) {
+	if h.proxyHealthService == nil {
+		response.Error(c, 503, "Proxy health service not available")
+		return
+	}
+	filter := service.ProxyHealthFilter{Protocol: protocol}
+	switch health {
+	case "healthy", "degraded", "suspected_restricted", "failed", "unknown":
+		filter.Health = health
+	case "stale", "expiring":
+		// Applied below because stale spans two timestamps and expiring is a
+		// lifecycle state rather than a connectivity health state.
+	default:
+		response.BadRequest(c, "Invalid proxy health filter")
+		return
+	}
+	healthResponse, err := h.proxyHealthService.List(c.Request.Context(), filter)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	matching := make(map[int64]service.ProxyHealthItem, len(healthResponse.Items))
+	for _, item := range healthResponse.Items {
+		if health == "stale" && !item.ConnectivityStale && !item.QualityStale {
+			continue
+		}
+		if health == "expiring" && item.Lifecycle != service.ProxyLifecycleExpiringSoon {
+			continue
+		}
+		matching[item.ID] = item
+	}
+
+	// Health lives in Redis while management filters/sorting live in SQL. Walk
+	// the SQL result in bounded pages, intersect IDs, then paginate the filtered
+	// slice so total/page semantics remain correct for GET /admin/proxies.
+	const batchSize = 1000
+	all := make([]service.ProxyWithAccountCount, 0, len(matching))
+	for sourcePage := 1; ; sourcePage++ {
+		batch, total, listErr := h.adminService.ListProxiesWithAccountCount(c.Request.Context(), sourcePage, batchSize, protocol, status, search, sortBy, sortOrder)
+		if listErr != nil {
+			response.ErrorFrom(c, listErr)
+			return
+		}
+		for i := range batch {
+			if healthItem, ok := matching[batch[i].ID]; ok {
+				item := batch[i]
+				item.QualityStatus = string(healthItem.Health)
+				item.QualitySummary = healthItem.HealthReason
+				all = append(all, item)
+			}
+		}
+		if int64(sourcePage*batchSize) >= total || len(batch) == 0 {
+			break
+		}
+	}
+
+	start := (page - 1) * pageSize
+	if start < 0 {
+		start = 0
+	}
+	if start > len(all) {
+		start = len(all)
+	}
+	end := start + pageSize
+	if end > len(all) {
+		end = len(all)
+	}
+	out := make([]dto.AdminProxyWithAccountCount, 0, end-start)
+	for i := start; i < end; i++ {
+		out = append(out, *dto.ProxyWithAccountCountFromServiceAdmin(&all[i]))
+	}
+	response.Paginated(c, out, int64(len(all)), page, pageSize)
 }
 
 // GetAll handles getting all active proxies without pagination

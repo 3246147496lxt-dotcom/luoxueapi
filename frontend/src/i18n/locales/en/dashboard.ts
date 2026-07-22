@@ -915,6 +915,7 @@ export default {
 
   // Pagination
   pagination: {
+    ariaLabel: 'Pagination',
     showing: 'Showing',
     to: 'to',
     of: 'of',

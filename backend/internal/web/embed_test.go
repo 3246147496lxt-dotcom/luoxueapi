@@ -236,16 +236,117 @@ func TestFrontendServer_InjectSettings(t *testing.T) {
 	})
 
 	t.Run("injects_route_specific_model_catalog_metadata", func(t *testing.T) {
+		provider := &mockSettingsProvider{settings: map[string]any{
+			"site_name":                    "落雪API",
+			"public_model_catalog_enabled": true,
+		}}
+		server, err := NewFrontendServer(provider)
+		require.NoError(t, err)
+
+		result := server.injectSettingsForPath([]byte(`{"site_name":"落雪API","public_model_catalog_enabled":true}`), "/models.html")
+
+		assert.Contains(t, string(result), "<title>模型广场 · 落雪API</title>")
+		assert.Contains(t, string(result), `<meta name="description"`)
+		assert.Contains(t, string(result), `<meta name="robots" content="index, follow`)
+		assert.Contains(t, string(result), `<link rel="canonical" href="https://luoxueapi.cc/models.html" />`)
+		assert.Contains(t, string(result), `<noscript><main`)
+	})
+
+	t.Run("marks_disabled_model_catalog_noindex", func(t *testing.T) {
+		provider := &mockSettingsProvider{settings: map[string]any{
+			"site_name":                    "落雪API",
+			"public_model_catalog_enabled": false,
+		}}
+		server, err := NewFrontendServer(provider)
+		require.NoError(t, err)
+
+		result := server.injectSettingsForPath([]byte(`{"site_name":"落雪API","public_model_catalog_enabled":false}`), "/models.html")
+		body := string(result)
+
+		assert.Contains(t, body, `<meta name="robots" content="noindex, nofollow" />`)
+		assert.NotContains(t, body, `rel="canonical"`)
+		assert.NotContains(t, body, `<noscript><main`)
+	})
+
+	t.Run("injects_route_specific_home_metadata", func(t *testing.T) {
 		provider := &mockSettingsProvider{settings: map[string]string{"site_name": "落雪API"}}
 		server, err := NewFrontendServer(provider)
 		require.NoError(t, err)
 
-		result := server.injectSettingsForPath([]byte(`{"site_name":"落雪API"}`), "/models.html")
+		result := server.injectSettingsForPath([]byte(`{"site_name":"落雪API"}`), "/home")
+		body := string(result)
 
-		assert.Contains(t, string(result), "<title>模型广场 · 落雪API</title>")
-		assert.Contains(t, string(result), `<meta name="description"`)
-		assert.Contains(t, string(result), `<link rel="canonical" href="/models.html" />`)
+		assert.Contains(t, body, "<title>落雪API · GPT API 接入与密钥管理</title>")
+		assert.Contains(t, body, `content="落雪API 是面向开发者的 AI API 网关`)
+		assert.Contains(t, body, `<meta name="robots" content="index, follow`)
+		assert.Contains(t, body, `<link rel="canonical" href="https://luoxueapi.cc/home" />`)
+		assert.Contains(t, body, `<meta property="og:url" content="https://luoxueapi.cc/home" />`)
+		assert.Contains(t, body, `<noscript><main`)
+		assert.NotContains(t, body, `content="noindex, nofollow"`)
 	})
+
+	t.Run("marks_home_noindex_in_backend_mode", func(t *testing.T) {
+		provider := &mockSettingsProvider{settings: map[string]any{
+			"site_name":            "落雪API",
+			"backend_mode_enabled": true,
+		}}
+		server, err := NewFrontendServer(provider)
+		require.NoError(t, err)
+
+		result := server.injectSettingsForPath([]byte(`{"site_name":"落雪API","backend_mode_enabled":true}`), "/home")
+		body := string(result)
+
+		assert.Contains(t, body, `<meta name="robots" content="noindex, nofollow" />`)
+		assert.NotContains(t, body, `rel="canonical"`)
+	})
+
+	t.Run("marks_application_routes_noindex", func(t *testing.T) {
+		provider := &mockSettingsProvider{settings: map[string]string{"site_name": "落雪API"}}
+		server, err := NewFrontendServer(provider)
+		require.NoError(t, err)
+
+		for _, path := range []string{"/login", "/register", "/dashboard", "/admin/dashboard", "/unknown"} {
+			result := server.injectSettingsForPath([]byte(`{"site_name":"落雪API"}`), path)
+			body := string(result)
+
+			assert.Contains(t, body, `<meta name="robots" content="noindex, nofollow" />`, "path=%s", path)
+			assert.NotContains(t, body, `rel="canonical"`, "path=%s", path)
+		}
+	})
+}
+
+func TestHTMLRouteCacheKey(t *testing.T) {
+	tests := []struct {
+		path string
+		want string
+	}{
+		{path: "", want: ""},
+		{path: "/", want: homeHTMLCacheKey},
+		{path: "/home", want: homeHTMLCacheKey},
+		{path: "/home/", want: homeHTMLCacheKey},
+		{path: "/index.html", want: homeHTMLCacheKey},
+		{path: "/models.html", want: modelCatalogHTMLCacheKey},
+		{path: "/models.html/", want: modelCatalogHTMLCacheKey},
+		{path: "/dashboard", want: noIndexHTMLCacheKey},
+		{path: "/admin/dashboard", want: noIndexHTMLCacheKey},
+		{path: "/not-found", want: noIndexHTMLCacheKey},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.path, func(t *testing.T) {
+			assert.Equal(t, tt.want, htmlRouteCacheKey(tt.path))
+		})
+	}
+}
+
+func TestApplyRouteIndexingHeaders(t *testing.T) {
+	indexable := make(http.Header)
+	applyRouteIndexingHeaders(indexable, homeHTMLCacheKey)
+	assert.Empty(t, indexable.Get("X-Robots-Tag"))
+
+	private := make(http.Header)
+	applyRouteIndexingHeaders(private, noIndexHTMLCacheKey)
+	assert.Equal(t, "noindex, nofollow", private.Get("X-Robots-Tag"))
 }
 
 func TestFrontendServer_ServeIndexHTML(t *testing.T) {
@@ -398,9 +499,44 @@ func TestFrontendServer_ServeIndexHTML(t *testing.T) {
 
 		server.serveIndexHTML(c)
 
-		// Should still return 200 with base HTML
+		// Should still return 200 with route-level metadata.
 		assert.Equal(t, http.StatusOK, w.Code)
 		assert.Contains(t, w.Header().Get("Content-Type"), "text/html")
+		assert.Contains(t, w.Body.String(), `<link rel="canonical" href="https://luoxueapi.cc/home" />`)
+	})
+
+	t.Run("isolates_indexable_and_noindex_route_caches", func(t *testing.T) {
+		provider := &mockSettingsProvider{
+			settings: map[string]any{
+				"site_name":                    "落雪API",
+				"public_model_catalog_enabled": true,
+			},
+		}
+
+		server, err := NewFrontendServer(provider)
+		require.NoError(t, err)
+
+		request := func(path string) *httptest.ResponseRecorder {
+			w := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(w)
+			c.Request = httptest.NewRequest(http.MethodGet, path, nil)
+			c.Set(middleware.CSPNonceKey, "nonce")
+			server.serveIndexHTML(c)
+			return w
+		}
+
+		home := request("/home")
+		private := request("/dashboard")
+		models := request("/models.html")
+		homeAgain := request("/")
+
+		assert.Contains(t, home.Body.String(), `<link rel="canonical" href="https://luoxueapi.cc/home" />`)
+		assert.Empty(t, home.Header().Get("X-Robots-Tag"))
+		assert.Contains(t, private.Body.String(), `content="noindex, nofollow"`)
+		assert.Equal(t, "noindex, nofollow", private.Header().Get("X-Robots-Tag"))
+		assert.Contains(t, models.Body.String(), `<link rel="canonical" href="https://luoxueapi.cc/models.html" />`)
+		assert.Contains(t, homeAgain.Body.String(), `<link rel="canonical" href="https://luoxueapi.cc/home" />`)
+		assert.Equal(t, 3, provider.called)
 	})
 }
 
@@ -614,6 +750,72 @@ func TestFrontendServer_Middleware(t *testing.T) {
 		}
 	})
 
+	t.Run("serves_documentation_site_and_its_deep_links", func(t *testing.T) {
+		provider := &mockSettingsProvider{
+			settings: map[string]string{"site_name": "Configured main site"},
+		}
+
+		server, err := NewFrontendServer(provider)
+		require.NoError(t, err)
+
+		router := gin.New()
+		router.Use(server.Middleware())
+
+		redirectWriter := httptest.NewRecorder()
+		redirectRequest := httptest.NewRequest(http.MethodGet, "/tutorial-docs?source=nav", nil)
+		router.ServeHTTP(redirectWriter, redirectRequest)
+		assert.Equal(t, http.StatusMovedPermanently, redirectWriter.Code)
+		assert.Equal(t, "/tutorial-docs/?source=nav", redirectWriter.Header().Get("Location"))
+
+		for _, requestPath := range []string{"/tutorial-docs/", "/tutorial-docs/orders"} {
+			t.Run(requestPath, func(t *testing.T) {
+				w := httptest.NewRecorder()
+				req := httptest.NewRequest(http.MethodGet, requestPath, nil)
+				router.ServeHTTP(w, req)
+
+				assert.Equal(t, http.StatusOK, w.Code)
+				assert.Contains(t, w.Header().Get("Content-Type"), "text/html")
+				assert.Equal(t, "no-cache", w.Header().Get("Cache-Control"))
+				assert.Contains(t, w.Body.String(), `href="https://luoxueapi.cc/tutorial-docs/"`)
+				assert.Contains(t, w.Body.String(), "/tutorial-docs/assets/")
+				assert.NotContains(t, w.Body.String(), "Configured main site")
+			})
+		}
+
+		missingAssetWriter := httptest.NewRecorder()
+		missingAssetRequest := httptest.NewRequest(http.MethodGet, "/tutorial-docs/assets/missing.js", nil)
+		router.ServeHTTP(missingAssetWriter, missingAssetRequest)
+		assert.Equal(t, http.StatusNotFound, missingAssetWriter.Code)
+		assert.NotContains(t, missingAssetWriter.Body.String(), "<!doctype html>")
+	})
+
+	t.Run("serves_documentation_fingerprinted_assets_with_immutable_cache", func(t *testing.T) {
+		provider := &mockSettingsProvider{settings: map[string]string{"test": "value"}}
+		server, err := NewFrontendServer(provider)
+		require.NoError(t, err)
+
+		entries, err := fs.ReadDir(server.distFS, "tutorial-docs/assets")
+		require.NoError(t, err)
+		fingerprintedPath := ""
+		for _, entry := range entries {
+			candidate := "tutorial-docs/assets/" + entry.Name()
+			if !entry.IsDir() && isFingerprintedEmbeddedAssetPath(candidate) {
+				fingerprintedPath = candidate
+				break
+			}
+		}
+		require.NotEmpty(t, fingerprintedPath)
+
+		router := gin.New()
+		router.Use(server.Middleware())
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/"+fingerprintedPath, nil)
+		router.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+		assert.Equal(t, staticAssetsCacheControl, w.Header().Get("Cache-Control"))
+	})
+
 	t.Run("serves_static_files", func(t *testing.T) {
 		provider := &mockSettingsProvider{
 			settings: map[string]string{"test": "value"},
@@ -652,6 +854,39 @@ func TestFrontendServer_Middleware(t *testing.T) {
 
 		assert.Equal(t, http.StatusOK, assetWriter.Code)
 		assert.Equal(t, staticAssetsCacheControl, assetWriter.Header().Get("Cache-Control"))
+	})
+
+	t.Run("serves_search_engine_files_instead_of_spa_html", func(t *testing.T) {
+		provider := &mockSettingsProvider{
+			settings: map[string]string{"site_name": "落雪API"},
+		}
+
+		server, err := NewFrontendServer(provider)
+		require.NoError(t, err)
+
+		router := gin.New()
+		router.Use(server.Middleware())
+
+		robotsWriter := httptest.NewRecorder()
+		robotsRequest := httptest.NewRequest(http.MethodGet, "/robots.txt", nil)
+		router.ServeHTTP(robotsWriter, robotsRequest)
+
+		assert.Equal(t, http.StatusOK, robotsWriter.Code)
+		assert.Contains(t, robotsWriter.Header().Get("Content-Type"), "text/plain")
+		assert.Contains(t, robotsWriter.Body.String(), "User-agent: *")
+		assert.Contains(t, robotsWriter.Body.String(), "Sitemap: https://luoxueapi.cc/sitemap.xml")
+		assert.NotContains(t, robotsWriter.Body.String(), "<!doctype html>")
+
+		sitemapWriter := httptest.NewRecorder()
+		sitemapRequest := httptest.NewRequest(http.MethodGet, "/sitemap.xml", nil)
+		router.ServeHTTP(sitemapWriter, sitemapRequest)
+
+		assert.Equal(t, http.StatusOK, sitemapWriter.Code)
+		assert.Contains(t, sitemapWriter.Header().Get("Content-Type"), "xml")
+		assert.Contains(t, sitemapWriter.Body.String(), `<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">`)
+		assert.Contains(t, sitemapWriter.Body.String(), `<loc>https://luoxueapi.cc/home</loc>`)
+		assert.NotContains(t, sitemapWriter.Body.String(), `<loc>https://luoxueapi.cc/models.html</loc>`)
+		assert.NotContains(t, sitemapWriter.Body.String(), "<!doctype html>")
 	})
 }
 
@@ -752,6 +987,21 @@ func TestServeEmbeddedFrontend(t *testing.T) {
 				assert.Contains(t, w.Header().Get("Content-Type"), "text/html")
 			})
 		}
+	})
+
+	t.Run("serves_documentation_index_for_deep_links", func(t *testing.T) {
+		middleware := ServeEmbeddedFrontend()
+		router := gin.New()
+		router.Use(middleware)
+
+		w := httptest.NewRecorder()
+		req := httptest.NewRequest(http.MethodGet, "/tutorial-docs/orders", nil)
+		router.ServeHTTP(w, req)
+
+		assert.Equal(t, http.StatusOK, w.Code)
+		assert.Contains(t, w.Header().Get("Content-Type"), "text/html")
+		assert.Contains(t, w.Body.String(), `href="https://luoxueapi.cc/tutorial-docs/"`)
+		assert.Contains(t, w.Body.String(), "/tutorial-docs/assets/")
 	})
 
 	t.Run("skips_api_routes", func(t *testing.T) {
@@ -862,12 +1112,15 @@ func TestHTMLCache(t *testing.T) {
 		cache.SetBaseHTML([]byte("<html></html>"))
 		settings := []byte(`{"site_name":"落雪API"}`)
 
-		cache.SetForKey("", []byte("home"), settings)
+		cache.SetForKey(homeHTMLCacheKey, []byte("home"), settings)
 		cache.SetForKey(modelCatalogHTMLCacheKey, []byte("models"), settings)
+		cache.SetForKey(noIndexHTMLCacheKey, []byte("private"), settings)
 
-		assert.Equal(t, []byte("home"), cache.GetForKey("").Content)
+		assert.Equal(t, []byte("home"), cache.GetForKey(homeHTMLCacheKey).Content)
 		assert.Equal(t, []byte("models"), cache.GetForKey(modelCatalogHTMLCacheKey).Content)
-		assert.NotEqual(t, cache.GetForKey("").ETag, cache.GetForKey(modelCatalogHTMLCacheKey).ETag)
+		assert.Equal(t, []byte("private"), cache.GetForKey(noIndexHTMLCacheKey).Content)
+		assert.NotEqual(t, cache.GetForKey(homeHTMLCacheKey).ETag, cache.GetForKey(modelCatalogHTMLCacheKey).ETag)
+		assert.NotEqual(t, cache.GetForKey(homeHTMLCacheKey).ETag, cache.GetForKey(noIndexHTMLCacheKey).ETag)
 	})
 }
 

@@ -1,6 +1,8 @@
 <template>
-  <AppLayout>
-    <div class="space-y-4">
+  <AppLayout variant="home-clay">
+    <div class="space-y-4" data-admin-page-kind="table">
+      <AdminPageHeader :title="t('nav.orderManagement')" />
+
       <!-- Filters -->
       <div class="card p-4">
         <div class="flex flex-wrap items-center gap-3">
@@ -124,6 +126,7 @@ import { extractI18nErrorMessage } from '@/utils/apiError'
 import { formatOrderDateTime } from '@/components/payment/orderUtils'
 import type { PaymentOrder } from '@/types/payment'
 import AppLayout from '@/components/layout/AppLayout.vue'
+import AdminPageHeader from '@/components/layout/AdminPageHeader.vue'
 import Pagination from '@/components/common/Pagination.vue'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import Select from '@/components/common/Select.vue'

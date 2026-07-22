@@ -56,6 +56,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v6
@@ -76,6 +78,25 @@ jobs:
       - name: Build frontend
         run: pnpm run build
         working-directory: frontend
+
+      - name: Install documentation site dependencies
+        run: npm ci
+        working-directory: docs-site
+
+      - name: Test and build documentation site
+        working-directory: docs-site
+        run: |
+          npm test
+          npm run build
+          npm run verify:build
+
+      - name: Assemble embedded web bundle
+        run: |
+          rm -rf backend/internal/web/dist/tutorial-docs
+          mkdir -p backend/internal/web/dist/tutorial-docs
+          cp -a docs-site/dist/. backend/internal/web/dist/tutorial-docs/
+          test -f backend/internal/web/dist/tutorial-docs/index.html
+          grep -q '/tutorial-docs/assets/' backend/internal/web/dist/tutorial-docs/index.html
 
       - name: Upload frontend artifact
         uses: actions/upload-artifact@v7
@@ -116,6 +137,10 @@ jobs:
       - name: Verify Go version
         run: |
           go version | grep -q 'go1.26.5'
+
+      - name: Verify embedded web bundle
+        working-directory: backend
+        run: go test -tags=embed ./internal/web
 
       # Docker setup for GoReleaser
       - name: Set up QEMU

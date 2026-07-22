@@ -1,7 +1,7 @@
 import { nextTick } from 'vue'
 import { mount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
 vi.mock('@/composables/useOnboardingTour', () => ({
   useOnboardingTour: () => ({ replayTour: vi.fn() }),
@@ -11,6 +11,10 @@ import AppLayout from '../AppLayout.vue'
 import { useAppStore } from '@/stores'
 
 describe('AppLayout navigation structure', () => {
+  afterEach(() => {
+    document.body.classList.remove('admin-home-clay-portals')
+  })
+
   it('places the global header before the floating sidebar and content shell', () => {
     const pinia = createPinia()
     setActivePinia(pinia)
@@ -70,6 +74,52 @@ describe('AppLayout navigation structure', () => {
     appStore.setSidebarCollapsed(false)
     await nextTick()
 
-    expect(mainShell.classes()).toContain('lg:ml-[184px]')
+    expect(mainShell.classes()).toEqual(
+      expect.arrayContaining([
+        'lg:ml-[184px]',
+        'min-[1025px]:ml-[196px]',
+        'min-[1281px]:ml-[208px]',
+      ]),
+    )
+  })
+
+  it('keeps content theming opt-in without changing the shared sidebar variant', async () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const wrapper = mount(AppLayout, {
+      global: {
+        plugins: [pinia],
+        stubs: {
+          AppHeader: {
+            template: '<header data-testid="header-original" />',
+          },
+          AppSidebar: { template: '<aside data-testid="sidebar-original" />' },
+        },
+      },
+    })
+
+    expect(wrapper.classes()).toContain('app-layout--snow-shell')
+    expect(wrapper.get('[data-testid="app-main-shell"]').classes()).not.toContain('app-layout--home-clay')
+    expect(wrapper.get('[data-testid="header-original"]').exists()).toBe(true)
+    expect(wrapper.get('[data-testid="sidebar-original"]').attributes('variant')).toBeUndefined()
+    expect(document.body.classList.contains('admin-home-clay-portals')).toBe(false)
+
+    await wrapper.setProps({ variant: 'home-clay' })
+
+    expect(wrapper.classes()).toContain('app-layout--snow-shell')
+    expect(wrapper.get('[data-testid="app-main-shell"]').classes()).toContain('app-layout--home-clay')
+    expect(wrapper.get('[data-testid="header-original"]').attributes('data-variant')).toBeUndefined()
+    expect(wrapper.get('[data-testid="sidebar-original"]').attributes('variant')).toBeUndefined()
+    expect(document.documentElement.classList.contains('app-layout--home-clay')).toBe(false)
+    expect(document.body.classList.contains('app-layout--home-clay')).toBe(false)
+    expect(document.body.classList.contains('admin-home-clay-portals')).toBe(true)
+
+    await wrapper.setProps({ variant: 'default' })
+
+    expect(wrapper.classes()).toContain('app-layout--snow-shell')
+    expect(wrapper.get('[data-testid="app-main-shell"]').classes()).not.toContain('app-layout--home-clay')
+    expect(wrapper.get('[data-testid="header-original"]').attributes('data-variant')).toBeUndefined()
+    expect(wrapper.get('[data-testid="sidebar-original"]').attributes('variant')).toBeUndefined()
+    expect(document.body.classList.contains('admin-home-clay-portals')).toBe(false)
   })
 })

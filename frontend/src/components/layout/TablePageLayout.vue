@@ -1,12 +1,21 @@
 <template>
-  <div class="table-page-layout" :class="{ 'mobile-mode': isMobile }">
+  <div
+    class="table-page-layout"
+    :class="{ 'mobile-mode': isMobile }"
+    data-admin-page-kind="table"
+  >
+    <!-- 固定区域：页面标题与说明 -->
+    <div v-if="$slots.header" class="layout-section-fixed layout-section-header">
+      <slot name="header" />
+    </div>
+
     <!-- 固定区域：操作按钮 -->
-    <div v-if="$slots.actions" class="layout-section-fixed">
+    <div v-if="$slots.actions" class="layout-section-fixed layout-section-actions">
       <slot name="actions" />
     </div>
 
     <!-- 固定区域：搜索和过滤器 -->
-    <div v-if="$slots.filters" class="layout-section-fixed">
+    <div v-if="$slots.filters" class="layout-section-fixed layout-section-filters">
       <slot name="filters" />
     </div>
 
@@ -18,7 +27,7 @@
     </div>
 
     <!-- 固定区域：分页器 -->
-    <div v-if="$slots.pagination" class="layout-section-fixed">
+    <div v-if="$slots.pagination" class="layout-section-fixed layout-section-pagination">
       <slot name="pagination" />
     </div>
   </div>
@@ -106,7 +115,8 @@ onUnmounted(() => {
 }
 
 .table-page-layout.mobile-mode .table-scroll-container {
-  @apply h-auto;
+  @apply h-auto overflow-visible rounded-none border-0 bg-transparent;
+  box-shadow: none;
 }
 
 .table-page-layout.mobile-mode .layout-section-scrollable {

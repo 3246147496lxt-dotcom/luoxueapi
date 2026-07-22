@@ -8,6 +8,11 @@ const componentPath = resolve(dirname(fileURLToPath(import.meta.url)), '../Table
 const componentSource = readFileSync(componentPath, 'utf8')
 
 describe('TablePageLayout responsive table scrolling', () => {
+  it('exposes a table page kind and a dedicated header slot', () => {
+    expect(componentSource).toContain('data-admin-page-kind="table"')
+    expect(componentSource).toContain('<slot name="header" />')
+  })
+
   it('does not disable the table horizontal scroll container in mobile mode', () => {
     const tableWrapperBlocks = Array.from(
       componentSource.matchAll(/([^{}]*:deep\(\.table-wrapper\)[^{}]*)\{([^{}]*)\}/g)
@@ -22,5 +27,13 @@ describe('TablePageLayout responsive table scrolling', () => {
     expect(mobileBlocks.every(([, , declarations]) => !declarations.includes('overflow-visible'))).toBe(
       true
     )
+  })
+
+  it('removes the redundant outer card around mobile row cards', () => {
+    expect(componentSource).toContain(
+      '.table-page-layout.mobile-mode .table-scroll-container'
+    )
+    expect(componentSource).toContain('overflow-visible rounded-none border-0 bg-transparent')
+    expect(componentSource).toContain('box-shadow: none')
   })
 })

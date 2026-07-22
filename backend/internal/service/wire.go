@@ -280,6 +280,22 @@ func ProvideProxyExpiryService(proxyRepo ProxyRepository) *ProxyExpiryService {
 	return svc
 }
 
+// ProvideProxyHealthService creates the safe proxy health aggregator and starts
+// its non-mutating, leader-elected background probe scheduler.
+func ProvideProxyHealthService(
+	adminService AdminService,
+	proxyRepo ProxyRepository,
+	cache ProxyLatencyCache,
+	opsService *OpsService,
+	lockCache LeaderLockCache,
+	db *sql.DB,
+	cfg *config.Config,
+) *ProxyHealthService {
+	svc := NewProxyHealthService(adminService, proxyRepo, cache, opsService, lockCache, db, cfg)
+	svc.Start()
+	return svc
+}
+
 // ProvideSubscriptionExpiryService creates and starts SubscriptionExpiryService.
 func ProvideSubscriptionExpiryService(userSubRepo UserSubscriptionRepository, settingRepo SettingRepository, notificationEmailService *NotificationEmailService, lockCache LeaderLockCache, db *sql.DB) *SubscriptionExpiryService {
 	svc := NewSubscriptionExpiryService(userSubRepo, time.Minute)
@@ -719,6 +735,7 @@ var ProviderSet = wire.NewSet(
 	wire.Bind(new(GrokOAuthReconciler), new(*TokenRefreshService)),
 	ProvideAccountExpiryService,
 	ProvideProxyExpiryService,
+	ProvideProxyHealthService,
 	ProvideSubscriptionExpiryService,
 	ProvideTimingWheelService,
 	ProvideDashboardAggregationService,

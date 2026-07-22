@@ -1,10 +1,12 @@
-import { describe, expect, it, vi } from 'vitest'
-import { mount } from '@vue/test-utils'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { flushPromises, mount } from '@vue/test-utils'
 
 import ModelDistributionChart from '../ModelDistributionChart.vue'
 
 const messages: Record<string, string> = {
   'admin.dashboard.modelDistribution': 'Model Distribution',
+  'admin.dashboard.modelUsageDistribution': 'Model Usage Distribution',
+  'admin.dashboard.modelMixEyebrow': 'MODEL MIX',
   'admin.dashboard.spendingRankingTitle': 'User Spending Ranking',
   'admin.dashboard.viewModelDistribution': 'Model Distribution',
   'admin.dashboard.viewSpendingRanking': 'User Spending Ranking',
@@ -21,9 +23,27 @@ const messages: Record<string, string> = {
   'admin.dashboard.standard': 'Standard',
   'admin.dashboard.metricTokens': 'By Tokens',
   'admin.dashboard.metricActualCost': 'By Actual Cost',
+  'admin.dashboard.totalTokens': 'Total Tokens',
+  'admin.dashboard.totalCost': 'Total Cost',
+  'admin.dashboard.requestsShort': 'Req',
+  'admin.dashboard.spendingRankingUsage': 'Usage',
   'admin.dashboard.noDataAvailable': 'No data available',
+  'admin.dashboard.failedToLoad': 'Failed to load dashboard statistics',
+  'admin.dashboard.retry': 'Reload',
   'admin.redeem.userPrefix': 'User #{id}',
+  'common.loading': 'Loading...',
+  'usage.requestedModel': 'Requested',
+  'usage.upstreamModel': 'Upstream',
+  'usage.mapping': 'Mapping',
 }
+
+const { getUserBreakdownMock } = vi.hoisted(() => ({
+  getUserBreakdownMock: vi.fn(),
+}))
+
+vi.mock('@/api/admin/dashboard', () => ({
+  getUserBreakdown: getUserBreakdownMock,
+}))
 
 vi.mock('vue-i18n', async () => {
   const actual = await vi.importActual<typeof import('vue-i18n')>('vue-i18n')
@@ -67,6 +87,11 @@ describe('ModelDistributionChart', () => {
       actual_cost: 1.4,
     },
   ]
+
+  beforeEach(() => {
+    getUserBreakdownMock.mockReset()
+    getUserBreakdownMock.mockResolvedValue({ users: [] })
+  })
 
   it('uses total_tokens and token ordering by default', () => {
     const wrapper = mount(ModelDistributionChart, {
@@ -151,8 +176,8 @@ describe('ModelDistributionChart', () => {
         modelStats: [],
         enableRankingView: true,
         rankingItems: [
-          { user_id: 1, email: 'alpha@example.com', actual_cost: 12, requests: 10, tokens: 1000 },
-          { user_id: 2, email: 'beta@example.com', actual_cost: 8, requests: 6, tokens: 600 },
+          { user_id: 1, email: 'alpha@example.com', username: 'Alpha', main_model: 'model-a', actual_cost: 12, requests: 10, tokens: 1000 },
+          { user_id: 2, email: 'beta@example.com', username: 'Beta', main_model: 'model-b', actual_cost: 8, requests: 6, tokens: 600 },
         ],
         rankingTotalActualCost: 30,
         rankingTotalRequests: 20,
@@ -176,7 +201,7 @@ describe('ModelDistributionChart', () => {
       'Others',
     ])
     expect(chartData.datasets[0].data).toEqual([12, 8, 10])
-    expect(chartData.datasets[0].backgroundColor[0]).toBe('#3b82f6')
+    expect(chartData.datasets[0].backgroundColor[0]).toBe('#7c3aed')
     expect(chartData.datasets[0].backgroundColor[2]).toBe('#94a3b8')
     expect(chartData.datasets[0].backgroundColor[2]).not.toBe(chartData.datasets[0].backgroundColor[0])
 
@@ -186,5 +211,119 @@ describe('ModelDistributionChart', () => {
     expect(rows[2].text()).toContain('4')
     expect(rows[2].text()).toContain('400')
     expect(rows[2].text()).toContain('$10.00')
+  })
+
+  it('renders the home-clay distribution as a totalled doughnut with real model shares', () => {
+    const wrapper = mount(ModelDistributionChart, {
+      props: {
+        modelStats,
+        variant: 'home-clay',
+        enableBreakdown: false,
+      },
+      global: {
+        stubs: {
+          LoadingSpinner: true,
+        },
+      },
+    })
+
+    expect(wrapper.get('.home-model-total').text()).toContain('Total Tokens')
+    expect(wrapper.get('.home-model-total').text()).toContain('1.50K')
+
+    const legendRows = wrapper.findAll('.home-model-row')
+    expect(legendRows).toHaveLength(2)
+    expect(legendRows[0].text()).toContain('model-a')
+    expect(legendRows[0].text()).toContain('1.00K Token')
+    expect(legendRows[0].text()).toContain('67%')
+    expect(legendRows[1].text()).toContain('model-b')
+    expect(legendRows[1].text()).toContain('33%')
+
+    const chartData = JSON.parse(wrapper.find('.chart-data').text())
+    expect(chartData.datasets[0].backgroundColor.slice(0, 3)).toEqual(['#7c3aed', '#0b8bed'])
+
+    const visual = wrapper.get('[role="img"]')
+    expect(visual.attributes('aria-label')).toContain('Total Tokens: 1.50K')
+    expect(visual.attributes('aria-label')).toContain('model-a: 1.00K Token, 67%')
+  })
+
+  it('keeps source and metric controls functional in the visual variant', async () => {
+    const wrapper = mount(ModelDistributionChart, {
+      props: {
+        modelStats,
+        variant: 'home-clay',
+        showSourceToggle: true,
+        showMetricToggle: true,
+      },
+    })
+
+    const buttons = wrapper.findAll('button')
+    const upstreamButton = buttons.find((button) => button.text() === 'Upstream')
+    const costButton = buttons.find((button) => button.text() === 'By Actual Cost')
+    expect(upstreamButton?.attributes('aria-pressed')).toBe('false')
+    expect(costButton?.attributes('aria-pressed')).toBe('false')
+
+    await upstreamButton!.trigger('click')
+    await costButton!.trigger('click')
+
+    expect(wrapper.emitted('update:source')).toEqual([['upstream']])
+    expect(wrapper.emitted('update:metric')).toEqual([['actual_cost']])
+  })
+
+  it('shows skeleton, empty, and retryable error states for home-clay', async () => {
+    const loadingWrapper = mount(ModelDistributionChart, {
+      props: { modelStats: [], variant: 'home-clay', loading: true },
+    })
+    expect(loadingWrapper.get('.home-model-skeleton').attributes('role')).toBe('status')
+    expect(loadingWrapper.text()).toContain('Loading...')
+
+    const emptyWrapper = mount(ModelDistributionChart, {
+      props: { modelStats: [], variant: 'home-clay' },
+    })
+    expect(emptyWrapper.get('.home-model-state').text()).toContain('No data available')
+
+    const errorWrapper = mount(ModelDistributionChart, {
+      props: { modelStats: [], variant: 'home-clay', error: 'Network unavailable' },
+    })
+    expect(errorWrapper.get('[role="alert"]').text()).toContain('Network unavailable')
+    await errorWrapper.get('.home-model-state button').trigger('click')
+    expect(errorWrapper.emitted('retry')).toHaveLength(1)
+  })
+
+  it('keeps model breakdown available through a keyboard-native disclosure button', async () => {
+    getUserBreakdownMock.mockResolvedValue({
+      users: [
+        {
+          user_id: 9,
+          email: 'person@example.com',
+          requests: 2,
+          total_tokens: 100,
+          actual_cost: 0.1,
+          account_cost: 0.08,
+          cost: 0.2,
+        },
+      ],
+    })
+    const wrapper = mount(ModelDistributionChart, {
+      props: {
+        modelStats,
+        variant: 'home-clay',
+        startDate: '2026-07-01',
+        endDate: '2026-07-02',
+      },
+    })
+
+    const firstRow = wrapper.get('button.home-model-row')
+    expect(firstRow.attributes('aria-expanded')).toBe('false')
+    await firstRow.trigger('click')
+    await flushPromises()
+
+    expect(firstRow.attributes('aria-expanded')).toBe('true')
+    expect(getUserBreakdownMock).toHaveBeenCalledWith(expect.objectContaining({
+      model: 'model-a',
+      model_source: 'requested',
+      start_date: '2026-07-01',
+      end_date: '2026-07-02',
+    }))
+    expect(wrapper.get('.home-model-breakdown').text()).toContain('person@example.com')
   })
 })

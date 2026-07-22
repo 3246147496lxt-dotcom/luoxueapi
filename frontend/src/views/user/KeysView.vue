@@ -33,8 +33,10 @@
           <div class="mt-5 flex flex-wrap items-center gap-2 border-t border-gray-100 pt-5 dark:border-dark-700">
             <button
               type="button"
-              class="btn btn-primary h-11"
+              class="key-header-create btn btn-primary h-11"
+              :class="{ 'key-header-create--empty': !loading && apiKeys.length === 0 }"
               data-tour="keys-create-btn"
+              data-test="key-create-header"
               @click="showCreateModal = true"
             >
               <Icon name="plus" size="md" class="mr-2" />
@@ -99,28 +101,56 @@
             />
           </div>
 
-          <div class="mt-5 grid gap-3 border-t border-gray-100 pt-5 dark:border-dark-700 sm:grid-cols-2 xl:grid-cols-[minmax(260px,1.35fr)_190px_190px_230px]">
+          <div class="mt-5 grid grid-cols-[minmax(0,1fr)_auto] gap-3 border-t border-gray-100 pt-5 dark:border-dark-700 md:grid-cols-2 xl:grid-cols-[minmax(260px,1.35fr)_190px_190px_230px]">
             <SearchInput
               v-model="filterSearch"
+              class="key-filter-search min-w-0"
               :placeholder="t('keys.searchPlaceholder')"
               @search="onFilterChange"
             />
-            <Select
-              :model-value="filterGroupId"
-              :options="groupFilterOptions"
-              @update:model-value="onGroupFilterChange"
-            />
-            <Select
-              :model-value="filterStatus"
-              :options="statusFilterOptions"
-              @update:model-value="onStatusFilterChange"
-            />
-            <Select
-              :model-value="sortSelection"
-              :options="sortOptions"
-              data-test="key-sort"
-              @update:model-value="onSortChange"
-            />
+            <button
+              type="button"
+              class="inline-flex min-h-11 min-w-11 items-center justify-center gap-2 rounded-xl border border-gray-200 bg-white px-3 text-sm font-semibold text-gray-700 transition-colors hover:border-primary-300 hover:bg-primary-50 hover:text-primary-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500/40 dark:border-dark-600 dark:bg-dark-800 dark:text-gray-200 dark:hover:border-primary-700 dark:hover:bg-primary-900/20 dark:hover:text-primary-300 md:hidden"
+              :aria-expanded="mobileFiltersExpanded"
+              aria-controls="key-mobile-secondary-filters"
+              data-test="key-mobile-filter-toggle"
+              @click="mobileFiltersExpanded = !mobileFiltersExpanded"
+            >
+              <Icon name="filter" size="md" aria-hidden="true" />
+              <span>{{ t('common.filter') }}</span>
+              <Icon
+                name="chevronDown"
+                size="sm"
+                class="transition-transform duration-200 motion-reduce:transition-none"
+                :class="mobileFiltersExpanded && 'rotate-180'"
+                aria-hidden="true"
+              />
+            </button>
+            <div
+              id="key-mobile-secondary-filters"
+              data-test="key-mobile-secondary-filters"
+              :class="mobileFiltersExpanded ? 'col-span-2 grid gap-3 md:contents' : 'hidden md:contents'"
+            >
+              <Select
+                class="key-secondary-filter"
+                :model-value="filterGroupId"
+                :options="groupFilterOptions"
+                @update:model-value="onGroupFilterChange"
+              />
+              <Select
+                class="key-secondary-filter"
+                :model-value="filterStatus"
+                :options="statusFilterOptions"
+                @update:model-value="onStatusFilterChange"
+              />
+              <Select
+                class="key-secondary-filter"
+                :model-value="sortSelection"
+                :options="sortOptions"
+                data-test="key-sort"
+                @update:model-value="onSortChange"
+              />
+            </div>
           </div>
 
           <button
@@ -202,9 +232,19 @@
             <EmptyState
               :title="t('keys.noKeysYet')"
               :description="t('keys.createFirstKey')"
-              :action-text="t('keys.createKey')"
-              @action="showCreateModal = true"
-            />
+            >
+              <template #action>
+                <button
+                  type="button"
+                  class="key-empty-create btn btn-primary min-h-11"
+                  data-test="key-create-empty"
+                  @click="showCreateModal = true"
+                >
+                  <Icon name="plus" size="md" class="mr-2" aria-hidden="true" />
+                  {{ t('keys.createKey') }}
+                </button>
+              </template>
+            </EmptyState>
           </div>
         </div>
 
@@ -1123,6 +1163,7 @@ const showUseKeyModal = ref(false)
 const showCcsClientSelect = ref(false)
 const showColumnDropdown = ref(false)
 const showCardActions = ref(true)
+const mobileFiltersExpanded = ref(false)
 const compactTable = ref(false)
 const statusUpdatingKeyIds = reactive(new Set<number>())
 const statusUpdatingIds = computed(() => Array.from(statusUpdatingKeyIds))
@@ -1809,3 +1850,22 @@ onUnmounted(() => {
   if (resetTimer) clearInterval(resetTimer)
 })
 </script>
+
+<style scoped>
+@media (max-width: 767px) {
+  .key-header-create--empty {
+    display: none;
+  }
+
+  .key-filter-search :deep(.input),
+  .key-secondary-filter :deep(.select-trigger) {
+    min-height: 44px;
+  }
+}
+
+@media (min-width: 768px) {
+  .key-empty-create {
+    display: none;
+  }
+}
+</style>

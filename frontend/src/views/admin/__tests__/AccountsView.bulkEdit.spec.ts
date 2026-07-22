@@ -55,6 +55,11 @@ vi.mock('@/stores/auth', () => ({
   })
 }))
 
+vi.mock('vue-router', () => ({
+  useRoute: () => ({ query: {} }),
+  useRouter: () => ({ replace: vi.fn().mockResolvedValue(undefined) })
+}))
+
 vi.mock('vue-i18n', async () => {
   const actual = await vi.importActual<typeof import('vue-i18n')>('vue-i18n')
   return {
@@ -66,13 +71,14 @@ vi.mock('vue-i18n', async () => {
 })
 
 const DataTableStub = {
-  props: ['columns', 'data'],
+  props: ['columns', 'data', 'mobilePrimaryKey', 'mobileVisibleKeys'],
   template: `
     <div data-test="data-table">
       <span v-for="column in columns" :key="column.key" data-test="column-key">{{ column.key }}</span>
       <div v-for="row in data" :key="row.id">
         <div data-test="select-row"><slot name="cell-select" :row="row" /></div>
         <slot name="cell-created_at" :value="row.created_at" :row="row" />
+        <div data-test="row-actions"><slot name="cell-actions" :row="row" /></div>
       </div>
     </div>
   `
@@ -82,7 +88,7 @@ const AccountBulkActionsBarStub = {
   props: ['selectedIds'],
   emits: ['edit-filtered', 'probe-upstream-billing'],
   template: `
-    <div>
+    <div data-test="account-bulk-actions">
       <button data-test="edit-filtered" @click="$emit('edit-filtered')">edit filtered</button>
       <button data-test="probe-upstream-billing" @click="$emit('probe-upstream-billing')">probe</button>
     </div>
@@ -167,7 +173,10 @@ describe('admin AccountsView bulk edit scope', () => {
     })
 
     await flushPromises()
-    await wrapper.get('[data-test="edit-filtered"]').trigger('click')
+    expect(wrapper.find('[data-test="account-bulk-actions"]').exists()).toBe(false)
+
+    await wrapper.get('[data-test="account-tools-toggle"]').trigger('click')
+    await wrapper.get('[data-test="bulk-edit-filtered"]').trigger('click')
     await flushPromises()
 
     expect(wrapper.get('[data-test="bulk-edit-modal"]').attributes('data-show')).toBe('true')
@@ -240,6 +249,20 @@ describe('admin AccountsView bulk edit scope', () => {
       label: 'admin.accounts.columns.createdAt',
       sortable: true
     })
+    expect(wrapper.getComponent(DataTableStub).props('mobilePrimaryKey')).toBe('name')
+    expect(wrapper.getComponent(DataTableStub).props('mobileVisibleKeys')).toEqual([
+      'name',
+      'platform_type',
+      'status',
+      'schedulable',
+      'groups'
+    ])
+
+    const rowActions = wrapper.get('[data-test="row-actions"]')
+    const deleteAction = rowActions.findAll('button').find(button => button.text().includes('common.delete'))
+    const editAction = rowActions.findAll('button').find(button => button.text().includes('common.edit'))
+    expect(deleteAction?.classes()).toEqual(expect.arrayContaining(['hidden', 'lg:flex']))
+    expect(editAction?.classes()).toEqual(expect.arrayContaining(['flex-1', 'lg:flex-none']))
   })
 
   it('submits selected account IDs from every page for backend eligibility checks', async () => {
@@ -294,6 +317,7 @@ describe('admin AccountsView bulk edit scope', () => {
 
     await flushPromises()
     await wrapper.get('[data-test="select-row"] input').trigger('change')
+    expect(wrapper.get('[data-test="account-bulk-actions"]').exists()).toBe(true)
     await wrapper.get('[data-test="next-page"]').trigger('click')
     await flushPromises()
     await wrapper.get('[data-test="select-row"] input').trigger('change')

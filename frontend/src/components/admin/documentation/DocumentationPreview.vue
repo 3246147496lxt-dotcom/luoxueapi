@@ -165,7 +165,7 @@ function safeUrl(value: string): string {
 function noteClasses(tone: DocumentationNoteTone): string {
   return tone === 'warning'
     ? 'border-amber-200 bg-amber-50 text-amber-950 dark:border-amber-900/60 dark:bg-amber-900/20 dark:text-amber-100'
-    : 'border-primary-200 bg-primary-50 text-primary-950 dark:border-primary-900/60 dark:bg-primary-900/20 dark:text-primary-100'
+    : 'info-surface'
 }
 
 async function moveTab(index: number, offset: -1 | 1): Promise<void> {

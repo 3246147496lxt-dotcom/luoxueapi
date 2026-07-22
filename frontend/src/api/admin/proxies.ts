@@ -28,6 +28,7 @@ export async function list(
   filters?: {
     protocol?: string
     status?: 'active' | 'inactive' | 'expired'
+    health?: string
     search?: string
     sort_by?: string
     sort_order?: 'asc' | 'desc'

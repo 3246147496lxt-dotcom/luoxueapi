@@ -17,8 +17,8 @@
       <section class="content-shell hero-section" aria-labelledby="home-hero-title">
         <div class="hero-copy">
           <h1 id="home-hero-title" class="hero-title">
-            {{ heroTitleParts.lead }}<br v-if="heroTitleParts.accent">
-            <span v-if="heroTitleParts.accent">{{ heroTitleParts.accent }}</span>
+            <span class="hero-title-lead">{{ heroTitleParts.lead }}</span><br v-if="heroTitleParts.accent">
+            <span v-if="heroTitleParts.accent" class="hero-title-accent">{{ heroTitleParts.accent }}</span>
           </h1>
 
           <p class="hero-description">{{ t('home.hero.description') }}</p>
@@ -70,18 +70,20 @@
                 type="button"
                 class="copy-button"
                 data-testid="copy-code-button"
-              :aria-label="copyAriaLabel"
-              @click="copyActiveCode"
-            >
-              <Icon
-                :name="copyStatus === 'copied' ? 'check' : 'lucideCopy'"
-                size="xs"
-                :stroke-width="2"
-                aria-hidden="true"
-              />
-              {{ copyButtonLabel }}
-            </button>
+                :aria-label="copyAriaLabel"
+                @click="copyActiveCode"
+              >
+                <Icon
+                  :name="copyStatus === 'copied' ? 'check' : 'lucideCopy'"
+                  size="xs"
+                  :stroke-width="2"
+                  aria-hidden="true"
+                />
+                {{ copyButtonLabel }}
+              </button>
             </div>
+
+            <p class="code-helper">{{ t('home.codeExample.description') }}</p>
 
             <div
               id="code-example-panel"
@@ -106,46 +108,14 @@
         </ul>
       </div>
 
-      <section id="capabilities" class="content-shell home-section" aria-labelledby="capabilities-title">
-        <div class="section-intro">
-          <h2 id="capabilities-title">{{ t('home.capabilities.title') }}</h2>
-          <p>{{ t('home.capabilities.description') }}</p>
-        </div>
-
-        <div class="capability-layout">
-          <figure class="clay-card dashboard-figure">
-            <div class="clay-recessed dashboard-frame">
-              <img
-                src="/brand/home-dashboard.webp"
-                :alt="t('home.capabilities.imageAlt')"
-                width="1600"
-                height="757"
-                loading="lazy"
-                decoding="async"
-              />
-            </div>
-          </figure>
-
-          <ul class="capability-list">
-            <li v-for="(item, index) in capabilityItems" :key="item.titleKey" class="clay-card">
-              <span class="clay-recessed capability-marker" :class="`capability-marker--${index + 1}`" aria-hidden="true">
-                <Icon :name="item.icon" size="md" />
-              </span>
-              <h3>{{ t(item.titleKey) }}</h3>
-              <p>{{ t(item.descriptionKey) }}</p>
-            </li>
-          </ul>
-        </div>
-      </section>
-
       <section id="steps" class="content-shell home-section" aria-labelledby="steps-title">
         <div class="section-intro">
           <h2 id="steps-title">{{ t('home.steps.title') }}</h2>
           <p>{{ t('home.steps.description') }}</p>
         </div>
 
-        <ol class="steps-list">
-          <li v-for="(step, index) in stepItems" :key="step.titleKey" class="clay-card">
+        <ol class="clay-card steps-list">
+          <li v-for="(step, index) in stepItems" :key="step.titleKey" class="step-item">
             <span class="step-node" aria-hidden="true">{{ index + 1 }}</span>
             <h3>{{ t(step.titleKey) }}</h3>
             <p>{{ t(step.descriptionKey) }}</p>
@@ -157,6 +127,48 @@
             {{ t('home.steps.tutorial') }}
             <Icon name="externalLink" size="sm" aria-hidden="true" />
           </a>
+        </div>
+      </section>
+
+      <section id="capabilities" class="content-shell home-section" aria-labelledby="capabilities-title">
+        <div class="section-intro">
+          <h2 id="capabilities-title">{{ t('home.capabilities.title') }}</h2>
+          <p>{{ t('home.capabilities.description') }}</p>
+        </div>
+
+        <div class="capability-layout">
+          <figure class="clay-card dashboard-figure">
+            <div class="clay-recessed dashboard-frame">
+              <img
+                class="dashboard-image dashboard-image--light"
+                src="/brand/home-dashboard.webp"
+                :alt="t('home.capabilities.imageAlt')"
+                width="1600"
+                height="757"
+                loading="lazy"
+                decoding="async"
+              />
+              <img
+                class="dashboard-image dashboard-image--dark"
+                src="/brand/home-dashboard-dark.png"
+                :alt="t('home.capabilities.imageAlt')"
+                width="1600"
+                height="757"
+                loading="lazy"
+                decoding="async"
+              />
+            </div>
+          </figure>
+
+          <ul class="clay-card capability-list">
+            <li v-for="(item, index) in capabilityItems" :key="item.titleKey" class="capability-item">
+              <span class="clay-recessed capability-marker" :class="`capability-marker--${index + 1}`" aria-hidden="true">
+                <Icon :name="item.icon" size="md" />
+              </span>
+              <h3>{{ t(item.titleKey) }}</h3>
+              <p>{{ t(item.descriptionKey) }}</p>
+            </li>
+          </ul>
         </div>
       </section>
 
@@ -175,7 +187,7 @@
               :data-provider="provider.id"
               :data-provider-status="provider.supported ? 'supported' : 'unsupported'"
               :aria-label="`${t(provider.labelKey)}：${t(provider.supported ? 'home.providers.supported' : 'home.providers.unsupported')}`"
-              class="clay-card provider-card"
+              class="provider-card"
               :class="provider.supported ? 'provider-card--supported' : 'provider-card--unsupported'"
             >
               <span class="clay-recessed provider-icon" aria-hidden="true">
@@ -196,11 +208,10 @@
           <p>{{ t('home.faq.description') }}</p>
         </div>
 
-        <div class="faq-list">
+        <div class="clay-card faq-list">
           <details
             v-for="(item, index) in faqItems"
             :key="item.questionKey"
-            class="clay-card"
             :open="index === 0"
             @toggle="handleFaqToggle"
           >
@@ -247,6 +258,7 @@ import PlatformIcon from '@/components/common/PlatformIcon.vue'
 import Icon from '@/components/icons/Icon.vue'
 import PublicSiteLayout from '@/components/public/PublicSiteLayout.vue'
 import { useClipboard } from '@/composables/useClipboard'
+import { resolveTutorialUrl } from '@/utils/documentationUrl'
 import { sanitizeUrl } from '@/utils/url'
 import type { GroupPlatform } from '@/types'
 
@@ -270,10 +282,7 @@ const heroTitleParts = computed(() => {
   return { lead, accent }
 })
 
-const tutorialUrl = computed(() => {
-  const base = (docUrl.value || '/tutorial-docs/').replace(/#.*$/, '')
-  return `${base}#quick-start`
-})
+const tutorialUrl = computed(() => resolveTutorialUrl(docUrl.value))
 
 function normalizeApiV1Base(value: string): string {
   const fallback = typeof window === 'undefined' ? 'https://luoxueapi.cc' : window.location.origin

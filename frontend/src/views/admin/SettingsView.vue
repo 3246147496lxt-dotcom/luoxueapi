@@ -1,6 +1,14 @@
 <template>
-  <AppLayout>
-    <div class="mx-auto max-w-6xl space-y-6">
+  <AppLayout variant="home-clay">
+    <div
+      class="mx-auto max-w-6xl space-y-6"
+      data-admin-page-kind="form"
+    >
+      <AdminPageHeader
+        :title="t('admin.settings.title')"
+        :description="t('admin.settings.description')"
+      />
+
       <!-- Loading State -->
       <div v-if="loading" class="flex items-center justify-center py-12">
         <div
@@ -7432,12 +7440,38 @@
           <BackupSettings />
         </div>
 
-        <!-- Save Button -->
-        <div v-show="activeTab !== 'backup'" class="flex justify-end">
+        <!-- Sticky save bar -->
+        <div
+          v-show="activeTab !== 'backup' || isSettingsDirty || saveFailed"
+          class="settings-save-bar"
+          :data-state="settingsSaveState"
+          aria-live="polite"
+        >
+          <div class="settings-save-status" role="status">
+            <span class="settings-save-status-dot" aria-hidden="true"></span>
+            <div class="min-w-0">
+              <p class="settings-save-status-title">
+                {{ settingsSaveStatus.title }}
+              </p>
+              <p class="settings-save-status-detail">
+                {{ settingsSaveStatus.detail }}
+              </p>
+            </div>
+          </div>
+
           <button
+            v-if="loadFailed"
+            type="button"
+            class="btn btn-secondary shrink-0"
+            @click="loadSettings"
+          >
+            {{ localText("重新加载", "Reload") }}
+          </button>
+          <button
+            v-else
             type="submit"
-            :disabled="saving || loadFailed"
-            class="btn btn-primary"
+            :disabled="saving || (!isSettingsDirty && !saveFailed)"
+            class="btn btn-primary shrink-0"
           >
             <svg
               v-if="saving"
@@ -7462,7 +7496,9 @@
             {{
               saving
                 ? t("admin.settings.saving")
-                : t("admin.settings.saveSettings")
+                : saveFailed
+                  ? localText("重试保存", "Retry save")
+                  : t("admin.settings.saveSettings")
             }}
           </button>
         </div>
@@ -7504,7 +7540,17 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed, onMounted, watch } from "vue";
+import {
+  ref,
+  reactive,
+  computed,
+  inject,
+  nextTick,
+  onMounted,
+  onBeforeUnmount,
+  watch,
+} from "vue";
+import { matchedRouteKey, onBeforeRouteLeave } from "vue-router";
 import { useI18n } from "vue-i18n";
 import { adminAPI } from "@/api";
 import {
@@ -7538,6 +7584,7 @@ import type {
 } from "@/types";
 import type { ProviderInstance } from "@/types/payment";
 import AppLayout from "@/components/layout/AppLayout.vue";
+import AdminPageHeader from "@/components/layout/AdminPageHeader.vue";
 import Icon from "@/components/icons/Icon.vue";
 import Select from "@/components/common/Select.vue";
 import ConfirmDialog from "@/components/common/ConfirmDialog.vue";
@@ -7669,6 +7716,7 @@ const { copyToClipboard } = useClipboard();
 const loading = ref(true);
 const loadFailed = ref(false);
 const saving = ref(false);
+const saveFailed = ref(false);
 const testingSmtp = ref(false);
 const sendingTestEmail = ref(false);
 const smtpPasswordManuallyEdited = ref(false);
@@ -8244,7 +8292,7 @@ const form = reactive<SettingsForm>({
   default_user_rpm_limit: 0,
   site_name: "落雪API",
   site_logo: "",
-  site_subtitle: "Subscription to API Conversion Platform",
+  site_subtitle: "",
   api_base_url: "",
   contact_info: "",
   doc_url: "",
@@ -9147,6 +9195,153 @@ interface CodexClientRow {
 const codexBlacklistRows = ref<CodexClientRow[]>([]);
 const codexWhitelistRows = ref<CodexClientRow[]>([]);
 const codexFingerprintRows = ref<FingerprintSignalRow[]>([]);
+
+type SettingsSaveState =
+  | "saved"
+  | "dirty"
+  | "saving"
+  | "error"
+  | "load-error";
+
+const savedSettingsFingerprint = ref<string | null>(null);
+const failedSettingsFingerprint = ref<string | null>(null);
+
+/**
+ * Track only data persisted by the page-level save action. Settings with their
+ * own API/save controls intentionally stay out of this fingerprint.
+ */
+const settingsFingerprint = computed(() =>
+  JSON.stringify({
+    form,
+    authSourceDefaults,
+    registrationEmailSuffixWhitelistTags:
+      registrationEmailSuffixWhitelistTags.value,
+    tablePageSizeOptionsInput: tablePageSizeOptionsInput.value,
+    claudeOAuthSystemPromptBlocks: claudeOAuthSystemPromptBlocks.value,
+    codexBlacklistRows: codexBlacklistRows.value,
+    codexWhitelistRows: codexWhitelistRows.value,
+    codexFingerprintRows: codexFingerprintRows.value,
+    openaiFastPolicyRules: openaiFastPolicyLoaded.value
+      ? openaiFastPolicyForm.rules
+      : null,
+    webSearchConfig: {
+      enabled: webSearchConfig.enabled,
+      providers: webSearchConfig.providers.map((provider) => ({
+        type: provider.type,
+        api_key: provider.api_key ?? "",
+        api_key_configured: provider.api_key_configured ?? false,
+        quota_limit: provider.quota_limit ?? null,
+        subscribed_at: provider.subscribed_at ?? null,
+        proxy_id: provider.proxy_id ?? null,
+      })),
+    },
+  }),
+);
+
+const isSettingsDirty = computed(
+  () =>
+    savedSettingsFingerprint.value !== null &&
+    settingsFingerprint.value !== savedSettingsFingerprint.value,
+);
+
+const settingsSaveState = computed<SettingsSaveState>(() => {
+  if (loadFailed.value) return "load-error";
+  if (saving.value) return "saving";
+  if (saveFailed.value) return "error";
+  if (isSettingsDirty.value) return "dirty";
+  return "saved";
+});
+
+const settingsSaveStatus = computed(() => {
+  switch (settingsSaveState.value) {
+    case "load-error":
+      return {
+        title: localText("设置加载失败", "Settings failed to load"),
+        detail: localText(
+          "尚未取得服务器配置，请重新加载后再编辑。",
+          "Reload the server settings before making changes.",
+        ),
+      };
+    case "saving":
+      return {
+        title: localText("正在保存", "Saving changes"),
+        detail: localText(
+          "正在将当前更改同步到服务器。",
+          "Your changes are being synced to the server.",
+        ),
+      };
+    case "error":
+      return {
+        title: localText("保存失败", "Save failed"),
+        detail: localText(
+          "更改仍保留在当前页面，你可以直接重试。",
+          "Your changes are still here and can be retried.",
+        ),
+      };
+    case "dirty":
+      return {
+        title: localText("有未保存的更改", "Unsaved changes"),
+        detail: localText(
+          "这些更改只会在保存后生效。",
+          "These changes take effect only after you save.",
+        ),
+      };
+    default:
+      return {
+        title: localText("已保存", "Saved"),
+        detail: localText(
+          "当前内容与服务器设置一致。",
+          "The current values match the server settings.",
+        ),
+      };
+  }
+});
+
+const shouldWarnUnsavedSettings = computed(
+  () => !loading.value && !loadFailed.value && isSettingsDirty.value,
+);
+
+function markSettingsBaseline(): void {
+  savedSettingsFingerprint.value = settingsFingerprint.value;
+  failedSettingsFingerprint.value = null;
+  saveFailed.value = false;
+}
+
+function markSettingsSaveFailed(): void {
+  failedSettingsFingerprint.value = settingsFingerprint.value;
+  saveFailed.value = true;
+}
+
+function handleSettingsBeforeUnload(event: BeforeUnloadEvent): void {
+  if (!shouldWarnUnsavedSettings.value) return;
+  event.preventDefault();
+  event.returnValue = "";
+}
+
+const activeSettingsRouteRecord = inject(matchedRouteKey, null);
+if (activeSettingsRouteRecord?.value) {
+  onBeforeRouteLeave(() => {
+    if (!shouldWarnUnsavedSettings.value) return true;
+    return window.confirm(
+      localText(
+        "当前页面有未保存的设置，确定要离开吗？",
+        "You have unsaved settings. Are you sure you want to leave?",
+      ),
+    );
+  });
+}
+
+watch(settingsFingerprint, (fingerprint) => {
+  if (
+    saveFailed.value &&
+    !saving.value &&
+    failedSettingsFingerprint.value !== fingerprint
+  ) {
+    saveFailed.value = false;
+    failedSettingsFingerprint.value = null;
+  }
+});
+
 const codexFingerprintNoRequired = computed(
   () => !codexFingerprintRows.value.some((r) => r.required),
 );
@@ -9217,6 +9412,9 @@ function removeCodexWhitelistRow(i: number): void {
 async function loadSettings() {
   loading.value = true;
   loadFailed.value = false;
+  saveFailed.value = false;
+  savedSettingsFingerprint.value = null;
+  failedSettingsFingerprint.value = null;
   try {
     const settings = await adminAPI.settings.getSettings();
     settings.payment_load_balance_strategy =
@@ -9358,6 +9556,8 @@ async function loadSettings() {
 
     // Load web search emulation config separately
     await loadWebSearchConfig();
+    await nextTick();
+    markSettingsBaseline();
   } catch (error: unknown) {
     loadFailed.value = true;
     appStore.showError(
@@ -9438,6 +9638,8 @@ function findDuplicateDefaultSubscription(
 
 async function saveSettings() {
   saving.value = true;
+  saveFailed.value = false;
+  failedSettingsFingerprint.value = null;
   try {
     const normalizedTableDefaultPageSize = Math.floor(
       Number(form.table_default_page_size),
@@ -9964,9 +10166,14 @@ async function saveSettings() {
     await appStore.fetchPublicSettings(true);
     await adminSettingsStore.fetch(true);
     if (wsOk) {
+      await nextTick();
+      markSettingsBaseline();
       appStore.showSuccess(t("admin.settings.settingsSaved"));
+    } else {
+      markSettingsSaveFailed();
     }
   } catch (error: unknown) {
+    markSettingsSaveFailed();
     appStore.showError(
       extractApiErrorMessage(error, t("admin.settings.failedToSave")),
     );
@@ -10788,6 +10995,7 @@ async function handleDeleteProvider() {
 }
 
 onMounted(() => {
+  window.addEventListener("beforeunload", handleSettingsBeforeUnload);
   loadSettings();
   loadSubscriptionGroups();
   loadAdminApiKey();
@@ -10797,6 +11005,10 @@ onMounted(() => {
   loadRectifierSettings();
   loadBetaPolicySettings();
   loadProviders();
+});
+
+onBeforeUnmount(() => {
+  window.removeEventListener("beforeunload", handleSettingsBeforeUnload);
 });
 
 // =========================
@@ -11234,7 +11446,9 @@ watch(
 }
 
 .settings-tab-active {
-  @apply border-primary-200/80 bg-white text-primary-700 shadow-sm dark:border-primary-400/30 dark:bg-dark-700/95 dark:text-primary-200;
+  @apply bg-white shadow-sm dark:bg-dark-700/95;
+  border-color: color-mix(in srgb, var(--admin-clay-violet) 28%, transparent);
+  color: var(--admin-clay-violet);
   box-shadow:
     0 8px 18px rgb(15 23 42 / 0.08),
     0 1px 0 rgb(255 255 255 / 0.92) inset;
@@ -11252,7 +11466,7 @@ watch(
   height: 2px;
   border-radius: 9999px;
   content: "";
-  background: linear-gradient(90deg, #14b8a6, #0ea5e9);
+  background: var(--admin-clay-violet);
 }
 
 .settings-tab-icon {
@@ -11265,11 +11479,83 @@ watch(
 }
 
 .settings-tab-active .settings-tab-icon {
-  @apply bg-primary-50 text-primary-600 dark:bg-primary-400/10 dark:text-primary-300;
+  background: var(--admin-clay-violet-soft);
+  color: var(--admin-clay-violet);
 }
 
 .settings-tab-label {
   @apply min-w-0 overflow-hidden text-ellipsis whitespace-nowrap leading-none;
+}
+
+/* ============ 页面级保存状态 ============ */
+.settings-save-bar {
+  @apply sticky z-20 flex items-center justify-between gap-4 rounded-2xl border px-4 py-3;
+  bottom: max(1rem, env(safe-area-inset-bottom));
+  border-color: var(--admin-clay-border-strong);
+  background: color-mix(in srgb, var(--admin-clay-surface) 94%, transparent);
+  box-shadow: var(--admin-clay-shadow);
+  backdrop-filter: blur(14px);
+}
+
+.settings-save-status {
+  @apply flex min-w-0 items-center gap-3;
+}
+
+.settings-save-status-dot {
+  @apply h-2.5 w-2.5 shrink-0 rounded-full bg-emerald-500 text-emerald-500;
+  box-shadow: 0 0 0 4px color-mix(in srgb, currentColor 10%, transparent);
+}
+
+.settings-save-bar[data-state="dirty"] .settings-save-status-dot,
+.settings-save-bar[data-state="saving"] .settings-save-status-dot {
+  background: var(--admin-clay-violet);
+  color: var(--admin-clay-violet);
+}
+
+.settings-save-bar[data-state="saving"] .settings-save-status-dot {
+  animation: settings-save-pulse 1.2s ease-in-out infinite;
+}
+
+.settings-save-bar[data-state="error"] .settings-save-status-dot,
+.settings-save-bar[data-state="load-error"] .settings-save-status-dot {
+  background: var(--admin-clay-danger);
+  color: var(--admin-clay-danger);
+}
+
+.settings-save-status-title {
+  @apply truncate text-sm font-semibold;
+  color: var(--admin-clay-text);
+}
+
+.settings-save-status-detail {
+  @apply mt-0.5 truncate text-xs;
+  color: var(--admin-clay-muted);
+}
+
+@keyframes settings-save-pulse {
+  50% {
+    opacity: 0.48;
+  }
+}
+
+@media (max-width: 639px) {
+  .settings-save-bar {
+    @apply items-stretch gap-3;
+  }
+
+  .settings-save-bar > .btn {
+    @apply shrink-0;
+  }
+
+  .settings-save-status-detail {
+    @apply hidden;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .settings-save-bar[data-state="saving"] .settings-save-status-dot {
+    animation: none;
+  }
 }
 </style>
 

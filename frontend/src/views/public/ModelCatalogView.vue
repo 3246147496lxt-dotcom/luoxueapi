@@ -301,6 +301,7 @@ import type {
 } from '@/api/catalog'
 import type { BillingMode } from '@/constants/channel'
 import { BILLING_MODE_IMAGE, BILLING_MODE_PER_REQUEST, BILLING_MODE_TOKEN } from '@/constants/channel'
+import { resolveTutorialUrl } from '@/utils/documentationUrl'
 import { formatScaled } from '@/utils/pricing'
 import { sanitizeUrl } from '@/utils/url'
 
@@ -334,10 +335,7 @@ let copiedResetTimer: ReturnType<typeof setTimeout> | null = null
 
 const siteName = computed(() => appStore.cachedPublicSettings?.site_name || appStore.siteName || '落雪API')
 const docUrl = computed(() => sanitizeUrl(appStore.cachedPublicSettings?.doc_url || appStore.docUrl || ''))
-const tutorialUrl = computed(() => {
-  const base = (docUrl.value || '/tutorial-docs/').replace(/#.*$/, '')
-  return `${base}#quick-start`
-})
+const tutorialUrl = computed(() => resolveTutorialUrl(docUrl.value))
 const providerOptions = computed(() => Array.from(new Set(
   items.value.map((item) => item.provider.trim().toLowerCase()).filter(Boolean)
 )).sort((a, b) => providerLabel(a).localeCompare(providerLabel(b), locale.value)))

@@ -1,32 +1,33 @@
 <template>
   <div
-    class="flex items-center justify-between border-t border-gray-200 bg-white px-4 py-3 dark:border-dark-700 dark:bg-dark-800 sm:px-6"
+    class="pagination flex items-center justify-between border-t border-gray-200 bg-white px-4 py-3 dark:border-dark-700 dark:bg-dark-800 sm:px-6"
+    data-ui-component="pagination"
   >
-    <div class="flex flex-1 items-center justify-between sm:hidden">
+    <div class="pagination-mobile flex flex-1 items-center justify-between sm:hidden">
       <!-- Mobile pagination -->
       <button
         @click="goToPage(page - 1)"
-        :disabled="page === 1"
-        class="relative inline-flex items-center rounded-md border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-dark-600 dark:bg-dark-700 dark:text-gray-200 dark:hover:bg-dark-600"
+        :disabled="page <= 1"
+        class="pagination-button pagination-button--previous relative inline-flex items-center rounded-md border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-dark-600 dark:bg-dark-700 dark:text-gray-200 dark:hover:bg-dark-600"
       >
         {{ t('pagination.previous') }}
       </button>
-      <span class="text-sm text-gray-700 dark:text-gray-300">
+      <span class="pagination-status text-sm text-gray-700 dark:text-gray-300">
         {{ t('pagination.pageOf', { page, total: totalPages }) }}
       </span>
       <button
         @click="goToPage(page + 1)"
-        :disabled="page === totalPages"
-        class="relative ml-3 inline-flex items-center rounded-md border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-dark-600 dark:bg-dark-700 dark:text-gray-200 dark:hover:bg-dark-600"
+        :disabled="page >= totalPages"
+        class="pagination-button pagination-button--next relative ml-3 inline-flex items-center rounded-md border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-dark-600 dark:bg-dark-700 dark:text-gray-200 dark:hover:bg-dark-600"
       >
         {{ t('pagination.next') }}
       </button>
     </div>
 
-    <div class="hidden sm:flex sm:flex-1 sm:items-center sm:justify-between">
+    <div class="pagination-desktop hidden sm:flex sm:flex-1 sm:items-center sm:justify-between">
       <!-- Desktop pagination info -->
-      <div class="flex items-center space-x-4">
-        <p class="text-sm text-gray-700 dark:text-gray-300">
+      <div class="pagination-meta flex items-center space-x-4">
+        <p class="pagination-summary text-sm text-gray-700 dark:text-gray-300">
           {{ t('pagination.showing') }}
           <span class="font-medium">{{ fromItem }}</span>
           {{ t('pagination.to') }}
@@ -37,11 +38,11 @@
         </p>
 
         <!-- Page size selector -->
-        <div v-if="showPageSizeSelector" class="flex items-center space-x-2">
-          <span class="text-sm text-gray-700 dark:text-gray-300"
+        <div v-if="showPageSizeSelector" class="pagination-page-size flex items-center space-x-2">
+          <span class="pagination-page-size-label text-sm text-gray-700 dark:text-gray-300"
             >{{ t('pagination.perPage') }}:</span
           >
-          <div class="page-size-select w-20">
+          <div class="pagination-page-size-select page-size-select w-20">
             <Select
               :model-value="pageSize"
               :options="pageSizeSelectOptions"
@@ -50,18 +51,19 @@
           </div>
         </div>
 
-        <div v-if="showJump" class="flex items-center space-x-2">
-          <span class="text-sm text-gray-700 dark:text-gray-300">{{ t('pagination.jumpTo') }}</span>
+        <div v-if="showJump" class="pagination-jump flex items-center space-x-2">
+          <span class="pagination-jump-label text-sm text-gray-700 dark:text-gray-300">{{ t('pagination.jumpTo') }}</span>
           <input
             v-model="jumpPage"
             type="number"
             min="1"
             :max="totalPages"
-            class="input w-20 text-sm"
+            class="pagination-jump-input input w-20 text-sm"
             :placeholder="t('pagination.jumpPlaceholder')"
+            :aria-label="t('pagination.jumpTo')"
             @keyup.enter="submitJump"
           />
-          <button type="button" class="btn btn-ghost btn-sm" @click="submitJump">
+          <button type="button" class="pagination-jump-button btn btn-ghost btn-sm" @click="submitJump">
             {{ t('pagination.jumpAction') }}
           </button>
         </div>
@@ -69,14 +71,14 @@
 
       <!-- Desktop pagination buttons -->
       <nav
-        class="relative z-0 inline-flex -space-x-px rounded-md shadow-sm"
-        aria-label="Pagination"
+        class="pagination-nav relative z-0 inline-flex -space-x-px rounded-md shadow-sm"
+        :aria-label="t('pagination.ariaLabel')"
       >
         <!-- Previous button -->
         <button
           @click="goToPage(page - 1)"
-          :disabled="page === 1"
-          class="relative inline-flex items-center rounded-l-md border border-gray-300 bg-white px-2 py-2 text-sm font-medium text-gray-500 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-dark-600 dark:bg-dark-700 dark:text-gray-400 dark:hover:bg-dark-600"
+          :disabled="page <= 1"
+          class="pagination-button pagination-button--previous relative inline-flex items-center rounded-l-md border border-gray-300 bg-white px-2 py-2 text-sm font-medium text-gray-500 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-dark-600 dark:bg-dark-700 dark:text-gray-400 dark:hover:bg-dark-600"
           :aria-label="t('pagination.previous')"
         >
           <Icon name="chevronLeft" size="md" />
@@ -89,11 +91,9 @@
           @click="typeof pageNum === 'number' && goToPage(pageNum)"
           :disabled="typeof pageNum !== 'number'"
           :class="[
-            'relative inline-flex items-center border px-4 py-2 text-sm font-medium',
-            pageNum === page
-              ? 'z-10 border-primary-500 bg-primary-50 text-primary-600 dark:bg-primary-900/30 dark:text-primary-400'
-              : 'border-gray-300 bg-white text-gray-700 hover:bg-gray-50 dark:border-dark-600 dark:bg-dark-700 dark:text-gray-300 dark:hover:bg-dark-600',
-            typeof pageNum !== 'number' && 'cursor-default'
+            'pagination-button pagination-button--page relative inline-flex items-center border px-4 py-2 text-sm font-medium',
+            pageNum === page && 'pagination-button--active',
+            typeof pageNum !== 'number' && 'pagination-button--ellipsis cursor-default'
           ]"
           :aria-label="
             typeof pageNum === 'number' ? t('pagination.goToPage', { page: pageNum }) : undefined
@@ -106,8 +106,8 @@
         <!-- Next button -->
         <button
           @click="goToPage(page + 1)"
-          :disabled="page === totalPages"
-          class="relative inline-flex items-center rounded-r-md border border-gray-300 bg-white px-2 py-2 text-sm font-medium text-gray-500 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-dark-600 dark:bg-dark-700 dark:text-gray-400 dark:hover:bg-dark-600"
+          :disabled="page >= totalPages"
+          class="pagination-button pagination-button--next relative inline-flex items-center rounded-r-md border border-gray-300 bg-white px-2 py-2 text-sm font-medium text-gray-500 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-dark-600 dark:bg-dark-700 dark:text-gray-400 dark:hover:bg-dark-600"
           :aria-label="t('pagination.next')"
         >
           <Icon name="chevronRight" size="md" />
@@ -122,7 +122,7 @@ import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import Icon from '@/components/icons/Icon.vue'
 import Select from './Select.vue'
-import { getConfiguredTablePageSizeOptions, normalizeTablePageSize } from '@/utils/tablePreferences'
+import { getConfiguredTablePageSizeOptions } from '@/utils/tablePreferences'
 import { setPersistedPageSize } from '@/composables/usePersistedPageSize'
 
 const { t } = useI18n()
@@ -149,7 +149,7 @@ const props = withDefaults(defineProps<Props>(), {
 
 const emit = defineEmits<Emits>()
 
-const totalPages = computed(() => Math.ceil(props.total / props.pageSize))
+const totalPages = computed(() => Math.max(1, Math.ceil(props.total / props.pageSize)))
 
 const fromItem = computed(() => {
   if (props.total === 0) return 0
@@ -164,8 +164,8 @@ const toItem = computed(() => {
 const pageSizeSelectOptions = computed(() => {
   const options = Array.from(
     new Set([
-      ...getConfiguredTablePageSizeOptions(),
-      normalizeTablePageSize(props.pageSize)
+      ...props.pageSizeOptions.filter((size) => Number.isInteger(size) && size > 0),
+      props.pageSize
     ])
   ).sort((a, b) => a - b)
 
@@ -224,7 +224,8 @@ const goToPage = (newPage: number) => {
 
 const handlePageSizeChange = (value: string | number | boolean | null) => {
   if (value === null || typeof value === 'boolean') return
-  const newPageSize = normalizeTablePageSize(typeof value === 'string' ? parseInt(value, 10) : value)
+  const newPageSize = typeof value === 'string' ? Number.parseInt(value, 10) : value
+  if (!Number.isInteger(newPageSize) || newPageSize <= 0) return
   setPersistedPageSize(newPageSize)
   emit('update:pageSize', newPageSize)
 }

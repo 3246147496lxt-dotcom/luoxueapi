@@ -2,10 +2,11 @@
   <div class="w-full">
     <label v-if="label" :for="id" class="input-label mb-1.5 block">
       {{ label }}
-      <span v-if="required" class="text-red-500">*</span>
+      <span v-if="required" class="text-red-500" aria-hidden="true">*</span>
     </label>
     <div class="relative">
       <textarea
+        v-bind="$attrs"
         :id="id"
         ref="textAreaRef"
         :value="modelValue"
@@ -14,6 +15,8 @@
         :placeholder="placeholderText"
         :readonly="readonly"
         :rows="rows"
+        :aria-invalid="error ? 'true' : undefined"
+        :aria-describedby="messageId"
         :class="[
           'input w-full min-h-[80px] transition-all duration-200 resize-y',
           error ? 'input-error ring-2 ring-red-500/20' : '',
@@ -26,10 +29,10 @@
       ></textarea>
     </div>
     <!-- Hint / Error Text -->
-    <p v-if="error" class="input-error-text mt-1.5">
+    <p v-if="error" :id="messageId" class="input-error-text mt-1.5" role="alert">
       {{ error }}
     </p>
-    <p v-else-if="hint" class="input-hint mt-1.5">
+    <p v-else-if="hint" :id="messageId" class="input-hint mt-1.5">
       {{ hint }}
     </p>
   </div>
@@ -37,6 +40,8 @@
 
 <script setup lang="ts">
 import { computed, ref } from 'vue'
+
+defineOptions({ inheritAttrs: false })
 
 interface Props {
   modelValue: string | null | undefined
@@ -67,6 +72,7 @@ const emit = defineEmits<{
 
 const textAreaRef = ref<HTMLTextAreaElement | null>(null)
 const placeholderText = computed(() => props.placeholder || '')
+const messageId = computed(() => (props.id && (props.error || props.hint) ? `${props.id}-message` : undefined))
 
 const onInput = (event: Event) => {
   const value = (event.target as HTMLTextAreaElement).value

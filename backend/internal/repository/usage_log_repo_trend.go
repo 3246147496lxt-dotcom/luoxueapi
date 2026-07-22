@@ -91,7 +91,9 @@ func (r *usageLogRepository) GetUserUsageTrend(ctx context.Context, startTime, e
 			FROM usage_logs
 			WHERE created_at >= $1 AND created_at < $2
 			GROUP BY user_id
-			ORDER BY SUM(input_tokens + output_tokens + cache_creation_tokens + cache_read_tokens) DESC
+			ORDER BY COALESCE(SUM(actual_cost), 0) DESC,
+				SUM(input_tokens + output_tokens + cache_creation_tokens + cache_read_tokens) DESC,
+				user_id ASC
 			LIMIT $3
 		)
 		SELECT
@@ -150,39 +152,69 @@ func (r *usageLogRepository) GetUserSpendingRanking(ctx context.Context, startTi
 			SELECT
 				u.user_id,
 				COALESCE(us.email, '') as email,
+				COALESCE(us.username, '') as username,
 				COALESCE(SUM(u.actual_cost), 0) as actual_cost,
 				COUNT(*) as requests,
 				COALESCE(SUM(u.input_tokens + u.output_tokens + u.cache_creation_tokens + u.cache_read_tokens), 0) as tokens
 			FROM usage_logs u
 			LEFT JOIN users us ON u.user_id = us.id
 			WHERE u.created_at >= $1 AND u.created_at < $2
-			GROUP BY u.user_id, us.email
+			GROUP BY u.user_id, us.email, us.username
 		),
-		ranked AS (
+		ranked_users AS (
 			SELECT
-				user_id,
-				email,
-				actual_cost,
-				requests,
-				tokens,
-				COALESCE(SUM(actual_cost) OVER (), 0) as total_actual_cost,
-				COALESCE(SUM(requests) OVER (), 0) as total_requests,
-				COALESCE(SUM(tokens) OVER (), 0) as total_tokens
+				user_spend.user_id,
+				user_spend.email,
+				user_spend.username,
+				user_spend.actual_cost,
+				user_spend.requests,
+				user_spend.tokens,
+				COALESCE(SUM(user_spend.actual_cost) OVER (), 0) as total_actual_cost,
+				COALESCE(SUM(user_spend.requests) OVER (), 0) as total_requests,
+				COALESCE(SUM(user_spend.tokens) OVER (), 0) as total_tokens
 			FROM user_spend
-			ORDER BY actual_cost DESC, tokens DESC, user_id ASC
+			ORDER BY user_spend.actual_cost DESC, user_spend.tokens DESC, user_spend.user_id ASC
 			LIMIT $3
+		),
+		model_usage AS (
+			SELECT
+				u.user_id,
+				COALESCE(NULLIF(TRIM(u.requested_model), ''), NULLIF(TRIM(u.model), ''), '') as model,
+				COALESCE(SUM(u.input_tokens + u.output_tokens + u.cache_creation_tokens + u.cache_read_tokens), 0) as tokens,
+				COUNT(*) as requests
+			FROM usage_logs u
+			INNER JOIN ranked_users ON ranked_users.user_id = u.user_id
+			WHERE u.created_at >= $1 AND u.created_at < $2
+			GROUP BY u.user_id, COALESCE(NULLIF(TRIM(u.requested_model), ''), NULLIF(TRIM(u.model), ''), '')
+		),
+		main_models AS (
+			SELECT user_id, model as main_model
+			FROM (
+				SELECT
+					user_id,
+					model,
+					ROW_NUMBER() OVER (
+						PARTITION BY user_id
+						ORDER BY tokens DESC, requests DESC, model ASC
+					) as model_rank
+				FROM model_usage
+			) ranked_models
+			WHERE model_rank = 1
 		)
 		SELECT
-			user_id,
-			email,
-			actual_cost,
-			requests,
-			tokens,
-			total_actual_cost,
-			total_requests,
-			total_tokens
-		FROM ranked
-		ORDER BY actual_cost DESC, tokens DESC, user_id ASC
+			ranked_users.user_id,
+			ranked_users.email,
+			ranked_users.username,
+			COALESCE(main_models.main_model, '') as main_model,
+			ranked_users.actual_cost,
+			ranked_users.requests,
+			ranked_users.tokens,
+			ranked_users.total_actual_cost,
+			ranked_users.total_requests,
+			ranked_users.total_tokens
+		FROM ranked_users
+		LEFT JOIN main_models ON main_models.user_id = ranked_users.user_id
+		ORDER BY ranked_users.actual_cost DESC, ranked_users.tokens DESC, ranked_users.user_id ASC
 	`
 
 	rows, err := r.sql.QueryContext(ctx, query, startTime, endTime, limit)
@@ -202,7 +234,7 @@ func (r *usageLogRepository) GetUserSpendingRanking(ctx context.Context, startTi
 	totalTokens := int64(0)
 	for rows.Next() {
 		var row UserSpendingRankingItem
-		if err = rows.Scan(&row.UserID, &row.Email, &row.ActualCost, &row.Requests, &row.Tokens, &totalActualCost, &totalRequests, &totalTokens); err != nil {
+		if err = rows.Scan(&row.UserID, &row.Email, &row.Username, &row.MainModel, &row.ActualCost, &row.Requests, &row.Tokens, &totalActualCost, &totalRequests, &totalTokens); err != nil {
 			return nil, err
 		}
 		ranking = append(ranking, row)

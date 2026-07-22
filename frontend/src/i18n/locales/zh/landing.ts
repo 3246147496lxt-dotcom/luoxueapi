@@ -46,7 +46,7 @@ export default {
       copiedAria: '{language} 示例代码已复制'
     },
     facts: {
-      gpt: 'GPT 已支持',
+      gpt: 'OpenAI 兼容接口',
       usage: '用量明细可查',
       quota: '密钥额度可控'
     },
@@ -135,6 +135,7 @@ export default {
       tutorial: '查看新手教程'
     },
     footer: {
+      ariaLabel: '页脚导航',
       tutorial: '使用教程',
       apiDocs: 'API 文档',
       channelStatus: '渠道状态',

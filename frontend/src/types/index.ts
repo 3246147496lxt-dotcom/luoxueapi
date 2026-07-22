@@ -205,6 +205,7 @@ export interface PublicSettings {
   site_name: string
   site_logo: string
   site_subtitle: string
+  site_subtitle_customized?: boolean
   api_base_url: string
   contact_info: string
   doc_url: string
@@ -1567,6 +1568,8 @@ export interface DashboardStats {
   // 用户统计
   total_users: number
   today_new_users: number // 今日新增用户数
+  current_day_new_users: number // 当前自然日截至统计时刻的新增用户数
+  previous_day_same_period_new_users: number // 前一自然日同期新增用户数
   active_users: number // 今日有请求的用户数
   hourly_active_users: number // 当前小时活跃用户数（UTC）
   stats_updated_at: string // 统计更新时间（UTC RFC3339）
@@ -1575,10 +1578,18 @@ export interface DashboardStats {
   // API Key 统计
   total_api_keys: number
   active_api_keys: number // 状态为 active 的 API Key 数
+  current_week_active_api_keys: number // 当前自然周截至统计时刻有请求的 API Key 数
+  previous_week_same_period_active_api_keys: number // 上一自然周同期有请求的 API Key 数
+  current_week_start_at: string // 当前自然周统计窗口起点（RFC3339）
+  current_week_end_at: string // 当前自然周统计窗口终点（RFC3339）
+  previous_week_same_period_start_at: string // 上一自然周同期窗口起点（RFC3339）
+  previous_week_same_period_end_at: string // 上一自然周同期窗口终点（RFC3339）
+  stats_timezone: string // 自然周统计所使用的 IANA 时区
 
   // 账户统计
   total_accounts: number
   normal_accounts: number // 正常账户数
+  healthy_accounts: number // 当前健康账户数（排除有效限流、过载、临时冷却与到期自动暂停；不含 extra 配额窗口）
   error_accounts: number // 异常账户数
   ratelimit_accounts: number // 限流账户数
   overload_accounts: number // 过载账户数
@@ -1596,6 +1607,12 @@ export interface DashboardStats {
 
   // 今日 Token 使用统计
   today_requests: number
+  current_day_requests: number // 当前自然日截至统计时刻的请求数
+  previous_day_same_period_requests: number // 前一自然日同期请求数
+  current_day_start_at: string // 当前自然日统计窗口起点（RFC3339）
+  current_day_end_at: string // 当前自然日统计窗口终点（RFC3339）
+  previous_day_same_period_start_at: string // 前一自然日同期窗口起点（RFC3339）
+  previous_day_same_period_end_at: string // 前一自然日同期窗口终点（RFC3339）
   today_input_tokens: number
   today_output_tokens: number
   today_cache_creation_tokens: number
@@ -1704,6 +1721,8 @@ export interface UserUsageTrendPoint {
 export interface UserSpendingRankingItem {
   user_id: number
   email: string
+  username?: string
+  main_model?: string
   actual_cost: number
   requests: number
   tokens: number

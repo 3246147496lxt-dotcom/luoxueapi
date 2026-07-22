@@ -1,0 +1,9 @@
+User-agent: *
+Allow: /
+Disallow: /api/
+Disallow: /v1/
+Disallow: /v1beta/
+Disallow: /backend-api/
+Disallow: /antigravity/
+
+Sitemap: https://luoxueapi.cc/sitemap.xml

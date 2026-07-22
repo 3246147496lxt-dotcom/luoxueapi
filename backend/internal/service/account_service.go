@@ -18,6 +18,12 @@ var (
 const AccountListGroupUngrouped int64 = -1
 const AccountPrivacyModeUnsetFilter = "__unset__"
 
+const (
+	AccountListStatusOverloaded     = "overloaded"
+	AccountListStatusExpired        = "expired"
+	AccountListStatusQuotaExhausted = "quota_exhausted"
+)
+
 // OAuthRefreshPageOptions describes one bounded, cursor-stable scan of OAuth
 // accounts. Candidate platforms are supplied by TokenRefreshService's refresher
 // registry so repository eligibility cannot drift from registered providers.

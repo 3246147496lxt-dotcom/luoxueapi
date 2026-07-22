@@ -19,14 +19,20 @@
               class="auth-brand-mark flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-2xl border border-white bg-white shadow-sm dark:border-dark-700 dark:bg-dark-800 lg:h-16 lg:w-16"
             >
               <img
-                :src="siteLogo || '/logo.png'"
+                :src="siteLogo || '/brand/luoxue-snowpuff-extracted.svg'"
                 :alt="siteName"
                 class="h-full w-full object-contain"
               />
             </div>
             <div class="min-w-0">
-              <p class="break-words text-xl font-semibold tracking-tight text-gray-950 dark:text-white lg:text-2xl">
-                {{ siteName }}
+              <p
+                class="auth-brand-name break-words text-xl font-semibold tracking-tight text-gray-950 dark:text-white lg:text-2xl"
+                :aria-label="siteName"
+              >
+                <span v-if="brandNameParts.base">{{ brandNameParts.base }}</span>
+                <span v-if="brandNameParts.apiSuffix" class="auth-brand-api">
+                  {{ brandNameParts.apiSuffix }}
+                </span>
               </p>
               <p
                 v-if="!isSnowVariant"
@@ -61,15 +67,6 @@
           <div class="auth-snow-hero">
             <div class="auth-snow-copy">
               <p class="auth-snow-title">{{ siteSubtitle }}</p>
-            </div>
-
-            <div class="auth-snow-media" aria-hidden="true">
-              <img
-                src="/brand/luoxue-snowflake-3d.png"
-                alt=""
-                width="640"
-                height="640"
-              />
             </div>
           </div>
 
@@ -173,6 +170,7 @@ import { useI18n } from 'vue-i18n'
 import LocaleSwitcher from '@/components/common/LocaleSwitcher.vue'
 import Icon from '@/components/icons/Icon.vue'
 import { useAppStore } from '@/stores'
+import { splitBrandApiSuffix } from '@/utils/brand'
 import { sanitizeUrl } from '@/utils/url'
 
 const { t } = useI18n()
@@ -181,21 +179,38 @@ const appStore = useAppStore()
 const props = withDefaults(defineProps<{
   variant?: 'default' | 'snow'
 }>(), {
-  variant: 'default'
+  variant: 'snow'
 })
 
 const isSnowVariant = computed(() => props.variant === 'snow')
 const isDark = ref(document.documentElement.classList.contains('dark'))
 
-const siteName = computed(() => appStore.siteName || '落雪API')
+const siteName = computed(() => (
+  appStore.cachedPublicSettings?.site_name || appStore.siteName || '落雪API'
+))
+const brandNameParts = computed(() => splitBrandApiSuffix(siteName.value))
 const siteLogo = computed(() =>
-  sanitizeUrl(appStore.siteLogo || '', { allowRelative: true, allowDataUrl: true })
+  sanitizeUrl(
+    appStore.cachedPublicSettings?.site_logo || appStore.siteLogo || '',
+    { allowRelative: true, allowDataUrl: true }
+  )
 )
-const siteSubtitle = computed(
-  () =>
-    appStore.cachedPublicSettings?.site_subtitle ||
-    'Subscription to API Conversion Platform'
-)
+const defaultSiteSubtitle = 'Subscription to API Conversion Platform'
+const siteSubtitle = computed(() => {
+  const publicSettings = appStore.cachedPublicSettings
+  const configuredSubtitle = publicSettings?.site_subtitle?.trim()
+
+  if (
+    configuredSubtitle &&
+    (publicSettings?.site_subtitle_customized === true ||
+      (publicSettings?.site_subtitle_customized === undefined &&
+        configuredSubtitle !== defaultSiteSubtitle))
+  ) {
+    return configuredSubtitle
+  }
+
+  return t('auth.siteSubtitle')
+})
 const currentYear = computed(() => new Date().getFullYear())
 
 function toggleTheme() {
@@ -210,39 +225,21 @@ onMounted(() => {
 </script>
 
 <style scoped>
-@font-face {
-  font-family: "Nunito";
-  src: url("/fonts/nunito-latin-variable.woff2") format("woff2");
-  font-weight: 700 900;
-  font-style: normal;
-  font-display: swap;
-}
-
-@font-face {
-  font-family: "DM Sans";
-  src: url("/fonts/dm-sans-latin-variable.woff2") format("woff2");
-  font-weight: 400 700;
-  font-style: normal;
-  font-display: swap;
-}
-
 .auth-layout--snow {
-  --auth-canvas: #f4f1fa;
-  --auth-surface: #ffffff;
-  --auth-recessed: #efebf5;
-  --auth-text: #332f3a;
-  --auth-copy: #635f69;
-  --auth-border: rgba(91, 80, 112, 0.14);
-  --auth-violet: #7c3aed;
-  --auth-violet-light: #a78bfa;
-  --auth-blue: #0b8bed;
-  --auth-blue-deep: #075985;
+  --auth-canvas: var(--lx-clay-canvas);
+  --auth-surface: var(--lx-clay-surface);
+  --auth-recessed: var(--lx-clay-recessed);
+  --auth-text: var(--lx-clay-text);
+  --auth-copy: var(--lx-clay-text-secondary);
+  --auth-border: var(--lx-clay-border);
+  --auth-violet: var(--lx-clay-accent);
+  --auth-blue: var(--lx-clay-info);
   color: var(--auth-text);
   background:
-    radial-gradient(circle at 12% 18%, rgba(11, 139, 237, 0.12), transparent 29rem),
-    radial-gradient(circle at 76% 78%, rgba(124, 58, 237, 0.12), transparent 31rem),
+    radial-gradient(circle at 12% 18%, color-mix(in srgb, var(--lx-clay-light-info) 12%, transparent), transparent 29rem),
+    radial-gradient(circle at 76% 78%, color-mix(in srgb, var(--lx-clay-light-accent) 12%, transparent), transparent 31rem),
     var(--auth-canvas);
-  font-family: "DM Sans", "PingFang SC", "Microsoft YaHei", sans-serif;
+  font-family: var(--lx-clay-font-ui);
 }
 
 .auth-layout--snow .auth-layout-grid {
@@ -270,9 +267,7 @@ onMounted(() => {
   -webkit-backdrop-filter: blur(20px);
 }
 
-.auth-layout--snow .auth-brand-mark,
 .auth-layout--snow .auth-form-panel,
-.auth-layout--snow .auth-snow-media,
 .auth-layout--snow .auth-feature-rail {
   border-color: var(--auth-border);
   background: var(--auth-surface);
@@ -283,17 +278,41 @@ onMounted(() => {
     inset -6px -6px 12px rgba(255, 255, 255, 0.9);
 }
 
-.auth-layout--snow .auth-brand-mark {
-  border-radius: 18px;
+.auth-layout--snow .auth-brand {
+  gap: 12px;
 }
 
-.auth-layout--snow .auth-brand p:first-child {
+.auth-layout--snow .auth-brand-mark {
+  width: 48px;
+  height: 48px;
+  overflow: visible;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.auth-layout--snow .auth-brand-name {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.24em;
   color: var(--auth-text);
   font-family: "Nunito", "PingFang SC", sans-serif;
+  font-size: 24px;
+  line-height: 36px;
   font-weight: 900;
+  letter-spacing: 0;
 }
 
-.auth-layout--snow .auth-toolbar :deep(button),
+.auth-layout--snow .auth-brand-api {
+  color: var(--lx-clay-light-info);
+}
+
+.auth-layout--snow.auth-layout--dark .auth-brand-api {
+  color: var(--lx-clay-dark-info-deep);
+}
+
+.auth-layout--snow .auth-toolbar :deep(.locale-switcher-trigger),
 .auth-layout--snow .auth-tool-button {
   display: inline-flex;
   width: 44px;
@@ -305,7 +324,7 @@ onMounted(() => {
   padding: 0;
   border: 1px solid var(--auth-border);
   border-radius: 16px;
-  color: var(--auth-blue-deep);
+  color: var(--auth-blue);
   background: var(--auth-recessed);
   box-shadow:
     inset 6px 6px 12px rgba(91, 80, 112, 0.09),
@@ -317,18 +336,18 @@ onMounted(() => {
     box-shadow 180ms ease;
 }
 
-.auth-layout--snow .auth-toolbar :deep(button:hover),
+.auth-layout--snow .auth-toolbar :deep(.locale-switcher-trigger:hover),
 .auth-layout--snow .auth-tool-button:hover {
-  color: var(--auth-violet);
+  color: var(--auth-blue);
   transform: translateY(-2px);
 }
 
-.auth-layout--snow .auth-toolbar :deep(button:active),
+.auth-layout--snow .auth-toolbar :deep(.locale-switcher-trigger:active),
 .auth-layout--snow .auth-tool-button:active {
   transform: scale(0.96);
 }
 
-.auth-layout--snow .auth-toolbar :deep(button:focus-visible),
+.auth-layout--snow .auth-toolbar :deep(.locale-switcher-trigger:focus-visible),
 .auth-layout--snow .auth-tool-button:focus-visible {
   outline: 3px solid color-mix(in srgb, var(--auth-violet) 42%, transparent);
   outline-offset: 3px;
@@ -342,10 +361,7 @@ onMounted(() => {
 }
 
 .auth-layout--snow .auth-snow-hero {
-  display: grid;
-  grid-template-columns: minmax(0, 1.1fr) minmax(250px, 0.9fr);
-  align-items: center;
-  gap: 18px;
+  width: 100%;
 }
 
 .auth-layout--snow .auth-snow-copy {
@@ -353,7 +369,7 @@ onMounted(() => {
 }
 
 .auth-layout--snow .auth-snow-title {
-  max-width: 11ch;
+  max-width: 16ch;
   margin: 0;
   color: var(--auth-text);
   font-family: "Nunito", "PingFang SC", sans-serif;
@@ -362,33 +378,6 @@ onMounted(() => {
   line-height: 1.04;
   letter-spacing: -0.035em;
   text-wrap: balance;
-}
-
-.auth-layout--snow .auth-snow-media {
-  position: relative;
-  width: min(100%, 310px);
-  justify-self: end;
-  padding: 10px;
-  border: 1px solid var(--auth-border);
-  border-radius: 46px;
-  animation: auth-snow-float 8s ease-in-out infinite;
-}
-
-.auth-layout--snow .auth-snow-media::before {
-  position: absolute;
-  z-index: -1;
-  inset: 12% -8% -10%;
-  border-radius: 50%;
-  background: radial-gradient(circle, rgba(11, 139, 237, 0.18), transparent 68%);
-  filter: blur(20px);
-  content: "";
-}
-
-.auth-layout--snow .auth-snow-media img {
-  display: block;
-  width: 100%;
-  height: auto;
-  border-radius: 37px;
 }
 
 .auth-layout--snow .auth-feature-rail {
@@ -429,7 +418,7 @@ onMounted(() => {
 }
 
 .auth-layout--snow .auth-feature-rail li:nth-child(3) svg {
-  color: #10b981;
+  color: var(--lx-clay-success-bright);
 }
 
 .auth-layout--snow .auth-form-panel {
@@ -450,24 +439,17 @@ onMounted(() => {
   width: 380px;
   height: 380px;
   border-radius: 50%;
-  background: radial-gradient(circle, rgba(167, 139, 250, 0.14), transparent 68%);
+  background: radial-gradient(
+    circle,
+    color-mix(in srgb, var(--lx-clay-light-accent-highlight) 14%, transparent),
+    transparent 68%
+  );
   pointer-events: none;
   content: "";
 }
 
 .auth-layout--snow .auth-story-footer {
   color: var(--auth-copy);
-}
-
-@keyframes auth-snow-float {
-  0%,
-  100% {
-    transform: translateY(0);
-  }
-
-  50% {
-    transform: translateY(-10px);
-  }
 }
 
 @media (max-width: 1023px) {
@@ -487,6 +469,26 @@ onMounted(() => {
   }
 }
 
+@media (max-width: 767px) {
+  .auth-layout--snow .auth-brand {
+    gap: 0;
+  }
+
+  .auth-layout--snow .auth-brand-mark {
+    width: 42px;
+    height: 42px;
+  }
+
+  .auth-layout--snow .auth-brand-name {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+  }
+}
+
 @media (max-width: 479px) {
   .auth-layout--snow .auth-layout-grid {
     padding: 8px;
@@ -497,37 +499,13 @@ onMounted(() => {
     border-radius: 22px;
   }
 
-  .auth-layout--snow .auth-brand-mark {
-    width: 44px;
-    height: 44px;
-    border-radius: 16px;
-  }
-
-  .auth-layout--snow .auth-brand p:first-child {
-    font-size: 18px;
-  }
-
   .auth-layout--snow .auth-toolbar {
     gap: 4px;
   }
 }
 
-.auth-layout--snow.auth-layout--dark {
-  --auth-canvas: #17131f;
-  --auth-surface: #251e2f;
-  --auth-recessed: #120f18;
-  --auth-text: #f8f5fc;
-  --auth-copy: #c5bccf;
-  --auth-border: rgba(255, 255, 255, 0.12);
-  --auth-violet: #a78bfa;
-  --auth-blue: #38bdf8;
-  --auth-blue-deep: #8dccff;
-}
-
 .auth-layout--snow.auth-layout--dark .auth-brand-bar,
-.auth-layout--snow.auth-layout--dark .auth-brand-mark,
 .auth-layout--snow.auth-layout--dark .auth-form-panel,
-.auth-layout--snow.auth-layout--dark .auth-snow-media,
 .auth-layout--snow.auth-layout--dark .auth-feature-rail {
   background: rgba(37, 30, 47, 0.9);
   box-shadow:
@@ -536,9 +514,8 @@ onMounted(() => {
     inset 5px 5px 10px rgba(255, 255, 255, 0.02);
 }
 
-.auth-layout--snow.auth-layout--dark .auth-toolbar :deep(button),
+.auth-layout--snow.auth-layout--dark .auth-toolbar :deep(.locale-switcher-trigger),
 .auth-layout--snow.auth-layout--dark .auth-tool-button {
-  color: var(--auth-blue-deep);
   background: var(--auth-recessed);
   box-shadow:
     inset 6px 6px 12px rgba(0, 0, 0, 0.3),
@@ -546,11 +523,7 @@ onMounted(() => {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .auth-layout--snow .auth-snow-media {
-    animation: none;
-  }
-
-  .auth-layout--snow .auth-toolbar :deep(button),
+  .auth-layout--snow .auth-toolbar :deep(.locale-switcher-trigger),
   .auth-layout--snow .auth-tool-button {
     transition-duration: 0.01ms;
   }

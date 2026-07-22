@@ -606,6 +606,104 @@ describe("admin SettingsView payment visible method controls", () => {
     adminSettingsFetch.mockResolvedValue(undefined);
   });
 
+  it("marks the page as a form surface and reports real save state", async () => {
+    const wrapper = mountView();
+
+    await flushPromises();
+
+    expect(wrapper.get('[data-admin-page-kind="form"]')).toBeTruthy();
+    expect(wrapper.get(".settings-save-bar").attributes("data-state")).toBe(
+      "saved",
+    );
+    expect(wrapper.get(".settings-save-status-title").text()).toBe("已保存");
+    expect(
+      wrapper.get<HTMLButtonElement>(".settings-save-bar button").element
+        .disabled,
+    ).toBe(true);
+
+    await wrapper
+      .get('input[placeholder="admin.settings.site.siteNamePlaceholder"]')
+      .setValue("Luoxue API");
+
+    expect(wrapper.get(".settings-save-bar").attributes("data-state")).toBe(
+      "dirty",
+    );
+    expect(wrapper.get(".settings-save-status-title").text()).toBe(
+      "有未保存的更改",
+    );
+    expect(
+      wrapper.get<HTMLButtonElement>(".settings-save-bar button").element
+        .disabled,
+    ).toBe(false);
+
+    await wrapper.find("form").trigger("submit.prevent");
+    await flushPromises();
+
+    expect(wrapper.get(".settings-save-bar").attributes("data-state")).toBe(
+      "saved",
+    );
+    expect(wrapper.get(".settings-save-status-title").text()).toBe("已保存");
+    wrapper.unmount();
+  });
+
+  it("keeps failed changes available for retry", async () => {
+    updateSettings.mockRejectedValueOnce(new Error("save failed"));
+    const wrapper = mountView();
+
+    await flushPromises();
+    await wrapper
+      .get('input[placeholder="admin.settings.site.siteNamePlaceholder"]')
+      .setValue("Unsaved name");
+    await wrapper.find("form").trigger("submit.prevent");
+    await flushPromises();
+
+    expect(wrapper.get(".settings-save-bar").attributes("data-state")).toBe(
+      "error",
+    );
+    expect(wrapper.get(".settings-save-status-title").text()).toBe("保存失败");
+    expect(wrapper.get(".settings-save-bar button").text()).toBe("重试保存");
+    expect(
+      wrapper.get<HTMLButtonElement>(".settings-save-bar button").element
+        .disabled,
+    ).toBe(false);
+    wrapper.unmount();
+  });
+
+  it("shows a reload action when settings fail to load", async () => {
+    getSettings.mockRejectedValueOnce(new Error("load failed"));
+    const wrapper = mountView();
+
+    await flushPromises();
+
+    expect(wrapper.get(".settings-save-bar").attributes("data-state")).toBe(
+      "load-error",
+    );
+    expect(wrapper.get(".settings-save-status-title").text()).toBe(
+      "设置加载失败",
+    );
+    expect(wrapper.get(".settings-save-bar button").text()).toBe("重新加载");
+    wrapper.unmount();
+  });
+
+  it("prevents browser unload while page-level settings are unsaved", async () => {
+    const wrapper = mountView();
+
+    await flushPromises();
+
+    const cleanEvent = new Event("beforeunload", { cancelable: true });
+    window.dispatchEvent(cleanEvent);
+    expect(cleanEvent.defaultPrevented).toBe(false);
+
+    await wrapper
+      .get('input[placeholder="admin.settings.site.siteNamePlaceholder"]')
+      .setValue("Unsaved name");
+
+    const dirtyEvent = new Event("beforeunload", { cancelable: true });
+    window.dispatchEvent(dirtyEvent);
+    expect(dirtyEvent.defaultPrevented).toBe(true);
+    wrapper.unmount();
+  });
+
   it("does not render legacy visible payment method controls", async () => {
     const wrapper = mountView();
 

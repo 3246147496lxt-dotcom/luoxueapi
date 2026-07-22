@@ -1,0 +1,353 @@
+[data-admin-page-kind="ops"].ops-dashboard-shell {
+  --ops-surface: var(--lx-clay-surface);
+  --ops-surface-soft: var(--lx-clay-surface-soft);
+  --ops-recessed: var(--lx-clay-recessed);
+  --ops-text: var(--lx-clay-text);
+  --ops-text-secondary: var(--lx-clay-text-secondary);
+  --ops-text-muted: var(--lx-clay-text-muted);
+  --ops-border: var(--lx-clay-border);
+  --ops-border-strong: var(--lx-clay-border-strong);
+  --ops-accent: var(--lx-clay-accent);
+  --ops-accent-soft: var(--lx-clay-accent-soft);
+  --ops-success: var(--lx-clay-success);
+  --ops-success-soft: var(--lx-clay-success-soft);
+  --ops-warning: var(--lx-clay-warning);
+  --ops-warning-soft: var(--lx-clay-warning-soft);
+  --ops-danger: var(--lx-clay-danger);
+  --ops-danger-soft: var(--lx-clay-danger-soft);
+  container: ops-dashboard / inline-size;
+  display: grid;
+  min-width: 0;
+  gap: 22px;
+  padding-bottom: 48px;
+  color: var(--ops-text);
+  font-family: var(--lx-clay-font-ui);
+}
+
+.ops-fullscreen-shell {
+  min-height: 100vh;
+  background: var(--lx-clay-canvas);
+}
+
+[data-admin-page-kind="ops"].ops-dashboard-shell--fullscreen {
+  min-height: 100vh;
+  padding: 20px;
+}
+
+.ops-dashboard-alert {
+  padding: 12px 14px;
+  border: 1px solid color-mix(in srgb, var(--ops-danger) 28%, transparent);
+  border-radius: var(--lx-clay-radius-ops);
+  color: var(--ops-danger);
+  background: var(--ops-danger-soft);
+  font-size: 0.8125rem;
+  font-weight: 700;
+}
+
+.ops-dashboard-body,
+.ops-workspace-view,
+.ops-workspace-section,
+.ops-support-stack {
+  display: grid;
+  min-width: 0;
+}
+
+.ops-dashboard-body {
+  gap: 26px;
+}
+
+.ops-dashboard-body--resources {
+  gap: 12px;
+}
+
+.ops-workspace-nav-host {
+  position: sticky;
+  top: 89px;
+  z-index: 20;
+  max-width: 100%;
+  align-self: start;
+  justify-self: start;
+  padding: 4px;
+  margin: -4px;
+  border-radius: var(--lx-clay-radius-control);
+  background: var(--lx-clay-canvas);
+}
+
+.ops-dashboard-shell--fullscreen .ops-workspace-nav-host {
+  top: 12px;
+}
+
+.ops-workspace-view {
+  gap: 26px;
+  scroll-margin-top: 156px;
+}
+
+.ops-dashboard-shell--fullscreen .ops-workspace-view {
+  scroll-margin-top: 82px;
+}
+
+.ops-dashboard-skeleton {
+  gap: 16px;
+}
+
+.ops-dashboard-skeleton > div {
+  border-color: var(--ops-border);
+  border-radius: var(--lx-clay-radius-surface);
+  background: var(--ops-surface);
+  box-shadow: var(--lx-clay-shadow-flat);
+}
+
+.ops-workspace-section {
+  gap: 12px;
+}
+
+.ops-section-heading {
+  display: flex;
+  min-width: 0;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 0 4px;
+}
+
+.ops-section-heading > div {
+  min-width: 0;
+}
+
+.ops-section-heading h2 {
+  margin: 0;
+  color: var(--ops-text);
+  font-family: var(--lx-clay-font-display);
+  font-size: 1.125rem;
+  font-weight: 900;
+  line-height: 1.25;
+  letter-spacing: -0.02em;
+}
+
+.ops-section-heading p {
+  max-width: 66ch;
+  margin: 4px 0 0;
+  color: var(--ops-text-secondary);
+  font-size: 0.75rem;
+  line-height: 1.5;
+  text-wrap: pretty;
+}
+
+.ops-section-signal {
+  display: inline-flex;
+  min-height: 28px;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 7px;
+  padding: 5px 10px;
+  border: 1px solid var(--ops-border);
+  border-radius: 999px;
+  color: var(--ops-text-muted);
+  background: var(--ops-surface-soft);
+  font-size: 0.6875rem;
+  font-weight: 750;
+  white-space: nowrap;
+}
+
+.ops-section-signal i {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.ops-section-signal--live {
+  border-color: color-mix(in srgb, var(--ops-success) 18%, transparent);
+  color: var(--ops-success);
+  background: var(--ops-success-soft);
+}
+
+.ops-section-signal--risk {
+  border-color: color-mix(in srgb, var(--ops-danger) 18%, transparent);
+  color: var(--ops-danger);
+  background: var(--ops-danger-soft);
+}
+
+.ops-diagnostics-action {
+  min-height: 38px;
+  flex: 0 0 auto;
+  padding: 0 14px;
+  border: 1px solid var(--ops-border-strong);
+  border-radius: var(--lx-clay-radius-control);
+  color: var(--ops-accent);
+  background: var(--ops-surface-soft);
+  font: inherit;
+  font-size: 0.75rem;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.ops-diagnostics-action:hover {
+  background: var(--ops-recessed);
+}
+
+.ops-live-grid,
+.ops-quality-grid,
+.ops-performance-grid {
+  display: grid;
+  min-width: 0;
+  gap: 16px;
+}
+
+.ops-live-grid {
+  grid-template-columns: minmax(0, 1.7fr) minmax(300px, 0.9fr);
+}
+
+.ops-quality-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-areas:
+    "error error"
+    "switch distribution";
+}
+
+.ops-performance-grid {
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+}
+
+.ops-panel {
+  min-width: 0;
+  border-radius: var(--lx-clay-radius-surface);
+}
+
+.ops-panel--throughput,
+.ops-panel--concurrency {
+  height: 390px;
+}
+
+.ops-panel--error-trend {
+  grid-area: error;
+}
+
+.ops-panel--switch-rate {
+  grid-area: switch;
+}
+
+.ops-panel--error-distribution {
+  grid-area: distribution;
+}
+
+.ops-panel--error-trend,
+.ops-panel--switch-rate,
+.ops-panel--latency,
+.ops-panel--error-distribution {
+  min-height: 310px;
+}
+
+.ops-performance-grid .ops-model-panel {
+  min-height: 310px;
+}
+
+.ops-panel > *,
+.ops-model-panel > *,
+.ops-support-stack > * {
+  min-width: 0;
+  border-color: var(--ops-border);
+  border-radius: var(--lx-clay-radius-surface);
+  color: var(--ops-text);
+  background-color: var(--ops-surface);
+  box-shadow: var(--lx-clay-shadow-flat);
+}
+
+.ops-panel > * {
+  height: 100%;
+}
+
+.ops-panel canvas {
+  max-width: 100%;
+}
+
+.ops-model-panel,
+.ops-support-stack {
+  min-width: 0;
+}
+
+.ops-support-stack {
+  gap: 16px;
+}
+
+.ops-workspace-empty {
+  min-height: 112px;
+  margin: 0;
+  padding: 24px;
+  border: 1px dashed var(--ops-border-strong);
+  border-radius: var(--lx-clay-radius-surface);
+  color: var(--ops-text-secondary);
+  background: var(--ops-surface-soft);
+  font-size: 0.8125rem;
+  line-height: 1.6;
+}
+
+.ops-dashboard-shell :is(button, a, input, select, textarea):focus-visible {
+  outline: 3px solid color-mix(in srgb, var(--ops-accent) 34%, transparent);
+  outline-offset: 2px;
+}
+
+@container ops-dashboard (min-width: 1080px) {
+  .ops-quality-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-areas:
+      "error error switch"
+      "distribution distribution distribution";
+  }
+}
+
+@container ops-dashboard (max-width: 840px) {
+  .ops-live-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .ops-panel--throughput,
+  .ops-panel--concurrency {
+    height: 360px;
+  }
+}
+
+@container ops-dashboard (max-width: 640px) {
+  [data-admin-page-kind="ops"].ops-dashboard-shell--fullscreen {
+    padding: 12px;
+  }
+
+  .ops-dashboard-body {
+    gap: 22px;
+  }
+
+  .ops-section-heading {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .ops-quality-grid {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas:
+      "error"
+      "switch"
+      "distribution";
+  }
+
+  .ops-performance-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .ops-panel--throughput,
+  .ops-panel--concurrency {
+    height: auto;
+    min-height: 340px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ops-dashboard-shell *,
+  .ops-dashboard-shell *::before,
+  .ops-dashboard-shell *::after {
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+  }
+}

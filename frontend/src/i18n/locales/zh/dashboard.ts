@@ -920,6 +920,7 @@ export default {
 
   // Pagination
   pagination: {
+    ariaLabel: '分页导航',
     showing: '显示',
     to: '至',
     of: '共',

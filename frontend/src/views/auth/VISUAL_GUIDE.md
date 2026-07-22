@@ -1,5 +1,7 @@
 # Authentication Views Visual Guide
 
+> **Deprecated visual snapshot (2026-07-21):** the indigo layout and palette values in this document describe an earlier authentication UI. The current source of truth is `.superdesign/design-system.md`, with runtime values in `frontend/src/styles/luoxue-clay-tokens.css`. Current authentication work must use Snow Clay violet, preserve administrator-provided custom copy verbatim, and must not reactivate this snapshot's indigo theme.
+
 This document describes the visual design and layout of the authentication views.
 
 ## Layout Structure
@@ -626,8 +628,8 @@ dark:border-gray-700
 
 ### Design Tokens
 
-- Defined in Tailwind config
-- Consistent with design system
+- Canonical runtime values are defined in `frontend/src/styles/luoxue-clay-tokens.css`
+- Tailwind indigo values elsewhere in this historical guide are not the active design system
 - Reusable across all components
 
 ### Iconography

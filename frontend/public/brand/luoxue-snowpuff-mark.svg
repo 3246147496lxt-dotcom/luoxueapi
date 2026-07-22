@@ -1,0 +1,51 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-labelledby="title desc">
+  <title id="title">落雪云端终端标志</title>
+  <desc id="desc">薰衣草紫向电光蓝紫连续渐变的八瓣圆润雪团，中央带有白色终端提示符。</desc>
+  <defs>
+    <path
+      id="snowpuff"
+      d="M256 54C292 54 321 80 323 116C348 96 387 98 413 126C438 152 438 189 416 215C450 224 469 253 468 289C467 326 443 351 410 357C430 385 427 422 401 447C374 472 337 471 310 454C302 479 282 494 256 494C230 494 210 479 202 454C175 471 138 472 111 447C85 422 82 385 102 357C69 351 45 326 44 289C43 253 62 224 96 215C74 189 74 152 99 126C125 98 164 96 189 116C191 80 220 54 256 54Z"
+    />
+    <linearGradient
+      id="bodyGradient"
+      x1="225"
+      y1="54"
+      x2="246"
+      y2="494"
+      gradientUnits="userSpaceOnUse"
+    >
+      <stop offset="0" stop-color="#c3bff6" />
+      <stop offset="0.2" stop-color="#afa5f5" />
+      <stop offset="0.38" stop-color="#8f8cf5" />
+      <stop offset="0.52" stop-color="#7f86f5" />
+      <stop offset="0.61" stop-color="#838ef6" />
+      <stop offset="0.78" stop-color="#5b4df3" />
+      <stop offset="1" stop-color="#482df3" />
+    </linearGradient>
+    <radialGradient
+      id="iceBlueBlend"
+      cx="0"
+      cy="0"
+      r="1"
+      gradientUnits="userSpaceOnUse"
+      gradientTransform="translate(190 256) rotate(90) scale(246 230)"
+    >
+      <stop offset="0" stop-color="#a0b2fa" stop-opacity="0.42" />
+      <stop offset="0.72" stop-color="#a0b2fa" stop-opacity="0" />
+    </radialGradient>
+  </defs>
+
+  <use href="#snowpuff" fill="url(#bodyGradient)" />
+  <use href="#snowpuff" fill="url(#iceBlueBlend)" />
+
+  <g
+    fill="none"
+    stroke="#e4e9fc"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+    stroke-width="40"
+  >
+    <path d="M168 194L214 256L168 318" />
+    <path d="M286 318H368" />
+  </g>
+</svg>

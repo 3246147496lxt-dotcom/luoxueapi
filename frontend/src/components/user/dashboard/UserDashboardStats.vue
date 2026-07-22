@@ -1,13 +1,13 @@
 <template>
   <section
-    class="grid grid-cols-1 gap-4 md:grid-cols-2"
+    class="dashboard-metric-grid grid grid-cols-2 gap-3 sm:gap-4 md:grid-cols-2"
     :class="isSimple ? 'xl:grid-cols-3' : 'xl:grid-cols-4'"
     data-testid="dashboard-metric-grid"
     :aria-label="t('dashboard.accountMetrics')"
   >
-    <article v-if="!isSimple" class="dashboard-panel min-h-[205px] overflow-hidden">
+    <article v-if="!isSimple" class="dashboard-panel dashboard-summary-card min-h-[205px] overflow-hidden">
       <DashboardCardHeader icon="wallet" :title="t('dashboard.accountData')" />
-      <div class="space-y-4 px-5 py-5">
+      <div class="dashboard-summary-content space-y-4 px-5 py-5">
         <DashboardMetricRow
           icon="arrowLeftRight"
           tone="blue"
@@ -25,9 +25,9 @@
       </div>
     </article>
 
-    <article class="dashboard-panel min-h-[205px] overflow-hidden">
+    <article class="dashboard-panel dashboard-summary-card min-h-[205px] overflow-hidden">
       <DashboardCardHeader icon="activity" :title="t('dashboard.usageStatistics')" />
-      <div class="space-y-4 px-5 py-5">
+      <div class="dashboard-summary-content space-y-4 px-5 py-5">
         <DashboardMetricRow
           icon="send"
           tone="emerald"
@@ -40,14 +40,14 @@
           :label="t('dashboard.rangeRequests')"
           :value="formatNumber(rangeMetrics.requests)"
           :sparkline-values="sparklineSeries.requests"
-          sparkline-color="#06b6d4"
+          sparkline-color="#0b8bed"
         />
       </div>
     </article>
 
-    <article class="dashboard-panel min-h-[205px] overflow-hidden">
+    <article class="dashboard-panel dashboard-summary-card min-h-[205px] overflow-hidden">
       <DashboardCardHeader icon="zap" :title="t('dashboard.resourceUsage')" />
-      <div class="space-y-4 px-5 py-5">
+      <div class="dashboard-summary-content space-y-4 px-5 py-5">
         <DashboardMetricRow
           icon="coins"
           tone="amber"
@@ -68,9 +68,9 @@
       </div>
     </article>
 
-    <article class="dashboard-panel min-h-[205px] overflow-hidden">
+    <article class="dashboard-panel dashboard-summary-card min-h-[205px] overflow-hidden">
       <DashboardCardHeader icon="gauge" :title="t('dashboard.performance')" />
-      <div class="space-y-4 px-5 py-5">
+      <div class="dashboard-summary-content space-y-4 px-5 py-5">
         <DashboardMetricRow
           icon="timer"
           tone="indigo"
@@ -158,7 +158,7 @@ const DashboardCardHeader = defineComponent({
   },
   setup(props) {
     return () => h('div', {
-      class: 'flex h-[61px] items-center gap-2 border-b border-gray-100 px-5 text-sm font-medium text-gray-800 dark:border-dark-700 dark:text-gray-100',
+      class: 'dashboard-summary-card-header flex h-[61px] items-center gap-2 border-b border-gray-100 px-5 text-sm font-medium text-gray-800 dark:border-dark-700 dark:text-gray-100',
     }, [
       h(Icon, { name: props.icon, size: 'sm', strokeWidth: 2 }),
       h('span', props.title),
@@ -178,14 +178,14 @@ const DashboardMetricRow = defineComponent({
     sparklineColor: { type: String, default: '' },
   },
   setup(props) {
-    return () => h('div', { class: 'flex min-w-0 items-center' }, [
+    return () => h('div', { class: 'dashboard-metric-row flex min-w-0 items-center' }, [
       h('span', {
-        class: `mr-3 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${toneClasses[props.tone]}`,
+        class: `dashboard-metric-row-icon mr-3 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${toneClasses[props.tone]}`,
       }, [h(Icon, { name: props.icon, size: 'sm', strokeWidth: 2 })]),
-      h('span', { class: 'min-w-0 flex-1' }, [
+      h('span', { class: 'dashboard-metric-row-copy min-w-0 flex-1' }, [
         h('span', { class: 'block text-xs leading-4 text-gray-500 dark:text-dark-400' }, props.label),
         h('strong', {
-          class: 'mt-0.5 block truncate text-lg font-semibold leading-6 text-gray-800 dark:text-gray-100',
+          class: 'dashboard-metric-row-value mt-0.5 block truncate text-lg font-semibold leading-6 text-gray-800 dark:text-gray-100',
           title: props.value,
         }, props.credit
           ? [h(CreditAmount, {
@@ -223,15 +223,45 @@ function formatBalance(value: number): string {
 
 <style scoped>
 .dashboard-panel {
-  border: 1px solid rgb(229 231 235 / 0.78);
-  border-radius: 16px;
-  background: rgb(255 255 255);
-  box-shadow: 0 0 1px rgb(15 23 42 / 0.16), 0 7px 18px rgb(15 23 42 / 0.07);
+  border: 1px solid var(--lx-clay-border);
+  border-radius: var(--lx-clay-radius-surface);
+  background: var(--lx-clay-surface);
+  box-shadow: var(--lx-clay-shadow-form);
 }
 
-:global(.dark) .dashboard-panel {
-  border-color: rgb(51 65 85 / 0.86);
-  background: rgb(30 41 59);
-  box-shadow: 0 0 1px rgb(0 0 0 / 0.45), 0 7px 20px rgb(0 0 0 / 0.2);
+@media (max-width: 639px) {
+  .dashboard-summary-card-header {
+    gap: 0.375rem;
+    padding-right: 0.75rem;
+    padding-left: 0.75rem;
+  }
+
+  .dashboard-summary-content {
+    padding: 0.875rem 0.75rem;
+  }
+
+  .dashboard-metric-row-icon {
+    width: 1.75rem;
+    height: 1.75rem;
+    margin-right: 0.5rem;
+  }
+
+  .dashboard-metric-row-value {
+    font-size: 1rem;
+    line-height: 1.375rem;
+  }
+
+  .dashboard-metric-row :deep(.dashboard-sparkline) {
+    width: 2.375rem;
+    height: 1.75rem;
+    margin-left: 0.25rem;
+    flex-basis: 2.375rem;
+  }
+}
+
+@media (max-width: 359px) {
+  .dashboard-metric-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 </style>

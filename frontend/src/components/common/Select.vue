@@ -1,5 +1,5 @@
 <template>
-  <div class="relative" ref="containerRef">
+  <div class="select-control relative" ref="containerRef" data-ui-component="select">
     <button
       ref="triggerRef"
       type="button"
@@ -7,15 +7,17 @@
       :disabled="disabled"
       :aria-expanded="isOpen"
       :aria-haspopup="true"
-      aria-label="Select option"
+      :aria-label="ariaLabelText"
+      :aria-controls="`${instanceId}-listbox`"
+      :aria-invalid="error ? 'true' : undefined"
+      :aria-activedescendant="activeDescendantId"
       :class="[
         'select-trigger',
         isOpen && 'select-trigger-open',
         error && 'select-trigger-error',
         disabled && 'select-trigger-disabled'
       ]"
-      @keydown.down.prevent="onTriggerKeyDown"
-      @keydown.up.prevent="onTriggerKeyDown"
+      @keydown="onTriggerKeyDown"
     >
       <span class="select-value">
         <slot name="selected" :option="selectedOption">
@@ -25,9 +27,7 @@
       <span
         v-if="clearable && hasValue && !disabled"
         class="select-clear"
-        role="button"
-        tabindex="-1"
-        aria-label="Clear selection"
+        aria-hidden="true"
         @click.stop="clearSelection"
         @mousedown.stop
         @keydown.enter.stop.prevent="clearSelection"
@@ -43,14 +43,16 @@
       </span>
     </button>
 
-    <!-- Teleport dropdown to body to escape stacking context -->
+    <!-- Keep a stable portal hook so body.admin-home-clay-portals can theme it safely. -->
     <Teleport to="body">
       <Transition name="select-dropdown">
         <div
           v-if="isOpen"
           ref="dropdownRef"
-          class="select-dropdown-portal"
+          class="select-portal select-dropdown-portal"
           :class="[instanceId]"
+          :id="`${instanceId}-listbox`"
+          data-ui-portal="select"
           :style="dropdownStyle"
           role="listbox"
           @click.stop
@@ -75,6 +77,7 @@
             <div
               v-for="(option, index) in filteredOptions"
               :key="`${typeof getOptionValue(option)}:${String(getOptionValue(option) ?? '')}`"
+              :id="`${instanceId}-option-${index}`"
               role="option"
               :aria-selected="isSelected(option)"
               :aria-disabled="isOptionDisabled(option)"
@@ -100,7 +103,7 @@
                   v-if="isSelected(option)"
                   name="check"
                   size="sm"
-                  class="text-primary-500"
+                  class="select-check-icon"
                   :stroke-width="2"
                 />
               </slot>
@@ -138,6 +141,7 @@ interface Props {
   modelValue: string | number | boolean | null | undefined
   options: SelectOption[] | Array<Record<string, unknown>>
   placeholder?: string
+  ariaLabel?: string
   disabled?: boolean
   error?: boolean
   searchable?: boolean | 'auto'
@@ -253,8 +257,16 @@ const selectedLabel = computed(() => {
   return placeholderText.value
 })
 
+const ariaLabelText = computed(() => props.ariaLabel ?? selectedLabel.value)
+
 const hasValue = computed(
   () => props.modelValue !== null && props.modelValue !== undefined && props.modelValue !== ''
+)
+
+const activeDescendantId = computed(() =>
+  isOpen.value && focusedIndex.value >= 0
+    ? `${instanceId}-option-${focusedIndex.value}`
+    : undefined
 )
 
 const filteredOptions = computed(() => {
@@ -380,9 +392,47 @@ const clearSelection = () => {
 }
 
 // Keyboards
-const onTriggerKeyDown = () => {
-  if (!isOpen.value) {
-    isOpen.value = true
+const onTriggerKeyDown = (event: KeyboardEvent) => {
+  switch (event.key) {
+    case 'ArrowDown':
+      event.preventDefault()
+      if (!isOpen.value) {
+        isOpen.value = true
+      } else {
+        focusedIndex.value = findNextEnabledIndex(focusedIndex.value + 1)
+        if (focusedIndex.value >= 0) scrollToFocused()
+      }
+      break
+    case 'ArrowUp':
+      event.preventDefault()
+      if (!isOpen.value) {
+        isOpen.value = true
+      } else {
+        focusedIndex.value = findPrevEnabledIndex(focusedIndex.value - 1)
+        if (focusedIndex.value >= 0) scrollToFocused()
+      }
+      break
+    case 'Enter':
+    case ' ':
+      event.preventDefault()
+      if (!isOpen.value) {
+        isOpen.value = true
+      } else if (focusedIndex.value >= 0) {
+        const option = filteredOptions.value[focusedIndex.value]
+        if (option && !isOptionDisabled(option)) selectOption(option)
+      }
+      break
+    case 'Escape':
+      if (!isOpen.value) return
+      event.preventDefault()
+      isOpen.value = false
+      break
+    case 'Backspace':
+    case 'Delete':
+      if (!props.clearable || !hasValue.value) return
+      event.preventDefault()
+      clearSelection()
+      break
   }
 }
 

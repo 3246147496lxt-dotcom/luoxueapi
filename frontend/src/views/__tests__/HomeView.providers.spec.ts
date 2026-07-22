@@ -42,6 +42,7 @@ const messages: Record<string, string> = {
   'home.hero.createKey': '创建 API 密钥',
   'home.codeExample.tabs.curl': 'cURL',
   'home.codeExample.tabs.python': 'Python',
+  'home.codeExample.description': '接口地址来自当前站点配置；API 密钥和模型名以控制台显示为准。',
   'home.codeExample.copy': '复制',
   'home.codeExample.copied': '已复制',
   'home.codeExample.copyFailed': '复制失败，请手动复制',
@@ -181,6 +182,8 @@ describe('HomeView clay composition', () => {
       height: '757',
       loading: 'lazy'
     })
+    expect(wrapper.get('.dashboard-image--dark').attributes('src'))
+      .toBe('/brand/home-dashboard-dark.png')
   })
 
   it('keeps one page heading and all navigation anchor targets labeled', () => {
@@ -194,6 +197,20 @@ describe('HomeView clay composition', () => {
       expect(headingId).toBeTruthy()
       expect(wrapper.find(`#${headingId}`).exists()).toBe(true)
     }
+  })
+
+  it('puts the onboarding path before product proof and flattens repeated cards', () => {
+    const wrapper = mountHomeView()
+    const sectionIds = wrapper.findAll('main > section').map((section) => section.attributes('id'))
+
+    expect(sectionIds.indexOf('steps')).toBeLessThan(sectionIds.indexOf('capabilities'))
+    expect(wrapper.get('.steps-list').classes()).toContain('clay-card')
+    expect(wrapper.get('.capability-list').classes()).toContain('clay-card')
+    expect(wrapper.get('.faq-list').classes()).toContain('clay-card')
+    expect(wrapper.findAll('.steps-list > .clay-card')).toHaveLength(0)
+    expect(wrapper.findAll('.capability-list > .clay-card')).toHaveLength(0)
+    expect(wrapper.findAll('.faq-list > .clay-card')).toHaveLength(0)
+    expect(wrapper.findAll('.home-page .clay-card')).toHaveLength(7)
   })
 })
 
@@ -227,6 +244,13 @@ describe('HomeView primary actions', () => {
 })
 
 describe('HomeView code examples', () => {
+  it('explains where the endpoint, key, and model values come from', () => {
+    const wrapper = mountHomeView()
+
+    expect(wrapper.get('.code-helper').text())
+      .toBe('接口地址来自当前站点配置；API 密钥和模型名以控制台显示为准。')
+  })
+
   it('keeps both tabs connected to one focusable code panel', () => {
     const wrapper = mountHomeView()
     const panel = wrapper.get('#code-example-panel')

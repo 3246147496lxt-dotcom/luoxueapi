@@ -7,12 +7,14 @@ import UsersView from '../UsersView.vue'
 const {
   listUsers,
   getAllGroups,
+  getAllGroupsIncludingInactive,
   getBatchUsersUsage,
   listEnabledDefinitions,
   getBatchUserAttributes
 } = vi.hoisted(() => ({
   listUsers: vi.fn(),
   getAllGroups: vi.fn(),
+  getAllGroupsIncludingInactive: vi.fn(),
   getBatchUsersUsage: vi.fn(),
   listEnabledDefinitions: vi.fn(),
   getBatchUserAttributes: vi.fn()
@@ -26,7 +28,8 @@ vi.mock('@/api/admin', () => ({
       delete: vi.fn()
     },
     groups: {
-      getAll: getAllGroups
+      getAll: getAllGroups,
+      getAllIncludingInactive: getAllGroupsIncludingInactive
     },
     dashboard: {
       getBatchUsersUsage
@@ -77,10 +80,19 @@ const createAdminUser = (overrides: Partial<AdminUser> = {}): AdminUser => ({
 })
 
 const DataTableStub = {
-  props: ['columns', 'data'],
+  props: {
+    columns: { type: Array, default: () => [] },
+    data: { type: Array, default: () => [] },
+    mobilePrimaryKey: { type: String, default: '' },
+    mobileVisibleKeys: { type: Array, default: () => [] }
+  },
   emits: ['sort'],
   template: `
-    <div>
+    <div
+      data-test="data-table"
+      :data-mobile-primary-key="mobilePrimaryKey"
+      :data-mobile-visible-keys="mobileVisibleKeys.join(',')"
+    >
       <div data-test="columns">{{ columns.map(col => col.key).join(',') }}</div>
       <div data-test="row-order">{{ data.map(row => row.email).join(',') }}</div>
       <button data-test="sort-last-used" @click="$emit('sort', 'last_used_at', 'desc')">sort</button>
@@ -94,6 +106,36 @@ const DataTableStub = {
   `
 }
 
+const mountUsersView = () => mount(UsersView, {
+  global: {
+    stubs: {
+      AppLayout: { template: '<div><slot /></div>' },
+      AdminPageHeader: true,
+      TablePageLayout: {
+        template: '<div><slot name="header" /><slot name="filters" /><slot name="table" /><slot name="pagination" /></div>'
+      },
+      DataTable: DataTableStub,
+      Pagination: true,
+      ConfirmDialog: true,
+      EmptyState: true,
+      GroupBadge: true,
+      Select: true,
+      UserAttributesConfigModal: true,
+      UserConcurrencyCell: true,
+      UserCreateModal: true,
+      UserEditModal: true,
+      UserPlatformQuotaModal: true,
+      UserApiKeysModal: true,
+      UserAllowedGroupsModal: true,
+      UserBalanceModal: true,
+      UserBalanceHistoryModal: true,
+      GroupReplaceModal: true,
+      Icon: true,
+      Teleport: true
+    }
+  }
+})
+
 describe('admin UsersView', () => {
   beforeEach(() => {
     vi.useRealTimers()
@@ -101,6 +143,7 @@ describe('admin UsersView', () => {
 
     listUsers.mockReset()
     getAllGroups.mockReset()
+    getAllGroupsIncludingInactive.mockReset()
     getBatchUsersUsage.mockReset()
     listEnabledDefinitions.mockReset()
     getBatchUserAttributes.mockReset()
@@ -113,6 +156,7 @@ describe('admin UsersView', () => {
       pages: 1
     })
     getAllGroups.mockResolvedValue([])
+    getAllGroupsIncludingInactive.mockResolvedValue([])
     getBatchUsersUsage.mockResolvedValue({ stats: {} })
     listEnabledDefinitions.mockResolvedValue([])
     getBatchUserAttributes.mockResolvedValue({ values: {} })
@@ -123,33 +167,7 @@ describe('admin UsersView', () => {
   })
 
   it('shows active, used, and created activity columns in order and requests last_used_at sort', async () => {
-    const wrapper = mount(UsersView, {
-      global: {
-        stubs: {
-          AppLayout: { template: '<div><slot /></div>' },
-          TablePageLayout: {
-            template: '<div><slot name="filters" /><slot name="table" /><slot name="pagination" /></div>'
-          },
-          DataTable: DataTableStub,
-          Pagination: true,
-          ConfirmDialog: true,
-          EmptyState: true,
-          GroupBadge: true,
-          Select: true,
-          UserAttributesConfigModal: true,
-          UserConcurrencyCell: true,
-          UserCreateModal: true,
-          UserEditModal: true,
-          UserApiKeysModal: true,
-          UserAllowedGroupsModal: true,
-          UserBalanceModal: true,
-          UserBalanceHistoryModal: true,
-          GroupReplaceModal: true,
-          Icon: true,
-          Teleport: true
-        }
-      }
-    })
+    const wrapper = mountUsersView()
 
     await flushPromises()
 
@@ -207,33 +225,7 @@ describe('admin UsersView', () => {
       }
     })
 
-    const wrapper = mount(UsersView, {
-      global: {
-        stubs: {
-          AppLayout: { template: '<div><slot /></div>' },
-          TablePageLayout: {
-            template: '<div><slot name="filters" /><slot name="table" /><slot name="pagination" /></div>'
-          },
-          DataTable: DataTableStub,
-          Pagination: true,
-          ConfirmDialog: true,
-          EmptyState: true,
-          GroupBadge: true,
-          Select: true,
-          UserAttributesConfigModal: true,
-          UserConcurrencyCell: true,
-          UserCreateModal: true,
-          UserEditModal: true,
-          UserApiKeysModal: true,
-          UserAllowedGroupsModal: true,
-          UserBalanceModal: true,
-          UserBalanceHistoryModal: true,
-          GroupReplaceModal: true,
-          Icon: true,
-          Teleport: true
-        }
-      }
-    })
+    const wrapper = mountUsersView()
 
     await flushPromises()
     await vi.advanceTimersByTimeAsync(50)
@@ -260,6 +252,82 @@ describe('admin UsersView', () => {
       expect.objectContaining({
         sort_by: 'last_used_at',
         sort_order: 'desc'
+      }),
+      expect.any(Object)
+    )
+  })
+
+  it('keeps search and the single primary action visible while progressively disclosing secondary controls below desktop', async () => {
+    const wrapper = mountUsersView()
+    await flushPromises()
+
+    expect(wrapper.get('[data-test="users-search"]').classes()).toContain('min-h-11')
+    expect(wrapper.findAll('[data-test="users-create"]')).toHaveLength(1)
+    expect(wrapper.get('[data-test="users-create"]').classes()).toContain('min-h-11')
+
+    const toggle = wrapper.get('[data-test="users-mobile-filter-toggle"]')
+    const panel = wrapper.get('[data-test="users-mobile-secondary-filters"]')
+    expect(toggle.classes()).toEqual(expect.arrayContaining(['min-h-11', 'min-w-11', 'lg:hidden']))
+    expect(toggle.attributes('aria-expanded')).toBe('false')
+    expect(toggle.attributes('aria-controls')).toBe('users-mobile-secondary-filters')
+    expect(panel.attributes('id')).toBe('users-mobile-secondary-filters')
+    expect(panel.classes()).toEqual(expect.arrayContaining(['hidden', 'lg:contents']))
+
+    await toggle.trigger('click')
+
+    expect(toggle.attributes('aria-expanded')).toBe('true')
+    expect(panel.classes()).not.toContain('hidden')
+    expect(panel.classes()).toEqual(expect.arrayContaining(['flex', 'lg:contents']))
+  })
+
+  it('configures a compact mobile card without changing the desktop column collection', async () => {
+    const wrapper = mountUsersView()
+    await flushPromises()
+
+    const table = wrapper.get('[data-test="data-table"]')
+    expect(table.attributes('data-mobile-primary-key')).toBe('email')
+    expect(table.attributes('data-mobile-visible-keys')).toBe(
+      'email,role,groups,status,balance'
+    )
+
+    const visibleColumns = wrapper.get('[data-test="columns"]').text().split(',')
+    expect(visibleColumns).toEqual(
+      expect.arrayContaining(['email', 'role', 'balance', 'status', 'actions'])
+    )
+  })
+
+  it('retains persisted built-in and dynamic attribute filters inside the responsive panel', async () => {
+    localStorage.setItem('user-visible-filters', JSON.stringify(['role', 'attr_7']))
+    localStorage.setItem(
+      'user-filter-values',
+      JSON.stringify({ role: 'admin', attributes: { 7: 'priority' } })
+    )
+    listEnabledDefinitions.mockResolvedValue([
+      {
+        id: 7,
+        name: 'Customer tier',
+        type: 'text',
+        enabled: true,
+        options: []
+      }
+    ])
+
+    const wrapper = mountUsersView()
+    await flushPromises()
+
+    const panel = wrapper.get('[data-test="users-mobile-secondary-filters"]')
+    expect(panel.classes()).toContain('lg:contents')
+    expect(wrapper.findAll('select-stub')).toHaveLength(1)
+    expect(wrapper.get('input[placeholder="Customer tier"]').element).toHaveProperty(
+      'value',
+      'priority'
+    )
+    expect(listUsers).toHaveBeenLastCalledWith(
+      1,
+      20,
+      expect.objectContaining({
+        role: 'admin',
+        attributes: { 7: 'priority' }
       }),
       expect.any(Object)
     )

@@ -29,6 +29,13 @@ describe('ops locale key completeness', () => {
       expect(enKeys).toContain(key)
     })
   }
+
+  it('keeps every resource-health workspace label symmetric between English and Chinese', () => {
+    const enResourceHealth = (en as Record<string, any>).admin.ops.resourceHealth as Record<string, any>
+    const zhResourceHealth = (zh as Record<string, any>).admin.ops.resourceHealth as Record<string, any>
+
+    expect(flattenKeys(enResourceHealth).sort()).toEqual(flattenKeys(zhResourceHealth).sort())
+  })
 })
 
 describe('groups locale key completeness', () => {

@@ -14,10 +14,10 @@ vi.mock('vue-chartjs', () => ({
 describe('DashboardSparkline', () => {
   it('stays hidden without a non-zero finite value', () => {
     const empty = mount(DashboardSparkline, {
-      props: { values: [], color: '#06b6d4' },
+      props: { values: [], color: '#0b8bed' },
     })
     const zeroOnly = mount(DashboardSparkline, {
-      props: { values: [0, Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY], color: '#06b6d4' },
+      props: { values: [0, Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY], color: '#0b8bed' },
     })
 
     expect(empty.find('[data-testid="line-chart"]').exists()).toBe(false)

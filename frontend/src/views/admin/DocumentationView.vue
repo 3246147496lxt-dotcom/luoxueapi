@@ -1,6 +1,6 @@
 <template>
-  <AppLayout>
-    <div class="space-y-5 pb-8">
+  <AppLayout variant="home-clay">
+    <div class="space-y-5 pb-8" data-admin-page-kind="form">
       <section class="rounded-2xl border border-gray-200 bg-white px-5 py-4 dark:border-dark-700 dark:bg-dark-800 sm:px-6">
         <div class="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
           <div class="min-w-0">

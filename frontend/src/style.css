@@ -338,6 +338,10 @@
     @apply bg-primary-100 text-primary-700 dark:bg-primary-900/30 dark:text-primary-400;
   }
 
+  .badge-info {
+    @apply bg-sky-100 text-sky-700 dark:bg-sky-900/30 dark:text-sky-300;
+  }
+
   .badge-success {
     @apply bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400;
   }
@@ -350,7 +354,8 @@
     @apply bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400;
   }
 
-  .badge-gray {
+  .badge-gray,
+  .badge-secondary {
     @apply bg-gray-100 text-gray-700 dark:bg-dark-700 dark:text-dark-300;
   }
 
@@ -523,7 +528,7 @@
   }
 
   .toast-info {
-    @apply border-l-primary-500;
+    border-left-color: var(--lx-clay-info);
   }
 
   /* ============ 侧边栏 ============ */

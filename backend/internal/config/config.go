@@ -1353,6 +1353,19 @@ type OpsConfig struct {
 
 	// Pre-aggregation configuration.
 	Aggregation OpsAggregationConfig `mapstructure:"aggregation"`
+
+	// ProxyHealth controls non-mutating background connectivity and supported
+	// provider probes used by the admin ops resource-health view.
+	ProxyHealth OpsProxyHealthConfig `mapstructure:"proxy_health"`
+}
+
+type OpsProxyHealthConfig struct {
+	Enabled          bool          `mapstructure:"enabled"`
+	BaseInterval     time.Duration `mapstructure:"base_interval"`
+	QualityInterval  time.Duration `mapstructure:"quality_interval"`
+	BaseFreshness    time.Duration `mapstructure:"base_freshness"`
+	QualityFreshness time.Duration `mapstructure:"quality_freshness"`
+	MaxConcurrency   int           `mapstructure:"max_concurrency"`
 }
 
 type OpsCleanupConfig struct {
@@ -1940,6 +1953,12 @@ func setDefaults() {
 	viper.SetDefault("ops.metrics_collector_cache.enabled", true)
 	// TTL should be slightly larger than collection interval (1m) to maximize cross-replica cache hits.
 	viper.SetDefault("ops.metrics_collector_cache.ttl", 65*time.Second)
+	viper.SetDefault("ops.proxy_health.enabled", false)
+	viper.SetDefault("ops.proxy_health.base_interval", 5*time.Minute)
+	viper.SetDefault("ops.proxy_health.quality_interval", 30*time.Minute)
+	viper.SetDefault("ops.proxy_health.base_freshness", 10*time.Minute)
+	viper.SetDefault("ops.proxy_health.quality_freshness", 60*time.Minute)
+	viper.SetDefault("ops.proxy_health.max_concurrency", 3)
 
 	// JWT
 	viper.SetDefault("jwt.secret", "")
@@ -3124,6 +3143,23 @@ func (c *Config) Validate() error {
 	}
 	if c.Ops.Cleanup.Enabled && strings.TrimSpace(c.Ops.Cleanup.Schedule) == "" {
 		return fmt.Errorf("ops.cleanup.schedule is required when ops.cleanup.enabled=true")
+	}
+	proxyHealth := c.Ops.ProxyHealth
+	if proxyHealth.Enabled {
+		if proxyHealth.BaseInterval <= 0 || proxyHealth.QualityInterval <= 0 {
+			return fmt.Errorf("ops.proxy_health probe intervals must be positive")
+		}
+		if proxyHealth.BaseFreshness < proxyHealth.BaseInterval {
+			return fmt.Errorf("ops.proxy_health.base_freshness must be >= base_interval")
+		}
+		if proxyHealth.QualityFreshness < proxyHealth.QualityInterval {
+			return fmt.Errorf("ops.proxy_health.quality_freshness must be >= quality_interval")
+		}
+		if proxyHealth.MaxConcurrency <= 0 || proxyHealth.MaxConcurrency > 32 {
+			return fmt.Errorf("ops.proxy_health.max_concurrency must be between 1 and 32")
+		}
+	} else if proxyHealth.BaseInterval < 0 || proxyHealth.QualityInterval < 0 || proxyHealth.BaseFreshness < 0 || proxyHealth.QualityFreshness < 0 || proxyHealth.MaxConcurrency < 0 {
+		return fmt.Errorf("ops.proxy_health settings must be non-negative when disabled")
 	}
 	if c.Concurrency.PingInterval < 5 || c.Concurrency.PingInterval > 30 {
 		return fmt.Errorf("concurrency.ping_interval must be between 5-30 seconds")

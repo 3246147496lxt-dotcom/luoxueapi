@@ -218,7 +218,7 @@ const costDistributionData = computed(() => {
     datasets: [{
       data: costDistributionModels.value.map((model) => model.actual_cost),
       backgroundColor: costDistributionModels.value.map((_, index) => palette[index % palette.length]),
-      borderColor: '#ffffff',
+      borderColor: 'transparent',
       borderWidth: 2,
       hoverOffset: 6,
     }],
@@ -232,7 +232,7 @@ const requestDistributionData = computed(() => {
     datasets: [{
       data: requestDistributionModels.value.map((model) => model.requests),
       backgroundColor: requestDistributionModels.value.map((_, index) => palette[index % palette.length]),
-      borderColor: '#ffffff',
+      borderColor: 'transparent',
       borderWidth: 2,
       hoverOffset: 6,
     }],
@@ -249,7 +249,7 @@ const costTrendData = computed(() => {
       borderColor: '#5b7cfa',
       backgroundColor: 'rgba(91, 124, 250, 0.12)',
       pointBackgroundColor: '#5b7cfa',
-      pointBorderColor: '#ffffff',
+      pointBorderColor: '#5b7cfa',
       pointBorderWidth: 2,
       pointRadius: props.trend.length > 20 ? 0 : 3,
       tension: 0.32,
@@ -437,10 +437,10 @@ const DashboardChartEmpty = defineComponent({
 
 <style scoped>
 .dashboard-panel {
-  border: 1px solid rgb(229 231 235 / 0.78);
-  border-radius: 16px;
-  background: rgb(255 255 255);
-  box-shadow: 0 0 1px rgb(15 23 42 / 0.16), 0 7px 18px rgb(15 23 42 / 0.07);
+  border: 1px solid var(--lx-clay-border);
+  border-radius: var(--lx-clay-radius-surface);
+  background: var(--lx-clay-surface);
+  box-shadow: var(--lx-clay-shadow-form);
 }
 
 .analysis-tab {
@@ -464,12 +464,6 @@ const DashboardChartEmpty = defineComponent({
 .analysis-tab-active {
   color: rgb(79 105 224);
   background: rgb(239 243 255);
-}
-
-:global(.dark) .dashboard-panel {
-  border-color: rgb(51 65 85 / 0.86);
-  background: rgb(30 41 59);
-  box-shadow: 0 0 1px rgb(0 0 0 / 0.45), 0 7px 20px rgb(0 0 0 / 0.2);
 }
 
 :global(.dark) .analysis-tab {

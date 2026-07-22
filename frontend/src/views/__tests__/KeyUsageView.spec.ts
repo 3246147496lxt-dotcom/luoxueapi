@@ -4,12 +4,34 @@ import { nextTick } from 'vue'
 
 import KeyUsageView from '../KeyUsageView.vue'
 
-const { showInfo, showSuccess, showError, fetchPublicSettings } = vi.hoisted(() => ({
-  showInfo: vi.fn(),
-  showSuccess: vi.fn(),
-  showError: vi.fn(),
-  fetchPublicSettings: vi.fn(),
-}))
+const { showInfo, showSuccess, showError, fetchPublicSettings, appStore } = vi.hoisted(() => {
+  const showInfo = vi.fn()
+  const showSuccess = vi.fn()
+  const showError = vi.fn()
+  const fetchPublicSettings = vi.fn()
+
+  return {
+    showInfo,
+    showSuccess,
+    showError,
+    fetchPublicSettings,
+    appStore: {
+      cachedPublicSettings: null as null | {
+        site_name?: string
+        site_logo?: string
+        doc_url?: string
+      },
+      siteName: 'Sub2API',
+      siteLogo: '',
+      docUrl: '',
+      publicSettingsLoaded: true,
+      fetchPublicSettings,
+      showInfo,
+      showSuccess,
+      showError,
+    },
+  }
+})
 
 const messages: Record<string, string> = {
   'keyUsage.title': 'API Key Usage',
@@ -84,17 +106,7 @@ vi.mock('vue-i18n', async () => {
 })
 
 vi.mock('@/stores', () => ({
-  useAppStore: () => ({
-    cachedPublicSettings: null,
-    siteName: 'Sub2API',
-    siteLogo: '',
-    docUrl: '',
-    publicSettingsLoaded: true,
-    fetchPublicSettings,
-    showInfo,
-    showSuccess,
-    showError,
-  }),
+  useAppStore: () => appStore,
 }))
 
 describe('KeyUsageView daily detail', () => {
@@ -103,6 +115,11 @@ describe('KeyUsageView daily detail', () => {
     showSuccess.mockReset()
     showError.mockReset()
     fetchPublicSettings.mockReset()
+    appStore.cachedPublicSettings = null
+    appStore.siteName = 'Sub2API'
+    appStore.siteLogo = ''
+    appStore.docUrl = ''
+    appStore.publicSettingsLoaded = true
     localStorage.clear()
 
     Object.defineProperty(window, 'matchMedia', {
@@ -164,6 +181,57 @@ describe('KeyUsageView daily detail', () => {
   afterEach(() => {
     vi.useRealTimers()
     vi.unstubAllGlobals()
+  })
+
+  it('uses the snowpuff mark when no site logo is configured', () => {
+    const wrapper = mount(KeyUsageView, {
+      global: {
+        stubs: {
+          RouterLink: { template: '<a><slot /></a>' },
+          LocaleSwitcher: true,
+          Icon: true,
+        },
+      },
+    })
+
+    expect(wrapper.get('header nav a img[alt="Logo"]').attributes('src')).toBe(
+      '/brand/luoxue-snowpuff-extracted.svg'
+    )
+
+    wrapper.unmount()
+  })
+
+  it('resolves both documentation links locally without showing an empty entry', () => {
+    const emptyWrapper = mount(KeyUsageView, {
+      global: {
+        stubs: {
+          RouterLink: { template: '<a><slot /></a>' },
+          LocaleSwitcher: true,
+          Icon: true,
+        },
+      },
+    })
+
+    expect(emptyWrapper.find('[data-testid="key-usage-header-docs-link"]').exists()).toBe(false)
+    expect(emptyWrapper.find('[data-testid="key-usage-footer-docs-link"]').exists()).toBe(false)
+    emptyWrapper.unmount()
+
+    appStore.docUrl = 'https://docs.luoxueapi.cc/orders#quick-start'
+    const wrapper = mount(KeyUsageView, {
+      global: {
+        stubs: {
+          RouterLink: { template: '<a><slot /></a>' },
+          LocaleSwitcher: true,
+          Icon: true,
+        },
+      },
+    })
+
+    const expected = 'http://127.0.0.1:4179/tutorial-docs/orders#quick-start'
+    expect(wrapper.get('[data-testid="key-usage-header-docs-link"]').attributes('href')).toBe(expected)
+    expect(wrapper.get('[data-testid="key-usage-footer-docs-link"]').attributes('href')).toBe(expected)
+
+    wrapper.unmount()
   })
 
   it('renders daily usage detail rows after a successful query', async () => {

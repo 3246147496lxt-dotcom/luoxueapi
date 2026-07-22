@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -285,7 +286,7 @@ func (r *proxyRepository) ListWithFilters(ctx context.Context, params pagination
 		q = q.Where(proxy.StatusEQ(status))
 	}
 	if search != "" {
-		q = q.Where(proxy.NameContainsFold(search))
+		q = applyProxySearch(q, search)
 	}
 
 	total, err := q.Count(ctx)
@@ -323,7 +324,7 @@ func (r *proxyRepository) ListWithFiltersAndAccountCount(ctx context.Context, pa
 		q = q.Where(proxy.StatusEQ(status))
 	}
 	if search != "" {
-		q = q.Where(proxy.NameContainsFold(search))
+		q = applyProxySearch(q, search)
 	}
 
 	total, err := q.Count(ctx)
@@ -348,6 +349,27 @@ func (r *proxyRepository) ListWithFiltersAndAccountCount(ctx context.Context, pa
 	}
 
 	return r.buildProxyWithAccountCountResult(ctx, proxies, params, int64(total))
+}
+
+func applyProxySearch(q *dbent.ProxyQuery, search string) *dbent.ProxyQuery {
+	if id, ok := parseProxyIDSearch(search); ok {
+		return q.Where(proxy.IDEQ(id))
+	}
+	return q.Where(proxy.NameContainsFold(strings.TrimSpace(search)))
+}
+
+// parseProxyIDSearch supports the management deep-link syntax "#<id>" while
+// preserving all existing free-text search behavior.
+func parseProxyIDSearch(search string) (int64, bool) {
+	value := strings.TrimSpace(search)
+	if len(value) < 2 || value[0] != '#' {
+		return 0, false
+	}
+	id, err := strconv.ParseInt(value[1:], 10, 64)
+	if err != nil || id <= 0 {
+		return 0, false
+	}
+	return id, true
 }
 
 func (r *proxyRepository) listWithAccountCountSort(ctx context.Context, q *dbent.ProxyQuery, params pagination.PaginationParams, total int) ([]service.ProxyWithAccountCount, *pagination.PaginationResult, error) {
@@ -569,6 +591,61 @@ func (r *proxyRepository) ListActiveWithAccountCount(ctx context.Context) ([]ser
 		})
 	}
 
+	return result, nil
+}
+
+// ListAllWithAccountImpact returns every proxy together with account counts in
+// one grouped query. It intentionally returns service-domain proxies internally;
+// the public ops response is built by ProxyHealthService and never serializes
+// credentials or the proxy URL.
+func (r *proxyRepository) ListAllWithAccountImpact(ctx context.Context) ([]service.ProxyWithAccountImpact, error) {
+	proxies, err := r.ListAllForFallback(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	rows, err := r.sql.QueryContext(ctx, `
+		SELECT proxy_id, platform, status, COUNT(*)
+		FROM accounts
+		WHERE proxy_id IS NOT NULL AND deleted_at IS NULL
+		GROUP BY proxy_id, platform, status
+	`)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+
+	impacts := make(map[int64]service.ProxyAccountImpact)
+	for rows.Next() {
+		var proxyID int64
+		var platform, status string
+		var count int64
+		if err := rows.Scan(&proxyID, &platform, &status, &count); err != nil {
+			return nil, err
+		}
+		impact := impacts[proxyID]
+		if impact.PlatformCounts == nil {
+			impact.PlatformCounts = make(map[string]int64)
+		}
+		impact.AccountCount += count
+		impact.PlatformCounts[platform] += count
+		if status == service.StatusActive {
+			impact.ActiveAccountCount += count
+		}
+		impacts[proxyID] = impact
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	result := make([]service.ProxyWithAccountImpact, 0, len(proxies))
+	for i := range proxies {
+		impact := impacts[proxies[i].ID]
+		if impact.PlatformCounts == nil {
+			impact.PlatformCounts = map[string]int64{}
+		}
+		result = append(result, service.ProxyWithAccountImpact{Proxy: proxies[i], Impact: impact})
+	}
 	return result, nil
 }
 

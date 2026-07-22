@@ -8,40 +8,36 @@ const layoutDirectory = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const layoutSource = readFileSync(resolve(layoutDirectory, 'AppLayout.vue'), 'utf8')
 const headerSource = readFileSync(resolve(layoutDirectory, 'AppHeader.vue'), 'utf8')
 const sidebarSource = readFileSync(resolve(layoutDirectory, 'AppSidebar.vue'), 'utf8')
-const globalStyleSource = readFileSync(resolve(layoutDirectory, '../../style.css'), 'utf8')
 
-describe('authenticated shell palette', () => {
-  it('uses the captured page canvas in both color schemes', () => {
-    expect(layoutSource.match(/bg-\[#f5f7fb\]/g)).toHaveLength(2)
-    expect(layoutSource.match(/dark:bg-\[#0f1115\]/g)).toHaveLength(2)
-    expect(layoutSource).not.toContain('#eef1ef')
-    expect(layoutSource).not.toContain('#0e1211')
-    expect(globalStyleSource).toContain('background: #f5f7fb;')
-    expect(globalStyleSource).toContain('background: #0f1115;')
-    expect(globalStyleSource).not.toContain('background: #eef1ef;')
-    expect(globalStyleSource).not.toContain('background: #0e1211;')
+describe('authenticated mixed application shell palette', () => {
+  it('uses the canonical canvas for the shared application shell', () => {
+    expect(layoutSource).toContain('app-layout app-layout--snow-shell')
+    expect(layoutSource).toContain('background: var(--lx-clay-canvas) !important;')
+    expect(layoutSource).toContain('font-family: var(--lx-clay-font-ui);')
+    expect(layoutSource).not.toContain('#f5f7fb')
+    expect(layoutSource).not.toContain('#0f1115')
   })
 
-  it('matches the captured header glass surfaces and highlights', () => {
+  it('keeps the header on the original production glass and typography contract', () => {
+    expect(headerSource).toContain('class="app-header fixed inset-x-0 top-0')
+    expect(headerSource).toContain('font-family: system-ui, -apple-system')
+    expect(headerSource).toContain('border-width: 1px 1px 0;')
     expect(headerSource).toContain(
-      'linear-gradient(rgb(248 251 255 / 0.32), rgb(235 242 252 / 0.1))',
+      'background: linear-gradient(rgb(248 251 255 / 0.32), rgb(235 242 252 / 0.1));',
     )
     expect(headerSource).toContain('backdrop-filter: saturate(1.7) blur(36px);')
     expect(headerSource).toContain(
       'linear-gradient(rgb(10 12 18 / 0.92), rgb(8 10 16 / 0.82))',
     )
-    expect(headerSource).toContain('backdrop-filter: saturate(1.6) blur(40px);')
-    expect(headerSource).toContain('rgb(96 165 250 / 0.1)')
-    expect(headerSource).toContain('rgb(167 139 250 / 0.1)')
+    expect(headerSource).not.toContain('background: var(--lx-clay-surface-elevated);')
   })
 
-  it('keeps desktop and mobile sidebars on the same captured palette', () => {
-    expect(sidebarSource.match(
-      /linear-gradient\(rgb\(248 251 255 \/ 0\.32\), rgb\(235 242 252 \/ 0\.1\)\)/g,
-    )).toHaveLength(2)
-    expect(sidebarSource).toContain('backdrop-filter: saturate(1.7) blur(36px);')
-    expect(sidebarSource.match(/background: rgb\(11 15 26\) !important;/g)).toHaveLength(2)
+  it('keeps the sidebar on the original production glass and blue interaction contract', () => {
+    expect(sidebarSource).toContain('class="sidebar"')
+    expect(sidebarSource).toContain('w-44 min-[1025px]:w-[188px] min-[1281px]:w-[200px]')
+    expect(sidebarSource).toContain('background: linear-gradient(rgb(248 251 255 / 0.32), rgb(235 242 252 / 0.1)) !important;')
+    expect(sidebarSource).toContain(':global(.dark .sidebar)')
     expect(sidebarSource).toContain('background: rgb(234 245 255);')
-    expect(sidebarSource).toContain('background: rgb(71 160 255 / 0.18);')
+    expect(sidebarSource).not.toContain('sidebar--snow-clay')
   })
 })

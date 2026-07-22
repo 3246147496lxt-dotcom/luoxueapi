@@ -1,6 +1,8 @@
 <template>
-  <AppLayout>
-    <div class="space-y-4">
+  <AppLayout variant="home-clay">
+    <div class="space-y-4" data-admin-page-kind="table">
+      <AdminPageHeader :title="t('nav.paymentPlans')" />
+
       <!-- Actions -->
       <div class="flex items-center justify-end gap-2">
         <button @click="loadPlans" :disabled="plansLoading" class="btn btn-secondary" :title="t('common.refresh')">
@@ -86,6 +88,7 @@ import type { SubscriptionPlan } from '@/types/payment'
 import type { AdminGroup } from '@/types'
 import type { Column } from '@/components/common/types'
 import AppLayout from '@/components/layout/AppLayout.vue'
+import AdminPageHeader from '@/components/layout/AdminPageHeader.vue'
 import DataTable from '@/components/common/DataTable.vue'
 import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
 import Icon from '@/components/icons/Icon.vue'
