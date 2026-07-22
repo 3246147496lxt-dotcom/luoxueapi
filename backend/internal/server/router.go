@@ -68,7 +68,7 @@ func SetupRouter(
 
 	// Serve embedded frontend with settings injection if available
 	if web.HasEmbeddedFrontend() {
-		frontendServer, err := web.NewFrontendServer(settingService)
+		frontendServer, err := web.NewFrontendServer(settingService) //nolint:staticcheck // See the build-variant note below.
 		// The !embed stub always returns an error, while release builds use the
 		// embed implementation where initialization can succeed or fail.
 		// Staticcheck only sees one build variant at a time and otherwise reports
