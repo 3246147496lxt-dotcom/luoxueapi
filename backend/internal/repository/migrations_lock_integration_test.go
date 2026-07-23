@@ -123,6 +123,59 @@ func TestApplyMigrationsFS_SerializesInstancesOnOneBackendSession(t *testing.T) 
 	require.NoError(t, rows.Err())
 	require.Len(t, backendPIDs, 2)
 	require.Equal(t, backendPIDs[0], backendPIDs[1], "all migration SQL must use one fixed PostgreSQL backend session")
+	requireMigrationOrigin(t, ctx, secondDB, schemaMigrationOriginFresh)
+	requireMigrationTableAbsent(t, ctx, secondDB, "atlas_schema_revisions")
+}
+
+func TestApplyMigrationsFS_FreshOriginSurvivesFailedMigrationRetry(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	db := openIsolatedMigrationIntegrationDB(t, "sub2api_migration_fresh_retry")
+	failingFS := fstest.MapFS{
+		"001_create_retry_probe.sql": &fstest.MapFile{Data: []byte(`
+			CREATE TABLE migration_retry_probe (id INTEGER PRIMARY KEY);
+			SELECT * FROM migration_retry_missing_table;
+		`)},
+	}
+
+	err := applyMigrationsFS(ctx, db, failingFS)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "apply migration 001_create_retry_probe.sql")
+	requireMigrationOrigin(t, ctx, db, schemaMigrationOriginFresh)
+	requireMigrationTableAbsent(t, ctx, db, "atlas_schema_revisions")
+
+	correctedFS := fstest.MapFS{
+		"001_create_retry_probe.sql": &fstest.MapFile{Data: []byte(`
+			CREATE TABLE migration_retry_probe (id INTEGER PRIMARY KEY);
+		`)},
+	}
+	require.NoError(t, applyMigrationsFS(ctx, db, correctedFS))
+	require.NoError(t, applyMigrationsFS(ctx, db, correctedFS), "second startup must preserve the original fresh classification")
+	requireMigrationOrigin(t, ctx, db, schemaMigrationOriginFresh)
+	requireMigrationTableAbsent(t, ctx, db, "atlas_schema_revisions")
+}
+
+func TestApplyMigrationsFS_LegacyOriginPersistsAcrossSecondStartup(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	db := openIsolatedMigrationIntegrationDB(t, "sub2api_migration_legacy")
+	_, err := db.ExecContext(ctx, schemaMigrationsTableDDL)
+	require.NoError(t, err)
+
+	migrationFS := fstest.MapFS{
+		"001_create_legacy_probe.sql": &fstest.MapFile{Data: []byte(`
+			CREATE TABLE migration_legacy_probe (id INTEGER PRIMARY KEY);
+		`)},
+	}
+	require.NoError(t, applyMigrationsFS(ctx, db, migrationFS))
+	require.NoError(t, applyMigrationsFS(ctx, db, migrationFS))
+	requireMigrationOrigin(t, ctx, db, schemaMigrationOriginLegacy)
+
+	var baselineCount int
+	require.NoError(t, db.QueryRowContext(ctx, "SELECT COUNT(*) FROM atlas_schema_revisions").Scan(&baselineCount))
+	require.Equal(t, 1, baselineCount, "legacy Atlas baseline must be idempotent across startups")
 }
 
 func migrationIntegrationDatabaseDSN(t *testing.T, rawDSN, databaseName string) string {
@@ -143,4 +196,50 @@ func openMigrationIntegrationDB(t *testing.T, dsn string) *sql.DB {
 	defer pingCancel()
 	require.NoError(t, db.PingContext(pingCtx))
 	return db
+}
+
+func openIsolatedMigrationIntegrationDB(t *testing.T, prefix string) *sql.DB {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	databaseName := fmt.Sprintf("%s_%d", prefix, time.Now().UnixNano())
+	_, err := integrationDB.ExecContext(ctx, "CREATE DATABASE "+pq.QuoteIdentifier(databaseName))
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		dropCtx, dropCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer dropCancel()
+		_, _ = integrationDB.ExecContext(
+			dropCtx,
+			"DROP DATABASE IF EXISTS "+pq.QuoteIdentifier(databaseName)+" WITH (FORCE)",
+		)
+	})
+
+	dsn := migrationIntegrationDatabaseDSN(t, integrationDSN, databaseName)
+	return openMigrationIntegrationDB(t, dsn)
+}
+
+func requireMigrationOrigin(
+	t *testing.T,
+	ctx context.Context,
+	db *sql.DB,
+	want schemaMigrationOrigin,
+) {
+	t.Helper()
+	var got string
+	err := db.QueryRowContext(ctx, `
+		SELECT state_value
+		FROM schema_migration_runner_state
+		WHERE state_key = $1
+	`, schemaMigrationOriginStateKey).Scan(&got)
+	require.NoError(t, err)
+	require.Equal(t, string(want), got)
+}
+
+func requireMigrationTableAbsent(t *testing.T, ctx context.Context, db *sql.DB, tableName string) {
+	t.Helper()
+	var absent bool
+	err := db.QueryRowContext(ctx, "SELECT to_regclass('public.' || $1) IS NULL", tableName).Scan(&absent)
+	require.NoError(t, err)
+	require.Truef(t, absent, "table %s must be absent", tableName)
 }

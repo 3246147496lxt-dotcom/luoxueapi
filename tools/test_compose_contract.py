@@ -52,10 +52,13 @@ class ComposeEnvironmentContractTest(unittest.TestCase):
         self.assertEqual(classified["LUOXUEAPI_VERSION"], "compose")
         self.assertEqual(classified["BIND_HOST"], "compose")
         self.assertEqual(classified["SERVER_PORT"], "compose")
+        self.assertEqual(classified["COMPOSE_STOP_GRACE_PERIOD"], "compose")
         self.assertEqual(classified["APPLE_CONTAINER_SUB2API_IMAGE"], "compose")
         self.assertEqual(classified["APPLE_CONTAINER_POSTGRES_IMAGE"], "compose")
         self.assertEqual(classified["APPLE_CONTAINER_REDIS_IMAGE"], "compose")
         self.assertEqual(classified["LOG_LEVEL"], "application")
+        self.assertEqual(classified["SERVER_SHUTDOWN_GRACE_SECONDS"], "application")
+        self.assertEqual(classified["SERVER_SHUTDOWN_FORCE_WAIT_SECONDS"], "application")
         self.assertEqual(classified["POSTGRES_MAX_CONNECTIONS"], "postgresql")
         self.assertEqual(classified["DATABASE_HOST"], "postgresql")
         self.assertEqual(classified["DATABASE_PASSWORD"], "postgresql")
@@ -71,6 +74,9 @@ class ComposeEnvironmentContractTest(unittest.TestCase):
                 self.assertRegex(text, r"path:\s*\.env")
                 self.assertRegex(text, r"required:\s*false")
                 self.assertIn("/readyz", text)
+                self.assertIn(
+                    "stop_grace_period: ${COMPOSE_STOP_GRACE_PERIOD:-60s}", text
+                )
                 self.assertNotIn("weishaw/sub2api:latest", text.lower())
 
     def test_representative_application_keys_match_loader_contract(self) -> None:

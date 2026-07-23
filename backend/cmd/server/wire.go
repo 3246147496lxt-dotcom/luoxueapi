@@ -22,9 +22,10 @@ import (
 )
 
 type Application struct {
-	Server     *http.Server
-	Supervisor *lifecycle.Supervisor
-	Cleanup    func()
+	Server         *http.Server
+	RequestDrainer *server.RequestDrainer
+	Supervisor     *lifecycle.Supervisor
+	Cleanup        func()
 }
 
 func initializeApplication(
@@ -56,7 +57,7 @@ func initializeApplication(
 		buildApplicationSupervisor,
 
 		// Application struct
-		wire.Struct(new(Application), "Server", "Supervisor", "Cleanup"),
+		wire.Struct(new(Application), "Server", "RequestDrainer", "Supervisor", "Cleanup"),
 	)
 	return nil, nil
 }

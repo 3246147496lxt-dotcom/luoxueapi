@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"net"
 	"net/http"
 	"strings"
 
@@ -113,22 +114,45 @@ func embeddedPageSourceOrigin(c *gin.Context) string {
 		return origin
 	}
 
-	proto := firstForwardedValue(c.GetHeader("X-Forwarded-Proto"))
-	if proto == "" {
-		if c.Request.TLS != nil {
-			proto = "https"
-		} else {
-			proto = "http"
+	proto := "http"
+	if c.Request.TLS != nil {
+		proto = "https"
+	} else if embeddedPageTrustsForwardedHeaders(c) {
+		forwardedProto := strings.ToLower(firstForwardedValue(c.GetHeader("X-Forwarded-Proto")))
+		if forwardedProto == "http" || forwardedProto == "https" {
+			proto = forwardedProto
 		}
 	}
-	host := firstForwardedValue(c.GetHeader("X-Forwarded-Host"))
-	if host == "" {
-		host = c.Request.Host
-	}
+
+	// Reverse proxies preserve the request Host by default. Do not accept
+	// X-Forwarded-Host here: unlike Host, it is not part of the authority that
+	// selected this route and is easy for an untrusted peer to spoof.
+	host := c.Request.Host
 	if strings.TrimSpace(host) == "" {
 		return ""
 	}
 	return proto + "://" + host
+}
+
+func embeddedPageTrustsForwardedHeaders(c *gin.Context) bool {
+	if c == nil || c.Request == nil {
+		return false
+	}
+	remoteIP := net.ParseIP(c.RemoteIP())
+	if remoteIP == nil {
+		return false
+	}
+	// The documented Caddy deployment proxies over localhost. Treat the local
+	// peer as trusted so its HTTPS scheme survives the hop even when the global
+	// trusted_proxies list is intentionally empty.
+	if remoteIP.IsLoopback() {
+		return true
+	}
+
+	// For non-local proxies, Gin only returns a different ClientIP after the
+	// direct peer passes Engine.SetTrustedProxies and its forwarded chain parses.
+	clientIP := net.ParseIP(c.ClientIP())
+	return clientIP != nil && !clientIP.Equal(remoteIP)
 }
 
 func firstForwardedValue(value string) string {

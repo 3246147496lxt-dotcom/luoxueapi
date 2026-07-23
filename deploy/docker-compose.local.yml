@@ -27,6 +27,7 @@ services:
     image: ghcr.io/3246147496lxt-dotcom/luoxueapi:${LUOXUEAPI_VERSION:-1.0.7}
     container_name: sub2api
     restart: unless-stopped
+    stop_grace_period: ${COMPOSE_STOP_GRACE_PERIOD:-60s}
     env_file:
       - path: .env
         required: false

@@ -15,6 +15,7 @@ import (
 
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/stretchr/testify/require"
+	"golang.org/x/time/rate"
 )
 
 type embeddedPageSettingsStub struct {
@@ -55,6 +56,7 @@ type fakeEmbeddedPageLaunchStore struct {
 	records    map[string]fakeEmbeddedPageLaunchRecord
 	putErr     error
 	consumeErr error
+	consumes   int
 }
 
 func newFakeEmbeddedPageLaunchStore(now func() time.Time) *fakeEmbeddedPageLaunchStore {
@@ -81,6 +83,7 @@ func (s *fakeEmbeddedPageLaunchStore) Put(_ context.Context, digest string, payl
 func (s *fakeEmbeddedPageLaunchStore) Consume(_ context.Context, digest string) ([]byte, bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.consumes++
 	if s.consumeErr != nil {
 		return nil, false, s.consumeErr
 	}
@@ -93,6 +96,12 @@ func (s *fakeEmbeddedPageLaunchStore) Consume(_ context.Context, digest string) 
 		return nil, false, nil
 	}
 	return append([]byte(nil), record.payload...), true, nil
+}
+
+func (s *fakeEmbeddedPageLaunchStore) consumeCount() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.consumes
 }
 
 func (s *fakeEmbeddedPageLaunchStore) observation(digest string) ([]byte, time.Duration, bool) {
@@ -119,12 +128,38 @@ func newEmbeddedPageLaunchTestService(t *testing.T) (*EmbeddedPageLaunchService,
 	nowFn := func() time.Time { return now }
 	store := newFakeEmbeddedPageLaunchStore(nowFn)
 	svc := &EmbeddedPageLaunchService{
-		settings: settings,
-		store:    store,
-		now:      nowFn,
-		random:   rand.Reader,
+		settings:          settings,
+		store:             store,
+		exchangeAdmission: &embeddedPageExchangeAdmissionStub{allowed: true},
+		now:               nowFn,
+		random:            rand.Reader,
 	}
 	return svc, settings, store, &now
+}
+
+type embeddedPageExchangeAdmissionStub struct {
+	mu      sync.Mutex
+	allowed bool
+	calls   int
+}
+
+func (s *embeddedPageExchangeAdmissionStub) Allow() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.calls++
+	return s.allowed
+}
+
+func (s *embeddedPageExchangeAdmissionStub) setAllowed(allowed bool) {
+	s.mu.Lock()
+	s.allowed = allowed
+	s.mu.Unlock()
+}
+
+func (s *embeddedPageExchangeAdmissionStub) callCount() int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.calls
 }
 
 func launchCodeFromURL(t *testing.T, launchURL string) string {
@@ -235,6 +270,99 @@ func TestEmbeddedPageLaunchConcurrentExchangeHasSingleWinner(t *testing.T) {
 	wg.Wait()
 	require.Equal(t, int32(1), successes.Load())
 	require.Equal(t, int32(23), invalid.Load())
+}
+
+func TestEmbeddedPageLaunchExchangeFuseRejectsBeforeRedisWithoutConsumingCode(t *testing.T) {
+	svc, _, store, _ := newEmbeddedPageLaunchTestService(t)
+	launch, err := svc.Issue(context.Background(), 321, "user", "pay", EmbeddedPageLaunchOptions{})
+	require.NoError(t, err)
+	code := launchCodeFromURL(t, launch.LaunchURL)
+	admission := &embeddedPageExchangeAdmissionStub{}
+	svc.exchangeAdmission = admission
+
+	_, err = svc.Exchange(context.Background(), "pay", code)
+	require.Equal(t, 429, infraerrors.Code(err))
+	require.Equal(t, "EMBEDDED_PAGE_EXCHANGE_RATE_LIMITED", infraerrors.Reason(err))
+	require.NotContains(t, err.Error(), code)
+	require.Equal(t, 1, admission.callCount())
+	require.Zero(t, store.consumeCount(), "overload must stop before Redis GETDEL")
+
+	admission.setAllowed(true)
+	identity, err := svc.Exchange(context.Background(), "pay", code)
+	require.NoError(t, err)
+	require.Equal(t, &EmbeddedPageIdentity{UserID: 321, MenuItemID: "pay"}, identity)
+	require.Equal(t, 1, store.consumeCount())
+
+	_, err = svc.Exchange(context.Background(), "pay", code)
+	require.Equal(t, "INVALID_EMBED_LAUNCH_CODE", infraerrors.Reason(err))
+	require.Equal(t, 2, store.consumeCount())
+}
+
+func TestEmbeddedPageLaunchExchangeFuseOnlyCountsRedisEligibleRequests(t *testing.T) {
+	svc, _, store, _ := newEmbeddedPageLaunchTestService(t)
+	admission := &embeddedPageExchangeAdmissionStub{}
+	svc.exchangeAdmission = admission
+
+	_, err := svc.Exchange(context.Background(), "pay", "not-a-32-byte-code")
+	require.Equal(t, "INVALID_EMBED_LAUNCH_CODE", infraerrors.Reason(err))
+	require.Zero(t, admission.callCount())
+	require.Zero(t, store.consumeCount())
+}
+
+func TestEmbeddedPageLaunchExchangeMissingFuseFailsClosedBeforeRedis(t *testing.T) {
+	svc, _, store, _ := newEmbeddedPageLaunchTestService(t)
+	launch, err := svc.Issue(context.Background(), 654, "user", "pay", EmbeddedPageLaunchOptions{})
+	require.NoError(t, err)
+	code := launchCodeFromURL(t, launch.LaunchURL)
+	svc.exchangeAdmission = nil
+
+	_, err = svc.Exchange(context.Background(), "pay", code)
+	require.Equal(t, 503, infraerrors.Code(err))
+	require.Equal(t, "EMBEDDED_PAGE_LAUNCH_UNAVAILABLE", infraerrors.Reason(err))
+	require.NotContains(t, err.Error(), code)
+	require.Zero(t, store.consumeCount())
+}
+
+func TestEmbeddedPageLaunchDefaultExchangeFuseConfiguration(t *testing.T) {
+	svc := NewEmbeddedPageLaunchService(nil, newFakeEmbeddedPageLaunchStore(time.Now))
+	limiter, ok := svc.exchangeAdmission.(*rate.Limiter)
+	require.True(t, ok)
+	require.Equal(t, rate.Limit(embeddedPageExchangeRequestsPerSecond), limiter.Limit())
+	require.Equal(t, embeddedPageExchangeBurst, limiter.Burst())
+}
+
+func TestEmbeddedPageLaunchExchangeFuseConcurrentBurstStopsBeforeRedis(t *testing.T) {
+	now := time.Now
+	store := newFakeEmbeddedPageLaunchStore(now)
+	svc := NewEmbeddedPageLaunchService(nil, store)
+	// Disable refill so the concurrent boundary is deterministic while still
+	// exercising the production limiter implementation and configured burst.
+	svc.exchangeAdmission = rate.NewLimiter(0, embeddedPageExchangeBurst)
+	validShapedCode := base64.RawURLEncoding.EncodeToString(make([]byte, 32))
+
+	var invalid atomic.Int32
+	var limited atomic.Int32
+	var wg sync.WaitGroup
+	for range embeddedPageExchangeBurst + 1 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, err := svc.Exchange(context.Background(), "pay", validShapedCode)
+			switch infraerrors.Reason(err) {
+			case "INVALID_EMBED_LAUNCH_CODE":
+				invalid.Add(1)
+			case "EMBEDDED_PAGE_EXCHANGE_RATE_LIMITED":
+				limited.Add(1)
+			default:
+				t.Errorf("unexpected exchange error: %v", err)
+			}
+		}()
+	}
+	wg.Wait()
+
+	require.Equal(t, int32(embeddedPageExchangeBurst), invalid.Load())
+	require.Equal(t, int32(1), limited.Load())
+	require.Equal(t, embeddedPageExchangeBurst, store.consumeCount())
 }
 
 func TestEmbeddedPageLaunchInvalidCasesAreIndistinguishable(t *testing.T) {

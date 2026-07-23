@@ -4,6 +4,8 @@ package service
 
 import (
 	"context"
+	"encoding/json"
+	"net/url"
 	"testing"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
@@ -124,6 +126,44 @@ func TestSettingService_GetPublicSettings_ExposesAllowUserViewErrorRequests(t *t
 	settings, err := svc.GetPublicSettings(context.Background())
 	require.NoError(t, err)
 	require.True(t, settings.AllowUserViewErrorRequests)
+}
+
+func TestSettingService_GetPublicSettingsForInjectionSanitizesCustomMenuURLs(t *testing.T) {
+	rawMenuItems := `[
+		{"id":"user-page","label":"User page","url":"https://admin:basic-secret@external.example/start?plan=pro&Token=secret&USER_ID=7&sRc_Url=https%3A%2F%2Fprivate.example%2Fpath&access_token=access-secret&api_key=api-secret&code=auth-code&s2a_launch_code=launch-secret&%74oken=encoded#token=fragment","visibility":"user","sort_order":1},
+		{"id":"admin-page","label":"Admin page","url":"https://admin.example/start?token=admin-secret","visibility":"admin","sort_order":2}
+	]`
+	repo := &settingPublicRepoStub{values: map[string]string{
+		SettingKeyCustomMenuItems: rawMenuItems,
+	}}
+	svc := NewSettingService(repo, &config.Config{})
+
+	publicSettings, err := svc.GetPublicSettings(context.Background())
+	require.NoError(t, err)
+	require.NotContains(t, publicSettings.CustomMenuItems, "secret")
+	require.NotContains(t, publicSettings.CustomMenuItems, "fragment")
+
+	injected, err := svc.GetPublicSettingsForInjection(context.Background())
+	require.NoError(t, err)
+	payload, ok := injected.(*PublicSettingsInjectionPayload)
+	require.True(t, ok)
+
+	var items []struct {
+		ID  string `json:"id"`
+		URL string `json:"url"`
+	}
+	require.NoError(t, json.Unmarshal(payload.CustomMenuItems, &items))
+	require.Len(t, items, 1)
+	require.Equal(t, "user-page", items[0].ID)
+
+	publicURL, err := url.Parse(items[0].URL)
+	require.NoError(t, err)
+	require.Nil(t, publicURL.User)
+	require.Empty(t, publicURL.RawQuery)
+	require.Empty(t, publicURL.Fragment)
+	require.NotContains(t, items[0].URL, "secret")
+	require.NotContains(t, items[0].URL, "auth-code")
+	require.Equal(t, rawMenuItems, repo.values[SettingKeyCustomMenuItems], "public serialization must not mutate stored settings")
 }
 
 func TestSettingService_GetPublicSettings_HidesCatalogInBackendMode(t *testing.T) {

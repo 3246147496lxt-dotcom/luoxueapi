@@ -295,12 +295,32 @@ func TestApplyMigrationsFS_TransactionalMigration(t *testing.T) {
 }
 
 func prepareMigrationsBootstrapExpectations(mock sqlmock.Sqlmock) {
+	prepareMigrationsBootstrapExpectationsWithOrigin(mock, false, schemaMigrationOriginFresh)
+}
+
+func prepareMigrationsBootstrapExpectationsWithOrigin(
+	mock sqlmock.Sqlmock,
+	hasSchemaMigrations bool,
+	persistedOrigin schemaMigrationOrigin,
+) {
 	mock.ExpectQuery("SELECT pg_try_advisory_lock\\(\\$1\\)").
 		WithArgs(migrationsAdvisoryLockID).
 		WillReturnRows(sqlmock.NewRows([]string{"pg_try_advisory_lock"}).AddRow(true))
 	mock.ExpectQuery("SELECT EXISTS \\(").
 		WithArgs("schema_migrations").
-		WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(false))
+		WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(hasSchemaMigrations))
+	mock.ExpectExec("CREATE TABLE IF NOT EXISTS schema_migration_runner_state").
+		WillReturnResult(sqlmock.NewResult(0, 0))
+	candidate := schemaMigrationOriginFresh
+	if hasSchemaMigrations {
+		candidate = schemaMigrationOriginLegacy
+	}
+	mock.ExpectExec("INSERT INTO schema_migration_runner_state").
+		WithArgs(schemaMigrationOriginStateKey, candidate).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectQuery("SELECT state_value FROM schema_migration_runner_state").
+		WithArgs(schemaMigrationOriginStateKey).
+		WillReturnRows(sqlmock.NewRows([]string{"state_value"}).AddRow(persistedOrigin))
 	mock.ExpectExec("CREATE TABLE IF NOT EXISTS schema_migrations").
 		WillReturnResult(sqlmock.NewResult(0, 0))
 }

@@ -196,6 +196,7 @@ func runMainServer() error {
 	defer cleanupApplicationInfrastructure(app)
 	signalCtx, stopSignals := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stopSignals()
+	componentsMayStop := true
 	if app.Supervisor != nil {
 		if err := app.Supervisor.Start(signalCtx); err != nil {
 			stopCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -208,6 +209,9 @@ func runMainServer() error {
 			return startErr
 		}
 		defer func() {
+			if !componentsMayStop || !app.Supervisor.HasPendingComponents() {
+				return
+			}
 			stopCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 			defer cancel()
 			if err := app.Supervisor.Stop(stopCtx); err != nil {
@@ -216,6 +220,10 @@ func runMainServer() error {
 		}()
 	}
 
+	// Once ingress starts, component teardown is allowed only after every
+	// tracked handler has returned. A stuck handler keeps dependencies alive
+	// until the process exits instead of racing DB/Redis teardown.
+	componentsMayStop = false
 	serverErr := make(chan error, 1)
 	go func() {
 		serverErr <- app.Server.ListenAndServe()
@@ -235,31 +243,106 @@ func runMainServer() error {
 
 	log.Println("Shutting down server...")
 	drainStartedAt := time.Now()
-	if app.Supervisor != nil {
-		// Readiness flips before HTTP Shutdown starts draining active ingress.
-		app.Supervisor.BeginDrain()
+	drained, shutdownErr := shutdownApplicationRuntime(
+		app.Server,
+		app.RequestDrainer,
+		app.Supervisor,
+		time.Duration(cfg.Server.ShutdownGraceSeconds)*time.Second,
+		time.Duration(cfg.Server.ShutdownForceWaitSeconds)*time.Second,
+		10*time.Second,
+	)
+	componentsMayStop = drained
+	if !drained {
+		log.Printf("HTTP handlers did not drain; leaving application dependencies open until process exit")
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
+	log.Printf("Server exited after shutdown drain duration=%s", time.Since(drainStartedAt))
+	return errors.Join(serveErr, shutdownErr)
+}
 
-	shutdownErr := app.Server.Shutdown(ctx)
-	if shutdownErr != nil {
-		shutdownErr = fmt.Errorf("shutdown HTTP server: %w", shutdownErr)
+type httpIngressServer interface {
+	Shutdown(context.Context) error
+	Close() error
+}
+
+type requestDrainController interface {
+	BeginDrain()
+	CancelActive()
+	Wait(context.Context) error
+	ActiveCount() int
+}
+
+type applicationLifecycleSupervisor interface {
+	BeginDrain()
+	Stop(context.Context) error
+}
+
+func shutdownApplicationRuntime(
+	httpServer httpIngressServer,
+	drainer requestDrainController,
+	supervisor applicationLifecycleSupervisor,
+	gracePeriod time.Duration,
+	forceWait time.Duration,
+	componentWait time.Duration,
+) (bool, error) {
+	if httpServer == nil || drainer == nil {
+		return false, errors.New("HTTP request drainer is unavailable")
+	}
+	if gracePeriod <= 0 || forceWait <= 0 || componentWait <= 0 {
+		return false, errors.New("shutdown timeouts must be positive")
+	}
+
+	if supervisor != nil {
+		// Readiness flips before the listener starts shutting down.
+		supervisor.BeginDrain()
+	}
+	drainer.BeginDrain()
+
+	graceCtx, cancelGrace := context.WithTimeout(context.Background(), gracePeriod)
+	shutdownErr := httpServer.Shutdown(graceCtx)
+	cancelGrace()
+
+	var closeErr error
+	if shutdownErr != nil || drainer.ActiveCount() > 0 {
+		drainer.CancelActive()
+		closeErr = httpServer.Close()
+		if errors.Is(closeErr, http.ErrServerClosed) {
+			closeErr = nil
+		}
+	}
+
+	waitCtx, cancelWait := context.WithTimeout(context.Background(), forceWait)
+	drainErr := drainer.Wait(waitCtx)
+	cancelWait()
+	if drainErr != nil {
+		return false, errors.Join(
+			wrapShutdownError("graceful HTTP shutdown", shutdownErr),
+			wrapShutdownError("force close HTTP server", closeErr),
+			fmt.Errorf("wait for active HTTP handlers: %w", drainErr),
+		)
 	}
 
 	var componentErr error
-	if app.Supervisor != nil {
-		componentCtx, componentCancel := context.WithTimeout(context.Background(), 10*time.Second)
-		componentErr = app.Supervisor.Stop(componentCtx)
-		componentCancel()
+	if supervisor != nil {
+		componentCtx, cancelComponents := context.WithTimeout(context.Background(), componentWait)
+		componentErr = supervisor.Stop(componentCtx)
+		cancelComponents()
 		if componentErr != nil {
 			componentErr = fmt.Errorf("shutdown application components: %w", componentErr)
 		}
 	}
+	return true, errors.Join(
+		wrapShutdownError("graceful HTTP shutdown", shutdownErr),
+		wrapShutdownError("force close HTTP server", closeErr),
+		componentErr,
+	)
+}
 
-	log.Printf("Server exited after shutdown drain duration=%s", time.Since(drainStartedAt))
-	return errors.Join(serveErr, shutdownErr, componentErr)
+func wrapShutdownError(operation string, err error) error {
+	if err == nil {
+		return nil
+	}
+	return fmt.Errorf("%s: %w", operation, err)
 }
 
 func cleanupApplicationInfrastructure(app *Application) {

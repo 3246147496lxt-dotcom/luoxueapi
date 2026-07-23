@@ -32,6 +32,17 @@ CREATE TABLE IF NOT EXISTS schema_migrations (
 );
 `
 
+// schemaMigrationRunnerStateTableDDL stores migration-runner metadata that
+// must survive a partially completed first migration run. Keep this separate
+// from schema_migrations so its rows can never be mistaken for SQL files.
+const schemaMigrationRunnerStateTableDDL = `
+CREATE TABLE IF NOT EXISTS schema_migration_runner_state (
+	state_key   TEXT PRIMARY KEY,
+	state_value TEXT NOT NULL,
+	recorded_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+`
+
 const atlasSchemaRevisionsTableDDL = `
 CREATE TABLE IF NOT EXISTS atlas_schema_revisions (
 	version TEXT PRIMARY KEY,
@@ -62,6 +73,14 @@ const schedulerOutboxPendingDedupKeyMigration = "153_scheduler_outbox_pending_de
 const schedulerOutboxPendingDedupKeyIndex = "idx_scheduler_outbox_pending_dedup_key"
 const latestAPIKeyIPIndexMigration = "174_add_usage_logs_api_key_latest_ip_index_notx.sql"
 const latestAPIKeyIPIndex = "idx_usage_logs_api_key_latest_ip"
+const schemaMigrationOriginStateKey = "schema_origin"
+
+type schemaMigrationOrigin string
+
+const (
+	schemaMigrationOriginFresh  schemaMigrationOrigin = "fresh"
+	schemaMigrationOriginLegacy schemaMigrationOrigin = "legacy"
+)
 
 var canonicalMigrationFilename = regexp.MustCompile(`^[0-9]{3}[a-z]?_[a-z0-9][a-z0-9_]*\.sql$`)
 
@@ -128,7 +147,7 @@ func ApplyMigrations(ctx context.Context, db *sql.DB) error {
 // 迁移执行流程：
 //  1. 在任何数据库 SQL 前校验并读取所有迁移文件
 //  2. 固定一个 PostgreSQL session 并获取 Advisory Lock
-//  3. 记录启动前 legacy 状态并确保 schema_migrations 表存在
+//  3. 持久化首次采用 runner 时的 fresh/legacy 状态并确保 schema_migrations 表存在
 //  4. 对于每个迁移文件：
 //     - 计算文件内容的 SHA256 校验和
 //     - 检查该迁移是否已应用（通过 filename 查询）
@@ -193,11 +212,12 @@ func applyMigrationsFS(ctx context.Context, db *sql.DB, fsys fs.FS) (retErr erro
 	}
 	locked = true
 
-	// 必须在本次启动创建 schema_migrations 之前记录 legacy 状态。否则新库也会
-	// 被误判为 legacy，并在迁移尚未成功时写入 Atlas baseline。
-	legacySchemaAtStartup, err := tableExists(ctx, conn, "schema_migrations")
+	// origin 必须在创建 schema_migrations 之前持久化。这样即使新库首次迁移失败，
+	// 后续重试或等待锁的第二实例也仍会读到 fresh，不会因迁移记录表已创建而误判
+	// 为 legacy 并写入 Atlas baseline。
+	schemaOrigin, err := ensureSchemaMigrationOrigin(ctx, conn)
 	if err != nil {
-		return fmt.Errorf("check schema_migrations before bootstrap: %w", err)
+		return err
 	}
 
 	// 创建迁移记录表（如果不存在）。
@@ -297,15 +317,65 @@ func applyMigrationsFS(ctx context.Context, db *sql.DB, fsys fs.FS) (retErr erro
 		}
 	}
 
-	// 仅对本次启动前已经存在 legacy schema_migrations 的数据库补 Atlas baseline，
-	// 且必须在全部 SQL migrations 成功后执行，避免记录一个未真正达到的版本。
-	if legacySchemaAtStartup {
+	// 仅对首次采用 runner 时已经存在 schema_migrations 的 legacy 数据库补 Atlas
+	// baseline，且必须在全部 SQL migrations 成功后执行，避免记录未达到的版本。
+	if schemaOrigin == schemaMigrationOriginLegacy {
 		if err := ensureAtlasBaselineAlignedWithFiles(ctx, conn, files); err != nil {
 			return err
 		}
 	}
 
 	return nil
+}
+
+func ensureSchemaMigrationOrigin(ctx context.Context, db migrationQueryExecer) (schemaMigrationOrigin, error) {
+	hasSchemaMigrations, err := tableExists(ctx, db, "schema_migrations")
+	if err != nil {
+		return "", fmt.Errorf("check schema_migrations before bootstrap: %w", err)
+	}
+
+	candidate := schemaMigrationOriginFresh
+	if hasSchemaMigrations {
+		candidate = schemaMigrationOriginLegacy
+	}
+
+	if _, err := db.ExecContext(ctx, schemaMigrationRunnerStateTableDDL); err != nil {
+		return "", fmt.Errorf("create schema_migration_runner_state: %w", err)
+	}
+	if _, err := db.ExecContext(ctx, `
+		INSERT INTO schema_migration_runner_state (state_key, state_value)
+		VALUES ($1, $2)
+		ON CONFLICT (state_key) DO NOTHING
+	`, schemaMigrationOriginStateKey, candidate); err != nil {
+		return "", fmt.Errorf("record schema migration origin: %w", err)
+	}
+
+	return readSchemaMigrationOrigin(ctx, db)
+}
+
+// readSchemaMigrationOrigin is deliberately read-only. Missing or invalid state
+// must fail closed; callers must never reconstruct origin from schema_migrations.
+func readSchemaMigrationOrigin(ctx context.Context, db migrationQueryExecer) (schemaMigrationOrigin, error) {
+	var persisted string
+	err := db.QueryRowContext(ctx, `
+		SELECT state_value
+		FROM schema_migration_runner_state
+		WHERE state_key = $1
+	`, schemaMigrationOriginStateKey).Scan(&persisted)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", errors.New("schema migration origin is missing")
+	}
+	if err != nil {
+		return "", fmt.Errorf("read schema migration origin: %w", err)
+	}
+
+	origin := schemaMigrationOrigin(persisted)
+	switch origin {
+	case schemaMigrationOriginFresh, schemaMigrationOriginLegacy:
+		return origin, nil
+	default:
+		return "", fmt.Errorf("invalid schema migration origin %q", persisted)
+	}
 }
 
 func collectValidatedMigrationFiles(fsys fs.FS) ([]validatedMigrationFile, error) {
@@ -446,17 +516,19 @@ func indexIsInvalid(ctx context.Context, db migrationQueryExecer, indexName stri
 	return invalid, err
 }
 
+// ensureAtlasBaselineAligned keeps the standalone compatibility helper aligned
+// with applyMigrationsFS: only a persisted legacy origin may create a baseline.
 func ensureAtlasBaselineAligned(ctx context.Context, db migrationQueryExecer, fsys fs.FS) error {
 	files, err := collectValidatedMigrationFiles(fsys)
 	if err != nil {
 		return fmt.Errorf("validate migrations: %w", err)
 	}
 
-	hasLegacy, err := tableExists(ctx, db, "schema_migrations")
+	origin, err := readSchemaMigrationOrigin(ctx, db)
 	if err != nil {
-		return fmt.Errorf("check schema_migrations: %w", err)
+		return fmt.Errorf("determine atlas baseline eligibility: %w", err)
 	}
-	if !hasLegacy {
+	if origin == schemaMigrationOriginFresh {
 		return nil
 	}
 	return ensureAtlasBaselineAlignedWithFiles(ctx, db, files)

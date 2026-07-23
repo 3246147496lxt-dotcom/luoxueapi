@@ -15,6 +15,7 @@ import (
 	"time"
 
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
+	"golang.org/x/time/rate"
 )
 
 const (
@@ -22,6 +23,11 @@ const (
 	CustomMenuAuthModeExchangeCode = "exchange_code"
 
 	EmbeddedPageLaunchTTL = 60 * time.Second
+
+	// Keep ordinary launch spikes well below the fuse while bounding each
+	// process to a Redis-safe sustained exchange rate during anonymous floods.
+	embeddedPageExchangeRequestsPerSecond = 100
+	embeddedPageExchangeBurst             = 200
 )
 
 var (
@@ -32,6 +38,10 @@ var (
 	ErrEmbeddedPageLaunchUnavailable = infraerrors.ServiceUnavailable(
 		"EMBEDDED_PAGE_LAUNCH_UNAVAILABLE",
 		"embedded page launch service is temporarily unavailable",
+	)
+	ErrEmbeddedPageExchangeRateLimited = infraerrors.TooManyRequests(
+		"EMBEDDED_PAGE_EXCHANGE_RATE_LIMITED",
+		"too many embedded page exchange requests",
 	)
 	ErrCustomPageNotFound = infraerrors.NotFound(
 		"CUSTOM_PAGE_NOT_FOUND",
@@ -68,6 +78,10 @@ type embeddedPageMenuSettings interface {
 type EmbeddedPageLaunchStore interface {
 	Put(ctx context.Context, digest string, payload []byte, ttl time.Duration) error
 	Consume(ctx context.Context, digest string) (payload []byte, found bool, err error)
+}
+
+type embeddedPageExchangeAdmission interface {
+	Allow() bool
 }
 
 // EmbeddedPageLaunchOptions contains non-sensitive UI context forwarded to an
@@ -111,18 +125,23 @@ type embeddedPageMenuItem struct {
 // EmbeddedPageLaunchService issues and atomically consumes external-page
 // launch tickets. Redis stores only a SHA-256 digest of the raw launch code.
 type EmbeddedPageLaunchService struct {
-	settings embeddedPageMenuSettings
-	store    EmbeddedPageLaunchStore
-	now      func() time.Time
-	random   io.Reader
+	settings          embeddedPageMenuSettings
+	store             EmbeddedPageLaunchStore
+	exchangeAdmission embeddedPageExchangeAdmission
+	now               func() time.Time
+	random            io.Reader
 }
 
 func NewEmbeddedPageLaunchService(settings *SettingService, store EmbeddedPageLaunchStore) *EmbeddedPageLaunchService {
 	return &EmbeddedPageLaunchService{
 		settings: settings,
 		store:    store,
-		now:      time.Now,
-		random:   rand.Reader,
+		exchangeAdmission: rate.NewLimiter(
+			rate.Limit(embeddedPageExchangeRequestsPerSecond),
+			embeddedPageExchangeBurst,
+		),
+		now:    time.Now,
+		random: rand.Reader,
 	}
 }
 
@@ -210,6 +229,17 @@ func (s *EmbeddedPageLaunchService) Exchange(ctx context.Context, menuItemID, co
 
 	if s == nil || s.store == nil {
 		return nil, ErrEmbeddedPageLaunchUnavailable
+	}
+	// This process-local fuse bounds the rate at which anonymous, correctly
+	// shaped guesses can reach Redis. It is deliberately global rather than
+	// keyed by source IP so unrelated services behind one proxy do not share a
+	// small bucket. Reject before GETDEL and leave a real ticket unconsumed so a
+	// caller can retry after the short overload clears.
+	if s.exchangeAdmission == nil {
+		return nil, ErrEmbeddedPageLaunchUnavailable
+	}
+	if !s.exchangeAdmission.Allow() {
+		return nil, ErrEmbeddedPageExchangeRateLimited
 	}
 	payload, found, err := s.store.Consume(ctx, embeddedPageLaunchDigest(code))
 	if err != nil {

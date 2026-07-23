@@ -23,6 +23,7 @@ var ProviderSet = wire.NewSet(
 	ProvideReadinessProbe,
 	ProvideRouterSettingsRuntime,
 	ProvideRouter,
+	NewRequestDrainer,
 	ProvideHTTPServer,
 )
 
@@ -62,7 +63,7 @@ func ProvideRouter(
 }
 
 // ProvideHTTPServer 提供 HTTP 服务器
-func ProvideHTTPServer(cfg *config.Config, router *gin.Engine) *http.Server {
+func ProvideHTTPServer(cfg *config.Config, router *gin.Engine, requestDrainer *RequestDrainer) *http.Server {
 	httpHandler := http.Handler(router)
 	server := &http.Server{
 		Addr:    cfg.Server.Address(),
@@ -83,6 +84,7 @@ func ProvideHTTPServer(cfg *config.Config, router *gin.Engine) *http.Server {
 		httpHandler = http.MaxBytesHandler(httpHandler, globalMaxSize)
 		log.Printf("Global max request body size: %d bytes (%.2f MB)", globalMaxSize, float64(globalMaxSize)/(1<<20))
 	}
+	httpHandler = requestDrainer.Wrap(httpHandler)
 
 	// 根据配置决定是否启用 H2C
 	if cfg.Server.H2C.Enabled {

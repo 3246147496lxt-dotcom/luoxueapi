@@ -35,6 +35,33 @@ func TestLoadServerTimingConfig(t *testing.T) {
 	})
 }
 
+func TestLoadServerShutdownConfig(t *testing.T) {
+	t.Run("defaults", func(t *testing.T) {
+		resetViperWithJWTSecret(t)
+		cfg, err := Load()
+		require.NoError(t, err)
+		require.Equal(t, 30, cfg.Server.ShutdownGraceSeconds)
+		require.Equal(t, 10, cfg.Server.ShutdownForceWaitSeconds)
+	})
+
+	t.Run("environment overrides", func(t *testing.T) {
+		resetViperWithJWTSecret(t)
+		t.Setenv("SERVER_SHUTDOWN_GRACE_SECONDS", "90")
+		t.Setenv("SERVER_SHUTDOWN_FORCE_WAIT_SECONDS", "15")
+		cfg, err := Load()
+		require.NoError(t, err)
+		require.Equal(t, 90, cfg.Server.ShutdownGraceSeconds)
+		require.Equal(t, 15, cfg.Server.ShutdownForceWaitSeconds)
+	})
+
+	t.Run("rejects non-positive windows", func(t *testing.T) {
+		resetViperWithJWTSecret(t)
+		t.Setenv("SERVER_SHUTDOWN_GRACE_SECONDS", "0")
+		_, err := Load()
+		require.ErrorContains(t, err, "server.shutdown_grace_seconds must be positive")
+	})
+}
+
 func TestLoadForBootstrapAllowsMissingJWTSecret(t *testing.T) {
 	viper.Reset()
 	t.Setenv("JWT_SECRET", "")

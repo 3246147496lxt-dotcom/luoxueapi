@@ -137,7 +137,7 @@ func TestSchedulerSnapshotServiceInitialFullRebuildFailsClosedWhenListBucketsFai
 	cache := &schedulerFullRebuildTestCache{listErr: errors.New("list buckets failed")}
 	svc := NewSchedulerSnapshotService(cache, nil, nil, nil, nil)
 
-	svc.runInitialRebuild()
+	svc.runInitialRebuild(context.Background())
 
 	cache.mu.Lock()
 	listCalls := cache.listCalls

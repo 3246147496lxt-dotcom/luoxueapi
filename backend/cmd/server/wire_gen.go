@@ -293,6 +293,10 @@ func initializeApplication(buildInfo handler.BuildInfo, cfg *config.Config, entC
 	stepUpAuthMiddleware := middleware.NewStepUpAuthMiddleware(totpService, userService)
 	routerSettingsRuntime := server.ProvideRouterSettingsRuntime(settingService)
 	userPlatformQuotaUsageFlusher := service.ProvideUserPlatformQuotaUsageFlusher(cfg, billingCache, serviceUserPlatformQuotaRepository, timingWheelService)
+	usageLogBatchRuntime, err := repository.ProvideUsageLogBatchRuntime(usageLogRepository)
+	if err != nil {
+		return nil, err
+	}
 	batchImageWorkerRuntime := service.ProvideBatchImageWorkerRuntime(batchImageRepository, accountRepository, batchImageQueue, usageBillingRepository, usageLogRepository, batchImageModelPricingResolver, apiKeyAuthCacheInvalidator, cfg)
 	opsMetricsCollector := service.ProvideOpsMetricsCollector(opsRepository, settingRepository, accountRepository, concurrencyService, db, redisClient, cfg)
 	opsAggregationService := service.ProvideOpsAggregationService(opsRepository, settingRepository, db, redisClient, cfg)
@@ -305,15 +309,17 @@ func initializeApplication(buildInfo handler.BuildInfo, cfg *config.Config, entC
 	scheduledTestRunnerService := service.ProvideScheduledTestRunnerService(scheduledTestPlanRepository, scheduledTestService, accountTestService, rateLimitService, cfg)
 	paymentOrderExpiryService := service.ProvidePaymentOrderExpiryService(paymentService, leaderLockCache, db)
 	channelMonitorRunner := service.ProvideChannelMonitorRunner(channelMonitorService, settingService)
-	supervisor := buildApplicationSupervisor(pricingService, settingService, routerSettingsRuntime, opsService, idempotencyCoordinator, subscriptionService, oAuthService, openAIOAuthService, geminiOAuthService, antigravityOAuthService, grokOAuthService, openAIGatewayService, digestSessionStore, tlsFingerprintProfileService, errorPassthroughService, timingWheelService, deferredService, userPlatformQuotaUsageFlusher, billingCacheService, auditLogService, opsSystemLogSink, emailQueueService, usageRecordWorkerPool, batchImageWorkerRuntime, schedulerSnapshotService, applicationFacade, apiKeyService, concurrencyService, userMessageQueueService, contentModerationService, batchImageCleanupService, idempotencyCleanupService, dashboardAggregationService, usageCleanupService, opsMetricsCollector, opsAggregationService, opsAlertEvaluatorService, opsCleanupService, opsScheduledReportService, tokenRefreshService, accountExpiryService, proxyExpiryService, subscriptionExpiryService, proxyHealthService, scheduledTestRunnerService, backupService, paymentOrderExpiryService, channelMonitorRunner, upstreamBillingProbeService, redisClient, cfg)
+	supervisor := buildApplicationSupervisor(pricingService, settingService, routerSettingsRuntime, opsService, idempotencyCoordinator, subscriptionService, oAuthService, openAIOAuthService, geminiOAuthService, antigravityOAuthService, grokOAuthService, openAIGatewayService, digestSessionStore, tlsFingerprintProfileService, errorPassthroughService, timingWheelService, deferredService, userPlatformQuotaUsageFlusher, billingCacheService, auditLogService, opsSystemLogSink, emailQueueService, usageLogBatchRuntime, usageRecordWorkerPool, batchImageWorkerRuntime, schedulerSnapshotService, applicationFacade, apiKeyService, concurrencyService, userMessageQueueService, contentModerationService, batchImageCleanupService, idempotencyCleanupService, dashboardAggregationService, usageCleanupService, opsMetricsCollector, opsAggregationService, opsAlertEvaluatorService, opsCleanupService, opsScheduledReportService, tokenRefreshService, accountExpiryService, proxyExpiryService, subscriptionExpiryService, proxyHealthService, scheduledTestRunnerService, backupService, paymentOrderExpiryService, channelMonitorRunner, upstreamBillingProbeService, redisClient, cfg)
 	readinessProbe := server.ProvideReadinessProbe(db, redisClient, schedulerSnapshotService, cfg, supervisor)
 	engine := server.ProvideRouter(cfg, handlers, jwtAuthMiddleware, adminAuthMiddleware, apiKeyAuthMiddleware, auditLogMiddleware, stepUpAuthMiddleware, apiKeyService, subscriptionService, opsService, settingService, redisClient, readinessProbe, routerSettingsRuntime)
-	httpServer := server.ProvideHTTPServer(cfg, engine)
+	requestDrainer := server.NewRequestDrainer()
+	httpServer := server.ProvideHTTPServer(cfg, engine, requestDrainer)
 	v := provideCleanup(entClient, redisClient)
 	application := &Application{
-		Server:     httpServer,
-		Supervisor: supervisor,
-		Cleanup:    v,
+		Server:         httpServer,
+		RequestDrainer: requestDrainer,
+		Supervisor:     supervisor,
+		Cleanup:        v,
 	}
 	return application, nil
 }
@@ -321,7 +327,8 @@ func initializeApplication(buildInfo handler.BuildInfo, cfg *config.Config, entC
 // wire.go:
 
 type Application struct {
-	Server     *http.Server
-	Supervisor *lifecycle.Supervisor
-	Cleanup    func()
+	Server         *http.Server
+	RequestDrainer *server.RequestDrainer
+	Supervisor     *lifecycle.Supervisor
+	Cleanup        func()
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"log"
 	"log/slog"
+	"sync"
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/ent"
@@ -45,6 +46,7 @@ func buildApplicationSupervisor(
 	auditLog *service.AuditLogService,
 	opsSystemLogSink *service.OpsSystemLogSink,
 	emailQueue *service.EmailQueueService,
+	usageLogBatchRuntime repository.UsageLogBatchRuntime,
 	usageRecordWorkerPool *service.UsageRecordWorkerPool,
 	batchImageWorker *service.BatchImageWorkerRuntime,
 	schedulerSnapshot *service.SchedulerSnapshotService,
@@ -75,6 +77,15 @@ func buildApplicationSupervisor(
 	redisClient *redis.Client,
 	cfg *config.Config,
 ) *lifecycle.Supervisor {
+	pricingStop := applicationStopWithinContext(pricing.Stop)
+	settingsRuntimeStop := applicationStopWithinContext(settingService.StopRuntime)
+	timingWheelStop := applicationStopWithinContext(timingWheel.Stop)
+	opsSystemLogSinkStop := applicationStopWithinContext(func() {
+		applogger.SetSink(nil)
+		opsSystemLogSink.Stop()
+	})
+	schedulerSnapshotStop := applicationStopWithinContext(schedulerSnapshot.Stop)
+
 	return lifecycle.NewSupervisor(
 		// Supporting runtimes start first and therefore stop last.
 		lifecycle.ComponentFuncs{
@@ -85,7 +96,7 @@ func buildApplicationSupervisor(
 				}
 				return nil
 			},
-			StopFunc: func(ctx context.Context) error { return applicationStopWithinContext(ctx, pricing.Stop) },
+			StopFunc: pricingStop,
 		},
 		lifecycle.ComponentFuncs{
 			ComponentName: "settings-runtime",
@@ -93,9 +104,7 @@ func buildApplicationSupervisor(
 				configureWebSearchManagerBuilder(settingService, redisClient)
 				return settingService.StartRuntime(ctx)
 			},
-			StopFunc: func(ctx context.Context) error {
-				return applicationStopWithinContext(ctx, settingService.StopRuntime)
-			},
+			StopFunc: settingsRuntimeStop,
 		},
 		lifecycle.ComponentFuncs{
 			ComponentName: "router-settings-runtime",
@@ -140,7 +149,7 @@ func buildApplicationSupervisor(
 			StartFunc: func(context.Context) error {
 				return timingWheel.StartWithError()
 			},
-			StopFunc: func(ctx context.Context) error { return applicationStopWithinContext(ctx, timingWheel.Stop) },
+			StopFunc: timingWheelStop,
 		},
 
 		// Flushers are stopped after request producers and queue consumers.
@@ -155,10 +164,14 @@ func buildApplicationSupervisor(
 				applogger.SetSink(opsSystemLogSink)
 				return nil
 			},
-			StopFunc: func(ctx context.Context) error {
-				applogger.SetSink(nil)
-				return applicationStopWithinContext(ctx, opsSystemLogSink.Stop)
-			},
+			StopFunc: opsSystemLogSinkStop,
+		},
+
+		// The repository sink stops after every consumer below has stopped
+		// producing usage records, but before flushers and infrastructure.
+		lifecycle.ComponentFuncs{
+			ComponentName: "usage-log-batch-runtime",
+			StopFunc:      usageLogBatchRuntime.Stop,
 		},
 
 		// Consumers are stopped before flushers and before the timing wheel.
@@ -219,9 +232,7 @@ func buildApplicationSupervisor(
 				schedulerSnapshot.Start()
 				return nil
 			},
-			StopFunc: func(ctx context.Context) error {
-				return applicationStopWithinContext(ctx, schedulerSnapshot.Stop)
-			},
+			StopFunc: schedulerSnapshotStop,
 		},
 		lifecycle.ComponentFuncs{
 			ComponentName: "scheduler-shadow-comparison",
@@ -277,6 +288,7 @@ func buildApplicationSupervisor(
 }
 
 func applicationVoidLifecycleComponent(name string, start, stop func()) lifecycle.Component {
+	stopWithinContext := applicationStopWithinContext(stop)
 	return lifecycle.ComponentFuncs{
 		ComponentName: name,
 		StartFunc: func(context.Context) error {
@@ -286,28 +298,39 @@ func applicationVoidLifecycleComponent(name string, start, stop func()) lifecycl
 			return nil
 		},
 		StopFunc: func(ctx context.Context) error {
-			return applicationStopWithinContext(ctx, stop)
+			return stopWithinContext(ctx)
 		},
 	}
 }
 
-func applicationStopWithinContext(ctx context.Context, stop func()) error {
+func applicationStopWithinContext(stop func()) func(context.Context) error {
 	if stop == nil {
-		return nil
+		return func(context.Context) error { return nil }
 	}
+
+	var once sync.Once
 	done := make(chan struct{})
-	go func() {
-		stop()
-		close(done)
-	}()
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	select {
-	case <-done:
-		return nil
-	case <-ctx.Done():
-		return ctx.Err()
+	return func(ctx context.Context) error {
+		once.Do(func() {
+			go func() {
+				defer close(done)
+				stop()
+			}()
+		})
+		select {
+		case <-done:
+			return nil
+		default:
+		}
+		if ctx == nil {
+			ctx = context.Background()
+		}
+		select {
+		case <-done:
+			return nil
+		case <-ctx.Done():
+			return ctx.Err()
+		}
 	}
 }
 

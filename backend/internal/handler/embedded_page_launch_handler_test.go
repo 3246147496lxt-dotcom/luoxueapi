@@ -41,3 +41,47 @@ func TestEmbeddedPageExchangeMalformedBodyUsesUnifiedInvalidCode(t *testing.T) {
 	require.Equal(t, "no-store", w.Header().Get("Cache-Control"))
 	require.Contains(t, w.Body.String(), "INVALID_EMBED_LAUNCH_CODE")
 }
+
+func TestEmbeddedPageSourceOriginIgnoresSpoofedForwardedHeaders(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	w := httptest.NewRecorder()
+	c, router := gin.CreateTestContext(w)
+	require.NoError(t, router.SetTrustedProxies(nil))
+	c.Request = httptest.NewRequest(http.MethodPost, "/api/v1/user/custom-pages/pay/launch", nil)
+	c.Request.RemoteAddr = "203.0.113.10:43100"
+	c.Request.Host = "api.example.com"
+	c.Request.Header.Set("X-Forwarded-For", "198.51.100.20")
+	c.Request.Header.Set("X-Forwarded-Proto", "https")
+	c.Request.Header.Set("X-Forwarded-Host", "attacker.example")
+
+	require.Equal(t, "http://api.example.com", embeddedPageSourceOrigin(c))
+}
+
+func TestEmbeddedPageSourceOriginSupportsDefaultLoopbackCaddy(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	w := httptest.NewRecorder()
+	c, router := gin.CreateTestContext(w)
+	require.NoError(t, router.SetTrustedProxies(nil))
+	c.Request = httptest.NewRequest(http.MethodPost, "/api/v1/user/custom-pages/pay/launch", nil)
+	c.Request.RemoteAddr = "127.0.0.1:43100"
+	c.Request.Host = "api.example.com"
+	c.Request.Header.Set("X-Forwarded-For", "198.51.100.20")
+	c.Request.Header.Set("X-Forwarded-Proto", "https")
+	c.Request.Header.Set("X-Forwarded-Host", "attacker.example")
+
+	require.Equal(t, "https://api.example.com", embeddedPageSourceOrigin(c))
+}
+
+func TestEmbeddedPageSourceOriginUsesGinTrustedProxyChain(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	w := httptest.NewRecorder()
+	c, router := gin.CreateTestContext(w)
+	require.NoError(t, router.SetTrustedProxies([]string{"10.0.0.0/8"}))
+	c.Request = httptest.NewRequest(http.MethodPost, "/api/v1/user/custom-pages/pay/launch", nil)
+	c.Request.RemoteAddr = "10.0.0.8:43100"
+	c.Request.Host = "api.example.com"
+	c.Request.Header.Set("X-Forwarded-For", "198.51.100.20")
+	c.Request.Header.Set("X-Forwarded-Proto", "https")
+
+	require.Equal(t, "https://api.example.com", embeddedPageSourceOrigin(c))
+}

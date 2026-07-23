@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"testing"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
@@ -109,6 +110,44 @@ func TestSettingHandler_GetPublicSettings_ExposesCustomizedSiteSubtitle(t *testi
 	require.Equal(t, 0, resp.Code)
 	require.Equal(t, "Subscription to API Conversion Platform", resp.Data.SiteSubtitle)
 	require.True(t, resp.Data.SiteSubtitleCustomized)
+}
+
+func TestSettingHandler_GetPublicSettingsSanitizesCustomMenuURLs(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	rawMenuItems := `[
+		{"id":"user-page","url":"https://admin:basic-secret@external.example/start?plan=pro&TOKEN=secret&User_ID=7&Src_Url=https%3A%2F%2Fprivate.example%2Fpath&access_token=access-secret&api_key=api-secret&code=auth-code&s2a_launch_code=launch-secret#token=fragment","visibility":"user","sort_order":1},
+		{"id":"admin-page","url":"https://admin.example/start?token=admin-secret","visibility":"admin","sort_order":2}
+	]`
+	repo := &settingHandlerPublicRepoStub{values: map[string]string{
+		service.SettingKeyCustomMenuItems: rawMenuItems,
+	}}
+	h := NewSettingHandler(service.NewSettingService(repo, &config.Config{}), "test-version")
+
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodGet, "/api/v1/settings/public", nil)
+	h.GetPublicSettings(c)
+
+	require.Equal(t, http.StatusOK, recorder.Code)
+	var resp struct {
+		Data struct {
+			CustomMenuItems []struct {
+				ID  string `json:"id"`
+				URL string `json:"url"`
+			} `json:"custom_menu_items"`
+		} `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &resp))
+	require.Len(t, resp.Data.CustomMenuItems, 1)
+	require.Equal(t, "user-page", resp.Data.CustomMenuItems[0].ID)
+	publicURL, err := url.Parse(resp.Data.CustomMenuItems[0].URL)
+	require.NoError(t, err)
+	require.Nil(t, publicURL.User)
+	require.Empty(t, publicURL.RawQuery)
+	require.Empty(t, publicURL.Fragment)
+	require.NotContains(t, resp.Data.CustomMenuItems[0].URL, "secret")
+	require.NotContains(t, resp.Data.CustomMenuItems[0].URL, "auth-code")
+	require.Equal(t, rawMenuItems, repo.values[service.SettingKeyCustomMenuItems])
 }
 
 func TestSettingHandler_GetPublicSettings_ExposesWeChatOAuthModeCapabilities(t *testing.T) {

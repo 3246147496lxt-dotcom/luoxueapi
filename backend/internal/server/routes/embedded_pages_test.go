@@ -3,6 +3,7 @@ package routes
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -118,14 +119,15 @@ func TestRegisterEmbeddedPageRoutesLaunchAndExchange(t *testing.T) {
 	require.Contains(t, replayRec.Body.String(), "INVALID_EMBED_LAUNCH_CODE")
 }
 
-func TestEmbeddedPageExchangeRateLimitBackendFailureReturns503(t *testing.T) {
+func TestEmbeddedPageExchangeRedisFailureReturns503(t *testing.T) {
 	router, mr := newEmbeddedPageRouteTestRouter(t)
 	mr.Close()
+	validShapedCode := base64.RawURLEncoding.EncodeToString(make([]byte, 32))
 
 	exchangeReq := httptest.NewRequest(
 		http.MethodPost,
 		"/api/v1/embedded-pages/exchange",
-		bytes.NewBufferString(`{"client_id":"payment","code":"invalid"}`),
+		bytes.NewBufferString(`{"client_id":"payment","code":"`+validShapedCode+`"}`),
 	)
 	exchangeReq.Header.Set("Content-Type", "application/json")
 	exchangeRec := httptest.NewRecorder()
@@ -138,25 +140,57 @@ func TestEmbeddedPageExchangeRateLimitBackendFailureReturns503(t *testing.T) {
 	require.Equal(t, "EMBEDDED_PAGE_LAUNCH_UNAVAILABLE", envelope.Reason)
 }
 
-func TestEmbeddedPageExchangeActualLimitExceededRemains429(t *testing.T) {
+func TestEmbeddedPageExchangeDoesNotRateLimitSharedProxyIP(t *testing.T) {
 	router, _ := newEmbeddedPageRouteTestRouter(t)
-	validShapedCode := "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
-	body, err := json.Marshal(map[string]string{"client_id": "payment", "code": validShapedCode})
-	require.NoError(t, err)
+	const sharedProxyAddress = "127.0.0.1:43100"
 
-	for requestNumber := 1; requestNumber <= 31; requestNumber++ {
+	for requestNumber := 1; requestNumber <= 40; requestNumber++ {
+		launchReq := httptest.NewRequest(
+			http.MethodPost,
+			"/api/v1/user/custom-pages/payment/launch",
+			bytes.NewBufferString(`{"theme":"dark","lang":"zh-CN"}`),
+		)
+		launchReq.Header.Set("Content-Type", "application/json")
+		launchReq.Host = "api.example.com"
+		launchReq.RemoteAddr = sharedProxyAddress
+		launchRec := httptest.NewRecorder()
+		router.ServeHTTP(launchRec, launchReq)
+		require.Equal(t, http.StatusOK, launchRec.Code, "launch request %d: %s", requestNumber, launchRec.Body.String())
+
+		var launchEnvelope response.Response
+		require.NoError(t, json.Unmarshal(launchRec.Body.Bytes(), &launchEnvelope))
+		launchData, ok := launchEnvelope.Data.(map[string]any)
+		require.True(t, ok)
+		rawLaunchURL, ok := launchData["launch_url"].(string)
+		require.True(t, ok)
+		launchURL, err := url.Parse(rawLaunchURL)
+		require.NoError(t, err)
+		code := launchURL.Query().Get("s2a_launch_code")
+		require.NotEmpty(t, code)
+
+		body, err := json.Marshal(map[string]string{"client_id": "payment", "code": code})
+		require.NoError(t, err)
 		exchangeReq := httptest.NewRequest(http.MethodPost, "/api/v1/embedded-pages/exchange", bytes.NewReader(body))
 		exchangeReq.Header.Set("Content-Type", "application/json")
-		exchangeReq.RemoteAddr = "192.0.2.10:1234"
+		exchangeReq.RemoteAddr = sharedProxyAddress
 		exchangeRec := httptest.NewRecorder()
 		router.ServeHTTP(exchangeRec, exchangeReq)
+		require.Equal(t, http.StatusOK, exchangeRec.Code, "exchange request %d: %s", requestNumber, exchangeRec.Body.String())
+	}
 
-		if requestNumber <= 30 {
-			require.Equal(t, http.StatusUnauthorized, exchangeRec.Code, "request %d: %s", requestNumber, exchangeRec.Body.String())
-			continue
-		}
-		require.Equal(t, http.StatusTooManyRequests, exchangeRec.Code, exchangeRec.Body.String())
-		require.Contains(t, exchangeRec.Body.String(), "rate limit exceeded")
-		require.NotContains(t, exchangeRec.Body.String(), "EMBEDDED_PAGE_LAUNCH_UNAVAILABLE")
+	invalidBody, err := json.Marshal(map[string]string{
+		"client_id": "payment",
+		"code":      base64.RawURLEncoding.EncodeToString(make([]byte, 32)),
+	})
+	require.NoError(t, err)
+	for requestNumber := 1; requestNumber <= 40; requestNumber++ {
+		exchangeReq := httptest.NewRequest(http.MethodPost, "/api/v1/embedded-pages/exchange", bytes.NewReader(invalidBody))
+		exchangeReq.Header.Set("Content-Type", "application/json")
+		exchangeReq.RemoteAddr = sharedProxyAddress
+		exchangeRec := httptest.NewRecorder()
+		router.ServeHTTP(exchangeRec, exchangeReq)
+		require.Equal(t, http.StatusUnauthorized, exchangeRec.Code, "invalid request %d: %s", requestNumber, exchangeRec.Body.String())
+		require.Contains(t, exchangeRec.Body.String(), "INVALID_EMBED_LAUNCH_CODE")
+		require.NotContains(t, exchangeRec.Body.String(), "rate limit exceeded")
 	}
 }

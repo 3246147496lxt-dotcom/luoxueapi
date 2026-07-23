@@ -1,11 +1,7 @@
 package routes
 
 import (
-	"net/http"
-	"time"
-
 	"github.com/Wei-Shaw/sub2api/internal/handler"
-	"github.com/Wei-Shaw/sub2api/internal/middleware"
 	"github.com/Wei-Shaw/sub2api/internal/repository"
 	servermiddleware "github.com/Wei-Shaw/sub2api/internal/server/middleware"
 	"github.com/Wei-Shaw/sub2api/internal/service"
@@ -33,15 +29,5 @@ func RegisterEmbeddedPageRoutes(
 	customPages.POST("/:id/launch", h.Launch)
 
 	embeddedPages := v1.Group("/embedded-pages")
-	rateLimiter := middleware.NewRateLimiter(redisClient)
-	embeddedPages.POST("/exchange", rateLimiter.LimitWithOptions(
-		"embedded-page-exchange",
-		30,
-		time.Minute,
-		middleware.RateLimitOptions{
-			FailureMode:          middleware.RateLimitFailClose,
-			BackendFailureStatus: http.StatusServiceUnavailable,
-			BackendFailureReason: "EMBEDDED_PAGE_LAUNCH_UNAVAILABLE",
-		},
-	), h.Exchange)
+	embeddedPages.POST("/exchange", h.Exchange)
 }

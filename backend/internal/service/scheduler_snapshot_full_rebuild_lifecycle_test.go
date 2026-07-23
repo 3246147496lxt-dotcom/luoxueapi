@@ -518,7 +518,7 @@ func TestSchedulerFullRebuildPartialLifecycleFailureReturnsBeforeDBAndRetries(t 
 	accounts := &fullRebuildAccountRepo{}
 	svc := newFullRebuildLifecycleService(cache, nil, accounts, groups, config.RunModeStandard)
 
-	err := svc.triggerFullRebuild("first")
+	err := svc.triggerFullRebuildWithContext(context.Background(), "first", false)
 	require.ErrorIs(t, err, wantErr)
 	_, _, freshCalls := groups.stats()
 	require.Equal(t, []int64{1, 2}, freshCalls)
@@ -530,7 +530,7 @@ func TestSchedulerFullRebuildPartialLifecycleFailureReturnsBeforeDBAndRetries(t 
 	delete(groups.freshErr, 2)
 	groups.fresh[2] = &Group{ID: 2, Status: StatusDisabled, Hydrated: true}
 	groups.mu.Unlock()
-	require.NoError(t, svc.triggerFullRebuild("retry"))
+	require.NoError(t, svc.triggerFullRebuildWithContext(context.Background(), "retry", false))
 	_, _, freshCalls = groups.stats()
 	require.Equal(t, []int64{1, 2, 2, 3}, freshCalls)
 	require.Equal(t, 39, len(cache.retiredBuckets()))
@@ -627,7 +627,7 @@ func TestSchedulerFullRebuildFreshReopenLockBusyRetriesWithoutBlockingOrdinaryTa
 	svc.pollOutbox()
 	require.Zero(t, cache.currentWatermark())
 	_, groupZeroPublished := cache.counts(schedulerCanonicalBuckets(0)[0])
-	require.Equal(t, 1, groupZeroPublished, "ordinary tasks must still run when one strict Reopen task is busy")
+	require.Equal(t, 1, groupZeroPublished, "ordinary tasks must still run when one authoritative Reopen task is busy")
 	require.Equal(t, 14, accounts.callCount())
 
 	svc.pollOutbox()
