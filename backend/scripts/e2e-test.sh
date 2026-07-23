@@ -22,17 +22,32 @@ compose=(
   -f "$repo_dir/deploy/docker-compose.yml"
   -f "$repo_dir/deploy/docker-compose.smoke.yml"
 )
+up_mode=(--build)
+if [[ -n "${SMOKE_IMAGE:-}" ]]; then
+  compose+=(
+    -f "$repo_dir/deploy/docker-compose.release-smoke.yml"
+  )
+  up_mode=(--no-build)
+fi
 
 cleanup() {
   "${compose[@]}" down --volumes --remove-orphans >/dev/null 2>&1 || true
 }
 trap cleanup EXIT
 
-"${compose[@]}" up --build --detach --wait --wait-timeout 180
+"${compose[@]}" up "${up_mode[@]}" --detach --wait --wait-timeout 180
 
 base_url="http://127.0.0.1:8080"
-"${compose[@]}" exec -T sub2api \
-  wget -q -T 5 -O /dev/null "$base_url/readyz"
+ready_json="$("${compose[@]}" exec -T sub2api \
+  wget -q -T 5 -O - "$base_url/readyz")"
+jq -e '
+  .status == "ready"
+  and .checks.draining.status == "ready"
+  and .checks.components.status == "ready"
+  and .checks.database.status == "ready"
+  and .checks.redis.status == "ready"
+  and .checks.scheduler.status == "ready"
+' <<< "$ready_json" >/dev/null
 
 login_response="$("${compose[@]}" exec -T sub2api \
   wget -q -T 10 -O - \

@@ -17,6 +17,7 @@ COMPOSE_FILES = [
     ROOT / "deploy/docker-compose.standalone.yml",
 ]
 SMOKE_COMPOSE = ROOT / "deploy/docker-compose.smoke.yml"
+RELEASE_SMOKE_COMPOSE = ROOT / "deploy/docker-compose.release-smoke.yml"
 E2E_SCRIPT = ROOT / "backend/scripts/e2e-test.sh"
 ROOT_MAKEFILE = ROOT / "Makefile"
 BACKEND_MAKEFILE = ROOT / "backend/Makefile"
@@ -122,6 +123,7 @@ class ComposeEnvironmentContractTest(unittest.TestCase):
 
     def test_smoke_and_make_targets_cover_disconnected_runtime(self) -> None:
         smoke = SMOKE_COMPOSE.read_text(encoding="utf-8")
+        release_smoke = RELEASE_SMOKE_COMPOSE.read_text(encoding="utf-8")
         e2e = E2E_SCRIPT.read_text(encoding="utf-8")
         root_make = ROOT_MAKEFILE.read_text(encoding="utf-8")
         backend_make = BACKEND_MAKEFILE.read_text(encoding="utf-8")
@@ -133,13 +135,24 @@ class ComposeEnvironmentContractTest(unittest.TestCase):
         self.assertIn("SMOKE_APP_CONTAINER_NAME", smoke)
         self.assertIn("SMOKE_POSTGRES_CONTAINER_NAME", smoke)
         self.assertIn("SMOKE_REDIS_CONTAINER_NAME", smoke)
+        self.assertIn("${SMOKE_IMAGE:?SMOKE_IMAGE is required}", release_smoke)
+        self.assertIn("build: !reset null", release_smoke)
+        self.assertIn("platform: linux/amd64", release_smoke)
+        self.assertIn("pull_policy: never", release_smoke)
         self.assertIn("docker-compose.smoke.yml", e2e)
+        self.assertIn("docker-compose.release-smoke.yml", e2e)
+        self.assertIn('${SMOKE_IMAGE:-}', e2e)
+        self.assertIn("up_mode=(--no-build)", e2e)
         self.assertIn('export SMOKE_APP_CONTAINER_NAME="${project_name}-app"', e2e)
         self.assertIn('export SMOKE_POSTGRES_CONTAINER_NAME="${project_name}-postgres"', e2e)
         self.assertIn('export SMOKE_REDIS_CONTAINER_NAME="${project_name}-redis"', e2e)
         self.assertIn('base_url="http://127.0.0.1:8080"', e2e)
         self.assertGreaterEqual(e2e.count('exec -T sub2api'), 4)
         self.assertIn("/readyz", e2e)
+        self.assertIn('.status == "ready"', e2e)
+        for check in ["draining", "components", "database", "redis", "scheduler"]:
+            with self.subTest(readiness_check=check):
+                self.assertIn(f'.checks.{check}.status == "ready"', e2e)
         self.assertIn("/api/v1/admin/compliance", e2e)
         self.assertIn("/api/v1/admin/compliance/accept", e2e)
         self.assertIn("ack_phrase_en", e2e)

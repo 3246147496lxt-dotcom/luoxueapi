@@ -232,6 +232,90 @@ jobs:
           GITHUB_REPO_NAME: ${{ github.event.repository.name }}
           DOCKERHUB_USERNAME: skip
 
+      - name: Verify GoReleaser binary metadata
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          mapfile -t binary_paths < <(jq -r '
+            .[]
+            | select(
+                .type == "Binary"
+                and .name == "sub2api"
+                and .goos == "linux"
+                and .goarch == "amd64"
+                and .extra.ID == "sub2api"
+              )
+            | .path
+          ' dist/artifacts.json)
+          if [[ "${#binary_paths[@]}" -ne 1 || ! -x "${binary_paths[0]:-}" ]]; then
+            printf 'Expected exactly one executable linux/amd64 artifact, found: %s\n' \
+              "${binary_paths[*]:-none}" >&2
+            exit 1
+          fi
+
+          version_output="$("${binary_paths[0]}" --version 2>&1)"
+          printf '%s\n' "$version_output"
+          grep -Fq -- "LuoxueAPI ${RELEASE_VERSION} (commit: ${RELEASE_COMMIT}," \
+            <<< "$version_output"
+
+      - name: Verify published GHCR images
+        shell: bash
+        env:
+          REGISTRY_OWNER: ${{ steps.registry.outputs.owner }}
+        run: |
+          set -Eeuo pipefail
+          if [[ "$SIMPLE_RELEASE" == "true" ]]; then
+            platforms=(linux/amd64)
+          else
+            # Leave amd64 as the locally selected tag for the published-image smoke.
+            platforms=(linux/arm64 linux/amd64)
+          fi
+
+          for image_name in luoxueapi sub2api; do
+            image_ref="ghcr.io/${REGISTRY_OWNER}/${image_name}:${RELEASE_VERSION}"
+            for platform in "${platforms[@]}"; do
+              for attempt in 1 2 3; do
+                if docker pull --platform "$platform" "$image_ref"; then
+                  break
+                fi
+                if [[ "$attempt" -eq 3 ]]; then
+                  printf 'Unable to pull %s for %s after %s attempts\n' \
+                    "$image_ref" "$platform" "$attempt" >&2
+                  exit 1
+                fi
+                sleep "$((attempt * 5))"
+              done
+
+              version_output="$(docker run --rm --platform "$platform" "$image_ref" --version 2>&1)"
+              printf '%s\n' "$version_output"
+              grep -Fq -- "LuoxueAPI ${RELEASE_VERSION} (commit: ${RELEASE_COMMIT}," \
+                <<< "$version_output"
+
+              image_version="$(docker image inspect \
+                --format '{{ index .Config.Labels "org.opencontainers.image.version" }}' \
+                "$image_ref")"
+              image_revision="$(docker image inspect \
+                --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}' \
+                "$image_ref")"
+              if [[ "$image_version" != "$RELEASE_VERSION" || "$image_revision" != "$RELEASE_COMMIT" ]]; then
+                printf 'Image metadata mismatch for %s (%s): version=%s revision=%s\n' \
+                  "$image_ref" "$platform" "$image_version" "$image_revision" >&2
+                exit 1
+              fi
+            done
+          done
+
+      - name: Run published GHCR image smoke
+        shell: bash
+        env:
+          REGISTRY_OWNER: ${{ steps.registry.outputs.owner }}
+        run: |
+          set -Eeuo pipefail
+          for image_name in luoxueapi sub2api; do
+            SMOKE_IMAGE="ghcr.io/${REGISTRY_OWNER}/${image_name}:${RELEASE_VERSION}" \
+              bash backend/scripts/e2e-test.sh
+          done
+
       - name: Update DockerHub description
         if: ${{ env.SIMPLE_RELEASE != 'true' && env.DOCKERHUB_USERNAME != '' }}
         uses: peter-evans/dockerhub-description@1b9a80c056b620d92cedb9d9b5a223409c68ddfa # v5

@@ -103,6 +103,13 @@ class ReleaseWorkflowSecurityTest(unittest.TestCase):
             "go test -race ./internal/lifecycle ./internal/server ./internal/modules/...",
             BACKEND_CI,
         )
+        self.assertIn(
+            "go test -tags=embed ./internal/web ./cmd/server", BACKEND_CI
+        )
+        self.assertIn("docker-compose.release-smoke.yml", BACKEND_CI)
+        self.assertIn("config --format json --no-env-resolution", BACKEND_CI)
+        self.assertIn('.services.sub2api.build == null', BACKEND_CI)
+        self.assertIn('.services.sub2api.pull_policy == "never"', BACKEND_CI)
         self.assertGreaterEqual(BACKEND_CI.count("if-no-files-found: error"), 4)
 
     def test_only_release_job_has_write_permissions(self) -> None:
@@ -157,6 +164,31 @@ class ReleaseWorkflowSecurityTest(unittest.TestCase):
         self.assertEqual(RELEASE.count("> backend/cmd/server/VERSION"), 1)
         for config in [GORELEASER, GORELEASER_SIMPLE]:
             self.assertIn("-X main.Version={{.Version}}", config)
+
+    def test_release_executes_binary_and_published_images(self) -> None:
+        self.assertIn("Verify GoReleaser binary metadata", RELEASE)
+        self.assertIn("dist/artifacts.json", RELEASE)
+        self.assertIn('.type == "Binary"', RELEASE)
+        self.assertIn('.extra.ID == "sub2api"', RELEASE)
+        self.assertIn('"${binary_paths[0]}" --version 2>&1', RELEASE)
+        self.assertIn("Verify published GHCR images", RELEASE)
+        self.assertIn("for image_name in luoxueapi sub2api", RELEASE)
+        self.assertIn("platforms=(linux/amd64)", RELEASE)
+        self.assertIn("platforms=(linux/arm64 linux/amd64)", RELEASE)
+        self.assertIn('docker pull --platform "$platform" "$image_ref"', RELEASE)
+        self.assertIn(
+            'docker run --rm --platform "$platform" "$image_ref" --version 2>&1',
+            RELEASE,
+        )
+        self.assertIn("for attempt in 1 2 3", RELEASE)
+        self.assertIn("org.opencontainers.image.version", RELEASE)
+        self.assertIn("org.opencontainers.image.revision", RELEASE)
+        self.assertIn("Run published GHCR image smoke", RELEASE)
+        self.assertIn('SMOKE_IMAGE="ghcr.io/${REGISTRY_OWNER}/${image_name}', RELEASE)
+        self.assertIn("bash backend/scripts/e2e-test.sh", RELEASE)
+        self.assertIn(
+            'LuoxueAPI ${RELEASE_VERSION} (commit: ${RELEASE_COMMIT},', RELEASE
+        )
 
     def test_remote_actions_are_immutable(self) -> None:
         action_pattern = re.compile(
@@ -314,6 +346,10 @@ class DeliveryPipelineContractTest(unittest.TestCase):
         self.assertIn("ports: !reset []", SMOKE_COMPOSE)
         self.assertIn("SMOKE_APP_CONTAINER_NAME", SMOKE_COMPOSE)
         self.assertIn("/readyz", E2E_SCRIPT)
+        self.assertIn('.status == "ready"', E2E_SCRIPT)
+        for check in ["draining", "components", "database", "redis", "scheduler"]:
+            with self.subTest(readiness_check=check):
+                self.assertIn(f'.checks.{check}.status == "ready"', E2E_SCRIPT)
         self.assertIn("/api/v1/auth/login", E2E_SCRIPT)
         self.assertIn("/api/v1/admin/compliance", E2E_SCRIPT)
         self.assertIn("/api/v1/admin/compliance/accept", E2E_SCRIPT)

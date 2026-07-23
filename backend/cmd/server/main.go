@@ -22,6 +22,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/Wei-Shaw/sub2api/internal/repository"
 	"github.com/Wei-Shaw/sub2api/internal/server/middleware"
+	serverroutes "github.com/Wei-Shaw/sub2api/internal/server/routes"
 	"github.com/Wei-Shaw/sub2api/internal/setup"
 	"github.com/Wei-Shaw/sub2api/internal/web"
 
@@ -103,18 +104,7 @@ func run() error {
 }
 
 func runSetupServer() error {
-	r := gin.New()
-	r.Use(middleware.Recovery())
-	r.Use(middleware.CORS(config.CORSConfig{}))
-	r.Use(middleware.SecurityHeaders(config.CSPConfig{Enabled: true, Policy: config.DefaultCSPPolicy}, nil))
-
-	// Register setup routes
-	setup.RegisterRoutes(r)
-
-	// Serve embedded frontend if available
-	if web.HasEmbeddedFrontend() {
-		r.Use(web.ServeEmbeddedFrontend())
-	}
+	r := newSetupRouter()
 
 	// Get server address from config.yaml or environment variables (SERVER_HOST, SERVER_PORT)
 	// This allows users to run setup on a different address if needed
@@ -156,6 +146,26 @@ func runSetupServer() error {
 		return fmt.Errorf("shutdown setup server: %w", err)
 	}
 	return nil
+}
+
+func newSetupRouter() *gin.Engine {
+	r := gin.New()
+	r.Use(middleware.Recovery())
+	r.Use(middleware.CORS(config.CORSConfig{}))
+	r.Use(middleware.SecurityHeaders(config.CSPConfig{Enabled: true, Policy: config.DefaultCSPPolicy}, nil))
+
+	// Setup mode is alive but cannot receive normal traffic until configuration
+	// completes, so readiness intentionally returns 503 with a JSON body.
+	serverroutes.RegisterHealthRoutes(r, nil)
+
+	// Register setup routes
+	setup.RegisterRoutes(r)
+
+	// Serve embedded frontend if available
+	if web.HasEmbeddedFrontend() {
+		r.Use(web.ServeEmbeddedFrontend())
+	}
+	return r
 }
 
 func runMainServer() error {

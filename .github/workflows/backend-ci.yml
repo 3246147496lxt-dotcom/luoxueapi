@@ -67,6 +67,25 @@ jobs:
             -f deploy/docker-compose.yml \
             -f deploy/docker-compose.smoke.yml \
             config --quiet --no-env-resolution
+          release_smoke_config="$(
+            SMOKE_IMAGE=ghcr.io/example/luoxueapi:contract \
+            SMOKE_APP_CONTAINER_NAME=contract-release-smoke-app \
+            SMOKE_POSTGRES_CONTAINER_NAME=contract-release-smoke-postgres \
+            SMOKE_REDIS_CONTAINER_NAME=contract-release-smoke-redis \
+            docker compose \
+              --env-file deploy/.env.example \
+              -f deploy/docker-compose.yml \
+              -f deploy/docker-compose.smoke.yml \
+              -f deploy/docker-compose.release-smoke.yml \
+              config --format json --no-env-resolution
+          )"
+          jq -e '
+            .services.sub2api.image == "ghcr.io/example/luoxueapi:contract"
+            and .services.sub2api.build == null
+            and .services.sub2api.platform == "linux/amd64"
+            and .services.sub2api.pull_policy == "never"
+            and .services.sub2api.ports == null
+          ' <<< "$release_smoke_config" >/dev/null
 
   release-contract:
     runs-on: ubuntu-latest
@@ -238,7 +257,7 @@ jobs:
           go version | grep -q 'go1.26.5'
       - name: Verify embedded main and documentation sites
         working-directory: backend
-        run: go test -tags=embed ./internal/web
+        run: go test -tags=embed ./internal/web ./cmd/server
 
   compose-smoke:
     needs: [frontend, docs-site]
