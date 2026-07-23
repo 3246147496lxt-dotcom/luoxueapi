@@ -51,6 +51,17 @@ func (r *upstreamBillingProbeAccountRepo) Create(_ context.Context, account *Acc
 	return nil
 }
 
+func (r *upstreamBillingProbeAccountRepo) CreateWithAccountGroups(ctx context.Context, account *Account, groups []AccountGroup) error {
+	if err := r.Create(ctx, account); err != nil {
+		return err
+	}
+	account.AccountGroups = append([]AccountGroup(nil), groups...)
+	for _, group := range groups {
+		account.GroupIDs = append(account.GroupIDs, group.GroupID)
+	}
+	return nil
+}
+
 func (r *upstreamBillingProbeAccountRepo) Update(_ context.Context, account *Account) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()

@@ -103,6 +103,7 @@ type UsageRecordWorkerPool struct {
 	lastScaleNanos        atomic.Int64
 	autoScaleCancel       context.CancelFunc
 	lifecycleWg           sync.WaitGroup
+	startOnce             sync.Once
 	stopOnce              sync.Once
 }
 
@@ -135,10 +136,20 @@ func NewUsageRecordWorkerPoolWithOptions(opts UsageRecordWorkerPoolOptions) *Usa
 		opts.WorkerCount,
 		pond.WithQueueSize(opts.QueueSize),
 	)
-	if p.autoScaleEnabled {
-		p.startAutoScaler()
-	}
 	return p
+}
+
+// Start launches the optional autoscaler after the application has finished
+// constructing all dependencies. Pond workers themselves remain demand-driven.
+func (p *UsageRecordWorkerPool) Start() {
+	if p == nil {
+		return
+	}
+	p.startOnce.Do(func() {
+		if p.autoScaleEnabled && p.pool != nil && !p.pool.Stopped() {
+			p.startAutoScaler()
+		}
+	})
 }
 
 // Submit 提交一个使用量记录任务。

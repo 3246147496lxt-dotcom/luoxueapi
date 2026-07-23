@@ -23,6 +23,11 @@ const (
 // RateLimitOptions 限流可选配置
 type RateLimitOptions struct {
 	FailureMode RateLimitFailureMode
+	// BackendFailureStatus and BackendFailureReason apply only when the Redis
+	// operation fails in fail-close mode. Zero values preserve the historical
+	// 429 response; an actual limit exceedance always uses that response.
+	BackendFailureStatus int
+	BackendFailureReason string
 }
 
 var rateLimitScript = redis.NewScript(`
@@ -100,7 +105,7 @@ func (r *RateLimiter) LimitWithOptions(key string, limit int, window time.Durati
 		if err != nil {
 			log.Printf("[RateLimit] redis error: key=%s mode=%s err=%v", redisKey, failureModeLabel(failureMode), err)
 			if failureMode == RateLimitFailClose {
-				abortRateLimit(c)
+				abortRateLimitBackendFailure(c, opts)
 				return
 			}
 			// Redis 错误时放行，避免影响正常服务
@@ -133,6 +138,23 @@ func abortRateLimit(c *gin.Context) {
 	c.AbortWithStatusJSON(http.StatusTooManyRequests, gin.H{
 		"error":   "rate limit exceeded",
 		"message": "Too many requests, please try again later",
+	})
+}
+
+func abortRateLimitBackendFailure(c *gin.Context, opts RateLimitOptions) {
+	status := opts.BackendFailureStatus
+	if status == 0 && opts.BackendFailureReason == "" {
+		abortRateLimit(c)
+		return
+	}
+	if status < http.StatusBadRequest || status > 599 {
+		status = http.StatusTooManyRequests
+	}
+
+	c.AbortWithStatusJSON(status, gin.H{
+		"code":    status,
+		"message": http.StatusText(status),
+		"reason":  opts.BackendFailureReason,
 	})
 }
 

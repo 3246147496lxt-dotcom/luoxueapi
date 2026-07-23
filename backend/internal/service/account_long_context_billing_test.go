@@ -87,6 +87,17 @@ func (r *longContextBillingRepoStub) Create(_ context.Context, account *Account)
 	return nil
 }
 
+func (r *longContextBillingRepoStub) CreateWithAccountGroups(ctx context.Context, account *Account, groups []AccountGroup) error {
+	if err := r.Create(ctx, account); err != nil {
+		return err
+	}
+	account.AccountGroups = append([]AccountGroup(nil), groups...)
+	for _, group := range groups {
+		account.GroupIDs = append(account.GroupIDs, group.GroupID)
+	}
+	return nil
+}
+
 func (r *longContextBillingRepoStub) GetByID(_ context.Context, _ int64) (*Account, error) {
 	return r.account, nil
 }
@@ -129,8 +140,10 @@ func TestAdminServiceCreateAccountDefaultsOpenAILongContextBillingDisabled(t *te
 	})
 
 	require.NoError(t, err)
-	require.Same(t, account, repo.createdAccount)
+	require.NotNil(t, repo.createdAccount)
+	require.Equal(t, account.ID, repo.createdAccount.ID)
 	require.Equal(t, false, account.Extra[openAILongContextBillingEnabledKey])
+	require.Equal(t, false, repo.createdAccount.Extra[openAILongContextBillingEnabledKey])
 }
 
 func TestAdminServiceCreateAccountRejectsMalformedOpenAILongContextBillingValue(t *testing.T) {

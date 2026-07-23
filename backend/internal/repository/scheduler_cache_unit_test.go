@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -31,6 +32,41 @@ func newSchedulerCacheUnitWithRedis(t *testing.T) (*schedulerCache, *miniredis.M
 	cache, ok := newSchedulerCacheWithChunkSizes(rdb, defaultSchedulerSnapshotMGetChunkSize, defaultSchedulerSnapshotWriteChunkSize).(*schedulerCache)
 	require.True(t, ok)
 	return cache, mr
+}
+
+func (c *schedulerCache) writeAccounts(ctx context.Context, accounts []service.Account) ([]service.Account, error) {
+	generation, err := c.ensureSchedulerGeneration(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return c.writeAccountsForGeneration(ctx, accounts, generation)
+}
+
+func (c *schedulerCache) updateAccountLastUsedCAS(ctx context.Context, accountID int64, candidate time.Time, initial any, generation string) error {
+	write, needed, err := prepareSchedulerLastUsedWrite(accountID, candidate, initial)
+	if err != nil {
+		return err
+	}
+	if !needed {
+		return nil
+	}
+	result, err := queueSchedulerLastUsedCAS(ctx, c.rdb, write, generation).Int64()
+	if err != nil {
+		return err
+	}
+	switch result {
+	case 1:
+		logSchedulerLastUsedEncodingCleanup(write)
+		return nil
+	case 0:
+		return nil
+	case -1:
+		return c.retryAccountLastUsedCAS(ctx, accountID, candidate, generation)
+	case -2:
+		return service.ErrSchedulerBucketWriteFenced
+	default:
+		return fmt.Errorf("update scheduler account last_used CAS returned %d", result)
+	}
 }
 
 func TestSchedulerCacheWriteAccountsSkipsUnencodableTimes(t *testing.T) {
@@ -69,6 +105,65 @@ func TestSchedulerCacheSetAccountClearsUnencodablePayload(t *testing.T) {
 	cached, err := cache.GetAccount(ctx, account.ID)
 	require.NoError(t, err)
 	require.Nil(t, cached)
+
+	tombstoned, err := cache.rdb.SIsMember(ctx, schedulerAccountTombstoneSetKey, strconv.FormatInt(account.ID, 10)).Result()
+	require.NoError(t, err)
+	require.False(t, tombstoned, "an encoding failure is cache cleanup, not a durable account deletion")
+
+	account.ExpiresAt = nil
+	require.NoError(t, cache.SetAccount(ctx, &account))
+	cached, err = cache.GetAccount(ctx, account.ID)
+	require.NoError(t, err)
+	require.NotNil(t, cached, "a later encodable projection must be allowed after payload-only cleanup")
+}
+
+func TestSchedulerCacheDeleteAccountAtomicallyTombstonesAndDeletesBothPayloads(t *testing.T) {
+	ctx := context.Background()
+	cache := newSchedulerCacheUnit(t)
+	account := service.Account{ID: 122, Platform: service.PlatformOpenAI, Type: service.AccountTypeAPIKey}
+	require.NoError(t, cache.SetAccount(ctx, &account))
+
+	id := strconv.FormatInt(account.ID, 10)
+	require.NoError(t, cache.DeleteAccount(ctx, account.ID))
+	require.NoError(t, cache.DeleteAccount(ctx, account.ID), "delete must be idempotent")
+
+	exists, err := cache.rdb.Exists(ctx, schedulerAccountKey(id), schedulerAccountMetaKey(id)).Result()
+	require.NoError(t, err)
+	require.Zero(t, exists, "durable deletion must remove full and metadata projections together")
+	tombstoned, err := cache.rdb.SIsMember(ctx, schedulerAccountTombstoneSetKey, id).Result()
+	require.NoError(t, err)
+	require.True(t, tombstoned)
+	count, err := cache.rdb.SCard(ctx, schedulerAccountTombstoneSetKey).Result()
+	require.NoError(t, err)
+	require.EqualValues(t, 1, count, "the single tombstone set keeps idempotent deletes compact")
+	ttl, err := cache.rdb.TTL(ctx, schedulerAccountTombstoneSetKey).Result()
+	require.NoError(t, err)
+	require.Less(t, ttl, time.Duration(0), "deletion fences must not expire while a stale rebuild can still resume")
+}
+
+func TestSchedulerCacheFirstProjectionWriteCannotResurrectAccountDeletedAfterDatabaseRead(t *testing.T) {
+	ctx := context.Background()
+	cache := newSchedulerCacheUnit(t)
+	staleDatabaseRow := service.Account{
+		ID:        123,
+		Name:      "read before delete",
+		Platform:  service.PlatformOpenAI,
+		Type:      service.AccountTypeAPIKey,
+		UpdatedAt: time.Date(2026, 7, 23, 7, 30, 0, 0, time.UTC),
+	}
+
+	// The rebuild already owns staleDatabaseRow, but the outbox deletion reaches
+	// Redis before this account has ever been projected. Its initial MGET will
+	// therefore observe a missing payload rather than an older CAS version.
+	require.NoError(t, cache.DeleteAccount(ctx, staleDatabaseRow.ID))
+	written, err := cache.writeAccounts(ctx, []service.Account{staleDatabaseRow})
+	require.NoError(t, err)
+	require.Empty(t, written)
+
+	id := strconv.FormatInt(staleDatabaseRow.ID, 10)
+	exists, err := cache.rdb.Exists(ctx, schedulerAccountKey(id), schedulerAccountMetaKey(id)).Result()
+	require.NoError(t, err)
+	require.Zero(t, exists)
 }
 
 func TestSchedulerCacheUpdateLastUsedClearsUnencodablePayload(t *testing.T) {
@@ -83,6 +178,725 @@ func TestSchedulerCacheUpdateLastUsedClearsUnencodablePayload(t *testing.T) {
 	cached, err := cache.GetAccount(ctx, account.ID)
 	require.NoError(t, err)
 	require.Nil(t, cached)
+}
+
+func TestSchedulerCacheUpdateLastUsedIsMonotonicAndUpdatesBothPayloads(t *testing.T) {
+	ctx := context.Background()
+	cache := newSchedulerCacheUnit(t)
+	base := time.Date(2026, 7, 23, 1, 0, 0, 0, time.UTC)
+	newer := base.Add(2 * time.Minute)
+	older := base.Add(time.Minute)
+	account := service.Account{
+		ID:         115,
+		Platform:   service.PlatformOpenAI,
+		Type:       service.AccountTypeAPIKey,
+		LastUsedAt: &base,
+	}
+	require.NoError(t, cache.SetAccount(ctx, &account))
+
+	require.NoError(t, cache.UpdateLastUsed(ctx, map[int64]time.Time{account.ID: newer}))
+	require.NoError(t, cache.UpdateLastUsed(ctx, map[int64]time.Time{account.ID: older}))
+
+	full, err := cache.GetAccount(ctx, account.ID)
+	require.NoError(t, err)
+	require.NotNil(t, full)
+	require.NotNil(t, full.LastUsedAt)
+	require.True(t, full.LastUsedAt.Equal(newer))
+	metaRaw, err := cache.rdb.Get(ctx, schedulerAccountMetaKey(strconv.FormatInt(account.ID, 10))).Result()
+	require.NoError(t, err)
+	meta, err := decodeCachedAccount(metaRaw)
+	require.NoError(t, err)
+	require.NotNil(t, meta.LastUsedAt)
+	require.True(t, meta.LastUsedAt.Equal(newer))
+}
+
+func TestSchedulerCacheUpdateLastUsedConcurrentFinalValueIsMaximum(t *testing.T) {
+	ctx := context.Background()
+	cache := newSchedulerCacheUnit(t)
+	account := service.Account{ID: 116, Platform: service.PlatformOpenAI, Type: service.AccountTypeAPIKey}
+	require.NoError(t, cache.SetAccount(ctx, &account))
+
+	base := time.Date(2026, 7, 23, 2, 0, 0, 0, time.UTC)
+	updates := make([]time.Time, 16)
+	for i := range updates {
+		updates[i] = base.Add(time.Duration(i) * time.Second)
+	}
+	errCh := make(chan error, len(updates))
+	var wg sync.WaitGroup
+	for _, updatedAt := range updates {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			errCh <- cache.UpdateLastUsed(ctx, map[int64]time.Time{account.ID: updatedAt})
+		}()
+	}
+	wg.Wait()
+	close(errCh)
+	for err := range errCh {
+		require.NoError(t, err)
+	}
+
+	cached, err := cache.GetAccount(ctx, account.ID)
+	require.NoError(t, err)
+	require.NotNil(t, cached)
+	require.NotNil(t, cached.LastUsedAt)
+	require.True(t, cached.LastUsedAt.Equal(updates[len(updates)-1]))
+}
+
+type schedulerCachePipelineProbe struct {
+	mu                sync.Mutex
+	evalPipelineSizes []int
+	directEvalCalls   int
+	afterFirstMGet    func()
+	mgetOnce          sync.Once
+}
+
+func (p *schedulerCachePipelineProbe) DialHook(next redis.DialHook) redis.DialHook { return next }
+
+func (p *schedulerCachePipelineProbe) ProcessHook(next redis.ProcessHook) redis.ProcessHook {
+	return func(ctx context.Context, cmd redis.Cmder) error {
+		err := next(ctx, cmd)
+		name := strings.ToLower(cmd.Name())
+		if strings.HasPrefix(name, "eval") && isSchedulerLastUsedEval(cmd) {
+			p.mu.Lock()
+			p.directEvalCalls++
+			p.mu.Unlock()
+		}
+		if name == "mget" && p.afterFirstMGet != nil {
+			p.mgetOnce.Do(p.afterFirstMGet)
+		}
+		return err
+	}
+}
+
+func (p *schedulerCachePipelineProbe) ProcessPipelineHook(next redis.ProcessPipelineHook) redis.ProcessPipelineHook {
+	return func(ctx context.Context, commands []redis.Cmder) error {
+		evalCount := 0
+		for _, command := range commands {
+			if strings.HasPrefix(strings.ToLower(command.Name()), "eval") && isSchedulerLastUsedEval(command) {
+				evalCount++
+			}
+		}
+		if evalCount > 0 {
+			p.mu.Lock()
+			p.evalPipelineSizes = append(p.evalPipelineSizes, evalCount)
+			p.mu.Unlock()
+		}
+		return next(ctx, commands)
+	}
+}
+
+func isSchedulerLastUsedEval(command redis.Cmder) bool {
+	args := command.Args()
+	if len(args) < 6 || fmt.Sprint(args[2]) != "5" {
+		return false
+	}
+	return strings.HasPrefix(fmt.Sprint(args[3]), schedulerAccountPrefix) &&
+		strings.HasPrefix(fmt.Sprint(args[4]), schedulerAccountMetaPrefix) &&
+		fmt.Sprint(args[5]) == schedulerAccountTombstoneSetKey
+}
+
+func TestSchedulerCacheUpdateLastUsedPipelinesFirstRoundInChunks(t *testing.T) {
+	ctx := context.Background()
+	cache, ok := newSchedulerCacheWithChunkSizes(
+		redis.NewClient(&redis.Options{Addr: miniredis.RunT(t).Addr()}),
+		128,
+		2,
+	).(*schedulerCache)
+	require.True(t, ok)
+	t.Cleanup(func() { _ = cache.rdb.Close() })
+	updates := make(map[int64]time.Time, 5)
+	for id := int64(2101); id <= 2105; id++ {
+		account := service.Account{ID: id, Platform: service.PlatformOpenAI, Type: service.AccountTypeAPIKey}
+		require.NoError(t, cache.SetAccount(ctx, &account))
+		updates[id] = time.Date(2026, 7, 23, 8, 0, int(id-2101), 0, time.UTC)
+	}
+	require.NoError(t, updateLastUsedCASScript.Load(ctx, cache.rdb).Err())
+	probe := &schedulerCachePipelineProbe{}
+	cache.rdb.AddHook(probe)
+
+	require.NoError(t, cache.UpdateLastUsed(ctx, updates))
+	probe.mu.Lock()
+	defer probe.mu.Unlock()
+	require.Equal(t, []int{2, 2, 1}, probe.evalPipelineSizes)
+	require.Zero(t, probe.directEvalCalls, "conflict-free items must not fall back to per-account scripts")
+}
+
+func TestSchedulerCacheUpdateLastUsedRetriesOnlyConflictedItem(t *testing.T) {
+	ctx := context.Background()
+	cache, mr := newSchedulerCacheUnitWithRedis(t)
+	secondary := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+	t.Cleanup(func() { _ = secondary.Close() })
+	base := time.Date(2026, 7, 23, 9, 0, 0, 0, time.UTC)
+	for _, id := range []int64{2201, 2202} {
+		account := service.Account{ID: id, Platform: service.PlatformOpenAI, Type: service.AccountTypeAPIKey, LastUsedAt: ptrTime(base)}
+		require.NoError(t, cache.SetAccount(ctx, &account))
+	}
+	require.NoError(t, updateLastUsedCASScript.Load(ctx, cache.rdb).Err())
+	probe := &schedulerCachePipelineProbe{}
+	probe.afterFirstMGet = func() {
+		id := strconv.FormatInt(2201, 10)
+		raw, err := secondary.Get(ctx, schedulerAccountKey(id)).Result()
+		require.NoError(t, err)
+		account, err := decodeCachedAccount(raw)
+		require.NoError(t, err)
+		account.LastUsedAt = ptrTime(base.Add(time.Minute))
+		full, meta, err := marshalSchedulerCacheAccount(*account)
+		require.NoError(t, err)
+		require.NoError(t, secondary.MSet(ctx,
+			schedulerAccountKey(id), full,
+			schedulerAccountMetaKey(id), meta,
+		).Err())
+	}
+	cache.rdb.AddHook(probe)
+	candidate := base.Add(2 * time.Minute)
+	require.NoError(t, cache.UpdateLastUsed(ctx, map[int64]time.Time{2201: candidate, 2202: candidate}))
+
+	probe.mu.Lock()
+	require.Equal(t, []int{2}, probe.evalPipelineSizes)
+	require.Equal(t, 1, probe.directEvalCalls, "only the CAS conflict should be retried individually")
+	probe.mu.Unlock()
+	for _, id := range []int64{2201, 2202} {
+		account, err := cache.GetAccount(ctx, id)
+		require.NoError(t, err)
+		require.NotNil(t, account.LastUsedAt)
+		require.True(t, account.LastUsedAt.Equal(candidate))
+	}
+}
+
+func TestSchedulerCacheSetAccountPreservesNewerProjectionAndLastUsed(t *testing.T) {
+	ctx := context.Background()
+	cache := newSchedulerCacheUnit(t)
+	base := time.Date(2026, 7, 23, 3, 0, 0, 0, time.UTC)
+	currentLastUsed := base.Add(3 * time.Minute)
+	current := service.Account{
+		ID:         117,
+		Name:       "newer projection",
+		Platform:   service.PlatformOpenAI,
+		Type:       service.AccountTypeAPIKey,
+		UpdatedAt:  base.Add(2 * time.Minute),
+		LastUsedAt: ptrTime(base.Add(time.Minute)),
+	}
+	require.NoError(t, cache.SetAccount(ctx, &current))
+	require.NoError(t, cache.UpdateLastUsed(ctx, map[int64]time.Time{current.ID: currentLastUsed}))
+
+	stale := current
+	stale.Name = "stale projection"
+	stale.UpdatedAt = base
+	stale.LastUsedAt = ptrTime(base.Add(2 * time.Minute))
+	require.NoError(t, cache.SetAccount(ctx, &stale))
+
+	assertSchedulerAccountProjection(t, ctx, cache, current.ID, "newer projection", current.UpdatedAt, currentLastUsed)
+}
+
+func TestSchedulerCacheRebuildPreservesNewerProjectionAndLastUsed(t *testing.T) {
+	ctx := context.Background()
+	cache := newSchedulerCacheUnit(t)
+	base := time.Date(2026, 7, 23, 4, 0, 0, 0, time.UTC)
+	currentLastUsed := base.Add(4 * time.Minute)
+	current := service.Account{
+		ID:         118,
+		Name:       "newer projection",
+		Platform:   service.PlatformOpenAI,
+		Type:       service.AccountTypeAPIKey,
+		UpdatedAt:  base.Add(3 * time.Minute),
+		LastUsedAt: ptrTime(base.Add(time.Minute)),
+	}
+	require.NoError(t, cache.SetAccount(ctx, &current))
+	require.NoError(t, cache.UpdateLastUsed(ctx, map[int64]time.Time{current.ID: currentLastUsed}))
+
+	stale := current
+	stale.Name = "stale rebuild"
+	stale.UpdatedAt = base
+	stale.LastUsedAt = nil
+	written, err := cache.writeAccounts(ctx, []service.Account{stale})
+	require.NoError(t, err)
+	require.Len(t, written, 1)
+	require.Equal(t, "newer projection", written[0].Name)
+	require.NotNil(t, written[0].LastUsedAt)
+	require.True(t, written[0].LastUsedAt.Equal(currentLastUsed))
+
+	assertSchedulerAccountProjection(t, ctx, cache, current.ID, "newer projection", current.UpdatedAt, currentLastUsed)
+}
+
+func TestSchedulerCacheProjectionCASRetriesWithoutRegressingLastUsed(t *testing.T) {
+	ctx := context.Background()
+	cache := newSchedulerCacheUnit(t)
+	base := time.Date(2026, 7, 23, 5, 0, 0, 0, time.UTC)
+	account := service.Account{
+		ID:         119,
+		Name:       "account",
+		Platform:   service.PlatformOpenAI,
+		Type:       service.AccountTypeAPIKey,
+		UpdatedAt:  base,
+		LastUsedAt: ptrTime(base),
+	}
+	require.NoError(t, cache.SetAccount(ctx, &account))
+
+	initial, err := cache.rdb.Get(ctx, schedulerAccountKey(strconv.FormatInt(account.ID, 10))).Result()
+	require.NoError(t, err)
+	staleWrite, err := prepareSchedulerAccountProjection(account, initial)
+	require.NoError(t, err)
+	generation, err := cache.rdb.Get(ctx, schedulerGenerationKey).Result()
+	require.NoError(t, err)
+
+	newerLastUsed := base.Add(time.Minute)
+	require.NoError(t, cache.UpdateLastUsed(ctx, map[int64]time.Time{account.ID: newerLastUsed}))
+	result, err := queueSchedulerAccountProjection(ctx, cache.rdb, staleWrite, "set", generation).Int64()
+	require.NoError(t, err)
+	require.EqualValues(t, -1, result, "the prepared stale write must lose its CAS")
+
+	written, ok, err := cache.retrySchedulerAccountProjection(ctx, account, generation)
+	require.NoError(t, err)
+	require.True(t, ok)
+	require.NotNil(t, written.LastUsedAt)
+	require.True(t, written.LastUsedAt.Equal(newerLastUsed))
+	assertSchedulerAccountProjection(t, ctx, cache, account.ID, "account", account.UpdatedAt, newerLastUsed)
+}
+
+func TestSchedulerCacheProjectionRetryDoesNotResurrectConcurrentDeletion(t *testing.T) {
+	ctx := context.Background()
+	cache := newSchedulerCacheUnit(t)
+	account := service.Account{
+		ID:        120,
+		Name:      "deleted",
+		Platform:  service.PlatformOpenAI,
+		Type:      service.AccountTypeAPIKey,
+		UpdatedAt: time.Date(2026, 7, 23, 6, 0, 0, 0, time.UTC),
+	}
+	require.NoError(t, cache.SetAccount(ctx, &account))
+
+	initial, err := cache.rdb.Get(ctx, schedulerAccountKey(strconv.FormatInt(account.ID, 10))).Result()
+	require.NoError(t, err)
+	staleWrite, err := prepareSchedulerAccountProjection(account, initial)
+	require.NoError(t, err)
+	generation, err := cache.rdb.Get(ctx, schedulerGenerationKey).Result()
+	require.NoError(t, err)
+	require.NoError(t, cache.DeleteAccount(ctx, account.ID))
+
+	result, err := queueSchedulerAccountProjection(ctx, cache.rdb, staleWrite, "set", generation).Int64()
+	require.NoError(t, err)
+	require.EqualValues(t, 0, result, "the tombstone must reject a write prepared before deletion")
+	_, ok, err := cache.retrySchedulerAccountProjection(ctx, account, generation)
+	require.NoError(t, err)
+	require.False(t, ok)
+
+	full, err := cache.GetAccount(ctx, account.ID)
+	require.NoError(t, err)
+	require.Nil(t, full)
+	_, err = cache.rdb.Get(ctx, schedulerAccountMetaKey(strconv.FormatInt(account.ID, 10))).Result()
+	require.ErrorIs(t, err, redis.Nil)
+}
+
+func TestSchedulerCacheUpdateLastUsedPreparedBeforeDeleteCannotRecreatePayloads(t *testing.T) {
+	ctx := context.Background()
+	cache := newSchedulerCacheUnit(t)
+	base := time.Date(2026, 7, 23, 6, 30, 0, 0, time.UTC)
+	account := service.Account{
+		ID:         124,
+		Platform:   service.PlatformOpenAI,
+		Type:       service.AccountTypeAPIKey,
+		LastUsedAt: ptrTime(base),
+	}
+	require.NoError(t, cache.SetAccount(ctx, &account))
+
+	id := strconv.FormatInt(account.ID, 10)
+	preparedPayload, err := cache.rdb.Get(ctx, schedulerAccountKey(id)).Result()
+	require.NoError(t, err)
+	generation, err := cache.rdb.Get(ctx, schedulerGenerationKey).Result()
+	require.NoError(t, err)
+	require.NoError(t, cache.DeleteAccount(ctx, account.ID))
+	require.NoError(t, cache.updateAccountLastUsedCAS(ctx, account.ID, base.Add(time.Minute), preparedPayload, generation))
+
+	exists, err := cache.rdb.Exists(ctx, schedulerAccountKey(id), schedulerAccountMetaKey(id)).Result()
+	require.NoError(t, err)
+	require.Zero(t, exists, "last_used CAS must honor a deletion that won after its initial read")
+	tombstoned, err := cache.rdb.SIsMember(ctx, schedulerAccountTombstoneSetKey, id).Result()
+	require.NoError(t, err)
+	require.True(t, tombstoned)
+}
+
+func TestSchedulerCacheGenerationFencesWritersAcrossRedisFlush(t *testing.T) {
+	ctx := context.Background()
+	cache, mr := newSchedulerCacheUnitWithRedis(t)
+	bucket := service.SchedulerBucket{GroupID: 125, Platform: service.PlatformOpenAI, Mode: service.SchedulerModeSingle}
+	oldAccount := service.Account{ID: 1251, Name: "old", Platform: service.PlatformOpenAI, Type: service.AccountTypeAPIKey}
+	oldToken, err := cache.CaptureBucketWriteToken(ctx, bucket)
+	require.NoError(t, err)
+	oldVersion, err := cache.allocateSnapshotVersion(ctx, bucket, oldToken)
+	require.NoError(t, err)
+	require.NoError(t, cache.SetAccount(ctx, &oldAccount))
+	oldPayload, err := cache.rdb.Get(ctx, schedulerAccountKey(strconv.FormatInt(oldAccount.ID, 10))).Result()
+	require.NoError(t, err)
+	oldProjection, err := prepareSchedulerAccountProjection(oldAccount, oldPayload)
+	require.NoError(t, err)
+
+	mr.FlushAll()
+	newToken, err := cache.CaptureBucketWriteToken(ctx, bucket)
+	require.NoError(t, err)
+	require.NotEqual(t, oldToken.Generation, newToken.Generation)
+	require.NotEqual(t, oldToken.Epoch, newToken.Epoch)
+	newAccount := service.Account{ID: 1252, Name: "new", Platform: service.PlatformOpenAI, Type: service.AccountTypeAPIKey}
+	require.NoError(t, cache.SetSnapshot(ctx, bucket, newToken, []service.Account{newAccount}))
+	newActive, err := cache.rdb.Get(ctx, schedulerBucketKey(schedulerActivePrefix, bucket)).Result()
+	require.NoError(t, err)
+
+	// Simulate an old writer that had already allocated and is resuming after the
+	// flush. Generation checks reject both projection and activation writes.
+	result, err := queueSchedulerAccountProjection(ctx, cache.rdb, oldProjection, "set", oldToken.Generation).Int64()
+	require.NoError(t, err)
+	require.EqualValues(t, -2, result)
+	require.NoError(t, cache.rdb.ZAdd(ctx, schedulerSnapshotKey(bucket, oldVersion), redis.Z{Score: 0, Member: oldAccount.ID}).Err())
+	err = cache.activateSnapshotVersion(ctx, bucket, oldToken, oldVersion)
+	require.ErrorIs(t, err, service.ErrSchedulerBucketWriteFenced)
+	activeAfterOldWriter, err := cache.rdb.Get(ctx, schedulerBucketKey(schedulerActivePrefix, bucket)).Result()
+	require.NoError(t, err)
+	require.Equal(t, newActive, activeAfterOldWriter)
+
+	oldCached, err := cache.GetAccount(ctx, oldAccount.ID)
+	require.NoError(t, err)
+	require.Nil(t, oldCached)
+	snapshot, hit, err := cache.GetSnapshot(ctx, bucket)
+	require.NoError(t, err)
+	require.True(t, hit)
+	require.Len(t, snapshot, 1)
+	require.Equal(t, newAccount.ID, snapshot[0].ID)
+}
+
+func TestSchedulerCacheEpochRoundTripsAtLuaSafeIntegerBoundary(t *testing.T) {
+	ctx := context.Background()
+	cache := newSchedulerCacheUnit(t)
+	bucket := service.SchedulerBucket{GroupID: 126, Platform: service.PlatformOpenAI, Mode: service.SchedulerModeForced}
+	require.NoError(t, cache.rdb.Set(ctx, schedulerGenerationKey, "exact-generation", 0).Err())
+	require.NoError(t, cache.rdb.Set(ctx, schedulerBucketKey(schedulerEpochPrefix, bucket), strconv.FormatInt(schedulerMaxSafeLuaInteger, 10), 0).Err())
+
+	token, err := cache.CaptureBucketWriteToken(ctx, bucket)
+	require.NoError(t, err)
+	require.Equal(t, schedulerMaxSafeLuaInteger, token.Epoch)
+	require.Equal(t, "exact-generation", token.Generation)
+	require.ErrorIs(t, cache.RetireBucket(ctx, bucket), service.ErrSchedulerBucketWriteFenced)
+}
+
+func TestSchedulerCacheAuthoritativeResetRotatesAndClearsNamespace(t *testing.T) {
+	ctx := context.Background()
+	cache := newSchedulerCacheUnit(t)
+	bucket := service.SchedulerBucket{GroupID: 127, Platform: service.PlatformOpenAI, Mode: service.SchedulerModeSingle}
+	live := service.Account{ID: 1271, Platform: service.PlatformOpenAI, Type: service.AccountTypeAPIKey}
+	deleted := service.Account{ID: 1272, Platform: service.PlatformOpenAI, Type: service.AccountTypeAPIKey}
+	require.NoError(t, cache.SetAccount(ctx, &live))
+	require.NoError(t, cache.DeleteAccount(ctx, deleted.ID))
+	oldToken, err := cache.CaptureBucketWriteToken(ctx, bucket)
+	require.NoError(t, err)
+	require.NoError(t, cache.SetSnapshot(ctx, bucket, oldToken, []service.Account{live}))
+	require.NoError(t, cache.SetOutboxWatermark(ctx, 99))
+
+	require.NoError(t, cache.ResetForAuthoritativeRebuild(ctx))
+	newGeneration, err := cache.rdb.Get(ctx, schedulerGenerationKey).Result()
+	require.NoError(t, err)
+	require.NotEqual(t, oldToken.Generation, newGeneration)
+	exists, err := cache.rdb.Exists(
+		ctx,
+		schedulerResetKey,
+		schedulerResetLeaseKey,
+		schedulerAccountKey(strconv.FormatInt(live.ID, 10)),
+		schedulerAccountMetaKey(strconv.FormatInt(live.ID, 10)),
+		schedulerAccountTombstoneSetKey,
+		schedulerBucketKey(schedulerActivePrefix, bucket),
+		schedulerOutboxWatermarkKey,
+	).Result()
+	require.NoError(t, err)
+	require.Zero(t, exists)
+	require.ErrorIs(t, cache.SetSnapshot(ctx, bucket, oldToken, []service.Account{live}), service.ErrSchedulerBucketWriteFenced)
+
+	// The restored PostgreSQL authority may legitimately contain an ID that was
+	// tombstoned by the newer database, so reset removes the old tombstone set.
+	require.NoError(t, cache.SetAccount(ctx, &deleted))
+	restored, err := cache.GetAccount(ctx, deleted.ID)
+	require.NoError(t, err)
+	require.NotNil(t, restored)
+}
+
+func TestSchedulerCacheResetBarrierFailsClosed(t *testing.T) {
+	ctx := context.Background()
+	cache := newSchedulerCacheUnit(t)
+	account := service.Account{ID: 1281, Platform: service.PlatformOpenAI, Type: service.AccountTypeAPIKey}
+	bucket := service.SchedulerBucket{GroupID: 128, Platform: service.PlatformOpenAI, Mode: service.SchedulerModeSingle}
+	rebuildToken, err := cache.CaptureBucketWriteToken(ctx, bucket)
+	require.NoError(t, err)
+	require.NoError(t, cache.SetSnapshot(ctx, bucket, rebuildToken, []service.Account{account}))
+	require.NoError(t, cache.SetOutboxWatermark(ctx, 12))
+	require.NoError(t, cache.rdb.Set(ctx, schedulerGenerationKey, "reset-generation", 0).Err())
+	require.NoError(t, cache.rdb.Set(ctx, schedulerResetKey, "owner", 0).Err())
+
+	err = cache.SetAccount(ctx, &account)
+	require.ErrorIs(t, err, service.ErrSchedulerCacheResetInProgress)
+	_, err = cache.CaptureBucketWriteToken(ctx, bucket)
+	require.ErrorIs(t, err, service.ErrSchedulerBucketWriteFenced)
+	_, err = cache.GetAccount(ctx, account.ID)
+	require.ErrorIs(t, err, service.ErrSchedulerCacheResetInProgress)
+	_, _, err = cache.GetSnapshot(ctx, bucket)
+	require.ErrorIs(t, err, service.ErrSchedulerCacheResetInProgress)
+	_, err = cache.ListBuckets(ctx)
+	require.ErrorIs(t, err, service.ErrSchedulerCacheResetInProgress)
+	_, err = cache.GetOutboxWatermark(ctx)
+	require.ErrorIs(t, err, service.ErrSchedulerCacheResetInProgress)
+}
+
+func TestSchedulerCacheInterruptedAuthoritativeResetCanBeTakenOver(t *testing.T) {
+	ctx := context.Background()
+	cache, mr := newSchedulerCacheUnitWithRedis(t)
+	account := service.Account{ID: 1291, Platform: service.PlatformOpenAI, Type: service.AccountTypeAPIKey}
+	require.NoError(t, cache.SetAccount(ctx, &account))
+
+	started, err := beginSchedulerAuthoritativeResetScript.Run(
+		ctx,
+		cache.rdb,
+		[]string{schedulerGenerationKey, schedulerResetKey, schedulerResetLeaseKey},
+		"interrupted-owner",
+		"interrupted-generation",
+		schedulerAuthoritativeResetLeaseTTL.Milliseconds(),
+	).Int64()
+	require.NoError(t, err)
+	require.EqualValues(t, 1, started)
+
+	mr.FastForward(schedulerAuthoritativeResetLeaseTTL + time.Second)
+	exists, err := cache.rdb.Exists(ctx, schedulerResetKey, schedulerResetLeaseKey).Result()
+	require.NoError(t, err)
+	require.EqualValues(t, 1, exists, "durable reset marker must outlive the expired owner lease")
+	_, err = cache.GetAccount(ctx, account.ID)
+	require.ErrorIs(t, err, service.ErrSchedulerCacheResetInProgress)
+
+	recovered, err := cache.RecoverInterruptedAuthoritativeReset(ctx)
+	require.NoError(t, err)
+	require.True(t, recovered)
+	exists, err = cache.rdb.Exists(ctx, schedulerResetKey, schedulerResetLeaseKey).Result()
+	require.NoError(t, err)
+	require.Zero(t, exists)
+	accountExists, err := cache.rdb.Exists(ctx, schedulerAccountKey(strconv.FormatInt(account.ID, 10))).Result()
+	require.NoError(t, err)
+	require.Zero(t, accountExists)
+}
+
+func TestSchedulerCacheAuthoritativeResetRecoveryIsNoopWithoutMarker(t *testing.T) {
+	ctx := context.Background()
+	cache := newSchedulerCacheUnit(t)
+	generation, err := cache.ensureSchedulerGeneration(ctx)
+	require.NoError(t, err)
+
+	recovered, err := cache.RecoverInterruptedAuthoritativeReset(ctx)
+	require.NoError(t, err)
+	require.False(t, recovered)
+	current, err := cache.rdb.Get(ctx, schedulerGenerationKey).Result()
+	require.NoError(t, err)
+	require.Equal(t, generation, current)
+}
+
+func TestSchedulerCacheAuthoritativeResetRecoveryWaitsForLiveOwner(t *testing.T) {
+	ctx := context.Background()
+	cache := newSchedulerCacheUnit(t)
+	started, err := beginSchedulerAuthoritativeResetScript.Run(
+		ctx,
+		cache.rdb,
+		[]string{schedulerGenerationKey, schedulerResetKey, schedulerResetLeaseKey},
+		"live-owner",
+		"live-generation",
+		schedulerAuthoritativeResetLeaseTTL.Milliseconds(),
+	).Int64()
+	require.NoError(t, err)
+	require.EqualValues(t, 1, started)
+
+	recovered, err := cache.RecoverInterruptedAuthoritativeReset(ctx)
+	require.ErrorIs(t, err, service.ErrSchedulerCacheResetInProgress)
+	require.False(t, recovered)
+}
+
+func TestSchedulerCacheResetTakeoverFencesOldOwnerDeleteChunks(t *testing.T) {
+	ctx := context.Background()
+	cache, mr := newSchedulerCacheUnitWithRedis(t)
+	leaseTTLMillis := schedulerAuthoritativeResetLeaseTTL.Milliseconds()
+	start := func(owner, generation string) int64 {
+		started, err := beginSchedulerAuthoritativeResetScript.Run(
+			ctx,
+			cache.rdb,
+			[]string{schedulerGenerationKey, schedulerResetKey, schedulerResetLeaseKey},
+			owner,
+			generation,
+			leaseTTLMillis,
+		).Int64()
+		require.NoError(t, err)
+		return started
+	}
+
+	require.EqualValues(t, 1, start("old-owner", "old-generation"))
+	mr.FastForward(schedulerAuthoritativeResetLeaseTTL + time.Second)
+	require.EqualValues(t, 1, start("new-owner", "new-generation"))
+
+	victimKey := schedulerAccountKey("1292")
+	require.NoError(t, cache.rdb.Set(ctx, victimKey, "new-owner-data", 0).Err())
+	err := cache.deleteAuthoritativeResetKeys(ctx, "old-owner", "old-generation", []string{victimKey})
+	require.ErrorContains(t, err, "ownership was lost")
+	value, err := cache.rdb.Get(ctx, victimKey).Result()
+	require.NoError(t, err)
+	require.Equal(t, "new-owner-data", value)
+
+	require.NoError(t, cache.deleteAuthoritativeResetKeys(ctx, "new-owner", "new-generation", []string{victimKey}))
+	finished, err := finishSchedulerAuthoritativeResetScript.Run(
+		ctx,
+		cache.rdb,
+		[]string{schedulerGenerationKey, schedulerResetKey, schedulerResetLeaseKey},
+		"new-owner",
+		"new-generation",
+	).Int64()
+	require.NoError(t, err)
+	require.EqualValues(t, 1, finished)
+}
+
+func TestSchedulerCacheUnencodableStaleProjectionDoesNotDeleteNewerValue(t *testing.T) {
+	ctx := context.Background()
+	cache := newSchedulerCacheUnit(t)
+	base := time.Date(2026, 7, 23, 7, 0, 0, 0, time.UTC)
+	current := service.Account{
+		ID:        121,
+		Name:      "newer",
+		Platform:  service.PlatformOpenAI,
+		Type:      service.AccountTypeAPIKey,
+		UpdatedAt: base.Add(time.Minute),
+	}
+	require.NoError(t, cache.SetAccount(ctx, &current))
+
+	invalidTime := time.Date(10000, time.January, 1, 0, 0, 0, 0, time.UTC)
+	staleInvalid := current
+	staleInvalid.Name = "stale invalid"
+	staleInvalid.UpdatedAt = base
+	staleInvalid.ExpiresAt = &invalidTime
+	require.NoError(t, cache.SetAccount(ctx, &staleInvalid))
+
+	cached, err := cache.GetAccount(ctx, current.ID)
+	require.NoError(t, err)
+	require.NotNil(t, cached)
+	require.Equal(t, "newer", cached.Name)
+}
+
+func assertSchedulerAccountProjection(
+	t *testing.T,
+	ctx context.Context,
+	cache *schedulerCache,
+	accountID int64,
+	wantName string,
+	wantUpdatedAt time.Time,
+	wantLastUsed time.Time,
+) {
+	t.Helper()
+	id := strconv.FormatInt(accountID, 10)
+	fullRaw, err := cache.rdb.Get(ctx, schedulerAccountKey(id)).Result()
+	require.NoError(t, err)
+	metaRaw, err := cache.rdb.Get(ctx, schedulerAccountMetaKey(id)).Result()
+	require.NoError(t, err)
+	full, err := decodeCachedAccount(fullRaw)
+	require.NoError(t, err)
+	meta, err := decodeCachedAccount(metaRaw)
+	require.NoError(t, err)
+	require.Equal(t, wantName, full.Name)
+	require.True(t, full.UpdatedAt.Equal(wantUpdatedAt))
+	require.NotNil(t, full.LastUsedAt)
+	require.NotNil(t, meta.LastUsedAt)
+	require.True(t, full.LastUsedAt.Equal(wantLastUsed))
+	require.True(t, meta.LastUsedAt.Equal(wantLastUsed))
+}
+
+func TestSchedulerCacheOutboxWatermarkNeverRegresses(t *testing.T) {
+	ctx := context.Background()
+	cache := newSchedulerCacheUnit(t)
+
+	require.NoError(t, cache.SetOutboxWatermark(ctx, 300))
+	require.NoError(t, cache.SetOutboxWatermark(ctx, 200))
+	watermark, err := cache.GetOutboxWatermark(ctx)
+	require.NoError(t, err)
+	require.Equal(t, int64(300), watermark)
+}
+
+func TestSchedulerCacheBucketRebuildLeaseStaleOwnerCannotDeleteSuccessor(t *testing.T) {
+	ctx := context.Background()
+	cache, mr := newSchedulerCacheUnitWithRedis(t)
+	bucket := service.SchedulerBucket{GroupID: 25, Platform: service.PlatformOpenAI, Mode: service.SchedulerModeSingle}
+	token, err := cache.CaptureBucketWriteToken(ctx, bucket)
+	require.NoError(t, err)
+
+	first, acquired, err := cache.TryAcquireBucketRebuildLease(ctx, bucket, token, time.Minute)
+	require.NoError(t, err)
+	require.True(t, acquired)
+	require.True(t, first.ValidFor(bucket))
+	mr.FastForward(time.Minute + time.Second)
+
+	second, acquired, err := cache.TryAcquireBucketRebuildLease(ctx, bucket, token, time.Minute)
+	require.NoError(t, err)
+	require.True(t, acquired)
+	require.NotEqual(t, first.OwnerToken, second.OwnerToken)
+	require.ErrorIs(t, cache.ReleaseBucketRebuildLease(ctx, first), service.ErrSchedulerBucketRebuildLeaseLost)
+	owner, err := cache.rdb.Get(ctx, schedulerBucketKey(schedulerLockPrefix, bucket)).Result()
+	require.NoError(t, err)
+	require.Equal(t, second.OwnerToken, owner)
+	require.NoError(t, cache.ReleaseBucketRebuildLease(ctx, second))
+}
+
+func TestSchedulerCacheBucketRebuildLeaseRejectsResetAndOldGeneration(t *testing.T) {
+	ctx := context.Background()
+	cache := newSchedulerCacheUnit(t)
+	bucket := service.SchedulerBucket{GroupID: 26, Platform: service.PlatformOpenAI, Mode: service.SchedulerModeSingle}
+	token, err := cache.CaptureBucketWriteToken(ctx, bucket)
+	require.NoError(t, err)
+
+	require.NoError(t, cache.rdb.Set(ctx, schedulerResetKey, "reset-owner", 0).Err())
+	_, acquired, err := cache.TryAcquireBucketRebuildLease(ctx, bucket, token, time.Minute)
+	require.ErrorIs(t, err, service.ErrSchedulerBucketWriteFenced)
+	require.False(t, acquired)
+	require.NoError(t, cache.rdb.Del(ctx, schedulerResetKey).Err())
+
+	require.NoError(t, cache.rdb.Set(ctx, schedulerGenerationKey, "next-generation", 0).Err())
+	_, acquired, err = cache.TryAcquireBucketRebuildLease(ctx, bucket, token, time.Minute)
+	require.ErrorIs(t, err, service.ErrSchedulerBucketWriteFenced)
+	require.False(t, acquired)
+	lockExists, err := cache.rdb.Exists(ctx, schedulerBucketKey(schedulerLockPrefix, bucket)).Result()
+	require.NoError(t, err)
+	require.Zero(t, lockExists)
+}
+
+func TestSchedulerCacheSnapshotStagingExpiresUntilActivation(t *testing.T) {
+	ctx := context.Background()
+	cache := newSchedulerCacheUnit(t)
+	bucket := service.SchedulerBucket{GroupID: 27, Platform: service.PlatformOpenAI, Mode: service.SchedulerModeSingle}
+	token, err := cache.CaptureBucketWriteToken(ctx, bucket)
+	require.NoError(t, err)
+	version, err := cache.allocateSnapshotVersion(ctx, bucket, token)
+	require.NoError(t, err)
+	require.NoError(t, cache.writeSnapshotAccountIDs(ctx, bucket, version, []int64{271, 272}))
+
+	snapshotKey := schedulerSnapshotKey(bucket, version)
+	ttl, err := cache.rdb.TTL(ctx, snapshotKey).Result()
+	require.NoError(t, err)
+	require.Greater(t, ttl, time.Duration(0))
+	require.LessOrEqual(t, ttl, schedulerSnapshotStagingTTL)
+	require.NoError(t, cache.activateSnapshotVersion(ctx, bucket, token, version))
+	ttl, err = cache.rdb.TTL(ctx, snapshotKey).Result()
+	require.NoError(t, err)
+	require.Equal(t, time.Duration(-1), ttl)
+}
+
+func TestSchedulerCacheSnapshotStagingWriteIsGenerationFenced(t *testing.T) {
+	ctx := context.Background()
+	cache := newSchedulerCacheUnit(t)
+	bucket := service.SchedulerBucket{GroupID: 28, Platform: service.PlatformOpenAI, Mode: service.SchedulerModeSingle}
+	token, err := cache.CaptureBucketWriteToken(ctx, bucket)
+	require.NoError(t, err)
+	version, err := cache.allocateSnapshotVersion(ctx, bucket, token)
+	require.NoError(t, err)
+	require.NoError(t, cache.rdb.Set(ctx, schedulerResetKey, "reset-owner", 0).Err())
+
+	err = cache.writeSnapshotAccountIDs(ctx, bucket, version, []int64{281})
+	require.ErrorIs(t, err, service.ErrSchedulerBucketWriteFenced)
+	exists, err := cache.rdb.Exists(ctx, schedulerSnapshotKey(bucket, version)).Result()
+	require.NoError(t, err)
+	require.Zero(t, exists)
 }
 
 func TestSchedulerCacheSnapshotAccountIDReusePreservesPayloadAndMembers(t *testing.T) {
@@ -214,6 +1028,38 @@ func TestSchedulerCacheSetSnapshotByAccountIDsDoesNotResurrectDeletedAccount(t *
 	require.NoError(t, err)
 	require.False(t, hit, "元数据缺失时必须安全回源，而不是返回残缺快照")
 	require.Nil(t, snapshot)
+}
+
+func TestSchedulerCacheSnapshotBuildOmitsTombstonedAccountFromMembers(t *testing.T) {
+	ctx := context.Background()
+	cache := newSchedulerCacheUnit(t)
+	deleted := service.Account{ID: 903, Platform: service.PlatformOpenAI, Type: service.AccountTypeOAuth}
+	live := service.Account{ID: 904, Platform: service.PlatformOpenAI, Type: service.AccountTypeOAuth}
+	require.NoError(t, cache.DeleteAccount(ctx, deleted.ID))
+
+	bucket := service.SchedulerBucket{GroupID: 21, Platform: service.PlatformOpenAI, Mode: service.SchedulerModeSingle}
+	token, err := cache.CaptureBucketWriteToken(ctx, bucket)
+	require.NoError(t, err)
+	accountIDs, err := cache.SetSnapshotAndReturnAccountIDs(ctx, bucket, token, []service.Account{deleted, live})
+	require.NoError(t, err)
+	require.Equal(t, []int64{live.ID}, accountIDs)
+
+	activeVersion, err := cache.rdb.Get(ctx, schedulerBucketKey(schedulerActivePrefix, bucket)).Result()
+	require.NoError(t, err)
+	members, err := cache.rdb.ZRange(ctx, schedulerSnapshotKey(bucket, activeVersion), 0, -1).Result()
+	require.NoError(t, err)
+	require.Equal(t, []string{strconv.FormatInt(live.ID, 10)}, members)
+
+	snapshot, hit, err := cache.GetSnapshot(ctx, bucket)
+	require.NoError(t, err)
+	require.True(t, hit)
+	require.Len(t, snapshot, 1)
+	require.Equal(t, live.ID, snapshot[0].ID)
+
+	deletedID := strconv.FormatInt(deleted.ID, 10)
+	exists, err := cache.rdb.Exists(ctx, schedulerAccountKey(deletedID), schedulerAccountMetaKey(deletedID)).Result()
+	require.NoError(t, err)
+	require.Zero(t, exists)
 }
 
 func TestMarshalSchedulerCacheAccountKeepsEncodingJSONWireFormat(t *testing.T) {

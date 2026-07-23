@@ -38,11 +38,13 @@ type QueueLockResult struct {
 // UserMessageQueueService 用户消息串行队列服务
 // 对真实用户消息实施账号级串行化 + RPM 自适应延迟
 type UserMessageQueueService struct {
-	cache    UserMsgQueueCache
-	rpmCache RPMCache
-	cfg      *config.UserMessageQueueConfig
-	stopCh   chan struct{} // graceful shutdown
-	stopOnce sync.Once     // 确保 Stop() 并发安全
+	cache     UserMsgQueueCache
+	rpmCache  RPMCache
+	cfg       *config.UserMessageQueueConfig
+	stopCh    chan struct{} // graceful shutdown
+	stopOnce  sync.Once     // 确保 Stop() 并发安全
+	startOnce sync.Once
+	workerWG  sync.WaitGroup
 }
 
 // NewUserMessageQueueService 创建用户消息串行队列服务
@@ -267,26 +269,52 @@ func (s *UserMessageQueueService) StartCleanupWorker(interval time.Duration) {
 		}
 	}
 
-	go func() {
-		ticker := time.NewTicker(interval)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-s.stopCh:
-				return
-			case <-ticker.C:
-				runCleanup()
+	s.startOnce.Do(func() {
+		s.workerWG.Add(1)
+		go func() {
+			defer s.workerWG.Done()
+			ticker := time.NewTicker(interval)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-s.stopCh:
+					return
+				case <-ticker.C:
+					runCleanup()
+				}
 			}
-		}
-	}()
+		}()
+	})
 }
 
 // Stop 停止后台 cleanup worker
 func (s *UserMessageQueueService) Stop() {
+	_ = s.StopContext(context.Background())
+}
+
+// StopContext stops and joins the cleanup worker, bounded by ctx.
+func (s *UserMessageQueueService) StopContext(ctx context.Context) error {
 	if s != nil && s.stopCh != nil {
 		s.stopOnce.Do(func() {
 			close(s.stopCh)
 		})
+	}
+	if s == nil {
+		return nil
+	}
+	done := make(chan struct{})
+	go func() {
+		s.workerWG.Wait()
+		close(done)
+	}()
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	select {
+	case <-done:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
 	}
 }
 

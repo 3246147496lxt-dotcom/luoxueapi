@@ -74,8 +74,7 @@ func (c apiKeyAuthCacheConfig) jitterTTL(ttl time.Duration) time.Duration {
 	return time.Duration(float64(ttl) * factor)
 }
 
-func (s *APIKeyService) initAuthCache(cfg *config.Config) {
-	s.authCfg = newAPIKeyAuthCacheConfig(cfg)
+func (s *APIKeyService) initAuthCache() {
 	if !s.authCfg.l1Enabled() {
 		return
 	}
@@ -93,14 +92,68 @@ func (s *APIKeyService) initAuthCache(cfg *config.Config) {
 // StartAuthCacheInvalidationSubscriber starts the Pub/Sub subscriber for L1 cache invalidation.
 // This should be called after the service is fully initialized.
 func (s *APIKeyService) StartAuthCacheInvalidationSubscriber(ctx context.Context) {
+	if s == nil {
+		return
+	}
+	s.authCacheStartOnce.Do(s.initAuthCache)
 	if s.cache == nil || s.authCacheL1 == nil {
 		return
 	}
-	if err := s.cache.SubscribeAuthCacheInvalidation(ctx, func(cacheKey string) {
-		s.authCacheL1.Del(cacheKey)
-	}); err != nil {
-		// Log but don't fail - L1 cache will still work, just without cross-instance invalidation
-		slog.Warn("failed to start auth cache invalidation subscriber", "error", err)
+	if ctx != nil {
+		select {
+		case <-ctx.Done():
+			return
+		default:
+		}
+	}
+	s.authSubscriberMu.Lock()
+	if s.authSubscriberCancel != nil {
+		s.authSubscriberMu.Unlock()
+		return
+	}
+	subscriberCtx, cancel := context.WithCancel(context.Background())
+	s.authSubscriberCancel = cancel
+	s.authSubscriberWG.Add(1)
+	s.authSubscriberMu.Unlock()
+
+	go func() {
+		defer s.authSubscriberWG.Done()
+		if err := s.cache.SubscribeAuthCacheInvalidation(subscriberCtx, func(cacheKey string) {
+			s.authCacheL1.Del(cacheKey)
+		}); err != nil && subscriberCtx.Err() == nil {
+			// Log but don't fail - L1 cache will still work, just without cross-instance invalidation.
+			slog.Warn("failed to start auth cache invalidation subscriber", "error", err)
+		}
+	}()
+}
+
+func (s *APIKeyService) StopAuthCacheInvalidationSubscriber(ctx context.Context) error {
+	if s == nil {
+		return nil
+	}
+	s.authSubscriberMu.Lock()
+	cancel := s.authSubscriberCancel
+	s.authSubscriberCancel = nil
+	s.authSubscriberMu.Unlock()
+	if cancel != nil {
+		cancel()
+	}
+	done := make(chan struct{})
+	go func() {
+		s.authSubscriberWG.Wait()
+		close(done)
+	}()
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	select {
+	case <-done:
+		if s.authCacheL1 != nil {
+			s.authCacheCloseOnce.Do(func() { s.authCacheL1.Close() })
+		}
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
 	}
 }
 

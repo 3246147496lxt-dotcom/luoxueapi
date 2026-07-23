@@ -21,8 +21,8 @@ type ProxyExpirySuite struct {
 }
 
 func (s *ProxyExpirySuite) SetupTest() {
-	s.ctx = context.Background()
 	s.tx = testEntTx(s.T())
+	s.ctx = dbent.NewTxContext(context.Background(), s.tx)
 	s.repo = newProxyRepositoryWithSQL(s.tx.Client(), s.tx)
 }
 func TestProxyExpirySuite(t *testing.T) { suite.Run(t, new(ProxyExpirySuite)) }
@@ -77,31 +77,45 @@ func (s *ProxyExpirySuite) TestSweep_EnqueuesChangedAccountIDsWithoutFullRebuild
 	secondProxyID := s.mkProxy("p-bulk-second", service.FallbackModeDirect, &past, nil)
 	firstAccountID := s.mkAccountWithProxy(firstProxyID)
 	secondAccountID := s.mkAccountWithProxy(secondProxyID)
+	var outboxBaseline int64
+	err := scanSingleRow(s.ctx, s.tx, `SELECT COALESCE(MAX(id), 0) FROM scheduler_outbox`, nil, &outboxBaseline)
+	s.Require().NoError(err)
 
 	changed, err := s.repo.SweepExpiredProxies(s.ctx, time.Now())
 	s.Require().NoError(err)
 	s.Require().EqualValues(2, changed)
 
-	var payloadRaw []byte
-	err = scanSingleRow(s.ctx, s.tx, `
+	rows, err := s.tx.QueryContext(s.ctx, `
 		SELECT payload
 		FROM scheduler_outbox
-		WHERE event_type=$1
-		ORDER BY id DESC
-		LIMIT 1`, []any{service.SchedulerOutboxEventAccountBulkChanged}, &payloadRaw)
+		WHERE event_type=$1 AND id > $2
+		ORDER BY id`, service.SchedulerOutboxEventAccountBulkChanged, outboxBaseline)
 	s.Require().NoError(err)
-
-	var payload struct {
-		AccountIDs []int64 `json:"account_ids"`
+	defer func() { _ = rows.Close() }()
+	var (
+		eventCount         int
+		enqueuedAccountIDs []int64
+	)
+	for rows.Next() {
+		var payloadRaw []byte
+		s.Require().NoError(rows.Scan(&payloadRaw))
+		var payload struct {
+			AccountIDs []int64 `json:"account_ids"`
+		}
+		s.Require().NoError(json.Unmarshal(payloadRaw, &payload))
+		s.Require().Len(payload.AccountIDs, 1)
+		eventCount++
+		enqueuedAccountIDs = append(enqueuedAccountIDs, payload.AccountIDs...)
 	}
-	s.Require().NoError(json.Unmarshal(payloadRaw, &payload))
-	s.Require().Equal([]int64{firstAccountID, secondAccountID}, payload.AccountIDs)
+	s.Require().NoError(rows.Err())
+	s.Require().Equal(2, eventCount)
+	s.Require().Equal([]int64{firstAccountID, secondAccountID}, sortedUniqueAccountIDs(enqueuedAccountIDs))
 
 	var fullRebuildCount int
 	err = scanSingleRow(s.ctx, s.tx, `
 		SELECT COUNT(*)
 		FROM scheduler_outbox
-		WHERE event_type=$1`, []any{service.SchedulerOutboxEventFullRebuild}, &fullRebuildCount)
+		WHERE event_type=$1 AND id > $2`, []any{service.SchedulerOutboxEventFullRebuild, outboxBaseline}, &fullRebuildCount)
 	s.Require().NoError(err)
 	s.Require().Zero(fullRebuildCount)
 }

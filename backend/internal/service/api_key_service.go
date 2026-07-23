@@ -216,6 +216,11 @@ type APIKeyService struct {
 	authGroup             singleflight.Group
 	lastUsedTouchL1       sync.Map // keyID -> nextAllowedAt(time.Time)
 	lastUsedTouchSF       singleflight.Group
+	authSubscriberMu      sync.Mutex
+	authSubscriberCancel  context.CancelFunc
+	authSubscriberWG      sync.WaitGroup
+	authCacheStartOnce    sync.Once
+	authCacheCloseOnce    sync.Once
 }
 
 // NewAPIKeyService 创建API Key服务实例
@@ -236,8 +241,8 @@ func NewAPIKeyService(
 		userGroupRateRepo: userGroupRateRepo,
 		cache:             cache,
 		cfg:               cfg,
+		authCfg:           newAPIKeyAuthCacheConfig(cfg),
 	}
-	svc.initAuthCache(cfg)
 	return svc
 }
 

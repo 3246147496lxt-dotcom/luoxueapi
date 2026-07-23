@@ -389,7 +389,7 @@ type OpenAIGatewayService struct {
 	cache                 GatewayCache
 	cfg                   *config.Config
 	codexDetector         CodexClientRestrictionDetector
-	schedulerSnapshot     *SchedulerSnapshotService
+	schedulerSnapshot     GatewayScheduler
 	concurrencyService    *ConcurrencyService
 	billingService        *BillingService
 	rateLimitService      *RateLimitService
@@ -446,7 +446,7 @@ func NewOpenAIGatewayService(
 	userGroupRateRepo UserGroupRateRepository,
 	cache GatewayCache,
 	cfg *config.Config,
-	schedulerSnapshot *SchedulerSnapshotService,
+	schedulerSnapshot GatewayScheduler,
 	concurrencyService *ConcurrencyService,
 	billingService *BillingService,
 	rateLimitService *RateLimitService,

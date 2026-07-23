@@ -224,7 +224,7 @@ func TestEmailOAuthStartPreservesPromoCodeInPendingSession(t *testing.T) {
 	require.Equal(t, http.StatusFound, callbackRecorder.Code)
 	session, err := client.PendingAuthSession.Query().Only(ctx)
 	require.NoError(t, err)
-	require.Equal(t, "WELCOME2024", pendingOAuthPromoCode(session))
+	require.Equal(t, "WELCOME2024", pendingOAuthPromoCode(&service.PendingAuthSession{LocalFlowState: session.LocalFlowState}))
 }
 
 func TestCompleteEmailOAuthRegistrationUsesAffiliateCodeFromPendingSession(t *testing.T) {

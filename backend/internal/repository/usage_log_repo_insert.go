@@ -174,12 +174,6 @@ func (r *usageLogRepository) CreateBestEffort(ctx context.Context, log *service.
 		return err
 	}
 
-	r.ensureBestEffortBatcher()
-	if r.bestEffortBatchCh == nil {
-		_, err := r.createSingle(ctx, r.sql, log)
-		return err
-	}
-
 	req := usageLogBestEffortRequest{
 		prepared: prepareUsageLogInsert(log),
 		apiKeyID: log.APIKeyID,
@@ -194,10 +188,8 @@ func (r *usageLogRepository) CreateBestEffort(ctx context.Context, log *service.
 	// 队列满时阻塞等待而非立即丢弃：批处理器持续排空队列，短暂等待即可入队。
 	// 立即丢弃会造成“已扣费但无 usage_log”的永久数据缺口（issue #3656）；
 	// 阻塞上限由调用方 ctx 期限约束，超时后由上层同步兜底。
-	select {
-	case r.bestEffortBatchCh <- req:
-	case <-ctx.Done():
-		return service.MarkUsageLogCreateDropped(ctx.Err())
+	if err := r.enqueueBestEffortBatchRequest(ctx, req); err != nil {
+		return service.MarkUsageLogCreateDropped(err)
 	}
 
 	select {
@@ -307,11 +299,6 @@ func (r *usageLogRepository) createBatched(ctx context.Context, log *service.Usa
 	if r.db == nil {
 		return r.createSingle(ctx, r.sql, log)
 	}
-	r.ensureCreateBatcher()
-	if r.createBatchCh == nil {
-		return r.createSingle(ctx, r.sql, log)
-	}
-
 	req := usageLogCreateRequest{
 		log:      log,
 		prepared: prepareUsageLogInsert(log),
@@ -321,10 +308,8 @@ func (r *usageLogRepository) createBatched(ctx context.Context, log *service.Usa
 
 	// 队列满时阻塞等待而非立即报错：本路径是 best-effort 丢弃后的最后兜底，
 	// 立即失败会让日志永久丢失；阻塞上限由调用方 ctx 期限约束。
-	select {
-	case r.createBatchCh <- req:
-	case <-ctx.Done():
-		return false, service.MarkUsageLogCreateNotPersisted(ctx.Err())
+	if err := r.enqueueCreateBatchRequest(ctx, req); err != nil {
+		return false, service.MarkUsageLogCreateNotPersisted(err)
 	}
 
 	select {
@@ -345,35 +330,9 @@ func (r *usageLogRepository) createBatched(ctx context.Context, log *service.Usa
 	}
 }
 
-func (r *usageLogRepository) ensureCreateBatcher() {
-	if r == nil || r.db == nil {
-		return
-	}
-	// nil 检查必须在 Once 内部：在外层做无同步快路径读会与 Once 内的写构成数据竞争。
-	r.createBatchOnce.Do(func() {
-		if r.createBatchCh == nil {
-			r.createBatchCh = make(chan usageLogCreateRequest, usageLogCreateBatchQueueCap)
-			go r.runCreateBatcher(r.db)
-		}
-	})
-}
-
-func (r *usageLogRepository) ensureBestEffortBatcher() {
-	if r == nil || r.db == nil {
-		return
-	}
-	// 同 ensureCreateBatcher：nil 检查放在 Once 内部以避免数据竞争。
-	r.bestEffortBatchOnce.Do(func() {
-		if r.bestEffortBatchCh == nil {
-			r.bestEffortBatchCh = make(chan usageLogBestEffortRequest, usageLogBestEffortBatchQueueCap)
-			go r.runBestEffortBatcher(r.db)
-		}
-	})
-}
-
-func (r *usageLogRepository) runCreateBatcher(db *sql.DB) {
+func (r *usageLogRepository) runCreateBatcher(db *sql.DB, batchCh <-chan usageLogCreateRequest) {
 	for {
-		first, ok := <-r.createBatchCh
+		first, ok := <-batchCh
 		if !ok {
 			return
 		}
@@ -385,7 +344,7 @@ func (r *usageLogRepository) runCreateBatcher(db *sql.DB) {
 	batchLoop:
 		for len(batch) < usageLogCreateBatchMaxSize {
 			select {
-			case req, ok := <-r.createBatchCh:
+			case req, ok := <-batchCh:
 				if !ok {
 					break batchLoop
 				}
@@ -405,9 +364,9 @@ func (r *usageLogRepository) runCreateBatcher(db *sql.DB) {
 	}
 }
 
-func (r *usageLogRepository) runBestEffortBatcher(db *sql.DB) {
+func (r *usageLogRepository) runBestEffortBatcher(db *sql.DB, batchCh <-chan usageLogBestEffortRequest) {
 	for {
-		first, ok := <-r.bestEffortBatchCh
+		first, ok := <-batchCh
 		if !ok {
 			return
 		}
@@ -419,7 +378,7 @@ func (r *usageLogRepository) runBestEffortBatcher(db *sql.DB) {
 	bestEffortLoop:
 		for len(batch) < usageLogBestEffortBatchMaxSize {
 			select {
-			case req, ok := <-r.bestEffortBatchCh:
+			case req, ok := <-batchCh:
 				if !ok {
 					break bestEffortLoop
 				}

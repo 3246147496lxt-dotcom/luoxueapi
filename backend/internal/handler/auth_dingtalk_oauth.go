@@ -10,8 +10,6 @@ import (
 	"strings"
 	"time"
 
-	dbent "github.com/Wei-Shaw/sub2api/ent"
-	dbuser "github.com/Wei-Shaw/sub2api/ent/user"
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/oauth"
@@ -173,14 +171,9 @@ func (h *AuthHandler) DingTalkOAuthStart(c *gin.Context) {
 // ─── findDingTalkCompatEmailUser ───────────────────────────────────────────
 
 // findDingTalkCompatEmailUser 通过真实邮箱查找可与 DingTalk 账号兼容绑定的现有用户。
-func (h *AuthHandler) findDingTalkCompatEmailUser(ctx context.Context, email string) (*dbent.User, error) {
+func (h *AuthHandler) findDingTalkCompatEmailUser(ctx context.Context, email string) (*service.AuthIdentityUser, error) {
 	if !dingTalkLevelThreeEnabled {
 		return nil, nil
-	}
-
-	client := h.entClient()
-	if client == nil {
-		return nil, infraerrors.ServiceUnavailable("PENDING_AUTH_NOT_READY", "pending auth service is not ready")
 	}
 
 	email = strings.TrimSpace(strings.ToLower(email))
@@ -192,21 +185,14 @@ func (h *AuthHandler) findDingTalkCompatEmailUser(ctx context.Context, email str
 		return nil, nil
 	}
 
-	userEntities, err := client.User.Query().
-		Where(userNormalizedEmailPredicate(email)).
-		Order(dbent.Asc(dbuser.FieldID)).
-		All(ctx)
+	userEntity, err := h.findPendingUserByNormalizedEmail(ctx, email)
 	if err != nil {
+		if errors.Is(err, service.ErrUserNotFound) {
+			return nil, nil
+		}
 		return nil, infraerrors.InternalServer("COMPAT_EMAIL_LOOKUP_FAILED", "failed to look up compat email user").WithCause(err)
 	}
-	switch len(userEntities) {
-	case 0:
-		return nil, nil
-	case 1:
-		return userEntities[0], nil
-	default:
-		return nil, infraerrors.Conflict("USER_EMAIL_CONFLICT", "normalized email matched multiple users")
-	}
+	return userEntity, nil
 }
 
 // ─── createDingTalkOAuthChoicePendingSession ───────────────────────────────
@@ -223,7 +209,7 @@ func (h *AuthHandler) createDingTalkOAuthChoicePendingSession(
 	browserSessionKey string,
 	upstreamClaims map[string]any,
 	compatEmail string,
-	compatEmailUser *dbent.User,
+	compatEmailUser *service.AuthIdentityUser,
 	forceEmailOnSignup bool,
 	signupBlocked bool,
 ) error {
@@ -513,7 +499,7 @@ func (h *AuthHandler) DingTalkOAuthCallback(c *gin.Context) {
 	}
 
 	// ─── L3/L4 有邮箱：统一 choice pending session ───
-	var compatEmailUser *dbent.User
+	var compatEmailUser *service.AuthIdentityUser
 	if dingTalkLevelThreeEnabled && staff.Email != "" {
 		compatEmailUser, _ = h.findDingTalkCompatEmailUser(c.Request.Context(), staff.Email)
 	}
@@ -764,12 +750,7 @@ func (h *AuthHandler) CompleteDingTalkOAuthRegistration(c *gin.Context) {
 		return
 	}
 
-	client := h.entClient()
-	if client == nil {
-		response.ErrorFrom(c, infraerrors.ServiceUnavailable("PENDING_AUTH_NOT_READY", "pending auth service is not ready"))
-		return
-	}
-	if err := ensurePendingOAuthRegistrationIdentityAvailable(c.Request.Context(), client, session); err != nil {
+	if err := h.ensurePendingRegistrationIdentityAvailable(c.Request.Context(), session); err != nil {
 		respondPendingOAuthBindingApplyError(c, err)
 		return
 	}
@@ -794,7 +775,7 @@ func (h *AuthHandler) CompleteDingTalkOAuthRegistration(c *gin.Context) {
 		response.ErrorFrom(c, err)
 		return
 	}
-	if err := applyPendingOAuthAdoptionAndConsumeSession(c.Request.Context(), client, h.authService, h.userService, session, decision, user.ID); err != nil {
+	if err := h.applyPendingIdentityBindingAndConsume(c.Request.Context(), session, decision, user.ID); err != nil {
 		respondPendingOAuthBindingApplyError(c, err)
 		return
 	}
@@ -957,17 +938,17 @@ func (h *AuthHandler) syncDingTalkIdentityFromClaims(ctx context.Context, cfg co
 
 // maybeSyncDingTalkAfterRegistration 在通用 OAuth 注册路径完成后调用。
 // 同步 4 个字段：users.username（首次） + dingtalk_name/email/department（每次）。
-func (h *AuthHandler) maybeSyncDingTalkAfterRegistration(ctx context.Context, session *dbent.PendingAuthSession, userID int64) {
+func (h *AuthHandler) maybeSyncDingTalkAfterRegistration(ctx context.Context, session *service.PendingAuthSession, userID int64) {
 	h.dispatchDingTalkPendingSync(ctx, session, userID, true)
 }
 
 // maybeSyncDingTalkAfterLogin 在通用 OAuth 登录/绑定路径完成后调用。
 // 仅刷新 3 个属性（dingtalk_name/email/department），不动 users.username。
-func (h *AuthHandler) maybeSyncDingTalkAfterLogin(ctx context.Context, session *dbent.PendingAuthSession, userID int64) {
+func (h *AuthHandler) maybeSyncDingTalkAfterLogin(ctx context.Context, session *service.PendingAuthSession, userID int64) {
 	h.dispatchDingTalkPendingSync(ctx, session, userID, false)
 }
 
-func (h *AuthHandler) dispatchDingTalkPendingSync(ctx context.Context, session *dbent.PendingAuthSession, userID int64, syncUsername bool) {
+func (h *AuthHandler) dispatchDingTalkPendingSync(ctx context.Context, session *service.PendingAuthSession, userID int64, syncUsername bool) {
 	if session == nil || userID <= 0 {
 		return
 	}

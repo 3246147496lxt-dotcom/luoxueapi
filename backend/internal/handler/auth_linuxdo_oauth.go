@@ -15,8 +15,6 @@ import (
 	"time"
 	"unicode/utf8"
 
-	dbent "github.com/Wei-Shaw/sub2api/ent"
-	dbuser "github.com/Wei-Shaw/sub2api/ent/user"
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/oauth"
@@ -324,7 +322,7 @@ func (h *AuthHandler) LinuxDoOAuthCallback(c *gin.Context) {
 		redirectOAuthError(c, frontendCallback, "session_error", infraerrors.Reason(err), infraerrors.Message(err))
 		return
 	}
-	emailVerificationRequired := h != nil && h.authService != nil && h.authService.IsEmailVerifyEnabled(c.Request.Context())
+	emailVerificationRequired := h != nil && h.signupCases() != nil && h.signupCases().IsEmailVerifyEnabled(c.Request.Context())
 	forceEmailOnSignup := h.isForceEmailOnThirdPartySignup(c.Request.Context())
 	if compatEmailUser == nil && !emailVerificationRequired && !forceEmailOnSignup {
 		if err := h.ensureBackendModeAllowsNewUserLogin(c.Request.Context()); err != nil {
@@ -341,12 +339,9 @@ func (h *AuthHandler) LinuxDoOAuthCallback(c *gin.Context) {
 			"linuxdo",
 		)
 		if err == nil {
-			if err := applyPendingOAuthBinding(
+			if err := h.applyPendingIdentityBinding(
 				c.Request.Context(),
-				h.entClient(),
-				h.authService,
-				h.userService,
-				&dbent.PendingAuthSession{
+				&service.PendingAuthSession{
 					Intent:                 oauthIntentLogin,
 					ProviderType:           identityKey.ProviderType,
 					ProviderKey:            identityKey.ProviderKey,
@@ -392,12 +387,7 @@ func (h *AuthHandler) LinuxDoOAuthCallback(c *gin.Context) {
 	redirectToFrontendCallback(c, frontendCallback)
 }
 
-func (h *AuthHandler) findLinuxDoCompatEmailUser(ctx context.Context, email string) (*dbent.User, error) {
-	client := h.entClient()
-	if client == nil {
-		return nil, infraerrors.ServiceUnavailable("PENDING_AUTH_NOT_READY", "pending auth service is not ready")
-	}
-
+func (h *AuthHandler) findLinuxDoCompatEmailUser(ctx context.Context, email string) (*service.AuthIdentityUser, error) {
 	email = strings.TrimSpace(strings.ToLower(email))
 	if email == "" ||
 		strings.HasSuffix(email, service.LinuxDoConnectSyntheticEmailDomain) ||
@@ -407,21 +397,14 @@ func (h *AuthHandler) findLinuxDoCompatEmailUser(ctx context.Context, email stri
 		return nil, nil
 	}
 
-	userEntity, err := client.User.Query().
-		Where(userNormalizedEmailPredicate(email)).
-		Order(dbent.Asc(dbuser.FieldID)).
-		All(ctx)
+	userEntity, err := h.findPendingUserByNormalizedEmail(ctx, email)
 	if err != nil {
+		if errors.Is(err, service.ErrUserNotFound) {
+			return nil, nil
+		}
 		return nil, infraerrors.InternalServer("COMPAT_EMAIL_LOOKUP_FAILED", "failed to look up compat email user").WithCause(err)
 	}
-	switch len(userEntity) {
-	case 0:
-		return nil, nil
-	case 1:
-		return userEntity[0], nil
-	default:
-		return nil, infraerrors.Conflict("USER_EMAIL_CONFLICT", "normalized email matched multiple users")
-	}
+	return userEntity, nil
 }
 
 func (h *AuthHandler) createLinuxDoOAuthChoicePendingSession(
@@ -433,7 +416,7 @@ func (h *AuthHandler) createLinuxDoOAuthChoicePendingSession(
 	browserSessionKey string,
 	upstreamClaims map[string]any,
 	compatEmail string,
-	compatEmailUser *dbent.User,
+	compatEmailUser *service.AuthIdentityUser,
 	emailVerificationRequired bool,
 	forceEmailOnSignup bool,
 ) error {
@@ -567,12 +550,7 @@ func (h *AuthHandler) CompleteLinuxDoOAuthRegistration(c *gin.Context) {
 		return
 	}
 
-	client := h.entClient()
-	if client == nil {
-		response.ErrorFrom(c, infraerrors.ServiceUnavailable("PENDING_AUTH_NOT_READY", "pending auth service is not ready"))
-		return
-	}
-	if err := ensurePendingOAuthRegistrationIdentityAvailable(c.Request.Context(), client, session); err != nil {
+	if err := h.ensurePendingRegistrationIdentityAvailable(c.Request.Context(), session); err != nil {
 		respondPendingOAuthBindingApplyError(c, err)
 		return
 	}
@@ -597,7 +575,7 @@ func (h *AuthHandler) CompleteLinuxDoOAuthRegistration(c *gin.Context) {
 		response.ErrorFrom(c, err)
 		return
 	}
-	if err := applyPendingOAuthAdoptionAndConsumeSession(c.Request.Context(), client, h.authService, h.userService, session, decision, user.ID); err != nil {
+	if err := h.applyPendingIdentityBindingAndConsume(c.Request.Context(), session, decision, user.ID); err != nil {
 		respondPendingOAuthBindingApplyError(c, err)
 		return
 	}

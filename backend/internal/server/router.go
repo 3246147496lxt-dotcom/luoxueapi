@@ -1,13 +1,11 @@
 package server
 
 import (
-	"context"
 	"log"
-	"sync/atomic"
-	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/handler"
+	"github.com/Wei-Shaw/sub2api/internal/lifecycle"
 	middleware2 "github.com/Wei-Shaw/sub2api/internal/server/middleware"
 	"github.com/Wei-Shaw/sub2api/internal/server/routes"
 	"github.com/Wei-Shaw/sub2api/internal/service"
@@ -16,8 +14,6 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/redis/go-redis/v9"
 )
-
-const frameSrcRefreshTimeout = 5 * time.Second
 
 // SetupRouter 配置路由器中间件和路由
 func SetupRouter(
@@ -34,24 +30,9 @@ func SetupRouter(
 	settingService *service.SettingService,
 	cfg *config.Config,
 	redisClient *redis.Client,
+	readinessProbe lifecycle.ReadinessProbe,
+	routerSettingsRuntime *RouterSettingsRuntime,
 ) *gin.Engine {
-	// 缓存 iframe 页面的 origin 列表，用于动态注入 CSP frame-src
-	var cachedFrameOrigins atomic.Pointer[[]string]
-	emptyOrigins := []string{}
-	cachedFrameOrigins.Store(&emptyOrigins)
-
-	refreshFrameOrigins := func() {
-		ctx, cancel := context.WithTimeout(context.Background(), frameSrcRefreshTimeout)
-		defer cancel()
-		origins, err := settingService.GetFrameSrcOrigins(ctx)
-		if err != nil {
-			// 获取失败时保留已有缓存，避免 frame-src 被意外清空
-			return
-		}
-		cachedFrameOrigins.Store(&origins)
-	}
-	refreshFrameOrigins() // 启动时初始化
-
 	// 应用中间件
 	r.Use(middleware2.RequestLogger())
 	// 将可信客户端 IP + UA 注入 request context，供 token 签发路径写入会话绑定
@@ -59,8 +40,8 @@ func SetupRouter(
 	r.Use(middleware2.Logger())
 	r.Use(middleware2.CORS(cfg.CORS))
 	r.Use(middleware2.SecurityHeaders(cfg.Security.CSP, func() []string {
-		if p := cachedFrameOrigins.Load(); p != nil {
-			return *p
+		if routerSettingsRuntime != nil {
+			return routerSettingsRuntime.FrameSrcOrigins()
 		}
 		return nil
 	}))
@@ -68,30 +49,22 @@ func SetupRouter(
 
 	// Serve embedded frontend with settings injection if available
 	if web.HasEmbeddedFrontend() {
-		frontendServer, err := web.NewFrontendServer(settingService) //nolint:staticcheck // See the build-variant note below.
-		// The !embed stub always returns an error, while release builds use the
-		// embed implementation where initialization can succeed or fail.
-		// Staticcheck only sees one build variant at a time and otherwise reports
-		// this production fallback as an always-true comparison.
-		//nolint:staticcheck
-		if err != nil {
+		var frontendMiddleware gin.HandlerFunc
+		var err error
+		ok := false
+		if routerSettingsRuntime != nil {
+			frontendMiddleware, ok, err = routerSettingsRuntime.FrontendMiddleware()
+		}
+		if !ok {
 			log.Printf("Warning: Failed to create frontend server with settings injection: %v, using legacy mode", err)
 			r.Use(web.ServeEmbeddedFrontend())
-			settingService.SetOnUpdateCallback(refreshFrameOrigins)
 		} else {
-			// Register combined callback: invalidate HTML cache + refresh frame origins
-			settingService.SetOnUpdateCallback(func() {
-				frontendServer.InvalidateCache()
-				refreshFrameOrigins()
-			})
-			r.Use(frontendServer.Middleware())
+			r.Use(frontendMiddleware)
 		}
-	} else {
-		settingService.SetOnUpdateCallback(refreshFrameOrigins)
 	}
 
 	// 注册路由
-	registerRoutes(r, handlers, jwtAuth, adminAuth, apiKeyAuth, auditLog, stepUpAuth, apiKeyService, subscriptionService, opsService, settingService, cfg, redisClient)
+	registerRoutes(r, handlers, jwtAuth, adminAuth, apiKeyAuth, auditLog, stepUpAuth, apiKeyService, subscriptionService, opsService, settingService, cfg, redisClient, readinessProbe)
 
 	return r
 }
@@ -111,9 +84,10 @@ func registerRoutes(
 	settingService *service.SettingService,
 	cfg *config.Config,
 	redisClient *redis.Client,
+	readinessProbe lifecycle.ReadinessProbe,
 ) {
 	// 通用路由（健康检查、状态等）
-	routes.RegisterCommonRoutes(r)
+	routes.RegisterCommonRoutesWithReadiness(r, readinessProbe)
 
 	// API v1
 	v1 := r.Group("/api/v1")
@@ -124,6 +98,7 @@ func registerRoutes(
 	routes.RegisterAdminRoutes(v1, h, adminAuth, auditLog, stepUpAuth, settingService)
 	routes.RegisterModelCatalogRoutes(v1, h, redisClient)
 	routes.RegisterDocumentationRoutes(v1, h, redisClient, settingService)
+	routes.RegisterEmbeddedPageRoutes(v1, jwtAuth, auditLog, settingService, redisClient)
 	routes.RegisterGatewayRoutes(r, h, apiKeyAuth, apiKeyService, subscriptionService, opsService, settingService, cfg)
 	routes.RegisterPaymentRoutes(v1, h.Payment, h.PaymentWebhook, h.Admin.Payment, jwtAuth, adminAuth, auditLog, settingService)
 

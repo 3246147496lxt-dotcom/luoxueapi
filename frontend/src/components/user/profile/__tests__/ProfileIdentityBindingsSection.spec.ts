@@ -252,6 +252,7 @@ describe('ProfileIdentityBindingsSection', () => {
       home_content: '',
       hide_ccs_import_button: false,
       payment_enabled: false,
+      risk_control_enabled: false,
       table_default_page_size: 20,
       table_page_size_options: [10, 20, 50, 100],
       custom_menu_items: [],
@@ -262,11 +263,18 @@ describe('ProfileIdentityBindingsSection', () => {
       wechat_oauth_mp_enabled: false,
       oidc_oauth_enabled: false,
       oidc_oauth_provider_name: 'OIDC',
+      github_oauth_enabled: false,
+      google_oauth_enabled: false,
       backend_mode_enabled: false,
       version: 'test',
       balance_low_notify_enabled: false,
       account_quota_notify_enabled: false,
       balance_low_notify_threshold: 0,
+      channel_monitor_enabled: false,
+      channel_monitor_default_interval_seconds: 60,
+      available_channels_enabled: false,
+      service_quota_enabled: false,
+      affiliate_enabled: false,
     }
     appStore.publicSettingsLoaded = true
 
@@ -359,7 +367,7 @@ describe('ProfileIdentityBindingsSection', () => {
     })
 
     expect(wrapper.get('[data-testid="profile-binding-email-status"]').text()).toBe('Not bound')
-    expect(wrapper.get('[data-testid="profile-binding-email-input"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="profile-binding-email-input"]').exists()).toBe(true)
   })
 
   it('does not show a synthetic oauth-only email as the bound email summary', () => {
@@ -473,7 +481,7 @@ describe('ProfileIdentityBindingsSection', () => {
     })
 
     expect(wrapper.get('[data-testid="profile-binding-email-status"]').text()).toBe('Bound')
-    expect(wrapper.get('[data-testid="profile-binding-email-input"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="profile-binding-email-input"]').exists()).toBe(true)
     expect(wrapper.get('[data-testid="profile-binding-email-submit"]').text()).toBe(
       'Replace primary email'
     )
@@ -526,7 +534,7 @@ describe('ProfileIdentityBindingsSection', () => {
 
     await wrapper.get('[data-testid="profile-binding-email-toggle"]').trigger('click')
 
-    expect(wrapper.get('[data-testid="profile-binding-email-input"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="profile-binding-email-input"]').exists()).toBe(true)
   })
 
   it('shows third-party binding details and unbinds a connected provider', async () => {

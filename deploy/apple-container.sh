@@ -400,7 +400,7 @@ validate_env_file_security() {
 prepare_environment() {
     validate_env_file_security
 
-    APP_IMAGE="$(read_env_value APPLE_CONTAINER_SUB2API_IMAGE weishaw/sub2api:latest)"
+    APP_IMAGE="$(read_env_value APPLE_CONTAINER_SUB2API_IMAGE ghcr.io/3246147496lxt-dotcom/luoxueapi:1.0.7)"
     POSTGRES_IMAGE="$(read_env_value APPLE_CONTAINER_POSTGRES_IMAGE postgres:18-alpine)"
     REDIS_IMAGE="$(read_env_value APPLE_CONTAINER_REDIS_IMAGE redis:8-alpine)"
     BIND_HOST="$(read_env_value BIND_HOST 0.0.0.0)"
@@ -604,12 +604,12 @@ probe_redis() {
 
 probe_app() {
     container exec "${APP_CONTAINER}" \
-        wget -q -T 5 -O /dev/null http://localhost:8080/health
+        wget -q -T 5 -O /dev/null http://localhost:8080/readyz
 }
 
 probe_host_app() {
     curl --fail --silent --show-error --max-time 5 \
-        "http://${ACCESS_HOST}:${HOST_PORT}/health"
+        "http://${ACCESS_HOST}:${HOST_PORT}/readyz"
 }
 
 show_failure_logs() {

@@ -27,7 +27,7 @@ type UserWithConcurrency struct {
 
 // UserHandler handles admin user management
 type UserHandler struct {
-	adminService          service.AdminService
+	adminService          UserAdminUseCases
 	concurrencyService    *service.ConcurrencyService
 	userPlatformQuotaRepo service.UserPlatformQuotaRepository // T13 admin quota view
 	billingCache          service.BillingCache                // T17/T18 缓存失效（PUT/POST 路径）
@@ -37,7 +37,7 @@ type UserHandler struct {
 
 // NewUserHandler creates a new admin user handler
 func NewUserHandler(
-	adminService service.AdminService,
+	adminService UserAdminUseCases,
 	concurrencyService *service.ConcurrencyService,
 	userPlatformQuotaRepo service.UserPlatformQuotaRepository,
 	billingCache service.BillingCache,

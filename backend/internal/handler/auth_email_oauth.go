@@ -9,7 +9,6 @@ import (
 	"net/url"
 	"strings"
 
-	dbent "github.com/Wei-Shaw/sub2api/ent"
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/oauth"
@@ -217,10 +216,6 @@ func (h *AuthHandler) emailOAuthCallbackWithProfile(
 }
 
 func (h *AuthHandler) emailOAuthShouldCreatePendingRegistration(ctx context.Context, input service.EmailOAuthIdentityInput) (bool, error) {
-	client := h.entClient()
-	if client == nil {
-		return false, infraerrors.ServiceUnavailable("PENDING_AUTH_NOT_READY", "pending auth service is not ready")
-	}
 	identityUser, err := h.findOAuthIdentityUser(ctx, service.PendingAuthIdentityKey{
 		ProviderType:    strings.TrimSpace(input.ProviderType),
 		ProviderKey:     strings.TrimSpace(input.ProviderKey),
@@ -236,7 +231,7 @@ func (h *AuthHandler) emailOAuthShouldCreatePendingRegistration(ctx context.Cont
 		}
 		return false, nil
 	}
-	if _, err := findUserByNormalizedEmail(ctx, client, email); err != nil {
+	if _, err := h.findPendingUserByNormalizedEmail(ctx, email); err != nil {
 		if errors.Is(err, service.ErrUserNotFound) {
 			return true, nil
 		}
@@ -381,18 +376,6 @@ func (h *AuthHandler) completeEmailOAuthRegistration(c *gin.Context, provider st
 		return
 	}
 
-	client := h.entClient()
-	if client == nil {
-		response.ErrorFrom(c, infraerrors.ServiceUnavailable("PENDING_AUTH_NOT_READY", "pending auth service is not ready"))
-		return
-	}
-	tx, err := client.Tx(c.Request.Context())
-	if err != nil {
-		response.ErrorFrom(c, infraerrors.InternalServer("PENDING_AUTH_BIND_APPLY_FAILED", "failed to consume pending oauth session").WithCause(err))
-		return
-	}
-	defer func() { _ = tx.Rollback() }()
-	txCtx := dbent.NewTxContext(c.Request.Context(), tx)
 	sessionForBinding := *session
 	sessionForBinding.UpstreamIdentityClaims = clonePendingMap(session.UpstreamIdentityClaims)
 	if strings.TrimSpace(req.InvitationCode) != "" {
@@ -400,39 +383,21 @@ func (h *AuthHandler) completeEmailOAuthRegistration(c *gin.Context, provider st
 	}
 	decision, err := h.ensurePendingOAuthAdoptionDecision(c, session.ID, oauthAdoptionDecisionRequest{})
 	if err != nil {
-		_ = tx.Rollback()
 		_ = h.authService.RollbackOAuthEmailAccountCreation(c.Request.Context(), user.ID, strings.TrimSpace(req.InvitationCode))
 		response.ErrorFrom(c, err)
 		return
 	}
-	if err := applyPendingOAuthBinding(txCtx, client, h.authService, h.userService, &sessionForBinding, decision, &user.ID, true, false); err != nil {
-		_ = tx.Rollback()
+	if err := h.authService.FinalizePendingOAuthAccount(c.Request.Context(), service.FinalizePendingOAuthAccountInput{
+		Session:        &sessionForBinding,
+		Decision:       decision,
+		User:           user,
+		InvitationCode: req.InvitationCode,
+		ProviderType:   session.ProviderType,
+		AffiliateCode:  affiliateCode,
+		AvatarWriter:   h.pendingIdentityAvatarWriter(),
+	}); err != nil {
 		_ = h.authService.RollbackOAuthEmailAccountCreation(c.Request.Context(), user.ID, strings.TrimSpace(req.InvitationCode))
 		respondPendingOAuthBindingApplyError(c, err)
-		return
-	}
-	if err := h.authService.FinalizeOAuthEmailAccount(
-		txCtx,
-		user,
-		strings.TrimSpace(req.InvitationCode),
-		strings.TrimSpace(session.ProviderType),
-		affiliateCode,
-	); err != nil {
-		_ = tx.Rollback()
-		_ = h.authService.RollbackOAuthEmailAccountCreation(c.Request.Context(), user.ID, strings.TrimSpace(req.InvitationCode))
-		response.ErrorFrom(c, err)
-		return
-	}
-	if err := consumePendingOAuthBrowserSessionTx(c.Request.Context(), tx, session); err != nil {
-		_ = tx.Rollback()
-		_ = h.authService.RollbackOAuthEmailAccountCreation(c.Request.Context(), user.ID, strings.TrimSpace(req.InvitationCode))
-		clearCookies()
-		response.ErrorFrom(c, err)
-		return
-	}
-	if err := tx.Commit(); err != nil {
-		_ = h.authService.RollbackOAuthEmailAccountCreation(c.Request.Context(), user.ID, strings.TrimSpace(req.InvitationCode))
-		response.ErrorFrom(c, infraerrors.InternalServer("PENDING_AUTH_BIND_APPLY_FAILED", "failed to consume pending oauth session").WithCause(err))
 		return
 	}
 	h.authService.ApplyOAuthSignupPromoCode(c.Request.Context(), user.ID, pendingOAuthPromoCode(session))

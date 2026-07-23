@@ -12,6 +12,8 @@ FROM ${POSTGRES_IMAGE} AS pg-client
 
 FROM ${ALPINE_IMAGE}
 
+ARG TARGETPLATFORM
+
 LABEL maintainer="Wei-Shaw <github.com/Wei-Shaw>"
 LABEL description="LuoxueAPI - AI API Gateway Platform"
 LABEL org.opencontainers.image.source="https://github.com/3246147496lxt-dotcom/luoxueapi"
@@ -42,8 +44,9 @@ RUN addgroup -g 1000 sub2api && \
 
 WORKDIR /app
 
-# Copy pre-built binary from GoReleaser
-COPY sub2api /app/sub2api
+# GoReleaser v2 places pre-built artifacts under their target platform.
+COPY ${TARGETPLATFORM}/sub2api /app/sub2api
+COPY backend/resources/model-pricing /app/resources/model-pricing
 
 # Create data directory
 RUN mkdir -p /app/data && chown -R sub2api:sub2api /app
@@ -55,7 +58,7 @@ RUN chmod +x /app/docker-entrypoint.sh
 EXPOSE 8080
 
 HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \
-    CMD curl -f http://localhost:${SERVER_PORT:-8080}/health || exit 1
+    CMD curl -f http://localhost:${SERVER_PORT:-8080}/readyz || exit 1
 
 # Run the application (entrypoint fixes /app/data ownership then execs as sub2api)
 ENTRYPOINT ["/app/docker-entrypoint.sh"]

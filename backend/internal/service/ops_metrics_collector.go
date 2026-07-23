@@ -58,9 +58,14 @@ type OpsMetricsCollector struct {
 	lastCgroupCPUUsageNanos uint64
 	lastCgroupCPUSampleAt   time.Time
 
-	stopCh    chan struct{}
 	startOnce sync.Once
 	stopOnce  sync.Once
+
+	lifecycleMu sync.Mutex
+	runCtx      context.Context
+	runCancel   context.CancelFunc
+	runWG       sync.WaitGroup
+	stopped     bool
 
 	skipLogMu sync.Mutex
 	skipLogAt time.Time
@@ -92,10 +97,22 @@ func (c *OpsMetricsCollector) Start() {
 		return
 	}
 	c.startOnce.Do(func() {
-		if c.stopCh == nil {
-			c.stopCh = make(chan struct{})
+		c.lifecycleMu.Lock()
+		if c.stopped {
+			c.lifecycleMu.Unlock()
+			return
 		}
-		go c.run()
+		if c.runCtx == nil {
+			c.runCtx, c.runCancel = context.WithCancel(context.Background())
+		}
+		runCtx := c.runCtx
+		c.runWG.Add(1)
+		c.lifecycleMu.Unlock()
+
+		go func() {
+			defer c.runWG.Done()
+			c.run(runCtx)
+		}()
 	})
 }
 
@@ -104,37 +121,48 @@ func (c *OpsMetricsCollector) Stop() {
 		return
 	}
 	c.stopOnce.Do(func() {
-		if c.stopCh != nil {
-			close(c.stopCh)
+		c.lifecycleMu.Lock()
+		c.stopped = true
+		cancel := c.runCancel
+		c.lifecycleMu.Unlock()
+		if cancel != nil {
+			cancel()
 		}
+		c.runWG.Wait()
 	})
 }
 
-func (c *OpsMetricsCollector) run() {
+func (c *OpsMetricsCollector) run(ctx context.Context) {
 	// First run immediately so the dashboard has data soon after startup.
-	c.collectOnce()
+	c.collectOnceWithContext(ctx)
 
 	for {
-		interval := c.getInterval()
+		if ctx.Err() != nil {
+			return
+		}
+		interval := c.getIntervalWithContext(ctx)
 		timer := time.NewTimer(interval)
 		select {
 		case <-timer.C:
-			c.collectOnce()
-		case <-c.stopCh:
+			c.collectOnceWithContext(ctx)
+		case <-ctx.Done():
 			timer.Stop()
 			return
 		}
 	}
 }
 
-func (c *OpsMetricsCollector) getInterval() time.Duration {
+func (c *OpsMetricsCollector) getIntervalWithContext(parent context.Context) time.Duration {
 	interval := opsMetricsCollectorMinInterval
 
 	if c.settingRepo == nil {
 		return interval
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	if parent == nil {
+		parent = context.Background()
+	}
+	ctx, cancel := context.WithTimeout(parent, 2*time.Second)
 	defer cancel()
 
 	raw, err := c.settingRepo.GetValue(ctx, SettingKeyOpsMetricsIntervalSeconds)
@@ -159,7 +187,7 @@ func (c *OpsMetricsCollector) getInterval() time.Duration {
 	return time.Duration(seconds) * time.Second
 }
 
-func (c *OpsMetricsCollector) collectOnce() {
+func (c *OpsMetricsCollector) collectOnceWithContext(parent context.Context) {
 	if c == nil {
 		return
 	}
@@ -173,10 +201,19 @@ func (c *OpsMetricsCollector) collectOnce() {
 		return
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), opsMetricsCollectorTimeout)
+	if parent == nil {
+		parent = context.Background()
+	}
+	ctx, cancel := context.WithTimeout(parent, opsMetricsCollectorTimeout)
 	defer cancel()
+	if ctx.Err() != nil {
+		return
+	}
 
 	if !c.isMonitoringEnabled(ctx) {
+		return
+	}
+	if ctx.Err() != nil {
 		return
 	}
 
@@ -191,6 +228,9 @@ func (c *OpsMetricsCollector) collectOnce() {
 	startedAt := time.Now().UTC()
 	err := c.collectAndPersist(ctx)
 	finishedAt := time.Now().UTC()
+	if ctx.Err() != nil {
+		return
+	}
 
 	durationMs := finishedAt.Sub(startedAt).Milliseconds()
 	dur := durationMs
@@ -199,7 +239,7 @@ func (c *OpsMetricsCollector) collectOnce() {
 	if err != nil {
 		msg := truncateString(err.Error(), 2048)
 		errAt := finishedAt
-		hbCtx, hbCancel := context.WithTimeout(context.Background(), opsMetricsCollectorHeartbeatTimeout)
+		hbCtx, hbCancel := context.WithTimeout(ctx, opsMetricsCollectorHeartbeatTimeout)
 		defer hbCancel()
 		_ = c.opsRepo.UpsertJobHeartbeat(hbCtx, &OpsUpsertJobHeartbeatInput{
 			JobName:        opsMetricsCollectorJobName,
@@ -213,7 +253,7 @@ func (c *OpsMetricsCollector) collectOnce() {
 	}
 
 	successAt := finishedAt
-	hbCtx, hbCancel := context.WithTimeout(context.Background(), opsMetricsCollectorHeartbeatTimeout)
+	hbCtx, hbCancel := context.WithTimeout(ctx, opsMetricsCollectorHeartbeatTimeout)
 	defer hbCancel()
 	_ = c.opsRepo.UpsertJobHeartbeat(hbCtx, &OpsUpsertJobHeartbeatInput{
 		JobName:        opsMetricsCollectorJobName,

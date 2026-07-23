@@ -639,16 +639,18 @@ type PricingConfig struct {
 }
 
 type ServerConfig struct {
-	Host               string    `mapstructure:"host"`
-	Port               int       `mapstructure:"port"`
-	Mode               string    `mapstructure:"mode"`                  // debug/release
-	EnableServerTiming bool      `mapstructure:"enable_server_timing"`  // Admin UI Server-Timing response header
-	FrontendURL        string    `mapstructure:"frontend_url"`          // 前端基础 URL，用于生成邮件中的外部链接
-	ReadHeaderTimeout  int       `mapstructure:"read_header_timeout"`   // 读取请求头超时（秒）
-	IdleTimeout        int       `mapstructure:"idle_timeout"`          // 空闲连接超时（秒）
-	TrustedProxies     []string  `mapstructure:"trusted_proxies"`       // 可信代理列表（CIDR/IP）
-	MaxRequestBodySize int64     `mapstructure:"max_request_body_size"` // 全局最大请求体限制
-	H2C                H2CConfig `mapstructure:"h2c"`                   // HTTP/2 Cleartext 配置
+	Host                     string    `mapstructure:"host"`
+	Port                     int       `mapstructure:"port"`
+	Mode                     string    `mapstructure:"mode"`                        // debug/release
+	EnableServerTiming       bool      `mapstructure:"enable_server_timing"`        // Admin UI Server-Timing response header
+	FrontendURL              string    `mapstructure:"frontend_url"`                // 前端基础 URL，用于生成邮件中的外部链接
+	ReadHeaderTimeout        int       `mapstructure:"read_header_timeout"`         // 读取请求头超时（秒）
+	IdleTimeout              int       `mapstructure:"idle_timeout"`                // 空闲连接超时（秒）
+	ShutdownGraceSeconds     int       `mapstructure:"shutdown_grace_seconds"`      // 停机时等待活跃请求的优雅窗口
+	ShutdownForceWaitSeconds int       `mapstructure:"shutdown_force_wait_seconds"` // 强制取消后等待 handler 退出的窗口
+	TrustedProxies           []string  `mapstructure:"trusted_proxies"`             // 可信代理列表（CIDR/IP）
+	MaxRequestBodySize       int64     `mapstructure:"max_request_body_size"`       // 全局最大请求体限制
+	H2C                      H2CConfig `mapstructure:"h2c"`                         // HTTP/2 Cleartext 配置
 }
 
 // H2CConfig HTTP/2 Cleartext 配置
@@ -1228,6 +1230,9 @@ type GatewaySchedulingConfig struct {
 	DbFallbackTimeoutSeconds int `mapstructure:"db_fallback_timeout_seconds"`
 	// 受控回源限流（实例级 QPS），0 表示不限制
 	DbFallbackMaxQPS int `mapstructure:"db_fallback_max_qps"`
+	// 候选集 shadow comparison 开关。关闭时 legacy 调度仍保持完整行为，
+	// 仅停止用于模块迁移校验的异步 PostgreSQL 对照查询。
+	ShadowComparisonEnabled bool `mapstructure:"shadow_comparison_enabled"`
 
 	// Outbox 轮询与滞后阈值配置
 	// Outbox 轮询周期（秒）
@@ -1713,6 +1718,8 @@ func setDefaults() {
 	viper.SetDefault("server.frontend_url", "")
 	viper.SetDefault("server.read_header_timeout", 30) // 30秒读取请求头
 	viper.SetDefault("server.idle_timeout", 120)       // 120秒空闲超时
+	viper.SetDefault("server.shutdown_grace_seconds", 30)
+	viper.SetDefault("server.shutdown_force_wait_seconds", 10)
 	viper.SetDefault("server.trusted_proxies", []string{})
 	viper.SetDefault("server.max_request_body_size", int64(256*1024*1024))
 	// H2C 默认配置
@@ -2162,6 +2169,7 @@ func setDefaults() {
 	viper.SetDefault("gateway.scheduling.db_fallback_enabled", true)
 	viper.SetDefault("gateway.scheduling.db_fallback_timeout_seconds", 0)
 	viper.SetDefault("gateway.scheduling.db_fallback_max_qps", 0)
+	viper.SetDefault("gateway.scheduling.shadow_comparison_enabled", true)
 	viper.SetDefault("gateway.scheduling.outbox_poll_interval_seconds", 1)
 	viper.SetDefault("gateway.scheduling.outbox_lag_warn_seconds", 5)
 	viper.SetDefault("gateway.scheduling.outbox_lag_rebuild_seconds", 10)
@@ -2315,6 +2323,12 @@ func (c *Config) Validate() error {
 			return fmt.Errorf("server.frontend_url invalid: must not include userinfo")
 		}
 		warnIfInsecureURL("server.frontend_url", c.Server.FrontendURL)
+	}
+	if c.Server.ShutdownGraceSeconds <= 0 {
+		return fmt.Errorf("server.shutdown_grace_seconds must be positive")
+	}
+	if c.Server.ShutdownForceWaitSeconds <= 0 {
+		return fmt.Errorf("server.shutdown_force_wait_seconds must be positive")
 	}
 	if c.JWT.ExpireHour <= 0 {
 		return fmt.Errorf("jwt.expire_hour must be positive")

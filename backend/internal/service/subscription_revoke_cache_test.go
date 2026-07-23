@@ -60,6 +60,7 @@ func TestRevokeSubscription_InvalidatesL1CacheSynchronously(t *testing.T) {
 			L1TTLSeconds: 60,
 		},
 	})
+	svc.Start()
 	t.Cleanup(svc.Stop)
 
 	_, err := svc.GetActiveSubscription(context.Background(), 10, 20)

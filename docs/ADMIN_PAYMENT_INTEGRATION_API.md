@@ -99,18 +99,34 @@ curl -X POST "${BASE}/api/v1/admin/users/123/balance" \
   }'
 ```
 
-### 4) 购买页 / 自定义页面 URL Query 透传（iframe / 新窗口一致）
-当落雪API打开 `purchase_subscription_url` 或用户侧自定义页面 iframe URL 时，会统一追加：
-- `user_id`
-- `token`
-- `theme`（`light` / `dark`）
-- `lang`（例如 `zh` / `en`，用于向嵌入页传递当前界面语言）
-- `ui_mode`（固定 `embedded`）
+### 4) 自定义页面一次性启动码（iframe / 新窗口）
+需要识别当前用户的 HTTPS 自定义页面，应把菜单项 `auth_mode` 配置为 `exchange_code`。Markdown 页面只支持 `none`。`purchase_subscription_url` 和 `auth_mode: none` 页面只接收匿名 UI 参数，不再接收 JWT 或用户 ID。
 
-示例：
-```text
-https://pay.example.com/pay?user_id=123&token=<jwt>&theme=light&lang=zh&ui_mode=embedded
+每次打开 iframe 或新窗口前，落雪API 前端分别调用：
+
+`POST /api/v1/user/custom-pages/:id/launch`（用户 JWT 认证）
+
+```json
+{"theme":"light","lang":"zh-CN","ui_mode":"embedded"}
 ```
+
+落雪API 会清除管理员配置 URL 中的全部 query 参数，只生成 `theme`、`lang`、`ui_mode`、`src_host`、`s2a_client_id` 和 60 秒一次性 `s2a_launch_code`。它永久不发送 `token`、`user_id` 或完整 `src_url`，且启动 URL 不得记录到日志。
+
+外部页面应立即把 code 交给自己的后端，由后端调用（浏览器 CORS 不开放）：
+
+`POST /api/v1/embedded-pages/exchange`
+
+```json
+{"client_id":"payment-page","code":"<s2a_launch_code>"}
+```
+
+成功响应只返回：
+
+```json
+{"code":0,"message":"success","data":{"user_id":123,"menu_item_id":"payment-page"}}
+```
+
+code 只能成功消费一次；过期、伪造、重放或菜单不匹配统一返回 `INVALID_EMBED_LAUNCH_CODE`，Redis 故障返回 HTTP 503。外部后端交换成功后应建立自己的短期会话，前端随即用 `history.replaceState` 清除地址栏中的 code。后续充值仍使用外部服务自己的 Admin API Key。
 
 ### 5) 失败处理建议
 - 支付成功与充值成功分状态落库
@@ -119,8 +135,8 @@ https://pay.example.com/pay?user_id=123&token=<jwt>&theme=light&lang=zh&ui_mode=
 - 重试保持相同 `code`，并使用新的 `Idempotency-Key`
 
 ### 6) `doc_url` 配置建议
-- 查看链接：`https://github.com/Wei-Shaw/sub2api/blob/main/docs/ADMIN_PAYMENT_INTEGRATION_API.md`
-- 下载链接：`https://raw.githubusercontent.com/Wei-Shaw/sub2api/main/docs/ADMIN_PAYMENT_INTEGRATION_API.md`
+- 查看链接：`https://github.com/3246147496lxt-dotcom/luoxueapi/blob/main/docs/ADMIN_PAYMENT_INTEGRATION_API.md`
+- 下载链接：`https://raw.githubusercontent.com/3246147496lxt-dotcom/luoxueapi/main/docs/ADMIN_PAYMENT_INTEGRATION_API.md`
 
 ---
 
@@ -219,18 +235,34 @@ curl -X POST "${BASE}/api/v1/admin/users/123/balance" \
   }'
 ```
 
-### 4) Purchase / Custom Page URL query forwarding (iframe and new tab)
-When LuoxueAPI opens `purchase_subscription_url` or a user-facing custom page iframe URL, it appends:
-- `user_id`
-- `token`
-- `theme` (`light` / `dark`)
-- `lang` (for example `zh` / `en`, used to pass the current UI language to the embedded page)
-- `ui_mode` (fixed: `embedded`)
+### 4) One-time custom-page launch codes (iframe and new tab)
+An HTTPS custom page that needs the current identity must set its menu item's `auth_mode` to `exchange_code`. Markdown pages support only `none`. `purchase_subscription_url` and `auth_mode: none` pages receive anonymous UI context only; JWTs and user IDs are never forwarded.
 
-Example:
-```text
-https://pay.example.com/pay?user_id=123&token=<jwt>&theme=light&lang=zh&ui_mode=embedded
+Before each iframe or new-tab opening, the LuoxueAPI frontend makes a separate authenticated request:
+
+`POST /api/v1/user/custom-pages/:id/launch`
+
+```json
+{"theme":"light","lang":"en","ui_mode":"embedded"}
 ```
+
+LuoxueAPI clears every query parameter from the administrator-configured URL and generates only `theme`, `lang`, `ui_mode`, `src_host`, `s2a_client_id`, and a 60-second one-time `s2a_launch_code`. It never sends `token`, `user_id`, or the full `src_url`, and the launch URL must not be logged.
+
+The external page immediately sends the code to its own backend. That backend performs this server-to-server request (browser CORS is intentionally disabled):
+
+`POST /api/v1/embedded-pages/exchange`
+
+```json
+{"client_id":"payment-page","code":"<s2a_launch_code>"}
+```
+
+The successful result is intentionally minimal:
+
+```json
+{"code":0,"message":"success","data":{"user_id":123,"menu_item_id":"payment-page"}}
+```
+
+A code can succeed only once. Expired, forged, replayed, or menu-mismatched codes all return `INVALID_EMBED_LAUNCH_CODE`; Redis outages return HTTP 503. After exchange, the external backend establishes its own short-lived session and the page removes the code from the address bar with `history.replaceState`. Subsequent recharge calls still use the external service's own Admin API Key.
 
 ### 5) Failure handling recommendations
 - Persist payment success and recharge success as separate states
@@ -239,5 +271,5 @@ https://pay.example.com/pay?user_id=123&token=<jwt>&theme=light&lang=zh&ui_mode=
 - Keep the same `code` for retry, and use a new `Idempotency-Key`
 
 ### 6) Recommended `doc_url`
-- View URL: `https://github.com/Wei-Shaw/sub2api/blob/main/docs/ADMIN_PAYMENT_INTEGRATION_API.md`
-- Download URL: `https://raw.githubusercontent.com/Wei-Shaw/sub2api/main/docs/ADMIN_PAYMENT_INTEGRATION_API.md`
+- View URL: `https://github.com/3246147496lxt-dotcom/luoxueapi/blob/main/docs/ADMIN_PAYMENT_INTEGRATION_API.md`
+- Download URL: `https://raw.githubusercontent.com/3246147496lxt-dotcom/luoxueapi/main/docs/ADMIN_PAYMENT_INTEGRATION_API.md`

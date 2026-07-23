@@ -440,6 +440,8 @@ func TestAPIKeyService_GetByKey_UsesL1Cache(t *testing.T) {
 		},
 	}
 	svc := NewAPIKeyService(repo, nil, nil, nil, nil, cache, cfg)
+	svc.StartAuthCacheInvalidationSubscriber(context.Background())
+	t.Cleanup(func() { _ = svc.StopAuthCacheInvalidationSubscriber(context.Background()) })
 	require.NotNil(t, svc.authCacheL1)
 
 	_, err := svc.GetByKey(context.Background(), "k-l1")

@@ -37,18 +37,29 @@ type OAuthSession struct {
 }
 
 type SessionStore struct {
-	mu       sync.RWMutex
-	sessions map[string]*OAuthSession
-	stopCh   chan struct{}
+	mu        sync.RWMutex
+	sessions  map[string]*OAuthSession
+	startOnce sync.Once
+	stopOnce  sync.Once
+	stopCh    chan struct{}
+	wg        sync.WaitGroup
 }
 
 func NewSessionStore() *SessionStore {
-	store := &SessionStore{
+	return &SessionStore{
 		sessions: make(map[string]*OAuthSession),
 		stopCh:   make(chan struct{}),
 	}
-	go store.cleanup()
-	return store
+}
+
+func (s *SessionStore) Start() {
+	s.startOnce.Do(func() {
+		s.wg.Add(1)
+		go func() {
+			defer s.wg.Done()
+			s.cleanup()
+		}()
+	})
 }
 
 func (s *SessionStore) Set(sessionID string, session *OAuthSession) {
@@ -77,12 +88,8 @@ func (s *SessionStore) Delete(sessionID string) {
 }
 
 func (s *SessionStore) Stop() {
-	select {
-	case <-s.stopCh:
-		return
-	default:
-		close(s.stopCh)
-	}
+	s.stopOnce.Do(func() { close(s.stopCh) })
+	s.wg.Wait()
 }
 
 func (s *SessionStore) cleanup() {

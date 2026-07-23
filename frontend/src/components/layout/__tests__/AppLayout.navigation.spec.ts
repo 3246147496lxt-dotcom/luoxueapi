@@ -37,7 +37,7 @@ describe('AppLayout navigation structure', () => {
     expect(wrapper.classes()).toContain('pt-[81px]')
     expect(wrapper.findAll('[data-testid="header-stub"]')).toHaveLength(1)
     expect(wrapper.findAll('[data-testid="sidebar-stub"]')).toHaveLength(1)
-    expect(wrapper.get('[data-testid="page-content"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="page-content"]').exists()).toBe(true)
   })
 
   it('keeps the content offset synchronized with the sidebar width', async () => {
@@ -100,7 +100,7 @@ describe('AppLayout navigation structure', () => {
 
     expect(wrapper.classes()).toContain('app-layout--snow-shell')
     expect(wrapper.get('[data-testid="app-main-shell"]').classes()).not.toContain('app-layout--home-clay')
-    expect(wrapper.get('[data-testid="header-original"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="header-original"]').exists()).toBe(true)
     expect(wrapper.get('[data-testid="sidebar-original"]').attributes('variant')).toBeUndefined()
     expect(document.body.classList.contains('admin-home-clay-portals')).toBe(false)
 

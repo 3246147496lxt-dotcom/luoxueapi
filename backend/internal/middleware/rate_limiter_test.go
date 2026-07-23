@@ -2,6 +2,7 @@ package middleware
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -58,6 +59,37 @@ func TestRateLimiterFailureModes(t *testing.T) {
 	recorder = httptest.NewRecorder()
 	failCloseRouter.ServeHTTP(recorder, req)
 	require.Equal(t, http.StatusTooManyRequests, recorder.Code)
+	require.Contains(t, recorder.Body.String(), "rate limit exceeded")
+}
+
+func TestRateLimiterBackendFailureResponseOverride(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	originalRun := rateLimitRun
+	rateLimitRun = func(context.Context, *redis.Client, string, int64) (int64, bool, error) {
+		return 0, false, errors.New("redis unavailable")
+	}
+	t.Cleanup(func() {
+		rateLimitRun = originalRun
+	})
+
+	limiter := NewRateLimiter(nil)
+	router := gin.New()
+	router.Use(limiter.LimitWithOptions("test", 1, time.Second, RateLimitOptions{
+		FailureMode:          RateLimitFailClose,
+		BackendFailureStatus: http.StatusServiceUnavailable,
+		BackendFailureReason: "BACKEND_UNAVAILABLE",
+	}))
+	router.GET("/test", func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{"ok": true})
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/test", nil)
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, req)
+
+	require.Equal(t, http.StatusServiceUnavailable, recorder.Code)
+	require.JSONEq(t, `{"code":503,"message":"Service Unavailable","reason":"BACKEND_UNAVAILABLE"}`, recorder.Body.String())
 }
 
 func TestRateLimiterDifferentIPsIndependent(t *testing.T) {

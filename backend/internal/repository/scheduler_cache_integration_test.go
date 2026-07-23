@@ -4,11 +4,13 @@ package repository
 
 import (
 	"context"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/service"
+	redisclient "github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/require"
 )
 
@@ -111,12 +113,20 @@ func TestSchedulerCacheRetireAndReopenFencesOldEpochIntegration(t *testing.T) {
 	cache := NewSchedulerCache(rdb)
 	bucket := service.SchedulerBucket{GroupID: 77, Platform: service.PlatformAntigravity, Mode: service.SchedulerModeForced}
 	account := service.Account{ID: 7701, Platform: service.PlatformAntigravity, Type: service.AccountTypeOAuth}
+	const initialEpoch int64 = 2722743571414299
+	const retiredEpoch int64 = initialEpoch + 1
+	epochKey := schedulerBucketKey(schedulerEpochPrefix, bucket)
+	retiredKey := schedulerBucketKey(schedulerRetiredPrefix, bucket)
+	require.NoError(t, rdb.Set(ctx, epochKey, strconv.FormatInt(initialEpoch, 10), 0).Err())
 
 	oldToken, err := cache.CaptureBucketWriteToken(ctx, bucket)
 	require.NoError(t, err)
+	require.Equal(t, initialEpoch, oldToken.Epoch)
 	require.NoError(t, cache.SetSnapshot(ctx, bucket, oldToken, []service.Account{account}))
 	require.NoError(t, cache.RetireBucket(ctx, bucket))
 	require.NoError(t, cache.RetireBucket(ctx, bucket))
+	require.Equal(t, strconv.FormatInt(retiredEpoch, 10), mustRedisString(t, ctx, rdb, epochKey))
+	require.Equal(t, strconv.FormatInt(retiredEpoch, 10), mustRedisString(t, ctx, rdb, retiredKey))
 
 	_, hit, err := cache.GetSnapshot(ctx, bucket)
 	require.NoError(t, err)
@@ -127,7 +137,8 @@ func TestSchedulerCacheRetireAndReopenFencesOldEpochIntegration(t *testing.T) {
 
 	newToken, err := cache.ReopenBucket(ctx, bucket)
 	require.NoError(t, err)
-	require.Greater(t, newToken.Epoch, oldToken.Epoch)
+	require.Equal(t, retiredEpoch, newToken.Epoch)
+	require.Equal(t, strconv.FormatInt(retiredEpoch, 10), mustRedisString(t, ctx, rdb, epochKey))
 	require.ErrorIs(t, cache.SetSnapshot(ctx, bucket, oldToken, []service.Account{account}), service.ErrSchedulerBucketWriteFenced)
 	require.NoError(t, cache.SetSnapshot(ctx, bucket, newToken, []service.Account{account}))
 
@@ -136,6 +147,48 @@ func TestSchedulerCacheRetireAndReopenFencesOldEpochIntegration(t *testing.T) {
 	require.True(t, hit)
 	require.Len(t, snapshot, 1)
 	require.Equal(t, account.ID, snapshot[0].ID)
+}
+
+func TestSchedulerCacheNormalizesLegacyScientificEpochIntegration(t *testing.T) {
+	ctx := context.Background()
+	rdb := testRedis(t)
+	cache := NewSchedulerCache(rdb)
+	bucket := service.SchedulerBucket{GroupID: 79, Platform: service.PlatformOpenAI, Mode: service.SchedulerModeSingle}
+	const canonicalEpoch = int64(2722743571414300)
+	epochKey := schedulerBucketKey(schedulerEpochPrefix, bucket)
+	require.NoError(t, rdb.Set(ctx, epochKey, "2.7227435714143e+15", 0).Err())
+
+	token, err := cache.CaptureBucketWriteToken(ctx, bucket)
+	require.NoError(t, err)
+	require.Equal(t, canonicalEpoch, token.Epoch)
+	require.Equal(t, strconv.FormatInt(canonicalEpoch, 10), mustRedisString(t, ctx, rdb, epochKey))
+}
+
+func TestSchedulerCacheRejectsInvalidEpochIntegration(t *testing.T) {
+	for name, rawEpoch := range map[string]string{
+		"fractional": "1.5",
+		"unsafe":     "9007199254740992",
+	} {
+		t.Run(name, func(t *testing.T) {
+			ctx := context.Background()
+			rdb := testRedis(t)
+			cache := NewSchedulerCache(rdb)
+			bucket := service.SchedulerBucket{GroupID: 80, Platform: service.PlatformOpenAI, Mode: service.SchedulerModeSingle}
+			epochKey := schedulerBucketKey(schedulerEpochPrefix, bucket)
+			require.NoError(t, rdb.Set(ctx, epochKey, rawEpoch, 0).Err())
+
+			_, err := cache.CaptureBucketWriteToken(ctx, bucket)
+			require.ErrorIs(t, err, service.ErrSchedulerBucketWriteFenced)
+			require.Equal(t, rawEpoch, mustRedisString(t, ctx, rdb, epochKey))
+		})
+	}
+}
+
+func mustRedisString(t *testing.T, ctx context.Context, rdb redisclient.UniversalClient, key string) string {
+	t.Helper()
+	value, err := rdb.Get(ctx, key).Result()
+	require.NoError(t, err)
+	return value
 }
 
 func TestSchedulerCacheGroupLifecycleLeaseOwnerAndTTLIntegration(t *testing.T) {

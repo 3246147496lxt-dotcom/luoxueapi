@@ -258,8 +258,16 @@ func (s *GrokOAuthService) BuildAccountCredentials(tokenInfo *GrokTokenInfo) map
 	return creds
 }
 
+func (s *GrokOAuthService) Start() {
+	if s != nil && s.sessionStore != nil {
+		s.sessionStore.Start()
+	}
+}
+
 func (s *GrokOAuthService) Stop() {
-	s.sessionStore.Stop()
+	if s != nil && s.sessionStore != nil {
+		s.sessionStore.Stop()
+	}
 }
 
 func (s *GrokOAuthService) tokenInfoFromResponse(tokenResp *xai.TokenResponse, clientID string, existing map[string]any) *GrokTokenInfo {

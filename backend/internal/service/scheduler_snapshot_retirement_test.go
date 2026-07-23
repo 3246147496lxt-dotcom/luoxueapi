@@ -168,7 +168,9 @@ func TestSchedulerFullRebuildCapturesAllRegistryTokensBeforeDBLoad(t *testing.T)
 	})
 
 	result := make(chan error, 1)
-	go func() { result <- svc.triggerFullRebuild("retirement_race_a") }()
+	go func() {
+		result <- svc.triggerFullRebuildWithContext(context.Background(), "retirement_race_a", false)
+	}()
 	select {
 	case <-dbStarted:
 	case <-time.After(time.Second):
@@ -216,7 +218,7 @@ func TestSchedulerRebuildRetireAfterDBLoadFencesPublish(t *testing.T) {
 
 	result := make(chan error, 1)
 	go func() {
-		result <- svc.rebuildBuckets(context.Background(), []SchedulerBucket{bucket}, "retirement_race_b")
+		result <- svc.rebuildBuckets(context.Background(), []SchedulerBucket{bucket}, "retirement_race_b", schedulerBucketRebuildBestEffort)
 	}()
 	select {
 	case <-dbReturned:

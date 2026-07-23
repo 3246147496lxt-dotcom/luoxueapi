@@ -16,6 +16,7 @@ type CustomMenuItem struct {
 	PageSlug   string `json:"page_slug,omitempty"`
 	Visibility string `json:"visibility"` // "user" or "admin"
 	SortOrder  int    `json:"sort_order"`
+	AuthMode   string `json:"auth_mode,omitempty"` // "none" or "exchange_code"; empty legacy values mean "none"
 }
 
 // CustomEndpoint represents an admin-configured API endpoint for quick copy.
@@ -512,6 +513,11 @@ func ParseCustomMenuItems(raw string) []CustomMenuItem {
 	var items []CustomMenuItem
 	if err := json.Unmarshal([]byte(raw), &items); err != nil {
 		return []CustomMenuItem{}
+	}
+	for i := range items {
+		if strings.TrimSpace(items[i].AuthMode) == "" {
+			items[i].AuthMode = service.CustomMenuAuthModeNone
+		}
 	}
 	return items
 }

@@ -1,5 +1,11 @@
+type MockIpGeoEntry = {
+  status: 'idle' | 'success'
+  label?: string
+  detail?: Record<string, unknown>
+}
+
 const ipGeoMocks = vi.hoisted(() => ({
-  getEntry: vi.fn(() => ({ status: 'idle' as const })),
+  getEntry: vi.fn((): MockIpGeoEntry => ({ status: 'idle' })),
   fetchOne: vi.fn(),
   fetchBatch: vi.fn(),
 }))
@@ -11,6 +17,7 @@ import { mount } from '@vue/test-utils'
 import { nextTick } from 'vue'
 
 import UsageTable from '../UsageTable.vue'
+import type { AdminUsageLog } from '@/types'
 
 const messages: Record<string, string> = {
   'admin.usage.userDeletedBadge': 'Deleted',
@@ -77,7 +84,52 @@ const DataTableStub = {
   `,
 }
 
-const baseImageRow = {
+function makeUsageRow(overrides: Partial<AdminUsageLog> = {}): AdminUsageLog {
+  return {
+    id: 1,
+    user_id: 1,
+    api_key_id: 1,
+    account_id: null,
+    request_id: 'req-admin-default',
+    model: 'claude-3',
+    group_id: null,
+    subscription_id: null,
+    input_tokens: 0,
+    output_tokens: 0,
+    cache_creation_tokens: 0,
+    cache_read_tokens: 0,
+    cache_creation_5m_tokens: 0,
+    cache_creation_1h_tokens: 0,
+    input_cost: 0,
+    output_cost: 0,
+    cache_creation_cost: 0,
+    cache_read_cost: 0,
+    total_cost: 0,
+    actual_cost: 0,
+    rate_multiplier: 1,
+    long_context_billing_applied: false,
+    billing_type: 0,
+    stream: false,
+    duration_ms: null,
+    first_token_ms: null,
+    image_count: 0,
+    image_size: null,
+    image_input_size: null,
+    image_output_size: null,
+    image_size_source: null,
+    image_size_breakdown: null,
+    image_input_tokens: 0,
+    image_input_cost: 0,
+    image_output_tokens: 0,
+    image_output_cost: 0,
+    user_agent: null,
+    cache_ttl_overridden: false,
+    created_at: '2026-01-01T00:00:00Z',
+    ...overrides,
+  }
+}
+
+const baseImageRow = makeUsageRow({
   request_id: 'req-admin-image',
   model: 'gpt-image-2',
   actual_cost: 0.4,
@@ -103,7 +155,7 @@ const baseImageRow = {
   image_output_size: null,
   image_size_source: null,
   image_size_breakdown: null,
-}
+})
 
 describe('admin UsageTable tooltip', () => {
   beforeEach(() => {
@@ -153,7 +205,7 @@ describe('admin UsageTable tooltip', () => {
   })
 
   it('shows service tier and billing breakdown in cost tooltip', async () => {
-    const row = {
+    const row = makeUsageRow({
       request_id: 'req-admin-1',
       actual_cost: 0.092883,
       total_cost: 0.092883,
@@ -166,7 +218,7 @@ describe('admin UsageTable tooltip', () => {
       cache_read_cost: 0.069568,
       input_tokens: 4057,
       output_tokens: 101,
-    }
+    })
 
     const wrapper = mount(UsageTable, {
       props: {
@@ -203,7 +255,7 @@ describe('admin UsageTable tooltip', () => {
   })
 
   it('shows requested and upstream models separately for admin rows', () => {
-    const row = {
+    const row = makeUsageRow({
       request_id: 'req-admin-model-1',
       model: 'claude-sonnet-4',
       upstream_model: 'claude-sonnet-4-20250514',
@@ -217,7 +269,7 @@ describe('admin UsageTable tooltip', () => {
       cache_read_cost: 0,
       input_tokens: 0,
       output_tokens: 0,
-    }
+    })
 
     const wrapper = mount(UsageTable, {
       props: {
@@ -243,19 +295,19 @@ describe('admin UsageTable tooltip', () => {
   it.each([
     {
       name: 'defaulted row',
-      row: {
+      row: makeUsageRow({
         ...baseImageRow,
         request_id: 'req-admin-default-image',
         image_size: '2K',
         image_input_size: 'auto',
         image_output_size: null,
         image_size_source: 'default',
-      },
+      }),
       expected: ['2K', 'Default billing tier', 'auto', 'unknown'],
     },
     {
       name: 'output-sourced row',
-      row: {
+      row: makeUsageRow({
         ...baseImageRow,
         request_id: 'req-admin-output-image',
         image_size: '4K',
@@ -263,31 +315,31 @@ describe('admin UsageTable tooltip', () => {
         image_output_size: '3840x2160',
         image_size_source: 'output',
         image_size_breakdown: { '4K': 1 },
-      },
+      }),
       expected: ['4K', 'Upstream output', '1024x1024', '3840x2160', '4K x 1'],
     },
     {
       name: 'input-sourced row',
-      row: {
+      row: makeUsageRow({
         ...baseImageRow,
         request_id: 'req-admin-input-image',
         image_size: '1K',
         image_input_size: '1024x1024',
         image_output_size: null,
         image_size_source: 'input',
-      },
+      }),
       expected: ['1K', 'Request input', '1024x1024', 'unknown'],
     },
     {
       name: 'legacy unstandardized row',
-      row: {
+      row: makeUsageRow({
         ...baseImageRow,
         request_id: 'req-admin-legacy-unstandardized-image',
         image_size: '512x512',
         image_input_size: null,
         image_output_size: null,
         image_size_source: null,
-      },
+      }),
       expected: ['legacy unstandardized: 512x512', 'Legacy record', 'unknown'],
     },
   ])('shows image usage metadata for $name', async ({ row, expected }) => {
@@ -385,7 +437,7 @@ describe('admin UsageTable IP geolocation batch toolbar', () => {
   it('does not render the batch toolbar when the ip_address column is not visible', () => {
     const wrapper = mount(UsageTable, {
       props: {
-        data: [{ request_id: 'r1', ip_address: '8.8.8.8' }],
+        data: [makeUsageRow({ request_id: 'r1', ip_address: '8.8.8.8' })],
         loading: false,
         columns: [],
       },
@@ -398,9 +450,9 @@ describe('admin UsageTable IP geolocation batch toolbar', () => {
     const wrapper = mount(UsageTable, {
       props: {
         data: [
-          { request_id: 'r1', ip_address: '8.8.8.8' },
-          { request_id: 'r2', ip_address: '8.8.8.8' },
-          { request_id: 'r3', ip_address: '1.1.1.1' },
+          makeUsageRow({ request_id: 'r1', ip_address: '8.8.8.8' }),
+          makeUsageRow({ request_id: 'r2', ip_address: '8.8.8.8' }),
+          makeUsageRow({ request_id: 'r3', ip_address: '1.1.1.1' }),
         ],
         loading: false,
         columns: [{ key: 'ip_address', label: 'IP' }],
@@ -418,9 +470,9 @@ describe('admin UsageTable IP geolocation batch toolbar', () => {
     const wrapper = mount(UsageTable, {
       props: {
         data: [
-          { request_id: 'r1', ip_address: '8.8.8.8' },
-          { request_id: 'r2', ip_address: '8.8.8.8' },
-          { request_id: 'r3', ip_address: '1.1.1.1' },
+          makeUsageRow({ request_id: 'r1', ip_address: '8.8.8.8' }),
+          makeUsageRow({ request_id: 'r2', ip_address: '8.8.8.8' }),
+          makeUsageRow({ request_id: 'r3', ip_address: '1.1.1.1' }),
         ],
         loading: false,
         columns: [{ key: 'ip_address', label: 'IP' }],
@@ -436,7 +488,7 @@ describe('admin UsageTable IP geolocation batch toolbar', () => {
     ipGeoMocks.fetchBatch.mockResolvedValue(false)
     const wrapper = mount(UsageTable, {
       props: {
-        data: [{ request_id: 'r1', ip_address: '8.8.8.8' }],
+        data: [makeUsageRow({ request_id: 'r1', ip_address: '8.8.8.8' })],
         loading: false,
         columns: [{ key: 'ip_address', label: 'IP' }],
       },
@@ -450,7 +502,7 @@ describe('admin UsageTable IP geolocation batch toolbar', () => {
     ipGeoMocks.getEntry.mockReturnValue({ status: 'success', label: 'CN · Guangdong · Shenzhen', detail: {} })
     const wrapper = mount(UsageTable, {
       props: {
-        data: [{ request_id: 'r1', ip_address: '121.35.47.43' }],
+        data: [makeUsageRow({ request_id: 'r1', ip_address: '121.35.47.43' })],
         loading: false,
         columns: [{ key: 'ip_address', label: 'IP' }],
       },
@@ -479,11 +531,11 @@ const DataTableStubWithUser = {
 
 describe('admin UsageTable deleted-user badge', () => {
   it('renders deleted badge for a soft-deleted user row', () => {
-    const row = {
+    const row = makeUsageRow({
       request_id: 'req-deleted-user-1',
       model: 'claude-3',
       user_id: 2,
-      user: { id: 2, email: 'd@test.com', deleted_at: '2026-05-28T00:00:00Z' },
+      user: { id: 2, email: 'd@test.com', deleted_at: '2026-05-28T00:00:00Z' } as AdminUsageLog['user'],
       actual_cost: 0,
       total_cost: 0,
       input_cost: 0,
@@ -491,7 +543,7 @@ describe('admin UsageTable deleted-user badge', () => {
       rate_multiplier: 1,
       input_tokens: 1,
       output_tokens: 1,
-    }
+    })
 
     const wrapper = mount(UsageTable, {
       props: {
@@ -514,11 +566,11 @@ describe('admin UsageTable deleted-user badge', () => {
   })
 
   it('does NOT render deleted badge for an active user row', () => {
-    const row = {
+    const row = makeUsageRow({
       request_id: 'req-active-user-1',
       model: 'claude-3',
       user_id: 3,
-      user: { id: 3, email: 'active@test.com', deleted_at: null },
+      user: { id: 3, email: 'active@test.com', deleted_at: null } as AdminUsageLog['user'],
       actual_cost: 0,
       total_cost: 0,
       input_cost: 0,
@@ -526,7 +578,7 @@ describe('admin UsageTable deleted-user badge', () => {
       rate_multiplier: 1,
       input_tokens: 1,
       output_tokens: 1,
-    }
+    })
 
     const wrapper = mount(UsageTable, {
       props: {

@@ -154,7 +154,7 @@ describe('feature route guard', () => {
     ['payment', { requiresPayment: true }, '/purchase'],
     ['risk control', { requiresRiskControl: true }, '/admin/risk-control'],
   ])('does not treat a failed %s settings load as explicitly disabled', async (_name, meta, path) => {
-    authStore.isAdmin = meta.requiresRiskControl === true
+    authStore.isAdmin = 'requiresRiskControl' in meta && meta.requiresRiskControl === true
     appStore.fetchPublicSettings.mockResolvedValue(null)
 
     const { navigation, next } = runGuard(meta, path)
@@ -174,7 +174,7 @@ describe('feature route guard', () => {
       '/admin/settings',
     ],
   ])('redirects when loaded settings explicitly disable %s', async (_name, meta, settings, target) => {
-    authStore.isAdmin = meta.requiresRiskControl === true
+    authStore.isAdmin = 'requiresRiskControl' in meta && meta.requiresRiskControl === true
     appStore.cachedPublicSettings = settings
     appStore.publicSettingsLoaded = true
 

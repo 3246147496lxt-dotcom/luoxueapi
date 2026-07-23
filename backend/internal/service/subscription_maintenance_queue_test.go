@@ -3,6 +3,7 @@
 package service
 
 import (
+	"context"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -11,8 +12,14 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func newStartedSubscriptionMaintenanceQueue(workerCount, queueSize int) *SubscriptionMaintenanceQueue {
+	q := NewSubscriptionMaintenanceQueue(workerCount, queueSize)
+	q.Start()
+	return q
+}
+
 func TestSubscriptionMaintenanceQueue_TryEnqueue_QueueFull(t *testing.T) {
-	q := NewSubscriptionMaintenanceQueue(1, 1)
+	q := newStartedSubscriptionMaintenanceQueue(1, 1)
 	t.Cleanup(q.Stop)
 
 	block := make(chan struct{})
@@ -38,7 +45,7 @@ func TestSubscriptionMaintenanceQueue_TryEnqueue_QueueFull(t *testing.T) {
 }
 
 func TestSubscriptionMaintenanceQueue_TryEnqueue_PanicDoesNotKillWorker(t *testing.T) {
-	q := NewSubscriptionMaintenanceQueue(1, 8)
+	q := newStartedSubscriptionMaintenanceQueue(1, 8)
 	t.Cleanup(q.Stop)
 
 	require.NoError(t, q.TryEnqueue(func() { panic("boom") }))
@@ -55,7 +62,7 @@ func TestSubscriptionMaintenanceQueue_TryEnqueue_PanicDoesNotKillWorker(t *testi
 }
 
 func TestSubscriptionMaintenanceQueue_TryEnqueue_AfterStop(t *testing.T) {
-	q := NewSubscriptionMaintenanceQueue(1, 8)
+	q := newStartedSubscriptionMaintenanceQueue(1, 8)
 	q.Stop()
 
 	err := q.TryEnqueue(func() {})
@@ -71,7 +78,7 @@ func TestSubscriptionMaintenanceQueue_TryEnqueue_NilReceiver(t *testing.T) {
 }
 
 func TestSubscriptionMaintenanceQueue_TryEnqueue_NilTask(t *testing.T) {
-	q := NewSubscriptionMaintenanceQueue(1, 8)
+	q := newStartedSubscriptionMaintenanceQueue(1, 8)
 	t.Cleanup(q.Stop)
 
 	err := q.TryEnqueue(nil)
@@ -86,13 +93,31 @@ func TestSubscriptionMaintenanceQueue_Stop_NilReceiver(t *testing.T) {
 }
 
 func TestSubscriptionMaintenanceQueue_Stop_Idempotent(t *testing.T) {
-	q := NewSubscriptionMaintenanceQueue(1, 4)
+	q := newStartedSubscriptionMaintenanceQueue(1, 4)
 	q.Stop()
 	q.Stop() // 第二次调用不应 panic
 }
 
+func TestSubscriptionMaintenanceQueue_StopContextHonorsDeadlineAndCanBeRetried(t *testing.T) {
+	q := newStartedSubscriptionMaintenanceQueue(1, 1)
+	started := make(chan struct{})
+	release := make(chan struct{})
+	require.NoError(t, q.TryEnqueue(func() {
+		close(started)
+		<-release
+	}))
+	<-started
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+	require.ErrorIs(t, q.StopContext(ctx), context.DeadlineExceeded)
+
+	close(release)
+	require.NoError(t, q.StopContext(context.Background()))
+}
+
 func TestNewSubscriptionMaintenanceQueue_ZeroParams(t *testing.T) {
-	q := NewSubscriptionMaintenanceQueue(0, 0)
+	q := newStartedSubscriptionMaintenanceQueue(0, 0)
 	t.Cleanup(q.Stop)
 
 	// workerCount/queueSize 应被修正为 1
@@ -101,7 +126,7 @@ func TestNewSubscriptionMaintenanceQueue_ZeroParams(t *testing.T) {
 }
 
 func TestNewSubscriptionMaintenanceQueue_NegativeParams(t *testing.T) {
-	q := NewSubscriptionMaintenanceQueue(-1, -1)
+	q := newStartedSubscriptionMaintenanceQueue(-1, -1)
 	t.Cleanup(q.Stop)
 
 	err := q.TryEnqueue(func() {})
@@ -111,7 +136,7 @@ func TestNewSubscriptionMaintenanceQueue_NegativeParams(t *testing.T) {
 func TestSubscriptionMaintenanceQueue_ConcurrentEnqueueAndStop(t *testing.T) {
 	// 并发调用 TryEnqueue 和 Stop 不应 panic
 	for i := 0; i < 100; i++ {
-		q := NewSubscriptionMaintenanceQueue(2, 4)
+		q := newStartedSubscriptionMaintenanceQueue(2, 4)
 		var wg sync.WaitGroup
 		wg.Add(2)
 

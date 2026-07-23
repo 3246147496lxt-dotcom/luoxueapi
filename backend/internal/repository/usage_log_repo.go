@@ -141,11 +141,16 @@ type usageLogRepository struct {
 	sql    sqlExecutor
 	db     *sql.DB
 
-	createBatchOnce     sync.Once
-	createBatchCh       chan usageLogCreateRequest
-	bestEffortBatchOnce sync.Once
-	bestEffortBatchCh   chan usageLogBestEffortRequest
-	bestEffortRecent    *gocache.Cache
+	batchMu        sync.Mutex
+	batchAccepting bool
+	batchEnqueueWG sync.WaitGroup
+	batchWorkerWG  sync.WaitGroup
+	batchStopOnce  sync.Once
+	batchStopDone  chan struct{}
+
+	createBatchCh     chan usageLogCreateRequest
+	bestEffortBatchCh chan usageLogBestEffortRequest
+	bestEffortRecent  *gocache.Cache
 }
 
 func NewUsageLogRepository(client *dbent.Client, sqlDB *sql.DB) service.UsageLogRepository {
@@ -154,7 +159,12 @@ func NewUsageLogRepository(client *dbent.Client, sqlDB *sql.DB) service.UsageLog
 
 func newUsageLogRepositoryWithSQL(client *dbent.Client, sqlq sqlExecutor) *usageLogRepository {
 	// 使用 scanSingleRow 替代 QueryRowContext，保证 ent.Tx 作为 sqlExecutor 可用。
-	repo := &usageLogRepository{client: client, sql: sqlq}
+	repo := &usageLogRepository{
+		client:         client,
+		sql:            sqlq,
+		batchAccepting: true,
+		batchStopDone:  make(chan struct{}),
+	}
 	if db, ok := sqlq.(*sql.DB); ok {
 		repo.db = db
 	}

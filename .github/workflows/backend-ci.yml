@@ -3,6 +3,13 @@ name: CI
 on:
   push:
   pull_request:
+  workflow_call:
+    inputs:
+      checkout_ref:
+        description: Commit or tag to validate
+        required: false
+        type: string
+        default: ''
 
 permissions:
   contents: read
@@ -11,17 +18,91 @@ jobs:
   shell:
     runs-on: macos-15
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ inputs.checkout_ref || github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version-file: backend/go.mod
+          check-latest: false
+          cache: false
       - name: Check deployment scripts
         run: |
           /bin/bash -n deploy/apple-container.sh
           /bin/bash deploy/tests/apple-container-test.sh
+      - name: Check release workflow security contract
+        run: |
+          python3 tools/test_release_workflow.py
+          python3 tools/test_pnpm_audit_exceptions.py
+          python3 tools/test_delivery_runtime_contract.py
+      - name: Lint GitHub Actions workflows
+        run: go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.7
+
+  compose-contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ inputs.checkout_ref || github.sha }}
+          persist-credentials: false
+      - name: Validate Compose and .env contract
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          python3 tools/test_compose_contract.py
+          for compose_file in \
+            deploy/docker-compose.yml \
+            deploy/docker-compose.local.yml \
+            deploy/docker-compose.dev.yml \
+            deploy/docker-compose.standalone.yml
+          do
+            docker compose --env-file deploy/.env.example -f "$compose_file" config --quiet --no-env-resolution
+          done
+          SMOKE_APP_CONTAINER_NAME=contract-smoke-app \
+          SMOKE_POSTGRES_CONTAINER_NAME=contract-smoke-postgres \
+          SMOKE_REDIS_CONTAINER_NAME=contract-smoke-redis \
+          docker compose \
+            --env-file deploy/.env.example \
+            -f deploy/docker-compose.yml \
+            -f deploy/docker-compose.smoke.yml \
+            config --quiet --no-env-resolution
+
+  release-contract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ inputs.checkout_ref || github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version-file: backend/go.mod
+          check-latest: false
+          cache: false
+      - name: Validate release packaging inputs and GoReleaser configs
+        shell: bash
+        env:
+          GITHUB_REPO_OWNER: contract-owner
+          GITHUB_REPO_OWNER_LOWER: contract-owner
+          GITHUB_REPO_NAME: sub2api
+          DOCKERHUB_USERNAME: contract-owner
+          TAG_MESSAGE: contract
+        run: |
+          set -Eeuo pipefail
+          test -s backend/resources/model-pricing/model_prices_and_context_window.json
+          go run github.com/goreleaser/goreleaser/v2@v2.17.0 check --config .goreleaser.yaml
+          go run github.com/goreleaser/goreleaser/v2@v2.17.0 check --config .goreleaser.simple.yaml
 
   test:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-go@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ inputs.checkout_ref || github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
         with:
           go-version-file: backend/go.mod
           check-latest: false
@@ -30,52 +111,87 @@ jobs:
       - name: Verify Go version
         run: |
           go version | grep -q 'go1.26.5'
+      - name: Verify generated Wire dependency graph
+        working-directory: backend
+        run: make wire-check
       - name: Unit tests
         working-directory: backend
-        run: make test-unit
+        run: go test -tags=unit -coverprofile=coverage-unit.out ./...
       - name: Integration tests
         working-directory: backend
         run: make test-integration
+      - name: Race tests for lifecycle and module boundaries
+        working-directory: backend
+        run: go test -race ./internal/lifecycle ./internal/server ./internal/modules/...
+      - name: Upload backend coverage baseline
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: backend-unit-coverage
+          path: backend/coverage-unit.out
+          retention-days: 14
+          if-no-files-found: error
 
   frontend:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ inputs.checkout_ref || github.sha }}
+          persist-credentials: false
       - name: Setup pnpm
-        uses: pnpm/action-setup@v6
+        uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6
         with:
-          version: 9
+          version: 9.15.9
       - name: Setup Node.js
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
-          node-version: '20'
+          node-version: '24'
           cache: 'pnpm'
           cache-dependency-path: frontend/pnpm-lock.yaml
+      - name: Verify frontend runtime and package manager versions
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          node -e 'if (Number(process.versions.node.split(".")[0]) < 24) process.exit(1)'
+          test "$(pnpm --version)" = "9.15.9"
       - name: Install frontend dependencies
         working-directory: frontend
         run: pnpm install --frozen-lockfile
-      - name: Frontend typecheck and critical vitest
+      - name: Frontend lint, production/test typecheck and full Vitest
         run: make test-frontend
+      - name: Upload frontend coverage baseline
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: frontend-coverage
+          path: frontend/coverage/
+          retention-days: 14
+          if-no-files-found: error
       - name: Build frontend
         working-directory: frontend
         run: pnpm run build
       - name: Upload frontend bundle
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: ci-frontend-dist
           path: backend/internal/web/dist/
           retention-days: 1
+          if-no-files-found: error
 
   docs-site:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
-      - name: Setup Node.js
-        uses: actions/setup-node@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
-          node-version: '20'
+          ref: ${{ inputs.checkout_ref || github.sha }}
+          persist-credentials: false
+      - name: Setup Node.js
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: '24'
           cache: 'npm'
           cache-dependency-path: docs-site/package-lock.json
+      - name: Verify documentation Node.js runtime
+        run: node -e 'if (Number(process.versions.node.split(".")[0]) < 24) process.exit(1)'
       - name: Install documentation site dependencies
         working-directory: docs-site
         run: npm ci
@@ -86,28 +202,32 @@ jobs:
           npm run build
           npm run verify:build
       - name: Upload documentation bundle
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: ci-docs-dist
           path: docs-site/dist/
           retention-days: 1
+          if-no-files-found: error
 
   embedded-web:
     needs: [frontend, docs-site]
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ inputs.checkout_ref || github.sha }}
+          persist-credentials: false
       - name: Download frontend bundle
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
           name: ci-frontend-dist
           path: backend/internal/web/dist/
       - name: Download documentation bundle
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
           name: ci-docs-dist
           path: backend/internal/web/dist/tutorial-docs/
-      - uses: actions/setup-go@v6
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
         with:
           go-version-file: backend/go.mod
           check-latest: false
@@ -120,11 +240,27 @@ jobs:
         working-directory: backend
         run: go test -tags=embed ./internal/web
 
+  compose-smoke:
+    needs: [frontend, docs-site]
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ inputs.checkout_ref || github.sha }}
+          persist-credentials: false
+      - name: Run isolated Compose smoke
+        working-directory: backend
+        run: make test-e2e
+
   golangci-lint:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-go@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ inputs.checkout_ref || github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
         with:
           go-version-file: backend/go.mod
           check-latest: false
@@ -134,7 +270,7 @@ jobs:
         run: |
           go version | grep -q 'go1.26.5'
       - name: golangci-lint
-        uses: golangci/golangci-lint-action@v9
+        uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9
         with:
           version: v2.9
           args: --timeout=30m

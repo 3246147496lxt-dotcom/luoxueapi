@@ -434,7 +434,7 @@ describe('useAppStore', () => {
     })
 
     it('fetchPublicSettings(force) 会同步更新运行时注入配置', async () => {
-      vi.mocked(getPublicSettings).mockResolvedValue({
+      vi.mocked(getPublicSettings).mockResolvedValue(createPublicSettings({
         registration_enabled: false,
         email_verify_enabled: false,
         registration_email_suffix_whitelist: [],
@@ -451,8 +451,7 @@ describe('useAppStore', () => {
         doc_url: '',
         home_content: '',
         hide_ccs_import_button: false,
-        purchase_subscription_enabled: false,
-        purchase_subscription_url: '',
+        payment_enabled: false,
         table_default_page_size: 1000,
         table_page_size_options: [20, 100, 1000],
         custom_menu_items: [],
@@ -460,7 +459,7 @@ describe('useAppStore', () => {
         linuxdo_oauth_enabled: false,
         backend_mode_enabled: false,
         version: '1.0.0'
-      })
+      }))
 
       const store = useAppStore()
       await store.fetchPublicSettings(true)

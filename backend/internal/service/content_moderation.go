@@ -521,6 +521,12 @@ type ContentModerationService struct {
 	runtimeRefreshRetryAt    atomic.Int64
 	keyHealthMu              sync.Mutex
 	keyHealth                map[string]*contentModerationKeyHealth
+	lifecycleMu              sync.Mutex
+	lifecycleCancel          context.CancelFunc
+	lifecycleWG              sync.WaitGroup
+	lifecycleStarted         bool
+	lifecycleCancelIssued    bool
+	stopping                 atomic.Bool
 }
 
 type contentModerationRuntimeSnapshot struct {
@@ -569,6 +575,38 @@ func NewContentModerationService(
 	authCacheInvalidator APIKeyAuthCacheInvalidator,
 	emailService *EmailService,
 ) *ContentModerationService {
+	return newContentModerationService(
+		settingRepo,
+		repo,
+		hashCache,
+		groupRepo,
+		userRepo,
+		authCacheInvalidator,
+		emailService,
+	)
+}
+
+func ProvideContentModerationService(
+	settingRepo SettingRepository,
+	repo ContentModerationRepository,
+	hashCache ContentModerationHashCache,
+	groupRepo GroupRepository,
+	userRepo UserRepository,
+	authCacheInvalidator APIKeyAuthCacheInvalidator,
+	emailService *EmailService,
+) *ContentModerationService {
+	return NewContentModerationService(settingRepo, repo, hashCache, groupRepo, userRepo, authCacheInvalidator, emailService)
+}
+
+func newContentModerationService(
+	settingRepo SettingRepository,
+	repo ContentModerationRepository,
+	hashCache ContentModerationHashCache,
+	groupRepo GroupRepository,
+	userRepo UserRepository,
+	authCacheInvalidator APIKeyAuthCacheInvalidator,
+	emailService *EmailService,
+) *ContentModerationService {
 	svc := &ContentModerationService{
 		settingRepo:          settingRepo,
 		repo:                 repo,
@@ -582,13 +620,100 @@ func NewContentModerationService(
 		asyncQueue:           make(chan contentModerationTask, maxContentModerationQueueSize),
 		keyHealth:            make(map[string]*contentModerationKeyHealth),
 	}
-	if settingRepo != nil && repo != nil {
-		for i := 0; i < svc.workerCount; i++ {
-			go svc.worker(i)
-		}
-		go svc.cleanupWorker()
-	}
 	return svc
+}
+
+// Start launches the bounded async moderation workers. It is idempotent.
+func (s *ContentModerationService) Start() {
+	if s == nil || s.settingRepo == nil || s.repo == nil {
+		return
+	}
+	s.lifecycleMu.Lock()
+	defer s.lifecycleMu.Unlock()
+	if s.lifecycleStarted {
+		return
+	}
+	runtimeCtx, cancel := context.WithCancel(context.Background())
+	s.lifecycleCancel = cancel
+	s.lifecycleStarted = true
+	s.lifecycleCancelIssued = false
+	s.stopping.Store(false)
+	for i := 0; i < s.workerCount; i++ {
+		s.lifecycleWG.Add(1)
+		go func(workerID int) {
+			defer s.lifecycleWG.Done()
+			s.worker(runtimeCtx, workerID)
+		}(i)
+	}
+	s.lifecycleWG.Add(1)
+	go func() {
+		defer s.lifecycleWG.Done()
+		s.cleanupWorker(runtimeCtx)
+	}()
+}
+
+// Stop prevents new async tasks, drains queued work while ctx permits, then
+// cancels and joins all workers. It is safe to call more than once.
+func (s *ContentModerationService) Stop(ctx context.Context) error {
+	if s == nil {
+		return nil
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	s.stopping.Store(true)
+
+	s.lifecycleMu.Lock()
+	cancel := s.lifecycleCancel
+	started := s.lifecycleStarted
+	cancelIssued := s.lifecycleCancelIssued
+	s.lifecycleMu.Unlock()
+	if !started || cancel == nil {
+		return nil
+	}
+
+	if !cancelIssued {
+		drainTicker := time.NewTicker(10 * time.Millisecond)
+		defer drainTicker.Stop()
+		for len(s.asyncQueue) > 0 || s.asyncActive.Load() > 0 {
+			select {
+			case <-ctx.Done():
+				s.markContentModerationCancelIssued(cancel)
+				return s.waitForStop(ctx)
+			case <-drainTicker.C:
+			}
+		}
+		s.markContentModerationCancelIssued(cancel)
+	}
+	return s.waitForStop(ctx)
+}
+
+// markContentModerationCancelIssued retains the cancel function after a
+// deadline so a later Stop call can keep waiting for the same worker set. A
+// context.CancelFunc is safe to invoke repeatedly, but recording the transition
+// also prevents a retry from waiting forever for a queue whose workers were
+// already told to exit.
+func (s *ContentModerationService) markContentModerationCancelIssued(cancel context.CancelFunc) {
+	s.lifecycleMu.Lock()
+	if !s.lifecycleCancelIssued {
+		s.lifecycleCancelIssued = true
+		cancel()
+	}
+	s.lifecycleMu.Unlock()
+}
+
+func (s *ContentModerationService) waitForStop(ctx context.Context) error {
+	done := make(chan struct{})
+	go func() {
+		s.lifecycleWG.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 func (s *ContentModerationService) GetConfig(ctx context.Context) (*ContentModerationConfigView, error) {
@@ -1130,6 +1255,10 @@ func (s *ContentModerationService) enqueueAsync(input ContentModerationCheckInpu
 	if s == nil || s.asyncQueue == nil {
 		return
 	}
+	if s.stopping.Load() {
+		s.asyncDropped.Add(1)
+		return
+	}
 	queueSize := defaultContentModerationQueueSize
 	if cfg != nil && cfg.QueueSize > 0 {
 		queueSize = cfg.QueueSize
@@ -1156,6 +1285,10 @@ func (s *ContentModerationService) enqueueAsync(input ContentModerationCheckInpu
 
 func (s *ContentModerationService) enqueueRecord(input ContentModerationCheckInput, cfg *ContentModerationConfig, log *ContentModerationLog, inputHash string, recordHash bool, applySideEffects bool) {
 	if s == nil || s.asyncQueue == nil || log == nil {
+		return
+	}
+	if s.stopping.Load() {
+		s.asyncDropped.Add(1)
 		return
 	}
 	queueSize := defaultContentModerationQueueSize
@@ -1192,13 +1325,22 @@ func (s *ContentModerationService) enqueueRecord(input ContentModerationCheckInp
 	}
 }
 
-func (s *ContentModerationService) worker(id int) {
+func (s *ContentModerationService) worker(runtimeCtx context.Context, id int) {
 	for {
-		ctx, cancel := context.WithTimeout(context.Background(), maxContentModerationTimeoutMS*time.Millisecond+10*time.Second)
+		select {
+		case <-runtimeCtx.Done():
+			return
+		default:
+		}
+		ctx, cancel := context.WithTimeout(runtimeCtx, maxContentModerationTimeoutMS*time.Millisecond+10*time.Second)
 		runtimeSnapshot, err := s.loadRuntimeSnapshot(ctx)
 		if err != nil || runtimeSnapshot == nil || runtimeSnapshot.config == nil || id >= runtimeSnapshot.config.WorkerCount {
 			cancel()
-			time.Sleep(time.Second)
+			select {
+			case <-runtimeCtx.Done():
+				return
+			case <-time.After(time.Second):
+			}
 			continue
 		}
 		cfg := runtimeSnapshot.config
@@ -1418,13 +1560,17 @@ func (s *ContentModerationService) GetStatus(ctx context.Context) (*ContentModer
 	}, nil
 }
 
-func (s *ContentModerationService) cleanupWorker() {
+func (s *ContentModerationService) cleanupWorker(runtimeCtx context.Context) {
 	timer := time.NewTimer(contentModerationCleanupDelay)
 	defer timer.Stop()
 	for {
-		<-timer.C
-		s.runCleanupOnce()
-		timer.Reset(contentModerationCleanupInterval)
+		select {
+		case <-runtimeCtx.Done():
+			return
+		case <-timer.C:
+			s.runCleanupOnce()
+			timer.Reset(contentModerationCleanupInterval)
+		}
 	}
 }
 

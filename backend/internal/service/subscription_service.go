@@ -7,6 +7,7 @@ import (
 	"math/rand/v2"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	dbent "github.com/Wei-Shaw/sub2api/ent"
@@ -47,6 +48,7 @@ type SubscriptionService struct {
 	userSubRepo         UserSubscriptionRepository
 	billingCacheService *BillingCacheService
 	entClient           *dbent.Client
+	cfg                 *config.Config
 
 	// L1 缓存：加速中间件热路径的订阅查询
 	subCacheL1     *ristretto.Cache
@@ -55,6 +57,12 @@ type SubscriptionService struct {
 	subCacheJitter int // 抖动百分比
 
 	maintenanceQueue *SubscriptionMaintenanceQueue
+	subscriberMu     sync.Mutex
+	subscriberCancel context.CancelFunc
+	subscriberWG     sync.WaitGroup
+	startOnce        sync.Once
+	stopOnce         sync.Once
+	cacheCloseOnce   sync.Once
 }
 
 // NewSubscriptionService 创建订阅服务
@@ -64,11 +72,23 @@ func NewSubscriptionService(groupRepo GroupRepository, userSubRepo UserSubscript
 		userSubRepo:         userSubRepo,
 		billingCacheService: billingCacheService,
 		entClient:           entClient,
+		cfg:                 cfg,
 	}
-	svc.initSubCache(cfg)
 	svc.initMaintenanceQueue(cfg)
-	svc.StartSubCacheInvalidationSubscriber(context.Background())
 	return svc
+}
+
+func (s *SubscriptionService) Start() {
+	if s == nil {
+		return
+	}
+	s.startOnce.Do(func() {
+		s.initSubCache(s.cfg)
+		if s.maintenanceQueue != nil {
+			s.maintenanceQueue.Start()
+		}
+		s.StartSubCacheInvalidationSubscriber(context.Background())
+	})
 }
 
 func (s *SubscriptionService) initMaintenanceQueue(cfg *config.Config) {
@@ -84,11 +104,45 @@ func (s *SubscriptionService) initMaintenanceQueue(cfg *config.Config) {
 
 // Stop stops the maintenance worker pool.
 func (s *SubscriptionService) Stop() {
+	_ = s.StopContext(context.Background())
+}
+
+func (s *SubscriptionService) StopContext(ctx context.Context) error {
 	if s == nil {
-		return
+		return nil
 	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	s.stopOnce.Do(func() {
+		s.subscriberMu.Lock()
+		cancel := s.subscriberCancel
+		s.subscriberCancel = nil
+		s.subscriberMu.Unlock()
+		if cancel != nil {
+			cancel()
+		}
+	})
 	if s.maintenanceQueue != nil {
-		s.maintenanceQueue.Stop()
+		if err := s.maintenanceQueue.StopContext(ctx); err != nil {
+			return err
+		}
+	}
+	done := make(chan struct{})
+	go func() {
+		s.subscriberWG.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+		s.cacheCloseOnce.Do(func() {
+			if s.subCacheL1 != nil {
+				s.subCacheL1.Close()
+			}
+		})
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
 	}
 }
 
@@ -163,11 +217,26 @@ func (s *SubscriptionService) StartSubCacheInvalidationSubscriber(ctx context.Co
 	if s.billingCacheService == nil || s.subCacheL1 == nil {
 		return
 	}
-	if err := s.billingCacheService.SubscribeSubscriptionCacheInvalidation(ctx, func(cacheKey string) {
-		s.invalidateSubCacheKeySync(cacheKey)
-	}); err != nil {
-		log.Printf("Warning: failed to start subscription cache invalidation subscriber: %v", err)
+	if ctx != nil && ctx.Err() != nil {
+		return
 	}
+	s.subscriberMu.Lock()
+	if s.subscriberCancel != nil {
+		s.subscriberMu.Unlock()
+		return
+	}
+	subscriberCtx, cancel := context.WithCancel(context.Background())
+	s.subscriberCancel = cancel
+	s.subscriberWG.Add(1)
+	s.subscriberMu.Unlock()
+	go func() {
+		defer s.subscriberWG.Done()
+		if err := s.billingCacheService.SubscribeSubscriptionCacheInvalidation(subscriberCtx, func(cacheKey string) {
+			s.invalidateSubCacheKeySync(cacheKey)
+		}); err != nil && subscriberCtx.Err() == nil {
+			log.Printf("Warning: failed to start subscription cache invalidation subscriber: %v", err)
+		}
+	}()
 }
 
 func (s *SubscriptionService) invalidateSubscriptionCaches(userID, groupID int64) error {

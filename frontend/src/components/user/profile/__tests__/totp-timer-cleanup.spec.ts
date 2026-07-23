@@ -1,4 +1,4 @@
-import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest'
+import { beforeEach, afterEach, describe, expect, it, vi, type MockInstance } from 'vitest'
 import { mount } from '@vue/test-utils'
 import TotpSetupModal from '@/components/user/profile/TotpSetupModal.vue'
 import TotpDisableDialog from '@/components/user/profile/TotpDisableDialog.vue'
@@ -43,8 +43,8 @@ const flushPromises = async () => {
 
 describe('TOTP 弹窗定时器清理', () => {
   let intervalSeed = 1000
-  let setIntervalSpy: ReturnType<typeof vi.spyOn>
-  let clearIntervalSpy: ReturnType<typeof vi.spyOn>
+  let setIntervalSpy: MockInstance<typeof window.setInterval>
+  let clearIntervalSpy: MockInstance<typeof window.clearInterval>
 
   beforeEach(() => {
     intervalSeed = 1000

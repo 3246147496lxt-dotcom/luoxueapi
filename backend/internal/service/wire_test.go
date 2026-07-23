@@ -8,7 +8,7 @@ import (
 	"github.com/zeromicro/go-zero/core/collection"
 )
 
-func TestProvideTimingWheelService_ReturnsError(t *testing.T) {
+func TestProvideTimingWheelService_DefersInitializationErrorUntilStart(t *testing.T) {
 	original := newTimingWheel
 	t.Cleanup(func() { newTimingWheel = original })
 
@@ -17,11 +17,14 @@ func TestProvideTimingWheelService_ReturnsError(t *testing.T) {
 	}
 
 	svc, err := ProvideTimingWheelService()
-	if err == nil {
-		t.Fatalf("期望返回 error，但得到 nil")
+	if err != nil {
+		t.Fatalf("构造阶段不应启动 timing wheel: %v", err)
 	}
-	if svc != nil {
-		t.Fatalf("期望返回 nil svc，但得到非空")
+	if svc == nil {
+		t.Fatalf("期望构造出未启动的 service")
+	}
+	if err := svc.StartWithError(); err == nil {
+		t.Fatalf("期望启动阶段返回 error，但得到 nil")
 	}
 }
 
@@ -32,6 +35,9 @@ func TestProvideTimingWheelService_Success(t *testing.T) {
 	}
 	if svc == nil {
 		t.Fatalf("期望 svc 非空，但得到 nil")
+	}
+	if err := svc.StartWithError(); err != nil {
+		t.Fatalf("启动 timing wheel: %v", err)
 	}
 	svc.Stop()
 }

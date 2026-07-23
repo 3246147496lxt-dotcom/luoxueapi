@@ -1384,6 +1384,8 @@ func newContractDeps(t *testing.T) *contractDeps {
 	usageService := service.NewUsageService(usageRepo, userRepo, nil, nil)
 
 	subscriptionService := service.NewSubscriptionService(groupRepo, userSubRepo, nil, nil, cfg)
+	subscriptionService.Start()
+	t.Cleanup(subscriptionService.Stop)
 	subscriptionHandler := handler.NewSubscriptionHandler(subscriptionService)
 
 	redeemService := service.NewRedeemService(redeemRepo, userRepo, subscriptionService, nil, nil, nil, nil, nil)

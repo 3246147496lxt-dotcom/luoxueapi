@@ -1,12 +1,12 @@
 package main
 
 import (
+	"context"
+	"errors"
 	"testing"
-	"time"
 
-	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/handler"
-	"github.com/Wei-Shaw/sub2api/internal/service"
+	"github.com/Wei-Shaw/sub2api/internal/lifecycle"
 	"github.com/stretchr/testify/require"
 )
 
@@ -20,73 +20,36 @@ func TestProvideServiceBuildInfo(t *testing.T) {
 	require.Equal(t, in.BuildType, out.BuildType)
 }
 
+func TestCleanupApplicationInfrastructureWaitsForPendingComponents(t *testing.T) {
+	allowStop := false
+	supervisor := lifecycle.NewSupervisor(lifecycle.ComponentFuncs{
+		ComponentName: "worker",
+		StopFunc: func(context.Context) error {
+			if !allowStop {
+				return errors.New("still draining")
+			}
+			return nil
+		},
+	})
+	require.NoError(t, supervisor.Start(context.Background()))
+	require.Error(t, supervisor.Stop(context.Background()))
+	cleanupCalls := 0
+	app := &Application{
+		Supervisor: supervisor,
+		Cleanup:    func() { cleanupCalls++ },
+	}
+
+	cleanupApplicationInfrastructure(app)
+	require.Zero(t, cleanupCalls)
+
+	allowStop = true
+	require.NoError(t, supervisor.Stop(context.Background()))
+	cleanupApplicationInfrastructure(app)
+	require.Equal(t, 1, cleanupCalls)
+}
+
 func TestProvideCleanup_WithMinimalDependencies_NoPanic(t *testing.T) {
-	cfg := &config.Config{}
-
-	oauthSvc := service.NewOAuthService(nil, nil)
-	openAIOAuthSvc := service.NewOpenAIOAuthService(nil, nil)
-	geminiOAuthSvc := service.NewGeminiOAuthService(nil, nil, nil, nil, cfg)
-	antigravityOAuthSvc := service.NewAntigravityOAuthService(nil)
-
-	tokenRefreshSvc := service.NewTokenRefreshService(
-		nil,
-		oauthSvc,
-		openAIOAuthSvc,
-		geminiOAuthSvc,
-		antigravityOAuthSvc,
-		nil,
-		nil,
-		cfg,
-		nil,
-	)
-	accountExpirySvc := service.NewAccountExpiryService(nil, time.Second)
-	proxyExpirySvc := service.NewProxyExpiryService(nil, time.Second)
-	subscriptionExpirySvc := service.NewSubscriptionExpiryService(nil, time.Second)
-	pricingSvc := service.NewPricingService(cfg, nil)
-	emailQueueSvc := service.NewEmailQueueService(nil, 1)
-	billingCacheSvc := service.NewBillingCacheService(nil, nil, nil, nil, nil, nil, cfg, nil)
-	idempotencyCleanupSvc := service.NewIdempotencyCleanupService(nil, cfg)
-	schedulerSnapshotSvc := service.NewSchedulerSnapshotService(nil, nil, nil, nil, cfg)
-	opsSystemLogSinkSvc := service.NewOpsSystemLogSink(nil)
-
-	cleanup := provideCleanup(
-		nil, // entClient
-		nil, // redis
-		&service.OpsMetricsCollector{},
-		&service.OpsAggregationService{},
-		&service.OpsAlertEvaluatorService{},
-		&service.OpsCleanupService{},
-		&service.OpsScheduledReportService{},
-		opsSystemLogSinkSvc,
-		schedulerSnapshotSvc,
-		tokenRefreshSvc,
-		accountExpirySvc,
-		proxyExpirySvc,
-		nil, // proxyHealth
-		subscriptionExpirySvc,
-		&service.UsageCleanupService{},
-		idempotencyCleanupSvc,
-		&service.BatchImageCleanupService{},
-		nil, // batchImageWorker
-		pricingSvc,
-		emailQueueSvc,
-		billingCacheSvc,
-		&service.UsageRecordWorkerPool{},
-		&service.SubscriptionService{},
-		oauthSvc,
-		openAIOAuthSvc,
-		geminiOAuthSvc,
-		antigravityOAuthSvc,
-		nil, // grokOAuth
-		nil, // openAIGateway
-		nil, // scheduledTestRunner
-		nil, // backupSvc
-		nil, // paymentOrderExpiry
-		nil, // channelMonitorRunner
-		nil, // quotaFlusher
-		nil, // upstreamBillingProbe
-		nil, // auditLog
-	)
+	cleanup := provideCleanup(nil, nil)
 
 	require.NotPanics(t, func() {
 		cleanup()

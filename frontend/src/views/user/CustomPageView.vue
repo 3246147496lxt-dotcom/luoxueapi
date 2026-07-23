@@ -95,19 +95,37 @@
 
         <!-- Iframe embed mode -->
         <div v-else class="custom-embed-shell">
-          <a
-            :href="embeddedUrl"
-            target="_blank"
-            rel="noopener noreferrer"
+          <button
+            type="button"
             class="btn btn-secondary btn-sm custom-open-fab"
+            :disabled="newTabLoading"
+            @click="openInNewTab"
           >
             <Icon name="externalLink" size="sm" class="mr-1.5" :stroke-width="2" />
             {{ t('customPage.openInNewTab') }}
-          </a>
+          </button>
+          <div
+            v-if="iframeLaunchLoading"
+            class="flex h-full items-center justify-center text-sm text-gray-500 dark:text-dark-300"
+          >
+            <div class="mr-2 h-5 w-5 animate-spin rounded-full border-2 border-primary-500 border-t-transparent"></div>
+            {{ t('customPage.launchLoading') }}
+          </div>
+          <div
+            v-else-if="iframeLaunchError"
+            class="flex h-full flex-col items-center justify-center gap-3 p-8 text-center"
+          >
+            <p class="text-sm text-red-500">{{ iframeLaunchError }}</p>
+            <button type="button" class="btn btn-secondary btn-sm" @click="loadIframeUrl">
+              {{ t('customPage.retry') }}
+            </button>
+          </div>
           <iframe
-            :src="embeddedUrl"
+            v-else-if="iframeUrl"
+            :src="iframeUrl"
             class="custom-embed-frame"
             allowfullscreen
+            referrerpolicy="no-referrer"
           ></iframe>
         </div>
       </div>
@@ -125,7 +143,14 @@ import { useAdminSettingsStore } from '@/stores/adminSettings'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import Icon from '@/components/icons/Icon.vue'
 import { buildApiUrl } from '@/api/client'
-import { buildEmbeddedUrl, detectTheme } from '@/utils/embedded-url'
+import { requestCustomPageLaunch } from '@/api/customPages'
+import { authSession } from '@/auth/authSession'
+import {
+  buildEmbeddedPageContext,
+  buildEmbeddedUrl,
+  detectTheme,
+  type EmbeddedUIMode,
+} from '@/utils/embedded-url'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
 
@@ -142,13 +167,18 @@ const authStore = useAuthStore()
 const adminSettingsStore = useAdminSettingsStore()
 
 const loading = ref(false)
-const pageTheme = ref<'light' | 'dark'>('light')
+const pageTheme = ref<'light' | 'dark'>(detectTheme())
 const renderedHtml = ref('')
 const markdownContainer = ref<HTMLElement | null>(null)
 const tocItems = ref<TocItem[]>([])
 const tocVisible = ref(typeof window !== 'undefined' ? window.innerWidth > 768 : true)
 const activeHeadingId = ref('')
+const iframeUrl = ref('')
+const iframeLaunchLoading = ref(false)
+const iframeLaunchError = ref('')
+const newTabLoading = ref(false)
 let themeObserver: MutationObserver | null = null
+let iframeLaunchRequestId = 0
 
 const menuItemId = computed(() => route.params.id as string)
 
@@ -173,22 +203,103 @@ const markdownSlug = computed(() => {
 
 const isMarkdownMode = computed(() => !!markdownSlug.value)
 
-const embeddedUrl = computed(() => {
-  if (!menuItem.value || isMarkdownMode.value) return ''
-  return buildEmbeddedUrl(
-    menuItem.value.url,
-    authStore.user?.id,
-    authStore.token,
-    pageTheme.value,
-    locale.value,
-  )
-})
+function isAbsoluteHttpUrl(value: string | undefined): value is string {
+  if (!value) return false
+  try {
+    const parsed = new URL(value)
+    return parsed.protocol === 'http:' || parsed.protocol === 'https:'
+  } catch {
+    return false
+  }
+}
 
-const isValidUrl = computed(() => {
-  if (isMarkdownMode.value) return false
-  const url = embeddedUrl.value
-  return url.startsWith('http://') || url.startsWith('https://')
-})
+const isValidUrl = computed(() => (
+  !isMarkdownMode.value && isAbsoluteHttpUrl(menuItem.value?.url)
+))
+
+function externalPageContext(uiMode: EmbeddedUIMode) {
+  return buildEmbeddedPageContext({
+    theme: pageTheme.value,
+    lang: locale.value,
+    uiMode,
+  })
+}
+
+async function resolveExternalPageUrl(uiMode: EmbeddedUIMode): Promise<string> {
+  const item = menuItem.value
+  if (!item || !isValidUrl.value) throw new Error(t('customPage.notConfiguredDesc'))
+
+  if (item.auth_mode === 'exchange_code') {
+    const launch = await requestCustomPageLaunch(item.id, externalPageContext(uiMode))
+    if (!isAbsoluteHttpUrl(launch.launch_url)) throw new Error(t('customPage.launchFailed'))
+    return launch.launch_url
+  }
+
+  return buildEmbeddedUrl(item.url, {
+    theme: pageTheme.value,
+    lang: locale.value,
+    uiMode,
+  })
+}
+
+async function loadIframeUrl(): Promise<void> {
+  const requestId = ++iframeLaunchRequestId
+  iframeUrl.value = ''
+  iframeLaunchError.value = ''
+
+  if (!menuItem.value || isMarkdownMode.value || !isValidUrl.value) {
+    iframeLaunchLoading.value = false
+    return
+  }
+
+  iframeLaunchLoading.value = menuItem.value.auth_mode === 'exchange_code'
+  try {
+    const url = await resolveExternalPageUrl('embedded')
+    if (requestId !== iframeLaunchRequestId) return
+    iframeUrl.value = url
+  } catch {
+    if (requestId !== iframeLaunchRequestId) return
+    iframeLaunchError.value = t('customPage.launchFailed')
+  } finally {
+    if (requestId === iframeLaunchRequestId) iframeLaunchLoading.value = false
+  }
+}
+
+function prepareNewTab(): Window | null {
+  const popup = window.open('', '_blank')
+  if (!popup) return null
+  popup.opener = null
+  try {
+    const referrerMeta = popup.document.createElement('meta')
+    referrerMeta.name = 'referrer'
+    referrerMeta.content = 'no-referrer'
+    popup.document.head.appendChild(referrerMeta)
+  } catch {
+    // The blank window is still isolated via opener=null.
+  }
+  return popup
+}
+
+async function openInNewTab(): Promise<void> {
+  if (newTabLoading.value) return
+  const popup = prepareNewTab()
+  if (!popup) {
+    appStore.showError(t('customPage.popupBlocked'))
+    return
+  }
+
+  newTabLoading.value = true
+  try {
+    // exchange_code launches are one-time: never reuse the iframe launch URL.
+    const url = await resolveExternalPageUrl('new_tab')
+    popup.location.replace(url)
+  } catch {
+    popup.close()
+    appStore.showError(t('customPage.launchFailed'))
+  } finally {
+    newTabLoading.value = false
+  }
+}
 
 function generateHeadingId(text: string, index: number): string {
   const base = text
@@ -226,8 +337,9 @@ async function fetchAndRenderMarkdown(slug: string) {
   tocItems.value = []
   activeHeadingId.value = ''
   try {
+    const accessToken = authSession.getSnapshot().accessToken
     const resp = await fetch(buildApiUrl(`/pages/${encodeURIComponent(slug)}`), {
-      headers: authStore.token ? { Authorization: `Bearer ${authStore.token}` } : {},
+      headers: accessToken ? { Authorization: `Bearer ${accessToken}` } : {},
     })
     if (!resp.ok) {
       renderedHtml.value = '<p class="text-red-500">Page not found</p>'
@@ -342,6 +454,12 @@ watch(markdownSlug, (slug) => {
     tocItems.value = []
   }
 }, { immediate: true })
+
+watch(
+  [menuItemId, () => menuItem.value?.url, () => menuItem.value?.auth_mode, pageTheme, locale],
+  () => { void loadIframeUrl() },
+  { immediate: true },
+)
 
 onMounted(async () => {
   pageTheme.value = detectTheme()

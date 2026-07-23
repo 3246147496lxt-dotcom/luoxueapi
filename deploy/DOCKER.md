@@ -12,7 +12,7 @@ docker run -d \
   -p 8080:8080 \
   -e DATABASE_URL="postgres://user:pass@host:5432/sub2api" \
   -e REDIS_URL="redis://host:6379" \
-  weishaw/sub2api:latest
+  ghcr.io/3246147496lxt-dotcom/luoxueapi:1.0.7
 ```
 
 ## Docker Compose
@@ -22,7 +22,7 @@ version: '3.8'
 
 services:
   sub2api:
-    image: weishaw/sub2api:latest
+    image: ghcr.io/3246147496lxt-dotcom/luoxueapi:1.0.7
     ports:
       - "8080:8080"
     environment:
@@ -74,5 +74,5 @@ volumes:
 
 ## Links
 
-- [GitHub Repository](https://github.com/weishaw/sub2api)
-- [Documentation](https://github.com/weishaw/sub2api#readme)
+- [GitHub Repository](https://github.com/3246147496lxt-dotcom/luoxueapi)
+- [Documentation](https://github.com/3246147496lxt-dotcom/luoxueapi#readme)

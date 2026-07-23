@@ -1204,6 +1204,8 @@ func TestOpenAIResponsesWebSocket_ContentModerationBlocksFirstFrame(t *testing.T
 		nil,
 		nil,
 	)
+	moderationSvc.Start()
+	t.Cleanup(func() { _ = moderationSvc.Stop(context.Background()) })
 	decision, err := moderationSvc.Check(context.Background(), service.ContentModerationCheckInput{
 		UserID:   1,
 		Endpoint: "/v1/responses",

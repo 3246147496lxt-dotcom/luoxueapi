@@ -3,10 +3,6 @@ version: 2
 
 project_name: sub2api
 
-before:
-  hooks:
-    - go mod tidy -C backend
-
 builds:
   - id: sub2api
     dir: backend
@@ -22,6 +18,7 @@ builds:
       - amd64
     ldflags:
       - -s -w
+      - -X main.Version={{.Version}}
       - -X main.Commit={{.Commit}}
       - -X main.Date={{.Date}}
       - -X main.BuildType=release
@@ -37,26 +34,40 @@ changelog:
   disable: true
 
 # 仅 GHCR x86_64 镜像
-dockers:
-  - id: ghcr-amd64
-    goos: linux
-    goarch: amd64
-    image_templates:
-      - "ghcr.io/{{ .Env.GITHUB_REPO_OWNER_LOWER }}/sub2api:{{ .Version }}-amd64"
-      - "ghcr.io/{{ .Env.GITHUB_REPO_OWNER_LOWER }}/sub2api:{{ .Version }}"
-      - "ghcr.io/{{ .Env.GITHUB_REPO_OWNER_LOWER }}/sub2api:latest"
+dockers_v2:
+  - id: ghcr-luoxueapi
+    ids: [sub2api]
     dockerfile: Dockerfile.goreleaser
-    use: buildx
+    images:
+      - "ghcr.io/{{ .Env.GITHUB_REPO_OWNER_LOWER }}/luoxueapi"
+    tags:
+      - "{{ .Version }}"
+    platforms:
+      - linux/amd64
     extra_files:
       - deploy/docker-entrypoint.sh
-    build_flag_templates:
-      - "--platform=linux/amd64"
-      - "--label=org.opencontainers.image.version={{ .Version }}"
-      - "--label=org.opencontainers.image.revision={{ .Commit }}"
-      - "--label=org.opencontainers.image.source=https://github.com/{{ .Env.GITHUB_REPO_OWNER }}/{{ .Env.GITHUB_REPO_NAME }}"
+      - backend/resources/model-pricing
+    labels:
+      "org.opencontainers.image.version": "{{ .Version }}"
+      "org.opencontainers.image.revision": "{{ .FullCommit }}"
+      "org.opencontainers.image.source": "https://github.com/{{ .Env.GITHUB_REPO_OWNER }}/{{ .Env.GITHUB_REPO_NAME }}"
 
-# 跳过 manifests（单架构不需要）
-docker_manifests: []
+  - id: ghcr-sub2api-compat
+    ids: [sub2api]
+    dockerfile: Dockerfile.goreleaser
+    images:
+      - "ghcr.io/{{ .Env.GITHUB_REPO_OWNER_LOWER }}/sub2api"
+    tags:
+      - "{{ .Version }}"
+    platforms:
+      - linux/amd64
+    extra_files:
+      - deploy/docker-entrypoint.sh
+      - backend/resources/model-pricing
+    labels:
+      "org.opencontainers.image.version": "{{ .Version }}"
+      "org.opencontainers.image.revision": "{{ .FullCommit }}"
+      "org.opencontainers.image.source": "https://github.com/{{ .Env.GITHUB_REPO_OWNER }}/{{ .Env.GITHUB_REPO_NAME }}"
 
 release:
   github:
@@ -80,7 +91,7 @@ release:
 
     **Docker (x86_64 only):**
     ```bash
-    docker pull ghcr.io/{{ .Env.GITHUB_REPO_OWNER_LOWER }}/sub2api:{{ .Version }}
+    docker pull ghcr.io/{{ .Env.GITHUB_REPO_OWNER_LOWER }}/luoxueapi:{{ .Version }}
     ```
 
     ## 📚 Documentation

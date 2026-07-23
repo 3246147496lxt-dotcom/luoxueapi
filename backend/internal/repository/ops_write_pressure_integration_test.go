@@ -91,6 +91,55 @@ func TestSchedulerOutbox_ListAfterAndReleaseDedup_AllowsSameKeyWhileEventInFligh
 	require.Equal(t, 1, pendingKeys)
 }
 
+func TestSchedulerOutbox_ListAfterWaitsForEarlierUncommittedSequenceValue(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	_, _ = integrationDB.ExecContext(ctx, "TRUNCATE scheduler_outbox RESTART IDENTITY")
+
+	firstTx, err := integrationDB.BeginTx(ctx, nil)
+	require.NoError(t, err)
+	defer func() { _ = firstTx.Rollback() }()
+
+	var firstID int64
+	require.NoError(t, firstTx.QueryRowContext(ctx, `
+		INSERT INTO scheduler_outbox (event_type) VALUES ('commit_fence_first') RETURNING id
+	`).Scan(&firstID))
+
+	var secondID int64
+	require.NoError(t, integrationDB.QueryRowContext(ctx, `
+		INSERT INTO scheduler_outbox (event_type) VALUES ('commit_fence_second') RETURNING id
+	`).Scan(&secondID))
+	require.Less(t, firstID, secondID)
+
+	type pollResult struct {
+		events []service.SchedulerOutboxEvent
+		err    error
+	}
+	resultCh := make(chan pollResult, 1)
+	go func() {
+		events, pollErr := NewSchedulerOutboxRepository(integrationDB).ListAfterAndReleaseDedup(ctx, 0, 200)
+		resultCh <- pollResult{events: events, err: pollErr}
+	}()
+
+	select {
+	case result := <-resultCh:
+		require.Failf(t, "poll crossed an uncommitted sequence value", "events=%v err=%v", result.events, result.err)
+	case <-time.After(100 * time.Millisecond):
+		// Expected: the SHARE ROW EXCLUSIVE fence waits for firstTx's INSERT.
+	}
+
+	require.NoError(t, firstTx.Commit())
+	select {
+	case result := <-resultCh:
+		require.NoError(t, result.err)
+		require.Len(t, result.events, 2)
+		require.Equal(t, firstID, result.events[0].ID)
+		require.Equal(t, secondID, result.events[1].ID)
+	case <-ctx.Done():
+		require.NoError(t, ctx.Err())
+	}
+}
+
 func TestEnqueueSchedulerOutbox_CoalescesAccountStateBurst(t *testing.T) {
 	ctx := context.Background()
 	_, _ = integrationDB.ExecContext(ctx, "TRUNCATE scheduler_outbox RESTART IDENTITY")

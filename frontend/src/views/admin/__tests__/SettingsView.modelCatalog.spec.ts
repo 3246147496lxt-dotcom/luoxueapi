@@ -5,13 +5,18 @@ import { describe, expect, it } from 'vitest'
 
 const testDir = dirname(fileURLToPath(import.meta.url))
 const viewSource = readFileSync(resolve(testDir, '../SettingsView.vue'), 'utf8')
+const draftSource = readFileSync(resolve(testDir, '../settings/settingsDraft.ts'), 'utf8')
+const featuresPanelSource = readFileSync(
+  resolve(testDir, '../settings/FeaturesSettingsPanel.vue'),
+  'utf8',
+)
 const settingsApiSource = readFileSync(resolve(testDir, '../../../api/admin/settings.ts'), 'utf8')
 
 describe('public model catalog setting', () => {
   it('is fail-closed in the form and included in the settings payload', () => {
-    expect(viewSource).toContain('public_model_catalog_enabled: false')
+    expect(draftSource).toContain('public_model_catalog_enabled: false')
     expect(viewSource).toContain('public_model_catalog_enabled: form.public_model_catalog_enabled')
-    expect(viewSource).toContain('v-model="form.public_model_catalog_enabled"')
+    expect(featuresPanelSource).toContain('v-model="form.public_model_catalog_enabled"')
   })
 
   it('is represented in both read and update settings contracts', () => {

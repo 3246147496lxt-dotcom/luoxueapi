@@ -414,9 +414,18 @@ func (s *OpenAIOAuthService) BuildAccountCredentials(tokenInfo *OpenAITokenInfo)
 	return NormalizeOpenAIPersonalAccessTokenCredentials(nil, tokenInfo, creds)
 }
 
-// Stop stops the session store cleanup goroutine
+// Start starts the session expiration worker.
+func (s *OpenAIOAuthService) Start() {
+	if s != nil && s.sessionStore != nil {
+		s.sessionStore.Start()
+	}
+}
+
+// Stop stops the session store cleanup goroutine.
 func (s *OpenAIOAuthService) Stop() {
-	s.sessionStore.Stop()
+	if s != nil && s.sessionStore != nil {
+		s.sessionStore.Stop()
+	}
 }
 
 func normalizeOpenAIOAuthPlatform(platform string) string {

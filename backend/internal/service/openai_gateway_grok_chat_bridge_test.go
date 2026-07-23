@@ -134,7 +134,7 @@ func TestGrokChatResponsesRuntimeEligibility(t *testing.T) {
 }
 
 func TestForwardGrokChatViaResponsesNonStreamingCachesAndReturnsChat(t *testing.T) {
-	gin.SetMode(gin.TestMode)
+	setGinTestMode()
 
 	body := []byte(`{"model":"grok","messages":[{"role":"system","content":"be concise"},{"role":"user","content":"hi"}],"stream":false,"prompt_cache_key":"stable-session","tools":[],"functions":null,"tool_choice":"none"}`)
 	recorder := httptest.NewRecorder()
@@ -184,7 +184,7 @@ func TestForwardGrokChatViaResponsesNonStreamingCachesAndReturnsChat(t *testing.
 }
 
 func TestForwardGrokChatViaResponsesStreamingPropagatesCachedUsage(t *testing.T) {
-	gin.SetMode(gin.TestMode)
+	setGinTestMode()
 
 	body := []byte(`{"model":"grok","messages":[{"role":"user","content":"hi"}],"stream":true}`)
 	recorder := httptest.NewRecorder()
@@ -216,7 +216,7 @@ func TestForwardGrokChatViaResponsesStreamingPropagatesCachedUsage(t *testing.T)
 }
 
 func TestForwardGrokChatRuntimeGateFallsBackToRaw(t *testing.T) {
-	gin.SetMode(gin.TestMode)
+	setGinTestMode()
 
 	tests := []struct {
 		name         string
@@ -271,7 +271,7 @@ func TestForwardGrokChatRuntimeGateFallsBackToRaw(t *testing.T) {
 }
 
 func TestForwardGrokChatViaResponses429UsesGrokRateLimitPolicy(t *testing.T) {
-	gin.SetMode(gin.TestMode)
+	setGinTestMode()
 
 	body := []byte(`{"model":"grok","messages":[{"role":"user","content":"hi"}],"stream":false}`)
 	recorder := httptest.NewRecorder()
@@ -314,7 +314,7 @@ func TestForwardGrokChatViaResponses429UsesGrokRateLimitPolicy(t *testing.T) {
 }
 
 func TestForwardGrokRawChat429PreservesRetryAfter(t *testing.T) {
-	gin.SetMode(gin.TestMode)
+	setGinTestMode()
 
 	body := []byte(`{"model":"grok","messages":[{"role":"user","content":"hi"}],"stream":false,"stop":"done"}`)
 	recorder := httptest.NewRecorder()
@@ -353,7 +353,7 @@ func TestForwardGrokRawChat429PreservesRetryAfter(t *testing.T) {
 }
 
 func TestForwardGrokRawChatErrorRecordsActualEndpoint(t *testing.T) {
-	gin.SetMode(gin.TestMode)
+	setGinTestMode()
 
 	body := []byte(`{"model":"grok","messages":[{"role":"user","content":"hi"}],"stream":false,"stop":"done"}`)
 	recorder := httptest.NewRecorder()

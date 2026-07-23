@@ -36,7 +36,10 @@ linters:
           list-mode: original
           files:
             - "**/internal/handler/**"
+            - "!**/*_test.go"
           deny:
+            - pkg: github.com/Wei-Shaw/sub2api/ent
+              desc: "handler must not import Ent"
             - pkg: github.com/Wei-Shaw/sub2api/internal/repository
               desc: "handler must not import repository"
             - pkg: gorm.io/gorm

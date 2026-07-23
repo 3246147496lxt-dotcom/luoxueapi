@@ -6,6 +6,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"strings"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
@@ -956,6 +957,16 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 			return
 		}
 		for i, item := range items {
+			authMode := strings.TrimSpace(item.AuthMode)
+			if authMode == "" {
+				authMode = service.CustomMenuAuthModeNone
+			}
+			if authMode != service.CustomMenuAuthModeNone && authMode != service.CustomMenuAuthModeExchangeCode {
+				response.BadRequest(c, "Custom menu item auth_mode must be 'none' or 'exchange_code'")
+				return
+			}
+			items[i].AuthMode = authMode
+
 			if strings.TrimSpace(item.Label) == "" {
 				response.BadRequest(c, "Custom menu item label is required")
 				return
@@ -966,6 +977,10 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 			}
 			urlTrimmed := strings.TrimSpace(item.URL)
 			if strings.HasPrefix(urlTrimmed, "md:") {
+				if authMode != service.CustomMenuAuthModeNone {
+					response.BadRequest(c, "Markdown custom menu items only support auth_mode 'none'")
+					return
+				}
 				// Markdown page mode: URL = "md:<slug>"
 				slug := strings.TrimPrefix(urlTrimmed, "md:")
 				if slug == "" {
@@ -984,6 +999,13 @@ func (h *SettingHandler) UpdateSettings(c *gin.Context) {
 				if err := config.ValidateAbsoluteHTTPURL(urlTrimmed); err != nil {
 					response.BadRequest(c, "Custom menu item URL must be an absolute http(s) URL or md:<slug>")
 					return
+				}
+				if authMode == service.CustomMenuAuthModeExchangeCode {
+					parsedURL, err := url.Parse(urlTrimmed)
+					if err != nil || !strings.EqualFold(parsedURL.Scheme, "https") || parsedURL.User != nil {
+						response.BadRequest(c, "Custom menu items using exchange_code must use HTTPS")
+						return
+					}
 				}
 			}
 			if item.Visibility != "user" && item.Visibility != "admin" {

@@ -47,7 +47,7 @@ type GeminiMessagesCompatService struct {
 	accountRepo               AccountRepository
 	groupRepo                 GroupRepository
 	cache                     GatewayCache
-	schedulerSnapshot         *SchedulerSnapshotService
+	schedulerSnapshot         GatewayScheduler
 	tokenProvider             *GeminiTokenProvider
 	rateLimitService          *RateLimitService
 	httpUpstream              HTTPUpstream
@@ -72,7 +72,7 @@ func NewGeminiMessagesCompatService(
 	accountRepo AccountRepository,
 	groupRepo GroupRepository,
 	cache GatewayCache,
-	schedulerSnapshot *SchedulerSnapshotService,
+	schedulerSnapshot GatewayScheduler,
 	tokenProvider *GeminiTokenProvider,
 	rateLimitService *RateLimitService,
 	httpUpstream HTTPUpstream,

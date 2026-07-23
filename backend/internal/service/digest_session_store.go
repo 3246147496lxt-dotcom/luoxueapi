@@ -3,6 +3,7 @@ package service
 import (
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	gocache "github.com/patrickmn/go-cache"
@@ -20,14 +21,52 @@ type sessionEntry struct {
 // DigestSessionStore 内存摘要会话存储（flat cache 实现）
 // key: "{groupID}:{prefixHash}|{digestChain}" → *sessionEntry
 type DigestSessionStore struct {
-	cache *gocache.Cache
+	cache     *gocache.Cache
+	startOnce sync.Once
+	stopOnce  sync.Once
+	stopCh    chan struct{}
+	wg        sync.WaitGroup
 }
 
 // NewDigestSessionStore 创建内存摘要会话存储
 func NewDigestSessionStore() *DigestSessionStore {
 	return &DigestSessionStore{
-		cache: gocache.New(digestSessionTTL, time.Minute),
+		cache:  gocache.New(digestSessionTTL, 0),
+		stopCh: make(chan struct{}),
 	}
+}
+
+// Start starts periodic removal of expired digest sessions. The cache itself
+// is usable before Start; only physical deletion of expired entries is delayed.
+func (s *DigestSessionStore) Start() {
+	if s == nil {
+		return
+	}
+	s.startOnce.Do(func() {
+		s.wg.Add(1)
+		go func() {
+			defer s.wg.Done()
+			ticker := time.NewTicker(time.Minute)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-ticker.C:
+					s.cache.DeleteExpired()
+				case <-s.stopCh:
+					return
+				}
+			}
+		}()
+	})
+}
+
+// Stop cancels and joins the cleanup worker.
+func (s *DigestSessionStore) Stop() {
+	if s == nil {
+		return
+	}
+	s.stopOnce.Do(func() { close(s.stopCh) })
+	s.wg.Wait()
 }
 
 // Save 保存摘要会话。oldDigestChain 为 Find 返回的 matchedChain，用于删旧 key。

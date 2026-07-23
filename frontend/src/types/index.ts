@@ -165,12 +165,16 @@ export interface SendVerifyCodeResponse {
   countdown: number
 }
 
+export type CustomMenuAuthMode = 'none' | 'exchange_code'
+
 export interface CustomMenuItem {
   id: string
   label: string
   icon_svg: string
   url: string
   page_slug?: string
+  /** Defaults to `none` for settings created before launch-code support. */
+  auth_mode?: CustomMenuAuthMode
   visibility: 'user' | 'admin'
   sort_order: number
 }

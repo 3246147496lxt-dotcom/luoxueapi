@@ -286,7 +286,7 @@ describe('AppSidebar grouped admin navigation', () => {
     ])
     expect(sections.every(section => section.findAll('.sidebar-link').length > 0)).toBe(true)
     expect(wrapper.find('a[href="/admin/users"]').exists()).toBe(false)
-    expect(wrapper.get('[data-testid="sidebar-admin-business-section"] a[href="/keys"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="sidebar-admin-business-section"] a[href="/keys"]').exists()).toBe(true)
     const simpleSystemLinks = wrapper
       .get('[data-testid="sidebar-admin-system-section"]')
       .findAll('a[href]')
@@ -389,7 +389,7 @@ describe('AppSidebar grouped admin navigation', () => {
     const wrapper = mountSidebar()
 
     expect(wrapper.get('a[href="/admin/dashboard"]').classes()).toContain('sidebar-link-collapsed')
-    expect(wrapper.get('a[href="/admin/announcements"]').exists()).toBe(true)
+    expect(wrapper.find('a[href="/admin/announcements"]').exists()).toBe(true)
   })
 
   it('uses the personal-center heading and the supplied notification glyph', () => {
@@ -444,7 +444,7 @@ describe('AppSidebar grouped admin navigation', () => {
           sort_order: 1,
         },
       ],
-    } as PublicSettings
+    } as unknown as PublicSettings
     const wrapper = mountSidebar('user')
     const sections = wrapper.get('nav.sidebar-nav').findAll('[data-testid^="sidebar-user-"]')
 
@@ -463,7 +463,7 @@ describe('AppSidebar grouped admin navigation', () => {
     appStore.cachedPublicSettings = {
       custom_menu_items: [],
       payment_enabled: false,
-    } as PublicSettings
+    } as unknown as PublicSettings
     const wrapper = mountSidebar('user')
     const personalSection = wrapper.get('[data-testid="sidebar-user-personal-section"]')
 
@@ -591,7 +591,7 @@ describe('AppSidebar grouped admin navigation', () => {
     for (const link of links) {
       expect(link.classes()).toContain('sidebar-destination-link-collapsed')
       expect(link.attributes('aria-label')).toBeTruthy()
-      expect(link.get('[data-role="destination-icon"]').exists()).toBe(true)
+      expect(link.find('[data-role="destination-icon"]').exists()).toBe(true)
       expect(link.get('[data-role="destination-label"]').attributes('aria-hidden')).toBe('true')
       expect(link.get('[data-role="destination-jump"]').attributes('aria-hidden')).toBe('true')
     }

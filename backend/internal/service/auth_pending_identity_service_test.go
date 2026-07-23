@@ -311,7 +311,7 @@ func TestAuthPendingIdentityService_UpsertAdoptionDecision_IsIdempotentUnderConc
 	})
 
 	type adoptionResult struct {
-		decision *dbent.IdentityAdoptionDecision
+		decision *PendingIdentityDecision
 		err      error
 	}
 

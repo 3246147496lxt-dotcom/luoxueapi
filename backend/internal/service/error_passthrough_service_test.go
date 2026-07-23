@@ -944,7 +944,7 @@ func TestDelete_ForceRefreshCacheAfterWrite(t *testing.T) {
 	assert.Equal(t, 1, cache.notifyCalled)
 }
 
-func TestNewService_StartupReloadFromDBToHealStaleCache(t *testing.T) {
+func TestServiceStartReloadsDBToHealStaleCache(t *testing.T) {
 	staleRule := newPassthroughRuleForWritePathTest(99, "stale keyword", "旧缓存消息")
 	latestRule := newPassthroughRuleForWritePathTest(1, "fresh keyword", "最新消息")
 
@@ -952,6 +952,8 @@ func TestNewService_StartupReloadFromDBToHealStaleCache(t *testing.T) {
 	cache := newMockErrorPassthroughCache([]*model.ErrorPassthroughRule{staleRule}, true)
 
 	svc := NewErrorPassthroughService(repo, cache)
+	require.NoError(t, svc.Start(context.Background()))
+	t.Cleanup(func() { require.NoError(t, svc.Stop(context.Background())) })
 
 	matchedFresh := svc.MatchRule("anthropic", 503, []byte(`{"message":"fresh keyword"}`))
 	require.NotNil(t, matchedFresh)

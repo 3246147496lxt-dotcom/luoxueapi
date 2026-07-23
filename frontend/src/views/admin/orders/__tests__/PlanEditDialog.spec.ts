@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
 import PlanEditDialog from '../PlanEditDialog.vue'
+import type { AdminPaymentConfig } from '@/api/admin/payment'
 
 vi.mock('vue-i18n', () => ({
   useI18n: () => ({
@@ -26,13 +27,13 @@ vi.mock('@/api/admin/payment', () => ({
   },
 }))
 
-function mountDialog(paymentConfig: Record<string, unknown> | null) {
+function mountDialog(paymentConfig: Partial<AdminPaymentConfig> | null) {
   return mount(PlanEditDialog, {
     props: {
       show: true,
       plan: null,
       groups: [],
-      paymentConfig,
+      paymentConfig: paymentConfig as AdminPaymentConfig | null,
     },
     global: {
       stubs: {

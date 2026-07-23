@@ -125,11 +125,14 @@ func NewAuthService(
 	}
 }
 
-func (s *AuthService) EntClient() *dbent.Client {
-	if s == nil {
+// PendingIdentityUseCases returns the cohesive pending-identity service rather
+// than exposing the ORM client to the transport layer. The remaining legacy
+// OAuth helpers are migrated behind this service incrementally.
+func (s *AuthService) PendingIdentityUseCases() *AuthPendingIdentityService {
+	if s == nil || s.entClient == nil {
 		return nil
 	}
-	return s.entClient
+	return NewAuthPendingIdentityService(s.entClient)
 }
 
 // Register 用户注册，返回token和用户

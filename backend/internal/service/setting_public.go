@@ -314,7 +314,7 @@ func (s *SettingService) GetPublicSettings(ctx context.Context) (*PublicSettings
 		PurchaseSubscriptionURL:          strings.TrimSpace(settings[SettingKeyPurchaseSubscriptionURL]),
 		TableDefaultPageSize:             tableDefaultPageSize,
 		TablePageSizeOptions:             tablePageSizeOptions,
-		CustomMenuItems:                  settings[SettingKeyCustomMenuItems],
+		CustomMenuItems:                  sanitizePublicCustomMenuItems(settings[SettingKeyCustomMenuItems]),
 		CustomEndpoints:                  settings[SettingKeyCustomEndpoints],
 		LinuxDoOAuthEnabled:              linuxDoEnabled,
 		DingTalkOAuthEnabled:             dingTalkEnabled,
@@ -638,6 +638,32 @@ func (s *SettingService) GetPublicSettingsForInjection(ctx context.Context) (any
 	}, nil
 }
 
+func sanitizePublicCustomMenuItems(raw string) string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" || raw == "[]" {
+		return "[]"
+	}
+	var items []json.RawMessage
+	if err := json.Unmarshal([]byte(raw), &items); err != nil {
+		return "[]"
+	}
+	sanitizedItems := make([]json.RawMessage, 0, len(items))
+	for _, item := range items {
+		sanitized, ok := sanitizePublicCustomMenuItem(item)
+		if ok {
+			sanitizedItems = append(sanitizedItems, sanitized)
+		}
+	}
+	if len(sanitizedItems) == 0 {
+		return "[]"
+	}
+	sanitized, err := json.Marshal(sanitizedItems)
+	if err != nil {
+		return "[]"
+	}
+	return string(sanitized)
+}
+
 // filterUserVisibleMenuItems filters out admin-only menu items from a raw JSON
 // array string, returning only items with visibility != "admin".
 func filterUserVisibleMenuItems(raw string) json.RawMessage {
@@ -661,7 +687,10 @@ func filterUserVisibleMenuItems(raw string) json.RawMessage {
 	var filtered []json.RawMessage
 	for i, item := range items {
 		if item.Visibility != "admin" {
-			filtered = append(filtered, fullItems[i])
+			sanitized, ok := sanitizePublicCustomMenuItem(fullItems[i])
+			if ok {
+				filtered = append(filtered, sanitized)
+			}
 		}
 	}
 	if len(filtered) == 0 {
@@ -672,6 +701,51 @@ func filterUserVisibleMenuItems(raw string) json.RawMessage {
 		return json.RawMessage("[]")
 	}
 	return result
+}
+
+func sanitizePublicCustomMenuItem(raw json.RawMessage) (json.RawMessage, bool) {
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &fields); err != nil || fields == nil {
+		return nil, false
+	}
+	rawURL, ok := fields["url"]
+	if !ok {
+		return raw, true
+	}
+	var menuURL string
+	if err := json.Unmarshal(rawURL, &menuURL); err != nil {
+		return nil, false
+	}
+	encodedURL, err := json.Marshal(sanitizePublicCustomMenuURL(menuURL))
+	if err != nil {
+		return nil, false
+	}
+	fields["url"] = encodedURL
+	sanitized, err := json.Marshal(fields)
+	if err != nil {
+		return nil, false
+	}
+	return sanitized, true
+}
+
+func sanitizePublicCustomMenuURL(raw string) string {
+	parsed, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil {
+		return ""
+	}
+
+	parsed.User = nil
+	// Public settings only expose the configured page location. Navigation
+	// code rebuilds the complete query from its allowlisted presentation
+	// context, while exchange-code launches add a fresh one-time credential.
+	// Dropping every administrator-provided query value avoids guessing which
+	// parameter names may contain credentials now or in the future.
+	parsed.RawQuery = ""
+	parsed.ForceQuery = false
+	// Fragments are client-side data and historically carried credentials.
+	parsed.Fragment = ""
+	parsed.RawFragment = ""
+	return parsed.String()
 }
 
 // safeRawJSONArray returns raw as json.RawMessage if it's valid JSON, otherwise "[]".

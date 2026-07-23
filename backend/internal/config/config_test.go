@@ -35,6 +35,33 @@ func TestLoadServerTimingConfig(t *testing.T) {
 	})
 }
 
+func TestLoadServerShutdownConfig(t *testing.T) {
+	t.Run("defaults", func(t *testing.T) {
+		resetViperWithJWTSecret(t)
+		cfg, err := Load()
+		require.NoError(t, err)
+		require.Equal(t, 30, cfg.Server.ShutdownGraceSeconds)
+		require.Equal(t, 10, cfg.Server.ShutdownForceWaitSeconds)
+	})
+
+	t.Run("environment overrides", func(t *testing.T) {
+		resetViperWithJWTSecret(t)
+		t.Setenv("SERVER_SHUTDOWN_GRACE_SECONDS", "90")
+		t.Setenv("SERVER_SHUTDOWN_FORCE_WAIT_SECONDS", "15")
+		cfg, err := Load()
+		require.NoError(t, err)
+		require.Equal(t, 90, cfg.Server.ShutdownGraceSeconds)
+		require.Equal(t, 15, cfg.Server.ShutdownForceWaitSeconds)
+	})
+
+	t.Run("rejects non-positive windows", func(t *testing.T) {
+		resetViperWithJWTSecret(t)
+		t.Setenv("SERVER_SHUTDOWN_GRACE_SECONDS", "0")
+		_, err := Load()
+		require.ErrorContains(t, err, "server.shutdown_grace_seconds must be positive")
+	})
+}
+
 func TestLoadForBootstrapAllowsMissingJWTSecret(t *testing.T) {
 	viper.Reset()
 	t.Setenv("JWT_SECRET", "")
@@ -96,6 +123,9 @@ func TestLoadDefaultSchedulingConfig(t *testing.T) {
 	}
 	if cfg.Gateway.Scheduling.SlotCleanupInterval != 30*time.Second {
 		t.Fatalf("SlotCleanupInterval = %v, want 30s", cfg.Gateway.Scheduling.SlotCleanupInterval)
+	}
+	if !cfg.Gateway.Scheduling.ShadowComparisonEnabled {
+		t.Fatalf("ShadowComparisonEnabled = false, want true")
 	}
 }
 
@@ -378,6 +408,7 @@ func TestLoadIdempotencyConfigFromEnv(t *testing.T) {
 func TestLoadSchedulingConfigFromEnv(t *testing.T) {
 	resetViperWithJWTSecret(t)
 	t.Setenv("GATEWAY_SCHEDULING_STICKY_SESSION_MAX_WAITING", "5")
+	t.Setenv("GATEWAY_SCHEDULING_SHADOW_COMPARISON_ENABLED", "false")
 
 	cfg, err := Load()
 	if err != nil {
@@ -386,6 +417,9 @@ func TestLoadSchedulingConfigFromEnv(t *testing.T) {
 
 	if cfg.Gateway.Scheduling.StickySessionMaxWaiting != 5 {
 		t.Fatalf("StickySessionMaxWaiting = %d, want 5", cfg.Gateway.Scheduling.StickySessionMaxWaiting)
+	}
+	if cfg.Gateway.Scheduling.ShadowComparisonEnabled {
+		t.Fatalf("ShadowComparisonEnabled = true, want false")
 	}
 }
 

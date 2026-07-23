@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { setActivePinia, createPinia } from 'pinia'
 import { useAuthStore } from '@/stores/auth'
+import { authSession } from '@/auth/authSession'
 
 // Mock authAPI
 const mockLogin = vi.fn()
@@ -31,6 +32,9 @@ const fakeUser = {
   concurrency: 5,
   status: 'active' as const,
   allowed_groups: null,
+  balance_notify_enabled: false,
+  balance_notify_threshold: null,
+  balance_notify_extra_emails: [],
   created_at: '2024-01-01',
   updated_at: '2024-01-01',
 }
@@ -54,7 +58,9 @@ const fakeAuthResponse = {
 describe('useAuthStore', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
+    authSession.clear()
     localStorage.clear()
+    sessionStorage.clear()
     vi.useFakeTimers()
     vi.clearAllMocks()
   })
@@ -103,6 +109,30 @@ describe('useAuthStore', () => {
       expect(store.token).toBeNull()
       expect(store.isAuthenticated).toBe(false)
     })
+
+    it('AUTH_SESSION_CHANGED 不会清除请求期间建立的新会话', async () => {
+      let rejectLogin!: (reason: unknown) => void
+      mockLogin.mockReturnValue(new Promise((_resolve, reject) => {
+        rejectLogin = reject
+      }))
+      const store = useAuthStore()
+      const pending = store.login({ email: 'old@example.com', password: '123456' })
+      authSession.replace({
+        accessToken: 'newer-access',
+        refreshToken: 'newer-refresh',
+        expiresAt: Date.now() + 3600_000,
+        user: { ...fakeUser, id: 9, username: 'newer-user' },
+      })
+
+      rejectLogin({ status: 409, code: 'AUTH_SESSION_CHANGED' })
+
+      await expect(pending).rejects.toEqual(expect.objectContaining({
+        code: 'AUTH_SESSION_CHANGED',
+      }))
+      expect(store.token).toBe('newer-access')
+      expect(store.user).toEqual(expect.objectContaining({ id: 9 }))
+      expect(authSession.getSnapshot().refreshToken).toBe('newer-refresh')
+    })
   })
 
   // --- login2FA ---
@@ -131,6 +161,29 @@ describe('useAuthStore', () => {
       expect(store.token).toBeNull()
       expect(store.isAuthenticated).toBe(false)
     })
+
+    it('2FA 的过期 AUTH_SESSION_CHANGED 不会清除新会话', async () => {
+      let rejectLogin!: (reason: unknown) => void
+      mockLogin2FA.mockReturnValue(new Promise((_resolve, reject) => {
+        rejectLogin = reject
+      }))
+      const store = useAuthStore()
+      const pending = store.login2FA('temp-123', '654321')
+      authSession.replace({
+        accessToken: 'newer-2fa-access',
+        refreshToken: 'newer-2fa-refresh',
+        expiresAt: Date.now() + 3600_000,
+        user: { ...fakeUser, id: 10, username: 'newer-2fa-user' },
+      })
+
+      rejectLogin({ status: 409, code: 'AUTH_SESSION_CHANGED' })
+
+      await expect(pending).rejects.toEqual(expect.objectContaining({
+        code: 'AUTH_SESSION_CHANGED',
+      }))
+      expect(store.token).toBe('newer-2fa-access')
+      expect(store.user).toEqual(expect.objectContaining({ id: 10 }))
+    })
   })
 
   // --- logout ---
@@ -155,6 +208,60 @@ describe('useAuthStore', () => {
       expect(localStorage.getItem('auth_user')).toBeNull()
       expect(localStorage.getItem('refresh_token')).toBeNull()
       expect(localStorage.getItem('token_expires_at')).toBeNull()
+      expect(mockLogout).toHaveBeenCalledWith({
+        accessToken: 'test-token-123',
+        refreshToken: 'refresh-token-456',
+      })
+    })
+
+    it('迟到的服务端吊销不会清除随后建立的新 family', async () => {
+      mockLogin.mockResolvedValue(fakeAuthResponse)
+      let resolveLogout!: () => void
+      mockLogout.mockReturnValue(new Promise<void>((resolve) => {
+        resolveLogout = resolve
+      }))
+      const store = useAuthStore()
+      await store.login({ email: 'test@example.com', password: '123456' })
+
+      const pending = store.logout()
+      expect(store.isAuthenticated).toBe(false)
+      authSession.replace({
+        accessToken: 'post-logout-access',
+        refreshToken: 'post-logout-refresh',
+        expiresAt: Date.now() + 3600_000,
+        user: { ...fakeUser, id: 13, username: 'post-logout-user' },
+      })
+      resolveLogout()
+      await pending
+
+      expect(store.token).toBe('post-logout-access')
+      expect(store.user).toEqual(expect.objectContaining({ id: 13 }))
+      expect(authSession.getSnapshot().refreshToken).toBe('post-logout-refresh')
+    })
+  })
+
+  describe('setToken', () => {
+    it('OAuth 用户查询的 AUTH_SESSION_CHANGED 不会清除新会话', async () => {
+      let rejectUser!: (reason: unknown) => void
+      mockGetCurrentUser.mockReturnValue(new Promise((_resolve, reject) => {
+        rejectUser = reject
+      }))
+      const store = useAuthStore()
+      const pending = store.setToken('oauth-candidate-access')
+      authSession.replace({
+        accessToken: 'newer-oauth-access',
+        refreshToken: 'newer-oauth-refresh',
+        expiresAt: Date.now() + 3600_000,
+        user: { ...fakeUser, id: 11, username: 'newer-oauth-user' },
+      })
+
+      rejectUser({ status: 409, code: 'AUTH_SESSION_CHANGED' })
+
+      await expect(pending).rejects.toEqual(expect.objectContaining({
+        code: 'AUTH_SESSION_CHANGED',
+      }))
+      expect(store.token).toBe('newer-oauth-access')
+      expect(store.user).toEqual(expect.objectContaining({ id: 11 }))
     })
   })
 
@@ -312,6 +419,36 @@ describe('useAuthStore', () => {
         redirect: '/register',
       })
     })
+
+    it('registration AUTH_SESSION_CHANGED preserves both the newer login and pending flow', async () => {
+      let rejectRegister!: (reason: unknown) => void
+      mockRegister.mockReturnValue(new Promise((_resolve, reject) => {
+        rejectRegister = reject
+      }))
+      const store = useAuthStore()
+      store.setPendingAuthSession({
+        token: 'pending-token',
+        token_field: 'pending_auth_token',
+        provider: 'oidc',
+        redirect: '/register',
+      })
+      const pending = store.register({ email: 'old@example.com', password: 'secret-123' })
+      authSession.replace({
+        accessToken: 'newer-register-access',
+        refreshToken: 'newer-register-refresh',
+        expiresAt: Date.now() + 3600_000,
+        user: { ...fakeUser, id: 12, username: 'newer-register-user' },
+      })
+
+      rejectRegister({ status: 409, code: 'AUTH_SESSION_CHANGED' })
+
+      await expect(pending).rejects.toEqual(expect.objectContaining({
+        code: 'AUTH_SESSION_CHANGED',
+      }))
+      expect(store.token).toBe('newer-register-access')
+      expect(store.user).toEqual(expect.objectContaining({ id: 12 }))
+      expect(store.hasPendingAuthSession).toBe(true)
+    })
   })
 
   // --- isAdmin ---
@@ -363,6 +500,22 @@ describe('useAuthStore', () => {
     it('未认证时抛出错误', async () => {
       const store = useAuthStore()
       await expect(store.refreshUser()).rejects.toThrow('Not authenticated')
+    })
+
+    it('401-shaped AUTH_SESSION_CHANGED does not clear the current family', async () => {
+      mockLogin.mockResolvedValue(fakeAuthResponse)
+      const store = useAuthStore()
+      await store.login({ email: 'test@example.com', password: '123456' })
+      const generation = authSession.getGeneration()
+      mockGetCurrentUser.mockRejectedValue({ status: 401, code: 'AUTH_SESSION_CHANGED' })
+
+      await expect(store.refreshUser()).rejects.toEqual(expect.objectContaining({
+        code: 'AUTH_SESSION_CHANGED',
+      }))
+
+      expect(store.token).toBe('test-token-123')
+      expect(store.user).toEqual(fakeUser)
+      expect(authSession.getGeneration()).toBe(generation)
     })
   })
 

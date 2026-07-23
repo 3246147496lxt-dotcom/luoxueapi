@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -230,10 +231,6 @@ func (s *AccountService) Create(ctx context.Context, req CreateAccountRequest) (
 		account.AutoPauseOnExpired = true
 	}
 
-	if err := s.accountRepo.Create(ctx, account); err != nil {
-		return nil, fmt.Errorf("create account: %w", err)
-	}
-
 	// require_oauth_only 检查：apikey 类型账号不可加入限制分组
 	if account.Type == AccountTypeAPIKey && len(req.GroupIDs) > 0 {
 		for _, gid := range req.GroupIDs {
@@ -247,14 +244,23 @@ func (s *AccountService) Create(ctx context.Context, req CreateAccountRequest) (
 		}
 	}
 
-	// 绑定分组
-	if len(req.GroupIDs) > 0 {
-		if err := s.accountRepo.BindGroups(ctx, account.ID, req.GroupIDs); err != nil {
-			return nil, fmt.Errorf("bind groups: %w", err)
-		}
+	atomicRepo, ok := s.accountRepo.(AccountDuplicateRepository)
+	if !ok {
+		return nil, errors.New("account repository does not support atomic account creation")
+	}
+	if err := CreateAccountWithModuleFacade(ctx, atomicRepo, account, accountGroupsFromIDs(req.GroupIDs)); err != nil {
+		return nil, fmt.Errorf("create account: %w", err)
 	}
 
 	return account, nil
+}
+
+func accountGroupsFromIDs(groupIDs []int64) []AccountGroup {
+	groups := make([]AccountGroup, 0, len(groupIDs))
+	for i, groupID := range groupIDs {
+		groups = append(groups, AccountGroup{GroupID: groupID, Priority: i + 1})
+	}
+	return groups
 }
 
 // GetByID 根据ID获取账号

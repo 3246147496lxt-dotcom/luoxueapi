@@ -4,7 +4,7 @@
 # Copy this file to /etc/sub2api/config.yaml and modify as needed
 # 复制此文件到 /etc/sub2api/config.yaml 并根据需要修改
 #
-# Documentation / 文档: https://github.com/Wei-Shaw/sub2api
+# Documentation / 文档: https://github.com/3246147496lxt-dotcom/luoxueapi
 
 # =============================================================================
 # Server Configuration
@@ -27,6 +27,12 @@ server:
   # 用于生成邮件中的外部链接（例如：重置密码链接）的前端基础地址
   # Example: "https://example.com"
   frontend_url: ""
+  # Graceful request drain before active request contexts are canceled.
+  # 优雅等待活跃请求完成的时间（秒）。
+  shutdown_grace_seconds: 30
+  # Bounded wait after forced cancellation; dependencies stay open on timeout.
+  # 强制取消后等待 handler 退出的时间（秒）。
+  shutdown_force_wait_seconds: 10
   # Trusted proxies for X-Forwarded-For parsing (CIDR/IP). Empty disables trusted proxies.
   # 信任的代理地址（CIDR/IP 格式），用于解析 X-Forwarded-For 头。留空则禁用代理信任。
   trusted_proxies: []

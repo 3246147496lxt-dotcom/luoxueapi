@@ -6,17 +6,18 @@ import (
 	"testing"
 	"time"
 
-	dbent "github.com/Wei-Shaw/sub2api/ent"
+	"github.com/Wei-Shaw/sub2api/internal/service"
 )
 
 func TestSanitizeAdminPaymentOrderForResponseAddsCurrency(t *testing.T) {
 	now := time.Now()
-	order := &dbent.PaymentOrder{
+	order := &service.PaymentOrderView{
 		ID:          1,
 		UserID:      2,
 		Amount:      100,
 		PayAmount:   108,
 		FeeRate:     8,
+		Currency:    "USD",
 		OutTradeNo:  "sub2_202606250001",
 		PaymentType: "stripe",
 		OrderType:   "subscription",
@@ -24,10 +25,6 @@ func TestSanitizeAdminPaymentOrderForResponseAddsCurrency(t *testing.T) {
 		ExpiresAt:   now,
 		CreatedAt:   now,
 		UpdatedAt:   now,
-		ProviderSnapshot: map[string]any{
-			"schema_version": 2,
-			"currency":       "USD",
-		},
 	}
 
 	got := sanitizeAdminPaymentOrderForResponse(order)

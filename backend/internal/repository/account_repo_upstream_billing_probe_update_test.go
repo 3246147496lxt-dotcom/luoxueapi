@@ -151,16 +151,28 @@ func TestUpdateExtraNilProbeRemovesKeyInsteadOfWritingJSONNull(t *testing.T) {
 }
 
 func TestBulkUpdateNilProbeRemovesKeyInsteadOfWritingJSONNull(t *testing.T) {
-	exec := &recordingSQLExecutor{result: rowsAffectedResult(1)}
-	repo := newAccountRepositoryWithSQL(nil, exec, nil)
+	db, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = db.Close() })
+	client := dbent.NewClient(dbent.Driver(entsql.OpenDB(dialect.Postgres, db)))
+	t.Cleanup(func() { _ = client.Close() })
 
-	_, err := repo.BulkUpdate(context.Background(), []int64{27}, service.AccountBulkUpdate{
+	mock.ExpectBegin()
+	mock.ExpectExec(`(?s)UPDATE accounts SET extra = .* - 'upstream_billing_probe'.*WHERE id = ANY\(\$2\)`).
+		WithArgs(sqlmock.AnyArg(), `{27}`).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO scheduler_outbox")).
+		WithArgs(service.SchedulerOutboxEventAccountBulkChanged, nil, nil, sqlmock.AnyArg()).
+		WillReturnResult(sqlmock.NewResult(1, 1))
+	mock.ExpectCommit()
+	repo := newAccountRepositoryWithSQL(client, db, nil)
+
+	_, err = repo.BulkUpdate(context.Background(), []int64{27}, service.AccountBulkUpdate{
 		Extra: map[string]any{service.UpstreamBillingProbeExtraKey: nil},
 	})
 
 	require.NoError(t, err)
-	require.NotEmpty(t, exec.execQueries)
-	require.Contains(t, normalizeSQLWhitespace(exec.execQueries[0]), "- 'upstream_billing_probe'")
+	require.NoError(t, mock.ExpectationsWereMet())
 }
 
 func TestUpdateCredentialsAtomicallyClearsProbeForOpenAIAPIKeyIdentityChange(t *testing.T) {

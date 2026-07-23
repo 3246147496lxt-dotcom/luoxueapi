@@ -29,8 +29,11 @@ type EmailQueueService struct {
 	emailService *EmailService
 	taskChan     chan EmailTask
 	wg           sync.WaitGroup
-	stopChan     chan struct{}
 	workers      int
+	startOnce    sync.Once
+	stopOnce     sync.Once
+	mu           sync.RWMutex
+	stopped      bool
 }
 
 // NewEmailQueueService 创建邮件队列服务
@@ -39,41 +42,35 @@ func NewEmailQueueService(emailService *EmailService, workers int) *EmailQueueSe
 		workers = 3 // 默认3个工作协程
 	}
 
-	service := &EmailQueueService{
+	return &EmailQueueService{
 		emailService: emailService,
 		taskChan:     make(chan EmailTask, 100), // 缓冲100个任务
-		stopChan:     make(chan struct{}),
 		workers:      workers,
 	}
-
-	// 启动工作协程
-	service.start()
-
-	return service
 }
 
-// start 启动工作协程
-func (s *EmailQueueService) start() {
-	for i := 0; i < s.workers; i++ {
-		s.wg.Add(1)
-		go s.worker(i)
+// Start launches workers after the application supervisor is active.
+func (s *EmailQueueService) Start() {
+	if s == nil {
+		return
 	}
-	logger.LegacyPrintf("service.email_queue", "[EmailQueue] Started %d workers", s.workers)
+	s.startOnce.Do(func() {
+		for i := 0; i < s.workers; i++ {
+			s.wg.Add(1)
+			go s.worker(i)
+		}
+		logger.LegacyPrintf("service.email_queue", "[EmailQueue] Started %d workers", s.workers)
+	})
 }
 
 // worker 工作协程
 func (s *EmailQueueService) worker(id int) {
 	defer s.wg.Done()
 
-	for {
-		select {
-		case task := <-s.taskChan:
-			s.processTask(id, task)
-		case <-s.stopChan:
-			logger.LegacyPrintf("service.email_queue", "[EmailQueue] Worker %d stopping", id)
-			return
-		}
+	for task := range s.taskChan {
+		s.processTask(id, task)
 	}
+	logger.LegacyPrintf("service.email_queue", "[EmailQueue] Worker %d stopping", id)
 }
 
 // processTask 处理任务
@@ -108,6 +105,11 @@ func (s *EmailQueueService) EnqueueVerifyCode(email, siteName string, locale ...
 		Locale:   firstEmailLocale(locale),
 	}
 
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.stopped {
+		return fmt.Errorf("email queue is stopped")
+	}
 	select {
 	case s.taskChan <- task:
 		logger.LegacyPrintf("service.email_queue", "[EmailQueue] Enqueued verify code task for %s", email)
@@ -127,6 +129,11 @@ func (s *EmailQueueService) EnqueuePasswordReset(email, siteName, resetURL strin
 		Locale:   firstEmailLocale(locale),
 	}
 
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.stopped {
+		return fmt.Errorf("email queue is stopped")
+	}
 	select {
 	case s.taskChan <- task:
 		logger.LegacyPrintf("service.email_queue", "[EmailQueue] Enqueued password reset task for %s", email)
@@ -138,7 +145,15 @@ func (s *EmailQueueService) EnqueuePasswordReset(email, siteName, resetURL strin
 
 // Stop 停止队列服务
 func (s *EmailQueueService) Stop() {
-	close(s.stopChan)
-	s.wg.Wait()
-	logger.LegacyPrintf("service.email_queue", "%s", "[EmailQueue] All workers stopped")
+	if s == nil {
+		return
+	}
+	s.stopOnce.Do(func() {
+		s.mu.Lock()
+		s.stopped = true
+		close(s.taskChan)
+		s.mu.Unlock()
+		s.wg.Wait()
+		logger.LegacyPrintf("service.email_queue", "%s", "[EmailQueue] All workers stopped")
+	})
 }

@@ -41,6 +41,8 @@ type OpsDashboardOverview struct {
 
 	// Latest system-level snapshot (window=1m, global).
 	SystemMetrics *OpsSystemMetricsSnapshot `json:"system_metrics"`
+	// Current process-local migration/outbox delivery acceptance counters.
+	DeliveryRuntime OpsDeliveryRuntimeStats `json:"delivery_runtime"`
 
 	// Background jobs health (heartbeats).
 	JobHeartbeats []*OpsJobHeartbeat `json:"job_heartbeats"`

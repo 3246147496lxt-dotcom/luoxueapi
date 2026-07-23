@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"strings"
@@ -109,10 +110,11 @@ func (e *plainEncryptor) Decrypt(ciphertext string) (string, error) {
 }
 
 type mockDumper struct {
-	dumpData []byte
-	dumpErr  error
-	restored []byte
-	restErr  error
+	dumpData  []byte
+	dumpErr   error
+	restored  []byte
+	restErr   error
+	onRestore func()
 }
 
 func (m *mockDumper) Dump(_ context.Context) (io.ReadCloser, error) {
@@ -123,6 +125,9 @@ func (m *mockDumper) Dump(_ context.Context) (io.ReadCloser, error) {
 }
 
 func (m *mockDumper) Restore(_ context.Context, data io.Reader) error {
+	if m.onRestore != nil {
+		m.onRestore()
+	}
 	if m.restErr != nil {
 		return m.restErr
 	}
@@ -139,6 +144,58 @@ type blockingDumper struct {
 	blockCh chan struct{}
 	data    []byte
 	restErr error
+}
+
+type stubbornDumper struct {
+	started sync.Once
+	startCh chan struct{}
+	release chan struct{}
+	data    []byte
+}
+
+func (d *stubbornDumper) Dump(context.Context) (io.ReadCloser, error) {
+	d.started.Do(func() { close(d.startCh) })
+	<-d.release
+	return io.NopCloser(bytes.NewReader(d.data)), nil
+}
+
+func (d *stubbornDumper) Restore(context.Context, io.Reader) error { return nil }
+
+type stubbornRestoreDumper struct {
+	startOnce sync.Once
+	startCh   chan struct{}
+	release   chan struct{}
+	dumpData  []byte
+}
+
+func (d *stubbornRestoreDumper) Dump(context.Context) (io.ReadCloser, error) {
+	return io.NopCloser(bytes.NewReader(d.dumpData)), nil
+}
+
+func (d *stubbornRestoreDumper) Restore(context.Context, io.Reader) error {
+	d.startOnce.Do(func() { close(d.startCh) })
+	<-d.release
+	return nil
+}
+
+type fakeBackupRestoreReconciler struct {
+	mu            sync.Mutex
+	invalidations int
+	calls         int
+	err           error
+}
+
+func (r *fakeBackupRestoreReconciler) InvalidateForDatabaseRestore() {
+	r.mu.Lock()
+	r.invalidations++
+	r.mu.Unlock()
+}
+
+func (r *fakeBackupRestoreReconciler) ReconcileAfterDatabaseRestore(context.Context) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.calls++
+	return r.err
 }
 
 func (d *blockingDumper) Dump(ctx context.Context) (io.ReadCloser, error) {
@@ -203,7 +260,7 @@ func (m *mockObjectStore) HeadBucket(_ context.Context) error {
 	return nil
 }
 
-func newTestBackupService(repo *mockSettingRepo, dumper DBDumper, store *mockObjectStore) *BackupService {
+func newTestBackupService(repo *mockSettingRepo, dumper DBDumper, store *mockObjectStore, reconcilers ...BackupRestoreReconciler) *BackupService {
 	cfg := &config.Config{
 		Database: config.DatabaseConfig{
 			Host:   "localhost",
@@ -215,7 +272,7 @@ func newTestBackupService(repo *mockSettingRepo, dumper DBDumper, store *mockObj
 	factory := func(_ context.Context, _ *BackupS3Config) (BackupObjectStore, error) {
 		return store, nil
 	}
-	return NewBackupService(repo, cfg, &plainEncryptor{}, factory, dumper)
+	return NewBackupService(repo, cfg, &plainEncryptor{}, factory, dumper, reconcilers...)
 }
 
 func seedS3Config(t *testing.T, repo *mockSettingRepo) {
@@ -412,6 +469,61 @@ func TestBackupService_RestoreBackup_Streaming(t *testing.T) {
 
 	// 验证 psql 收到的数据是否与原始 dump 内容一致
 	require.Equal(t, dumpContent, string(dumper.restored))
+}
+
+func TestBackupService_RestoreBackup_ReconcilesRuntimeProjection(t *testing.T) {
+	repo := newMockSettingRepo()
+	seedS3Config(t, repo)
+	reconciler := &fakeBackupRestoreReconciler{}
+	dumper := &mockDumper{dumpData: []byte("restored data")}
+	svc := newTestBackupService(repo, dumper, newMockObjectStore(), reconciler)
+	record, err := svc.CreateBackup(context.Background(), "manual", 14)
+	require.NoError(t, err)
+
+	require.NoError(t, svc.RestoreBackup(context.Background(), record.ID))
+	reconciler.mu.Lock()
+	require.Equal(t, 1, reconciler.invalidations)
+	require.Equal(t, 1, reconciler.calls)
+	reconciler.mu.Unlock()
+}
+
+func TestBackupService_RestoreBackup_InvalidatesBeforeRestoreAndReconcilesFailure(t *testing.T) {
+	repo := newMockSettingRepo()
+	seedS3Config(t, repo)
+	reconciler := &fakeBackupRestoreReconciler{}
+	dumper := &mockDumper{
+		dumpData: []byte("restored data"),
+		restErr:  errors.New("restore failed"),
+	}
+	dumper.onRestore = func() {
+		reconciler.mu.Lock()
+		defer reconciler.mu.Unlock()
+		require.Equal(t, 1, reconciler.invalidations)
+		require.Zero(t, reconciler.calls)
+	}
+	svc := newTestBackupService(repo, dumper, newMockObjectStore(), reconciler)
+	record, err := svc.CreateBackup(context.Background(), "manual", 14)
+	require.NoError(t, err)
+
+	err = svc.RestoreBackup(context.Background(), record.ID)
+	require.ErrorContains(t, err, "pg restore")
+	reconciler.mu.Lock()
+	require.Equal(t, 1, reconciler.invalidations)
+	require.Equal(t, 1, reconciler.calls)
+	reconciler.mu.Unlock()
+}
+
+func TestBackupService_RestoreBackup_FailsWhenRuntimeReconcileFails(t *testing.T) {
+	repo := newMockSettingRepo()
+	seedS3Config(t, repo)
+	reconciler := &fakeBackupRestoreReconciler{err: fmt.Errorf("rebuild failed")}
+	dumper := &mockDumper{dumpData: []byte("restored data")}
+	svc := newTestBackupService(repo, dumper, newMockObjectStore(), reconciler)
+	record, err := svc.CreateBackup(context.Background(), "manual", 14)
+	require.NoError(t, err)
+
+	err = svc.RestoreBackup(context.Background(), record.ID)
+	require.ErrorContains(t, err, "reconcile restored database")
 }
 
 func TestBackupService_RestoreBackup_NotCompleted(t *testing.T) {
@@ -638,7 +750,7 @@ func TestRecoverStaleRecords(t *testing.T) {
 	require.Contains(t, r2.RestoreError, "server restart")
 }
 
-func TestGracefulShutdown(t *testing.T) {
+func TestGracefulShutdownCancelsAndJoinsActiveBackup(t *testing.T) {
 	repo := newMockSettingRepo()
 	seedS3Config(t, repo)
 
@@ -649,31 +761,104 @@ func TestGracefulShutdown(t *testing.T) {
 	_, err := svc.StartBackup(context.Background(), "manual", 14)
 	require.NoError(t, err)
 
-	// Stop 应该等待备份完成
-	done := make(chan struct{})
-	go func() {
-		svc.Stop()
-		close(done)
-	}()
+	stopCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	require.NoError(t, svc.StopContext(stopCtx))
+	require.True(t, svc.shuttingDown.Load())
 
-	// 短暂等待确认 Stop 还在等待
-	select {
-	case <-done:
-		t.Fatal("Stop returned before backup finished")
-	case <-time.After(100 * time.Millisecond):
-		// 预期：Stop 还在等待
+	_, err = svc.StartBackup(context.Background(), "manual", 14)
+	require.ErrorContains(t, err, "shutting down")
+}
+
+func TestBackupStopContextTimeoutCanBeRetried(t *testing.T) {
+	repo := newMockSettingRepo()
+	seedS3Config(t, repo)
+	dumper := &stubbornDumper{
+		startCh: make(chan struct{}),
+		release: make(chan struct{}),
+		data:    []byte("data"),
 	}
-
-	// 释放备份
-	close(dumper.blockCh)
-
-	// 现在 Stop 应该完成
+	svc := newTestBackupService(repo, dumper, newMockObjectStore())
+	_, err := svc.StartBackup(context.Background(), "manual", 14)
+	require.NoError(t, err)
 	select {
-	case <-done:
-		// 预期
+	case <-dumper.startCh:
 	case <-time.After(5 * time.Second):
-		t.Fatal("Stop did not return after backup finished")
+		t.Fatal("backup worker did not enter dumper")
 	}
+
+	stopCtx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	err = svc.StopContext(stopCtx)
+	cancel()
+	require.ErrorIs(t, err, context.DeadlineExceeded)
+
+	close(dumper.release)
+	retryCtx, retryCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer retryCancel()
+	require.NoError(t, svc.StopContext(retryCtx))
+}
+
+func TestBackupStopContextWaitsForSynchronousCreateBackup(t *testing.T) {
+	repo := newMockSettingRepo()
+	seedS3Config(t, repo)
+	dumper := &stubbornDumper{
+		startCh: make(chan struct{}),
+		release: make(chan struct{}),
+		data:    []byte("data"),
+	}
+	svc := newTestBackupService(repo, dumper, newMockObjectStore())
+	backupDone := make(chan error, 1)
+	go func() {
+		_, err := svc.CreateBackup(context.Background(), "manual", 14)
+		backupDone <- err
+	}()
+	select {
+	case <-dumper.startCh:
+	case <-time.After(5 * time.Second):
+		t.Fatal("synchronous backup did not enter dumper")
+	}
+
+	stopCtx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	err := svc.StopContext(stopCtx)
+	cancel()
+	require.ErrorIs(t, err, context.DeadlineExceeded)
+	close(dumper.release)
+	require.NoError(t, <-backupDone)
+	retryCtx, retryCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer retryCancel()
+	require.NoError(t, svc.StopContext(retryCtx))
+}
+
+func TestBackupStopContextWaitsForSynchronousRestoreBackup(t *testing.T) {
+	repo := newMockSettingRepo()
+	seedS3Config(t, repo)
+	dumper := &stubbornRestoreDumper{
+		startCh:  make(chan struct{}),
+		release:  make(chan struct{}),
+		dumpData: []byte("data"),
+	}
+	svc := newTestBackupService(repo, dumper, newMockObjectStore())
+	record, err := svc.CreateBackup(context.Background(), "manual", 14)
+	require.NoError(t, err)
+	restoreDone := make(chan error, 1)
+	go func() {
+		restoreDone <- svc.RestoreBackup(context.Background(), record.ID)
+	}()
+	select {
+	case <-dumper.startCh:
+	case <-time.After(5 * time.Second):
+		t.Fatal("synchronous restore did not enter dumper")
+	}
+
+	stopCtx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	err = svc.StopContext(stopCtx)
+	cancel()
+	require.ErrorIs(t, err, context.DeadlineExceeded)
+	close(dumper.release)
+	require.NoError(t, <-restoreDone)
+	retryCtx, retryCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer retryCancel()
+	require.NoError(t, svc.StopContext(retryCtx))
 }
 
 func TestStartRestore_Async(t *testing.T) {
@@ -700,4 +885,22 @@ func TestStartRestore_Async(t *testing.T) {
 	final, err := svc.GetBackupRecord(context.Background(), record.ID)
 	require.NoError(t, err)
 	require.Equal(t, "completed", final.RestoreStatus)
+}
+
+func TestStartRestore_ReconcileFailureMarksRestoreFailed(t *testing.T) {
+	repo := newMockSettingRepo()
+	seedS3Config(t, repo)
+	reconciler := &fakeBackupRestoreReconciler{err: fmt.Errorf("projection reset failed")}
+	dumper := &mockDumper{dumpData: []byte("restored data")}
+	svc := newTestBackupService(repo, dumper, newMockObjectStore(), reconciler)
+	record, err := svc.CreateBackup(context.Background(), "manual", 14)
+	require.NoError(t, err)
+
+	_, err = svc.StartRestore(context.Background(), record.ID)
+	require.NoError(t, err)
+	svc.wg.Wait()
+	final, err := svc.GetBackupRecord(context.Background(), record.ID)
+	require.NoError(t, err)
+	require.Equal(t, "failed", final.RestoreStatus)
+	require.Contains(t, final.RestoreError, "reconcile restored database")
 }

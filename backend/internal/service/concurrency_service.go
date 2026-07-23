@@ -235,6 +235,11 @@ type ConcurrencyService struct {
 	accountLoadCacheMu  sync.RWMutex
 	accountLoadCache    map[string]cachedAccountLoadBatch
 	accountLoadGroup    singleflight.Group
+
+	cleanupMu      sync.Mutex
+	cleanupCancel  context.CancelFunc
+	cleanupWG      sync.WaitGroup
+	cleanupRunning bool
 }
 
 type cachedAccountLoadBatch struct {
@@ -725,9 +730,19 @@ func (s *ConcurrencyService) StartSlotCleanupWorker(_ AccountRepository, interva
 	if s == nil || s.cache == nil || interval <= 0 {
 		return
 	}
+	s.cleanupMu.Lock()
+	if s.cleanupRunning {
+		s.cleanupMu.Unlock()
+		return
+	}
+	workerCtx, cancelWorker := context.WithCancel(context.Background())
+	s.cleanupCancel = cancelWorker
+	s.cleanupRunning = true
+	s.cleanupWG.Add(1)
+	s.cleanupMu.Unlock()
 
 	runCleanup := func() {
-		cleanupCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		cleanupCtx, cancel := context.WithTimeout(workerCtx, 5*time.Second)
 		err := s.cache.CleanupExpiredAccountSlotKeys(cleanupCtx)
 		cancel()
 		if err != nil {
@@ -737,14 +752,55 @@ func (s *ConcurrencyService) StartSlotCleanupWorker(_ AccountRepository, interva
 	}
 
 	go func() {
+		defer s.cleanupWG.Done()
 		ticker := time.NewTicker(interval)
 		defer ticker.Stop()
 
 		runCleanup()
-		for range ticker.C {
-			runCleanup()
+		for {
+			select {
+			case <-workerCtx.Done():
+				return
+			case <-ticker.C:
+				runCleanup()
+			}
 		}
 	}()
+}
+
+// StopSlotCleanupWorker cancels and joins the slot cleanup worker.
+func (s *ConcurrencyService) StopSlotCleanupWorker(ctx context.Context) error {
+	if s == nil {
+		return nil
+	}
+	s.cleanupMu.Lock()
+	cancel := s.cleanupCancel
+	s.cleanupCancel = nil
+	running := s.cleanupRunning
+	s.cleanupMu.Unlock()
+	if !running {
+		return nil
+	}
+	if cancel != nil {
+		cancel()
+	}
+	done := make(chan struct{})
+	go func() {
+		s.cleanupWG.Wait()
+		close(done)
+	}()
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	select {
+	case <-done:
+		s.cleanupMu.Lock()
+		s.cleanupRunning = false
+		s.cleanupMu.Unlock()
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 // GetAccountConcurrencyBatch gets current concurrency counts for multiple accounts.

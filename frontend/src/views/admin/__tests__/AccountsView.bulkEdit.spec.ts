@@ -317,7 +317,7 @@ describe('admin AccountsView bulk edit scope', () => {
 
     await flushPromises()
     await wrapper.get('[data-test="select-row"] input').trigger('change')
-    expect(wrapper.get('[data-test="account-bulk-actions"]').exists()).toBe(true)
+    expect(wrapper.find('[data-test="account-bulk-actions"]').exists()).toBe(true)
     await wrapper.get('[data-test="next-page"]').trigger('click')
     await flushPromises()
     await wrapper.get('[data-test="select-row"] input').trigger('change')

@@ -102,6 +102,11 @@ type outboxCleanupRepo struct {
 	releaseCount        int
 	deleteCalls         []outboxCleanupDeleteCall
 	firstCreatedAfterID []int64
+	consumerMu          sync.Mutex
+	consumerLeaseHeld   bool
+	consumerUnavailable bool
+	consumerAttempts    int
+	consumerReleases    int
 }
 
 type outboxCleanupAccountRepo struct {
@@ -118,6 +123,30 @@ type blockingOutboxCleanupCache struct {
 	calls   int
 	started chan struct{}
 	release chan struct{}
+}
+
+type blockingOutboxConsumerCache struct {
+	*outboxCleanupCache
+	once        sync.Once
+	mu          sync.Mutex
+	updateCalls int
+	started     chan struct{}
+	release     chan struct{}
+}
+
+func (c *blockingOutboxConsumerCache) UpdateLastUsed(context.Context, map[int64]time.Time) error {
+	c.mu.Lock()
+	c.updateCalls++
+	c.mu.Unlock()
+	c.once.Do(func() { close(c.started) })
+	<-c.release
+	return nil
+}
+
+func (c *blockingOutboxConsumerCache) updates() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.updateCalls
 }
 
 func (c *blockingOutboxCleanupCache) ListBuckets(context.Context) ([]SchedulerBucket, error) {
@@ -150,6 +179,51 @@ func (r *outboxCleanupRepo) ListAfterAndReleaseDedup(ctx context.Context, afterI
 		}
 	}
 	return events, nil
+}
+
+func (r *outboxCleanupRepo) TryAcquireConsumerLease(context.Context) (SchedulerOutboxConsumerLease, bool, error) {
+	r.consumerMu.Lock()
+	defer r.consumerMu.Unlock()
+	r.consumerAttempts++
+	if r.consumerUnavailable || r.consumerLeaseHeld {
+		return nil, false, nil
+	}
+	r.consumerLeaseHeld = true
+	return &outboxConsumerTestLease{
+		list: r.ListAfterAndReleaseDedup,
+		release: func() {
+			r.consumerMu.Lock()
+			r.consumerLeaseHeld = false
+			r.consumerReleases++
+			r.consumerMu.Unlock()
+		}}, true, nil
+}
+
+type outboxConsumerTestLease struct {
+	once    sync.Once
+	list    func(context.Context, int64, int) ([]SchedulerOutboxEvent, error)
+	release func()
+}
+
+func (l *outboxConsumerTestLease) ListAfterAndReleaseDedup(ctx context.Context, afterID int64, limit int) ([]SchedulerOutboxEvent, error) {
+	if l == nil || l.list == nil {
+		return nil, errors.New("consumer lease list is not configured")
+	}
+	return l.list(ctx, afterID, limit)
+}
+
+func (l *outboxConsumerTestLease) BindContext(ctx context.Context) (context.Context, error) {
+	if l == nil {
+		return nil, errors.New("consumer lease is not configured")
+	}
+	return ctx, nil
+}
+
+func (l *outboxConsumerTestLease) Release() error {
+	if l != nil {
+		l.once.Do(l.release)
+	}
+	return nil
 }
 
 func (r *outboxCleanupRepo) FirstCreatedAtAfter(ctx context.Context, afterID int64) (time.Time, bool, error) {
@@ -203,19 +277,28 @@ func (r *outboxCleanupRepo) TryAcquireCleanupLock(ctx context.Context) (Schedule
 	if !r.lockAcquired {
 		return nil, false, nil
 	}
-	return outboxCleanupLease{release: func() {
+	return outboxCleanupLease{delete: r.DeleteConsumedUpTo, release: func() {
 		r.releaseCount++
 	}}, true, nil
 }
 
 type outboxCleanupLease struct {
+	delete  func(context.Context, int64, int) (int64, error)
 	release func()
 }
 
-func (l outboxCleanupLease) Release() {
+func (l outboxCleanupLease) DeleteConsumedUpTo(ctx context.Context, watermark int64, limit int) (int64, error) {
+	if l.delete == nil {
+		return 0, errors.New("cleanup lease delete is not configured")
+	}
+	return l.delete(ctx, watermark, limit)
+}
+
+func (l outboxCleanupLease) Release() error {
 	if l.release != nil {
 		l.release()
 	}
+	return nil
 }
 
 func TestSchedulerSnapshotServicePollOutboxCleansConsumedRowsAfterWatermark(t *testing.T) {
@@ -315,6 +398,63 @@ func TestSchedulerSnapshotServicePollOutboxDoesNotCleanupOnHandleFailure(t *test
 	}
 	if !reflect.DeepEqual(repo.rows, []int64{1, 2, 3, 4, 5, 6}) {
 		t.Fatalf("expected rows unchanged, got %#v", repo.rows)
+	}
+}
+
+func TestSchedulerSnapshotServicePollOutboxConsumerLeaseSerializesInstances(t *testing.T) {
+	cache := &blockingOutboxConsumerCache{
+		outboxCleanupCache: &outboxCleanupCache{},
+		started:            make(chan struct{}),
+		release:            make(chan struct{}),
+	}
+	repo := &outboxCleanupRepo{events: []SchedulerOutboxEvent{{
+		ID:        1,
+		EventType: SchedulerOutboxEventAccountLastUsed,
+		Payload: map[string]any{
+			"last_used": map[string]any{"101": float64(123)},
+		},
+	}}}
+	first := NewSchedulerSnapshotService(cache, repo, nil, nil, nil)
+	second := NewSchedulerSnapshotService(cache, repo, nil, nil, nil)
+
+	firstDone := make(chan struct{})
+	go func() {
+		first.pollOutbox()
+		close(firstDone)
+	}()
+	select {
+	case <-cache.started:
+	case <-time.After(time.Second):
+		t.Fatal("first consumer did not start handling the event")
+	}
+
+	second.pollOutbox()
+	if calls := cache.updates(); calls != 1 {
+		t.Fatalf("expected contending instance to skip the poll, got %d handlers", calls)
+	}
+	repo.consumerMu.Lock()
+	attemptsBeforeRelease := repo.consumerAttempts
+	releasesBeforeRelease := repo.consumerReleases
+	repo.consumerMu.Unlock()
+	if attemptsBeforeRelease != 2 || releasesBeforeRelease != 0 {
+		t.Fatalf("expected two attempts and a held first lease, attempts=%d releases=%d", attemptsBeforeRelease, releasesBeforeRelease)
+	}
+
+	close(cache.release)
+	select {
+	case <-firstDone:
+	case <-time.After(time.Second):
+		t.Fatal("first consumer did not finish after release")
+	}
+	repo.consumerMu.Lock()
+	releases := repo.consumerReleases
+	held := repo.consumerLeaseHeld
+	repo.consumerMu.Unlock()
+	if releases != 1 || held {
+		t.Fatalf("expected consumer lease released exactly once, releases=%d held=%v", releases, held)
+	}
+	if cache.watermark != 1 {
+		t.Fatalf("expected first consumer to advance watermark to 1, got %d", cache.watermark)
 	}
 }
 

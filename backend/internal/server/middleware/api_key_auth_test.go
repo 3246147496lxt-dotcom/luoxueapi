@@ -105,6 +105,7 @@ func TestSimpleModeBypassesQuotaCheck(t *testing.T) {
 			},
 		}
 		subscriptionService := service.NewSubscriptionService(nil, subscriptionRepo, nil, nil, cfg)
+		subscriptionService.Start()
 		t.Cleanup(subscriptionService.Stop)
 
 		router := newAuthTestRouter(apiKeyService, subscriptionService, cfg)
@@ -160,6 +161,8 @@ func TestSimpleModeBypassesQuotaCheck(t *testing.T) {
 			resetMonthly: func(context.Context, int64, time.Time) error { return nil },
 		}
 		subscriptionService := service.NewSubscriptionService(nil, subscriptionRepo, nil, nil, cfg)
+		subscriptionService.Start()
+		t.Cleanup(subscriptionService.Stop)
 		router := newAuthTestRouter(apiKeyService, subscriptionService, cfg)
 
 		w := httptest.NewRecorder()
@@ -174,6 +177,8 @@ func TestSimpleModeBypassesQuotaCheck(t *testing.T) {
 		cfg := &config.Config{RunMode: config.RunModeSimple}
 		apiKeyService := service.NewAPIKeyService(apiKeyRepo, nil, nil, nil, nil, nil, cfg)
 		subscriptionService := service.NewSubscriptionService(nil, &stubUserSubscriptionRepo{}, nil, nil, cfg)
+		subscriptionService.Start()
+		t.Cleanup(subscriptionService.Stop)
 		router := newAuthTestRouter(apiKeyService, subscriptionService, cfg)
 
 		w := httptest.NewRecorder()
@@ -188,6 +193,8 @@ func TestSimpleModeBypassesQuotaCheck(t *testing.T) {
 		cfg := &config.Config{RunMode: config.RunModeSimple}
 		apiKeyService := service.NewAPIKeyService(apiKeyRepo, nil, nil, nil, nil, nil, cfg)
 		subscriptionService := service.NewSubscriptionService(nil, &stubUserSubscriptionRepo{}, nil, nil, cfg)
+		subscriptionService.Start()
+		t.Cleanup(subscriptionService.Stop)
 		router := newAuthTestRouter(apiKeyService, subscriptionService, cfg)
 
 		w := httptest.NewRecorder()
@@ -227,6 +234,8 @@ func TestSimpleModeBypassesQuotaCheck(t *testing.T) {
 			resetMonthly:   func(ctx context.Context, id int64, start time.Time) error { return nil },
 		}
 		subscriptionService := service.NewSubscriptionService(nil, subscriptionRepo, nil, nil, cfg)
+		subscriptionService.Start()
+		t.Cleanup(subscriptionService.Stop)
 		router := newAuthTestRouter(apiKeyService, subscriptionService, cfg)
 
 		w := httptest.NewRecorder()
@@ -1118,6 +1127,7 @@ func TestAPIKeyAuthBillingInfoSkipsBillingAndSideEffects(t *testing.T) {
 	cfg := &config.Config{RunMode: config.RunModeStandard}
 	apiKeyService := service.NewAPIKeyService(apiKeyRepo, nil, nil, nil, nil, nil, cfg)
 	subscriptionService := service.NewSubscriptionService(nil, subscriptionRepo, nil, nil, cfg)
+	subscriptionService.Start()
 	t.Cleanup(subscriptionService.Stop)
 	router := newAuthTestRouter(apiKeyService, subscriptionService, cfg)
 

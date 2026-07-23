@@ -3,7 +3,6 @@ package repository
 import (
 	"context"
 	"fmt"
-	"log"
 	"strconv"
 	"time"
 
@@ -165,20 +164,6 @@ type sessionLimitCache struct {
 func NewSessionLimitCache(rdb *redis.Client, defaultIdleTimeoutMinutes int) service.SessionLimitCache {
 	if defaultIdleTimeoutMinutes <= 0 {
 		defaultIdleTimeoutMinutes = 5 // 默认 5 分钟
-	}
-
-	// 预加载 Lua 脚本到 Redis，避免 Pipeline 中出现 NOSCRIPT 错误
-	ctx := context.Background()
-	scripts := []*redis.Script{
-		registerSessionScript,
-		refreshSessionScript,
-		getActiveSessionCountScript,
-		isSessionActiveScript,
-	}
-	for _, script := range scripts {
-		if err := script.Load(ctx, rdb).Err(); err != nil {
-			log.Printf("[SessionLimitCache] Failed to preload Lua script: %v", err)
-		}
 	}
 
 	return &sessionLimitCache{
