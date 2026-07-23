@@ -56,7 +56,7 @@ describe('AmountInput', () => {
     await wrapper.findAll('[role="tab"]')[1].trigger('click')
     await nextTick()
 
-    const input = wrapper.get('input')
+    const input = wrapper.find('input')
     expect(input.exists()).toBe(true)
     expect(document.activeElement).toBe(input.element)
     wrapper.unmount()

@@ -45,6 +45,24 @@ func (s *sparkShadowRepoStub) Create(_ context.Context, account *Account) error 
 	return nil
 }
 
+func (s *sparkShadowRepoStub) CreateWithAccountGroups(ctx context.Context, account *Account, groups []AccountGroup) error {
+	if err := s.Create(ctx, account); err != nil {
+		return err
+	}
+	groupIDs := make([]int64, 0, len(groups))
+	for _, group := range groups {
+		groupIDs = append(groupIDs, group.GroupID)
+	}
+	account.GroupIDs = append([]int64(nil), groupIDs...)
+	account.AccountGroups = append([]AccountGroup(nil), groups...)
+	s.groupsOf[account.ID] = append([]int64(nil), groupIDs...)
+	if stored := s.accounts[account.ID]; stored != nil {
+		stored.GroupIDs = append([]int64(nil), groupIDs...)
+		stored.AccountGroups = append([]AccountGroup(nil), groups...)
+	}
+	return nil
+}
+
 func (s *sparkShadowRepoStub) GetByID(_ context.Context, id int64) (*Account, error) {
 	acc, ok := s.accounts[id]
 	if !ok {
@@ -746,13 +764,21 @@ func (s *raceCreateRepoStub) Create(ctx context.Context, account *Account) error
 	return s.sparkShadowRepoStub.Create(ctx, account)
 }
 
-// bindFailRepoStub 让 BindGroups 失败,用于验证绑组失败时补偿删除刚建的影子(外审 C/P1)。
+func (s *raceCreateRepoStub) CreateWithAccountGroups(ctx context.Context, account *Account, _ []AccountGroup) error {
+	return s.Create(ctx, account)
+}
+
+// bindFailRepoStub 模拟原子 create+bind 失败，验证事务不会留下半成品影子。
 type bindFailRepoStub struct {
 	*sparkShadowRepoStub
 }
 
 func (s *bindFailRepoStub) BindGroups(_ context.Context, _ int64, _ []int64) error {
 	return errors.New("simulated bind failure")
+}
+
+func (s *bindFailRepoStub) CreateWithAccountGroups(_ context.Context, _ *Account, _ []AccountGroup) error {
+	return errors.New("simulated atomic create failure")
 }
 
 // sparkShadowValidatingGroupRepoStub 实现 groupExistenceBatchReader(ExistsByIDs),
@@ -826,8 +852,7 @@ func TestCreateShadow_InvalidGroupRejectedNoOrphan(t *testing.T) {
 	require.Empty(t, shadows, "无效分组应在创建前被拒,不应建出影子")
 }
 
-// TestCreateShadow_BindFailureRollsBackShadow 验证外审 C/P1:绑组失败时补偿删除
-// 刚建的影子,不留孤儿(否则一母一影唯一索引会挡住重试)。
+// TestCreateShadow_BindFailureRollsBackShadow 验证外审 C/P1:原子建号绑组失败时不留孤儿。
 func TestCreateShadow_BindFailureRollsBackShadow(t *testing.T) {
 	ctx := context.Background()
 	base := newSparkShadowRepoStub()

@@ -239,7 +239,7 @@ One-click installation script that downloads pre-built binaries from GitHub Rele
 #### Installation Steps
 
 ```bash
-curl -sSL https://raw.githubusercontent.com/Wei-Shaw/sub2api/main/deploy/install.sh | sudo bash
+curl -sSL https://raw.githubusercontent.com/3246147496lxt-dotcom/luoxueapi/main/deploy/install.sh | sudo bash
 ```
 
 The script will:
@@ -289,7 +289,7 @@ sudo journalctl -u sub2api -f
 sudo systemctl restart sub2api
 
 # Uninstall
-curl -sSL https://raw.githubusercontent.com/Wei-Shaw/sub2api/main/deploy/install.sh | sudo bash -s -- uninstall -y
+curl -sSL https://raw.githubusercontent.com/3246147496lxt-dotcom/luoxueapi/main/deploy/install.sh | sudo bash -s -- uninstall -y
 ```
 
 ---
@@ -312,7 +312,7 @@ Use the automated deployment script for easy setup:
 mkdir -p luoxueapi-deploy && cd luoxueapi-deploy
 
 # Download and run deployment preparation script
-curl -sSL https://raw.githubusercontent.com/Wei-Shaw/sub2api/main/deploy/docker-deploy.sh | bash
+curl -sSL https://raw.githubusercontent.com/3246147496lxt-dotcom/luoxueapi/main/deploy/docker-deploy.sh | bash
 
 # Start services
 docker compose up -d
@@ -429,7 +429,7 @@ When using `docker-compose.local.yml`, migrate to a new server easily:
 # On source server
 docker compose -f docker-compose.local.yml down
 cd ..
-tar czf luoxueapi-complete.tar.gz luoxueapi-deploy/
+COPYFILE_DISABLE=1 tar czf luoxueapi-complete.tar.gz luoxueapi-deploy/
 
 # Transfer to new server
 scp luoxueapi-complete.tar.gz user@new-server:/path/

@@ -51,8 +51,8 @@ describe('AccountTableFilters responsive disclosure', () => {
     const wrapper = mountFilters()
     const secondary = wrapper.get('[data-testid="account-secondary-filters"]')
 
-    expect(wrapper.get('[data-testid="account-search-filter"]').exists()).toBe(true)
-    expect(wrapper.get('[data-testid="account-status-filter"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="account-search-filter"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="account-status-filter"]').exists()).toBe(true)
     expect(secondary.find('[data-testid="account-search-filter"]').exists()).toBe(false)
     expect(secondary.find('[data-testid="account-status-filter"]').exists()).toBe(false)
     expect(secondary.classes()).toContain('hidden')

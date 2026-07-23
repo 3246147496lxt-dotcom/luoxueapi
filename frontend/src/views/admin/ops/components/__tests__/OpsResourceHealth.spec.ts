@@ -328,7 +328,7 @@ describe('OpsResourceHealth', () => {
     expect(metrics.text()).toContain('admin.ops.resourceHealth.metrics.groupCapacity')
     expect(metrics.text()).toContain('admin.ops.resourceHealth.metrics.proxyHealth')
     expect(metrics.text()).toContain('admin.ops.resourceHealth.metrics.severeAlerts')
-    expect(wrapper.get('[data-testid="overview-capacity-viz"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="overview-capacity-viz"]').exists()).toBe(true)
     expect(wrapper.get('[data-testid="account-composition-stack"]').attributes('role')).toBe('img')
     expect(wrapper.get('[data-testid="account-composition-stack"]').findAll('i')).toHaveLength(4)
     expect(wrapper.find('[data-testid="account-composition-fallback"]').exists()).toBe(false)
@@ -336,7 +336,7 @@ describe('OpsResourceHealth', () => {
       'admin.ops.resourceHealth.composition.quotaUnknown:{"count":1}'
     )
     expect(wrapper.get('[data-testid="overview-capacity-viz"]').text()).toContain('Jan 02')
-    expect(wrapper.get('[data-testid="overview-cockpit"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="overview-cockpit"]').exists()).toBe(true)
     expect(wrapper.get('[data-testid="overview-capacity-list"]').text()).toContain('Critical group')
     expect(wrapper.get('[data-testid="overview-healthy-group-disclosure"]').attributes('open')).toBeUndefined()
     expect(wrapper.find('[data-testid="account-ledger"]').exists()).toBe(false)
@@ -619,7 +619,7 @@ describe('OpsResourceHealth', () => {
 
     expect(wrapper.get('[data-testid="alert-source-error"]').attributes('role')).toBe('alert')
     expect(wrapper.get('[data-testid="alert-source-error"]').text()).toContain('alert source unavailable')
-    expect(wrapper.get('[data-testid="overview-metrics"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="overview-metrics"]').exists()).toBe(true)
     expect(wrapper.get('[data-testid="pending-list"]').text()).toContain('Tokyo exit')
 
     wrapper.unmount()
@@ -649,7 +649,7 @@ describe('OpsResourceHealth', () => {
     const wrapper = mountResource()
     await flushPromises()
 
-    expect(wrapper.get(`[data-testid="${errorTestId}"]`).exists()).toBe(true)
+    expect(wrapper.find(`[data-testid="${errorTestId}"]`).exists()).toBe(true)
     for (const testId of metricTestIds) {
       const metric = wrapper.get(`[data-testid="${testId}"]`)
       expect(metric.attributes('data-tone')).toBe('neutral')
@@ -668,7 +668,7 @@ describe('OpsResourceHealth', () => {
     await flushPromises()
 
     expect(wrapper.find('[data-testid="resource-loading"]').exists()).toBe(false)
-    expect(wrapper.get('[data-testid="overview-metrics"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="overview-metrics"]').exists()).toBe(true)
     expect(wrapper.get('[data-testid="ops-resource-health"]').attributes('aria-busy')).toBe('true')
 
     alertsDeferred.resolve([])
@@ -685,7 +685,7 @@ describe('OpsResourceHealth', () => {
     await flushPromises()
 
     expect(wrapper.get('[data-testid="proxy-data-partial"]').attributes('role')).toBe('status')
-    expect(wrapper.get('[data-testid="proxy-metrics"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="proxy-metrics"]').exists()).toBe(true)
     expect(wrapper.get('[data-testid="proxy-issues-list"]').text()).toContain('Tokyo exit')
 
     wrapper.unmount()

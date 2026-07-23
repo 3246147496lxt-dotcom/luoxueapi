@@ -301,7 +301,7 @@ describe('OpsDashboardHeader', () => {
 
     expect(mockGetRealtimeTrafficSummary).toHaveBeenCalledTimes(1)
     expect(wrapper.findAllComponents(SelectStub)).toHaveLength(3)
-    expect(wrapper.get('[data-testid="ops-signal-strip"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="ops-signal-strip"]').exists()).toBe(true)
   })
 
   it('IP 资源页隐藏不会影响全局 IP 快照的平台和分组筛选', async () => {
@@ -309,7 +309,7 @@ describe('OpsDashboardHeader', () => {
     await flushPromises()
 
     expect(wrapper.findAllComponents(SelectStub)).toHaveLength(0)
-    expect(wrapper.get('.ops-command-button--primary').exists()).toBe(true)
+    expect(wrapper.find('.ops-command-button--primary').exists()).toBe(true)
 
     await wrapper.setProps({ resource: 'accounts' })
     await flushPromises()

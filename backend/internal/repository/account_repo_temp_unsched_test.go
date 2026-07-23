@@ -14,7 +14,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestAccountRepository_SetTempUnschedulable_NoRowsAffectedDoesNotWriteOutbox(t *testing.T) {
+func TestAccountRepository_SetTempUnschedulable_NoRowsAffectedKeepsOutboxAtomic(t *testing.T) {
 	exec := &recordingSQLExecutor{result: rowsAffectedResult(0)}
 	repo := newAccountRepositoryWithSQL(nil, exec, nil)
 	until := time.Now().Add(10 * time.Minute)
@@ -22,8 +22,10 @@ func TestAccountRepository_SetTempUnschedulable_NoRowsAffectedDoesNotWriteOutbox
 	err := repo.SetTempUnschedulable(context.Background(), 42, until, "retry")
 	require.NoError(t, err)
 	require.Len(t, exec.execQueries, 1)
-	require.Contains(t, exec.execQueries[0], "UPDATE accounts")
-	require.NotContains(t, strings.Join(exec.execQueries, "\n"), "scheduler_outbox")
+	normalized := normalizeSQLWhitespace(strings.Join(exec.execQueries, "\n"))
+	require.Contains(t, normalized, "WITH updated AS ( UPDATE accounts")
+	require.Contains(t, normalized, "INSERT INTO scheduler_outbox")
+	require.Contains(t, normalized, "FROM updated")
 }
 
 func TestAccountRepository_GrokCredentialConditionalMutationsAreEligibleAndAtomicallyPropagated(t *testing.T) {

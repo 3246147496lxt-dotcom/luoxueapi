@@ -1,9 +1,13 @@
-import { describe, expect, it, vi } from 'vitest'
-import { mount } from '@vue/test-utils'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { enableAutoUnmount, mount } from '@vue/test-utils'
 import { nextTick } from 'vue'
 import PaymentProviderDialog from '@/components/payment/PaymentProviderDialog.vue'
 import { STRIPE_SDK_API_VERSION } from '@/components/payment/providerConfig'
 import type { ProviderInstance } from '@/types/payment'
+
+const { showErrorMock } = vi.hoisted(() => ({
+  showErrorMock: vi.fn(),
+}))
 
 const messages: Record<string, string> = {
   'admin.settings.payment.providerConfig': 'Credentials',
@@ -21,6 +25,16 @@ const messages: Record<string, string> = {
   'admin.settings.payment.stripeWebhookApiVersionHint': 'Use Stripe API version {version}.',
   'admin.settings.payment.airwallexWebhookHint': 'Select payment_intent.succeeded and use the latest stable API version.',
 }
+
+enableAutoUnmount(afterEach)
+
+afterEach(() => {
+  showErrorMock.mockClear()
+})
+
+vi.mock('@/stores/app', () => ({
+  useAppStore: () => ({ showError: showErrorMock }),
+}))
 
 vi.mock('vue-i18n', () => ({
   useI18n: () => ({
@@ -244,5 +258,8 @@ describe('PaymentProviderDialog payment guide', () => {
     await wrapper.find('form').trigger('submit.prevent')
 
     expect(wrapper.emitted('save')).toBeUndefined()
+    expect(showErrorMock).toHaveBeenCalledWith(
+      'admin.settings.payment.validationEasyPayCustomMethodPrefixReserved',
+    )
   })
 })

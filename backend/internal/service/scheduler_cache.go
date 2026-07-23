@@ -18,15 +18,20 @@ const (
 var (
 	ErrSchedulerBucketRetired              = errors.New("scheduler bucket retired")
 	ErrSchedulerBucketWriteFenced          = errors.New("scheduler bucket write fenced")
+	ErrSchedulerBucketRebuildLeaseInvalid  = errors.New("scheduler bucket rebuild lease invalid")
+	ErrSchedulerBucketRebuildLeaseLost     = errors.New("scheduler bucket rebuild lease lost")
 	ErrSchedulerGroupLifecycleLeaseInvalid = errors.New("scheduler group lifecycle lease invalid")
 	ErrSchedulerGroupLifecycleLeaseLost    = errors.New("scheduler group lifecycle lease lost")
+	ErrSchedulerCacheResetInProgress       = errors.New("scheduler cache reset in progress")
 )
 
-// SchedulerBucketWriteToken fences a snapshot writer to one bucket epoch.
-// Tokens must be captured before any database load or queued rebuild work.
+// SchedulerBucketWriteToken fences a snapshot writer to both the Redis
+// namespace generation and one bucket epoch. Tokens must be captured before
+// any database load or queued rebuild work.
 type SchedulerBucketWriteToken struct {
-	Bucket SchedulerBucket
-	Epoch  int64
+	Bucket     SchedulerBucket
+	Generation string
+	Epoch      int64
 }
 
 func (t SchedulerBucketWriteToken) ValidFor(bucket SchedulerBucket) bool {
@@ -38,6 +43,18 @@ func (t SchedulerBucketWriteToken) ValidFor(bucket SchedulerBucket) bool {
 type SchedulerGroupLifecycleLease struct {
 	GroupID    int64
 	OwnerToken string
+}
+
+// SchedulerBucketRebuildLease identifies one owner of a bucket's distributed
+// rebuild critical section. It is an optional SchedulerCache capability so
+// legacy test fakes can keep the older bool lock API.
+type SchedulerBucketRebuildLease struct {
+	Bucket     SchedulerBucket
+	OwnerToken string
+}
+
+func (l SchedulerBucketRebuildLease) ValidFor(bucket SchedulerBucket) bool {
+	return l.OwnerToken != "" && l.Bucket == bucket
 }
 
 func (l SchedulerGroupLifecycleLease) ValidFor(groupID int64) bool {
@@ -75,6 +92,7 @@ func ParseSchedulerBucket(raw string) (SchedulerBucket, bool) {
 
 // SchedulerCache 负责调度快照与账号快照的缓存读写。
 type SchedulerCache interface {
+	AccountProjectionWriter
 	// GetSnapshot 读取快照并返回命中与否（ready + active + 数据完整）。
 	GetSnapshot(ctx context.Context, bucket SchedulerBucket) ([]*Account, bool, error)
 	// CaptureBucketWriteToken captures the current open epoch without changing
@@ -102,10 +120,6 @@ type SchedulerCache interface {
 	ReleaseGroupLifecycleLease(ctx context.Context, lease SchedulerGroupLifecycleLease) error
 	// GetAccount 获取单账号快照。
 	GetAccount(ctx context.Context, accountID int64) (*Account, error)
-	// SetAccount 写入单账号快照（包含不可调度状态）。
-	SetAccount(ctx context.Context, account *Account) error
-	// DeleteAccount 删除单账号快照。
-	DeleteAccount(ctx context.Context, accountID int64) error
 	// UpdateLastUsed 批量更新账号的最后使用时间。
 	UpdateLastUsed(ctx context.Context, updates map[int64]time.Time) error
 	// TryLockBucket 尝试获取分桶重建锁。
@@ -118,4 +132,20 @@ type SchedulerCache interface {
 	GetOutboxWatermark(ctx context.Context) (int64, error)
 	// SetOutboxWatermark 保存 outbox 水位。
 	SetOutboxWatermark(ctx context.Context, id int64) error
+}
+
+// SchedulerCacheAuthoritativeReset is the narrow capability used after a
+// successful built-in PostgreSQL restore. It rotates the namespace generation
+// before deleting cached state, so every writer holding an older token is
+// fenced before an authoritative rebuild starts.
+type SchedulerCacheAuthoritativeReset interface {
+	ResetForAuthoritativeRebuild(ctx context.Context) error
+}
+
+// SchedulerCacheAuthoritativeResetRecovery is an optional production
+// capability used by startup and periodic full rebuilds. It takes over only a
+// durable reset marker left by an interrupted owner; when no marker exists it
+// is a no-op, so a completed restore is never reset a second time.
+type SchedulerCacheAuthoritativeResetRecovery interface {
+	RecoverInterruptedAuthoritativeReset(ctx context.Context) (bool, error)
 }

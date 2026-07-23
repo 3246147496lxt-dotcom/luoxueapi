@@ -100,6 +100,7 @@ const baseConfig = (): ContentModerationConfig => ({
   email_on_hit: true,
   auto_ban_enabled: true,
   ban_threshold: 10,
+  cyber_policy_exclude_from_ban_count: false,
   violation_window_hours: 720,
   retry_count: 2,
   hit_retention_days: 180,

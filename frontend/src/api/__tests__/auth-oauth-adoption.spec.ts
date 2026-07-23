@@ -178,7 +178,9 @@ describe('oauth adoption auth api', () => {
     const { getOAuthCompletionKind } = await import('@/api/auth')
 
     expect(getOAuthCompletionKind({ access_token: 'access-token' })).toBe('login')
-    expect(getOAuthCompletionKind({ redirect: '/profile' })).toBe('bind')
+    expect(
+      getOAuthCompletionKind({ redirect: '/profile' } as Parameters<typeof getOAuthCompletionKind>[0])
+    ).toBe('bind')
   })
 
   it('provides bind-login utility helpers for invitation and suggested profile states', async () => {
@@ -220,5 +222,42 @@ describe('oauth adoption auth api', () => {
     await prepareOAuthBindAccessTokenCookie()
 
     expect(post).toHaveBeenCalledWith('/auth/oauth/bind-token')
+  })
+
+  it('commits direct API logout before revocation settles and keeps a later family', async () => {
+    const { authAPI } = await import('@/api/auth')
+    const { authSession } = await import('@/auth/authSession')
+    authSession.replace({
+      accessToken: 'logout-access',
+      refreshToken: 'logout-refresh',
+      expiresAt: Date.now() + 900_000,
+      user: null,
+    })
+    let resolveLogout!: (value: unknown) => void
+    post.mockReturnValue(new Promise((resolve) => {
+      resolveLogout = resolve
+    }))
+
+    const pending = authAPI.logout()
+
+    expect(authSession.getSnapshot().accessToken).toBeNull()
+    expect(post).toHaveBeenCalledWith(
+      '/auth/logout',
+      { refresh_token: 'logout-refresh' },
+      { headers: { Authorization: 'Bearer logout-access' } },
+    )
+    authSession.replace({
+      accessToken: 'later-access',
+      refreshToken: 'later-refresh',
+      expiresAt: Date.now() + 1_800_000,
+      user: null,
+    })
+    resolveLogout({ data: {} })
+    await pending
+
+    expect(authSession.getSnapshot()).toEqual(expect.objectContaining({
+      accessToken: 'later-access',
+      refreshToken: 'later-refresh',
+    }))
   })
 })

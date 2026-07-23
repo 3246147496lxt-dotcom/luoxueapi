@@ -337,7 +337,7 @@ describe('OpsDashboard integration shell', () => {
     const wrapper = mountDashboard()
     await flushPromises()
 
-    const page = wrapper.get('[data-admin-page-kind="ops"]')
+    const page = wrapper.find('[data-admin-page-kind="ops"]')
     expect(page.exists()).toBe(true)
     expect(page.attributes('aria-busy')).toBe('false')
     expect(wrapper.get('[data-testid="app-layout"]').attributes('data-variant')).toBe('home-clay')
@@ -363,7 +363,7 @@ describe('OpsDashboard integration shell', () => {
     expect(wrapper.get('#ops-workspace-tab-resources').attributes('aria-selected')).toBe('true')
     expect(wrapper.get('[data-testid="ops-workspace-panel-resources"]').attributes('style')).toBeUndefined()
     expect(wrapper.get('[data-testid="ops-workspace-panel-traffic"]').attributes('style')).toContain('display: none')
-    expect(wrapper.get('[data-testid="ops-header"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="ops-header"]').exists()).toBe(true)
     expect(wrapper.get('[data-testid="resource-health"]').attributes('data-resource')).toBe('overview')
     expect(wrapper.find('[data-testid="concurrency-card"]').exists()).toBe(false)
     expect(wrapper.find('[data-testid="throughput-trend"]').exists()).toBe(false)
@@ -391,7 +391,7 @@ describe('OpsDashboard integration shell', () => {
     expect(wrapper.get('#ops-workspace-tab-traffic').attributes('aria-selected')).toBe('true')
     expect(wrapper.get('[data-testid="ops-traffic-section"]').attributes('aria-labelledby')).toBe('ops-traffic-heading')
     expect(wrapper.get('[data-testid="ops-workspace-panel-resources"]').attributes('style')).toContain('display: none')
-    expect(wrapper.get('[data-testid="ops-resources-section"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="ops-resources-section"]').exists()).toBe(true)
     expect(mocks.getDashboardOverview).toHaveBeenCalledTimes(1)
     expect(mocks.getThroughputTrend).toHaveBeenCalledTimes(1)
     expect(mocks.getLatencyHistogram).toHaveBeenCalledTimes(1)
@@ -408,7 +408,7 @@ describe('OpsDashboard integration shell', () => {
 
     await wrapper.get('#ops-workspace-tab-incidents').trigger('click')
     await flushPromises()
-    expect(wrapper.get('[data-testid="ops-incidents-section"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="ops-incidents-section"]').exists()).toBe(true)
     expect(mocks.getDashboardOverview).toHaveBeenCalledTimes(1)
     expect(mocks.getLatencyHistogram).toHaveBeenCalledTimes(1)
     expect(mocks.getErrorTrend).toHaveBeenCalledTimes(1)
@@ -418,15 +418,15 @@ describe('OpsDashboard integration shell', () => {
 
     await wrapper.get('#ops-workspace-tab-diagnostics').trigger('click')
     await flushPromises()
-    expect(wrapper.get('[data-testid="system-log"]').exists()).toBe(true)
-    expect(wrapper.get('[data-testid="ops-traffic-section"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="system-log"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="ops-traffic-section"]').exists()).toBe(true)
     expect(wrapper.get('[data-testid="ops-workspace-panel-traffic"]').attributes('style')).toContain('display: none')
     expect(mocks.getDashboardOverview).toHaveBeenCalledTimes(1)
     expect(mocks.getErrorTrend).toHaveBeenCalledTimes(1)
 
     await wrapper.get('#ops-workspace-tab-traffic').trigger('click')
     await flushPromises()
-    expect(wrapper.get('[data-testid="ops-traffic-section"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="ops-traffic-section"]').exists()).toBe(true)
     expect(mocks.getDashboardOverview).toHaveBeenCalledTimes(1)
     expect(mocks.getLatencyHistogram).toHaveBeenCalledTimes(1)
     expect(mocks.getThroughputTrend).toHaveBeenCalledTimes(2)
@@ -597,7 +597,7 @@ describe('OpsDashboard integration shell', () => {
 
     expect(wrapper.find('[data-testid="ops-dashboard-loading"]').exists()).toBe(false)
     expect(page.attributes('aria-busy')).toBe('false')
-    expect(wrapper.get('[data-testid="ops-header"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="ops-header"]').exists()).toBe(true)
   })
 
   it('redirects to settings without calling monitoring endpoints when Ops is disabled', async () => {
@@ -636,7 +636,7 @@ describe('OpsDashboard integration shell', () => {
       'data-error-type': 'upstream',
     })
     expect(wrapper.get('#ops-workspace-tab-incidents').attributes('aria-selected')).toBe('true')
-    expect(wrapper.get('[data-testid="ops-incidents-section"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="ops-incidents-section"]').exists()).toBe(true)
     expect(mocks.getErrorTrend).toHaveBeenCalledWith(
       {
         platform: 'anthropic',
@@ -753,8 +753,8 @@ describe('OpsDashboard integration shell', () => {
     const wrapper = mountDashboard()
     await flushPromises()
 
-    expect(wrapper.get('[data-testid="ops-header"]').exists()).toBe(true)
-    expect(wrapper.get('[data-testid="latency-chart"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="ops-header"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="latency-chart"]').exists()).toBe(true)
     expect(mocks.showError).toHaveBeenCalledWith('latency unavailable')
   })
 

@@ -828,7 +828,7 @@ describe('admin DashboardView', () => {
     await flushPromises()
 
     expect(wrapper.find('[data-testid="dashboard-loading"]').exists()).toBe(false)
-    expect(wrapper.get('[data-testid="dashboard-error"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="dashboard-error"]').exists()).toBe(true)
     expect(wrapper.find('[data-testid="dashboard-overview"]').exists()).toBe(false)
     expect(showError).toHaveBeenCalledTimes(1)
     expect(showError).toHaveBeenCalledWith('admin.dashboard.failedToLoad')
@@ -844,7 +844,7 @@ describe('admin DashboardView', () => {
       include_stats: true,
     }))
     expect(wrapper.find('[data-testid="dashboard-error"]').exists()).toBe(false)
-    expect(wrapper.get('[data-testid="dashboard-overview"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="dashboard-overview"]').exists()).toBe(true)
     expect(showError).toHaveBeenCalledTimes(1)
 
     consoleError.mockRestore()
@@ -877,7 +877,7 @@ describe('admin DashboardView', () => {
     const wrapper = mountDashboard()
     await flushPromises()
 
-    expect(wrapper.get('[data-testid="dashboard-overview"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="dashboard-overview"]').exists()).toBe(true)
     expect(wrapper.get('[data-testid="dashboard-refresh"]').attributes('disabled')).toBeDefined()
 
     resolveUsersTrend({

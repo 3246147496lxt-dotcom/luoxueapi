@@ -37,6 +37,12 @@ type TLSFingerprintProfileService struct {
 	// 本地 ID→Profile 映射缓存，用于 DoWithTLS 热路径快速查找
 	localCache map[int64]*model.TLSFingerprintProfile
 	localMu    sync.RWMutex
+
+	lifecycleMu      sync.Mutex
+	lifecycleCancel  context.CancelFunc
+	lifecycleWG      sync.WaitGroup
+	lifecycleStarted bool
+	lifecycleStopped bool
 }
 
 // NewTLSFingerprintProfileService 创建 TLS 指纹模板服务
@@ -44,29 +50,88 @@ func NewTLSFingerprintProfileService(
 	repo TLSFingerprintProfileRepository,
 	cache TLSFingerprintProfileCache,
 ) *TLSFingerprintProfileService {
-	svc := &TLSFingerprintProfileService{
+	return &TLSFingerprintProfileService{
 		repo:       repo,
 		cache:      cache,
 		localCache: make(map[int64]*model.TLSFingerprintProfile),
 	}
+}
 
-	ctx := context.Background()
-	if err := svc.reloadFromDB(ctx); err != nil {
+// Start loads the initial projection and owns the Redis subscription. Object
+// construction stays side-effect free so Supervisor can roll startup back.
+func (s *TLSFingerprintProfileService) Start(ctx context.Context) error {
+	if s == nil {
+		return nil
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	s.lifecycleMu.Lock()
+	if s.lifecycleStarted || s.lifecycleStopped {
+		s.lifecycleMu.Unlock()
+		return nil
+	}
+	runtimeCtx, cancel := context.WithCancel(context.Background())
+	s.lifecycleCancel = cancel
+	s.lifecycleStarted = true
+	s.lifecycleMu.Unlock()
+
+	if err := s.reloadFromDB(ctx); err != nil {
 		logger.LegacyPrintf("service.tls_fp_profile", "[TLSFPProfileService] Failed to load profiles from DB on startup: %v", err)
-		if fallbackErr := svc.refreshLocalCache(ctx); fallbackErr != nil {
+		if fallbackErr := s.refreshLocalCache(ctx); fallbackErr != nil {
 			logger.LegacyPrintf("service.tls_fp_profile", "[TLSFPProfileService] Failed to load profiles from cache fallback on startup: %v", fallbackErr)
 		}
 	}
 
-	if cache != nil {
-		cache.SubscribeUpdates(ctx, func() {
-			if err := svc.refreshLocalCache(context.Background()); err != nil {
-				logger.LegacyPrintf("service.tls_fp_profile", "[TLSFPProfileService] Failed to refresh cache on notification: %v", err)
-			}
-		})
+	if s.cache != nil {
+		s.lifecycleWG.Add(1)
+		go func() {
+			defer s.lifecycleWG.Done()
+			s.cache.SubscribeUpdates(runtimeCtx, func() {
+				refreshCtx, refreshCancel := context.WithTimeout(runtimeCtx, 5*time.Second)
+				defer refreshCancel()
+				if err := s.refreshLocalCache(refreshCtx); err != nil && runtimeCtx.Err() == nil {
+					logger.LegacyPrintf("service.tls_fp_profile", "[TLSFPProfileService] Failed to refresh cache on notification: %v", err)
+				}
+			})
+		}()
 	}
+	return nil
+}
 
-	return svc
+// Stop cancels and joins the cache subscriber. It is idempotent.
+func (s *TLSFingerprintProfileService) Stop(ctx context.Context) error {
+	if s == nil {
+		return nil
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	s.lifecycleMu.Lock()
+	cancel := s.lifecycleCancel
+	// Retain the cancel handle until the subscriber has actually joined. If this
+	// call times out, a later Stop can continue waiting for the same goroutine.
+	s.lifecycleStarted = false
+	s.lifecycleStopped = true
+	s.lifecycleMu.Unlock()
+	if cancel == nil {
+		return nil
+	}
+	cancel()
+	done := make(chan struct{})
+	go func() {
+		s.lifecycleWG.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+		s.lifecycleMu.Lock()
+		s.lifecycleCancel = nil
+		s.lifecycleMu.Unlock()
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 // --- CRUD ---

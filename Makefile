@@ -1,4 +1,4 @@
-.PHONY: build build-backend build-frontend test test-backend test-frontend test-frontend-critical
+.PHONY: build build-backend build-noembed build-frontend build-docs test test-backend test-frontend test-frontend-critical test-e2e
 
 FRONTEND_CRITICAL_VITEST := \
 	src/views/auth/__tests__/LinuxDoCallbackView.spec.ts \
@@ -10,16 +10,32 @@ FRONTEND_CRITICAL_VITEST := \
 	src/utils/__tests__/documentationUrl.spec.ts \
 	src/utils/__tests__/favicon.spec.ts
 
-# 一键编译前后端
-build: build-backend build-frontend
+# 一键编译嵌入式发布产物。使用递归 make 保证即使传入 -j，顺序仍然固定。
+build:
+	@$(MAKE) build-frontend
+	@$(MAKE) build-docs
+	@$(MAKE) build-backend
 
-# 编译后端（复用 backend/Makefile）
+# 编译带嵌入资源的后端（复用 backend/Makefile）
 build-backend:
-	@$(MAKE) -C backend build
+	@$(MAKE) -C backend build-embed
+
+# 显式的无嵌入开发构建，不可用于发布。
+build-noembed:
+	@$(MAKE) -C backend build-noembed
 
 # 编译前端（需要已安装依赖）
 build-frontend:
-	@pnpm --dir frontend run build
+	@cd frontend && corepack pnpm run build
+
+build-docs:
+	@npm --prefix docs-site run build
+	@npm --prefix docs-site run verify:build
+	@rm -rf backend/internal/web/dist/tutorial-docs
+	@mkdir -p backend/internal/web/dist/tutorial-docs
+	@cp -a docs-site/dist/. backend/internal/web/dist/tutorial-docs/
+	@test -f backend/internal/web/dist/tutorial-docs/index.html
+	@grep -q '/tutorial-docs/assets/' backend/internal/web/dist/tutorial-docs/index.html
 
 # 运行测试（后端 + 前端）
 test: test-backend test-frontend
@@ -27,10 +43,14 @@ test: test-backend test-frontend
 test-backend:
 	@$(MAKE) -C backend test
 
+test-e2e:
+	@$(MAKE) -C backend test-e2e
+
 test-frontend:
-	@pnpm --dir frontend run lint:check
-	@pnpm --dir frontend run typecheck
-	@$(MAKE) test-frontend-critical
+	@cd frontend && corepack pnpm run lint:check
+	@cd frontend && corepack pnpm run typecheck
+	@cd frontend && corepack pnpm run typecheck:test
+	@cd frontend && corepack pnpm run test:run
 
 test-frontend-critical:
-	@pnpm --dir frontend exec vitest run $(FRONTEND_CRITICAL_VITEST)
+	@cd frontend && corepack pnpm exec vitest run $(FRONTEND_CRITICAL_VITEST)

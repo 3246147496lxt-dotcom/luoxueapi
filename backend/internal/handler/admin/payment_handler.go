@@ -4,7 +4,6 @@ import (
 	"strconv"
 	"time"
 
-	dbent "github.com/Wei-Shaw/sub2api/ent"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/response"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 
@@ -56,7 +55,7 @@ func (h *PaymentHandler) ListOrders(c *gin.Context) {
 			userID = v
 		}
 	}
-	orders, total, err := h.paymentService.AdminListOrders(c.Request.Context(), userID, service.OrderListParams{
+	orders, total, err := h.paymentService.AdminListOrderViews(c.Request.Context(), userID, service.OrderListParams{
 		Page:        page,
 		PageSize:    pageSize,
 		Status:      c.Query("status"),
@@ -78,12 +77,12 @@ func (h *PaymentHandler) GetOrderDetail(c *gin.Context) {
 	if !ok {
 		return
 	}
-	order, err := h.paymentService.GetOrderByID(c.Request.Context(), orderID)
+	order, err := h.paymentService.GetOrderByIDView(c.Request.Context(), orderID)
 	if err != nil {
 		response.ErrorFrom(c, err)
 		return
 	}
-	auditLogs, _ := h.paymentService.GetOrderAuditLogs(c.Request.Context(), orderID)
+	auditLogs, _ := h.paymentService.GetOrderAuditLogViews(c.Request.Context(), orderID)
 	response.Success(c, gin.H{"order": sanitizeAdminPaymentOrderForResponse(order), "auditLogs": auditLogs})
 }
 
@@ -159,7 +158,7 @@ type AdminPaymentOrderResult struct {
 	UpdatedAt           time.Time  `json:"updated_at"`
 }
 
-func sanitizeAdminPaymentOrdersForResponse(orders []*dbent.PaymentOrder) []*AdminPaymentOrderResult {
+func sanitizeAdminPaymentOrdersForResponse(orders []*service.PaymentOrderView) []*AdminPaymentOrderResult {
 	out := make([]*AdminPaymentOrderResult, 0, len(orders))
 	for _, order := range orders {
 		if item := sanitizeAdminPaymentOrderForResponse(order); item != nil {
@@ -169,7 +168,7 @@ func sanitizeAdminPaymentOrdersForResponse(orders []*dbent.PaymentOrder) []*Admi
 	return out
 }
 
-func sanitizeAdminPaymentOrderForResponse(order *dbent.PaymentOrder) *AdminPaymentOrderResult {
+func sanitizeAdminPaymentOrderForResponse(order *service.PaymentOrderView) *AdminPaymentOrderResult {
 	if order == nil {
 		return nil
 	}
@@ -182,14 +181,14 @@ func sanitizeAdminPaymentOrderForResponse(order *dbent.PaymentOrder) *AdminPayme
 		Amount:              order.Amount,
 		PayAmount:           order.PayAmount,
 		FeeRate:             order.FeeRate,
-		Currency:            service.PaymentOrderCurrency(order),
+		Currency:            order.Currency,
 		RechargeCode:        order.RechargeCode,
 		OutTradeNo:          order.OutTradeNo,
 		PaymentType:         order.PaymentType,
 		PaymentTradeNo:      order.PaymentTradeNo,
 		PayURL:              order.PayURL,
-		QRCode:              order.QrCode,
-		QRCodeImg:           order.QrCodeImg,
+		QRCode:              order.QRCode,
+		QRCodeImg:           order.QRCodeImg,
 		OrderType:           order.OrderType,
 		PlanID:              order.PlanID,
 		SubscriptionGroupID: order.SubscriptionGroupID,

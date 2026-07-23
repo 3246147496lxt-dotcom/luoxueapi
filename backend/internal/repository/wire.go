@@ -2,11 +2,7 @@ package repository
 
 import (
 	"context"
-	"database/sql"
-	"errors"
 
-	entsql "entgo.io/ent/dialect/sql"
-	"github.com/Wei-Shaw/sub2api/ent"
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/google/wire"
@@ -61,6 +57,13 @@ func ProvideSchedulerCache(rdb *redis.Client, cfg *config.Config) service.Schedu
 		}
 	}
 	return newSchedulerCacheWithChunkSizes(rdb, mgetChunkSize, writeChunkSize)
+}
+
+// ProvideAccountProjectionWriter narrows SchedulerCache to the only cache
+// writes account persistence may perform. These writes are best-effort after
+// commit; scheduler_outbox is the durable publication path.
+func ProvideAccountProjectionWriter(cache service.SchedulerCache) service.AccountProjectionWriter {
+	return cache
 }
 
 // ProviderSet is the Wire provider set for all repositories
@@ -126,6 +129,7 @@ var ProviderSet = wire.NewSet(
 	NewBatchImageDownloadLimiter,
 	NewLeaderLockCache,
 	ProvideSchedulerCache,
+	ProvideAccountProjectionWriter,
 	NewSchedulerOutboxRepository,
 	NewProxyLatencyCache,
 	NewTotpCache,
@@ -157,23 +161,7 @@ var ProviderSet = wire.NewSet(
 	NewGeminiOAuthClient,
 	NewGeminiCliCodeAssistClient,
 	NewGeminiDriveClient,
-
-	ProvideEnt,
-	ProvideSQLDB,
-	ProvideRedis,
 )
-
-// ProvideEnt 为依赖注入提供 Ent 客户端。
-//
-// 该函数是 InitEnt 的包装器，符合 Wire 的依赖提供函数签名要求。
-// Wire 会在编译时分析依赖关系，自动生成初始化代码。
-//
-// 依赖：config.Config
-// 提供：*ent.Client
-func ProvideEnt(cfg *config.Config) (*ent.Client, error) {
-	client, _, err := InitEnt(cfg)
-	return client, err
-}
 
 // ProvideImageStorage 提供异步图片任务结果转存所用的对象存储实现。
 // 仅当开关打开且 S3 凭证齐全时返回具体实现，否则返回 nil（功能整体禁用）。
@@ -186,42 +174,4 @@ func ProvideImageStorage(cfg *config.Config) (service.ImageStorage, error) {
 		return nil, err
 	}
 	return store, nil
-}
-
-// ProvideSQLDB 从 Ent 客户端提取底层的 *sql.DB 连接。
-//
-// 某些 Repository 需要直接执行原生 SQL（如复杂的批量更新、聚合查询），
-// 此时需要访问底层的 sql.DB 而不是通过 Ent ORM。
-//
-// 设计说明：
-//   - Ent 底层使用 sql.DB，通过 Driver 接口可以访问
-//   - 这种设计允许在同一事务中混用 Ent 和原生 SQL
-//
-// 依赖：*ent.Client
-// 提供：*sql.DB
-func ProvideSQLDB(client *ent.Client) (*sql.DB, error) {
-	if client == nil {
-		return nil, errors.New("nil ent client")
-	}
-	// 从 Ent 客户端获取底层驱动
-	drv, ok := client.Driver().(*entsql.Driver)
-	if !ok {
-		return nil, errors.New("ent driver does not expose *sql.DB")
-	}
-	// 返回驱动持有的 sql.DB 实例
-	return drv.DB(), nil
-}
-
-// ProvideRedis 为依赖注入提供 Redis 客户端。
-//
-// Redis 用于：
-//   - 分布式锁（如并发控制）
-//   - 缓存（如用户会话、API 响应缓存）
-//   - 速率限制
-//   - 实时统计数据
-//
-// 依赖：config.Config
-// 提供：*redis.Client
-func ProvideRedis(cfg *config.Config) *redis.Client {
-	return InitRedis(cfg)
 }

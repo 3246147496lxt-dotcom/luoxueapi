@@ -17,6 +17,9 @@ services:
         NPM_CONFIG_REGISTRY: ${NPM_CONFIG_REGISTRY:-https://registry.npmmirror.com}
     container_name: sub2api-dev
     restart: unless-stopped
+    env_file:
+      - path: .env
+        required: false
     ports:
       - "${BIND_HOST:-127.0.0.1}:${SERVER_PORT:-8080}:8080"
     volumes:
@@ -81,7 +84,7 @@ services:
     networks:
       - sub2api-network
     healthcheck:
-      test: ["CMD", "wget", "-q", "-T", "5", "-O", "/dev/null", "http://localhost:8080/health"]
+      test: ["CMD", "wget", "-q", "-T", "5", "-O", "/dev/null", "http://localhost:8080/readyz"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -99,6 +102,16 @@ services:
       - POSTGRES_DB=${POSTGRES_DB:-sub2api}
       - PGDATA=/var/lib/postgresql/data
       - TZ=${TZ:-Asia/Shanghai}
+    command:
+      - postgres
+      - -c
+      - max_connections=${POSTGRES_MAX_CONNECTIONS:-1024}
+      - -c
+      - shared_buffers=${POSTGRES_SHARED_BUFFERS:-1GB}
+      - -c
+      - effective_cache_size=${POSTGRES_EFFECTIVE_CACHE_SIZE:-4GB}
+      - -c
+      - maintenance_work_mem=${POSTGRES_MAINTENANCE_WORK_MEM:-128MB}
     networks:
       - sub2api-network
     healthcheck:
@@ -114,15 +127,23 @@ services:
     restart: unless-stopped
     volumes:
       - ./redis_data:/data:Z
-    command: >
-        sh -c '
-          redis-server
-          --save 60 1
-          --appendonly yes
-          --appendfsync everysec
-          ${REDIS_PASSWORD:+--requirepass "$REDIS_PASSWORD"}'
+    command:
+      - sh
+      - -eu
+      - -c
+      - |
+        set -- redis-server \
+          --save 60 1 \
+          --appendonly yes \
+          --appendfsync everysec \
+          --maxclients "$${REDIS_MAXCLIENTS:-50000}"
+        if [ -n "$${REDISCLI_AUTH:-}" ]; then
+          set -- "$$@" --requirepass "$$REDISCLI_AUTH"
+        fi
+        exec "$$@"
     environment:
       - TZ=${TZ:-Asia/Shanghai}
+      - REDIS_MAXCLIENTS=${REDIS_MAXCLIENTS:-50000}
       - REDISCLI_AUTH=${REDIS_PASSWORD:-}
     networks:
       - sub2api-network

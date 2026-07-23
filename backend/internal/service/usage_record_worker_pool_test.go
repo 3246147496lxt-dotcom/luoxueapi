@@ -197,6 +197,7 @@ func TestUsageRecordWorkerPool_AutoScaleUpAndDown(t *testing.T) {
 		AutoScaleInterval:     20 * time.Millisecond,
 		AutoScaleCooldown:     20 * time.Millisecond,
 	})
+	pool.Start()
 	t.Cleanup(pool.Stop)
 
 	block := make(chan struct{})
@@ -240,6 +241,7 @@ func TestUsageRecordWorkerPool_AutoScaleDownRequiresLowRunningUtilization(t *tes
 		AutoScaleInterval:     20 * time.Millisecond,
 		AutoScaleCooldown:     20 * time.Millisecond,
 	})
+	pool.Start()
 	t.Cleanup(pool.Stop)
 
 	block := make(chan struct{})
@@ -293,6 +295,7 @@ func TestUsageRecordWorkerPool_AutoScaleDisabledKeepsFixedConcurrency(t *testing
 		AutoScaleInterval:     10 * time.Millisecond,
 		AutoScaleCooldown:     10 * time.Millisecond,
 	})
+	pool.Start()
 	t.Cleanup(pool.Stop)
 
 	require.Equal(t, 2, pool.Stats().MaxConcurrency)

@@ -27,6 +27,28 @@ func TestRedactText_QueryLike(t *testing.T) {
 	}
 }
 
+func TestRedactText_EmbeddedPageLaunchCode(t *testing.T) {
+	in := "https://pay.example.com/start?s2a_client_id=payment&s2a_launch_code=raw-one-time-code"
+	out := RedactText(in)
+	if strings.Contains(out, "raw-one-time-code") {
+		t.Fatalf("expected embedded launch code redacted, got %q", out)
+	}
+	if !strings.Contains(out, "s2a_launch_code=***") {
+		t.Fatalf("expected launch-code key redacted, got %q", out)
+	}
+}
+
+func TestRedactText_EmbeddedPageLaunchURLInsideJSON(t *testing.T) {
+	in := `{"launch_url":"https://pay.example.com/start?s2a_client_id=payment&s2a_launch_code=raw-one-time-code"}`
+	out := RedactText(in)
+	if strings.Contains(out, "raw-one-time-code") || strings.Contains(out, "pay.example.com") {
+		t.Fatalf("expected full embedded launch URL redacted, got %q", out)
+	}
+	if !strings.Contains(out, `"launch_url":"***"`) {
+		t.Fatalf("expected launch_url key redacted in %q", out)
+	}
+}
+
 func TestRedactText_GOCSPX(t *testing.T) {
 	in := "client_secret=GOCSPX-your-client-secret"
 	out := RedactText(in)

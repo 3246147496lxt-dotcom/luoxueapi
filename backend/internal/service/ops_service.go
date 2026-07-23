@@ -100,8 +100,20 @@ func NewOpsService(
 		antigravityGatewayService: antigravityGatewayService,
 		systemLogSink:             systemLogSink,
 	}
-	svc.applyRuntimeLogConfigOnStartup(context.Background())
 	return svc
+}
+
+// StartRuntime applies persisted process-level logging settings after all
+// dependencies have been constructed and under Supervisor ownership.
+func (s *OpsService) StartRuntime(ctx context.Context) error {
+	if s == nil {
+		return nil
+	}
+	cfg, err := s.GetRuntimeLogConfig(ctx)
+	if err != nil {
+		return err
+	}
+	return applyOpsRuntimeLogConfig(cfg)
 }
 
 func (s *OpsService) RequireMonitoringEnabled(ctx context.Context) error {

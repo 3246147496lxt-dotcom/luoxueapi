@@ -4,14 +4,18 @@ import (
 	"context"
 	"crypto/sha256"
 	"database/sql"
+	"database/sql/driver"
 	"encoding/hex"
 	"errors"
 	"fmt"
 	"io/fs"
+	"path"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/pkg/opsruntime"
 	"github.com/Wei-Shaw/sub2api/migrations"
 )
 
@@ -50,6 +54,7 @@ CREATE TABLE IF NOT EXISTS atlas_schema_revisions (
 // 任何稳定的 int64 值都可以，只要不与同一数据库中的其他锁冲突即可。
 const migrationsAdvisoryLockID int64 = 694208311321144027
 const migrationsLockRetryInterval = 500 * time.Millisecond
+const migrationsUnlockTimeout = 5 * time.Second
 const nonTransactionalMigrationSuffix = "_notx.sql"
 const paymentOrdersOutTradeNoUniqueMigration = "120_enforce_payment_orders_out_trade_no_unique_notx.sql"
 const paymentOrdersOutTradeNoUniqueIndex = "paymentorder_out_trade_no_unique"
@@ -57,6 +62,20 @@ const schedulerOutboxPendingDedupKeyMigration = "153_scheduler_outbox_pending_de
 const schedulerOutboxPendingDedupKeyIndex = "idx_scheduler_outbox_pending_dedup_key"
 const latestAPIKeyIPIndexMigration = "174_add_usage_logs_api_key_latest_ip_index_notx.sql"
 const latestAPIKeyIPIndex = "idx_usage_logs_api_key_latest_ip"
+
+var canonicalMigrationFilename = regexp.MustCompile(`^[0-9]{3}[a-z]?_[a-z0-9][a-z0-9_]*\.sql$`)
+
+type migrationQueryExecer interface {
+	ExecContext(ctx context.Context, query string, args ...any) (sql.Result, error)
+	QueryContext(ctx context.Context, query string, args ...any) (*sql.Rows, error)
+	QueryRowContext(ctx context.Context, query string, args ...any) *sql.Row
+}
+
+type validatedMigrationFile struct {
+	name     string
+	content  string
+	checksum string
+}
 
 type migrationChecksumCompatibilityRule struct {
 	fileChecksum       string
@@ -107,80 +126,101 @@ func ApplyMigrations(ctx context.Context, db *sql.DB) error {
 // 它从指定的文件系统读取 SQL 迁移文件并按顺序应用。
 //
 // 迁移执行流程：
-//  1. 获取 PostgreSQL Advisory Lock，防止多实例并发迁移
-//  2. 确保 schema_migrations 表存在
-//  3. 按文件名排序读取所有 .sql 文件
+//  1. 在任何数据库 SQL 前校验并读取所有迁移文件
+//  2. 固定一个 PostgreSQL session 并获取 Advisory Lock
+//  3. 记录启动前 legacy 状态并确保 schema_migrations 表存在
 //  4. 对于每个迁移文件：
 //     - 计算文件内容的 SHA256 校验和
 //     - 检查该迁移是否已应用（通过 filename 查询）
 //     - 如果已应用，验证校验和是否匹配
 //     - 如果未应用，在事务中执行迁移并记录
-//  5. 释放 Advisory Lock
+//  5. 全部成功后仅为启动前 legacy schema 对齐 Atlas baseline
+//  6. 在同一 session 释放 Advisory Lock
 //
 // 参数：
 //   - ctx: 上下文
 //   - db: 数据库连接
 //   - fsys: 包含迁移文件的文件系统（通常是 embed.FS）
-func applyMigrationsFS(ctx context.Context, db *sql.DB, fsys fs.FS) error {
+func applyMigrationsFS(ctx context.Context, db *sql.DB, fsys fs.FS) (retErr error) {
 	if db == nil {
 		return errors.New("nil sql db")
 	}
 
+	// 文件清单必须在任何数据库 SQL 之前完成严格校验。除了阻止拼写错误的迁移，
+	// 这也会显式拒绝 macOS AppleDouble 文件（例如 ._001_init.sql），避免它们被
+	// 当成一条真实迁移记录进 schema_migrations。
+	files, err := collectValidatedMigrationFiles(fsys)
+	if err != nil {
+		return fmt.Errorf("validate migrations: %w", err)
+	}
+
+	// PostgreSQL advisory lock 是 session-scoped。整个锁生命周期及所有迁移 SQL
+	// 必须固定在同一个物理连接上，不能经 *sql.DB 重新从池中选择连接。
+	conn, err := db.Conn(ctx)
+	if err != nil {
+		return fmt.Errorf("acquire migrations connection: %w", err)
+	}
+	locked := false
+	discardConn := false
+	defer func() {
+		if locked {
+			// 原 ctx 可能已经取消；给同一 session 一个独立、有限的解锁窗口。
+			unlockCtx, cancel := context.WithTimeout(context.Background(), migrationsUnlockTimeout)
+			unlockErr := pgAdvisoryUnlock(unlockCtx, conn)
+			cancel()
+			if unlockErr != nil {
+				discardConn = true
+				retErr = errors.Join(retErr, unlockErr)
+			}
+		}
+
+		if discardConn {
+			// 解锁结果不可信时绝不能让该物理 session 回到连接池；它可能仍持有锁。
+			discardSQLConn(conn)
+			_ = conn.Close()
+			return
+		}
+		if closeErr := conn.Close(); closeErr != nil {
+			retErr = errors.Join(retErr, fmt.Errorf("release migrations connection: %w", closeErr))
+		}
+	}()
+
 	// 获取分布式锁，确保多实例部署时只有一个实例执行迁移。
-	// 这是 PostgreSQL 特有的 Advisory Lock 机制。
-	if err := pgAdvisoryLock(ctx, db); err != nil {
+	// 锁查询本身失败时结果可能不确定，因此同样丢弃该 session。
+	if err := pgAdvisoryLock(ctx, conn); err != nil {
+		discardConn = true
 		return err
 	}
-	defer func() {
-		// 无论迁移是否成功，都要释放锁。
-		// 使用 context.Background() 确保即使原 ctx 已取消也能释放锁。
-		_ = pgAdvisoryUnlock(context.Background(), db)
-	}()
+	locked = true
+
+	// 必须在本次启动创建 schema_migrations 之前记录 legacy 状态。否则新库也会
+	// 被误判为 legacy，并在迁移尚未成功时写入 Atlas baseline。
+	legacySchemaAtStartup, err := tableExists(ctx, conn, "schema_migrations")
+	if err != nil {
+		return fmt.Errorf("check schema_migrations before bootstrap: %w", err)
+	}
 
 	// 创建迁移记录表（如果不存在）。
 	// 该表记录所有已应用的迁移及其校验和。
-	if _, err := db.ExecContext(ctx, schemaMigrationsTableDDL); err != nil {
+	if _, err := conn.ExecContext(ctx, schemaMigrationsTableDDL); err != nil {
 		return fmt.Errorf("create schema_migrations: %w", err)
 	}
 
-	// 自动对齐 Atlas 基线（如果检测到 legacy schema_migrations 且缺失 atlas_schema_revisions）。
-	if err := ensureAtlasBaselineAligned(ctx, db, fsys); err != nil {
-		return err
-	}
-
-	// 获取所有 .sql 迁移文件并按文件名排序。
-	// 命名规范：使用零填充数字前缀（如 001_init.sql, 002_add_users.sql）。
-	files, err := fs.Glob(fsys, "*.sql")
-	if err != nil {
-		return fmt.Errorf("list migrations: %w", err)
-	}
-	sort.Strings(files) // 确保按文件名顺序执行迁移
-
-	for _, name := range files {
-		// 读取迁移文件内容
-		contentBytes, err := fs.ReadFile(fsys, name)
-		if err != nil {
-			return fmt.Errorf("read migration %s: %w", name, err)
-		}
-
-		content := strings.TrimSpace(string(contentBytes))
+	for _, file := range files {
+		name := file.name
+		content := file.content
 		if content == "" {
 			continue // 跳过空文件
 		}
 
-		// 计算文件内容的 SHA256 校验和，用于检测文件是否被修改。
-		// 这是一种防篡改机制：如果有人修改了已应用的迁移文件，系统会拒绝启动。
-		sum := sha256.Sum256([]byte(content))
-		checksum := hex.EncodeToString(sum[:])
-
 		// 检查该迁移是否已经应用
 		var existing string
-		rowErr := db.QueryRowContext(ctx, "SELECT checksum FROM schema_migrations WHERE filename = $1", name).Scan(&existing)
+		rowErr := conn.QueryRowContext(ctx, "SELECT checksum FROM schema_migrations WHERE filename = $1", name).Scan(&existing)
 		if rowErr == nil {
 			// 迁移已应用，验证校验和是否匹配
-			if existing != checksum {
+			if existing != file.checksum {
 				// 兼容特定历史误改场景（仅白名单规则），其余仍保持严格不可变约束。
-				if isMigrationChecksumCompatible(name, existing, checksum) {
+				if isMigrationChecksumCompatible(name, existing, file.checksum) {
 					continue
 				}
 				// 校验和不匹配意味着迁移文件在应用后被修改，这是危险的。
@@ -192,7 +232,7 @@ func applyMigrationsFS(ctx context.Context, db *sql.DB, fsys fs.FS) error {
 						"  1. Revert to original: git log --oneline -- migrations/%s && git checkout <commit> -- migrations/%s\n"+
 						"  2. For new changes, create a new migration file instead of modifying existing ones\n"+
 						"Note: Modifying applied migrations breaks the immutability principle and can cause inconsistencies across environments",
-					name, existing, checksum, name, name,
+					name, existing, file.checksum, name, name,
 				)
 			}
 			continue // 迁移已应用且校验和匹配，跳过
@@ -207,7 +247,7 @@ func applyMigrationsFS(ctx context.Context, db *sql.DB, fsys fs.FS) error {
 		}
 
 		if nonTx {
-			if err := prepareNonTransactionalMigration(ctx, db, name); err != nil {
+			if err := prepareNonTransactionalMigration(ctx, conn, name); err != nil {
 				return fmt.Errorf("prepare migration %s: %w", name, err)
 			}
 
@@ -222,18 +262,18 @@ func applyMigrationsFS(ctx context.Context, db *sql.DB, fsys fs.FS) error {
 				if stripSQLLineComment(trimmed) == "" {
 					continue
 				}
-				if _, err := db.ExecContext(ctx, trimmed); err != nil {
+				if _, err := conn.ExecContext(ctx, trimmed); err != nil {
 					return fmt.Errorf("apply migration %s (non-tx statement %d): %w", name, i+1, err)
 				}
 			}
-			if _, err := db.ExecContext(ctx, "INSERT INTO schema_migrations (filename, checksum) VALUES ($1, $2)", name, checksum); err != nil {
+			if _, err := conn.ExecContext(ctx, "INSERT INTO schema_migrations (filename, checksum) VALUES ($1, $2)", name, file.checksum); err != nil {
 				return fmt.Errorf("record migration %s (non-tx): %w", name, err)
 			}
 			continue
 		}
 
 		// 默认迁移在事务中执行，确保原子性：要么完全成功，要么完全回滚。
-		tx, err := db.BeginTx(ctx, nil)
+		tx, err := conn.BeginTx(ctx, nil)
 		if err != nil {
 			return fmt.Errorf("begin migration %s: %w", name, err)
 		}
@@ -245,7 +285,7 @@ func applyMigrationsFS(ctx context.Context, db *sql.DB, fsys fs.FS) error {
 		}
 
 		// 记录迁移已完成，保存文件名和校验和
-		if _, err := tx.ExecContext(ctx, "INSERT INTO schema_migrations (filename, checksum) VALUES ($1, $2)", name, checksum); err != nil {
+		if _, err := tx.ExecContext(ctx, "INSERT INTO schema_migrations (filename, checksum) VALUES ($1, $2)", name, file.checksum); err != nil {
 			_ = tx.Rollback()
 			return fmt.Errorf("record migration %s: %w", name, err)
 		}
@@ -257,10 +297,64 @@ func applyMigrationsFS(ctx context.Context, db *sql.DB, fsys fs.FS) error {
 		}
 	}
 
+	// 仅对本次启动前已经存在 legacy schema_migrations 的数据库补 Atlas baseline，
+	// 且必须在全部 SQL migrations 成功后执行，避免记录一个未真正达到的版本。
+	if legacySchemaAtStartup {
+		if err := ensureAtlasBaselineAlignedWithFiles(ctx, conn, files); err != nil {
+			return err
+		}
+	}
+
 	return nil
 }
 
-func prepareNonTransactionalMigration(ctx context.Context, db *sql.DB, name string) error {
+func collectValidatedMigrationFiles(fsys fs.FS) ([]validatedMigrationFile, error) {
+	entries, err := fs.ReadDir(fsys, ".")
+	if err != nil {
+		return nil, fmt.Errorf("list migration directory: %w", err)
+	}
+
+	files := make([]validatedMigrationFile, 0, len(entries))
+	for _, entry := range entries {
+		name := entry.Name()
+		if !strings.EqualFold(path.Ext(name), ".sql") {
+			continue
+		}
+		if !canonicalMigrationFilename.MatchString(name) {
+			return nil, fmt.Errorf(
+				"invalid migration filename %q: expected NNN[a]_description.sql (lowercase letters, digits, and underscores only); remove metadata files such as ._*.sql",
+				name,
+			)
+		}
+
+		info, err := entry.Info()
+		if err != nil {
+			return nil, fmt.Errorf("inspect migration %s: %w", name, err)
+		}
+		if !info.Mode().IsRegular() {
+			return nil, fmt.Errorf("invalid migration %q: expected a regular file", name)
+		}
+
+		contentBytes, err := fs.ReadFile(fsys, name)
+		if err != nil {
+			return nil, fmt.Errorf("read migration %s: %w", name, err)
+		}
+		content := strings.TrimSpace(string(contentBytes))
+		sum := sha256.Sum256([]byte(content))
+		files = append(files, validatedMigrationFile{
+			name:     name,
+			content:  content,
+			checksum: hex.EncodeToString(sum[:]),
+		})
+	}
+
+	sort.Slice(files, func(i, j int) bool {
+		return files[i].name < files[j].name
+	})
+	return files, nil
+}
+
+func prepareNonTransactionalMigration(ctx context.Context, db migrationQueryExecer, name string) error {
 	switch name {
 	case paymentOrdersOutTradeNoUniqueMigration:
 		return preparePaymentOrdersOutTradeNoUniqueMigration(ctx, db)
@@ -273,7 +367,7 @@ func prepareNonTransactionalMigration(ctx context.Context, db *sql.DB, name stri
 	}
 }
 
-func preparePaymentOrdersOutTradeNoUniqueMigration(ctx context.Context, db *sql.DB) error {
+func preparePaymentOrdersOutTradeNoUniqueMigration(ctx context.Context, db migrationQueryExecer) error {
 	duplicates, err := findDuplicatePaymentOrderOutTradeNos(ctx, db)
 	if err != nil {
 		return fmt.Errorf("precheck duplicate out_trade_no: %w", err)
@@ -289,7 +383,7 @@ func preparePaymentOrdersOutTradeNoUniqueMigration(ctx context.Context, db *sql.
 	return dropInvalidIndexIfPresent(ctx, db, paymentOrdersOutTradeNoUniqueIndex)
 }
 
-func dropInvalidIndexIfPresent(ctx context.Context, db *sql.DB, indexName string) error {
+func dropInvalidIndexIfPresent(ctx context.Context, db migrationQueryExecer, indexName string) error {
 	invalid, err := indexIsInvalid(ctx, db, indexName)
 	if err != nil {
 		return fmt.Errorf("check invalid index %s: %w", indexName, err)
@@ -304,7 +398,7 @@ func dropInvalidIndexIfPresent(ctx context.Context, db *sql.DB, indexName string
 	return nil
 }
 
-func findDuplicatePaymentOrderOutTradeNos(ctx context.Context, db *sql.DB) ([]string, error) {
+func findDuplicatePaymentOrderOutTradeNos(ctx context.Context, db migrationQueryExecer) ([]string, error) {
 	rows, err := db.QueryContext(ctx, `
 		SELECT out_trade_no, COUNT(*) AS duplicate_count
 		FROM payment_orders
@@ -336,7 +430,7 @@ func findDuplicatePaymentOrderOutTradeNos(ctx context.Context, db *sql.DB) ([]st
 	return duplicates, nil
 }
 
-func indexIsInvalid(ctx context.Context, db *sql.DB, indexName string) (bool, error) {
+func indexIsInvalid(ctx context.Context, db migrationQueryExecer, indexName string) (bool, error) {
 	var invalid bool
 	err := db.QueryRowContext(ctx, `
 		SELECT EXISTS (
@@ -352,7 +446,12 @@ func indexIsInvalid(ctx context.Context, db *sql.DB, indexName string) (bool, er
 	return invalid, err
 }
 
-func ensureAtlasBaselineAligned(ctx context.Context, db *sql.DB, fsys fs.FS) error {
+func ensureAtlasBaselineAligned(ctx context.Context, db migrationQueryExecer, fsys fs.FS) error {
+	files, err := collectValidatedMigrationFiles(fsys)
+	if err != nil {
+		return fmt.Errorf("validate migrations: %w", err)
+	}
+
 	hasLegacy, err := tableExists(ctx, db, "schema_migrations")
 	if err != nil {
 		return fmt.Errorf("check schema_migrations: %w", err)
@@ -360,7 +459,10 @@ func ensureAtlasBaselineAligned(ctx context.Context, db *sql.DB, fsys fs.FS) err
 	if !hasLegacy {
 		return nil
 	}
+	return ensureAtlasBaselineAlignedWithFiles(ctx, db, files)
+}
 
+func ensureAtlasBaselineAlignedWithFiles(ctx context.Context, db migrationQueryExecer, files []validatedMigrationFile) error {
 	hasAtlas, err := tableExists(ctx, db, "atlas_schema_revisions")
 	if err != nil {
 		return fmt.Errorf("check atlas_schema_revisions: %w", err)
@@ -379,10 +481,7 @@ func ensureAtlasBaselineAligned(ctx context.Context, db *sql.DB, fsys fs.FS) err
 		return nil
 	}
 
-	version, description, hash, err := latestMigrationBaseline(fsys)
-	if err != nil {
-		return fmt.Errorf("atlas baseline version: %w", err)
-	}
+	version, description, hash := latestMigrationBaselineFromFiles(files)
 
 	if _, err := db.ExecContext(ctx, `
 		INSERT INTO atlas_schema_revisions (version, description, type, applied, total, executed_at, execution_time, hash)
@@ -393,7 +492,7 @@ func ensureAtlasBaselineAligned(ctx context.Context, db *sql.DB, fsys fs.FS) err
 	return nil
 }
 
-func tableExists(ctx context.Context, db *sql.DB, tableName string) (bool, error) {
+func tableExists(ctx context.Context, db migrationQueryExecer, tableName string) (bool, error) {
 	var exists bool
 	err := db.QueryRowContext(ctx, `
 		SELECT EXISTS (
@@ -406,24 +505,22 @@ func tableExists(ctx context.Context, db *sql.DB, tableName string) (bool, error
 }
 
 func latestMigrationBaseline(fsys fs.FS) (string, string, string, error) {
-	files, err := fs.Glob(fsys, "*.sql")
+	files, err := collectValidatedMigrationFiles(fsys)
 	if err != nil {
 		return "", "", "", err
 	}
+	version, description, hash := latestMigrationBaselineFromFiles(files)
+	return version, description, hash, nil
+}
+
+func latestMigrationBaselineFromFiles(files []validatedMigrationFile) (string, string, string) {
 	if len(files) == 0 {
-		return "baseline", "baseline", "", nil
+		return "baseline", "baseline", ""
 	}
-	sort.Strings(files)
-	name := files[len(files)-1]
-	contentBytes, err := fs.ReadFile(fsys, name)
-	if err != nil {
-		return "", "", "", err
-	}
-	content := strings.TrimSpace(string(contentBytes))
-	sum := sha256.Sum256([]byte(content))
-	hash := hex.EncodeToString(sum[:])
+	latest := files[len(files)-1]
+	name := latest.name
 	version := strings.TrimSuffix(name, ".sql")
-	return version, version, hash, nil
+	return version, version, latest.checksum
 }
 
 func checksumSet(values ...string) map[string]struct{} {
@@ -524,20 +621,35 @@ func stripSQLLineComment(s string) string {
 // pgAdvisoryLock 获取 PostgreSQL Advisory Lock。
 // Advisory Lock 是一种轻量级的锁机制，不与任何特定的数据库对象关联。
 // 它非常适合用于应用层面的分布式锁场景，如迁移序列化。
-func pgAdvisoryLock(ctx context.Context, db *sql.DB) error {
+func pgAdvisoryLock(ctx context.Context, db migrationQueryExecer) error {
+	startedAt := time.Now()
+	waited := false
+	timedOut := false
+	acquired := false
+	defer func() {
+		opsruntime.ObserveMigrationLock(time.Since(startedAt), waited, timedOut, acquired)
+	}()
+
 	ticker := time.NewTicker(migrationsLockRetryInterval)
 	defer ticker.Stop()
 
 	for {
 		var locked bool
 		if err := db.QueryRowContext(ctx, "SELECT pg_try_advisory_lock($1)", migrationsAdvisoryLockID).Scan(&locked); err != nil {
+			if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+				waited = true
+				timedOut = true
+			}
 			return fmt.Errorf("acquire migrations lock: %w", err)
 		}
 		if locked {
+			acquired = true
 			return nil
 		}
+		waited = true
 		select {
 		case <-ctx.Done():
+			timedOut = errors.Is(ctx.Err(), context.DeadlineExceeded)
 			return fmt.Errorf("acquire migrations lock: %w", ctx.Err())
 		case <-ticker.C:
 		}
@@ -546,10 +658,24 @@ func pgAdvisoryLock(ctx context.Context, db *sql.DB) error {
 
 // pgAdvisoryUnlock 释放 PostgreSQL Advisory Lock。
 // 必须在获取锁后确保释放，否则会阻塞其他实例的迁移操作。
-func pgAdvisoryUnlock(ctx context.Context, db *sql.DB) error {
-	_, err := db.ExecContext(ctx, "SELECT pg_advisory_unlock($1)", migrationsAdvisoryLockID)
-	if err != nil {
+func pgAdvisoryUnlock(ctx context.Context, db migrationQueryExecer) error {
+	var unlocked bool
+	if err := db.QueryRowContext(ctx, "SELECT pg_advisory_unlock($1)", migrationsAdvisoryLockID).Scan(&unlocked); err != nil {
 		return fmt.Errorf("release migrations lock: %w", err)
 	}
+	if !unlocked {
+		return errors.New("release migrations lock: current session did not hold the lock")
+	}
 	return nil
+}
+
+func discardSQLConn(conn *sql.Conn) {
+	if conn == nil {
+		return
+	}
+	// Returning driver.ErrBadConn tells database/sql to close this physical
+	// connection instead of putting it back into the idle pool.
+	_ = conn.Raw(func(any) error {
+		return driver.ErrBadConn
+	})
 }

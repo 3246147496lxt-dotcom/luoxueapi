@@ -13,7 +13,19 @@ import {
   shouldMarkUserUIRequest,
 } from './adminUIRequest'
 import { getAPIBaseURL } from './url'
+import { AuthSessionChangedError, authSession } from '@/auth/authSession'
+import { refreshAuthSession } from '@/auth/authRefresh'
 export { buildApiUrl, buildGatewayUrl } from './url'
+
+type AuthenticatedRequestConfig = InternalAxiosRequestConfig & {
+  _retry?: boolean
+  _authSessionAccessToken?: string | null
+  _authSessionPrincipalId?: number | string | null
+  _authSessionGeneration?: string | null
+  _authRetryExpectedAccessToken?: string
+  _authRetryExpectedPrincipalId?: number | string | null
+  _authRetryExpectedGeneration?: string | null
+}
 
 // ==================== Axios Instance Configuration ====================
 
@@ -26,26 +38,59 @@ export const apiClient: AxiosInstance = axios.create({
   }
 })
 
-// ==================== Token Refresh State ====================
-
-// Track if a token refresh is in progress to prevent multiple simultaneous refresh requests
-let isRefreshing = false
-// Queue of requests waiting for token refresh
-let refreshSubscribers: Array<(token: string) => void> = []
-
-/**
- * Subscribe to token refresh completion
- */
-function subscribeTokenRefresh(callback: (token: string) => void): void {
-  refreshSubscribers.push(callback)
+function authSessionChangedResponse() {
+  return {
+    status: 409,
+    code: 'AUTH_SESSION_CHANGED',
+    message: 'Authentication session changed. Please retry the request.'
+  }
 }
 
-/**
- * Notify all subscribers that token has been refreshed
- */
-function onTokenRefreshed(token: string): void {
-  refreshSubscribers.forEach((callback) => callback(token))
-  refreshSubscribers = []
+function normalizeAccessToken(value: unknown): string | null {
+  return typeof value === 'string' && value.trim() ? value.trim() : null
+}
+
+function getSentBearerToken(headers: unknown): string | null {
+  if (!headers || typeof headers !== 'object') return null
+
+  const candidate = headers as {
+    get?: (name: string) => unknown
+    Authorization?: unknown
+    authorization?: unknown
+  }
+  let authorization: unknown
+  try {
+    authorization = typeof candidate.get === 'function'
+      ? candidate.get('Authorization')
+      : candidate.Authorization ?? candidate.authorization
+  } catch {
+    return null
+  }
+
+  const values = Array.isArray(authorization) ? authorization : [authorization]
+  for (const value of values) {
+    if (typeof value !== 'string') continue
+    const match = /^Bearer\s+(.+?)\s*$/i.exec(value.trim())
+    const token = normalizeAccessToken(match?.[1])
+    if (token) return token
+  }
+  return null
+}
+
+function shouldClearSessionAfterRefreshFailure(error: unknown): boolean {
+  if (axios.isAxiosError(error)) {
+    const status = error.response?.status
+    // Network failures, rate limiting, and server outages are transient. Keep
+    // the atomically stored token pair so a later request can retry refresh.
+    return status === 400 || status === 401 || status === 403
+  }
+
+  const status = (error as { status?: number } | null)?.status
+  if (typeof status === 'number') return status === 400 || status === 401 || status === 403
+
+  // A syntactically successful but invalid refresh payload cannot be retried
+  // safely with the same token family.
+  return true
 }
 
 // ==================== Request Interceptor ====================
@@ -61,8 +106,34 @@ const getUserTimezone = (): string => {
 
 apiClient.interceptors.request.use(
   (config: InternalAxiosRequestConfig) => {
-    // Attach token from localStorage
-    const token = localStorage.getItem('auth_token')
+    // Attach the current token from the single in-memory session authority.
+    const currentSession = authSession.getSnapshot()
+    const currentGeneration = authSession.getGeneration()
+    const token = currentSession.accessToken
+    const principalId = currentSession.user?.id ?? null
+    const authenticatedConfig = config as AuthenticatedRequestConfig
+    if (
+      (
+        Object.prototype.hasOwnProperty.call(authenticatedConfig, '_authRetryExpectedAccessToken')
+        && authenticatedConfig._authRetryExpectedAccessToken !== token
+      )
+      || (
+        Object.prototype.hasOwnProperty.call(authenticatedConfig, '_authRetryExpectedPrincipalId')
+        && authenticatedConfig._authRetryExpectedPrincipalId !== principalId
+      )
+      || (
+        Object.prototype.hasOwnProperty.call(authenticatedConfig, '_authRetryExpectedGeneration')
+        && authenticatedConfig._authRetryExpectedGeneration !== currentGeneration
+      )
+    ) {
+      throw new AuthSessionChangedError()
+    }
+    // Preserve the dispatch-time identity, including an explicit null. The
+    // response interceptor uses it to reject stale 401s after login/logout or
+    // token rotation instead of replaying a write under a different session.
+    authenticatedConfig._authSessionAccessToken = token
+    authenticatedConfig._authSessionPrincipalId = principalId
+    authenticatedConfig._authSessionGeneration = currentGeneration
     if (token && config.headers) {
       config.headers.Authorization = `Bearer ${token}`
     }
@@ -101,6 +172,25 @@ apiClient.interceptors.request.use(
 
 apiClient.interceptors.response.use(
   (response: AxiosResponse) => {
+    const dispatchedConfig = response.config as AuthenticatedRequestConfig
+    const dispatchedAccessToken = normalizeAccessToken(dispatchedConfig._authSessionAccessToken)
+    if (dispatchedAccessToken) {
+      // Re-read the canonical record at response time. A 2xx produced for an
+      // old family must not reach callers that would patch the current session.
+      // Same-family token rotation remains valid because access-token equality
+      // is intentionally not required here.
+      const currentSession = authSession.hydrate()
+      const currentGeneration = authSession.getGeneration()
+      const dispatchedPrincipalId = dispatchedConfig._authSessionPrincipalId ?? null
+      const dispatchedGeneration = dispatchedConfig._authSessionGeneration ?? null
+      if (
+        currentGeneration !== dispatchedGeneration
+        || (currentSession.user?.id ?? null) !== dispatchedPrincipalId
+      ) {
+        return Promise.reject(authSessionChangedResponse())
+      }
+    }
+
     // Unwrap standard API response format { code, message, data }
     const apiResponse = response.data as ApiResponse<unknown>
     if (apiResponse && typeof apiResponse === 'object' && 'code' in apiResponse) {
@@ -121,14 +211,18 @@ apiClient.interceptors.response.use(
     }
     return response
   },
-  async (error: AxiosError<ApiResponse<unknown>>) => {
+  async (error: AxiosError<ApiResponse<unknown>> | AuthSessionChangedError) => {
+    if (error instanceof AuthSessionChangedError) {
+      return Promise.reject(authSessionChangedResponse())
+    }
+
     // Request cancellation: keep the original axios cancellation error so callers can ignore it.
     // Otherwise we'd misclassify it as a generic "network error".
     if (error.code === 'ERR_CANCELED' || axios.isCancel(error)) {
       return Promise.reject(error)
     }
 
-    const originalRequest = error.config as InternalAxiosRequestConfig & { _retry?: boolean }
+    const originalRequest = error.config as AuthenticatedRequestConfig
 
     // Handle common errors
     if (error.response) {
@@ -184,102 +278,111 @@ apiClient.interceptors.response.use(
       // 401: Try to refresh the token if we have a refresh token
       // This handles TOKEN_EXPIRED, INVALID_TOKEN, TOKEN_REVOKED, etc.
       if (status === 401 && !originalRequest._retry) {
-        const refreshToken = localStorage.getItem('refresh_token')
+        const currentSession = authSession.getSnapshot()
+        const currentGeneration = authSession.getGeneration()
+        const sentBearerToken = getSentBearerToken(originalRequest.headers)
+        const dispatchedAccessToken = Object.prototype.hasOwnProperty.call(
+          originalRequest,
+          '_authSessionAccessToken',
+        )
+          ? normalizeAccessToken(originalRequest._authSessionAccessToken)
+          : sentBearerToken
+        const principalWasTracked = Object.prototype.hasOwnProperty.call(
+          originalRequest,
+          '_authSessionPrincipalId',
+        )
+        const dispatchedPrincipalId = principalWasTracked
+          ? originalRequest._authSessionPrincipalId ?? null
+          : null
+        const generationWasTracked = Object.prototype.hasOwnProperty.call(
+          originalRequest,
+          '_authSessionGeneration',
+        )
+        const dispatchedGeneration = generationWasTracked
+          ? originalRequest._authSessionGeneration ?? null
+          : null
+
+        if (
+          dispatchedAccessToken !== currentSession.accessToken
+          || (sentBearerToken !== null && sentBearerToken !== currentSession.accessToken)
+          || (
+            principalWasTracked
+            && dispatchedPrincipalId !== (currentSession.user?.id ?? null)
+          )
+          || (generationWasTracked && dispatchedGeneration !== currentGeneration)
+        ) {
+          return Promise.reject(authSessionChangedResponse())
+        }
+
         const isAuthEndpoint =
           url.includes('/auth/login') || url.includes('/auth/register') || url.includes('/auth/refresh')
 
         // If we have a refresh token and this is not an auth endpoint, try to refresh
-        if (refreshToken && !isAuthEndpoint) {
-          if (isRefreshing) {
-            // Wait for the ongoing refresh to complete
-            return new Promise((resolve, reject) => {
-              subscribeTokenRefresh((newToken: string) => {
-                if (newToken) {
-                  // Mark as retried to prevent infinite loop if retry also returns 401
-                  originalRequest._retry = true
-                  if (originalRequest.headers) {
-                    originalRequest.headers.Authorization = `Bearer ${newToken}`
-                  }
-                  resolve(apiClient(originalRequest))
-                } else {
-                  // Refresh failed, reject with original error
-                  reject({
-                    status,
-                    code: apiData.code,
-                    message: apiData.message || apiData.detail || error.message
-                  })
-                }
-              })
-            })
-          }
-
+        if (currentSession.refreshToken && !isAuthEndpoint) {
           originalRequest._retry = true
-          isRefreshing = true
 
           try {
-            // Call refresh endpoint directly to avoid circular dependency
-            const refreshResponse = await axios.post(
-              `${getAPIBaseURL()}/auth/refresh`,
-              { refresh_token: refreshToken },
-              // 显式设置超时：裸 axios 默认无限等待，若刷新请求挂起会导致 isRefreshing
-              // 永远为 true，所有排队的 401 重试请求永久卡死，页面 loading 无法恢复。
-              { headers: { 'Content-Type': 'application/json' }, timeout: 30000 }
-            )
+            // authSession owns the single-flight promise, so simultaneous 401s
+            // all retry with the same rotated token pair.
+            const refreshedSession = await refreshAuthSession()
+            if (!refreshedSession.accessToken) throw new Error('Token refresh failed')
 
-            const refreshData = refreshResponse.data as ApiResponse<{
-              access_token: string
-              refresh_token: string
-              expires_in: number
-            }>
-
-            if (refreshData.code === 0 && refreshData.data) {
-              const { access_token, refresh_token: newRefreshToken, expires_in } = refreshData.data
-
-              // Update tokens in localStorage (convert expires_in to timestamp)
-              localStorage.setItem('auth_token', access_token)
-              localStorage.setItem('refresh_token', newRefreshToken)
-              localStorage.setItem('token_expires_at', String(Date.now() + expires_in * 1000))
-
-              // Notify subscribers with new token
-              onTokenRefreshed(access_token)
-
-              // Retry the original request with new token
-              if (originalRequest.headers) {
-                originalRequest.headers.Authorization = `Bearer ${access_token}`
-              }
-
-              isRefreshing = false
-              return apiClient(originalRequest)
+            const latestSession = authSession.getSnapshot()
+            const latestGeneration = authSession.getGeneration()
+            if (
+              latestSession.accessToken !== refreshedSession.accessToken
+              || latestSession.refreshToken !== refreshedSession.refreshToken
+              || (latestSession.user?.id ?? null) !== (refreshedSession.user?.id ?? null)
+              || latestGeneration !== currentGeneration
+            ) {
+              return Promise.reject(authSessionChangedResponse())
             }
 
-            // Refresh response was not successful, fall through to clear auth
-            throw new Error('Token refresh failed')
+            if (originalRequest.headers) {
+              originalRequest.headers.Authorization = `Bearer ${refreshedSession.accessToken}`
+            }
+            originalRequest._authRetryExpectedAccessToken = refreshedSession.accessToken
+            originalRequest._authRetryExpectedPrincipalId = refreshedSession.user?.id ?? null
+            originalRequest._authRetryExpectedGeneration = latestGeneration
+            return apiClient(originalRequest)
           } catch (refreshError) {
-            // Refresh failed - notify subscribers with empty token
-            onTokenRefreshed('')
-            isRefreshing = false
+            if (refreshError instanceof AuthSessionChangedError) {
+              // The user logged out or switched accounts while the stale 401
+              // was refreshing. Never clear or redirect the newer session.
+              return Promise.reject(authSessionChangedResponse())
+            }
 
-            // Clear tokens and redirect to login
-            localStorage.removeItem('auth_token')
-            localStorage.removeItem('refresh_token')
-            localStorage.removeItem('auth_user')
-            localStorage.removeItem('token_expires_at')
-            sessionStorage.setItem('auth_expired', '1')
+            if (shouldClearSessionAfterRefreshFailure(refreshError)) {
+              // Fatal refresh rejection invalidates only this tab's observed
+              // family. It never deletes durable state, so a concurrent login
+              // in another tab cannot be erased by a compare-then-delete race.
+              if (!authSession.invalidate(currentGeneration)) {
+                return Promise.reject(authSessionChangedResponse())
+              }
 
-            if (!window.location.pathname.includes('/login')) {
-              window.location.href = '/login'
+              sessionStorage.setItem('auth_expired', '1')
+
+              if (!window.location.pathname.includes('/login')) {
+                window.location.href = '/login'
+              }
+
+              return Promise.reject({
+                status: 401,
+                code: 'TOKEN_REFRESH_FAILED',
+                message: 'Session expired. Please log in again.'
+              })
             }
 
             return Promise.reject({
-              status: 401,
-              code: 'TOKEN_REFRESH_FAILED',
-              message: 'Session expired. Please log in again.'
+              status: axios.isAxiosError(refreshError) ? (refreshError.response?.status ?? 0) : 0,
+              code: 'TOKEN_REFRESH_TEMPORARILY_UNAVAILABLE',
+              message: 'Token refresh is temporarily unavailable. Please try again.'
             })
           }
         }
 
         // No refresh token or is auth endpoint - clear auth and redirect
-        const hasToken = !!localStorage.getItem('auth_token')
+        const hasToken = !!currentSession.accessToken
         const headers = error.config?.headers as Record<string, unknown> | undefined
         const authHeader = headers?.Authorization ?? headers?.authorization
         const sentAuth =
@@ -289,10 +392,9 @@ apiClient.interceptors.response.use(
               ? authHeader.length > 0
               : !!authHeader
 
-        localStorage.removeItem('auth_token')
-        localStorage.removeItem('refresh_token')
-        localStorage.removeItem('auth_user')
-        localStorage.removeItem('token_expires_at')
+        if (!authSession.invalidate(currentGeneration)) {
+          return Promise.reject(authSessionChangedResponse())
+        }
         if ((hasToken || sentAuth) && !isAuthEndpoint) {
           sessionStorage.setItem('auth_expired', '1')
         }

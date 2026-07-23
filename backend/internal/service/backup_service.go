@@ -26,7 +26,8 @@ const (
 	settingKeyBackupSchedule = "backup_schedule"
 	settingKeyBackupRecords  = "backup_records"
 
-	maxBackupRecords = 100
+	maxBackupRecords              = 100
+	backupRestoreReconcileTimeout = 2 * time.Minute
 )
 
 var (
@@ -57,6 +58,15 @@ type BackupObjectStore interface {
 
 // BackupObjectStoreFactory creates an object store from S3 config
 type BackupObjectStoreFactory func(ctx context.Context, cfg *BackupS3Config) (BackupObjectStore, error)
+
+// BackupRestoreReconciler fails runtime readiness closed before PostgreSQL is
+// restored, then repairs projections from whichever database authority remains
+// after the restore attempt. A successful database restore is not complete
+// until the reconciliation hook has fenced stale writers and rebuilt authority.
+type BackupRestoreReconciler interface {
+	InvalidateForDatabaseRestore()
+	ReconcileAfterDatabaseRestore(ctx context.Context) error
+}
 
 // ─── 数据模型 ───
 
@@ -110,6 +120,7 @@ type BackupService struct {
 	encryptor    SecretEncryptor
 	storeFactory BackupObjectStoreFactory
 	dumper       DBDumper
+	reconciler   BackupRestoreReconciler
 
 	opMu      sync.Mutex // 保护 backingUp/restoring 标志
 	backingUp bool
@@ -129,6 +140,8 @@ type BackupService struct {
 	shuttingDown atomic.Bool        // 阻止新备份启动
 	bgCtx        context.Context    // 所有后台操作的 parent context
 	bgCancel     context.CancelFunc // 取消所有活跃后台操作
+	stopOnce     sync.Once
+	stopDone     chan struct{}
 }
 
 func NewBackupService(
@@ -137,16 +150,23 @@ func NewBackupService(
 	encryptor SecretEncryptor,
 	storeFactory BackupObjectStoreFactory,
 	dumper DBDumper,
+	reconcilers ...BackupRestoreReconciler,
 ) *BackupService {
 	bgCtx, bgCancel := context.WithCancel(context.Background())
+	var reconciler BackupRestoreReconciler
+	if len(reconcilers) > 0 {
+		reconciler = reconcilers[0]
+	}
 	return &BackupService{
 		settingRepo:  settingRepo,
 		dbCfg:        &cfg.Database,
 		encryptor:    encryptor,
 		storeFactory: storeFactory,
 		dumper:       dumper,
+		reconciler:   reconciler,
 		bgCtx:        bgCtx,
 		bgCancel:     bgCancel,
+		stopDone:     make(chan struct{}),
 	}
 }
 
@@ -200,37 +220,53 @@ func (s *BackupService) recoverStaleRecords() {
 	}
 }
 
-// Stop 停止定时备份并等待活跃操作完成
+// Stop preserves the legacy blocking API for direct callers. Runtime
+// lifecycle management uses StopContext so a timed-out join can be retried.
 func (s *BackupService) Stop() {
-	s.shuttingDown.Store(true)
+	_ = s.StopContext(context.Background())
+}
 
-	s.cronMu.Lock()
-	if s.cronSched != nil {
-		s.cronSched.Stop()
+// StopContext first prevents and cancels active work, then joins every tracked
+// backup/restore goroutine within the caller's deadline. A timeout does not
+// forget the workers: later calls wait on the same completion channel.
+func (s *BackupService) StopContext(ctx context.Context) error {
+	if s == nil {
+		return nil
 	}
-	s.cronMu.Unlock()
-
-	// 等待活跃备份/恢复完成（最多 5 分钟）
-	done := make(chan struct{})
-	go func() {
-		s.wg.Wait()
-		close(done)
-	}()
-	select {
-	case <-done:
-		logger.LegacyPrintf("service.backup", "[Backup] all active operations finished")
-	case <-time.After(5 * time.Minute):
-		logger.LegacyPrintf("service.backup", "[Backup] shutdown timeout after 5min, cancelling active operations")
+	s.stopOnce.Do(func() {
+		// Admission and wg.Add share opMu, so no operation can be added after the
+		// waiter starts.
+		s.opMu.Lock()
+		s.shuttingDown.Store(true)
 		if s.bgCancel != nil {
-			s.bgCancel() // 取消所有后台操作
+			s.bgCancel()
 		}
-		// 给 goroutine 时间响应取消并完成清理
-		select {
-		case <-done:
-			logger.LegacyPrintf("service.backup", "[Backup] active operations cancelled and cleaned up")
-		case <-time.After(10 * time.Second):
-			logger.LegacyPrintf("service.backup", "[Backup] goroutine cleanup timed out")
+		s.opMu.Unlock()
+
+		s.cronMu.Lock()
+		var cronStopped context.Context
+		if s.cronSched != nil {
+			cronStopped = s.cronSched.Stop()
 		}
+		s.cronMu.Unlock()
+
+		go func() {
+			if cronStopped != nil {
+				<-cronStopped.Done()
+			}
+			s.wg.Wait()
+			close(s.stopDone)
+		}()
+	})
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	select {
+	case <-s.stopDone:
+		logger.LegacyPrintf("service.backup", "[Backup] all active operations finished")
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
 	}
 }
 
@@ -385,7 +421,13 @@ func (s *BackupService) removeCronSchedule() {
 }
 
 func (s *BackupService) runScheduledBackup() {
+	s.opMu.Lock()
+	if s.shuttingDown.Load() {
+		s.opMu.Unlock()
+		return
+	}
 	s.wg.Add(1)
+	s.opMu.Unlock()
 	defer s.wg.Done()
 
 	ctx, cancel := context.WithTimeout(s.bgCtx, 30*time.Minute)
@@ -429,16 +471,22 @@ func (s *BackupService) CreateBackup(ctx context.Context, triggeredBy string, ex
 	}
 
 	s.opMu.Lock()
+	if s.shuttingDown.Load() {
+		s.opMu.Unlock()
+		return nil, infraerrors.ServiceUnavailable("SERVER_SHUTTING_DOWN", "server is shutting down")
+	}
 	if s.backingUp {
 		s.opMu.Unlock()
 		return nil, ErrBackupInProgress
 	}
 	s.backingUp = true
+	s.wg.Add(1)
 	s.opMu.Unlock()
 	defer func() {
 		s.opMu.Lock()
 		s.backingUp = false
 		s.opMu.Unlock()
+		s.wg.Done()
 	}()
 
 	s3Cfg, err := s.loadS3Config(ctx)
@@ -546,11 +594,16 @@ func (s *BackupService) StartBackup(ctx context.Context, triggeredBy string, exp
 	}
 
 	s.opMu.Lock()
+	if s.shuttingDown.Load() {
+		s.opMu.Unlock()
+		return nil, infraerrors.ServiceUnavailable("SERVER_SHUTTING_DOWN", "server is shutting down")
+	}
 	if s.backingUp {
 		s.opMu.Unlock()
 		return nil, ErrBackupInProgress
 	}
 	s.backingUp = true
+	s.wg.Add(1)
 	s.opMu.Unlock()
 
 	// 初始化阶段出错时自动重置标志
@@ -560,6 +613,7 @@ func (s *BackupService) StartBackup(ctx context.Context, triggeredBy string, exp
 			s.opMu.Lock()
 			s.backingUp = false
 			s.opMu.Unlock()
+			s.wg.Done()
 		}
 	}()
 
@@ -607,7 +661,6 @@ func (s *BackupService) StartBackup(ctx context.Context, triggeredBy string, exp
 	// 在启动 goroutine 前完成拷贝，避免数据竞争
 	result := *record
 
-	s.wg.Add(1)
 	go func() {
 		defer s.wg.Done()
 		defer func() {
@@ -710,16 +763,22 @@ func (s *BackupService) executeBackup(record *BackupRecord, objectStore BackupOb
 // RestoreBackup 从 S3 下载备份并流式恢复到数据库
 func (s *BackupService) RestoreBackup(ctx context.Context, backupID string) error {
 	s.opMu.Lock()
+	if s.shuttingDown.Load() {
+		s.opMu.Unlock()
+		return infraerrors.ServiceUnavailable("SERVER_SHUTTING_DOWN", "server is shutting down")
+	}
 	if s.restoring {
 		s.opMu.Unlock()
 		return ErrRestoreInProgress
 	}
 	s.restoring = true
+	s.wg.Add(1)
 	s.opMu.Unlock()
 	defer func() {
 		s.opMu.Lock()
 		s.restoring = false
 		s.opMu.Unlock()
+		s.wg.Done()
 	}()
 
 	record, err := s.GetBackupRecord(ctx, backupID)
@@ -753,9 +812,19 @@ func (s *BackupService) RestoreBackup(ctx context.Context, backupID string) erro
 	}
 	defer func() { _ = gzReader.Close() }()
 
-	// 流式恢复
+	// Readiness must fail closed before psql can commit a replacement database.
+	// Reconciliation also runs after a failed restore because the DBDumper
+	// contract does not promise that every implementation is transactional.
+	s.invalidateForDatabaseRestore()
 	if err := s.dumper.Restore(ctx, gzReader); err != nil {
-		return fmt.Errorf("pg restore: %w", err)
+		restoreErr := fmt.Errorf("pg restore: %w", err)
+		if reconcileErr := s.reconcileDatabaseRestore(); reconcileErr != nil {
+			return errors.Join(restoreErr, fmt.Errorf("reconcile database after failed restore: %w", reconcileErr))
+		}
+		return restoreErr
+	}
+	if err := s.reconcileDatabaseRestore(); err != nil {
+		return fmt.Errorf("reconcile restored database: %w", err)
 	}
 
 	return nil
@@ -768,11 +837,16 @@ func (s *BackupService) StartRestore(ctx context.Context, backupID string) (*Bac
 	}
 
 	s.opMu.Lock()
+	if s.shuttingDown.Load() {
+		s.opMu.Unlock()
+		return nil, infraerrors.ServiceUnavailable("SERVER_SHUTTING_DOWN", "server is shutting down")
+	}
 	if s.restoring {
 		s.opMu.Unlock()
 		return nil, ErrRestoreInProgress
 	}
 	s.restoring = true
+	s.wg.Add(1)
 	s.opMu.Unlock()
 
 	// 初始化阶段出错时自动重置标志
@@ -782,6 +856,7 @@ func (s *BackupService) StartRestore(ctx context.Context, backupID string) (*Bac
 			s.opMu.Lock()
 			s.restoring = false
 			s.opMu.Unlock()
+			s.wg.Done()
 		}
 	}()
 
@@ -808,7 +883,6 @@ func (s *BackupService) StartRestore(ctx context.Context, backupID string) (*Bac
 	launched = true
 	result := *record
 
-	s.wg.Add(1)
 	go func() {
 		defer s.wg.Done()
 		defer func() {
@@ -853,9 +927,20 @@ func (s *BackupService) executeRestore(record *BackupRecord, objectStore BackupO
 	}
 	defer func() { _ = gzReader.Close() }()
 
+	s.invalidateForDatabaseRestore()
 	if err := s.dumper.Restore(ctx, gzReader); err != nil {
 		record.RestoreStatus = "failed"
-		record.RestoreError = fmt.Sprintf("pg restore: %v", err)
+		restoreErr := fmt.Errorf("pg restore: %w", err)
+		if reconcileErr := s.reconcileDatabaseRestore(); reconcileErr != nil {
+			restoreErr = errors.Join(restoreErr, fmt.Errorf("reconcile database after failed restore: %w", reconcileErr))
+		}
+		record.RestoreError = restoreErr.Error()
+		_ = s.saveRecord(context.Background(), record)
+		return
+	}
+	if err := s.reconcileDatabaseRestore(); err != nil {
+		record.RestoreStatus = "failed"
+		record.RestoreError = fmt.Sprintf("reconcile restored database: %v", err)
 		_ = s.saveRecord(context.Background(), record)
 		return
 	}
@@ -865,6 +950,22 @@ func (s *BackupService) executeRestore(record *BackupRecord, objectStore BackupO
 	if err := s.saveRecord(context.Background(), record); err != nil {
 		logger.LegacyPrintf("service.backup", "[Backup] 保存恢复记录失败: %v", err)
 	}
+}
+
+func (s *BackupService) invalidateForDatabaseRestore() {
+	if s == nil || s.reconciler == nil {
+		return
+	}
+	s.reconciler.InvalidateForDatabaseRestore()
+}
+
+func (s *BackupService) reconcileDatabaseRestore() error {
+	if s == nil || s.reconciler == nil {
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), backupRestoreReconcileTimeout)
+	defer cancel()
+	return s.reconciler.ReconcileAfterDatabaseRestore(ctx)
 }
 
 // ─── 备份记录管理 ───

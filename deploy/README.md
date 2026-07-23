@@ -57,10 +57,10 @@ Use the automated preparation script for the easiest setup:
 
 ```bash
 # Download and run the preparation script
-curl -sSL https://raw.githubusercontent.com/Wei-Shaw/sub2api/main/deploy/docker-deploy.sh | bash
+curl -sSL https://raw.githubusercontent.com/3246147496lxt-dotcom/luoxueapi/main/deploy/docker-deploy.sh | bash
 
 # Or download first, then run
-curl -sSL https://raw.githubusercontent.com/Wei-Shaw/sub2api/main/deploy/docker-deploy.sh -o docker-deploy.sh
+curl -sSL https://raw.githubusercontent.com/3246147496lxt-dotcom/luoxueapi/main/deploy/docker-deploy.sh -o docker-deploy.sh
 chmod +x docker-deploy.sh
 ./docker-deploy.sh
 ```
@@ -257,7 +257,7 @@ When using `docker-compose.local.yml`, all data is stored in local directories, 
 cd /path/to/deployment
 docker compose -f docker-compose.local.yml down
 cd ..
-tar czf luoxueapi-complete.tar.gz deployment/
+COPYFILE_DISABLE=1 tar czf luoxueapi-complete.tar.gz deployment/
 
 # Transfer to new server
 scp luoxueapi-complete.tar.gz user@new-server:/path/to/destination/
@@ -376,12 +376,12 @@ For production servers using systemd.
 ### One-Line Installation
 
 ```bash
-curl -sSL https://raw.githubusercontent.com/Wei-Shaw/sub2api/main/deploy/install.sh | sudo bash
+curl -sSL https://raw.githubusercontent.com/3246147496lxt-dotcom/luoxueapi/main/deploy/install.sh | sudo bash
 ```
 
 ### Manual Installation
 
-1. Download the latest release from [GitHub Releases](https://github.com/Wei-Shaw/sub2api/releases)
+1. Download the latest release from [GitHub Releases](https://github.com/3246147496lxt-dotcom/luoxueapi/releases)
 2. Extract and copy the binary to `/opt/sub2api/`
 3. Copy `sub2api.service` to `/etc/systemd/system/`
 4. Run:
@@ -504,6 +504,40 @@ The main config file is at `/etc/sub2api/config.yaml` (created by Setup Wizard).
 /etc/sub2api/
 └── config.yaml          # Configuration file
 ```
+
+---
+
+## Scheduler outbox worker upgrade
+
+The fenced outbox consumer must not run alongside an older consumer version.
+For the release that introduces the new worker, use this non-rolling sequence:
+
+1. Stop every old LuoxueAPI application instance while leaving PostgreSQL and Redis running.
+2. Start exactly one instance of the new release.
+3. Wait for `GET /readyz` to report `ready` and for the `scheduler` check to be `ready`. The startup readiness gate completes only after the initial full Scheduler rebuild.
+4. Validate login and one gateway request, then scale out using only the same new release.
+5. If the first instance never becomes ready, stop it and roll back before starting any old worker; do not mix generations as a recovery shortcut.
+
+This restriction applies only during the worker cutover. Normal same-version restarts can use the usual deployment strategy.
+
+### Scheduler account deletion fences
+
+Redis key `sched:account:tombstones` is a permanent set of deleted PostgreSQL
+account IDs. It prevents a delayed Scheduler rebuild or `last_used` projection
+from recreating an account after its delete event has already been applied. Do
+not expire, prune, or selectively delete this set during routine cache
+maintenance.
+
+This fence relies on the application invariant that PostgreSQL account IDs are
+sequence-generated and never reused. Do not reset the account sequence below a
+previously issued ID or insert a replacement account with a deleted ID.
+
+If Redis must be reset, stop every application instance and background worker
+first. Clear the whole Scheduler cache namespace (including projections,
+snapshots, watermarks, and tombstones), then start exactly one instance and wait
+for its initial full Scheduler rebuild and `/readyz` before scaling out. When
+restoring PostgreSQL to an older backup, follow the same whole-namespace rebuild
+procedure so tombstones from a newer database state cannot mask restored rows.
 
 ---
 

@@ -317,7 +317,16 @@ func (s *OAuthService) RefreshAccountToken(ctx context.Context, account *Account
 	return s.RefreshToken(ctx, refreshToken, proxyURL)
 }
 
-// Stop stops the session store cleanup goroutine
+// Start starts the session expiration worker.
+func (s *OAuthService) Start() {
+	if s != nil && s.sessionStore != nil {
+		s.sessionStore.Start()
+	}
+}
+
+// Stop stops the session store cleanup goroutine.
 func (s *OAuthService) Stop() {
-	s.sessionStore.Stop()
+	if s != nil && s.sessionStore != nil {
+		s.sessionStore.Stop()
+	}
 }

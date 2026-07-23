@@ -13,6 +13,7 @@ import (
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/opsruntime"
 )
 
 var (
@@ -25,9 +26,13 @@ var (
 const (
 	outboxEventTimeout                    = 2 * time.Minute
 	schedulerOutboxCleanupBatch           = 5000
+	schedulerBucketRebuildTimeout         = 30 * time.Second
+	schedulerBucketRebuildLeaseTTL        = 2 * schedulerBucketRebuildTimeout
+	schedulerBucketRebuildReleaseTimeout  = 2 * time.Second
 	schedulerGroupLifecycleTimeout        = 30 * time.Second
 	schedulerGroupLifecycleLeaseTTL       = 60 * time.Second
 	schedulerGroupLifecycleReleaseTimeout = 2 * time.Second
+	schedulerAuthoritativeRetryDelay      = 100 * time.Millisecond
 	outboxRebuildRetryBaseDelay           = 5 * time.Second
 	outboxRebuildRetryMaxDelay            = 5 * time.Minute
 	outboxMaxIDErrorLogSampleInterval     = time.Minute
@@ -66,6 +71,14 @@ type schedulerAccountQueryCache struct {
 type schedulerSnapshotAccountIDWriter interface {
 	SetSnapshotAndReturnAccountIDs(ctx context.Context, bucket SchedulerBucket, token SchedulerBucketWriteToken, accounts []Account) ([]int64, error)
 	SetSnapshotByAccountIDs(ctx context.Context, bucket SchedulerBucket, token SchedulerBucketWriteToken, accountIDs []int64) error
+}
+
+// schedulerBucketRebuildLeaseCache is the owner-safe production lock
+// capability. It remains optional so existing narrow test fakes can continue
+// implementing SchedulerCache's legacy bool lock methods.
+type schedulerBucketRebuildLeaseCache interface {
+	TryAcquireBucketRebuildLease(ctx context.Context, bucket SchedulerBucket, token SchedulerBucketWriteToken, ttl time.Duration) (SchedulerBucketRebuildLease, bool, error)
+	ReleaseBucketRebuildLease(ctx context.Context, lease SchedulerBucketRebuildLease) error
 }
 
 func newSchedulerAccountQueryCache(taskSets ...[]schedulerBucketWriteTask) *schedulerAccountQueryCache {
@@ -125,6 +138,7 @@ type SchedulerSnapshotService struct {
 	groupRepo                    GroupRepository
 	cfg                          *config.Config
 	stopCh                       chan struct{}
+	startOnce                    sync.Once
 	stopOnce                     sync.Once
 	wg                           sync.WaitGroup
 	fallbackLimit                *fallbackLimiter
@@ -143,6 +157,21 @@ type SchedulerSnapshotService struct {
 	fullRebuildRequested uint64
 	fullRebuildCompleted uint64
 	fullRebuildLastErr   error
+
+	initialSnapshotMu    sync.RWMutex
+	initialSnapshotDone  bool
+	initialSnapshotErr   error
+	initialSnapshotRun   uint64
+	initialSnapshotEpoch uint64
+}
+
+// SchedulerInitialSnapshotStatus is the process-local startup projection state
+// consumed by /readyz. A failed initial rebuild may still be served through the
+// configured database fallback, but callers must explicitly opt into that
+// degraded state.
+type SchedulerInitialSnapshotStatus struct {
+	Done bool
+	Err  error
 }
 
 func NewSchedulerSnapshotService(
@@ -168,7 +197,15 @@ func NewSchedulerSnapshotService(
 }
 
 func (s *SchedulerSnapshotService) Start() {
-	if s == nil || s.cache == nil {
+	if s == nil {
+		return
+	}
+	s.startOnce.Do(s.start)
+}
+
+func (s *SchedulerSnapshotService) start() {
+	if s.cache == nil {
+		s.finishInitialSnapshot(nil)
 		return
 	}
 
@@ -205,6 +242,74 @@ func (s *SchedulerSnapshotService) Stop() {
 		close(s.stopCh)
 	})
 	s.wg.Wait()
+}
+
+func (s *SchedulerSnapshotService) InitialSnapshotStatus() SchedulerInitialSnapshotStatus {
+	if s == nil {
+		return SchedulerInitialSnapshotStatus{Done: true}
+	}
+	s.initialSnapshotMu.RLock()
+	defer s.initialSnapshotMu.RUnlock()
+	return SchedulerInitialSnapshotStatus{Done: s.initialSnapshotDone, Err: s.initialSnapshotErr}
+}
+
+func (s *SchedulerSnapshotService) finishInitialSnapshot(err error) {
+	if s == nil {
+		return
+	}
+	s.initialSnapshotMu.Lock()
+	s.initialSnapshotDone = true
+	s.initialSnapshotErr = err
+	s.initialSnapshotMu.Unlock()
+}
+
+func (s *SchedulerSnapshotService) invalidateAuthoritativeSnapshot() {
+	if s == nil {
+		return
+	}
+	s.initialSnapshotMu.Lock()
+	s.initialSnapshotDone = false
+	s.initialSnapshotErr = nil
+	s.initialSnapshotEpoch++
+	s.initialSnapshotMu.Unlock()
+}
+
+func (s *SchedulerSnapshotService) recordAuthoritativeRebuild(run uint64, err error) {
+	if s == nil {
+		return
+	}
+	s.recordAuthoritativeRebuildAtEpoch(run, s.authoritativeSnapshotEpoch(), err)
+}
+
+func (s *SchedulerSnapshotService) authoritativeSnapshotEpoch() uint64 {
+	if s == nil {
+		return 0
+	}
+	s.initialSnapshotMu.RLock()
+	defer s.initialSnapshotMu.RUnlock()
+	return s.initialSnapshotEpoch
+}
+
+func (s *SchedulerSnapshotService) recordAuthoritativeRebuildAtEpoch(run, epoch uint64, err error) {
+	if s == nil {
+		return
+	}
+	s.initialSnapshotMu.Lock()
+	defer s.initialSnapshotMu.Unlock()
+	if epoch != s.initialSnapshotEpoch {
+		return
+	}
+	if run < s.initialSnapshotRun {
+		return
+	}
+	// Once an authoritative rebuild succeeds, a later failed refresh does not
+	// invalidate the already-published snapshot. Before the first success,
+	// retain the newest failure so readiness remains retryable/degraded.
+	if err == nil || !s.initialSnapshotDone || s.initialSnapshotErr != nil {
+		s.initialSnapshotDone = true
+		s.initialSnapshotErr = err
+	}
+	s.initialSnapshotRun = run
 }
 
 func (s *SchedulerSnapshotService) ListSchedulableAccounts(ctx context.Context, groupID *int64, platform string, hasForcePlatform bool) ([]Account, bool, error) {
@@ -298,17 +403,165 @@ func (s *SchedulerSnapshotService) UpdateAccountInCache(ctx context.Context, acc
 
 func (s *SchedulerSnapshotService) runInitialRebuild() {
 	if s.cache == nil {
+		s.finishInitialSnapshot(nil)
 		return
 	}
-	_ = s.coalesceFullRebuild(func() error {
-		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
-		defer cancel()
-		if err := s.rebuildFullSnapshot(ctx, "startup"); err != nil {
-			logger.LegacyPrintf("service.scheduler_snapshot", "[Scheduler] rebuild startup failed: %v", err)
+	if err := s.triggerFullRebuild("startup"); err != nil {
+		s.finishInitialSnapshot(err)
+		logger.LegacyPrintf("service.scheduler_snapshot", "[Scheduler] rebuild startup failed: %v", err)
+	}
+}
+
+// InvalidateForDatabaseRestore makes readiness fail closed before PostgreSQL
+// restore can replace authority. ReconcileAfterDatabaseRestore repeats this
+// fence so direct callers and failures before Redis reset are also safe.
+func (s *SchedulerSnapshotService) InvalidateForDatabaseRestore() {
+	s.invalidateAuthoritativeSnapshot()
+}
+
+// ReconcileAfterDatabaseRestore fences every pre-restore cache writer, clears
+// the Scheduler namespace, and rebuilds it from restored PostgreSQL authority.
+// The outbox consumer advisory lease is held across the generation rotation so
+// no already-loaded pre-restore event can cross that boundary.
+func (s *SchedulerSnapshotService) ReconcileAfterDatabaseRestore(ctx context.Context) (retErr error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	s.InvalidateForDatabaseRestore()
+	if s == nil || s.cache == nil {
+		return ErrSchedulerCacheNotReady
+	}
+	resetter, ok := s.cache.(SchedulerCacheAuthoritativeReset)
+	if !ok {
+		return errors.New("scheduler cache does not support authoritative reset")
+	}
+
+	var consumerLease SchedulerOutboxConsumerLease
+	if s.outboxRepo != nil {
+		lease, err := s.acquireRestoreConsumerLease(ctx)
+		if err != nil {
 			return err
 		}
-		return nil
+		consumerLease = lease
+	}
+	if consumerLease != nil {
+		defer func() {
+			if consumerLease != nil {
+				retErr = errors.Join(retErr, consumerLease.Release())
+			}
+		}()
+	}
+
+	// Once restore reconciliation owns the consumer fence, fail readiness closed
+	// before touching Redis. Reset errors may occur after generation rotation or
+	// partial deletion, so an earlier successful snapshot is no longer proof of
+	// availability.
+	s.invalidateAuthoritativeSnapshot()
+	if err := resetSchedulerAuthorityWithRetry(ctx, resetter); err != nil {
+		s.finishInitialSnapshot(err)
+		return err
+	}
+	// Reset removed the previously published projection. Readiness must remain
+	// unavailable until the restored PostgreSQL authority has been republished;
+	// in particular, a pre-reset rebuild that raced with the first invalidation
+	// cannot make a later restore rebuild failure inherit success.
+	s.invalidateAuthoritativeSnapshot()
+	if consumerLease != nil {
+		if err := consumerLease.Release(); err != nil {
+			s.finishInitialSnapshot(err)
+			return err
+		}
+		consumerLease = nil
+	}
+
+	return s.runForcedFullRebuild(func() error {
+		return s.rebuildAuthoritativeSnapshotWithRetry(ctx, "database_restore")
 	})
+}
+
+func resetSchedulerAuthorityWithRetry(ctx context.Context, resetter SchedulerCacheAuthoritativeReset) error {
+	for {
+		err := resetter.ResetForAuthoritativeRebuild(ctx)
+		if !errors.Is(err, ErrSchedulerCacheResetInProgress) {
+			return err
+		}
+		if err := waitForSchedulerAuthoritativeRetry(ctx); err != nil {
+			return err
+		}
+	}
+}
+
+func (s *SchedulerSnapshotService) recoverInterruptedAuthoritativeReset(ctx context.Context) (bool, error) {
+	recovery, ok := s.cache.(SchedulerCacheAuthoritativeResetRecovery)
+	if !ok {
+		return false, nil
+	}
+	observedReset := false
+	for {
+		recovered, err := recovery.RecoverInterruptedAuthoritativeReset(ctx)
+		if !errors.Is(err, ErrSchedulerCacheResetInProgress) {
+			needsAuthoritativeRebuild := recovered || observedReset
+			if needsAuthoritativeRebuild && !observedReset {
+				s.invalidateAuthoritativeSnapshot()
+			}
+			return needsAuthoritativeRebuild, err
+		}
+		if !observedReset {
+			// Another owner has already rotated the generation and exposed the
+			// durable marker. Readiness must fail while we wait for takeover or
+			// for that owner to finish.
+			s.invalidateAuthoritativeSnapshot()
+			observedReset = true
+		}
+		if err := waitForSchedulerAuthoritativeRetry(ctx); err != nil {
+			return false, err
+		}
+	}
+}
+
+func (s *SchedulerSnapshotService) rebuildAuthoritativeSnapshotWithRetry(ctx context.Context, reason string) error {
+	for {
+		err := s.rebuildFullSnapshot(ctx, reason)
+		if !errors.Is(err, ErrSchedulerBucketRebuildBusy) {
+			return err
+		}
+		if err := waitForSchedulerAuthoritativeRetry(ctx); err != nil {
+			return err
+		}
+	}
+}
+
+func waitForSchedulerAuthoritativeRetry(ctx context.Context) error {
+	timer := time.NewTimer(schedulerAuthoritativeRetryDelay)
+	defer timer.Stop()
+	select {
+	case <-timer.C:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+func (s *SchedulerSnapshotService) acquireRestoreConsumerLease(ctx context.Context) (SchedulerOutboxConsumerLease, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	ticker := time.NewTicker(50 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		lease, acquired, err := s.outboxRepo.TryAcquireConsumerLease(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("acquire scheduler restore consumer lease: %w", err)
+		}
+		if acquired {
+			return lease, nil
+		}
+		select {
+		case <-ctx.Done():
+			return nil, fmt.Errorf("acquire scheduler restore consumer lease: %w", ctx.Err())
+		case <-ticker.C:
+		}
+	}
 }
 
 func (s *SchedulerSnapshotService) runOutboxWorker(interval time.Duration) {
@@ -346,6 +599,26 @@ func (s *SchedulerSnapshotService) pollOutbox() {
 	if s.outboxRepo == nil || s.cache == nil {
 		return
 	}
+	leaseCtx, leaseCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	consumerLease, acquired, err := s.outboxRepo.TryAcquireConsumerLease(leaseCtx)
+	leaseCancel()
+	if err != nil {
+		logger.LegacyPrintf("service.scheduler_snapshot", "[Scheduler] outbox consumer lease failed: %v", err)
+		return
+	}
+	if !acquired {
+		return
+	}
+	leaseHeld := true
+	defer func() {
+		if !leaseHeld {
+			return
+		}
+		if err := consumerLease.Release(); err != nil {
+			logger.LegacyPrintf("service.scheduler_snapshot", "[Scheduler] outbox consumer lease release failed: %v", err)
+		}
+	}()
+
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
@@ -355,7 +628,7 @@ func (s *SchedulerSnapshotService) pollOutbox() {
 		return
 	}
 
-	events, err := s.outboxRepo.ListAfterAndReleaseDedup(ctx, watermark, 200)
+	events, err := consumerLease.ListAfterAndReleaseDedup(ctx, watermark, 200)
 	if err != nil {
 		logger.LegacyPrintf("service.scheduler_snapshot", "[Scheduler] outbox poll failed: %v", err)
 		return
@@ -368,11 +641,29 @@ func (s *SchedulerSnapshotService) pollOutbox() {
 		return
 	}
 
+	fullRebuildLockHeld := false
+	if outboxBatchContainsFullRebuild(events) {
+		// Do not wait here while the lease owns the pool's only connection: a
+		// startup/interval rebuild may hold this mutex and be waiting for that
+		// connection. Leaving the watermark unchanged retries the whole batch.
+		if !s.fullRebuildRunMu.TryLock() {
+			return
+		}
+		fullRebuildLockHeld = true
+		defer s.fullRebuildRunMu.Unlock()
+	}
+
 	seen := make(map[batchSeenKey]struct{})
 	for _, event := range events {
-		eventCtx, cancel := context.WithTimeout(context.Background(), outboxEventTimeout)
-		err := s.handleOutboxEvent(eventCtx, event, seen)
-		cancel()
+		baseEventCtx, eventCancel := context.WithTimeout(context.Background(), outboxEventTimeout)
+		eventCtx, bindErr := consumerLease.BindContext(baseEventCtx)
+		if bindErr != nil {
+			eventCancel()
+			logger.LegacyPrintf("service.scheduler_snapshot", "[Scheduler] outbox lease context failed: id=%d type=%s err=%v", event.ID, event.EventType, bindErr)
+			return
+		}
+		err := s.handleOutboxEvent(eventCtx, event, seen, fullRebuildLockHeld)
+		eventCancel()
 		if err != nil {
 			logger.LegacyPrintf("service.scheduler_snapshot", "[Scheduler] outbox handle failed: id=%d type=%s err=%v", event.ID, event.EventType, err)
 			return
@@ -396,6 +687,12 @@ func (s *SchedulerSnapshotService) pollOutbox() {
 		logger.LegacyPrintf("service.scheduler_snapshot", "[Scheduler] outbox watermark write failed: %v", wmErr)
 		return
 	}
+	leaseErr := consumerLease.Release()
+	leaseHeld = false
+	if leaseErr != nil {
+		logger.LegacyPrintf("service.scheduler_snapshot", "[Scheduler] outbox consumer lease release failed: %v", leaseErr)
+		return
+	}
 	s.cleanupConsumedOutbox(lastID)
 
 	// 只有 watermark 成功推进后，当前批次才算已消费。延迟必须按下一条待消费事件计算，
@@ -403,6 +700,15 @@ func (s *SchedulerSnapshotService) pollOutbox() {
 	lagCtx, lagCancel := context.WithTimeout(context.Background(), 5*time.Second)
 	s.checkOutboxLag(lagCtx, lastID)
 	lagCancel()
+}
+
+func outboxBatchContainsFullRebuild(events []SchedulerOutboxEvent) bool {
+	for _, event := range events {
+		if event.EventType == SchedulerOutboxEventFullRebuild {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *SchedulerSnapshotService) cleanupConsumedOutbox(watermark int64) {
@@ -421,10 +727,14 @@ func (s *SchedulerSnapshotService) cleanupConsumedOutbox(watermark int64) {
 	if !acquired {
 		return
 	}
-	defer lease.Release()
+	defer func() {
+		if err := lease.Release(); err != nil {
+			logger.LegacyPrintf("service.scheduler_snapshot", "[Scheduler] outbox cleanup lease release failed: %v", err)
+		}
+	}()
 
 	for {
-		deleted, err := s.outboxRepo.DeleteConsumedUpTo(ctx, watermark, schedulerOutboxCleanupBatch)
+		deleted, err := lease.DeleteConsumedUpTo(ctx, watermark, schedulerOutboxCleanupBatch)
 		if err != nil {
 			logger.LegacyPrintf("service.scheduler_snapshot", "[Scheduler] outbox cleanup failed: watermark=%d err=%v", watermark, err)
 			return
@@ -435,7 +745,12 @@ func (s *SchedulerSnapshotService) cleanupConsumedOutbox(watermark int64) {
 	}
 }
 
-func (s *SchedulerSnapshotService) handleOutboxEvent(ctx context.Context, event SchedulerOutboxEvent, seen map[batchSeenKey]struct{}) error {
+func (s *SchedulerSnapshotService) handleOutboxEvent(
+	ctx context.Context,
+	event SchedulerOutboxEvent,
+	seen map[batchSeenKey]struct{},
+	fullRebuildLockHeld bool,
+) error {
 	switch event.EventType {
 	case SchedulerOutboxEventAccountLastUsed:
 		return s.handleLastUsedEvent(ctx, event.Payload)
@@ -448,7 +763,7 @@ func (s *SchedulerSnapshotService) handleOutboxEvent(ctx context.Context, event 
 	case SchedulerOutboxEventGroupChanged:
 		return s.handleGroupEvent(ctx, event.GroupID, seen)
 	case SchedulerOutboxEventFullRebuild:
-		return s.triggerFullRebuild("outbox")
+		return s.triggerFullRebuildWithContext(ctx, "outbox", fullRebuildLockHeld)
 	default:
 		return nil
 	}
@@ -920,7 +1235,7 @@ func (s *SchedulerSnapshotService) rebuildBucketWithTokenPolicyAndQueryCache(
 		return ErrSchedulerCacheNotReady
 	}
 	bucket := task.bucket
-	ok, err := s.cache.TryLockBucket(ctx, bucket, 30*time.Second)
+	release, ok, err := s.tryAcquireBucketRebuildLease(ctx, bucket, task.token)
 	if err != nil {
 		return err
 	}
@@ -931,10 +1246,12 @@ func (s *SchedulerSnapshotService) rebuildBucketWithTokenPolicyAndQueryCache(
 		return nil
 	}
 	defer func() {
-		_ = s.cache.UnlockBucket(ctx, bucket)
+		if err := release(); err != nil {
+			logger.LegacyPrintf("service.scheduler_snapshot", "[Scheduler] bucket rebuild lease release failed: bucket=%s err=%v", bucket.String(), err)
+		}
 	}()
 
-	rebuildCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	rebuildCtx, cancel := context.WithTimeout(ctx, schedulerBucketRebuildTimeout)
 	defer cancel()
 
 	accounts, err := s.loadAccountsForRebuild(rebuildCtx, bucket, queries)
@@ -955,6 +1272,36 @@ func (s *SchedulerSnapshotService) rebuildBucketWithTokenPolicyAndQueryCache(
 	}
 	slog.Debug("[Scheduler] rebuild ok", "bucket", bucket.String(), "reason", reason, "size", len(accounts))
 	return nil
+}
+
+func (s *SchedulerSnapshotService) tryAcquireBucketRebuildLease(
+	ctx context.Context,
+	bucket SchedulerBucket,
+	token SchedulerBucketWriteToken,
+) (func() error, bool, error) {
+	if leaseCache, ok := s.cache.(schedulerBucketRebuildLeaseCache); ok {
+		lease, acquired, err := leaseCache.TryAcquireBucketRebuildLease(ctx, bucket, token, schedulerBucketRebuildLeaseTTL)
+		if err != nil || !acquired {
+			return nil, acquired, err
+		}
+		return func() error {
+			releaseCtx, cancel := context.WithTimeout(context.Background(), schedulerBucketRebuildReleaseTimeout)
+			defer cancel()
+			return leaseCache.ReleaseBucketRebuildLease(releaseCtx, lease)
+		}, true, nil
+	}
+
+	// Legacy fallback exists for the existing narrow test fakes. The production
+	// schedulerCache implements the owner-token capability above.
+	acquired, err := s.cache.TryLockBucket(ctx, bucket, schedulerBucketRebuildTimeout)
+	if err != nil || !acquired {
+		return nil, acquired, err
+	}
+	return func() error {
+		releaseCtx, cancel := context.WithTimeout(context.Background(), schedulerBucketRebuildReleaseTimeout)
+		defer cancel()
+		return s.cache.UnlockBucket(releaseCtx, bucket)
+	}, true, nil
 }
 
 func (s *SchedulerSnapshotService) setRebuildSnapshot(
@@ -990,12 +1337,42 @@ func (s *SchedulerSnapshotService) setRebuildSnapshot(
 }
 
 func (s *SchedulerSnapshotService) triggerFullRebuild(reason string) error {
+	return s.triggerFullRebuildWithContext(context.Background(), reason, false)
+}
+
+func (s *SchedulerSnapshotService) triggerFullRebuildWithContext(
+	parent context.Context,
+	reason string,
+	fullRebuildLockHeld bool,
+) error {
 	if s.cache == nil {
 		return ErrSchedulerCacheNotReady
 	}
-	return s.coalesceFullRebuild(func() error {
-		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
-		defer cancel()
+	if parent == nil {
+		parent = context.Background()
+	}
+	if fullRebuildLockHeld {
+		return s.triggerFullRebuildWithLockHeld(parent, reason)
+	}
+	s.fullRebuildRunMu.Lock()
+	defer s.fullRebuildRunMu.Unlock()
+	return s.triggerFullRebuildWithLockHeld(parent, reason)
+}
+
+func (s *SchedulerSnapshotService) triggerFullRebuildWithLockHeld(parent context.Context, reason string) error {
+	ctx, cancel := context.WithTimeout(parent, 2*time.Minute)
+	defer cancel()
+	recovered, err := s.recoverInterruptedAuthoritativeReset(ctx)
+	if err != nil {
+		return err
+	}
+	if recovered {
+		reason = "reset_recovery"
+	}
+	return s.coalesceFullRebuildWithLockHeld(func() error {
+		if recovered {
+			return s.rebuildAuthoritativeSnapshotWithRetry(ctx, reason)
+		}
 		return s.rebuildFullSnapshot(ctx, reason)
 	})
 }
@@ -1178,7 +1555,8 @@ func (s *SchedulerSnapshotService) prepareAndRebuildFullSnapshot(
 	if err := s.rebuildPreparedBucketTasks(ctx, reopened, reason, true, queries); err != nil {
 		firstErr = err
 	}
-	if err := s.rebuildPreparedBucketTasks(ctx, captured, reason, false, queries); err != nil && firstErr == nil {
+	strictCaptured := reason == "database_restore" || reason == "reset_recovery"
+	if err := s.rebuildPreparedBucketTasks(ctx, captured, reason, strictCaptured, queries); err != nil && firstErr == nil {
 		firstErr = err
 	}
 	return firstErr
@@ -1213,14 +1591,27 @@ func appendBucketsExcept(dst, buckets, excluded []SchedulerBucket) []SchedulerBu
 }
 
 func (s *SchedulerSnapshotService) coalesceFullRebuild(run func() error) error {
+	requestID := s.registerFullRebuildRequest()
+
+	s.fullRebuildRunMu.Lock()
+	defer s.fullRebuildRunMu.Unlock()
+	return s.runCoalescedFullRebuildWithLockHeld(requestID, run)
+}
+
+func (s *SchedulerSnapshotService) coalesceFullRebuildWithLockHeld(run func() error) error {
+	requestID := s.registerFullRebuildRequest()
+	return s.runCoalescedFullRebuildWithLockHeld(requestID, run)
+}
+
+func (s *SchedulerSnapshotService) registerFullRebuildRequest() uint64 {
 	s.fullRebuildStateMu.Lock()
 	s.fullRebuildRequested++
 	requestID := s.fullRebuildRequested
 	s.fullRebuildStateMu.Unlock()
+	return requestID
+}
 
-	s.fullRebuildRunMu.Lock()
-	defer s.fullRebuildRunMu.Unlock()
-
+func (s *SchedulerSnapshotService) runCoalescedFullRebuildWithLockHeld(requestID uint64, run func() error) error {
 	s.fullRebuildStateMu.Lock()
 	if s.fullRebuildCompleted >= requestID {
 		err := s.fullRebuildLastErr
@@ -1232,12 +1623,39 @@ func (s *SchedulerSnapshotService) coalesceFullRebuild(run func() error) error {
 	coveredThrough := s.fullRebuildRequested
 	s.fullRebuildStateMu.Unlock()
 
+	rebuildEpoch := s.authoritativeSnapshotEpoch()
 	err := run()
 
 	s.fullRebuildStateMu.Lock()
 	s.fullRebuildCompleted = coveredThrough
 	s.fullRebuildLastErr = err
 	s.fullRebuildStateMu.Unlock()
+	s.recordAuthoritativeRebuildAtEpoch(coveredThrough, rebuildEpoch, err)
+	return err
+}
+
+// runForcedFullRebuild always executes its callback under the full-rebuild
+// mutex. Restore cannot reuse an earlier coalesced result because reset has
+// removed the projection that result described.
+func (s *SchedulerSnapshotService) runForcedFullRebuild(run func() error) error {
+	s.fullRebuildRunMu.Lock()
+	defer s.fullRebuildRunMu.Unlock()
+
+	s.fullRebuildStateMu.Lock()
+	s.fullRebuildRequested++
+	runID := s.fullRebuildRequested
+	s.fullRebuildStateMu.Unlock()
+
+	rebuildEpoch := s.authoritativeSnapshotEpoch()
+	err := run()
+
+	s.fullRebuildStateMu.Lock()
+	if runID > s.fullRebuildCompleted {
+		s.fullRebuildCompleted = runID
+	}
+	s.fullRebuildLastErr = err
+	s.fullRebuildStateMu.Unlock()
+	s.recordAuthoritativeRebuildAtEpoch(runID, rebuildEpoch, err)
 	return err
 }
 
@@ -1276,6 +1694,7 @@ func (s *SchedulerSnapshotService) checkOutboxLag(ctx context.Context, watermark
 			}
 		} else {
 			backlog = maxID - watermark
+			opsruntime.ObserveOutboxBacklog(backlog)
 		}
 	}
 	backlogDegraded := backlogKnown && backlogThreshold > 0 && backlog >= int64(backlogThreshold)

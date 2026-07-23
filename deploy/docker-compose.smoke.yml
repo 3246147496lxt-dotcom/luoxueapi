@@ -1,0 +1,22 @@
+services:
+  sub2api:
+    container_name: ${SMOKE_APP_CONTAINER_NAME:?SMOKE_APP_CONTAINER_NAME is required}
+    # Never inherit an ignored operator deploy/.env during CI/local smoke.
+    env_file: !reset []
+    image: luoxueapi-smoke:local
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    ports: !reset []
+    environment:
+      UPDATE_PROXY_URL: http://127.0.0.1:1
+
+  postgres:
+    container_name: ${SMOKE_POSTGRES_CONTAINER_NAME:?SMOKE_POSTGRES_CONTAINER_NAME is required}
+
+  redis:
+    container_name: ${SMOKE_REDIS_CONTAINER_NAME:?SMOKE_REDIS_CONTAINER_NAME is required}
+
+networks:
+  sub2api-network:
+    internal: true

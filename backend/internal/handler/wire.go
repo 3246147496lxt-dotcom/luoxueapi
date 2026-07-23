@@ -108,6 +108,25 @@ func ProvideAdminSettingHandler(settingService *service.SettingService, emailSer
 	return h
 }
 
+// The legacy facade still implements all admin use cases. These providers make
+// each handler receive only its declared capability surface and give Wire an
+// explicit interface-to-interface conversion while the facades coexist.
+func ProvideAccountAdminUseCases(adminService service.AdminService) admin.AccountAdminUseCases {
+	return adminService
+}
+
+func ProvideGroupAdminUseCases(adminService service.AdminService) admin.GroupAdminUseCases {
+	return adminService
+}
+
+func ProvideUserAdminUseCases(adminService service.AdminService) admin.UserAdminUseCases {
+	return adminService
+}
+
+func ProvideProxyAdminUseCases(adminService service.AdminService) admin.ProxyAdminUseCases {
+	return adminService
+}
+
 // ProvideHandlers creates the Handlers struct
 func ProvideHandlers(
 	authHandler *AuthHandler,
@@ -160,7 +179,7 @@ func ProvideHandlers(
 // ProviderSet is the Wire provider set for all handlers
 var ProviderSet = wire.NewSet(
 	// Top-level handlers
-	NewAuthHandler,
+	ProvideAuthHandler,
 	NewUserHandler,
 	NewAPIKeyHandler,
 	NewUsageHandler,
@@ -179,6 +198,10 @@ var ProviderSet = wire.NewSet(
 	NewBatchImageHandler,
 	NewModelCatalogHandler,
 	NewDocumentationHandler,
+	ProvideAccountAdminUseCases,
+	ProvideGroupAdminUseCases,
+	ProvideUserAdminUseCases,
+	ProvideProxyAdminUseCases,
 
 	// Admin handlers
 	admin.NewDashboardHandler,

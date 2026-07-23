@@ -670,7 +670,7 @@ type GatewayService struct {
 	cache                 GatewayCache
 	digestStore           *DigestSessionStore
 	cfg                   *config.Config
-	schedulerSnapshot     *SchedulerSnapshotService
+	schedulerSnapshot     GatewayScheduler
 	billingService        *BillingService
 	rateLimitService      *RateLimitService
 	billingCacheService   *BillingCacheService
@@ -709,7 +709,7 @@ func NewGatewayService(
 	userGroupRateRepo UserGroupRateRepository,
 	cache GatewayCache,
 	cfg *config.Config,
-	schedulerSnapshot *SchedulerSnapshotService,
+	schedulerSnapshot GatewayScheduler,
 	concurrencyService *ConcurrencyService,
 	billingService *BillingService,
 	rateLimitService *RateLimitService,

@@ -109,7 +109,10 @@ function installAvatarCompressionMocks(blobSize = 8 * 1024) {
       } else {
         this.result = 'data:image/png;base64,' + Buffer.from('original-avatar').toString('base64')
       }
-      this.onload?.call(this as unknown as FileReader, new ProgressEvent('load'))
+      this.onload?.call(
+        this as unknown as FileReader,
+        new ProgressEvent('load') as ProgressEvent<FileReader>,
+      )
     }
   }
 

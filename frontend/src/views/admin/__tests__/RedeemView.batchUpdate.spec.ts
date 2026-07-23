@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
+import type { Component } from 'vue'
 
 import RedeemView from '../RedeemView.vue'
 
@@ -157,7 +158,7 @@ describe('admin RedeemView batch update', () => {
           DataTable: DataTableStub,
           Pagination: true,
           ConfirmDialog: true,
-          Select: SelectStub,
+          Select: SelectStub as unknown as Component,
           GroupBadge: true,
           GroupOptionItem: true,
           Icon: true,

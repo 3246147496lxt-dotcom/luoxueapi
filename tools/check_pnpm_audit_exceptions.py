@@ -111,6 +111,22 @@ def iter_vulns(data: dict):
                 yield name, severity, advisory_id, title
 
 
+def validate_audit_report(data: object) -> list[str]:
+    """Reject transport/tool failures that could otherwise look vulnerability-free."""
+    if not isinstance(data, dict):
+        return ["pnpm audit output must be a JSON object"]
+    if data.get("error"):
+        return ["pnpm audit reported an execution or registry error"]
+
+    advisories = data.get("advisories")
+    vulnerabilities = data.get("vulnerabilities")
+    if not isinstance(advisories, dict) and not isinstance(vulnerabilities, dict):
+        return ["pnpm audit output has no supported vulnerability collection"]
+    if not isinstance(data.get("metadata"), dict):
+        return ["pnpm audit output has no metadata; refusing an incomplete report"]
+    return []
+
+
 def normalize_severity(severity: str) -> str:
     # 统一大小写，避免比较失败。
     return (severity or "").strip().lower()
@@ -147,6 +163,11 @@ def main() -> int:
 
     with open(args.audit, "r", encoding="utf-8") as handle:
         audit = json.load(handle)
+
+    report_errors = validate_audit_report(audit)
+    if report_errors:
+        sys.stderr.write("\n".join(report_errors) + "\n")
+        return 1
 
     # 读取异常清单并建立索引，便于快速匹配包名 + advisory。
     exceptions = parse_exceptions(args.exceptions)

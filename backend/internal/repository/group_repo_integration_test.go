@@ -36,8 +36,8 @@ func (s *forbidSQLExecutor) QueryContext(ctx context.Context, query string, args
 }
 
 func (s *GroupRepoSuite) SetupTest() {
-	s.ctx = context.Background()
 	tx := testEntTx(s.T())
+	s.ctx = dbent.NewTxContext(context.Background(), tx)
 	s.tx = tx
 	s.repo = newGroupRepositoryWithSQL(tx.Client(), tx)
 }

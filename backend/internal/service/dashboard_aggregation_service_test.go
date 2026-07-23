@@ -81,7 +81,7 @@ func TestDashboardAggregationService_RunScheduledAggregation_EpochUsesRetentionS
 		},
 	}
 
-	svc.runScheduledAggregation()
+	svc.runScheduledAggregation(context.Background())
 
 	require.Equal(t, 1, repo.aggregateCalls)
 	require.False(t, repo.lastEnd.IsZero())
@@ -144,7 +144,7 @@ func TestDashboardAggregationService_PartitionFailure_DoesNotAggregate(t *testin
 		},
 	}
 
-	svc.runScheduledAggregation()
+	svc.runScheduledAggregation(context.Background())
 
 	require.Equal(t, 1, repo.ensurePartitionCalls)
 	require.Equal(t, 1, repo.aggregateCalls)

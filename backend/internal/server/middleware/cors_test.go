@@ -175,6 +175,29 @@ func TestCORS_WildcardOrigin_AllowsAny(t *testing.T) {
 		"通配符 origin 应设置 Allow-Methods")
 }
 
+func TestCORS_EmbeddedPageExchangeNeverAllowsBrowserOrigin(t *testing.T) {
+	cfg := config.CORSConfig{
+		AllowedOrigins:   []string{"*"},
+		AllowCredentials: false,
+	}
+	middleware := CORS(cfg)
+
+	for _, method := range []string{http.MethodOptions, http.MethodPost} {
+		t.Run(method, func(t *testing.T) {
+			w := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(w)
+			c.Request = httptest.NewRequest(method, "/api/v1/embedded-pages/exchange", nil)
+			c.Request.Header.Set("Origin", "https://external-page.example.com")
+
+			middleware(c)
+
+			assert.Equal(t, http.StatusForbidden, w.Code)
+			assert.Empty(t, w.Header().Get("Access-Control-Allow-Origin"))
+			assert.Contains(t, w.Body.String(), "EMBEDDED_PAGE_SERVER_EXCHANGE_REQUIRED")
+		})
+	}
+}
+
 func TestCORS_AllowCredentials_SetCorrectly(t *testing.T) {
 	cfg := config.CORSConfig{
 		AllowedOrigins:   []string{"https://allowed.example.com"},

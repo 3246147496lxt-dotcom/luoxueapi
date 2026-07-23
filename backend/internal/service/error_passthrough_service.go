@@ -47,6 +47,12 @@ type ErrorPassthroughService struct {
 	// 本地内存缓存，用于快速匹配
 	localCache   []*cachedPassthroughRule
 	localCacheMu sync.RWMutex
+
+	lifecycleMu      sync.Mutex
+	lifecycleCancel  context.CancelFunc
+	lifecycleWG      sync.WaitGroup
+	lifecycleStarted bool
+	lifecycleStopped bool
 }
 
 // cachedPassthroughRule 预计算的规则缓存，避免运行时重复 ToLower
@@ -64,30 +70,87 @@ func NewErrorPassthroughService(
 	repo ErrorPassthroughRepository,
 	cache ErrorPassthroughCache,
 ) *ErrorPassthroughService {
-	svc := &ErrorPassthroughService{
+	return &ErrorPassthroughService{
 		repo:  repo,
 		cache: cache,
 	}
+}
 
-	// 启动时加载规则到本地缓存
-	ctx := context.Background()
-	if err := svc.reloadRulesFromDB(ctx); err != nil {
+// Start loads the initial projection and owns the Redis subscription. Object
+// construction stays side-effect free so Supervisor can roll startup back.
+func (s *ErrorPassthroughService) Start(ctx context.Context) error {
+	if s == nil {
+		return nil
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	s.lifecycleMu.Lock()
+	if s.lifecycleStarted || s.lifecycleStopped {
+		s.lifecycleMu.Unlock()
+		return nil
+	}
+	runtimeCtx, cancel := context.WithCancel(context.Background())
+	s.lifecycleCancel = cancel
+	s.lifecycleStarted = true
+	s.lifecycleMu.Unlock()
+
+	if err := s.reloadRulesFromDB(ctx); err != nil {
 		logger.LegacyPrintf("service.error_passthrough", "[ErrorPassthroughService] Failed to load rules from DB on startup: %v", err)
-		if fallbackErr := svc.refreshLocalCache(ctx); fallbackErr != nil {
+		if fallbackErr := s.refreshLocalCache(ctx); fallbackErr != nil {
 			logger.LegacyPrintf("service.error_passthrough", "[ErrorPassthroughService] Failed to load rules from cache fallback on startup: %v", fallbackErr)
 		}
 	}
 
-	// 订阅缓存更新通知
-	if cache != nil {
-		cache.SubscribeUpdates(ctx, func() {
-			if err := svc.refreshLocalCache(context.Background()); err != nil {
-				logger.LegacyPrintf("service.error_passthrough", "[ErrorPassthroughService] Failed to refresh cache on notification: %v", err)
-			}
-		})
+	if s.cache != nil {
+		s.lifecycleWG.Add(1)
+		go func() {
+			defer s.lifecycleWG.Done()
+			s.cache.SubscribeUpdates(runtimeCtx, func() {
+				refreshCtx, refreshCancel := context.WithTimeout(runtimeCtx, 5*time.Second)
+				defer refreshCancel()
+				if err := s.refreshLocalCache(refreshCtx); err != nil && runtimeCtx.Err() == nil {
+					logger.LegacyPrintf("service.error_passthrough", "[ErrorPassthroughService] Failed to refresh cache on notification: %v", err)
+				}
+			})
+		}()
 	}
+	return nil
+}
 
-	return svc
+// Stop cancels and joins the cache subscriber. It is idempotent.
+func (s *ErrorPassthroughService) Stop(ctx context.Context) error {
+	if s == nil {
+		return nil
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	s.lifecycleMu.Lock()
+	cancel := s.lifecycleCancel
+	// Retain the cancel handle until the subscriber has actually joined. If this
+	// call times out, a later Stop can continue waiting for the same goroutine.
+	s.lifecycleStarted = false
+	s.lifecycleStopped = true
+	s.lifecycleMu.Unlock()
+	if cancel == nil {
+		return nil
+	}
+	cancel()
+	done := make(chan struct{})
+	go func() {
+		s.lifecycleWG.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+		s.lifecycleMu.Lock()
+		s.lifecycleCancel = nil
+		s.lifecycleMu.Unlock()
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 // List 获取所有规则

@@ -27,6 +27,9 @@ func clientFromContext(ctx context.Context, defaultClient *dbent.Client) *dbent.
 	if tx := dbent.TxFromContext(ctx); tx != nil {
 		return tx.Client()
 	}
+	if client, ok := schedulerOutboxReadClientFromContext(ctx); ok {
+		return client
+	}
 	return defaultClient
 }
 

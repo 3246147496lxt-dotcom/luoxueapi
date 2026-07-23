@@ -127,7 +127,7 @@ type AntigravityGatewayService struct {
 	httpUpstream      HTTPUpstream
 	settingService    *SettingService
 	cache             GatewayCache // 用于模型级限流时清除粘性会话绑定
-	schedulerSnapshot *SchedulerSnapshotService
+	schedulerSnapshot AccountSnapshotReader
 	internal500Cache  Internal500CounterCache // INTERNAL 500 渐进惩罚计数器
 }
 
@@ -150,7 +150,7 @@ func (s *AntigravityGatewayService) readUpstreamErrorBody(resp *http.Response) [
 func NewAntigravityGatewayService(
 	accountRepo AccountRepository,
 	cache GatewayCache,
-	schedulerSnapshot *SchedulerSnapshotService,
+	schedulerSnapshot AccountSnapshotReader,
 	tokenProvider *AntigravityTokenProvider,
 	rateLimitService *RateLimitService,
 	httpUpstream HTTPUpstream,

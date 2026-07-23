@@ -6,7 +6,6 @@ import (
 	"strings"
 	"time"
 
-	dbent "github.com/Wei-Shaw/sub2api/ent"
 	"github.com/Wei-Shaw/sub2api/internal/payment"
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/response"
@@ -331,7 +330,7 @@ func (h *PaymentHandler) GetMyOrders(c *gin.Context) {
 	}
 
 	page, pageSize := response.ParsePagination(c)
-	orders, total, err := h.paymentService.GetUserOrders(c.Request.Context(), subject.UserID, service.OrderListParams{
+	orders, total, err := h.paymentService.GetUserOrderViews(c.Request.Context(), subject.UserID, service.OrderListParams{
 		Page:        page,
 		PageSize:    pageSize,
 		Status:      c.Query("status"),
@@ -359,7 +358,7 @@ func (h *PaymentHandler) GetOrder(c *gin.Context) {
 		return
 	}
 
-	order, err := h.paymentService.GetOrder(c.Request.Context(), orderID, subject.UserID)
+	order, err := h.paymentService.GetOrderView(c.Request.Context(), orderID, subject.UserID)
 	if err != nil {
 		response.ErrorFrom(c, err)
 		return
@@ -455,7 +454,7 @@ func (h *PaymentHandler) VerifyOrder(c *gin.Context) {
 		return
 	}
 
-	order, err := h.paymentService.VerifyOrderByOutTradeNo(c.Request.Context(), req.OutTradeNo, subject.UserID)
+	order, err := h.paymentService.VerifyOrderByOutTradeNoView(c.Request.Context(), req.OutTradeNo, subject.UserID)
 	if err != nil {
 		response.ErrorFrom(c, err)
 		return
@@ -500,14 +499,14 @@ type PublicOrderVerifyResult struct {
 	CompletedAt *time.Time `json:"completed_at,omitempty"`
 }
 
-func buildPublicOrderResult(order *dbent.PaymentOrder) PublicOrderResult {
+func buildPublicOrderResult(order *service.PaymentOrderView) PublicOrderResult {
 	return PublicOrderResult{
 		ID:                  order.ID,
 		OutTradeNo:          order.OutTradeNo,
 		Amount:              order.Amount,
 		PayAmount:           order.PayAmount,
 		FeeRate:             order.FeeRate,
-		Currency:            service.PaymentOrderCurrency(order),
+		Currency:            order.Currency,
 		PaymentType:         order.PaymentType,
 		OrderType:           order.OrderType,
 		Status:              order.Status,
@@ -524,7 +523,7 @@ func buildPublicOrderResult(order *dbent.PaymentOrder) PublicOrderResult {
 	}
 }
 
-func buildPublicOrderVerifyResult(order *dbent.PaymentOrder) PublicOrderVerifyResult {
+func buildPublicOrderVerifyResult(order *service.PaymentOrderView) PublicOrderVerifyResult {
 	return PublicOrderVerifyResult{
 		OutTradeNo:  order.OutTradeNo,
 		Status:      order.Status,
@@ -562,7 +561,7 @@ func (h *PaymentHandler) VerifyOrderPublic(c *gin.Context) {
 		return
 	}
 
-	order, err := h.paymentService.VerifyOrderPublic(c.Request.Context(), req.OutTradeNo)
+	order, err := h.paymentService.VerifyOrderPublicView(c.Request.Context(), req.OutTradeNo)
 	if err != nil {
 		response.ErrorFrom(c, err)
 		return
@@ -579,7 +578,7 @@ func (h *PaymentHandler) ResolveOrderPublicByResumeToken(c *gin.Context) {
 		return
 	}
 
-	order, err := h.paymentService.GetPublicOrderByResumeToken(c.Request.Context(), req.ResumeToken)
+	order, err := h.paymentService.GetPublicOrderByResumeTokenView(c.Request.Context(), req.ResumeToken)
 	if err != nil {
 		response.ErrorFrom(c, err)
 		return
@@ -633,7 +632,7 @@ type PaymentOrderResult struct {
 	ProviderInstanceID  *string    `json:"provider_instance_id,omitempty"`
 }
 
-func sanitizePaymentOrdersForResponse(orders []*dbent.PaymentOrder) []PaymentOrderResult {
+func sanitizePaymentOrdersForResponse(orders []*service.PaymentOrderView) []PaymentOrderResult {
 	out := make([]PaymentOrderResult, 0, len(orders))
 	for _, order := range orders {
 		if item := sanitizePaymentOrderForResponse(order); item != nil {
@@ -643,7 +642,7 @@ func sanitizePaymentOrdersForResponse(orders []*dbent.PaymentOrder) []PaymentOrd
 	return out
 }
 
-func sanitizePaymentOrderForResponse(order *dbent.PaymentOrder) *PaymentOrderResult {
+func sanitizePaymentOrderForResponse(order *service.PaymentOrderView) *PaymentOrderResult {
 	if order == nil {
 		return nil
 	}
@@ -653,7 +652,7 @@ func sanitizePaymentOrderForResponse(order *dbent.PaymentOrder) *PaymentOrderRes
 		Amount:              order.Amount,
 		PayAmount:           order.PayAmount,
 		FeeRate:             order.FeeRate,
-		Currency:            service.PaymentOrderCurrency(order),
+		Currency:            order.Currency,
 		PaymentType:         order.PaymentType,
 		OutTradeNo:          order.OutTradeNo,
 		Status:              order.Status,

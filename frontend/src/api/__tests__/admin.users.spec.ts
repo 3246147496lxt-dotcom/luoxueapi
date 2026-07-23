@@ -27,13 +27,13 @@ type ExpectedAdminBindAuthIdentityRequest = {
   provider_type: string
   provider_key: string
   provider_subject: string
-  issuer?: string
-  metadata?: Record<string, unknown>
+  issuer?: string | null
+  metadata?: Record<string, unknown> | null
   channel?: {
     channel: string
     channel_app_id: string
     channel_subject: string
-    metadata?: Record<string, unknown>
+    metadata?: Record<string, unknown> | null
   }
 }
 

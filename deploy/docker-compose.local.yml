@@ -14,7 +14,7 @@
 #
 # Migration to New Server:
 #   1. docker-compose -f docker-compose.local.yml down
-#   2. tar czf sub2api-deploy.tar.gz deploy/
+#   2. COPYFILE_DISABLE=1 tar czf sub2api-deploy.tar.gz deploy/
 #   3. Transfer to new server and extract
 #   4. docker-compose -f docker-compose.local.yml up -d
 # =============================================================================
@@ -24,9 +24,12 @@ services:
   # LuoxueAPI Application
   # ===========================================================================
   sub2api:
-    image: weishaw/sub2api:latest
+    image: ghcr.io/3246147496lxt-dotcom/luoxueapi:${LUOXUEAPI_VERSION:-1.0.7}
     container_name: sub2api
     restart: unless-stopped
+    env_file:
+      - path: .env
+        required: false
     ulimits:
       nofile:
         soft: 100000
@@ -179,7 +182,7 @@ services:
     networks:
       - sub2api-network
     healthcheck:
-      test: ["CMD", "wget", "-q", "-T", "5", "-O", "/dev/null", "http://localhost:8080/health"]
+      test: ["CMD", "wget", "-q", "-T", "5", "-O", "/dev/null", "http://localhost:8080/readyz"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -205,6 +208,16 @@ services:
       - POSTGRES_DB=${POSTGRES_DB:-sub2api}
       - PGDATA=/var/lib/postgresql/data
       - TZ=${TZ:-Asia/Shanghai}
+    command:
+      - postgres
+      - -c
+      - max_connections=${POSTGRES_MAX_CONNECTIONS:-1024}
+      - -c
+      - shared_buffers=${POSTGRES_SHARED_BUFFERS:-1GB}
+      - -c
+      - effective_cache_size=${POSTGRES_EFFECTIVE_CACHE_SIZE:-4GB}
+      - -c
+      - maintenance_work_mem=${POSTGRES_MAINTENANCE_WORK_MEM:-128MB}
     networks:
       - sub2api-network
     healthcheck:
@@ -230,15 +243,23 @@ services:
     volumes:
       # Local directory mapping for easy migration
       - ./redis_data:/data:Z
-    command: >
-        sh -c '
-          redis-server
-          --save 60 1
-          --appendonly yes
-          --appendfsync everysec
-          ${REDIS_PASSWORD:+--requirepass "$REDIS_PASSWORD"}'
+    command:
+      - sh
+      - -eu
+      - -c
+      - |
+        set -- redis-server \
+          --save 60 1 \
+          --appendonly yes \
+          --appendfsync everysec \
+          --maxclients "$${REDIS_MAXCLIENTS:-50000}"
+        if [ -n "$${REDISCLI_AUTH:-}" ]; then
+          set -- "$$@" --requirepass "$$REDISCLI_AUTH"
+        fi
+        exec "$$@"
     environment:
       - TZ=${TZ:-Asia/Shanghai}
+      - REDIS_MAXCLIENTS=${REDIS_MAXCLIENTS:-50000}
       # REDISCLI_AUTH is used by redis-cli for authentication (safer than -a flag)
       - REDISCLI_AUTH=${REDIS_PASSWORD:-}
     networks:

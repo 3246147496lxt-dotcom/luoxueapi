@@ -265,21 +265,20 @@ func TestProxyIdentityUpdateInvalidatesProbeAndRejectsInFlightSnapshot(t *testin
 			)
 			require.NoError(t, rows.Scan(&outboxCount, &payloadJSON))
 			require.NoError(t, rows.Close())
-			if tt.wantInvalidation {
-				require.Equal(t, 1, outboxCount)
-				var payload struct {
-					AccountIDs []int64 `json:"account_ids"`
-				}
-				require.NoError(t, json.Unmarshal([]byte(payloadJSON), &payload))
-				require.Equal(t, []int64{account.ID}, payload.AccountIDs)
-			} else {
-				require.Zero(t, outboxCount, "no snapshot change means no PR2 cache invalidation event")
+			// The scheduler snapshot embeds proxy identity, so every bound account
+			// must be refreshed even when there was no persisted probe snapshot to
+			// delete. Missing/null snapshots still must not update the account row.
+			require.Equal(t, 1, outboxCount)
+			var payload struct {
+				AccountIDs []int64 `json:"account_ids"`
 			}
+			require.NoError(t, json.Unmarshal([]byte(payloadJSON), &payload))
+			require.Equal(t, []int64{account.ID}, payload.AccountIDs)
 		})
 	}
 }
 
-func TestSweepExpiredProxyWithoutFallbackInvalidatesOnlyExistingProbeSnapshot(t *testing.T) {
+func TestSweepExpiredProxyWithoutFallbackRefreshesBoundAccountsAndInvalidatesExistingProbeSnapshot(t *testing.T) {
 	ctx := context.Background()
 	tx := testEntTx(t)
 	proxyRepo := newProxyRepositoryWithSQL(tx.Client(), tx)
@@ -334,7 +333,9 @@ func TestSweepExpiredProxyWithoutFallbackInvalidatesOnlyExistingProbeSnapshot(t 
 	}
 
 	payload := latestBulkAccountOutboxPayload(t, ctx, tx)
-	require.Equal(t, []int64{withSnapshot.ID}, payload)
+	// The proxy status is part of every bound account's scheduler snapshot;
+	// only the account with a real probe snapshot needs an account-row update.
+	require.Equal(t, []int64{withSnapshot.ID, withoutSnapshot.ID, withJSONNull.ID}, payload)
 }
 
 func TestSweepExpiredProxyFallbackRerouteDeletesProbeSnapshot(t *testing.T) {

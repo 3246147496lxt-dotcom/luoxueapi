@@ -19,7 +19,6 @@ import (
 	"strings"
 	"time"
 
-	dbent "github.com/Wei-Shaw/sub2api/ent"
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/oauth"
@@ -512,12 +511,7 @@ func (h *AuthHandler) OIDCOAuthCallback(c *gin.Context) {
 	redirectToFrontendCallback(c, frontendCallback)
 }
 
-func (h *AuthHandler) findOIDCCompatEmailUser(ctx context.Context, email string) (*dbent.User, error) {
-	client := h.entClient()
-	if client == nil {
-		return nil, infraerrors.ServiceUnavailable("PENDING_AUTH_NOT_READY", "pending auth service is not ready")
-	}
-
+func (h *AuthHandler) findOIDCCompatEmailUser(ctx context.Context, email string) (*service.AuthIdentityUser, error) {
 	email = strings.TrimSpace(strings.ToLower(email))
 	if email == "" ||
 		strings.HasSuffix(email, service.LinuxDoConnectSyntheticEmailDomain) ||
@@ -527,7 +521,7 @@ func (h *AuthHandler) findOIDCCompatEmailUser(ctx context.Context, email string)
 		return nil, nil
 	}
 
-	userEntity, err := findUserByNormalizedEmail(ctx, client, email)
+	userEntity, err := h.findPendingUserByNormalizedEmail(ctx, email)
 	if err != nil {
 		if errors.Is(err, service.ErrUserNotFound) {
 			return nil, nil
@@ -546,7 +540,7 @@ func (h *AuthHandler) createOIDCOAuthChoicePendingSession(
 	browserSessionKey string,
 	upstreamClaims map[string]any,
 	compatEmail string,
-	compatEmailUser *dbent.User,
+	compatEmailUser *service.AuthIdentityUser,
 	forceEmailOnSignup bool,
 ) error {
 	suggestionEmail := strings.TrimSpace(suggestedEmail)
@@ -670,12 +664,7 @@ func (h *AuthHandler) CompleteOIDCOAuthRegistration(c *gin.Context) {
 		return
 	}
 
-	client := h.entClient()
-	if client == nil {
-		response.ErrorFrom(c, infraerrors.ServiceUnavailable("PENDING_AUTH_NOT_READY", "pending auth service is not ready"))
-		return
-	}
-	if err := ensurePendingOAuthRegistrationIdentityAvailable(c.Request.Context(), client, session); err != nil {
+	if err := h.ensurePendingRegistrationIdentityAvailable(c.Request.Context(), session); err != nil {
 		respondPendingOAuthBindingApplyError(c, err)
 		return
 	}
@@ -700,7 +689,7 @@ func (h *AuthHandler) CompleteOIDCOAuthRegistration(c *gin.Context) {
 		response.ErrorFrom(c, err)
 		return
 	}
-	if err := applyPendingOAuthAdoptionAndConsumeSession(c.Request.Context(), client, h.authService, h.userService, session, decision, user.ID); err != nil {
+	if err := h.applyPendingIdentityBindingAndConsume(c.Request.Context(), session, decision, user.ID); err != nil {
 		respondPendingOAuthBindingApplyError(c, err)
 		return
 	}

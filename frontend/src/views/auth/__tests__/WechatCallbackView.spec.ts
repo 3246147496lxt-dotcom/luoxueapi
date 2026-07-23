@@ -558,8 +558,8 @@ describe('WechatCallbackView', () => {
     })
     expect(setTokenMock).not.toHaveBeenCalled()
     expect(replaceMock).not.toHaveBeenCalled()
-    expect(wrapper.get('[data-testid="wechat-choice-bind-existing"]').exists()).toBe(true)
-    expect(wrapper.get('[data-testid="wechat-choice-create-account"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="wechat-choice-bind-existing"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="wechat-choice-create-account"]').exists()).toBe(true)
   })
 
   it('offers existing-account email collection during invitation flow', async () => {

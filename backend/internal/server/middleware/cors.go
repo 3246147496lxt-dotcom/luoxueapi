@@ -66,6 +66,17 @@ func CORS(cfg config.CORSConfig) gin.HandlerFunc {
 
 	return func(c *gin.Context) {
 		origin := strings.TrimSpace(c.GetHeader("Origin"))
+		// Launch-code exchange is a server-to-server credential endpoint. Never
+		// grant browser CORS access, even when the deployment allows wildcard CORS
+		// for the rest of the public API.
+		if c.Request.URL.Path == "/api/v1/embedded-pages/exchange" && origin != "" {
+			c.AbortWithStatusJSON(http.StatusForbidden, gin.H{
+				"code":    http.StatusForbidden,
+				"message": "browser exchange is not allowed",
+				"reason":  "EMBEDDED_PAGE_SERVER_EXCHANGE_REQUIRED",
+			})
+			return
+		}
 		originAllowed := allowAll
 		if origin != "" && !allowAll {
 			_, originAllowed = allowedSet[origin]

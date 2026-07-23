@@ -1,12 +1,13 @@
 package main
 
-//go:generate go run github.com/google/wire/cmd/wire
+//go:generate go run github.com/google/wire/cmd/wire@v0.7.0
 
 import (
 	"context"
 	_ "embed"
 	"errors"
 	"flag"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -19,6 +20,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/handler"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
+	"github.com/Wei-Shaw/sub2api/internal/repository"
 	"github.com/Wei-Shaw/sub2api/internal/server/middleware"
 	"github.com/Wei-Shaw/sub2api/internal/setup"
 	"github.com/Wei-Shaw/sub2api/internal/web"
@@ -50,9 +52,16 @@ func init() {
 	}
 }
 
-// initLogger configures the default slog handler based on gin.Mode().
-// In non-release mode, Debug level logs are enabled.
 func main() {
+	if err := run(); err != nil {
+		log.Printf("LuoxueAPI exited with error: %v", err)
+		os.Exit(1)
+	}
+}
+
+// run owns process-scoped resources so every error path executes deferred
+// logger and application cleanup before main chooses the exit status.
+func run() error {
 	logger.InitBootstrap()
 	defer logger.Sync()
 
@@ -63,15 +72,15 @@ func main() {
 
 	if *showVersion {
 		log.Printf("LuoxueAPI %s (commit: %s, built: %s)\n", Version, Commit, Date)
-		return
+		return nil
 	}
 
 	// CLI setup mode
 	if *setupMode {
 		if err := setup.RunCLI(); err != nil {
-			log.Fatalf("Setup failed: %v", err)
+			return fmt.Errorf("setup failed: %w", err)
 		}
-		return
+		return nil
 	}
 
 	// Check if setup is needed
@@ -80,21 +89,20 @@ func main() {
 		if setup.AutoSetupEnabled() {
 			log.Println("Auto setup mode enabled...")
 			if err := setup.AutoSetupFromEnv(); err != nil {
-				log.Fatalf("Auto setup failed: %v", err)
+				return fmt.Errorf("auto setup failed: %w", err)
 			}
 			// Continue to main server after auto-setup
 		} else {
 			log.Println("First run detected, starting setup wizard...")
-			runSetupServer()
-			return
+			return runSetupServer()
 		}
 	}
 
 	// Normal server mode
-	runMainServer()
+	return runMainServer()
 }
 
-func runSetupServer() {
+func runSetupServer() error {
 	r := gin.New()
 	r.Use(middleware.Recovery())
 	r.Use(middleware.CORS(config.CORSConfig{}))
@@ -126,18 +134,42 @@ func runSetupServer() {
 		Protocols:         protocols,
 	}
 
-	if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-		log.Fatalf("Failed to start setup server: %v", err)
+	serverErr := make(chan error, 1)
+	go func() {
+		serverErr <- server.ListenAndServe()
+	}()
+
+	signalCtx, stopSignals := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stopSignals()
+	select {
+	case err := <-serverErr:
+		if err != nil && !errors.Is(err, http.ErrServerClosed) {
+			return fmt.Errorf("start setup server: %w", err)
+		}
+		return nil
+	case <-signalCtx.Done():
 	}
+
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := server.Shutdown(shutdownCtx); err != nil {
+		return fmt.Errorf("shutdown setup server: %w", err)
+	}
+	return nil
 }
 
-func runMainServer() {
+func runMainServer() error {
 	cfg, err := config.LoadForBootstrap()
 	if err != nil {
-		log.Fatalf("Failed to load config: %v", err)
+		return fmt.Errorf("load config: %w", err)
 	}
 	if err := logger.Init(logger.OptionsFromConfig(cfg.Log)); err != nil {
-		log.Fatalf("Failed to initialize logger: %v", err)
+		return fmt.Errorf("initialize logger: %w", err)
+	}
+	// Gin mode is process-global state, so configure it explicitly in the
+	// runtime entrypoint instead of mutating globals from a Wire provider.
+	if cfg.Server.Mode == "release" {
+		gin.SetMode(gin.ReleaseMode)
 	}
 	if cfg.RunMode == config.RunModeSimple {
 		log.Println("⚠️  WARNING: Running in SIMPLE mode - billing and quota checks are DISABLED")
@@ -148,34 +180,98 @@ func runMainServer() {
 		BuildType: BuildType,
 	}
 
-	app, err := initializeApplication(buildInfo)
+	entClient, sqlDB, err := repository.InitEnt(cfg)
 	if err != nil {
-		log.Fatalf("Failed to initialize application: %v", err)
+		return fmt.Errorf("bootstrap database: %w", err)
 	}
-	defer app.Cleanup()
-
-	// 启动服务器
-	go func() {
-		if err := app.Server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			log.Fatalf("Failed to start server: %v", err)
+	redisClient := repository.InitRedis(cfg)
+	app, err := initializeApplication(buildInfo, cfg, entClient, sqlDB, redisClient)
+	if err != nil {
+		if redisClient != nil {
+			_ = redisClient.Close()
 		}
+		_ = entClient.Close()
+		return fmt.Errorf("initialize application: %w", err)
+	}
+	defer cleanupApplicationInfrastructure(app)
+	signalCtx, stopSignals := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stopSignals()
+	if app.Supervisor != nil {
+		if err := app.Supervisor.Start(signalCtx); err != nil {
+			stopCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			stopErr := app.Supervisor.Stop(stopCtx)
+			cancel()
+			startErr := fmt.Errorf("start application components: %w", err)
+			if stopErr != nil {
+				return errors.Join(startErr, fmt.Errorf("retry application component rollback: %w", stopErr))
+			}
+			return startErr
+		}
+		defer func() {
+			stopCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			if err := app.Supervisor.Stop(stopCtx); err != nil {
+				log.Printf("Application component shutdown failed: %v", err)
+			}
+		}()
+	}
+
+	serverErr := make(chan error, 1)
+	go func() {
+		serverErr <- app.Server.ListenAndServe()
 	}()
 
 	log.Printf("Server started on %s", app.Server.Addr)
 
 	// 等待中断信号
-	quit := make(chan os.Signal, 1)
-	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
-	<-quit
+	var serveErr error
+	select {
+	case err := <-serverErr:
+		if err != nil && !errors.Is(err, http.ErrServerClosed) {
+			serveErr = fmt.Errorf("serve HTTP: %w", err)
+		}
+	case <-signalCtx.Done():
+	}
 
 	log.Println("Shutting down server...")
+	drainStartedAt := time.Now()
+	if app.Supervisor != nil {
+		// Readiness flips before HTTP Shutdown starts draining active ingress.
+		app.Supervisor.BeginDrain()
+	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	if err := app.Server.Shutdown(ctx); err != nil {
-		log.Fatalf("Server forced to shutdown: %v", err)
+	shutdownErr := app.Server.Shutdown(ctx)
+	if shutdownErr != nil {
+		shutdownErr = fmt.Errorf("shutdown HTTP server: %w", shutdownErr)
 	}
 
-	log.Println("Server exited")
+	var componentErr error
+	if app.Supervisor != nil {
+		componentCtx, componentCancel := context.WithTimeout(context.Background(), 10*time.Second)
+		componentErr = app.Supervisor.Stop(componentCtx)
+		componentCancel()
+		if componentErr != nil {
+			componentErr = fmt.Errorf("shutdown application components: %w", componentErr)
+		}
+	}
+
+	log.Printf("Server exited after shutdown drain duration=%s", time.Since(drainStartedAt))
+	return errors.Join(serveErr, shutdownErr, componentErr)
+}
+
+func cleanupApplicationInfrastructure(app *Application) {
+	if app == nil || app.Cleanup == nil {
+		return
+	}
+	if app.Supervisor != nil && app.Supervisor.HasPendingComponents() {
+		// A timed-out component can still be using Redis or PostgreSQL. Do not
+		// close them underneath that worker; process exit will release them after
+		// the deferred retry has had its final opportunity to join.
+		log.Printf("Skipping explicit infrastructure cleanup: application components remain pending")
+		return
+	}
+	app.Cleanup()
 }

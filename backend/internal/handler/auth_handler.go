@@ -8,6 +8,8 @@ import (
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/handler/dto"
+	authapplication "github.com/Wei-Shaw/sub2api/internal/modules/auth/application"
+	authdomain "github.com/Wei-Shaw/sub2api/internal/modules/auth/domain"
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/ip"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/response"
@@ -19,7 +21,13 @@ import (
 
 // AuthHandler handles authentication-related requests
 type AuthHandler struct {
-	cfg                  *config.Config
+	cfg             *config.Config
+	loginUseCases   LoginUseCases
+	signupUseCases  SignupUseCases
+	pendingIdentity PendingIdentityUseCases
+	authModule      *authapplication.Facade
+	// authService is retained only as a compatibility facade for provider-
+	// specific OAuth flows while they migrate to the narrow ports above.
 	authService          *service.AuthService
 	userService          *service.UserService
 	settingSvc           *service.SettingService
@@ -34,8 +42,19 @@ type AuthHandler struct {
 
 // NewAuthHandler creates a new AuthHandler
 func NewAuthHandler(cfg *config.Config, authService *service.AuthService, userService *service.UserService, settingService *service.SettingService, promoService *service.PromoService, redeemService *service.RedeemService, totpService *service.TotpService, userAttributeService *service.UserAttributeService) *AuthHandler {
+	var loginUseCases LoginUseCases
+	var signupUseCases SignupUseCases
+	var pendingIdentity PendingIdentityUseCases
+	if authService != nil {
+		loginUseCases = authService
+		signupUseCases = authService
+		pendingIdentity = authService.PendingIdentityUseCases()
+	}
 	return &AuthHandler{
 		cfg:                  cfg,
+		loginUseCases:        loginUseCases,
+		signupUseCases:       signupUseCases,
+		pendingIdentity:      pendingIdentity,
 		authService:          authService,
 		userService:          userService,
 		settingSvc:           settingService,
@@ -44,6 +63,98 @@ func NewAuthHandler(cfg *config.Config, authService *service.AuthService, userSe
 		totpService:          totpService,
 		userAttributeService: userAttributeService,
 	}
+}
+
+// ProvideAuthHandler is the Wire entry point for the module-aware handler.
+// NewAuthHandler remains available for one release so focused tests and
+// external embeddings retain their existing constructor contract.
+func ProvideAuthHandler(
+	cfg *config.Config,
+	authService *service.AuthService,
+	userService *service.UserService,
+	settingService *service.SettingService,
+	promoService *service.PromoService,
+	redeemService *service.RedeemService,
+	totpService *service.TotpService,
+	userAttributeService *service.UserAttributeService,
+	authModule *authapplication.Facade,
+) *AuthHandler {
+	authHandler := NewAuthHandler(cfg, authService, userService, settingService, promoService, redeemService, totpService, userAttributeService)
+	authHandler.authModule = authModule
+	return authHandler
+}
+
+func (h *AuthHandler) loginCases() LoginUseCases {
+	if h == nil {
+		return nil
+	}
+	if h.loginUseCases != nil {
+		return h.loginUseCases
+	}
+	// Compatibility for focused tests and one-release legacy facades that
+	// construct AuthHandler literals directly.
+	return h.authService
+}
+
+func (h *AuthHandler) signupCases() SignupUseCases {
+	if h == nil {
+		return nil
+	}
+	if h.signupUseCases != nil {
+		return h.signupUseCases
+	}
+	return h.authService
+}
+
+func (h *AuthHandler) verifyLoginChallenge(ctx context.Context, token, remoteIP string) error {
+	if h != nil && h.authModule != nil {
+		return h.authModule.VerifyLoginChallenge(ctx, authdomain.LoginChallengeCommand{
+			TurnstileToken: token,
+			RemoteIP:       remoteIP,
+		})
+	}
+	return h.loginCases().VerifyTurnstile(ctx, token, remoteIP)
+}
+
+func (h *AuthHandler) verifySignupChallenge(ctx context.Context, token, remoteIP, verifyCode string) error {
+	if h != nil && h.authModule != nil {
+		return h.authModule.VerifySignupChallenge(ctx, authdomain.SignupChallengeCommand{
+			TurnstileToken: token,
+			RemoteIP:       remoteIP,
+			VerifyCode:     verifyCode,
+		})
+	}
+	return h.signupCases().VerifyTurnstileForRegister(ctx, token, remoteIP, verifyCode)
+}
+
+func (h *AuthHandler) refreshSession(ctx context.Context, refreshToken string) (authdomain.TokenPair, error) {
+	if h != nil && h.authModule != nil {
+		return h.authModule.Refresh(ctx, refreshToken)
+	}
+	result, err := h.loginCases().RefreshTokenPair(ctx, refreshToken)
+	if err != nil {
+		return authdomain.TokenPair{}, err
+	}
+	return authdomain.TokenPair{
+		AccessToken:  result.AccessToken,
+		RefreshToken: result.RefreshToken,
+		ExpiresIn:    result.ExpiresIn,
+		UserRole:     result.UserRole,
+	}, nil
+}
+
+func (h *AuthHandler) revokeSession(ctx context.Context, refreshToken string) error {
+	if h != nil && h.authModule != nil {
+		return h.authModule.Revoke(ctx, refreshToken)
+	}
+	return h.loginCases().RevokeRefreshToken(ctx, refreshToken)
+}
+
+func (h *AuthHandler) revokeAllSessions(ctx context.Context, userID int64) error {
+	if h != nil && h.authModule != nil {
+		return h.authModule.RevokeAll(ctx, userID)
+	}
+	return h.loginCases().RevokeAllUserTokens(ctx, userID)
 }
 
 // RegisterRequest represents the registration request payload
@@ -103,11 +214,11 @@ func (h *AuthHandler) respondWithTokenPair(c *gin.Context, user *service.User) {
 		return
 	}
 
-	tokenPair, err := h.authService.GenerateTokenPair(c.Request.Context(), user, "")
+	tokenPair, err := h.loginCases().GenerateTokenPair(c.Request.Context(), user, "")
 	if err != nil {
 		slog.Error("failed to generate token pair", "error", err, "user_id", user.ID)
 		// 回退到只返回Access Token
-		token, tokenErr := h.authService.GenerateToken(c.Request.Context(), user)
+		token, tokenErr := h.loginCases().GenerateToken(c.Request.Context(), user)
 		if tokenErr != nil {
 			response.InternalError(c, "Failed to generate token")
 			return
@@ -166,12 +277,14 @@ func (h *AuthHandler) Register(c *gin.Context) {
 	}
 
 	// Turnstile 验证（邮箱验证码注册场景避免重复校验一次性 token）
-	if err := h.authService.VerifyTurnstileForRegister(c.Request.Context(), req.TurnstileToken, ip.GetClientIP(c), req.VerifyCode); err != nil {
+	if err := h.verifySignupChallenge(c.Request.Context(), req.TurnstileToken, ip.GetClientIP(c), req.VerifyCode); err != nil {
 		response.ErrorFrom(c, err)
 		return
 	}
 
-	_, user, err := h.authService.RegisterWithVerification(
+	// Keep the aggregate-producing compatibility call until the auth module
+	// owns the exact public user snapshot and token fallback contract.
+	_, user, err := h.signupCases().RegisterWithVerification(
 		c.Request.Context(),
 		req.Email,
 		req.Password,
@@ -198,20 +311,34 @@ func (h *AuthHandler) SendVerifyCode(c *gin.Context) {
 	}
 
 	// Turnstile 验证
-	if err := h.authService.VerifyTurnstile(c.Request.Context(), req.TurnstileToken, ip.GetClientIP(c)); err != nil {
+	if err := h.verifyLoginChallenge(c.Request.Context(), req.TurnstileToken, ip.GetClientIP(c)); err != nil {
 		response.ErrorFrom(c, err)
 		return
 	}
 
-	result, err := h.authService.SendVerifyCodeAsync(c.Request.Context(), req.Email, c.GetHeader("Accept-Language"))
-	if err != nil {
-		response.ErrorFrom(c, err)
-		return
+	countdown := 0
+	if h.authModule != nil {
+		result, err := h.authModule.SendVerification(c.Request.Context(), authdomain.VerificationCommand{
+			Email:  req.Email,
+			Locale: c.GetHeader("Accept-Language"),
+		})
+		if err != nil {
+			response.ErrorFrom(c, err)
+			return
+		}
+		countdown = result.Countdown
+	} else {
+		result, err := h.signupCases().SendVerifyCodeAsync(c.Request.Context(), req.Email, c.GetHeader("Accept-Language"))
+		if err != nil {
+			response.ErrorFrom(c, err)
+			return
+		}
+		countdown = result.Countdown
 	}
 
 	response.Success(c, SendVerifyCodeResponse{
 		Message:   "Verification code sent successfully",
-		Countdown: result.Countdown,
+		Countdown: countdown,
 	})
 }
 
@@ -225,12 +352,14 @@ func (h *AuthHandler) Login(c *gin.Context) {
 	}
 
 	// Turnstile 验证
-	if err := h.authService.VerifyTurnstile(c.Request.Context(), req.TurnstileToken, ip.GetClientIP(c)); err != nil {
+	if err := h.verifyLoginChallenge(c.Request.Context(), req.TurnstileToken, ip.GetClientIP(c)); err != nil {
 		response.ErrorFrom(c, err)
 		return
 	}
 
-	token, user, err := h.authService.Login(c.Request.Context(), req.Email, req.Password)
+	// Authentication still returns the compatibility aggregate so backend-mode
+	// and 2FA checks happen before refresh-token issuance, exactly as before.
+	token, user, err := h.loginCases().Login(c.Request.Context(), req.Email, req.Password)
 	if err != nil {
 		response.ErrorFrom(c, err)
 		return
@@ -259,7 +388,7 @@ func (h *AuthHandler) Login(c *gin.Context) {
 		return
 	}
 
-	h.authService.RecordSuccessfulLogin(c.Request.Context(), user.ID)
+	h.loginCases().RecordSuccessfulLogin(c.Request.Context(), user.ID)
 
 	h.respondWithTokenPair(c, user)
 }
@@ -355,17 +484,7 @@ func (h *AuthHandler) Login2FA(c *gin.Context) {
 			response.ErrorFrom(c, err)
 			return
 		}
-		if err := applyPendingOAuthBinding(
-			c.Request.Context(),
-			h.entClient(),
-			h.authService,
-			h.userService,
-			pendingSession,
-			decision,
-			&user.ID,
-			true,
-			true,
-		); err != nil {
+		if err := h.applyPendingIdentityBinding(c.Request.Context(), pendingSession, decision, &user.ID, true, true); err != nil {
 			response.ErrorFrom(c, infraerrors.InternalServer("PENDING_AUTH_BIND_APPLY_FAILED", "failed to bind pending oauth identity").WithCause(err))
 			return
 		}
@@ -381,7 +500,7 @@ func (h *AuthHandler) Login2FA(c *gin.Context) {
 		secureCookie := isRequestHTTPS(c)
 		clearOAuthPendingSessionCookie(c, secureCookie)
 		clearOAuthPendingBrowserCookie(c, secureCookie)
-		h.authService.RecordSuccessfulLogin(c.Request.Context(), user.ID)
+		h.loginCases().RecordSuccessfulLogin(c.Request.Context(), user.ID)
 
 		user, err = h.userService.GetByID(c.Request.Context(), session.UserID)
 		if err != nil {
@@ -394,7 +513,7 @@ func (h *AuthHandler) Login2FA(c *gin.Context) {
 	_ = h.totpService.DeleteLoginSession(c.Request.Context(), req.TempToken)
 
 	if session.PendingOAuthBind == nil {
-		h.authService.RecordSuccessfulLogin(c.Request.Context(), user.ID)
+		h.loginCases().RecordSuccessfulLogin(c.Request.Context(), user.ID)
 	}
 
 	h.respondWithTokenPair(c, user)
@@ -588,7 +707,7 @@ func (h *AuthHandler) ForgotPassword(c *gin.Context) {
 	}
 
 	// Turnstile 验证
-	if err := h.authService.VerifyTurnstile(c.Request.Context(), req.TurnstileToken, ip.GetClientIP(c)); err != nil {
+	if err := h.verifyLoginChallenge(c.Request.Context(), req.TurnstileToken, ip.GetClientIP(c)); err != nil {
 		response.ErrorFrom(c, err)
 		return
 	}
@@ -602,7 +721,7 @@ func (h *AuthHandler) ForgotPassword(c *gin.Context) {
 
 	// Request password reset (async)
 	// Note: This returns success even if email doesn't exist (to prevent enumeration)
-	if err := h.authService.RequestPasswordResetAsync(c.Request.Context(), req.Email, frontendBaseURL, c.GetHeader("Accept-Language")); err != nil {
+	if err := h.loginCases().RequestPasswordResetAsync(c.Request.Context(), req.Email, frontendBaseURL, c.GetHeader("Accept-Language")); err != nil {
 		response.ErrorFrom(c, err)
 		return
 	}
@@ -634,7 +753,7 @@ func (h *AuthHandler) ResetPassword(c *gin.Context) {
 	}
 
 	// Reset password
-	if err := h.authService.ResetPassword(c.Request.Context(), req.Email, req.Token, req.NewPassword); err != nil {
+	if err := h.loginCases().ResetPassword(c.Request.Context(), req.Email, req.Token, req.NewPassword); err != nil {
 		response.ErrorFrom(c, err)
 		return
 	}
@@ -668,7 +787,7 @@ func (h *AuthHandler) RefreshToken(c *gin.Context) {
 		return
 	}
 
-	result, err := h.authService.RefreshTokenPair(c.Request.Context(), req.RefreshToken)
+	result, err := h.refreshSession(c.Request.Context(), req.RefreshToken)
 	if err != nil {
 		response.ErrorFrom(c, err)
 		return
@@ -707,7 +826,7 @@ func (h *AuthHandler) Logout(c *gin.Context) {
 
 	// 如果提供了Refresh Token，撤销它
 	if req.RefreshToken != "" {
-		if err := h.authService.RevokeRefreshToken(c.Request.Context(), req.RefreshToken); err != nil {
+		if err := h.revokeSession(c.Request.Context(), req.RefreshToken); err != nil {
 			slog.Debug("failed to revoke refresh token", "error", err)
 			// 不影响登出流程
 		}
@@ -734,7 +853,7 @@ func (h *AuthHandler) RevokeAllSessions(c *gin.Context) {
 		return
 	}
 
-	if err := h.authService.RevokeAllUserTokens(c.Request.Context(), subject.UserID); err != nil {
+	if err := h.revokeAllSessions(c.Request.Context(), subject.UserID); err != nil {
 		slog.Error("failed to revoke all sessions", "user_id", subject.UserID, "error", err)
 		response.InternalError(c, "Failed to revoke sessions")
 		return

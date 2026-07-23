@@ -66,7 +66,7 @@ func (r *cyberOrderingTestRepo) snapshotEmailSents() []bool {
 
 func TestRecordCyberPolicyEvent_DisabledWhenRiskControlOff(t *testing.T) {
 	repo := &contentModerationTestRepo{}
-	svc := NewContentModerationService(
+	svc := newStartedContentModerationService(
 		&contentModerationTestSettingRepo{values: map[string]string{
 			SettingKeyRiskControlEnabled: "false",
 		}},
@@ -93,7 +93,7 @@ func TestRecordCyberPolicyEvent_DisabledWhenRiskControlOff(t *testing.T) {
 
 func TestRecordCyberPolicyEvent_WritesLogWhenEnabled(t *testing.T) {
 	repo := &contentModerationTestRepo{}
-	svc := NewContentModerationService(
+	svc := newStartedContentModerationService(
 		&contentModerationTestSettingRepo{values: map[string]string{
 			SettingKeyRiskControlEnabled: "true",
 		}},
@@ -170,7 +170,7 @@ func TestRecordCyberPolicyEvent_WritesLogWhenEnabled(t *testing.T) {
 // (or test-double) SMTP endpoint is available.
 func TestRecordCyberPolicyEvent_CreateLogBeforeEmail(t *testing.T) {
 	repo := &cyberOrderingTestRepo{}
-	svc := NewContentModerationService(
+	svc := newStartedContentModerationService(
 		&contentModerationTestSettingRepo{values: map[string]string{
 			SettingKeyRiskControlEnabled: "true",
 		}},
@@ -231,7 +231,7 @@ func (r *banCountArgsTestRepo) snapshotCountCalls() []bool {
 
 func TestApplyFlaggedAccountSideEffects_PassesExcludeCyberFlag(t *testing.T) {
 	repo := &banCountArgsTestRepo{}
-	svc := NewContentModerationService(
+	svc := newStartedContentModerationService(
 		&contentModerationTestSettingRepo{values: map[string]string{}},
 		repo, nil, nil, nil, nil, nil,
 	)
@@ -250,7 +250,7 @@ func TestApplyFlaggedAccountSideEffects_PassesExcludeCyberFlag(t *testing.T) {
 
 func TestRecordCyberPolicyEvent_ExcludeFromBanCount_SkipsBanJudgment(t *testing.T) {
 	repo := &banCountArgsTestRepo{}
-	svc := NewContentModerationService(
+	svc := newStartedContentModerationService(
 		&contentModerationTestSettingRepo{values: map[string]string{
 			SettingKeyRiskControlEnabled:      "true",
 			SettingKeyContentModerationConfig: `{"cyber_policy_exclude_from_ban_count":true}`,
@@ -278,7 +278,7 @@ func TestRecordCyberPolicyEvent_ExcludeFromBanCount_SkipsBanJudgment(t *testing.
 
 func TestRecordCyberPolicyEvent_DefaultCountsTowardBan(t *testing.T) {
 	repo := &banCountArgsTestRepo{}
-	svc := NewContentModerationService(
+	svc := newStartedContentModerationService(
 		&contentModerationTestSettingRepo{values: map[string]string{
 			SettingKeyRiskControlEnabled: "true",
 		}},

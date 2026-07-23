@@ -169,7 +169,7 @@ describe('DataTable', () => {
 
     await wrapper.vm.$nextTick()
 
-    expect(wrapper.get('[data-ui-mode="mobile"]').exists()).toBe(true)
+    expect(wrapper.find('[data-ui-mode="mobile"]').exists()).toBe(true)
     expect(wrapper.find('[data-ui-mode="desktop"]').exists()).toBe(false)
     expect(wrapper.get('[data-mobile-primary]').text()).toContain('Snow account')
     expect(wrapper.get('[data-mobile-primary] input').attributes('aria-label')).toBe('Select account')

@@ -122,7 +122,7 @@ describe('OpsAlertEventsCard responsive controls', () => {
       tabindex: '0',
       'aria-label': 'admin.ops.alertEvents.title',
     })
-    expect(scrollRegion.get('table').exists()).toBe(true)
+    expect(scrollRegion.find('table').exists()).toBe(true)
   })
 
   it('uses a native detail button so Enter and Space retain their standard activation behavior', async () => {

@@ -153,6 +153,44 @@ func TestSchedulerSnapshotServiceInitialFullRebuildFailsClosedWhenListBucketsFai
 	svc.fullRebuildStateMu.Lock()
 	require.ErrorIs(t, svc.fullRebuildLastErr, cache.listErr)
 	svc.fullRebuildStateMu.Unlock()
+	status := svc.InitialSnapshotStatus()
+	require.True(t, status.Done)
+	require.ErrorIs(t, status.Err, cache.listErr)
+}
+
+func TestSchedulerSnapshotReadinessRecoversAfterLaterAuthoritativeRebuild(t *testing.T) {
+	svc := &SchedulerSnapshotService{}
+	initialErr := errors.New("initial rebuild failed")
+	require.ErrorIs(t, svc.coalesceFullRebuild(func() error { return initialErr }), initialErr)
+	status := svc.InitialSnapshotStatus()
+	require.True(t, status.Done)
+	require.ErrorIs(t, status.Err, initialErr)
+
+	require.NoError(t, svc.coalesceFullRebuild(func() error { return nil }))
+	status = svc.InitialSnapshotStatus()
+	require.True(t, status.Done)
+	require.NoError(t, status.Err)
+
+	// Once a full snapshot is published, a refresh failure must not make the
+	// process unready while that authoritative snapshot remains available.
+	refreshErr := errors.New("refresh failed")
+	require.ErrorIs(t, svc.coalesceFullRebuild(func() error { return refreshErr }), refreshErr)
+	status = svc.InitialSnapshotStatus()
+	require.True(t, status.Done)
+	require.NoError(t, status.Err)
+}
+
+func TestSchedulerSnapshotStaleFailureCannotOverwriteNewerSuccess(t *testing.T) {
+	svc := &SchedulerSnapshotService{}
+	svc.recordAuthoritativeRebuild(2, nil)
+	svc.recordAuthoritativeRebuild(1, errors.New("stale failure"))
+
+	status := svc.InitialSnapshotStatus()
+	require.True(t, status.Done)
+	require.NoError(t, status.Err)
+	svc.initialSnapshotMu.RLock()
+	require.EqualValues(t, 2, svc.initialSnapshotRun)
+	svc.initialSnapshotMu.RUnlock()
 }
 
 func schedulerFullRebuildState(svc *SchedulerSnapshotService) (requested uint64, completed uint64) {

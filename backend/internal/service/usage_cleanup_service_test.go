@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -57,7 +58,7 @@ type cleanupRepoStub struct {
 
 type dashboardRepoStub struct {
 	recomputeErr   error
-	recomputeCalls int
+	recomputeCalls atomic.Int64
 }
 
 func (s *dashboardRepoStub) AggregateRange(ctx context.Context, start, end time.Time) error {
@@ -65,7 +66,7 @@ func (s *dashboardRepoStub) AggregateRange(ctx context.Context, start, end time.
 }
 
 func (s *dashboardRepoStub) RecomputeRange(ctx context.Context, start, end time.Time) error {
-	s.recomputeCalls++
+	s.recomputeCalls.Add(1)
 	return s.recomputeErr
 }
 
@@ -562,9 +563,15 @@ func TestUsageCleanupServiceExecuteTaskDashboardRecomputeError(t *testing.T) {
 			{deleted: 0},
 		},
 	}
-	dashboard := NewDashboardAggregationService(dashboardRepo, nil, &config.Config{
+	timingWheel, err := NewTimingWheelService()
+	require.NoError(t, err)
+	require.NoError(t, timingWheel.StartWithError())
+	t.Cleanup(timingWheel.Stop)
+	dashboard := NewDashboardAggregationService(dashboardRepo, timingWheel, &config.Config{
 		DashboardAgg: config.DashboardAggregationConfig{Enabled: true},
 	})
+	dashboard.Start()
+	t.Cleanup(dashboard.Stop)
 	cfg := &config.Config{UsageCleanup: config.UsageCleanupConfig{Enabled: true, BatchSize: 2}}
 	svc := NewUsageCleanupService(repo, nil, dashboard, cfg)
 	task := &UsageCleanupTask{
@@ -580,7 +587,7 @@ func TestUsageCleanupServiceExecuteTaskDashboardRecomputeError(t *testing.T) {
 	repo.mu.Lock()
 	defer repo.mu.Unlock()
 	require.Len(t, repo.markSucceeded, 1)
-	require.Eventually(t, func() bool { return dashboardRepo.recomputeCalls == 1 }, time.Second, 10*time.Millisecond)
+	require.Eventually(t, func() bool { return dashboardRepo.recomputeCalls.Load() == 1 }, time.Second, 10*time.Millisecond)
 }
 
 func TestUsageCleanupServiceExecuteTaskDashboardRecomputeSuccess(t *testing.T) {
@@ -590,9 +597,15 @@ func TestUsageCleanupServiceExecuteTaskDashboardRecomputeSuccess(t *testing.T) {
 			{deleted: 0},
 		},
 	}
-	dashboard := NewDashboardAggregationService(dashboardRepo, nil, &config.Config{
+	timingWheel, err := NewTimingWheelService()
+	require.NoError(t, err)
+	require.NoError(t, timingWheel.StartWithError())
+	t.Cleanup(timingWheel.Stop)
+	dashboard := NewDashboardAggregationService(dashboardRepo, timingWheel, &config.Config{
 		DashboardAgg: config.DashboardAggregationConfig{Enabled: true},
 	})
+	dashboard.Start()
+	t.Cleanup(dashboard.Stop)
 	cfg := &config.Config{UsageCleanup: config.UsageCleanupConfig{Enabled: true, BatchSize: 2}}
 	svc := NewUsageCleanupService(repo, nil, dashboard, cfg)
 	task := &UsageCleanupTask{
@@ -608,7 +621,7 @@ func TestUsageCleanupServiceExecuteTaskDashboardRecomputeSuccess(t *testing.T) {
 	repo.mu.Lock()
 	defer repo.mu.Unlock()
 	require.Len(t, repo.markSucceeded, 1)
-	require.Eventually(t, func() bool { return dashboardRepo.recomputeCalls == 1 }, time.Second, 10*time.Millisecond)
+	require.Eventually(t, func() bool { return dashboardRepo.recomputeCalls.Load() == 1 }, time.Second, 10*time.Millisecond)
 }
 
 func TestUsageCleanupServiceExecuteTaskCanceled(t *testing.T) {
@@ -809,6 +822,8 @@ func TestUsageCleanupServiceDefaultsAndLifecycle(t *testing.T) {
 
 	timingWheel, err := NewTimingWheelService()
 	require.NoError(t, err)
+	require.NoError(t, timingWheel.StartWithError())
+	defer timingWheel.Stop()
 
 	cfg := &config.Config{UsageCleanup: config.UsageCleanupConfig{Enabled: true, WorkerIntervalSeconds: 5}}
 	svc := NewUsageCleanupService(repo, timingWheel, nil, cfg)

@@ -97,6 +97,9 @@ func TestLoadDefaultSchedulingConfig(t *testing.T) {
 	if cfg.Gateway.Scheduling.SlotCleanupInterval != 30*time.Second {
 		t.Fatalf("SlotCleanupInterval = %v, want 30s", cfg.Gateway.Scheduling.SlotCleanupInterval)
 	}
+	if !cfg.Gateway.Scheduling.ShadowComparisonEnabled {
+		t.Fatalf("ShadowComparisonEnabled = false, want true")
+	}
 }
 
 func TestLoadDefaultOpenAIFirstOutputTimeoutsDisabled(t *testing.T) {
@@ -378,6 +381,7 @@ func TestLoadIdempotencyConfigFromEnv(t *testing.T) {
 func TestLoadSchedulingConfigFromEnv(t *testing.T) {
 	resetViperWithJWTSecret(t)
 	t.Setenv("GATEWAY_SCHEDULING_STICKY_SESSION_MAX_WAITING", "5")
+	t.Setenv("GATEWAY_SCHEDULING_SHADOW_COMPARISON_ENABLED", "false")
 
 	cfg, err := Load()
 	if err != nil {
@@ -386,6 +390,9 @@ func TestLoadSchedulingConfigFromEnv(t *testing.T) {
 
 	if cfg.Gateway.Scheduling.StickySessionMaxWaiting != 5 {
 		t.Fatalf("StickySessionMaxWaiting = %d, want 5", cfg.Gateway.Scheduling.StickySessionMaxWaiting)
+	}
+	if cfg.Gateway.Scheduling.ShadowComparisonEnabled {
+		t.Fatalf("ShadowComparisonEnabled = true, want false")
 	}
 }
 

@@ -1,47 +1,60 @@
+/** Safe, non-secret context shared with external custom pages. */
+
+export type EmbeddedUIMode = 'embedded' | 'new_tab'
+
+export interface EmbeddedPageContext {
+  theme: 'light' | 'dark'
+  lang?: string
+  ui_mode: EmbeddedUIMode
+  src_host?: string
+}
+
+export interface EmbeddedUrlOptions {
+  theme?: 'light' | 'dark'
+  lang?: string
+  uiMode?: EmbeddedUIMode
+}
+
+export function buildEmbeddedPageContext(
+  options: EmbeddedUrlOptions = {},
+): EmbeddedPageContext {
+  const context: EmbeddedPageContext = {
+    theme: options.theme ?? 'light',
+    ui_mode: options.uiMode ?? 'embedded',
+  }
+  if (options.lang?.trim()) context.lang = options.lang.trim()
+  if (typeof window !== 'undefined' && window.location.origin) {
+    context.src_host = window.location.origin
+  }
+  return context
+}
+
 /**
- * Shared URL builder for iframe-embedded pages.
- * Used by PurchaseSubscriptionView and CustomPageView to build consistent URLs
- * with user_id, token, theme, lang, ui_mode, src_host, and src parameters.
+ * Add only presentation context to an external URL.
+ *
+ * Authentication is intentionally excluded. Pages that opt into
+ * `exchange_code` receive a one-time launch URL from the backend instead.
  */
-
-const EMBEDDED_USER_ID_QUERY_KEY = 'user_id'
-const EMBEDDED_AUTH_TOKEN_QUERY_KEY = 'token'
-const EMBEDDED_THEME_QUERY_KEY = 'theme'
-const EMBEDDED_LANG_QUERY_KEY = 'lang'
-const EMBEDDED_UI_MODE_QUERY_KEY = 'ui_mode'
-const EMBEDDED_UI_MODE_VALUE = 'embedded'
-const EMBEDDED_SRC_HOST_QUERY_KEY = 'src_host'
-const EMBEDDED_SRC_QUERY_KEY = 'src_url'
-
 export function buildEmbeddedUrl(
   baseUrl: string,
-  userId?: number,
-  authToken?: string | null,
-  theme: 'light' | 'dark' = 'light',
-  lang?: string,
+  options: EmbeddedUrlOptions = {},
 ): string {
   if (!baseUrl) return baseUrl
   try {
     const url = new URL(baseUrl)
-    if (userId) {
-      url.searchParams.set(EMBEDDED_USER_ID_QUERY_KEY, String(userId))
-    }
-    if (authToken) {
-      url.searchParams.set(EMBEDDED_AUTH_TOKEN_QUERY_KEY, authToken)
-    }
-    url.searchParams.set(EMBEDDED_THEME_QUERY_KEY, theme)
-    if (lang) {
-      url.searchParams.set(EMBEDDED_LANG_QUERY_KEY, lang)
-    }
-    url.searchParams.set(EMBEDDED_UI_MODE_QUERY_KEY, EMBEDDED_UI_MODE_VALUE)
-    // Source tracking: let the embedded page know where it's being loaded from
-    if (typeof window !== 'undefined') {
-      url.searchParams.set(EMBEDDED_SRC_HOST_QUERY_KEY, window.location.origin)
-      url.searchParams.set(EMBEDDED_SRC_QUERY_KEY, window.location.href)
-    }
+    const context = buildEmbeddedPageContext(options)
+    url.search = ''
+    url.hash = ''
+    url.searchParams.set('theme', context.theme)
+    if (context.lang) url.searchParams.set('lang', context.lang)
+    url.searchParams.set('ui_mode', context.ui_mode)
+    if (context.src_host) url.searchParams.set('src_host', context.src_host)
     return url.toString()
   } catch {
-    return baseUrl
+    // Fail closed: returning an unparseable original string could preserve a
+    // legacy token/query fragment if a future caller navigates without first
+    // validating the configured URL.
+    return ''
   }
 }
 

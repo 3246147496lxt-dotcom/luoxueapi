@@ -56,7 +56,7 @@ function createStreamResponse(lines: string[]) {
         })
       })
     }
-  } as Response
+  } as unknown as Response
 }
 
 function mountModal(account: Record<string, unknown> = {

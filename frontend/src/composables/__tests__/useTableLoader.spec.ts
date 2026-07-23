@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { useTableLoader } from '@/composables/useTableLoader'
+import type { BasePaginationResponse } from '@/types'
 
 // Mock @vueuse/core 的 useDebounceFn
 vi.mock('@vueuse/core', () => ({
@@ -59,9 +60,9 @@ describe('useTableLoader', () => {
     })
 
     it('load 期间 loading 为 true', async () => {
-      let resolveLoad: (v: any) => void
+      let resolveLoad: (v: BasePaginationResponse<unknown>) => void
       const fetchFn = vi.fn(
-        () => new Promise((resolve) => { resolveLoad = resolve })
+        () => new Promise<BasePaginationResponse<unknown>>((resolve) => { resolveLoad = resolve })
       )
 
       const { loading, load } = useTableLoader({ fetchFn })
@@ -69,7 +70,7 @@ describe('useTableLoader', () => {
       const p = load()
       expect(loading.value).toBe(true)
 
-      resolveLoad!({ items: [], total: 0, pages: 0 })
+      resolveLoad!({ items: [], total: 0, page: 1, page_size: 20, pages: 0 })
       await p
 
       expect(loading.value).toBe(false)
@@ -197,7 +198,7 @@ describe('useTableLoader', () => {
       const fetchFn = vi.fn((_page, _size, _params, options) => {
         callCount++
         const currentCall = callCount
-        return new Promise((resolve, reject) => {
+        return new Promise<BasePaginationResponse<{ id: number }>>((resolve, reject) => {
           // 模拟监听 abort
           if (options?.signal) {
             options.signal.addEventListener('abort', () => {
@@ -206,7 +207,7 @@ describe('useTableLoader', () => {
           }
           // 异步解决
           setTimeout(() => {
-            resolve({ items: [{ id: currentCall }], total: 1, pages: 1 })
+            resolve({ items: [{ id: currentCall }], total: 1, page: 1, page_size: 20, pages: 1 })
           }, 1000)
         })
       })

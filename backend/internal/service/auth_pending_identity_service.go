@@ -200,7 +200,7 @@ func NewAuthPendingIdentityService(entClient *dbent.Client) *AuthPendingIdentity
 	return &AuthPendingIdentityService{entClient: entClient}
 }
 
-func (s *AuthPendingIdentityService) CreatePendingSession(ctx context.Context, input CreatePendingAuthSessionInput) (*dbent.PendingAuthSession, error) {
+func (s *AuthPendingIdentityService) CreatePendingSession(ctx context.Context, input CreatePendingAuthSessionInput) (*PendingAuthSession, error) {
 	if s == nil || s.entClient == nil {
 		return nil, fmt.Errorf("pending auth ent client is not configured")
 	}
@@ -235,7 +235,8 @@ func (s *AuthPendingIdentityService) CreatePendingSession(ctx context.Context, i
 	if input.TargetUserID != nil {
 		create = create.SetTargetUserID(*input.TargetUserID)
 	}
-	return create.Save(ctx)
+	session, err := create.Save(ctx)
+	return pendingAuthSessionFromEntity(session), err
 }
 
 func (s *AuthPendingIdentityService) IssueCompletionCode(ctx context.Context, input IssuePendingAuthCompletionCodeInput) (*IssuePendingAuthCompletionCodeResult, error) {
@@ -277,7 +278,7 @@ func (s *AuthPendingIdentityService) IssueCompletionCode(ctx context.Context, in
 	}, nil
 }
 
-func (s *AuthPendingIdentityService) ConsumeCompletionCode(ctx context.Context, rawCode, browserSessionKey string) (*dbent.PendingAuthSession, error) {
+func (s *AuthPendingIdentityService) ConsumeCompletionCode(ctx context.Context, rawCode, browserSessionKey string) (*PendingAuthSession, error) {
 	if s == nil || s.entClient == nil {
 		return nil, fmt.Errorf("pending auth ent client is not configured")
 	}
@@ -293,10 +294,11 @@ func (s *AuthPendingIdentityService) ConsumeCompletionCode(ctx context.Context, 
 		return nil, err
 	}
 
-	return s.consumeSession(ctx, session, browserSessionKey, ErrPendingAuthCodeExpired, ErrPendingAuthCodeConsumed)
+	consumed, err := s.consumeSession(ctx, session, browserSessionKey, ErrPendingAuthCodeExpired, ErrPendingAuthCodeConsumed)
+	return pendingAuthSessionFromEntity(consumed), err
 }
 
-func (s *AuthPendingIdentityService) ConsumeBrowserSession(ctx context.Context, sessionToken, browserSessionKey string) (*dbent.PendingAuthSession, error) {
+func (s *AuthPendingIdentityService) ConsumeBrowserSession(ctx context.Context, sessionToken, browserSessionKey string) (*PendingAuthSession, error) {
 	if s == nil || s.entClient == nil {
 		return nil, fmt.Errorf("pending auth ent client is not configured")
 	}
@@ -306,10 +308,11 @@ func (s *AuthPendingIdentityService) ConsumeBrowserSession(ctx context.Context, 
 		return nil, err
 	}
 
-	return s.consumeSession(ctx, session, browserSessionKey, ErrPendingAuthSessionExpired, ErrPendingAuthSessionConsumed)
+	consumed, err := s.consumeSession(ctx, session, browserSessionKey, ErrPendingAuthSessionExpired, ErrPendingAuthSessionConsumed)
+	return pendingAuthSessionFromEntity(consumed), err
 }
 
-func (s *AuthPendingIdentityService) GetBrowserSession(ctx context.Context, sessionToken, browserSessionKey string) (*dbent.PendingAuthSession, error) {
+func (s *AuthPendingIdentityService) GetBrowserSession(ctx context.Context, sessionToken, browserSessionKey string) (*PendingAuthSession, error) {
 	if s == nil || s.entClient == nil {
 		return nil, fmt.Errorf("pending auth ent client is not configured")
 	}
@@ -321,7 +324,7 @@ func (s *AuthPendingIdentityService) GetBrowserSession(ctx context.Context, sess
 	if err := validatePendingSessionState(session, browserSessionKey, ErrPendingAuthSessionExpired, ErrPendingAuthSessionConsumed); err != nil {
 		return nil, err
 	}
-	return session, nil
+	return pendingAuthSessionFromEntity(session), nil
 }
 
 func (s *AuthPendingIdentityService) getBrowserSession(ctx context.Context, sessionToken string) (*dbent.PendingAuthSession, error) {
@@ -440,7 +443,7 @@ func validatePendingSessionState(session *dbent.PendingAuthSession, browserSessi
 	return nil
 }
 
-func (s *AuthPendingIdentityService) UpsertAdoptionDecision(ctx context.Context, input PendingIdentityAdoptionDecisionInput) (*dbent.IdentityAdoptionDecision, error) {
+func (s *AuthPendingIdentityService) UpsertAdoptionDecision(ctx context.Context, input PendingIdentityAdoptionDecisionInput) (*PendingIdentityDecision, error) {
 	if s == nil || s.entClient == nil {
 		return nil, fmt.Errorf("pending auth ent client is not configured")
 	}
@@ -512,7 +515,7 @@ func (s *AuthPendingIdentityService) UpsertAdoptionDecision(ctx context.Context,
 		}
 	}
 
-	return decision, nil
+	return pendingIdentityDecisionFromEntity(decision), nil
 }
 
 func copyPendingMap(in map[string]any) map[string]any {

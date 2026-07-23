@@ -270,30 +270,26 @@ func (c *billingCache) SubscribeSubscriptionCacheInvalidation(ctx context.Contex
 		return fmt.Errorf("subscribe to subscription cache invalidation: %w", err)
 	}
 
-	go func() {
-		defer func() {
-			if err := pubsub.Close(); err != nil {
-				log.Printf("Warning: failed to close subscription cache invalidation pubsub: %v", err)
-			}
-		}()
-
-		ch := pubsub.Channel()
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case msg, ok := <-ch:
-				if !ok {
-					return
-				}
-				if msg != nil {
-					handler(msg.Payload)
-				}
-			}
+	defer func() {
+		if err := pubsub.Close(); err != nil {
+			log.Printf("Warning: failed to close subscription cache invalidation pubsub: %v", err)
 		}
 	}()
 
-	return nil
+	ch := pubsub.Channel()
+	for {
+		select {
+		case <-ctx.Done():
+			return nil
+		case msg, ok := <-ch:
+			if !ok {
+				return nil
+			}
+			if msg != nil {
+				handler(msg.Payload)
+			}
+		}
+	}
 }
 
 func (c *billingCache) GetAPIKeyRateLimit(ctx context.Context, keyID int64) (*service.APIKeyRateLimitCacheData, error) {

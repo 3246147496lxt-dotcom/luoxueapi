@@ -1665,7 +1665,7 @@ func TestCreateOIDCOAuthAccountRollsBackPostBindFailureBeforeIdentityCanCommit(t
 		Save(ctx)
 	require.NoError(t, err)
 
-	pendingOAuthCreateAccountPreCommitHook = func(context.Context, *dbent.PendingAuthSession) error {
+	pendingOAuthCreateAccountPreCommitHook = func(context.Context, *service.PendingAuthSession) error {
 		return errors.New("forced post-bind failure")
 	}
 	t.Cleanup(func() {
@@ -2110,9 +2110,11 @@ func TestResolvePendingOAuthTargetUserIDNormalizesLegacySpacingAndCase(t *testin
 		Save(ctx)
 	require.NoError(t, err)
 
-	resolvedUserID, err := resolvePendingOAuthTargetUserID(ctx, client, session)
+	pendingSvc, err := handler.pendingIdentityService()
 	require.NoError(t, err)
-	require.Equal(t, existingUser.ID, resolvedUserID)
+	resolvedUser, err := pendingSvc.FindUserByNormalizedEmail(ctx, session.ResolvedEmail)
+	require.NoError(t, err)
+	require.Equal(t, existingUser.ID, resolvedUser.ID)
 }
 
 func TestBindOIDCOAuthLoginReturns2FAChallengeWhenUserHasTotp(t *testing.T) {

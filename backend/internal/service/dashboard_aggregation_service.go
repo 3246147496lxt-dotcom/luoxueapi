@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"log/slog"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -59,6 +60,13 @@ type DashboardAggregationService struct {
 	lockCache  LeaderLockCache
 	db         *sql.DB
 	instanceID string
+
+	lifecycleMu       sync.Mutex
+	lifecycleCtx      context.Context
+	lifecycleCancel   context.CancelFunc
+	lifecycleWG       sync.WaitGroup
+	lifecycleStarted  bool
+	lifecycleStopping bool
 }
 
 // NewDashboardAggregationService 创建聚合服务。
@@ -91,6 +99,14 @@ func (s *DashboardAggregationService) Start() {
 	if s == nil || s.repo == nil || s.timingWheel == nil {
 		return
 	}
+	s.lifecycleMu.Lock()
+	if s.lifecycleStarted || s.lifecycleStopping {
+		s.lifecycleMu.Unlock()
+		return
+	}
+	s.lifecycleCtx, s.lifecycleCancel = context.WithCancel(context.Background())
+	s.lifecycleStarted = true
+	s.lifecycleMu.Unlock()
 	if !s.cfg.Enabled {
 		logger.LegacyPrintf("service.dashboard_aggregation", "[DashboardAggregation] 聚合作业已禁用")
 		return
@@ -102,16 +118,74 @@ func (s *DashboardAggregationService) Start() {
 	}
 
 	if s.cfg.RecomputeDays > 0 {
-		go s.recomputeRecentDays()
+		s.launchBackground(func(ctx context.Context) { s.recomputeRecentDays(ctx) })
 	}
 
 	s.timingWheel.ScheduleRecurring("dashboard:aggregation", interval, func() {
-		s.runScheduledAggregation()
+		s.launchBackground(s.runScheduledAggregation)
 	})
 	logger.LegacyPrintf("service.dashboard_aggregation", "[DashboardAggregation] 聚合作业启动 (interval=%v, lookback=%ds)", interval, s.cfg.LookbackSeconds)
 	if !s.cfg.BackfillEnabled {
 		logger.LegacyPrintf("service.dashboard_aggregation", "[DashboardAggregation] 回填已禁用，如需补齐保留窗口以外历史数据请手动回填")
 	}
+}
+
+func (s *DashboardAggregationService) Stop() {
+	_ = s.StopContext(context.Background())
+}
+
+func (s *DashboardAggregationService) StopContext(ctx context.Context) error {
+	if s == nil {
+		return nil
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	s.lifecycleMu.Lock()
+	if !s.lifecycleStarted {
+		s.lifecycleMu.Unlock()
+		return nil
+	}
+	s.lifecycleStopping = true
+	cancel := s.lifecycleCancel
+	s.lifecycleMu.Unlock()
+
+	if s.timingWheel != nil {
+		s.timingWheel.Cancel("dashboard:aggregation")
+	}
+	if cancel != nil {
+		cancel()
+	}
+	done := make(chan struct{})
+	go func() {
+		s.lifecycleWG.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+func (s *DashboardAggregationService) launchBackground(fn func(context.Context)) bool {
+	if s == nil || fn == nil {
+		return false
+	}
+	s.lifecycleMu.Lock()
+	if !s.lifecycleStarted || s.lifecycleStopping || s.lifecycleCtx == nil {
+		s.lifecycleMu.Unlock()
+		return false
+	}
+	runCtx := s.lifecycleCtx
+	s.lifecycleWG.Add(1)
+	s.lifecycleMu.Unlock()
+	go func() {
+		defer s.lifecycleWG.Done()
+		fn(runCtx)
+	}()
+	return true
 }
 
 // TriggerBackfill 触发回填（异步）。
@@ -133,13 +207,15 @@ func (s *DashboardAggregationService) TriggerBackfill(start, end time.Time) erro
 		}
 	}
 
-	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), defaultDashboardAggregationBackfillTimeout)
+	if !s.launchBackground(func(runCtx context.Context) {
+		ctx, cancel := context.WithTimeout(runCtx, defaultDashboardAggregationBackfillTimeout)
 		defer cancel()
 		if err := s.backfillRange(ctx, start, end); err != nil {
 			logger.LegacyPrintf("service.dashboard_aggregation", "[DashboardAggregation] 回填失败: %v", err)
 		}
-	}()
+	}) {
+		return errors.New("聚合服务未启动")
+	}
 	return nil
 }
 
@@ -158,10 +234,10 @@ func (s *DashboardAggregationService) TriggerRecomputeRange(start, end time.Time
 		return errors.New("重新计算时间范围无效")
 	}
 
-	go func() {
+	if !s.launchBackground(func(runCtx context.Context) {
 		const maxRetries = 3
 		for i := 0; i < maxRetries; i++ {
-			ctx, cancel := context.WithTimeout(context.Background(), defaultDashboardAggregationBackfillTimeout)
+			ctx, cancel := context.WithTimeout(runCtx, defaultDashboardAggregationBackfillTimeout)
 			err := s.recomputeRange(ctx, start, end)
 			cancel()
 			if err == nil {
@@ -171,14 +247,20 @@ func (s *DashboardAggregationService) TriggerRecomputeRange(start, end time.Time
 				logger.LegacyPrintf("service.dashboard_aggregation", "[DashboardAggregation] 重新计算失败: %v", err)
 				return
 			}
-			time.Sleep(5 * time.Second)
+			select {
+			case <-runCtx.Done():
+				return
+			case <-time.After(5 * time.Second):
+			}
 		}
 		logger.LegacyPrintf("service.dashboard_aggregation", "[DashboardAggregation] 重新计算放弃: 聚合作业持续占用")
-	}()
+	}) {
+		return errors.New("聚合服务未启动")
+	}
 	return nil
 }
 
-func (s *DashboardAggregationService) recomputeRecentDays() {
+func (s *DashboardAggregationService) recomputeRecentDays(runCtx context.Context) {
 	days := s.cfg.RecomputeDays
 	if days <= 0 {
 		return
@@ -186,7 +268,7 @@ func (s *DashboardAggregationService) recomputeRecentDays() {
 	now := time.Now().UTC()
 	start := now.AddDate(0, 0, -days)
 
-	ctx, cancel := context.WithTimeout(context.Background(), defaultDashboardAggregationBackfillTimeout)
+	ctx, cancel := context.WithTimeout(runCtx, defaultDashboardAggregationBackfillTimeout)
 	defer cancel()
 	if err := s.backfillRange(ctx, start, now); err != nil {
 		logger.LegacyPrintf("service.dashboard_aggregation", "[DashboardAggregation] 启动重算失败: %v", err)
@@ -212,14 +294,14 @@ func (s *DashboardAggregationService) recomputeRange(ctx context.Context, start,
 	return nil
 }
 
-func (s *DashboardAggregationService) runScheduledAggregation() {
+func (s *DashboardAggregationService) runScheduledAggregation(runCtx context.Context) {
 	if !atomic.CompareAndSwapInt32(&s.running, 0, 1) {
 		return
 	}
 	defer atomic.StoreInt32(&s.running, 0)
 
 	jobStart := time.Now().UTC()
-	ctx, cancel := context.WithTimeout(context.Background(), defaultDashboardAggregationTimeout)
+	ctx, cancel := context.WithTimeout(runCtx, defaultDashboardAggregationTimeout)
 	defer cancel()
 
 	// Multi-instance guard: only the leader runs the periodic aggregation; peers

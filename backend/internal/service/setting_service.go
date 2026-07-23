@@ -50,7 +50,9 @@ type SettingService struct {
 	defaultSubGroupReader       DefaultSubscriptionGroupReader
 	proxyRepo                   ProxyRepository // for resolving websearch provider proxy URLs
 	cfg                         *config.Config
+	onUpdateMu                  sync.RWMutex
 	onUpdate                    func() // Callback when settings are updated (for cache invalidation)
+	onUpdateID                  uint64
 	version                     string // Application version
 	webSearchManagerBuilder     WebSearchManagerBuilder
 	antigravityUAVersionCache   atomic.Value // *cachedAntigravityUserAgentVersion
@@ -252,10 +254,56 @@ func (s *SettingService) GetAllSettings(ctx context.Context) (*SystemSettings, e
 	return s.parseSettings(settings), nil
 }
 
-// SetOnUpdateCallback sets a callback function to be called when settings are updated
-// This is used for cache invalidation (e.g., HTML cache in frontend server)
+// SetOnUpdateCallback preserves the legacy single-listener API. Runtime-owned
+// integrations should prefer RegisterOnUpdateCallback so startup rollback and
+// shutdown can remove the exact registration they installed.
 func (s *SettingService) SetOnUpdateCallback(callback func()) {
+	if s == nil {
+		return
+	}
+	s.onUpdateMu.Lock()
+	s.onUpdateID++
 	s.onUpdate = callback
+	s.onUpdateMu.Unlock()
+}
+
+// RegisterOnUpdateCallback installs the process runtime's single settings
+// listener and returns an idempotent, ownership-aware unsubscribe function.
+// A stale runtime cannot clear a callback installed by a newer owner.
+func (s *SettingService) RegisterOnUpdateCallback(callback func()) func() {
+	if s == nil {
+		return func() {}
+	}
+	s.onUpdateMu.Lock()
+	s.onUpdateID++
+	registrationID := s.onUpdateID
+	s.onUpdate = callback
+	s.onUpdateMu.Unlock()
+
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			s.onUpdateMu.Lock()
+			defer s.onUpdateMu.Unlock()
+			if s.onUpdateID != registrationID {
+				return
+			}
+			s.onUpdateID++
+			s.onUpdate = nil
+		})
+	}
+}
+
+func (s *SettingService) notifyUpdated() {
+	if s == nil {
+		return
+	}
+	s.onUpdateMu.RLock()
+	callback := s.onUpdate
+	s.onUpdateMu.RUnlock()
+	if callback != nil {
+		callback()
+	}
 }
 
 // SetVersion sets the application version for injection into public settings

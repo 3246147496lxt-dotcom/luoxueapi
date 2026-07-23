@@ -211,8 +211,15 @@ func (s *SettingService) IsWebSearchEmulationEnabled(ctx context.Context) bool {
 // The infra layer (main/wire) provides this builder, keeping redis out of the service layer.
 // Triggers initial build.
 func (s *SettingService) SetWebSearchManagerBuilder(ctx context.Context, builder WebSearchManagerBuilder) {
-	s.webSearchManagerBuilder = builder
+	s.ConfigureWebSearchManagerBuilder(builder)
 	s.rebuildWebSearchManager(ctx)
+}
+
+// ConfigureWebSearchManagerBuilder records the builder without reading
+// settings or installing a package-global manager. The Supervisor invokes the
+// initial rebuild from SettingService.StartRuntime.
+func (s *SettingService) ConfigureWebSearchManagerBuilder(builder WebSearchManagerBuilder) {
+	s.webSearchManagerBuilder = builder
 }
 
 // rebuildWebSearchManager reads the current config, resolves proxy URLs, and invokes the builder.

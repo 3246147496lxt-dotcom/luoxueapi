@@ -457,13 +457,13 @@ describe('AccountUsageCell', () => {
 	expect(getUsage).toHaveBeenCalledTimes(1)
 
 	await wrapper.setProps({
-	  account: {
+	  account: makeAccount({
 	    id: 2003,
 	    platform: 'openai',
 	    type: 'oauth',
 	    updated_at: '2026-03-07T10:01:00Z',
 	    extra: {}
-	  }
+	  })
 	})
 
 	await flushPromises()

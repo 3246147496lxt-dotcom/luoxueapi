@@ -221,8 +221,11 @@ type PricingService struct {
 	localHash    string
 
 	// 停止信号
-	stopCh chan struct{}
-	wg     sync.WaitGroup
+	stopCh    chan struct{}
+	wg        sync.WaitGroup
+	startOnce sync.Once
+	stopOnce  sync.Once
+	startErr  error
 }
 
 // LastUpdated returns the timestamp of the exact metadata/pricing snapshot.
@@ -248,6 +251,16 @@ func NewPricingService(cfg *config.Config, remoteClient PricingRemoteClient) *Pr
 
 // Initialize 初始化价格服务
 func (s *PricingService) Initialize() error {
+	if s == nil {
+		return nil
+	}
+	s.startOnce.Do(func() {
+		s.startErr = s.initialize()
+	})
+	return s.startErr
+}
+
+func (s *PricingService) initialize() error {
 	// 确保数据目录存在
 	if err := os.MkdirAll(s.cfg.Pricing.DataDir, 0755); err != nil {
 		logger.LegacyPrintf("service.pricing", "[Pricing] Failed to create data directory: %v", err)
@@ -270,9 +283,14 @@ func (s *PricingService) Initialize() error {
 
 // Stop 停止价格服务
 func (s *PricingService) Stop() {
-	close(s.stopCh)
-	s.wg.Wait()
-	logger.LegacyPrintf("service.pricing", "%s", "[Pricing] Service stopped")
+	if s == nil {
+		return
+	}
+	s.stopOnce.Do(func() {
+		close(s.stopCh)
+		s.wg.Wait()
+		logger.LegacyPrintf("service.pricing", "%s", "[Pricing] Service stopped")
+	})
 }
 
 // startUpdateScheduler 启动定时更新调度器

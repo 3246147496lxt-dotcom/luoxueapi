@@ -214,7 +214,7 @@ describe('admin ProxiesView precise deep links', () => {
     const { wrapper } = await mountView({})
     const toolbar = wrapper.get('.proxy-toolbar')
 
-    expect(toolbar.get('input[type="text"]').exists()).toBe(true)
+    expect(toolbar.find('input[type="text"]').exists()).toBe(true)
     expect(toolbar.findAll('.btn-primary')).toHaveLength(1)
     expect(toolbar.get('[data-testid="proxy-create-action"]').classes()).toContain('proxy-touch-target')
 

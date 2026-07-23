@@ -658,8 +658,8 @@ import { useClipboard } from '@/composables/useClipboard'
 import Icon from '@/components/icons/Icon.vue'
 
 const GITHUB_REPO = 'Wei-Shaw/sub2api'
-// Public compatibility image; tags carry no "v" prefix, e.g. weishaw/sub2api:0.1.146.
-const DOCKER_IMAGE = 'weishaw/sub2api'
+// Canonical production image; release tags carry no "v" prefix.
+const DOCKER_IMAGE = 'ghcr.io/3246147496lxt-dotcom/luoxueapi'
 
 const { t } = useI18n()
 

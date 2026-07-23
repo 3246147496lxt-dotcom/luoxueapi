@@ -46,7 +46,7 @@ describe('AccountTableActions responsive disclosure', () => {
 
     expect(toggle.attributes('aria-expanded')).toBe('true')
     expect(secondary.classes()).toContain('flex')
-    expect(secondary.get('[data-testid="secondary-action"]').exists()).toBe(true)
+    expect(secondary.find('[data-testid="secondary-action"]').exists()).toBe(true)
   })
 
   it('keeps refresh directly available with an accessible 44px target', async () => {
