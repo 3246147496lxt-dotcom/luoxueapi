@@ -111,6 +111,23 @@ class ReleaseWorkflowSecurityTest(unittest.TestCase):
         self.assertNotIn("sync-version-file:", RELEASE)
 
     def test_release_uses_immutable_resolved_commit(self) -> None:
+        resolve_checkout = RELEASE.split(
+            "- name: Checkout repository history", 1
+        )[1].split("- name: Resolve and validate release tag", 1)[0]
+        resolve_job = RELEASE.split("  resolve-release:", 1)[1].split(
+            "  quality-gates:", 1
+        )[0]
+
+        self.assertIn("fetch-depth: 0", resolve_checkout)
+        self.assertIn("fetch-tags: true", resolve_checkout)
+        self.assertIn("persist-credentials: false", resolve_checkout)
+        self.assertNotIn("git fetch", resolve_job)
+        self.assertNotIn("GITHUB_TOKEN", resolve_job)
+        self.assertNotIn("GH_TOKEN", resolve_job)
+        self.assertNotIn("github.token", resolve_job)
+        self.assertNotIn("extraheader", resolve_job.lower())
+        self.assertNotIn("x-access-token", resolve_job.lower())
+        self.assertNotIn("credential.helper", resolve_job.lower())
         self.assertIn(
             "ref: ${{ needs.resolve-release.outputs.commit }}",
             RELEASE,

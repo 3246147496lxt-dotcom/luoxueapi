@@ -38,6 +38,7 @@ jobs:
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
           fetch-depth: 0
+          fetch-tags: true
           persist-credentials: false
 
       - name: Resolve and validate release tag
@@ -59,10 +60,6 @@ jobs:
 
           export RELEASE_TAG_CANDIDATE="$tag"
           python3 tools/release_semver.py
-
-          git fetch --force --no-tags origin \
-            "+refs/heads/${DEFAULT_BRANCH}:refs/remotes/origin/${DEFAULT_BRANCH}" \
-            "+refs/tags/${tag}:refs/tags/${tag}"
 
           if ! git show-ref --verify --quiet "refs/tags/${tag}"; then
             echo "Release tag does not exist" >&2
