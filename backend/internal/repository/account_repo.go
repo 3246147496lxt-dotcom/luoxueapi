@@ -3354,6 +3354,7 @@ func (r *accountRepository) IncrementQuotaUsed(ctx context.Context, id int64, am
 			ELSE '{}'::jsonb END
 		), updated_at = NOW()
 		WHERE id = $2 AND deleted_at IS NULL
+		RETURNING id
 		)
 		INSERT INTO scheduler_outbox (event_type, account_id, group_id, payload, dedup_key)
 		SELECT $4, updated.id, NULL, NULL, $3 FROM updated

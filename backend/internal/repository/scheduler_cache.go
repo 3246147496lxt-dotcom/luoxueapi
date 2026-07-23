@@ -97,10 +97,15 @@ if currentEpoch == false then
     redis.call('SET', KEYS[1], currentEpoch)
 end
 local parsedEpoch = tonumber(currentEpoch)
-if parsedEpoch == nil or parsedEpoch < 1 then
+local maxEpoch = tonumber(ARGV[3])
+if parsedEpoch == nil or maxEpoch == nil or parsedEpoch < 1 or parsedEpoch > maxEpoch or parsedEpoch ~= math.floor(parsedEpoch) then
     return {-2, '', ''}
 end
-return {1, generation, currentEpoch}
+local canonicalEpoch = string.format('%.0f', parsedEpoch)
+if canonicalEpoch ~= currentEpoch then
+    redis.call('SET', KEYS[1], canonicalEpoch)
+end
+return {1, generation, canonicalEpoch}
 `)
 
 	allocateSnapshotVersionScript = redis.NewScript(`
@@ -129,27 +134,41 @@ end
 local retired = redis.call('GET', KEYS[2])
 local currentEpochRaw = redis.call('GET', KEYS[1])
 local currentEpoch = tonumber(currentEpochRaw)
+local maxEpoch = tonumber(ARGV[6])
+local function validEpoch(epoch)
+    return epoch ~= nil and maxEpoch ~= nil and epoch >= 1 and epoch <= maxEpoch and epoch == math.floor(epoch)
+end
+local retiredEpoch = nil
+if retired ~= false then
+    retiredEpoch = tonumber(retired)
+    if not validEpoch(retiredEpoch) then
+        return {-2, ''}
+    end
+end
 
 if retired == false then
-    if currentEpoch == nil then
+    if currentEpochRaw == false then
         currentEpoch = tonumber(ARGV[4])
     else
-        if currentEpoch >= tonumber(ARGV[6]) then
+        if not validEpoch(currentEpoch) or currentEpoch >= maxEpoch then
             return {-2, ''}
         end
         currentEpoch = currentEpoch + 1
     end
-    if currentEpoch == nil or currentEpoch < 1 then
+    if not validEpoch(currentEpoch) then
         return {-2, ''}
     end
-    redis.call('SET', KEYS[1], tostring(currentEpoch))
-    redis.call('SET', KEYS[2], tostring(currentEpoch))
-elseif currentEpoch == nil or currentEpoch < 1 then
-    currentEpoch = tonumber(retired)
-    if currentEpoch == nil or currentEpoch < 1 then
-        return {-2, ''}
-    end
-    redis.call('SET', KEYS[1], tostring(currentEpoch))
+    local canonicalEpoch = string.format('%.0f', currentEpoch)
+    redis.call('SET', KEYS[1], canonicalEpoch)
+    redis.call('SET', KEYS[2], canonicalEpoch)
+elseif not validEpoch(currentEpoch) then
+    currentEpoch = retiredEpoch
+    local canonicalEpoch = string.format('%.0f', currentEpoch)
+    redis.call('SET', KEYS[1], canonicalEpoch)
+    redis.call('SET', KEYS[2], canonicalEpoch)
+else
+    redis.call('SET', KEYS[1], string.format('%.0f', currentEpoch))
+    redis.call('SET', KEYS[2], string.format('%.0f', retiredEpoch))
 end
 
 redis.call('SREM', KEYS[3], ARGV[1])
@@ -158,7 +177,7 @@ if currentActive ~= false then
     redis.call('EXPIRE', ARGV[2] .. currentActive, tonumber(ARGV[3]))
 end
 redis.call('DEL', KEYS[4], KEYS[5])
-return {1, tostring(currentEpoch)}
+return {1, string.format('%.0f', currentEpoch)}
 `)
 
 	reopenBucketScript = redis.NewScript(`
@@ -173,31 +192,38 @@ end
 local currentEpochRaw = redis.call('GET', KEYS[1])
 local currentEpoch = tonumber(currentEpochRaw)
 local retiredEpochRaw = redis.call('GET', KEYS[2])
+local maxEpoch = tonumber(ARGV[6])
+local function validEpoch(epoch)
+    return epoch ~= nil and maxEpoch ~= nil and epoch >= 1 and epoch <= maxEpoch and epoch == math.floor(epoch)
+end
 
 if retiredEpochRaw == false then
     if currentEpochRaw == false then
         currentEpochRaw = ARGV[4]
         currentEpoch = tonumber(currentEpochRaw)
-        if currentEpoch == nil or currentEpoch < 1 then
+        if not validEpoch(currentEpoch) then
             return {-2, '', ''}
         end
         redis.call('SET', KEYS[1], currentEpochRaw)
     end
-    if currentEpoch == nil or currentEpoch < 1 then
+    if not validEpoch(currentEpoch) then
         return {-2, '', ''}
     end
-    return {1, generation, tostring(currentEpoch)}
+    local canonicalEpoch = string.format('%.0f', currentEpoch)
+    redis.call('SET', KEYS[1], canonicalEpoch)
+    return {1, generation, canonicalEpoch}
 end
 
 local retiredEpoch = tonumber(retiredEpochRaw)
-if retiredEpoch == nil or retiredEpoch < 1 then
+if not validEpoch(retiredEpoch) then
     return {-2, '', ''}
 end
-if currentEpoch == nil or currentEpoch < retiredEpoch then
+if not validEpoch(currentEpoch) or currentEpoch < retiredEpoch then
     currentEpoch = retiredEpoch
 end
 
-redis.call('SET', KEYS[1], tostring(currentEpoch))
+local canonicalEpoch = string.format('%.0f', currentEpoch)
+redis.call('SET', KEYS[1], canonicalEpoch)
 redis.call('DEL', KEYS[2])
 redis.call('SREM', KEYS[3], ARGV[1])
 local currentActive = redis.call('GET', KEYS[5])
@@ -205,7 +231,7 @@ if currentActive ~= false then
     redis.call('EXPIRE', ARGV[2] .. currentActive, tonumber(ARGV[3]))
 end
 redis.call('DEL', KEYS[4], KEYS[5])
-return {1, generation, tostring(currentEpoch)}
+return {1, generation, canonicalEpoch}
 `)
 
 	// 释放租约必须先比较所有者令牌再删除，过期持有者的延迟释放不能误删继任租约。
@@ -622,7 +648,7 @@ func (c *schedulerCache) CaptureBucketWriteToken(ctx context.Context, bucket ser
 		schedulerBucketKey(schedulerRetiredPrefix, bucket),
 		schedulerGenerationKey,
 		schedulerResetKey,
-	}, strconv.FormatInt(candidateEpoch, 10), candidateGeneration).Slice()
+	}, strconv.FormatInt(candidateEpoch, 10), candidateGeneration, strconv.FormatInt(schedulerMaxSafeLuaInteger, 10)).Slice()
 	if err != nil {
 		return service.SchedulerBucketWriteToken{}, err
 	}
@@ -686,7 +712,7 @@ func (c *schedulerCache) ReopenBucket(ctx context.Context, bucket service.Schedu
 		schedulerBucketKey(schedulerActivePrefix, bucket),
 		schedulerGenerationKey,
 		schedulerResetKey,
-	}, bucket.String(), snapshotKeyPrefix, snapshotGraceTTLSeconds, strconv.FormatInt(candidateEpoch, 10), candidateGeneration).Slice()
+	}, bucket.String(), snapshotKeyPrefix, snapshotGraceTTLSeconds, strconv.FormatInt(candidateEpoch, 10), candidateGeneration, strconv.FormatInt(schedulerMaxSafeLuaInteger, 10)).Slice()
 	if err != nil {
 		return service.SchedulerBucketWriteToken{}, err
 	}
