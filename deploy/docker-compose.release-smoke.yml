@@ -1,0 +1,6 @@
+services:
+  sub2api:
+    image: ${SMOKE_IMAGE:?SMOKE_IMAGE is required}
+    build: !reset null
+    platform: linux/amd64
+    pull_policy: never

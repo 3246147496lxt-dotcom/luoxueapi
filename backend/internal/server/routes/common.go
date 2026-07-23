@@ -17,6 +17,28 @@ func RegisterCommonRoutes(r *gin.Engine) {
 // RegisterCommonRoutesWithReadiness preserves /health byte-for-byte while
 // exposing process liveness separately from dependency-aware readiness.
 func RegisterCommonRoutesWithReadiness(r *gin.Engine, readinessProbe lifecycle.ReadinessProbe) {
+	RegisterHealthRoutes(r, readinessProbe)
+
+	// Claude Code 遥测日志（忽略，直接返回200）
+	r.POST("/api/event_logging/batch", func(c *gin.Context) {
+		c.Status(http.StatusOK)
+	})
+
+	// Setup status endpoint (always returns needs_setup: false in normal mode)
+	// This is used by the frontend to detect when the service has restarted after setup
+	r.GET("/setup/status", func(c *gin.Context) {
+		c.JSON(http.StatusOK, gin.H{
+			"code": 0,
+			"data": gin.H{
+				"needs_setup": false,
+				"step":        "completed",
+			},
+		})
+	})
+}
+
+// RegisterHealthRoutes exposes health endpoints in both setup and normal mode.
+func RegisterHealthRoutes(r *gin.Engine, readinessProbe lifecycle.ReadinessProbe) {
 	// 健康检查
 	r.GET("/health", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"status": "ok"})
@@ -45,22 +67,5 @@ func RegisterCommonRoutesWithReadiness(r *gin.Engine, readinessProbe lifecycle.R
 			status = http.StatusServiceUnavailable
 		}
 		c.JSON(status, result)
-	})
-
-	// Claude Code 遥测日志（忽略，直接返回200）
-	r.POST("/api/event_logging/batch", func(c *gin.Context) {
-		c.Status(http.StatusOK)
-	})
-
-	// Setup status endpoint (always returns needs_setup: false in normal mode)
-	// This is used by the frontend to detect when the service has restarted after setup
-	r.GET("/setup/status", func(c *gin.Context) {
-		c.JSON(http.StatusOK, gin.H{
-			"code": 0,
-			"data": gin.H{
-				"needs_setup": false,
-				"step":        "completed",
-			},
-		})
 	})
 }
