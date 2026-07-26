@@ -242,7 +242,7 @@ html.dark .app-layout--home-clay .btn-ghost:hover:not(:disabled) {
 /* Table-page framing */
 .app-layout--home-clay .table-page-layout {
   gap: 16px;
-  height: calc(100vh - 81px - 80px);
+  height: calc(100dvh - var(--app-shell-top-offset) - var(--app-main-block-padding));
 }
 
 .app-layout--home-clay :where(.layout-section-actions, .layout-section-filters) {

@@ -814,7 +814,7 @@ onBeforeUnmount(() => {
 
 <style scoped>
 .admin-chat-history-page {
-  min-height: calc(100dvh - 81px - 62px);
+  min-height: calc(100dvh - var(--app-shell-top-offset) - var(--app-main-block-padding));
 }
 
 .chat-history-message-scroll,
@@ -824,7 +824,7 @@ onBeforeUnmount(() => {
 
 @media (min-width: 1024px) {
   .admin-chat-history-page {
-    height: calc(100dvh - 81px - 80px);
+    height: calc(100dvh - var(--app-shell-top-offset) - var(--app-main-block-padding));
     min-height: 38rem;
   }
 }

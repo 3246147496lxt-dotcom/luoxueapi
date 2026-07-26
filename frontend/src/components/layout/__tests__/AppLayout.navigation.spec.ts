@@ -1,5 +1,5 @@
 import { nextTick } from 'vue'
-import { mount } from '@vue/test-utils'
+import { flushPromises, mount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import { createMemoryHistory, createRouter } from 'vue-router'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -49,7 +49,7 @@ describe('AppLayout navigation structure', () => {
     document.body.classList.remove('app-flat-workspace-active')
   })
 
-  it('places the global header before the floating sidebar and content shell', async () => {
+  it('places the mobile header before the sidebar and content shell without a desktop header offset class', async () => {
     const pinia = createPinia()
     setActivePinia(pinia)
     const router = await createLayoutRouter()
@@ -57,8 +57,9 @@ describe('AppLayout navigation structure', () => {
       global: {
         plugins: [pinia, router],
         stubs: {
-          AppHeader: { template: '<header data-testid="header-stub" />' },
+          AppMobileHeader: { template: '<header data-testid="mobile-header-stub" />' },
           AppSidebar: { template: '<aside data-testid="sidebar-stub" />' },
+          PersonalSettingsDialog: { template: '<div v-if="false" />' },
         },
       },
       slots: { default: '<div data-testid="page-content" />' },
@@ -66,13 +67,45 @@ describe('AppLayout navigation structure', () => {
 
     const rootChildren = Array.from(wrapper.element.children)
     expect(rootChildren).toHaveLength(3)
-    expect(rootChildren[0]).toBe(wrapper.get('[data-testid="header-stub"]').element)
+    expect(rootChildren[0]).toBe(wrapper.get('[data-testid="mobile-header-stub"]').element)
     expect(rootChildren[1]).toBe(wrapper.get('[data-testid="sidebar-stub"]').element)
     expect(rootChildren[2]).toBe(wrapper.get('[data-testid="app-main-shell"]').element)
-    expect(wrapper.classes()).toContain('pt-[81px]')
-    expect(wrapper.findAll('[data-testid="header-stub"]')).toHaveLength(1)
+    expect(wrapper.classes()).not.toContain('pt-[81px]')
+    expect(wrapper.findAll('[data-testid="mobile-header-stub"]')).toHaveLength(1)
     expect(wrapper.findAll('[data-testid="sidebar-stub"]')).toHaveLength(1)
     expect(wrapper.find('[data-testid="page-content"]').exists()).toBe(true)
+  })
+
+  it('requests the async settings host only after the query first appears', async () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const router = await createLayoutRouter()
+    const wrapper = mount(AppLayout, {
+      global: {
+        plugins: [pinia, router],
+        stubs: {
+          AppMobileHeader: true,
+          AppSidebar: true,
+          PersonalSettingsDialog: {
+            template: '<div data-testid="personal-settings-dialog-stub" />',
+          },
+        },
+      },
+    })
+
+    expect(wrapper.find('[data-testid="personal-settings-dialog-stub"]').exists()).toBe(false)
+
+    await router.replace('/dashboard?account_settings=general')
+    await flushPromises()
+
+    expect(wrapper.find('[data-testid="personal-settings-dialog-stub"]').exists()).toBe(true)
+
+    await router.replace('/dashboard')
+    await flushPromises()
+
+    // Once requested, the lightweight host stays mounted so its dialog can
+    // release modal resources and restore focus after the query is removed.
+    expect(wrapper.find('[data-testid="personal-settings-dialog-stub"]').exists()).toBe(true)
   })
 
   it('keeps the content offset synchronized with the sidebar width', async () => {
@@ -84,19 +117,18 @@ describe('AppLayout navigation structure', () => {
       global: {
         plugins: [pinia, router],
         stubs: {
-          AppHeader: true,
+          AppMobileHeader: true,
           AppSidebar: true,
+          PersonalSettingsDialog: { template: '<div v-if="false" />' },
         },
       },
     })
     const mainShell = wrapper.get('[data-testid="app-main-shell"]')
 
-    expect(mainShell.classes()).toContain('min-h-[calc(100vh-81px)]')
+    expect(mainShell.classes()).not.toContain('min-h-[calc(100vh-81px)]')
     expect(mainShell.classes()).toEqual(
       expect.arrayContaining([
-        'lg:ml-[184px]',
-        'min-[1025px]:ml-[196px]',
-        'min-[1281px]:ml-[208px]',
+        'lg:ml-[260px]',
       ]),
     )
     expect(mainShell.classes()).not.toContain('lg:ml-[68px]')
@@ -105,16 +137,14 @@ describe('AppLayout navigation structure', () => {
     await nextTick()
 
     expect(mainShell.classes()).toContain('lg:ml-[68px]')
-    expect(mainShell.classes()).not.toContain('lg:ml-[184px]')
+    expect(mainShell.classes()).not.toContain('lg:ml-[260px]')
 
     appStore.setSidebarCollapsed(false)
     await nextTick()
 
     expect(mainShell.classes()).toEqual(
       expect.arrayContaining([
-        'lg:ml-[184px]',
-        'min-[1025px]:ml-[196px]',
-        'min-[1281px]:ml-[208px]',
+        'lg:ml-[260px]',
       ]),
     )
   })
@@ -127,10 +157,11 @@ describe('AppLayout navigation structure', () => {
       global: {
         plugins: [pinia, router],
         stubs: {
-          AppHeader: {
-            template: '<header data-testid="header-original" />',
+          AppMobileHeader: {
+            template: '<header data-testid="mobile-header-original" />',
           },
           AppSidebar: { template: '<aside data-testid="sidebar-original" />' },
+          PersonalSettingsDialog: { template: '<div v-if="false" />' },
         },
       },
     })
@@ -140,7 +171,7 @@ describe('AppLayout navigation structure', () => {
     expect(wrapper.classes()).not.toContain('app-layout--admin-shell')
     expect(wrapper.get('[data-testid="app-main-shell"]').classes()).not.toContain('app-layout--home-clay')
     expect(wrapper.get('[data-testid="app-main-shell"]').classes()).not.toContain('app-layout--chat')
-    expect(wrapper.find('[data-testid="header-original"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="mobile-header-original"]').exists()).toBe(true)
     expect(wrapper.get('[data-testid="sidebar-original"]').attributes('variant')).toBeUndefined()
     expect(document.body.classList.contains('admin-home-clay-portals')).toBe(false)
     expect(document.body.classList.contains('app-flat-workspace-active')).toBe(true)
@@ -151,7 +182,7 @@ describe('AppLayout navigation structure', () => {
     expect(wrapper.classes()).toContain('app-layout--flat-workspace-shell')
     expect(wrapper.classes()).toContain('app-layout--admin-shell')
     expect(wrapper.get('[data-testid="app-main-shell"]').classes()).toContain('app-layout--home-clay')
-    expect(wrapper.get('[data-testid="header-original"]').attributes('data-variant')).toBeUndefined()
+    expect(wrapper.get('[data-testid="mobile-header-original"]').attributes('data-variant')).toBeUndefined()
     expect(wrapper.get('[data-testid="sidebar-original"]').attributes('variant')).toBeUndefined()
     expect(document.documentElement.classList.contains('app-layout--home-clay')).toBe(false)
     expect(document.body.classList.contains('app-layout--home-clay')).toBe(false)
@@ -164,7 +195,7 @@ describe('AppLayout navigation structure', () => {
     expect(wrapper.classes()).toContain('app-layout--flat-workspace-shell')
     expect(wrapper.classes()).not.toContain('app-layout--admin-shell')
     expect(wrapper.get('[data-testid="app-main-shell"]').classes()).not.toContain('app-layout--home-clay')
-    expect(wrapper.get('[data-testid="header-original"]').attributes('data-variant')).toBeUndefined()
+    expect(wrapper.get('[data-testid="mobile-header-original"]').attributes('data-variant')).toBeUndefined()
     expect(wrapper.get('[data-testid="sidebar-original"]').attributes('variant')).toBeUndefined()
     expect(document.body.classList.contains('admin-home-clay-portals')).toBe(false)
     expect(document.body.classList.contains('app-flat-workspace-active')).toBe(true)
@@ -178,8 +209,9 @@ describe('AppLayout navigation structure', () => {
       global: {
         plugins: [pinia, router],
         stubs: {
-          AppHeader: true,
+          AppMobileHeader: true,
           AppSidebar: true,
+          PersonalSettingsDialog: { template: '<div v-if="false" />' },
         },
       },
     })
@@ -218,8 +250,9 @@ describe('AppLayout navigation structure', () => {
       global: {
         plugins: [pinia, router],
         stubs: {
-          AppHeader: true,
+          AppMobileHeader: true,
           AppSidebar: true,
+          PersonalSettingsDialog: { template: '<div v-if="false" />' },
         },
       },
     })

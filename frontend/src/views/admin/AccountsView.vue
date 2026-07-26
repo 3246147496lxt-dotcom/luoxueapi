@@ -3039,7 +3039,7 @@ onUnmounted(() => {
 }
 
 .account-inspector-overlay--drawer {
-  top: 81px;
+  top: var(--app-shell-top-offset);
   align-items: stretch;
   justify-content: flex-end;
 }
@@ -3101,7 +3101,7 @@ onUnmounted(() => {
 
 @media (min-width: 1024px) {
   .account-table-page-layout {
-    height: calc(100vh - 81px - 80px);
+    height: calc(100dvh - var(--app-shell-top-offset) - var(--app-main-block-padding));
   }
 }
 

@@ -5,22 +5,27 @@ import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 
 const dir = dirname(fileURLToPath(import.meta.url))
-const headerSource = readFileSync(resolve(dir, '../AppHeader.vue'), 'utf8')
-const sidebarSource = readFileSync(resolve(dir, '../AppSidebar.vue'), 'utf8')
+const appSidebarSource = readFileSync(resolve(dir, '../AppSidebar.vue'), 'utf8')
+const accountDockSource = readFileSync(resolve(dir, '../SidebarAccountDock.vue'), 'utf8')
 const publicSiteLayoutSource = readFileSync(resolve(dir, '../../public/PublicSiteLayout.vue'), 'utf8')
 const homeViewSource = readFileSync(resolve(dir, '../../../views/HomeView.vue'), 'utf8')
 const keyUsageViewSource = readFileSync(resolve(dir, '../../../views/KeyUsageView.vue'), 'utf8')
 
 describe('doc_url sanitization', () => {
-  it('AppHeader leaves documentation navigation to the sidebar', () => {
-    expect(headerSource).not.toContain('data-testid="header-docs-link"')
-    expect(headerSource).not.toContain("import { resolveDocumentationUrl } from '@/utils/documentationUrl'")
+  it('AppSidebar resolves the configured tutorial URL before rendering it in navigation', () => {
+    expect(appSidebarSource).toContain(
+      "import { resolveDocumentationUrl } from '@/utils/documentationUrl'",
+    )
+    expect(appSidebarSource).toContain('appStore.cachedPublicSettings?.doc_url || appStore.docUrl')
+    expect(appSidebarSource).toContain('href: documentationUrl.value')
   })
 
-  it('AppSidebar uses the shared environment-aware documentation URL resolver', () => {
-    expect(sidebarSource).toContain("import { resolveDocumentationUrl } from '@/utils/documentationUrl'")
-    expect(sidebarSource).toContain('appStore.cachedPublicSettings?.doc_url || appStore.docUrl')
-    expect(sidebarSource).not.toContain('https://luoxueapi.cc/tutorial-docs/')
+  it('SidebarAccountDock uses the shared environment-aware documentation URL resolver', () => {
+    expect(accountDockSource).toContain(
+      "import { resolveDocumentationUrl } from '@/utils/documentationUrl'",
+    )
+    expect(accountDockSource).toContain('appStore.cachedPublicSettings?.doc_url || appStore.docUrl')
+    expect(accountDockSource).not.toContain('https://luoxueapi.cc/tutorial-docs/')
   })
 
   it('HomeView imports sanitizeUrl', () => {

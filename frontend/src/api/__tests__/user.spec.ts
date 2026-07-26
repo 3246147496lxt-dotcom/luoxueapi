@@ -29,4 +29,26 @@ describe('user api oauth binding urls', () => {
       'https://api.example.com/api/v1/auth/oauth/wechat/bind/start?redirect=%2Fsettings%2Fprofile&intent=bind_current_user&mode=open'
     )
   })
+
+  it.each(['linuxdo', 'dingtalk', 'oidc'] as const)(
+    'uses the role-safe legacy settings bridge when %s has no explicit redirect',
+    async provider => {
+      const { buildOAuthBindingStartURL } = await import('@/api/user')
+
+      expect(buildOAuthBindingStartURL(provider)).toBe(
+        `https://api.example.com/api/v1/auth/oauth/${provider}/bind/start?redirect=%2Fsettings%2Fprofile&intent=bind_current_user`
+      )
+    }
+  )
+
+  it('uses canonical user/admin settings hosts when role context is available', async () => {
+    const { buildOAuthBindingStartURL } = await import('@/api/user')
+
+    expect(buildOAuthBindingStartURL('linuxdo', { userRole: 'user' })).toContain(
+      'redirect=%2Fdashboard%3Faccount_settings%3Daccount%26account_settings_detail%3Dconnections'
+    )
+    expect(buildOAuthBindingStartURL('dingtalk', { userRole: 'admin' })).toContain(
+      'redirect=%2Fadmin%2Fdashboard%3Faccount_settings%3Daccount%26account_settings_detail%3Dconnections'
+    )
+  })
 })

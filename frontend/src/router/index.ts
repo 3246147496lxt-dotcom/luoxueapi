@@ -3,7 +3,11 @@
  * Defines all application routes with lazy loading and navigation guards
  */
 
-import { createRouter, createWebHistory, type RouteRecordRaw } from 'vue-router'
+import {
+  createRouter,
+  createWebHistory,
+  type RouteRecordRaw,
+} from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import { useAppStore } from '@/stores/app'
 import { useAdminSettingsStore } from '@/stores/adminSettings'
@@ -11,8 +15,17 @@ import { useAdminComplianceStore } from '@/stores/adminCompliance'
 import { useNavigationLoadingState } from '@/composables/useNavigationLoading'
 import { useRoutePrefetch } from '@/composables/useRoutePrefetch'
 import { getSetupStatus } from '@/api/setup'
+import {
+  parsePersonalSettingsRoute,
+  resolveLegacyPersonalSettingsRedirect,
+  resolvePersonalSettingsCanonicalization
+} from '@/navigation/personalSettingsRoute'
 import { resolveCompletedSetupRedirectPath } from './setupRedirect'
 import { resolveRouteDocumentTitle } from './title'
+import {
+  isFreshSubscriptionPlanBridge,
+  resolveLegacySubscriptionPricingRedirect
+} from './purchasePricingRedirect'
 
 /**
  * Route definitions with lazy loading
@@ -294,13 +307,69 @@ const routes: RouteRecordRaw[] = [
   {
     path: '/profile',
     name: 'Profile',
-    component: () => import('@/views/user/ProfileView.vue'),
+    component: { render: () => null },
+    beforeEnter: (to) => resolveLegacyPersonalSettingsRedirect(
+      to,
+      useAuthStore().isAdmin ? 'admin' : 'user',
+      'account',
+      'profile'
+    ),
     meta: {
       requiresAuth: true,
       requiresAdmin: false,
       title: 'Profile',
       titleKey: 'profile.title',
       descriptionKey: 'profile.description'
+    }
+  },
+  {
+    path: '/profile/security',
+    name: 'ProfileSecurityLegacy',
+    component: { render: () => null },
+    beforeEnter: (to) => resolveLegacyPersonalSettingsRedirect(
+      to,
+      useAuthStore().isAdmin ? 'admin' : 'user',
+      'security'
+    ),
+    meta: {
+      requiresAuth: true,
+      requiresAdmin: false,
+      title: 'Profile Security',
+      titleKey: 'profile.securityTitle'
+    }
+  },
+  {
+    path: '/profile/connections',
+    name: 'ProfileConnectionsLegacy',
+    component: { render: () => null },
+    beforeEnter: (to) => resolveLegacyPersonalSettingsRedirect(
+      to,
+      useAuthStore().isAdmin ? 'admin' : 'user',
+      'account',
+      'connections'
+    ),
+    meta: {
+      requiresAuth: true,
+      requiresAdmin: false,
+      title: 'Profile Connections',
+      titleKey: 'profile.authBindings.title'
+    }
+  },
+  {
+    path: '/settings/profile',
+    name: 'SettingsProfileLegacy',
+    component: { render: () => null },
+    beforeEnter: (to) => resolveLegacyPersonalSettingsRedirect(
+      to,
+      useAuthStore().isAdmin ? 'admin' : 'user',
+      'account',
+      'connections'
+    ),
+    meta: {
+      requiresAuth: true,
+      requiresAdmin: false,
+      title: 'Profile Connections',
+      titleKey: 'profile.authBindings.title'
     }
   },
   {
@@ -325,6 +394,19 @@ const routes: RouteRecordRaw[] = [
       title: 'Purchase Subscription',
       titleKey: 'nav.buySubscription',
       descriptionKey: 'purchase.description'
+    }
+  },
+  {
+    path: '/pricing',
+    name: 'UserSubscriptionPricing',
+    component: () => import('@/views/user/PricingView.vue'),
+    meta: {
+      requiresAuth: true,
+      requiresAdmin: false,
+      requiresPayment: true,
+      title: 'Subscription Plans',
+      titleKey: 'pricing.title',
+      descriptionKey: 'pricing.description'
     }
   },
   {
@@ -831,6 +913,18 @@ router.beforeEach(async (to, _from, next) => {
   // 开始导航加载状态
   navigationLoading.startNavigation()
 
+  const personalSettingsCanonicalization = resolvePersonalSettingsCanonicalization(to)
+  if (personalSettingsCanonicalization) {
+    next(personalSettingsCanonicalization)
+    return
+  }
+
+  const purchasePricingCanonicalization = resolveLegacySubscriptionPricingRedirect(to)
+  if (purchasePricingCanonicalization) {
+    next(purchasePricingCanonicalization)
+    return
+  }
+
   const authStore = useAuthStore()
 
   // Restore auth state from localStorage on first navigation (page refresh)
@@ -928,7 +1022,11 @@ router.beforeEach(async (to, _from, next) => {
     return
   }
 
-  if (requiresAdmin && authStore.isAdmin) {
+  const personalSettingsState = parsePersonalSettingsRoute(to)
+  if (
+    authStore.isAdmin
+    && (requiresAdmin || personalSettingsState.isOpen)
+  ) {
     const adminComplianceStore = useAdminComplianceStore()
     if (!adminComplianceStore.initialized) {
       try {
@@ -940,13 +1038,32 @@ router.beforeEach(async (to, _from, next) => {
         }
       }
     }
+
+    if (adminComplianceStore.shouldShow) {
+      const complianceCanonicalization = resolvePersonalSettingsCanonicalization(
+        to,
+        { activationBlocked: true }
+      )
+      if (complianceCanonicalization) {
+        next(complianceCanonicalization)
+        return
+      }
+    }
   }
 
+  const freshSubscriptionPlanBridge = isFreshSubscriptionPlanBridge(to)
 
   // 公共设置可能尚未加载（App.vue 的 onMounted 异步拉取晚于首次导航，且纯静态部署
   // 无 __APP_CONFIG__ 注入）。此时 cachedPublicSettings 为空会把 payment/risk_control
   // 误判为“未启用”而错误拦截，故这里先确保设置加载完成。
-  if ((to.meta.requiresPayment || to.meta.requiresRiskControl) && !appStore.publicSettingsLoaded) {
+  if (
+    (
+      to.meta.requiresPayment
+      || freshSubscriptionPlanBridge
+      || to.meta.requiresRiskControl
+    )
+    && !appStore.publicSettingsLoaded
+  ) {
     try {
       await appStore.fetchPublicSettings()
     } catch (error) {
@@ -957,7 +1074,7 @@ router.beforeEach(async (to, _from, next) => {
   // Only an explicit value from successfully loaded settings can disable a route.
   // A transient settings failure is unknown state, not a confirmed feature toggle.
   if (
-    to.meta.requiresPayment &&
+    (to.meta.requiresPayment || freshSubscriptionPlanBridge) &&
     appStore.publicSettingsLoaded &&
     appStore.cachedPublicSettings?.payment_enabled === false
   ) {
@@ -981,10 +1098,14 @@ router.beforeEach(async (to, _from, next) => {
       '/admin/subscriptions',
       '/admin/redeem',
       '/subscriptions',
+      '/pricing',
       '/redeem'
     ]
 
-    if (restrictedPaths.some((path) => to.path.startsWith(path))) {
+    if (
+      freshSubscriptionPlanBridge
+      || restrictedPaths.some((path) => to.path.startsWith(path))
+    ) {
       // 简易模式下访问受限页面,重定向到仪表板
       next(authStore.isAdmin ? '/admin/dashboard' : '/dashboard')
       return

@@ -16,6 +16,9 @@ const login2FA = vi.fn()
 const apiClientPost = vi.fn()
 const sendVerifyCode = vi.fn()
 const sendPendingOAuthVerifyCode = vi.fn()
+const authUser = {
+  current: null as { role: 'admin' | 'user' } | null
+}
 
 vi.mock('vue-router', () => ({
   useRoute: () => ({
@@ -46,6 +49,7 @@ vi.mock('vue-i18n', async () => {
 
 vi.mock('@/stores', () => ({
   useAuthStore: () => ({
+    user: authUser.current,
     setToken,
     setPendingAuthSession,
     clearPendingAuthSession
@@ -90,6 +94,7 @@ describe('OidcCallbackView', () => {
     apiClientPost.mockReset()
     sendVerifyCode.mockReset()
     sendPendingOAuthVerifyCode.mockReset()
+    authUser.current = null
     getPublicSettings.mockResolvedValue({
       oidc_oauth_provider_name: 'ExampleID',
       turnstile_enabled: false,
@@ -191,6 +196,28 @@ describe('OidcCallbackView', () => {
 
     expect(exchangePendingOAuthCompletion).toHaveBeenCalledTimes(1)
     expect(exchangePendingOAuthCompletion).toHaveBeenCalledWith()
+  })
+
+  it('returns a bind completion without an explicit redirect to canonical user settings', async () => {
+    authUser.current = { role: 'user' }
+    exchangePendingOAuthCompletion.mockResolvedValue({})
+
+    mount(OidcCallbackView, {
+      global: {
+        stubs: {
+          AuthLayout: { template: '<div><slot /></div>' },
+          Icon: true,
+          RouterLink: { template: '<a><slot /></a>' },
+          transition: false
+        }
+      }
+    })
+
+    await flushPromises()
+
+    expect(replace).toHaveBeenCalledWith(
+      '/dashboard?account_settings=account&account_settings_detail=connections'
+    )
   })
 
   it('waits for explicit adoption confirmation before finishing a non-invitation login', async () => {

@@ -1,5 +1,7 @@
 <template>
   <AppLayout>
+    <h1 class="sr-only">{{ pageTitle }}</h1>
+
     <div class="custom-page-layout">
       <div class="card flex-1 min-h-0 overflow-hidden">
         <div v-if="loading" class="flex h-full items-center justify-center py-12">
@@ -192,6 +194,8 @@ const menuItem = computed(() => {
   }
   return null
 })
+
+const pageTitle = computed(() => menuItem.value?.label || t('customPage.title'))
 
 const markdownSlug = computed(() => {
   const item = menuItem.value
@@ -494,7 +498,11 @@ onUnmounted(() => {
 <style scoped>
 .custom-page-layout {
   @apply flex flex-col;
-  height: calc(100vh - 64px - 4rem);
+  height: calc(
+    100dvh
+    - var(--app-shell-top-offset)
+    - var(--app-main-block-padding)
+  );
 }
 
 .toc-sidebar {

@@ -89,7 +89,7 @@ type PlanGroupInfo struct {
 }
 
 // GetGroupInfoMap returns a map of group_id → PlanGroupInfo for the given plans.
-func (s *PaymentConfigService) GetGroupInfoMap(ctx context.Context, plans []*dbent.SubscriptionPlan) map[int64]PlanGroupInfo {
+func (s *PaymentConfigService) GetGroupInfoMap(ctx context.Context, plans []*dbent.SubscriptionPlan) (map[int64]PlanGroupInfo, error) {
 	ids := make([]int64, 0, len(plans))
 	seen := make(map[int64]bool)
 	for _, p := range plans {
@@ -99,11 +99,11 @@ func (s *PaymentConfigService) GetGroupInfoMap(ctx context.Context, plans []*dbe
 		}
 	}
 	if len(ids) == 0 {
-		return nil
+		return nil, nil
 	}
 	groups, err := s.entClient.Group.Query().Where(group.IDIn(ids...)).All(ctx)
 	if err != nil {
-		return nil
+		return nil, fmt.Errorf("query plan groups: %w", err)
 	}
 	m := make(map[int64]PlanGroupInfo, len(groups))
 	for _, g := range groups {
@@ -121,7 +121,7 @@ func (s *PaymentConfigService) GetGroupInfoMap(ctx context.Context, plans []*dbe
 			ModelScopes:        g.SupportedModelScopes,
 		}
 	}
-	return m
+	return m, nil
 }
 
 func (s *PaymentConfigService) ListPlans(ctx context.Context) ([]*dbent.SubscriptionPlan, error) {

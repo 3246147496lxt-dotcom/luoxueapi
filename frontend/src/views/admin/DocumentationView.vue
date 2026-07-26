@@ -107,7 +107,7 @@
       </section>
 
       <section v-else class="grid min-w-0 gap-5 lg:grid-cols-[240px_minmax(0,1fr)]">
-        <aside class="self-start rounded-2xl border border-gray-200 bg-white p-3 dark:border-dark-700 dark:bg-dark-800 lg:sticky lg:top-[101px]">
+        <aside class="documentation-category-sidebar self-start rounded-2xl border border-gray-200 bg-white p-3 dark:border-dark-700 dark:bg-dark-800">
           <div class="flex items-center justify-between px-2 pb-2">
             <div>
               <h2 class="text-sm font-semibold text-gray-950 dark:text-white">
@@ -1002,6 +1002,17 @@ onBeforeRouteLeave(() => {
 </script>
 
 <style scoped>
+.documentation-category-sidebar {
+  position: static;
+}
+
+@media (min-width: 1024px) {
+  .documentation-category-sidebar {
+    position: sticky;
+    top: calc(var(--app-shell-top-offset) + 20px);
+  }
+}
+
 .editor-icon-button {
   @apply inline-flex h-8 w-8 items-center justify-center rounded-lg text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500/40 disabled:cursor-not-allowed disabled:opacity-35 dark:text-dark-400 dark:hover:bg-dark-700 dark:hover:text-white;
 }

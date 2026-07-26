@@ -162,6 +162,7 @@ import { useI18n } from 'vue-i18n'
 import { useAppStore, useAuthStore } from '@/stores'
 import LocaleSwitcher from '@/components/common/LocaleSwitcher.vue'
 import Icon from '@/components/icons/Icon.vue'
+import { useThemePreference } from '@/composables/useThemePreference'
 import { splitBrandApiSuffix } from '@/utils/brand'
 import { resolveDocumentationUrl, resolveTutorialUrl } from '@/utils/documentationUrl'
 import { sanitizeUrl } from '@/utils/url'
@@ -177,6 +178,7 @@ const props = withDefaults(defineProps<{
 const { t } = useI18n()
 const appStore = useAppStore()
 const authStore = useAuthStore()
+const { isDark, toggleTheme } = useThemePreference()
 
 const siteName = computed(() => appStore.cachedPublicSettings?.site_name || appStore.siteName || '落雪API')
 const brandNameParts = computed(() => splitBrandApiSuffix(siteName.value))
@@ -218,16 +220,9 @@ const headerAccountLabel = computed(() => (
 ))
 const currentYear = computed(() => new Date().getFullYear())
 
-const isDark = ref(document.documentElement.classList.contains('dark'))
 const isHeaderElevated = ref(false)
 const mobileMenuOpen = ref(false)
 const mobileMenuButtonRef = ref<HTMLButtonElement | null>(null)
-
-function toggleTheme() {
-  isDark.value = !isDark.value
-  document.documentElement.classList.toggle('dark', isDark.value)
-  localStorage.setItem('theme', isDark.value ? 'dark' : 'light')
-}
 
 function closeMobileMenu(restoreFocus = false) {
   mobileMenuOpen.value = false

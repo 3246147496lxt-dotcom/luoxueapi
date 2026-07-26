@@ -9,7 +9,7 @@
                 <Icon name="key" size="lg" :stroke-width="1.8" />
               </div>
               <div class="min-w-0">
-                <h1 class="text-xl font-semibold tracking-tight text-gray-950 dark:text-white md:sr-only">
+                <h1 class="text-xl font-semibold tracking-tight text-gray-950 dark:text-white">
                   {{ t('keys.title') }}
                 </h1>
                 <p class="mt-1 max-w-3xl text-sm leading-6 text-gray-600 dark:text-gray-300 md:mt-0 md:text-base md:text-gray-800 md:dark:text-gray-100">

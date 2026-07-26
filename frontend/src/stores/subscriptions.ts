@@ -4,7 +4,7 @@
  */
 
 import { defineStore } from 'pinia'
-import { ref, computed } from 'vue'
+import { computed, readonly, ref } from 'vue'
 import subscriptionsAPI from '@/api/subscriptions'
 import type { UserSubscription } from '@/types'
 
@@ -128,6 +128,7 @@ export const useSubscriptionStore = defineStore('subscriptions', () => {
     // State
     activeSubscriptions,
     loading,
+    loaded: readonly(loaded),
     hasActiveSubscriptions,
 
     // Actions

@@ -1,38 +1,39 @@
+import { readonly, ref } from 'vue'
 import { createI18n } from 'vue-i18n'
+import {
+  DEFAULT_LOCALE,
+  LOCALE_STORAGE_KEY,
+  isLocaleCode,
+  parseLocalePreference,
+  persistLocalePreference,
+  readLocalePreference,
+  resolveLocalePreference,
+  type LocaleCode,
+  type LocalePreference,
+} from './preference'
 
-type LocaleCode = 'en' | 'zh'
+export type { LocaleCode, LocalePreference } from './preference'
+export {
+  DEFAULT_LOCALE,
+  LOCALE_STORAGE_KEY,
+  detectBrowserLocale,
+  parseLocalePreference,
+  readLocalePreference,
+  resolveLocalePreference,
+} from './preference'
 
 type LocaleMessages = Record<string, any>
-
-const LOCALE_KEY = 'sub2api_locale'
-const DEFAULT_LOCALE: LocaleCode = 'en'
 
 const localeLoaders: Record<LocaleCode, () => Promise<{ default: LocaleMessages }>> = {
   en: () => import('./locales/en'),
   zh: () => import('./locales/zh')
 }
 
-function isLocaleCode(value: string): value is LocaleCode {
-  return value === 'en' || value === 'zh'
-}
-
-function getDefaultLocale(): LocaleCode {
-  const saved = localStorage.getItem(LOCALE_KEY)
-  if (saved && isLocaleCode(saved)) {
-    return saved
-  }
-
-  const browserLang = navigator.language.toLowerCase()
-  if (browserLang.startsWith('zh')) {
-    return 'zh'
-  }
-
-  return DEFAULT_LOCALE
-}
+const preferenceState = ref<LocalePreference>(readLocalePreference())
 
 export const i18n = createI18n({
   legacy: false,
-  locale: getDefaultLocale(),
+  locale: resolveLocalePreference(preferenceState.value),
   fallbackLocale: DEFAULT_LOCALE,
   messages: {},
   // 禁用 HTML 消息警告 - 引导步骤使用富文本内容（driver.js 支持 HTML）
@@ -41,6 +42,10 @@ export const i18n = createI18n({
 })
 
 const loadedLocales = new Set<LocaleCode>()
+let localeApplySequence = 0
+let preferenceSyncInstalled = false
+
+export const localePreference = readonly(preferenceState)
 
 export async function loadLocaleMessages(locale: LocaleCode): Promise<void> {
   if (loadedLocales.has(locale)) {
@@ -53,21 +58,17 @@ export async function loadLocaleMessages(locale: LocaleCode): Promise<void> {
   loadedLocales.add(locale)
 }
 
-export async function initI18n(): Promise<void> {
-  const current = getLocale()
-  await loadLocaleMessages(current)
-  document.documentElement.setAttribute('lang', current)
-}
+async function applyLocale(locale: LocaleCode, updateTitle: boolean): Promise<void> {
+  const requestSequence = ++localeApplySequence
+  await loadLocaleMessages(locale)
+  if (requestSequence !== localeApplySequence) return
 
-export async function setLocale(locale: string): Promise<void> {
-  if (!isLocaleCode(locale)) {
-    return
+  i18n.global.locale.value = locale
+  if (typeof document !== 'undefined') {
+    document.documentElement.setAttribute('lang', locale)
   }
 
-  await loadLocaleMessages(locale)
-  i18n.global.locale.value = locale
-  localStorage.setItem(LOCALE_KEY, locale)
-  document.documentElement.setAttribute('lang', locale)
+  if (!updateTitle || typeof document === 'undefined') return
 
   // 同步更新浏览器页签标题，使其跟随语言切换
   const { resolveRouteDocumentTitle } = await import('@/router/title')
@@ -86,6 +87,51 @@ export async function setLocale(locale: string): Promise<void> {
   document.title = resolveRouteDocumentTitle(route, appStore.siteName, customMenuItems)
 }
 
+function handleBrowserLanguageChange() {
+  if (preferenceState.value !== 'auto') return
+  void applyLocale(resolveLocalePreference('auto'), true)
+}
+
+function handleLocaleStorage(event: StorageEvent) {
+  if (event.key !== LOCALE_STORAGE_KEY) return
+
+  preferenceState.value = parseLocalePreference(event.newValue)
+  void applyLocale(resolveLocalePreference(preferenceState.value), true)
+}
+
+export function installLocalePreferenceSync() {
+  if (preferenceSyncInstalled || typeof window === 'undefined') return
+
+  preferenceSyncInstalled = true
+  window.addEventListener('languagechange', handleBrowserLanguageChange)
+  window.addEventListener('storage', handleLocaleStorage)
+}
+
+export function stopLocalePreferenceSync() {
+  if (!preferenceSyncInstalled || typeof window === 'undefined') return
+
+  preferenceSyncInstalled = false
+  window.removeEventListener('languagechange', handleBrowserLanguageChange)
+  window.removeEventListener('storage', handleLocaleStorage)
+}
+
+export async function initI18n(): Promise<void> {
+  preferenceState.value = readLocalePreference()
+  await applyLocale(resolveLocalePreference(preferenceState.value), false)
+  installLocalePreferenceSync()
+}
+
+export async function setLocalePreference(preference: LocalePreference): Promise<void> {
+  preferenceState.value = preference
+  persistLocalePreference(preference)
+  await applyLocale(resolveLocalePreference(preference), true)
+}
+
+export async function setLocale(locale: string): Promise<void> {
+  if (!isLocaleCode(locale)) return
+  await setLocalePreference(locale)
+}
+
 export function getLocale(): LocaleCode {
   const current = i18n.global.locale.value
   return isLocaleCode(current) ? current : DEFAULT_LOCALE
@@ -95,5 +141,9 @@ export const availableLocales = [
   { code: 'en', name: 'English', flag: '🇺🇸' },
   { code: 'zh', name: '中文', flag: '🇨🇳' }
 ] as const
+
+if (import.meta.hot) {
+  import.meta.hot.dispose(stopLocalePreferenceSync)
+}
 
 export default i18n

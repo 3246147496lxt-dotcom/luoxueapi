@@ -1,5 +1,7 @@
 <template>
   <AppLayout variant="chat">
+    <h1 class="sr-only">{{ t('chat.title') }}</h1>
+
     <div class="chat-workspace">
       <ChatHistoryPanel
         class="chat-workspace__history chat-workspace__history--desktop"
@@ -1676,7 +1678,7 @@ function scheduleScrollToBottom() {
 
   .chat-workspace__drawer {
     position: fixed;
-    inset: 81px 0 0;
+    inset: var(--app-shell-top-offset) 0 0;
     z-index: 45;
     display: flex;
   }

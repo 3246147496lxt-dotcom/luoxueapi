@@ -76,6 +76,7 @@ beforeEach(() => {
   testState.appStore.cachedPublicSettings.site_subtitle_customized = false
   document.documentElement.classList.remove('dark')
   localStorage.clear()
+  localStorage.setItem('theme', 'light')
 })
 
 describe('AuthLayout', () => {
@@ -90,6 +91,9 @@ describe('AuthLayout', () => {
     expect(toolbarRule).toContain('color: var(--auth-blue);')
     expect(toolbarHoverRule).toContain('color: var(--auth-blue);')
     expect(authLayoutSource).not.toContain('--auth-blue-deep')
+    expect(authLayoutSource).toContain('useThemePreference')
+    expect(authLayoutSource).not.toContain("localStorage.setItem('theme'")
+    expect(authLayoutSource).not.toContain('document.documentElement.classList.toggle')
   })
 
   it('renders the Snow Clay composition by default without replacing slotted auth content', () => {
@@ -164,7 +168,7 @@ describe('AuthLayout', () => {
     expect(wrapper.find('.auth-tool-button').exists()).toBe(false)
   })
 
-  it('persists theme changes and applies the local dark-theme surface class', async () => {
+  it('persists theme changes through the shared preference controller', async () => {
     const wrapper = mountLayout()
     const themeButton = wrapper.get('.auth-tool-button')
 

@@ -65,7 +65,7 @@ onUnmounted(() => {
 /* 桌面端：Flexbox 布局 */
 .table-page-layout {
   @apply flex flex-col gap-5;
-  height: calc(100vh - 81px - 2rem); /* 减去顶部布局高度与桌面端底部留白 */
+  height: calc(100dvh - var(--app-shell-top-offset) - 2rem);
 }
 
 .layout-section-fixed {

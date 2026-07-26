@@ -1,6 +1,9 @@
 <template>
-  <div class="card">
-    <div class="border-b border-gray-100 px-6 py-4 dark:border-dark-700">
+  <div :class="props.embedded ? 'space-y-4' : 'card'">
+    <div
+      v-if="!props.embedded"
+      class="border-b border-gray-100 px-6 py-4 dark:border-dark-700"
+    >
       <h2 class="text-lg font-medium text-gray-900 dark:text-white">
         {{ t('profile.balanceNotify.title') }}
       </h2>
@@ -8,7 +11,7 @@
         {{ t('profile.balanceNotify.description') }}
       </p>
     </div>
-    <div class="px-6 py-6 space-y-6">
+    <div :class="props.embedded ? 'space-y-6' : 'space-y-6 px-6 py-6'">
       <!-- Enable toggle -->
       <div class="flex items-center justify-between">
         <label class="input-label mb-0">{{ t('profile.balanceNotify.enabled') }}</label>
@@ -184,6 +187,7 @@ const props = defineProps<{
   extraEmails: NotifyEmailEntry[]
   systemDefaultThreshold: number
   userEmail: string
+  embedded?: boolean
 }>()
 
 const { t } = useI18n()

@@ -56,7 +56,7 @@ The product is one brand with deliberately different information densities, not 
 7. **Commerce / entitlement** — purchase, subscriptions, redeem and orders. Clear price, entitlement and next-action hierarchy without fake urgency.
 8. **Reference / detail** — key usage, legal and custom content. Readable lightweight shell with metadata and task-specific tools.
 
-The authenticated shell keeps `AppHeader + AppSidebar`; public discovery keeps `PublicSiteLayout`; focused flows use the compact auth/state shell. Shared brand tokens, controls, status semantics, typography and motion remain identical across all archetypes.
+The authenticated desktop shell uses `AppSidebar` as the full-height primary frame and does not render a global top header. Page context belongs to a semantic content-level `h1`; identity, wallet, subscription status, preferences and help live in the account dock at the bottom of the sidebar. Mobile retains one compact app bar only for navigation access and immediate context. Public discovery keeps `PublicSiteLayout`; focused flows use the compact auth/state shell. Shared brand tokens, controls, status semantics, typography and motion remain identical across all archetypes.
 
 ## Data and Operations Readability
 
@@ -104,7 +104,7 @@ Dense product surfaces follow **state → impact → next action**. The first vi
 - Table workspaces use about 14px radii and near-flat elevation.
 - Forms use 14–17px radii with grouped section boundaries.
 - Operations use about 12px radii, hairlines and minimal decorative shadow. Density comes from shorter spacing and fewer container layers, never unreadably small type.
-- Authenticated content may reach 1600px, while the sidebar remains 200px expanded or 60–68px collapsed. The global header remains 65px inside its 81px fixed shell.
+- Authenticated content may reach 1600px, while the sidebar remains about 200px expanded or 60–68px collapsed. Desktop content starts at the top of the viewport with no global-header reservation. Mobile shell offsets come from the shared compact-bar token (56px plus safe-area inset), never from page-local magic numbers.
 
 ## Current UI Reproduction Tokens
 

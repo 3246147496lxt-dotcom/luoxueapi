@@ -1,222 +1,140 @@
 # Layout Components
 
-> **Documentation note (2026-07-21):** examples in this file predate the Luoxue Snow Clay migration and may still show centered authentication layouts or `indigo-*` utilities. They are API examples only. `AppLayout` and `AuthLayout` now enter Snow Clay by default; use `.superdesign/design-system.md` and `frontend/src/styles/luoxue-clay-tokens.css` for all current visual decisions.
+Vue 3 layout components for the Sub2API frontend. The authenticated product shell uses
+Luoxue Snow Clay tokens from `frontend/src/styles/luoxue-clay-tokens.css`; visual
+decisions belong in `.superdesign/design-system.md`.
 
-Vue 3 layout components for the Sub2API frontend, built with Composition API, TypeScript, and TailwindCSS.
+## Authenticated shell
+
+```text
+AppLayout
+├── AppMobileHeader        mobile navigation context only
+├── AppSidebar
+│   ├── AppBrand
+│   ├── navigation
+│   └── SidebarAccountDock
+│       └── SidebarAccountOverlay
+└── main page slot
+```
+
+Desktop uses a full-height sidebar and has no global top bar. Each page owns its
+visible heading and must render one semantic `h1`. On mobile, `AppMobileHeader`
+provides the navigation trigger, brand, and compact route title.
+
+Do not reserve a page-specific top height. Shell-aware heights and sticky offsets
+must use `--app-shell-top-offset`; the token is zero on desktop and includes the
+compact mobile bar and safe-area inset on small screens.
 
 ## Components
 
-### 1. AppLayout.vue
+### `AppLayout.vue`
 
-Main application layout with sidebar and header.
-
-**Usage:**
+`AppLayout` composes the authenticated shell and adjusts the main content margin
+when the sidebar is collapsed.
 
 ```vue
 <template>
   <AppLayout>
-    <!-- Your page content here -->
-    <h1>Dashboard</h1>
-    <p>Welcome to your dashboard!</p>
+    <section>
+      <h1>{{ t('dashboard.title') }}</h1>
+      <!-- Page content -->
+    </section>
   </AppLayout>
 </template>
 
 <script setup lang="ts">
+import { useI18n } from 'vue-i18n'
 import { AppLayout } from '@/components/layout'
+
+const { t } = useI18n()
 </script>
 ```
 
-**Features:**
+Use `variant="home-clay"` for the admin content-density adapter and
+`variant="chat"` for the viewport-bound chat workspace.
 
-- Responsive sidebar (collapsible)
-- Fixed header at top
-- Snow Clay canvas, header, and sidebar are the shared default shell
-- `home-clay` is an internal admin content-density adapter, not a second theme
-- Main content area with slot
-- Automatically adjusts margin based on sidebar state
+### `AppSidebar.vue`
 
----
+The sidebar owns authenticated navigation on desktop and mobile:
 
-### 2. AppSidebar.vue
+- persistent and collapsible on desktop;
+- opened as a drawer by `AppMobileHeader` on mobile;
+- role-, capability-, and simple-mode-aware navigation;
+- active-route highlighting;
+- `SidebarAccountDock` fixed at the bottom of the sidebar.
 
-Navigation sidebar with user and admin sections.
+`AppLayout` mounts the sidebar automatically.
 
-**Features:**
+### `AppMobileHeader.vue`
 
-- Logo/brand at top
-- User navigation links:
-  - Dashboard
-  - API Keys
-  - Usage
-  - Redeem
-  - Profile
-- Admin navigation links (shown only if user is admin):
-  - Admin Dashboard
-  - Users
-  - Groups
-  - Accounts
-  - Proxies
-  - Redeem Codes
-- Collapsible sidebar with toggle button
-- Active route highlighting
-- Icons using HTML entities
-- Responsive (mobile-friendly)
+The compact header is rendered only below the desktop breakpoint. It contains:
 
-**Used automatically by AppLayout** - no need to import separately.
+- the sidebar menu trigger;
+- `AppBrand`;
+- the localized page title resolved by `usePageContext()`.
 
----
+Provide `route.meta.titleKey` whenever possible, with `route.meta.title` as a
+fallback. The compact title supplements rather than replaces the page's `h1`.
 
-### 3. AppHeader.vue
+### `SidebarAccountDock.vue` and `SidebarAccountOverlay.vue`
 
-Top header with user info and actions.
+The account dock is the single entry point for identity and account actions. Its
+collapsed state keeps the avatar trigger visible. Opening it shows:
 
-**Features:**
+- identity, available balance, frozen balance, and subscription status;
+- subscriptions, wallet, orders, and profile destinations when available;
+- theme, language, announcements, help, and onboarding actions;
+- logout.
 
-- Mobile menu toggle button
-- Page title (from route meta or slot)
-- User balance display (desktop only)
-- User dropdown menu with:
-  - Profile link
-  - Logout button
-- User avatar with initials
-- Click-outside handling for dropdown
-- Responsive design
+The overlay is anchored to the dock on desktop and becomes a modal bottom sheet on
+mobile. It handles focus return, Escape dismissal, outside-click dismissal, and
+mobile background scroll locking. These components are internal to `AppSidebar`;
+pages should link to account destinations instead of mounting another account menu.
 
-**Usage with custom title:**
+### `AuthLayout.vue`
 
-```vue
-<template>
-  <AppLayout>
-    <template #title> Custom Page Title </template>
+`AuthLayout` provides the responsive authentication shell for login, registration,
+recovery, verification, and callback pages. It exposes the main content slot and an
+optional footer slot.
 
-    <!-- Your content -->
-  </AppLayout>
-</template>
-```
+### Page helpers
 
-**Used automatically by AppLayout** - no need to import separately.
+- `AdminPageHeader` provides the standard page `h1`, description, and actions.
+- `TablePageLayout` provides a bounded table workspace with header and filter slots.
 
----
+## Route metadata
 
-### 4. AuthLayout.vue
+Route metadata drives the mobile title and browser document title:
 
-Responsive Snow Clay layout for login, registration, recovery, verification, and authentication callbacks.
-
-**Usage:**
-
-```vue
-<template>
-  <AuthLayout>
-    <!-- Login/Register form content -->
-    <h2 class="mb-6 text-2xl font-bold">Login</h2>
-
-    <form @submit.prevent="handleLogin">
-      <!-- Form fields -->
-    </form>
-
-    <!-- Optional footer slot -->
-    <template #footer>
-      <p>
-        Don't have an account?
-        <router-link to="/register" class="text-indigo-600 hover:underline"> Sign up </router-link>
-      </p>
-    </template>
-  </AuthLayout>
-</template>
-
-<script setup lang="ts">
-import { AuthLayout } from '@/components/layout'
-
-function handleLogin() {
-  // Login logic
-}
-</script>
-```
-
-**Features:**
-
-- Snow Clay split composition on desktop and compact single-column composition on mobile
-- Shared logo, locale, and light/dark controls
-- Administrator-defined subtitle content is rendered verbatim
-- Main content slot
-- Optional footer slot for links
-- Fully responsive
-
----
-
-## Route Configuration
-
-To set page titles in the header, add meta to your routes:
-
-```typescript
-// router/index.ts
-const routes = [
-  {
-    path: '/dashboard',
-    component: DashboardView,
-    meta: { title: 'Dashboard' }
+```ts
+{
+  path: '/dashboard',
+  name: 'Dashboard',
+  component: () => import('@/views/user/DashboardView.vue'),
+  meta: {
+    requiresAuth: true,
+    title: 'Dashboard',
+    titleKey: 'dashboard.title',
   },
-  {
-    path: '/api-keys',
-    component: ApiKeysView,
-    meta: { title: 'API Keys' }
-  }
-  // ...
-]
-```
-
----
-
-## Store Dependencies
-
-These components use the following Pinia stores:
-
-- **useAuthStore**: For user authentication state, role checking, and logout
-- **useAppStore**: For sidebar state management and toast notifications
-
-Make sure these stores are properly initialized in your app.
-
----
-
-## Styling
-
-All components use TailwindCSS utility classes. Make sure your `tailwind.config.js` includes the component paths:
-
-```js
-module.exports = {
-  content: ['./index.html', './src/**/*.{vue,js,ts,jsx,tsx}']
-  // ...
 }
 ```
 
----
+Custom menu pages are resolved from their configured labels.
 
-## Icons
+## Store dependencies
 
-Components use HTML entity icons for simplicity:
+- `useAuthStore`: authentication, role, user identity, and logout.
+- `useAppStore`: sidebar state, public settings, and shell capabilities.
+- `useSubscriptionStore`: account subscription summary.
+- `useAnnouncementStore`: unread announcement state.
+- `useOnboardingStore`: onboarding replay.
 
-- &#128200; Chart (Dashboard)
-- &#128273; Key (API Keys)
-- &#128202; Bar Chart (Usage)
-- &#127873; Gift (Redeem)
-- &#128100; User (Profile)
-- &#128268; Admin
-- &#128101; Users
-- &#128193; Folder (Groups)
-- &#127760; Globe (Accounts)
-- &#128260; Network (Proxies)
-- &#127991; Ticket (Redeem Codes)
+## Responsive and accessibility contract
 
-You can replace these with your preferred icon library (e.g., Heroicons, Font Awesome) if needed.
-
----
-
-## Mobile Responsiveness
-
-All components are fully responsive:
-
-- **AppSidebar**: Fixed positioning on desktop, hidden by default on mobile
-- **AppHeader**: Shows mobile menu toggle on small screens, hides balance display
-- **AuthLayout**: Adapts padding and card size for mobile devices
-
-The sidebar uses Tailwind's responsive breakpoints (md:) to adjust behavior.
+- The desktop breakpoint is `lg` (`1024px`).
+- The mobile header and sidebar drawer share `useAppStore().mobileOpen`.
+- Account and navigation triggers expose expanded state and dialog relationships.
+- The mobile account sheet traps focus, restores focus on close, and locks background
+  scrolling.
+- Every authenticated view must keep one semantic `h1`; workspace-style views may
+  make it visually hidden.

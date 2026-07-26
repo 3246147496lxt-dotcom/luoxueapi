@@ -58,15 +58,50 @@ export default {
     dockerRecreate: '重新创建容器'
   },
 
-  // Recharge / Subscription Page
+  // Balance recharge page
   purchase: {
-    title: '充值/订阅',
-    description: '充值余额、购买订阅或使用兑换码',
+    title: '余额充值',
+    description: '充值余额或使用兑换码',
     openInNewTab: '新窗口打开',
     notEnabledTitle: '该功能未开启',
     notEnabledDesc: '在线支付暂未开启，您仍可在下方使用兑换码。',
-    notConfiguredTitle: '充值/订阅链接未配置',
-    notConfiguredDesc: '管理员已开启入口，但尚未配置充值/订阅链接，请联系管理员。'
+    notConfiguredTitle: '充值链接未配置',
+    notConfiguredDesc: '管理员已开启入口，但尚未配置充值链接，请联系管理员。'
+  },
+
+  pricing: {
+    eyebrow: '订阅套餐',
+    title: '选择适合你的套餐',
+    description: '按你的使用规模选择订阅。套餐额度、倍率和有效期均以当前页面展示为准。',
+    availablePlans: '可选订阅套餐',
+    loading: '正在加载套餐',
+    loadErrorTitle: '暂时无法加载套餐',
+    loadErrorDescription: '套餐信息或支付配置加载失败，请稍后重试。',
+    staleWarning: '刷新套餐信息失败，当前展示的是最近一次加载结果。',
+    retry: '重新加载',
+    emptyTitle: '暂时没有可购买的套餐',
+    emptyDescription: '管理员尚未发布订阅套餐，你仍然可以继续使用余额按量计费。',
+    renewalOption: '续费可选',
+    choosePlan: '选择此套餐',
+    renewPlan: '选择续费方案',
+    choosePlanAccessible: '选择 {plan} 套餐',
+    renewPlanAccessible: '选择 {plan} 作为续费方案',
+    manageSubscriptions: '管理我的订阅',
+    groupFilter: '正在查看所选分组的可用套餐',
+    viewAllPlans: '查看全部套餐',
+    includes: '套餐包含',
+    validityDays: '{days} 天',
+    rateMultiplier: '计费倍率 ×{rate}',
+    peakRateWindow: '高峰时段倍率：{window}',
+    modelScopes: '支持模型：{models}',
+    dailyQuota: '每日额度 {amount}',
+    weeklyQuota: '每周额度 {amount}',
+    monthlyQuota: '每月额度 {amount}',
+    unlimitedQuota: '未设置周期额度上限',
+    planUnavailableTitle: '此套餐当前不可用',
+    planUnavailableDescription: '套餐可能已下架或链接已失效，请返回套餐页重新选择。',
+    returnToPlans: '返回套餐页',
+    close: '关闭套餐页'
   },
 
   // Custom Page (iframe embed)
@@ -144,8 +179,8 @@ export default {
     restartTour: '重新查看新手引导',
     dontShowAgain: '不再提示',
     dontShowAgainTitle: '永久关闭新手引导',
-    confirmDontShow: '确定不再显示新手引导吗？\n\n您可以随时在右上角头像菜单中重新开启。',
-    confirmExit: '确定要退出新手引导吗？您可以随时在右上角菜单重新开始。',
+    confirmDontShow: '确定不再显示新手引导吗？\n\n您可以随时在左下角账户菜单中重新开启。',
+    confirmExit: '确定要退出新手引导吗？您可以随时从左下角账户菜单重新开始。',
     interactiveHint: '按 Enter 或点击继续',
     navigation: {
       flipPage: '翻页',
@@ -313,7 +348,7 @@ export default {
 
   // Payment System
   payment: {
-    title: '充值/订阅',
+    title: '余额充值',
     checkoutTitle: '在线充值',
     checkoutDescription: '快速方便的充值方式',
     userTypeAdmin: '管理员',

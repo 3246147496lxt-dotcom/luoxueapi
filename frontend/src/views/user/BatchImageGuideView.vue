@@ -1,6 +1,13 @@
 <template>
   <AppLayout>
     <TablePageLayout>
+      <template #header>
+        <AdminPageHeader
+          :title="t('batchImageGuide.title')"
+          :description="t('batchImageGuide.description')"
+        />
+      </template>
+
       <template #filters>
         <div class="flex flex-col gap-3">
           <div class="flex flex-col gap-3 2xl:flex-row 2xl:items-center 2xl:justify-between">
@@ -749,6 +756,7 @@
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import AppLayout from '@/components/layout/AppLayout.vue'
+import AdminPageHeader from '@/components/layout/AdminPageHeader.vue'
 import CreditAmount from '@/components/common/CreditAmount.vue'
 import TablePageLayout from '@/components/layout/TablePageLayout.vue'
 import DataTable from '@/components/common/DataTable.vue'
@@ -831,7 +839,7 @@ const batchPageSizeOptions: SelectOption[] = [20, 50, 100].map(size => ({ value:
 
 const appStore = useAppStore()
 const { copyToClipboard } = useClipboard()
-const { locale } = useI18n()
+const { t, locale } = useI18n()
 
 const columns: Column[] = [
   { key: 'select', label: '', sortable: false, class: 'w-12 text-center' },

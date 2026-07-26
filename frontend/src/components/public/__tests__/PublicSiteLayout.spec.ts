@@ -1,8 +1,15 @@
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import { defineComponent } from 'vue'
 import { mount } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import PublicSiteLayout from '../PublicSiteLayout.vue'
+
+const publicSiteLayoutSource = readFileSync(
+  resolve(process.cwd(), 'src/components/public/PublicSiteLayout.vue'),
+  'utf8'
+)
 
 const testState = vi.hoisted(() => ({
   authStore: {
@@ -97,10 +104,17 @@ beforeEach(() => {
   testState.appStore.backendModeEnabled = false
   document.documentElement.classList.remove('dark')
   localStorage.clear()
+  localStorage.setItem('theme', 'light')
   Object.defineProperty(window, 'innerWidth', { value: 1280, writable: true, configurable: true })
 })
 
 describe('PublicSiteLayout', () => {
+  it('delegates theme state to the shared preference controller', () => {
+    expect(publicSiteLayoutSource).toContain('useThemePreference')
+    expect(publicSiteLayoutSource).not.toContain("localStorage.setItem('theme'")
+    expect(publicSiteLayoutSource).not.toContain('document.documentElement.classList.toggle')
+  })
+
   it('uses the shared docs resolver while keeping the tutorial fallback available', () => {
     testState.appStore.cachedPublicSettings.doc_url = '/tutorial-docs/?source=public#old'
     const wrapper = mountLayout()
@@ -246,7 +260,7 @@ describe('PublicSiteLayout', () => {
     expect(currentLink).toBeTruthy()
   })
 
-  it('persists theme changes through the shared header', async () => {
+  it('persists theme changes through the shared preference controller', async () => {
     const wrapper = mountLayout()
     const themeButton = wrapper.get('[data-testid="theme-toggle"]')
 

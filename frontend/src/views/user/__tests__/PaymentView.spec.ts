@@ -10,10 +10,12 @@ import type { CheckoutInfoResponse, MethodLimit, SubscriptionPlan } from '@/type
 const routeState = vi.hoisted(() => ({
   path: '/purchase',
   query: {} as Record<string, unknown>,
+  hash: '',
 }))
 
 const routerReplace = vi.hoisted(() => vi.fn())
 const routerPush = vi.hoisted(() => vi.fn())
+const routerBack = vi.hoisted(() => vi.fn())
 const routerResolve = vi.hoisted(() => vi.fn(() => ({ href: '/payment/stripe?mock=1' })))
 const createOrder = vi.hoisted(() => vi.fn())
 const refreshUser = vi.hoisted(() => vi.fn())
@@ -40,6 +42,7 @@ vi.mock('vue-router', async () => {
     useRouter: () => ({
       replace: routerReplace,
       push: routerPush,
+      back: routerBack,
       resolve: routerResolve,
     }),
   }
@@ -65,6 +68,7 @@ vi.mock('@/stores/auth', () => ({
 vi.mock('@/stores/payment', () => ({
   usePaymentStore: () => ({
     createOrder,
+    ensureCheckoutInfo: async () => (await getCheckoutInfo()).data,
   }),
 }))
 
@@ -224,6 +228,7 @@ describe('PaymentView integrated purchase surface', () => {
     publicSettings.payment_enabled = true
     routeState.path = '/purchase'
     routeState.query = {}
+    routeState.hash = ''
     getCheckoutInfo.mockReset().mockResolvedValue(checkoutInfoFixture())
     fetchActiveSubscriptions.mockReset().mockResolvedValue(undefined)
     showError.mockReset()
@@ -248,7 +253,7 @@ describe('PaymentView integrated purchase surface', () => {
     publicSettings.payment_enabled = true
   })
 
-  it('exposes the recharge and subscription switch as an accessible tablist', async () => {
+  it('keeps the default purchase surface focused on balance recharge', async () => {
     const wrapper = shallowMount(PaymentView, {
       global: {
         stubs: {
@@ -260,10 +265,12 @@ describe('PaymentView integrated purchase surface', () => {
     })
     await flushPromises()
 
-    const tabs = wrapper.findAll('[role="tab"]')
-    expect(tabs).toHaveLength(2)
-    expect(tabs[0].attributes('aria-selected')).toBe('true')
-    expect(tabs[1].attributes('aria-selected')).toBe('false')
+    expect(wrapper.findAll('[role="tab"]')).toHaveLength(0)
+    const rechargeRegion = wrapper.get('#purchase-panel-recharge')
+    expect(rechargeRegion.element.tagName).toBe('SECTION')
+    expect(rechargeRegion.attributes('role')).toBeUndefined()
+    expect(rechargeRegion.attributes('aria-label')).toBe('payment.tabTopUp')
+    expect(wrapper.find('#purchase-panel-subscription').exists()).toBe(false)
   })
 
   it('uses snowflake credits for balances while keeping recharge amounts in CNY', async () => {
@@ -380,10 +387,12 @@ async function mountSubscriptionConfirm(options: Parameters<typeof checkoutInfoW
   routeState.path = '/purchase'
   routeState.query = {
     tab: 'subscription',
-    group: '3',
+    plan: '7',
   }
+  routeState.hash = ''
   routerReplace.mockReset().mockResolvedValue(undefined)
   routerPush.mockReset().mockResolvedValue(undefined)
+  routerBack.mockReset()
   routerResolve.mockClear()
   createOrder.mockReset()
   refreshUser.mockReset()
@@ -443,6 +452,10 @@ describe('PaymentView subscription confirmation amounts', () => {
       'payment-mobile-sticky-action',
       'grid-cols-[minmax(0,1fr)_auto]',
     ]))
+    const subscriptionRegion = wrapper.get('#purchase-panel-subscription')
+    expect(subscriptionRegion.element.tagName).toBe('SECTION')
+    expect(subscriptionRegion.attributes('role')).toBeUndefined()
+    expect(subscriptionRegion.attributes('aria-label')).toBe('payment.tabSubscribe')
   })
 
   it('keeps plan price when the subscription rate is not configured or payment currency is not CNY', async () => {
@@ -505,6 +518,64 @@ describe('PaymentView subscription confirmation amounts', () => {
     expect(text).toContain(total)
     expect(wrapper.findAll('button').some(button => button.text().includes(total))).toBe(true)
   })
+
+  it('returns through pricing history when cancelling a selected plan', async () => {
+    const historyState = vi.spyOn(window.history, 'state', 'get').mockReturnValue({
+      back: '/pricing?group=3',
+    })
+    try {
+      const wrapper = await mountSubscriptionConfirm()
+      await wrapper.get('[data-testid="payment-subscription-cancel"]').trigger('click')
+
+      expect(routerBack).toHaveBeenCalledOnce()
+      expect(routerReplace).not.toHaveBeenCalledWith('/pricing')
+      expect(routerPush).not.toHaveBeenCalledWith('/pricing')
+    } finally {
+      historyState.mockRestore()
+    }
+  })
+
+  it('replaces with pricing when cancellation has no pricing history entry', async () => {
+    const historyState = vi.spyOn(window.history, 'state', 'get').mockReturnValue({
+      back: '/dashboard',
+    })
+    try {
+      const wrapper = await mountSubscriptionConfirm()
+      await wrapper.get('[data-testid="payment-subscription-cancel"]').trigger('click')
+
+      expect(routerBack).not.toHaveBeenCalled()
+      expect(routerReplace).toHaveBeenCalledWith('/pricing')
+      expect(routerPush).not.toHaveBeenCalledWith('/pricing')
+    } finally {
+      historyState.mockRestore()
+    }
+  })
+
+  it.each([
+    ['repeated tab', { tab: ['subscription', 'subscription'], plan: '7' }, ''],
+    ['repeated plan', { tab: 'subscription', plan: ['7', '7'] }, ''],
+    ['redeem anchor', { tab: 'subscription', plan: '7' }, '#redeem'],
+  ])('does not select a subscription plan for %s state', async (_label, query, hash) => {
+    routeState.path = '/purchase'
+    routeState.query = query
+    routeState.hash = hash
+    getCheckoutInfo.mockReset().mockResolvedValue(checkoutInfoWithPlansFixture())
+
+    const wrapper = shallowMount(PaymentView, {
+      global: {
+        stubs: {
+          AppLayout: { template: '<div><slot /></div>' },
+          Teleport: true,
+          Transition: false,
+        },
+      },
+    })
+    await flushPromises()
+    await flushPromises()
+
+    expect(wrapper.find('#purchase-panel-subscription').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="payment-subscription-action-bar"]').exists()).toBe(false)
+  })
 })
 
 describe('PaymentView payment recovery', () => {
@@ -512,6 +583,7 @@ describe('PaymentView payment recovery', () => {
     vi.useRealTimers()
     routeState.path = '/purchase'
     routeState.query = {}
+    routeState.hash = ''
     routerReplace.mockReset().mockResolvedValue(undefined)
     routerPush.mockReset().mockResolvedValue(undefined)
     routerResolve.mockClear()
@@ -596,6 +668,7 @@ describe('PaymentView WeChat JSAPI flow', () => {
       wechat_resume: '1',
       wechat_resume_token: 'resume-token-123',
     }
+    routeState.hash = ''
     routerReplace.mockReset().mockResolvedValue(undefined)
     routerPush.mockReset().mockResolvedValue(undefined)
     routerResolve.mockClear()
@@ -778,6 +851,137 @@ describe('PaymentView WeChat JSAPI flow', () => {
       configurable: true,
       value: originalLocation,
     })
+  })
+
+  it('consumes legacy subscription checkout state before resuming an openid callback', async () => {
+    routeState.query = {
+      from: 'wechat',
+      tab: 'subscription',
+      plan: '7',
+      group: '3',
+      wechat_resume: '1',
+      openid: 'openid-123',
+      payment_type: 'wxpay_direct',
+      amount: '128',
+      order_type: 'subscription',
+      plan_id: '7',
+    }
+    getCheckoutInfo.mockResolvedValue(checkoutInfoWithPlansFixture())
+    createOrder.mockRejectedValueOnce(new Error('resume failed'))
+
+    const wrapper = shallowMount(PaymentView, {
+      global: {
+        stubs: {
+          AppLayout: { template: '<div><slot /></div>' },
+          Teleport: true,
+          Transition: false,
+        },
+      },
+    })
+    await flushPromises()
+    await flushPromises()
+
+    expect(routerReplace).toHaveBeenCalledWith({
+      path: '/purchase',
+      query: {
+        from: 'wechat',
+      },
+    })
+    expect(createOrder).toHaveBeenCalledWith(expect.objectContaining({
+      payment_type: 'wxpay',
+      order_type: 'subscription',
+      plan_id: 7,
+      openid: 'openid-123',
+    }))
+    expect(routerReplace.mock.invocationCallOrder[0]).toBeLessThan(
+      createOrder.mock.invocationCallOrder[0],
+    )
+    expect(wrapper.find('#purchase-panel-subscription').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="payment-subscription-action-bar"]').exists()).toBe(false)
+  })
+
+  it('consumes injected subscription checkout state before resuming a balance callback', async () => {
+    routeState.query = {
+      from: 'wechat',
+      tab: 'subscription',
+      plan: '7',
+      group: '3',
+      wechat_resume: '1',
+      openid: 'openid-balance-123',
+      payment_type: 'wxpay_direct',
+      amount: '88',
+      order_type: 'balance',
+    }
+    getCheckoutInfo.mockResolvedValue(checkoutInfoWithPlansFixture())
+    createOrder.mockRejectedValueOnce(new Error('resume failed'))
+
+    const wrapper = shallowMount(PaymentView, {
+      global: {
+        stubs: {
+          AppLayout: { template: '<div><slot /></div>' },
+          Teleport: true,
+          Transition: false,
+        },
+      },
+    })
+    await flushPromises()
+    await flushPromises()
+
+    expect(routerReplace).toHaveBeenCalledWith({
+      path: '/purchase',
+      query: {
+        from: 'wechat',
+      },
+    })
+    expect(createOrder).toHaveBeenCalledWith(expect.objectContaining({
+      amount: 88,
+      payment_type: 'wxpay',
+      order_type: 'balance',
+      openid: 'openid-balance-123',
+    }))
+    expect(routerReplace.mock.invocationCallOrder[0]).toBeLessThan(
+      createOrder.mock.invocationCallOrder[0],
+    )
+    expect(wrapper.find('#purchase-panel-subscription').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="payment-subscription-action-bar"]').exists()).toBe(false)
+  })
+
+  it.each([
+    ['marker only', {
+      tab: 'subscription',
+      plan: '7',
+      wechat_resume: '1',
+    }],
+    ['token only', {
+      tab: 'subscription',
+      plan: '7',
+      wechat_resume_token: 'resume-token-123',
+    }],
+    ['repeated token', {
+      tab: 'subscription',
+      plan: '7',
+      wechat_resume: '1',
+      wechat_resume_token: ['resume-token-123', 'resume-token-456'],
+    }],
+  ])('does not expose a new subscription purchase for invalid %s recovery state', async (_label, query) => {
+    routeState.query = query
+    getCheckoutInfo.mockResolvedValue(checkoutInfoWithPlansFixture())
+
+    const wrapper = shallowMount(PaymentView, {
+      global: {
+        stubs: {
+          AppLayout: { template: '<div><slot /></div>' },
+          Teleport: true,
+          Transition: false,
+        },
+      },
+    })
+    await flushPromises()
+    await flushPromises()
+
+    expect(createOrder).not.toHaveBeenCalled()
+    expect(wrapper.find('#purchase-panel-subscription').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="payment-subscription-action-bar"]').exists()).toBe(false)
   })
 
   it('falls back to QR flow when mobile WeChat payment is unavailable', async () => {

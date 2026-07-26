@@ -1,6 +1,6 @@
 <template>
   <AppLayout>
-    <div class="yunwu-dashboard space-y-4 pt-[4.75rem] sm:pt-0">
+    <div class="yunwu-dashboard space-y-4">
       <header class="flex items-center justify-between gap-4 py-1">
         <h1 class="min-w-0 truncate text-2xl font-semibold leading-8 text-gray-800 dark:text-gray-100">
           {{ t('dashboard.greeting.line', { period: greetingPeriod, name: dashboardUserName }) }}

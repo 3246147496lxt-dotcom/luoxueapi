@@ -207,6 +207,7 @@ import {
   startOAuthBinding,
   unbindAuthIdentity,
 } from '@/api/user'
+import { resolveOAuthBindingConnectionsRedirect } from '@/navigation/oauthBindingRedirect'
 import Icon from '@/components/icons/Icon.vue'
 import { useAppStore, useAuthStore } from '@/stores'
 import type { User, UserAuthBindingStatus, UserAuthProvider } from '@/types'
@@ -557,7 +558,9 @@ function startBinding(provider: UserAuthProvider): void {
     return
   }
   startOAuthBinding(provider, {
-    redirectTo: route.fullPath || '/profile',
+    redirectTo: route.fullPath?.trim()
+      || resolveOAuthBindingConnectionsRedirect(authStore.user?.role),
+    userRole: authStore.user?.role,
     wechatOAuthSettings: provider === 'wechat' ? wechatOAuthSettings.value : null,
   })
 }

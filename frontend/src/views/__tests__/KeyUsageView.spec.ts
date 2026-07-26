@@ -1,8 +1,15 @@
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 import { nextTick } from 'vue'
 
 import KeyUsageView from '../KeyUsageView.vue'
+
+const keyUsageViewSource = readFileSync(
+  resolve(process.cwd(), 'src/views/KeyUsageView.vue'),
+  'utf8'
+)
 
 const { showInfo, showSuccess, showError, fetchPublicSettings, appStore } = vi.hoisted(() => {
   const showInfo = vi.fn()
@@ -124,7 +131,13 @@ describe('KeyUsageView daily detail', () => {
 
     Object.defineProperty(window, 'matchMedia', {
       configurable: true,
-      value: vi.fn().mockReturnValue({ matches: false }),
+      value: vi.fn().mockReturnValue({
+        matches: false,
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+        addListener: vi.fn(),
+        removeListener: vi.fn(),
+      }),
     })
     vi.stubGlobal('requestAnimationFrame', (cb: FrameRequestCallback) => window.setTimeout(() => cb(0), 0))
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
@@ -197,6 +210,33 @@ describe('KeyUsageView daily detail', () => {
     expect(wrapper.get('header nav a img[alt="Logo"]').attributes('src')).toBe(
       '/brand/luoxue-snowpuff-extracted.svg'
     )
+
+    wrapper.unmount()
+  })
+
+  it('keeps the public theme shortcut on the shared preference controller', async () => {
+    expect(keyUsageViewSource).toContain('useThemePreference')
+    expect(keyUsageViewSource).not.toContain("localStorage.setItem('theme'")
+    expect(keyUsageViewSource).not.toContain('document.documentElement.classList')
+
+    const wrapper = mount(KeyUsageView, {
+      global: {
+        stubs: {
+          RouterLink: { template: '<a><slot /></a>' },
+          LocaleSwitcher: true,
+          Icon: true,
+        },
+      },
+    })
+    const themeButton = wrapper.get('header button')
+
+    expect(themeButton.attributes('title')).toBe('Dark')
+
+    await themeButton.trigger('click')
+
+    expect(localStorage.getItem('theme')).toBe('dark')
+    expect(document.documentElement.classList.contains('dark')).toBe(true)
+    expect(themeButton.attributes('title')).toBe('Light')
 
     wrapper.unmount()
   })

@@ -1,5 +1,7 @@
 <template>
   <AppLayout>
+    <AdminPageHeader :title="t('nav.channelStatus')" />
+
     <MonitorHero
       :overall-status="overallStatus"
       :interval-seconds="DEFAULT_INTERVAL_SECONDS"
@@ -40,6 +42,7 @@ import {
   type UserMonitorDetail,
 } from '@/api/channelMonitor'
 import AppLayout from '@/components/layout/AppLayout.vue'
+import AdminPageHeader from '@/components/layout/AdminPageHeader.vue'
 import MonitorHero, {
   type MonitorWindow,
   type OverallStatus,

@@ -9,6 +9,21 @@
     --luoxue-blue-deep-rgb: 7 89 133;
     --luoxue-blue-light-rgb: 141 204 255;
     --luoxue-ice-rgb: 234 245 255;
+    --app-shell-mobile-bar-height: calc(56px + env(safe-area-inset-top));
+    --app-shell-top-offset: var(--app-shell-mobile-bar-height);
+    --app-main-block-padding: 80px;
+  }
+
+  @media (max-width: 767px) {
+    :root {
+      --app-main-block-padding: 62px;
+    }
+  }
+
+  @media (min-width: 1024px) {
+    :root {
+      --app-shell-top-offset: 0px;
+    }
   }
 
   * {

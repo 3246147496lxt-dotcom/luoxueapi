@@ -6,8 +6,9 @@ import { describe, expect, it } from 'vitest'
 
 const layoutDirectory = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const layoutSource = readFileSync(resolve(layoutDirectory, 'AppLayout.vue'), 'utf8')
-const headerSource = readFileSync(resolve(layoutDirectory, 'AppHeader.vue'), 'utf8')
+const mobileHeaderSource = readFileSync(resolve(layoutDirectory, 'AppMobileHeader.vue'), 'utf8')
 const sidebarSource = readFileSync(resolve(layoutDirectory, 'AppSidebar.vue'), 'utf8')
+const accountDockSource = readFileSync(resolve(layoutDirectory, 'SidebarAccountDock.vue'), 'utf8')
 const brandSource = readFileSync(resolve(layoutDirectory, 'AppBrand.vue'), 'utf8')
 
 describe('authenticated mixed application shell palette', () => {
@@ -26,7 +27,7 @@ describe('authenticated mixed application shell palette', () => {
     expect(layoutSource).toContain('background: var(--app-shell-canvas, var(--lx-clay-canvas)) !important;')
     expect(layoutSource).toContain(':global(html:not(.dark) .app-layout--snow-shell.app-layout--flat-workspace-shell)')
     expect(layoutSource).toContain('--app-shell-canvas: #ffffff;')
-    expect(layoutSource).toContain('--app-shell-sidebar-bg: #f7f7f8;')
+    expect(layoutSource).toContain('--app-shell-sidebar-bg: #fcfcfc;')
     expect(layoutSource).toContain('--app-shell-sidebar-border: #e5e7eb;')
     expect(layoutSource).toContain('--app-shell-sidebar-hover-color: #0d0d0d;')
     expect(layoutSource).toContain('--app-shell-sidebar-hover-bg: rgb(0 0 0 / 0.05);')
@@ -45,31 +46,23 @@ describe('authenticated mixed application shell palette', () => {
     expect(layoutSource).not.toContain('#0f1115')
   })
 
-  it('keeps the header on the original production glass and typography contract', () => {
-    expect(headerSource).toContain('class="app-header fixed left-0 right-0 top-0')
-    expect(headerSource).toContain("? 'lg:left-[68px]'")
-    expect(headerSource).toContain(
-      ": 'lg:left-[184px] min-[1025px]:left-[196px] min-[1281px]:left-[208px]'",
+  it('keeps the top chrome mobile-only and shares the shell offset token', () => {
+    expect(layoutSource).toContain('<AppMobileHeader />')
+    expect(mobileHeaderSource).toContain('class="app-mobile-header lg:hidden"')
+    expect(mobileHeaderSource).toContain('height: var(--app-shell-top-offset);')
+    expect(mobileHeaderSource).toContain(
+      'background: color-mix(in srgb, var(--app-shell-canvas, #fff) 94%, transparent);',
     )
-    expect(headerSource).toContain('font-family: system-ui, -apple-system')
-    expect(headerSource).toContain('border-width: 1px 1px 0;')
-    expect(headerSource).toContain(
-      'background: linear-gradient(rgb(248 251 255 / 0.32), rgb(235 242 252 / 0.1));',
-    )
-    expect(headerSource).toContain('backdrop-filter: saturate(1.7) blur(36px);')
-    expect(headerSource).toContain(
-      'linear-gradient(rgb(10 12 18 / 0.92), rgb(8 10 16 / 0.82))',
-    )
-    expect(headerSource).toContain('data-testid="header-mobile-menu"')
-    expect(headerSource).not.toContain('data-testid="header-sidebar-toggle"')
-    expect(headerSource).not.toContain('SidebarCollapseIcon')
-    expect(headerSource).not.toContain('background: var(--lx-clay-surface-elevated);')
+    expect(mobileHeaderSource).toContain('backdrop-filter: blur(18px) saturate(1.25);')
+    expect(mobileHeaderSource).toContain('data-testid="mobile-header-menu"')
+    expect(mobileHeaderSource).not.toContain('SidebarCollapseIcon')
+    expect(layoutSource).not.toContain('AppHeader')
   })
 
   it('keeps the original sidebar as fallback while the flat workspace removes its glass', () => {
     expect(sidebarSource).toContain('class="sidebar"')
     expect(sidebarSource).toContain(
-      'w-44 lg:w-[184px] min-[1025px]:w-[196px] min-[1281px]:w-[208px]',
+      'w-[min(84vw,288px)] lg:w-[260px]',
     )
     expect(sidebarSource).toContain('<AppBrand placement="sidebar" :collapsed="sidebarCollapsed" />')
     expect(sidebarSource).toContain('data-testid="sidebar-collapse-toggle"')
@@ -85,6 +78,9 @@ describe('authenticated mixed application shell palette', () => {
     expect(sidebarSource).toContain('--app-shell-sidebar-active-marker, none')
     expect(sidebarSource).toContain(':global(.dark .sidebar)')
     expect(sidebarSource).not.toContain('sidebar--snow-clay')
+    expect(sidebarSource).toContain('<SidebarAccountDock />')
+    expect(accountDockSource).toContain('padding: 0 6px calc(6px + env(safe-area-inset-bottom)) 8px;')
+    expect(accountDockSource).toContain(':global(html.dark .sidebar-account-row)')
   })
 
   it('keeps the Luoxue mark readable in the dark sidebar', () => {

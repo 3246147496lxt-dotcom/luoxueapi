@@ -59,16 +59,51 @@ export default {
     dockerRecreate: 'Recreate the container'
   },
 
-  // Recharge / Subscription Page
+  // Balance recharge page
   purchase: {
-    title: 'Recharge / Subscription',
-    description: 'Recharge balance, purchase a subscription, or redeem a code',
+    title: 'Balance Top-up',
+    description: 'Top up your balance or redeem a code',
     openInNewTab: 'Open in new tab',
     notEnabledTitle: 'Feature not enabled',
     notEnabledDesc: 'Online payment is not enabled. You can still redeem a code below.',
-    notConfiguredTitle: 'Recharge / Subscription URL not configured',
+    notConfiguredTitle: 'Recharge URL not configured',
     notConfiguredDesc:
-      'The administrator enabled the entry but has not configured a recharge/subscription URL. Please contact admin.'
+      'The administrator enabled the entry but has not configured a recharge URL. Please contact admin.'
+  },
+
+  pricing: {
+    eyebrow: 'Subscription plans',
+    title: 'Choose the plan that fits',
+    description: 'Pick a subscription for your usage. Quotas, rates, and validity shown here are the current terms.',
+    availablePlans: 'Available subscription plans',
+    loading: 'Loading plans',
+    loadErrorTitle: 'Plans are temporarily unavailable',
+    loadErrorDescription: 'We could not load the plans or payment configuration. Please try again.',
+    staleWarning: 'The latest refresh failed. Showing the most recently loaded plan information.',
+    retry: 'Try again',
+    emptyTitle: 'No plans are available yet',
+    emptyDescription: 'No subscription plan has been published. You can keep using pay-as-you-go balance billing.',
+    renewalOption: 'Renewal option',
+    choosePlan: 'Choose this plan',
+    renewPlan: 'Choose renewal',
+    choosePlanAccessible: 'Choose the {plan} plan',
+    renewPlanAccessible: 'Choose {plan} as a renewal plan',
+    manageSubscriptions: 'Manage my subscriptions',
+    groupFilter: 'Showing available plans for the selected group',
+    viewAllPlans: 'View all plans',
+    includes: 'Includes',
+    validityDays: '{days} days',
+    rateMultiplier: 'Billing rate ×{rate}',
+    peakRateWindow: 'Peak-period rate: {window}',
+    modelScopes: 'Supported models: {models}',
+    dailyQuota: 'Daily quota {amount}',
+    weeklyQuota: 'Weekly quota {amount}',
+    monthlyQuota: 'Monthly quota {amount}',
+    unlimitedQuota: 'No periodic quota limit configured',
+    planUnavailableTitle: 'This plan is unavailable',
+    planUnavailableDescription: 'The plan may have been removed or the link has expired. Choose another plan.',
+    returnToPlans: 'Back to plans',
+    close: 'Close pricing'
   },
 
   // Custom Page (iframe embed)
@@ -147,8 +182,8 @@ export default {
     restartTour: 'Restart Onboarding Tour',
     dontShowAgain: "Don't show again",
     dontShowAgainTitle: 'Permanently close onboarding guide',
-    confirmDontShow: "Are you sure you don't want to see the onboarding guide again?\n\nYou can restart it anytime from the user menu in the top right corner.",
-    confirmExit: 'Are you sure you want to exit the onboarding guide? You can restart it anytime from the top right menu.',
+    confirmDontShow: "Are you sure you don't want to see the onboarding guide again?\n\nYou can restart it anytime from the account menu at the bottom of the sidebar.",
+    confirmExit: 'Are you sure you want to exit the onboarding guide? You can restart it anytime from the account menu at the bottom of the sidebar.',
     interactiveHint: 'Press Enter or Click to continue',
     navigation: {
       flipPage: 'Flip Page',
@@ -289,7 +324,7 @@ export default {
 
   // Payment System
   payment: {
-    title: 'Recharge / Subscription',
+    title: 'Balance Top-up',
     checkoutTitle: 'Online Top-up',
     checkoutDescription: 'Fast and convenient ways to top up',
     userTypeAdmin: 'Administrator',

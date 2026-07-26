@@ -1,14 +1,14 @@
 <template>
   <div
-    class="app-layout app-layout--snow-shell min-h-screen pt-[81px]"
+    class="app-layout app-layout--snow-shell min-h-screen"
     :class="{
       'app-layout--flat-workspace-shell': isFlatWorkspaceShell,
       'app-layout--admin-shell': isAdminShell
     }"
     :data-sidebar-collapsed="sidebarCollapsed"
   >
-    <!-- Global Header -->
-    <AppHeader />
+    <!-- Mobile navigation context -->
+    <AppMobileHeader />
 
     <!-- Sidebar -->
     <AppSidebar />
@@ -16,11 +16,11 @@
     <!-- Main Content Area -->
     <div
       data-testid="app-main-shell"
-      class="app-main-shell relative min-h-[calc(100vh-81px)] transition-[margin] duration-300 ease-out motion-reduce:transition-none"
+      class="app-main-shell relative transition-[margin] duration-300 ease-out motion-reduce:transition-none"
       :class="[
         sidebarCollapsed
           ? 'lg:ml-[68px]'
-          : 'lg:ml-[184px] min-[1025px]:ml-[196px] min-[1281px]:ml-[208px]',
+          : 'lg:ml-[260px]',
         isAdminShell && 'app-layout--home-clay',
         variant === 'chat' && 'app-layout--chat'
       ]"
@@ -32,20 +32,33 @@
         </div>
       </main>
     </div>
+
+    <PersonalSettingsDialog v-if="settingsDialogRequested" />
   </div>
 </template>
 
 <script setup lang="ts">
 import '@/styles/onboarding.css'
 import './AdminClayTheme.css'
-import { computed, onBeforeUnmount, onMounted, watch } from 'vue'
+import {
+  computed,
+  defineAsyncComponent,
+  onBeforeUnmount,
+  onMounted,
+  ref,
+  watch,
+} from 'vue'
 import { useRoute } from 'vue-router'
 import { useAppStore } from '@/stores'
 import { useAuthStore } from '@/stores/auth'
 import { useOnboardingTour } from '@/composables/useOnboardingTour'
 import { useOnboardingStore } from '@/stores/onboarding'
 import AppSidebar from './AppSidebar.vue'
-import AppHeader from './AppHeader.vue'
+import AppMobileHeader from './AppMobileHeader.vue'
+
+const PersonalSettingsDialog = defineAsyncComponent(
+  () => import('@/components/settings/PersonalSettingsDialog.vue'),
+)
 
 export type AppLayoutVariant = 'default' | 'home-clay' | 'chat'
 
@@ -56,6 +69,9 @@ const props = withDefaults(defineProps<{
 })
 
 const route = useRoute()
+const settingsDialogRequested = ref(
+  Object.prototype.hasOwnProperty.call(route.query, 'account_settings'),
+)
 const isAdminShell = computed(
   () => props.variant === 'home-clay' || route.meta.requiresAdmin === true
 )
@@ -106,6 +122,17 @@ watch(
   { immediate: true }
 )
 
+watch(
+  () => route.query.account_settings,
+  (queryValue) => {
+    if (queryValue !== undefined) {
+      // Keep the host mounted after its first request so the dialog can finish
+      // its close transition, restore focus, and release modal resources.
+      settingsDialogRequested.value = true
+    }
+  },
+)
+
 onMounted(() => {
   onboardingStore.setReplayCallback(replayTour)
 })
@@ -121,14 +148,14 @@ defineExpose({ replayTour })
 <style scoped>
 .app-layout--snow-shell {
   min-height: 100vh;
-  padding-top: 81px !important;
+  padding-top: var(--app-shell-top-offset) !important;
   color: var(--lx-clay-text);
   background: var(--app-shell-canvas, var(--lx-clay-canvas)) !important;
   font-family: var(--lx-clay-font-ui);
 }
 
 .app-layout--snow-shell .app-main-shell {
-  min-height: calc(100vh - 81px);
+  min-height: calc(100vh - var(--app-shell-top-offset));
   background: var(--app-shell-canvas, var(--lx-clay-canvas)) !important;
 }
 
@@ -138,7 +165,7 @@ defineExpose({ replayTour })
 
 :global(html:not(.dark) .app-layout--snow-shell.app-layout--flat-workspace-shell) {
   --app-shell-canvas: #ffffff;
-  --app-shell-sidebar-bg: #f7f7f8;
+  --app-shell-sidebar-bg: #fcfcfc;
   --app-shell-sidebar-border: #e5e7eb;
   --app-shell-sidebar-shadow: none;
   --app-shell-sidebar-backdrop: none;
@@ -162,7 +189,7 @@ defineExpose({ replayTour })
 
 @media (max-width: 767px) {
   .app-layout--snow-shell .app-main-shell {
-    min-height: calc(100vh - 81px);
+    min-height: calc(100vh - var(--app-shell-top-offset));
   }
 
   .app-layout--snow-shell .app-main-content {
@@ -171,7 +198,7 @@ defineExpose({ replayTour })
 }
 
 .app-layout--snow-shell .app-main-shell.app-layout--chat {
-  height: calc(100dvh - 81px);
+  height: calc(100dvh - var(--app-shell-top-offset));
   min-height: 0;
   overflow: hidden;
 }

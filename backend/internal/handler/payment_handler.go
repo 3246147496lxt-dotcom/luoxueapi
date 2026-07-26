@@ -71,7 +71,11 @@ func (h *PaymentHandler) GetPlans(c *gin.Context) {
 		ForSale            bool     `json:"for_sale"`
 		SortOrder          int      `json:"sort_order"`
 	}
-	groupInfo := h.configService.GetGroupInfoMap(c.Request.Context(), plans)
+	groupInfo, err := h.configService.GetGroupInfoMap(c.Request.Context(), plans)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
 	result := make([]planWithPlatform, 0, len(plans))
 	for _, p := range plans {
 		gi := groupInfo[p.GroupID]
@@ -110,8 +114,16 @@ func (h *PaymentHandler) GetCheckoutInfo(c *gin.Context) {
 	}
 
 	// Fetch plans with group info
-	plans, _ := h.configService.ListPlansForSale(ctx)
-	groupInfo := h.configService.GetGroupInfoMap(ctx, plans)
+	plans, err := h.configService.ListPlansForSale(ctx)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	groupInfo, err := h.configService.GetGroupInfoMap(ctx, plans)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
 	planList := make([]checkoutPlan, 0, len(plans))
 	for _, p := range plans {
 		gi := groupInfo[p.GroupID]

@@ -188,7 +188,7 @@ function makeAccount(name: string, updatedAt: string, id = 1) {
     type: 'oauth',
     credentials: {},
     extra: {},
-    proxy_id: null,
+    proxy_id: null as number | null,
     concurrency: 4,
     priority: 10,
     status: 'active',

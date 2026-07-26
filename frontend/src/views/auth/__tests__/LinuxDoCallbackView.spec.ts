@@ -240,7 +240,7 @@ describe('LinuxDoCallbackView', () => {
     expect(replace).toHaveBeenCalledWith('/dashboard')
   })
 
-  it('treats a completion without token as bind success and returns to profile', async () => {
+  it('uses the role-safe settings bridge when a bind completion has no redirect', async () => {
     exchangePendingOAuthCompletion.mockResolvedValue({})
 
     mount(LinuxDoCallbackView, {
@@ -258,7 +258,7 @@ describe('LinuxDoCallbackView', () => {
 
     expect(setToken).not.toHaveBeenCalled()
     expect(showSuccess).toHaveBeenCalledWith('profile.authBindings.bindSuccess')
-    expect(replace).toHaveBeenCalledWith('/profile')
+    expect(replace).toHaveBeenCalledWith('/settings/profile')
   })
 
   it('supports bind completion after adoption confirmation', async () => {

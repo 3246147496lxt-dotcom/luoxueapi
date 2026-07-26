@@ -18,6 +18,7 @@ import type {
   AffiliateTransferResponse,
   PlatformQuotasResponse,
 } from '@/types'
+import { resolveOAuthBindingConnectionsRedirect } from '@/navigation/oauthBindingRedirect'
 
 /**
  * Get current user profile
@@ -119,6 +120,7 @@ export type BindableOAuthProvider = Exclude<UserAuthProvider, 'email'>
 
 interface BuildOAuthBindingStartURLOptions {
   redirectTo?: string
+  userRole?: User['role'] | null
   wechatOAuthSettings?: WeChatOAuthPublicSettings | null
 }
 
@@ -142,7 +144,8 @@ export function buildOAuthBindingStartURL(
   provider: BindableOAuthProvider,
   options: BuildOAuthBindingStartURLOptions = {}
 ): string | null {
-  const redirectTo = options.redirectTo?.trim() || '/profile'
+  const redirectTo = options.redirectTo?.trim()
+    || resolveOAuthBindingConnectionsRedirect(options.userRole)
   const apiBase = (import.meta.env.VITE_API_BASE_URL as string | undefined) || '/api/v1'
   const normalized = apiBase.replace(/\/$/, '')
   const params = new URLSearchParams({

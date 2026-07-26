@@ -22,6 +22,7 @@ const {
   routeState,
   locationState,
   appStoreState,
+  authUserState,
 } = vi.hoisted(() => ({
   exchangePendingOAuthCompletionMock: vi.fn(),
   completeWeChatOAuthRegistrationMock: vi.fn(),
@@ -53,6 +54,9 @@ const {
   appStoreState: {
     cachedPublicSettings: null as null | Record<string, unknown>,
     publicSettingsLoaded: false,
+  },
+  authUserState: {
+    current: null as { role: 'admin' | 'user' } | null,
   },
 }))
 
@@ -117,6 +121,7 @@ vi.mock('vue-i18n', () => ({
 
 vi.mock('@/stores', () => ({
   useAuthStore: () => ({
+    user: authUserState.current,
     setToken: setTokenMock,
     setPendingAuthSession: setPendingAuthSessionMock,
     clearPendingAuthSession: clearPendingAuthSessionMock,
@@ -171,6 +176,7 @@ describe('WechatCallbackView', () => {
     routeState.query = {}
     appStoreState.cachedPublicSettings = null
     appStoreState.publicSettingsLoaded = false
+    authUserState.current = null
     localStorage.clear()
     sessionStorage.clear()
     locationState.current = {
@@ -381,6 +387,28 @@ describe('WechatCallbackView', () => {
 
     expect(exchangePendingOAuthCompletionMock).toHaveBeenCalledWith()
     expect(exchangePendingOAuthCompletionMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('returns a bind completion without an explicit redirect to canonical admin settings', async () => {
+    authUserState.current = { role: 'admin' }
+    exchangePendingOAuthCompletionMock.mockResolvedValue({})
+
+    mount(WechatCallbackView, {
+      global: {
+        stubs: {
+          AuthLayout: { template: '<div><slot /></div>' },
+          Icon: true,
+          RouterLink: { template: '<a><slot /></a>' },
+          transition: false,
+        },
+      },
+    })
+
+    await flushPromises()
+
+    expect(replaceMock).toHaveBeenCalledWith(
+      '/admin/dashboard?account_settings=account&account_settings_detail=connections'
+    )
   })
 
   it('waits for explicit adoption confirmation before finishing a non-invitation login', async () => {

@@ -1,6 +1,11 @@
 <template>
   <AppLayout>
     <div class="space-y-6">
+      <AdminPageHeader
+        :title="t('usage.title')"
+        :description="t('usage.description')"
+      />
+
       <UsageStatsCards :stats="usageStats" :show-account-cost="false" :strike-standard-cost="true" credit-mode />
 
       <div class="space-y-4">
@@ -265,6 +270,7 @@ import { useRoute } from 'vue-router'
 import { useAppStore } from '@/stores/app'
 import { keysAPI, usageAPI, userGroupsAPI } from '@/api'
 import AppLayout from '@/components/layout/AppLayout.vue'
+import AdminPageHeader from '@/components/layout/AdminPageHeader.vue'
 import Pagination from '@/components/common/Pagination.vue'
 import Select, { type SelectOption } from '@/components/common/Select.vue'
 import DateRangePicker from '@/components/common/DateRangePicker.vue'

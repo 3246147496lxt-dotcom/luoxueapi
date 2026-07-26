@@ -57,6 +57,7 @@ describe('AppSidebar navigation shell', () => {
     expect(componentSource).toContain('appStore.toggleSidebar()')
     expect(componentSource).not.toContain('VersionBadge')
     expect(componentSource).not.toContain('sidebar-footer')
+    expect(componentSource).toContain('<SidebarAccountDock />')
   })
 
   it('does not draw a divider between the brand row and navigation sections', () => {
@@ -91,14 +92,34 @@ describe('AppSidebar navigation shell', () => {
     )
   })
 
+  it('matches the target collapse button hover and resize-cursor behavior', () => {
+    expect(componentSource).toMatch(
+      /\.sidebar-collapse-toggle\s*\{[^}]*cursor: w-resize;/,
+    )
+    expect(componentSource).toMatch(
+      /\.sidebar-collapse-toggle\s*\{[^}]*transition: none;/,
+    )
+    expect(componentSource).toMatch(
+      /\.sidebar-collapse-toggle:hover\s*\{[^}]*background: rgb\(0 0 0 \/ 0\.07\);[^}]*\}/,
+    )
+    expect(componentSource).toMatch(
+      /\.sidebar-header-collapsed \.sidebar-collapse-toggle\s*\{[^}]*cursor: e-resize;/,
+    )
+    expect(componentSource).toContain(":global([dir='rtl']) .sidebar-collapse-toggle")
+    expect(componentSource).toContain(
+      ":global([dir='rtl']) .sidebar-header-collapsed .sidebar-collapse-toggle",
+    )
+  })
+
   it('uses matching compact and expanded widths inside a full-height desktop rail', () => {
     expect(componentSource).toContain(
-      "? 'w-[60px] lg:w-[68px]'\n        : 'w-44 lg:w-[184px] min-[1025px]:w-[196px] min-[1281px]:w-[208px]'",
+      "? 'w-[60px] lg:w-[68px]'\n        : 'w-[min(84vw,288px)] lg:w-[260px]'",
     )
     expect(componentSource).toContain('top: 0;')
-    expect(componentSource.match(/top: 5\.0625rem;/g)).toHaveLength(1)
+    expect(componentSource).toContain('top: var(--app-shell-top-offset);')
+    expect(componentSource).not.toContain('top: 5.0625rem;')
     expect(componentSource).toContain('@apply px-2 py-3;')
-    expect(componentSource).toContain('min-height: 2rem;')
+    expect(componentSource).toContain('min-height: 2.25rem;')
     expect(componentSource).toContain('padding-left: 0.75rem;')
     expect(componentSource).toContain('padding-right: 0.75rem;')
     expect(componentSource).toContain('min-height: 2.75rem;')
@@ -116,6 +137,15 @@ describe('AppSidebar navigation shell', () => {
     expect(componentSource).toContain('transform: translateX(-100%);')
   })
 
+  it('removes the off-canvas mobile navigation from keyboard and screen-reader access', () => {
+    expect(componentSource).toContain(
+      "const mobileNavigationHidden = computed(() => mobileViewport.value && !mobileOpen.value)",
+    )
+    expect(componentSource).toContain(":aria-hidden=\"mobileNavigationHidden ? 'true' : undefined\"")
+    expect(componentSource).toContain(':inert="mobileNavigationHidden"')
+    expect(componentSource).toContain("window.matchMedia('(max-width: 1023px)')")
+  })
+
   it('keeps the mobile overlay and configurable glass fallback above it', () => {
     expect(componentSource).toContain(
       'class="fixed inset-0 z-30 border-0 bg-gray-950/5 p-0 backdrop-blur-[1px] lg:hidden dark:bg-black/20"',
@@ -130,6 +160,7 @@ describe('AppSidebar navigation shell', () => {
     expect(componentSource).toContain('gap: 0.625rem;')
     expect(componentSource).toContain('padding-top: 0.25rem;')
     expect(componentSource).toContain('line-height: 1.5rem;')
+    expect(componentSource).toContain('font-weight: 400;')
     expect(componentSource).toContain(
       'color: var(--app-shell-sidebar-active-color, rgb(13 13 13));',
     )
@@ -156,52 +187,29 @@ describe('AppSidebar navigation shell', () => {
 })
 
 describe('AppSidebar utility actions', () => {
-  it('does not render or manage the theme toggle', () => {
+  it('delegates account and utility actions to the account dock', () => {
+    const navEnd = componentSource.indexOf('</nav>')
+    const dock = componentSource.indexOf('<SidebarAccountDock />')
+
+    expect(navEnd).toBeGreaterThan(-1)
+    expect(dock).toBeGreaterThan(navEnd)
+    expect(componentSource).toContain("import SidebarAccountDock from './SidebarAccountDock.vue'")
     expect(componentSource).not.toContain('toggleTheme')
     expect(componentSource).not.toContain("t('nav.lightMode')")
     expect(componentSource).not.toContain("t('nav.darkMode')")
   })
 })
 
-describe('AppSidebar pinned destinations', () => {
-  it('keeps the destination block outside the scrolling navigation region', () => {
-    const navEnd = componentSource.indexOf('</nav>')
-    const destinations = componentSource.indexOf('data-testid="sidebar-destination-links"')
-
-    expect(navEnd).toBeGreaterThan(-1)
-    expect(destinations).toBeGreaterThan(navEnd)
-    expect(componentSource).toContain('.sidebar-destination-links {')
-    expect(componentSource).toContain('flex: 0 0 auto;')
-  })
-
-  it('matches the compact reference rhythm and keeps a visible keyboard focus state', () => {
-    expect(componentSource).toContain('min-height: 2.25rem;')
-    expect(componentSource).toContain('padding: 0.5rem 0.75rem;')
-    expect(componentSource).toContain('border-radius: 0.625rem;')
-    expect(componentSource).toContain('font-size: 0.8125rem;')
-    expect(componentSource).toContain('.sidebar-destination-link:focus-visible')
-  })
-
-  it('uses the tokenized blue hover contract and recolors both destination glyphs', () => {
+describe('AppSidebar account destination ownership', () => {
+  it('filters account destinations out of the scrolling navigation', () => {
+    expect(componentSource).toContain('ACCOUNT_DESTINATION_PATHS')
+    expect(componentSource).toContain('isAccountDestinationPath')
     expect(componentSource).toContain(
-      'color: var(--app-shell-sidebar-hover-color, rgb(0 132 255));',
+      "(item) => !isAccountDestinationPath(item.path) && !item.path.startsWith('/custom/')",
     )
     expect(componentSource).toContain(
-      'background: var(--app-shell-sidebar-hover-bg, rgb(0 132 255 / 0.08));',
+      "(item) => item.path !== '/chat' && !isAccountDestinationPath(item.path)",
     )
-    expect(componentSource).toContain(
-      'outline: 2px solid var(--app-shell-sidebar-focus, rgb(0 132 255 / 0.5));',
-    )
-    expect(componentSource).toContain('.sidebar-destination-label {')
-    expect(componentSource).toContain('color: inherit;')
-  })
-
-  it('disables the destination lift when reduced motion is requested', () => {
-    expect(componentSource).toMatch(
-      /@media \(prefers-reduced-motion: reduce\)[\s\S]*\.sidebar-destination-leading > :deep\(svg\)[\s\S]*transition-duration:\s*0\.01ms/,
-    )
-    expect(componentSource).toMatch(
-      /@media \(prefers-reduced-motion: reduce\)[\s\S]*\.sidebar-destination-link:hover,[\s\S]*transform:\s*none/,
-    )
+    expect(componentSource).not.toContain('data-testid="sidebar-destination-links"')
   })
 })

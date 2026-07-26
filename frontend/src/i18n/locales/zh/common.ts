@@ -170,6 +170,7 @@ export default {
     modelCatalog: '模型广场',
     contactUs: '联系我们',
     quickLinks: '快捷入口',
+    openNavigation: '打开导航',
     closeNavigation: '关闭导航',
     adminSections: {
       overview: '概览',
@@ -195,6 +196,7 @@ export default {
     promoCodes: '优惠码',
     settings: '系统设置',
     myAccount: '个人中心',
+    personalTools: '个人工具',
     lightMode: '浅色模式',
     darkMode: '深色模式',
     collapse: '收起',
@@ -217,6 +219,24 @@ export default {
     channelStatus: '渠道状态',
     riskControl: '风控中心',
     auditLogs: '操作日志',
+  },
+
+  accountDock: {
+    open: '打开账户菜单',
+    close: '关闭账户菜单',
+    availableBalance: '可用余额',
+    frozenBalance: '冻结额度',
+    subscriptionStatus: '订阅状态',
+    subscriptionLoading: '正在同步',
+    activeSubscriptions: '{count} 个有效订阅',
+    payAsYouGo: '按量使用',
+    summary: '余额 {balance} · {subscription}',
+    accountActions: '账户操作',
+    upgrade: '升级',
+    recharge: '充值',
+    settings: '设置',
+    helpAndResources: '帮助与资源',
+    adminGuide: '管理员使用引导',
   },
 
   // Auth

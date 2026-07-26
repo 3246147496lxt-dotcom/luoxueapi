@@ -5,9 +5,11 @@
       @click="openModal"
       class="relative flex items-center justify-center rounded-full text-[#007bff] transition-colors duration-200 after:absolute after:-inset-1.5 after:content-[''] hover:bg-[rgba(46,50,56,0.05)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 focus-visible:ring-offset-2 dark:text-[#5aa2ff] dark:hover:bg-white/[0.08] dark:focus-visible:ring-offset-dark-900"
       :class="[
-        compact
-          ? 'h-8 w-8'
-          : 'h-11 min-h-11 w-11 min-w-11',
+        variant === 'row'
+          ? 'announcement-bell-row min-h-11 w-full rounded-xl px-3'
+          : compact
+            ? 'h-8 w-8'
+            : 'h-11 min-h-11 w-11 min-w-11',
         { 'text-blue-600 dark:text-blue-400': unreadCount > 0 }
       ]"
       :aria-label="t('announcements.title')"
@@ -16,9 +18,18 @@
         class="announcement-bell-icon"
         :class="compact ? 'h-[18px] w-[18px]' : 'h-5 w-5'"
       />
+      <span v-if="variant === 'row'" class="ml-3 min-w-0 flex-1 truncate text-left text-sm font-medium">
+        {{ t('announcements.title') }}
+      </span>
+      <span
+        v-if="variant === 'row' && unreadCount > 0"
+        class="ml-3 rounded-full bg-red-50 px-2 py-0.5 text-xs font-semibold text-red-600 dark:bg-red-950/40 dark:text-red-300"
+      >
+        {{ unreadCount }}
+      </span>
       <!-- 未读红点 -->
       <span
-        v-if="unreadCount > 0"
+        v-if="variant !== 'row' && unreadCount > 0"
         class="absolute right-2 top-2 flex h-2 w-2"
       >
         <span class="absolute inline-flex h-full w-full animate-ping rounded-full bg-red-500 opacity-75 motion-reduce:animate-none"></span>
@@ -31,6 +42,7 @@
       <Transition name="modal-fade">
         <div
           v-if="isModalOpen"
+          data-announcement-modal="true"
           class="fixed inset-0 z-[100] flex items-start justify-center overflow-y-auto bg-gradient-to-br from-black/70 via-black/60 to-black/70 p-4 pt-[8vh] backdrop-blur-md"
           @click="closeModal"
         >
@@ -191,6 +203,7 @@
       <Transition name="modal-fade">
         <div
           v-if="detailModalOpen && selectedAnnouncement"
+          data-announcement-modal="true"
           class="fixed inset-0 z-[110] flex items-start justify-center overflow-y-auto bg-gradient-to-br from-black/70 via-black/60 to-black/70 p-4 pt-[6vh] backdrop-blur-md"
           @click="closeDetail"
         >
@@ -329,13 +342,16 @@ import { useAppStore } from '@/stores/app'
 import { useAnnouncementStore } from '@/stores/announcements'
 import { formatRelativeTime, formatRelativeWithDateTime } from '@/utils/format'
 import type { UserAnnouncement } from '@/types'
+import { acquireBodyScrollLock, releaseBodyScrollLock } from '@/utils/bodyScrollLock'
 import Icon from '@/components/icons/Icon.vue'
 import NotificationIcon from '@/components/icons/NotificationIcon.vue'
 
 withDefaults(defineProps<{
   compact?: boolean
+  variant?: 'icon' | 'row'
 }>(), {
   compact: false,
+  variant: 'icon',
 })
 
 const { t } = useI18n()
@@ -356,6 +372,7 @@ const unreadCount = computed(() => announcementStore.unreadCount)
 const isModalOpen = ref(false)
 const detailModalOpen = ref(false)
 const selectedAnnouncement = ref<UserAnnouncement | null>(null)
+const scrollLockToken = Symbol('announcement-modal')
 
 // Methods
 function renderMarkdown(content: string): string {
@@ -424,18 +441,43 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   document.removeEventListener('keydown', handleEscape)
-  document.body.style.overflow = ''
+  releaseBodyScrollLock(scrollLockToken)
 })
 
 watch(
   [isModalOpen, detailModalOpen, () => announcementStore.currentPopup],
   ([modal, detail, popup]) => {
-    document.body.style.overflow = (modal || detail || popup) ? 'hidden' : ''
+    if (modal || detail || popup) {
+      acquireBodyScrollLock(scrollLockToken)
+    } else {
+      releaseBodyScrollLock(scrollLockToken)
+    }
   }
 )
 </script>
 
 <style scoped>
+.announcement-bell-row {
+  justify-content: flex-start;
+  border-radius: 0.75rem;
+  color: rgb(51 65 85);
+  background: transparent;
+}
+
+.announcement-bell-row:hover {
+  color: rgb(15 23 42);
+  background: rgb(15 23 42 / 0.045);
+}
+
+:global(html.dark .announcement-bell-row) {
+  color: rgb(226 232 240);
+}
+
+:global(html.dark .announcement-bell-row:hover) {
+  color: #fff;
+  background: rgb(255 255 255 / 0.07);
+}
+
 /* Modal Animations */
 .modal-fade-enter-active {
   transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);

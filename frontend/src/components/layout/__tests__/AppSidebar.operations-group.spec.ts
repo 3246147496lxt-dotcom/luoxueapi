@@ -17,7 +17,7 @@ vi.mock('vue-router', () => ({
 vi.mock('vue-i18n', async () => {
   const actual = await vi.importActual<typeof import('vue-i18n')>('vue-i18n')
   const messages: Record<string, string> = {
-    'nav.myAccount': '个人中心',
+    'nav.personalTools': '个人工具',
     'nav.adminSections.overview': '概览',
     'nav.adminSections.business': '用户与资源',
     'nav.adminSections.operations': '计费与运营',
@@ -75,6 +75,7 @@ function mountSidebar(role: User['role'] = 'admin'): VueWrapper {
   const adminSettingsStore = useAdminSettingsStore()
 
   authStore.user = createUser(role)
+  appStore.docUrl = '/docs/'
   appStore.publicSettingsLoaded = true
   vi.spyOn(adminSettingsStore, 'fetch').mockResolvedValue(undefined)
 
@@ -91,18 +92,13 @@ function mountSidebar(role: User['role'] = 'admin'): VueWrapper {
           template:
             '<svg data-component="sidebar-collapse-icon" :data-collapsed="String(collapsed)" />',
         },
+        SidebarAccountDock: {
+          template: '<div data-testid="sidebar-account-dock-stub" />',
+        },
         VersionBadge: true,
       },
     },
   })
-}
-
-function setPublicModelCatalog(enabled: boolean, backendMode = false): void {
-  const appStore = useAppStore()
-  appStore.cachedPublicSettings = {
-    public_model_catalog_enabled: enabled,
-    backend_mode_enabled: backendMode,
-  } as PublicSettings
 }
 
 function enableAllAdminNavigation(): void {
@@ -159,13 +155,11 @@ describe('AppSidebar grouped admin navigation', () => {
     expect(sidebar.classes()).toContain('sidebar')
     expect(sidebar.classes()).toEqual(
       expect.arrayContaining([
-        'w-44',
-        'lg:w-[184px]',
-        'min-[1025px]:w-[196px]',
-        'min-[1281px]:w-[208px]',
+        'w-[min(84vw,288px)]',
+        'lg:w-[260px]',
       ]),
     )
-    expect(wrapper.get('[data-testid="sidebar-brand-row"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="sidebar-brand-row"]').exists()).toBe(true)
     expect(wrapper.get('[data-testid="sidebar-brand"]').attributes('href')).toBe('/admin/dashboard')
     expect(sidebar.classes()).not.toContain('sidebar--snow-clay')
     expect(sidebar.classes()).not.toContain('sidebar--home-clay')
@@ -190,10 +184,8 @@ describe('AppSidebar grouped admin navigation', () => {
     expect(icon.attributes('data-collapsed')).toBe('false')
     expect(sidebar.classes()).toEqual(
       expect.arrayContaining([
-        'w-44',
-        'lg:w-[184px]',
-        'min-[1025px]:w-[196px]',
-        'min-[1281px]:w-[208px]',
+        'w-[min(84vw,288px)]',
+        'lg:w-[260px]',
       ]),
     )
     expect(brandRow.classes()).not.toContain('sidebar-header-collapsed')
@@ -208,7 +200,7 @@ describe('AppSidebar grouped admin navigation', () => {
     expect(toggle.attributes('title')).toBe('nav.expand')
     expect(icon.attributes('data-collapsed')).toBe('true')
     expect(sidebar.classes()).toEqual(expect.arrayContaining(['w-[60px]', 'lg:w-[68px]']))
-    expect(sidebar.classes()).not.toContain('w-44')
+    expect(sidebar.classes()).not.toContain('w-[min(84vw,288px)]')
     expect(brandRow.classes()).toContain('sidebar-header-collapsed')
     expect(brand.classes()).toContain('app-brand--collapsed')
 
@@ -220,7 +212,7 @@ describe('AppSidebar grouped admin navigation', () => {
     expect(toggle.attributes('aria-label')).toBe('nav.collapse')
     expect(toggle.attributes('title')).toBe('nav.collapse')
     expect(icon.attributes('data-collapsed')).toBe('false')
-    expect(sidebar.classes()).toContain('lg:w-[184px]')
+    expect(sidebar.classes()).toContain('lg:w-[260px]')
     expect(brandRow.classes()).not.toContain('sidebar-header-collapsed')
     expect(brand.classes()).not.toContain('app-brand--collapsed')
   })
@@ -326,7 +318,7 @@ describe('AppSidebar grouped admin navigation', () => {
     ])
   })
 
-  it('keeps simple mode grouped without empty headings or the personal-center section', () => {
+  it('keeps simple mode grouped without empty headings or the personal-tools section', () => {
     useAuthStore()
     const adminSettingsStore = useAdminSettingsStore()
     const rawAuthState = toRaw(pinia.state.value.auth) as unknown as {
@@ -361,6 +353,7 @@ describe('AppSidebar grouped admin navigation', () => {
         .exists(),
     ).toBe(true)
     expect(wrapper.findAll('a[href="/chat"]')).toHaveLength(1)
+    expect(wrapper.get('[data-testid="sidebar-docs-tutorial"]').attributes('href')).toBe('/docs/')
     expect(wrapper.find('a[href="/admin/users"]').exists()).toBe(false)
     expect(wrapper.find('[data-testid="sidebar-admin-business-section"] a[href="/keys"]').exists()).toBe(true)
     const simpleSystemLinks = wrapper
@@ -368,7 +361,7 @@ describe('AppSidebar grouped admin navigation', () => {
       .findAll('a[href]')
       .map(link => link.attributes('href'))
     expect(simpleSystemLinks.at(-1)).toBe('/admin/settings')
-    expect(wrapper.text()).not.toContain('个人中心')
+    expect(wrapper.text()).not.toContain('个人工具')
   })
 
   it('ships concise Chinese and English labels for the grouped administrator rail', () => {
@@ -386,6 +379,8 @@ describe('AppSidebar grouped admin navigation', () => {
       system: 'System & Audit',
     })
     expect(enCommon.nav.adminUsage).toBe('Platform Usage')
+    expect(enCommon.nav.docsTutorial).toBe('Documentation Guide')
+    expect(enCommon.nav.documentationManagement).toBe('Documentation Management')
   })
 
   it('does not inject a status card into the original navigation rail', () => {
@@ -469,11 +464,11 @@ describe('AppSidebar grouped admin navigation', () => {
     expect(wrapper.find('a[href="/admin/announcements"]').exists()).toBe(true)
   })
 
-  it('uses the personal-center heading and the supplied notification glyph', () => {
+  it('uses the personal-tools heading and the supplied notification glyph', () => {
     const wrapper = mountSidebar()
     const announcementPath = wrapper.get('a[href="/admin/announcements"] svg path')
 
-    expect(wrapper.text()).toContain('个人中心')
+    expect(wrapper.text()).toContain('个人工具')
     expect(announcementPath.attributes('d')).toContain('M512 235.52')
     expect(announcementPath.attributes('fill')).toBe('currentColor')
   })
@@ -485,7 +480,7 @@ describe('AppSidebar grouped admin navigation', () => {
     expect(wrapper.find('a[href="/admin/dashboard"]').exists()).toBe(false)
   })
 
-  it('keeps chat and recharge reachable for regular users in simple mode', () => {
+  it('keeps account destinations out of regular-user navigation in simple mode', () => {
     useAuthStore()
     const rawAuthState = toRaw(pinia.state.value.auth) as unknown as {
       runMode: Ref<'standard' | 'simple'>
@@ -495,19 +490,17 @@ describe('AppSidebar grouped admin navigation', () => {
     const wrapper = mountSidebar('user')
 
     expect(wrapper.find('a[href="/chat"]').exists()).toBe(true)
-    expect(wrapper.find('a[href="/purchase"]').exists()).toBe(true)
+    expect(wrapper.get('[data-testid="sidebar-docs-tutorial"]').attributes('href')).toBe('/docs/')
+    expect(wrapper.find('a[href="/purchase"]').exists()).toBe(false)
     expect(wrapper.find('a[href="/subscriptions"]').exists()).toBe(false)
+    expect(wrapper.find('a[href="/orders"]').exists()).toBe(false)
+    expect(wrapper.find('a[href="/profile"]').exists()).toBe(false)
   })
 
-  it('groups regular-user account links under the personal-center heading', () => {
+  it('keeps regular-user account links out of the scrolling rail', () => {
     const wrapper = mountSidebar('user')
     const mainSection = wrapper.get('[data-testid="sidebar-user-main-section"]')
-    const personalSection = wrapper.get('[data-testid="sidebar-user-personal-section"]')
 
-    expect(personalSection.attributes('role')).toBe('group')
-    expect(personalSection.attributes('aria-label')).toBe('个人中心')
-    expect(personalSection.get('.sidebar-section-title').text()).toBe('个人中心')
-    expect(personalSection.get('.sidebar-section-title').attributes('aria-hidden')).toBe('true')
     expect(mainSection.findAll('a').map((link) => link.attributes('href'))).toEqual([
       '/dashboard',
       '/chat',
@@ -515,15 +508,42 @@ describe('AppSidebar grouped admin navigation', () => {
       '/usage',
       '/monitor',
     ])
-    expect(personalSection.findAll('a').map((link) => link.attributes('href'))).toEqual([
-      '/subscriptions',
-      '/purchase',
-      '/orders',
-      '/profile',
-    ])
+    expect(wrapper.find('[data-testid="sidebar-user-personal-section"]').exists()).toBe(false)
+    for (const path of ['/subscriptions', '/purchase', '/orders', '/profile']) {
+      expect(wrapper.find(`nav a[href="${path}"]`).exists()).toBe(false)
+    }
+    expect(wrapper.find('[data-testid="sidebar-account-dock-stub"]').exists()).toBe(true)
   })
 
-  it('keeps custom user links after the personal-center section', () => {
+  it.each<User['role']>(['admin', 'user'])(
+    'moves the configured documentation tutorial into the scrolling %s navigation',
+    (role) => {
+      const wrapper = mountSidebar(role)
+      const navigation = wrapper.get('nav.sidebar-nav')
+      const docsLink = navigation.get('[data-testid="sidebar-docs-tutorial"]')
+
+      expect(docsLink.text()).toContain('nav.docsTutorial')
+      expect(docsLink.attributes('href')).toBe('/docs/')
+      expect(docsLink.attributes('target')).toBe('_blank')
+      expect(docsLink.attributes('rel')).toBe('noopener noreferrer')
+      expect(wrapper.findAll('[data-testid="sidebar-docs-tutorial"]')).toHaveLength(1)
+    },
+  )
+
+  it('keeps the documentation tutorial in navigation when backend mode hides user routes', () => {
+    const appStore = useAppStore()
+    appStore.cachedPublicSettings = {
+      backend_mode_enabled: true,
+      doc_url: '/docs/',
+    } as PublicSettings
+
+    const wrapper = mountSidebar('user')
+
+    expect(wrapper.find('[data-testid="sidebar-user-main-section"]').exists()).toBe(false)
+    expect(wrapper.get('[data-testid="sidebar-docs-tutorial"]').attributes('href')).toBe('/docs/')
+  })
+
+  it('keeps custom user links after the main section', () => {
     const appStore = useAppStore()
     appStore.cachedPublicSettings = {
       custom_menu_items: [
@@ -542,7 +562,6 @@ describe('AppSidebar grouped admin navigation', () => {
 
     expect(sections.map((section) => section.attributes('data-testid'))).toEqual([
       'sidebar-user-main-section',
-      'sidebar-user-personal-section',
       'sidebar-user-custom-section',
     ])
     expect(wrapper.get('[data-testid="sidebar-user-custom-section"] a').attributes('href')).toBe(
@@ -550,155 +569,13 @@ describe('AppSidebar grouped admin navigation', () => {
     )
   })
 
-  it('keeps the remaining account links grouped when payments are disabled', () => {
-    const appStore = useAppStore()
-    appStore.cachedPublicSettings = {
-      custom_menu_items: [],
-      payment_enabled: false,
-    } as unknown as PublicSettings
-    const wrapper = mountSidebar('user')
-    const personalSection = wrapper.get('[data-testid="sidebar-user-personal-section"]')
-
-    expect(personalSection.findAll('a').map((link) => link.attributes('href'))).toEqual([
-      '/subscriptions',
-      '/purchase',
-      '/profile',
-    ])
-  })
-
-  it('links regular users to the configured documentation center', () => {
-    const appStore = useAppStore()
-    appStore.docUrl = 'https://docs.example.com/tutorial-docs/'
-    const wrapper = mountSidebar('user')
-    const docsLink = wrapper.get('[data-destination="docs"]')
-
-    expect(docsLink.text()).toContain('nav.docsTutorial')
-    expect(docsLink.attributes('href')).toBe('https://docs.example.com/tutorial-docs/')
-    expect(docsLink.attributes('target')).toBe('_blank')
-    expect(docsLink.attributes('rel')).toBe('noopener noreferrer')
-    expect(wrapper.findAll('[data-destination="docs"]')).toHaveLength(1)
-  })
-
-  it('shows administrators the documentation link and falls back to the canonical center', () => {
-    const wrapper = mountSidebar()
-    const docsLink = wrapper.get('[data-destination="docs"]')
-
-    expect(docsLink.attributes('href')).toBe('http://127.0.0.1:4179/tutorial-docs/')
-  })
-
-  it('uses a configured support URL or falls back to the contact section in documentation', () => {
-    const appStore = useAppStore()
-    appStore.docUrl = 'https://docs.example.com/tutorial-docs/'
-    appStore.contactInfo = 'QQ: 2456772148'
-    const fallbackWrapper = mountSidebar('user')
-
-    expect(fallbackWrapper.get('[data-destination="contact"]').attributes('href')).toBe(
-      'https://docs.example.com/tutorial-docs/#recharge',
-    )
-
-    fallbackWrapper.unmount()
-    appStore.contactInfo = 'https://support.example.com/contact'
-    const configuredWrapper = mountSidebar('user')
-
-    expect(configuredWrapper.get('[data-destination="contact"]').attributes('href')).toBe(
-      'https://support.example.com/contact',
-    )
-  })
-
-  it.each<User['role']>(['admin', 'user'])('pins the enabled public destinations below the scrollable %s menu', (role) => {
-    setPublicModelCatalog(true)
+  it.each<User['role']>(['admin', 'user'])('mounts the account dock below the scrollable %s menu', (role) => {
     const wrapper = mountSidebar(role)
     const sidebar = wrapper.get('#app-sidebar')
     const navigation = wrapper.get('nav.sidebar-nav')
-    const destinations = wrapper.get('[data-testid="sidebar-destination-links"]')
-    const links = destinations.findAll('[data-destination]')
 
-    expect(destinations.element.parentElement).toBe(sidebar.element)
-    expect(navigation.element.contains(destinations.element)).toBe(false)
-    expect(links.map(link => link.attributes('data-destination'))).toEqual([
-      'home',
-      'models',
-      'contact',
-      'docs',
-    ])
-    expect(destinations.get('[data-destination="home"]').attributes('href')).toBe('/home')
-    expect(destinations.get('[data-destination="models"]').attributes('href')).toBe('/models.html')
-    expect(destinations.get('[data-destination="contact"]').attributes('href')).toBe('http://127.0.0.1:4179/tutorial-docs/#recharge')
-    expect(destinations.findAll('[data-role="destination-icon"]')).toHaveLength(4)
-    expect(destinations.findAll('[data-role="destination-label"]')).toHaveLength(4)
-    expect(destinations.findAll('[data-role="destination-jump"]')).toHaveLength(4)
-    expect(links.every(link => link.attributes('target') === '_blank')).toBe(true)
-
-    const expectedIcons = [
-      'destinationHome',
-      'destinationModels',
-      'destinationContact',
-      'destinationDocument',
-    ]
-
-    links.forEach((link, index) => {
-      const leading = link.get('.sidebar-destination-leading')
-      const icon = link.get('[data-role="destination-icon"]')
-      const jump = link.get('[data-role="destination-jump"]')
-
-      expect(leading.element.contains(icon.element)).toBe(true)
-      expect(icon.attributes('data-icon-name')).toBe(expectedIcons[index])
-      expect(jump.attributes('data-icon-name')).toBe('destinationArrowUpRight')
-      expect(link.element.lastElementChild).toBe(jump.element)
-    })
-  })
-
-  it('hides the model catalog destination when its public flag is disabled', () => {
-    setPublicModelCatalog(false)
-    const wrapper = mountSidebar('user')
-
-    expect(wrapper.find('[data-destination="models"]').exists()).toBe(false)
-    expect(wrapper.findAll('[data-destination]')).toHaveLength(3)
-  })
-
-  it('shows the model catalog destination when its public flag is enabled', () => {
-    setPublicModelCatalog(true)
-    const wrapper = mountSidebar('user')
-
-    expect(wrapper.get('[data-destination="models"]').attributes('href')).toBe('/models.html')
-  })
-
-  it('hides the model catalog destination in backend mode even when enabled', () => {
-    setPublicModelCatalog(true, true)
-    const wrapper = mountSidebar('user')
-
-    expect(wrapper.find('[data-destination="models"]').exists()).toBe(false)
-    expect(wrapper.findAll('[data-destination]')).toHaveLength(3)
-  })
-
-  it('keeps destination icons accessible when the sidebar is collapsed', () => {
-    const appStore = useAppStore()
-    setPublicModelCatalog(true)
-    appStore.setSidebarCollapsed(true)
-    const wrapper = mountSidebar()
-    const destinations = wrapper.get('[data-testid="sidebar-destination-links"]')
-    const links = destinations.findAll('[data-destination]')
-
-    expect(links).toHaveLength(4)
-    for (const link of links) {
-      expect(link.classes()).toContain('sidebar-destination-link-collapsed')
-      expect(link.attributes('aria-label')).toBeTruthy()
-      expect(link.find('[data-role="destination-icon"]').exists()).toBe(true)
-      expect(link.get('[data-role="destination-label"]').attributes('aria-hidden')).toBe('true')
-      expect(link.get('[data-role="destination-jump"]').attributes('aria-hidden')).toBe('true')
-    }
-  })
-
-  it('closes the mobile sidebar after a destination is activated', async () => {
-    vi.useFakeTimers()
-    const appStore = useAppStore()
-    appStore.setMobileOpen(true)
-    const wrapper = mountSidebar('user')
-
-    await wrapper.get('[data-destination="home"]').trigger('click')
-    await vi.advanceTimersByTimeAsync(150)
-
-    expect(appStore.mobileOpen).toBe(false)
-    vi.useRealTimers()
+    const dock = wrapper.get('[data-testid="sidebar-account-dock-stub"]')
+    expect(dock.element.parentElement).toBe(sidebar.element)
+    expect(navigation.element.contains(dock.element)).toBe(false)
   })
 })

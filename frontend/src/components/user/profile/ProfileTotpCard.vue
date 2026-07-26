@@ -1,6 +1,9 @@
 <template>
-  <div class="card">
-    <div class="border-b border-gray-100 px-6 py-4 dark:border-dark-700">
+  <div :class="props.embedded ? 'space-y-4' : 'card'">
+    <div
+      v-if="!props.embedded"
+      class="border-b border-gray-100 px-6 py-4 dark:border-dark-700"
+    >
       <h2 class="text-lg font-medium text-gray-900 dark:text-white">
         {{ t('profile.totp.title') }}
       </h2>
@@ -8,9 +11,13 @@
         {{ t('profile.totp.description') }}
       </p>
     </div>
-    <div class="px-6 py-6">
+    <div :class="props.embedded ? '' : 'px-6 py-6'">
       <!-- Loading state -->
-      <div v-if="loading" class="flex items-center justify-center py-8">
+      <div
+        v-if="loading"
+        class="flex items-center justify-center"
+        :class="props.embedded ? 'py-4' : 'py-8'"
+      >
         <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-500"></div>
       </div>
 
@@ -32,7 +39,12 @@
       </div>
 
       <!-- 2FA Enabled -->
-      <div v-else-if="status?.enabled" class="flex items-center justify-between">
+      <div
+        v-else-if="status?.enabled"
+        :class="props.embedded
+          ? 'flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between'
+          : 'flex items-center justify-between'"
+      >
         <div class="flex items-center gap-4">
           <div class="flex-shrink-0 rounded-full bg-green-100 p-3 dark:bg-green-900/30">
             <svg class="h-6 w-6 text-green-600 dark:text-green-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
@@ -51,6 +63,7 @@
         <button
           type="button"
           class="btn btn-outline-danger"
+          :class="{ 'self-start sm:self-auto': props.embedded }"
           @click="showDisableDialog = true"
         >
           {{ t('profile.totp.disable') }}
@@ -58,7 +71,12 @@
       </div>
 
       <!-- 2FA Not Enabled -->
-      <div v-else class="flex items-center justify-between">
+      <div
+        v-else
+        :class="props.embedded
+          ? 'flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between'
+          : 'flex items-center justify-between'"
+      >
         <div class="flex items-center gap-4">
           <div class="flex-shrink-0 rounded-full bg-gray-100 p-3 dark:bg-dark-700">
             <svg class="h-6 w-6 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
@@ -77,6 +95,7 @@
         <button
           type="button"
           class="btn btn-primary"
+          :class="{ 'self-start sm:self-auto': props.embedded }"
           @click="showSetupModal = true"
         >
           {{ t('profile.totp.enable') }}
@@ -109,6 +128,11 @@ import TotpSetupModal from './TotpSetupModal.vue'
 import TotpDisableDialog from './TotpDisableDialog.vue'
 
 const { t } = useI18n()
+const props = withDefaults(defineProps<{
+  embedded?: boolean
+}>(), {
+  embedded: false,
+})
 
 const loading = ref(true)
 const status = ref<TotpStatus | null>(null)

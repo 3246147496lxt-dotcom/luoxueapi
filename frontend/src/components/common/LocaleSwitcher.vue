@@ -76,10 +76,10 @@
 
 <script setup lang="ts">
 import { ref, computed, nextTick, onMounted, onBeforeUnmount } from 'vue'
-import { useI18n } from 'vue-i18n'
 import Icon from '@/components/icons/Icon.vue'
 import LanguageIcon from '@/components/icons/LanguageIcon.vue'
-import { setLocale, availableLocales } from '@/i18n'
+import { useLocalePreference } from '@/composables/useLocalePreference'
+import { availableLocales } from '@/i18n'
 
 withDefaults(defineProps<{
   compact?: boolean
@@ -89,7 +89,7 @@ withDefaults(defineProps<{
   iconVariant: 'brand',
 })
 
-const { locale } = useI18n()
+const { resolvedLocale, setPreference } = useLocalePreference()
 
 const instanceId = Math.random().toString(36).slice(2, 9)
 const triggerId = `locale-switcher-trigger-${instanceId}`
@@ -102,8 +102,10 @@ const optionRefs = ref<HTMLButtonElement[]>([])
 const focusedIndex = ref(-1)
 const switching = ref(false)
 
-const currentLocaleCode = computed(() => locale.value)
-const currentLocale = computed(() => availableLocales.find((l) => l.code === locale.value))
+const currentLocaleCode = computed(() => resolvedLocale.value)
+const currentLocale = computed(() => (
+  availableLocales.find((locale) => locale.code === resolvedLocale.value)
+))
 
 function toggleDropdown() {
   if (isOpen.value) {
@@ -214,7 +216,9 @@ async function selectLocale(code: string) {
 
   switching.value = true
   try {
-    await setLocale(code)
+    if (code === 'zh' || code === 'en') {
+      await setPreference(code)
+    }
   } finally {
     switching.value = false
   }

@@ -3,19 +3,18 @@ import { mount } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mocks = vi.hoisted(() => ({
-  setLocale: vi.fn(),
+  resolvedLocale: { value: 'en' as 'en' | 'zh' },
+  setPreference: vi.fn(),
 }))
 
-vi.mock('vue-i18n', async () => {
-  const { ref } = await vi.importActual<typeof import('vue')>('vue')
-
-  return {
-    useI18n: () => ({ locale: ref('en') }),
-  }
-})
+vi.mock('@/composables/useLocalePreference', () => ({
+  useLocalePreference: () => ({
+    resolvedLocale: mocks.resolvedLocale,
+    setPreference: mocks.setPreference,
+  }),
+}))
 
 vi.mock('@/i18n', () => ({
-  setLocale: mocks.setLocale,
   availableLocales: [
     { code: 'en', name: 'English', flag: '🇺🇸' },
     { code: 'zh', name: '中文', flag: '🇨🇳' },
@@ -32,8 +31,9 @@ async function expectMenuClosed(wrapper: ReturnType<typeof mount>) {
 
 describe('LocaleSwitcher', () => {
   beforeEach(() => {
-    mocks.setLocale.mockReset()
-    mocks.setLocale.mockResolvedValue(undefined)
+    mocks.resolvedLocale.value = 'en'
+    mocks.setPreference.mockReset()
+    mocks.setPreference.mockResolvedValue(undefined)
   })
 
   it('exposes menu-button semantics and 44px touch targets', async () => {
@@ -154,7 +154,7 @@ describe('LocaleSwitcher', () => {
     await wrapper.findAll('[role="menuitemradio"]')[1].trigger('click')
     await nextTick()
 
-    expect(mocks.setLocale).toHaveBeenCalledWith('zh')
+    expect(mocks.setPreference).toHaveBeenCalledWith('zh')
     await expectMenuClosed(wrapper)
     expect(document.activeElement).toBe(trigger.element)
 

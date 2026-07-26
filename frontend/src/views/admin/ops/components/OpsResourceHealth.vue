@@ -1782,7 +1782,7 @@ onBeforeUnmount(() => {
 .ops-resource-health__nav {
   position: sticky;
   z-index: 19;
-  top: 149px;
+  top: calc(var(--app-shell-top-offset) + 68px);
   padding: 3px;
   margin: -3px;
   border-radius: var(--lx-clay-radius-control);
@@ -3080,7 +3080,7 @@ onBeforeUnmount(() => {
   }
 
   .ops-resource-health__nav {
-    top: 145px;
+    top: calc(var(--app-shell-top-offset) + 64px);
   }
 
   .ops-resource-health__nonadditive-note {

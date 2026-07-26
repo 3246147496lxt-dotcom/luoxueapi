@@ -87,41 +87,12 @@
               </div>
 
               <template v-else>
-                <div
-                  v-if="tabs.length > 1 && !selectedPlan"
-                  class="flex flex-wrap gap-2"
-                  role="tablist"
-                  :aria-label="t('payment.purchaseOptions')"
-                  @keydown="handlePrimaryTabKeydown"
-                >
-                  <button
-                    v-for="tab in tabs"
-                    :id="`purchase-tab-${tab.key}`"
-                    :key="tab.key"
-                    type="button"
-                    role="tab"
-                    :aria-selected="activeTab === tab.key"
-                    :aria-controls="`purchase-panel-${tab.key}`"
-                    :tabindex="activeTab === tab.key ? 0 : -1"
-                    class="min-h-10 rounded-lg px-4 text-sm font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500/40"
-                    :class="activeTab === tab.key
-                      ? 'bg-primary-50 text-primary-700 dark:bg-primary-950/50 dark:text-primary-300'
-                      : 'bg-gray-100 text-gray-500 hover:text-gray-800 dark:bg-dark-900 dark:text-gray-400 dark:hover:text-gray-200'"
-                    @click="activeTab = tab.key"
-                  >
-                    {{ tab.label }}
-                  </button>
-                </div>
-
-                <div
+                <section
                   v-if="activeTab === 'recharge'"
                   id="purchase-panel-recharge"
-                  role="tabpanel"
-                  :aria-labelledby="tabs.length > 1 && !selectedPlan ? 'purchase-tab-recharge' : undefined"
-                  :aria-label="tabs.length > 1 && !selectedPlan ? undefined : t('payment.tabTopUp')"
-                  class="mt-5"
+                  :aria-label="t('payment.tabTopUp')"
                 >
-                  <div v-if="enabledMethods.length === 0" class="py-14 text-center">
+                  <div v-if="checkout.balance_disabled || enabledMethods.length === 0" class="py-14 text-center">
                     <Icon name="creditCard" size="xl" class="mx-auto text-gray-300 dark:text-gray-600" />
                     <p class="mt-3 text-sm text-gray-500 dark:text-gray-400">{{ t('payment.notAvailable') }}</p>
                   </div>
@@ -198,17 +169,14 @@
                       </button>
                     </div>
                   </div>
-                </div>
+                </section>
 
-                <div
-                  v-else-if="activeTab === 'subscription'"
+                <section
+                  v-else-if="activeTab === 'subscription' && selectedPlan"
                   id="purchase-panel-subscription"
-                  role="tabpanel"
-                  :aria-labelledby="tabs.length > 1 && !selectedPlan ? 'purchase-tab-subscription' : undefined"
-                  :aria-label="tabs.length > 1 && !selectedPlan ? undefined : t('payment.tabSubscribe')"
-                  class="mt-5 space-y-5"
+                  :aria-label="t('payment.tabSubscribe')"
+                  class="space-y-5"
                 >
-              <template v-if="selectedPlan">
                 <section class="overflow-clip rounded-2xl border border-gray-200 bg-white dark:border-dark-700 dark:bg-dark-800">
                   <div class="p-5 sm:p-6">
                     <div class="flex flex-wrap items-center gap-2">
@@ -293,49 +261,33 @@
                       <span v-if="submitting" class="h-4 w-4 animate-spin rounded-full border-2 border-white/40 border-t-white" aria-hidden="true"></span>
                       <span class="min-w-0 [overflow-wrap:anywhere]">{{ submitting ? t('common.processing') : `${t('payment.createOrder')} · ${formatSelectedPaymentAmount(subTotalAmount)}` }}</span>
                     </button>
-                    <button class="btn btn-secondary min-h-12 px-4 sm:px-6" @click="selectedPlan = null">{{ t('common.cancel') }}</button>
+                    <button
+                      class="btn btn-secondary min-h-12 px-4 sm:px-6"
+                      data-testid="payment-subscription-cancel"
+                      @click="cancelSubscriptionCheckout"
+                    >
+                      {{ t('common.cancel') }}
+                    </button>
                   </div>
                 </section>
-              </template>
-
-              <template v-else>
-                <div class="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
-                  <div>
-                    <h3 class="text-base font-semibold text-gray-950 dark:text-white">{{ t('payment.choosePlanTitle') }}</h3>
-                    <p class="mt-1 text-sm text-gray-500 dark:text-gray-400">{{ t('payment.choosePlanDescription') }}</p>
-                  </div>
-                </div>
-                <div v-if="checkout.plans.length === 0" class="rounded-2xl border border-gray-200 bg-white py-16 text-center dark:border-dark-700 dark:bg-dark-800">
-                  <Icon name="gift" size="xl" class="mx-auto text-gray-300 dark:text-gray-600" />
-                  <p class="mt-3 text-gray-500 dark:text-gray-400">{{ t('payment.noPlans') }}</p>
-                </div>
-                <div v-else :class="planGridClass">
-                  <SubscriptionPlanCard v-for="plan in checkout.plans" :key="plan.id" :plan="plan" :active-subscriptions="activeSubscriptions" @select="selectPlan" />
-                </div>
-
-                <section v-if="activeSubscriptions.length" aria-labelledby="active-subscriptions-title">
-                  <h3 id="active-subscriptions-title" class="mb-3 text-sm font-semibold text-gray-700 dark:text-gray-300">{{ t('payment.activeSubscription') }}</h3>
-                  <div class="space-y-2">
-                    <div v-for="sub in activeSubscriptions" :key="sub.id" class="flex flex-wrap items-center gap-3 rounded-xl border border-gray-200 bg-white px-4 py-3 dark:border-dark-700 dark:bg-dark-800">
-                      <div :class="['h-8 w-1 shrink-0 rounded-full', platformAccentBarClass(sub.group?.platform || '')]" />
-                      <div class="min-w-0 flex-1">
-                        <div class="flex flex-wrap items-center gap-2">
-                          <span class="min-w-0 break-words text-sm font-semibold text-gray-900 dark:text-white">{{ sub.group?.name || t('payment.groupFallback', { id: sub.group_id }) }}</span>
-                          <span :class="['shrink-0 rounded-full px-2 py-0.5 text-xs font-medium', platformBadgeLightClass(sub.group?.platform || '')]">{{ platformLabel(sub.group?.platform || '') }}</span>
-                        </div>
-                        <div class="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-xs text-gray-400 dark:text-gray-500">
-                          <span>{{ t('payment.planCard.rate') }}: ×{{ sub.group?.rate_multiplier ?? 1 }}</span>
-                          <span v-if="subscriptionHasPeakRate(sub)">{{ t('payment.planCard.peakRate') }}: {{ subscriptionPeakRateLabel(sub) }}</span>
-                          <span v-if="sub.group?.daily_limit_usd == null && sub.group?.weekly_limit_usd == null && sub.group?.monthly_limit_usd == null">{{ t('payment.planCard.quota') }}: {{ t('payment.planCard.unlimited') }}</span>
-                          <span v-if="sub.expires_at">{{ t('userSubscriptions.daysRemaining', { days: getDaysRemaining(sub.expires_at) }) }}</span>
-                          <span v-else>{{ t('userSubscriptions.noExpiration') }}</span>
-                        </div>
-                      </div>
-                      <span class="badge badge-success shrink-0 text-xs">{{ t('userSubscriptions.status.active') }}</span>
-                    </div>
-                  </div>
                 </section>
-              </template>
+
+                <div
+                  v-else-if="activeTab === 'subscription'"
+                  class="rounded-2xl border border-gray-200 bg-white px-5 py-14 text-center dark:border-dark-700 dark:bg-dark-800"
+                  data-testid="payment-plan-unavailable"
+                  role="alert"
+                >
+                  <Icon name="creditCard" size="xl" class="mx-auto text-gray-300 dark:text-gray-600" />
+                  <h3 class="mt-4 text-base font-semibold text-gray-950 dark:text-white">
+                    {{ t('pricing.planUnavailableTitle') }}
+                  </h3>
+                  <p class="mt-2 text-sm text-gray-500 dark:text-gray-400">
+                    {{ t('pricing.planUnavailableDescription') }}
+                  </p>
+                  <RouterLink to="/pricing" class="btn btn-primary mt-5">
+                    {{ t('pricing.returnToPlans') }}
+                  </RouterLink>
                 </div>
 
                 <div v-if="(checkout.help_text || checkout.help_image_url) && !selectedPlan" class="mt-5 rounded-2xl bg-gray-50 p-4 dark:bg-dark-900/45">
@@ -369,23 +321,6 @@
         </div>
       </section>
     </div>
-    <!-- Renewal Plan Selection Modal -->
-    <Teleport to="body">
-      <Transition name="modal">
-        <div v-if="showRenewalModal" class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4" @click.self="closeRenewalModal">
-          <div class="relative w-full max-w-lg rounded-2xl border border-gray-200 bg-white p-6 shadow-2xl dark:border-dark-700 dark:bg-dark-900">
-            <!-- Close button -->
-            <button class="absolute right-4 top-4 rounded-lg p-1 text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-600 dark:hover:bg-dark-700 dark:hover:text-gray-200" @click="closeRenewalModal">
-              <svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12" /></svg>
-            </button>
-            <h3 class="mb-4 text-lg font-semibold text-gray-900 dark:text-white">{{ t('payment.selectPlan') }}</h3>
-            <div class="space-y-4">
-              <SubscriptionPlanCard v-for="plan in renewalPlans" :key="plan.id" :plan="plan" :active-subscriptions="activeSubscriptions" @select="selectPlanFromModal" />
-            </div>
-          </div>
-        </div>
-      </Transition>
-    </Teleport>
     <!-- Image Preview Overlay -->
     <Teleport to="body">
       <Transition name="modal">
@@ -405,12 +340,11 @@ import { useAuthStore } from '@/stores/auth'
 import { usePaymentStore } from '@/stores/payment'
 import { useSubscriptionStore } from '@/stores/subscriptions'
 import { useAppStore } from '@/stores'
-import { paymentAPI } from '@/api/payment'
 import { usageAPI } from '@/api/usage'
 import { extractApiErrorMessage, extractI18nErrorMessage } from '@/utils/apiError'
 import { isMobileDevice } from '@/utils/device'
 import { formatCostFixed } from '@/utils/format'
-import { hasPeakRate, formatPeakRateWindow, serverTimezoneLabel, type PeakRateFields } from '@/utils/peak-rate'
+import { hasPeakRate, formatPeakRateWindow, serverTimezoneLabel } from '@/utils/peak-rate'
 import type { SubscriptionPlan, CheckoutInfoResponse, CreateOrderResult, OrderType } from '@/types/payment'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import CreditAmount from '@/components/common/CreditAmount.vue'
@@ -428,8 +362,7 @@ import {
   type PaymentRecoverySnapshot,
   writePaymentRecoverySnapshot,
 } from '@/components/payment/paymentFlow'
-import { platformAccentBarClass, platformBadgeLightClass, platformBadgeClass, platformTextClass, platformLabel } from '@/utils/platformColors'
-import SubscriptionPlanCard from '@/components/payment/SubscriptionPlanCard.vue'
+import { platformBadgeClass, platformTextClass, platformLabel } from '@/utils/platformColors'
 import PaymentStatusPanel from '@/components/payment/PaymentStatusPanel.vue'
 import RedeemCodePanel from '@/components/payment/RedeemCodePanel.vue'
 import Icon from '@/components/icons/Icon.vue'
@@ -437,6 +370,10 @@ import { DEFAULT_PAYMENT_CURRENCY, formatPaymentAmount, normalizePaymentCurrency
 import type { PaymentMethodOption } from '@/components/payment/PaymentMethodSelector.vue'
 import { buildPaymentErrorToastMessage, describePaymentScenarioError } from './paymentUx'
 import { hasWechatResumeQuery, parseWechatResumeRoute, stripWechatResumeQuery } from './paymentWechatResume'
+import {
+  hasCompleteWechatResumeQuery,
+  readSingleQueryString,
+} from '@/navigation/purchaseQueryState'
 
 const i18n = useI18n()
 const { t } = i18n
@@ -456,21 +393,7 @@ const userTypeLabel = computed(() =>
     ? t('payment.userTypeAdmin')
     : t('payment.userTypeRegular'),
 )
-const activeSubscriptions = computed(() => subscriptionStore.activeSubscriptions)
 const paymentEnabled = computed(() => appStore.cachedPublicSettings?.payment_enabled !== false)
-
-function getDaysRemaining(expiresAt: string): number {
-  const diff = new Date(expiresAt).getTime() - Date.now()
-  return Math.max(0, Math.ceil(diff / (1000 * 60 * 60 * 24)))
-}
-
-function subscriptionHasPeakRate(sub: { group?: PeakRateFields | null }): boolean {
-  return hasPeakRate(sub.group)
-}
-
-function subscriptionPeakRateLabel(sub: { group?: PeakRateFields | null }): string {
-  return formatPeakRateWindow(sub.group, serverTimezoneLabel(appStore.cachedPublicSettings?.server_utc_offset))
-}
 
 const loading = ref(true)
 const historicalSpend = ref(0)
@@ -638,6 +561,7 @@ function onPaymentDone() {
   if (wasSubscription) {
     subscriptionStore.fetchActiveSubscriptions(true).catch(() => {})
   }
+  syncSubscriptionCheckoutFromRoute()
 }
 
 function onPaymentSuccess() {
@@ -658,27 +582,6 @@ const checkout = ref<CheckoutInfoResponse>({
   plans: [], balance_disabled: false, balance_recharge_multiplier: 1, subscription_usd_to_cny_rate: 0, recharge_fee_rate: 0, help_text: '', help_image_url: '', stripe_publishable_key: '',
 })
 
-const tabs = computed(() => {
-  const result: { key: 'recharge' | 'subscription'; label: string }[] = []
-  if (!checkout.value.balance_disabled) result.push({ key: 'recharge', label: t('payment.tabTopUp') })
-  result.push({ key: 'subscription', label: t('payment.tabSubscribe') })
-  return result
-})
-
-function handlePrimaryTabKeydown(event: KeyboardEvent) {
-  if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key) || tabs.value.length < 2) return
-  event.preventDefault()
-  const currentIndex = tabs.value.findIndex(tab => tab.key === activeTab.value)
-  let nextIndex = currentIndex
-  if (event.key === 'Home') nextIndex = 0
-  else if (event.key === 'End') nextIndex = tabs.value.length - 1
-  else if (event.key === 'ArrowLeft') nextIndex = (currentIndex - 1 + tabs.value.length) % tabs.value.length
-  else nextIndex = (currentIndex + 1) % tabs.value.length
-
-  activeTab.value = tabs.value[nextIndex].key
-  nextTick(() => document.getElementById(`purchase-tab-${activeTab.value}`)?.focus())
-}
-
 const visibleMethods = computed(() => getVisibleMethods(checkout.value.methods))
 const enabledMethods = computed(() => Object.keys(visibleMethods.value))
 const validAmount = computed(() => amount.value ?? 0)
@@ -692,13 +595,6 @@ const subscriptionUsdToCnyRate = computed(() => {
   return Number.isFinite(rate) && rate > 0 ? rate : 0
 })
 const creditedAmount = computed(() => Math.round((validAmount.value * balanceRechargeMultiplier.value) * 100) / 100)
-
-// Adaptive grid: center single card, 2-col for 2 plans, 3-col for 3+
-const planGridClass = computed(() => {
-  const n = checkout.value.plans.length
-  if (n <= 2) return 'grid grid-cols-1 gap-5 sm:grid-cols-2'
-  return 'grid grid-cols-1 gap-5 sm:grid-cols-2 lg:grid-cols-3'
-})
 
 // Check if an amount fits a method's [min, max]. 0 = no limit.
 function amountFitsMethod(amt: number, methodType: string): boolean {
@@ -883,14 +779,6 @@ const paymentButtonClass = computed(() => {
 const planBadgeClass = computed(() => platformBadgeClass(selectedPlan.value?.group_platform || ''))
 const planTextClass = computed(() => platformTextClass(selectedPlan.value?.group_platform || ''))
 
-// Renewal modal state
-const showRenewalModal = ref(false)
-const renewGroupId = ref<number | null>(null)
-const renewalPlans = computed(() => {
-  if (renewGroupId.value == null) return []
-  return checkout.value.plans.filter(p => p.group_id === renewGroupId.value)
-})
-
 const planValiditySuffix = computed(() => {
   if (!selectedPlan.value) return ''
   const u = selectedPlan.value.validity_unit || 'day'
@@ -907,23 +795,6 @@ function planPeakRateLabel(plan: SubscriptionPlan): string {
   return formatPeakRateWindow(plan, serverTimezoneLabel(appStore.cachedPublicSettings?.server_utc_offset))
 }
 
-function selectPlan(plan: SubscriptionPlan) {
-  selectedPlan.value = plan
-  errorMessage.value = ''
-}
-
-function selectPlanFromModal(plan: SubscriptionPlan) {
-  showRenewalModal.value = false
-  renewGroupId.value = null
-  selectedPlan.value = plan
-  errorMessage.value = ''
-}
-
-function closeRenewalModal() {
-  showRenewalModal.value = false
-  renewGroupId.value = null
-}
-
 async function handleSubmitRecharge() {
   if (!canSubmit.value || submitting.value) return
   await createOrder(validAmount.value, 'balance')
@@ -932,6 +803,29 @@ async function handleSubmitRecharge() {
 async function confirmSubscribe() {
   if (!selectedPlan.value || submitting.value) return
   await createOrder(selectedPlan.value.price, 'subscription', selectedPlan.value.id)
+}
+
+function cancelSubscriptionCheckout() {
+  const historyBack = typeof window !== 'undefined'
+    ? window.history.state?.back
+    : null
+
+  if (typeof historyBack === 'string') {
+    try {
+      const backUrl = new URL(historyBack, window.location.origin)
+      if (
+        backUrl.origin === window.location.origin
+        && backUrl.pathname === '/pricing'
+      ) {
+        router.back()
+        return
+      }
+    } catch {
+      // Invalid history state falls through to the safe catalogue fallback.
+    }
+  }
+
+  void router.replace('/pricing')
 }
 
 async function createOrder(orderAmount: number, orderType: OrderType, planId?: number, options: CreateOrderOptions = {}) {
@@ -1237,14 +1131,16 @@ async function resumeWechatPaymentFromQuery() {
   }
 
   selectedMethod.value = resume.paymentType
+  activeTab.value = 'recharge'
+  selectedPlan.value = null
   if (resume.orderType === 'balance' && resume.orderAmount > 0) {
     amount.value = resume.orderAmount
   }
-  if (resume.orderType === 'subscription' && resume.planId) {
-    selectedPlan.value = checkout.value.plans.find(plan => plan.id === resume.planId) ?? null
-  }
 
-  await router.replace({ path: route.path, query: stripWechatResumeQuery(route.query) })
+  await router.replace({
+    path: '/purchase',
+    query: stripWechatResumeQuery(route.query),
+  })
 
   if (resume.wechatResumeToken) {
     await createOrder(0, resume.orderType, resume.planId, {
@@ -1264,6 +1160,35 @@ async function resumeWechatPaymentFromQuery() {
   }
 }
 
+function hasWechatResumeRouteState(): boolean {
+  return hasCompleteWechatResumeQuery(route.query)
+    || ['wechat_resume', 'wechat_resume_token', 'openid'].some(
+      key => Object.prototype.hasOwnProperty.call(route.query, key),
+    )
+}
+
+function syncSubscriptionCheckoutFromRoute() {
+  if (paymentPhase.value === 'paying') return
+
+  if (
+    route.hash === '#redeem'
+    || hasWechatResumeRouteState()
+    || readSingleQueryString(route.query, 'tab') !== 'subscription'
+  ) {
+    activeTab.value = 'recharge'
+    selectedPlan.value = null
+    return
+  }
+
+  const planId = Number(readSingleQueryString(route.query, 'plan'))
+  activeTab.value = 'subscription'
+  selectedPlan.value = Number.isSafeInteger(planId) && planId > 0
+    ? checkout.value.plans.find((plan) => plan.id === planId) ?? null
+    : null
+  errorMessage.value = ''
+  errorHintMessage.value = ''
+}
+
 onMounted(async () => {
   const historicalSpendRequest = usageAPI.getDashboardStats()
     .then((stats) => {
@@ -1273,11 +1198,10 @@ onMounted(async () => {
     })
     .catch((error) => {
       console.error('Failed to load historical spend:', error)
-    })
+  })
 
   try {
-    const res = await paymentAPI.getCheckoutInfo()
-    checkout.value = res.data
+    checkout.value = await paymentStore.ensureCheckoutInfo()
     if (enabledMethods.value.length) {
       const order: readonly string[] = METHOD_ORDER
       const sorted = [...enabledMethods.value].sort((a, b) => {
@@ -1287,15 +1211,17 @@ onMounted(async () => {
       })
       selectedMethod.value = sorted[0]
     }
+    syncSubscriptionCheckoutFromRoute()
     if (typeof window !== 'undefined') {
-      if (hasWechatResumeQuery(route.query)) {
+      const hasCompleteWechatResume = hasWechatResumeQuery(route.query)
+      if (hasCompleteWechatResume) {
         removeRecoverySnapshot()
       }
-      const routeResumeToken = typeof route.query.resume_token === 'string'
-        ? route.query.resume_token
-        : typeof route.query.wechat_resume_token === 'string'
-          ? route.query.wechat_resume_token
-          : undefined
+      const paymentResumeToken = readSingleQueryString(route.query, 'resume_token')
+      const wechatResumeToken = hasCompleteWechatResume
+        ? readSingleQueryString(route.query, 'wechat_resume_token')
+        : ''
+      const routeResumeToken = paymentResumeToken || wechatResumeToken || undefined
       const restored = readPaymentRecoverySnapshot(
         window.localStorage.getItem(PAYMENT_RECOVERY_STORAGE_KEY),
         { resumeToken: routeResumeToken },
@@ -1313,33 +1239,30 @@ onMounted(async () => {
       }
     }
     await resumeWechatPaymentFromQuery()
-    if (checkout.value.balance_disabled) {
-      activeTab.value = 'subscription'
-    }
-    // Handle renewal navigation: ?tab=subscription&group=123
-    if (route.query.tab === 'subscription') {
-      activeTab.value = 'subscription'
-      if (route.query.group) {
-        const groupId = Number(route.query.group)
-        const groupPlans = checkout.value.plans.filter(p => p.group_id === groupId)
-        if (groupPlans.length === 1) {
-          selectedPlan.value = groupPlans[0]
-        } else if (groupPlans.length > 1) {
-          renewGroupId.value = groupId
-          showRenewalModal.value = true
-        }
-      }
-    }
   } catch (err: unknown) { appStore.showError(extractI18nErrorMessage(err, t, 'payment.errors', t('common.error'))) }
   finally { loading.value = false }
   await nextTick()
   if (route.hash === '#redeem') {
     document.getElementById('redeem')?.scrollIntoView({ block: 'start' })
   }
-  // Fetch active subscriptions (uses cache, non-blocking)
-  subscriptionStore.fetchActiveSubscriptions().catch(() => {})
   await historicalSpendRequest
 })
+
+watch(
+  () => [
+    route.query.tab,
+    route.query.plan,
+    route.query.wechat_resume,
+    route.query.wechat_resume_token,
+    route.query.openid,
+    route.hash,
+  ] as const,
+  () => {
+    if (!loading.value) {
+      syncSubscriptionCheckoutFromRoute()
+    }
+  },
+)
 </script>
 
 <style scoped>

@@ -25,6 +25,7 @@
 }
 
 .ops-fullscreen-shell {
+  --app-shell-top-offset: 0px;
   min-height: 100vh;
   background: var(--app-shell-canvas, var(--lx-clay-canvas));
 }
@@ -70,7 +71,7 @@ html:not(.dark) body.admin-ops-fullscreen {
 
 .ops-workspace-nav-host {
   position: sticky;
-  top: 89px;
+  top: calc(var(--app-shell-top-offset) + 8px);
   z-index: 20;
   max-width: 100%;
   align-self: start;
@@ -87,7 +88,7 @@ html:not(.dark) body.admin-ops-fullscreen {
 
 .ops-workspace-view {
   gap: 26px;
-  scroll-margin-top: 156px;
+  scroll-margin-top: calc(var(--app-shell-top-offset) + 75px);
 }
 
 .ops-dashboard-shell--fullscreen .ops-workspace-view {

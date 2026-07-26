@@ -2,11 +2,13 @@
   <aside
     id="app-sidebar"
     aria-label="Sidebar"
+    :aria-hidden="mobileNavigationHidden ? 'true' : undefined"
+    :inert="mobileNavigationHidden"
     class="sidebar"
     :class="[
       sidebarCollapsed
         ? 'w-[60px] lg:w-[68px]'
-        : 'w-44 lg:w-[184px] min-[1025px]:w-[196px] min-[1281px]:w-[208px]',
+        : 'w-[min(84vw,288px)] lg:w-[260px]',
       { 'sidebar-mobile-hidden': !mobileOpen }
     ]"
   >
@@ -121,7 +123,7 @@
                 class="sidebar-link mb-1"
                 :class="{ 'sidebar-link-collapsed': sidebarCollapsed }"
                 :title="sidebarCollapsed ? item.label : undefined"
-                data-testid="sidebar-docs-tutorial"
+                :data-testid="item.path === DOCS_TUTORIAL_PATH ? 'sidebar-docs-tutorial' : undefined"
                 target="_blank"
                 rel="noopener noreferrer"
                 @click="handleMenuItemClick(item.path)"
@@ -163,7 +165,7 @@
         <div v-if="!authStore.isSimpleMode" class="sidebar-section">
           <div class="sidebar-section-title" :class="{ 'sidebar-section-title-collapsed': sidebarCollapsed }" :aria-hidden="sidebarCollapsed ? 'true' : 'false'">
             <span class="sidebar-section-title-text" :class="{ 'sidebar-section-title-text-collapsed': sidebarCollapsed }">
-              {{ t('nav.myAccount') }}
+              {{ t('nav.personalTools') }}
             </span>
           </div>
 
@@ -174,7 +176,7 @@
               class="sidebar-link mb-1"
               :class="{ 'sidebar-link-collapsed': sidebarCollapsed }"
               :title="sidebarCollapsed ? item.label : undefined"
-              data-testid="sidebar-docs-tutorial"
+              :data-testid="item.path === DOCS_TUTORIAL_PATH ? 'sidebar-docs-tutorial' : undefined"
               target="_blank"
               rel="noopener noreferrer"
               @click="handleMenuItemClick(item.path)"
@@ -235,7 +237,7 @@
               class="sidebar-link mb-1"
               :class="{ 'sidebar-link-collapsed': sidebarCollapsed }"
               :title="sidebarCollapsed ? item.label : undefined"
-              data-testid="sidebar-docs-tutorial"
+              :data-testid="item.path === DOCS_TUTORIAL_PATH ? 'sidebar-docs-tutorial' : undefined"
               target="_blank"
               rel="noopener noreferrer"
               @click="handleMenuItemClick(item.path)"
@@ -264,162 +266,35 @@
           </template>
         </div>
       </template>
+
+      <div
+        v-if="navigationNavItems.length"
+        class="sidebar-section"
+        data-testid="sidebar-navigation-destinations"
+      >
+        <a
+          v-for="item in navigationNavItems"
+          :key="item.path"
+          :href="item.href"
+          class="sidebar-link mb-1"
+          :class="{ 'sidebar-link-collapsed': sidebarCollapsed }"
+          :title="sidebarCollapsed ? item.label : undefined"
+          data-testid="sidebar-docs-tutorial"
+          target="_blank"
+          rel="noopener noreferrer"
+          @click="handleMenuItemClick(item.path)"
+        >
+          <component :is="item.icon" class="sidebar-nav-icon h-5 w-5 flex-shrink-0" />
+          <span
+            class="sidebar-label"
+            :class="{ 'sidebar-label-collapsed': sidebarCollapsed }"
+            :aria-hidden="sidebarCollapsed ? 'true' : 'false'"
+          >{{ item.label }}</span>
+        </a>
+      </div>
     </nav>
 
-    <div
-      class="sidebar-destination-links"
-      data-testid="sidebar-destination-links"
-      :aria-label="t('nav.quickLinks')"
-    >
-      <a
-        href="/home"
-        class="sidebar-destination-link"
-        :class="{ 'sidebar-destination-link-collapsed': sidebarCollapsed }"
-        data-destination="home"
-        :aria-label="t('nav.home')"
-        :title="sidebarCollapsed ? t('nav.home') : undefined"
-        target="_blank"
-        rel="noopener noreferrer"
-        @click="handleMenuItemClick('/home')"
-      >
-        <span class="sidebar-destination-leading">
-          <Icon
-            name="destinationHome"
-            size="sm"
-            :stroke-width="1.75"
-            data-role="destination-icon"
-            data-icon-name="destinationHome"
-            aria-hidden="true"
-          />
-          <span
-            class="sidebar-destination-label"
-            data-role="destination-label"
-            :aria-hidden="sidebarCollapsed ? 'true' : 'false'"
-          >{{ t('nav.home') }}</span>
-        </span>
-        <Icon
-          name="destinationArrowUpRight"
-          size="sm"
-          :stroke-width="1.75"
-          class="sidebar-destination-jump"
-          data-role="destination-jump"
-          data-icon-name="destinationArrowUpRight"
-          aria-hidden="true"
-        />
-      </a>
-
-      <a
-        v-if="showPublicModelCatalog"
-        href="/models.html"
-        class="sidebar-destination-link"
-        :class="{ 'sidebar-destination-link-collapsed': sidebarCollapsed }"
-        data-destination="models"
-        :aria-label="t('nav.modelCatalog')"
-        :title="sidebarCollapsed ? t('nav.modelCatalog') : undefined"
-        target="_blank"
-        rel="noopener noreferrer"
-        @click="handleMenuItemClick('/models.html')"
-      >
-        <span class="sidebar-destination-leading">
-          <Icon
-            name="destinationModels"
-            size="sm"
-            :stroke-width="1.75"
-            data-role="destination-icon"
-            data-icon-name="destinationModels"
-            aria-hidden="true"
-          />
-          <span
-            class="sidebar-destination-label"
-            data-role="destination-label"
-            :aria-hidden="sidebarCollapsed ? 'true' : 'false'"
-          >{{ t('nav.modelCatalog') }}</span>
-        </span>
-        <Icon
-          name="destinationArrowUpRight"
-          size="sm"
-          :stroke-width="1.75"
-          class="sidebar-destination-jump"
-          data-role="destination-jump"
-          data-icon-name="destinationArrowUpRight"
-          aria-hidden="true"
-        />
-      </a>
-
-      <a
-        :href="contactUrl"
-        class="sidebar-destination-link"
-        :class="{ 'sidebar-destination-link-collapsed': sidebarCollapsed }"
-        data-destination="contact"
-        :aria-label="t('nav.contactUs')"
-        :title="sidebarCollapsed ? t('nav.contactUs') : undefined"
-        target="_blank"
-        rel="noopener noreferrer"
-        @click="handleMenuItemClick('/profile')"
-      >
-        <span class="sidebar-destination-leading">
-          <Icon
-            name="destinationContact"
-            size="sm"
-            :stroke-width="1.75"
-            data-role="destination-icon"
-            data-icon-name="destinationContact"
-            aria-hidden="true"
-          />
-          <span
-            class="sidebar-destination-label"
-            data-role="destination-label"
-            :aria-hidden="sidebarCollapsed ? 'true' : 'false'"
-          >{{ t('nav.contactUs') }}</span>
-        </span>
-        <Icon
-          name="destinationArrowUpRight"
-          size="sm"
-          :stroke-width="1.75"
-          class="sidebar-destination-jump"
-          data-role="destination-jump"
-          data-icon-name="destinationArrowUpRight"
-          aria-hidden="true"
-        />
-      </a>
-
-      <a
-        :href="documentationUrl"
-        class="sidebar-destination-link"
-        :class="{ 'sidebar-destination-link-collapsed': sidebarCollapsed }"
-        data-destination="docs"
-        :aria-label="t('nav.docsTutorial')"
-        :title="sidebarCollapsed ? t('nav.docsTutorial') : undefined"
-        target="_blank"
-        rel="noopener noreferrer"
-        @click="handleMenuItemClick('/tutorial-docs/')"
-      >
-        <span class="sidebar-destination-leading">
-          <Icon
-            name="destinationDocument"
-            size="sm"
-            :stroke-width="1.75"
-            data-role="destination-icon"
-            data-icon-name="destinationDocument"
-            aria-hidden="true"
-          />
-          <span
-            class="sidebar-destination-label"
-            data-role="destination-label"
-            :aria-hidden="sidebarCollapsed ? 'true' : 'false'"
-          >{{ t('nav.docsTutorial') }}</span>
-        </span>
-        <Icon
-          name="destinationArrowUpRight"
-          size="sm"
-          :stroke-width="1.75"
-          class="sidebar-destination-jump"
-          data-role="destination-jump"
-          data-icon-name="destinationArrowUpRight"
-          aria-hidden="true"
-        />
-      </a>
-    </div>
+    <SidebarAccountDock />
 
   </aside>
 
@@ -442,8 +317,13 @@ import { useI18n } from 'vue-i18n'
 import { useAdminSettingsStore, useAppStore, useAuthStore, useOnboardingStore } from '@/stores'
 import { resolveDocumentationUrl } from '@/utils/documentationUrl'
 import { sanitizeSvg } from '@/utils/sanitize'
-import { sanitizeUrl } from '@/utils/url'
 import { FeatureFlags, makeSidebarFlag } from '@/utils/featureFlags'
+import {
+  ACCOUNT_DESTINATION_PATHS,
+  getShellDestinationSpecs,
+  isAccountDestinationPath,
+  selectVisibleShellDestinations,
+} from '@/navigation/shellDestinations'
 import { useBatchImageAccess } from '@/composables/useBatchImageAccess'
 import accountPoolIconSvg from '@/assets/icons/account-pool.svg?raw'
 import auditLogIconSvg from '@/assets/icons/audit-log.svg?raw'
@@ -454,6 +334,7 @@ import { Icon } from '@/components/icons'
 import NotificationIcon from '@/components/icons/NotificationIcon.vue'
 import SidebarCollapseIcon from '@/components/icons/SidebarCollapseIcon.vue'
 import AppBrand from './AppBrand.vue'
+import SidebarAccountDock from './SidebarAccountDock.vue'
 
 interface NavItem {
   path: string
@@ -507,32 +388,23 @@ const authStore = useAuthStore()
 const onboardingStore = useOnboardingStore()
 const adminSettingsStore = useAdminSettingsStore()
 const { canUseBatchImage, refreshBatchImageAccess } = useBatchImageAccess()
+const DOCS_TUTORIAL_PATH = '/tutorial-docs/'
 
 const sidebarCollapsed = computed(() => appStore.sidebarCollapsed)
 const mobileOpen = computed(() => appStore.mobileOpen)
 const isAdmin = computed(() => authStore.isAdmin)
-const showPublicModelCatalog = computed(
-  () =>
-    appStore.cachedPublicSettings?.public_model_catalog_enabled === true
-    && !appStore.backendModeEnabled,
-)
+const documentationUrl = computed(() => resolveDocumentationUrl(
+  appStore.cachedPublicSettings?.doc_url || appStore.docUrl,
+))
 const sidebarNavRef = ref<HTMLElement | null>(null)
-const documentationUrl = computed(
-  () => resolveDocumentationUrl(
-    appStore.cachedPublicSettings?.doc_url || appStore.docUrl,
-  ),
-)
-const contactUrl = computed(
-  () => {
-    const configuredContactUrl = sanitizeUrl(
-      appStore.cachedPublicSettings?.contact_info || appStore.contactInfo,
-      { allowRelative: true },
-    )
-    if (configuredContactUrl) return configuredContactUrl
+const mobileViewport = ref(false)
+const mobileNavigationHidden = computed(() => mobileViewport.value && !mobileOpen.value)
+let mobileViewportQuery: MediaQueryList | null = null
 
-    return `${documentationUrl.value.replace(/#.*$/, '')}#recharge`
-  },
-)
+function syncMobileViewport(event?: MediaQueryListEvent) {
+  mobileViewport.value =
+    event?.matches ?? mobileViewportQuery?.matches ?? window.innerWidth < 1024
+}
 
 // Track which parent nav groups are expanded
 const expandedGroups = ref<Set<string>>(new Set())
@@ -867,6 +739,31 @@ const ChatIcon = {
   render: () => h(Icon, { name: 'chat', size: 'md', strokeWidth: 1.7 })
 }
 
+const navigationNavItems = computed((): NavItem[] => (
+  selectVisibleShellDestinations(
+    getShellDestinationSpecs(isAdmin.value ? 'admin' : 'user'),
+    {
+      audience: isAdmin.value ? 'admin' : 'user',
+      simpleMode: authStore.isSimpleMode,
+    },
+    'navigation',
+  ).flatMap((spec): NavItem[] => {
+    if (
+      spec.target.kind !== 'configured-href'
+      || spec.target.source !== 'documentation'
+    ) {
+      return []
+    }
+
+    return [{
+      path: DOCS_TUTORIAL_PATH,
+      label: t(spec.labelKey),
+      icon: BookIcon,
+      href: documentationUrl.value,
+    }]
+  })
+))
+
 // Public-settings flags go through the registry in utils/featureFlags.ts,
 // which handles the opt-in vs opt-out fallback when settings haven't loaded
 // yet. Admin-only flags (not in public settings) stay inline below.
@@ -896,11 +793,11 @@ function buildSelfNavItems(withDashboard: boolean): NavItem[] {
     { path: '/usage', label: t('nav.usage'), icon: ChartIcon, hideInSimpleMode: true },
     { path: '/available-channels', label: t('nav.availableChannels'), icon: ChannelIcon, hideInSimpleMode: true, featureFlag: flagAvailableChannels },
     { path: '/monitor', label: t('nav.channelStatus'), icon: SignalIcon, featureFlag: flagChannelMonitor },
-    { path: '/subscriptions', label: t('nav.mySubscriptions'), icon: CreditCardIcon, hideInSimpleMode: true },
-    { path: '/purchase', label: t('nav.buySubscription'), icon: RechargeSubscriptionIcon },
-    { path: '/orders', label: t('nav.myOrders'), icon: OrderListIcon, hideInSimpleMode: true, featureFlag: flagPayment },
+    { path: ACCOUNT_DESTINATION_PATHS.subscriptions, label: t('nav.mySubscriptions'), icon: CreditCardIcon, hideInSimpleMode: true },
+    { path: ACCOUNT_DESTINATION_PATHS.wallet, label: t('nav.buySubscription'), icon: RechargeSubscriptionIcon },
+    { path: ACCOUNT_DESTINATION_PATHS.orders, label: t('nav.myOrders'), icon: OrderListIcon, hideInSimpleMode: true, featureFlag: flagPayment },
     { path: '/affiliate', label: t('nav.affiliate'), icon: UsersIcon, hideInSimpleMode: true, featureFlag: flagAffiliate },
-    { path: '/profile', label: t('nav.profile'), icon: UserIcon },
+    { path: ACCOUNT_DESTINATION_PATHS.profile, label: t('nav.profile'), icon: UserIcon },
     ...customMenuItemsForUser.value.map((item): NavItem => ({
       path: `/custom/${item.id}`,
       label: item.label,
@@ -920,27 +817,16 @@ function finalizeNav(items: NavItem[]): NavItem[] {
 // User navigation items (for regular users)
 const userNavItems = computed((): NavItem[] => finalizeNav(buildSelfNavItems(true)))
 
-const USER_PERSONAL_NAV_PATHS = new Set(['/subscriptions', '/purchase', '/orders', '/profile'])
-
 const userNavSections = computed((): NavSection[] => {
-  const personalItems = userNavItems.value.filter((item) => USER_PERSONAL_NAV_PATHS.has(item.path))
   const customItems = userNavItems.value.filter((item) => item.path.startsWith('/custom/'))
   const sections: NavSection[] = [
     {
       id: 'main',
       items: userNavItems.value.filter(
-        (item) => !USER_PERSONAL_NAV_PATHS.has(item.path) && !item.path.startsWith('/custom/'),
+        (item) => !isAccountDestinationPath(item.path) && !item.path.startsWith('/custom/'),
       ),
     },
   ]
-
-  if (personalItems.length > 0) {
-    sections.push({
-      id: 'personal',
-      label: t('nav.myAccount'),
-      items: personalItems,
-    })
-  }
 
   if (customItems.length > 0) {
     sections.push({
@@ -956,7 +842,9 @@ const userNavSections = computed((): NavSection[] => {
 // Admins access 可用渠道 from this section just like regular users — there is no
 // separate admin entry, since the page is purely a user-facing view.
 const personalNavItems = computed(
-  (): NavItem[] => finalizeNav(buildSelfNavItems(false)).filter((item) => item.path !== '/chat')
+  (): NavItem[] => finalizeNav(buildSelfNavItems(false)).filter(
+    (item) => item.path !== '/chat' && !isAccountDestinationPath(item.path),
+  )
 )
 
 // Custom menu items filtered by visibility
@@ -1222,6 +1110,14 @@ watch(
 )
 
 onMounted(() => {
+  if (typeof window.matchMedia === 'function') {
+    mobileViewportQuery = window.matchMedia('(max-width: 1023px)')
+    syncMobileViewport()
+    mobileViewportQuery.addEventListener?.('change', syncMobileViewport)
+  } else {
+    syncMobileViewport()
+  }
+
   void refreshBatchImageAccess()
   if (isAdmin.value) {
     adminSettingsStore.fetch()
@@ -1237,6 +1133,7 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
+  mobileViewportQuery?.removeEventListener?.('change', syncMobileViewport)
   if (sidebarNavRef.value) {
     appStore.sidebarScrollTop = sidebarNavRef.value.scrollTop
   }
@@ -1334,9 +1231,8 @@ onBeforeUnmount(() => {
   justify-content: center;
   border-radius: 0.5rem;
   color: rgb(143 143 143);
-  transition:
-    color 0.2s ease,
-    background-color 0.2s ease;
+  cursor: w-resize;
+  transition: none;
 }
 
 .sidebar-collapse-toggle::after {
@@ -1346,8 +1242,7 @@ onBeforeUnmount(() => {
 }
 
 .sidebar-collapse-toggle:hover {
-  color: rgb(17 24 39);
-  background: rgb(46 50 56 / 0.05);
+  background: rgb(0 0 0 / 0.07);
 }
 
 .sidebar-collapse-toggle:focus-visible {
@@ -1360,122 +1255,7 @@ onBeforeUnmount(() => {
 }
 
 :global(.dark .sidebar-collapse-toggle:hover) {
-  color: rgb(255 255 255);
   background: rgb(255 255 255 / 0.08);
-}
-
-.sidebar-destination-links {
-  position: relative;
-  z-index: 1;
-  flex: 0 0 auto;
-  padding: 0.25rem 0.5rem 0.5rem;
-}
-
-.sidebar-destination-link {
-  display: flex;
-  min-height: 2.25rem;
-  align-items: center;
-  justify-content: space-between;
-  padding: 0.5rem 0.75rem;
-  border-radius: 0.625rem;
-  color: rgb(28 31 35 / 0.88);
-  text-decoration: none;
-  transform-origin: center;
-  transition:
-    color 0.2s ease,
-    background-color 0.2s ease,
-    box-shadow 0.2s ease,
-    transform 0.2s ease;
-}
-
-.sidebar-destination-leading {
-  display: flex;
-  min-width: 0;
-  align-items: center;
-  gap: 0.5rem;
-}
-
-.sidebar-destination-leading > :deep(svg) {
-  width: 1.125rem;
-  height: 1.125rem;
-  flex: 0 0 auto;
-  color: rgb(71 85 105 / 0.82);
-  transform-origin: center;
-  transition: color 0.2s ease;
-}
-
-.sidebar-destination-label {
-  overflow: hidden;
-  color: inherit;
-  font-size: 0.8125rem;
-  font-weight: 500;
-  line-height: 1.25rem;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.sidebar-destination-jump {
-  width: 0.875rem !important;
-  height: 0.875rem !important;
-  flex: 0 0 auto;
-  color: rgb(100 116 139 / 0.72);
-  transition:
-    color 0.2s ease,
-    transform 0.2s ease;
-}
-
-.sidebar-destination-link:hover,
-.sidebar-destination-link:focus-visible {
-  color: var(--app-shell-sidebar-hover-color, rgb(0 132 255));
-  background: var(--app-shell-sidebar-hover-bg, rgb(0 132 255 / 0.08));
-  box-shadow: var(--app-shell-sidebar-hover-shadow, 0 2px 8px rgb(0 132 255 / 0.06));
-  transform: var(--app-shell-sidebar-hover-transform, translateY(-1px) scale(1.03));
-}
-
-.sidebar-destination-link:hover .sidebar-destination-leading > :deep(svg),
-.sidebar-destination-link:hover .sidebar-destination-jump,
-.sidebar-destination-link:focus-visible .sidebar-destination-leading > :deep(svg),
-.sidebar-destination-link:focus-visible .sidebar-destination-jump {
-  color: var(--app-shell-sidebar-hover-color, rgb(0 132 255));
-}
-
-.sidebar-destination-link:focus-visible {
-  outline: 2px solid var(--app-shell-sidebar-focus, rgb(0 132 255 / 0.5));
-  outline-offset: 1px;
-}
-
-.sidebar-destination-link-collapsed {
-  min-height: 2.75rem;
-  justify-content: center;
-  padding-right: 0;
-  padding-left: 0;
-}
-
-.sidebar-destination-link-collapsed .sidebar-destination-label,
-.sidebar-destination-link-collapsed .sidebar-destination-jump {
-  display: none;
-}
-
-:global(.dark .sidebar-destination-link) {
-  color: rgb(235 235 235 / 0.82);
-}
-
-:global(.dark .sidebar-destination-leading > svg),
-:global(.dark .sidebar-destination-jump) {
-  color: rgb(235 235 235 / 0.58);
-}
-
-:global(.dark .sidebar-destination-link:hover) {
-  color: rgb(71 160 255);
-  background: rgb(71 160 255 / 0.12);
-  box-shadow: 0 2px 8px rgb(71 160 255 / 0.08);
-}
-
-:global(.dark .sidebar-destination-link:hover .sidebar-destination-leading > svg),
-:global(.dark .sidebar-destination-link:hover .sidebar-destination-jump),
-:global(.dark .sidebar-destination-link:focus-visible .sidebar-destination-leading > svg),
-:global(.dark .sidebar-destination-link:focus-visible .sidebar-destination-jump) {
-  color: rgb(71 160 255);
 }
 
 .sidebar-section {
@@ -1484,7 +1264,7 @@ onBeforeUnmount(() => {
 
 .sidebar-link {
   position: relative;
-  min-height: 2rem;
+  min-height: 2.25rem;
   gap: 0.625rem;
   padding-top: 0.25rem;
   padding-right: 0.75rem;
@@ -1493,7 +1273,7 @@ onBeforeUnmount(() => {
   border-radius: 0.625rem;
   color: rgb(28 31 35);
   font-size: 0.875rem;
-  font-weight: 500;
+  font-weight: 400;
   line-height: 1.5rem;
   transition-property: color, background-color, box-shadow;
   transition-duration: 0.2s;
@@ -1678,16 +1458,8 @@ onBeforeUnmount(() => {
   .sidebar,
   .sidebar-label,
   .sidebar-section-title-text,
-  .sidebar-nav-icon,
-  .sidebar-destination-link,
-  .sidebar-destination-leading > :deep(svg),
-  .sidebar-destination-jump {
+  .sidebar-nav-icon {
     transition-duration: 0.01ms;
-  }
-
-  .sidebar-destination-link:hover,
-  .sidebar-destination-link:focus-visible {
-    transform: none;
   }
 }
 
@@ -1750,10 +1522,19 @@ onBeforeUnmount(() => {
     width: 1.75rem;
     height: 1.75rem;
     flex-basis: 1.75rem;
+    cursor: e-resize;
   }
 
   .sidebar-header-collapsed .sidebar-collapse-toggle::after {
     inset: -0.5rem;
+  }
+
+  :global([dir='rtl']) .sidebar-collapse-toggle {
+    cursor: e-resize;
+  }
+
+  :global([dir='rtl']) .sidebar-header-collapsed .sidebar-collapse-toggle {
+    cursor: w-resize;
   }
 
   .sidebar-mobile-hidden {
@@ -1763,7 +1544,7 @@ onBeforeUnmount(() => {
 
 @media (max-width: 1023px) {
   .sidebar {
-    top: 5.0625rem;
+    top: var(--app-shell-top-offset);
     bottom: 0;
     left: 0;
     height: auto;
@@ -1778,10 +1559,6 @@ onBeforeUnmount(() => {
 
   :global(.dark .sidebar) {
     background: rgb(11 15 26) !important;
-  }
-
-  .sidebar-destination-link {
-    min-height: 2.75rem;
   }
 
   .sidebar-mobile-hidden {

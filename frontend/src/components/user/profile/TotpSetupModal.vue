@@ -1,15 +1,34 @@
 <template>
-  <div class="fixed inset-0 z-50 overflow-y-auto" @click.self="$emit('close')">
-    <div class="flex min-h-full items-center justify-center p-4">
-      <div class="fixed inset-0 bg-black/50 transition-opacity" @click="$emit('close')"></div>
+  <Teleport to="body">
+    <div class="totp-modal-layer fixed inset-0 overflow-y-auto">
+      <div
+        class="fixed inset-0 bg-black/50 transition-opacity"
+        aria-hidden="true"
+        @click="requestClose"
+      ></div>
+      <div class="flex min-h-full items-center justify-center p-4">
 
-      <div class="relative w-full max-w-md transform rounded-xl bg-white p-6 shadow-xl transition-all dark:bg-dark-800">
+        <div
+          ref="dialogRef"
+          class="relative w-full max-w-md transform rounded-xl bg-white p-6 shadow-xl transition-all dark:bg-dark-800"
+          role="dialog"
+          aria-modal="true"
+          :aria-labelledby="dialogTitleId"
+          :aria-describedby="dialogDescriptionId"
+          tabindex="-1"
+        >
         <!-- Header -->
         <div class="mb-6 text-center">
-          <h3 class="text-xl font-semibold text-gray-900 dark:text-white">
+          <h3
+            :id="dialogTitleId"
+            class="text-xl font-semibold text-gray-900 dark:text-white"
+          >
             {{ t('profile.totp.setupTitle') }}
           </h3>
-          <p class="mt-2 text-sm text-gray-500 dark:text-gray-400">
+          <p
+            :id="dialogDescriptionId"
+            class="mt-2 text-sm text-gray-500 dark:text-gray-400"
+          >
             {{ stepDescription }}
           </p>
         </div>
@@ -62,7 +81,7 @@
             </div>
 
             <div class="flex justify-end gap-3 pt-4">
-              <button type="button" class="btn btn-secondary" @click="$emit('close')">
+              <button type="button" class="btn btn-secondary" @click="requestClose">
                 {{ t('common.cancel') }}
               </button>
               <button
@@ -109,7 +128,7 @@
           </template>
 
           <div class="flex justify-end gap-3 pt-4">
-            <button type="button" class="btn btn-secondary" @click="$emit('close')">
+            <button type="button" class="btn btn-secondary" @click="requestClose">
               {{ t('common.cancel') }}
             </button>
             <button
@@ -141,7 +160,7 @@
                   pattern="[0-9]"
                   class="h-12 w-10 rounded-lg border border-gray-300 text-center text-lg font-semibold focus:border-primary-500 focus:ring-primary-500 dark:border-dark-600 dark:bg-dark-700"
                   @input="handleCodeInput($event, index)"
-                  @keydown="handleKeydown($event, index)"
+                  @keydown="handleCodeKeydown($event, index)"
                   @paste="handlePaste"
                 />
               </div>
@@ -163,15 +182,30 @@
         </div>
       </div>
     </div>
-  </div>
+    </div>
+  </Teleport>
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, nextTick, watch, computed } from 'vue'
+import {
+  computed,
+  getCurrentInstance,
+  nextTick,
+  onMounted,
+  onUnmounted,
+  ref,
+  watch,
+} from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
 import { totpAPI } from '@/api'
 import type { TotpSetupResponse } from '@/types'
+import { acquireBodyScrollLock, releaseBodyScrollLock } from '@/utils/bodyScrollLock'
+import {
+  isTopModalLayer,
+  registerModalLayer,
+  unregisterModalLayer,
+} from '@/utils/modalStack'
 import QRCode from 'qrcode'
 
 const emit = defineEmits<{
@@ -181,6 +215,16 @@ const emit = defineEmits<{
 
 const { t } = useI18n()
 const appStore = useAppStore()
+const dialogRef = ref<HTMLElement | null>(null)
+const instanceId = getCurrentInstance()?.uid ?? 'dialog'
+const dialogTitleId = `totp-setup-title-${instanceId}`
+const dialogDescriptionId = `totp-setup-description-${instanceId}`
+const modalLayerToken = Symbol('totp-setup-modal')
+const scrollLockToken = Symbol('totp-setup-modal-scroll-lock')
+let previouslyFocusedElement: HTMLElement | null = null
+let underlyingModalElement: HTMLElement | null = null
+let underlyingModalWasInert = false
+let underlyingModalAriaHidden: string | null = null
 
 // Step: 0 = verify identity, 1 = QR code, 2 = verify TOTP code
 const step = ref(0)
@@ -258,7 +302,7 @@ const handleCodeInput = (event: Event, index: number) => {
   }
 }
 
-const handleKeydown = (event: KeyboardEvent, index: number) => {
+const handleCodeKeydown = (event: KeyboardEvent, index: number) => {
   if (event.key === 'Backspace') {
     const input = event.target as HTMLInputElement
     // If current cell is empty and not the first, move to previous cell
@@ -296,6 +340,90 @@ const handlePaste = (event: ClipboardEvent) => {
   nextTick(() => {
     inputRefs.value[focusIndex]?.focus()
   })
+}
+
+function getFocusableElements(): HTMLElement[] {
+  if (!dialogRef.value) return []
+
+  return Array.from(dialogRef.value.querySelectorAll<HTMLElement>(
+    'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+  )).filter(element => (
+    !element.hasAttribute('hidden')
+    && element.getAttribute('aria-hidden') !== 'true'
+    && !element.closest('[hidden]')
+  ))
+}
+
+function requestClose() {
+  if (!isTopModalLayer(modalLayerToken)) return
+  emit('close')
+}
+
+function handleDialogKeydown(event: KeyboardEvent) {
+  if (!isTopModalLayer(modalLayerToken)) return
+
+  if (event.key === 'Escape') {
+    event.preventDefault()
+    event.stopPropagation()
+    requestClose()
+    return
+  }
+
+  if (event.key !== 'Tab') return
+
+  const focusable = getFocusableElements()
+  if (focusable.length === 0) {
+    event.preventDefault()
+    dialogRef.value?.focus()
+    return
+  }
+
+  const first = focusable[0]
+  const last = focusable[focusable.length - 1]
+  const activeElement = document.activeElement
+
+  if (
+    event.shiftKey
+    && (activeElement === first || activeElement === dialogRef.value || !dialogRef.value?.contains(activeElement))
+  ) {
+    event.preventDefault()
+    last.focus()
+  } else if (
+    !event.shiftKey
+    && (activeElement === last || activeElement === dialogRef.value || !dialogRef.value?.contains(activeElement))
+  ) {
+    event.preventDefault()
+    first.focus()
+  }
+}
+
+async function focusDialog() {
+  await nextTick()
+  dialogRef.value?.focus()
+}
+
+function hideUnderlyingModal() {
+  underlyingModalElement = previouslyFocusedElement?.closest<HTMLElement>(
+    '[role="dialog"][aria-modal="true"], [role="alertdialog"][aria-modal="true"]',
+  ) ?? null
+  if (!underlyingModalElement) return
+
+  underlyingModalWasInert = underlyingModalElement.inert ?? false
+  underlyingModalAriaHidden = underlyingModalElement.getAttribute('aria-hidden')
+  underlyingModalElement.inert = true
+  underlyingModalElement.setAttribute('aria-hidden', 'true')
+}
+
+function restoreUnderlyingModal() {
+  if (!underlyingModalElement) return
+
+  underlyingModalElement.inert = underlyingModalWasInert
+  if (underlyingModalAriaHidden === null) {
+    underlyingModalElement.removeAttribute('aria-hidden')
+  } else {
+    underlyingModalElement.setAttribute('aria-hidden', underlyingModalAriaHidden)
+  }
+  underlyingModalElement = null
 }
 
 const copySecret = async () => {
@@ -391,13 +519,41 @@ const handleVerify = async () => {
 }
 
 onMounted(() => {
-  loadVerificationMethod()
+  previouslyFocusedElement = document.activeElement instanceof HTMLElement
+    ? document.activeElement
+    : null
+  hideUnderlyingModal()
+  registerModalLayer(modalLayerToken)
+  acquireBodyScrollLock(scrollLockToken)
+  document.addEventListener('keydown', handleDialogKeydown)
+  void focusDialog()
+  void loadVerificationMethod()
 })
 
 onUnmounted(() => {
+  document.removeEventListener('keydown', handleDialogKeydown)
+  unregisterModalLayer(modalLayerToken)
+  releaseBodyScrollLock(scrollLockToken)
+  restoreUnderlyingModal()
   if (cooldownTimer.value) {
     clearInterval(cooldownTimer.value)
     cooldownTimer.value = null
   }
+  if (previouslyFocusedElement?.isConnected) {
+    previouslyFocusedElement.focus()
+  }
 })
 </script>
+
+<style scoped>
+.totp-modal-layer {
+  z-index: 100;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .totp-modal-layer,
+  .totp-modal-layer * {
+    transition-duration: 1ms !important;
+  }
+}
+</style>

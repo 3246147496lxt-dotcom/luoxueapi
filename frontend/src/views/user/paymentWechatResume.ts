@@ -1,6 +1,10 @@
 import type { LocationQuery, LocationQueryRaw } from 'vue-router'
 import type { SubscriptionPlan } from '@/types/payment'
 import { normalizeVisibleMethod } from '@/components/payment/paymentFlow'
+import {
+  hasCompleteWechatResumeQuery,
+  readSingleQueryString,
+} from '@/navigation/purchaseQueryState'
 
 export interface ParsedWechatResumeRoute {
   orderAmount: number
@@ -11,20 +15,8 @@ export interface ParsedWechatResumeRoute {
   wechatResumeToken?: string
 }
 
-function readQueryString(query: LocationQuery, key: string): string {
-  const value = query[key]
-  if (Array.isArray(value)) {
-    return typeof value[0] === 'string' ? value[0] : ''
-  }
-  return typeof value === 'string' ? value : ''
-}
-
 export function hasWechatResumeQuery(query: LocationQuery): boolean {
-  if (readQueryString(query, 'wechat_resume') === '1') {
-    return true
-  }
-  return readQueryString(query, 'wechat_resume_token') !== ''
-    || readQueryString(query, 'openid') !== ''
+  return hasCompleteWechatResumeQuery(query)
 }
 
 export function parseWechatResumeRoute(
@@ -36,11 +28,11 @@ export function parseWechatResumeRoute(
     return null
   }
 
-  const wechatResumeToken = readQueryString(query, 'wechat_resume_token')
-  const paymentType = normalizeVisibleMethod(readQueryString(query, 'payment_type')) || 'wxpay'
-  const planId = Number.parseInt(readQueryString(query, 'plan_id'), 10)
+  const wechatResumeToken = readSingleQueryString(query, 'wechat_resume_token').trim()
+  const paymentType = normalizeVisibleMethod(readSingleQueryString(query, 'payment_type')) || 'wxpay'
+  const planId = Number.parseInt(readSingleQueryString(query, 'plan_id'), 10)
   const hasPlanId = Number.isFinite(planId) && planId > 0
-  const orderType = readQueryString(query, 'order_type') === 'subscription' || hasPlanId
+  const orderType = readSingleQueryString(query, 'order_type') === 'subscription' || hasPlanId
     ? 'subscription'
     : 'balance'
 
@@ -54,12 +46,12 @@ export function parseWechatResumeRoute(
     }
   }
 
-  const openid = readQueryString(query, 'openid')
+  const openid = readSingleQueryString(query, 'openid').trim()
   if (!openid) {
     return null
   }
 
-  const rawAmount = Number.parseFloat(readQueryString(query, 'amount'))
+  const rawAmount = Number.parseFloat(readSingleQueryString(query, 'amount'))
   const orderAmount = Number.isFinite(rawAmount) && rawAmount > 0
     ? rawAmount
     : (orderType === 'subscription'
@@ -86,5 +78,8 @@ export function stripWechatResumeQuery(query: LocationQuery): LocationQueryRaw {
   delete nextQuery.amount
   delete nextQuery.order_type
   delete nextQuery.plan_id
+  delete nextQuery.tab
+  delete nextQuery.plan
+  delete nextQuery.group
   return nextQuery
 }

@@ -165,16 +165,18 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import LocaleSwitcher from '@/components/common/LocaleSwitcher.vue'
 import Icon from '@/components/icons/Icon.vue'
+import { useThemePreference } from '@/composables/useThemePreference'
 import { useAppStore } from '@/stores'
 import { splitBrandApiSuffix } from '@/utils/brand'
 import { sanitizeUrl } from '@/utils/url'
 
 const { t } = useI18n()
 const appStore = useAppStore()
+const { isDark, toggleTheme } = useThemePreference()
 
 const props = withDefaults(defineProps<{
   variant?: 'default' | 'snow'
@@ -183,7 +185,6 @@ const props = withDefaults(defineProps<{
 })
 
 const isSnowVariant = computed(() => props.variant === 'snow')
-const isDark = ref(document.documentElement.classList.contains('dark'))
 
 const siteName = computed(() => (
   appStore.cachedPublicSettings?.site_name || appStore.siteName || '落雪API'
@@ -212,12 +213,6 @@ const siteSubtitle = computed(() => {
   return t('auth.siteSubtitle')
 })
 const currentYear = computed(() => new Date().getFullYear())
-
-function toggleTheme() {
-  isDark.value = !isDark.value
-  document.documentElement.classList.toggle('dark', isDark.value)
-  localStorage.setItem('theme', isDark.value ? 'dark' : 'light')
-}
 
 onMounted(() => {
   appStore.fetchPublicSettings()

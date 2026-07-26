@@ -1,487 +1,172 @@
-# Layout Components Integration Guide
+# Layout Integration Guide
 
-> **Design-system note (2026-07-21):** the active product language is Luoxue Snow Clay. Use `.superdesign/design-system.md` for design guidance and `frontend/src/styles/luoxue-clay-tokens.css` for runtime tokens. Indigo examples in this integration guide are historical snippets, not a theme recommendation.
+This guide describes the current authenticated shell. Use Snow Clay runtime tokens
+from `frontend/src/styles/luoxue-clay-tokens.css` and design guidance from
+`.superdesign/design-system.md`.
 
-## Quick Start
+## Add an authenticated page
 
-### 1. Import Layout Components
+Define localized route metadata:
 
-```typescript
-// In your view files
-import { AppLayout, AuthLayout } from '@/components/layout'
+```ts
+{
+  path: '/usage',
+  name: 'Usage',
+  component: () => import('@/views/user/UsageView.vue'),
+  meta: {
+    requiresAuth: true,
+    title: 'Usage',
+    titleKey: 'usage.title',
+    descriptionKey: 'usage.description',
+  },
+}
 ```
 
-### 2. Use in Routes
-
-```typescript
-// src/router/index.ts
-import { createRouter, createWebHistory } from 'vue-router'
-import type { RouteRecordRaw } from 'vue-router'
-
-// Views
-import DashboardView from '@/views/DashboardView.vue'
-import LoginView from '@/views/auth/LoginView.vue'
-import RegisterView from '@/views/auth/RegisterView.vue'
-
-const routes: RouteRecordRaw[] = [
-  // Auth routes (no layout needed - views use AuthLayout internally)
-  {
-    path: '/login',
-    name: 'Login',
-    component: LoginView,
-    meta: { requiresAuth: false }
-  },
-  {
-    path: '/register',
-    name: 'Register',
-    component: RegisterView,
-    meta: { requiresAuth: false }
-  },
-
-  // User routes (use AppLayout)
-  {
-    path: '/dashboard',
-    name: 'Dashboard',
-    component: DashboardView,
-    meta: { requiresAuth: true, title: 'Dashboard' }
-  },
-  {
-    path: '/api-keys',
-    name: 'ApiKeys',
-    component: () => import('@/views/ApiKeysView.vue'),
-    meta: { requiresAuth: true, title: 'API Keys' }
-  },
-  {
-    path: '/usage',
-    name: 'Usage',
-    component: () => import('@/views/UsageView.vue'),
-    meta: { requiresAuth: true, title: 'Usage Statistics' }
-  },
-  {
-    path: '/redeem',
-    name: 'Redeem',
-    component: () => import('@/views/RedeemView.vue'),
-    meta: { requiresAuth: true, title: 'Redeem Code' }
-  },
-  {
-    path: '/profile',
-    name: 'Profile',
-    component: () => import('@/views/ProfileView.vue'),
-    meta: { requiresAuth: true, title: 'Profile Settings' }
-  },
-
-  // Admin routes (use AppLayout, admin only)
-  {
-    path: '/admin/dashboard',
-    name: 'AdminDashboard',
-    component: () => import('@/views/admin/DashboardView.vue'),
-    meta: { requiresAuth: true, requiresAdmin: true, title: 'Admin Dashboard' }
-  },
-  {
-    path: '/admin/users',
-    name: 'AdminUsers',
-    component: () => import('@/views/admin/UsersView.vue'),
-    meta: { requiresAuth: true, requiresAdmin: true, title: 'User Management' }
-  },
-  {
-    path: '/admin/groups',
-    name: 'AdminGroups',
-    component: () => import('@/views/admin/GroupsView.vue'),
-    meta: { requiresAuth: true, requiresAdmin: true, title: 'Groups' }
-  },
-  {
-    path: '/admin/accounts',
-    name: 'AdminAccounts',
-    component: () => import('@/views/admin/AccountsView.vue'),
-    meta: { requiresAuth: true, requiresAdmin: true, title: 'Accounts' }
-  },
-  {
-    path: '/admin/proxies',
-    name: 'AdminProxies',
-    component: () => import('@/views/admin/ProxiesView.vue'),
-    meta: { requiresAuth: true, requiresAdmin: true, title: 'Proxies' }
-  },
-  {
-    path: '/admin/redeem-codes',
-    name: 'AdminRedeemCodes',
-    component: () => import('@/views/admin/RedeemCodesView.vue'),
-    meta: { requiresAuth: true, requiresAdmin: true, title: 'Redeem Codes' }
-  },
-
-  // Default redirect
-  {
-    path: '/',
-    redirect: '/dashboard'
-  }
-]
-
-const router = createRouter({
-  history: createWebHistory(),
-  routes
-})
-
-// Navigation guards
-router.beforeEach((to, from, next) => {
-  const authStore = useAuthStore()
-
-  if (to.meta.requiresAuth && !authStore.isAuthenticated) {
-    // Redirect to login if not authenticated
-    next('/login')
-  } else if (to.meta.requiresAdmin && !authStore.isAdmin) {
-    // Redirect to dashboard if not admin
-    next('/dashboard')
-  } else {
-    next()
-  }
-})
-
-export default router
-```
-
-### 3. Initialize Stores in main.ts
-
-```typescript
-// src/main.ts
-import { createApp } from 'vue'
-import { createPinia } from 'pinia'
-import App from './App.vue'
-import router from './router'
-import './style.css'
-
-const app = createApp(App)
-const pinia = createPinia()
-
-app.use(pinia)
-app.use(router)
-
-// Initialize auth state on app startup
-import { useAuthStore } from '@/stores'
-const authStore = useAuthStore()
-authStore.checkAuth()
-
-app.mount('#app')
-```
-
-### 4. Update App.vue
+Wrap the view in `AppLayout` and render a semantic page heading:
 
 ```vue
-<!-- src/App.vue -->
-<template>
-  <router-view />
-</template>
-
-<script setup lang="ts">
-// App.vue just renders the router view
-// Layouts are handled by individual views
-</script>
-```
-
----
-
-## View Component Templates
-
-### Authenticated Page Template
-
-```vue
-<!-- src/views/DashboardView.vue -->
 <template>
   <AppLayout>
-    <div class="space-y-6">
-      <h1 class="text-3xl font-bold text-gray-900">Dashboard</h1>
+    <AdminPageHeader
+      :title="t('usage.title')"
+      :description="t('usage.description')"
+    />
 
-      <!-- Your content here -->
-    </div>
+    <!-- Page content -->
   </AppLayout>
 </template>
 
 <script setup lang="ts">
-import { AppLayout } from '@/components/layout'
+import { useI18n } from 'vue-i18n'
+import { AdminPageHeader, AppLayout } from '@/components/layout'
 
-// Your component logic here
+const { t } = useI18n()
 </script>
 ```
 
-### Auth Page Template
+Use a native `h1` directly when the standard header does not fit the page. Compact
+workspaces may use an `sr-only` heading, but must not omit it. The mobile route title
+is resolved separately and does not replace this heading.
+
+## Shell composition
+
+`AppLayout` mounts both shell branches:
+
+- Desktop: full-height `AppSidebar`, no global top bar, and a margin-adjusted content
+  area.
+- Mobile: fixed `AppMobileHeader`, drawer-style `AppSidebar`, and a shared backdrop.
+
+Do not mount these components again inside a page. Do not add local padding to
+compensate for the mobile bar; `AppLayout` already applies
+`--app-shell-top-offset`.
+
+For viewport-bound layouts, use the shared tokens:
+
+```css
+.page-workspace {
+  min-height: calc(100dvh - var(--app-shell-top-offset));
+}
+
+.page-sticky-control {
+  top: calc(var(--app-shell-top-offset) + 1rem);
+}
+```
+
+Avoid fixed shell-height constants in pages.
+
+## Navigation
+
+Main navigation is rendered by `AppSidebar.vue`. Keep route labels localized and
+preserve role, capability, simple-mode, and feature-flag visibility checks.
+
+Account, support, and standalone navigation destinations are declared in
+`frontend/src/navigation/shellDestinations.ts`. Use that registry when adding or
+removing links for subscriptions, wallet, orders, profile, home, model catalog,
+contact, or documentation so the sidebar and account panel share one visibility
+policy.
+
+On mobile, the menu button in `AppMobileHeader` controls
+`useAppStore().mobileOpen`. Selecting a sidebar route closes the drawer.
+
+## Account entry point
+
+`SidebarAccountDock` is mounted at the bottom of `AppSidebar`. Do not add a second
+user dropdown or page-level account launcher.
+
+`SidebarAccountOverlay` presents account summary and actions:
+
+- desktop: an anchored dialog beside the dock;
+- mobile: a modal bottom sheet with safe-area padding;
+- both: route-aware dismissal, outside-click and Escape handling, theme and locale
+  controls, announcements, support, onboarding replay, and logout.
+
+When changing account actions, keep destination selection in
+`shellDestinations.ts`, display data in `useAccountSummary`, and the view behavior in
+the dock/overlay pair.
+
+## Authentication pages
+
+Authentication views use `AuthLayout` directly:
 
 ```vue
-<!-- src/views/auth/LoginView.vue -->
 <template>
   <AuthLayout>
-    <h2 class="mb-6 text-2xl font-bold text-gray-900">Login</h2>
-
-    <!-- Your login form here -->
-
-    <template #footer>
-      <p class="text-gray-600">
-        Don't have an account?
-        <router-link to="/register" class="text-indigo-600 hover:underline"> Sign up </router-link>
-      </p>
-    </template>
+    <h1>{{ t('auth.login') }}</h1>
+    <!-- Form -->
   </AuthLayout>
 </template>
 
 <script setup lang="ts">
+import { useI18n } from 'vue-i18n'
 import { AuthLayout } from '@/components/layout'
 
-// Your login logic here
+const { t } = useI18n()
 </script>
 ```
 
----
+## State responsibilities
 
-## Customization
+- `useAuthStore`: session, role, identity, and logout.
+- `useAppStore`: desktop collapse state, mobile drawer state, and public settings.
+- `useSubscriptionStore`: account subscription data.
+- `useAnnouncementStore`: unread announcements.
+- `useOnboardingStore`: guide replay.
 
-### Changing Colors
+Pages should consume these stores for page behavior, not duplicate shell state.
 
-Do not establish page-local palettes. New and migrated layouts must consume the canonical Snow Clay tokens:
+## Testing checklist
 
-```css
-/* Shared token examples; do not hard-code a replacement palette here. */
-color: var(--lx-clay-text);
-background: var(--lx-clay-surface);
-border-color: var(--lx-clay-border);
-```
+When changing the shell, verify:
 
-### Adding Custom Icons
+- `AppLayout` renders the correct desktop and mobile branches;
+- `AppMobileHeader` toggles the sidebar and resolves localized route titles;
+- `AppSidebar` preserves visibility rules and closes after mobile navigation;
+- `SidebarAccountDock` works in expanded and collapsed sidebar states;
+- `SidebarAccountOverlay` positions beside its anchor on desktop and behaves as an
+  accessible bottom sheet on mobile;
+- focus returns to the correct trigger and background scroll is restored;
+- authenticated pages retain a semantic `h1`;
+- light and dark Snow Clay tokens remain consistent.
 
-Replace HTML entity icons with your preferred icon library:
-
-```vue
-<!-- Before (HTML entities) -->
-<span class="text-lg">&#128200;</span>
-
-<!-- After (Heroicons example) -->
-<ChartBarIcon class="h-5 w-5" />
-```
-
-### Sidebar Customization
-
-Modify navigation items in `AppSidebar.vue`:
-
-```typescript
-// Add/remove/modify navigation items
-const userNavItems = [
-  { path: '/dashboard', label: 'Dashboard', icon: '&#128200;' },
-  { path: '/new-page', label: 'New Page', icon: '&#128196;' } // Add new item
-  // ...
-]
-```
-
-### Header Customization
-
-Modify user dropdown in `AppHeader.vue`:
-
-```vue
-<!-- Add new dropdown items -->
-<router-link
-  to="/settings"
-  @click="closeDropdown"
-  class="flex items-center px-4 py-2 text-sm text-gray-700 hover:bg-gray-100"
->
-  <span class="mr-2">&#9881;</span>
-  Settings
-</router-link>
-```
-
----
-
-## Mobile Responsive Behavior
-
-### Sidebar
-
-- **Desktop (md+)**: Always visible, can be collapsed to icon-only view
-- **Mobile**: Hidden by default, shown via menu toggle in header
-
-### Header
-
-- **Desktop**: Shows full user info and balance
-- **Mobile**: Shows compact view with hamburger menu
-
-To improve mobile experience, you can add overlay and transitions:
-
-```vue
-<!-- AppSidebar.vue enhancement for mobile -->
-<aside
-  class="fixed left-0 top-0 z-40 h-screen transition-transform duration-300"
-  :class="[
-    sidebarCollapsed ? 'w-16' : 'w-64',
-    // Hide on mobile when collapsed
-    'md:translate-x-0',
-    sidebarCollapsed ? '-translate-x-full md:translate-x-0' : 'translate-x-0'
-  ]"
->
-  <!-- ... -->
-</aside>
-
-<!-- Add overlay for mobile -->
-<div
-  v-if="!sidebarCollapsed"
-  @click="toggleSidebar"
-  class="fixed inset-0 z-30 bg-black bg-opacity-50 md:hidden"
-></div>
-```
-
----
-
-## State Management Integration
-
-### Auth Store Usage
-
-```typescript
-import { useAuthStore } from '@/stores'
-
-const authStore = useAuthStore()
-
-// Check if user is authenticated
-if (authStore.isAuthenticated) {
-  // User is logged in
-}
-
-// Check if user is admin
-if (authStore.isAdmin) {
-  // User has admin role
-}
-
-// Get current user
-const user = authStore.user
-```
-
-### App Store Usage
-
-```typescript
-import { useAppStore } from '@/stores'
-
-const appStore = useAppStore()
-
-// Toggle sidebar
-appStore.toggleSidebar()
-
-// Show notifications
-appStore.showSuccess('Operation completed!')
-appStore.showError('Something went wrong')
-appStore.showInfo('Did you know...')
-appStore.showWarning('Be careful!')
-
-// Loading state
-appStore.setLoading(true)
-// ... perform operation
-appStore.setLoading(false)
-
-// Or use helper
-await appStore.withLoading(async () => {
-  // Your async operation
-})
-```
-
----
-
-## Accessibility Features
-
-All layout components include:
-
-- **Semantic HTML**: Proper use of `<nav>`, `<header>`, `<main>`, `<aside>`
-- **ARIA labels**: Buttons have descriptive labels
-- **Keyboard navigation**: All interactive elements are keyboard accessible
-- **Focus management**: Proper focus states with Tailwind's `focus:` utilities
-- **Color contrast**: WCAG AA compliant color combinations
-
-To enhance further:
-
-```vue
-<!-- Add skip to main content link -->
-<a
-  href="#main-content"
-  class="sr-only rounded bg-white px-4 py-2 focus:not-sr-only focus:absolute focus:left-4 focus:top-4"
->
-  Skip to main content
-</a>
-
-<main id="main-content">
-  <!-- Content -->
-</main>
-```
-
----
-
-## Testing
-
-### Unit Testing Layout Components
-
-```typescript
-// AppHeader.test.ts
-import { describe, it, expect, beforeEach } from 'vitest'
-import { mount } from '@vue/test-utils'
-import { createPinia, setActivePinia } from 'pinia'
-import AppHeader from '@/components/layout/AppHeader.vue'
-
-describe('AppHeader', () => {
-  beforeEach(() => {
-    setActivePinia(createPinia())
-  })
-
-  it('renders user info when authenticated', () => {
-    const wrapper = mount(AppHeader)
-    // Add assertions
-  })
-
-  it('shows dropdown when clicked', async () => {
-    const wrapper = mount(AppHeader)
-    await wrapper.find('button').trigger('click')
-    expect(wrapper.find('.dropdown').exists()).toBe(true)
-  })
-})
-```
-
----
-
-## Performance Optimization
-
-### Lazy Loading
-
-Views using layouts are already lazy loaded in the router example above.
-
-### Code Splitting
-
-Layout components are automatically code-split when imported:
-
-```typescript
-// This creates a separate chunk for layout components
-import { AppLayout } from '@/components/layout'
-```
-
-### Reducing Re-renders
-
-Layout components use `computed` refs to prevent unnecessary re-renders:
-
-```typescript
-const sidebarCollapsed = computed(() => appStore.sidebarCollapsed)
-// This only re-renders when sidebarCollapsed changes
-```
-
----
+Run the related layout unit tests plus `vue-tsc --noEmit` after implementation
+changes. Documentation-only edits need formatting and reference checks.
 
 ## Troubleshooting
 
-### Sidebar not showing
+### Mobile menu does not open
 
-- Check if `useAppStore` is properly initialized
-- Verify Tailwind classes are being processed
-- Check z-index conflicts with other components
+- Confirm the route is inside `AppLayout`.
+- Check `useAppStore().mobileOpen` and the `lg` breakpoint.
+- Check whether another modal currently owns the page scroll lock.
 
-### Routes not highlighting in sidebar
+### Account panel has stale data
 
-- Ensure route paths match exactly
-- Check `isActive()` function logic
-- Verify `useRoute()` is working correctly
+- Confirm auth and subscription stores have initialized.
+- Check `useAccountSummary` rather than duplicating balance calculations.
+- Verify capability state before expecting optional destinations.
 
-### User info not displaying
+### Page is offset or clipped
 
-- Ensure auth store is initialized with `checkAuth()`
-- Verify user is logged in
-- Check localStorage for auth data
-
-### Mobile menu not working
-
-- Verify `toggleSidebar()` is called correctly
-- Check responsive breakpoints (md:)
-- Test on actual mobile device or browser dev tools
+- Remove local shell-height constants.
+- Use `--app-shell-top-offset` for viewport height, sticky top, and scroll margin.
+- Keep page padding inside the page content rather than recreating shell chrome.

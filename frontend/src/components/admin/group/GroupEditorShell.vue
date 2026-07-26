@@ -170,7 +170,7 @@ watch(
   width: min(100%, 1180px);
   margin-inline: auto;
   padding: 1rem 1rem max(1rem, env(safe-area-inset-bottom));
-  scroll-margin-top: 5.5rem;
+  scroll-margin-top: calc(var(--app-shell-top-offset) + 7px);
 }
 
 .group-editor-header {
@@ -254,7 +254,7 @@ watch(
   display: flex;
   position: sticky;
   z-index: 12;
-  top: 5.5rem;
+  top: calc(var(--app-shell-top-offset) + 7px);
   gap: 0.5rem;
   overflow-x: auto;
   border: 1px solid var(--lx-clay-border);
@@ -335,7 +335,7 @@ watch(
   font-size: 1.125rem;
   font-weight: 800;
   line-height: 1.35;
-  scroll-margin-block-start: 7rem;
+  scroll-margin-block-start: calc(var(--app-shell-top-offset) + 31px);
 }
 
 .group-editor-section-heading h2:focus {

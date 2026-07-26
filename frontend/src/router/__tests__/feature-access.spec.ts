@@ -30,6 +30,13 @@ const appStore = vi.hoisted(() => ({
   fetchPublicSettings: vi.fn(),
 }))
 
+const adminComplianceStore = vi.hoisted(() => ({
+  initialized: true,
+  shouldShow: false,
+  fetchStatus: vi.fn(),
+  requireAcknowledgement: vi.fn(),
+}))
+
 vi.mock('vue-router', () => ({
   createWebHistory: vi.fn(() => ({})),
   createRouter: vi.fn(() => ({
@@ -54,11 +61,7 @@ vi.mock('@/stores/adminSettings', () => ({
 }))
 
 vi.mock('@/stores/adminCompliance', () => ({
-  useAdminComplianceStore: () => ({
-    initialized: true,
-    fetchStatus: vi.fn(),
-    requireAcknowledgement: vi.fn(),
-  }),
+  useAdminComplianceStore: () => adminComplianceStore,
 }))
 
 vi.mock('@/composables/useNavigationLoading', () => ({
@@ -85,18 +88,32 @@ function createDeferred<T>() {
   return { promise, resolve }
 }
 
-function runGuard(meta: Record<string, unknown>, path: string) {
+function runGuard(
+  meta: Record<string, unknown>,
+  path: string,
+  query: Record<string, string | string[]> = {},
+  hash = '',
+) {
   if (!routerHarness.guard) {
     throw new Error('router guard was not registered')
   }
 
   const next = vi.fn()
+  const searchParams = new URLSearchParams()
+  Object.entries(query).forEach(([key, value]) => {
+    const values = Array.isArray(value) ? value : [value]
+    values.forEach((entry) => searchParams.append(key, entry))
+  })
+  const search = searchParams.toString()
+  const fullPath = `${path}${search ? `?${search}` : ''}${hash}`
   const navigation = routerHarness.guard(
     {
       path,
-      fullPath: path,
+      fullPath,
       name: 'FeatureRoute',
       params: {},
+      query,
+      hash,
       meta: { requiresAuth: true, ...meta },
     },
     {},
@@ -117,6 +134,14 @@ describe('feature route guard', () => {
     appStore.publicSettingsLoaded = false
     appStore.cachedPublicSettings = null
     appStore.fetchPublicSettings.mockReset()
+    adminComplianceStore.initialized = true
+    adminComplianceStore.shouldShow = false
+    adminComplianceStore.fetchStatus.mockReset()
+    adminComplianceStore.requireAcknowledgement.mockReset()
+    adminComplianceStore.requireAcknowledgement.mockImplementation(() => {
+      adminComplianceStore.initialized = true
+      adminComplianceStore.shouldShow = true
+    })
   })
 
   it('waits for the first public-settings request before deciding payment access', async () => {
@@ -139,6 +164,46 @@ describe('feature route guard', () => {
     expect(next).toHaveBeenCalledWith()
   })
 
+  it('waits for public settings before opening a fresh subscription plan bridge', async () => {
+    const deferred = createDeferred<{ payment_enabled: boolean }>()
+    appStore.fetchPublicSettings.mockImplementation(async () => {
+      const settings = await deferred.promise
+      appStore.cachedPublicSettings = settings
+      appStore.publicSettingsLoaded = true
+      return settings
+    })
+
+    const { navigation, next } = runGuard(
+      {},
+      '/purchase',
+      { tab: 'subscription', plan: '7' },
+    )
+
+    await vi.waitFor(() => expect(appStore.fetchPublicSettings).toHaveBeenCalledTimes(1))
+    expect(next).not.toHaveBeenCalled()
+
+    deferred.resolve({ payment_enabled: true })
+    await navigation
+    expect(next).toHaveBeenCalledOnce()
+    expect(next).toHaveBeenCalledWith()
+  })
+
+  it('redirects a fresh subscription plan bridge when payment is disabled', async () => {
+    appStore.cachedPublicSettings = { payment_enabled: false }
+    appStore.publicSettingsLoaded = true
+
+    const { navigation, next } = runGuard(
+      {},
+      '/purchase',
+      { tab: 'subscription', plan: '7' },
+    )
+    await navigation
+
+    expect(appStore.fetchPublicSettings).not.toHaveBeenCalled()
+    expect(next).toHaveBeenCalledOnce()
+    expect(next).toHaveBeenCalledWith('/dashboard')
+  })
+
   it('keeps the integrated purchase page available in simple mode for web-chat recharge', async () => {
     authStore.isSimpleMode = true
 
@@ -147,6 +212,155 @@ describe('feature route guard', () => {
 
     expect(next).toHaveBeenCalledOnce()
     expect(next).toHaveBeenCalledWith()
+  })
+
+  it('blocks a fresh subscription plan bridge in simple mode', async () => {
+    authStore.isSimpleMode = true
+    appStore.cachedPublicSettings = { payment_enabled: true }
+    appStore.publicSettingsLoaded = true
+
+    const { navigation, next } = runGuard(
+      {},
+      '/purchase',
+      { tab: 'subscription', plan: '7' },
+    )
+    await navigation
+
+    expect(next).toHaveBeenCalledOnce()
+    expect(next).toHaveBeenCalledWith('/dashboard')
+  })
+
+  it('does not let auxiliary callback state bypass the simple-mode plan gate', async () => {
+    authStore.isSimpleMode = true
+    appStore.cachedPublicSettings = { payment_enabled: true }
+    appStore.publicSettingsLoaded = true
+
+    const { navigation, next } = runGuard(
+      {},
+      '/purchase',
+      {
+        tab: 'subscription',
+        plan: '7',
+        state: 'x',
+      },
+    )
+    await navigation
+
+    expect(next).toHaveBeenCalledOnce()
+    expect(next).toHaveBeenCalledWith('/dashboard')
+  })
+
+  it('canonicalizes a repeated tab before simple-mode capability checks', async () => {
+    authStore.isSimpleMode = true
+    appStore.cachedPublicSettings = { payment_enabled: false }
+    appStore.publicSettingsLoaded = true
+
+    const { navigation, next } = runGuard(
+      {},
+      '/purchase',
+      {
+        tab: ['subscription', 'recharge'],
+        plan: '7',
+        group: '3',
+        source: 'account-menu',
+      },
+    )
+    await navigation
+
+    expect(appStore.fetchPublicSettings).not.toHaveBeenCalled()
+    expect(next).toHaveBeenCalledOnce()
+    expect(next).toHaveBeenCalledWith({
+      path: '/purchase',
+      query: { source: 'account-menu' },
+      hash: '',
+      replace: true,
+    })
+  })
+
+  it('canonicalizes redemption before simple-mode capability checks', async () => {
+    authStore.isSimpleMode = true
+    appStore.cachedPublicSettings = { payment_enabled: false }
+    appStore.publicSettingsLoaded = true
+
+    const { navigation, next } = runGuard(
+      {},
+      '/purchase',
+      {
+        tab: 'subscription',
+        plan: '7',
+        group: '3',
+        source: 'wallet',
+      },
+      '#redeem',
+    )
+    await navigation
+
+    expect(appStore.fetchPublicSettings).not.toHaveBeenCalled()
+    expect(next).toHaveBeenCalledOnce()
+    expect(next).toHaveBeenCalledWith({
+      path: '/purchase',
+      query: { source: 'wallet' },
+      hash: '#redeem',
+      replace: true,
+    })
+  })
+
+  it('keeps a complete WeChat recovery available in simple mode', async () => {
+    authStore.isSimpleMode = true
+    appStore.cachedPublicSettings = { payment_enabled: false }
+    appStore.publicSettingsLoaded = true
+
+    const { navigation, next } = runGuard(
+      {},
+      '/purchase',
+      {
+        tab: 'subscription',
+        plan: '7',
+        wechat_resume: '1',
+        wechat_resume_token: 'resume-7',
+      },
+    )
+    await navigation
+
+    expect(appStore.fetchPublicSettings).not.toHaveBeenCalled()
+    expect(next).toHaveBeenCalledOnce()
+    expect(next).toHaveBeenCalledWith()
+  })
+
+  it('keeps ordinary recharge available when payment and simple mode are disabled', async () => {
+    authStore.isSimpleMode = true
+    appStore.cachedPublicSettings = { payment_enabled: false }
+    appStore.publicSettingsLoaded = true
+
+    const { navigation, next } = runGuard(
+      {},
+      '/purchase',
+      { tab: 'recharge' },
+    )
+    await navigation
+
+    expect(appStore.fetchPublicSettings).not.toHaveBeenCalled()
+    expect(next).toHaveBeenCalledOnce()
+    expect(next).toHaveBeenCalledWith()
+  })
+
+  it('canonicalizes the retired subscription catalogue before capability checks', async () => {
+    const { navigation, next } = runGuard(
+      {},
+      '/purchase',
+      { tab: 'subscription', source: 'account-menu' },
+      '#plans',
+    )
+    await navigation
+
+    expect(appStore.fetchPublicSettings).not.toHaveBeenCalled()
+    expect(next).toHaveBeenCalledOnce()
+    expect(next).toHaveBeenCalledWith({
+      path: '/pricing',
+      query: { source: 'account-menu' },
+      hash: '#plans',
+      replace: true,
+    })
   })
 
   it.each([
@@ -183,5 +397,69 @@ describe('feature route guard', () => {
     expect(appStore.fetchPublicSettings).not.toHaveBeenCalled()
     expect(next).toHaveBeenCalledOnce()
     expect(next).toHaveBeenCalledWith(target)
+  })
+
+  it('removes settings state when mandatory admin compliance is incomplete', async () => {
+    authStore.isAdmin = true
+    adminComplianceStore.shouldShow = true
+
+    const { navigation, next } = runGuard(
+      { requiresAdmin: true },
+      '/admin/dashboard',
+      {
+        source: 'operations',
+        account_settings: 'security',
+        account_settings_detail: 'totp',
+      },
+      '#review',
+    )
+    await navigation
+
+    expect(next).toHaveBeenCalledOnce()
+    expect(next).toHaveBeenCalledWith({
+      path: '/admin/dashboard',
+      query: {
+        source: 'operations',
+      },
+      hash: '#review',
+      state: {
+        __sub2api_personal_settings_owner: undefined,
+      },
+      replace: true,
+    })
+  })
+
+  it('checks compliance before an admin activates settings on the user dashboard', async () => {
+    authStore.isAdmin = true
+    adminComplianceStore.initialized = false
+    adminComplianceStore.fetchStatus.mockImplementation(async () => {
+      adminComplianceStore.initialized = true
+      adminComplianceStore.shouldShow = true
+    })
+
+    const { navigation, next } = runGuard(
+      {},
+      '/dashboard',
+      {
+        return_to: 'usage',
+        account_settings: 'general',
+      },
+      '#limits',
+    )
+    await navigation
+
+    expect(adminComplianceStore.fetchStatus).toHaveBeenCalledOnce()
+    expect(next).toHaveBeenCalledOnce()
+    expect(next).toHaveBeenCalledWith({
+      path: '/dashboard',
+      query: {
+        return_to: 'usage',
+      },
+      hash: '#limits',
+      state: {
+        __sub2api_personal_settings_owner: undefined,
+      },
+      replace: true,
+    })
   })
 })
