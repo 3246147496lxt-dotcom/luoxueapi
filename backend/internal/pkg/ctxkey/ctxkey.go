@@ -45,6 +45,14 @@ const (
 	// 供 service 层执行用户级策略，不能使用客户端请求体中的 user 标识替代。
 	UserID Key = "ctx_user_id"
 
+	// WebChat 标识请求来自 JWT 认证的站内聊天入口。
+	// 该标记只由服务端在绑定内部 web_chat principal 后写入。
+	WebChat Key = "ctx_web_chat"
+
+	// WebChatIngress 标识请求进入站内聊天路由，不代表 JWT 或内部 principal 已通过校验。
+	// 该标记用于认证前后的日志隔离，不能作为计费或授权依据。
+	WebChatIngress Key = "ctx_web_chat_ingress"
+
 	// IsMaxTokensOneHaikuRequest 标识当前请求是否为 max_tokens=1 + haiku 模型的探测请求
 	// 用于 ClaudeCodeOnly 验证绕过（绕过 system prompt 检查，但仍需验证 User-Agent）
 	IsMaxTokensOneHaikuRequest Key = "ctx_is_max_tokens_one_haiku"

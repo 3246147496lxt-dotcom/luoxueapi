@@ -93,6 +93,37 @@ func TestMigrationsRunner_IsIdempotent_AndSchemaIsUpToDate(t *testing.T) {
 	requireColumn(t, tx, "usage_billing_dedup_archive", "request_fingerprint", "character varying", 64, false)
 	requireIndex(t, tx, "usage_billing_dedup_archive", "usage_billing_dedup_archive_pkey")
 
+	// billing_usage_entries: durable charge receipts; usage logs can arrive later.
+	requireColumn(t, tx, "billing_usage_entries", "usage_log_id", "bigint", 0, true)
+	requireColumn(t, tx, "billing_usage_entries", "request_id", "character varying", 255, true)
+	requireColumn(t, tx, "billing_usage_entries", "source", "character varying", 20, false)
+	requireColumn(t, tx, "billing_usage_entries", "model", "character varying", 255, false)
+	requireColumn(t, tx, "billing_usage_entries", "requested_model", "character varying", 255, false)
+	requireColumn(t, tx, "billing_usage_entries", "charged_amount", "numeric", 0, false)
+	requireColumn(t, tx, "billing_usage_entries", "balance_before", "numeric", 0, true)
+	requireColumn(t, tx, "billing_usage_entries", "balance_after", "numeric", 0, true)
+	requireColumn(t, tx, "billing_usage_entries", "status", "character varying", 20, false)
+	requireForeignKeyOnDelete(t, tx, "billing_usage_entries", "usage_log_id", "usage_logs", "SET NULL")
+	requireIndex(t, tx, "billing_usage_entries", "billing_usage_entries_request_api_key_unique")
+	requireIndex(t, tx, "billing_usage_entries", "idx_billing_usage_entries_admin_filters")
+
+	// chat_request_attempts: renewable stale-processing recovery lease.
+	requireColumn(t, tx, "chat_request_attempts", "lease_expires_at", "timestamp with time zone", 0, true)
+	requireIndexDefinitionContains(
+		t,
+		tx,
+		"chat_request_attempts",
+		"idx_chat_request_attempts_processing_lease",
+		"lease_expires_at",
+		"WHERE",
+		"status",
+		"processing",
+		"conversation_public_id IS NOT NULL",
+		"assistant_message_public_id IS NOT NULL",
+	)
+	requireMigrationRecorded(t, tx, "189_web_chat_attempt_lease.sql")
+	requireMigrationRecorded(t, tx, "189a_web_chat_attempt_lease_index_notx.sql")
+
 	// settings table should exist
 	var settingsRegclass sql.NullString
 	require.NoError(t, tx.QueryRowContext(context.Background(), "SELECT to_regclass('public.settings')").Scan(&settingsRegclass))
@@ -192,6 +223,50 @@ SELECT EXISTS (
 `, table, index).Scan(&exists)
 	require.NoError(t, err, "query pg_indexes for %s.%s", table, index)
 	require.False(t, exists, "expected index %s on %s to be absent", index, table)
+}
+
+func requireIndexDefinitionContains(
+	t *testing.T,
+	tx *sql.Tx,
+	table string,
+	index string,
+	fragments ...string,
+) {
+	t.Helper()
+
+	var definition string
+	err := tx.QueryRowContext(context.Background(), `
+SELECT indexdef
+FROM pg_indexes
+WHERE schemaname = 'public'
+  AND tablename = $1
+  AND indexname = $2
+`, table, index).Scan(&definition)
+	require.NoError(t, err, "query index definition for %s.%s", table, index)
+	for _, fragment := range fragments {
+		require.Contains(
+			t,
+			definition,
+			fragment,
+			"expected index definition for %s.%s to contain %q",
+			table,
+			index,
+			fragment,
+		)
+	}
+}
+
+func requireMigrationRecorded(t *testing.T, tx *sql.Tx, filename string) {
+	t.Helper()
+
+	var count int
+	err := tx.QueryRowContext(context.Background(), `
+SELECT COUNT(*)
+FROM schema_migrations
+WHERE filename = $1
+`, filename).Scan(&count)
+	require.NoError(t, err, "query schema_migrations for %s", filename)
+	require.Equal(t, 1, count, "expected migration %s to be recorded exactly once", filename)
 }
 
 func requirePartialUniqueIndexDefinition(t *testing.T, tx *sql.Tx, table, index string, fragments ...string) {

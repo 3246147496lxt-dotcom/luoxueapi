@@ -208,6 +208,52 @@ describe('DataTable', () => {
     expect(wrapper.emitted('rowClick')).toEqual([[row]])
   })
 
+  it('marks the inspected desktop row and moves selection by stable row key', async () => {
+    const wrapper = mount(DataTable, {
+      props: {
+        columns: [{ key: 'name', label: 'Name' }],
+        data: [
+          { id: 1, name: 'First' },
+          { id: 2, name: 'Second' }
+        ],
+        rowKey: 'id',
+        clickableRows: true,
+        selectedRowKey: 1
+      }
+    })
+
+    await wrapper.vm.$nextTick()
+    const rows = wrapper.findAll('tbody tr[data-index]')
+    expect(rows[0].classes()).toContain('data-table-row--selected')
+    expect(rows[0].attributes('aria-selected')).toBe('true')
+    expect(rows[1].attributes('aria-selected')).toBe('false')
+
+    await wrapper.setProps({ selectedRowKey: 2 })
+    expect(rows[0].classes()).not.toContain('data-table-row--selected')
+    expect(rows[0].attributes('aria-selected')).toBe('false')
+    expect(rows[1].classes()).toContain('data-table-row--selected')
+    expect(rows[1].attributes('aria-selected')).toBe('true')
+  })
+
+  it('marks the inspected mobile card with button pressed state', async () => {
+    stubMobileMatchMedia()
+    const wrapper = mount(DataTable, {
+      props: {
+        columns: [{ key: 'name', label: 'Name' }],
+        data: [{ id: 7, name: 'Mobile account' }],
+        rowKey: 'id',
+        clickableRows: true,
+        selectedRowKey: 7
+      }
+    })
+
+    await wrapper.vm.$nextTick()
+    const card = wrapper.get('.data-table-mobile-row')
+    expect(card.classes()).toContain('data-table-mobile-row--selected')
+    expect(card.attributes('aria-pressed')).toBe('true')
+    expect(card.attributes('data-row-id')).toBe('7')
+  })
+
   it('switches to windowed rendering once row count exceeds virtualizeThreshold', async () => {
     const data = Array.from({ length: 12 }, (_, i) => ({ id: i + 1, name: `Row ${i + 1}` }))
     const wrapper = mount(DataTable, {

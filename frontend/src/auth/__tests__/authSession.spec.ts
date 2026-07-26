@@ -3,7 +3,9 @@ import {
   AUTH_SESSION_STORAGE_KEYS,
   AuthSessionChangedError,
   createAuthSession,
+  type AuthSessionInvalidationExpectation,
   type AuthSessionLockManager,
+  type AuthSessionPatch,
   type AuthSessionRefreshResult,
   type AuthSessionSnapshot,
 } from '../authSession'
@@ -61,6 +63,15 @@ const fakeUser = {
   created_at: '2026-01-01T00:00:00Z',
   updated_at: '2026-01-01T00:00:00Z',
 }
+
+const sameGenerationIdentityChanges: Array<{
+  label: string
+  patch: AuthSessionPatch
+}> = [
+  { label: 'access token', patch: { accessToken: 'peer-access' } },
+  { label: 'refresh token', patch: { refreshToken: 'peer-refresh' } },
+  { label: 'user', patch: { user: { ...fakeUser, id: 2, username: 'peer-user' } } },
+]
 
 function createSerialLockManager(): AuthSessionLockManager {
   let tail = Promise.resolve()
@@ -890,6 +901,67 @@ describe('authSession', () => {
     expect(localStorage.getItem('auth_token')).toBe('new-login-access')
     expect(localStorage.getItem('refresh_token')).toBe('new-login-refresh')
     expect(localStorage.getItem('auth_session_generation')).toBe(newGeneration)
+  })
+
+  it.each(sameGenerationIdentityChanges)(
+    'guarded invalidation preserves a same-generation $label rotation',
+    ({ patch }) => {
+      const session = createSession()
+      session.replace({
+        accessToken: 'observed-access',
+        refreshToken: 'observed-refresh',
+        expiresAt: Date.now() - 1,
+        user: fakeUser,
+      })
+      const generation = session.getGeneration()
+      const expectation: AuthSessionInvalidationExpectation = {
+        generation,
+        accessToken: 'observed-access',
+        refreshToken: 'observed-refresh',
+        userId: fakeUser.id,
+      }
+      const peer = createAuthSession({
+        storage: localStorage,
+        tabStorage: null,
+        eventTarget: null,
+        lockManager: null,
+      })
+      sessions.push(peer)
+      peer.hydrate()
+      peer.patch(patch)
+
+      expect(peer.getGeneration()).toBe(generation)
+      expect(session.invalidate(expectation)).toBe(false)
+      expect(session.getGeneration()).toBe(generation)
+      expect(session.getSnapshot()).toEqual(peer.getSnapshot())
+      expect(session.getSnapshot().accessToken).not.toBeNull()
+    },
+  )
+
+  it('guarded invalidation clears the matching observed identity only in this tab', () => {
+    const session = createSession()
+    session.replace({
+      accessToken: 'matching-access',
+      refreshToken: 'matching-refresh',
+      expiresAt: Date.now() - 1,
+      user: fakeUser,
+    })
+    const generation = session.getGeneration()
+
+    expect(session.invalidate({
+      generation,
+      accessToken: 'matching-access',
+      refreshToken: 'matching-refresh',
+      userId: fakeUser.id,
+    })).toBe(true)
+    expect(session.getSnapshot()).toEqual({
+      accessToken: null,
+      refreshToken: null,
+      expiresAt: null,
+      user: null,
+    })
+    expect(localStorage.getItem('auth_token')).toBe('matching-access')
+    expect(localStorage.getItem('refresh_token')).toBe('matching-refresh')
   })
 
   it.each([

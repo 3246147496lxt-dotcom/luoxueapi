@@ -52,11 +52,21 @@ func (s *OpenAIGatewayService) newStreamHeaderWriter(c *gin.Context, upstream ht
 			return
 		}
 		headersWritten = true
+		existingCacheControl := append([]string(nil), c.Writer.Header().Values("Cache-Control")...)
 		if s.responseHeaderFilter != nil {
 			responseheaders.WriteFilteredHeaders(c.Writer.Header(), upstream, s.responseHeaderFilter)
 		}
+		if len(existingCacheControl) > 0 {
+			c.Writer.Header().Del("Cache-Control")
+			for _, value := range existingCacheControl {
+				c.Writer.Header().Add("Cache-Control", value)
+			}
+		} else {
+			// Preserve the historical gateway contract and never let an upstream
+			// make a streamed response publicly cacheable.
+			c.Writer.Header().Set("Cache-Control", "no-cache")
+		}
 		c.Writer.Header().Set("Content-Type", "text/event-stream")
-		c.Writer.Header().Set("Cache-Control", "no-cache")
 		c.Writer.Header().Set("Connection", "keep-alive")
 		c.Writer.Header().Set("X-Accel-Buffering", "no")
 		c.Writer.WriteHeader(http.StatusOK)
@@ -88,6 +98,12 @@ func (s *OpenAIGatewayService) failoverOpenAIUpstreamHTTPError(
 	upstreamMsg string,
 	upstreamModel string,
 ) *UpstreamFailoverError {
+	// cyber_policy is a request-level policy rejection, not account health
+	// evidence. Keep this guard even though current compat callers short-circuit
+	// earlier, so a future caller cannot cool an account before checking the body.
+	if hit, _, _ := detectOpenAICyberPolicy(respBody); hit {
+		return nil
+	}
 	if account != nil && account.Platform == PlatformGrok {
 		s.handleGrokAccountUpstreamError(ctx, account, resp.StatusCode, resp.Header, respBody)
 	}
@@ -169,8 +185,23 @@ func (s *OpenAIGatewayService) sendCCUpstreamRequest(
 	grokCacheIdentity string,
 ) (*http.Response, error) {
 	upstreamCtx, releaseUpstreamCtx := detachUpstreamContext(ctx)
+	defer releaseUpstreamCtx()
+	return s.sendCCUpstreamRequestWithContext(ctx, upstreamCtx, c, account, targetURL, body, stream, bearerToken, userAgent, grokCacheIdentity)
+}
+
+func (s *OpenAIGatewayService) sendCCUpstreamRequestWithContext(
+	ctx context.Context,
+	upstreamCtx context.Context,
+	c *gin.Context,
+	account *Account,
+	targetURL string,
+	body []byte,
+	stream bool,
+	bearerToken string,
+	userAgent string,
+	grokCacheIdentity string,
+) (*http.Response, error) {
 	upstreamReq, err := http.NewRequestWithContext(upstreamCtx, http.MethodPost, targetURL, bytes.NewReader(body))
-	releaseUpstreamCtx()
 	if err != nil {
 		return nil, fmt.Errorf("build upstream request: %w", err)
 	}
@@ -212,6 +243,9 @@ func (s *OpenAIGatewayService) sendCCUpstreamRequest(
 	}
 	resp, err := s.httpUpstream.Do(upstreamReq, proxyURL, account.ID, account.Concurrency)
 	if err != nil {
+		if webChatClientDisconnected(ctx) {
+			return nil, err
+		}
 		return nil, s.handleOpenAIUpstreamTransportError(ctx, c, account, err, false)
 	}
 	return resp, nil

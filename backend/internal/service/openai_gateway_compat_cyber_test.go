@@ -49,7 +49,7 @@ func compatCyberUpstreamRecorder() *httpUpstreamRecorder {
 }
 
 // C-1: chat completions 非流式客户端（buffered 路径）cyber 命中——不 failover、标记已设、
-// 以 chat 错误格式回写、丢弃 result（使 handler 落入 tokens=0 免费用量行而非 RecordUsage 扣费）。
+// 以 chat 错误格式回写、丢弃 result，使 handler 只启动按真实 token 结算的 Cyber producer。
 func TestForwardAsChatCompletions_BufferedCyberPolicyNoFailover(t *testing.T) {
 	setGinTestMode()
 	rec := httptest.NewRecorder()
@@ -62,7 +62,7 @@ func TestForwardAsChatCompletions_BufferedCyberPolicyNoFailover(t *testing.T) {
 
 	result, err := svc.ForwardAsChatCompletions(context.Background(), c, compatCyberOAuthAccount(), body, "", "gpt-5.5")
 	require.Error(t, err)
-	require.Nil(t, result, "cyber must drop result so handler writes tokens=0 free row, not RecordUsage")
+	require.Nil(t, result, "cyber must drop result so handler uses only the dedicated Cyber usage producer")
 	var failoverErr *UpstreamFailoverError
 	require.False(t, errors.As(err, &failoverErr), "cyber must NOT trigger failover")
 	mark := GetOpsCyberPolicy(c)
@@ -72,7 +72,7 @@ func TestForwardAsChatCompletions_BufferedCyberPolicyNoFailover(t *testing.T) {
 }
 
 // I-1: chat completions 流式客户端 cyber 命中——result 必须被丢弃（返回 nil），
-// 使 handler forwardErrored 分支走 tokens=0 免费行，而非 RecordUsage(CyberBlocked) 扣费。
+// 使 handler forwardErrored 分支用上游真实 token 启动专用 Cyber producer。
 func TestForwardAsChatCompletions_StreamCyberPolicyDropsResult(t *testing.T) {
 	setGinTestMode()
 	rec := httptest.NewRecorder()
@@ -85,7 +85,7 @@ func TestForwardAsChatCompletions_StreamCyberPolicyDropsResult(t *testing.T) {
 
 	result, err := svc.ForwardAsChatCompletions(context.Background(), c, compatCyberOAuthAccount(), body, "", "gpt-5.5")
 	require.Error(t, err)
-	require.Nil(t, result, "cyber must drop result so handler does not bill via RecordUsage")
+	require.Nil(t, result, "cyber must drop result so handler does not duplicate the dedicated Cyber producer")
 	var failoverErr *UpstreamFailoverError
 	require.False(t, errors.As(err, &failoverErr), "cyber must NOT trigger failover")
 	require.NotNil(t, GetOpsCyberPolicy(c), "cyber mark must be set")
@@ -105,7 +105,7 @@ func TestForwardAsAnthropic_BufferedCyberPolicyNoFailover(t *testing.T) {
 
 	result, err := svc.ForwardAsAnthropic(context.Background(), c, compatCyberOAuthAccount(), body, "", "gpt-5.5")
 	require.Error(t, err)
-	require.Nil(t, result, "cyber must drop result so handler writes tokens=0 free row")
+	require.Nil(t, result, "cyber must drop result so handler uses only the dedicated Cyber usage producer")
 	var failoverErr *UpstreamFailoverError
 	require.False(t, errors.As(err, &failoverErr), "cyber must NOT trigger failover")
 	mark := GetOpsCyberPolicy(c)
@@ -128,7 +128,7 @@ func TestForwardAsAnthropic_StreamCyberPolicyNoFailover(t *testing.T) {
 
 	result, err := svc.ForwardAsAnthropic(context.Background(), c, compatCyberOAuthAccount(), body, "", "gpt-5.5")
 	require.Error(t, err)
-	require.Nil(t, result, "cyber must drop result so handler does not bill via RecordUsage")
+	require.Nil(t, result, "cyber must drop result so handler does not duplicate the dedicated Cyber producer")
 	var failoverErr *UpstreamFailoverError
 	require.False(t, errors.As(err, &failoverErr), "cyber must NOT trigger failover")
 	require.NotNil(t, GetOpsCyberPolicy(c), "cyber mark must be set")

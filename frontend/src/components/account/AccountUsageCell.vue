@@ -1,5 +1,82 @@
 <template>
-  <div ref="rootRef" v-if="showUsageWindows">
+  <div
+    v-if="displayMode === 'summary'"
+    ref="rootRef"
+    class="account-usage-summary"
+    :data-level="compactUsageLevel"
+  >
+    <template v-if="loading && !compactUsageSummary">
+      <div class="account-usage-summary__top" aria-hidden="true">
+        <span class="h-3 w-7 animate-pulse rounded bg-gray-200 dark:bg-gray-700"></span>
+        <span class="h-3 w-12 animate-pulse rounded bg-gray-200 dark:bg-gray-700"></span>
+      </div>
+      <div class="account-usage-summary__track">
+        <span class="w-1/3 animate-pulse bg-gray-200 dark:bg-gray-700"></span>
+      </div>
+    </template>
+    <template v-else>
+      <div class="account-usage-summary__top">
+        <span class="account-usage-summary__label">{{ compactUsageSummary?.label || '—' }}</span>
+        <span class="account-usage-summary__value">{{ compactUsagePercentLabel }}</span>
+      </div>
+      <div class="account-usage-summary__track" aria-hidden="true">
+        <span :style="{ width: compactUsageWidth }"></span>
+      </div>
+    </template>
+  </div>
+
+  <div
+    v-else-if="displayMode === 'overview'"
+    ref="rootRef"
+    class="account-usage-overview"
+    data-testid="account-usage-overview"
+  >
+    <div
+      v-if="loading && overviewUsageRows.length === 0"
+      class="account-usage-overview__skeleton"
+      aria-hidden="true"
+    >
+      <div v-for="index in 2" :key="index" class="account-usage-overview__skeleton-row">
+        <span />
+        <span />
+        <i />
+      </div>
+    </div>
+
+    <div v-else-if="overviewUsageRows.length" class="account-usage-overview__rows">
+      <article
+        v-for="row in overviewUsageRows"
+        :key="row.key"
+        class="account-usage-overview__row"
+        :data-level="row.level"
+        :data-tone="row.tone"
+      >
+        <div class="account-usage-overview__heading">
+          <span>{{ row.label }}</span>
+          <strong>{{ overviewUsedLabel(row.utilization) }}</strong>
+        </div>
+        <div
+          class="account-usage-overview__track"
+          role="progressbar"
+          :aria-label="row.label"
+          aria-valuemin="0"
+          aria-valuemax="100"
+          :aria-valuenow="normalizedOverviewPercent(row.utilization)"
+        >
+          <span :style="{ width: overviewProgressWidth(row.utilization) }" />
+        </div>
+        <p v-if="row.showReset && overviewResetText(row)">
+          {{ overviewResetText(row) }}
+        </p>
+      </article>
+    </div>
+
+    <p v-else class="account-usage-overview__empty">
+      {{ t('admin.accounts.workbench.quotaUnavailable') }}
+    </p>
+  </div>
+
+  <div ref="rootRef" v-else-if="showUsageWindows">
     <!-- Anthropic OAuth and Setup Token accounts: fetch real usage data -->
     <template
       v-if="
@@ -617,19 +694,22 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onBeforeUnmount, onUnmounted, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { adminAPI } from '@/api/admin'
 import type { GrokQuotaProbeResult } from '@/api/admin/grok'
 import type { Account, AccountUsageInfo, GeminiCredentials, WindowStats } from '@/types'
+import {
+  isAccountUsageHealthSnapshotFresh,
+  publishAccountUsage,
+  requestAccountUsage,
+  useAccountUsageHealthSnapshot,
+  type AccountUsageRequestOptions as UsageLoadOptions
+} from '@/composables/useAccountUsageHealth'
 import { buildOpenAIUsageRefreshKey } from '@/utils/accountUsageRefresh'
-import { enqueueUsageRequest } from '@/utils/usageLoadQueue'
 import { formatCompactNumber, formatRelativeTime } from '@/utils/format'
 import UsageProgressBar from './UsageProgressBar.vue'
 import AccountQuotaInfo from './AccountQuotaInfo.vue'
 import OpenAIQuotaResetCell from './OpenAIQuotaResetCell.vue'
 import GrokQuotaProbeCell from './GrokQuotaProbeCell.vue'
 
-// Module-level cache shared across all AccountUsageCell instances
-const _usageCache = new Map<number, { data: AccountUsageInfo; ts: number }>()
 const USAGE_CACHE_TTL = 5 * 60 * 1000 // 5 minutes
 // xAI Free billing exposes a window without usage_percent, so estimate it from local tokens.
 const GROK_FREE_TOKEN_LIMIT = 2_000_000
@@ -640,11 +720,13 @@ const props = withDefaults(
     todayStats?: WindowStats | null
     todayStatsLoading?: boolean
     manualRefreshToken?: number
+    displayMode?: 'detailed' | 'summary' | 'overview'
   }>(),
   {
     todayStats: null,
     todayStatsLoading: false,
-    manualRefreshToken: 0
+    manualRefreshToken: 0,
+    displayMode: 'detailed'
   }
 )
 
@@ -657,7 +739,8 @@ onBeforeUnmount(() => { unmounted.value = true })
 const loading = ref(false)
 const activeQueryLoading = ref(false)
 const error = ref<string | null>(null)
-const usageInfo = ref<AccountUsageInfo | null>(null)
+const usageSnapshot = useAccountUsageHealthSnapshot(() => props.account.id)
+const usageInfo = computed(() => usageSnapshot.value?.usage ?? null)
 const rootRef = ref<HTMLElement | null>(null)
 const isDesktopViewport = ref(
   typeof window === 'undefined' ? true : window.matchMedia(desktopViewportQuery).matches
@@ -665,10 +748,13 @@ const isDesktopViewport = ref(
 const hasEnteredViewport = ref(false)
 const pendingAutoLoad = ref(false)
 const pendingAutoLoadSource = ref<'passive' | 'active' | undefined>(undefined)
+const pendingAutoLoadBypassCache = ref(false)
 
 let desktopViewportMediaQuery: MediaQueryList | null = null
 let desktopViewportListener: ((event: MediaQueryListEvent) => void) | null = null
 let visibilityObserver: IntersectionObserver | null = null
+let overviewClock: ReturnType<typeof setInterval> | null = null
+let localUsageRequestVersion = 0
 
 // Show usage windows for OAuth and Setup Token accounts
 const showUsageWindows = computed(() => {
@@ -1254,14 +1340,15 @@ const isAnthropicOAuthOrSetupToken = computed(() => {
   return props.account.platform === 'anthropic' && (props.account.type === 'oauth' || props.account.type === 'setup-token')
 })
 
-const loadUsage = async (options?: { source?: 'passive' | 'active'; bypassCache?: boolean }) => {
+const loadUsage = async (options: UsageLoadOptions = {}) => {
   if (!shouldFetchUsage.value) return
+  const account = props.account
+  const accountId = account.id
 
   // Check cache
   if (!options?.bypassCache) {
-    const cached = _usageCache.get(props.account.id)
-    if (cached && Date.now() - cached.ts < USAGE_CACHE_TTL) {
-      usageInfo.value = cached.data
+    if (isAccountUsageHealthSnapshotFresh(accountId, USAGE_CACHE_TTL)) {
+      error.value = null
       loading.value = false
       return
     }
@@ -1269,44 +1356,56 @@ const loadUsage = async (options?: { source?: 'passive' | 'active'; bypassCache?
 
   loading.value = true
   error.value = null
+  const componentRequestVersion = ++localUsageRequestVersion
+  const request = requestAccountUsage(account, options)
 
   try {
-    const fetchFn = () => options?.source
-      ? adminAPI.accounts.getUsage(props.account.id, options.source)
-      : adminAPI.accounts.getUsage(props.account.id)
-    const result = await enqueueUsageRequest(props.account, fetchFn)
-    if (!unmounted.value) {
-      usageInfo.value = result
-      _usageCache.set(props.account.id, { data: result, ts: Date.now() })
-    }
+    await request.promise
   } catch (e: any) {
-    if (!unmounted.value) {
+    if (
+      !unmounted.value &&
+      props.account.id === accountId &&
+      componentRequestVersion === localUsageRequestVersion &&
+      request.isCurrent()
+    ) {
       error.value = t('common.error')
       console.error('Failed to load usage:', e)
     }
   } finally {
-    if (!unmounted.value) loading.value = false
+    if (
+      !unmounted.value &&
+      props.account.id === accountId &&
+      componentRequestVersion === localUsageRequestVersion
+    ) {
+      loading.value = false
+    }
   }
 }
 
 const flushPendingAutoLoad = () => {
   if (!pendingAutoLoad.value) return
   const source = pendingAutoLoadSource.value
+  const bypassCache = pendingAutoLoadBypassCache.value
   pendingAutoLoad.value = false
   pendingAutoLoadSource.value = undefined
-  loadUsage({ source }).catch((e) => {
+  pendingAutoLoadBypassCache.value = false
+  loadUsage({ source, bypassCache }).catch((e) => {
     console.error('Failed to load deferred usage:', e)
   })
 }
 
-const requestAutoLoad = (source?: 'passive' | 'active') => {
+const requestAutoLoad = (
+  source?: 'passive' | 'active',
+  bypassCache = false
+) => {
   if (!shouldFetchUsage.value) return
   if (shouldLazyLoadOnMobile.value && !hasEnteredViewport.value) {
     pendingAutoLoad.value = true
     pendingAutoLoadSource.value = source
+    pendingAutoLoadBypassCache.value = bypassCache
     return
   }
-  loadUsage({ source }).catch((e) => {
+  loadUsage({ source, bypassCache }).catch((e) => {
     console.error('Failed to auto load usage:', e)
   })
 }
@@ -1342,13 +1441,19 @@ const attachVisibilityObserver = () => {
 const loadActiveUsage = async () => {
   activeQueryLoading.value = true
   try {
-    usageInfo.value = await adminAPI.accounts.getUsage(props.account.id, 'active', true)
+    await loadUsage({
+      source: 'active',
+      bypassCache: true,
+      force: true
+    })
   } catch (e: any) {
     console.error('Failed to load active usage:', e)
   } finally {
     activeQueryLoading.value = false
   }
 }
+
+defineExpose({ queryQuota: loadActiveUsage })
 
 const handleGrokProbed = (result: GrokQuotaProbeResult) => {
   const current = usageInfo.value
@@ -1375,8 +1480,7 @@ const handleGrokProbed = (result: GrokQuotaProbeResult) => {
     error: result.billing || snapshot ? undefined : current.error,
     error_code: result.billing || snapshot ? undefined : current.error_code
   }
-  usageInfo.value = merged
-  _usageCache.set(props.account.id, { data: merged, ts: Date.now() })
+  publishAccountUsage(props.account.id, merged, { authoritative: true })
 }
 
 // ===== API Key quota progress bars =====
@@ -1444,6 +1548,272 @@ const quotaTotalBar = computed((): QuotaBarInfo | null => {
   return makeQuotaBar(props.account.quota_used ?? 0, limit)
 })
 
+interface CompactUsageSummary {
+  label: string
+  utilization: number
+}
+
+const compactUsageSummary = computed((): CompactUsageSummary | null => {
+  const candidates: CompactUsageSummary[] = []
+  const addCandidate = (label: string, utilization: number | null | undefined) => {
+    if (utilization == null || !Number.isFinite(utilization)) return
+    candidates.push({ label, utilization })
+  }
+
+  addCandidate('5h', usageInfo.value?.five_hour?.utilization)
+  addCandidate('7d', usageInfo.value?.seven_day?.utilization)
+  addCandidate('7d S', usageInfo.value?.seven_day_sonnet?.utilization)
+  addCandidate('7d F', usageInfo.value?.seven_day_fable?.utilization)
+  addCandidate('1d', quotaDailyBar.value?.utilization)
+
+  for (const bar of geminiUsageBars.value) {
+    addCandidate(bar.label, bar.utilization)
+  }
+
+  const antigravityBar = [
+    antigravity3ProUsageFromAPI.value,
+    antigravity3FlashUsageFromAPI.value,
+    antigravity3ImageUsageFromAPI.value,
+    antigravityClaudeUsageFromAPI.value
+  ]
+    .filter((bar): bar is AntigravityUsageResult => Boolean(bar))
+    .sort((a, b) => b.utilization - a.utilization)[0]
+  addCandidate('1d', antigravityBar?.utilization)
+  addCandidate('7d', grokWeeklyBillingBar.value?.utilization)
+  addCandidate('1d', grokFreeTokenBar.value?.utilization)
+
+  if (grokRequestQuotaBar.value) {
+    addCandidate(
+      t('admin.accounts.workbench.quotaLabel'),
+      100 - grokRequestQuotaBar.value.utilization
+    )
+  }
+  if (grokTokenQuotaBar.value) {
+    addCandidate(
+      t('admin.accounts.workbench.tokenQuota'),
+      100 - grokTokenQuotaBar.value.utilization
+    )
+  }
+
+  addCandidate('7d', quotaWeeklyBar.value?.utilization)
+  addCandidate(
+    t('admin.accounts.workbench.totalQuotaLabel'),
+    quotaTotalBar.value?.utilization
+  )
+
+  return candidates.reduce<CompactUsageSummary | null>(
+    (highest, candidate) =>
+      !highest || candidate.utilization > highest.utilization ? candidate : highest,
+    null
+  )
+})
+
+type UsageLevel = 'normal' | 'warning' | 'danger'
+
+const normalizedUsagePercent = (utilization: number) =>
+  Math.min(999, Math.max(0, Math.round(utilization)))
+
+const usageLevel = (utilization: number): UsageLevel => {
+  const percent = normalizedUsagePercent(utilization)
+  if (percent >= 100) return 'danger'
+  if (percent >= 80) return 'warning'
+  return 'normal'
+}
+
+const compactUsagePercent = computed(() => {
+  const utilization = compactUsageSummary.value?.utilization
+  if (utilization == null || !Number.isFinite(utilization)) return null
+  return normalizedUsagePercent(utilization)
+})
+
+const compactUsagePercentLabel = computed(() => {
+  if (compactUsagePercent.value == null) return t('admin.accounts.workbench.quotaUnavailable')
+  return t('admin.accounts.workbench.quotaUsed', { percent: compactUsagePercent.value })
+})
+
+const compactUsageWidth = computed(() => {
+  if (compactUsagePercent.value == null) return '0%'
+  return `${Math.min(100, compactUsagePercent.value)}%`
+})
+
+const compactUsageLevel = computed(() => {
+  const utilization = compactUsagePercent.value
+  if (utilization == null) return 'empty'
+  return usageLevel(utilization)
+})
+
+type OverviewTone = 'primary' | 'secondary'
+
+interface OverviewUsageRow {
+  key: string
+  label: string
+  utilization: number
+  resetsAt: string | null
+  level: UsageLevel
+  tone: OverviewTone
+  showReset: boolean
+}
+
+const overviewNow = ref(Date.now())
+
+const overviewUsageRows = computed((): OverviewUsageRow[] => {
+  const rows: Omit<OverviewUsageRow, 'level' | 'tone' | 'showReset'>[] = []
+  const addRow = (
+    key: string,
+    label: string,
+    utilization: number | null | undefined,
+    resetsAt: string | null | undefined = null
+  ) => {
+    if (utilization == null || !Number.isFinite(utilization) || rows.some(row => row.key === key)) return
+    rows.push({ key, label, utilization, resetsAt: resetsAt || null })
+  }
+
+  addRow(
+    'five-hour',
+    t('admin.accounts.workbench.fiveHourRollingWindow'),
+    usageInfo.value?.five_hour?.utilization,
+    usageInfo.value?.five_hour?.resets_at
+  )
+  addRow(
+    'seven-day',
+    t('admin.accounts.workbench.sevenDayTotalQuota'),
+    usageInfo.value?.seven_day?.utilization,
+    usageInfo.value?.seven_day?.resets_at
+  )
+
+  if (rows.length < 2 && props.account.platform === 'grok') {
+    addRow(
+      'grok-weekly',
+      t('admin.accounts.workbench.sevenDayTotalQuota'),
+      grokWeeklyBillingBar.value?.utilization,
+      grokWeeklyBillingBar.value?.resetsAt
+    )
+    addRow(
+      'grok-free',
+      t('admin.accounts.workbench.twentyFourHourQuota'),
+      grokFreeTokenBar.value?.utilization
+    )
+    addRow(
+      'grok-requests',
+      t('admin.accounts.workbench.requestQuota'),
+      grokRequestQuotaBar.value ? 100 - grokRequestQuotaBar.value.utilization : null,
+      grokRequestQuotaBar.value?.resetsAt
+    )
+    addRow(
+      'grok-tokens',
+      t('admin.accounts.workbench.tokenQuota'),
+      grokTokenQuotaBar.value ? 100 - grokTokenQuotaBar.value.utilization : null,
+      grokTokenQuotaBar.value?.resetsAt
+    )
+  }
+
+  if (rows.length < 2 && props.account.platform === 'gemini') {
+    for (const bar of geminiUsageBars.value) {
+      addRow(
+        `gemini-${bar.key}`,
+        bar.label === '1d'
+          ? t('admin.accounts.workbench.dailyQuota')
+          : t('admin.accounts.workbench.modelQuota', { model: bar.label.toUpperCase() }),
+        bar.utilization,
+        bar.resetsAt
+      )
+    }
+  }
+
+  if (rows.length < 2 && props.account.platform === 'antigravity') {
+    const antigravityRows = [
+      {
+        key: 'antigravity-pro',
+        model: t('admin.accounts.usageWindow.gemini3Pro'),
+        data: antigravity3ProUsageFromAPI.value
+      },
+      {
+        key: 'antigravity-flash',
+        model: t('admin.accounts.usageWindow.gemini3Flash'),
+        data: antigravity3FlashUsageFromAPI.value
+      },
+      {
+        key: 'antigravity-image',
+        model: t('admin.accounts.usageWindow.gemini3Image'),
+        data: antigravity3ImageUsageFromAPI.value
+      },
+      {
+        key: 'antigravity-claude',
+        model: 'Claude',
+        data: antigravityClaudeUsageFromAPI.value
+      }
+    ]
+      .filter((row): row is { key: string; model: string; data: AntigravityUsageResult } => Boolean(row.data))
+      .sort((a, b) => b.data.utilization - a.data.utilization)
+
+    for (const row of antigravityRows) {
+      addRow(
+        row.key,
+        t('admin.accounts.workbench.modelQuota', { model: row.model }),
+        row.data.utilization,
+        row.data.resetTime
+      )
+    }
+  }
+
+  addRow(
+    'daily-quota',
+    t('admin.accounts.workbench.dailyQuota'),
+    quotaDailyBar.value?.utilization,
+    quotaDailyBar.value?.resetsAt
+  )
+  addRow(
+    'weekly-quota',
+    t('admin.accounts.workbench.sevenDayTotalQuota'),
+    quotaWeeklyBar.value?.utilization,
+    quotaWeeklyBar.value?.resetsAt
+  )
+  addRow(
+    'total-quota',
+    t('admin.accounts.workbench.totalQuota'),
+    quotaTotalBar.value?.utilization
+  )
+
+  return rows.slice(0, 2).map((row, index) => ({
+    ...row,
+    level: usageLevel(row.utilization),
+    tone: index === 0 ? 'primary' : 'secondary',
+    showReset: index === 0 && Boolean(row.resetsAt)
+  }))
+})
+
+const normalizedOverviewPercent = (utilization: number) =>
+  normalizedUsagePercent(utilization)
+
+const overviewUsedLabel = (utilization: number) =>
+  t('admin.accounts.workbench.quotaUsed', {
+    percent: normalizedOverviewPercent(utilization)
+  })
+
+const overviewProgressWidth = (utilization: number) =>
+  `${Math.min(100, normalizedOverviewPercent(utilization))}%`
+
+const overviewResetText = (row: OverviewUsageRow) => {
+  if (!row.resetsAt) return ''
+  const resetAt = new Date(row.resetsAt).getTime()
+  if (!Number.isFinite(resetAt)) return ''
+
+  const remainingSeconds = Math.floor((resetAt - overviewNow.value) / 1000)
+  if (remainingSeconds <= 0) {
+    return row.utilization > 0
+      ? t('admin.accounts.workbench.quotaResetPending')
+      : t('admin.accounts.workbench.quotaResetNow')
+  }
+
+  const hours = Math.floor(remainingSeconds / 3600)
+  const minutes = Math.floor((remainingSeconds % 3600) / 60)
+  const seconds = remainingSeconds % 60
+  const time = [hours, minutes, seconds]
+    .map(value => String(value).padStart(2, '0'))
+    .join(':')
+  return t('admin.accounts.workbench.quotaResetCountdown', { time })
+}
+
 // ===== Key account today stats formatters =====
 
 const formatKeyRequests = computed(() => {
@@ -1467,6 +1837,12 @@ const formatKeyUserCost = computed(() => {
 })
 
 onMounted(() => {
+  if (props.displayMode === 'overview') {
+    overviewClock = setInterval(() => {
+      overviewNow.value = Date.now()
+    }, 1000)
+  }
+
   if (typeof window !== 'undefined') {
     desktopViewportMediaQuery = window.matchMedia(desktopViewportQuery)
     isDesktopViewport.value = desktopViewportMediaQuery.matches
@@ -1489,8 +1865,7 @@ watch(openAIUsageRefreshKey, (nextKey, prevKey) => {
   if (!prevKey || nextKey === prevKey) return
   if (props.account.platform !== 'openai' || props.account.type !== 'oauth') return
 
-  _usageCache.delete(props.account.id)
-  requestAutoLoad()
+  requestAutoLoad(undefined, true)
 })
 
 watch(
@@ -1500,7 +1875,6 @@ watch(
     if (!shouldFetchUsage.value) return
 
     const source = isAnthropicOAuthOrSetupToken.value ? 'passive' : undefined
-    _usageCache.delete(props.account.id)
     loadUsage({ source, bypassCache: true }).catch((e) => {
       console.error('Failed to refresh usage after manual refresh:', e)
     })
@@ -1531,6 +1905,10 @@ watch(isDesktopViewport, (isDesktop) => {
 })
 
 onUnmounted(() => {
+  if (overviewClock) {
+    clearInterval(overviewClock)
+    overviewClock = null
+  }
   detachVisibilityObserver()
   if (desktopViewportMediaQuery && desktopViewportListener) {
     if (typeof desktopViewportMediaQuery.removeEventListener === 'function') {

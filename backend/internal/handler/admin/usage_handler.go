@@ -25,6 +25,7 @@ type UsageHandler struct {
 	apiKeyService  *service.APIKeyService
 	adminService   service.AdminService
 	cleanupService *service.UsageCleanupService
+	receiptService *service.BillingReceiptService
 }
 
 // NewUsageHandler creates a new admin usage handler
@@ -33,13 +34,72 @@ func NewUsageHandler(
 	apiKeyService *service.APIKeyService,
 	adminService service.AdminService,
 	cleanupService *service.UsageCleanupService,
+	receiptService *service.BillingReceiptService,
 ) *UsageHandler {
 	return &UsageHandler{
 		usageService:   usageService,
 		apiKeyService:  apiKeyService,
 		adminService:   adminService,
 		cleanupService: cleanupService,
+		receiptService: receiptService,
 	}
+}
+
+// ListBillingReceipts returns the immutable request-level billing view.
+// GET /api/v1/admin/billing/receipts
+func (h *UsageHandler) ListBillingReceipts(c *gin.Context) {
+	if h == nil || h.receiptService == nil {
+		response.InternalError(c, "Billing receipt service is unavailable")
+		return
+	}
+
+	page, pageSize := response.ParsePagination(c)
+	filter := &service.BillingReceiptFilter{
+		Page:      page,
+		PageSize:  pageSize,
+		Model:     strings.TrimSpace(c.Query("model")),
+		RequestID: strings.TrimSpace(c.Query("receipt_id")),
+		Status:    strings.TrimSpace(c.Query("status")),
+		Source:    strings.TrimSpace(c.Query("source")),
+	}
+	if filter.RequestID == "" {
+		filter.RequestID = strings.TrimSpace(c.Query("request_id"))
+	}
+
+	if rawUserID := strings.TrimSpace(c.Query("user_id")); rawUserID != "" {
+		userID, err := strconv.ParseInt(rawUserID, 10, 64)
+		if err != nil || userID <= 0 {
+			response.BadRequest(c, "Invalid user_id")
+			return
+		}
+		filter.UserID = &userID
+	}
+
+	userTZ := c.Query("timezone")
+	if rawStart := strings.TrimSpace(c.Query("start_date")); rawStart != "" {
+		start, err := timezone.ParseInUserLocation("2006-01-02", rawStart, userTZ)
+		if err != nil {
+			response.BadRequest(c, "Invalid start_date format, use YYYY-MM-DD")
+			return
+		}
+		filter.StartTime = &start
+	}
+	if rawEnd := strings.TrimSpace(c.Query("end_date")); rawEnd != "" {
+		end, err := timezone.ParseInUserLocation("2006-01-02", rawEnd, userTZ)
+		if err != nil {
+			response.BadRequest(c, "Invalid end_date format, use YYYY-MM-DD")
+			return
+		}
+		end = end.AddDate(0, 0, 1)
+		filter.EndTime = &end
+	}
+
+	result, err := h.receiptService.ListBillingReceipts(c.Request.Context(), filter)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Paginated(c, result.Receipts, int64(result.Total), result.Page, result.PageSize)
 }
 
 // CreateUsageCleanupTaskRequest represents cleanup task creation request
@@ -111,6 +171,11 @@ func (h *UsageHandler) List(c *gin.Context) {
 
 	model := c.Query("model")
 	billingMode := strings.TrimSpace(c.Query("billing_mode"))
+	source, validSource := usagestats.NormalizeUsageSource(c.Query("source"))
+	if !validSource {
+		response.BadRequest(c, "Invalid source, use web_chat or api")
+		return
+	}
 
 	var requestType *int16
 	var stream *bool
@@ -177,6 +242,8 @@ func (h *UsageHandler) List(c *gin.Context) {
 		AccountID:   accountID,
 		GroupID:     groupID,
 		Model:       model,
+		RequestID:   strings.TrimSpace(c.Query("request_id")),
+		Source:      source,
 		RequestType: requestType,
 		Stream:      stream,
 		BillingType: billingType,
@@ -242,6 +309,11 @@ func (h *UsageHandler) Stats(c *gin.Context) {
 
 	model := c.Query("model")
 	billingMode := strings.TrimSpace(c.Query("billing_mode"))
+	source, validSource := usagestats.NormalizeUsageSource(c.Query("source"))
+	if !validSource {
+		response.BadRequest(c, "Invalid source, use web_chat or api")
+		return
+	}
 
 	var requestType *int16
 	var stream *bool
@@ -317,6 +389,8 @@ func (h *UsageHandler) Stats(c *gin.Context) {
 		AccountID:   accountID,
 		GroupID:     groupID,
 		Model:       model,
+		RequestID:   strings.TrimSpace(c.Query("request_id")),
+		Source:      source,
 		RequestType: requestType,
 		Stream:      stream,
 		BillingType: billingType,

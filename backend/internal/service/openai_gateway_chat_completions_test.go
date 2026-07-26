@@ -32,6 +32,10 @@ func (w *openAIChatFailingWriter) Write(p []byte) (int, error) {
 	return w.ResponseWriter.Write(p)
 }
 
+func (w *openAIChatFailingWriter) WriteString(s string) (int, error) {
+	return w.Write([]byte(s))
+}
+
 func TestNormalizeResponsesRequestServiceTier(t *testing.T) {
 	t.Parallel()
 
@@ -227,7 +231,8 @@ func TestForwardAsChatCompletions_ClientDisconnectDrainsUpstreamUsage(t *testing
 
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
-	c.Writer = &openAIChatFailingWriter{ResponseWriter: c.Writer, failAfter: 0}
+	failingWriter := &openAIChatFailingWriter{ResponseWriter: c.Writer, failAfter: 1}
+	c.Writer = failingWriter
 	body := []byte(`{"model":"gpt-5.4","messages":[{"role":"user","content":"hello"}],"stream":true}`)
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader(body))
 	c.Request.Header.Set("Content-Type", "application/json")
@@ -267,6 +272,9 @@ func TestForwardAsChatCompletions_ClientDisconnectDrainsUpstreamUsage(t *testing
 	require.Equal(t, 11, result.Usage.InputTokens)
 	require.Equal(t, 5, result.Usage.OutputTokens)
 	require.Equal(t, 4, result.Usage.CacheReadInputTokens)
+	require.True(t, result.ClientDisconnect)
+	require.Equal(t, 1, failingWriter.writes, "the first SSE chunk must reach the client before disconnect")
+	require.Len(t, upstream.requests, 1, "a disconnected client must not trigger an upstream replay")
 }
 
 func TestForwardAsChatCompletions_BufferedContextWindowResponseFailedReturnsErrorWithoutFailover(t *testing.T) {

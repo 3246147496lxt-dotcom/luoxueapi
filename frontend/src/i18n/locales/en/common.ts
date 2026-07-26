@@ -149,6 +149,7 @@ export default {
   nav: {
     home: 'Home',
     dashboard: 'Dashboard',
+    gptChat: 'GPT Chat',
     adminDashboard: 'Data Dashboard',
     announcements: 'Announcements',
     apiKeys: 'API Keys',
@@ -187,6 +188,7 @@ export default {
     },
     subscriptions: 'Subscriptions',
     accounts: 'Account Pool',
+    management: 'Admin',
     proxies: 'Proxies',
     redeemCodes: 'Redeem Codes',
     ops: 'Ops',

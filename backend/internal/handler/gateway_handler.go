@@ -2148,6 +2148,9 @@ func billingErrorDetails(err error) (status int, code, message string, retryAfte
 		msg := pkgerrors.Message(err)
 		return http.StatusTooManyRequests, "rate_limit_exceeded", msg, extractQuotaResetSeconds(err)
 	}
+	if errors.Is(err, service.ErrInsufficientBalance) {
+		return http.StatusForbidden, "INSUFFICIENT_BALANCE", pkgerrors.Message(err), 0
+	}
 	msg := pkgerrors.Message(err)
 	if msg == "" {
 		logger.L().With(

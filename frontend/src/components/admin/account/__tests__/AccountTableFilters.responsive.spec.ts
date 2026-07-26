@@ -47,41 +47,80 @@ const mountFilters = (filters: Record<string, unknown> = {}) =>
   })
 
 describe('AccountTableFilters responsive disclosure', () => {
-  it('keeps search and status outside the collapsed secondary filters', () => {
+  it('keeps search visible and opens advanced filters as an accessible popover', async () => {
     const wrapper = mountFilters()
-    const secondary = wrapper.get('[data-testid="account-secondary-filters"]')
-
-    expect(wrapper.find('[data-testid="account-search-filter"]').exists()).toBe(true)
-    expect(wrapper.find('[data-testid="account-status-filter"]').exists()).toBe(true)
-    expect(secondary.find('[data-testid="account-search-filter"]').exists()).toBe(false)
-    expect(secondary.find('[data-testid="account-status-filter"]').exists()).toBe(false)
-    expect(secondary.classes()).toContain('hidden')
-    expect(secondary.classes()).toContain('lg:contents')
-  })
-
-  it('expands secondary filters with accessible state and a 44px touch target', async () => {
-    const wrapper = mountFilters({ platform: 'openai', group: 'ungrouped' })
     const toggle = wrapper.get('[data-testid="account-filters-toggle"]')
 
+    expect(wrapper.find('[data-testid="account-search-filter"]').exists()).toBe(true)
     expect(toggle.attributes('aria-expanded')).toBe('false')
     expect(toggle.attributes('aria-controls')).toBe('account-secondary-filters')
-    expect(toggle.classes()).toEqual(expect.arrayContaining(['min-h-11', 'min-w-11', 'lg:hidden']))
-    expect(toggle.text()).toContain('2')
+    expect(toggle.text()).toContain('admin.accounts.advancedFilters')
+    expect(wrapper.find('[data-testid="account-secondary-filters"]').exists()).toBe(false)
 
     await toggle.trigger('click')
 
     expect(toggle.attributes('aria-expanded')).toBe('true')
-    expect(wrapper.get('[data-testid="account-secondary-filters"]').classes()).toContain('grid')
+    const secondary = wrapper.get('[data-testid="account-secondary-filters"]')
+    expect(secondary.attributes('id')).toBe('account-secondary-filters')
+    expect(secondary.classes()).toContain('account-filter-popover')
+
+    await secondary.trigger('keydown', { key: 'Escape' })
+    expect(toggle.attributes('aria-expanded')).toBe('false')
+    expect(wrapper.find('[data-testid="account-secondary-filters"]').exists()).toBe(false)
   })
 
-  it('preserves the original desktop filter order through responsive order classes', () => {
+  it('keeps all five secondary filters inside the advanced popover', async () => {
     const wrapper = mountFilters()
+    await wrapper.get('[data-testid="account-filters-toggle"]').trigger('click')
 
-    expect(wrapper.get('[data-testid="account-search-filter"]').classes()).toContain('lg:order-1')
-    expect(wrapper.get('[data-testid="account-platform-filter"]').classes()).toContain('lg:order-2')
-    expect(wrapper.get('[data-testid="account-type-filter"]').classes()).toContain('lg:order-3')
-    expect(wrapper.get('[data-testid="account-status-filter"]').classes()).toContain('lg:order-4')
-    expect(wrapper.get('[data-testid="account-privacy-filter"]').classes()).toContain('lg:order-5')
-    expect(wrapper.get('[data-testid="account-group-filter"]').classes()).toContain('lg:order-6')
+    const secondary = wrapper.get('[data-testid="account-secondary-filters"]')
+    const filterTestIds = [
+      'account-platform-filter',
+      'account-type-filter',
+      'account-status-filter',
+      'account-privacy-filter',
+      'account-group-filter'
+    ]
+
+    expect(secondary.findAll('.select-stub')).toHaveLength(5)
+    for (const testId of filterTestIds) {
+      expect(secondary.find(`[data-testid="${testId}"]`).exists()).toBe(true)
+    }
+    expect(secondary.find('[data-testid="account-search-filter"]').exists()).toBe(false)
+  })
+
+  it('shows applied filter chips and supports clearing one or all filters', async () => {
+    const wrapper = mountFilters({
+      platform: 'openai',
+      type: 'oauth',
+      status: 'active',
+      privacy_mode: 'training_off',
+      group: 'ungrouped'
+    })
+    const applied = wrapper.get('[data-testid="account-applied-filters"]')
+    const chips = applied.findAll('.account-filter-chip')
+
+    expect(chips).toHaveLength(5)
+    expect(chips[0]?.text()).toContain('OpenAI')
+    expect(chips[0]?.classes()).toContain('account-filter-chip--openai')
+    expect(wrapper.get('[data-testid="account-filters-toggle"]').text()).toContain('5')
+
+    await chips[0]?.trigger('click')
+
+    const updatesAfterChip = wrapper.emitted('update:filters')
+    expect(updatesAfterChip?.[0]?.[0]).toEqual(expect.objectContaining({ platform: '' }))
+    expect(wrapper.emitted('change')).toHaveLength(1)
+
+    await applied.get('.account-applied-filters__clear').trigger('click')
+
+    const updatesAfterClearAll = wrapper.emitted('update:filters')
+    expect(updatesAfterClearAll?.at(-1)?.[0]).toEqual(expect.objectContaining({
+      platform: '',
+      type: '',
+      status: '',
+      privacy_mode: '',
+      group: ''
+    }))
+    expect(wrapper.emitted('change')).toHaveLength(2)
   })
 })

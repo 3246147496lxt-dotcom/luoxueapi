@@ -277,7 +277,7 @@ describe('admin AccountsView — 影子行 parent_* OR 兜底展示', () => {
     vi.unstubAllGlobals()
   })
 
-  it('影子行 email 单元格显示 parent_email，PlatformTypeBadge 接收 parent_plan_type/parent_privacy_mode', async () => {
+  it('影子行身份不显示 email，PlatformTypeBadge 仍接收 parent_plan_type/parent_privacy_mode', async () => {
     const shadowAccount = {
       id: 100,
       name: '影子账号',
@@ -296,10 +296,10 @@ describe('admin AccountsView — 影子行 parent_* OR 兜底展示', () => {
     const wrapper = mountViewWithRow()
     await flushPromises()
 
-    // 1. email 单元格通过 OR 兜底渲染 parent_email
-    expect(wrapper.text()).toContain('parent@example.com')
+    // 1. 紧凑身份单元格不重复展示 email，详情由 Inspector 承载
+    expect(wrapper.text()).not.toContain('parent@example.com')
 
-    // 2. PlatformTypeBadge 收到 parent_plan_type 和 parent_privacy_mode
+    // 2. PlatformTypeBadge 仍通过 parent_* 字段兜底
     const badge = wrapper.findComponent(PlatformTypeBadge)
     expect(badge.exists()).toBe(true)
     expect(badge.props('planType')).toBe('plus')
@@ -373,6 +373,7 @@ describe('admin AccountsView — 影子行 parent_* OR 兜底展示', () => {
     await flushPromises()
 
     const badges = wrapper.findAllComponents(PlatformTypeBadge)
+      .filter((badge) => badge.props('compact') === true)
     expect(badges.map((badge) => badge.props('planType'))).toEqual([
       'SuperGrok',
       'SuperGrok Heavy',

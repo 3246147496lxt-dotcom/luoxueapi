@@ -42,6 +42,14 @@ func (r *usageBillingRepository) Apply(ctx context.Context, cmd *service.UsageBi
 		}
 	}()
 
+	settlementClosed, err := r.lockWebChatAttemptForBilling(ctx, tx, cmd)
+	if err != nil {
+		return nil, err
+	}
+	if settlementClosed {
+		return &service.UsageBillingApplyResult{SettlementClosed: true}, nil
+	}
+
 	applied, err := r.claimUsageBillingKey(ctx, tx, cmd)
 	if err != nil {
 		return nil, err
@@ -54,12 +62,106 @@ func (r *usageBillingRepository) Apply(ctx context.Context, cmd *service.UsageBi
 	if err := r.applyUsageBillingEffects(ctx, tx, cmd, result); err != nil {
 		return nil, err
 	}
+	if err := insertUsageBillingReceipt(ctx, tx, cmd, result); err != nil {
+		return nil, err
+	}
 
 	if err := tx.Commit(); err != nil {
 		return nil, err
 	}
 	tx = nil
 	return result, nil
+}
+
+func (r *usageBillingRepository) lockWebChatAttemptForBilling(
+	ctx context.Context,
+	tx *sql.Tx,
+	cmd *service.UsageBillingCommand,
+) (bool, error) {
+	if cmd == nil || cmd.Source != service.BillingReceiptSourceWebChat {
+		return false, nil
+	}
+
+	const clientRequestPrefix = "client:"
+	if !strings.HasPrefix(cmd.RequestID, clientRequestPrefix) {
+		return false, service.ErrUsageBillingAttemptNotFound
+	}
+	clientRequestID := strings.TrimSpace(strings.TrimPrefix(cmd.RequestID, clientRequestPrefix))
+	if clientRequestID == "" || cmd.UserID <= 0 {
+		return false, service.ErrUsageBillingAttemptNotFound
+	}
+
+	var lockedUserID int64
+	err := tx.QueryRowContext(ctx, `
+		SELECT id
+		FROM users
+		WHERE id = $1
+		  AND deleted_at IS NULL
+		FOR UPDATE
+	`, cmd.UserID).Scan(&lockedUserID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, service.ErrUserNotFound
+	}
+	if err != nil {
+		return false, err
+	}
+
+	var status string
+	err = tx.QueryRowContext(ctx, `
+		SELECT status
+		FROM chat_request_attempts
+		WHERE client_request_id = $1
+		  AND user_id = $2
+		FOR UPDATE
+	`, clientRequestID, cmd.UserID).Scan(&status)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, service.ErrUsageBillingAttemptNotFound
+	}
+	if err != nil {
+		return false, err
+	}
+	if status == service.ChatAttemptStatusProcessing {
+		return false, nil
+	}
+
+	exists, err := usageBillingClaimExists(
+		ctx,
+		tx,
+		cmd.RequestID,
+		cmd.APIKeyID,
+		cmd.RequestFingerprint,
+	)
+	if err != nil {
+		return false, err
+	}
+	return !exists, nil
+}
+
+func usageBillingClaimExists(
+	ctx context.Context,
+	tx *sql.Tx,
+	requestID string,
+	apiKeyID int64,
+	requestFingerprint string,
+) (bool, error) {
+	for _, table := range []string{"usage_billing_dedup", "usage_billing_dedup_archive"} {
+		var existingFingerprint string
+		err := tx.QueryRowContext(ctx, `
+			SELECT request_fingerprint
+			FROM `+table+`
+			WHERE request_id = $1 AND api_key_id = $2
+		`, requestID, apiKeyID).Scan(&existingFingerprint)
+		if err == nil {
+			if strings.TrimSpace(existingFingerprint) != strings.TrimSpace(requestFingerprint) {
+				return false, service.ErrUsageBillingRequestConflict
+			}
+			return true, nil
+		}
+		if !errors.Is(err, sql.ErrNoRows) {
+			return false, err
+		}
+	}
+	return false, nil
 }
 
 func (r *usageBillingRepository) claimUsageBillingKey(ctx context.Context, tx *sql.Tx, cmd *service.UsageBillingCommand) (bool, error) {
@@ -179,10 +281,11 @@ func (r *usageBillingRepository) applyUsageBillingEffects(ctx context.Context, t
 	}
 
 	if cmd.BalanceCost > 0 {
-		newBalance, sufficient, err := deductUsageBillingBalance(ctx, tx, cmd.UserID, cmd.BalanceCost)
+		balanceBefore, newBalance, sufficient, err := deductUsageBillingBalance(ctx, tx, cmd.UserID, cmd.BalanceCost)
 		if err != nil {
 			return err
 		}
+		result.BalanceBefore = &balanceBefore
 		result.NewBalance = &newBalance
 		result.BalanceOverdrafted = !sufficient
 	}
@@ -240,20 +343,20 @@ func incrementUsageBillingSubscription(ctx context.Context, tx *sql.Tx, subscrip
 	return service.ErrSubscriptionNotFound
 }
 
-func deductUsageBillingBalance(ctx context.Context, tx *sql.Tx, userID int64, amount float64) (float64, bool, error) {
-	var newBalance float64
+func deductUsageBillingBalance(ctx context.Context, tx *sql.Tx, userID int64, amount float64) (float64, float64, bool, error) {
+	var balanceBefore, newBalance float64
 	err := tx.QueryRowContext(ctx, `
 		UPDATE users
 		SET balance = balance - $1,
 			updated_at = NOW()
 		WHERE id = $2 AND deleted_at IS NULL AND balance >= $1
-		RETURNING balance
-	`, amount, userID).Scan(&newBalance)
+		RETURNING balance + $1, balance
+	`, amount, userID).Scan(&balanceBefore, &newBalance)
 	if err == nil {
-		return newBalance, true, nil
+		return balanceBefore, newBalance, true, nil
 	}
 	if !errors.Is(err, sql.ErrNoRows) {
-		return 0, false, err
+		return 0, 0, false, err
 	}
 
 	err = tx.QueryRowContext(ctx, `
@@ -261,15 +364,115 @@ func deductUsageBillingBalance(ctx context.Context, tx *sql.Tx, userID int64, am
 		SET balance = balance - $1,
 			updated_at = NOW()
 		WHERE id = $2 AND deleted_at IS NULL
-		RETURNING balance
-	`, amount, userID).Scan(&newBalance)
+		RETURNING balance + $1, balance
+	`, amount, userID).Scan(&balanceBefore, &newBalance)
 	if errors.Is(err, sql.ErrNoRows) {
-		return 0, false, service.ErrUserNotFound
+		return 0, 0, false, service.ErrUserNotFound
 	}
 	if err != nil {
-		return 0, false, err
+		return 0, 0, false, err
 	}
-	return newBalance, false, nil
+	return balanceBefore, newBalance, false, nil
+}
+
+func insertUsageBillingReceipt(
+	ctx context.Context,
+	tx *sql.Tx,
+	cmd *service.UsageBillingCommand,
+	result *service.UsageBillingApplyResult,
+) error {
+	if cmd == nil {
+		return nil
+	}
+
+	var receiptID int64
+	err := tx.QueryRowContext(ctx, `
+		INSERT INTO billing_usage_entries (
+			usage_log_id,
+			user_id,
+			api_key_id,
+			subscription_id,
+			billing_type,
+			applied,
+			delta_usd,
+			request_id,
+			request_fingerprint,
+			source,
+			account_id,
+			model,
+			requested_model,
+			input_tokens,
+			output_tokens,
+			cache_creation_tokens,
+			cache_read_tokens,
+			gross_amount,
+			charged_amount,
+			balance_before,
+			balance_after,
+			status,
+			overdraft,
+			created_at
+		)
+		SELECT
+			(
+				SELECT ul.id
+				FROM usage_logs ul
+				WHERE ul.request_id = $1 AND ul.api_key_id = $2
+				LIMIT 1
+			),
+			ak.user_id,
+			ak.id,
+			$4::bigint,
+			$5::smallint,
+			TRUE,
+			-($6::numeric),
+			$1::varchar,
+			$7::varchar,
+			$8::varchar,
+			NULLIF($9::bigint, 0),
+			$10::varchar,
+			$11::varchar,
+			$12::integer,
+			$13::integer,
+			$14::integer,
+			$15::integer,
+			$16::numeric,
+			$6::numeric,
+			$17::numeric,
+			$18::numeric,
+			$19::varchar,
+			$20::boolean,
+			NOW()
+		FROM api_keys ak
+		WHERE ak.id = $2
+		  AND ($3::bigint = 0 OR ak.user_id = $3::bigint)
+		RETURNING id
+	`,
+		cmd.RequestID,
+		cmd.APIKeyID,
+		cmd.UserID,
+		cmd.SubscriptionID,
+		cmd.BillingType,
+		cmd.BalanceCost,
+		cmd.RequestFingerprint,
+		cmd.Source,
+		cmd.AccountID,
+		cmd.Model,
+		cmd.RequestedModel,
+		cmd.InputTokens,
+		cmd.OutputTokens,
+		cmd.CacheCreationTokens,
+		cmd.CacheReadTokens,
+		cmd.GrossCost,
+		result.BalanceBefore,
+		result.NewBalance,
+		cmd.ReceiptStatus(),
+		result.BalanceOverdrafted,
+	).Scan(&receiptID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return service.ErrUsageBillingPrincipalMismatch
+	}
+	return err
 }
 
 func reserveUsageBillingBatchImageBalance(ctx context.Context, tx *sql.Tx, cmd *service.BatchImageBalanceHoldCommand) (*service.BatchImageBalanceHoldResult, error) {

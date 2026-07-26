@@ -219,6 +219,19 @@ export function resolveActiveTutorialId(tutorialList, hashValue) {
     : tutorialList[0].id;
 }
 
+export function shouldRenderDocumentationImage(image, source) {
+  if (source !== "published" || typeof image?.src !== "string") return false;
+
+  try {
+    const pathname = decodeURIComponent(
+      new URL(image.src, "https://documentation.invalid/").pathname,
+    );
+    return !pathname.startsWith("/tutorial-docs/assets/");
+  } catch {
+    return false;
+  }
+}
+
 export function subscribeToTutorialHashChanges({
   target = globalThis.window,
   tutorialList,
@@ -264,7 +277,7 @@ export async function loadPublishedDocumentation({
     const response = await fetchImpl(endpoint, {
       method: "GET",
       credentials: "same-origin",
-      cache: "default",
+      cache: "no-cache",
       headers: { Accept: "application/json" },
       signal,
     });

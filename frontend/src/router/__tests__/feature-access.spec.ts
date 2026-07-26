@@ -139,15 +139,14 @@ describe('feature route guard', () => {
     expect(next).toHaveBeenCalledWith()
   })
 
-  it('keeps the integrated purchase and redeem page unavailable in simple mode', async () => {
+  it('keeps the integrated purchase page available in simple mode for web-chat recharge', async () => {
     authStore.isSimpleMode = true
 
     const { navigation, next } = runGuard({}, '/purchase')
     await navigation
 
-    expect(appStore.fetchPublicSettings).not.toHaveBeenCalled()
     expect(next).toHaveBeenCalledOnce()
-    expect(next).toHaveBeenCalledWith('/dashboard')
+    expect(next).toHaveBeenCalledWith()
   })
 
   it.each([

@@ -47,6 +47,10 @@ func (APIKey) Fields() []ent.Field {
 		field.String("status").
 			MaxLen(20).
 			Default(domain.StatusActive),
+		field.String("purpose").
+			MaxLen(20).
+			Default("user").
+			Comment("API key purpose: user or web_chat"),
 		field.Time("last_used_at").
 			Optional().
 			Nillable().
@@ -139,6 +143,11 @@ func (APIKey) Indexes() []ent.Index {
 		index.Fields("user_id"),
 		index.Fields("group_id"),
 		index.Fields("status"),
+		index.Fields("purpose"),
+		index.Fields("user_id", "group_id").
+			Unique().
+			StorageKey("idx_api_keys_web_chat_principal_user_group").
+			Annotations(entsql.IndexWhere("purpose = 'web_chat' AND status = 'active'")),
 		index.Fields("deleted_at"),
 		index.Fields("last_used_at"),
 		// Index for quota queries

@@ -10,14 +10,16 @@ const {
   getAllGroupsIncludingInactive,
   getBatchUsersUsage,
   listEnabledDefinitions,
-  getBatchUserAttributes
+  getBatchUserAttributes,
+  routerPush
 } = vi.hoisted(() => ({
   listUsers: vi.fn(),
   getAllGroups: vi.fn(),
   getAllGroupsIncludingInactive: vi.fn(),
   getBatchUsersUsage: vi.fn(),
   listEnabledDefinitions: vi.fn(),
-  getBatchUserAttributes: vi.fn()
+  getBatchUserAttributes: vi.fn(),
+  routerPush: vi.fn()
 }))
 
 vi.mock('@/api/admin', () => ({
@@ -45,6 +47,12 @@ vi.mock('@/stores/app', () => ({
   useAppStore: () => ({
     showError: vi.fn(),
     showSuccess: vi.fn()
+  })
+}))
+
+vi.mock('vue-router', () => ({
+  useRouter: () => ({
+    push: routerPush
   })
 }))
 
@@ -101,6 +109,7 @@ const DataTableStub = {
       </template>
       <div v-for="row in data" :key="row.id">
         <slot name="cell-last_used_at" :value="row.last_used_at" :row="row" />
+        <slot name="cell-actions" :value="row.actions" :row="row" />
       </div>
     </div>
   `
@@ -147,6 +156,7 @@ describe('admin UsersView', () => {
     getBatchUsersUsage.mockReset()
     listEnabledDefinitions.mockReset()
     getBatchUserAttributes.mockReset()
+    routerPush.mockReset()
 
     listUsers.mockResolvedValue({
       items: [createAdminUser()],
@@ -294,6 +304,20 @@ describe('admin UsersView', () => {
     expect(visibleColumns).toEqual(
       expect.arrayContaining(['email', 'role', 'balance', 'status', 'actions'])
     )
+  })
+
+  it('opens the selected user chat history from the more-actions menu', async () => {
+    const wrapper = mountUsersView()
+    await flushPromises()
+
+    await wrapper.get('.action-menu-trigger').trigger('click')
+    await flushPromises()
+    await wrapper.get('[data-test="user-chat-history"]').trigger('click')
+
+    expect(routerPush).toHaveBeenCalledWith({
+      name: 'AdminUserChatHistory',
+      params: { userId: '42' }
+    })
   })
 
   it('retains persisted built-in and dynamic attribute filters inside the responsive panel', async () => {

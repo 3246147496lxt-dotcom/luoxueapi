@@ -21,7 +21,10 @@
 
     <!-- 滚动区域：表格 -->
     <div class="layout-section-scrollable">
-      <div class="card table-scroll-container">
+      <div
+        class="table-scroll-container"
+        :class="{ card: tableSurface === 'card', 'table-scroll-container--plain': tableSurface === 'plain' }"
+      >
         <slot name="table" />
       </div>
     </div>
@@ -35,6 +38,12 @@
 
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted } from 'vue'
+
+withDefaults(defineProps<{
+  tableSurface?: 'card' | 'plain'
+}>(), {
+  tableSurface: 'card'
+})
 
 const isMobile = ref(false)
 
@@ -80,6 +89,15 @@ onUnmounted(() => {
   @apply flex-1 overflow-x-auto overflow-y-auto;
   /* 确保横向滚动条显示在最底部 */
   scrollbar-gutter: stable;
+}
+
+.table-scroll-container--plain {
+  @apply overflow-visible rounded-none border-0 bg-transparent dark:border-0 dark:bg-transparent;
+  box-shadow: none;
+}
+
+.table-scroll-container--plain :deep(.table-wrapper) {
+  scrollbar-gutter: auto;
 }
 
 .table-scroll-container :deep(table) {

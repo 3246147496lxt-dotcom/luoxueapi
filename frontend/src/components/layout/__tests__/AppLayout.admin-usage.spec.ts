@@ -121,18 +121,19 @@ function usesHomeClay(element: AstElement): boolean {
   )
 }
 
-describe('AppLayout view-level home-clay contract', () => {
-  it('requires every admin AppLayout use to opt into home-clay', () => {
+describe('AppLayout route and view-level shell contract', () => {
+  it('allows admin views to inherit route metadata or explicitly opt into home-clay', () => {
     const uses = collectComponentUses(adminViewsDirectory)
     const staticUses = uses.filter(({ element }) => element.tag === 'AppLayout')
     const dynamicUses = uses.filter(({ element }) => usesDynamicAppLayout(element))
 
     expect(staticUses.length).toBeGreaterThan(0)
     staticUses.forEach(({ file, element }) => {
+      const variant = staticAttribute(element, 'variant')
       expect(
-        staticAttribute(element, 'variant'),
-        `${file}: <AppLayout> must explicitly use variant="home-clay"`,
-      ).toBe('home-clay')
+        variant === undefined || variant === 'home-clay',
+        `${file}: admin AppLayout may inherit route metadata or explicitly use home-clay`,
+      ).toBe(true)
     })
 
     const opsUse = dynamicUses.find(({ file }) => file.endsWith('views/admin/ops/OpsDashboard.vue'))
@@ -151,6 +152,24 @@ describe('AppLayout view-level home-clay contract', () => {
     expect(opsVariantExpression).toContain('home-clay')
   })
 
+  it('marks every renderable admin route for both flat workspace and admin shell behavior', async () => {
+    const { default: router } = await import('@/router')
+    const adminRoutes = router.getRoutes().filter(
+      (route) => route.path.startsWith('/admin') && route.components?.default,
+    )
+
+    expect(adminRoutes.length).toBeGreaterThan(0)
+    adminRoutes.forEach((route) => {
+      expect(
+        route.meta,
+        `${route.path}: renderable admin routes must enable authenticated and admin shells`,
+      ).toMatchObject({
+        requiresAuth: true,
+        requiresAdmin: true,
+      })
+    })
+  })
+
   it('lets user views inherit the Snow Clay shell without enabling the admin content adapter', () => {
     const uses = collectComponentUses(userViewsDirectory).filter(
       ({ element }) => element.tag === 'AppLayout' || usesDynamicAppLayout(element),
@@ -163,6 +182,10 @@ describe('AppLayout view-level home-clay contract', () => {
         `${file}: user AppLayout must inherit the shared shell without the admin content adapter`,
       ).toBe(false)
     })
+
+    const chatUse = uses.find(({ file }) => file.endsWith('views/user/ChatView.vue'))
+    expect(chatUse, 'ChatView must retain its chat layout variant').toBeDefined()
+    expect(staticAttribute(chatUse!.element, 'variant')).toBe('chat')
   })
 
   it('requires every admin page shell to declare its content density', () => {

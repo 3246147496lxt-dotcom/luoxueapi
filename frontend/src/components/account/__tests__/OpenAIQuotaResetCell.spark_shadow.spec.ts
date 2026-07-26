@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 import OpenAIQuotaResetCell from '../OpenAIQuotaResetCell.vue'
 import type { Account } from '@/types'
-import { queryOpenAIQuota } from '@/api/admin/accounts'
+import { queryOpenAIQuota, resetOpenAIQuota } from '@/api/admin/accounts'
 
 vi.mock('@/api/admin/accounts', () => ({
   queryOpenAIQuota: vi.fn(),
@@ -55,6 +55,7 @@ const resetButton = (wrapper: ReturnType<typeof mount>) =>
 
 beforeEach(() => {
   vi.mocked(queryOpenAIQuota).mockReset()
+  vi.mocked(resetOpenAIQuota).mockReset()
 })
 
 describe('OpenAIQuotaResetCell — 外审 F6:影子禁用重置', () => {
@@ -134,6 +135,66 @@ describe('OpenAIQuotaResetCell — 外审 F6:影子禁用重置', () => {
     expect(wrapper.find('[data-testid="reset-credit-expiry-toggle"]').exists()).toBe(false)
     expect(wrapper.find('[data-testid="reset-credit-expiry-details"]').exists()).toBe(false)
     expect(wrapper.text()).toContain('admin.accounts.openaiQuotaReset.expiresAt:')
+    wrapper.unmount()
+  })
+
+  it('成功重置后刷新次数并通知额度概览重查', async () => {
+    vi.mocked(queryOpenAIQuota)
+      .mockResolvedValueOnce({
+        rate_limit_reset_credits: {
+          available_count: 1,
+          credits: [{ expires_at: '2026-07-03T04:05:06Z' }],
+        },
+        fetched_at: 1770000000,
+      })
+      .mockResolvedValueOnce({
+        rate_limit_reset_credits: {
+          available_count: 0,
+          credits: [],
+        },
+        fetched_at: 1770000100,
+      })
+    vi.mocked(resetOpenAIQuota).mockResolvedValue({
+      code: 'ok',
+      windows_reset: 1,
+    })
+
+    const wrapper = mount(OpenAIQuotaResetCell, {
+      props: { account: makeAccount({ parent_account_id: null }) },
+      global: {
+        stubs: {
+          ConfirmDialog: {
+            props: ['show'],
+            emits: ['confirm', 'cancel'],
+            template: `
+              <button
+                v-if="show"
+                type="button"
+                data-testid="confirm-quota-reset"
+                @click="$emit('confirm')"
+              >
+                confirm
+              </button>
+            `,
+          },
+        },
+      },
+    })
+
+    await wrapper.get('[data-testid="openai-quota-reset-count"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.get('[data-testid="openai-quota-reset-button"]').attributes('disabled'))
+      .toBeUndefined()
+
+    await wrapper.get('[data-testid="openai-quota-reset-button"]').trigger('click')
+    await wrapper.get('[data-testid="confirm-quota-reset"]').trigger('click')
+    await flushPromises()
+
+    expect(resetOpenAIQuota).toHaveBeenCalledWith(1)
+    expect(queryOpenAIQuota).toHaveBeenCalledTimes(2)
+    expect(wrapper.emitted('quota-updated')).toHaveLength(1)
+    expect(wrapper.get('[data-testid="openai-quota-reset-button"]').attributes('disabled'))
+      .toBeDefined()
     wrapper.unmount()
   })
 })

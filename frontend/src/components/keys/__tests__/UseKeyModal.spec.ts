@@ -503,6 +503,8 @@ describe('UseKeyModal', () => {
       expect(models[model].variants).toHaveProperty('xhigh')
     }
     expect(models['gpt-5.6'].name).toBe('GPT-5.6 (Sol)')
+    expect(models['gpt-5.5']).toBeDefined()
+    expect(models['gpt-5.2']).toBeUndefined()
   })
 
   it('renders Claude Fable 5 OpenCode config with adaptive thinking', async () => {

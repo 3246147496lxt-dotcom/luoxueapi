@@ -183,7 +183,7 @@ describe('admin AccountsView bulk edit scope', () => {
     expect(wrapper.get('[data-test="bulk-edit-modal"]').attributes('data-target-mode')).toBe('filtered')
   })
 
-  it('renders the created_at column by default', async () => {
+  it('uses the compact workbench columns and mobile card order by default', async () => {
     listAccounts.mockResolvedValue({
       items: [
         {
@@ -243,26 +243,34 @@ describe('admin AccountsView bulk edit scope', () => {
     await flushPromises()
 
     const columnKeys = wrapper.findAll('[data-test="column-key"]').map(node => node.text())
-    expect(columnKeys).toContain('created_at')
+    expect(columnKeys).toEqual([
+      'select',
+      'name',
+      'usage',
+      'status',
+      'groups',
+      'last_used_at',
+      'actions'
+    ])
     const columns = wrapper.getComponent(DataTableStub).props('columns') as Array<{ key: string; label: string; sortable: boolean }>
-    expect(columns.find(column => column.key === 'created_at')).toMatchObject({
-      label: 'admin.accounts.columns.createdAt',
-      sortable: true
+    expect(columns.find(column => column.key === 'usage')).toMatchObject({
+      label: 'admin.accounts.workbench.quotaCapacity',
+      sortable: false
     })
     expect(wrapper.getComponent(DataTableStub).props('mobilePrimaryKey')).toBe('name')
     expect(wrapper.getComponent(DataTableStub).props('mobileVisibleKeys')).toEqual([
       'name',
-      'platform_type',
+      'usage',
       'status',
-      'schedulable',
-      'groups'
+      'groups',
+      'last_used_at'
     ])
 
     const rowActions = wrapper.get('[data-test="row-actions"]')
-    const deleteAction = rowActions.findAll('button').find(button => button.text().includes('common.delete'))
-    const editAction = rowActions.findAll('button').find(button => button.text().includes('common.edit'))
-    expect(deleteAction?.classes()).toEqual(expect.arrayContaining(['hidden', 'lg:flex']))
-    expect(editAction?.classes()).toEqual(expect.arrayContaining(['flex-1', 'lg:flex-none']))
+    const actionButtons = rowActions.findAll('button')
+    expect(actionButtons).toHaveLength(1)
+    expect(actionButtons[0]?.attributes('aria-label')).toBe('common.more')
+    expect(actionButtons[0]?.classes()).toContain('account-row-more-button')
   })
 
   it('submits selected account IDs from every page for backend eligibility checks', async () => {

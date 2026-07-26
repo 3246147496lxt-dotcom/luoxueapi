@@ -34,8 +34,21 @@ import (
 var sseDataPrefix = regexp.MustCompile(`^data:\s*`)
 
 const (
-	testClaudeAPIURL   = "https://api.anthropic.com/v1/messages?beta=true"
-	chatgptCodexAPIURL = "https://chatgpt.com/backend-api/codex/responses"
+	testClaudeAPIURL                    = "https://api.anthropic.com/v1/messages?beta=true"
+	chatgptCodexAPIURL                  = "https://chatgpt.com/backend-api/codex/responses"
+	openAITestErrorBodyMaxBytes         = 2 << 20
+	openAITestAuthSummaryMaxBytes       = 512
+	openAITestAuthFailureExtraKey       = "openai_account_test_auth_failure"
+	openAITestAuthFailureOwner          = "account_test_service.openai_auth.v1"
+	openAITestAuthFailureOwnerField     = "owner"
+	openAITestAuthFailureMessageField   = "error_message"
+	openAITestAuthPreviousScheduleField = "previous_schedulable"
+)
+
+var (
+	openAITestNamedSecretPattern = regexp.MustCompile(`(?i)(authorization|proxy-authorization|x-api-key|api[_-]?key|access[_-]?token|refresh[_-]?token|id[_-]?token|password|client[_-]?secret)\s*[:=]\s*(?:bearer\s+)?[^\s,;]+`)
+	openAITestBearerPattern      = regexp.MustCompile(`(?i)\bbearer\s+[^\s,;]+`)
+	openAITestAPIKeyPattern      = regexp.MustCompile(`\bsk-[A-Za-z0-9_-]{6,}`)
 )
 
 // TestEvent represents a SSE event for account testing
@@ -663,7 +676,7 @@ func (s *AccountTestService) testOpenAIAccountConnection(c *gin.Context, account
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, openAITestErrorBodyMaxBytes))
 		body = redactAgentIdentitySensitiveBodyForAccount(ctx, s.accountRepo, credentialAccount, body)
 		if !agentIdentityTaskRecoveryWasTried(ctx) && credentialAccount.IsOpenAIAgentIdentity() && isAgentIdentityTaskInvalidHTTPResponse(resp.StatusCode, body) {
 			expectedTaskID := credentialAccount.GetCredential("task_id")
@@ -676,16 +689,18 @@ func (s *AccountTestService) testOpenAIAccountConnection(c *gin.Context, account
 		if resp.StatusCode == http.StatusTooManyRequests {
 			s.reconcileOpenAI429State(ctx, account, resp.Header, body)
 		}
-		// 401 Unauthorized: 标记账号为永久错误
-		if resp.StatusCode == http.StatusUnauthorized && s.accountRepo != nil {
-			errMsg := fmt.Sprintf("Authentication failed (401): %s", string(body))
-			_ = s.accountRepo.SetError(ctx, account.ID, errMsg)
+		if summary := s.persistOpenAITestAuthFailure(ctx, account, resp.StatusCode, body, ""); summary != "" {
+			return s.sendErrorAndEnd(c, summary)
 		}
 		return s.sendErrorAndEnd(c, fmt.Sprintf("API returned %d: %s", resp.StatusCode, string(body)))
 	}
 
 	// Process SSE stream
-	return s.processOpenAIStream(c, resp.Body)
+	if err := s.processOpenAIStream(c, resp.Body); err != nil {
+		return err
+	}
+	s.recoverOpenAITestAuthFailure(ctx, account)
+	return nil
 }
 
 // testGrokAccountConnection tests a Grok OAuth or API-key account through xAI's Responses API.
@@ -848,18 +863,21 @@ func (s *AccountTestService) testOpenAIChatCompletionsConnection(
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, openAITestErrorBodyMaxBytes))
 		if resp.StatusCode == http.StatusTooManyRequests {
 			s.reconcileOpenAI429State(ctx, account, resp.Header, body)
 		}
-		if resp.StatusCode == http.StatusUnauthorized && s.accountRepo != nil {
-			errMsg := fmt.Sprintf("Chat Completions authentication failed (401): %s", string(body))
-			_ = s.accountRepo.SetError(ctx, account.ID, errMsg)
+		if summary := s.persistOpenAITestAuthFailure(ctx, account, resp.StatusCode, body, "Chat Completions"); summary != "" {
+			return s.sendErrorAndEnd(c, summary)
 		}
 		return s.sendErrorAndEnd(c, fmt.Sprintf("Chat Completions API (/v1/chat/completions) returned %d: %s", resp.StatusCode, string(body)))
 	}
 
-	return s.processOpenAIChatCompletionsStream(c, resp.Body)
+	if err := s.processOpenAIChatCompletionsStream(c, resp.Body); err != nil {
+		return err
+	}
+	s.recoverOpenAITestAuthFailure(ctx, account)
+	return nil
 }
 
 // testOpenAICompactConnection probes /responses/compact and persists the
@@ -998,16 +1016,308 @@ func (s *AccountTestService) testOpenAICompactConnection(c *gin.Context, account
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		if resp.StatusCode == http.StatusUnauthorized && s.accountRepo != nil {
-			errMsg := fmt.Sprintf("Authentication failed (401): %s", string(body))
-			_ = s.accountRepo.SetError(ctx, account.ID, errMsg)
+		if summary := s.persistOpenAITestAuthFailure(ctx, account, resp.StatusCode, body, "Compact"); summary != "" {
+			return s.sendErrorAndEnd(c, summary)
 		}
 		return s.sendErrorAndEnd(c, fmt.Sprintf("API returned %d: %s", resp.StatusCode, string(body)))
 	}
 
+	s.recoverOpenAITestAuthFailure(ctx, account)
 	s.sendEvent(c, TestEvent{Type: "content", Text: "Compact probe succeeded"})
 	s.sendEvent(c, TestEvent{Type: "test_complete", Success: true})
 	return nil
+}
+
+func (s *AccountTestService) persistOpenAITestAuthFailure(
+	ctx context.Context,
+	account *Account,
+	statusCode int,
+	body []byte,
+	scope string,
+) string {
+	if statusCode != http.StatusUnauthorized && statusCode != http.StatusForbidden {
+		return ""
+	}
+
+	code, errorType, message := extractOpenAITestAuthErrorFields(body)
+	summary := buildOpenAITestAuthFailureSummary(account, statusCode, scope, code, errorType, message)
+	if s == nil || s.accountRepo == nil || account == nil {
+		return summary
+	}
+	if statusCode == http.StatusForbidden && !isAccountLevelOpenAITestForbidden(code, errorType, message, scope == "Compact") {
+		return summary
+	}
+
+	previousSchedulable := account.Schedulable
+	if previous, _, ok := persistedOpenAITestAuthFailure(account); ok {
+		previousSchedulable = previous
+	}
+	state := map[string]any{
+		openAITestAuthFailureOwnerField:     openAITestAuthFailureOwner,
+		openAITestAuthFailureMessageField:   summary,
+		openAITestAuthPreviousScheduleField: previousSchedulable,
+	}
+	if err := s.accountRepo.UpdateExtra(ctx, account.ID, map[string]any{openAITestAuthFailureExtraKey: state}); err != nil {
+		return summary
+	}
+	mergeAccountExtra(account, map[string]any{openAITestAuthFailureExtraKey: state})
+
+	if err := s.accountRepo.SetError(ctx, account.ID, summary); err != nil {
+		_ = s.accountRepo.UpdateExtra(ctx, account.ID, map[string]any{openAITestAuthFailureExtraKey: nil})
+		delete(account.Extra, openAITestAuthFailureExtraKey)
+		return summary
+	}
+
+	account.Status = StatusError
+	account.ErrorMessage = summary
+	account.Schedulable = false
+	return summary
+}
+
+func extractOpenAITestAuthErrorFields(body []byte) (code, errorType, message string) {
+	var payload map[string]any
+	if err := json.Unmarshal(body, &payload); err != nil {
+		return "", "", ""
+	}
+
+	errorObject, _ := payload["error"].(map[string]any)
+	detailObject, _ := payload["detail"].(map[string]any)
+	code = firstOpenAITestString(
+		extractUpstreamErrorCode(body),
+		openAITestString(detailObject["code"]),
+		openAITestString(payload["code"]),
+	)
+	errorType = firstOpenAITestString(
+		openAITestString(errorObject["type"]),
+		openAITestString(detailObject["type"]),
+		openAITestString(payload["type"]),
+	)
+	message = strings.TrimSpace(extractUpstreamErrorMessage(body))
+	if strings.HasPrefix(message, "{") || strings.HasPrefix(message, "[") {
+		message = ""
+	}
+	message = firstOpenAITestString(
+		message,
+		openAITestString(errorObject["message"]),
+		openAITestString(detailObject["message"]),
+		openAITestString(payload["message"]),
+		openAITestString(payload["detail"]),
+		openAITestString(payload["error"]),
+	)
+	return code, errorType, message
+}
+
+func openAITestString(value any) string {
+	text, _ := value.(string)
+	return strings.TrimSpace(text)
+}
+
+func firstOpenAITestString(values ...string) string {
+	for _, value := range values {
+		if value = strings.TrimSpace(value); value != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+func buildOpenAITestAuthFailureSummary(account *Account, statusCode int, scope, code, errorType, message string) string {
+	title := "Authentication failed"
+	fallback := "upstream rejected the account credentials"
+	if statusCode == http.StatusForbidden {
+		title = "Access forbidden"
+		fallback = "upstream denied account access"
+	}
+	if scope != "" {
+		title = scope + " " + strings.ToLower(title[:1]) + title[1:]
+	}
+
+	parts := make([]string, 0, 3)
+	if code = sanitizeOpenAITestAuthField(account, code, 96); code != "" {
+		parts = append(parts, "code="+code)
+	}
+	if errorType = sanitizeOpenAITestAuthField(account, errorType, 96); errorType != "" {
+		parts = append(parts, "type="+errorType)
+	}
+	if message = sanitizeOpenAITestAuthField(account, message, 320); message != "" {
+		parts = append(parts, "message="+message)
+	}
+	if len(parts) == 0 {
+		parts = append(parts, fallback)
+	}
+
+	return truncateString(
+		fmt.Sprintf("%s (%d): %s", title, statusCode, strings.Join(parts, "; ")),
+		openAITestAuthSummaryMaxBytes,
+	)
+}
+
+func sanitizeOpenAITestAuthField(account *Account, value string, maxBytes int) string {
+	value = strings.Join(strings.Fields(value), " ")
+	value = sanitizeUpstreamErrorMessage(value)
+	value = openAITestNamedSecretPattern.ReplaceAllString(value, "${1}=[REDACTED]")
+	value = openAITestBearerPattern.ReplaceAllString(value, "Bearer [REDACTED]")
+	value = openAITestAPIKeyPattern.ReplaceAllString(value, "[REDACTED]")
+	if account != nil {
+		for key, raw := range account.Credentials {
+			if !isSensitiveKey(key) {
+				continue
+			}
+			secret, ok := raw.(string)
+			if !ok || len(secret) < 4 {
+				continue
+			}
+			value = strings.ReplaceAll(value, secret, "[REDACTED]")
+		}
+	}
+	return truncateString(strings.TrimSpace(value), maxBytes)
+}
+
+func isAccountLevelOpenAITestForbidden(code, errorType, message string, compact bool) bool {
+	normalizedCode := normalizeOpenAITestAuthSignal(code)
+	normalizedType := normalizeOpenAITestAuthSignal(errorType)
+	normalizedMessage := normalizeOpenAITestAuthSignal(message)
+
+	switch normalizedCode {
+	case "invalid_api_key", "authentication_error", "unauthorized", "invalid_authentication",
+		"invalid_token", "token_expired", "account_deactivated", "account_suspended",
+		"account_disabled", "deactivated_workspace", "workspace_deactivated", "workspace_suspended":
+		return true
+	}
+
+	combined := strings.Join([]string{normalizedCode, normalizedType, normalizedMessage}, " ")
+	for _, signal := range []string{
+		"account_deactivated",
+		"account_is_deactivated",
+		"deactivated_account",
+		"account_suspended",
+		"account_is_suspended",
+		"suspended_account",
+		"account_disabled",
+		"account_is_disabled",
+		"disabled_account",
+		"workspace_deactivated",
+		"workspace_is_deactivated",
+		"deactivated_workspace",
+		"workspace_suspended",
+		"workspace_is_suspended",
+		"suspended_workspace",
+	} {
+		if strings.Contains(normalizedMessage, signal) {
+			return true
+		}
+	}
+
+	nonAccountSignals := []string{
+		"model", "capability", "endpoint", "unsupported", "not_supported",
+		"cloudflare", "waf", "challenge", "captcha",
+		"country", "region", "geograph", "location", "territory",
+	}
+	if compact {
+		nonAccountSignals = append(nonAccountSignals, "compact")
+	}
+	for _, signal := range nonAccountSignals {
+		if strings.Contains(combined, signal) {
+			return false
+		}
+	}
+
+	switch normalizedType {
+	case "authentication_error", "unauthorized":
+		return true
+	}
+	strongAccountSignals := []string{
+		"invalid_api_key",
+		"authentication_failed",
+		"not_authenticated",
+		"account_deactivated",
+		"account_suspended",
+		"account_disabled",
+		"workspace_deactivated",
+		"workspace_suspended",
+	}
+	for _, signal := range strongAccountSignals {
+		if strings.Contains(combined, signal) {
+			return true
+		}
+	}
+	if compact {
+		return false
+	}
+	for _, signal := range []string{
+		"missing_account_permission",
+		"account_permission_denied",
+		"permission_denied_for_account",
+	} {
+		if strings.Contains(combined, signal) {
+			return true
+		}
+	}
+	return false
+}
+
+func normalizeOpenAITestAuthSignal(value string) string {
+	value = strings.ToLower(strings.TrimSpace(value))
+	replacer := strings.NewReplacer("-", "_", " ", "_", ".", "_", "/", "_")
+	return replacer.Replace(value)
+}
+
+func isPersistedOpenAITestAuthError(message string) bool {
+	for _, prefix := range []string{
+		"Authentication failed (401): ",
+		"Access forbidden (403): ",
+		"Chat Completions authentication failed (401): ",
+		"Chat Completions access forbidden (403): ",
+		"Compact authentication failed (401): ",
+		"Compact access forbidden (403): ",
+	} {
+		if strings.HasPrefix(message, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
+func persistedOpenAITestAuthFailure(account *Account) (previousSchedulable bool, expectedMessage string, ok bool) {
+	if account == nil || !isPersistedOpenAITestAuthError(account.ErrorMessage) || account.Extra == nil {
+		return false, "", false
+	}
+	state, ok := account.Extra[openAITestAuthFailureExtraKey].(map[string]any)
+	if !ok {
+		return false, "", false
+	}
+	owner, _ := state[openAITestAuthFailureOwnerField].(string)
+	expectedMessage, _ = state[openAITestAuthFailureMessageField].(string)
+	previousSchedulable, previousOK := state[openAITestAuthPreviousScheduleField].(bool)
+	if owner != openAITestAuthFailureOwner || !previousOK || expectedMessage == "" || expectedMessage != account.ErrorMessage {
+		return false, "", false
+	}
+	return previousSchedulable, expectedMessage, true
+}
+
+func (s *AccountTestService) recoverOpenAITestAuthFailure(ctx context.Context, account *Account) {
+	if s == nil || s.accountRepo == nil || account == nil {
+		return
+	}
+	previousSchedulable, _, ok := persistedOpenAITestAuthFailure(account)
+	if !ok {
+		return
+	}
+
+	if previousSchedulable {
+		if err := s.accountRepo.SetSchedulable(ctx, account.ID, true); err != nil {
+			return
+		}
+		account.Schedulable = true
+	}
+	if err := s.accountRepo.ClearError(ctx, account.ID); err != nil {
+		return
+	}
+	account.Status = StatusActive
+	account.ErrorMessage = ""
+	if err := s.accountRepo.UpdateExtra(ctx, account.ID, map[string]any{openAITestAuthFailureExtraKey: nil}); err == nil {
+		delete(account.Extra, openAITestAuthFailureExtraKey)
+	}
 }
 
 func (s *AccountTestService) reconcileOpenAI429State(ctx context.Context, account *Account, headers http.Header, body []byte) {

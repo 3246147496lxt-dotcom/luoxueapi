@@ -20,6 +20,7 @@ import (
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
 	"github.com/Wei-Shaw/sub2api/internal/util/responseheaders"
 	"github.com/cespare/xxhash/v2"
 	gocache "github.com/patrickmn/go-cache"
@@ -1223,6 +1224,46 @@ func (s *GatewayService) GetAvailableModels(ctx context.Context, groupID *int64,
 		modelsListCacheStoreTotal.Add(1)
 	}
 	return cloneStringSlice(models)
+}
+
+// GetAvailableModelsStrict returns model IDs from the same platform-scoped
+// candidate source used by scheduling and propagates snapshot/repository
+// failures. It intentionally bypasses the legacy catalog cache so a value
+// produced by the broader compatibility query cannot leak into Chat.
+func (s *GatewayService) GetAvailableModelsStrict(ctx context.Context, groupID *int64, platform string) ([]string, error) {
+	if s == nil || (s.schedulerSnapshot == nil && s.accountRepo == nil) {
+		return nil, errors.New("gateway account catalog is unavailable")
+	}
+	accounts, _, err := s.listSchedulableAccounts(ctx, groupID, platform, false)
+	if err != nil {
+		return nil, err
+	}
+
+	modelSet := make(map[string]struct{})
+	hasAnyMapping := false
+	for i := range accounts {
+		mapping := accounts[i].GetModelMapping()
+		if len(mapping) == 0 {
+			continue
+		}
+		hasAnyMapping = true
+		for model := range mapping {
+			modelSet[model] = struct{}{}
+		}
+	}
+	if !hasAnyMapping {
+		if platform == PlatformOpenAI {
+			return openai.DefaultModelIDs(), nil
+		}
+		return nil, nil
+	}
+
+	models := make([]string, 0, len(modelSet))
+	for model := range modelSet {
+		models = append(models, model)
+	}
+	sort.Strings(models)
+	return models, nil
 }
 
 func (s *GatewayService) InvalidateAvailableModelsCache(groupID *int64, platform string) {

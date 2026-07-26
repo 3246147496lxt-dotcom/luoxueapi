@@ -31,13 +31,21 @@ func NewAPIKeyRepository(client *dbent.Client, sqlDB *sql.DB) service.APIKeyRepo
 	return newAPIKeyRepositoryWithSQL(client, sqlDB)
 }
 
+func NewChatPrincipalRepository(client *dbent.Client, sqlDB *sql.DB) service.ChatPrincipalRepository {
+	return newAPIKeyRepositoryWithSQL(client, sqlDB)
+}
+
 func newAPIKeyRepositoryWithSQL(client *dbent.Client, sqlq sqlExecutor) *apiKeyRepository {
 	return &apiKeyRepository{client: client, sql: sqlq}
 }
 
 func (r *apiKeyRepository) activeQuery() *dbent.APIKeyQuery {
-	// 默认过滤已软删除记录，避免删除后仍被查询到。
-	return r.client.APIKey.Query().Where(apikey.DeletedAtIsNil())
+	// API-key management and authentication only see user-managed keys. Internal
+	// web-chat principals have a separate repository capability below.
+	return r.client.APIKey.Query().Where(
+		apikey.DeletedAtIsNil(),
+		apikey.PurposeEQ(service.APIKeyPurposeUser),
+	)
 }
 
 func (r *apiKeyRepository) Create(ctx context.Context, key *service.APIKey) error {
@@ -46,6 +54,7 @@ func (r *apiKeyRepository) Create(ctx context.Context, key *service.APIKey) erro
 		SetKey(key.Key).
 		SetName(key.Name).
 		SetStatus(key.Status).
+		SetPurpose(service.APIKeyPurposeUser).
 		SetNillableGroupID(key.GroupID).
 		SetNillableLastUsedAt(key.LastUsedAt).
 		SetQuota(key.Quota).
@@ -65,11 +74,125 @@ func (r *apiKeyRepository) Create(ctx context.Context, key *service.APIKey) erro
 	created, err := builder.Save(ctx)
 	if err == nil {
 		key.ID = created.ID
+		key.Purpose = service.APIKeyPurposeUser
 		key.LastUsedAt = created.LastUsedAt
 		key.CreatedAt = created.CreatedAt
 		key.UpdatedAt = created.UpdatedAt
 	}
 	return translatePersistenceError(err, nil, service.ErrAPIKeyExists)
+}
+
+func (r *apiKeyRepository) GetOrCreateWebChatPrincipal(ctx context.Context, userID, groupID int64, generatedKey string) (*service.APIKey, error) {
+	client := clientFromContext(ctx, r.client)
+	if existing, err := r.getActiveWebChatPrincipal(ctx, client, userID, groupID); err == nil {
+		return existing, nil
+	} else if !errors.Is(err, service.ErrAPIKeyNotFound) {
+		return nil, err
+	}
+
+	createdID, inserted, err := insertWebChatPrincipal(
+		ctx,
+		sqlExecutorFromContext(ctx, r.sql),
+		userID,
+		groupID,
+		generatedKey,
+	)
+	if err != nil {
+		return nil, err
+	}
+	if inserted {
+		return r.getWebChatPrincipalByID(ctx, client, createdID)
+	}
+
+	// ON CONFLICT covers both the partial user/group principal index and the
+	// globally unique generated key. A visible principal means another request
+	// won the race; otherwise ask the resolver to generate a new random key.
+	if existing, getErr := r.getActiveWebChatPrincipal(ctx, client, userID, groupID); getErr == nil {
+		return existing, nil
+	} else if !errors.Is(getErr, service.ErrAPIKeyNotFound) {
+		return nil, getErr
+	}
+	return nil, service.ErrAPIKeyExists
+}
+
+func insertWebChatPrincipal(ctx context.Context, exec sqlExecutor, userID, groupID int64, generatedKey string) (int64, bool, error) {
+	if exec == nil {
+		return 0, false, errors.New("web chat principal SQL executor is unavailable")
+	}
+	rows, err := exec.QueryContext(ctx, `
+		INSERT INTO api_keys (user_id, group_id, key, name, status, purpose, deleted_at, created_at, updated_at)
+		VALUES ($1, $2, $3, 'Web Chat', $4, $5, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+		ON CONFLICT DO NOTHING
+		RETURNING id`, userID, groupID, generatedKey, service.StatusActive, service.APIKeyPurposeWebChat)
+	if err != nil {
+		return 0, false, err
+	}
+	defer rows.Close()
+
+	if !rows.Next() {
+		if err := rows.Err(); err != nil {
+			return 0, false, err
+		}
+		return 0, false, nil
+	}
+	var id int64
+	if err := rows.Scan(&id); err != nil {
+		return 0, false, err
+	}
+	if err := rows.Err(); err != nil {
+		return 0, false, err
+	}
+	return id, true, nil
+}
+
+func (r *apiKeyRepository) getActiveWebChatPrincipal(ctx context.Context, client *dbent.Client, userID, groupID int64) (*service.APIKey, error) {
+	m, err := r.webChatPrincipalQuery(client).
+		Where(
+			apikey.UserIDEQ(userID),
+			apikey.GroupIDEQ(groupID),
+		).
+		Only(mixins.SkipSoftDelete(ctx))
+	if err != nil {
+		if dbent.IsNotFound(err) {
+			return nil, service.ErrAPIKeyNotFound
+		}
+		return nil, err
+	}
+	return apiKeyEntityToService(m), nil
+}
+
+func (r *apiKeyRepository) getWebChatPrincipalByID(ctx context.Context, client *dbent.Client, id int64) (*service.APIKey, error) {
+	m, err := r.webChatPrincipalQuery(client).
+		Where(apikey.IDEQ(id)).
+		Only(mixins.SkipSoftDelete(ctx))
+	if err != nil {
+		if dbent.IsNotFound(err) {
+			return nil, service.ErrAPIKeyNotFound
+		}
+		return nil, err
+	}
+	return apiKeyEntityToService(m), nil
+}
+
+func (r *apiKeyRepository) webChatPrincipalQuery(client *dbent.Client) *dbent.APIKeyQuery {
+	return client.APIKey.Query().
+		Where(
+			// Internal principals are deliberate soft-deletion tombstones. This
+			// makes binaries that predate purpose filtering hide and reject them.
+			apikey.DeletedAtNotNil(),
+			apikey.StatusEQ(service.StatusActive),
+			apikey.PurposeEQ(service.APIKeyPurposeWebChat),
+		).
+		WithUser(func(q *dbent.UserQuery) {
+			q.Where(user.DeletedAtIsNil())
+			q.WithAllowedGroups(func(gq *dbent.GroupQuery) {
+				gq.Where(group.DeletedAtIsNil())
+				gq.Select(group.FieldID)
+			})
+		}).
+		WithGroup(func(q *dbent.GroupQuery) {
+			q.Where(group.DeletedAtIsNil())
+		})
 }
 
 func (r *apiKeyRepository) GetByID(ctx context.Context, id int64) (*service.APIKey, error) {
@@ -134,6 +257,7 @@ func (r *apiKeyRepository) GetByKeyForAuth(ctx context.Context, key string) (*se
 			apikey.FieldGroupID,
 			apikey.FieldName,
 			apikey.FieldStatus,
+			apikey.FieldPurpose,
 			apikey.FieldIPWhitelist,
 			apikey.FieldIPBlacklist,
 			apikey.FieldQuota,
@@ -228,7 +352,11 @@ func (r *apiKeyRepository) Update(ctx context.Context, key *service.APIKey) erro
 	client := clientFromContext(ctx, r.client)
 	now := time.Now()
 	builder := client.APIKey.Update().
-		Where(apikey.IDEQ(key.ID), apikey.DeletedAtIsNil()).
+		Where(
+			apikey.IDEQ(key.ID),
+			apikey.DeletedAtIsNil(),
+			apikey.PurposeEQ(service.APIKeyPurposeUser),
+		).
 		SetName(key.Name).
 		SetStatus(key.Status).
 		SetQuota(key.Quota).
@@ -301,7 +429,11 @@ func (r *apiKeyRepository) Delete(ctx context.Context, id int64) error {
 	tombstoneKey := fmt.Sprintf("__deleted__%d__%d", id, time.Now().UnixNano())
 	// 显式软删除：避免依赖 Hook 行为，确保 deleted_at 一定被设置。
 	affected, err := r.client.APIKey.Update().
-		Where(apikey.IDEQ(id), apikey.DeletedAtIsNil()).
+		Where(
+			apikey.IDEQ(id),
+			apikey.DeletedAtIsNil(),
+			apikey.PurposeEQ(service.APIKeyPurposeUser),
+		).
 		SetKey(tombstoneKey).
 		SetDeletedAt(time.Now()).
 		Save(ctx)
@@ -313,7 +445,7 @@ func (r *apiKeyRepository) Delete(ctx context.Context, id int64) error {
 	}
 	if affected == 0 {
 		exists, err := r.client.APIKey.Query().
-			Where(apikey.IDEQ(id)).
+			Where(apikey.IDEQ(id), apikey.PurposeEQ(service.APIKeyPurposeUser)).
 			Exist(mixins.SkipSoftDelete(ctx))
 		if err != nil {
 			return err
@@ -364,7 +496,7 @@ func (r *apiKeyRepository) deleteWithAudit(ctx context.Context, exec *dbent.Clie
 		INSERT INTO deleted_api_key_audits (key, api_key_id, user_id, key_name, deleted_at)
 		SELECT key, id, user_id, name, NOW()
 		FROM api_keys
-		WHERE id = $1 AND deleted_at IS NULL`, id); err != nil {
+		WHERE id = $1 AND deleted_at IS NULL AND purpose = $2`, id, service.APIKeyPurposeUser); err != nil {
 		return err
 	}
 
@@ -372,7 +504,7 @@ func (r *apiKeyRepository) deleteWithAudit(ctx context.Context, exec *dbent.Clie
 	res, err := exec.ExecContext(ctx, `
 		UPDATE api_keys
 		SET key = $1, deleted_at = NOW(), updated_at = NOW()
-		WHERE id = $2 AND deleted_at IS NULL`, tombstoneKey, id)
+		WHERE id = $2 AND deleted_at IS NULL AND purpose = $3`, tombstoneKey, id, service.APIKeyPurposeUser)
 	if err != nil {
 		return err
 	}
@@ -383,7 +515,7 @@ func (r *apiKeyRepository) deleteWithAudit(ctx context.Context, exec *dbent.Clie
 	if affected == 0 {
 		// 并发/重复删除:记录已存在(已软删)则幂等返回 nil(defer 回滚空事务),否则 NotFound。
 		exists, existErr := r.client.APIKey.Query().
-			Where(apikey.IDEQ(id)).
+			Where(apikey.IDEQ(id), apikey.PurposeEQ(service.APIKeyPurposeUser)).
 			Exist(mixins.SkipSoftDelete(ctx))
 		if existErr != nil {
 			return existErr
@@ -565,7 +697,12 @@ func (r *apiKeyRepository) VerifyOwnership(ctx context.Context, userID int64, ap
 	}
 
 	ids, err := r.client.APIKey.Query().
-		Where(apikey.UserIDEQ(userID), apikey.IDIn(apiKeyIDs...), apikey.DeletedAtIsNil()).
+		Where(
+			apikey.UserIDEQ(userID),
+			apikey.IDIn(apiKeyIDs...),
+			apikey.DeletedAtIsNil(),
+			apikey.PurposeEQ(service.APIKeyPurposeUser),
+		).
 		IDs(ctx)
 	if err != nil {
 		return nil, err
@@ -674,7 +811,11 @@ func (r *apiKeyRepository) SearchAPIKeys(ctx context.Context, userID int64, keyw
 // ClearGroupIDByGroupID 将指定分组的所有 API Key 的 group_id 设为 nil
 func (r *apiKeyRepository) ClearGroupIDByGroupID(ctx context.Context, groupID int64) (int64, error) {
 	n, err := r.client.APIKey.Update().
-		Where(apikey.GroupIDEQ(groupID), apikey.DeletedAtIsNil()).
+		Where(
+			apikey.GroupIDEQ(groupID),
+			apikey.DeletedAtIsNil(),
+			apikey.PurposeEQ(service.APIKeyPurposeUser),
+		).
 		ClearGroupID().
 		Save(ctx)
 	return int64(n), err
@@ -684,7 +825,12 @@ func (r *apiKeyRepository) ClearGroupIDByGroupID(ctx context.Context, groupID in
 func (r *apiKeyRepository) UpdateGroupIDByUserAndGroup(ctx context.Context, userID, oldGroupID, newGroupID int64) (int64, error) {
 	client := clientFromContext(ctx, r.client)
 	n, err := client.APIKey.Update().
-		Where(apikey.UserIDEQ(userID), apikey.GroupIDEQ(oldGroupID), apikey.DeletedAtIsNil()).
+		Where(
+			apikey.UserIDEQ(userID),
+			apikey.GroupIDEQ(oldGroupID),
+			apikey.DeletedAtIsNil(),
+			apikey.PurposeEQ(service.APIKeyPurposeUser),
+		).
 		SetGroupID(newGroupID).
 		Save(ctx)
 	return int64(n), err
@@ -842,6 +988,7 @@ func apiKeyEntityToService(m *dbent.APIKey) *service.APIKey {
 		Key:           m.Key,
 		Name:          m.Name,
 		Status:        m.Status,
+		Purpose:       m.Purpose,
 		IPWhitelist:   m.IPWhitelist,
 		IPBlacklist:   m.IPBlacklist,
 		LastUsedAt:    m.LastUsedAt,

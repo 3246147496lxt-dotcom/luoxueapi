@@ -3094,6 +3094,7 @@ func TestDefaultOpenAIAccountScheduler_ReportSwitchAndSnapshot(t *testing.T) {
 
 	ttft := 100
 	scheduler.ReportResult(1001, true, &ttft)
+	scheduler.ReportResult(1001, false, nil)
 	scheduler.ReportSwitch()
 	scheduler.metrics.recordSelect(OpenAIAccountScheduleDecision{
 		Layer:             openAIAccountScheduleLayerLoadBalance,
@@ -3114,6 +3115,8 @@ func TestDefaultOpenAIAccountScheduler_ReportSwitchAndSnapshot(t *testing.T) {
 	require.Equal(t, int64(1), snapshot.StickySessionHitTotal)
 	require.Equal(t, int64(1), snapshot.LoadBalanceSelectTotal)
 	require.Equal(t, int64(1), snapshot.AccountSwitchTotal)
+	require.Equal(t, int64(1), snapshot.ReportSuccessTotal)
+	require.Equal(t, int64(1), snapshot.ReportFailureTotal)
 	require.Greater(t, snapshot.SchedulerLatencyMsAvg, 0.0)
 	require.Greater(t, snapshot.StickyHitRatio, 0.0)
 	require.Greater(t, snapshot.LoadSkewAvg, 0.0)

@@ -734,89 +734,99 @@ func TestForwardAsAnthropicMessages_BetaFastModePassesOpenAIFastPolicyByDefault(
 		"default policy should pass service_tier=priority through to upstream")
 }
 
-// --- Fix1: passthrough capturedSessionModel must follow session.update ---
+// --- Fix1: passthrough model identity is immutable for the connection ---
 
-// TestPolicyEnforcingFrameConn_SessionUpdateRotatesCapturedModel covers the
-// fix1 bypass: client opens with a whitelist-miss model (gpt-4o → pass under
-// gpt-5.5 whitelist), rotates to gpt-5.5 via session.update, then sends
-// response.create without "model". Without the session.update sniffing the
-// follow-up frame would fall back to the stale gpt-4o capture and pass — the
-// fix updates capturedSessionModel from session.* events so the fallback now
-// resolves to gpt-5.5 and the policy filters service_tier.
-func TestPolicyEnforcingFrameConn_SessionUpdateRotatesCapturedModel(t *testing.T) {
-	svc := newOpenAIGatewayServiceWithSettings(t, gpt55WhitelistFastPolicy())
-	account := &Account{Platform: PlatformOpenAI, Type: AccountTypeAPIKey}
-
-	// Frame 1: response.create with whitelist-miss model — under default
-	// rule fallback=pass, service_tier stays.
-	first := []byte(`{"type":"response.create","model":"gpt-4o","service_tier":"priority"}`)
-	// Frame 2: session.update rotates the session model to gpt-5.5.
-	rotate := []byte(`{"type":"session.update","session":{"model":"gpt-5.5"}}`)
-	// Frame 3: response.create WITHOUT model — must inherit gpt-5.5.
-	followup := []byte(`{"type":"response.create","service_tier":"priority"}`)
-
-	inner := &fakePassthroughFrameConn{reads: [][]byte{first, rotate, followup}}
-
-	// Replicate the production wiring in openai_ws_v2_passthrough_adapter.go
-	// so capturedSessionModel state is shared across frames.
-	capturedSessionModel := openAIWSPassthroughPolicyModelForFrame(account, first)
-	require.Equal(t, "gpt-4o", capturedSessionModel)
-	wrapper := &openAIWSPolicyEnforcingFrameConn{
-		inner: inner,
-		filter: func(msgType coderws.MessageType, payload []byte) ([]byte, *OpenAIFastBlockedError, error) {
-			if msgType != coderws.MessageText {
-				return payload, nil, nil
-			}
-			if updated := openAIWSPassthroughPolicyModelFromSessionFrame(account, payload); updated != "" {
-				capturedSessionModel = updated
-			}
-			model := openAIWSPassthroughPolicyModelForFrame(account, payload)
-			if model == "" {
-				model = capturedSessionModel
-			}
-			return svc.applyOpenAIFastPolicyToWSResponseCreate(context.Background(), account, model, payload)
+func TestNormalizeOpenAIWSPassthroughLockedModelFrame(t *testing.T) {
+	const (
+		originalModel = "public-gpt-xhigh"
+		forwardModel  = "gpt-5.4"
+	)
+	tests := []struct {
+		name      string
+		eventType string
+		payload   string
+		want      string
+		wantErr   string
+	}{
+		{
+			name:      "response create omits model",
+			eventType: "response.create",
+			payload:   `{"type":"response.create","stream":true}`,
+			want:      `{"type":"response.create","stream":true}`,
+		},
+		{
+			name:      "response create repeats original alias",
+			eventType: "response.create",
+			payload:   `{"type":"response.create","model":"public-gpt-xhigh","stream":true}`,
+			want:      `{"type":"response.create","model":"gpt-5.4","stream":true}`,
+		},
+		{
+			name:      "response create repeats forward model",
+			eventType: "response.create",
+			payload:   `{"type":"response.create","model":"gpt-5.4","stream":true}`,
+			want:      `{"type":"response.create","model":"gpt-5.4","stream":true}`,
+		},
+		{
+			name:      "session update repeats original alias",
+			eventType: "session.update",
+			payload:   `{"type":"session.update","session":{"model":"public-gpt-xhigh","voice":"alloy"}}`,
+			want:      `{"type":"session.update","session":{"model":"gpt-5.4","voice":"alloy"}}`,
+		},
+		{
+			name:      "session update omits model",
+			eventType: "session.update",
+			payload:   `{"type":"session.update","session":{"voice":"alloy"}}`,
+			want:      `{"type":"session.update","session":{"voice":"alloy"}}`,
+		},
+		{
+			name:      "unrelated event is untouched",
+			eventType: "session.created",
+			payload:   `{"type":"session.created","session":{"model":"different"}}`,
+			want:      `{"type":"session.created","session":{"model":"different"}}`,
+		},
+		{
+			name:      "response create attempts switch",
+			eventType: "response.create",
+			payload:   `{"type":"response.create","model":"gpt-5.5"}`,
+			wantErr:   "changing model within a websocket connection is not supported",
+		},
+		{
+			name:      "session update attempts switch",
+			eventType: "session.update",
+			payload:   `{"type":"session.update","session":{"model":"gpt-5.5"}}`,
+			wantErr:   "changing model within a websocket connection is not supported",
+		},
+		{
+			name:      "explicit null is not omission",
+			eventType: "response.create",
+			payload:   `{"type":"response.create","model":null}`,
+			wantErr:   "websocket model must be a non-empty string",
+		},
+		{
+			name:      "explicit blank is invalid",
+			eventType: "session.update",
+			payload:   `{"type":"session.update","session":{"model":"  "}}`,
+			wantErr:   "websocket model must be a non-empty string",
 		},
 	}
 
-	// Frame 1: gpt-4o miss whitelist → pass (service_tier preserved).
-	_, payload1, err := wrapper.ReadFrame(context.Background())
-	require.NoError(t, err)
-	require.Contains(t, string(payload1), `"service_tier"`, "frame1: gpt-4o miss whitelist → pass keeps service_tier")
-
-	// Frame 2: session.update — not response.create, untouched, but its
-	// side effect updates capturedSessionModel to gpt-5.5.
-	_, payload2, err := wrapper.ReadFrame(context.Background())
-	require.NoError(t, err)
-	require.Equal(t, string(rotate), string(payload2), "session.update frame is forwarded verbatim")
-	require.Equal(t, "gpt-5.5", capturedSessionModel, "fix1: session.update must rotate capturedSessionModel")
-
-	// Frame 3: empty model + new captured gpt-5.5 → matches whitelist → filter.
-	_, payload3, err := wrapper.ReadFrame(context.Background())
-	require.NoError(t, err)
-	require.NotContains(t, string(payload3), `"service_tier"`,
-		"fix1: post-rotate response.create without model must use refreshed capturedSessionModel and trigger filter")
-}
-
-// TestPolicyModelFromSessionFrame_OnlySessionUpdate covers the negative
-// branches of openAIWSPassthroughPolicyModelFromSessionFrame: only
-// client→upstream session.update frames rotate the captured model;
-// server→client events (session.created) and unrelated frames must not.
-func TestPolicyModelFromSessionFrame_OnlySessionUpdate(t *testing.T) {
-	account := &Account{Platform: PlatformOpenAI, Type: AccountTypeAPIKey}
-
-	// session.created is a server→client event in the OpenAI Realtime
-	// protocol — clients never send it, so this filter (which only runs on
-	// the client→upstream direction) must ignore it even if it appears.
-	created := []byte(`{"type":"session.created","session":{"model":"gpt-5.5"}}`)
-	require.Empty(t, openAIWSPassthroughPolicyModelFromSessionFrame(account, created))
-
-	// Non-session.* frames must NOT trigger rotation.
-	notSession := []byte(`{"type":"response.create","session":{"model":"gpt-9"}}`)
-	require.Empty(t, openAIWSPassthroughPolicyModelFromSessionFrame(account, notSession))
-
-	// Missing session.model returns empty — caller keeps the old captured value.
-	noModel := []byte(`{"type":"session.update","session":{"voice":"alloy"}}`)
-	require.Empty(t, openAIWSPassthroughPolicyModelFromSessionFrame(account, noModel))
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := normalizeOpenAIWSPassthroughLockedModelFrame(
+				[]byte(tt.payload),
+				tt.eventType,
+				originalModel,
+				forwardModel,
+			)
+			if tt.wantErr != "" {
+				require.EqualError(t, err, tt.wantErr)
+				require.Nil(t, got)
+				return
+			}
+			require.NoError(t, err)
+			require.JSONEq(t, tt.want, string(got))
+		})
+	}
 }
 
 // --- Fix2: native /responses normalize "fast" → "priority" on pass ---
@@ -979,13 +989,7 @@ func TestPassthroughBilling_MultiTurnServiceTierFollowsFilteredFrames(t *testing
 		if msgType != coderws.MessageText {
 			return payload, nil, nil
 		}
-		if updated := openAIWSPassthroughPolicyModelFromSessionFrame(account, payload); updated != "" {
-			capturedSessionModel = updated
-		}
-		model := openAIWSPassthroughPolicyModelForFrame(account, payload)
-		if model == "" {
-			model = capturedSessionModel
-		}
+		model := capturedSessionModel
 		out, blocked, policyErr := svc.applyOpenAIFastPolicyToWSResponseCreate(context.Background(), account, model, payload)
 		if policyErr == nil && blocked == nil &&
 			strings.TrimSpace(gjson.GetBytes(payload, "type").String()) == "response.create" {
@@ -1043,39 +1047,51 @@ func TestPassthroughUsageMeta_TracksReasoningEffortAcrossTurns(t *testing.T) {
 	svc := newOpenAIGatewayServiceWithSettings(t, DefaultOpenAIFastPolicySettings())
 	account := &Account{Platform: PlatformOpenAI, Type: AccountTypeAPIKey}
 
-	firstFrame := []byte(`{"type":"response.create","model":"gpt-5.5","reasoning":{"effort":"medium"},"service_tier":"priority"}`)
-	meta := newOpenAIWSPassthroughUsageMeta("", firstFrame)
-	capturedSessionModel := openAIWSPassthroughPolicyModelForFrame(account, firstFrame)
-	firstOut, firstBlocked, firstErr := svc.applyOpenAIFastPolicyToWSResponseCreate(context.Background(), account, capturedSessionModel, firstFrame)
+	const (
+		originalModel = "gpt-5.4-xhigh"
+		forwardModel  = "gpt-5.4"
+	)
+	firstFrame := []byte(`{"type":"response.create","model":"gpt-5.4","reasoning":{"effort":"medium"},"service_tier":"priority"}`)
+	meta := newOpenAIWSPassthroughUsageMeta(originalModel, firstFrame)
+	lockedPolicyModel := openAIWSPassthroughPolicyModelForFrame(account, firstFrame)
+	firstOut, firstBlocked, firstErr := svc.applyOpenAIFastPolicyToWSResponseCreate(context.Background(), account, lockedPolicyModel, firstFrame)
 	require.NoError(t, firstErr)
 	require.Nil(t, firstBlocked)
-	meta.initFromFirstFrame(firstOut, capturedSessionModel)
+	meta.initFromFirstFrame(firstOut, lockedPolicyModel)
 	require.NotNil(t, meta.reasoningEffort.Load())
 	require.Equal(t, "medium", *meta.reasoningEffort.Load())
 
 	process := func(payload []byte) ([]byte, *OpenAIFastBlockedError, error) {
-		if updated := openAIWSPassthroughPolicyModelFromSessionFrame(account, payload); updated != "" {
-			capturedSessionModel = updated
+		eventType := strings.TrimSpace(gjson.GetBytes(payload, "type").String())
+		normalized, modelErr := normalizeOpenAIWSPassthroughLockedModelFrame(
+			payload,
+			eventType,
+			originalModel,
+			forwardModel,
+		)
+		if modelErr != nil {
+			return nil, nil, modelErr
 		}
-		meta.updateSessionRequestModel(payload)
-		requestModelForThisFrame := meta.requestModelForFrame(payload)
-		model := openAIWSPassthroughPolicyModelForFrame(account, payload)
-		if model == "" {
-			model = capturedSessionModel
-		}
-		out, blocked, policyErr := svc.applyOpenAIFastPolicyToWSResponseCreate(context.Background(), account, model, payload)
+		requestModelForThisFrame := meta.requestModelForFrame(normalized)
+		out, blocked, policyErr := svc.applyOpenAIFastPolicyToWSResponseCreate(
+			context.Background(),
+			account,
+			lockedPolicyModel,
+			normalized,
+		)
 		if policyErr == nil && blocked == nil &&
-			strings.TrimSpace(gjson.GetBytes(payload, "type").String()) == "response.create" {
-			meta.updateFromResponseCreate(out, model, requestModelForThisFrame)
+			eventType == "response.create" {
+			meta.updateFromResponseCreate(out, lockedPolicyModel, requestModelForThisFrame)
 		}
 		return out, blocked, policyErr
 	}
 
-	_, blockedSession, errSession := process([]byte(`{"type":"session.update","session":{"model":"gpt-5-high"}}`))
+	sessionOut, blockedSession, errSession := process([]byte(`{"type":"session.update","session":{"model":"gpt-5.4-xhigh"}}`))
 	require.NoError(t, errSession)
 	require.Nil(t, blockedSession)
+	require.Equal(t, forwardModel, gjson.GetBytes(sessionOut, "session.model").String())
 	require.NotNil(t, meta.reasoningEffort.Load())
-	require.Equal(t, "medium", *meta.reasoningEffort.Load(), "session.update 只刷新后续 fallback model，不覆盖当前 turn metadata")
+	require.Equal(t, "medium", *meta.reasoningEffort.Load(), "session.update 不能改变连接的 reasoning identity")
 
 	_, blockedCancel, errCancel := process([]byte(`{"type":"response.cancel","reasoning_effort":"x-high"}`))
 	require.NoError(t, errCancel)
@@ -1089,10 +1105,18 @@ func TestPassthroughUsageMeta_TracksReasoningEffortAcrossTurns(t *testing.T) {
 	require.NotNil(t, meta.reasoningEffort.Load())
 	require.Equal(t, "xhigh", *meta.reasoningEffort.Load(), "flat reasoning_effort 必须进入 passthrough usage metadata")
 
-	_, blockedClear, errClear := process([]byte(`{"type":"response.create","model":"gpt-4o"}`))
-	require.NoError(t, errClear)
-	require.Nil(t, blockedClear)
-	require.Nil(t, meta.reasoningEffort.Load(), "新的 response.create 无 effort 且无可推导后缀时必须清空旧值")
+	aliasOut, blockedAlias, errAlias := process([]byte(`{"type":"response.create","model":"gpt-5.4-xhigh"}`))
+	require.NoError(t, errAlias)
+	require.Nil(t, blockedAlias)
+	require.Equal(t, forwardModel, gjson.GetBytes(aliasOut, "model").String())
+	require.NotNil(t, meta.reasoningEffort.Load())
+	require.Equal(t, "xhigh", *meta.reasoningEffort.Load(), "同模别名必须继续使用首轮固定 reasoning identity")
+
+	_, blockedSwitch, errSwitch := process([]byte(`{"type":"response.create","model":"gpt-4o"}`))
+	require.EqualError(t, errSwitch, "changing model within a websocket connection is not supported")
+	require.Nil(t, blockedSwitch)
+	require.NotNil(t, meta.reasoningEffort.Load())
+	require.Equal(t, "xhigh", *meta.reasoningEffort.Load(), "被拒绝的切模帧不能污染当前 reasoning metadata")
 }
 
 // TestPassthroughBilling_BlockedFrameDoesNotMutateServiceTier locks in the

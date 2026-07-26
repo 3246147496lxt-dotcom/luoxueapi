@@ -4,7 +4,12 @@ vi.mock('@/api/admin/accounts', () => ({
   getAntigravityDefaultModelMapping: vi.fn()
 }))
 
-import { buildModelMappingObject, getModelsByPlatform, splitModelMappingObject } from '../useModelWhitelist'
+import {
+  buildModelMappingObject,
+  getModelsByPlatform,
+  getPresetMappingsByPlatform,
+  splitModelMappingObject
+} from '../useModelWhitelist'
 
 describe('useModelWhitelist', () => {
   it('openai 模型列表包含 GPT-5.4 官方快照', () => {
@@ -26,6 +31,22 @@ describe('useModelWhitelist', () => {
     expect(models).not.toContain('gpt-5.1-codex-max')
     expect(models).not.toContain('gpt-5.1-codex-mini')
     expect(models).not.toContain('gpt-5.2-codex')
+  })
+
+  it('openai 模型列表和预设映射不再暴露 GPT-5.2 系列', () => {
+    const models = getModelsByPlatform('openai')
+    const retiredModels = [
+      'gpt-5.2',
+      'gpt-5.2-2025-12-11',
+      'gpt-5.2-chat-latest',
+      'gpt-5.2-pro',
+      'gpt-5.2-pro-2025-12-11'
+    ]
+
+    for (const model of retiredModels) expect(models).not.toContain(model)
+    expect(getPresetMappingsByPlatform('openai')).not.toContainEqual(
+      expect.objectContaining({ from: 'gpt-5.2' })
+    )
   })
 
   it('antigravity 模型列表包含图片模型兼容项', () => {

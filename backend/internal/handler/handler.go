@@ -26,6 +26,7 @@ type AdminHandlers struct {
 	System                 *admin.SystemHandler
 	Subscription           *admin.SubscriptionHandler
 	Usage                  *admin.UsageHandler
+	ChatHistory            *admin.AdminChatHistoryHandler
 	UserAttribute          *admin.UserAttributeHandler
 	ErrorPassthrough       *admin.ErrorPassthroughHandler
 	TLSFingerprintProfile  *admin.TLSFingerprintProfileHandler
@@ -65,6 +66,7 @@ type Handlers struct {
 	BatchImage       *BatchImageHandler
 	ModelCatalog     *ModelCatalogHandler
 	Documentation    *DocumentationHandler
+	Chat             *ChatHandler
 }
 
 // BuildInfo contains build-time information

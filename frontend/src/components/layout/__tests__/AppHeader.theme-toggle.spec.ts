@@ -65,9 +65,6 @@ function mountHeader(userOverrides: Partial<User> = {}) {
         LocaleSwitcher: {
           template: '<div data-testid="locale-switcher" />',
         },
-        SidebarCollapseIcon: {
-          template: '<svg data-component="sidebar-collapse-icon" />',
-        },
         SubscriptionProgressMini: true,
       },
     },
@@ -151,8 +148,22 @@ describe('AppHeader global navigation shell', () => {
     const wrapper = mountHeader()
 
     expect(wrapper.get('[data-testid="app-header"]').classes()).toEqual(
-      expect.arrayContaining(['fixed', 'inset-x-0', 'top-0', 'h-[81px]', 'bg-transparent', 'p-2', 'z-50']),
+      expect.arrayContaining([
+        'fixed',
+        'left-0',
+        'right-0',
+        'top-0',
+        'h-[81px]',
+        'bg-transparent',
+        'p-2',
+        'z-50',
+        'transition-[left]',
+        'lg:left-[184px]',
+        'min-[1025px]:left-[196px]',
+        'min-[1281px]:left-[208px]',
+      ]),
     )
+    expect(wrapper.get('[data-testid="app-header"]').classes()).not.toContain('inset-x-0')
     expect(wrapper.get('[data-testid="app-header"]').classes()).not.toContain('sticky')
     expect(wrapper.get('[data-testid="header-surface"]').classes()).toEqual(
       expect.arrayContaining([
@@ -178,30 +189,27 @@ describe('AppHeader global navigation shell', () => {
     )
     expect(wrapper.get('[data-testid="header-brand-slot"]').classes()).toEqual(
       expect.arrayContaining([
-        'md:w-[196px]',
-        'lg:w-[184px]',
-        'min-[1025px]:w-[196px]',
-        'min-[1281px]:w-[208px]',
-        'lg:justify-start',
+        'w-10',
+        'md:w-12',
+        'lg:hidden',
       ]),
     )
     expect(wrapper.get('[data-testid="header-brand"]').classes()).toEqual(
       expect.arrayContaining([
-        'lg:w-44',
-        'min-[1025px]:w-[188px]',
-        'min-[1281px]:w-[200px]',
+        'app-brand',
+        'app-brand--header',
       ]),
     )
     expect(wrapper.get('[data-testid="header-brand"]').classes()).not.toContain('hover:bg-gray-100/80')
     expect(wrapper.get('[data-testid="header-brand"]').attributes('href')).toBe('/dashboard')
     expect(wrapper.get('[data-testid="header-brand"]').attributes('aria-label')).toBe('落雪API')
     const brandImage = wrapper.get('[data-testid="header-brand"] img')
-    expect(brandImage.attributes('src')).toBe('/logo.png')
+    expect(brandImage.attributes('src')).toBe('/brand/luoxue-snowflake-cloud-palette.png')
     const brandLogo = wrapper.get('[data-testid="header-brand-logo"]')
     expect(brandLogo.element).toBe(brandImage.element.parentElement)
     expect(brandLogo.classes()).toEqual(
       expect.arrayContaining([
-        'brand-logo-frame',
+        'app-brand-logo-frame',
         'h-10',
         'w-10',
         'md:h-12',
@@ -215,29 +223,10 @@ describe('AppHeader global navigation shell', () => {
     expect(brandLogo.classes()).not.toContain('transition-transform')
     expect(brandLogo.classes()).not.toContain('group-hover:scale-105')
     expect(brandImage.classes()).toEqual(
-      expect.arrayContaining(['brand-logo-image', 'max-w-none']),
+      expect.arrayContaining(['app-brand-logo-image', 'max-w-none']),
     )
-    expect(brandImage.classes()).not.toContain('brand-logo-image-luoxue')
-    const wordmark = wrapper.get('[data-testid="header-brand-wordmark"]')
-    expect(wordmark.classes()).toEqual(
-      expect.arrayContaining([
-        'header-brand-wordmark-luoxue',
-        'text-[22px]',
-        'font-bold',
-        'leading-7',
-        'text-[#1c1f23]',
-        'dark:text-[#f9f9f9]',
-      ]),
-    )
-    expect(wordmark.classes()).not.toContain('tracking-tight')
-    expect(wordmark.get('.inline-flex').classes()).toEqual(
-      expect.arrayContaining(['items-baseline', 'gap-1.5', 'whitespace-nowrap']),
-    )
-    expect(wrapper.get('[data-testid="header-brand-name"]').text()).toBe('落雪')
-    expect(wrapper.get('[data-testid="header-brand-name"]').classes()).toContain('header-brand-name-luoxue')
-    expect(wrapper.get('[data-testid="header-brand-suffix"]').text()).toBe('API')
-    expect(wrapper.get('[data-testid="header-brand-suffix"]').classes()).toContain('header-brand-suffix-luoxue')
-    expect(wrapper.get('[data-testid="header-brand"]').text()).toContain('落雪API')
+    expect(brandImage.classes()).toContain('app-brand-logo-image-luoxue')
+    expect(wrapper.get('[data-testid="header-brand"]').text()).toBe('')
     expect(wrapper.find('[data-testid="header-surface"] p').exists()).toBe(false)
   })
 
@@ -250,7 +239,7 @@ describe('AppHeader global navigation shell', () => {
     await wrapper.vm.$nextTick()
 
     expect(brandImage.attributes('src')).toBe('/brand/luoxue-snowpuff-mark.svg')
-    expect(brandImage.classes()).not.toContain('brand-logo-image-luoxue')
+    expect(brandImage.classes()).not.toContain('app-brand-logo-image-luoxue')
   })
 
   it('uses configured brand data and links administrators to their dashboard', async () => {
@@ -265,11 +254,8 @@ describe('AppHeader global navigation shell', () => {
     expect(brand.attributes('href')).toBe('/admin/dashboard')
     expect(brand.attributes('aria-label')).toBe('Snow Console')
     expect(brand.get('img').attributes('src')).toBe('/brand.svg')
-    expect(brand.get('img').classes()).not.toContain('brand-logo-image-luoxue')
-    expect(brand.text()).toContain('Snow Console')
-    expect(brand.get('[data-testid="header-brand-wordmark"]').classes()).not.toContain('header-brand-wordmark-luoxue')
-    expect(brand.get('[data-testid="header-brand-name"]').text()).toBe('Snow Console')
-    expect(brand.find('[data-testid="header-brand-suffix"]').exists()).toBe(false)
+    expect(brand.get('img').classes()).not.toContain('app-brand-logo-image-luoxue')
+    expect(brand.text()).toBe('')
   })
 
   it('applies tight logo treatment only to the approved Luoxue snowflake asset', async () => {
@@ -280,54 +266,49 @@ describe('AppHeader global navigation shell', () => {
     appStore.siteLogo = '/brand/luoxue-snowflake-cloud-palette.svg'
     await wrapper.vm.$nextTick()
 
-    expect(brandImage.classes()).toContain('brand-logo-image-luoxue')
+    expect(brandImage.classes()).toContain('app-brand-logo-image-luoxue')
 
     appStore.siteLogo = '/brand/another-logo.svg'
     await wrapper.vm.$nextTick()
 
-    expect(brandImage.classes()).not.toContain('brand-logo-image-luoxue')
+    expect(brandImage.classes()).not.toContain('app-brand-logo-image-luoxue')
   })
 
-  it('moves desktop sidebar collapse control into the header with synchronized aria state', async () => {
+  it('leaves the desktop collapse control in the sidebar while tracking the rail width', async () => {
     const wrapper = mountHeader()
     const appStore = useAppStore()
-    const toggle = wrapper.get('[data-testid="header-sidebar-toggle"]')
-
-    expect(toggle.classes()).toEqual(expect.arrayContaining(['hidden', 'h-8', 'w-8', 'lg:flex']))
-    expect(toggle.classes()).not.toContain('lg:-ml-px')
-    expect(toggle.attributes('aria-controls')).toBe('app-sidebar')
-    expect(toggle.attributes('aria-expanded')).toBe('true')
-    expect(toggle.attributes('aria-label')).toBe('nav.collapse')
-    const collapseIcon = toggle.get('[data-component="sidebar-collapse-icon"]')
-    expect(collapseIcon.attributes('data-testid')).toBe('header-sidebar-toggle-icon')
-    expect(collapseIcon.classes()).toEqual(expect.arrayContaining(['h-5', 'w-5']))
-    expect(collapseIcon.classes()).not.toContain('rotate-180')
 
     const pageLabel = wrapper.get('[data-testid="header-surface"] h1')
     const pageContext = pageLabel.element.parentElement
+    expect(wrapper.find('[data-testid="header-sidebar-toggle"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="sidebar-collapse-toggle"]').exists()).toBe(false)
     expect(pageLabel.text()).toBe('Groups')
+    expect(wrapper.get('[data-testid="header-page-context"]').text()).toContain('nav.management')
+    expect(wrapper.get('[data-testid="header-page-context"]').text()).toContain('/')
     expect(wrapper.findAll('[data-testid="header-surface"] h1')).toHaveLength(1)
-    expect(toggle.element.nextElementSibling).toBe(pageContext)
-    expect(toggle.element.parentElement?.querySelector('.w-px')).toBeNull()
+    expect(wrapper.get('[data-testid="header-brand-slot"]').element.nextElementSibling).toBe(
+      pageContext,
+    )
+    expect(wrapper.get('[data-testid="header-surface"]').element.querySelector('.w-px')).toBeNull()
+    expect(wrapper.get('[data-testid="app-header"]').classes()).toContain('lg:left-[184px]')
 
-    await toggle.trigger('click')
+    appStore.setSidebarCollapsed(true)
+    await wrapper.vm.$nextTick()
 
     expect(appStore.sidebarCollapsed).toBe(true)
-    expect(toggle.attributes('aria-expanded')).toBe('false')
-    expect(toggle.attributes('aria-label')).toBe('nav.expand')
-    expect(collapseIcon.classes()).toContain('rotate-180')
+    expect(wrapper.get('[data-testid="app-header"]').classes()).toContain('lg:left-[68px]')
+    expect(wrapper.get('[data-testid="app-header"]').classes()).not.toContain('lg:left-[184px]')
     expect(wrapper.get('[data-testid="header-brand-slot"]').classes()).toEqual(
-      expect.arrayContaining(['md:w-[68px]']),
+      expect.arrayContaining(['w-10', 'md:w-12', 'lg:hidden']),
     )
-    expect(wrapper.get('[data-testid="header-brand-slot"]').classes()).not.toContain('lg:w-[76px]')
-    expect(wrapper.get('[data-testid="header-brand"]').classes()).toContain('lg:w-[60px]')
+    expect(wrapper.get('[data-testid="header-brand"]').classes()).toContain('app-brand--collapsed')
 
-    await toggle.trigger('click')
+    appStore.setSidebarCollapsed(false)
+    await wrapper.vm.$nextTick()
 
     expect(appStore.sidebarCollapsed).toBe(false)
-    expect(toggle.attributes('aria-expanded')).toBe('true')
-    expect(toggle.attributes('aria-label')).toBe('nav.collapse')
-    expect(collapseIcon.classes()).not.toContain('rotate-180')
+    expect(wrapper.get('[data-testid="app-header"]').classes()).toContain('lg:left-[184px]')
+    expect(wrapper.get('[data-testid="header-brand"]').classes()).not.toContain('app-brand--collapsed')
   })
 
   it('keeps the mobile menu state and sidebar aria relationship in sync', async () => {
@@ -369,6 +350,14 @@ describe('AppHeader global navigation shell', () => {
     const localeSwitcher = actions.get('[data-testid="locale-switcher"]')
     expect(localeSwitcher.attributes('icon-variant') ?? localeSwitcher.attributes('iconvariant'))
       .toBe('lucide')
+  })
+
+  it('shows the compact balance entry at the approved 1440px breakpoint', () => {
+    const wrapper = mountHeader()
+    const balance = wrapper.get('[data-testid="header-balance"]')
+
+    expect(balance.classes()).toContain('min-[1400px]:flex')
+    expect(balance.classes()).not.toContain('2xl:flex')
   })
 
   it('uses a rounded account pill with responsive identity and accessible menu state', async () => {

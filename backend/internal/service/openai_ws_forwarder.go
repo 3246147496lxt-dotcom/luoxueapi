@@ -205,10 +205,50 @@ func (e *OpenAIWSClientCloseError) Reason() string {
 	return strings.TrimSpace(e.reason)
 }
 
+// ShouldReportOpenAIWSAccountScheduleFailure reports whether a terminal WS
+// proxy error should be attributed to the selected upstream account.
+//
+// OpenAIWSClientCloseError is reserved for local client-facing termination
+// (payload/policy/concurrency/idle/client I/O), so it must not affect account
+// health. Explicit upstream I/O and dial failures remain reportable, as do
+// unknown errors so newly introduced upstream failures are not silently hidden.
+func ShouldReportOpenAIWSAccountScheduleFailure(err error) bool {
+	if err == nil {
+		return false
+	}
+
+	var dialErr *openAIWSDialError
+	if errors.As(err, &dialErr) {
+		return true
+	}
+
+	if errors.Is(err, context.Canceled) {
+		return false
+	}
+
+	var closeErr *OpenAIWSClientCloseError
+	if errors.As(err, &closeErr) {
+		return false
+	}
+
+	var turnErr *openAIWSIngressTurnError
+	if errors.As(err, &turnErr) && turnErr != nil {
+		switch strings.TrimSpace(turnErr.stage) {
+		case "write_client", "read_client":
+			return false
+		case "write_upstream", "read_upstream":
+			return true
+		}
+	}
+
+	return true
+}
+
 // OpenAIWSIngressHooks 定义入站 WS 每个 turn 的生命周期回调。
 type OpenAIWSIngressHooks struct {
-	// InitialRequestModel 是首帧渠道映射前的请求模型，只用于 usage metadata
-	// 的 reasoning effort 后缀推导，禁止用于上游请求或计费模型。
+	// InitialRequestModel is the pre-channel-mapping model identity. It locks
+	// the requested model for the connection and supports reasoning suffix
+	// derivation; it is never forwarded as the upstream or billing model.
 	InitialRequestModel string
 	BeforeTurn          func(turn int) error
 	BeforeRequest       func(turn int, payload []byte, originalModel string) error

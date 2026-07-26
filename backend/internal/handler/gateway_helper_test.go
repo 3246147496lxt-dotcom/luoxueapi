@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/pkg/ctxkey"
 	"github.com/stretchr/testify/require"
 )
 
@@ -82,6 +83,28 @@ func TestWrapReleaseOnDone_AlreadyCancelledReleasesExactlyOnce(t *testing.T) {
 	require.Eventually(t, func() bool {
 		return atomic.LoadInt32(&releaseCount) == 1
 	}, time.Second, time.Millisecond)
+}
+
+func TestWrapGatewayReleaseWebChatRetainsSlotUntilForwardReturns(t *testing.T) {
+	parent := context.WithValue(context.Background(), ctxkey.WebChat, true)
+	ctx, cancel := context.WithCancel(parent)
+	var active atomic.Int32
+	active.Store(1)
+
+	release := wrapGatewayRelease(ctx, func() {
+		active.Add(-1)
+	})
+	cancel()
+
+	require.Never(t, func() bool {
+		return active.Load() == 0
+	}, 50*time.Millisecond, 5*time.Millisecond, "browser cancellation must not release a Web Chat slot while upstream drain is active")
+	require.False(t, active.CompareAndSwap(0, 1), "a second request must remain constrained while the first upstream is draining")
+
+	release()
+	release()
+	require.EqualValues(t, 0, active.Load(), "terminal drain completion must release exactly once")
+	require.True(t, active.CompareAndSwap(0, 1), "the next request may acquire only after drain completion")
 }
 
 // TestWrapReleaseOnDone_MultipleCallsOnlyReleaseOnce 验证多次调用 release 只释放一次

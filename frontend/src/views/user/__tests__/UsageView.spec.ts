@@ -14,6 +14,7 @@ const {
   showWarning,
   showSuccess,
   showInfo,
+  routeQuery,
 } = vi.hoisted(() => ({
   query: vi.fn(),
   getStats: vi.fn(),
@@ -25,6 +26,7 @@ const {
   showWarning: vi.fn(),
   showSuccess: vi.fn(),
   showInfo: vi.fn(),
+  routeQuery: {} as Record<string, string | undefined>,
 }))
 
 const messages: Record<string, string> = {
@@ -48,6 +50,12 @@ const messages: Record<string, string> = {
   'admin.usage.allModels': 'All models',
   'usage.allApiKeys': 'All API Keys',
   'usage.apiKeyFilter': 'API Key',
+  'usage.source': 'Source',
+  'usage.allSources': 'All',
+  'usage.sourceWebChat': 'GPT Chat',
+  'usage.sourceApi': 'API',
+  'usage.requestId': 'Request ID',
+  'usage.requestIdPlaceholder': 'Full request ID',
   'usage.model': 'Model',
   'usage.type': 'Type',
   'usage.ws': 'WS',
@@ -81,6 +89,12 @@ vi.mock('@/api', () => ({
 
 vi.mock('@/stores/app', () => ({
   useAppStore: () => ({ showError, showWarning, showSuccess, showInfo }),
+}))
+
+vi.mock('vue-router', () => ({
+  useRoute: () => ({
+    query: routeQuery,
+  }),
 }))
 
 vi.mock('vue-i18n', async () => {
@@ -159,6 +173,7 @@ describe('user UsageView', () => {
     showWarning.mockReset()
     showSuccess.mockReset()
     showInfo.mockReset()
+    Object.keys(routeQuery).forEach((key) => delete routeQuery[key])
 
     query.mockResolvedValue({ items: [usageLog], total: 1, pages: 1 })
     getStats.mockResolvedValue({
@@ -205,6 +220,45 @@ describe('user UsageView', () => {
     }))
     expect(list).toHaveBeenCalledWith(1, 100)
     expect(getAvailable).toHaveBeenCalled()
+  })
+
+  it('applies source and exact request ID deep links only to the usage list', async () => {
+    Object.assign(routeQuery, {
+      source: 'web_chat',
+      request_id: 'req-chat-deep-link',
+    })
+
+    const wrapper = mountUsageView()
+    await flushPromises()
+
+    expect(query).toHaveBeenCalledWith(expect.objectContaining({
+      source: 'web_chat',
+      request_id: 'req-chat-deep-link',
+    }), expect.anything())
+    expect(getStats).toHaveBeenCalledWith(expect.not.objectContaining({
+      source: expect.anything(),
+      request_id: expect.anything(),
+    }))
+    expect((wrapper.vm as any).activeSource).toBe('web_chat')
+    expect((wrapper.vm as any).visibleColumns.map((column: { key: string }) => column.key)).toEqual(
+      expect.arrayContaining(['source', 'request_id'])
+    )
+  })
+
+  it('switches the source segment and reloads the list with the selected source', async () => {
+    const wrapper = mountUsageView()
+    await flushPromises()
+    query.mockClear()
+
+    const sourceButtons = wrapper.findAll('[data-testid="usage-source-filter"]')
+    expect(sourceButtons).toHaveLength(3)
+    await sourceButtons[1].trigger('click')
+    await flushPromises()
+
+    expect(query).toHaveBeenCalledWith(expect.objectContaining({
+      source: 'web_chat',
+    }), expect.anything())
+    expect(getStats).toHaveBeenCalledTimes(1)
   })
 
   it('exports csv with current filters and without admin-only fields', async () => {

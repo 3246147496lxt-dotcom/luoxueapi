@@ -103,6 +103,8 @@ type OpenAIAccountSchedulerMetricsSnapshot struct {
 	StickySessionHitTotal    int64
 	LoadBalanceSelectTotal   int64
 	AccountSwitchTotal       int64
+	ReportSuccessTotal       int64
+	ReportFailureTotal       int64
 	SchedulerLatencyMsTotal  int64
 	SchedulerLatencyMsAvg    float64
 	StickyHitRatio           float64
@@ -124,6 +126,8 @@ type openAIAccountSchedulerMetrics struct {
 	stickySessionHitTotal  atomic.Int64
 	loadBalanceSelectTotal atomic.Int64
 	accountSwitchTotal     atomic.Int64
+	reportSuccessTotal     atomic.Int64
+	reportFailureTotal     atomic.Int64
 	latencyMsTotal         atomic.Int64
 	loadSkewMilliTotal     atomic.Int64
 }
@@ -173,6 +177,17 @@ func (m *openAIAccountSchedulerMetrics) recordSwitch() {
 		return
 	}
 	m.accountSwitchTotal.Add(1)
+}
+
+func (m *openAIAccountSchedulerMetrics) recordResult(success bool) {
+	if m == nil {
+		return
+	}
+	if success {
+		m.reportSuccessTotal.Add(1)
+		return
+	}
+	m.reportFailureTotal.Add(1)
 }
 
 type openAIAccountRuntimeStats struct {
@@ -1637,10 +1652,13 @@ func (s *defaultOpenAIAccountScheduler) isAccountRequestCompatible(ctx context.C
 }
 
 func (s *defaultOpenAIAccountScheduler) ReportResult(accountID int64, success bool, firstTokenMs *int) {
-	if s == nil || s.stats == nil {
+	if s == nil {
 		return
 	}
-	s.stats.report(accountID, success, firstTokenMs)
+	s.metrics.recordResult(success)
+	if s.stats != nil {
+		s.stats.report(accountID, success, firstTokenMs)
+	}
 }
 
 func (s *defaultOpenAIAccountScheduler) ReportSwitch() {
@@ -1668,6 +1686,8 @@ func (s *defaultOpenAIAccountScheduler) SnapshotMetrics() OpenAIAccountScheduler
 		StickySessionHitTotal:    sessionHit,
 		LoadBalanceSelectTotal:   s.metrics.loadBalanceSelectTotal.Load(),
 		AccountSwitchTotal:       switchTotal,
+		ReportSuccessTotal:       s.metrics.reportSuccessTotal.Load(),
+		ReportFailureTotal:       s.metrics.reportFailureTotal.Load(),
 		SchedulerLatencyMsTotal:  latencyTotal,
 		RuntimeStatsAccountCount: s.stats.size(),
 	}

@@ -73,6 +73,9 @@ const schedulerOutboxPendingDedupKeyMigration = "153_scheduler_outbox_pending_de
 const schedulerOutboxPendingDedupKeyIndex = "idx_scheduler_outbox_pending_dedup_key"
 const latestAPIKeyIPIndexMigration = "174_add_usage_logs_api_key_latest_ip_index_notx.sql"
 const latestAPIKeyIPIndex = "idx_usage_logs_api_key_latest_ip"
+const apiKeyPurposeWebChatIndexesMigration = "183a_api_key_purpose_web_chat_indexes_notx.sql"
+const apiKeyPurposeIndex = "idx_api_keys_purpose"
+const apiKeyWebChatActiveUserGroupIndex = "idx_api_keys_web_chat_active_user_group"
 const schemaMigrationOriginStateKey = "schema_origin"
 
 type schemaMigrationOrigin string
@@ -432,6 +435,13 @@ func prepareNonTransactionalMigration(ctx context.Context, db migrationQueryExec
 		return dropInvalidIndexIfPresent(ctx, db, schedulerOutboxPendingDedupKeyIndex)
 	case latestAPIKeyIPIndexMigration:
 		return dropInvalidIndexIfPresent(ctx, db, latestAPIKeyIPIndex)
+	case apiKeyPurposeWebChatIndexesMigration:
+		for _, indexName := range []string{apiKeyPurposeIndex, apiKeyWebChatActiveUserGroupIndex} {
+			if err := dropInvalidIndexIfPresent(ctx, db, indexName); err != nil {
+				return err
+			}
+		}
+		return nil
 	default:
 		return nil
 	}

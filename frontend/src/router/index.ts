@@ -206,6 +206,18 @@ const routes: RouteRecordRaw[] = [
     }
   },
   {
+    path: '/chat',
+    name: 'Chat',
+    component: () => import('@/views/user/ChatView.vue'),
+    meta: {
+      requiresAuth: true,
+      requiresAdmin: false,
+      title: 'GPT Chat',
+      titleKey: 'chat.title',
+      descriptionKey: 'chat.subtitle'
+    }
+  },
+  {
     path: '/keys',
     name: 'Keys',
     component: () => import('@/views/user/KeysView.vue'),
@@ -449,6 +461,18 @@ const routes: RouteRecordRaw[] = [
       title: 'User Management',
       titleKey: 'admin.users.title',
       descriptionKey: 'admin.users.description'
+    }
+  },
+  {
+    path: '/admin/users/:userId([1-9]\\d*)/chat-history',
+    name: 'AdminUserChatHistory',
+    component: () => import('@/views/admin/AdminUserChatHistoryView.vue'),
+    meta: {
+      requiresAuth: true,
+      requiresAdmin: true,
+      title: 'User Chat History',
+      titleKey: 'admin.chatHistory.title',
+      descriptionKey: 'admin.chatHistory.description'
     }
   },
   {
@@ -957,7 +981,6 @@ router.beforeEach(async (to, _from, next) => {
       '/admin/subscriptions',
       '/admin/redeem',
       '/subscriptions',
-      '/purchase',
       '/redeem'
     ]
 

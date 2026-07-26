@@ -23,6 +23,13 @@ export interface AuthSessionSnapshot {
 
 export type AuthSessionPatch = Partial<AuthSessionSnapshot>
 
+export interface AuthSessionInvalidationExpectation {
+  generation: string | null
+  accessToken: string | null
+  refreshToken: string | null
+  userId: number | null
+}
+
 export interface AuthSessionRefreshResult {
   access_token: string
   refresh_token?: string
@@ -978,13 +985,29 @@ export function createAuthSession(options: AuthSessionOptions = {}) {
     applySnapshot(EMPTY_SESSION, null)
   }
 
-  const invalidate = (expectedGeneration: string | null): boolean => {
+  const invalidate = (
+    expected: string | null | AuthSessionInvalidationExpectation,
+  ): boolean => {
     ensureStorageSync()
-    // Reconcile durable state at the mutation boundary. This operation never
-    // deletes localStorage, so a concurrent login in another tab cannot be
-    // erased even if it lands immediately after this check.
+    // Reconcile and compare at the mutation boundary. Callers that provide the
+    // full identity cannot invalidate a same-family token rotation observed in
+    // durable storage. This operation never deletes localStorage.
     syncFromStorage()
+    const expectation = expected !== null && typeof expected === 'object'
+      ? expected
+      : null
+    const expectedGeneration = expectation
+      ? normalizeGeneration(expectation.generation)
+      : normalizeGeneration(expected)
     if (familyGeneration !== expectedGeneration) return false
+    if (
+      expectation
+      && (
+        snapshot.accessToken !== normalizeToken(expectation.accessToken)
+        || snapshot.refreshToken !== normalizeToken(expectation.refreshToken)
+        || (snapshot.user?.id ?? null) !== expectation.userId
+      )
+    ) return false
 
     writeInvalidatedGeneration(expectedGeneration)
     applySnapshot(EMPTY_SESSION, null)

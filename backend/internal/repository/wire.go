@@ -70,6 +70,7 @@ func ProvideAccountProjectionWriter(cache service.SchedulerCache) service.Accoun
 var ProviderSet = wire.NewSet(
 	NewUserRepository,
 	NewAPIKeyRepository,
+	NewChatPrincipalRepository,
 	NewGroupRepository,
 	NewAccountRepository,
 	NewAdminAccountRepository,
@@ -83,6 +84,10 @@ var ProviderSet = wire.NewSet(
 	NewUsageLogRepository,
 	ProvideUsageLogBatchRuntime,
 	NewUsageBillingRepository,
+	NewBillingReceiptRepository,
+	NewChatAttemptRepository,
+	NewChatHistoryRepository,
+	NewAdminChatHistoryRepository,
 	NewBatchImageRepository,
 	NewIdempotencyRepository,
 	NewUsageCleanupRepository,

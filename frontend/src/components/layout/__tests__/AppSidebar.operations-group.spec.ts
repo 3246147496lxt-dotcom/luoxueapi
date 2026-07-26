@@ -86,6 +86,11 @@ function mountSidebar(role: User['role'] = 'admin'): VueWrapper {
           props: ['to'],
           template: '<a :href="String(to)"><slot /></a>',
         },
+        SidebarCollapseIcon: {
+          props: ['collapsed'],
+          template:
+            '<svg data-component="sidebar-collapse-icon" :data-collapsed="String(collapsed)" />',
+        },
         VersionBadge: true,
       },
     },
@@ -125,14 +130,15 @@ describe('AppSidebar grouped admin navigation', () => {
 
   it('renders admin navigation directly without the operations wrapper', () => {
     const wrapper = mountSidebar()
-    const dashboardIcon = wrapper.get('a[href="/admin/dashboard"] .sidebar-svg-icon svg')
-    const accountPoolIcon = wrapper.get('a[href="/admin/accounts"] .sidebar-svg-icon svg')
-    const auditLogIcon = wrapper.get('a[href="/admin/audit-logs"] .sidebar-svg-icon svg')
-    const modelMarketplaceIcon = wrapper.get('a[href="/admin/model-catalog"] .sidebar-svg-icon svg')
+    const navigation = wrapper.get('nav.sidebar-nav')
+    const dashboardIcon = navigation.get('a[href="/admin/dashboard"] .sidebar-svg-icon svg')
+    const accountPoolIcon = navigation.get('a[href="/admin/accounts"] .sidebar-svg-icon svg')
+    const auditLogIcon = navigation.get('a[href="/admin/audit-logs"] .sidebar-svg-icon svg')
+    const modelMarketplaceIcon = navigation.get('a[href="/admin/model-catalog"] .sidebar-svg-icon svg')
 
     expect(wrapper.find('#sidebar-admin-operations-toggle').exists()).toBe(false)
     expect(wrapper.find('#sidebar-admin-operations').exists()).toBe(false)
-    expect(wrapper.get('a[href="/admin/dashboard"]').text()).toContain('nav.adminDashboard')
+    expect(navigation.get('a[href="/admin/dashboard"]').text()).toContain('nav.adminDashboard')
     expect(dashboardIcon.attributes('viewBox')).toBe('0 0 1024 1024')
     expect(dashboardIcon.get('path').attributes('fill')).toBe('currentColor')
     expect(accountPoolIcon.attributes('viewBox')).toBe('-112 -112 1248 1248')
@@ -146,16 +152,77 @@ describe('AppSidebar grouped admin navigation', () => {
     expect(wrapper.text()).not.toContain('nav.operationsManagement')
   })
 
-  it('keeps the original production sidebar surface on every admin page', () => {
+  it('keeps the full-height sidebar widths aligned with the application shell', () => {
     const wrapper = mountSidebar()
     const sidebar = wrapper.get('#app-sidebar')
 
     expect(sidebar.classes()).toContain('sidebar')
     expect(sidebar.classes()).toEqual(
-      expect.arrayContaining(['w-44', 'min-[1025px]:w-[188px]', 'min-[1281px]:w-[200px]']),
+      expect.arrayContaining([
+        'w-44',
+        'lg:w-[184px]',
+        'min-[1025px]:w-[196px]',
+        'min-[1281px]:w-[208px]',
+      ]),
     )
+    expect(wrapper.get('[data-testid="sidebar-brand-row"]').exists()).toBe(true)
+    expect(wrapper.get('[data-testid="sidebar-brand"]').attributes('href')).toBe('/admin/dashboard')
     expect(sidebar.classes()).not.toContain('sidebar--snow-clay')
     expect(sidebar.classes()).not.toContain('sidebar--home-clay')
+  })
+
+  it('keeps the desktop collapse control beside the brand and synchronizes its state', async () => {
+    const appStore = useAppStore()
+    const wrapper = mountSidebar()
+    const sidebar = wrapper.get('#app-sidebar')
+    const brandRow = wrapper.get('[data-testid="sidebar-brand-row"]')
+    const brand = brandRow.get('[data-testid="sidebar-brand"]')
+    const toggle = brandRow.get('[data-testid="sidebar-collapse-toggle"]')
+    const icon = toggle.get('[data-component="sidebar-collapse-icon"]')
+
+    expect(toggle.element.tagName).toBe('BUTTON')
+    expect(toggle.attributes('type')).toBe('button')
+    expect(toggle.attributes('aria-controls')).toBe('app-sidebar')
+    expect(toggle.attributes('aria-expanded')).toBe('true')
+    expect(toggle.attributes('aria-label')).toBe('nav.collapse')
+    expect(toggle.attributes('title')).toBe('nav.collapse')
+    expect(icon.attributes('data-testid')).toBe('sidebar-collapse-toggle-icon')
+    expect(icon.attributes('data-collapsed')).toBe('false')
+    expect(sidebar.classes()).toEqual(
+      expect.arrayContaining([
+        'w-44',
+        'lg:w-[184px]',
+        'min-[1025px]:w-[196px]',
+        'min-[1281px]:w-[208px]',
+      ]),
+    )
+    expect(brandRow.classes()).not.toContain('sidebar-header-collapsed')
+    expect(brand.classes()).not.toContain('app-brand--collapsed')
+
+    await toggle.trigger('click')
+    await nextTick()
+
+    expect(appStore.sidebarCollapsed).toBe(true)
+    expect(toggle.attributes('aria-expanded')).toBe('false')
+    expect(toggle.attributes('aria-label')).toBe('nav.expand')
+    expect(toggle.attributes('title')).toBe('nav.expand')
+    expect(icon.attributes('data-collapsed')).toBe('true')
+    expect(sidebar.classes()).toEqual(expect.arrayContaining(['w-[60px]', 'lg:w-[68px]']))
+    expect(sidebar.classes()).not.toContain('w-44')
+    expect(brandRow.classes()).toContain('sidebar-header-collapsed')
+    expect(brand.classes()).toContain('app-brand--collapsed')
+
+    await toggle.trigger('click')
+    await nextTick()
+
+    expect(appStore.sidebarCollapsed).toBe(false)
+    expect(toggle.attributes('aria-expanded')).toBe('true')
+    expect(toggle.attributes('aria-label')).toBe('nav.collapse')
+    expect(toggle.attributes('title')).toBe('nav.collapse')
+    expect(icon.attributes('data-collapsed')).toBe('false')
+    expect(sidebar.classes()).toContain('lg:w-[184px]')
+    expect(brandRow.classes()).not.toContain('sidebar-header-collapsed')
+    expect(brand.classes()).not.toContain('app-brand--collapsed')
   })
 
   it('groups the complete admin navigation by task while retaining the production rail', async () => {
@@ -193,9 +260,11 @@ describe('AppSidebar grouped admin navigation', () => {
 
     expect(sections[0].findAll('a[href]').map(link => link.attributes('href'))).toEqual([
       '/admin/dashboard',
+      '/chat',
       '/admin/ops',
       '/admin/usage',
     ])
+    expect(wrapper.findAll('a[href="/chat"]')).toHaveLength(1)
     expect(sections[0].text()).toContain('全站用量')
     expect(sections[1].findAll('a[href]').map(link => link.attributes('href'))).toEqual([
       '/admin/users',
@@ -285,6 +354,13 @@ describe('AppSidebar grouped admin navigation', () => {
       'sidebar-admin-system-section',
     ])
     expect(sections.every(section => section.findAll('.sidebar-link').length > 0)).toBe(true)
+    expect(
+      wrapper
+        .get('[data-testid="sidebar-admin-overview-section"]')
+        .find('a[href="/chat"]')
+        .exists(),
+    ).toBe(true)
+    expect(wrapper.findAll('a[href="/chat"]')).toHaveLength(1)
     expect(wrapper.find('a[href="/admin/users"]').exists()).toBe(false)
     expect(wrapper.find('[data-testid="sidebar-admin-business-section"] a[href="/keys"]').exists()).toBe(true)
     const simpleSystemLinks = wrapper
@@ -387,8 +463,9 @@ describe('AppSidebar grouped admin navigation', () => {
     const appStore = useAppStore()
     appStore.setSidebarCollapsed(true)
     const wrapper = mountSidebar()
+    const navigation = wrapper.get('nav.sidebar-nav')
 
-    expect(wrapper.get('a[href="/admin/dashboard"]').classes()).toContain('sidebar-link-collapsed')
+    expect(navigation.get('a[href="/admin/dashboard"]').classes()).toContain('sidebar-link-collapsed')
     expect(wrapper.find('a[href="/admin/announcements"]').exists()).toBe(true)
   })
 
@@ -408,6 +485,20 @@ describe('AppSidebar grouped admin navigation', () => {
     expect(wrapper.find('a[href="/admin/dashboard"]').exists()).toBe(false)
   })
 
+  it('keeps chat and recharge reachable for regular users in simple mode', () => {
+    useAuthStore()
+    const rawAuthState = toRaw(pinia.state.value.auth) as unknown as {
+      runMode: Ref<'standard' | 'simple'>
+    }
+    toRaw(rawAuthState.runMode).value = 'simple'
+
+    const wrapper = mountSidebar('user')
+
+    expect(wrapper.find('a[href="/chat"]').exists()).toBe(true)
+    expect(wrapper.find('a[href="/purchase"]').exists()).toBe(true)
+    expect(wrapper.find('a[href="/subscriptions"]').exists()).toBe(false)
+  })
+
   it('groups regular-user account links under the personal-center heading', () => {
     const wrapper = mountSidebar('user')
     const mainSection = wrapper.get('[data-testid="sidebar-user-main-section"]')
@@ -419,6 +510,7 @@ describe('AppSidebar grouped admin navigation', () => {
     expect(personalSection.get('.sidebar-section-title').attributes('aria-hidden')).toBe('true')
     expect(mainSection.findAll('a').map((link) => link.attributes('href'))).toEqual([
       '/dashboard',
+      '/chat',
       '/keys',
       '/usage',
       '/monitor',

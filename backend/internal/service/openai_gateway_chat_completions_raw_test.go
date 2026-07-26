@@ -14,10 +14,31 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/ctxkey"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/gjson"
 )
+
+type openAIChatCancelingWriter struct {
+	gin.ResponseWriter
+	cancel      context.CancelFunc
+	cancelAfter int
+	writes      int
+}
+
+func (w *openAIChatCancelingWriter) Write(p []byte) (int, error) {
+	w.writes++
+	n, err := w.ResponseWriter.Write(p)
+	if w.writes == w.cancelAfter {
+		w.cancel()
+	}
+	return n, err
+}
+
+func (w *openAIChatCancelingWriter) WriteString(s string) (int, error) {
+	return w.Write([]byte(s))
+}
 
 func TestBuildOpenAIChatCompletionsURL(t *testing.T) {
 	t.Parallel()
@@ -441,6 +462,7 @@ func TestHandleChatStreamingResponse_SilentRefusalReasoningSummaryExempt(t *test
 		"gpt-5.5",
 		time.Now(),
 		openAISilentRefusalMinRequestBodyBytes,
+		nil,
 	)
 	require.NoError(t, err)
 	require.NotNil(t, result)
@@ -491,7 +513,8 @@ func TestForwardAsRawChatCompletions_ClientDisconnectDrainsUsage(t *testing.T) {
 	body := []byte(`{"model":"gpt-5.4","messages":[{"role":"user","content":"hello"}],"stream":true}`)
 	rec := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(rec)
-	c.Writer = &openAIChatFailingWriter{ResponseWriter: c.Writer, failAfter: 0}
+	failingWriter := &openAIChatFailingWriter{ResponseWriter: c.Writer, failAfter: 2}
+	c.Writer = failingWriter
 	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader(body))
 	c.Request.Header.Set("Content-Type", "application/json")
 
@@ -521,7 +544,235 @@ func TestForwardAsRawChatCompletions_ClientDisconnectDrainsUsage(t *testing.T) {
 	require.Equal(t, 17, result.Usage.InputTokens)
 	require.Equal(t, 8, result.Usage.OutputTokens)
 	require.Equal(t, 6, result.Usage.CacheReadInputTokens)
+	require.True(t, result.ClientDisconnect)
+	require.Equal(t, 2, failingWriter.writes, "the first complete SSE chunk must reach the client before disconnect")
+	require.Len(t, upstream.requests, 1, "a disconnected client must not trigger an upstream replay")
 	require.True(t, gjson.GetBytes(upstream.lastBody, "stream_options.include_usage").Bool())
+}
+
+func TestForwardAsRawChatCompletions_WebChatDisconnectDrainTimeoutIsBounded(t *testing.T) {
+	setGinTestMode()
+
+	parent := context.WithValue(context.Background(), ctxkey.WebChat, true)
+	reqCtx, cancel := context.WithCancel(parent)
+	defer cancel()
+	body := []byte(`{"model":"gpt-5.4","messages":[{"role":"user","content":"hello"}],"stream":true}`)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	cancelingWriter := &openAIChatCancelingWriter{ResponseWriter: c.Writer, cancel: cancel, cancelAfter: 2}
+	c.Writer = cancelingWriter
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader(body)).WithContext(reqCtx)
+	c.Request.Header.Set("Content-Type", "application/json")
+
+	pr, pw := io.Pipe()
+	t.Cleanup(func() { _ = pw.Close() })
+	firstFrame := `data: {"id":"chatcmpl_1","object":"chat.completion.chunk","model":"gpt-5.4","choices":[{"index":0,"delta":{"content":"partial"}}]}` + "\n\n"
+	writeDone := make(chan struct{})
+	go func() {
+		_, _ = io.WriteString(pw, firstFrame)
+		close(writeDone)
+	}()
+
+	upstream := &httpUpstreamRecorder{resp: &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"text/event-stream"}, "x-request-id": []string{"rid_raw_drain_timeout"}},
+		Body:       pr,
+	}}
+	cfg := rawChatCompletionsTestConfig()
+	cfg.Gateway.StreamDataIntervalTimeout = 1
+	svc := &OpenAIGatewayService{cfg: cfg, httpUpstream: upstream}
+
+	started := time.Now()
+	result, err := svc.forwardAsRawChatCompletions(reqCtx, c, rawChatCompletionsTestAccount(), body, "")
+	<-writeDone
+
+	require.ErrorIs(t, err, errWebChatUpstreamDrainTimeout)
+	require.NotNil(t, result)
+	require.True(t, result.ClientDisconnect)
+	require.Equal(t, 2, cancelingWriter.writes, "one complete SSE frame must be delivered before cancellation")
+	require.Len(t, upstream.requests, 1, "drain timeout must not replay the upstream request")
+	require.Less(t, time.Since(started), 2*time.Second)
+}
+
+func TestForwardAsRawChatCompletions_WebChatDisconnectDrainDeadlineIgnoresUpstreamPings(t *testing.T) {
+	setGinTestMode()
+
+	parent := context.WithValue(context.Background(), ctxkey.WebChat, true)
+	reqCtx, cancel := context.WithCancel(parent)
+	defer cancel()
+	body := []byte(`{"model":"gpt-5.4","messages":[{"role":"user","content":"hello"}],"stream":true}`)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	cancelingWriter := &openAIChatCancelingWriter{ResponseWriter: c.Writer, cancel: cancel, cancelAfter: 2}
+	c.Writer = cancelingWriter
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader(body)).WithContext(reqCtx)
+	c.Request.Header.Set("Content-Type", "application/json")
+
+	pr, pw := io.Pipe()
+	t.Cleanup(func() { _ = pw.Close() })
+	writeDone := make(chan int, 1)
+	go func() {
+		firstFrame := `data: {"id":"chatcmpl_1","object":"chat.completion.chunk","model":"gpt-5.4","choices":[{"index":0,"delta":{"content":"partial"}}]}` + "\n\n"
+		if _, err := io.WriteString(pw, firstFrame); err != nil {
+			writeDone <- 0
+			return
+		}
+		pingCount := 0
+		for {
+			time.Sleep(40 * time.Millisecond)
+			if _, err := io.WriteString(pw, ": upstream ping\n\n"); err != nil {
+				writeDone <- pingCount
+				return
+			}
+			pingCount++
+		}
+	}()
+
+	upstream := &httpUpstreamRecorder{resp: &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"text/event-stream"}, "x-request-id": []string{"rid_raw_drain_ping_deadline"}},
+		Body:       pr,
+	}}
+	cfg := rawChatCompletionsTestConfig()
+	cfg.Gateway.StreamDataIntervalTimeout = 1
+	svc := &OpenAIGatewayService{cfg: cfg, httpUpstream: upstream}
+
+	started := time.Now()
+	result, err := svc.forwardAsRawChatCompletions(reqCtx, c, rawChatCompletionsTestAccount(), body, "")
+	pingsWritten := <-writeDone
+
+	require.ErrorIs(t, err, errWebChatUpstreamDrainTimeout)
+	require.NotNil(t, result)
+	require.True(t, result.ClientDisconnect)
+	require.Greater(t, pingsWritten, 5, "the upstream must remain active while the hard drain deadline is running")
+	require.Len(t, upstream.requests, 1, "keepalive traffic must not trigger an upstream replay")
+	require.Less(t, time.Since(started), 2*time.Second, "upstream pings must not extend the drain deadline")
+}
+
+func TestForwardAsRawChatCompletions_WebChatDoneReleasesBeforeUpstreamEOF(t *testing.T) {
+	setGinTestMode()
+
+	parent := context.WithValue(context.Background(), ctxkey.WebChat, true)
+	reqCtx, cancel := context.WithCancel(parent)
+	defer cancel()
+	body := []byte(`{"model":"gpt-5.4","messages":[{"role":"user","content":"hello"}],"stream":true}`)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader(body)).WithContext(reqCtx)
+	c.Request.Header.Set("Content-Type", "application/json")
+
+	pr, pw := io.Pipe()
+	t.Cleanup(func() { _ = pw.Close() })
+	writeDone := make(chan struct{})
+	go func() {
+		defer close(writeDone)
+		_, _ = io.WriteString(pw, strings.Join([]string{
+			`data: {"id":"chatcmpl_1","object":"chat.completion.chunk","model":"gpt-5.4","choices":[{"index":0,"delta":{"content":"ok"}}]}`,
+			"",
+			`data: {"id":"chatcmpl_1","object":"chat.completion.chunk","model":"gpt-5.4","choices":[],"usage":{"prompt_tokens":7,"completion_tokens":3,"total_tokens":10}}`,
+			"",
+			"data: [DONE]",
+			"",
+		}, "\n"))
+	}()
+
+	upstream := &httpUpstreamRecorder{resp: &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"text/event-stream"}, "x-request-id": []string{"rid_raw_done_open_connection"}},
+		Body:       pr,
+	}}
+	svc := &OpenAIGatewayService{cfg: rawChatCompletionsTestConfig(), httpUpstream: upstream}
+
+	started := time.Now()
+	result, err := svc.forwardAsRawChatCompletions(reqCtx, c, rawChatCompletionsTestAccount(), body, "")
+	<-writeDone
+
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.Equal(t, 7, result.Usage.InputTokens)
+	require.Equal(t, 3, result.Usage.OutputTokens)
+	require.Contains(t, rec.Body.String(), "data: [DONE]\n\n")
+	require.Less(t, time.Since(started), time.Second, "[DONE] must release the request without waiting for upstream EOF")
+}
+
+func TestForwardAsRawChatCompletions_WebChatDisconnectTerminalUsageReleasesBeforeTimeout(t *testing.T) {
+	setGinTestMode()
+
+	parent := context.WithValue(context.Background(), ctxkey.WebChat, true)
+	reqCtx, cancel := context.WithCancel(parent)
+	defer cancel()
+	body := []byte(`{"model":"gpt-5.4","messages":[{"role":"user","content":"hello"}],"stream":true}`)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	cancelingWriter := &openAIChatCancelingWriter{ResponseWriter: c.Writer, cancel: cancel, cancelAfter: 2}
+	c.Writer = cancelingWriter
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader(body)).WithContext(reqCtx)
+	c.Request.Header.Set("Content-Type", "application/json")
+
+	pr, pw := io.Pipe()
+	t.Cleanup(func() { _ = pw.Close() })
+	writeDone := make(chan struct{})
+	go func() {
+		defer close(writeDone)
+		_, _ = io.WriteString(pw, strings.Join([]string{
+			`data: {"id":"chatcmpl_1","object":"chat.completion.chunk","model":"gpt-5.4","choices":[{"index":0,"delta":{"content":"partial"}}]}`,
+			"",
+			`data: {"id":"chatcmpl_1","object":"chat.completion.chunk","model":"gpt-5.4","choices":[],"usage":{"prompt_tokens":13,"completion_tokens":5,"total_tokens":18}}`,
+			"",
+		}, "\n"))
+	}()
+
+	upstream := &httpUpstreamRecorder{resp: &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"text/event-stream"}, "x-request-id": []string{"rid_raw_terminal_usage"}},
+		Body:       pr,
+	}}
+	cfg := rawChatCompletionsTestConfig()
+	cfg.Gateway.StreamDataIntervalTimeout = 3
+	svc := &OpenAIGatewayService{cfg: cfg, httpUpstream: upstream}
+
+	started := time.Now()
+	result, err := svc.forwardAsRawChatCompletions(reqCtx, c, rawChatCompletionsTestAccount(), body, "")
+	<-writeDone
+
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.True(t, result.ClientDisconnect)
+	require.Equal(t, 13, result.Usage.InputTokens)
+	require.Equal(t, 5, result.Usage.OutputTokens)
+	require.Less(t, time.Since(started), time.Second, "terminal usage must release a disconnected request before its drain timeout")
+}
+
+func TestForwardAsRawChatCompletions_WebChatDisconnectReadErrorIsNotSuccess(t *testing.T) {
+	setGinTestMode()
+
+	parent := context.WithValue(context.Background(), ctxkey.WebChat, true)
+	reqCtx, cancel := context.WithCancel(parent)
+	defer cancel()
+	body := []byte(`{"model":"gpt-5.4","messages":[{"role":"user","content":"hello"}],"stream":true}`)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	cancelingWriter := &openAIChatCancelingWriter{ResponseWriter: c.Writer, cancel: cancel, cancelAfter: 2}
+	c.Writer = cancelingWriter
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader(body)).WithContext(reqCtx)
+	c.Request.Header.Set("Content-Type", "application/json")
+	readErr := errors.New("upstream stream reset")
+	upstream := &httpUpstreamRecorder{resp: &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"text/event-stream"}, "x-request-id": []string{"rid_raw_read_error"}},
+		Body: &errTailReader{data: []byte(
+			`data: {"id":"chatcmpl_1","object":"chat.completion.chunk","model":"gpt-5.4","choices":[{"index":0,"delta":{"content":"partial"}}]}` + "\n\n",
+		), err: readErr},
+	}}
+	svc := &OpenAIGatewayService{cfg: rawChatCompletionsTestConfig(), httpUpstream: upstream}
+
+	result, err := svc.forwardAsRawChatCompletions(reqCtx, c, rawChatCompletionsTestAccount(), body, "")
+
+	require.Error(t, err)
+	require.ErrorIs(t, err, readErr)
+	require.NotNil(t, result)
+	require.True(t, result.ClientDisconnect)
+	require.Len(t, upstream.requests, 1)
 }
 
 func TestForwardAsRawChatCompletions_UpstreamRequestIgnoresClientCancel(t *testing.T) {

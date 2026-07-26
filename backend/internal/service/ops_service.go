@@ -347,8 +347,9 @@ func sanitizeOpsUpstreamErrors(entry *OpsInsertErrorLogInput) error {
 			out.Detail = ""
 		}
 
-		// Drop fully-empty events (can happen if only status code was known).
-		if out.UpstreamStatusCode == 0 && out.Message == "" && out.Detail == "" {
+		// Keep metadata-only events: privacy-sensitive callers may intentionally
+		// remove message/body fields while retaining routing diagnostics.
+		if !hasOpsUpstreamErrorEventContext(&out) {
 			continue
 		}
 
@@ -359,6 +360,25 @@ func sanitizeOpsUpstreamErrors(entry *OpsInsertErrorLogInput) error {
 	entry.UpstreamErrorsJSON = marshalOpsUpstreamErrors(sanitized)
 	entry.UpstreamErrors = nil
 	return nil
+}
+
+func hasOpsUpstreamErrorEventContext(event *OpsUpstreamErrorEvent) bool {
+	if event == nil {
+		return false
+	}
+	return event.Passthrough ||
+		strings.TrimSpace(event.Platform) != "" ||
+		event.AccountID != 0 ||
+		strings.TrimSpace(event.AccountName) != "" ||
+		event.UpstreamStatusCode != 0 ||
+		strings.TrimSpace(event.UpstreamRequestID) != "" ||
+		strings.TrimSpace(event.UpstreamURL) != "" ||
+		strings.TrimSpace(event.Kind) != "" ||
+		strings.TrimSpace(event.Stage) != "" ||
+		strings.TrimSpace(event.Scope) != "" ||
+		strings.TrimSpace(event.Reason) != "" ||
+		strings.TrimSpace(event.Message) != "" ||
+		strings.TrimSpace(event.Detail) != ""
 }
 
 func (s *OpsService) GetErrorLogs(ctx context.Context, filter *OpsErrorLogFilter) (*OpsErrorLogList, error) {

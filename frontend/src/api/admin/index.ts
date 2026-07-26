@@ -36,6 +36,7 @@ import adminComplianceAPI from './compliance'
 import auditAPI from './audit'
 import modelCatalogAPI from './modelCatalog'
 import documentationAPI from './documentation'
+import chatHistoryAPI from './chatHistory'
 
 /**
  * Unified admin API object for convenient access
@@ -73,7 +74,8 @@ export const adminAPI = {
   compliance: adminComplianceAPI,
   audit: auditAPI,
   modelCatalog: modelCatalogAPI,
-  documentation: documentationAPI
+  documentation: documentationAPI,
+  chatHistory: chatHistoryAPI
 }
 
 export {
@@ -109,7 +111,8 @@ export {
   adminComplianceAPI,
   auditAPI,
   modelCatalogAPI,
-  documentationAPI
+  documentationAPI,
+  chatHistoryAPI
 }
 
 export default adminAPI
@@ -150,3 +153,13 @@ export type {
   DocumentationStep,
   DocumentationTutorial,
 } from './documentation'
+export type {
+  AdminChatConversation,
+  AdminChatConversationDetail,
+  AdminChatConversationDetailParams,
+  AdminChatConversationListPage,
+  AdminChatConversationListParams,
+  AdminChatConversationSummary,
+  AdminChatMessage,
+  AdminChatRequestOptions,
+} from './chatHistory'

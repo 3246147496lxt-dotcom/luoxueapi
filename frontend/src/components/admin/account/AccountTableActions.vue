@@ -1,69 +1,76 @@
 <template>
-  <div
-    class="grid w-full grid-cols-[minmax(0,1fr)_auto_auto] items-center gap-3 lg:flex lg:w-auto lg:flex-wrap"
-  >
+  <div class="account-table-actions">
     <slot name="before"></slot>
 
     <button
       type="button"
-      class="btn btn-secondary order-2 min-h-11 min-w-11 justify-center px-3 lg:order-none"
+      class="account-table-action-button"
       :aria-label="t('common.refresh')"
       :title="t('common.refresh')"
       :disabled="loading"
       @click="$emit('refresh')"
     >
-      <Icon name="refresh" size="md" :class="[loading ? 'animate-spin' : '']" />
+      <Icon name="refresh" size="sm" :class="{ 'animate-spin': loading }" />
     </button>
 
-    <div
-      id="account-secondary-actions"
-      data-testid="account-secondary-actions"
-      :class="[
-        'order-4 col-span-3 min-w-0 flex-wrap items-center gap-3',
-        secondaryActionsOpen ? 'flex' : 'hidden',
-        'lg:contents'
-      ]"
-    >
-      <slot name="after"></slot>
-    </div>
-
-    <slot name="beforeCreate"></slot>
-
-    <button
-      type="button"
-      class="btn btn-primary order-1 min-h-11 w-full justify-center lg:order-none lg:w-auto"
-      @click="$emit('create')"
-    >
-      {{ t('admin.accounts.createAccount') }}
-    </button>
-
-    <slot name="afterCreate"></slot>
-
-    <button
-      type="button"
-      class="btn btn-secondary order-3 min-h-11 min-w-11 justify-center px-3 lg:hidden"
-      data-testid="account-actions-toggle"
-      :aria-expanded="secondaryActionsOpen"
-      aria-controls="account-secondary-actions"
-      @click="secondaryActionsOpen = !secondaryActionsOpen"
-    >
-      <Icon name="more" size="sm" />
-      <span>{{ t('common.more') }}</span>
-    </button>
+    <slot name="after"></slot>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import Icon from '@/components/icons/Icon.vue'
 
 defineProps<{ loading?: boolean }>()
 defineEmits<{
   (event: 'refresh'): void
-  (event: 'create'): void
 }>()
 
 const { t } = useI18n()
-const secondaryActionsOpen = ref(false)
 </script>
+
+<style scoped>
+.account-table-actions {
+  display: flex;
+  width: auto;
+  flex: none;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.account-table-action-button {
+  display: inline-flex;
+  width: 44px;
+  height: 44px;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--lx-clay-border);
+  border-radius: 12px;
+  color: var(--lx-clay-text-secondary);
+  background: var(--lx-clay-surface);
+  box-shadow: 0 5px 13px rgb(70 55 96 / 0.06);
+  transition:
+    color 150ms ease-out,
+    background-color 150ms ease-out,
+    border-color 150ms ease-out;
+}
+
+.account-table-action-button:hover:not(:disabled) {
+  color: var(--lx-clay-text);
+  border-color: var(--lx-clay-border-strong);
+  background: var(--lx-clay-surface-soft);
+}
+
+.account-table-action-button:disabled {
+  cursor: wait;
+  opacity: 0.6;
+}
+
+@media (max-width: 639px) {
+  .account-table-actions {
+    width: 100%;
+  }
+}
+</style>

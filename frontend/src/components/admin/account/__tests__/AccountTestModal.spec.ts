@@ -143,6 +143,7 @@ describe('AccountTestModal', () => {
     const preview = wrapper.find('img[alt="test-image-1"]')
     expect(preview.exists()).toBe(true)
     expect(preview.attributes('src')).toBe('data:image/png;base64,QUJD')
+    expect(wrapper.emitted('completed')).toHaveLength(1)
   })
 
   it('grok 账号测试默认选择 Grok 模型', async () => {
@@ -215,5 +216,79 @@ describe('AccountTestModal', () => {
       prompt: '',
       mode: 'compact'
     })
+  })
+
+  it('收到 test_complete 后会等待 SSE EOF 再通知父页面刷新账号', async () => {
+    const encoder = new TextEncoder()
+    let finishEOF!: () => void
+    let readCount = 0
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      body: {
+        getReader: () => ({
+          read: vi.fn().mockImplementation(() => {
+            if (readCount++ === 0) {
+              return Promise.resolve({
+                done: false,
+                value: encoder.encode('data: {"type":"test_complete","success":true}\n')
+              })
+            }
+            return new Promise((resolve) => {
+              finishEOF = () => resolve({ done: true, value: undefined })
+            })
+          })
+        })
+      }
+    } as unknown as Response) as any
+
+    const wrapper = mountModal()
+    await wrapper.setProps({ show: true })
+    await flushPromises()
+
+    const run = (wrapper.vm as any).startTest()
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('admin.accounts.testCompleted')
+    expect(wrapper.emitted('completed')).toBeUndefined()
+
+    finishEOF()
+    await run
+    await flushPromises()
+
+    expect(wrapper.emitted('completed')).toHaveLength(1)
+  })
+
+  it('失败流会在 EOF 后通知父页面且单次测试只通知一次', async () => {
+    global.fetch = vi.fn().mockResolvedValue(
+      createStreamResponse([
+        'data: {"type":"error","error":"permission denied"}\n',
+        'data: {"type":"test_complete","success":false,"error":"permission denied"}\n'
+      ])
+    ) as any
+
+    const wrapper = mountModal()
+    await wrapper.setProps({ show: true })
+    await flushPromises()
+
+    const startButton = wrapper
+      .findAll('button')
+      .find((button) => button.text().includes('admin.accounts.startTest'))
+    await startButton!.trigger('click')
+    await flushPromises()
+
+    expect(wrapper.emitted('completed')).toHaveLength(1)
+  })
+
+  it('非 Abort 网络错误仍会通知父页面刷新账号', async () => {
+    global.fetch = vi.fn().mockRejectedValue(new Error('socket closed')) as any
+
+    const wrapper = mountModal()
+    await wrapper.setProps({ show: true })
+    await flushPromises()
+
+    await (wrapper.vm as any).startTest()
+    await flushPromises()
+
+    expect(wrapper.emitted('completed')).toHaveLength(1)
   })
 })

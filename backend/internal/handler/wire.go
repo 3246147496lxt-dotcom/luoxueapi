@@ -29,6 +29,7 @@ func ProvideAdminHandlers(
 	systemHandler *admin.SystemHandler,
 	subscriptionHandler *admin.SubscriptionHandler,
 	usageHandler *admin.UsageHandler,
+	chatHistoryHandler *admin.AdminChatHistoryHandler,
 	userAttributeHandler *admin.UserAttributeHandler,
 	errorPassthroughHandler *admin.ErrorPassthroughHandler,
 	tlsFingerprintProfileHandler *admin.TLSFingerprintProfileHandler,
@@ -71,6 +72,7 @@ func ProvideAdminHandlers(
 		System:                 systemHandler,
 		Subscription:           subscriptionHandler,
 		Usage:                  usageHandler,
+		ChatHistory:            chatHistoryHandler,
 		UserAttribute:          userAttributeHandler,
 		ErrorPassthrough:       errorPassthroughHandler,
 		TLSFingerprintProfile:  tlsFingerprintProfileHandler,
@@ -149,6 +151,7 @@ func ProvideHandlers(
 	batchImageHandler *BatchImageHandler,
 	modelCatalogHandler *ModelCatalogHandler,
 	documentationHandler *DocumentationHandler,
+	chatHandler *ChatHandler,
 	_ *service.IdempotencyCoordinator,
 	_ *service.IdempotencyCleanupService,
 ) *Handlers {
@@ -173,6 +176,7 @@ func ProvideHandlers(
 		BatchImage:       batchImageHandler,
 		ModelCatalog:     modelCatalogHandler,
 		Documentation:    documentationHandler,
+		Chat:             chatHandler,
 	}
 }
 
@@ -198,6 +202,7 @@ var ProviderSet = wire.NewSet(
 	NewBatchImageHandler,
 	NewModelCatalogHandler,
 	NewDocumentationHandler,
+	ProvideChatHandler,
 	ProvideAccountAdminUseCases,
 	ProvideGroupAdminUseCases,
 	ProvideUserAdminUseCases,
@@ -224,6 +229,7 @@ var ProviderSet = wire.NewSet(
 	ProvideSystemHandler,
 	admin.NewSubscriptionHandler,
 	admin.NewUsageHandler,
+	admin.NewAdminChatHistoryHandler,
 	admin.NewUserAttributeHandler,
 	admin.NewErrorPassthroughHandler,
 	admin.NewTLSFingerprintProfileHandler,

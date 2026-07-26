@@ -1786,7 +1786,7 @@ onBeforeUnmount(() => {
   padding: 3px;
   margin: -3px;
   border-radius: var(--lx-clay-radius-control);
-  background: var(--lx-clay-canvas);
+  background: var(--app-shell-canvas, var(--lx-clay-canvas));
 }
 
 .ops-resource-health__capacity-viz {
@@ -2248,7 +2248,7 @@ onBeforeUnmount(() => {
   align-items: start;
   gap: 20px;
   padding: 20px;
-  background: var(--lx-clay-canvas);
+  background: var(--app-shell-canvas, var(--lx-clay-canvas));
 }
 
 .ops-resource-health__ledger-main {

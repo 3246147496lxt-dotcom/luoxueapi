@@ -186,6 +186,28 @@ func TestUsageLogFromService_FallsBackToLegacyModelWhenRequestedModelMissing(t *
 	require.Equal(t, "claude-3", adminDTO.Model)
 }
 
+func TestUsageLogFromServiceMarksWebChatSourceWithoutExposingPrincipalKey(t *testing.T) {
+	t.Parallel()
+
+	log := &service.UsageLog{
+		RequestID: "client:receipt-id",
+		Model:     "gpt-5.5",
+		APIKey: &service.APIKey{
+			ID:      99,
+			Purpose: service.APIKeyPurposeWebChat,
+			Key:     "must-not-leak",
+		},
+	}
+
+	userDTO := UsageLogFromService(log)
+	adminDTO := UsageLogFromServiceAdmin(log)
+
+	require.Equal(t, "web_chat", userDTO.Source)
+	require.Equal(t, "web_chat", adminDTO.Source)
+	require.NotNil(t, userDTO.APIKey)
+	require.Empty(t, userDTO.APIKey.Key)
+}
+
 func TestUsageLogFromService_IncludesImageBillingMetadataForUserAndAdmin(t *testing.T) {
 	t.Parallel()
 

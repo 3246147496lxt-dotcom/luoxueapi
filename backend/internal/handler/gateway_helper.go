@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/pkg/ctxkey"
 	middleware2 "github.com/Wei-Shaw/sub2api/internal/server/middleware"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 
@@ -171,6 +172,26 @@ func wrapReleaseOnDone(ctx context.Context, releaseFunc func()) func() {
 	return func() {
 		_ = stop()
 		releaseOnce()
+	}
+}
+
+// wrapGatewayRelease keeps first-party Web Chat slots until the forwarding
+// call has drained the detached upstream. Other gateway callers retain the
+// historical cancellation-triggered release behavior.
+func wrapGatewayRelease(ctx context.Context, releaseFunc func()) func() {
+	if releaseFunc == nil {
+		return nil
+	}
+	webChat := false
+	if ctx != nil {
+		webChat, _ = ctx.Value(ctxkey.WebChat).(bool)
+	}
+	if !webChat {
+		return wrapReleaseOnDone(ctx, releaseFunc)
+	}
+	var once sync.Once
+	return func() {
+		once.Do(releaseFunc)
 	}
 }
 
@@ -391,7 +412,9 @@ func (h *ConcurrencyHelper) waitForSlotWithPingTimeout(c *gin.Context, slotType 
 			// Send ping to keep connection alive
 			if !*streamStarted {
 				c.Header("Content-Type", "text/event-stream")
-				c.Header("Cache-Control", "no-cache")
+				if strings.TrimSpace(c.Writer.Header().Get("Cache-Control")) == "" {
+					c.Header("Cache-Control", "no-cache")
+				}
 				c.Header("Connection", "keep-alive")
 				c.Header("X-Accel-Buffering", "no")
 				*streamStarted = true

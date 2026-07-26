@@ -5,11 +5,35 @@
     class="sidebar"
     :class="[
       sidebarCollapsed
-        ? 'w-[60px]'
-        : 'w-44 min-[1025px]:w-[188px] min-[1281px]:w-[200px]',
+        ? 'w-[60px] lg:w-[68px]'
+        : 'w-44 lg:w-[184px] min-[1025px]:w-[196px] min-[1281px]:w-[208px]',
       { 'sidebar-mobile-hidden': !mobileOpen }
     ]"
   >
+    <div
+      data-testid="sidebar-brand-row"
+      class="sidebar-header"
+      :class="{ 'sidebar-header-collapsed': sidebarCollapsed }"
+    >
+      <AppBrand placement="sidebar" :collapsed="sidebarCollapsed" />
+      <button
+        type="button"
+        data-testid="sidebar-collapse-toggle"
+        class="sidebar-collapse-toggle"
+        :title="sidebarCollapsed ? t('nav.expand') : t('nav.collapse')"
+        :aria-label="sidebarCollapsed ? t('nav.expand') : t('nav.collapse')"
+        aria-controls="app-sidebar"
+        :aria-expanded="!sidebarCollapsed"
+        @click="toggleSidebar"
+      >
+        <SidebarCollapseIcon
+          data-testid="sidebar-collapse-toggle-icon"
+          class="h-5 w-5"
+          :collapsed="sidebarCollapsed"
+        />
+      </button>
+    </div>
+
     <!-- Navigation -->
     <nav ref="sidebarNavRef" class="sidebar-nav scrollbar-hide">
       <!-- Admin View: Admin menu first, then personal menu -->
@@ -428,6 +452,8 @@ import modelMarketplaceIconSvg from '@/assets/icons/model-marketplace.svg?raw'
 import reportDashboardIconSvg from '@/assets/icons/report-dashboard.svg?raw'
 import { Icon } from '@/components/icons'
 import NotificationIcon from '@/components/icons/NotificationIcon.vue'
+import SidebarCollapseIcon from '@/components/icons/SidebarCollapseIcon.vue'
+import AppBrand from './AppBrand.vue'
 
 interface NavItem {
   path: string
@@ -837,6 +863,10 @@ const ChevronDownIcon = {
     )
 }
 
+const ChatIcon = {
+  render: () => h(Icon, { name: 'chat', size: 'md', strokeWidth: 1.7 })
+}
+
 // Public-settings flags go through the registry in utils/featureFlags.ts,
 // which handles the opt-in vs opt-out fallback when settings haven't loaded
 // yet. Admin-only flags (not in public settings) stay inline below.
@@ -852,7 +882,7 @@ const flagBatchImageAccess = () => canUseBatchImage.value
 // buildSelfNavItems 构造用户自己的导航项（用户端主菜单和管理员的"我的账户"子菜单共享这组声明）。
 // withDashboard=true 时包含仪表盘（用户端），false 时不含（管理员的个人区已经有独立仪表盘入口）。
 //
-// 条目顺序：密钥 → 用量 → 可用渠道 → 渠道状态 → 订阅/支付/兑换 → 资料。
+// 条目顺序：聊天 → 密钥 → 用量 → 可用渠道 → 渠道状态 → 订阅/支付/兑换 → 资料。
 // 可用渠道紧挨渠道状态之上，让用户"先看自己能用什么、再看对应状态"。
 function buildSelfNavItems(withDashboard: boolean): NavItem[] {
   const items: NavItem[] = []
@@ -860,13 +890,14 @@ function buildSelfNavItems(withDashboard: boolean): NavItem[] {
     items.push({ path: '/dashboard', label: t('nav.dashboard'), icon: DashboardIcon })
   }
   items.push(
+    { path: '/chat', label: t('nav.gptChat'), icon: ChatIcon },
     { path: '/keys', label: t('nav.apiKeys'), icon: null, iconSvg: keyOutlineIconSvg },
     { path: '/batch-image', label: t('nav.batchImage'), icon: BatchImageIcon, hideInSimpleMode: true, featureFlag: flagBatchImageAccess },
     { path: '/usage', label: t('nav.usage'), icon: ChartIcon, hideInSimpleMode: true },
     { path: '/available-channels', label: t('nav.availableChannels'), icon: ChannelIcon, hideInSimpleMode: true, featureFlag: flagAvailableChannels },
     { path: '/monitor', label: t('nav.channelStatus'), icon: SignalIcon, featureFlag: flagChannelMonitor },
     { path: '/subscriptions', label: t('nav.mySubscriptions'), icon: CreditCardIcon, hideInSimpleMode: true },
-    { path: '/purchase', label: t('nav.buySubscription'), icon: RechargeSubscriptionIcon, hideInSimpleMode: true },
+    { path: '/purchase', label: t('nav.buySubscription'), icon: RechargeSubscriptionIcon },
     { path: '/orders', label: t('nav.myOrders'), icon: OrderListIcon, hideInSimpleMode: true, featureFlag: flagPayment },
     { path: '/affiliate', label: t('nav.affiliate'), icon: UsersIcon, hideInSimpleMode: true, featureFlag: flagAffiliate },
     { path: '/profile', label: t('nav.profile'), icon: UserIcon },
@@ -924,7 +955,9 @@ const userNavSections = computed((): NavSection[] => {
 // Personal navigation items (for admin's "My Account" section, without Dashboard).
 // Admins access 可用渠道 from this section just like regular users — there is no
 // separate admin entry, since the page is purely a user-facing view.
-const personalNavItems = computed((): NavItem[] => finalizeNav(buildSelfNavItems(false)))
+const personalNavItems = computed(
+  (): NavItem[] => finalizeNav(buildSelfNavItems(false)).filter((item) => item.path !== '/chat')
+)
 
 // Custom menu items filtered by visibility
 const customMenuItemsForUser = computed(() => {
@@ -949,6 +982,7 @@ const adminNavItems = computed((): NavItem[] => {
       icon: null,
       iconSvg: reportDashboardIconSvg,
     },
+    { path: '/chat', label: t('nav.gptChat'), icon: ChatIcon },
     { path: '/admin/ops', label: t('nav.ops'), icon: ChartIcon, featureFlag: flagOpsMonitoring },
     { path: '/admin/usage', label: t('nav.adminUsage'), icon: ChartIcon },
     { path: '/admin/users', label: t('nav.users'), icon: UsersIcon, hideInSimpleMode: true },
@@ -1043,6 +1077,7 @@ type AdminNavSectionId = 'overview' | 'business' | 'operations' | 'system'
 
 const ADMIN_NAV_SECTION_BY_PATH: Record<string, AdminNavSectionId> = {
   '/admin/dashboard': 'overview',
+  '/chat': 'overview',
   '/admin/ops': 'overview',
   '/admin/usage': 'overview',
   '/admin/users': 'business',
@@ -1090,6 +1125,10 @@ const displayedAdminNavSections = computed((): NavSection[] => {
 
 function closeMobile() {
   appStore.setMobileOpen(false)
+}
+
+function toggleSidebar() {
+  appStore.toggleSidebar()
 }
 
 function handleMenuItemClick(itemPath: string) {
@@ -1210,16 +1249,24 @@ onBeforeUnmount(() => {
   isolation: isolate;
   overflow: hidden;
   font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
-  border-color: rgb(255 255 255 / 0.65) rgb(255 255 255 / 0.36) rgb(255 255 255 / 0.36);
-  background: linear-gradient(rgb(248 251 255 / 0.32), rgb(235 242 252 / 0.1)) !important;
-  box-shadow:
+  border-color: var(
+    --app-shell-sidebar-border,
+    rgb(255 255 255 / 0.65) rgb(255 255 255 / 0.36) rgb(255 255 255 / 0.36)
+  );
+  background: var(
+    --app-shell-sidebar-bg,
+    linear-gradient(rgb(248 251 255 / 0.32), rgb(235 242 252 / 0.1))
+  ) !important;
+  box-shadow: var(
+    --app-shell-sidebar-shadow,
     inset 0 1px 0 rgb(255 255 255 / 0.65),
     inset 0 -1px 0 rgb(15 23 42 / 0.04),
     0 1px 2px rgb(15 23 42 / 0.04),
     0 6px 16px -4px rgb(15 23 42 / 0.08),
-    0 18px 40px -12px rgb(15 23 42 / 0.18);
-  backdrop-filter: saturate(1.7) blur(36px);
-  -webkit-backdrop-filter: saturate(1.7) blur(36px);
+    0 18px 40px -12px rgb(15 23 42 / 0.18)
+  );
+  backdrop-filter: var(--app-shell-sidebar-backdrop, saturate(1.7) blur(36px));
+  -webkit-backdrop-filter: var(--app-shell-sidebar-backdrop, saturate(1.7) blur(36px));
   transition-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
 }
 
@@ -1233,9 +1280,11 @@ onBeforeUnmount(() => {
 .sidebar::before {
   inset: 0;
   z-index: -1;
-  background:
+  background: var(
+    --app-shell-sidebar-decoration,
     radial-gradient(80% 50% at 50% 0%, rgb(96 165 250 / 0.1) 0%, transparent 70%),
-    radial-gradient(80% 50% at 50% 100%, rgb(167 139 250 / 0.1) 0%, transparent 70%);
+    radial-gradient(80% 50% at 50% 100%, rgb(167 139 250 / 0.1) 0%, transparent 70%)
+  );
 }
 
 .sidebar::after {
@@ -1243,7 +1292,10 @@ onBeforeUnmount(() => {
   right: 12%;
   left: 12%;
   height: 1px;
-  background: linear-gradient(to right, transparent, rgb(255 255 255 / 0.85), transparent);
+  background: var(
+    --app-shell-sidebar-highlight,
+    linear-gradient(to right, transparent, rgb(255 255 255 / 0.85), transparent)
+  );
 }
 
 :global(.dark .sidebar) {
@@ -1264,7 +1316,52 @@ onBeforeUnmount(() => {
 .sidebar-nav {
   position: relative;
   z-index: 1;
+  min-height: 0;
   @apply px-2 py-3;
+}
+
+.sidebar-header {
+  display: none;
+}
+
+.sidebar-collapse-toggle {
+  position: relative;
+  display: flex;
+  width: 2.25rem;
+  height: 2.25rem;
+  flex: 0 0 2.25rem;
+  align-items: center;
+  justify-content: center;
+  border-radius: 0.5rem;
+  color: rgb(143 143 143);
+  transition:
+    color 0.2s ease,
+    background-color 0.2s ease;
+}
+
+.sidebar-collapse-toggle::after {
+  content: '';
+  position: absolute;
+  inset: -0.375rem;
+}
+
+.sidebar-collapse-toggle:hover {
+  color: rgb(17 24 39);
+  background: rgb(46 50 56 / 0.05);
+}
+
+.sidebar-collapse-toggle:focus-visible {
+  outline: 2px solid var(--app-shell-sidebar-focus, rgb(0 132 255 / 0.5));
+  outline-offset: 2px;
+}
+
+:global(.dark .sidebar-collapse-toggle) {
+  color: rgb(209 213 219);
+}
+
+:global(.dark .sidebar-collapse-toggle:hover) {
+  color: rgb(255 255 255);
+  background: rgb(255 255 255 / 0.08);
 }
 
 .sidebar-destination-links {
@@ -1329,21 +1426,21 @@ onBeforeUnmount(() => {
 
 .sidebar-destination-link:hover,
 .sidebar-destination-link:focus-visible {
-  color: rgb(0 132 255);
-  background: rgb(0 132 255 / 0.08);
-  box-shadow: 0 2px 8px rgb(0 132 255 / 0.06);
-  transform: translateY(-1px) scale(1.03);
+  color: var(--app-shell-sidebar-hover-color, rgb(0 132 255));
+  background: var(--app-shell-sidebar-hover-bg, rgb(0 132 255 / 0.08));
+  box-shadow: var(--app-shell-sidebar-hover-shadow, 0 2px 8px rgb(0 132 255 / 0.06));
+  transform: var(--app-shell-sidebar-hover-transform, translateY(-1px) scale(1.03));
 }
 
 .sidebar-destination-link:hover .sidebar-destination-leading > :deep(svg),
 .sidebar-destination-link:hover .sidebar-destination-jump,
 .sidebar-destination-link:focus-visible .sidebar-destination-leading > :deep(svg),
 .sidebar-destination-link:focus-visible .sidebar-destination-jump {
-  color: rgb(0 132 255);
+  color: var(--app-shell-sidebar-hover-color, rgb(0 132 255));
 }
 
 .sidebar-destination-link:focus-visible {
-  outline: 2px solid rgb(0 132 255 / 0.5);
+  outline: 2px solid var(--app-shell-sidebar-focus, rgb(0 132 255 / 0.5));
   outline-offset: 1px;
 }
 
@@ -1410,28 +1507,29 @@ onBeforeUnmount(() => {
 }
 
 .sidebar-link:hover {
-  color: rgb(0 132 255);
-  background: rgb(0 132 255 / 0.08);
-  box-shadow: 0 2px 8px rgb(0 132 255 / 0.045);
+  color: var(--app-shell-sidebar-hover-color, rgb(0 132 255));
+  background: var(--app-shell-sidebar-hover-bg, rgb(0 132 255 / 0.08));
+  box-shadow: var(--app-shell-sidebar-hover-shadow, 0 2px 8px rgb(0 132 255 / 0.045));
 }
 
 .sidebar-link:hover > :deep(svg),
 .sidebar-link:hover > .sidebar-svg-icon {
-  color: rgb(0 132 255);
+  color: var(--app-shell-sidebar-hover-color, rgb(0 132 255));
 }
 
 .sidebar-link:focus-visible {
-  outline: 2px solid rgb(0 132 255 / 0.5);
+  outline: 2px solid var(--app-shell-sidebar-focus, rgb(0 132 255 / 0.5));
   outline-offset: 2px;
 }
 
 .sidebar-link-active {
-  color: rgb(0 132 255);
-  background: rgb(234 245 255);
+  color: var(--app-shell-sidebar-active-color, rgb(13 13 13));
+  background: var(--app-shell-sidebar-active-bg, rgb(0 0 0 / 0.05));
   box-shadow: none;
 }
 
 .sidebar-link-active::before {
+  display: var(--app-shell-sidebar-active-marker, none);
   content: '';
   position: absolute;
   top: 50%;
@@ -1445,12 +1543,12 @@ onBeforeUnmount(() => {
 
 .sidebar-link-active > :deep(svg),
 .sidebar-link-active > .sidebar-svg-icon {
-  color: rgb(0 100 250);
+  color: var(--app-shell-sidebar-active-icon, rgb(13 13 13));
 }
 
 .sidebar-link-active:hover {
-  color: rgb(0 132 255);
-  background: rgb(234 245 255);
+  color: var(--app-shell-sidebar-active-color, rgb(13 13 13));
+  background: var(--app-shell-sidebar-active-bg, rgb(0 0 0 / 0.05));
 }
 
 :global(.dark .sidebar-link) {
@@ -1469,17 +1567,17 @@ onBeforeUnmount(() => {
 
 :global(.dark .sidebar-link-active),
 :global(.dark .sidebar-link-active:hover) {
-  color: rgb(0 132 255);
-  background: rgb(71 160 255 / 0.18);
+  color: var(--app-shell-sidebar-active-color, rgb(245 245 245));
+  background: var(--app-shell-sidebar-active-bg, rgb(255 255 255 / 0.1));
 }
 
 :global(.dark .sidebar-link-active > svg),
 :global(.dark .sidebar-link-active > .sidebar-svg-icon) {
-  color: rgb(71 160 255);
+  color: var(--app-shell-sidebar-active-icon, rgb(245 245 245));
 }
 
 :global(.dark .sidebar-link-active::before) {
-  background: rgb(71 160 255);
+  display: var(--app-shell-sidebar-active-marker, none);
 }
 
 .sidebar-link-collapsed {
@@ -1497,7 +1595,7 @@ onBeforeUnmount(() => {
   min-height: 1.5625rem;
   margin: 0;
   padding: 0.1875rem 1rem 0.25rem;
-  color: rgb(100 116 139);
+  color: var(--app-shell-sidebar-section-color, rgb(100 116 139));
   font-size: 0.75rem;
   font-weight: 400;
   line-height: 1.125rem;
@@ -1595,13 +1693,67 @@ onBeforeUnmount(() => {
 
 @media (min-width: 1024px) {
   .sidebar {
-    top: 5.0625rem;
+    top: 0;
     right: auto;
-    bottom: 1rem;
-    left: 0.5rem;
+    bottom: 0;
+    left: 0;
     height: auto;
-    border-width: 1px;
-    border-radius: 1rem;
+    border-width: 0 1px 0 0;
+    border-radius: 0;
+    box-shadow: none;
+  }
+
+  .sidebar-header {
+    display: flex;
+    height: 3.25rem;
+    min-width: 0;
+    flex: 0 0 3.25rem;
+    align-items: center;
+    gap: 0;
+    padding: 0.5rem;
+    border-bottom-width: 0;
+  }
+
+  .sidebar-header :deep(.app-brand) {
+    width: 2.25rem;
+    height: 2.25rem;
+    flex: 0 0 2.25rem;
+    border-radius: 0.5rem;
+  }
+
+  .sidebar-header :deep(.app-brand-logo-frame) {
+    width: 2.25rem;
+    height: 2.25rem;
+  }
+
+  .sidebar-header :deep(.app-brand-logo-image) {
+    width: 1.25rem;
+    height: 1.25rem;
+  }
+
+  .sidebar-header :deep(.app-brand-logo-image-luoxue) {
+    /* The PNG has transparent padding; this keeps the visible snowflake near 20px. */
+    transform: scale(1.6);
+  }
+
+  .sidebar-header .sidebar-collapse-toggle {
+    margin-left: auto;
+  }
+
+  .sidebar-header-collapsed {
+    gap: 0;
+    padding-right: 0;
+    padding-left: 0;
+  }
+
+  .sidebar-header-collapsed .sidebar-collapse-toggle {
+    width: 1.75rem;
+    height: 1.75rem;
+    flex-basis: 1.75rem;
+  }
+
+  .sidebar-header-collapsed .sidebar-collapse-toggle::after {
+    inset: -0.5rem;
   }
 
   .sidebar-mobile-hidden {
@@ -1612,12 +1764,16 @@ onBeforeUnmount(() => {
 @media (max-width: 1023px) {
   .sidebar {
     top: 5.0625rem;
-    bottom: 1rem;
-    left: 0.5rem;
+    bottom: 0;
+    left: 0;
     height: auto;
-    border-width: 1px;
-    border-radius: 1rem;
-    background: linear-gradient(rgb(248 251 255 / 0.32), rgb(235 242 252 / 0.1)) !important;
+    border-width: 0 1px 0 0;
+    border-radius: 0;
+    background: var(
+      --app-shell-sidebar-bg,
+      linear-gradient(rgb(248 251 255 / 0.32), rgb(235 242 252 / 0.1))
+    ) !important;
+    box-shadow: none;
   }
 
   :global(.dark .sidebar) {
@@ -1629,7 +1785,7 @@ onBeforeUnmount(() => {
   }
 
   .sidebar-mobile-hidden {
-    transform: translateX(calc(-100% - 0.5rem));
+    transform: translateX(-100%);
   }
 }
 </style>

@@ -2,12 +2,15 @@ package service
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
+	coderws "github.com/coder/websocket"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 )
@@ -130,6 +133,140 @@ func TestOpenAIForwardResultSucceededForScheduling_TerminalEvents(t *testing.T) 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			require.Equal(t, tt.expected, tt.result.SucceededForScheduling())
+		})
+	}
+}
+
+func TestShouldReportOpenAIWSAccountScheduleFailure(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{
+			name: "nil is not reportable",
+			err:  nil,
+			want: false,
+		},
+		{
+			name: "local pipeline policy close",
+			err: NewOpenAIWSClientCloseError(
+				coderws.StatusPolicyViolation,
+				"response.create already in progress",
+				errors.New("pipelined response.create"),
+			),
+			want: false,
+		},
+		{
+			name: "local concurrency close",
+			err: NewOpenAIWSClientCloseError(
+				coderws.StatusTryAgainLater,
+				"account is busy, please retry later",
+				nil,
+			),
+			want: false,
+		},
+		{
+			name: "local idle close",
+			err: NewOpenAIWSClientCloseError(
+				coderws.StatusNormalClosure,
+				"websocket idle timeout",
+				context.DeadlineExceeded,
+			),
+			want: false,
+		},
+		{
+			name: "wrapped local close remains local",
+			err: fmt.Errorf(
+				"proxy ingress: %w",
+				NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "request denied by local policy", nil),
+			),
+			want: false,
+		},
+		{
+			name: "client cancellation is not reportable",
+			err:  context.Canceled,
+			want: false,
+		},
+		{
+			name: "wrapped client cancellation is not reportable",
+			err:  fmt.Errorf("acquire websocket connection: %w", context.Canceled),
+			want: false,
+		},
+		{
+			name: "client write stage",
+			err: wrapOpenAIWSIngressTurnError(
+				"write_client",
+				errors.New("client websocket is gone"),
+				true,
+			),
+			want: false,
+		},
+		{
+			name: "client read stage",
+			err: wrapOpenAIWSIngressTurnError(
+				"read_client",
+				errors.New("client websocket is gone"),
+				false,
+			),
+			want: false,
+		},
+		{
+			name: "upstream dial failure",
+			err: &openAIWSDialError{
+				StatusCode: http.StatusBadGateway,
+				Err:        errors.New("dial upstream websocket"),
+			},
+			want: true,
+		},
+		{
+			name: "dial error remains reportable when cause is canceled",
+			err: &openAIWSDialError{
+				StatusCode: http.StatusBadGateway,
+				Err:        context.Canceled,
+			},
+			want: true,
+		},
+		{
+			name: "client close wrapping upstream dial failure",
+			err: NewOpenAIWSClientCloseError(
+				coderws.StatusTryAgainLater,
+				"upstream websocket connect timeout",
+				&openAIWSDialError{
+					StatusCode: http.StatusGatewayTimeout,
+					Err:        context.DeadlineExceeded,
+				},
+			),
+			want: true,
+		},
+		{
+			name: "upstream write stage",
+			err: wrapOpenAIWSIngressTurnError(
+				"write_upstream",
+				errors.New("upstream websocket write failed"),
+				false,
+			),
+			want: true,
+		},
+		{
+			name: "upstream read stage",
+			err: wrapOpenAIWSIngressTurnError(
+				"read_upstream",
+				errors.New("upstream websocket read failed"),
+				true,
+			),
+			want: true,
+		},
+		{
+			name: "unknown error remains reportable",
+			err:  errors.New("unexpected websocket proxy failure"),
+			want: true,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			require.Equal(t, test.want, ShouldReportOpenAIWSAccountScheduleFailure(test.err))
 		})
 	}
 }

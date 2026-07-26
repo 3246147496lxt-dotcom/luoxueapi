@@ -80,6 +80,8 @@ type postUsageBillingParams struct {
 	AccountRateMultiplier float64
 	APIKeyService         APIKeyQuotaUpdater
 	Platform              string // 来自 APIKey 关联 Group 的平台标识
+	Source                string // api or trusted internal web_chat ingress
+	ForceNoCharge         bool   // Simple mode Web Chat persists evidence without applying billing effects
 }
 
 // PlatformFromAPIKey 从 APIKey 关联的 Group 推导 platform 名称。
@@ -222,6 +224,15 @@ func resolveUsageBillingPayloadFingerprint(ctx context.Context, requestPayloadHa
 	return ""
 }
 
+func resolveBillingReceiptSource(ctx context.Context) string {
+	if ctx != nil {
+		if webChat, _ := ctx.Value(ctxkey.WebChat).(bool); webChat {
+			return BillingReceiptSourceWebChat
+		}
+	}
+	return BillingReceiptSourceAPI
+}
+
 func buildUsageBillingCommand(requestID string, usageLog *UsageLog, p *postUsageBillingParams) *UsageBillingCommand {
 	if p == nil || p.Cost == nil || p.APIKey == nil || p.User == nil || p.Account == nil {
 		return nil
@@ -234,9 +245,12 @@ func buildUsageBillingCommand(requestID string, usageLog *UsageLog, p *postUsage
 		AccountID:          p.Account.ID,
 		AccountType:        p.Account.Type,
 		RequestPayloadHash: strings.TrimSpace(p.RequestPayloadHash),
+		Source:             p.Source,
+		GrossCost:          p.Cost.TotalCost,
 	}
 	if usageLog != nil {
 		cmd.Model = usageLog.Model
+		cmd.RequestedModel = usageLog.RequestedModel
 		cmd.BillingType = usageLog.BillingType
 		cmd.InputTokens = usageLog.InputTokens
 		cmd.OutputTokens = usageLog.OutputTokens
@@ -274,20 +288,42 @@ func buildUsageBillingCommand(requestID string, usageLog *UsageLog, p *postUsage
 	if p.shouldUpdateAccountQuota() {
 		cmd.AccountQuotaCost = p.Cost.TotalCost * p.AccountRateMultiplier
 	}
+	if p.ForceNoCharge {
+		cmd.SubscriptionID = nil
+		cmd.BillingType = BillingTypeBalance
+		cmd.BalanceCost = 0
+		cmd.SubscriptionCost = 0
+		cmd.APIKeyQuotaCost = 0
+		cmd.APIKeyRateLimitCost = 0
+		cmd.AccountQuotaCost = 0
+	}
 
 	cmd.Normalize()
 	return cmd
 }
 
-func applyUsageBilling(ctx context.Context, requestID string, usageLog *UsageLog, p *postUsageBillingParams, deps *billingDeps, repo UsageBillingRepository) (bool, error) {
+func applyUsageBilling(
+	ctx context.Context,
+	requestID string,
+	usageLog *UsageLog,
+	p *postUsageBillingParams,
+	deps *billingDeps,
+	repo UsageBillingRepository,
+) (*UsageBillingApplyResult, error) {
 	if p == nil || deps == nil {
-		return false, nil
+		return &UsageBillingApplyResult{}, nil
 	}
 
 	cmd := buildUsageBillingCommand(requestID, usageLog, p)
-	if cmd == nil || cmd.RequestID == "" || repo == nil {
+	if cmd == nil || cmd.RequestID == "" {
+		return &UsageBillingApplyResult{}, nil
+	}
+	if repo == nil {
+		if cmd.Source == BillingReceiptSourceWebChat {
+			return nil, ErrUsageBillingRepositoryUnavailable
+		}
 		postUsageBilling(ctx, p, deps)
-		return true, nil
+		return &UsageBillingApplyResult{Applied: true}, nil
 	}
 
 	billingCtx, cancel := detachedBillingContext(ctx)
@@ -295,12 +331,23 @@ func applyUsageBilling(ctx context.Context, requestID string, usageLog *UsageLog
 
 	result, err := repo.Apply(billingCtx, cmd)
 	if err != nil {
-		return false, err
+		return nil, err
 	}
 
-	if result == nil || !result.Applied {
+	if result == nil {
 		deps.deferredService.ScheduleLastUsedUpdate(p.Account.ID)
-		return false, nil
+		return &UsageBillingApplyResult{}, nil
+	}
+	if result.SettlementClosed {
+		return result, ErrUsageBillingSettlementClosed
+	}
+	if !result.Applied {
+		deps.deferredService.ScheduleLastUsedUpdate(p.Account.ID)
+		return result, nil
+	}
+	if p.ForceNoCharge {
+		deps.deferredService.ScheduleLastUsedUpdate(p.Account.ID)
+		return result, nil
 	}
 
 	if result.APIKeyQuotaExhausted {
@@ -310,7 +357,7 @@ func applyUsageBilling(ctx context.Context, requestID string, usageLog *UsageLog
 	}
 
 	finalizePostUsageBilling(billingCtx, p, deps, result)
-	return true, nil
+	return result, nil
 }
 
 func finalizePostUsageBilling(ctx context.Context, p *postUsageBillingParams, deps *billingDeps, result *UsageBillingApplyResult) {
@@ -466,6 +513,13 @@ func detachedBillingContext(ctx context.Context) (context.Context, context.Cance
 	base := context.Background()
 	if ctx != nil {
 		base = context.WithoutCancel(ctx)
+	}
+	if ctx != nil {
+		webChat, _ := ctx.Value(ctxkey.WebChat).(bool)
+		if deadline, ok := ctx.Deadline(); webChat && ok &&
+			time.Until(deadline) < postUsageBillingTimeout {
+			return context.WithDeadline(base, deadline)
+		}
 	}
 	return context.WithTimeout(base, postUsageBillingTimeout)
 }
@@ -721,6 +775,33 @@ func (s *GatewayService) recordUsageCore(ctx context.Context, input *recordUsage
 	}
 
 	if s.cfg != nil && s.cfg.RunMode == config.RunModeSimple {
+		if resolveBillingReceiptSource(ctx) == BillingReceiptSourceWebChat {
+			billingResult, billingErr := applyUsageBilling(
+				ctx,
+				usageLog.RequestID,
+				usageLog,
+				&postUsageBillingParams{
+					Cost:                  cost,
+					User:                  user,
+					APIKey:                apiKey,
+					Account:               account,
+					Subscription:          subscription,
+					RequestPayloadHash:    resolveUsageBillingPayloadFingerprint(ctx, input.RequestPayloadHash),
+					AccountRateMultiplier: accountRateMultiplier,
+					APIKeyService:         input.APIKeyService,
+					Source:                BillingReceiptSourceWebChat,
+					ForceNoCharge:         true,
+				},
+				s.billingDeps(),
+				s.usageBillingRepo,
+			)
+			if billingErr != nil {
+				return billingErr
+			}
+			if billingResult != nil && billingResult.SettlementClosed {
+				return nil
+			}
+		}
 		writeUsageLogBestEffort(ctx, s.usageLogRepo, usageLog, "service.gateway")
 		logger.LegacyPrintf("service.gateway", "[SIMPLE MODE] Usage recorded (not billed): user=%d, tokens=%d", usageLog.UserID, usageLog.TotalTokens())
 		s.deferredService.ScheduleLastUsedUpdate(account.ID)
@@ -735,7 +816,7 @@ func (s *GatewayService) recordUsageCore(ctx context.Context, input *recordUsage
 		quotaPlatform = PlatformFromAPIKey(apiKey)
 	}
 	requestID := usageLog.RequestID
-	_, billingErr := applyUsageBilling(ctx, requestID, usageLog, &postUsageBillingParams{
+	billingResult, billingErr := applyUsageBilling(ctx, requestID, usageLog, &postUsageBillingParams{
 		Cost:                  cost,
 		User:                  user,
 		APIKey:                apiKey,
@@ -746,10 +827,14 @@ func (s *GatewayService) recordUsageCore(ctx context.Context, input *recordUsage
 		AccountRateMultiplier: accountRateMultiplier,
 		APIKeyService:         input.APIKeyService,
 		Platform:              quotaPlatform,
+		Source:                resolveBillingReceiptSource(ctx),
 	}, s.billingDeps(), s.usageBillingRepo)
 
 	if billingErr != nil {
 		return billingErr
+	}
+	if billingResult != nil && billingResult.SettlementClosed {
+		return nil
 	}
 	writeUsageLogBestEffort(ctx, s.usageLogRepo, usageLog, "service.gateway")
 

@@ -5,6 +5,7 @@ import {
   loadPublishedDocumentation,
   normalizeDocumentationResponse,
   resolveActiveTutorialId,
+  shouldRenderDocumentationImage,
   subscribeToTutorialHashChanges,
 } from "../src/documentation.js";
 
@@ -29,7 +30,10 @@ function publishedPayload(overrides = {}) {
               note: { tone: "warning", text: "不要公开密钥。" },
               note_placement: "after-image",
               code: { label: "示例", value: "curl https://example.com/v1/models" },
-              image: { src: "/tutorial-docs/assets/key.png", alt: "创建密钥页面" },
+              image: {
+                src: "/api/v1/public/documentation/assets/key-upload.png",
+                alt: "创建密钥页面",
+              },
               link: { label: "进入控制台", href: "https://example.com/keys" },
             },
           ],
@@ -63,11 +67,27 @@ test("加载已发布内容并把外部 snake_case 字段映射为渲染字段",
   assert.equal(result.publishedAt, "2026-07-19T10:00:00+08:00");
   assert.equal(result.tutorials[0].tabLabel, "快速开始");
   assert.equal(result.tutorials[0].steps[0].notePlacement, "after-image");
-  assert.equal(result.tutorials[0].steps[0].image.src, "/tutorial-docs/assets/key.png");
+  assert.equal(
+    result.tutorials[0].steps[0].image.src,
+    "/api/v1/public/documentation/assets/key-upload.png",
+  );
   assert.equal(request.url, "/api/v1/public/documentation");
   assert.equal(request.options.credentials, "same-origin");
-  assert.equal(request.options.cache, "default");
+  assert.equal(request.options.cache, "no-cache");
   assert.deepEqual(request.options.headers, { Accept: "application/json" });
+});
+
+test("只渲染已发布内容中的非内置图片", () => {
+  assert.equal(shouldRenderDocumentationImage({
+    src: "/api/v1/public/documentation/assets/uploaded.png",
+  }, "published"), true);
+  assert.equal(shouldRenderDocumentationImage({
+    src: "/tutorial-docs/assets/old-screen.png?version=2",
+  }, "published"), false);
+  assert.equal(shouldRenderDocumentationImage({
+    src: "/api/v1/public/documentation/assets/uploaded.png",
+  }, "bundled"), false);
+  assert.equal(shouldRenderDocumentationImage(null, "published"), false);
 });
 
 test("兼容 response.Success 的 data 包装", () => {

@@ -282,6 +282,14 @@ afterEach(() => {
 })
 
 describe('OpsResourceHealth', () => {
+  it('keeps sticky and account workspaces on the shared admin canvas', () => {
+    const sharedCanvasUses = resourceHealthSource.match(
+      /background: var\(--app-shell-canvas, var\(--lx-clay-canvas\)\);/g,
+    )
+
+    expect(sharedCanvasUses).toHaveLength(2)
+  })
+
   it('keeps the compact layout usable at 390px with accessible navigation, records, and drawer targets', () => {
     expect(resourceHealthSource).toContain('@media (max-width: 420px)')
     expect(resourceHealthSource).toContain('@container ops-dashboard (max-width: 1080px)')

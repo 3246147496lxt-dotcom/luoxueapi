@@ -46,8 +46,64 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 	if account == nil {
 		return errors.New("account is nil")
 	}
+	clientSession := NewOpenAIWSIngressClientSession(
+		clientConn,
+		OpenAIWSIngressClientSessionOptions{},
+	)
+	proxyErr := s.ProxyResponsesWebSocketFromClientSession(
+		ctx,
+		c,
+		clientSession,
+		account,
+		token,
+		firstClientMessage,
+		hooks,
+	)
+	var closeErr *OpenAIWSClientCloseError
+	if errors.As(proxyErr, &closeErr) {
+		// Compatibility callers own the raw connection and translate this
+		// typed error into the close frame. Keeping the session reader alive
+		// lets that handshake complete without racing a CloseNow here.
+		return proxyErr
+	}
+	clientSession.CloseAndWait()
+	return proxyErr
+}
+
+func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClientSession(
+	ctx context.Context,
+	c *gin.Context,
+	clientSession *OpenAIWSIngressClientSession,
+	account *Account,
+	token string,
+	firstClientMessage []byte,
+	hooks *OpenAIWSIngressHooks,
+) error {
+	if s == nil {
+		return errors.New("service is nil")
+	}
+	if c == nil {
+		return errors.New("gin context is nil")
+	}
+	if clientSession == nil {
+		return errors.New("client websocket session is nil")
+	}
+	if account == nil {
+		return errors.New("account is nil")
+	}
+	clientAttempt := clientSession.BeginAttempt()
+	defer func() {
+		_ = clientAttempt.Close()
+	}()
 	if err := validateOpenAIWSBearerToken(account, token); err != nil {
 		return err
+	}
+	if err := ValidateOpenAIWSFirstClientFrameJSON(firstClientMessage); err != nil {
+		return NewOpenAIWSClientCloseError(
+			coderws.StatusPolicyViolation,
+			"invalid websocket request payload",
+			err,
+		)
 	}
 
 	// 预取一次 OpenAI Fast Policy settings，绑定到 ctx，让该 WS session
@@ -80,7 +136,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 			return s.proxyResponsesWebSocketV2Passthrough(
 				ctx,
 				c,
-				clientConn,
+				clientAttempt,
 				account,
 				token,
 				firstClientMessage,
@@ -168,12 +224,12 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		if len(trimmed) == 0 {
 			return openAIWSClientPayload{}, NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "empty websocket request payload", nil)
 		}
-		if !gjson.ValidBytes(trimmed) {
-			return openAIWSClientPayload{}, NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "invalid websocket request payload", errors.New("invalid json"))
+		eventType, validationErr := ValidateOpenAIWSClientFrameJSON(trimmed)
+		if validationErr != nil {
+			return openAIWSClientPayload{}, NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "invalid websocket request payload", validationErr)
 		}
 
 		values := gjson.GetManyBytes(trimmed, "type", "model", "prompt_cache_key", "previous_response_id")
-		eventType := strings.TrimSpace(values[0].String())
 		normalized := trimmed
 		switch eventType {
 		case "":
@@ -350,7 +406,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 			eventBytes := buildOpenAIFastPolicyBlockedWSEvent(blocked)
 			if eventBytes != nil {
 				writeCtx, cancel := context.WithTimeout(ctx, s.openAIWSWriteTimeout())
-				_ = clientConn.Write(writeCtx, coderws.MessageText, eventBytes)
+				_ = clientAttempt.WriteFrame(writeCtx, coderws.MessageText, eventBytes)
 				cancel()
 			}
 			return openAIWSClientPayload{}, NewOpenAIWSClientCloseError(
@@ -378,19 +434,27 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 	writeClientMessage := func(message []byte) error {
 		writeCtx, cancel := context.WithTimeout(ctx, s.openAIWSWriteTimeout())
 		defer cancel()
-		return clientConn.Write(writeCtx, coderws.MessageText, message)
+		return clientAttempt.WriteFrame(writeCtx, coderws.MessageText, message)
 	}
 
 	readClientMessage := func() ([]byte, error) {
 		idleTimeout := s.openAIWSIngressInterTurnIdleTimeout()
-		msgType, payload, readErr := ReadOpenAIWSClientMessage(
-			ctx,
-			clientConn,
-			idleTimeout,
-			coderws.StatusNormalClosure,
-			"websocket idle timeout",
-		)
+		readCtx := ctx
+		cancel := func() {}
+		if idleTimeout > 0 {
+			readCtx, cancel = context.WithTimeout(ctx, idleTimeout)
+		}
+		msgType, payload, readErr := clientAttempt.ReadFrame(readCtx)
+		cancel()
 		if readErr != nil {
+			if idleTimeout > 0 && errors.Is(readErr, context.DeadlineExceeded) {
+				clientSession.Close(coderws.StatusNormalClosure, "websocket idle timeout")
+				readErr = NewOpenAIWSClientCloseError(
+					coderws.StatusNormalClosure,
+					"websocket idle timeout",
+					readErr,
+				)
+			}
 			var closeErr *OpenAIWSClientCloseError
 			if errors.As(readErr, &closeErr) && closeErr.StatusCode() == coderws.StatusNormalClosure {
 				logOpenAIWSModeInfo("ingress_ws_inter_turn_idle_timeout account_id=%d timeout_seconds=%d", account.ID, int(idleTimeout.Seconds()))
@@ -815,9 +879,12 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 				}
 				lastEventType = eventType
 			}
+			cyberHit := observeOpenAIWSCyberPolicy(c, upstreamMessage, http.StatusOK, nil)
 			if eventType == "error" {
 				canonicalModel := canonicalOpenAIAccountSchedulingModel(account, originalModel)
-				s.handleOpenAIWSErrorEventTransientFailure(ctx, account, canonicalModel, lease.HandshakeHeaders(), upstreamMessage)
+				if !cyberHit {
+					s.handleOpenAIWSErrorEventTransientFailure(ctx, account, canonicalModel, lease.HandshakeHeaders(), upstreamMessage)
+				}
 				errCodeRaw, errTypeRaw, errMsgRaw := parseOpenAIWSErrorEventFields(upstreamMessage)
 				s.persistOpenAIWSRateLimitSignal(ctx, account, lease.HandshakeHeaders(), upstreamMessage, errCodeRaw, errTypeRaw, errMsgRaw)
 				fallbackReason, _ := classifyOpenAIWSErrorEventFromRaw(errCodeRaw, errTypeRaw, errMsgRaw)
@@ -903,19 +970,6 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 			}
 			imageCounter.AddSSEData(upstreamMessage)
 
-			if eventType == "response.failed" {
-				if hit, code, msg := detectOpenAICyberPolicy(upstreamMessage); hit {
-					MarkOpsCyberPolicy(c, CyberPolicyMark{
-						Code:           code,
-						Message:        msg,
-						Body:           truncateString(string(upstreamMessage), 4096),
-						UpstreamStatus: http.StatusOK,
-						UpstreamInTok:  usage.InputTokens,
-						UpstreamOutTok: usage.OutputTokens,
-					})
-				}
-			}
-
 			if !clientDisconnected {
 				if needModelReplace && len(mappedModelBytes) > 0 && openAIWSEventMayContainModel(eventType) && bytes.Contains(upstreamMessage, mappedModelBytes) {
 					upstreamMessage = replaceOpenAIWSMessageModel(upstreamMessage, mappedModel, originalModel)
@@ -951,7 +1005,10 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 			}
 			if isTerminalEvent {
 				canonicalModel := canonicalOpenAIAccountSchedulingModel(account, originalModel)
-				terminalEvent := s.handleOpenAIWSTerminalTransientFailure(ctx, account, canonicalModel, lease.HandshakeHeaders(), upstreamMessage)
+				terminalEvent := normalizeOpenAIWSTerminalEvent(eventType)
+				if !cyberHit {
+					terminalEvent = s.handleOpenAIWSTerminalTransientFailure(ctx, account, canonicalModel, lease.HandshakeHeaders(), upstreamMessage)
+				}
 				// 客户端已断连时，上游连接的 session 状态不可信，标记 broken 避免回池复用。
 				if clientDisconnected {
 					lease.MarkBroken()

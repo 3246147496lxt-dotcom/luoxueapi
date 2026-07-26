@@ -433,6 +433,15 @@ const isFullscreen = computed(() => {
   return val === '1' || val === 'true'
 })
 
+const OPS_FULLSCREEN_BODY_CLASS = 'admin-ops-fullscreen'
+
+function syncFullscreenBodyClass(enabled: boolean) {
+  if (typeof document === 'undefined') return
+  document.body.classList.toggle(OPS_FULLSCREEN_BODY_CLASS, enabled)
+}
+
+watch(isFullscreen, syncFullscreenBodyClass, { immediate: true })
+
 function exitFullscreen() {
   const nextQuery = { ...route.query }
   delete nextQuery[QUERY_KEYS.fullscreen]
@@ -1125,6 +1134,7 @@ async function loadThresholds() {
 }
 
 onUnmounted(() => {
+  syncFullscreenBodyClass(false)
   window.removeEventListener('keydown', handleKeydown)
   abortDashboardFetch()
   pauseCountdown()

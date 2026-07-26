@@ -98,6 +98,96 @@ func keyPrefix(key string, n int) string {
 	return key[:n]
 }
 
+// opsAPIKeyPrefix prevents platform-managed web-chat credentials from entering Ops records.
+func opsAPIKeyPrefix(apiKey *service.APIKey, n int) string {
+	if apiKey == nil || apiKey.Purpose == service.APIKeyPurposeWebChat {
+		return ""
+	}
+	return keyPrefix(apiKey.Key, n)
+}
+
+func isWebChatIngress(c *gin.Context) bool {
+	if c == nil || c.Request == nil {
+		return false
+	}
+	marked, _ := c.Request.Context().Value(ctxkey.WebChatIngress).(bool)
+	return marked
+}
+
+// applyWebChatOpsAttribution keeps platform-managed credentials out of Ops
+// records and attributes post-JWT preflight failures to the authenticated user.
+func applyWebChatOpsAttribution(c *gin.Context, entry *service.OpsInsertErrorLogInput) {
+	if entry == nil || !isWebChatIngress(c) {
+		return
+	}
+
+	entry.APIKeyPrefix = ""
+	entry.AttemptedKeyPrefix = ""
+	entry.DeletedKeyOwnerUserID = nil
+	entry.DeletedKeyName = ""
+	if entry.UserID != nil {
+		return
+	}
+
+	if subject, ok := middleware2.GetAuthSubjectFromContext(c); ok && subject.UserID > 0 {
+		userID := subject.UserID
+		entry.UserID = &userID
+	}
+}
+
+const (
+	webChatOpsRequestFailedMessage         = "Web chat request failed"
+	webChatOpsUpstreamFailedMessage        = "Web chat upstream request failed"
+	webChatOpsUpstreamAttemptFailedMessage = "Web chat upstream attempt failed"
+)
+
+// prepareOpsErrorLogForEnqueue removes chat content before an Ops entry leaves
+// the request goroutine. It copies both the entry and its attempt events so the
+// gateway's request-scoped diagnostics remain unchanged for other consumers.
+func prepareOpsErrorLogForEnqueue(c *gin.Context, entry *service.OpsInsertErrorLogInput) *service.OpsInsertErrorLogInput {
+	if entry == nil || !isWebChatIngress(c) {
+		return entry
+	}
+
+	prepared := *entry
+	applyWebChatOpsAttribution(c, &prepared)
+
+	prepared.ErrorBody = ""
+	prepared.UpstreamErrorMessage = nil
+	prepared.UpstreamErrorDetail = nil
+	prepared.UpstreamErrorsJSON = nil
+
+	hasUpstreamAttempt := prepared.UpstreamStatusCode != nil || len(prepared.UpstreamErrors) > 0
+	if len(prepared.UpstreamErrors) > 0 {
+		prepared.UpstreamErrors = make([]*service.OpsUpstreamErrorEvent, len(entry.UpstreamErrors))
+		for i, event := range entry.UpstreamErrors {
+			if event == nil {
+				continue
+			}
+			eventCopy := *event
+			eventCopy.Message = ""
+			eventCopy.Detail = ""
+			eventCopy.UpstreamResponseBody = ""
+			prepared.UpstreamErrors[i] = &eventCopy
+		}
+	}
+
+	switch {
+	case prepared.StatusCode < http.StatusBadRequest && hasUpstreamAttempt:
+		prepared.ErrorMessage = webChatOpsUpstreamAttemptFailedMessage
+	case hasUpstreamAttempt || prepared.ErrorPhase == "upstream" || prepared.ErrorPhase == "network" || prepared.ErrorPhase == "account_auth" || prepared.ErrorSource == "upstream_http":
+		prepared.ErrorMessage = webChatOpsUpstreamFailedMessage
+	default:
+		prepared.ErrorMessage = webChatOpsRequestFailedMessage
+	}
+
+	return &prepared
+}
+
+func enqueueOpsErrorLogForRequest(c *gin.Context, ops *service.OpsService, entry *service.OpsInsertErrorLogInput) {
+	enqueueOpsErrorLog(ops, prepareOpsErrorLogForEnqueue(c, entry))
+}
+
 // extractAttemptedKey 按认证中间件同样的顺序从请求头提取提交的 key 明文。
 // 与 api_key_auth.go:43-59 一致:Authorization 仅取 Bearer scheme,非 Bearer 则忽略并继续 x-api-key → x-goog-api-key。
 func extractAttemptedKey(c *gin.Context) string {
@@ -864,7 +954,7 @@ func OpsErrorLoggerMiddleware(ops *service.OpsService) gin.HandlerFunc {
 
 			if apiKey != nil {
 				entry.APIKeyID = &apiKey.ID
-				entry.APIKeyPrefix = keyPrefix(apiKey.Key, 8)
+				entry.APIKeyPrefix = opsAPIKeyPrefix(apiKey, 8)
 				if apiKey.User != nil {
 					entry.UserID = &apiKey.User.ID
 				}
@@ -882,7 +972,6 @@ func OpsErrorLoggerMiddleware(ops *service.OpsService) gin.HandlerFunc {
 				clientIP = ip
 				entry.ClientIP = &clientIP
 			}
-
 			// Skip logging if a passthrough rule with skip_monitoring=true matched.
 			if v, ok := c.Get(service.OpsSkipPassthroughKey); ok {
 				if skip, _ := v.(bool); skip {
@@ -890,7 +979,7 @@ func OpsErrorLoggerMiddleware(ops *service.OpsService) gin.HandlerFunc {
 				}
 			}
 
-			enqueueOpsErrorLog(ops, entry)
+			enqueueOpsErrorLogForRequest(c, ops, entry)
 			return
 		}
 
@@ -1003,7 +1092,7 @@ func OpsErrorLoggerMiddleware(ops *service.OpsService) gin.HandlerFunc {
 		if apiKey != nil {
 			entry.APIKeyID = &apiKey.ID
 			// 有效(未删除)key 报错时快照前缀,key 之后被删也保留;与 INVALID_API_KEY 的 attempted_key_prefix 互斥。
-			entry.APIKeyPrefix = keyPrefix(apiKey.Key, 8)
+			entry.APIKeyPrefix = opsAPIKeyPrefix(apiKey, 8)
 			if apiKey.User != nil {
 				entry.UserID = &apiKey.User.ID
 			}
@@ -1023,7 +1112,7 @@ func OpsErrorLoggerMiddleware(ops *service.OpsService) gin.HandlerFunc {
 		}
 
 		// 已删除 key 归因:仅 INVALID_API_KEY 才尝试。响应已写出,此处不阻塞客户端。
-		if parsed.Code == opsCodeInvalidAPIKey {
+		if parsed.Code == opsCodeInvalidAPIKey && !isWebChatIngress(c) {
 			if attemptedKey := extractAttemptedKey(c); attemptedKey != "" {
 				entry.AttemptedKeyPrefix = keyPrefix(attemptedKey, 8)
 				if looksLikeSystemKey(attemptedKey) {
@@ -1038,7 +1127,7 @@ func OpsErrorLoggerMiddleware(ops *service.OpsService) gin.HandlerFunc {
 			}
 		}
 
-		enqueueOpsErrorLog(ops, entry)
+		enqueueOpsErrorLogForRequest(c, ops, entry)
 	}
 }
 
@@ -1155,7 +1244,7 @@ func logOpsStreamError(c *gin.Context, ops *service.OpsService, wireStatus int) 
 
 	if apiKey != nil {
 		entry.APIKeyID = &apiKey.ID
-		entry.APIKeyPrefix = keyPrefix(apiKey.Key, 8)
+		entry.APIKeyPrefix = opsAPIKeyPrefix(apiKey, 8)
 		if apiKey.User != nil {
 			entry.UserID = &apiKey.User.ID
 		}
@@ -1171,7 +1260,7 @@ func logOpsStreamError(c *gin.Context, ops *service.OpsService, wireStatus int) 
 		entry.ClientIP = &clientIP
 	}
 
-	enqueueOpsErrorLog(ops, entry)
+	enqueueOpsErrorLogForRequest(c, ops, entry)
 }
 
 // isCountTokensRequest checks if the request is a count_tokens request

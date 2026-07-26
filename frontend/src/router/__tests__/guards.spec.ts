@@ -121,7 +121,6 @@ function simulateGuard(
       '/admin/subscriptions',
       '/admin/redeem',
       '/subscriptions',
-      '/purchase',
       '/redeem',
     ]
     if (restrictedPaths.some((path) => toPath.startsWith(path))) {

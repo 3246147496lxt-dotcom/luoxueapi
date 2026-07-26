@@ -142,6 +142,11 @@ func (h *UsageHandler) parseUserUsageFilters(c *gin.Context, requireRange bool) 
 		response.BadRequest(c, "Invalid billing_mode")
 		return nil, false
 	}
+	source, validSource := usagestats.NormalizeUsageSource(c.Query("source"))
+	if !validSource {
+		response.BadRequest(c, "Invalid source, use web_chat or api")
+		return nil, false
+	}
 
 	userTZ := c.Query("timezone")
 	now := timezone.NowInUserLocation(userTZ)
@@ -199,6 +204,8 @@ func (h *UsageHandler) parseUserUsageFilters(c *gin.Context, requireRange bool) 
 			APIKeyID:          apiKeyID,
 			GroupID:           groupID,
 			Model:             strings.TrimSpace(c.Query("model")),
+			RequestID:         strings.TrimSpace(c.Query("request_id")),
+			Source:            source,
 			ModelFilterSource: usagestats.ModelSourceRequested,
 			RequestType:       requestType,
 			Stream:            stream,

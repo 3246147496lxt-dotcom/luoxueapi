@@ -1,12 +1,17 @@
 // Package usagestats provides types for usage statistics and reporting.
 package usagestats
 
-import "time"
+import (
+	"strings"
+	"time"
+)
 
 const (
 	ModelSourceRequested = "requested"
 	ModelSourceUpstream  = "upstream"
 	ModelSourceMapping   = "mapping"
+	UsageSourceAPI       = "api"
+	UsageSourceWebChat   = "web_chat"
 )
 
 func IsValidModelSource(source string) bool {
@@ -15,6 +20,18 @@ func IsValidModelSource(source string) bool {
 		return true
 	default:
 		return false
+	}
+}
+
+func NormalizeUsageSource(source string) (string, bool) {
+	source = strings.ToLower(strings.TrimSpace(source))
+	switch source {
+	case "":
+		return "", true
+	case UsageSourceAPI, UsageSourceWebChat:
+		return source, true
+	default:
+		return "", false
 	}
 }
 
@@ -289,6 +306,10 @@ type UsageLogFilters struct {
 	AccountID int64
 	GroupID   int64
 	Model     string
+	RequestID string
+	// Source filters first-party Web Chat traffic from ordinary API traffic.
+	// Supported values are "web_chat" and "api"; empty means all sources.
+	Source string
 	// ModelFilterSource controls how Model is matched. Empty preserves raw usage_logs.model semantics.
 	ModelFilterSource string
 	RequestType       *int16

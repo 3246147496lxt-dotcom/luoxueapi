@@ -1,5 +1,9 @@
 <template>
-  <div v-if="visible" class="space-y-1">
+  <div
+    v-if="visible"
+    class="openai-quota-reset space-y-1"
+    data-testid="openai-quota-reset"
+  >
     <!--
       Unified action row. Parents that already render their own "local query"
       affordance (e.g. AccountUsageCell's active-sampling refresh) pass it in
@@ -11,14 +15,15 @@
       owns that real estate. This cell is purely about the rate-limit reset
       credit: query its count, consume one if needed.
     -->
-    <div class="flex flex-wrap items-center gap-1.5">
+    <div class="openai-quota-reset__actions flex flex-wrap items-center gap-1.5">
       <slot name="pre-actions" />
 
       <button
         type="button"
-        class="inline-flex items-center gap-0.5 rounded px-1.5 py-0.5 text-[10px] font-medium text-blue-600 transition-colors hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-50 dark:text-blue-400 dark:hover:bg-blue-900/30"
+        class="openai-quota-reset__count inline-flex items-center gap-0.5 rounded px-1.5 py-0.5 text-[10px] font-medium text-blue-600 transition-colors hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-50 dark:text-blue-400 dark:hover:bg-blue-900/30"
         :disabled="loading || resetting"
         :title="countButtonTitle"
+        data-testid="openai-quota-reset-count"
         @click="handleQuery"
       >
         <svg
@@ -40,9 +45,10 @@
 
       <button
         type="button"
-        class="inline-flex items-center gap-0.5 rounded px-1.5 py-0.5 text-[10px] font-medium text-orange-600 transition-colors hover:bg-orange-50 disabled:cursor-not-allowed disabled:opacity-50 dark:text-orange-400 dark:hover:bg-orange-900/30"
+        class="openai-quota-reset__reset inline-flex items-center gap-0.5 rounded px-1.5 py-0.5 text-[10px] font-medium text-orange-600 transition-colors hover:bg-orange-50 disabled:cursor-not-allowed disabled:opacity-50 dark:text-orange-400 dark:hover:bg-orange-900/30"
         :disabled="resetting || loading || !canReset"
         :title="resetButtonTitle"
+        data-testid="openai-quota-reset-button"
         @click="openResetConfirm"
       >
         <svg
@@ -145,6 +151,10 @@ import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
 
 const props = defineProps<{
   account: Account
+}>()
+
+const emit = defineEmits<{
+  'quota-updated': []
 }>()
 
 const { t } = useI18n()
@@ -303,6 +313,7 @@ const confirmReset = async () => {
     resetMessage.value = t('admin.accounts.openaiQuotaReset.resetSuccess', {
       windows: result.windows_reset
     })
+    emit('quota-updated')
   } catch (e) {
     error.value = extractErrorMessage(e)
   } finally {

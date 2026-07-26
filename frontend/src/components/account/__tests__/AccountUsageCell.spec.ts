@@ -728,7 +728,7 @@ describe('AccountUsageCell', () => {
 
     const wrapper = mount(AccountUsageCell, {
       props: {
-        account: makeAccount({ id: 4300 + expected, platform: 'grok', type: 'oauth', extra: {} })
+        account: makeAccount({ id: 4_300_000 + tokens, platform: 'grok', type: 'oauth', extra: {} })
       },
       global: {
         stubs: {
@@ -1231,5 +1231,397 @@ describe('AccountUsageCell', () => {
     expect(wrapper.text()).toContain('7d|56')
     expect(wrapper.text()).not.toContain('7d S')
     expect(wrapper.text()).not.toContain('7d F')
+  })
+
+  it('summary 模式只显示最紧张额度窗口、已用比例和单条进度', async () => {
+    getUsage.mockResolvedValue({
+      five_hour: {
+        utilization: 35,
+        resets_at: '2026-07-25T12:00:00Z',
+        remaining_seconds: 3600,
+        window_stats: {
+          requests: 42,
+          tokens: 4200,
+          cost: 1.25,
+          standard_cost: 1.25,
+          user_cost: 1.5
+        }
+      },
+      seven_day: {
+        utilization: 68,
+        resets_at: '2026-07-31T12:00:00Z',
+        remaining_seconds: 3600
+      }
+    })
+
+    const wrapper = mount(AccountUsageCell, {
+      props: {
+        account: makeAccount({
+          id: 9901,
+          platform: 'openai',
+          type: 'oauth',
+          extra: {}
+        }),
+        displayMode: 'summary'
+      }
+    })
+
+    await flushPromises()
+
+    const summary = wrapper.get('.account-usage-summary')
+    expect(getUsage).toHaveBeenCalledWith(9901)
+    expect(summary.get('.account-usage-summary__label').text()).toBe('7d')
+    expect(summary.get('.account-usage-summary__value').text())
+      .toBe('admin.accounts.workbench.quotaUsed')
+    expect(summary.get('.account-usage-summary__track > span').attributes('style'))
+      .toContain('width: 68%')
+    expect(wrapper.text()).not.toContain('5h')
+    expect(wrapper.text()).not.toContain('4200')
+    expect(wrapper.text()).not.toContain('1.25')
+    expect(wrapper.find('button').exists()).toBe(false)
+  })
+
+  it('summary 模式会纳入 Anthropic 模型级 7d 子额度', async () => {
+    getUsage.mockResolvedValue({
+      source: 'passive',
+      five_hour: {
+        utilization: 10,
+        resets_at: '2099-07-25T12:00:00Z',
+        remaining_seconds: 8100
+      },
+      seven_day: {
+        utilization: 20,
+        resets_at: '2099-07-31T12:00:00Z',
+        remaining_seconds: 8100
+      },
+      seven_day_sonnet: {
+        utilization: 100,
+        resets_at: '2099-07-31T12:00:00Z',
+        remaining_seconds: 8100
+      },
+      seven_day_fable: {
+        utilization: 90,
+        resets_at: '2099-07-31T12:00:00Z',
+        remaining_seconds: 8100
+      }
+    })
+
+    const wrapper = mount(AccountUsageCell, {
+      props: {
+        account: makeAccount({
+          id: 9914,
+          platform: 'anthropic',
+          type: 'oauth',
+          extra: {}
+        }),
+        displayMode: 'summary'
+      }
+    })
+    await flushPromises()
+
+    expect(wrapper.get('.account-usage-summary__label').text()).toBe('7d S')
+    expect(wrapper.get('.account-usage-summary').attributes('data-level')).toBe('danger')
+    expect(wrapper.get('.account-usage-summary__track > span').attributes('style'))
+      .toContain('width: 100%')
+  })
+
+  it('summary 模式会纳入 Grok Token 配额', async () => {
+    getUsage.mockResolvedValue({
+      grok_billing: {
+        period_type: 'weekly',
+        usage_percent: null,
+        plan: 'SuperGrok'
+      },
+      grok_request_quota: {
+        limit: 100,
+        remaining: 80
+      },
+      grok_token_quota: {
+        limit: 100,
+        remaining: 0
+      }
+    })
+
+    const wrapper = mount(AccountUsageCell, {
+      props: {
+        account: makeAccount({
+          id: 9915,
+          platform: 'grok',
+          type: 'oauth',
+          extra: {}
+        }),
+        displayMode: 'summary'
+      }
+    })
+    await flushPromises()
+
+    expect(wrapper.get('.account-usage-summary__label').text())
+      .toBe('admin.accounts.workbench.tokenQuota')
+    expect(wrapper.get('.account-usage-summary').attributes('data-level')).toBe('danger')
+    expect(wrapper.get('.account-usage-summary__track > span').attributes('style'))
+      .toContain('width: 100%')
+  })
+
+  it('overview 模式只显示主 5h / 7d 额度、双进度和精确重置提示', async () => {
+    getUsage.mockResolvedValue({
+      five_hour: {
+        utilization: 35,
+        resets_at: '2099-07-25T12:00:00Z',
+        remaining_seconds: 8100,
+        window_stats: {
+          requests: 42,
+          tokens: 4200,
+          cost: 1.25,
+          standard_cost: 1.25,
+          user_cost: 1.5
+        }
+      },
+      seven_day: {
+        utilization: 12,
+        resets_at: '2099-07-31T12:00:00Z',
+        remaining_seconds: 3600
+      }
+    })
+
+    const wrapper = mount(AccountUsageCell, {
+      props: {
+        account: makeAccount({
+          id: 9902,
+          platform: 'openai',
+          type: 'oauth',
+          extra: {}
+        }),
+        displayMode: 'overview'
+      }
+    })
+
+    await flushPromises()
+
+    const overview = wrapper.get('[data-testid="account-usage-overview"]')
+    const rows = overview.findAll('.account-usage-overview__row')
+    expect(rows).toHaveLength(2)
+    expect(rows[0].text()).toContain('admin.accounts.workbench.fiveHourRollingWindow')
+    expect(rows[0].text()).toContain('admin.accounts.workbench.quotaResetCountdown')
+    expect(rows[0].get('.account-usage-overview__track > span').attributes('style'))
+      .toContain('width: 35%')
+    expect(rows[1].text()).toContain('admin.accounts.workbench.sevenDayTotalQuota')
+    expect(rows[1].get('.account-usage-overview__track > span').attributes('style'))
+      .toContain('width: 12%')
+    expect(wrapper.text()).not.toContain('4200')
+    expect(wrapper.text()).not.toContain('1.25')
+    expect(wrapper.find('button').exists()).toBe(false)
+
+    wrapper.unmount()
+  })
+
+  it('deduplicates a cold usage request shared by summary and overview instances', async () => {
+    let resolveUsage!: (value: {
+      five_hour: {
+        utilization: number
+        resets_at: string
+        remaining_seconds: number
+      }
+      seven_day: null
+    }) => void
+    const pendingUsage = new Promise<{
+      five_hour: {
+        utilization: number
+        resets_at: string
+        remaining_seconds: number
+      }
+      seven_day: null
+    }>((resolve) => {
+      resolveUsage = resolve
+    })
+    getUsage.mockReturnValue(pendingUsage)
+    const account = makeAccount({
+      id: 9903,
+      platform: 'openai',
+      type: 'oauth',
+      extra: {}
+    })
+
+    const summary = mount(AccountUsageCell, {
+      props: { account, displayMode: 'summary' }
+    })
+    const overview = mount(AccountUsageCell, {
+      props: { account, displayMode: 'overview' }
+    })
+
+    await Promise.resolve()
+    expect(getUsage).toHaveBeenCalledTimes(1)
+
+    resolveUsage({
+      five_hour: {
+        utilization: 48,
+        resets_at: '2099-07-25T12:00:00Z',
+        remaining_seconds: 8100
+      },
+      seven_day: null
+    })
+    await flushPromises()
+
+    expect(summary.get('.account-usage-summary__track > span').attributes('style'))
+      .toContain('width: 48%')
+    expect(overview.get('.account-usage-overview__track > span').attributes('style'))
+      .toContain('width: 48%')
+
+    summary.unmount()
+    overview.unmount()
+  })
+
+  it.each([
+    [80, 'warning', 9910],
+    [100, 'danger', 9911]
+  ])(
+    'marks %i%% usage as %s in both summary and overview',
+    async (utilization, level, accountId) => {
+      getUsage.mockResolvedValue({
+        five_hour: {
+          utilization,
+          resets_at: '2099-07-25T12:00:00Z',
+          remaining_seconds: 8100
+        },
+        seven_day: null
+      })
+      const account = makeAccount({
+        id: accountId,
+        platform: 'openai',
+        type: 'oauth',
+        extra: {}
+      })
+
+      const summary = mount(AccountUsageCell, {
+        props: { account, displayMode: 'summary' }
+      })
+      const overview = mount(AccountUsageCell, {
+        props: { account, displayMode: 'overview' }
+      })
+      await flushPromises()
+
+      expect(summary.get('.account-usage-summary').attributes('data-level')).toBe(level)
+      expect(overview.get('.account-usage-overview__row').attributes('data-level')).toBe(level)
+
+      summary.unmount()
+      overview.unmount()
+    }
+  )
+
+  it('keeps table summary and inspector overview synchronized after an active query', async () => {
+    getUsage
+      .mockResolvedValueOnce({
+        five_hour: {
+          utilization: 30,
+          resets_at: '2099-07-25T12:00:00Z',
+          remaining_seconds: 8100
+        },
+        seven_day: {
+          utilization: 40,
+          resets_at: '2099-07-31T12:00:00Z',
+          remaining_seconds: 8100
+        }
+      })
+      .mockResolvedValueOnce({
+        five_hour: {
+          utilization: 5,
+          resets_at: '2099-07-25T12:00:00Z',
+          remaining_seconds: 8100
+        },
+        seven_day: {
+          utilization: 100,
+          resets_at: '2099-07-31T12:00:00Z',
+          remaining_seconds: 8100
+        }
+      })
+    const account = makeAccount({
+      id: 9912,
+      platform: 'openai',
+      type: 'oauth',
+      extra: {}
+    })
+
+    const summary = mount(AccountUsageCell, {
+      props: { account, displayMode: 'summary' }
+    })
+    const overview = mount(AccountUsageCell, {
+      props: { account, displayMode: 'overview' }
+    })
+    await flushPromises()
+
+    await (overview.vm as unknown as { queryQuota: () => Promise<void> }).queryQuota()
+    await flushPromises()
+
+    expect(getUsage).toHaveBeenLastCalledWith(9912, 'active', true)
+    expect(summary.get('.account-usage-summary__label').text()).toBe('7d')
+    expect(summary.get('.account-usage-summary').attributes('data-level')).toBe('danger')
+    expect(summary.get('.account-usage-summary__track > span').attributes('style'))
+      .toContain('width: 100%')
+    expect(
+      overview.findAll('.account-usage-overview__row')[1].attributes('data-level')
+    ).toBe('danger')
+    expect(
+      overview.findAll('.account-usage-overview__track > span')[1].attributes('style')
+    ).toContain('width: 100%')
+
+    summary.unmount()
+    overview.unmount()
+  })
+
+  it('does not let an older automatic request overwrite a newer active result', async () => {
+    let resolveAutomatic!: (value: {
+      five_hour: {
+        utilization: number
+        resets_at: string
+        remaining_seconds: number
+      }
+      seven_day: null
+    }) => void
+    const automatic = new Promise<{
+      five_hour: {
+        utilization: number
+        resets_at: string
+        remaining_seconds: number
+      }
+      seven_day: null
+    }>((resolve) => {
+      resolveAutomatic = resolve
+    })
+    getUsage
+      .mockReturnValueOnce(automatic)
+      .mockResolvedValueOnce({
+        five_hour: {
+          utilization: 100,
+          resets_at: '2099-07-25T12:00:00Z',
+          remaining_seconds: 8100
+        },
+        seven_day: null
+      })
+    const account = makeAccount({
+      id: 9913,
+      platform: 'openai',
+      type: 'oauth',
+      extra: {}
+    })
+    const summary = mount(AccountUsageCell, {
+      props: { account, displayMode: 'summary' }
+    })
+
+    await Promise.resolve()
+    await (summary.vm as unknown as { queryQuota: () => Promise<void> }).queryQuota()
+    resolveAutomatic({
+      five_hour: {
+        utilization: 10,
+        resets_at: '2099-07-25T12:00:00Z',
+        remaining_seconds: 8100
+      },
+      seven_day: null
+    })
+    await flushPromises()
+
+    expect(summary.get('.account-usage-summary').attributes('data-level')).toBe('danger')
+    expect(summary.get('.account-usage-summary__track > span').attributes('style'))
+      .toContain('width: 100%')
+
+    summary.unmount()
   })
 })

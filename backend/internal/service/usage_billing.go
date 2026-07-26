@@ -11,6 +11,10 @@ import (
 
 var ErrUsageBillingRequestIDRequired = errors.New("usage billing request_id is required")
 var ErrUsageBillingRequestConflict = errors.New("usage billing request fingerprint conflict")
+var ErrUsageBillingPrincipalMismatch = errors.New("usage billing api key owner does not match command user")
+var ErrUsageBillingAttemptNotFound = errors.New("web chat billing attempt not found")
+var ErrUsageBillingRepositoryUnavailable = errors.New("web chat usage billing repository unavailable")
+var ErrUsageBillingSettlementClosed = errors.New("web chat usage settlement is closed")
 
 // UsageBillingCommand describes one billable request that must be applied at most once.
 type UsageBillingCommand struct {
@@ -18,12 +22,14 @@ type UsageBillingCommand struct {
 	APIKeyID           int64
 	RequestFingerprint string
 	RequestPayloadHash string
+	Source             string
 
 	UserID              int64
 	AccountID           int64
 	SubscriptionID      *int64
 	AccountType         string
 	Model               string
+	RequestedModel      string
 	ServiceTier         string
 	ReasoningEffort     string
 	BillingType         int8
@@ -34,6 +40,7 @@ type UsageBillingCommand struct {
 	ImageCount          int
 	MediaType           string
 
+	GrossCost           float64
 	BalanceCost         float64
 	SubscriptionCost    float64
 	APIKeyQuotaCost     float64
@@ -46,9 +53,36 @@ func (c *UsageBillingCommand) Normalize() {
 		return
 	}
 	c.RequestID = strings.TrimSpace(c.RequestID)
+	c.Source = strings.ToLower(strings.TrimSpace(c.Source))
+	if c.Source == "" {
+		c.Source = BillingReceiptSourceAPI
+	}
+	c.Model = strings.TrimSpace(c.Model)
+	c.RequestedModel = strings.TrimSpace(c.RequestedModel)
+	if c.RequestedModel == "" {
+		c.RequestedModel = c.Model
+	}
+	if c.GrossCost == 0 {
+		switch {
+		case c.BalanceCost > 0:
+			c.GrossCost = c.BalanceCost
+		case c.SubscriptionCost > 0:
+			c.GrossCost = c.SubscriptionCost
+		}
+	}
 	if strings.TrimSpace(c.RequestFingerprint) == "" {
 		c.RequestFingerprint = buildUsageBillingFingerprint(c)
 	}
+}
+
+func (c *UsageBillingCommand) ReceiptStatus() string {
+	if c != nil && (c.BillingType == BillingTypeSubscription || (c.SubscriptionID != nil && c.BalanceCost <= 0)) {
+		return BillingReceiptStatusSubscription
+	}
+	if c != nil && c.BalanceCost > 0 {
+		return BillingReceiptStatusCharged
+	}
+	return BillingReceiptStatusNotCharged
 }
 
 func buildUsageBillingFingerprint(c *UsageBillingCommand) string {
@@ -56,12 +90,14 @@ func buildUsageBillingFingerprint(c *UsageBillingCommand) string {
 		return ""
 	}
 	raw := fmt.Sprintf(
-		"%d|%d|%d|%s|%s|%s|%s|%d|%d|%d|%d|%d|%d|%s|%d|%0.10f|%0.10f|%0.10f|%0.10f|%0.10f",
+		"%d|%d|%d|%s|%s|%s|%s|%s|%s|%d|%d|%d|%d|%d|%d|%s|%d|%0.10f|%0.10f|%0.10f|%0.10f|%0.10f|%0.10f",
 		c.UserID,
 		c.AccountID,
 		c.APIKeyID,
+		strings.TrimSpace(c.Source),
 		strings.TrimSpace(c.AccountType),
 		strings.TrimSpace(c.Model),
+		strings.TrimSpace(c.RequestedModel),
 		strings.TrimSpace(c.ServiceTier),
 		strings.TrimSpace(c.ReasoningEffort),
 		c.BillingType,
@@ -72,6 +108,7 @@ func buildUsageBillingFingerprint(c *UsageBillingCommand) string {
 		c.ImageCount,
 		strings.TrimSpace(c.MediaType),
 		valueOrZero(c.SubscriptionID),
+		c.GrossCost,
 		c.BalanceCost,
 		c.SubscriptionCost,
 		c.APIKeyQuotaCost,
@@ -113,7 +150,9 @@ type AccountQuotaState struct {
 
 type UsageBillingApplyResult struct {
 	Applied              bool
+	SettlementClosed     bool // terminal Web Chat attempt rejected this late billing producer
 	APIKeyQuotaExhausted bool
+	BalanceBefore        *float64           // pre-deduction balance (nil = no balance deduction)
 	NewBalance           *float64           // post-deduction balance (nil = no balance deduction)
 	BalanceOverdrafted   bool               // true when the sufficient-balance guard missed and debt was still recorded
 	QuotaState           *AccountQuotaState // post-increment quota state (nil = no quota increment)

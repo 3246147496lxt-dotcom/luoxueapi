@@ -15,7 +15,11 @@ const mountActions = () =>
   mount(AccountTableActions, {
     props: { loading: false },
     slots: {
-      after: '<button data-testid="secondary-action">secondary</button>'
+      after: `
+        <button class="account-toolbar-icon-button" data-testid="auto-refresh-action" aria-label="auto refresh"></button>
+        <button class="account-toolbar-icon-button" data-testid="columns-action" aria-label="columns"></button>
+        <button class="account-toolbar-icon-button" data-testid="more-action" aria-label="more"></button>
+      `
     },
     global: {
       stubs: { Icon: true }
@@ -23,37 +27,27 @@ const mountActions = () =>
   })
 
 describe('AccountTableActions responsive disclosure', () => {
-  it('keeps account creation as the only primary page action', () => {
+  it('renders refresh and after tools as one always-visible icon group', () => {
     const wrapper = mountActions()
-    const primaryActions = wrapper.findAll('.btn-primary')
+    const group = wrapper.get('.account-table-actions')
+    const buttons = group.findAll('button')
 
-    expect(primaryActions).toHaveLength(1)
-    expect(primaryActions[0].text()).toBe('admin.accounts.createAccount')
-    expect(primaryActions[0].classes()).toEqual(expect.arrayContaining(['order-1', 'min-h-11', 'lg:order-none']))
+    expect(buttons).toHaveLength(4)
+    expect(buttons[0]?.attributes('aria-label')).toBe('common.refresh')
+    expect(buttons[0]?.classes()).toContain('account-table-action-button')
+    expect(buttons.slice(1).every(button => button.classes().includes('account-toolbar-icon-button'))).toBe(true)
+    expect(wrapper.find('[data-testid="account-actions-toggle"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="account-secondary-actions"]').exists()).toBe(false)
+    expect(wrapper.find('.btn-primary').exists()).toBe(false)
+    expect(wrapper.text()).not.toContain('admin.accounts.createAccount')
   })
 
-  it('collapses low-frequency actions on mobile and exposes accessible state', async () => {
-    const wrapper = mountActions()
-    const toggle = wrapper.get('[data-testid="account-actions-toggle"]')
-    const secondary = wrapper.get('[data-testid="account-secondary-actions"]')
-
-    expect(toggle.attributes('aria-expanded')).toBe('false')
-    expect(toggle.attributes('aria-controls')).toBe('account-secondary-actions')
-    expect(toggle.classes()).toEqual(expect.arrayContaining(['min-h-11', 'min-w-11', 'lg:hidden']))
-    expect(secondary.classes()).toEqual(expect.arrayContaining(['hidden', 'lg:contents']))
-
-    await toggle.trigger('click')
-
-    expect(toggle.attributes('aria-expanded')).toBe('true')
-    expect(secondary.classes()).toContain('flex')
-    expect(secondary.find('[data-testid="secondary-action"]').exists()).toBe(true)
-  })
-
-  it('keeps refresh directly available with an accessible 44px target', async () => {
+  it('keeps the 44px refresh action accessible and emits refresh directly', async () => {
     const wrapper = mountActions()
     const refresh = wrapper.get('button[aria-label="common.refresh"]')
 
-    expect(refresh.classes()).toEqual(expect.arrayContaining(['min-h-11', 'min-w-11']))
+    expect(refresh.attributes('title')).toBe('common.refresh')
+    expect(refresh.classes()).toContain('account-table-action-button')
     await refresh.trigger('click')
     expect(wrapper.emitted('refresh')).toHaveLength(1)
   })

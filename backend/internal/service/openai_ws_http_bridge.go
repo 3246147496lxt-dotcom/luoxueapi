@@ -233,9 +233,10 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 
 	if resp.StatusCode >= 400 {
 		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, openAIWSHTTPBridgeErrorBodyLimitBytes))
-		if account.Platform == PlatformGrok {
+		cyberHit := observeOpenAIWSCyberPolicy(c, respBody, resp.StatusCode, nil)
+		if account.Platform == PlatformGrok && !cyberHit {
 			s.handleGrokAccountUpstreamError(ctx, account, resp.StatusCode, resp.Header, respBody)
-		} else if shouldCooldownOpenAITransientUpstreamError(resp.StatusCode, respBody) {
+		} else if !cyberHit && shouldCooldownOpenAITransientUpstreamError(resp.StatusCode, respBody) {
 			canonicalModel := canonicalOpenAIAccountSchedulingModel(account, originalModel)
 			s.handleOpenAIAccountUpstreamError(ctx, account, resp.StatusCode, resp.Header, respBody, canonicalModel)
 		}
@@ -353,6 +354,7 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 			parseOpenAIWSResponseUsageFromCompletedEvent(upstreamMessage, &usage)
 		}
 		imageCounter.AddSSEData(upstreamMessage)
+		cyberHit := observeOpenAIWSCyberPolicy(c, upstreamMessage, http.StatusOK, &usage)
 
 		if needModelReplace && len(mappedModelBytes) > 0 && openAIWSEventMayContainModel(eventType) && strings.Contains(trimmedData, mappedModel) {
 			upstreamMessage = replaceOpenAIWSMessageModel(upstreamMessage, mappedModel, originalModel)
@@ -389,7 +391,9 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 		}
 
 		if eventType == "error" {
-			s.handleOpenAIWSErrorEventTransientFailure(ctx, account, canonicalOpenAIAccountSchedulingModel(account, originalModel), resp.Header, upstreamMessage)
+			if !cyberHit {
+				s.handleOpenAIWSErrorEventTransientFailure(ctx, account, canonicalOpenAIAccountSchedulingModel(account, originalModel), resp.Header, upstreamMessage)
+			}
 			errCodeRaw, errTypeRaw, errMsgRaw := parseOpenAIWSErrorEventFields(upstreamMessage)
 			s.persistOpenAIWSRateLimitSignal(ctx, account, resp.Header, upstreamMessage, errCodeRaw, errTypeRaw, errMsgRaw)
 			errMessage := strings.TrimSpace(errMsgRaw)
@@ -399,7 +403,10 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 			return resultWithUsage(), errors.New(errMessage)
 		}
 		if isOpenAIWSTerminalEvent(eventType) {
-			upstreamTerminalEvent = s.handleOpenAIWSTerminalTransientFailure(ctx, account, canonicalOpenAIAccountSchedulingModel(account, originalModel), resp.Header, upstreamMessage)
+			upstreamTerminalEvent = normalizeOpenAIWSTerminalEvent(eventType)
+			if !cyberHit {
+				upstreamTerminalEvent = s.handleOpenAIWSTerminalTransientFailure(ctx, account, canonicalOpenAIAccountSchedulingModel(account, originalModel), resp.Header, upstreamMessage)
+			}
 			terminalEventCount++
 			firstTokenMsValue := -1
 			if firstTokenMs != nil {

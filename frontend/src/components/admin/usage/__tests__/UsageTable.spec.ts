@@ -37,6 +37,9 @@ const messages: Record<string, string> = {
   'usage.accountMultiplier': 'Account rate',
   'usage.original': 'Original',
   'usage.userBilled': 'User billed',
+  'usage.chargedAmount': 'Charged',
+  'usage.sourceWebChat': 'GPT Chat',
+  'usage.sourceApi': 'API',
   'usage.accountBilled': 'Account billed',
   'usage.imageUnit': ' images',
   'usage.imageCount': 'Image count',
@@ -75,6 +78,8 @@ const DataTableStub = {
   template: `
     <div>
       <div v-for="row in data" :key="row.request_id">
+        <slot name="cell-source" :row="row" />
+        <slot name="cell-request_id" :row="row" />
         <slot name="cell-model" :row="row" :value="row.model" />
         <slot name="cell-billing_mode" :row="row" />
         <slot name="cell-tokens" :row="row" />
@@ -246,7 +251,7 @@ describe('admin UsageTable tooltip', () => {
     expect(text).toContain('Rate')
     expect(text).toContain('1.00x')
     expect(text).toContain('Account rate')
-    expect(text).toContain('User billed')
+    expect(text).toContain('Charged')
     expect(text).toContain('Account billed')
     expect(text).toContain('$0.092883')
     expect(text).toContain('$5.0000 / 1M tokens')
@@ -290,6 +295,41 @@ describe('admin UsageTable tooltip', () => {
     const text = wrapper.text()
     expect(text).toContain('claude-sonnet-4')
     expect(text).toContain('claude-sonnet-4-20250514')
+  })
+
+  it('renders Web Chat source, request ID, actual model, and server-reported usage cost', () => {
+    const row = makeUsageRow({
+      request_id: 'req-chat-usage-facts',
+      source: 'web_chat',
+      model: 'gpt-5.5',
+      upstream_model: 'gpt-5.5-2026-07-01',
+      total_cost: 0.024,
+      actual_cost: 0.02,
+    })
+
+    const wrapper = mount(UsageTable, {
+      props: {
+        data: [row],
+        loading: false,
+        columns: [],
+        creditMode: true,
+      },
+      global: {
+        stubs: {
+          DataTable: DataTableStub,
+          EmptyState: true,
+          Icon: true,
+          Teleport: true,
+        },
+      },
+    })
+
+    const text = wrapper.text()
+    expect(text).toContain('GPT Chat')
+    expect(text).toContain('req-chat-usage-facts')
+    expect(text).toContain('gpt-5.5')
+    expect(text).toContain('gpt-5.5-2026-07-01')
+    expect(text).toContain('0.020000')
   })
 
   it.each([

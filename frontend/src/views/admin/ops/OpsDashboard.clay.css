@@ -26,7 +26,15 @@
 
 .ops-fullscreen-shell {
   min-height: 100vh;
-  background: var(--lx-clay-canvas);
+  background: var(--app-shell-canvas, var(--lx-clay-canvas));
+}
+
+html:not(.dark) .ops-fullscreen-shell {
+  --app-shell-canvas: #ffffff;
+}
+
+html:not(.dark) body.admin-ops-fullscreen {
+  background: #ffffff;
 }
 
 [data-admin-page-kind="ops"].ops-dashboard-shell--fullscreen {
@@ -70,7 +78,7 @@
   padding: 4px;
   margin: -4px;
   border-radius: var(--lx-clay-radius-control);
-  background: var(--lx-clay-canvas);
+  background: var(--app-shell-canvas, var(--lx-clay-canvas));
 }
 
 .ops-dashboard-shell--fullscreen .ops-workspace-nav-host {

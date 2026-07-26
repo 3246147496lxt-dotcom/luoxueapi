@@ -328,6 +328,9 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 	// 8. Handle error response with failover
 	if resp.StatusCode >= 400 {
 		respBody, upstreamMsg := s.readOpenAIUpstreamError(resp)
+		if hit, _, _ := detectOpenAICyberPolicy(respBody); hit {
+			return s.handleAnthropicErrorResponse(resp, c, account, billingModel)
+		}
 		if !agentIdentityTaskRecoveryWasTried(ctx) && s.isAgentIdentityAccount(ctx, account) && isAgentIdentityTaskInvalidHTTPResponse(resp.StatusCode, respBody) {
 			expectedTaskID := account.GetCredential("task_id")
 			if err := s.recoverAgentIdentityTask(ctx, account, expectedTaskID); err != nil {
@@ -376,7 +379,8 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 	}
 
 	// cyber_policy：标记已设、error 已按 Anthropic 格式发给客户端。丢弃 result、返回哨兵，
-	// 使 handler 落入 tokens=0 免费用量行（对齐 /v1/responses），不计费、不 failover。
+	// 使 handler 通过专用 Cyber producer 按上游真实 token 记录用量与计费，
+	// 不 failover、不重复走正常 RecordUsage。
 	if GetOpsCyberPolicy(c) != nil {
 		if handleErr == nil {
 			handleErr = errOpenAICyberPolicyForwarded

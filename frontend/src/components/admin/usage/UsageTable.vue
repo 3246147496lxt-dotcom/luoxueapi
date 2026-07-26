@@ -48,6 +48,26 @@
           <span class="text-sm text-gray-900 dark:text-white">{{ row.api_key?.name || '-' }}</span>
         </template>
 
+        <template #cell-source="{ row }">
+          <span
+            v-if="row.source"
+            class="inline-flex items-center rounded px-2 py-0.5 text-xs font-medium"
+            :class="getSourceBadgeClass(row.source)"
+          >
+            {{ getSourceLabel(row.source) }}
+          </span>
+          <span v-else class="text-sm text-gray-400 dark:text-gray-500">-</span>
+        </template>
+
+        <template #cell-request_id="{ row }">
+          <code
+            v-if="row.request_id"
+            class="block max-w-[220px] truncate text-xs text-gray-700 dark:text-gray-300"
+            :title="row.request_id"
+          >{{ row.request_id }}</code>
+          <span v-else class="text-sm text-gray-400 dark:text-gray-500">-</span>
+        </template>
+
         <template #cell-account="{ row }">
           <span class="text-sm text-gray-900 dark:text-white">{{ row.account?.name || '-' }}</span>
         </template>
@@ -61,15 +81,18 @@
               <span v-if="i > 0" class="mr-0.5">↳</span>{{ step }}
             </div>
           </div>
-          <div v-else-if="row.upstream_model && row.upstream_model !== row.model" class="space-y-0.5 text-xs">
+          <div
+            v-else-if="getActualModel(row) && getActualModel(row) !== getRequestedModel(row)"
+            class="space-y-0.5 text-xs"
+          >
             <div class="break-all font-medium text-gray-900 dark:text-white">
-              {{ row.model }}
+              {{ getRequestedModel(row) }}
             </div>
             <div class="break-all text-gray-500 dark:text-gray-400">
-              <span class="mr-0.5">↳</span>{{ row.upstream_model }}
+              <span class="mr-0.5">↳</span>{{ getActualModel(row) }}
             </div>
           </div>
-          <span v-else class="font-medium text-gray-900 dark:text-white">{{ row.model }}</span>
+          <span v-else class="font-medium text-gray-900 dark:text-white">{{ getRequestedModel(row) }}</span>
         </template>
 
         <template #cell-reasoning_effort="{ row }">
@@ -176,11 +199,11 @@
               <CreditAmount
                 v-if="creditMode"
                 class="font-medium text-green-600 dark:text-green-400"
-                :value="row.actual_cost?.toFixed(6) || '0.000000'"
+                :value="getChargedAmount(row).toFixed(6)"
                 icon-size="xs"
-                :label="`${t('usage.userBilled')} ${row.actual_cost?.toFixed(6) || '0.000000'}`"
+                :label="`${t('usage.chargedAmount')} ${getChargedAmount(row).toFixed(6)}`"
               />
-              <span v-else class="font-medium text-green-600 dark:text-green-400">${{ row.actual_cost?.toFixed(6) || '0.000000' }}</span>
+              <span v-else class="font-medium text-green-600 dark:text-green-400">${{ getChargedAmount(row).toFixed(6) }}</span>
               <span
                 v-if="row.long_context_billing_applied"
                 data-testid="long-context-billing-marker"
@@ -437,18 +460,18 @@
           </div>
           <div class="flex items-center justify-between gap-6">
             <span class="text-gray-400">{{ t('usage.original') }}</span>
-            <span class="font-medium text-white">${{ tooltipData?.total_cost?.toFixed(6) || '0.000000' }}</span>
+            <span class="font-medium text-white">${{ getGrossCost(tooltipData).toFixed(6) }}</span>
           </div>
           <div class="flex items-center justify-between gap-6">
-            <span class="text-gray-400">{{ t('usage.userBilled') }}</span>
+            <span class="text-gray-400">{{ t('usage.chargedAmount') }}</span>
             <CreditAmount
               v-if="creditMode"
               class="font-semibold text-green-400"
-              :value="tooltipData?.actual_cost?.toFixed(6) || '0.000000'"
+              :value="getChargedAmount(tooltipData).toFixed(6)"
               icon-size="xs"
-              :label="`${t('usage.userBilled')} ${tooltipData?.actual_cost?.toFixed(6) || '0.000000'}`"
+              :label="`${t('usage.chargedAmount')} ${getChargedAmount(tooltipData).toFixed(6)}`"
             />
-            <span v-else class="font-semibold text-green-400">${{ tooltipData?.actual_cost?.toFixed(6) || '0.000000' }}</span>
+            <span v-else class="font-semibold text-green-400">${{ getChargedAmount(tooltipData).toFixed(6) }}</span>
           </div>
           <!-- Account billing (separated from user billing) -->
           <template v-if="showAccountBilling">
@@ -616,7 +639,34 @@ const getRequestTypeBadgeClass = (row: AdminUsageLog): string => {
   return 'bg-amber-100 text-amber-800 dark:bg-amber-900 dark:text-amber-200'
 }
 
+const getRequestedModel = (row: AdminUsageLog): string =>
+  row.model || '-'
 
+const getActualModel = (row: AdminUsageLog): string =>
+  row.upstream_model?.trim() || row.model || '-'
+
+const getChargedAmount = (row: AdminUsageLog | null | undefined): number => {
+  const value = row?.actual_cost ?? 0
+  return Number.isFinite(value) ? value : 0
+}
+
+const getGrossCost = (row: AdminUsageLog | null | undefined): number => {
+  const value = row?.total_cost ?? getChargedAmount(row)
+  return Number.isFinite(value) ? value : 0
+}
+
+const getSourceLabel = (source: string): string => {
+  if (source === 'web_chat') return t('usage.sourceWebChat')
+  if (source === 'api') return t('usage.sourceApi')
+  return source
+}
+
+const getSourceBadgeClass = (source: string): string => {
+  if (source === 'web_chat') {
+    return 'bg-violet-100 text-violet-800 dark:bg-violet-900/40 dark:text-violet-200'
+  }
+  return 'bg-gray-100 text-gray-700 dark:bg-dark-700 dark:text-gray-300'
+}
 
 const formatUserAgent = (ua: string): string => {
   return ua

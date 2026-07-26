@@ -3,7 +3,16 @@ import { flushPromises, mount } from '@vue/test-utils'
 
 import UsageView from '../UsageView.vue'
 
-const { list, getStats, getSnapshotV2, getById, getModelStats, listErrorLogs, routeQuery } = vi.hoisted(() => {
+const {
+  list,
+  getStats,
+  getSnapshotV2,
+  getById,
+  getModelStats,
+  listErrorLogs,
+  listBillingReceipts,
+  routeQuery,
+} = vi.hoisted(() => {
   vi.stubGlobal('localStorage', {
     getItem: vi.fn(() => null),
     setItem: vi.fn(),
@@ -17,6 +26,7 @@ const { list, getStats, getSnapshotV2, getById, getModelStats, listErrorLogs, ro
     getById: vi.fn(),
     getModelStats: vi.fn(),
     listErrorLogs: vi.fn(),
+    listBillingReceipts: vi.fn(),
     routeQuery: {} as Record<string, string | undefined>,
   }
 })
@@ -54,6 +64,7 @@ vi.mock('@/api/admin', () => ({
 vi.mock('@/api/admin/usage', () => ({
   adminUsageAPI: {
     list: vi.fn(),
+    listBillingReceipts,
   },
 }))
 
@@ -125,6 +136,11 @@ const GroupDistributionChartStub = {
       <button class="switch-metric" @click="$emit('update:metric', 'actual_cost')">switch</button>
     </div>
   `,
+}
+const AdminBillingReceiptsPanelStub = {
+  name: 'AdminBillingReceiptsPanel',
+  props: ['startDate', 'endDate'],
+  template: '<div data-test="billing-receipts">{{ startDate }}|{{ endDate }}</div>',
 }
 
 describe('admin UsageView distribution metric toggles', () => {
@@ -431,7 +447,7 @@ describe('admin UsageView ranking tab', () => {
     expect(wrapper.find('[data-test="ranking"]').exists()).toBe(false)
 
     const tabs = wrapper.findAll('[data-testid="usage-detail-tab"]')
-    expect(tabs).toHaveLength(3)
+    expect(tabs).toHaveLength(4)
     await tabs[2].trigger('click')
     await flushPromises()
     expect(wrapper.find('[data-test="ranking"]').exists()).toBe(true)
@@ -444,5 +460,34 @@ describe('admin UsageView ranking tab', () => {
     expect((wrapper.vm as any).activeTab).toBe('usage')
     expect((wrapper.vm as any).filters.user_id).toBe(5)
     expect(list).toHaveBeenCalledWith(expect.objectContaining({ user_id: 5 }), expect.anything())
+  })
+
+  it('opens the read-only chat billing tab from a deep link', async () => {
+    Object.assign(routeQuery, {
+      tab: 'billing',
+      start_date: '2026-07-22',
+      end_date: '2026-07-25',
+      receipt_id: 'rcpt-chat-42',
+    })
+
+    const wrapper = mount(UsageView, {
+      global: { stubs: {
+        AppLayout: AppLayoutStub, UsageStatsCards: true, UsageFilters: UsageFiltersStub,
+        UsageTable: true, UsageExportProgress: true, UsageCleanupDialog: true,
+        UserBalanceHistoryModal: true, Pagination: true, Select: true,
+        DateRangePicker: true, Icon: true, TokenUsageTrend: true,
+        ModelDistributionChart: true, GroupDistributionChart: true, EndpointDistributionChart: true,
+        UserTokenRanking: UserTokenRankingStub, OpsErrorLogTable: true, OpsErrorDetailModal: true,
+        AdminBillingReceiptsPanel: AdminBillingReceiptsPanelStub,
+      } },
+    })
+    vi.advanceTimersByTime(120)
+    await flushPromises()
+
+    expect((wrapper.vm as any).activeTab).toBe('billing')
+    expect(wrapper.get('[data-test="billing-receipts"]').text()).toBe(
+      '2026-07-22|2026-07-25'
+    )
+    expect(wrapper.findComponent(UsageFiltersStub).exists()).toBe(false)
   })
 })

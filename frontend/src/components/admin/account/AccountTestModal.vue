@@ -275,6 +275,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   (e: 'close'): void
+  (e: 'completed'): void
 }>()
 
 const terminalRef = ref<HTMLElement | null>(null)
@@ -290,6 +291,7 @@ let abortController: AbortController | null = null
 const generatedImages = ref<PreviewImage[]>([])
 const previewImageUrl = ref('')
 const testMode = ref<'default' | 'compact'>('default')
+let completionEmittedForRun = false
 const isOpenAIAccount = computed(() => props.account?.platform === 'openai')
 const openAITestModeOptions = computed(() => [
   { value: 'default', label: t('admin.accounts.openai.testModeDefault') },
@@ -374,12 +376,19 @@ const loadAvailableModels = async () => {
 }
 
 const resetState = () => {
+  completionEmittedForRun = false
   status.value = 'idle'
   outputLines.value = []
   streamingContent.value = ''
   errorMessage.value = ''
   generatedImages.value = []
   previewImageUrl.value = ''
+}
+
+const notifyTestCompleted = () => {
+  if (completionEmittedForRun) return
+  completionEmittedForRun = true
+  emit('completed')
 }
 
 const handleClose = () => {
@@ -482,6 +491,7 @@ const startTest = async () => {
         }
       }
     }
+    notifyTestCompleted()
   } catch (error: unknown) {
     if (error instanceof DOMException && error.name === 'AbortError') {
       status.value = 'idle'
@@ -491,6 +501,7 @@ const startTest = async () => {
     const msg = error instanceof Error ? error.message : 'Unknown error'
     errorMessage.value = msg
     addLine(`Error: ${msg}`, 'text-red-400')
+    notifyTestCompleted()
   }
 }
 

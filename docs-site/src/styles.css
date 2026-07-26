@@ -366,6 +366,31 @@ select:focus-visible,
   font-weight: 900;
 }
 
+.documentation-loading {
+  min-height: min(58vh, 520px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  gap: 12px;
+  color: var(--text-muted);
+}
+
+.documentation-loading svg {
+  color: var(--accent);
+  animation: documentation-loading-spin 900ms linear infinite;
+}
+
+.documentation-loading p {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+@keyframes documentation-loading-spin {
+  to { transform: rotate(1turn); }
+}
+
 .tabs {
   position: sticky;
   top: var(--docs-sticky-tabs-top);
@@ -908,6 +933,7 @@ select:focus-visible,
   .docs-main { padding: 112px 16px 24px; }
   .page-heading { margin-bottom: 28px; }
   .page-heading h1 { font-size: 34px; line-height: 1.16; }
+  .documentation-loading { min-height: 52vh; }
 
   .tabs {
     width: 100%;

@@ -300,6 +300,34 @@ func GetSubscriptionFromContext(c *gin.Context) (*service.UserSubscription, bool
 	return subscription, ok
 }
 
+// BindChatPrincipalContext installs the same trusted identity and routing
+// context normally produced by API-key authentication, after JWT chat
+// authorization has resolved an internal web-chat principal.
+func BindChatPrincipalContext(c *gin.Context, apiKey *service.APIKey) bool {
+	if c == nil || c.Request == nil || apiKey == nil || apiKey.User == nil || apiKey.Group == nil ||
+		apiKey.Purpose != service.APIKeyPurposeWebChat || !apiKey.IsActive() ||
+		!apiKey.User.IsActive() || !apiKey.User.CanBindGroup(apiKey.Group.ID, apiKey.Group.IsExclusive) ||
+		apiKey.UserID != apiKey.User.ID || apiKey.GroupID == nil || *apiKey.GroupID != apiKey.Group.ID ||
+		!service.IsGroupContextValid(apiKey.Group) {
+		return false
+	}
+	if ingress, _ := c.Request.Context().Value(ctxkey.WebChatIngress).(bool); !ingress {
+		return false
+	}
+
+	ctx := context.WithValue(c.Request.Context(), ctxkey.UserID, apiKey.User.ID)
+	ctx = context.WithValue(ctx, ctxkey.WebChat, true)
+	c.Request = c.Request.WithContext(ctx)
+	c.Set(string(ContextKeyAPIKey), apiKey)
+	c.Set(string(ContextKeyUser), AuthSubject{
+		UserID:      apiKey.User.ID,
+		Concurrency: apiKey.User.Concurrency,
+	})
+	c.Set(string(ContextKeyUserRole), apiKey.User.Role)
+	setGroupContext(c, apiKey.Group)
+	return true
+}
+
 func setGroupContext(c *gin.Context, group *service.Group) {
 	if !service.IsGroupContextValid(group) {
 		return

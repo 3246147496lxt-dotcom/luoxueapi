@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"testing"
 	"time"
@@ -143,6 +144,64 @@ func TestOpsServiceRecordErrorPersistsExplicitAccountAuthStatusZero(t *testing.T
 	require.NotNil(t, captured.UpstreamErrorsJSON)
 	require.Contains(t, *captured.UpstreamErrorsJSON, `"upstream_status_code":403`)
 	require.Contains(t, *captured.UpstreamErrorsJSON, `"stage":"account_auth"`)
+}
+
+func TestOpsServiceRecordErrorPreservesMetadataOnlyUpstreamEvent(t *testing.T) {
+	t.Parallel()
+
+	var captured *OpsInsertErrorLogInput
+	repo := &opsRepoMock{
+		InsertErrorLogFn: func(_ context.Context, input *OpsInsertErrorLogInput) (int64, error) {
+			captured = input
+			return 1, nil
+		},
+	}
+	svc := NewOpsService(repo, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+
+	err := svc.RecordError(context.Background(), &OpsInsertErrorLogInput{
+		ErrorPhase:   string(GatewayFailureStageAccountAuth),
+		ErrorType:    "upstream_error",
+		ErrorMessage: "Web chat upstream request failed",
+		UpstreamErrors: []*OpsUpstreamErrorEvent{
+			{
+				Passthrough:          true,
+				Platform:             "openai",
+				AccountID:            91,
+				AccountName:          "fallback-account",
+				UpstreamRequestID:    "upstream-request-metadata-only",
+				UpstreamURL:          "https://api.openai.com/v1/responses",
+				Kind:                 "failover",
+				Stage:                string(GatewayFailureStageAccountAuth),
+				Scope:                string(GatewayFailureScopeAccount),
+				Reason:               string(GrokCredentialReasonRevoked),
+				Message:              "",
+				Detail:               "",
+				UpstreamResponseBody: "",
+			},
+		},
+	})
+
+	require.NoError(t, err)
+	require.NotNil(t, captured)
+	require.Nil(t, captured.UpstreamErrors)
+	require.NotNil(t, captured.UpstreamErrorsJSON)
+
+	var stored []*OpsUpstreamErrorEvent
+	require.NoError(t, json.Unmarshal([]byte(*captured.UpstreamErrorsJSON), &stored))
+	require.Len(t, stored, 1)
+	require.True(t, stored[0].Passthrough)
+	require.Equal(t, "openai", stored[0].Platform)
+	require.Equal(t, int64(91), stored[0].AccountID)
+	require.Equal(t, "fallback-account", stored[0].AccountName)
+	require.Equal(t, "upstream-request-metadata-only", stored[0].UpstreamRequestID)
+	require.Equal(t, "https://api.openai.com/v1/responses", stored[0].UpstreamURL)
+	require.Equal(t, "failover", stored[0].Kind)
+	require.Equal(t, string(GatewayFailureStageAccountAuth), stored[0].Stage)
+	require.Equal(t, string(GatewayFailureScopeAccount), stored[0].Scope)
+	require.Equal(t, string(GrokCredentialReasonRevoked), stored[0].Reason)
+	require.Empty(t, stored[0].Message)
+	require.Empty(t, stored[0].Detail)
+	require.Empty(t, stored[0].UpstreamResponseBody)
 }
 
 func strPtr(v string) *string {

@@ -235,9 +235,9 @@ describe('admin AccountsView scheduler score column', () => {
     expect(JSON.parse(localStorage.getItem('account-hidden-columns') || '[]')).toContain('scheduler_score')
   })
 
-  it('requests scheduler scores when the migrated column settings explicitly show the column', async () => {
+  it('requests scheduler scores when current workbench settings explicitly show the column', async () => {
     localStorage.setItem('account-hidden-columns', JSON.stringify(['today_stats']))
-    localStorage.setItem('account-hidden-columns-version', 'scheduler-score-hidden-by-default')
+    localStorage.setItem('account-hidden-columns-version', 'account-workbench-v2')
 
     mountView()
     await flushPromises()

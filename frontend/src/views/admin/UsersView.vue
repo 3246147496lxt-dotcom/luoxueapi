@@ -315,7 +315,7 @@
           :columns="columns"
           :data="sortedUsers"
           :loading="loading"
-          :actions-count="7"
+          :actions-count="8"
           mobile-primary-key="email"
           :mobile-visible-keys="['email', 'role', 'groups', 'status', 'balance']"
           :server-side-sort="true"
@@ -739,6 +739,17 @@
                 {{ t('admin.users.apiKeys') }}
               </button>
 
+              <!-- Chat History -->
+              <button
+                type="button"
+                data-test="user-chat-history"
+                @click="handleViewChatHistory(user); closeActionMenu()"
+                class="flex w-full items-center gap-2 px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-dark-700"
+              >
+                <Icon name="chat" size="sm" class="text-gray-400" :stroke-width="2" />
+                {{ t('admin.users.chatHistory') }}
+              </button>
+
               <!-- Allowed Groups -->
               <button
                 @click="handleAllowedGroups(user); closeActionMenu()"
@@ -826,6 +837,7 @@
 <script setup lang="ts">
 import { ref, reactive, computed, onMounted, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { useRouter } from 'vue-router'
 import { useAppStore } from '@/stores/app'
 import { getPersistedPageSize } from '@/composables/usePersistedPageSize'
 import { formatDateTime } from '@/utils/format'
@@ -833,6 +845,7 @@ import CreditAmount from '@/components/common/CreditAmount.vue'
 import Icon from '@/components/icons/Icon.vue'
 
 const { t } = useI18n()
+const router = useRouter()
 import { adminAPI } from '@/api/admin'
 import type { AdminUser, AdminGroup, UserAttributeDefinition } from '@/types'
 import type { BatchUserUsageStats } from '@/api/admin/dashboard'
@@ -1485,10 +1498,14 @@ const openActionMenu = (user: AdminUser, e: MouseEvent) => {
 
     const rect = target.getBoundingClientRect()
     const menuWidth = 200
-    const menuHeight = 240
     const padding = 8
     const viewportWidth = window.innerWidth
     const viewportHeight = window.innerHeight
+    const menuHeight = user.role === 'admin'
+      ? 288
+      : viewportWidth < 1024
+        ? 360
+        : 324
 
     let left, top
 
@@ -1774,6 +1791,13 @@ const handleToggleStatus = async (user: AdminUser) => {
 const handleViewApiKeys = (user: AdminUser) => {
   viewingUser.value = user
   showApiKeysModal.value = true
+}
+
+const handleViewChatHistory = (user: AdminUser) => {
+  void router.push({
+    name: 'AdminUserChatHistory',
+    params: { userId: String(user.id) }
+  })
 }
 
 const closeApiKeysModal = () => {

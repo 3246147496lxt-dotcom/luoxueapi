@@ -2,13 +2,16 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/ctxkey"
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/timezone"
@@ -741,13 +744,148 @@ func (s *BillingCacheService) IncrementUserPlatformQuotaUsage(userID int64, plat
 // 统一检查方法
 // ============================================
 
+// PeekWebChatEligibility performs the read-only billing preflight used by the
+// first-party Chat UI. It never consumes RPM or API-key rate limits. Standard
+// mode checks the balance reserve and the user x platform quota. Simple mode
+// applies only the Web Chat product rule that balance must be positive; it
+// deliberately skips the reserve and platform quota checks used in standard
+// mode.
+func (s *BillingCacheService) PeekWebChatEligibility(ctx context.Context, userID int64, platform string) (float64, error) {
+	if s == nil || s.cfg == nil || userID <= 0 {
+		return 0, ErrBillingServiceUnavailable
+	}
+	if s.circuitBreaker != nil && !s.circuitBreaker.Allow() {
+		return 0, ErrBillingServiceUnavailable
+	}
+	if s.cache == nil && s.userRepo == nil {
+		return 0, ErrBillingServiceUnavailable
+	}
+
+	balance, err := s.GetUserBalance(ctx, userID)
+	if err != nil {
+		if s.circuitBreaker != nil {
+			s.circuitBreaker.OnFailure(err)
+		}
+		return 0, ErrBillingServiceUnavailable.WithCause(err)
+	}
+	if s.cfg.RunMode == config.RunModeSimple {
+		if s.circuitBreaker != nil {
+			s.circuitBreaker.OnSuccess()
+		}
+		if balance <= 0 {
+			return balance, ErrInsufficientBalance
+		}
+		return balance, nil
+	}
+	if s.balanceBelowEligibilityThreshold(balance) {
+		if s.circuitBreaker != nil {
+			s.circuitBreaker.OnSuccess()
+		}
+		return balance, ErrInsufficientBalance
+	}
+	if err := s.peekUserPlatformQuotaEligibilityStrict(ctx, userID, platform); err != nil {
+		if s.circuitBreaker != nil {
+			if infraerrors.IsServiceUnavailable(err) {
+				s.circuitBreaker.OnFailure(err)
+			} else {
+				s.circuitBreaker.OnSuccess()
+			}
+		}
+		return balance, err
+	}
+	if s.circuitBreaker != nil {
+		s.circuitBreaker.OnSuccess()
+	}
+	return balance, nil
+}
+
+func (s *BillingCacheService) peekUserPlatformQuotaEligibilityStrict(ctx context.Context, userID int64, platform string) error {
+	if strings.TrimSpace(platform) == "" {
+		return nil
+	}
+
+	var cacheErr error
+	if s.cache != nil {
+		entry, ok, err := s.cache.GetUserPlatformQuotaCache(ctx, userID, platform)
+		cacheErr = err
+		if err == nil && ok && entry != nil && entry.SchemaVersion == UserPlatformQuotaCacheSchemaV1 {
+			return evaluateUserPlatformQuotaEntry(entry, time.Now())
+		}
+	} else {
+		cacheErr = errBillingCacheUnavailable
+	}
+
+	if s.userPlatformQuotaRepo == nil {
+		if cacheErr == nil {
+			cacheErr = errors.New("user platform quota repository is unavailable")
+		}
+		return ErrBillingServiceUnavailable.WithCause(cacheErr)
+	}
+	record, err := s.userPlatformQuotaRepo.GetByUserPlatform(ctx, userID, platform)
+	if err != nil {
+		return ErrBillingServiceUnavailable.WithCause(err)
+	}
+	if record == nil {
+		return nil
+	}
+	return evaluateUserPlatformQuotaEntry(&UserPlatformQuotaCacheEntry{
+		SchemaVersion:      UserPlatformQuotaCacheSchemaV1,
+		DailyLimitUSD:      record.DailyLimitUSD,
+		WeeklyLimitUSD:     record.WeeklyLimitUSD,
+		MonthlyLimitUSD:    record.MonthlyLimitUSD,
+		DailyUsageUSD:      record.DailyUsageUSD,
+		WeeklyUsageUSD:     record.WeeklyUsageUSD,
+		MonthlyUsageUSD:    record.MonthlyUsageUSD,
+		DailyWindowStart:   record.DailyWindowStart,
+		WeeklyWindowStart:  record.WeeklyWindowStart,
+		MonthlyWindowStart: record.MonthlyWindowStart,
+	}, time.Now())
+}
+
+func evaluateUserPlatformQuotaEntry(entry *UserPlatformQuotaCacheEntry, now time.Time) error {
+	if entry == nil {
+		return nil
+	}
+	dailyUsage := entry.DailyUsageUSD
+	weeklyUsage := entry.WeeklyUsageUSD
+	monthlyUsage := entry.MonthlyUsageUSD
+	if quotaWindowExpired(entry.DailyWindowStart, timezone.StartOfDay(now)) {
+		dailyUsage = 0
+	}
+	if quotaWindowExpired(entry.WeeklyWindowStart, timezone.StartOfWeek(now)) {
+		weeklyUsage = 0
+	}
+	if monthlyQuotaWindowExpired(entry.MonthlyWindowStart, now) {
+		monthlyUsage = 0
+	}
+	if entry.DailyLimitUSD != nil && dailyUsage >= *entry.DailyLimitUSD {
+		return withWindowResetsMetadata(ErrUserPlatformDailyQuotaExhausted, nextDailyReset(now))
+	}
+	if entry.WeeklyLimitUSD != nil && weeklyUsage >= *entry.WeeklyLimitUSD {
+		return withWindowResetsMetadata(ErrUserPlatformWeeklyQuotaExhausted, nextWeeklyReset(now))
+	}
+	if entry.MonthlyLimitUSD != nil && monthlyUsage >= *entry.MonthlyLimitUSD {
+		return withWindowResetsMetadata(ErrUserPlatformMonthlyQuotaExhausted, nextMonthlyResetFrom(entry.MonthlyWindowStart, now))
+	}
+	return nil
+}
+
 // CheckBillingEligibility 检查用户是否有资格发起请求
 // 余额模式：检查缓存余额 > 0
 // 订阅模式：检查缓存用量未超过限额（Group限额从参数传入）
 // platform 为请求的目标平台（如 "anthropic"），传空串 "" 时跳过 user × platform quota 检查。
 func (s *BillingCacheService) CheckBillingEligibility(ctx context.Context, user *User, apiKey *APIKey, group *Group, subscription *UserSubscription, platform string) error {
-	// 简易模式：跳过所有计费检查
+	// 简易模式保留标准 API 跳过计费检查的既有语义。站内 Web Chat
+	// 仍需在进入调度前做第二次权威正余额复检，但不检查 reserve 或平台额度。
 	if s.cfg.RunMode == config.RunModeSimple {
+		webChat, _ := ctx.Value(ctxkey.WebChat).(bool)
+		if webChat {
+			if user == nil || user.ID <= 0 {
+				return ErrBillingServiceUnavailable
+			}
+			_, err := s.PeekWebChatEligibility(ctx, user.ID, platform)
+			return err
+		}
 		return nil
 	}
 	if s.circuitBreaker != nil && !s.circuitBreaker.Allow() {

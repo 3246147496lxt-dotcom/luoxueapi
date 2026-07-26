@@ -1,17 +1,28 @@
 <template>
   <AppLayout variant="home-clay">
-    <TablePageLayout>
+    <TablePageLayout class="account-table-page-layout" table-surface="plain">
       <template #header>
         <AdminPageHeader
           :title="t('admin.accounts.title')"
           :description="t('admin.accounts.description')"
-        />
+        >
+          <template #primary-actions>
+            <button
+              type="button"
+              class="btn btn-primary min-h-11 gap-2 px-4"
+              @click="showCreate = true"
+            >
+              <Icon name="plus" size="sm" aria-hidden="true" />
+              <span>{{ t('admin.accounts.createAccount') }}</span>
+            </button>
+          </template>
+        </AdminPageHeader>
       </template>
 
       <template #filters>
-        <div class="flex flex-col-reverse items-stretch gap-3 lg:flex-row lg:flex-wrap-reverse lg:items-start lg:justify-between">
+        <div class="account-filter-toolbar">
           <AccountTableFilters
-            class="min-w-0 lg:w-auto lg:flex-1"
+            class="min-w-0 flex-1"
             v-model:searchQuery="params.search"
             :filters="params"
             :groups="groups"
@@ -22,29 +33,34 @@
           <AccountTableActions
             :loading="loading"
             @refresh="handleManualRefresh"
-            @create="showCreate = true"
           >
             <template #after>
               <!-- Auto Refresh Dropdown -->
               <div class="relative" ref="autoRefreshDropdownRef">
                 <button
+                  type="button"
                   @click="
                     showAutoRefreshDropdown = !showAutoRefreshDropdown;
-                    showAccountToolsDropdown = false
+                    showAccountToolsDropdown = false;
+                    showColumnDropdown = false
                   "
-                  class="btn btn-secondary min-h-11 min-w-11 px-3"
-                  :title="t('admin.accounts.autoRefresh')"
+                  class="account-toolbar-icon-button"
+                  :class="{ 'account-toolbar-icon-button--active': autoRefreshEnabled }"
+                  data-test="account-auto-refresh-toggle"
+                  :title="
+                    autoRefreshEnabled
+                      ? t('admin.accounts.autoRefreshCountdown', { seconds: autoRefreshCountdown })
+                      : t('admin.accounts.autoRefresh')
+                  "
+                  :aria-label="
+                    autoRefreshEnabled
+                      ? t('admin.accounts.autoRefreshCountdown', { seconds: autoRefreshCountdown })
+                      : t('admin.accounts.autoRefresh')
+                  "
                   :aria-expanded="showAutoRefreshDropdown"
                   aria-controls="account-auto-refresh-menu"
                 >
-                  <Icon name="refresh" size="sm" :class="[autoRefreshEnabled ? 'animate-spin' : '', 'mr-1.5']" />
-                  <span>
-                    {{
-                      autoRefreshEnabled
-                        ? t('admin.accounts.autoRefreshCountdown', { seconds: autoRefreshCountdown })
-                        : t('admin.accounts.autoRefresh')
-                    }}
-                  </span>
+                  <Icon name="timer" size="sm" />
                 </button>
                 <div
                   v-if="showAutoRefreshDropdown"
@@ -73,22 +89,67 @@
                 </div>
               </div>
 
+              <!-- Column Settings Dropdown -->
+              <div class="relative" ref="columnDropdownRef">
+                <button
+                  type="button"
+                  class="account-toolbar-icon-button"
+                  data-test="account-columns-toggle"
+                  :title="t('admin.accounts.viewColumns')"
+                  :aria-label="t('admin.accounts.viewColumns')"
+                  :aria-expanded="showColumnDropdown"
+                  aria-controls="account-columns-menu"
+                  @click="
+                    showColumnDropdown = !showColumnDropdown;
+                    showAutoRefreshDropdown = false;
+                    showAccountToolsDropdown = false
+                  "
+                >
+                  <Icon name="grid" size="sm" />
+                </button>
+                <div
+                  v-if="showColumnDropdown"
+                  id="account-columns-menu"
+                  class="absolute right-0 z-50 mt-2 w-[min(18rem,calc(100vw-2rem))] origin-top-right overflow-hidden rounded-lg border border-gray-200 bg-white shadow-xl dark:border-gray-700 dark:bg-gray-800"
+                >
+                  <div class="flex items-center justify-between gap-3 border-b border-gray-100 px-4 py-3 dark:border-gray-700">
+                    <span class="text-sm font-semibold text-gray-800 dark:text-gray-100">
+                      {{ t('admin.accounts.viewColumns') }}
+                    </span>
+                    <Icon name="grid" size="sm" class="text-gray-400" />
+                  </div>
+                  <div class="max-h-[60vh] overflow-y-auto p-2">
+                    <button
+                      v-for="col in toggleableColumns"
+                      :key="col.key"
+                      type="button"
+                      class="flex min-h-11 w-full items-center justify-between rounded-md px-3 py-2 text-sm text-gray-700 transition-colors hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-gray-700"
+                      @click="toggleColumn(col.key)"
+                    >
+                      <span class="truncate">{{ col.label }}</span>
+                      <Icon v-if="isColumnVisible(col.key)" name="check" size="sm" class="text-primary-500" />
+                    </button>
+                  </div>
+                </div>
+              </div>
+
               <!-- More Tools Dropdown -->
               <div class="relative" ref="accountToolsDropdownRef">
                 <button
+                  type="button"
                   @click="
                     showAccountToolsDropdown = !showAccountToolsDropdown;
-                    showAutoRefreshDropdown = false
+                    showAutoRefreshDropdown = false;
+                    showColumnDropdown = false
                   "
-                  class="btn btn-secondary min-h-11 min-w-11 px-3"
+                  class="account-toolbar-icon-button"
                   data-test="account-tools-toggle"
                   :title="t('admin.accounts.moreActions')"
+                  :aria-label="t('admin.accounts.moreActions')"
                   :aria-expanded="showAccountToolsDropdown"
                   aria-controls="account-tools-menu"
                 >
-                  <Icon name="more" size="sm" class="mr-1.5" />
-                  <span>{{ t('admin.accounts.moreActions') }}</span>
-                  <Icon name="chevronDown" size="xs" class="ml-1" />
+                  <Icon name="more" size="sm" />
                 </button>
                 <div
                   v-if="showAccountToolsDropdown"
@@ -192,26 +253,6 @@
                       </div>
                     </div>
 
-                    <div class="my-2 border-t border-gray-100 dark:border-gray-700"></div>
-                    <div class="px-2 py-2">
-                      <div class="flex items-center justify-between gap-3">
-                        <span class="text-xs font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500">
-                          {{ t('admin.accounts.viewColumns') }}
-                        </span>
-                        <Icon name="grid" size="sm" class="text-gray-400" />
-                      </div>
-                    </div>
-                    <div class="grid grid-cols-1 gap-1">
-                      <button
-                        v-for="col in toggleableColumns"
-                        :key="col.key"
-                        @click="toggleColumn(col.key)"
-                        class="flex min-h-11 w-full items-center justify-between rounded-md px-3 py-2 text-sm text-gray-700 transition-colors hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-gray-700"
-                      >
-                        <span class="truncate">{{ col.label }}</span>
-                        <Icon v-if="isColumnVisible(col.key)" name="check" size="sm" class="text-primary-500" />
-                      </button>
-                    </div>
                   </div>
                 </div>
               </div>
@@ -232,6 +273,12 @@
         </div>
       </template>
       <template #table>
+        <div class="account-workbench" @keydown.esc="closeAccountInspector">
+          <section
+            class="account-workbench__table-surface"
+            :class="{ 'account-workbench__table-surface--expanded': hasExpandedColumns }"
+            :aria-label="t('admin.accounts.title')"
+          >
         <AccountBulkActionsBar
           v-if="selIds.length > 0"
           :selected-ids="selIds"
@@ -244,7 +291,7 @@
           @select-page="selectPage"
           @toggle-schedulable="handleBulkToggleSchedulable"
         />
-        <div ref="accountTableRef" class="flex min-h-0 flex-1 flex-col overflow-hidden">
+        <div ref="accountTableRef" class="account-workbench__table-body flex min-h-0 flex-1 flex-col overflow-hidden">
         <DataTable
           ref="dataTableRef"
           :columns="cols"
@@ -256,11 +303,15 @@
           default-sort-key="name"
           default-sort-order="asc"
           :sort-storage-key="ACCOUNT_SORT_STORAGE_KEY"
-          :estimate-row-height="156"
+          :estimate-row-height="60"
           :overscan="5"
           :virtualize-threshold="50"
           mobile-primary-key="name"
           :mobile-visible-keys="ACCOUNT_MOBILE_VISIBLE_KEYS"
+          :clickable-rows="true"
+          :selected-row-key="selectedAccountId"
+          :row-aria-label="accountRowAriaLabel"
+          @rowClick="openAccountInspector"
         >
           <template #empty>
             <div class="flex flex-col items-center px-4 py-3 text-center">
@@ -283,21 +334,34 @@
             />
           </template>
           <template #cell-select="{ row }">
-            <input type="checkbox" :checked="isSelected(row.id)" @change="toggleSel(row.id)" class="rounded border-gray-300 text-primary-600 focus:ring-primary-500" />
+            <input
+              type="checkbox"
+              :checked="isSelected(row.id)"
+              class="rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+              :aria-label="t('admin.accounts.workbench.selectAccountCheckbox', { name: row.name })"
+              @click.stop
+              @change="toggleSel(row.id)"
+            />
           </template>
           <template #cell-id="{ value }">
             <span class="font-mono text-xs text-gray-500 dark:text-gray-400">#{{ value }}</span>
           </template>
           <template #cell-name="{ row, value }">
-            <div class="flex flex-col">
-              <span class="font-medium text-gray-900 dark:text-white">{{ value }}</span>
-              <span
-                v-if="accountDisplayEmail(row)"
-                class="text-xs text-gray-500 dark:text-gray-400 truncate max-w-[200px]"
-                :title="accountDisplayEmail(row) + (row.parent_chatgpt_account_id ? ' · ' + row.parent_chatgpt_account_id : '')"
-              >
-                {{ accountDisplayEmail(row) }}
-              </span>
+            <div class="account-identity-cell">
+              <span class="account-identity-cell__name">{{ value }}</span>
+              <div class="account-identity-cell__meta">
+                <span class="account-identity-cell__id">ID: {{ row.id }}</span>
+                <span aria-hidden="true" class="account-identity-cell__separator">·</span>
+                <PlatformTypeBadge
+                  :platform="row.platform"
+                  :type="row.type"
+                  :auth-mode="getOpenAIAuthMode(row)"
+                  :plan-type="getAccountPlanType(row)"
+                  :privacy-mode="row.extra?.privacy_mode || row.parent_privacy_mode"
+                  :subscription-expires-at="row.credentials?.subscription_expires_at || row.parent_subscription_expires_at"
+                  compact
+                />
+              </div>
             </div>
           </template>
           <template #cell-notes="{ value }">
@@ -333,15 +397,32 @@
             </div>
           </template>
           <template #cell-capacity="{ row }">
-            <AccountCapacityCell :account="row" />
+            <div @click.stop>
+              <AccountCapacityCell :account="row" />
+            </div>
           </template>
           <template #cell-status="{ row }">
-            <div class="flex items-center gap-1.5">
-              <AccountStatusIndicator :account="row" @show-temp-unsched="handleShowTempUnsched" />
+            <div class="account-status-cell">
+              <AccountStatusIndicator
+                :account="row"
+                compact
+                @show-temp-unsched="handleShowTempUnsched"
+              />
+              <button
+                type="button"
+                class="account-status-cell__switch"
+                role="switch"
+                :aria-checked="row.schedulable"
+                :aria-label="row.schedulable ? t('admin.accounts.schedulableEnabled') : t('admin.accounts.schedulableDisabled')"
+                :disabled="togglingSchedulable === row.id"
+                @click.stop="handleToggleSchedulable(row)"
+              >
+                <span />
+              </button>
             </div>
           </template>
           <template #cell-schedulable="{ row }">
-            <button @click="handleToggleSchedulable(row)" :disabled="togglingSchedulable === row.id" class="relative inline-flex h-5 w-9 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 dark:focus:ring-offset-dark-800" :class="[row.schedulable ? 'bg-primary-500 hover:bg-primary-600' : 'bg-gray-200 hover:bg-gray-300 dark:bg-dark-600 dark:hover:bg-dark-500']" :title="row.schedulable ? t('admin.accounts.schedulableEnabled') : t('admin.accounts.schedulableDisabled')">
+            <button @click.stop="handleToggleSchedulable(row)" :disabled="togglingSchedulable === row.id" class="relative inline-flex h-5 w-9 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 dark:focus:ring-offset-dark-800" :class="[row.schedulable ? 'bg-primary-500 hover:bg-primary-600' : 'bg-gray-200 hover:bg-gray-300 dark:bg-dark-600 dark:hover:bg-dark-500']" :title="row.schedulable ? t('admin.accounts.schedulableEnabled') : t('admin.accounts.schedulableDisabled')">
               <span class="pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out" :class="[row.schedulable ? 'translate-x-4' : 'translate-x-0']" />
             </button>
           </template>
@@ -353,24 +434,49 @@
             />
           </template>
           <template #cell-groups="{ row }">
-            <AccountGroupsCell :groups="row.groups" :max-display="4" />
+            <div
+              v-if="row.groups?.length"
+              class="account-groups-summary"
+              :title="accountGroupTitle(row)"
+            >
+              <GroupBadge
+                class="account-groups-summary__badge"
+                :name="row.groups[0].name"
+                :platform="row.groups[0].platform"
+                :subscription-type="row.groups[0].subscription_type"
+                :rate-multiplier="row.groups[0].rate_multiplier"
+                :show-rate="false"
+              />
+              <span v-if="row.groups.length > 1" class="account-groups-summary__more">
+                +{{ row.groups.length - 1 }}
+              </span>
+            </div>
+            <span v-else class="text-xs text-gray-400 dark:text-dark-500">-</span>
           </template>
           <template #header-usage="{ column }">
-            <div class="flex items-center">
-              <span>{{ column.label }}</span>
-              <HelpTooltip :content="t('admin.accounts.usageWindowsHint')" width-class="w-72" />
-            </div>
+            <span>{{ column.label }}</span>
           </template>
           <template #cell-usage="{ row }">
-            <AccountUsageCell
-              :account="row"
-              :today-stats="todayStatsByAccountId[String(row.id)] ?? null"
-              :today-stats-loading="todayStatsLoading"
-              :manual-refresh-token="usageManualRefreshToken"
-            />
+            <div class="account-quota-capacity">
+              <AccountUsageCell
+                :account="row"
+                :today-stats="todayStatsByAccountId[String(row.id)] ?? null"
+                :today-stats-loading="todayStatsLoading"
+                :manual-refresh-token="usageManualRefreshToken"
+                display-mode="summary"
+              />
+              <span class="account-quota-capacity__capacity">
+                {{
+                  t('admin.accounts.workbench.concurrencySummary', {
+                    current: row.current_concurrency || 0,
+                    max: row.concurrency || 0
+                  })
+                }}
+              </span>
+            </div>
           </template>
           <template #cell-proxy="{ row }">
-            <div class="flex flex-col gap-1">
+            <div class="flex flex-col gap-1" @click.stop>
               <div v-if="row.proxy" class="flex items-center gap-2">
                 <span class="text-sm text-gray-700 dark:text-gray-300">{{ row.proxy.name }}</span>
                 <span v-if="row.proxy.country_code" class="text-xs text-gray-500 dark:text-gray-400">
@@ -386,7 +492,7 @@
                 <span class="inline-flex items-center px-1.5 py-0.5 rounded text-xs font-medium bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200" :title="t('admin.accounts.fallbackActiveTip', { origin: row.proxy_fallback_origin_name })">
                   {{ t('admin.accounts.fallbackActive') }}
                 </span>
-                <button class="text-xs px-1.5 py-0.5 rounded border border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700" @click="onRevertFallback(row)">{{ t('admin.accounts.revertProxy') }}</button>
+                <button class="text-xs px-1.5 py-0.5 rounded border border-gray-300 dark:border-gray-600 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700" @click.stop="onRevertFallback(row)">{{ t('admin.accounts.revertProxy') }}</button>
               </div>
             </div>
           </template>
@@ -402,13 +508,15 @@
             </div>
           </template>
           <template #cell-upstream_billing_rate="{ row }">
-            <UpstreamBillingRateCell
-              :account="row"
-              :interval-minutes="upstreamBillingProbeSettings.interval_minutes"
-              :now="upstreamBillingNow"
-              :probing="probingUpstreamBilling.has(row.id)"
-              @probe="handleProbeUpstreamBilling(row)"
-            />
+            <div @click.stop>
+              <UpstreamBillingRateCell
+                :account="row"
+                :interval-minutes="upstreamBillingProbeSettings.interval_minutes"
+                :now="upstreamBillingNow"
+                :probing="probingUpstreamBilling.has(row.id)"
+                @probe="handleProbeUpstreamBilling(row)"
+              />
+            </div>
           </template>
           <template #cell-priority="{ value }">
             <span class="text-sm text-gray-700 dark:text-gray-300">{{ value }}</span>
@@ -462,30 +570,96 @@
             </div>
           </template>
           <template #cell-actions="{ row }">
-            <div class="flex w-full items-center gap-1">
-              <button @click="handleEdit(row)" class="flex min-h-11 min-w-11 flex-1 flex-col items-center justify-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-gray-100 hover:text-primary-600 lg:min-h-0 lg:min-w-0 lg:flex-none dark:hover:bg-dark-700 dark:hover:text-primary-400">
-                <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M16.862 4.487l1.687-1.688a1.875 1.875 0 112.652 2.652L10.582 16.07a4.5 4.5 0 01-1.897 1.13L6 18l.8-2.685a4.5 4.5 0 011.13-1.897l8.932-8.931zm0 0L19.5 7.125M18 14v4.75A2.25 2.25 0 0115.75 21H5.25A2.25 2.25 0 013 18.75V8.25A2.25 2.25 0 015.25 6H10" /></svg>
-                <span class="text-xs">{{ t('common.edit') }}</span>
-              </button>
-              <button @click="handleDelete(row)" class="hidden flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-red-50 hover:text-red-600 lg:flex dark:hover:bg-red-900/20 dark:hover:text-red-400">
-                <svg class="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M14.74 9l-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 01-2.244 2.077H8.084a2.25 2.25 0 01-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 00-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 013.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 00-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 00-7.5 0" /></svg>
-                <span class="text-xs">{{ t('common.delete') }}</span>
-              </button>
-              <button @click="openMenu(row, $event)" class="flex min-h-11 min-w-11 flex-col items-center justify-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-900 lg:min-h-0 lg:min-w-0 dark:hover:bg-dark-700 dark:hover:text-white">
-                <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M6.75 12a.75.75 0 11-1.5 0 .75.75 0 011.5 0zM12.75 12a.75.75 0 11-1.5 0 .75.75 0 011.5 0zM18.75 12a.75.75 0 11-1.5 0 .75.75 0 011.5 0z" /></svg>
-                <span class="text-xs">{{ t('common.more') }}</span>
+            <div class="flex w-full items-center justify-end" @click.stop>
+              <button
+                type="button"
+                class="account-row-more-button"
+                :aria-label="t('common.more')"
+                :title="t('common.more')"
+                @click.stop="openMenu(row, $event)"
+              >
+                <Icon name="more" size="sm" class="rotate-90" aria-hidden="true" />
               </button>
             </div>
           </template>
         </DataTable>
         </div>
+            <div class="account-workbench__pagination">
+              <Pagination
+                v-if="pagination.total > 0"
+                :page="pagination.page"
+                :total="pagination.total"
+                :page-size="pagination.page_size"
+                @update:page="handlePageChange"
+                @update:pageSize="handlePageSizeChange"
+              />
+            </div>
+          </section>
+
+          <aside v-if="isWideInspector" class="account-workbench__inspector-surface">
+            <AccountInspector
+              :account="selectedAccount"
+              :proxy-telemetry="selectedProxyTelemetry"
+              :today-stats="selectedTodayStats"
+              :today-stats-loading="todayStatsLoading"
+              :today-stats-error="todayStatsError"
+              :usage-refresh-token="usageManualRefreshToken"
+              :toggling-schedulable="togglingSchedulable === selectedAccount?.id"
+              mode="inline"
+              @close="closeAccountInspector"
+              @test="handleTest"
+              @stats="handleViewStats"
+              @edit="handleEdit"
+              @more="openMenu"
+              @revert-fallback="onRevertFallback"
+              @toggle-schedulable="handleToggleSchedulable"
+              @view-proxy="handleViewProxy"
+            />
+          </aside>
+        </div>
       </template>
-      <template #pagination><Pagination v-if="pagination.total > 0" :page="pagination.page" :total="pagination.total" :page-size="pagination.page_size" @update:page="handlePageChange" @update:pageSize="handlePageSizeChange" /></template>
     </TablePageLayout>
+
+    <Teleport to="body">
+      <Transition name="account-inspector-overlay">
+        <div
+          v-if="selectedAccount && !isWideInspector"
+          class="account-inspector-overlay"
+          :class="`account-inspector-overlay--${overlayInspectorMode}`"
+          data-testid="account-inspector-overlay"
+          @click.self="closeAccountInspector"
+        >
+          <AccountInspector
+            ref="overlayInspectorRef"
+            :account="selectedAccount"
+            :proxy-telemetry="selectedProxyTelemetry"
+            :today-stats="selectedTodayStats"
+            :today-stats-loading="todayStatsLoading"
+            :today-stats-error="todayStatsError"
+            :usage-refresh-token="usageManualRefreshToken"
+            :toggling-schedulable="togglingSchedulable === selectedAccount.id"
+            :mode="overlayInspectorMode"
+            @close="closeAccountInspector"
+            @test="handleTest"
+            @stats="handleViewStats"
+            @edit="handleEdit"
+            @more="openMenu"
+            @revert-fallback="onRevertFallback"
+            @toggle-schedulable="handleToggleSchedulable"
+            @view-proxy="handleViewProxy"
+          />
+        </div>
+      </Transition>
+    </Teleport>
     <CreateAccountModal :show="showCreate" :proxies="proxies" :groups="groups" @close="showCreate = false" @created="reload" />
     <EditAccountModal :show="showEdit" :account="edAcc" :proxies="proxies" :groups="groups" @close="showEdit = false" @updated="handleAccountUpdated" />
     <ReAuthAccountModal :show="showReAuth" :account="reAuthAcc" @close="closeReAuthModal" @reauthorized="handleAccountUpdated" />
-    <AccountTestModal :show="showTest" :account="testingAcc" @close="closeTestModal" />
+    <AccountTestModal
+      :show="showTest"
+      :account="testingAcc"
+      @close="closeTestModal"
+      @completed="handleTestCompleted"
+    />
     <AccountStatsModal :show="showStats" :account="statsAcc" @close="closeStatsModal" />
     <ScheduledTestsPanel :show="showSchedulePanel" :account-id="scheduleAcc?.id ?? null" :model-options="scheduleModelOptions" @close="closeSchedulePanel" />
     <AccountActionMenu :show="menu.show" :account="menu.acc" :position="menu.pos" @close="menu.show = false" @test="handleTest" @stats="handleViewStats" @schedule="handleSchedule" @duplicate="handleDuplicateAccount" @reauth="handleReAuth" @refresh-token="handleRefresh" @recover-state="handleRecoverState" @reset-quota="handleResetQuota" @set-privacy="handleSetPrivacy" @create-spark-shadow="handleCreateSparkShadow" @delete="handleDelete" />
@@ -518,7 +692,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed, onMounted, onUnmounted, toRaw, watch } from 'vue'
+import { ref, reactive, computed, nextTick, onMounted, onUnmounted, toRaw, watch } from 'vue'
 import { useIntervalFn } from '@vueuse/core'
 import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
@@ -529,6 +703,10 @@ import { useTableLoader } from '@/composables/useTableLoader'
 import { useSwipeSelect, type SwipeSelectVirtualContext } from '@/composables/useSwipeSelect'
 import { useTableSelection } from '@/composables/useTableSelection'
 import { useStepUp, isStepUpBlocked, isStepUpCancelled, stepUpBlockReason } from '@/composables/useStepUp'
+import {
+  invalidateAccountUsageHealthSnapshot,
+  requestAccountUsage
+} from '@/composables/useAccountUsageHealth'
 import TotpStepUpDialog from '@/components/auth/TotpStepUpDialog.vue'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import AdminPageHeader from '@/components/layout/AdminPageHeader.vue'
@@ -543,6 +721,7 @@ import AccountTableActions from '@/components/admin/account/AccountTableActions.
 import AccountTableFilters from '@/components/admin/account/AccountTableFilters.vue'
 import AccountBulkActionsBar from '@/components/admin/account/AccountBulkActionsBar.vue'
 import AccountActionMenu from '@/components/admin/account/AccountActionMenu.vue'
+import AccountInspector from '@/components/admin/account/AccountInspector.vue'
 import ImportDataModal from '@/components/admin/account/ImportDataModal.vue'
 import ReAuthAccountModal from '@/components/admin/account/ReAuthAccountModal.vue'
 import AccountTestModal from '@/components/admin/account/AccountTestModal.vue'
@@ -552,9 +731,9 @@ import type { SelectOption } from '@/components/common/Select.vue'
 import AccountStatusIndicator from '@/components/account/AccountStatusIndicator.vue'
 import AccountUsageCell from '@/components/account/AccountUsageCell.vue'
 import AccountTodayStatsCell from '@/components/account/AccountTodayStatsCell.vue'
-import AccountGroupsCell from '@/components/account/AccountGroupsCell.vue'
 import AccountCapacityCell from '@/components/account/AccountCapacityCell.vue'
 import UpstreamBillingRateCell from '@/components/account/UpstreamBillingRateCell.vue'
+import GroupBadge from '@/components/common/GroupBadge.vue'
 import PlatformTypeBadge from '@/components/common/PlatformTypeBadge.vue'
 import Icon from '@/components/icons/Icon.vue'
 import ErrorPassthroughRulesModal from '@/components/admin/ErrorPassthroughRulesModal.vue'
@@ -576,6 +755,16 @@ const proxies = ref<AccountProxy[]>([])
 const groups = ref<AdminGroup[]>([])
 const accountTableRef = ref<HTMLElement | null>(null)
 const dataTableRef = ref<InstanceType<typeof DataTable> | null>(null)
+const overlayInspectorRef = ref<InstanceType<typeof AccountInspector> | null>(null)
+const selectedAccountId = ref<number | null>(null)
+const viewportWidth = ref(typeof window === 'undefined' ? 1440 : window.innerWidth)
+const isWideInspector = computed(() => viewportWidth.value >= 1280)
+const overlayInspectorMode = computed<'drawer' | 'sheet'>(() =>
+  viewportWidth.value >= 1024 ? 'drawer' : 'sheet'
+)
+let inspectorTriggerElement: HTMLElement | null = null
+let previousBodyOverflow = ''
+let inspectorBodyLocked = false
 type AccountBulkEditTarget =
   | {
       mode: 'selected'
@@ -657,16 +846,41 @@ useIntervalFn(() => { upstreamBillingNow.value = Date.now() }, 60_000)
 // Account tools dropdown
 const showAccountToolsDropdown = ref(false)
 const accountToolsDropdownRef = ref<HTMLElement | null>(null)
+const showColumnDropdown = ref(false)
+const columnDropdownRef = ref<HTMLElement | null>(null)
 const hiddenColumns = reactive<Set<string>>(new Set())
-const DEFAULT_HIDDEN_COLUMNS = ['today_stats', 'proxy', 'notes', 'priority', 'scheduler_score', 'rate_multiplier']
+const DEFAULT_HIDDEN_COLUMNS = [
+  'id',
+  'platform_type',
+  'capacity',
+  'schedulable',
+  'today_stats',
+  'proxy',
+  'notes',
+  'priority',
+  'scheduler_score',
+  'rate_multiplier',
+  'upstream_billing_rate',
+  'created_at',
+  'expires_at'
+]
 const HIDDEN_COLUMNS_KEY = 'account-hidden-columns'
-// One-time migration: hide scheduler score for existing admins too, because showing it opt-ins to heavy backend scoring.
+// One-time migration keeps existing admins on the compact workbench column set.
 const HIDDEN_COLUMNS_VERSION_KEY = 'account-hidden-columns-version'
-const HIDDEN_COLUMNS_CURRENT_VERSION = 'scheduler-score-hidden-by-default'
+const HIDDEN_COLUMNS_CURRENT_VERSION = 'account-workbench-v2'
+const COMPACT_WORKBENCH_COLUMN_KEYS = new Set([
+  'select',
+  'name',
+  'usage',
+  'status',
+  'groups',
+  'last_used_at',
+  'actions'
+])
 
 // Sorting settings
 const ACCOUNT_SORT_STORAGE_KEY = 'account-table-sort'
-const ACCOUNT_MOBILE_VISIBLE_KEYS: string[] = ['name', 'platform_type', 'status', 'schedulable', 'groups']
+const ACCOUNT_MOBILE_VISIBLE_KEYS: string[] = ['name', 'usage', 'status', 'groups', 'last_used_at']
 type AccountSortOrder = 'asc' | 'desc'
 type AccountSortState = {
   sort_by: string
@@ -819,9 +1033,11 @@ const loadSavedColumns = () => {
       parsed.forEach(key => {
         hiddenColumns.add(key)
       })
-      // Older saved column layouts may have scheduler_score visible; migrate them to the new safe default once.
+      // Older saved layouts can recreate the former wide table. Apply the
+      // approved compact defaults once while preserving any extra hidden fields.
       if (localStorage.getItem(HIDDEN_COLUMNS_VERSION_KEY) !== HIDDEN_COLUMNS_CURRENT_VERSION) {
-        hiddenColumns.add('scheduler_score')
+        DEFAULT_HIDDEN_COLUMNS.forEach(key => hiddenColumns.add(key))
+        ;['usage', 'status', 'groups', 'last_used_at'].forEach(key => hiddenColumns.delete(key))
         localStorage.setItem(HIDDEN_COLUMNS_KEY, JSON.stringify([...hiddenColumns]))
         localStorage.setItem(HIDDEN_COLUMNS_VERSION_KEY, HIDDEN_COLUMNS_CURRENT_VERSION)
       }
@@ -955,6 +1171,29 @@ const {
     sort_by: sortState.sort_by,
     sort_order: sortState.sort_order
   }
+})
+
+const proxyTelemetryById = computed(() =>
+  new Map(proxies.value.map(proxy => [proxy.id, proxy]))
+)
+const selectedAccount = computed(() =>
+  accounts.value.find(account => account.id === selectedAccountId.value) ?? null
+)
+const selectedProxyTelemetry = computed(() => {
+  const proxyId = selectedAccount.value?.proxy_id
+  if (proxyId == null) return null
+  const proxy = proxyTelemetryById.value.get(proxyId)
+  if (!proxy) return null
+  return {
+    id: proxy.id,
+    name: proxy.name,
+    status: proxy.status
+  }
+})
+const selectedTodayStats = computed(() => {
+  const accountId = selectedAccount.value?.id
+  if (accountId == null) return null
+  return todayStatsByAccountId.value[String(accountId)] ?? null
 })
 
 const allowedAccountPlatforms = new Set(['anthropic', 'openai', 'gemini', 'antigravity', 'grok'])
@@ -1101,11 +1340,89 @@ useSwipeSelect(accountTableRef, {
   batchUpdate
 }, swipeVirtualContext)
 
+const accountRowAriaLabel = (account: Account) =>
+  t('admin.accounts.workbench.inspectAccount', { name: account.name })
+
+const lockInspectorBody = () => {
+  if (isWideInspector.value || inspectorBodyLocked || typeof document === 'undefined') return
+  previousBodyOverflow = document.body.style.overflow
+  document.body.style.overflow = 'hidden'
+  inspectorBodyLocked = true
+}
+
+const unlockInspectorBody = () => {
+  if (!inspectorBodyLocked || typeof document === 'undefined') return
+  document.body.style.overflow = previousBodyOverflow
+  previousBodyOverflow = ''
+  inspectorBodyLocked = false
+}
+
+const openAccountInspector = async (
+  account: Account,
+  event?: MouseEvent | KeyboardEvent
+) => {
+  const eventTarget = event?.currentTarget
+  const rowElement = accountTableRef.value?.querySelector<HTMLElement>(
+    `[data-row-id="${account.id}"]`
+  ) ?? null
+  const activeElement = document.activeElement
+  inspectorTriggerElement = eventTarget instanceof HTMLElement
+    ? eventTarget
+    : rowElement
+      ?? (activeElement instanceof HTMLElement && activeElement !== document.body
+        ? activeElement
+        : null)
+  selectedAccountId.value = account.id
+  if (!isWideInspector.value) {
+    lockInspectorBody()
+    await nextTick()
+    overlayInspectorRef.value?.focus()
+  }
+}
+
+const closeAccountInspector = () => {
+  const trigger = inspectorTriggerElement
+  selectedAccountId.value = null
+  inspectorTriggerElement = null
+  unlockInspectorBody()
+  void nextTick(() => trigger?.focus())
+}
+
+const handleViewProxy = (proxyId: number) => {
+  if (!Number.isInteger(proxyId) || proxyId <= 0) return
+  void router.push({
+    name: 'AdminProxies',
+    query: {
+      focus_id: String(proxyId),
+      open: 'health'
+    }
+  })
+}
+
+const handleInspectorViewportResize = () => {
+  const wasWide = isWideInspector.value
+  viewportWidth.value = window.innerWidth
+  if (wasWide === isWideInspector.value || !selectedAccount.value) return
+  if (isWideInspector.value) {
+    unlockInspectorBody()
+  } else {
+    lockInspectorBody()
+    void nextTick(() => overlayInspectorRef.value?.focus())
+  }
+}
+
+watch([selectedAccount, loading], ([account, isLoading]) => {
+  if (!account && !isLoading && selectedAccountId.value !== null) {
+    closeAccountInspector()
+  }
+})
+
 const resetAutoRefreshCache = () => {
   autoRefreshETag.value = null
 }
 
 const isFirstLoad = ref(true)
+let initialInspectorSelectionHandled = false
 
 const load = async () => {
   const requestParams = params as any
@@ -1117,6 +1434,12 @@ const load = async () => {
     requestParams.lite = '1'
   }
   await baseLoad()
+  if (!initialInspectorSelectionHandled) {
+    initialInspectorSelectionHandled = true
+    if (isWideInspector.value && accounts.value.length > 0) {
+      selectedAccountId.value = accounts.value[0].id
+    }
+  }
   if (isFirstLoad.value) {
     isFirstLoad.value = false
     delete requestParams.lite
@@ -1433,6 +1756,9 @@ function getOpenAIAuthMode(row: any): string | undefined {
   return typeof authMode === 'string' && authMode.trim() ? authMode : undefined
 }
 
+const accountGroupTitle = (account: Account): string =>
+  account.groups?.map(group => group.name).join(', ') ?? ''
+
 // Antigravity 订阅等级辅助函数
 function getAntigravityTierFromRow(row: any): string | null {
   if (row.platform !== 'antigravity') return null
@@ -1455,12 +1781,6 @@ function getAntigravityTierLabel(row: any): string | null {
     case 'g1-ultra-tier': return t('admin.accounts.tier.ultra')
     default: return null
   }
-}
-
-// 账号显示邮箱:优先账号自身(extra/credentials),影子账号回退母账号 parent_email。
-// 供名称单元格 v-if/标题/文本三处共用,避免同一回退链在模板里重复三次。
-function accountDisplayEmail(row: any): string {
-  return row.extra?.email_address || row.extra?.email || row.credentials?.email || row.parent_email || ''
 }
 
 type OpenAICompactBadgeState = 'active' | 'blocked' | 'auto'
@@ -1523,30 +1843,45 @@ function getAntigravityTierClass(row: any): string {
 // All available columns
 const allColumns = computed(() => {
   const c = [
-    { key: 'select', label: '', sortable: false },
-    { key: 'name', label: t('admin.accounts.columns.name'), sortable: true },
+    { key: 'select', label: '', sortable: false, class: 'account-table-col--select' },
+    { key: 'name', label: t('admin.accounts.workbench.identity'), sortable: true, class: 'account-table-col--identity' },
     { key: 'id', label: t('admin.accounts.columns.id'), sortable: true },
     { key: 'platform_type', label: t('admin.accounts.columns.platformType'), sortable: false },
     { key: 'capacity', label: t('admin.accounts.columns.capacity'), sortable: false },
-    { key: 'status', label: t('admin.accounts.columns.status'), sortable: true },
+    { key: 'usage', label: t('admin.accounts.workbench.quotaCapacity'), sortable: false, class: 'account-table-col--quota' },
+    { key: 'status', label: t('admin.accounts.workbench.statusScheduling'), sortable: true, class: 'account-table-col--status' },
     { key: 'schedulable', label: t('admin.accounts.columns.schedulable'), sortable: true },
     { key: 'today_stats', label: t('admin.accounts.columns.todayStats'), sortable: false }
   ]
   if (!authStore.isSimpleMode) {
-    c.push({ key: 'groups', label: t('admin.accounts.columns.groups'), sortable: false })
+    c.push({
+      key: 'groups',
+      label: t('admin.accounts.workbench.effectiveGroups'),
+      sortable: false,
+      class: 'account-table-col--groups'
+    })
   }
   c.push(
-    { key: 'usage', label: t('admin.accounts.columns.usageWindows'), sortable: false },
     { key: 'proxy', label: t('admin.accounts.columns.proxy'), sortable: false },
     { key: 'priority', label: t('admin.accounts.columns.priority'), sortable: true },
     { key: 'scheduler_score', label: t('admin.accounts.columns.schedulerScore'), sortable: false },
     { key: 'rate_multiplier', label: t('admin.accounts.columns.billingRateMultiplier'), sortable: true },
     { key: 'upstream_billing_rate', label: t('admin.accounts.columns.upstreamBillingRate'), sortable: false },
-    { key: 'last_used_at', label: t('admin.accounts.columns.lastUsed'), sortable: true },
+    {
+      key: 'last_used_at',
+      label: t('admin.accounts.workbench.recentActivity'),
+      sortable: true,
+      class: 'account-table-col--activity'
+    },
     { key: 'created_at', label: t('admin.accounts.columns.createdAt'), sortable: true },
     { key: 'expires_at', label: t('admin.accounts.columns.expiresAt'), sortable: true },
     { key: 'notes', label: t('admin.accounts.columns.notes'), sortable: false },
-    { key: 'actions', label: t('admin.accounts.columns.actions'), sortable: false }
+    {
+      key: 'actions',
+      label: t('admin.accounts.columns.actions'),
+      sortable: false,
+      class: 'account-table-col--actions'
+    }
   )
   return c
 })
@@ -1561,6 +1896,9 @@ const cols = computed(() =>
   allColumns.value.filter(col =>
     col.key === 'select' || col.key === 'name' || col.key === 'actions' || !hiddenColumns.has(col.key)
   )
+)
+const hasExpandedColumns = computed(() =>
+  cols.value.some(column => !COMPACT_WORKBENCH_COLUMN_KEYS.has(column.key))
 )
 
 const handleEdit = (a: Account) => { edAcc.value = a; showEdit.value = true }
@@ -2019,6 +2357,30 @@ const closeTestModal = () => { showTest.value = false; testingAcc.value = null }
 const closeStatsModal = () => { showStats.value = false; statsAcc.value = null }
 const closeReAuthModal = () => { showReAuth.value = false; reAuthAcc.value = null }
 const handleTest = (a: Account) => { testingAcc.value = a; showTest.value = true }
+let accountTestRefreshVersion = 0
+const handleTestCompleted = async () => {
+  const accountID = testingAcc.value?.id
+  if (!accountID) return
+  invalidateAccountUsageHealthSnapshot(accountID)
+  const refreshVersion = ++accountTestRefreshVersion
+  try {
+    const updated = await adminAPI.accounts.getById(accountID)
+    if (refreshVersion !== accountTestRefreshVersion) return
+    patchAccountInList(updated)
+    enterAutoRefreshSilentWindow()
+    try {
+      await requestAccountUsage(updated, {
+        source: 'active',
+        bypassCache: true,
+        force: true
+      }).promise
+    } catch (error) {
+      console.error('Failed to refresh account usage after connection test:', error)
+    }
+  } catch (error) {
+    console.error('Failed to refresh account after connection test:', error)
+  }
+}
 const handleViewStats = (a: Account) => { statsAcc.value = a; showStats.value = true }
 const handleSchedule = async (a: Account) => {
   scheduleAcc.value = a
@@ -2207,20 +2569,26 @@ const handleClickOutside = (event: MouseEvent) => {
   if (autoRefreshDropdownRef.value && !autoRefreshDropdownRef.value.contains(target)) {
     showAutoRefreshDropdown.value = false
   }
+  if (columnDropdownRef.value && !columnDropdownRef.value.contains(target)) {
+    showColumnDropdown.value = false
+  }
 }
 
 onMounted(async () => {
+  viewportWidth.value = window.innerWidth
   await applyAccountRouteFilters()
   accountRouteReady = true
   load()
   loadUpstreamBillingProbeSettings()
   try {
-    const [p, g] = await Promise.all([adminAPI.proxies.getAll(), adminAPI.groups.getAll()])
+    const loadProxies = adminAPI.proxies.getAllWithCount ?? adminAPI.proxies.getAll
+    const [p, g] = await Promise.all([loadProxies(), adminAPI.groups.getAll()])
     proxies.value = p
     groups.value = g
   } catch (error) {
     console.error('Failed to load proxies/groups:', error)
   }
+  window.addEventListener('resize', handleInspectorViewportResize)
   window.addEventListener('scroll', handleScroll, true)
   document.addEventListener('click', handleClickOutside)
 
@@ -2233,17 +2601,568 @@ onMounted(async () => {
 })
 
 onUnmounted(() => {
+  unlockInspectorBody()
+  window.removeEventListener('resize', handleInspectorViewportResize)
   window.removeEventListener('scroll', handleScroll, true)
   document.removeEventListener('click', handleClickOutside)
 })
 </script>
 
 <style scoped>
+.account-filter-toolbar {
+  display: flex;
+  min-width: 0;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.account-toolbar-icon-button {
+  display: inline-flex;
+  width: 44px;
+  height: 44px;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--lx-clay-border);
+  border-radius: 12px;
+  color: var(--lx-clay-text-secondary);
+  background: var(--lx-clay-surface);
+  box-shadow: 0 5px 13px rgb(70 55 96 / 0.06);
+  transition:
+    color 150ms ease-out,
+    background-color 150ms ease-out,
+    border-color 150ms ease-out;
+}
+
+.account-toolbar-icon-button:hover,
+.account-toolbar-icon-button--active {
+  color: var(--lx-clay-accent-deep);
+  border-color: color-mix(in srgb, var(--lx-clay-accent) 34%, var(--lx-clay-border));
+  background: var(--lx-clay-accent-soft);
+}
+
+.account-toolbar-icon-button:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--lx-clay-accent) 55%, transparent);
+  outline-offset: 2px;
+}
+
 .account-tools-menu-item {
   @apply flex min-h-11 w-full items-center gap-3 rounded-md px-3 py-2 text-sm text-gray-700 transition-colors hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-gray-700;
 }
 
 .account-tools-menu-icon {
   @apply inline-flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-md;
+}
+
+.account-workbench {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  min-width: 0;
+  min-height: 0;
+  flex: 1;
+  gap: 20px;
+}
+
+.account-workbench__table-surface,
+.account-workbench__inspector-surface {
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--lx-clay-border);
+  border-radius: 14px;
+  background: var(--lx-clay-surface);
+  box-shadow: var(--lx-clay-shadow-flat);
+}
+
+.account-workbench__table-surface > :deep(.account-bulk-actions-bar) {
+  flex: none;
+}
+
+.account-workbench__pagination {
+  flex: none;
+  padding: 10px 14px;
+  border-top: 1px solid var(--lx-clay-border);
+  background: var(--lx-clay-surface);
+}
+
+.account-identity-cell {
+  display: flex;
+  min-width: 0;
+  max-width: 100%;
+  flex-direction: column;
+  gap: 3px;
+  overflow: hidden;
+}
+
+.account-identity-cell__name {
+  overflow: hidden;
+  color: var(--lx-clay-text);
+  font-size: 0.875rem;
+  font-weight: 700;
+  line-height: 1.25rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.account-identity-cell__meta {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 5px;
+  overflow: hidden;
+}
+
+.account-identity-cell__id {
+  flex: none;
+  color: var(--lx-clay-text-muted);
+  font-family: var(--lx-clay-font-mono, ui-monospace, monospace);
+  font-size: 0.6875rem;
+  line-height: 1rem;
+}
+
+.account-identity-cell__separator {
+  color: var(--lx-clay-text-muted);
+  font-size: 0.6875rem;
+}
+
+.account-quota-capacity {
+  display: flex;
+  min-width: 0;
+  max-width: 100%;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.account-quota-capacity__capacity {
+  overflow: hidden;
+  color: var(--lx-clay-text-muted);
+  font-size: 0.625rem;
+  line-height: 0.875rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.account-quota-capacity :deep(.account-usage-summary) {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.account-quota-capacity :deep(.account-usage-summary__top) {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 0.65rem;
+  font-weight: 650;
+  line-height: 0.875rem;
+}
+
+.account-quota-capacity :deep(.account-usage-summary__label) {
+  flex: none;
+  color: var(--lx-clay-text-muted);
+}
+
+.account-quota-capacity :deep(.account-usage-summary__value) {
+  overflow: hidden;
+  color: var(--lx-clay-text-secondary);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.account-quota-capacity :deep(.account-usage-summary__track) {
+  display: flex;
+  width: 100%;
+  height: 6px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--lx-clay-recessed);
+}
+
+.account-quota-capacity :deep(.account-usage-summary__track > span) {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--lx-clay-success-bright);
+  transition: width 220ms ease-out;
+}
+
+.account-quota-capacity :deep(.account-usage-summary[data-level='warning'] .account-usage-summary__value) {
+  color: var(--lx-clay-warning);
+}
+
+.account-quota-capacity :deep(.account-usage-summary[data-level='warning'] .account-usage-summary__track > span) {
+  background: var(--lx-clay-warning-bright);
+}
+
+.account-quota-capacity :deep(.account-usage-summary[data-level='danger'] .account-usage-summary__value) {
+  color: var(--lx-clay-danger);
+}
+
+.account-quota-capacity :deep(.account-usage-summary[data-level='danger'] .account-usage-summary__track > span) {
+  background: var(--lx-clay-danger);
+}
+
+.account-quota-capacity :deep(.account-usage-summary[data-level='empty'] .account-usage-summary__track > span) {
+  background: transparent;
+}
+
+.account-status-cell {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 6px;
+}
+
+.account-status-cell > :deep(.account-status-summary) {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+.account-status-cell__switch {
+  position: relative;
+  width: 32px;
+  height: 44px;
+  min-height: 44px;
+  flex: none;
+  margin-left: auto;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+}
+
+.account-status-cell__switch::before {
+  position: absolute;
+  top: 13px;
+  left: 0;
+  width: 32px;
+  height: 18px;
+  border-radius: 999px;
+  background: var(--lx-clay-recessed-strong);
+  content: '';
+  transition: background-color 160ms ease-out;
+}
+
+.account-status-cell__switch[aria-checked='true']::before {
+  background: var(--lx-clay-accent);
+}
+
+.account-status-cell__switch:disabled {
+  cursor: wait;
+  opacity: 0.55;
+}
+
+.account-status-cell__switch span {
+  position: absolute;
+  top: 15px;
+  left: 2px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: white;
+  box-shadow: 0 1px 3px rgb(15 23 42 / 0.24);
+  transition: transform 160ms ease-out;
+}
+
+.account-status-cell__switch[aria-checked='true'] span {
+  transform: translateX(14px);
+}
+
+.account-groups-summary {
+  display: flex;
+  min-width: 0;
+  max-width: 100%;
+  align-items: center;
+  gap: 4px;
+  overflow: hidden;
+}
+
+.account-groups-summary :deep(.account-groups-summary__badge) {
+  min-width: 0;
+  max-width: 100%;
+  padding: 2px 6px;
+  font-size: 0.625rem;
+  line-height: 0.875rem;
+}
+
+.account-groups-summary__more {
+  flex: none;
+  color: var(--lx-clay-text-muted);
+  font-size: 0.625rem;
+}
+
+.account-row-more-button {
+  display: inline-flex;
+  width: 30px;
+  height: 30px;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  color: var(--lx-clay-text-muted);
+  transition:
+    color 150ms ease-out,
+    background-color 150ms ease-out;
+}
+
+.account-row-more-button:hover {
+  color: var(--lx-clay-text);
+  background: color-mix(in srgb, var(--lx-clay-text) 5%, transparent);
+}
+
+.account-workbench__table-surface :deep(.data-table--desktop) {
+  min-height: 0;
+  flex: 1;
+  overflow-x: hidden;
+}
+
+.account-workbench__table-surface :deep(.data-table-table) {
+  width: 100%;
+  min-width: 0 !important;
+  table-layout: fixed;
+}
+
+.account-workbench__table-surface :deep(.data-table-header-cell) {
+  padding: 10px 12px;
+  letter-spacing: 0;
+  text-transform: none;
+  white-space: nowrap;
+  overflow: hidden;
+  font-size: 0.75rem;
+  font-weight: 700;
+  text-overflow: ellipsis;
+}
+
+.account-workbench__table-surface :deep(.data-table-cell) {
+  padding: 8px 10px;
+  overflow: hidden;
+  white-space: normal;
+  vertical-align: middle;
+}
+
+.account-workbench__table-surface :deep(.data-table-row--selected > td) {
+  background: color-mix(in srgb, var(--lx-clay-accent) 8%, var(--lx-clay-surface)) !important;
+}
+
+.account-workbench__table-surface :deep(.data-table-row--selected:focus-visible) {
+  outline: 2px solid color-mix(in srgb, var(--lx-clay-accent) 48%, transparent);
+  outline-offset: -2px;
+}
+
+.account-workbench__table-surface :deep(.account-table-col--select) {
+  width: 5%;
+  padding-right: 6px;
+  padding-left: 6px;
+  text-align: center;
+}
+
+.account-workbench__table-surface :deep(.account-table-col--identity) {
+  width: 25%;
+}
+
+.account-workbench__table-surface :deep(.account-table-col--quota) {
+  width: 24%;
+}
+
+.account-workbench__table-surface :deep(.account-table-col--status) {
+  width: 18%;
+}
+
+.account-workbench__table-surface :deep(.account-table-col--groups) {
+  width: 10%;
+}
+
+.account-workbench__table-surface :deep(.account-table-col--activity) {
+  width: 11%;
+}
+
+.account-workbench__table-surface :deep(.account-table-col--actions) {
+  width: 7%;
+  padding-right: 8px;
+  padding-left: 8px;
+  text-align: right;
+}
+
+.account-workbench__table-surface :deep(.account-table-col--actions .data-table-header-content) {
+  justify-content: flex-end;
+}
+
+.account-workbench__table-surface :deep(.data-table-row + .data-table-row) {
+  border-color: color-mix(in srgb, var(--lx-clay-border) 45%, transparent);
+}
+
+.account-workbench__table-surface--expanded :deep(.data-table--desktop) {
+  overflow-x: auto;
+}
+
+.account-workbench__table-surface--expanded :deep(.data-table-table) {
+  min-width: max-content !important;
+  table-layout: auto;
+}
+
+.account-workbench__table-surface--expanded :deep(.account-table-col--select) {
+  min-width: 40px;
+}
+
+.account-workbench__table-surface--expanded :deep(.account-table-col--identity),
+.account-workbench__table-surface--expanded :deep(.account-table-col--quota) {
+  min-width: 190px;
+}
+
+.account-workbench__table-surface--expanded :deep(.account-table-col--status) {
+  min-width: 110px;
+}
+
+.account-workbench__table-surface--expanded :deep(.account-table-col--groups) {
+  min-width: 96px;
+}
+
+.account-workbench__table-surface--expanded :deep(.account-table-col--activity) {
+  min-width: 90px;
+}
+
+.account-workbench__table-surface--expanded :deep(.account-table-col--actions) {
+  min-width: 50px;
+}
+
+.account-inspector-overlay {
+  position: fixed;
+  z-index: 45;
+  inset: 0;
+  display: flex;
+  background: color-mix(in srgb, var(--lx-clay-text) 28%, transparent);
+}
+
+.account-inspector-overlay--drawer {
+  top: 81px;
+  align-items: stretch;
+  justify-content: flex-end;
+}
+
+.account-inspector-overlay--drawer :deep(.account-inspector) {
+  width: min(420px, calc(100vw - 24px));
+  height: 100%;
+  border-left: 1px solid var(--lx-clay-border-strong);
+  box-shadow: -16px 0 36px color-mix(in srgb, var(--lx-clay-text) 18%, transparent);
+}
+
+.account-inspector-overlay--sheet {
+  align-items: flex-end;
+  justify-content: stretch;
+}
+
+.account-inspector-overlay--sheet :deep(.account-inspector) {
+  width: 100%;
+  max-height: min(86dvh, 760px);
+  border-top: 1px solid var(--lx-clay-border-strong);
+  border-radius: 16px 16px 0 0;
+  box-shadow: 0 -18px 42px color-mix(in srgb, var(--lx-clay-text) 18%, transparent);
+}
+
+.account-inspector-overlay-enter-active,
+.account-inspector-overlay-leave-active {
+  transition: opacity 180ms ease-out;
+}
+
+.account-inspector-overlay-enter-active :deep(.account-inspector),
+.account-inspector-overlay-leave-active :deep(.account-inspector) {
+  transition: transform 220ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.account-inspector-overlay-enter-from,
+.account-inspector-overlay-leave-to {
+  opacity: 0;
+}
+
+.account-inspector-overlay--drawer.account-inspector-overlay-enter-from :deep(.account-inspector),
+.account-inspector-overlay--drawer.account-inspector-overlay-leave-to :deep(.account-inspector) {
+  transform: translateX(100%);
+}
+
+.account-inspector-overlay--sheet.account-inspector-overlay-enter-from :deep(.account-inspector),
+.account-inspector-overlay--sheet.account-inspector-overlay-leave-to :deep(.account-inspector) {
+  transform: translateY(100%);
+}
+
+@media (min-width: 1280px) {
+  .account-workbench {
+    grid-template-columns: minmax(0, 64fr) minmax(320px, 36fr);
+  }
+
+  .account-workbench__inspector-surface :deep(.account-inspector) {
+    height: 100%;
+  }
+}
+
+@media (min-width: 1024px) {
+  .account-table-page-layout {
+    height: calc(100vh - 81px - 80px);
+  }
+}
+
+@media (max-width: 1023px) {
+  .account-workbench,
+  .account-workbench__table-surface {
+    min-height: auto;
+  }
+
+  .account-workbench__table-surface {
+    overflow: visible;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none;
+  }
+
+  .account-workbench__table-body {
+    overflow: visible;
+  }
+
+  .account-workbench__table-surface :deep(.data-table-mobile-row) {
+    padding: 14px;
+  }
+
+  .account-workbench__table-surface :deep(.data-table-mobile-field) {
+    align-items: flex-start;
+  }
+
+  .account-workbench__table-surface :deep(.data-table-mobile-value) {
+    min-width: 0;
+    max-width: 70%;
+  }
+
+  .account-workbench__pagination {
+    margin-top: 12px;
+    border: 1px solid var(--lx-clay-border);
+    border-radius: 12px;
+  }
+}
+
+@media (max-width: 639px) {
+  .account-filter-toolbar {
+    flex-direction: column;
+  }
+
+  .account-inspector-overlay {
+    background: color-mix(in srgb, var(--lx-clay-text) 34%, transparent);
+  }
+
+  .account-workbench__table-surface :deep(.data-table-mobile-value) {
+    max-width: 64%;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .account-status-cell__switch,
+  .account-status-cell__switch span,
+  .account-inspector-overlay,
+  .account-inspector-overlay :deep(.account-inspector) {
+    transition-duration: 0.01ms;
+  }
 }
 </style>

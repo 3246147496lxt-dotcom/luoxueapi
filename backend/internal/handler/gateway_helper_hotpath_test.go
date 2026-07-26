@@ -439,6 +439,25 @@ func TestWaitForSlotWithPingTimeout_TimeoutAndStreamPing(t *testing.T) {
 		require.True(t, cErr.IsTimeout)
 		require.True(t, streamStarted)
 		require.Contains(t, rec.Body.String(), ":\n\n")
+		require.Equal(t, "no-cache", rec.Header().Get("Cache-Control"))
+	})
+
+	t.Run("stream_ping_preserves_existing_cache_control", func(t *testing.T) {
+		cache := &helperConcurrencyCacheStub{
+			accountSeq: []bool{false, false, false},
+		}
+		helper := NewConcurrencyHelper(service.NewConcurrencyService(cache), SSEPingFormatComment, 10*time.Millisecond)
+		c, rec := newHelperTestContext(http.MethodPost, "/api/v1/chat/completions")
+		c.Header("Cache-Control", "private, no-store")
+		streamStarted := false
+		release, err := helper.waitForSlotWithPingTimeout(c, "account", 101, 2, 70*time.Millisecond, true, &streamStarted, true)
+		require.Nil(t, release)
+		var cErr *ConcurrencyError
+		require.ErrorAs(t, err, &cErr)
+		require.True(t, cErr.IsTimeout)
+		require.True(t, streamStarted)
+		require.Contains(t, rec.Body.String(), ":\n\n")
+		require.Equal(t, "private, no-store", rec.Header().Get("Cache-Control"))
 	})
 }
 

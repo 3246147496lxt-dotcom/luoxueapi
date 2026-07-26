@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/pkg/ctxkey"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/stretchr/testify/require"
 )
@@ -188,4 +189,52 @@ func TestOpenAIGatewayHandlerSubmitOpenAIUsageRecordTask_ImageResultUsesMandator
 	close(release)
 
 	require.True(t, called.Load(), "image usage task must be mandatory when async submit is dropped")
+}
+
+func TestOpenAIGatewayHandlerSubmitOpenAIUsageRecordTask_WebChatTextUsesMandatoryFallback(t *testing.T) {
+	pool := service.NewUsageRecordWorkerPoolWithOptions(service.UsageRecordWorkerPoolOptions{
+		WorkerCount:           1,
+		QueueSize:             1,
+		TaskTimeout:           time.Second,
+		OverflowPolicy:        "drop",
+		OverflowSamplePercent: 0,
+		AutoScaleEnabled:      false,
+	})
+	t.Cleanup(pool.Stop)
+	h := &OpenAIGatewayHandler{usageRecordWorkerPool: pool}
+
+	block := make(chan struct{})
+	release := make(chan struct{})
+	pool.Submit(func(context.Context) {
+		close(block)
+		<-release
+	})
+	<-block
+	pool.Submit(func(context.Context) {})
+
+	parent := context.WithValue(context.Background(), ctxkey.WebChat, true)
+	var calls atomic.Int32
+	h.submitOpenAIUsageRecordTask(parent, &service.OpenAIForwardResult{ClientDisconnect: true}, func(ctx context.Context) {
+		webChat, _ := ctx.Value(ctxkey.WebChat).(bool)
+		if webChat {
+			calls.Add(1)
+		}
+	})
+	close(release)
+
+	require.EqualValues(t, 1, calls.Load(), "disconnected web chat usage must run synchronously exactly once when the queue is full")
+}
+
+func TestOpenAIGatewayHandlerSubmitOpenAIUsageRecordTask_WebChatTextFallsBackAfterPoolStop(t *testing.T) {
+	pool := newUsageRecordTestPool(t)
+	pool.Stop()
+	h := &OpenAIGatewayHandler{usageRecordWorkerPool: pool}
+	parent := context.WithValue(context.Background(), ctxkey.WebChat, true)
+
+	var calls atomic.Int32
+	h.submitOpenAIUsageRecordTask(parent, &service.OpenAIForwardResult{ClientDisconnect: true}, func(context.Context) {
+		calls.Add(1)
+	})
+
+	require.EqualValues(t, 1, calls.Load(), "disconnected web chat usage must run synchronously exactly once after the worker pool stops")
 }

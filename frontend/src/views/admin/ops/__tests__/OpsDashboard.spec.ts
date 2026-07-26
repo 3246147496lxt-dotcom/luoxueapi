@@ -1,3 +1,7 @@
+import { readFileSync } from 'node:fs'
+import { dirname, resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
+
 import { defineComponent } from 'vue'
 import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -5,6 +9,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import OpsDashboard from '../OpsDashboard.vue'
 import OpsDashboardHeader from '../components/OpsDashboardHeader.vue'
 import opsDashboardHeaderSource from '../components/OpsDashboardHeader.vue?raw'
+
+const opsDashboardStyles = readFileSync(
+  resolve(dirname(fileURLToPath(import.meta.url)), '../OpsDashboard.clay.css'),
+  'utf8',
+)
 
 const mocks = vi.hoisted(() => {
   const route = { query: {} as Record<string, string> }
@@ -280,6 +289,15 @@ function mountDashboard(): VueWrapper {
 }
 
 describe('OpsDashboard integration shell', () => {
+  it('uses the shared admin canvas in both embedded and light fullscreen modes', () => {
+    expect(opsDashboardStyles).toContain(
+      'background: var(--app-shell-canvas, var(--lx-clay-canvas));',
+    )
+    expect(opsDashboardStyles).toContain('html:not(.dark) .ops-fullscreen-shell')
+    expect(opsDashboardStyles).toContain('html:not(.dark) body.admin-ops-fullscreen')
+    expect(opsDashboardStyles).toContain('--app-shell-canvas: #ffffff;')
+  })
+
   beforeEach(() => {
     mocks.route.query = {}
     mocks.adminSettingsStore.opsMonitoringEnabled = true
@@ -330,6 +348,7 @@ describe('OpsDashboard integration shell', () => {
   })
 
   afterEach(() => {
+    document.body.classList.remove('admin-ops-fullscreen')
     vi.restoreAllMocks()
   })
 
@@ -794,6 +813,10 @@ describe('OpsDashboard integration shell', () => {
 
     window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))
     expect(mocks.routerReplace).toHaveBeenLastCalledWith({ query: { section: 'diagnostics' } })
+
+    expect(document.body.classList.contains('admin-ops-fullscreen')).toBe(true)
+    wrapper.unmount()
+    expect(document.body.classList.contains('admin-ops-fullscreen')).toBe(false)
   })
 
   it('keeps fullscreen entry route-driven so the current filters are not lost', async () => {

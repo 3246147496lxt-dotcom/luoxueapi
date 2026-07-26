@@ -64,6 +64,7 @@ func newTestContext() (*gin.Context, *httptest.ResponseRecorder) {
 type openAIAccountTestRepo struct {
 	mockAccountRepoForGemini
 	updatedExtra       map[string]any
+	updatedExtraCalls  []map[string]any
 	bulkUpdatedIDs     []int64
 	bulkUpdatedPayload AccountBulkUpdate
 	rateLimitedID      int64
@@ -71,10 +72,13 @@ type openAIAccountTestRepo struct {
 	clearedErrorID     int64
 	setErrorID         int64
 	setErrorMsg        string
+	schedulableID      int64
+	schedulableCalls   []bool
 }
 
 func (r *openAIAccountTestRepo) UpdateExtra(_ context.Context, _ int64, updates map[string]any) error {
 	r.updatedExtra = updates
+	r.updatedExtraCalls = append(r.updatedExtraCalls, updates)
 	return nil
 }
 
@@ -98,6 +102,12 @@ func (r *openAIAccountTestRepo) ClearError(_ context.Context, id int64) error {
 func (r *openAIAccountTestRepo) SetError(_ context.Context, id int64, errorMsg string) error {
 	r.setErrorID = id
 	r.setErrorMsg = errorMsg
+	return nil
+}
+
+func (r *openAIAccountTestRepo) SetSchedulable(_ context.Context, id int64, schedulable bool) error {
+	r.schedulableID = id
+	r.schedulableCalls = append(r.schedulableCalls, schedulable)
 	return nil
 }
 
@@ -399,9 +409,17 @@ func TestAccountTestService_OpenAI429WithoutResetSignalDoesNotMutateRuntimeState
 
 func TestAccountTestService_OpenAI401SetsPermanentErrorOnly(t *testing.T) {
 	setGinTestMode()
-	ctx, _ := newTestContext()
+	ctx, recorder := newTestContext()
 
-	resp := newJSONResponse(http.StatusUnauthorized, `{"error":"bad token"}`)
+	const secret = "sk-super-secret-123456"
+	resp := newJSONResponse(
+		http.StatusUnauthorized,
+		fmt.Sprintf(
+			`{"error":{"code":"invalid_api_key","type":"authentication_error","message":"Incorrect API key %s; access_token=also-secret %s"},"raw_secret":"must-not-persist"}`,
+			secret,
+			strings.Repeat("x", 1000),
+		),
+	)
 
 	repo := &openAIAccountTestRepo{}
 	upstream := &queuedHTTPUpstream{responses: []*http.Response{resp}}
@@ -411,17 +429,285 @@ func TestAccountTestService_OpenAI401SetsPermanentErrorOnly(t *testing.T) {
 		Platform:    PlatformOpenAI,
 		Type:        AccountTypeOAuth,
 		Status:      StatusActive,
+		Schedulable: true,
 		Concurrency: 1,
-		Credentials: map[string]any{"access_token": "test-token"},
+		Credentials: map[string]any{"access_token": secret},
 	}
 
 	err := svc.testOpenAIAccountConnection(ctx, account, "gpt-5.4", "", "")
 	require.Error(t, err)
 	require.Equal(t, account.ID, repo.setErrorID)
 	require.Contains(t, repo.setErrorMsg, "Authentication failed (401)")
+	require.Contains(t, repo.setErrorMsg, "code=invalid_api_key")
+	require.Contains(t, repo.setErrorMsg, "type=authentication_error")
+	require.LessOrEqual(t, len(repo.setErrorMsg), openAITestAuthSummaryMaxBytes)
+	require.NotContains(t, repo.setErrorMsg, secret)
+	require.NotContains(t, repo.setErrorMsg, "also-secret")
+	require.NotContains(t, repo.setErrorMsg, "raw_secret")
+	require.NotContains(t, repo.setErrorMsg, "must-not-persist")
+	require.NotContains(t, recorder.Body.String(), secret)
+	require.NotContains(t, recorder.Body.String(), "must-not-persist")
+	state, ok := repo.updatedExtra[openAITestAuthFailureExtraKey].(map[string]any)
+	require.True(t, ok)
+	require.Equal(t, openAITestAuthFailureOwner, state[openAITestAuthFailureOwnerField])
+	require.Equal(t, true, state[openAITestAuthPreviousScheduleField])
+	require.Equal(t, StatusError, account.Status)
+	require.False(t, account.Schedulable)
 	require.Zero(t, repo.rateLimitedID)
 	require.Zero(t, repo.clearedErrorID)
 	require.Nil(t, account.RateLimitResetAt)
+}
+
+func TestAccountTestService_OpenAI403SetsPermanentPermissionError(t *testing.T) {
+	for _, body := range []string{
+		`{"error":{"code":"account_suspended","type":"permission_error","message":"account is suspended"}}`,
+		`{"error":{"type":"permission_error","message":"This account is deactivated"}}`,
+	} {
+		ctx, _ := newTestContext()
+		repo := &openAIAccountTestRepo{}
+		upstream := &queuedHTTPUpstream{responses: []*http.Response{
+			newJSONResponse(http.StatusForbidden, body),
+		}}
+		svc := &AccountTestService{accountRepo: repo, httpUpstream: upstream}
+		account := &Account{
+			ID:          82,
+			Platform:    PlatformOpenAI,
+			Type:        AccountTypeOAuth,
+			Status:      StatusActive,
+			Schedulable: true,
+			Concurrency: 1,
+			Credentials: map[string]any{"access_token": "test-token"},
+		}
+
+		err := svc.testOpenAIAccountConnection(ctx, account, "gpt-5.4", "", "")
+		require.Error(t, err)
+		require.Equal(t, account.ID, repo.setErrorID)
+		require.Contains(t, repo.setErrorMsg, "Access forbidden (403)")
+		require.Zero(t, repo.rateLimitedID)
+		require.Zero(t, repo.clearedErrorID)
+		require.Nil(t, account.RateLimitResetAt)
+	}
+}
+
+func TestAccountTestService_OpenAI403DoesNotDisableNonAccountFailures(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+		mode string
+	}{
+		{
+			name: "model access",
+			body: `{"error":{"code":"model_not_allowed","type":"permission_error","message":"You do not have access to model gpt-5.4"}}`,
+		},
+		{
+			name: "compact capability",
+			body: `{"error":{"code":"unsupported_feature","type":"permission_error","message":"Responses compact capability is not supported"}}`,
+			mode: AccountTestModeCompact,
+		},
+		{
+			name: "compact generic permission",
+			body: `{"error":{"type":"permission_error","message":"missing account permission"}}`,
+			mode: AccountTestModeCompact,
+		},
+		{
+			name: "waf challenge",
+			body: `{"error":{"code":"forbidden","message":"Cloudflare WAF challenge required"}}`,
+		},
+		{
+			name: "region restriction",
+			body: `{"detail":{"code":"region_restricted","message":"This service is unavailable in your region"}}`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx, recorder := newTestContext()
+			repo := &openAIAccountTestRepo{}
+			upstream := &queuedHTTPUpstream{responses: []*http.Response{
+				newJSONResponse(http.StatusForbidden, tt.body),
+			}}
+			svc := &AccountTestService{accountRepo: repo, httpUpstream: upstream}
+			account := &Account{
+				ID:          83,
+				Platform:    PlatformOpenAI,
+				Type:        AccountTypeOAuth,
+				Status:      StatusActive,
+				Schedulable: true,
+				Concurrency: 1,
+				Credentials: map[string]any{"access_token": "test-token"},
+			}
+
+			err := svc.testOpenAIAccountConnection(ctx, account, "gpt-5.4", "", tt.mode)
+			require.Error(t, err)
+			require.Zero(t, repo.setErrorID)
+			require.Equal(t, StatusActive, account.Status)
+			require.True(t, account.Schedulable)
+			require.Contains(t, recorder.Body.String(), "403")
+			require.NotContains(t, recorder.Body.String(), tt.body)
+		})
+	}
+}
+
+func TestAccountTestService_OpenAIResponsesSuccessRecoversOnlyOwnedAuthError(t *testing.T) {
+	const summary = "Authentication failed (401): code=invalid_api_key"
+
+	tests := []struct {
+		name                 string
+		errorMessage         string
+		stateMessage         string
+		previousSchedulable  bool
+		wantClear            bool
+		wantSchedulableCalls []bool
+		wantStatus           string
+		wantSchedulable      bool
+	}{
+		{
+			name:                 "restores previously schedulable account",
+			errorMessage:         summary,
+			stateMessage:         summary,
+			previousSchedulable:  true,
+			wantClear:            true,
+			wantSchedulableCalls: []bool{true},
+			wantStatus:           StatusActive,
+			wantSchedulable:      true,
+		},
+		{
+			name:                "preserves a user-paused account",
+			errorMessage:        summary,
+			stateMessage:        summary,
+			previousSchedulable: false,
+			wantClear:           true,
+			wantStatus:          StatusActive,
+			wantSchedulable:     false,
+		},
+		{
+			name:                "does not clear unrelated error",
+			errorMessage:        "proxy transport failed",
+			stateMessage:        summary,
+			previousSchedulable: true,
+			wantStatus:          StatusError,
+			wantSchedulable:     false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx, _ := newTestContext()
+			resp := newJSONResponse(http.StatusOK, "")
+			resp.Body = io.NopCloser(strings.NewReader("data: {\"type\":\"response.completed\"}\n\n"))
+			repo := &openAIAccountTestRepo{}
+			svc := &AccountTestService{
+				accountRepo:  repo,
+				httpUpstream: &queuedHTTPUpstream{responses: []*http.Response{resp}},
+			}
+			account := &Account{
+				ID:           84,
+				Platform:     PlatformOpenAI,
+				Type:         AccountTypeOAuth,
+				Status:       StatusError,
+				ErrorMessage: tt.errorMessage,
+				Schedulable:  false,
+				Concurrency:  1,
+				Credentials:  map[string]any{"access_token": "test-token"},
+				Extra: map[string]any{
+					openAITestAuthFailureExtraKey: map[string]any{
+						openAITestAuthFailureOwnerField:     openAITestAuthFailureOwner,
+						openAITestAuthFailureMessageField:   tt.stateMessage,
+						openAITestAuthPreviousScheduleField: tt.previousSchedulable,
+					},
+				},
+			}
+
+			err := svc.testOpenAIAccountConnection(ctx, account, "gpt-5.4", "", "")
+			require.NoError(t, err)
+			if tt.wantClear {
+				require.Equal(t, account.ID, repo.clearedErrorID)
+			} else {
+				require.Zero(t, repo.clearedErrorID)
+			}
+			require.Equal(t, tt.wantSchedulableCalls, repo.schedulableCalls)
+			require.Equal(t, tt.wantStatus, account.Status)
+			require.Equal(t, tt.wantSchedulable, account.Schedulable)
+		})
+	}
+}
+
+func TestAccountTestService_OpenAIChatCompletionsSuccessClearsOwnedAuthError(t *testing.T) {
+	ctx, _ := newTestContext()
+	upstreamBody := strings.Join([]string{
+		`data: {"id":"chatcmpl_test","object":"chat.completion.chunk","choices":[{"index":0,"delta":{"content":"pong"},"finish_reason":null}]}`,
+		"",
+		`data: {"id":"chatcmpl_test","object":"chat.completion.chunk","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}`,
+		"",
+		"data: [DONE]",
+		"",
+	}, "\n")
+	resp := newJSONResponse(http.StatusOK, "")
+	resp.Body = io.NopCloser(strings.NewReader(upstreamBody))
+	repo := &openAIAccountTestRepo{}
+	svc := &AccountTestService{
+		accountRepo:  repo,
+		httpUpstream: &queuedHTTPUpstream{responses: []*http.Response{resp}},
+	}
+	const summary = "Chat Completions authentication failed (401): code=invalid_api_key"
+	account := &Account{
+		ID:           85,
+		Platform:     PlatformOpenAI,
+		Type:         AccountTypeAPIKey,
+		Status:       StatusError,
+		ErrorMessage: summary,
+		Concurrency:  1,
+		Credentials:  map[string]any{"api_key": "sk-test"},
+		Extra: map[string]any{
+			openAITestAuthFailureExtraKey: map[string]any{
+				openAITestAuthFailureOwnerField:     openAITestAuthFailureOwner,
+				openAITestAuthFailureMessageField:   summary,
+				openAITestAuthPreviousScheduleField: true,
+			},
+		},
+	}
+
+	err := svc.testOpenAIChatCompletionsConnection(ctx, account, "gpt-5.4", "", "https://api.example.test", "sk-test")
+	require.NoError(t, err)
+	require.Equal(t, account.ID, repo.clearedErrorID)
+	require.Equal(t, []bool{true}, repo.schedulableCalls)
+	require.Equal(t, StatusActive, account.Status)
+	require.True(t, account.Schedulable)
+}
+
+func TestAccountTestService_OpenAICompactSuccessClearsOwnedAuthError(t *testing.T) {
+	ctx, _ := newTestContext()
+	repo := &openAIAccountTestRepo{}
+	svc := &AccountTestService{
+		accountRepo: repo,
+		httpUpstream: &queuedHTTPUpstream{responses: []*http.Response{
+			newJSONResponse(http.StatusOK, `{}`),
+		}},
+	}
+	const summary = "Compact access forbidden (403): code=account_suspended"
+	account := &Account{
+		ID:           86,
+		Platform:     PlatformOpenAI,
+		Type:         AccountTypeOAuth,
+		Status:       StatusError,
+		ErrorMessage: summary,
+		Concurrency:  1,
+		Credentials:  map[string]any{"access_token": "test-token"},
+		Extra: map[string]any{
+			openAITestAuthFailureExtraKey: map[string]any{
+				openAITestAuthFailureOwnerField:     openAITestAuthFailureOwner,
+				openAITestAuthFailureMessageField:   summary,
+				openAITestAuthPreviousScheduleField: false,
+			},
+		},
+	}
+
+	err := svc.testOpenAICompactConnection(ctx, account, "gpt-5.4")
+	require.NoError(t, err)
+	require.Equal(t, account.ID, repo.clearedErrorID)
+	require.Empty(t, repo.schedulableCalls)
+	require.Equal(t, StatusActive, account.Status)
+	require.False(t, account.Schedulable)
 }
 
 func TestAccountTestService_OpenAIAPIKeyResponsesUnsupportedUsesChatCompletionsPath(t *testing.T) {

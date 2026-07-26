@@ -1,12 +1,43 @@
 <template>
-  <div class="inline-flex flex-col gap-0.5 text-xs font-medium">
-    <!-- Row 1: Platform + Type -->
-    <div class="inline-flex items-center overflow-hidden rounded-md">
-      <span :class="['inline-flex items-center gap-1 px-2 py-1', platformClass]">
+  <div
+    :class="[
+      'inline-flex font-medium',
+      compact ? 'items-center text-[10px] leading-none' : 'flex-col gap-0.5 text-xs'
+    ]"
+  >
+    <!-- Compact table treatment: one quiet, provider-colored badge. -->
+    <div
+      v-if="compact"
+      data-testid="platform-type-compact"
+      :class="[
+        'inline-flex items-center gap-1 overflow-hidden rounded-md px-1.5 py-1 font-bold',
+        platformClass
+      ]"
+    >
+      <PlatformIcon :platform="platform" size="xs" />
+      <span>{{ platformLabel }}</span>
+      <span aria-hidden="true" class="opacity-50">/</span>
+      <span>{{ typeLabel }}</span>
+    </div>
+
+    <!-- Detailed treatment keeps the existing split platform/auth presentation. -->
+    <div v-else class="inline-flex items-center overflow-hidden rounded-md">
+      <span
+        :class="[
+          'inline-flex items-center gap-1',
+          'px-2 py-1',
+          platformClass
+        ]"
+      >
         <PlatformIcon :platform="platform" size="xs" />
         <span>{{ platformLabel }}</span>
       </span>
-      <span :class="['inline-flex items-center gap-1 px-1.5 py-1', typeClass]">
+      <span
+        :class="[
+          'inline-flex items-center gap-1 px-1.5 py-1',
+          typeClass
+        ]"
+      >
         <!-- OAuth icon -->
         <svg
           v-if="type === 'oauth'"
@@ -31,7 +62,7 @@
       </span>
     </div>
     <!-- Row 2: Plan type + Privacy mode (only if either exists) -->
-    <div v-if="planLabel || privacyBadge" class="inline-flex items-center overflow-hidden rounded-md">
+    <div v-if="!compact && (planLabel || privacyBadge)" class="inline-flex items-center overflow-hidden rounded-md">
       <span v-if="planLabel" :class="['inline-flex items-center gap-1 px-1.5 py-1', planBadgeClass]">
         <GrokFreeIcon
           v-if="isGrokFreePlan"
@@ -58,7 +89,7 @@
       </span>
     </div>
     <!-- Row 3: Subscription expiration (non-free paid accounts only) -->
-    <div v-if="expiresLabel" class="text-[10px] leading-tight text-gray-400 dark:text-gray-500 pl-0.5" :title="subscriptionExpiresAt">
+    <div v-if="!compact && expiresLabel" class="text-[10px] leading-tight text-gray-400 dark:text-gray-500 pl-0.5" :title="subscriptionExpiresAt">
       {{ expiresLabel }}
     </div>
   </div>
@@ -81,9 +112,12 @@ interface Props {
   planType?: string
   privacyMode?: string
   subscriptionExpiresAt?: string
+  compact?: boolean
 }
 
-const props = defineProps<Props>()
+const props = withDefaults(defineProps<Props>(), {
+  compact: false
+})
 
 const platformLabel = computed(() => {
   if (props.platform === 'anthropic') return 'Anthropic'

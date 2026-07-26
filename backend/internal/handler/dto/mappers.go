@@ -5,6 +5,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/pkg/usagestats"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 )
 
@@ -598,6 +599,14 @@ func usageLogFromServiceUser(l *service.UsageLog) UsageLog {
 	if requestedModel == "" {
 		requestedModel = l.Model
 	}
+	source := usagestats.UsageSourceAPI
+	if l.APIKey != nil && l.APIKey.Purpose == service.APIKeyPurposeWebChat {
+		source = usagestats.UsageSourceWebChat
+	}
+	apiKey := APIKeyFromService(l.APIKey)
+	if source == usagestats.UsageSourceWebChat && apiKey != nil {
+		apiKey.Key = ""
+	}
 	return UsageLog{
 		ID:                        l.ID,
 		UserID:                    l.UserID,
@@ -605,6 +614,7 @@ func usageLogFromServiceUser(l *service.UsageLog) UsageLog {
 		AccountID:                 l.AccountID,
 		RequestID:                 l.RequestID,
 		Model:                     requestedModel,
+		Source:                    source,
 		ServiceTier:               l.ServiceTier,
 		ReasoningEffort:           l.ReasoningEffort,
 		InboundEndpoint:           l.InboundEndpoint,
@@ -647,7 +657,7 @@ func usageLogFromServiceUser(l *service.UsageLog) UsageLog {
 		BillingMode:               l.BillingMode,
 		CreatedAt:                 l.CreatedAt,
 		User:                      UserFromServiceShallow(l.User),
-		APIKey:                    APIKeyFromService(l.APIKey),
+		APIKey:                    apiKey,
 		Group:                     GroupFromServiceShallow(l.Group),
 		Subscription:              UserSubscriptionFromService(l.Subscription),
 	}

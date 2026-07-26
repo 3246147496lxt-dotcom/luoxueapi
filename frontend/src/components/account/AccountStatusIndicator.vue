@@ -1,13 +1,32 @@
 <template>
-  <div class="flex items-center gap-2">
+  <button
+    v-if="compact && effectiveStatus.code === 'temp_unschedulable'"
+    type="button"
+    class="account-status-summary"
+    :title="compactStatusTitle"
+    @click.stop="handleTempUnschedClick"
+  >
+    <span :class="['account-status-summary__dot', compactStatusDotClass]"></span>
+    <span class="account-status-summary__label">{{ compactStatusText }}</span>
+  </button>
+  <span
+    v-else-if="compact"
+    class="account-status-summary"
+    :title="compactStatusTitle"
+  >
+    <span :class="['account-status-summary__dot', compactStatusDotClass]"></span>
+    <span class="account-status-summary__label">{{ compactStatusText }}</span>
+  </span>
+
+  <div v-else class="flex items-center gap-2">
     <!-- Rate Limit Display (429) - Two-line layout -->
-    <div v-if="isRateLimited" class="flex flex-col items-center gap-1">
+    <div v-if="effectiveStatus.code === 'rate_limited'" class="flex flex-col items-center gap-1">
       <span class="badge text-xs badge-warning">{{ t('admin.accounts.status.rateLimited') }}</span>
       <span class="text-[11px] text-gray-400 dark:text-gray-500">{{ rateLimitResumeText }}</span>
     </div>
 
     <!-- Overload Display (529) - Two-line layout -->
-    <div v-else-if="isOverloaded" class="flex flex-col items-center gap-1">
+    <div v-else-if="effectiveStatus.code === 'overloaded'" class="flex flex-col items-center gap-1">
       <span class="badge text-xs badge-danger">{{ t('admin.accounts.status.overloaded') }}</span>
       <span class="text-[11px] text-gray-400 dark:text-gray-500">{{ overloadCountdown }}</span>
     </div>
@@ -15,11 +34,11 @@
     <!-- Main Status Badge (shown when not rate limited/overloaded) -->
     <template v-else>
       <button
-        v-if="isTempUnschedulable"
+        v-if="effectiveStatus.code === 'temp_unschedulable'"
         type="button"
         :class="['badge text-xs', statusClass, 'cursor-pointer']"
         :title="t('admin.accounts.status.viewTempUnschedDetails')"
-        @click="handleTempUnschedClick"
+        @click.stop="handleTempUnschedClick"
       >
         {{ statusText }}
       </button>
@@ -58,7 +77,7 @@
     </div>
 
     <!-- Rate Limit Indicator (429) -->
-    <div v-if="isRateLimited" class="group relative">
+    <div v-if="effectiveStatus.code === 'rate_limited'" class="group relative">
       <span
         class="inline-flex items-center gap-1 rounded bg-amber-100 px-1.5 py-0.5 text-xs font-medium text-amber-700 dark:bg-amber-900/30 dark:text-amber-400"
       >
@@ -134,7 +153,7 @@
     </div>
 
     <!-- Overload Indicator (529) -->
-    <div v-if="isOverloaded" class="group relative">
+    <div v-if="effectiveStatus.code === 'overloaded'" class="group relative">
       <span
         class="inline-flex items-center gap-1 rounded bg-red-100 px-1.5 py-0.5 text-xs font-medium text-red-700 dark:bg-red-900/30 dark:text-red-400"
       >
@@ -159,22 +178,39 @@ import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import Icon from '@/components/icons/Icon.vue'
 import type { Account } from '@/types'
+import {
+  useAccountStatusClock,
+  useAccountUsageHealthSnapshot
+} from '@/composables/useAccountUsageHealth'
+import { resolveAccountEffectiveStatus } from '@/utils/accountEffectiveStatus'
 import { formatCountdown, formatDateTime, formatCountdownWithSuffix, formatTime } from '@/utils/format'
 
 const { t } = useI18n()
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   account: Account
-}>()
+  compact?: boolean
+}>(), {
+  compact: false
+})
 
 const emit = defineEmits<{
   (e: 'show-temp-unsched', account: Account): void
 }>()
 
-// Computed: is rate limited (429)
-const isRateLimited = computed(() => {
-  if (!props.account.rate_limit_reset_at) return false
-  return new Date(props.account.rate_limit_reset_at) > new Date()
+const usageSnapshot = useAccountUsageHealthSnapshot(() => props.account.id)
+const statusNow = useAccountStatusClock()
+const effectiveStatus = computed(() => {
+  const resolved = resolveAccountEffectiveStatus(
+    props.account,
+    usageSnapshot.value?.usage ?? null,
+    { now: Date.now() }
+  )
+  if (resolved.resetAt) {
+    // Subscribe only while the current status has a timed boundary.
+    void statusNow.value
+  }
+  return resolved
 })
 
 type AccountModelStatusItem = {
@@ -189,10 +225,10 @@ const activeModelStatuses = computed<AccountModelStatusItem[]>(() => {
   const modelLimits = extra?.model_rate_limits as
     | Record<string, { rate_limited_at: string; rate_limit_reset_at: string }>
     | undefined
-  const now = new Date()
   const items: AccountModelStatusItem[] = []
 
   if (!modelLimits) return items
+  const now = new Date()
 
   // 检查 AICredits key 是否生效（积分是否耗尽）
   const aiCreditsEntry = modelLimits['AICredits']
@@ -214,6 +250,9 @@ const activeModelStatuses = computed<AccountModelStatusItem[]>(() => {
     }
   }
 
+  if (items.length > 0) {
+    void statusNow.value
+  }
   return items
 })
 
@@ -272,35 +311,14 @@ const formatModelResetTime = (resetAt: string): string => {
   return `${s}s`
 }
 
-// Computed: is overloaded (529)
-const isOverloaded = computed(() => {
-  if (!props.account.overload_until) return false
-  return new Date(props.account.overload_until) > new Date()
-})
-
-// Computed: is temp unschedulable
-const isTempUnschedulable = computed(() => {
-  if (!props.account.temp_unschedulable_until) return false
-  return new Date(props.account.temp_unschedulable_until) > new Date()
-})
-
 // Computed: has error status
 const hasError = computed(() => {
   return props.account.status === 'error'
 })
 
-const isQuotaExceeded = computed(() => {
-  const exceeded = (used?: number | null, limit?: number | null) =>
-    typeof limit === 'number' && limit > 0 && typeof used === 'number' && used >= limit
-  return (
-    exceeded(props.account.quota_used, props.account.quota_limit) ||
-    exceeded(props.account.quota_daily_used, props.account.quota_daily_limit) ||
-    exceeded(props.account.quota_weekly_used, props.account.quota_weekly_limit)
-  )
-})
-
 // Computed: countdown text for rate limit (429)
 const rateLimitCountdown = computed(() => {
+  void statusNow.value
   return formatCountdown(props.account.rate_limit_reset_at)
 })
 
@@ -311,51 +329,103 @@ const rateLimitResumeText = computed(() => {
 
 // Computed: countdown text for overload (529)
 const overloadCountdown = computed(() => {
+  void statusNow.value
   return formatCountdownWithSuffix(props.account.overload_until)
 })
 
 // Computed: status badge class
 const statusClass = computed(() => {
-  if (hasError.value) {
-    return 'badge-danger'
+  switch (effectiveStatus.value.tone) {
+    case 'danger':
+      return 'badge-danger'
+    case 'warning':
+      return 'badge-warning'
+    case 'muted':
+      return 'badge-gray'
+    default:
+      return 'badge-success'
   }
-  if (isTempUnschedulable.value) {
-    return 'badge-warning'
-  }
-  if (props.account.status !== 'active') {
-    return props.account.status === 'error' ? 'badge-danger' : 'badge-gray'
-  }
-  if (isQuotaExceeded.value) {
-    return 'badge-warning'
-  }
-  if (!props.account.schedulable) {
-    return 'badge-gray'
-  }
-  return 'badge-success'
 })
 
 // Computed: status text
-const statusText = computed(() => {
-  if (hasError.value) {
-    return t('admin.accounts.status.error')
+const statusText = computed(() => t(effectiveStatus.value.labelKey))
+const compactStatusText = statusText
+
+const compactStatusDotClass = computed(() => {
+  switch (effectiveStatus.value.tone) {
+    case 'danger':
+      return 'bg-red-500'
+    case 'warning':
+      return 'bg-amber-500'
+    case 'muted':
+      return 'bg-gray-400'
+    default:
+      return 'bg-emerald-500'
   }
-  if (isTempUnschedulable.value) {
-    return t('admin.accounts.status.tempUnschedulable')
+})
+
+const compactStatusTitle = computed(() => {
+  const params: Record<string, string | number> = {
+    ...effectiveStatus.value.titleParams
   }
-  if (props.account.status !== 'active') {
-    return t(`admin.accounts.status.${props.account.status}`)
+  if (effectiveStatus.value.resetAt && 'time' in params) {
+    params.time = formatDateTime(effectiveStatus.value.resetAt)
   }
-  if (isQuotaExceeded.value) {
-    return t('admin.accounts.status.quotaExceeded')
+  if (typeof params.model === 'string') {
+    params.model = formatScopeName(params.model)
   }
-  if (!props.account.schedulable) {
-    return t('admin.accounts.status.paused')
+
+  let title = effectiveStatus.value.code === 'quota_exhausted' && effectiveStatus.value.resetAt
+    ? t('admin.accounts.status.quotaExceededUntil', {
+        time: formatDateTime(effectiveStatus.value.resetAt)
+      })
+    : effectiveStatus.value.code === 'temp_unschedulable' && effectiveStatus.value.resetAt
+      ? t('admin.accounts.status.tempUnschedulableUntil', {
+          time: formatDateTime(effectiveStatus.value.resetAt)
+        })
+      : t(effectiveStatus.value.titleKey, params)
+
+  if (effectiveStatus.value.detail) {
+    title = `${title}: ${effectiveStatus.value.detail}`
   }
-  return t(`admin.accounts.status.${props.account.status}`)
+  return title
 })
 
 const handleTempUnschedClick = () => {
-  if (!isTempUnschedulable.value) return
+  if (effectiveStatus.value.code !== 'temp_unschedulable') return
   emit('show-temp-unsched', props.account)
 }
 </script>
+
+<style scoped>
+.account-status-summary {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0;
+  border: 0;
+  color: var(--lx-clay-text-secondary);
+  background: transparent;
+  font-size: 0.75rem;
+  line-height: 1rem;
+  white-space: nowrap;
+}
+
+button.account-status-summary {
+  cursor: pointer;
+}
+
+.account-status-summary__dot {
+  width: 0.375rem;
+  height: 0.375rem;
+  flex: none;
+  border-radius: 999px;
+}
+
+.account-status-summary__label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+</style>

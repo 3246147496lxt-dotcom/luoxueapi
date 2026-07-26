@@ -222,6 +222,12 @@ const dashboardActiveAPIKeyWeekStatsQuery = `
 		OR (ul.created_at >= $3 AND ul.created_at < $4)
 	)
 		AND ul.actual_cost > 0
+		AND EXISTS (
+			SELECT 1
+			FROM api_keys ak
+			WHERE ak.id = ul.api_key_id
+				AND ak.purpose = 'user'
+		)
 `
 
 func newDashboardActiveAPIKeyWeekWindow(now time.Time, loc *time.Location) dashboardActiveAPIKeyWeekWindow {
@@ -349,6 +355,7 @@ func (r *usageLogRepository) fillDashboardEntityStats(ctx context.Context, stats
 			COUNT(CASE WHEN status = $1 THEN 1 END) as active_api_keys
 		FROM api_keys
 		WHERE deleted_at IS NULL
+		  AND purpose = 'user'
 	`
 	if err := scanSingleRow(
 		ctx,
@@ -573,7 +580,7 @@ func (r *usageLogRepository) GetUserDashboardStats(ctx context.Context, userID i
 	if err := scanSingleRow(
 		ctx,
 		r.sql,
-		"SELECT COUNT(*) FROM api_keys WHERE user_id = $1 AND deleted_at IS NULL",
+		"SELECT COUNT(*) FROM api_keys WHERE user_id = $1 AND purpose = 'user' AND deleted_at IS NULL",
 		[]any{userID},
 		&stats.TotalAPIKeys,
 	); err != nil {
@@ -582,7 +589,7 @@ func (r *usageLogRepository) GetUserDashboardStats(ctx context.Context, userID i
 	if err := scanSingleRow(
 		ctx,
 		r.sql,
-		"SELECT COUNT(*) FROM api_keys WHERE user_id = $1 AND status = $2 AND deleted_at IS NULL",
+		"SELECT COUNT(*) FROM api_keys WHERE user_id = $1 AND status = $2 AND purpose = 'user' AND deleted_at IS NULL",
 		[]any{userID, service.StatusActive},
 		&stats.ActiveAPIKeys,
 	); err != nil {

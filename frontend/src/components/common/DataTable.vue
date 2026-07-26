@@ -60,11 +60,16 @@
       <div
         v-for="(row, index) in sortedData"
         :key="resolveRowKey(row, index)"
+        :data-row-id="resolveRowKey(row, index)"
         class="data-table-mobile-card data-table-mobile-row rounded-lg border border-gray-200 bg-white p-4 dark:border-dark-700 dark:bg-dark-900"
-        :class="{ 'cursor-pointer': clickableRows }"
+        :class="{
+          'cursor-pointer': clickableRows,
+          'data-table-mobile-row--selected border-primary-300 bg-primary-50/70 dark:border-primary-700 dark:bg-primary-950/20': isRowSelected(row)
+        }"
         :role="clickableRows ? 'button' : undefined"
         :tabindex="clickableRows ? 0 : undefined"
         :aria-label="clickableRows ? getRowAriaLabel(row) : undefined"
+        :aria-pressed="clickableRows ? isRowSelected(row) : undefined"
         @click="clickableRows && emit('rowClick', row)"
         @keydown="handleRowKeydown($event, row)"
       >
@@ -257,9 +262,13 @@
             :data-index="item.index"
             :ref="item.measure ? measureElement : undefined"
             class="data-table-row hover:bg-gray-50 dark:hover:bg-dark-800"
-            :class="{ 'cursor-pointer': clickableRows }"
+            :class="{
+              'cursor-pointer': clickableRows,
+              'data-table-row--selected bg-primary-50/70 hover:bg-primary-50 dark:bg-primary-950/20 dark:hover:bg-primary-950/30': isRowSelected(item.row)
+            }"
             :tabindex="clickableRows ? 0 : undefined"
             :aria-label="clickableRows ? getRowAriaLabel(item.row) : undefined"
+            :aria-selected="clickableRows ? isRowSelected(item.row) : undefined"
             @click="clickableRows && emit('rowClick', item.row)"
             @keydown="handleRowKeydown($event, item.row)"
           >
@@ -491,6 +500,8 @@ interface Props {
   clickableRows?: boolean
   /** Accessible label for clickable rows/cards. Falls back to the first data column. */
   rowAriaLabel?: (row: any) => string
+  /** Stable key of the row currently shown in a companion inspector. */
+  selectedRowKey?: string | number | null
   /**
    * Promote one column into the mobile card header. Desktop rendering is unchanged.
    * When omitted, the legacy mobile field list is preserved.
@@ -672,6 +683,11 @@ const resolveStableRowKey = (row: any): string | number | undefined => {
 }
 
 const resolveRowKey = (row: any, index: number) => resolveStableRowKey(row) ?? index
+
+const isRowSelected = (row: any) => {
+  if (props.selectedRowKey === null || props.selectedRowKey === undefined) return false
+  return String(resolveStableRowKey(row)) === String(props.selectedRowKey)
+}
 
 const getRowAriaLabel = (row: any) => {
   const explicitLabel = props.rowAriaLabel?.(row)?.trim()

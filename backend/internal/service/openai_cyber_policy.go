@@ -2,6 +2,7 @@ package service
 
 import (
 	"errors"
+	"net/http"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -10,13 +11,16 @@ import (
 
 // opsCyberPolicyKey 在 gin context 中携带 cyber_policy 命中标记。
 // 由 gateway 服务层在检测到上游 error.code=="cyber_policy" 时设置，
-// handler 在 Forward 返回后读取以触发风控记录、邮件与 tokens=0 用量行。
+// handler 在 Forward 返回后读取以触发风控记录、邮件，以及按上游真实 token
+// 记录用量与计费的专用 Cyber producer。
 const opsCyberPolicyKey = "ops_cyber_policy"
+
+const OpenAICyberSessionBlockedClientMessage = "该会话已被网络安全策略屏蔽，请开启新会话 / This session is blocked by cyber-security policy, please start a new session"
 
 // errOpenAICyberPolicyForwarded 表示 cyber_policy 已按当前端点格式透传给客户端
 // （error 已写出/下发）。compat 路径 ForwardAsChatCompletions / ForwardAsAnthropic 出口
-// 据此丢弃 result 并返回该哨兵，使 handler 落入 tokens=0 免费用量行（对齐 /v1/responses），
-// 既不计费、也不 failover、不重复写响应。
+// 据此丢弃 result 并返回该哨兵，使 handler 只启动专用 Cyber producer（按上游真实
+// token 记录用量与计费），不 failover、不重复走正常 RecordUsage 或写响应。
 var errOpenAICyberPolicyForwarded = errors.New("openai cyber_policy forwarded to client")
 
 // CyberPolicyMark 记录一次 cyber_policy 硬阻断的上游证据。
@@ -85,4 +89,35 @@ func detectOpenAICyberPolicy(payload []byte) (bool, string, string) {
 		msg = gjson.GetBytes(payload, "response.error.message").String()
 	}
 	return true, "cyber_policy", strings.TrimSpace(msg)
+}
+
+// observeOpenAIWSCyberPolicy records the shared Cyber contract for every WS
+// transport before transient handling, failover, and handler scheduling.
+func observeOpenAIWSCyberPolicy(
+	c *gin.Context,
+	payload []byte,
+	upstreamStatus int,
+	usage *OpenAIUsage,
+) bool {
+	hit, code, msg := detectOpenAICyberPolicy(payload)
+	if !hit {
+		return false
+	}
+	if upstreamStatus <= 0 {
+		upstreamStatus = http.StatusOK
+	}
+	if usage == nil {
+		parsedUsage := OpenAIUsage{}
+		parseOpenAIWSResponseUsageFromCompletedEvent(payload, &parsedUsage)
+		usage = &parsedUsage
+	}
+	MarkOpsCyberPolicy(c, CyberPolicyMark{
+		Code:           code,
+		Message:        msg,
+		Body:           truncateString(string(payload), 4096),
+		UpstreamStatus: upstreamStatus,
+		UpstreamInTok:  usage.InputTokens,
+		UpstreamOutTok: usage.OutputTokens,
+	})
+	return true
 }

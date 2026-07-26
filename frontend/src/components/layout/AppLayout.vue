@@ -1,6 +1,10 @@
 <template>
   <div
     class="app-layout app-layout--snow-shell min-h-screen pt-[81px]"
+    :class="{
+      'app-layout--flat-workspace-shell': isFlatWorkspaceShell,
+      'app-layout--admin-shell': isAdminShell
+    }"
     :data-sidebar-collapsed="sidebarCollapsed"
   >
     <!-- Global Header -->
@@ -17,7 +21,8 @@
         sidebarCollapsed
           ? 'lg:ml-[68px]'
           : 'lg:ml-[184px] min-[1025px]:ml-[196px] min-[1281px]:ml-[208px]',
-        variant === 'home-clay' && 'app-layout--home-clay'
+        isAdminShell && 'app-layout--home-clay',
+        variant === 'chat' && 'app-layout--chat'
       ]"
     >
       <!-- Main Content -->
@@ -34,6 +39,7 @@
 import '@/styles/onboarding.css'
 import './AdminClayTheme.css'
 import { computed, onBeforeUnmount, onMounted, watch } from 'vue'
+import { useRoute } from 'vue-router'
 import { useAppStore } from '@/stores'
 import { useAuthStore } from '@/stores/auth'
 import { useOnboardingTour } from '@/composables/useOnboardingTour'
@@ -41,7 +47,7 @@ import { useOnboardingStore } from '@/stores/onboarding'
 import AppSidebar from './AppSidebar.vue'
 import AppHeader from './AppHeader.vue'
 
-export type AppLayoutVariant = 'default' | 'home-clay'
+export type AppLayoutVariant = 'default' | 'home-clay' | 'chat'
 
 const props = withDefaults(defineProps<{
   variant?: AppLayoutVariant
@@ -49,14 +55,31 @@ const props = withDefaults(defineProps<{
   variant: 'default'
 })
 
+const route = useRoute()
+const isAdminShell = computed(
+  () => props.variant === 'home-clay' || route.meta.requiresAdmin === true
+)
+const isFlatWorkspaceShell = computed(
+  () => isAdminShell.value || route.meta.requiresAuth === true
+)
+
 const HOME_CLAY_PORTAL_CLASS = 'admin-home-clay-portals'
+const FLAT_WORKSPACE_BODY_CLASS = 'app-flat-workspace-active'
 let ownsHomeClayPortalClass = false
+let ownsFlatWorkspaceBodyClass = false
 
 const syncHomeClayPortalClass = (enabled: boolean) => {
   if (typeof document === 'undefined' || enabled === ownsHomeClayPortalClass) return
 
   document.body.classList.toggle(HOME_CLAY_PORTAL_CLASS, enabled)
   ownsHomeClayPortalClass = enabled
+}
+
+const syncFlatWorkspaceBodyClass = (enabled: boolean) => {
+  if (typeof document === 'undefined' || enabled === ownsFlatWorkspaceBodyClass) return
+
+  document.body.classList.toggle(FLAT_WORKSPACE_BODY_CLASS, enabled)
+  ownsFlatWorkspaceBodyClass = enabled
 }
 
 const appStore = useAppStore()
@@ -72,8 +95,14 @@ const { replayTour } = useOnboardingTour({
 const onboardingStore = useOnboardingStore()
 
 watch(
-  () => props.variant === 'home-clay',
+  isAdminShell,
   syncHomeClayPortalClass,
+  { immediate: true }
+)
+
+watch(
+  isFlatWorkspaceShell,
+  syncFlatWorkspaceBodyClass,
   { immediate: true }
 )
 
@@ -83,6 +112,7 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   syncHomeClayPortalClass(false)
+  syncFlatWorkspaceBodyClass(false)
 })
 
 defineExpose({ replayTour })
@@ -93,17 +123,41 @@ defineExpose({ replayTour })
   min-height: 100vh;
   padding-top: 81px !important;
   color: var(--lx-clay-text);
-  background: var(--lx-clay-canvas) !important;
+  background: var(--app-shell-canvas, var(--lx-clay-canvas)) !important;
   font-family: var(--lx-clay-font-ui);
 }
 
 .app-layout--snow-shell .app-main-shell {
   min-height: calc(100vh - 81px);
-  background: var(--lx-clay-canvas) !important;
+  background: var(--app-shell-canvas, var(--lx-clay-canvas)) !important;
 }
 
 .app-layout--snow-shell .app-main-content {
   padding: 32px 28px 48px;
+}
+
+:global(html:not(.dark) .app-layout--snow-shell.app-layout--flat-workspace-shell) {
+  --app-shell-canvas: #ffffff;
+  --app-shell-sidebar-bg: #f7f7f8;
+  --app-shell-sidebar-border: #e5e7eb;
+  --app-shell-sidebar-shadow: none;
+  --app-shell-sidebar-backdrop: none;
+  --app-shell-sidebar-decoration: none;
+  --app-shell-sidebar-highlight: none;
+  --app-shell-sidebar-hover-color: #0d0d0d;
+  --app-shell-sidebar-hover-bg: rgb(0 0 0 / 0.05);
+  --app-shell-sidebar-hover-shadow: none;
+  --app-shell-sidebar-hover-transform: none;
+  --app-shell-sidebar-focus: color-mix(in srgb, var(--lx-clay-accent) 44%, transparent);
+  --app-shell-sidebar-section-color: #5f6b7a;
+  --app-shell-sidebar-active-color: #0d0d0d;
+  --app-shell-sidebar-active-icon: #0d0d0d;
+  --app-shell-sidebar-active-bg: rgb(0 0 0 / 0.05);
+  --app-shell-sidebar-active-marker: none;
+}
+
+:global(html:not(.dark) body.app-flat-workspace-active) {
+  background: #ffffff;
 }
 
 @media (max-width: 767px) {
@@ -113,6 +167,27 @@ defineExpose({ replayTour })
 
   .app-layout--snow-shell .app-main-content {
     padding: 22px 16px 40px;
+  }
+}
+
+.app-layout--snow-shell .app-main-shell.app-layout--chat {
+  height: calc(100dvh - 81px);
+  min-height: 0;
+  overflow: hidden;
+}
+
+.app-layout--snow-shell .app-main-shell.app-layout--chat .app-main-content {
+  height: 100%;
+  padding: 0 8px 8px;
+}
+
+.app-layout--snow-shell .app-main-shell.app-layout--chat .app-main-content > div {
+  height: 100%;
+}
+
+@media (max-width: 767px) {
+  .app-layout--snow-shell .app-main-shell.app-layout--chat .app-main-content {
+    padding: 0 5px 5px;
   }
 }
 </style>

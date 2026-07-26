@@ -83,3 +83,29 @@ describe('PlatformTypeBadge OpenAI authentication modes', () => {
     expect(wrapper.text()).toContain('OAuth')
   })
 })
+
+describe('PlatformTypeBadge compact provider treatment', () => {
+  it('uses one provider-colored badge for platform and authentication type', async () => {
+    const wrapper = mount(PlatformTypeBadge, {
+      props: {
+        platform: 'openai',
+        type: 'oauth',
+        compact: true,
+      },
+    })
+
+    const compactBadge = wrapper.get('[data-testid="platform-type-compact"]')
+    expect(compactBadge.text().replace(/\s+/g, '')).toBe('OpenAI/OAuth')
+    expect(compactBadge.classes()).toEqual(
+      expect.arrayContaining(['bg-emerald-100', 'text-emerald-700']),
+    )
+    expect(wrapper.findAll('svg')).toHaveLength(1)
+
+    await wrapper.setProps({ platform: 'anthropic', type: 'apikey' })
+
+    expect(compactBadge.text().replace(/\s+/g, '')).toBe('Anthropic/Key')
+    expect(compactBadge.classes()).toEqual(
+      expect.arrayContaining(['bg-orange-100', 'text-orange-700']),
+    )
+  })
+})

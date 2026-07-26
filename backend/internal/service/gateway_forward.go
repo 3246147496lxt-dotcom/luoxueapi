@@ -862,6 +862,15 @@ func (s *GatewayService) ResolveChannelMapping(ctx context.Context, groupID int6
 	return s.channelService.ResolveChannelMapping(ctx, groupID, model)
 }
 
+// ResolveChannelMappingStrict delegates to the fail-closed channel lookup used
+// by Chat catalog and authorization paths.
+func (s *GatewayService) ResolveChannelMappingStrict(ctx context.Context, groupID int64, model string) (ChannelMappingResult, error) {
+	if s == nil || s.channelService == nil {
+		return ChannelMappingResult{}, errors.New("channel service is unavailable")
+	}
+	return s.channelService.ResolveChannelMappingStrict(ctx, groupID, model)
+}
+
 // ReplaceModelInBody 替换请求体中的模型名（导出供 handler 使用）
 func (s *GatewayService) ReplaceModelInBody(body []byte, newModel string) []byte {
 	return ReplaceModelInBody(body, newModel)
@@ -873,6 +882,15 @@ func (s *GatewayService) IsModelRestricted(ctx context.Context, groupID int64, m
 		return false
 	}
 	return s.channelService.IsModelRestricted(ctx, groupID, model)
+}
+
+// IsModelRestrictedStrict delegates to the fail-closed channel restriction
+// check used by Chat catalog and authorization paths.
+func (s *GatewayService) IsModelRestrictedStrict(ctx context.Context, groupID int64, model string) (bool, error) {
+	if s == nil || s.channelService == nil {
+		return false, errors.New("channel service is unavailable")
+	}
+	return s.channelService.IsModelRestrictedStrict(ctx, groupID, model)
 }
 
 // ResolveChannelMappingAndRestrict 解析渠道映射。

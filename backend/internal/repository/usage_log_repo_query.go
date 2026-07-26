@@ -116,6 +116,8 @@ func (r *usageLogRepository) ListWithFilters(ctx context.Context, params paginat
 		conditions = append(conditions, fmt.Sprintf("group_id = $%d", len(args)+1))
 		args = append(args, filters.GroupID)
 	}
+	conditions, args = appendUsageLogRequestIDWhereCondition(conditions, args, filters.RequestID)
+	conditions, args = appendUsageLogSourceWhereCondition(conditions, args, filters.Source)
 	conditions, args = appendUsageLogModelWhereCondition(conditions, args, filters.Model, filters.ModelFilterSource)
 	conditions, args = appendRequestTypeOrStreamWhereCondition(conditions, args, filters.RequestType, filters.Stream)
 	if filters.BillingType != nil {
@@ -158,7 +160,55 @@ func shouldUseFastUsageLogTotal(filters UsageLogFilters) bool {
 		return false
 	}
 	// 强选择过滤下记录集通常较小，保留精确总数。
-	return filters.UserID == 0 && filters.APIKeyID == 0 && filters.AccountID == 0
+	return filters.UserID == 0 &&
+		filters.APIKeyID == 0 &&
+		filters.AccountID == 0 &&
+		strings.TrimSpace(filters.RequestID) == ""
+}
+
+func appendUsageLogRequestIDWhereCondition(
+	conditions []string,
+	args []any,
+	requestID string,
+) ([]string, []any) {
+	requestID = strings.TrimSpace(requestID)
+	if requestID == "" {
+		return conditions, args
+	}
+	if strings.HasPrefix(requestID, "client:") {
+		conditions = append(conditions, fmt.Sprintf("request_id = $%d", len(args)+1))
+		return conditions, append(args, requestID)
+	}
+	conditions = append(conditions, fmt.Sprintf("(request_id = $%d OR request_id = $%d)", len(args)+1, len(args)+2))
+	return conditions, append(args, requestID, "client:"+requestID)
+}
+
+func appendUsageLogSourceWhereCondition(
+	conditions []string,
+	args []any,
+	source string,
+) ([]string, []any) {
+	switch strings.ToLower(strings.TrimSpace(source)) {
+	case "web_chat":
+		conditions = append(conditions, fmt.Sprintf(`
+			EXISTS (
+				SELECT 1
+				FROM api_keys usage_source_key
+				WHERE usage_source_key.id = usage_logs.api_key_id
+				  AND usage_source_key.purpose = $%d
+			)`, len(args)+1))
+		args = append(args, service.APIKeyPurposeWebChat)
+	case "api":
+		conditions = append(conditions, fmt.Sprintf(`
+			NOT EXISTS (
+				SELECT 1
+				FROM api_keys usage_source_key
+				WHERE usage_source_key.id = usage_logs.api_key_id
+				  AND usage_source_key.purpose = $%d
+			)`, len(args)+1))
+		args = append(args, service.APIKeyPurposeWebChat)
+	}
+	return conditions, args
 }
 
 func (r *usageLogRepository) listUsageLogsWithPagination(ctx context.Context, whereClause string, args []any, params pagination.PaginationParams) ([]service.UsageLog, *pagination.PaginationResult, error) {
@@ -368,12 +418,20 @@ func (r *usageLogRepository) loadAPIKeys(ctx context.Context, ids []int64) (map[
 	if len(ids) == 0 {
 		return out, nil
 	}
-	models, err := r.client.APIKey.Query().Where(dbapikey.IDIn(ids...)).All(ctx)
+	models, err := r.client.APIKey.Query().
+		Where(dbapikey.IDIn(ids...)).
+		All(mixins.SkipSoftDelete(ctx))
 	if err != nil {
 		return nil, err
 	}
 	for _, m := range models {
-		out[m.ID] = apiKeyEntityToService(m)
+		apiKey := apiKeyEntityToService(m)
+		if apiKey.Purpose == service.APIKeyPurposeWebChat {
+			// Keep billing attribution visible without serializing the internal
+			// credential through user or admin usage-log responses.
+			apiKey.Key = ""
+		}
+		out[m.ID] = apiKey
 	}
 	return out, nil
 }

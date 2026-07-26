@@ -95,6 +95,51 @@
             </div>
           </div>
           <div v-else class="flex flex-1 flex-wrap items-end gap-4">
+            <div class="w-full sm:w-auto">
+              <label class="input-label">{{ t('usage.source') }}</label>
+              <div
+                class="inline-flex min-h-10 w-full items-center rounded-md border border-gray-200 bg-gray-50 p-1 dark:border-dark-600 dark:bg-dark-800 sm:w-auto"
+                role="group"
+                :aria-label="t('usage.source')"
+              >
+                <button
+                  v-for="option in sourceOptions"
+                  :key="option.key"
+                  type="button"
+                  data-testid="usage-source-filter"
+                  class="min-h-8 flex-1 rounded px-3 text-sm font-medium transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500/30 sm:flex-none"
+                  :class="activeSource === option.key
+                    ? 'bg-white text-primary-700 shadow-sm dark:bg-dark-700 dark:text-primary-300'
+                    : 'text-gray-500 hover:text-gray-800 dark:text-gray-400 dark:hover:text-gray-100'"
+                  :aria-pressed="activeSource === option.key"
+                  @click="setSourceFilter(option.key)"
+                >
+                  {{ option.label }}
+                </button>
+              </div>
+            </div>
+            <div class="w-full sm:w-auto sm:min-w-[260px]">
+              <label for="usage-request-id" class="input-label">{{ t('usage.requestId') }}</label>
+              <div class="relative">
+                <input
+                  id="usage-request-id"
+                  v-model.trim="filters.request_id"
+                  type="text"
+                  class="input pr-10 font-mono"
+                  :placeholder="t('usage.requestIdPlaceholder')"
+                  @keyup.enter="applyDetailFilters"
+                />
+                <button
+                  type="button"
+                  class="absolute right-1 top-1/2 flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded text-gray-400 transition-colors hover:bg-gray-100 hover:text-primary-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500/30 dark:hover:bg-dark-700 dark:hover:text-primary-300"
+                  :title="t('common.search')"
+                  :aria-label="t('common.search')"
+                  @click="applyDetailFilters"
+                >
+                  <Icon name="search" size="sm" />
+                </button>
+              </div>
+            </div>
             <div class="w-full sm:w-auto sm:min-w-[220px]">
               <label class="input-label">{{ t('usage.apiKeyFilter') }}</label>
               <Select v-model="filters.api_key_id" :options="apiKeyOptions" @change="applyFilters" />
@@ -216,6 +261,7 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { useRoute } from 'vue-router'
 import { useAppStore } from '@/stores/app'
 import { keysAPI, usageAPI, userGroupsAPI } from '@/api'
 import AppLayout from '@/components/layout/AppLayout.vue'
@@ -243,6 +289,7 @@ import type {
   TrendDataPoint,
   UsageLog,
   UsageQueryParams,
+  UsageSource,
   UsageStatsResponse,
   UserErrorRequest,
 } from '@/types'
@@ -250,10 +297,12 @@ import type { Column } from '@/components/common/types'
 import { COMMON_ERROR_STATUS_CODES } from '@/utils/errorBadges'
 
 const { t } = useI18n()
+const route = useRoute()
 const appStore = useAppStore()
 
 type DistributionMetric = 'tokens' | 'actual_cost'
 type EndpointSource = 'inbound' | 'upstream' | 'path'
+type UsageSourceFilter = 'all' | UsageSource
 
 const usageStats = ref<UsageStatsResponse | null>(null)
 const usageLogs = ref<UsageLog[]>([])
@@ -355,6 +404,8 @@ const errorViewEnabled = computed(() => appStore.cachedPublicSettings?.allow_use
 const filters = ref<UsageQueryParams>({
   start_date: startDate.value,
   end_date: endDate.value,
+  source: undefined,
+  request_id: undefined,
   request_type: undefined,
   billing_type: null,
   billing_mode: null,
@@ -410,6 +461,13 @@ const modelOptions = computed<SelectOption[]>(() => [
   ...modelOptionValues.value.map((model) => ({ value: model, label: model })),
 ])
 
+const activeSource = computed<UsageSourceFilter>(() => filters.value.source ?? 'all')
+const sourceOptions = computed(() => [
+  { key: 'all' as const, label: t('usage.allSources') },
+  { key: 'web_chat' as const, label: t('usage.sourceWebChat') },
+  { key: 'api' as const, label: t('usage.sourceApi') },
+])
+
 const normalizedFilters = computed<UsageQueryParams>(() => {
   const requestType = filters.value.request_type
   const legacyStream = requestType ? requestTypeToLegacyStream(requestType) : filters.value.stream
@@ -419,6 +477,11 @@ const normalizedFilters = computed<UsageQueryParams>(() => {
     end_date: endDate.value,
     stream: legacyStream === null ? undefined : legacyStream,
   }
+})
+
+const analysisFilters = computed<UsageQueryParams>(() => {
+  const { source: _source, request_id: _requestId, ...analysis } = normalizedFilters.value
+  return analysis
 })
 
 const buildUsageListParams = (page: number, pageSize: number): UsageQueryParams => ({
@@ -455,7 +518,7 @@ const loadStats = async () => {
   const seq = ++statsReqSeq
   endpointStatsLoading.value = true
   try {
-    const stats = await usageAPI.getStats(normalizedFilters.value)
+    const stats = await usageAPI.getStats(analysisFilters.value)
     if (seq !== statsReqSeq) return
     usageStats.value = stats
     inboundEndpointStats.value = stats.endpoints || []
@@ -477,7 +540,7 @@ const loadModelStats = async () => {
   modelStatsLoading.value = true
   try {
     const response = await usageAPI.getDashboardModels({
-      ...normalizedFilters.value,
+      ...analysisFilters.value,
       model_source: 'requested',
     })
     if (seq !== modelStatsReqSeq) return
@@ -497,7 +560,7 @@ const loadChartData = async () => {
   chartsLoading.value = true
   try {
     const snapshot = await usageAPI.getDashboardSnapshotV2({
-      ...normalizedFilters.value,
+      ...analysisFilters.value,
       granularity: granularity.value,
       include_trend: true,
       include_model_stats: false,
@@ -535,6 +598,16 @@ const applyFilters = () => {
   resetErrorRows()
 }
 
+const applyDetailFilters = () => {
+  pagination.page = 1
+  void loadLogs()
+}
+
+const setSourceFilter = (source: UsageSourceFilter) => {
+  filters.value.source = source === 'all' ? undefined : source
+  applyDetailFilters()
+}
+
 const refreshData = () => {
   void loadLogs()
   void loadStats()
@@ -550,6 +623,8 @@ const resetFilters = () => {
   filters.value = {
     start_date: range.start,
     end_date: range.end,
+    source: undefined,
+    request_id: undefined,
     request_type: undefined,
     billing_type: null,
     billing_mode: null,
@@ -700,7 +775,9 @@ const DEFAULT_HIDDEN_COLUMNS = ['user_agent']
 const HIDDEN_COLUMNS_KEY = 'user-usage-hidden-columns'
 
 const allColumns = computed<Column[]>(() => [
+  { key: 'source', label: t('usage.source'), sortable: false },
   { key: 'api_key', label: t('usage.apiKeyFilter'), sortable: false },
+  { key: 'request_id', label: t('usage.requestId'), sortable: false },
   { key: 'model', label: t('usage.model'), sortable: true },
   { key: 'reasoning_effort', label: t('usage.reasoningEffort'), sortable: false },
   { key: 'endpoint', label: t('usage.endpoint'), sortable: false },
@@ -872,7 +949,27 @@ const switchToErrors = () => {
   if (errorRows.value.length === 0) void loadErrors()
 }
 
+const getSingleRouteQuery = (value: unknown): string | undefined => {
+  if (Array.isArray(value)) {
+    return value.find((item): item is string => typeof item === 'string' && item.length > 0)
+  }
+  return typeof value === 'string' && value.length > 0 ? value : undefined
+}
+
+const applyRouteQueryFilters = () => {
+  const source = getSingleRouteQuery(route.query.source)
+  const requestId = getSingleRouteQuery(route.query.request_id)
+
+  if (source === 'web_chat' || source === 'api') {
+    filters.value.source = source
+  }
+  if (requestId) {
+    filters.value.request_id = requestId
+  }
+}
+
 onMounted(() => {
+  applyRouteQueryFilters()
   loadSavedColumns()
   loadSavedErrColumns()
   document.addEventListener('click', handleColumnClickOutside)

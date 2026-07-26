@@ -103,6 +103,9 @@ func (s *OpenAIGatewayService) forwardAnthropicViaRawChatCompletions(
 	// 4. Handle error responses
 	if resp.StatusCode >= 400 {
 		respBody, upstreamMsg := s.readOpenAIUpstreamError(resp)
+		if hit, _, _ := detectOpenAICyberPolicy(respBody); hit {
+			return s.handleAnthropicErrorResponse(resp, c, account, billingModel)
+		}
 		if foErr := s.failoverOpenAIUpstreamHTTPError(ctx, c, account, resp, respBody, upstreamMsg, upstreamModel); foErr != nil {
 			return nil, foErr
 		}

@@ -157,21 +157,23 @@ describe('admin AccountsView usage windows hint', () => {
     getAllGroups.mockResolvedValue([])
   })
 
-  it('renders an explanatory tooltip next to the usage windows column header', async () => {
+  it('renders the compact quota label without a redundant header tooltip', async () => {
     const wrapper = mountView()
     await flushPromises()
 
     const header = wrapper.find('[data-test="usage-header"]')
     expect(header.exists()).toBe(true)
-    // Column label is still shown alongside the help icon.
-    expect(header.text()).toContain('admin.accounts.columns.usageWindows')
+    // The compact workbench label is shown alongside the upstream-window help icon.
+    expect(header.text()).toContain('admin.accounts.workbench.quotaCapacity')
 
     const hint = wrapper.find('[data-test="usage-windows-hint"]')
-    expect(hint.exists()).toBe(true)
-    expect(hint.text()).toBe('admin.accounts.usageWindowsHint')
+    expect(hint.exists()).toBe(false)
   })
 
   it('renders the upstream billing trust warning next to the declared-rate column', async () => {
+    // In the v2 fixture, omitted keys are explicitly visible.
+    localStorage.setItem('account-hidden-columns', JSON.stringify(['scheduler_score']))
+    localStorage.setItem('account-hidden-columns-version', 'account-workbench-v2')
     const wrapper = mountView()
     await flushPromises()
 

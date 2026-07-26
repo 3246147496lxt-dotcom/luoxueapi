@@ -10,6 +10,7 @@ import {
   ExternalLink,
   Image as ImageIcon,
   KeyRound,
+  LoaderCircle,
   Menu,
   Moon,
   MonitorCog,
@@ -24,6 +25,7 @@ import { siteConfig, tutorials } from "./content.js";
 import {
   loadPublishedDocumentation,
   resolveActiveTutorialId,
+  shouldRenderDocumentationImage,
   subscribeToTutorialHashChanges,
 } from "./documentation.js";
 
@@ -364,7 +366,7 @@ function MobileMenu({ authState, open, onNavigate }) {
   );
 }
 
-function Step({ step, index, tutorialId }) {
+function Step({ step, index, tutorialId, documentationSource }) {
   return (
     <li
       id={`${tutorialId}-step-${index + 1}`}
@@ -386,7 +388,7 @@ function Step({ step, index, tutorialId }) {
 
         {step.code && <CodeBlock label={step.code.label}>{step.code.value}</CodeBlock>}
 
-        {step.image && (
+        {shouldRenderDocumentationImage(step.image, documentationSource) && (
           <figure className="step-image">
             <img src={step.image.src} alt={step.image.alt} />
             {step.image.caption && <figcaption>{step.image.caption}</figcaption>}
@@ -399,7 +401,7 @@ function Step({ step, index, tutorialId }) {
   );
 }
 
-function TutorialPanel({ tutorial }) {
+function TutorialPanel({ tutorial, documentationSource }) {
   return (
     <section
       id={`panel-${tutorial.id}`}
@@ -418,9 +420,19 @@ function TutorialPanel({ tutorial }) {
             step={step}
             index={index}
             tutorialId={tutorial.id}
+            documentationSource={documentationSource}
           />
         ))}
       </ol>
+    </section>
+  );
+}
+
+function DocumentationLoading() {
+  return (
+    <section className="documentation-loading" role="status" aria-live="polite">
+      <LoaderCircle size={24} aria-hidden="true" />
+      <p>正在加载最新教程</p>
     </section>
   );
 }
@@ -673,61 +685,74 @@ export function App() {
       />
       <MobileMenu authState={authState} open={menuOpen} onNavigate={() => setMenuOpen(false)} />
 
-      <main className="docs-main">
+      <main
+        className="docs-main"
+        aria-busy={!documentation.refreshComplete}
+        data-documentation-source={documentation.refreshComplete ? documentation.source : "loading"}
+      >
         <div className="docs-container">
           <section className="page-heading">
             <h1>{siteConfig.pageTitle}</h1>
           </section>
 
-          <div className="tabs" role="tablist" aria-label="教程分类">
-            {visibleTutorials.map((tutorial, index) => {
-              const selected = tutorial.id === activeTutorial.id;
-              return (
-                <button
-                  key={tutorial.id}
-                  type="button"
-                  role="tab"
-                  id={`tab-${tutorial.id}`}
-                  aria-selected={selected}
-                  aria-controls={`panel-${tutorial.id}`}
-                  tabIndex={selected ? 0 : -1}
-                  className={selected ? "selected" : ""}
-                  onClick={() => selectTutorial(tutorial.id)}
-                  onKeyDown={(event) => handleTabKeyDown(event, index)}
-                >
-                  <TutorialTabIcon tutorial={tutorial} />
-                  <span>{tutorial.tabLabel}</span>
-                </button>
-              );
-            })}
-          </div>
+          {!documentation.refreshComplete ? (
+            <DocumentationLoading />
+          ) : (
+            <>
+              <div className="tabs" role="tablist" aria-label="教程分类">
+                {visibleTutorials.map((tutorial, index) => {
+                  const selected = tutorial.id === activeTutorial.id;
+                  return (
+                    <button
+                      key={tutorial.id}
+                      type="button"
+                      role="tab"
+                      id={`tab-${tutorial.id}`}
+                      aria-selected={selected}
+                      aria-controls={`panel-${tutorial.id}`}
+                      tabIndex={selected ? 0 : -1}
+                      className={selected ? "selected" : ""}
+                      onClick={() => selectTutorial(tutorial.id)}
+                      onKeyDown={(event) => handleTabKeyDown(event, index)}
+                    >
+                      <TutorialTabIcon tutorial={tutorial} />
+                      <span>{tutorial.tabLabel}</span>
+                    </button>
+                  );
+                })}
+              </div>
 
-          <div className="reading-grid">
-            <StepOutline
-              tutorial={activeTutorial}
-              activeIndex={activeStepIndex}
-              onSelect={scrollToStep}
-            />
+              <div className="reading-grid">
+                <StepOutline
+                  tutorial={activeTutorial}
+                  activeIndex={activeStepIndex}
+                  onSelect={scrollToStep}
+                />
 
-            <div className="reading-column">
-              <MobileStepOutline
-                tutorial={activeTutorial}
-                activeIndex={activeStepIndex}
-                onSelect={scrollToStep}
-              />
-              <TutorialPanel tutorial={activeTutorial} />
-            </div>
+                <div className="reading-column">
+                  <MobileStepOutline
+                    tutorial={activeTutorial}
+                    activeIndex={activeStepIndex}
+                    onSelect={scrollToStep}
+                  />
+                  <TutorialPanel
+                    tutorial={activeTutorial}
+                    documentationSource={documentation.source}
+                  />
+                </div>
 
-            <div className="reading-balance" aria-hidden="true" />
-          </div>
+                <div className="reading-balance" aria-hidden="true" />
+              </div>
 
-          <footer className="docs-footer">
-            <div>
-              <img src={brand.logo} alt="" />
-              <p>{brand.name} 新用户接入与使用指南。</p>
-            </div>
-            <SupportContact />
-          </footer>
+              <footer className="docs-footer">
+                <div>
+                  <img src={brand.logo} alt="" />
+                  <p>{brand.name} 新用户接入与使用指南。</p>
+                </div>
+                <SupportContact />
+              </footer>
+            </>
+          )}
         </div>
       </main>
     </div>

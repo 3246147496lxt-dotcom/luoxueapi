@@ -66,9 +66,9 @@ type CyberPolicyUsageInput struct {
 // 报告的 usage（非流式直接拒通常为 0，cost 随之为 0）。复用 RecordUsage 完成成本计算、
 // 扣费与用量行写入（request_type=cyber 由 CyberBlocked 置位）。仅 forward 返回错误的
 // 路径由 handler 调用，避免与成功路径的正常 RecordUsage 重复。
-func (s *OpenAIGatewayService) RecordCyberPolicyUsageLog(ctx context.Context, in CyberPolicyUsageInput) {
+func (s *OpenAIGatewayService) RecordCyberPolicyUsageLog(ctx context.Context, in CyberPolicyUsageInput) error {
 	if s == nil || in.APIKey == nil || in.APIKey.User == nil || in.Account == nil || strings.TrimSpace(in.Model) == "" {
-		return
+		return nil
 	}
 	result := &OpenAIForwardResult{
 		RequestID: in.RequestID,
@@ -95,7 +95,9 @@ func (s *OpenAIGatewayService) RecordCyberPolicyUsageLog(ctx context.Context, in
 		CyberBlocked:       true,
 	}); err != nil {
 		logger.LegacyPrintf("service.openai_gateway", "cyber usage record failed: request_id=%s err=%v", in.RequestID, err)
+		return err
 	}
+	return nil
 }
 
 // ResolveUserGroupRateMultiplier resolves the same cached multiplier used by OpenAI usage billing.
@@ -349,6 +351,33 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 	}
 
 	if s.cfg != nil && s.cfg.RunMode == config.RunModeSimple {
+		if resolveBillingReceiptSource(ctx) == BillingReceiptSourceWebChat {
+			billingResult, billingErr := applyUsageBilling(
+				ctx,
+				requestID,
+				usageLog,
+				&postUsageBillingParams{
+					Cost:                  cost,
+					User:                  user,
+					APIKey:                apiKey,
+					Account:               account,
+					Subscription:          subscription,
+					RequestPayloadHash:    resolveUsageBillingPayloadFingerprint(ctx, input.RequestPayloadHash),
+					AccountRateMultiplier: accountRateMultiplier,
+					APIKeyService:         input.APIKeyService,
+					Source:                BillingReceiptSourceWebChat,
+					ForceNoCharge:         true,
+				},
+				s.billingDeps(),
+				s.usageBillingRepo,
+			)
+			if billingErr != nil {
+				return billingErr
+			}
+			if billingResult != nil && billingResult.SettlementClosed {
+				return nil
+			}
+		}
 		writeUsageLogBestEffort(ctx, s.usageLogRepo, usageLog, "service.openai_gateway")
 		logger.LegacyPrintf("service.openai_gateway", "[SIMPLE MODE] Usage recorded (not billed): user=%d, tokens=%d", usageLog.UserID, usageLog.TotalTokens())
 		s.deferredService.ScheduleLastUsedUpdate(account.ID)
@@ -362,24 +391,25 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 		quotaPlatform = PlatformFromAPIKey(apiKey)
 	}
 
-	billingErr := func() error {
-		_, err := applyUsageBilling(ctx, requestID, usageLog, &postUsageBillingParams{
-			Cost:                  cost,
-			User:                  user,
-			APIKey:                apiKey,
-			Account:               account,
-			Subscription:          subscription,
-			RequestPayloadHash:    resolveUsageBillingPayloadFingerprint(ctx, input.RequestPayloadHash),
-			IsSubscriptionBill:    isSubscriptionBilling,
-			AccountRateMultiplier: accountRateMultiplier,
-			APIKeyService:         input.APIKeyService,
-			Platform:              quotaPlatform,
-		}, s.billingDeps(), s.usageBillingRepo)
-		return err
-	}()
+	billingResult, billingErr := applyUsageBilling(ctx, requestID, usageLog, &postUsageBillingParams{
+		Cost:                  cost,
+		User:                  user,
+		APIKey:                apiKey,
+		Account:               account,
+		Subscription:          subscription,
+		RequestPayloadHash:    resolveUsageBillingPayloadFingerprint(ctx, input.RequestPayloadHash),
+		IsSubscriptionBill:    isSubscriptionBilling,
+		AccountRateMultiplier: accountRateMultiplier,
+		APIKeyService:         input.APIKeyService,
+		Platform:              quotaPlatform,
+		Source:                resolveBillingReceiptSource(ctx),
+	}, s.billingDeps(), s.usageBillingRepo)
 
 	if billingErr != nil {
 		return billingErr
+	}
+	if billingResult != nil && billingResult.SettlementClosed {
+		return nil
 	}
 	writeUsageLogBestEffort(ctx, s.usageLogRepo, usageLog, "service.openai_gateway")
 

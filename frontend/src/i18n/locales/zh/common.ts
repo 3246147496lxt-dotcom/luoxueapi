@@ -149,6 +149,7 @@ export default {
   nav: {
     home: '首页',
     dashboard: '仪表盘',
+    gptChat: 'GPT 聊天',
     adminDashboard: '数据看板',
     announcements: '公告',
     apiKeys: 'API 密钥',
@@ -187,6 +188,7 @@ export default {
     },
     subscriptions: '订阅管理',
     accounts: '账号池',
+    management: '管理',
     proxies: 'IP管理',
     redeemCodes: '兑换码',
     ops: '运维监控',

@@ -33,6 +33,9 @@ func RegisterAdminRoutes(
 		// 用户管理
 		registerUserManagementRoutes(admin, h)
 
+		// 用户聊天记录只读审阅
+		registerAdminChatHistoryRoutes(admin, h)
+
 		// 分组管理
 		registerGroupRoutes(admin, h)
 
@@ -119,6 +122,14 @@ func RegisterAdminRoutes(
 
 		// 操作审计日志
 		registerAuditLogRoutes(admin, h, stepUpAuth)
+	}
+}
+
+func registerAdminChatHistoryRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
+	conversations := admin.Group("/users/:id/chat/conversations")
+	{
+		conversations.GET("", h.Admin.ChatHistory.ListUserConversations)
+		conversations.GET("/:conversation_id", h.Admin.ChatHistory.ViewConversation)
 	}
 }
 
@@ -640,6 +651,11 @@ func registerSubscriptionRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 }
 
 func registerUsageRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
+	billing := admin.Group("/billing")
+	{
+		billing.GET("/receipts", h.Admin.Usage.ListBillingReceipts)
+	}
+
 	usage := admin.Group("/usage")
 	{
 		usage.GET("", h.Admin.Usage.List)

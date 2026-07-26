@@ -39,7 +39,7 @@ func (s *adminUsageRepoCapture) GetStatsWithFilters(ctx context.Context, filters
 func newAdminUsageRequestTypeTestRouter(repo *adminUsageRepoCapture) *gin.Engine {
 	gin.SetMode(gin.TestMode)
 	usageSvc := service.NewUsageService(repo, nil, nil, nil)
-	handler := NewUsageHandler(usageSvc, nil, nil, nil)
+	handler := NewUsageHandler(usageSvc, nil, nil, nil, nil)
 	router := gin.New()
 	router.GET("/admin/usage", handler.List)
 	router.GET("/admin/usage/stats", handler.Stats)
@@ -92,6 +92,30 @@ func TestAdminUsageListExactTotalTrue(t *testing.T) {
 
 	require.Equal(t, http.StatusOK, rec.Code)
 	require.True(t, repo.listFilters.ExactTotal)
+}
+
+func TestAdminUsageListPassesSourceAndRequestID(t *testing.T) {
+	repo := &adminUsageRepoCapture{}
+	router := newAdminUsageRequestTypeTestRouter(repo)
+
+	req := httptest.NewRequest(http.MethodGet, "/admin/usage?source=web_chat&request_id=receipt-1", nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.Equal(t, "web_chat", repo.listFilters.Source)
+	require.Equal(t, "receipt-1", repo.listFilters.RequestID)
+}
+
+func TestAdminUsageListRejectsInvalidSource(t *testing.T) {
+	repo := &adminUsageRepoCapture{}
+	router := newAdminUsageRequestTypeTestRouter(repo)
+
+	req := httptest.NewRequest(http.MethodGet, "/admin/usage?source=unknown", nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusBadRequest, rec.Code)
 }
 
 func TestAdminUsageListInvalidExactTotal(t *testing.T) {

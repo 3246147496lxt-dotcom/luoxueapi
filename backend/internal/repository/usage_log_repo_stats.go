@@ -566,19 +566,18 @@ func (r *usageLogRepository) GetBatchAPIKeyUsageStats(ctx context.Context, apiKe
 		endTime = time.Now()
 	}
 
-	for _, id := range normalizedAPIKeyIDs {
-		result[id] = &BatchAPIKeyUsageStats{APIKeyID: id}
-	}
-
 	query := `
 		SELECT
-			api_key_id,
-			COALESCE(SUM(actual_cost) FILTER (WHERE created_at >= $2 AND created_at < $3), 0) as total_cost,
-			COALESCE(SUM(actual_cost) FILTER (WHERE created_at >= $4), 0) as today_cost
-		FROM usage_logs
-		WHERE api_key_id = ANY($1)
-		  AND created_at >= LEAST($2, $4)
-		GROUP BY api_key_id
+			ak.id,
+			COALESCE(SUM(ul.actual_cost) FILTER (WHERE ul.created_at >= $2::timestamptz AND ul.created_at < $3::timestamptz), 0) as total_cost,
+			COALESCE(SUM(ul.actual_cost) FILTER (WHERE ul.created_at >= $4::timestamptz), 0) as today_cost
+		FROM api_keys ak
+		LEFT JOIN usage_logs ul
+		  ON ul.api_key_id = ak.id
+		 AND ul.created_at >= LEAST($2::timestamptz, $4::timestamptz)
+		WHERE ak.id = ANY($1)
+		  AND ak.purpose = 'user'
+		GROUP BY ak.id
 	`
 	today := timezone.Today()
 	rows, err := r.sql.QueryContext(ctx, query, pq.Array(normalizedAPIKeyIDs), startTime, endTime, today)
@@ -593,9 +592,10 @@ func (r *usageLogRepository) GetBatchAPIKeyUsageStats(ctx context.Context, apiKe
 			_ = rows.Close()
 			return nil, err
 		}
-		if stats, ok := result[apiKeyID]; ok {
-			stats.TotalActualCost = total
-			stats.TodayActualCost = todayTotal
+		result[apiKeyID] = &BatchAPIKeyUsageStats{
+			APIKeyID:        apiKeyID,
+			TotalActualCost: total,
+			TodayActualCost: todayTotal,
 		}
 	}
 	if err := rows.Close(); err != nil {
@@ -676,6 +676,8 @@ func (r *usageLogRepository) GetStatsWithFilters(ctx context.Context, filters Us
 		conditions = append(conditions, fmt.Sprintf("group_id = $%d", len(args)+1))
 		args = append(args, filters.GroupID)
 	}
+	conditions, args = appendUsageLogRequestIDWhereCondition(conditions, args, filters.RequestID)
+	conditions, args = appendUsageLogSourceWhereCondition(conditions, args, filters.Source)
 	conditions, args = appendUsageLogModelWhereCondition(conditions, args, filters.Model, filters.ModelFilterSource)
 	conditions, args = appendRequestTypeOrStreamWhereCondition(conditions, args, filters.RequestType, filters.Stream)
 	if filters.BillingType != nil {

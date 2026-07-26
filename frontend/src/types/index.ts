@@ -1401,6 +1401,7 @@ export interface CodexSessionImportResult {
 
 export type RedeemCodeType = 'balance' | 'concurrency' | 'subscription' | 'invitation'
 export type UsageRequestType = 'unknown' | 'sync' | 'stream' | 'ws_v2' | 'cyber'
+export type UsageSource = 'web_chat' | 'api'
 export type ImageSizeSource = 'output' | 'input' | 'default' | 'legacy'
 export type ImageSizeBreakdown = Record<string, number>
 
@@ -1411,6 +1412,7 @@ export interface UsageLog {
   account_id: number | null
   request_id: string
   model: string
+  source?: UsageSource | null
   service_tier?: string | null
   reasoning_effort?: string | null
   inbound_endpoint?: string | null
@@ -1881,6 +1883,8 @@ export interface UsageQueryParams {
   account_id?: number
   group_id?: number
   model?: string
+  source?: UsageSource
+  request_id?: string
   request_type?: UsageRequestType
   stream?: boolean
   billing_type?: number | null

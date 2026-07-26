@@ -1,10 +1,16 @@
 package handler
 
 import (
+	"context"
+	"io"
+	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 
+	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/Wei-Shaw/sub2api/internal/server/middleware"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
@@ -100,6 +106,216 @@ func TestClearCyberPolicyTurnState(t *testing.T) {
 	h.recordCyberPolicyIfMarked(c, nil, nil, nil, "gpt-5", false, "", service.ChannelUsageFields{}, "")
 	require.True(t, c.GetBool(cyberPolicyRecordedKey))
 	require.Equal(t, "turn2", service.GetOpsCyberPolicy(c).Message)
+}
+
+func TestReportOpenAIAccountScheduleFailureSkipsCyber(t *testing.T) {
+	cfg := &config.Config{}
+	settingRepo := &contentModerationHandlerSettingRepo{values: map[string]string{}}
+	settingService := service.NewSettingService(settingRepo, cfg)
+	setAdvancedScheduler := func(enabled bool) {
+		require.NoError(t, settingService.UpdateSettings(context.Background(), &service.SystemSettings{
+			OpenAIAdvancedSchedulerEnabled: enabled,
+		}))
+	}
+	setAdvancedScheduler(true)
+	t.Cleanup(func() {
+		setAdvancedScheduler(false)
+	})
+
+	rateLimitService := service.NewRateLimitService(nil, nil, cfg, nil, nil)
+	rateLimitService.SetSettingService(settingService)
+	gatewayService := service.NewOpenAIGatewayService(
+		nil, nil, nil, nil, nil, nil, nil, cfg, nil, nil, nil,
+		rateLimitService, nil, nil, nil, nil, nil, nil, nil, nil,
+		settingService, nil,
+	)
+	h := &OpenAIGatewayHandler{gatewayService: gatewayService}
+	c := newTestGinContext()
+	service.MarkOpsCyberPolicy(c, service.CyberPolicyMark{
+		Message:        "blocked",
+		UpstreamStatus: 403,
+	})
+
+	h.reportOpenAIAccountScheduleFailure(c, 42, "gpt-5.5")
+	require.Zero(t, gatewayService.SnapshotOpenAIAccountSchedulerMetrics().RuntimeStatsAccountCount)
+
+	service.ClearOpsCyberPolicy(c)
+	h.reportOpenAIAccountScheduleFailure(c, 42, "gpt-5.5")
+	require.Equal(t, 1, gatewayService.SnapshotOpenAIAccountSchedulerMetrics().RuntimeStatsAccountCount)
+}
+
+type openAIHTTPCyberHandlerUpstream struct {
+	service.HTTPUpstream
+	mu    sync.Mutex
+	calls int
+}
+
+func (u *openAIHTTPCyberHandlerUpstream) Do(*http.Request, string, int64, int) (*http.Response, error) {
+	u.mu.Lock()
+	u.calls++
+	u.mu.Unlock()
+	return &http.Response{
+		StatusCode: http.StatusForbidden,
+		Header:     http.Header{"Content-Type": []string{"application/json"}},
+		Body: io.NopCloser(strings.NewReader(
+			`{"error":{"code":"cyber_policy","message":"blocked"}}`,
+		)),
+	}, nil
+}
+
+func (u *openAIHTTPCyberHandlerUpstream) callCount() int {
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	return u.calls
+}
+
+type openAIHTTPCyberUsageRepo struct {
+	service.UsageLogRepository
+	mu   sync.Mutex
+	logs []service.UsageLog
+}
+
+func (r *openAIHTTPCyberUsageRepo) Create(_ context.Context, log *service.UsageLog) (bool, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.logs = append(r.logs, *log)
+	return true, nil
+}
+
+func (r *openAIHTTPCyberUsageRepo) snapshot() []service.UsageLog {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return append([]service.UsageLog(nil), r.logs...)
+}
+
+func TestOpenAIHTTPHandlersCyberPolicyDoesNotPenalizeScheduler(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	cfg := &config.Config{RunMode: config.RunModeSimple}
+	cfg.Default.RateMultiplier = 1
+	cfg.Security.URLAllowlist.Enabled = false
+	settingRepo := &contentModerationHandlerSettingRepo{values: map[string]string{}}
+	settingService := service.NewSettingService(settingRepo, cfg)
+	setAdvancedScheduler := func(enabled bool) {
+		require.NoError(t, settingService.UpdateSettings(context.Background(), &service.SystemSettings{
+			OpenAIAdvancedSchedulerEnabled: enabled,
+		}))
+	}
+	setAdvancedScheduler(true)
+	t.Cleanup(func() {
+		setAdvancedScheduler(false)
+	})
+
+	tests := []struct {
+		name   string
+		path   string
+		body   string
+		invoke func(*OpenAIGatewayHandler, *gin.Context)
+	}{
+		{
+			name: "chat_completions",
+			path: "/v1/chat/completions",
+			body: `{"model":"gpt-5.5","messages":[{"role":"user","content":"hello"}],"stream":false}`,
+			invoke: func(h *OpenAIGatewayHandler, c *gin.Context) {
+				h.ChatCompletions(c)
+			},
+		},
+		{
+			name: "responses",
+			path: "/v1/responses",
+			body: `{"model":"gpt-5.5","input":"hello","stream":false}`,
+			invoke: func(h *OpenAIGatewayHandler, c *gin.Context) {
+				h.Responses(c)
+			},
+		},
+		{
+			name: "messages",
+			path: "/v1/messages",
+			body: `{"model":"gpt-5.5","max_tokens":64,"messages":[{"role":"user","content":"hello"}],"stream":false}`,
+			invoke: func(h *OpenAIGatewayHandler, c *gin.Context) {
+				h.Messages(c)
+			},
+		},
+	}
+
+	for index, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			groupID := int64(7100 + index)
+			accountRepo := &openAIWSUsageHandlerAccountRepoStub{account: service.Account{
+				ID:          int64(7200 + index),
+				Name:        "cyber-handler-account",
+				Platform:    service.PlatformOpenAI,
+				Type:        service.AccountTypeOAuth,
+				Status:      service.StatusActive,
+				Schedulable: true,
+				Concurrency: 1,
+				Credentials: map[string]any{"access_token": "test-token"},
+			}}
+			usageRepo := &openAIHTTPCyberUsageRepo{}
+			upstream := &openAIHTTPCyberHandlerUpstream{}
+			rateLimitService := service.NewRateLimitService(accountRepo, usageRepo, cfg, nil, nil)
+			rateLimitService.SetSettingService(settingService)
+			concurrencyCache := &concurrencyCacheMock{
+				acquireUserSlotFn: func(context.Context, int64, int, string) (bool, error) {
+					return true, nil
+				},
+				acquireAccountSlotFn: func(context.Context, int64, int, string) (bool, error) {
+					return true, nil
+				},
+			}
+			concurrencyService := service.NewConcurrencyService(concurrencyCache)
+			billingCacheService := service.NewBillingCacheService(nil, nil, nil, nil, nil, nil, cfg, nil)
+			t.Cleanup(billingCacheService.Stop)
+			gatewayService := service.NewOpenAIGatewayService(
+				accountRepo, usageRepo, nil, nil, nil, nil, nil, cfg, nil,
+				concurrencyService, service.NewBillingService(cfg, nil), rateLimitService,
+				billingCacheService, upstream, &service.DeferredService{}, nil, nil, nil,
+				nil, nil, settingService, nil,
+			)
+			h := NewOpenAIGatewayHandler(
+				gatewayService,
+				concurrencyService,
+				billingCacheService,
+				service.NewAPIKeyService(nil, nil, nil, nil, nil, nil, cfg),
+				nil,
+				nil,
+				nil,
+				nil,
+				cfg,
+			)
+
+			recorder := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(recorder)
+			c.Request = httptest.NewRequest(http.MethodPost, test.path, strings.NewReader(test.body))
+			c.Request.Header.Set("Content-Type", "application/json")
+			c.Set(string(middleware.ContextKeyAPIKey), &service.APIKey{
+				ID:      int64(7300 + index),
+				GroupID: &groupID,
+				User:    &service.User{ID: int64(7400 + index), Status: service.StatusActive},
+				Group: &service.Group{
+					ID:                    groupID,
+					Platform:              service.PlatformOpenAI,
+					Status:                service.StatusActive,
+					RateMultiplier:        1,
+					AllowMessagesDispatch: true,
+				},
+			})
+			c.Set(string(middleware.ContextKeyUser), middleware.AuthSubject{
+				UserID:      int64(7400 + index),
+				Concurrency: 1,
+			})
+
+			test.invoke(h, c)
+
+			require.Equal(t, http.StatusForbidden, recorder.Code, recorder.Body.String())
+			require.Equal(t, 1, upstream.callCount(), "Cyber must not trigger retry or failover")
+			require.NotNil(t, service.GetOpsCyberPolicy(c))
+			require.Zero(t, gatewayService.SnapshotOpenAIAccountSchedulerMetrics().RuntimeStatsAccountCount)
+			logs := usageRepo.snapshot()
+			require.Len(t, logs, 1, "Cyber usage must be recorded exactly once")
+			require.Equal(t, service.RequestTypeCyberBlocked, logs[0].RequestType)
+		})
+	}
 }
 
 // TestBuildCyberSessionBlockedOpsEntry verifies the locally-rejected request is

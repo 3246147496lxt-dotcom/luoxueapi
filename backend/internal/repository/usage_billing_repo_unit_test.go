@@ -14,13 +14,93 @@ import (
 )
 
 const (
-	conditionalBalanceDeductSQL = `(?s)UPDATE users\s+SET balance = balance - \$1,\s+updated_at = NOW\(\)\s+WHERE id = \$2 AND deleted_at IS NULL AND balance >= \$1\s+RETURNING balance`
-	overdraftBalanceDeductSQL   = `(?s)UPDATE users\s+SET balance = balance - \$1,\s+updated_at = NOW\(\)\s+WHERE id = \$2 AND deleted_at IS NULL\s+RETURNING balance`
+	conditionalBalanceDeductSQL = `(?s)UPDATE users\s+SET balance = balance - \$1,\s+updated_at = NOW\(\)\s+WHERE id = \$2 AND deleted_at IS NULL AND balance >= \$1\s+RETURNING balance \+ \$1, balance`
+	overdraftBalanceDeductSQL   = `(?s)UPDATE users\s+SET balance = balance - \$1,\s+updated_at = NOW\(\)\s+WHERE id = \$2 AND deleted_at IS NULL\s+RETURNING balance \+ \$1, balance`
+	lockWebChatBillingUserSQL   = `(?s)SELECT id\s+FROM users\s+WHERE id = \$1\s+AND deleted_at IS NULL\s+FOR UPDATE`
+	lockWebChatAttemptSQL       = `(?s)SELECT status\s+FROM chat_request_attempts\s+WHERE client_request_id = \$1\s+AND user_id = \$2\s+FOR UPDATE`
+	findUsageBillingClaimSQL    = `(?s)SELECT request_fingerprint\s+FROM usage_billing_dedup\s+WHERE request_id = \$1 AND api_key_id = \$2`
+	findArchivedBillingClaimSQL = `(?s)SELECT request_fingerprint\s+FROM usage_billing_dedup_archive\s+WHERE request_id = \$1 AND api_key_id = \$2`
 	reserveBatchImageHoldSQL    = `(?s)UPDATE users\s+SET balance = balance - \$1,\s+frozen_balance = COALESCE\(frozen_balance, 0\) \+ \$1,\s+updated_at = NOW\(\)\s+WHERE id = \$2 AND deleted_at IS NULL AND balance >= \$1\s+RETURNING balance, frozen_balance`
 	captureBatchImageHoldSQL    = `(?s)UPDATE users\s+SET balance = balance\s+\+ CASE WHEN \$1 > \$2 THEN \$1 - \$2 ELSE 0 END\s+- CASE WHEN \$2 > \$1 THEN \$2 - \$1 ELSE 0 END,\s+frozen_balance = COALESCE\(frozen_balance, 0\) - \$1,\s+updated_at = NOW\(\)\s+WHERE id = \$3 AND deleted_at IS NULL AND COALESCE\(frozen_balance, 0\) >= \$1\s+RETURNING balance, frozen_balance`
 	releaseBatchImageHoldSQL    = `(?s)UPDATE users\s+SET balance = balance \+ \$1,\s+frozen_balance = COALESCE\(frozen_balance, 0\) - \$1,\s+updated_at = NOW\(\)\s+WHERE id = \$2 AND deleted_at IS NULL AND COALESCE\(frozen_balance, 0\) >= \$1\s+RETURNING balance, frozen_balance`
 	userExistsForBillingSQL     = `(?s)SELECT 1\s+FROM users\s+WHERE id = \$1 AND deleted_at IS NULL`
 )
+
+func TestUsageBillingRepositoryApply_RejectsLateWebChatBillingAfterTerminalAttempt(t *testing.T) {
+	ctx := context.Background()
+	db, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	defer func() { _ = db.Close() }()
+
+	requestID := "client:9c466607-6e38-42dd-9012-2a3f01b26bed"
+	mock.ExpectBegin()
+	mock.ExpectQuery(lockWebChatBillingUserSQL).
+		WithArgs(int64(42)).
+		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(int64(42)))
+	mock.ExpectQuery(lockWebChatAttemptSQL).
+		WithArgs("9c466607-6e38-42dd-9012-2a3f01b26bed", int64(42)).
+		WillReturnRows(sqlmock.NewRows([]string{"status"}).AddRow(service.ChatAttemptStatusInterrupted))
+	mock.ExpectQuery(findUsageBillingClaimSQL).
+		WithArgs(requestID, int64(7)).
+		WillReturnError(sql.ErrNoRows)
+	mock.ExpectQuery(findArchivedBillingClaimSQL).
+		WithArgs(requestID, int64(7)).
+		WillReturnError(sql.ErrNoRows)
+	mock.ExpectRollback()
+
+	result, err := (&usageBillingRepository{db: db}).Apply(ctx, &service.UsageBillingCommand{
+		RequestID:          requestID,
+		RequestFingerprint: "fingerprint",
+		Source:             service.BillingReceiptSourceWebChat,
+		UserID:             42,
+		APIKeyID:           7,
+		BalanceCost:        2.5,
+	})
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.False(t, result.Applied)
+	require.True(t, result.SettlementClosed)
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestUsageBillingRepositoryApply_DistinguishesTerminalIdempotentReplay(t *testing.T) {
+	ctx := context.Background()
+	db, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	defer func() { _ = db.Close() }()
+
+	requestID := "client:9c466607-6e38-42dd-9012-2a3f01b26bed"
+	mock.ExpectBegin()
+	mock.ExpectQuery(lockWebChatBillingUserSQL).
+		WithArgs(int64(42)).
+		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(int64(42)))
+	mock.ExpectQuery(lockWebChatAttemptSQL).
+		WithArgs("9c466607-6e38-42dd-9012-2a3f01b26bed", int64(42)).
+		WillReturnRows(sqlmock.NewRows([]string{"status"}).AddRow(service.ChatAttemptStatusCompleted))
+	mock.ExpectQuery(findUsageBillingClaimSQL).
+		WithArgs(requestID, int64(7)).
+		WillReturnRows(sqlmock.NewRows([]string{"request_fingerprint"}).AddRow("fingerprint"))
+	mock.ExpectQuery(`INSERT INTO usage_billing_dedup`).
+		WithArgs(requestID, int64(7), "fingerprint").
+		WillReturnError(sql.ErrNoRows)
+	mock.ExpectQuery(`SELECT request_fingerprint\s+FROM usage_billing_dedup`).
+		WithArgs(requestID, int64(7)).
+		WillReturnRows(sqlmock.NewRows([]string{"request_fingerprint"}).AddRow("fingerprint"))
+	mock.ExpectRollback()
+
+	result, err := (&usageBillingRepository{db: db}).Apply(ctx, &service.UsageBillingCommand{
+		RequestID:          requestID,
+		RequestFingerprint: "fingerprint",
+		Source:             service.BillingReceiptSourceWebChat,
+		UserID:             42,
+		APIKeyID:           7,
+	})
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.False(t, result.Applied)
+	require.False(t, result.SettlementClosed)
+	require.NoError(t, mock.ExpectationsWereMet())
+}
 
 func TestDeductUsageBillingBalance_UsesSufficientBalanceGuard(t *testing.T) {
 	ctx := context.Background()
@@ -33,12 +113,13 @@ func TestDeductUsageBillingBalance_UsesSufficientBalanceGuard(t *testing.T) {
 	require.NoError(t, err)
 	mock.ExpectQuery(conditionalBalanceDeductSQL).
 		WithArgs(2.5, int64(42)).
-		WillReturnRows(sqlmock.NewRows([]string{"balance"}).AddRow(7.5))
+		WillReturnRows(sqlmock.NewRows([]string{"balance_before", "balance"}).AddRow(10.0, 7.5))
 	mock.ExpectCommit()
 
-	newBalance, sufficient, err := deductUsageBillingBalance(ctx, tx, 42, 2.5)
+	balanceBefore, newBalance, sufficient, err := deductUsageBillingBalance(ctx, tx, 42, 2.5)
 	require.NoError(t, err)
 	require.True(t, sufficient)
+	require.InDelta(t, 10.0, balanceBefore, 0.000001)
 	require.InDelta(t, 7.5, newBalance, 0.000001)
 	require.NoError(t, tx.Commit())
 	require.NoError(t, mock.ExpectationsWereMet())
@@ -58,12 +139,13 @@ func TestDeductUsageBillingBalance_RecordsOverdraftWhenGuardMisses(t *testing.T)
 		WillReturnError(sql.ErrNoRows)
 	mock.ExpectQuery(overdraftBalanceDeductSQL).
 		WithArgs(10.0, int64(42)).
-		WillReturnRows(sqlmock.NewRows([]string{"balance"}).AddRow(-5.0))
+		WillReturnRows(sqlmock.NewRows([]string{"balance_before", "balance"}).AddRow(5.0, -5.0))
 	mock.ExpectCommit()
 
-	newBalance, sufficient, err := deductUsageBillingBalance(ctx, tx, 42, 10)
+	balanceBefore, newBalance, sufficient, err := deductUsageBillingBalance(ctx, tx, 42, 10)
 	require.NoError(t, err)
 	require.False(t, sufficient)
+	require.InDelta(t, 5.0, balanceBefore, 0.000001)
 	require.InDelta(t, -5.0, newBalance, 0.000001)
 	require.NoError(t, tx.Commit())
 	require.NoError(t, mock.ExpectationsWereMet())
@@ -83,7 +165,7 @@ func TestApplyUsageBillingEffects_FlagsBalanceOverdraft(t *testing.T) {
 		WillReturnError(sql.ErrNoRows)
 	mock.ExpectQuery(overdraftBalanceDeductSQL).
 		WithArgs(10.0, int64(42)).
-		WillReturnRows(sqlmock.NewRows([]string{"balance"}).AddRow(-5.0))
+		WillReturnRows(sqlmock.NewRows([]string{"balance_before", "balance"}).AddRow(5.0, -5.0))
 	mock.ExpectCommit()
 
 	result := &service.UsageBillingApplyResult{Applied: true}
@@ -92,6 +174,8 @@ func TestApplyUsageBillingEffects_FlagsBalanceOverdraft(t *testing.T) {
 		BalanceCost: 10,
 	}, result)
 	require.NoError(t, err)
+	require.NotNil(t, result.BalanceBefore)
+	require.InDelta(t, 5.0, *result.BalanceBefore, 0.000001)
 	require.NotNil(t, result.NewBalance)
 	require.InDelta(t, -5.0, *result.NewBalance, 0.000001)
 	require.True(t, result.BalanceOverdrafted)
@@ -116,7 +200,7 @@ func TestDeductUsageBillingBalance_ReturnsUserNotFoundWhenNoUserUpdated(t *testi
 		WillReturnError(sql.ErrNoRows)
 	mock.ExpectRollback()
 
-	_, _, err = deductUsageBillingBalance(ctx, tx, 42, 10)
+	_, _, _, err = deductUsageBillingBalance(ctx, tx, 42, 10)
 	require.ErrorIs(t, err, service.ErrUserNotFound)
 	require.NoError(t, tx.Rollback())
 	require.NoError(t, mock.ExpectationsWereMet())

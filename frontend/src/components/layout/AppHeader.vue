@@ -1,7 +1,12 @@
 <template>
   <header
     data-testid="app-header"
-    class="app-header fixed inset-x-0 top-0 z-50 h-[81px] bg-transparent p-2"
+    class="app-header fixed left-0 right-0 top-0 z-50 h-[81px] bg-transparent p-2 transition-[left] duration-300 ease-out motion-reduce:transition-none"
+    :class="
+      sidebarCollapsed
+        ? 'lg:left-[68px]'
+        : 'lg:left-[184px] min-[1025px]:left-[196px] min-[1281px]:left-[208px]'
+    "
   >
     <div
       data-testid="header-surface"
@@ -23,84 +28,20 @@
 
         <div
           data-testid="header-brand-slot"
-          class="flex w-10 min-w-0 flex-shrink-0 items-center justify-center transition-[width] duration-300 ease-out motion-reduce:transition-none lg:justify-start"
-          :class="
-            sidebarCollapsed
-              ? 'md:w-[68px]'
-              : 'md:w-[196px] lg:w-[184px] min-[1025px]:w-[196px] min-[1281px]:w-[208px]'
-          "
+          class="flex w-10 min-w-0 flex-shrink-0 items-center justify-center md:w-12 lg:hidden"
         >
-          <router-link
-            :to="homePath"
-            data-testid="header-brand"
-            class="flex h-10 w-full min-w-0 items-center justify-center gap-2 rounded-xl focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 md:h-16"
-            :class="
-              sidebarCollapsed
-                ? 'lg:w-[60px]'
-                : 'lg:w-44 min-[1025px]:w-[188px] min-[1281px]:w-[200px]'
-            "
-            :aria-label="siteName"
-          >
-            <span
-              data-testid="header-brand-logo"
-              class="brand-logo-frame flex h-10 w-10 flex-shrink-0 items-center justify-center md:h-12 md:w-12"
-            >
-              <img
-                :src="siteLogo || '/logo.png'"
-                alt=""
-                class="brand-logo-image block h-full w-full max-w-none object-contain"
-                :class="{ 'brand-logo-image-luoxue': isLuoxueLogo }"
-              >
-            </span>
-            <span
-              data-testid="header-brand-wordmark"
-              class="header-brand-wordmark hidden min-w-0 truncate text-[22px] font-bold leading-7 text-[#1c1f23] md:block dark:text-[#f9f9f9]"
-              :class="[
-                sidebarCollapsed ? 'md:hidden' : 'md:block',
-                { 'header-brand-wordmark-luoxue': isLuoxueBrand }
-              ]"
-            >
-              <span
-                v-if="brandNameParts.suffix"
-                class="inline-flex items-baseline gap-1.5 whitespace-nowrap"
-              >
-                <span
-                  data-testid="header-brand-name"
-                  :class="{ 'header-brand-name-luoxue': isLuoxueBrand }"
-                >{{ brandNameParts.name }}</span>
-                <span
-                  data-testid="header-brand-suffix"
-                  :class="{ 'header-brand-suffix-luoxue': isLuoxueBrand }"
-                >{{ brandNameParts.suffix }}</span>
-              </span>
-              <span
-                v-else
-                data-testid="header-brand-name"
-                :class="{ 'header-brand-name-luoxue': isLuoxueBrand }"
-              >{{ brandNameParts.name }}</span>
-            </span>
-          </router-link>
+          <AppBrand placement="header" :collapsed="sidebarCollapsed" />
         </div>
 
-        <button
-          type="button"
-          data-testid="header-sidebar-toggle"
-          class="relative hidden h-8 w-8 flex-shrink-0 items-center justify-center rounded-[10px] text-gray-500 transition-colors after:absolute after:-inset-1.5 after:content-[''] hover:bg-[rgba(46,50,56,0.05)] hover:text-gray-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 focus-visible:ring-offset-2 lg:flex dark:text-dark-300 dark:hover:bg-white/[0.08] dark:hover:text-white dark:focus-visible:ring-offset-dark-900"
-          :title="sidebarCollapsed ? t('nav.expand') : t('nav.collapse')"
-          :aria-label="sidebarCollapsed ? t('nav.expand') : t('nav.collapse')"
-          aria-controls="app-sidebar"
-          :aria-expanded="!sidebarCollapsed"
-          @click="toggleSidebar"
+        <div
+          data-testid="header-page-context"
+          class="hidden min-w-0 items-center gap-2 text-sm lg:flex"
         >
-          <SidebarCollapseIcon
-            data-testid="header-sidebar-toggle-icon"
-            class="h-5 w-5 transition-transform duration-200 motion-reduce:transition-none"
-            :class="{ 'rotate-180': sidebarCollapsed }"
-          />
-        </button>
-
-        <div class="hidden min-w-0 lg:block">
-          <h1 class="truncate text-base font-semibold tracking-tight text-gray-950 dark:text-white">
+          <span class="flex-none font-medium text-gray-400 dark:text-dark-400">
+            {{ t('nav.management') }}
+          </span>
+          <span aria-hidden="true" class="text-gray-300 dark:text-dark-600">/</span>
+          <h1 class="truncate font-semibold text-gray-950 dark:text-white">
             {{ pageTitle }}
           </h1>
         </div>
@@ -144,7 +85,8 @@
         <!-- Balance Display -->
         <div
           v-if="user"
-          class="group relative hidden h-9 items-center gap-2 rounded-lg border border-primary-100 bg-primary-50/80 px-3 dark:border-primary-900/50 dark:bg-primary-900/20 2xl:flex"
+          data-testid="header-balance"
+          class="group relative hidden h-9 items-center gap-2 rounded-lg border border-primary-100 bg-primary-50/80 px-3 dark:border-primary-900/50 dark:bg-primary-900/20 min-[1400px]:flex"
         >
           <CreditAmount
             class="text-sm font-semibold text-primary-700 dark:text-primary-300"
@@ -371,9 +313,7 @@ import CreditAmount from '@/components/common/CreditAmount.vue'
 import SubscriptionProgressMini from '@/components/common/SubscriptionProgressMini.vue'
 import AnnouncementBell from '@/components/common/AnnouncementBell.vue'
 import Icon from '@/components/icons/Icon.vue'
-import SidebarCollapseIcon from '@/components/icons/SidebarCollapseIcon.vue'
-import { splitBrandApiSuffix } from '@/utils/brand'
-import { sanitizeUrl } from '@/utils/url'
+import AppBrand from './AppBrand.vue'
 
 const router = useRouter()
 const route = useRoute()
@@ -390,27 +330,6 @@ const isDark = ref(document.documentElement.classList.contains('dark'))
 const dropdownOpen = ref(false)
 const dropdownRef = ref<HTMLElement | null>(null)
 const contactInfo = computed(() => appStore.contactInfo)
-const siteName = computed(() => appStore.siteName || '落雪API')
-const isLuoxueBrand = computed(() => /^落雪\s*API$/i.test(siteName.value.trim()))
-const brandNameParts = computed(() => {
-  const { base, apiSuffix } = splitBrandApiSuffix(siteName.value)
-
-  return {
-    name: base,
-    suffix: apiSuffix,
-  }
-})
-const siteLogo = computed(() => sanitizeUrl(appStore.siteLogo || '', {
-  allowRelative: true,
-  allowDataUrl: true,
-}))
-const isLuoxueLogo = computed(() => {
-  if (!isLuoxueBrand.value) return false
-
-  return siteLogo.value.startsWith('data:image/svg+xml')
-    || /luoxue-snowflake-cloud-palette\.(?:png|svg)(?:[?#].*)?$/i.test(siteLogo.value)
-})
-const homePath = computed(() => (authStore.isAdmin ? '/admin/dashboard' : '/dashboard'))
 const avatarUrl = computed(() => user.value?.avatar_url?.trim() || '')
 const availableBalance = computed(() => Number(user.value?.balance || 0))
 const frozenBalance = computed(() => Number(user.value?.frozen_balance || 0))
@@ -464,10 +383,6 @@ function toggleMobileSidebar() {
     appStore.setSidebarCollapsed(false)
   }
   appStore.toggleMobileSidebar()
-}
-
-function toggleSidebar() {
-  appStore.toggleSidebar()
 }
 
 function toggleTheme() {
@@ -526,20 +441,6 @@ onBeforeUnmount(() => {
   font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
 }
 
-.brand-logo-frame {
-  position: relative;
-}
-
-.brand-logo-image-luoxue {
-  transform: scale(1.13);
-  transform-origin: center;
-}
-
-.header-brand-name-luoxue {
-  color: rgb(var(--luoxue-navy-rgb));
-}
-
-.header-brand-suffix-luoxue,
 .brand-utility-icon {
   color: rgb(var(--luoxue-blue-rgb));
 }
@@ -549,35 +450,8 @@ onBeforeUnmount(() => {
   color: #1c1f23;
 }
 
-:global(html.dark .header-brand-name-luoxue) {
-  color: rgb(248 251 255);
-}
-
-:global(html.dark .header-brand-suffix-luoxue),
 :global(html.dark .brand-utility-icon) {
   color: rgb(var(--luoxue-blue-light-rgb));
-}
-
-:global(html.dark .brand-logo-image-luoxue) {
-  filter:
-    drop-shadow(0 0 0.75px rgb(255 255 255 / 0.95))
-    drop-shadow(0 0 5px rgb(var(--luoxue-blue-rgb) / 0.22));
-}
-
-.header-brand-wordmark {
-  font-family:
-    Inter,
-    -apple-system,
-    BlinkMacSystemFont,
-    "Segoe UI",
-    "PingFang SC",
-    "Hiragino Sans GB",
-    "Microsoft YaHei",
-    "Helvetica Neue",
-    Helvetica,
-    Arial,
-    sans-serif;
-  letter-spacing: normal;
 }
 
 .topup-header-surface {

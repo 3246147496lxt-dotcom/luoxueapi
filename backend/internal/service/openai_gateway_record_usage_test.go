@@ -1667,6 +1667,96 @@ func TestOpenAIGatewayServiceRecordUsage_SimpleModeSkipsBillingAfterPersist(t *t
 	require.Equal(t, 0, subRepo.incrementCalls)
 }
 
+func TestOpenAIGatewayServiceRecordUsage_SimpleModeWebChatWritesCanonicalNoChargeReceipt(t *testing.T) {
+	usageRepo := &openAIRecordUsageLogRepoStub{inserted: true}
+	billingRepo := &openAIRecordUsageBillingRepoStub{
+		result: &UsageBillingApplyResult{Applied: true},
+	}
+	svc := newOpenAIRecordUsageServiceWithBillingRepoForTest(
+		usageRepo,
+		billingRepo,
+		&openAIRecordUsageUserRepoStub{},
+		&openAIRecordUsageSubRepoStub{},
+		nil,
+	)
+	svc.cfg.RunMode = config.RunModeSimple
+
+	ctx := context.WithValue(context.Background(), ctxkey.ClientRequestID, "2e52af97-cb02-40e5-bf0c-372a3e75d480")
+	ctx = context.WithValue(ctx, ctxkey.WebChat, true)
+	subscriptionID := int64(91)
+	err := svc.RecordUsage(ctx, &OpenAIRecordUsageInput{
+		Result: &OpenAIForwardResult{
+			RequestID: "upstream-simple-web-chat",
+			Usage:     OpenAIUsage{InputTokens: 10, OutputTokens: 5},
+			Model:     "gpt-5.1",
+			Duration:  time.Second,
+		},
+		APIKey: &APIKey{
+			ID:      1001,
+			GroupID: i64p(88),
+			Group: &Group{
+				ID:               88,
+				SubscriptionType: SubscriptionTypeSubscription,
+				RateMultiplier:   1,
+			},
+		},
+		User: &User{ID: 2001},
+		Account: &Account{
+			ID:    3001,
+			Type:  AccountTypeAPIKey,
+			Extra: map[string]any{"quota_limit": 100.0},
+		},
+		Subscription: &UserSubscription{ID: subscriptionID},
+	})
+
+	require.NoError(t, err)
+	require.Equal(t, 1, billingRepo.calls)
+	require.NotNil(t, billingRepo.lastCmd)
+	require.Equal(t, "client:2e52af97-cb02-40e5-bf0c-372a3e75d480", billingRepo.lastCmd.RequestID)
+	require.Equal(t, BillingReceiptSourceWebChat, billingRepo.lastCmd.Source)
+	require.Equal(t, BillingTypeBalance, billingRepo.lastCmd.BillingType)
+	require.Nil(t, billingRepo.lastCmd.SubscriptionID)
+	require.Zero(t, billingRepo.lastCmd.BalanceCost)
+	require.Zero(t, billingRepo.lastCmd.SubscriptionCost)
+	require.Zero(t, billingRepo.lastCmd.APIKeyQuotaCost)
+	require.Zero(t, billingRepo.lastCmd.APIKeyRateLimitCost)
+	require.Zero(t, billingRepo.lastCmd.AccountQuotaCost)
+	require.Greater(t, billingRepo.lastCmd.GrossCost, 0.0)
+	require.Equal(t, 1, usageRepo.calls)
+}
+
+func TestOpenAIGatewayServiceRecordUsage_SettlementClosedSkipsLateUsageLog(t *testing.T) {
+	usageRepo := &openAIRecordUsageLogRepoStub{inserted: true}
+	billingRepo := &openAIRecordUsageBillingRepoStub{
+		result: &UsageBillingApplyResult{SettlementClosed: true},
+	}
+	svc := newOpenAIRecordUsageServiceWithBillingRepoForTest(
+		usageRepo,
+		billingRepo,
+		&openAIRecordUsageUserRepoStub{},
+		&openAIRecordUsageSubRepoStub{},
+		nil,
+	)
+
+	ctx := context.WithValue(context.Background(), ctxkey.ClientRequestID, "c6e062a6-c06d-4b89-a188-972377af4b71")
+	ctx = context.WithValue(ctx, ctxkey.WebChat, true)
+	err := svc.RecordUsage(ctx, &OpenAIRecordUsageInput{
+		Result: &OpenAIForwardResult{
+			RequestID: "upstream-late-web-chat",
+			Usage:     OpenAIUsage{InputTokens: 10, OutputTokens: 5},
+			Model:     "gpt-5.1",
+			Duration:  time.Second,
+		},
+		APIKey:  &APIKey{ID: 1002},
+		User:    &User{ID: 2002},
+		Account: &Account{ID: 3002},
+	})
+
+	require.ErrorIs(t, err, ErrUsageBillingSettlementClosed)
+	require.Equal(t, 1, billingRepo.calls)
+	require.Zero(t, usageRepo.calls)
+}
+
 func TestOpenAIGatewayServiceRecordUsage_ImageOnlyUsageStillPersists(t *testing.T) {
 	usageRepo := &openAIRecordUsageLogRepoStub{inserted: true}
 	userRepo := &openAIRecordUsageUserRepoStub{}

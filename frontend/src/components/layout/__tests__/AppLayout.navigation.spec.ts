@@ -1,6 +1,7 @@
 import { nextTick } from 'vue'
 import { mount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
+import { createMemoryHistory, createRouter } from 'vue-router'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 vi.mock('@/composables/useOnboardingTour', () => ({
@@ -10,17 +11,51 @@ vi.mock('@/composables/useOnboardingTour', () => ({
 import AppLayout from '../AppLayout.vue'
 import { useAppStore } from '@/stores'
 
+async function createLayoutRouter(initialPath = '/dashboard') {
+  const router = createRouter({
+    history: createMemoryHistory(),
+    routes: [
+      {
+        path: '/dashboard',
+        component: { template: '<div />' },
+        meta: { requiresAuth: true },
+      },
+      {
+        path: '/chat',
+        component: { template: '<div />' },
+        meta: { requiresAuth: true },
+      },
+      {
+        path: '/admin/promo-codes',
+        component: { template: '<div />' },
+        meta: { requiresAuth: true, requiresAdmin: true },
+      },
+      {
+        path: '/home',
+        component: { template: '<div />' },
+        meta: { requiresAuth: false },
+      },
+    ],
+  })
+
+  await router.push(initialPath)
+  await router.isReady()
+  return router
+}
+
 describe('AppLayout navigation structure', () => {
   afterEach(() => {
     document.body.classList.remove('admin-home-clay-portals')
+    document.body.classList.remove('app-flat-workspace-active')
   })
 
-  it('places the global header before the floating sidebar and content shell', () => {
+  it('places the global header before the floating sidebar and content shell', async () => {
     const pinia = createPinia()
     setActivePinia(pinia)
+    const router = await createLayoutRouter()
     const wrapper = mount(AppLayout, {
       global: {
-        plugins: [pinia],
+        plugins: [pinia, router],
         stubs: {
           AppHeader: { template: '<header data-testid="header-stub" />' },
           AppSidebar: { template: '<aside data-testid="sidebar-stub" />' },
@@ -43,10 +78,11 @@ describe('AppLayout navigation structure', () => {
   it('keeps the content offset synchronized with the sidebar width', async () => {
     const pinia = createPinia()
     setActivePinia(pinia)
+    const router = await createLayoutRouter()
     const appStore = useAppStore()
     const wrapper = mount(AppLayout, {
       global: {
-        plugins: [pinia],
+        plugins: [pinia, router],
         stubs: {
           AppHeader: true,
           AppSidebar: true,
@@ -83,12 +119,13 @@ describe('AppLayout navigation structure', () => {
     )
   })
 
-  it('keeps content theming opt-in without changing the shared sidebar variant', async () => {
+  it('keeps the flat authenticated shell while the admin content adapter remains opt-in', async () => {
     const pinia = createPinia()
     setActivePinia(pinia)
+    const router = await createLayoutRouter()
     const wrapper = mount(AppLayout, {
       global: {
-        plugins: [pinia],
+        plugins: [pinia, router],
         stubs: {
           AppHeader: {
             template: '<header data-testid="header-original" />',
@@ -99,27 +136,103 @@ describe('AppLayout navigation structure', () => {
     })
 
     expect(wrapper.classes()).toContain('app-layout--snow-shell')
+    expect(wrapper.classes()).toContain('app-layout--flat-workspace-shell')
+    expect(wrapper.classes()).not.toContain('app-layout--admin-shell')
     expect(wrapper.get('[data-testid="app-main-shell"]').classes()).not.toContain('app-layout--home-clay')
+    expect(wrapper.get('[data-testid="app-main-shell"]').classes()).not.toContain('app-layout--chat')
     expect(wrapper.find('[data-testid="header-original"]').exists()).toBe(true)
     expect(wrapper.get('[data-testid="sidebar-original"]').attributes('variant')).toBeUndefined()
     expect(document.body.classList.contains('admin-home-clay-portals')).toBe(false)
+    expect(document.body.classList.contains('app-flat-workspace-active')).toBe(true)
 
     await wrapper.setProps({ variant: 'home-clay' })
 
     expect(wrapper.classes()).toContain('app-layout--snow-shell')
+    expect(wrapper.classes()).toContain('app-layout--flat-workspace-shell')
+    expect(wrapper.classes()).toContain('app-layout--admin-shell')
     expect(wrapper.get('[data-testid="app-main-shell"]').classes()).toContain('app-layout--home-clay')
     expect(wrapper.get('[data-testid="header-original"]').attributes('data-variant')).toBeUndefined()
     expect(wrapper.get('[data-testid="sidebar-original"]').attributes('variant')).toBeUndefined()
     expect(document.documentElement.classList.contains('app-layout--home-clay')).toBe(false)
     expect(document.body.classList.contains('app-layout--home-clay')).toBe(false)
     expect(document.body.classList.contains('admin-home-clay-portals')).toBe(true)
+    expect(document.body.classList.contains('app-flat-workspace-active')).toBe(true)
 
     await wrapper.setProps({ variant: 'default' })
 
     expect(wrapper.classes()).toContain('app-layout--snow-shell')
+    expect(wrapper.classes()).toContain('app-layout--flat-workspace-shell')
+    expect(wrapper.classes()).not.toContain('app-layout--admin-shell')
     expect(wrapper.get('[data-testid="app-main-shell"]').classes()).not.toContain('app-layout--home-clay')
     expect(wrapper.get('[data-testid="header-original"]').attributes('data-variant')).toBeUndefined()
     expect(wrapper.get('[data-testid="sidebar-original"]').attributes('variant')).toBeUndefined()
     expect(document.body.classList.contains('admin-home-clay-portals')).toBe(false)
+    expect(document.body.classList.contains('app-flat-workspace-active')).toBe(true)
+  })
+
+  it('derives authenticated, admin, and public shell layers from route metadata', async () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const router = await createLayoutRouter('/admin/promo-codes')
+    const wrapper = mount(AppLayout, {
+      global: {
+        plugins: [pinia, router],
+        stubs: {
+          AppHeader: true,
+          AppSidebar: true,
+        },
+      },
+    })
+
+    expect(wrapper.classes()).toContain('app-layout--flat-workspace-shell')
+    expect(wrapper.classes()).toContain('app-layout--admin-shell')
+    expect(wrapper.get('[data-testid="app-main-shell"]').classes()).toContain('app-layout--home-clay')
+    expect(document.body.classList.contains('admin-home-clay-portals')).toBe(true)
+    expect(document.body.classList.contains('app-flat-workspace-active')).toBe(true)
+
+    await router.push('/dashboard')
+    await nextTick()
+
+    expect(wrapper.classes()).toContain('app-layout--flat-workspace-shell')
+    expect(wrapper.classes()).not.toContain('app-layout--admin-shell')
+    expect(wrapper.get('[data-testid="app-main-shell"]').classes()).not.toContain('app-layout--home-clay')
+    expect(document.body.classList.contains('admin-home-clay-portals')).toBe(false)
+    expect(document.body.classList.contains('app-flat-workspace-active')).toBe(true)
+
+    await router.push('/home')
+    await nextTick()
+
+    expect(wrapper.classes()).not.toContain('app-layout--flat-workspace-shell')
+    expect(wrapper.classes()).not.toContain('app-layout--admin-shell')
+    expect(wrapper.get('[data-testid="app-main-shell"]').classes()).not.toContain('app-layout--home-clay')
+    expect(document.body.classList.contains('admin-home-clay-portals')).toBe(false)
+    expect(document.body.classList.contains('app-flat-workspace-active')).toBe(false)
+  })
+
+  it('layers the chat workspace behavior on the authenticated flat shell', async () => {
+    const pinia = createPinia()
+    setActivePinia(pinia)
+    const router = await createLayoutRouter('/chat')
+    const wrapper = mount(AppLayout, {
+      props: { variant: 'chat' },
+      global: {
+        plugins: [pinia, router],
+        stubs: {
+          AppHeader: true,
+          AppSidebar: true,
+        },
+      },
+    })
+
+    expect(wrapper.classes()).toContain('app-layout--flat-workspace-shell')
+    expect(wrapper.classes()).not.toContain('app-layout--admin-shell')
+    expect(wrapper.get('[data-testid="app-main-shell"]').classes()).toContain('app-layout--chat')
+    expect(wrapper.get('[data-testid="app-main-shell"]').classes()).not.toContain('app-layout--home-clay')
+    expect(document.body.classList.contains('admin-home-clay-portals')).toBe(false)
+    expect(document.body.classList.contains('app-flat-workspace-active')).toBe(true)
+
+    wrapper.unmount()
+
+    expect(document.body.classList.contains('app-flat-workspace-active')).toBe(false)
   })
 })

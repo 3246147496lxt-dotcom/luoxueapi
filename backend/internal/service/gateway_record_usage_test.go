@@ -548,3 +548,19 @@ func TestGatewayServiceRecordUsage_ReasoningEffortNil(t *testing.T) {
 	require.NotNil(t, usageRepo.lastLog)
 	require.Nil(t, usageRepo.lastLog.ReasoningEffort)
 }
+
+func TestDetachedBillingContextWebChatPreservesBudgetDeadlineButIgnoresCancellation(t *testing.T) {
+	parent, cancelParent := context.WithTimeout(context.Background(), time.Second)
+	parent = context.WithValue(parent, ctxkey.WebChat, true)
+	parentDeadline, ok := parent.Deadline()
+	require.True(t, ok)
+	cancelParent()
+
+	billingCtx, cancelBilling := detachedBillingContext(parent)
+	defer cancelBilling()
+
+	require.NoError(t, billingCtx.Err())
+	billingDeadline, ok := billingCtx.Deadline()
+	require.True(t, ok)
+	require.WithinDuration(t, parentDeadline, billingDeadline, 10*time.Millisecond)
+}

@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -90,6 +91,7 @@ type channelCache struct {
 	// 冷路径（CRUD 操作）
 	byID     map[int64]*Channel
 	loadedAt time.Time
+	loadErr  error
 }
 
 // ChannelMappingResult 渠道映射查找结果
@@ -189,6 +191,20 @@ func (s *ChannelService) loadCache(ctx context.Context) (*channelCache, error) {
 	return cache, nil
 }
 
+// loadCacheStrict preserves repository failures stored in the short-lived
+// error snapshot. Compatibility callers use loadCache and may degrade to the
+// empty snapshot after the first failure; Chat authorization must not.
+func (s *ChannelService) loadCacheStrict(ctx context.Context) (*channelCache, error) {
+	cache, err := s.loadCache(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if cache.loadErr != nil {
+		return nil, cache.loadErr
+	}
+	return cache, nil
+}
+
 // newEmptyChannelCache 创建空的渠道缓存（所有 map 已初始化）
 func newEmptyChannelCache() *channelCache {
 	return &channelCache{
@@ -254,11 +270,13 @@ func expandMappingToCache(cache *channelCache, ch *Channel, gid int64, platform 
 	}
 }
 
-// storeErrorCache 存入短 TTL 空缓存，防止 DB 错误后紧密重试。
-// 通过回退 loadedAt 使剩余 TTL = channelErrorTTL。
-func (s *ChannelService) storeErrorCache() {
+// storeErrorCache 存入短 TTL 错误缓存，防止 DB 错误后紧密重试。
+// 通过回退 loadedAt 使剩余 TTL = channelErrorTTL。loadErr 使严格读取
+// 在 TTL 内保持 fail-closed，而兼容读取仍可按原有逻辑自行降级。
+func (s *ChannelService) storeErrorCache(err error) {
 	errorCache := newEmptyChannelCache()
 	errorCache.loadedAt = time.Now().Add(-(channelCacheTTL - channelErrorTTL))
+	errorCache.loadErr = err
 	s.cache.Store(errorCache)
 }
 
@@ -282,9 +300,10 @@ func (s *ChannelService) buildCache(ctx context.Context) (*channelCache, error) 
 func (s *ChannelService) fetchChannelData(ctx context.Context) ([]Channel, map[int64]string, error) {
 	channels, err := s.repo.ListAll(ctx)
 	if err != nil {
-		slog.Warn("failed to build channel cache", "error", err)
-		s.storeErrorCache()
-		return nil, nil, fmt.Errorf("list all channels: %w", err)
+		loadErr := fmt.Errorf("list all channels: %w", err)
+		slog.Warn("failed to build channel cache", "error", loadErr)
+		s.storeErrorCache(loadErr)
+		return nil, nil, loadErr
 	}
 
 	var allGroupIDs []int64
@@ -296,9 +315,10 @@ func (s *ChannelService) fetchChannelData(ctx context.Context) ([]Channel, map[i
 	if len(allGroupIDs) > 0 {
 		groupPlatforms, err = s.repo.GetGroupPlatforms(ctx, allGroupIDs)
 		if err != nil {
-			slog.Warn("failed to load group platforms for channel cache", "error", err)
-			s.storeErrorCache()
-			return nil, nil, fmt.Errorf("get group platforms: %w", err)
+			loadErr := fmt.Errorf("get group platforms: %w", err)
+			slog.Warn("failed to load group platforms for channel cache", "error", loadErr)
+			s.storeErrorCache(loadErr)
+			return nil, nil, loadErr
 		}
 	}
 	return channels, groupPlatforms, nil
@@ -460,6 +480,22 @@ func (s *ChannelService) lookupGroupChannel(ctx context.Context, groupID int64) 
 	}, nil
 }
 
+func (s *ChannelService) lookupGroupChannelStrict(ctx context.Context, groupID int64) (*channelLookup, error) {
+	cache, err := s.loadCacheStrict(ctx)
+	if err != nil {
+		return nil, err
+	}
+	ch, ok := cache.channelByGroupID[groupID]
+	if !ok || !ch.IsActive() {
+		return nil, nil
+	}
+	return &channelLookup{
+		cache:    cache,
+		channel:  ch,
+		platform: cache.groupPlatform[groupID],
+	}, nil
+}
+
 // GetChannelModelPricing 获取指定分组+模型的渠道定价（热路径 O(1)）。
 // 各平台严格独立，只在本平台内查找定价。
 func (s *ChannelService) GetChannelModelPricing(ctx context.Context, groupID int64, model string) *ChannelModelPricing {
@@ -495,6 +531,22 @@ func (s *ChannelService) ResolveChannelMapping(ctx context.Context, groupID int6
 	return resolveMapping(lk, groupID, model)
 }
 
+// ResolveChannelMappingStrict resolves a channel mapping without hiding cache
+// or repository failures. Chat authorization uses this fail-closed variant.
+func (s *ChannelService) ResolveChannelMappingStrict(ctx context.Context, groupID int64, model string) (ChannelMappingResult, error) {
+	if s == nil || s.repo == nil {
+		return ChannelMappingResult{}, errors.New("channel repository is unavailable")
+	}
+	lk, err := s.lookupGroupChannelStrict(ctx, groupID)
+	if err != nil {
+		return ChannelMappingResult{}, err
+	}
+	if lk == nil {
+		return ChannelMappingResult{MappedModel: model}, nil
+	}
+	return resolveMapping(lk, groupID, model), nil
+}
+
 // IsModelRestricted 检查模型是否被渠道限制。
 // 返回 true 表示模型被限制（不在允许列表中）。
 // 如果渠道未启用模型限制或分组无渠道关联，返回 false。
@@ -507,6 +559,22 @@ func (s *ChannelService) IsModelRestricted(ctx context.Context, groupID int64, m
 		return false
 	}
 	return checkRestricted(lk, groupID, model)
+}
+
+// IsModelRestrictedStrict checks channel restrictions without treating a
+// cache or repository failure as an unrestricted model.
+func (s *ChannelService) IsModelRestrictedStrict(ctx context.Context, groupID int64, model string) (bool, error) {
+	if s == nil || s.repo == nil {
+		return false, errors.New("channel repository is unavailable")
+	}
+	lk, err := s.lookupGroupChannelStrict(ctx, groupID)
+	if err != nil {
+		return false, err
+	}
+	if lk == nil {
+		return false, nil
+	}
+	return checkRestricted(lk, groupID, model), nil
 }
 
 // ResolveChannelMappingAndRestrict 解析渠道映射。

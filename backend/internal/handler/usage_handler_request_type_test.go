@@ -135,7 +135,7 @@ func TestUserUsageListAdvancedFilters(t *testing.T) {
 	repo := &userUsageRepoCapture{}
 	router := newUserUsageRequestTypeTestRouter(repo)
 
-	req := httptest.NewRequest(http.MethodGet, "/usage?group_id=7&model=gpt-5&billing_type=1&billing_mode=image&start_date=2026-03-01&end_date=2026-03-02", nil)
+	req := httptest.NewRequest(http.MethodGet, "/usage?group_id=7&model=gpt-5&source=web_chat&request_id=receipt-1&billing_type=1&billing_mode=image&start_date=2026-03-01&end_date=2026-03-02", nil)
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, req)
 
@@ -143,12 +143,25 @@ func TestUserUsageListAdvancedFilters(t *testing.T) {
 	require.Equal(t, int64(42), repo.listFilters.UserID)
 	require.Equal(t, int64(7), repo.listFilters.GroupID)
 	require.Equal(t, "gpt-5", repo.listFilters.Model)
+	require.Equal(t, "web_chat", repo.listFilters.Source)
+	require.Equal(t, "receipt-1", repo.listFilters.RequestID)
 	require.Equal(t, usagestats.ModelSourceRequested, repo.listFilters.ModelFilterSource)
 	require.NotNil(t, repo.listFilters.BillingType)
 	require.Equal(t, int8(1), *repo.listFilters.BillingType)
 	require.Equal(t, "image", repo.listFilters.BillingMode)
 	require.NotNil(t, repo.listFilters.StartTime)
 	require.NotNil(t, repo.listFilters.EndTime)
+}
+
+func TestUserUsageListRejectsInvalidSource(t *testing.T) {
+	repo := &userUsageRepoCapture{}
+	router := newUserUsageRequestTypeTestRouter(repo)
+
+	req := httptest.NewRequest(http.MethodGet, "/usage?source=unknown", nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusBadRequest, rec.Code)
 }
 
 func TestUserUsageListInvalidBillingMode(t *testing.T) {

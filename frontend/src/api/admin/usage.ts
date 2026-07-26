@@ -4,7 +4,13 @@
  */
 
 import { apiClient } from '../client'
-import type { AdminUsageLog, UsageQueryParams, PaginatedResponse, UsageRequestType } from '@/types'
+import type {
+  AdminUsageLog,
+  UsageQueryParams,
+  PaginatedResponse,
+  UsageRequestType,
+  UsageSource,
+} from '@/types'
 import type { EndpointStat } from '@/types'
 
 // ==================== Types ====================
@@ -92,6 +98,53 @@ export interface AdminUsageQueryParams extends UsageQueryParams {
   status_code?: number | null
 }
 
+export interface BillingReceiptTokenSummary {
+  input_tokens: number
+  output_tokens: number
+  cache_tokens: number
+  cache_read_tokens?: number
+  cache_creation_tokens?: number
+}
+
+export interface AdminBillingReceipt {
+  id: number | string
+  receipt_id: string
+  request_id?: string | null
+  user_id: number
+  user?: {
+    id?: number
+    email?: string
+    deleted?: boolean
+  } | null
+  user_email?: string | null
+  source?: UsageSource | null
+  requested_model?: string | null
+  actual_model: string
+  model?: string | null
+  tokens: BillingReceiptTokenSummary
+  gross_cost: number
+  charged_amount: number
+  balance_before?: number | null
+  balance_after?: number | null
+  status: string
+  overdraft?: boolean
+  failure_code?: string | null
+  failure_reason?: string | null
+  created_at: string
+}
+
+export interface BillingReceiptQueryParams {
+  page?: number
+  page_size?: number
+  user_id?: number
+  model?: string
+  receipt_id?: string
+  status?: string
+  source?: UsageSource
+  start_date?: string
+  end_date?: string
+}
+
 // ==================== API Functions ====================
 
 /**
@@ -108,6 +161,104 @@ export async function list(
     signal: options?.signal
   })
   return data
+}
+
+function asFiniteNumber(value: unknown, fallback = 0): number {
+  const parsed = typeof value === 'number' ? value : Number(value)
+  return Number.isFinite(parsed) ? parsed : fallback
+}
+
+function normalizeBillingReceipt(raw: Record<string, any>): AdminBillingReceipt {
+  const tokenData = raw.tokens && typeof raw.tokens === 'object' ? raw.tokens : {}
+  const id = raw.id ?? raw.receipt_id ?? raw.request_id ?? ''
+  const receiptId = String(raw.receipt_id ?? raw.request_id ?? id)
+  const requestedModel = raw.requested_model ?? raw.model ?? null
+  const actualModel = raw.actual_model ?? raw.upstream_model ?? raw.model ?? requestedModel ?? ''
+
+  return {
+    id,
+    receipt_id: receiptId,
+    request_id: raw.request_id ?? receiptId,
+    user_id: asFiniteNumber(raw.user_id ?? raw.user?.id),
+    user: raw.user ?? null,
+    user_email: raw.user_email ?? raw.email ?? raw.user?.email ?? null,
+    source: raw.source ?? 'web_chat',
+    requested_model: requestedModel,
+    actual_model: String(actualModel),
+    model: raw.model ?? requestedModel,
+    tokens: {
+      input_tokens: asFiniteNumber(raw.input_tokens ?? tokenData.input_tokens ?? tokenData.input),
+      output_tokens: asFiniteNumber(raw.output_tokens ?? tokenData.output_tokens ?? tokenData.output),
+      cache_tokens: asFiniteNumber(
+        raw.cache_tokens
+          ?? tokenData.cache_tokens
+          ?? tokenData.cache
+          ?? (
+            asFiniteNumber(raw.cache_read_tokens ?? tokenData.cache_read_tokens)
+            + asFiniteNumber(raw.cache_creation_tokens ?? tokenData.cache_creation_tokens)
+          )
+      ),
+      cache_read_tokens: asFiniteNumber(raw.cache_read_tokens ?? tokenData.cache_read_tokens),
+      cache_creation_tokens: asFiniteNumber(raw.cache_creation_tokens ?? tokenData.cache_creation_tokens),
+    },
+    gross_cost: asFiniteNumber(
+      raw.gross_cost
+        ?? raw.gross_amount
+        ?? raw.total_cost
+        ?? raw.actual_cost
+        ?? raw.charged_amount
+    ),
+    charged_amount: asFiniteNumber(
+      raw.charged_amount ?? raw.actual_cost ?? raw.gross_cost ?? raw.total_cost
+    ),
+    balance_before: raw.balance_before == null ? null : asFiniteNumber(raw.balance_before),
+    balance_after: raw.balance_after == null ? null : asFiniteNumber(raw.balance_after),
+    status: String(raw.status ?? raw.billing_status ?? 'pending'),
+    overdraft: Boolean(raw.overdraft),
+    failure_code: raw.failure_code ?? null,
+    failure_reason: raw.failure_reason ?? raw.error_message ?? raw.billing_error ?? null,
+    created_at: String(raw.created_at ?? ''),
+  }
+}
+
+/**
+ * List request-level Web Chat billing receipts (admin only).
+ */
+export async function listBillingReceipts(
+  params: BillingReceiptQueryParams,
+  options?: { signal?: AbortSignal }
+): Promise<PaginatedResponse<AdminBillingReceipt>> {
+  const { data } = await apiClient.get<
+    PaginatedResponse<Record<string, any>> | {
+      data?: PaginatedResponse<Record<string, any>>
+      receipts?: Record<string, any>[]
+      items?: Record<string, any>[]
+      total?: number
+      page?: number
+      page_size?: number
+      pages?: number
+    }
+  >('/admin/billing/receipts', {
+    params,
+    signal: options?.signal,
+  })
+
+  const outer = data as any
+  const payload = outer?.data && typeof outer.data === 'object' ? outer.data : outer
+  const items = Array.isArray(payload?.items)
+    ? payload.items
+    : (Array.isArray(payload?.receipts) ? payload.receipts : [])
+  const page = asFiniteNumber(payload?.page, params.page ?? 1)
+  const pageSize = asFiniteNumber(payload?.page_size, params.page_size ?? 20)
+  const total = asFiniteNumber(payload?.total, items.length)
+
+  return {
+    items: items.map((item: Record<string, any>) => normalizeBillingReceipt(item)),
+    total,
+    page,
+    page_size: pageSize,
+    pages: asFiniteNumber(payload?.pages, pageSize > 0 ? Math.ceil(total / pageSize) : 0),
+  }
 }
 
 /**
@@ -206,6 +357,7 @@ export async function cancelCleanupTask(taskId: number): Promise<{ id: number; s
 
 export const adminUsageAPI = {
   list,
+  listBillingReceipts,
   getStats,
   searchUsers,
   searchApiKeys,

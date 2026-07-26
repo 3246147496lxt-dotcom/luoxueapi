@@ -20,3 +20,10 @@ func TestDeriveAuditAction(t *testing.T) {
 		}
 	}
 }
+
+func TestAdminChatContentReadIsRegisteredAsSensitiveRead(t *testing.T) {
+	const route = "GET /api/v1/admin/users/:id/chat/conversations/:conversation_id"
+	if got := auditSensitiveReads[route]; got != "admin.chat.conversation.view" {
+		t.Fatalf("sensitive read action = %q, want admin.chat.conversation.view", got)
+	}
+}

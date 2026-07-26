@@ -1,9 +1,24 @@
 <template>
   <svg
-    fill="currentColor"
-    viewBox="224 190 640 640"
+    fill="none"
+    viewBox="0 0 24 24"
+    stroke="currentColor"
+    stroke-width="1.75"
+    stroke-linecap="round"
+    stroke-linejoin="round"
     aria-hidden="true"
   >
-    <path d="M256 238.9504a25.6 25.6 0 0 0 0 51.2h546.1504a25.6 25.6 0 0 0 0-51.2H256zM256 392.5504a25.6 25.6 0 1 0 0 51.2h273.0496a25.6 25.6 0 0 0 0-51.2H256zM256 546.1504a25.6 25.6 0 1 0 0 51.2h273.0496a25.6 25.6 0 0 0 0-51.2H256zM256 699.7504a25.6 25.6 0 0 0 0 51.2h546.1504a25.6 25.6 0 0 0 0-51.2H256zM827.7504 409.6a25.6 25.6 0 0 0-39.168-21.7088l-136.5504 85.3504a25.6 25.6 0 0 0 0 43.4176l136.5504 85.2992a25.6 25.6 0 0 0 39.168-21.7088V409.6z m-51.2 46.1312v78.336l-62.6176-39.168 62.6176-39.168z" />
+    <rect width="18" height="18" x="3" y="3" rx="2" />
+    <path d="M9 3v18" />
+    <path v-if="collapsed" d="m14 9 3 3-3 3" />
+    <path v-else d="m16 15-3-3 3-3" />
   </svg>
 </template>
+
+<script setup lang="ts">
+withDefaults(defineProps<{
+  collapsed?: boolean
+}>(), {
+  collapsed: false
+})
+</script>

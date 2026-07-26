@@ -357,14 +357,15 @@ func TestEmitTurnCompleteCoverage(t *testing.T) {
 	})
 	require.Equal(t, 0, called)
 
-	// 缺少 response_id 时不应触发。
+	// 缺少 response_id 时仍应结算当前 turn；relay 会在转发该 terminal
+	// 后结束物理连接，避免无法去重的 terminal 进入后续 turn。
 	emitTurnComplete(func(turn RelayTurnResult) {
 		called++
 	}, &relayState{requestModel: "gpt-5"}, observedUpstreamEvent{
 		terminal:  true,
 		eventType: "response.completed",
 	})
-	require.Equal(t, 0, called)
+	require.Equal(t, 1, called)
 
 	// terminal 且 response_id 存在，应该触发；state=nil 时 model 为空串。
 	var got RelayTurnResult
@@ -377,7 +378,7 @@ func TestEmitTurnCompleteCoverage(t *testing.T) {
 		responseID: "resp_emit",
 		usage:      Usage{InputTokens: 2, OutputTokens: 3},
 	})
-	require.Equal(t, 1, called)
+	require.Equal(t, 2, called)
 	require.Equal(t, "resp_emit", got.RequestID)
 	require.Equal(t, "response.completed", got.TerminalEventType)
 	require.Equal(t, 2, got.Usage.InputTokens)

@@ -4,6 +4,7 @@ package repository
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"strings"
 	"testing"
@@ -14,6 +15,209 @@ import (
 
 	"github.com/Wei-Shaw/sub2api/internal/service"
 )
+
+func TestUsageBillingRepositoryApply_LinearizesWithWebChatFinalization(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	userID, apiKeyID, accountID := newBillingReceiptWebChatFixture(t, 50)
+	clientRequestID := uuid.NewString()
+	requestID := "client:" + clientRequestID
+	attemptID := insertBillingReceiptWebChatAttempt(
+		t,
+		userID,
+		clientRequestID,
+		service.ChatAttemptStatusProcessing,
+	)
+	repo := NewUsageBillingRepository(testEntClient(t), integrationDB)
+
+	type applyOutcome struct {
+		result *service.UsageBillingApplyResult
+		err    error
+	}
+	applyDone := make(chan applyOutcome, 1)
+	finalizeDone := make(chan error, 1)
+	start := make(chan struct{})
+
+	go func() {
+		<-start
+		result, err := repo.Apply(ctx, &service.UsageBillingCommand{
+			RequestID:      requestID,
+			Source:         service.BillingReceiptSourceWebChat,
+			UserID:         userID,
+			APIKeyID:       apiKeyID,
+			AccountID:      accountID,
+			AccountType:    service.AccountTypeAPIKey,
+			Model:          "gpt-5.5",
+			RequestedModel: "gpt-5.5",
+			BalanceCost:    1.25,
+		})
+		applyDone <- applyOutcome{result: result, err: err}
+	}()
+	go func() {
+		<-start
+		tx, err := integrationDB.BeginTx(ctx, nil)
+		if err != nil {
+			finalizeDone <- err
+			return
+		}
+		defer func() { _ = tx.Rollback() }()
+
+		var status string
+		err = tx.QueryRowContext(ctx, `
+			SELECT status
+			FROM chat_request_attempts
+			WHERE user_id = $1 AND attempt_id = $2
+			FOR UPDATE
+		`, userID, attemptID).Scan(&status)
+		if err == nil && status == service.ChatAttemptStatusProcessing {
+			_, err = tx.ExecContext(ctx, `
+				UPDATE chat_request_attempts
+				SET status = $3, terminal_at = NOW(), updated_at = NOW()
+				WHERE user_id = $1 AND attempt_id = $2
+			`, userID, attemptID, service.ChatAttemptStatusInterrupted)
+		}
+		if err == nil {
+			err = tx.Commit()
+		}
+		finalizeDone <- err
+	}()
+
+	close(start)
+	outcome := <-applyDone
+	require.NoError(t, outcome.err)
+	require.NoError(t, <-finalizeDone)
+	require.NotNil(t, outcome.result)
+
+	var (
+		status       string
+		balance      float64
+		dedupCount   int
+		receiptCount int
+	)
+	require.NoError(t, integrationDB.QueryRowContext(ctx, `
+		SELECT status
+		FROM chat_request_attempts
+		WHERE user_id = $1 AND attempt_id = $2
+	`, userID, attemptID).Scan(&status))
+	require.Equal(t, service.ChatAttemptStatusInterrupted, status)
+	require.NoError(t, integrationDB.QueryRowContext(
+		ctx,
+		"SELECT balance FROM users WHERE id = $1",
+		userID,
+	).Scan(&balance))
+	require.NoError(t, integrationDB.QueryRowContext(ctx, `
+		SELECT COUNT(*)
+		FROM usage_billing_dedup
+		WHERE request_id = $1 AND api_key_id = $2
+	`, requestID, apiKeyID).Scan(&dedupCount))
+	require.NoError(t, integrationDB.QueryRowContext(ctx, `
+		SELECT COUNT(*)
+		FROM billing_usage_entries
+		WHERE request_id = $1 AND api_key_id = $2
+	`, requestID, apiKeyID).Scan(&receiptCount))
+
+	switch {
+	case outcome.result.Applied:
+		require.False(t, outcome.result.SettlementClosed)
+		require.InDelta(t, 48.75, balance, 0.000001)
+		require.Equal(t, 1, dedupCount)
+		require.Equal(t, 1, receiptCount)
+	case outcome.result.SettlementClosed:
+		require.False(t, outcome.result.Applied)
+		require.InDelta(t, 50, balance, 0.000001)
+		require.Zero(t, dedupCount)
+		require.Zero(t, receiptCount)
+	default:
+		t.Fatalf("unexpected billing outcome: %+v", outcome.result)
+	}
+}
+
+func TestWebChatBillingLocksUserBeforeAttempt(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	userID, apiKeyID, _ := newBillingReceiptWebChatFixture(t, 50)
+	clientRequestID := uuid.NewString()
+	insertBillingReceiptWebChatAttempt(
+		t,
+		userID,
+		clientRequestID,
+		service.ChatAttemptStatusProcessing,
+	)
+	cmd := &service.UsageBillingCommand{
+		RequestID:          "client:" + clientRequestID,
+		RequestFingerprint: strings.Repeat("f", 64),
+		Source:             service.BillingReceiptSourceWebChat,
+		UserID:             userID,
+		APIKeyID:           apiKeyID,
+	}
+	cmd.Normalize()
+
+	deleteTx, err := integrationDB.BeginTx(ctx, nil)
+	require.NoError(t, err)
+	defer func() { _ = deleteTx.Rollback() }()
+	var lockedUserID int64
+	require.NoError(t, deleteTx.QueryRowContext(ctx, `
+		SELECT id
+		FROM users
+		WHERE id = $1
+		FOR UPDATE
+	`, userID).Scan(&lockedUserID))
+
+	billingTx, err := integrationDB.BeginTx(ctx, nil)
+	require.NoError(t, err)
+	defer func() { _ = billingTx.Rollback() }()
+	var billingBackendPID int
+	require.NoError(t, billingTx.QueryRowContext(
+		ctx,
+		"SELECT pg_backend_pid()",
+	).Scan(&billingBackendPID))
+
+	type lockOutcome struct {
+		closed bool
+		err    error
+	}
+	lockDone := make(chan lockOutcome, 1)
+	repo := &usageBillingRepository{db: integrationDB}
+	go func() {
+		closed, lockErr := repo.lockWebChatAttemptForBilling(
+			ctx,
+			billingTx,
+			cmd,
+		)
+		lockDone <- lockOutcome{closed: closed, err: lockErr}
+	}()
+
+	require.Eventually(t, func() bool {
+		var (
+			waitEventType sql.NullString
+			query         string
+		)
+		queryErr := integrationDB.QueryRowContext(ctx, `
+			SELECT wait_event_type, query
+			FROM pg_stat_activity
+			WHERE pid = $1
+		`, billingBackendPID).Scan(&waitEventType, &query)
+		return queryErr == nil &&
+			waitEventType.String == "Lock" &&
+			strings.Contains(query, "FROM users")
+	}, 3*time.Second, 10*time.Millisecond)
+
+	var lockedAttemptID int64
+	require.NoError(t, deleteTx.QueryRowContext(ctx, `
+		SELECT id
+		FROM chat_request_attempts
+		WHERE user_id = $1
+		  AND client_request_id = $2
+		FOR UPDATE NOWAIT
+	`, userID, clientRequestID).Scan(&lockedAttemptID))
+
+	require.NoError(t, deleteTx.Rollback())
+	outcome := <-lockDone
+	require.NoError(t, outcome.err)
+	require.False(t, outcome.closed)
+}
 
 func TestUsageBillingRepositoryApply_DeduplicatesBalanceBilling(t *testing.T) {
 	ctx := context.Background()

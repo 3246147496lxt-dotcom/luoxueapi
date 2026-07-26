@@ -453,7 +453,10 @@ func (r *userRepository) ListWithFilters(ctx context.Context, params pagination.
 				dbuser.EmailContainsFold(filters.Search),
 				dbuser.UsernameContainsFold(filters.Search),
 				dbuser.NotesContainsFold(filters.Search),
-				dbuser.HasAPIKeysWith(apikey.KeyContainsFold(filters.Search)),
+				dbuser.HasAPIKeysWith(
+					apikey.KeyContainsFold(filters.Search),
+					apikey.PurposeEQ(service.APIKeyPurposeUser),
+				),
 			),
 		)
 	}
@@ -472,6 +475,7 @@ func (r *userRepository) ListWithFilters(ctx context.Context, params pagination.
 		q = q.Where(dbuser.HasAPIKeysWith(
 			apikey.GroupIDEQ(filters.APIKeyGroupID),
 			apikey.DeletedAtIsNil(),
+			apikey.PurposeEQ(service.APIKeyPurposeUser),
 		))
 	}
 

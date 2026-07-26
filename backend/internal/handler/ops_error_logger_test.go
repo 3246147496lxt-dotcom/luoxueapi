@@ -1,11 +1,16 @@
 package handler
 
 import (
+	"context"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
+	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/pkg/ctxkey"
 	middleware2 "github.com/Wei-Shaw/sub2api/internal/server/middleware"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/gin-gonic/gin"
@@ -149,6 +154,284 @@ func setupOpsErrorLogTestQueue(t *testing.T, size int) {
 	opsErrorLogMu.Unlock()
 }
 
+func TestOpsErrorLoggerMiddlewareWebChatIngressDoesNotCaptureCredentialsOrRequestBody(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	for _, method := range []string{http.MethodGet, http.MethodPost} {
+		t.Run(method, func(t *testing.T) {
+			setupOpsErrorLogTestQueue(t, 4)
+
+			ops := service.NewOpsService(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+			r := gin.New()
+			r.Use(middleware2.WebChatIngress())
+			r.Use(OpsErrorLoggerMiddleware(ops))
+			r.Handle(method, "/api/v1/chat/preflight", func(c *gin.Context) {
+				_, _ = io.Copy(io.Discard, c.Request.Body)
+				middleware2.AbortWithError(c, http.StatusUnauthorized, opsCodeInvalidAPIKey, "Authentication failed")
+			})
+
+			const jwt = "jwt-secret-value-that-must-not-be-stored"
+			const bodySecret = "request-body-secret-that-must-not-be-stored"
+			recorder := httptest.NewRecorder()
+			request := httptest.NewRequest(method, "/api/v1/chat/preflight", strings.NewReader(`{"prompt":"`+bodySecret+`"}`))
+			request.Header.Set("Authorization", "Bearer "+jwt)
+			r.ServeHTTP(recorder, request)
+
+			require.Equal(t, http.StatusUnauthorized, recorder.Code)
+			job := <-opsErrorLogQueue
+			require.NotNil(t, job.entry)
+			require.Empty(t, job.entry.APIKeyPrefix)
+			require.Empty(t, job.entry.AttemptedKeyPrefix)
+			require.Nil(t, job.entry.UserID)
+			require.NotContains(t, job.entry.ErrorBody, jwt)
+			require.NotContains(t, job.entry.ErrorBody, bodySecret)
+			require.NotContains(t, job.entry.ErrorMessage, jwt)
+			require.NotContains(t, job.entry.ErrorMessage, bodySecret)
+		})
+	}
+}
+
+func TestOpsErrorLoggerMiddlewareWebChatPreflightAttributesAuthenticatedUser(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	tests := []struct {
+		name   string
+		method string
+		status int
+		code   string
+	}{
+		{name: "insufficient balance", method: http.MethodPost, status: http.StatusForbidden, code: opsCodeInsufficientBalance},
+		{name: "catalog unavailable", method: http.MethodGet, status: http.StatusServiceUnavailable, code: "CHAT_CATALOG_UNAVAILABLE"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			setupOpsErrorLogTestQueue(t, 4)
+
+			ops := service.NewOpsService(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+			r := gin.New()
+			r.Use(middleware2.WebChatIngress())
+			r.Use(OpsErrorLoggerMiddleware(ops))
+			r.Handle(tt.method, "/api/v1/chat/preflight", func(c *gin.Context) {
+				c.Set(string(middleware2.ContextKeyUser), middleware2.AuthSubject{UserID: 42})
+				middleware2.AbortWithError(c, tt.status, tt.code, "Chat preflight failed")
+			})
+
+			const jwt = "authenticated-jwt-secret"
+			recorder := httptest.NewRecorder()
+			request := httptest.NewRequest(tt.method, "/api/v1/chat/preflight", strings.NewReader(`{"prompt":"private chat body"}`))
+			request.Header.Set("Authorization", "Bearer "+jwt)
+			r.ServeHTTP(recorder, request)
+
+			require.Equal(t, tt.status, recorder.Code)
+			job := <-opsErrorLogQueue
+			require.NotNil(t, job.entry)
+			require.NotNil(t, job.entry.UserID)
+			require.Equal(t, int64(42), *job.entry.UserID)
+			require.Empty(t, job.entry.APIKeyPrefix)
+			require.Empty(t, job.entry.AttemptedKeyPrefix)
+			require.NotContains(t, job.entry.ErrorBody, jwt)
+			require.NotContains(t, job.entry.ErrorBody, "private chat body")
+		})
+	}
+}
+
+func TestOpsErrorLoggerMiddlewareWebChatSuccessfulFailoverScrubsChatContent(t *testing.T) {
+	setupOpsErrorLogTestQueue(t, 4)
+	gin.SetMode(gin.TestMode)
+
+	const (
+		promptSecret   = "private-prompt-successful-failover"
+		responseSecret = "private-upstream-response-successful-failover"
+	)
+	originalEvent := &service.OpsUpstreamErrorEvent{
+		AtUnixMs:             123456789,
+		Passthrough:          true,
+		Platform:             "openai",
+		AccountID:            81,
+		AccountName:          "primary-account",
+		UpstreamStatusCode:   http.StatusBadGateway,
+		UpstreamRequestID:    "upstream-request-success",
+		UpstreamURL:          "https://api.openai.com/v1/responses",
+		UpstreamResponseBody: responseSecret,
+		Kind:                 "failover",
+		Stage:                "inference",
+		Scope:                "account",
+		Reason:               "retryable_status",
+		Message:              promptSecret,
+		Detail:               responseSecret + ": detail",
+	}
+
+	ops := service.NewOpsService(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+	r := gin.New()
+	r.Use(middleware2.WebChatIngress())
+	r.Use(OpsErrorLoggerMiddleware(ops))
+	r.POST("/api/v1/chat/completions", func(c *gin.Context) {
+		c.Set(opsModelKey, "gpt-5")
+		c.Set(opsAccountIDKey, int64(82))
+		c.Set(service.OpsUpstreamStatusCodeKey, http.StatusBadGateway)
+		c.Set(service.OpsUpstreamErrorMessageKey, promptSecret)
+		c.Set(service.OpsUpstreamErrorDetailKey, responseSecret)
+		c.Set(service.OpsUpstreamErrorsKey, []*service.OpsUpstreamErrorEvent{originalEvent})
+		c.Header("X-Request-Id", "chat-request-success")
+		c.Status(http.StatusOK)
+	})
+
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/chat/completions", strings.NewReader(`{"messages":[{"role":"user","content":"`+promptSecret+`"}]}`))
+	r.ServeHTTP(recorder, request)
+
+	require.Equal(t, http.StatusOK, recorder.Code)
+	job := <-opsErrorLogQueue
+	require.NotNil(t, job.entry)
+	require.Equal(t, http.StatusOK, job.entry.StatusCode)
+	require.Equal(t, "chat-request-success", job.entry.RequestID)
+	require.NotNil(t, job.entry.AccountID)
+	require.Equal(t, int64(81), *job.entry.AccountID)
+	require.Equal(t, webChatOpsUpstreamAttemptFailedMessage, job.entry.ErrorMessage)
+	require.Empty(t, job.entry.ErrorBody)
+	require.Nil(t, job.entry.UpstreamErrorMessage)
+	require.Nil(t, job.entry.UpstreamErrorDetail)
+	require.Nil(t, job.entry.UpstreamErrorsJSON)
+	require.Len(t, job.entry.UpstreamErrors, 1)
+
+	storedEvent := job.entry.UpstreamErrors[0]
+	require.NotNil(t, storedEvent)
+	require.NotSame(t, originalEvent, storedEvent)
+	require.Equal(t, originalEvent.AtUnixMs, storedEvent.AtUnixMs)
+	require.Equal(t, originalEvent.Passthrough, storedEvent.Passthrough)
+	require.Equal(t, originalEvent.Platform, storedEvent.Platform)
+	require.Equal(t, originalEvent.AccountID, storedEvent.AccountID)
+	require.Equal(t, originalEvent.AccountName, storedEvent.AccountName)
+	require.Equal(t, originalEvent.UpstreamStatusCode, storedEvent.UpstreamStatusCode)
+	require.Equal(t, originalEvent.UpstreamRequestID, storedEvent.UpstreamRequestID)
+	require.Equal(t, originalEvent.UpstreamURL, storedEvent.UpstreamURL)
+	require.Equal(t, originalEvent.Kind, storedEvent.Kind)
+	require.Equal(t, originalEvent.Stage, storedEvent.Stage)
+	require.Equal(t, originalEvent.Scope, storedEvent.Scope)
+	require.Equal(t, originalEvent.Reason, storedEvent.Reason)
+	require.Empty(t, storedEvent.Message)
+	require.Empty(t, storedEvent.Detail)
+	require.Empty(t, storedEvent.UpstreamResponseBody)
+
+	// The request-scoped event is shared with gateway diagnostics and must not be mutated.
+	require.Equal(t, promptSecret, originalEvent.Message)
+	require.Equal(t, responseSecret+": detail", originalEvent.Detail)
+	require.Equal(t, responseSecret, originalEvent.UpstreamResponseBody)
+}
+
+func TestOpsErrorLoggerMiddlewareWebChatFinalErrorScrubsChatContent(t *testing.T) {
+	setupOpsErrorLogTestQueue(t, 4)
+	gin.SetMode(gin.TestMode)
+
+	const (
+		promptSecret   = "private-prompt-final-error"
+		responseSecret = "private-upstream-response-final-error"
+	)
+	originalEvent := &service.OpsUpstreamErrorEvent{
+		AtUnixMs:             987654321,
+		Platform:             "openai",
+		AccountID:            91,
+		AccountName:          "fallback-account",
+		UpstreamStatusCode:   http.StatusTooManyRequests,
+		UpstreamRequestID:    "upstream-request-failure",
+		UpstreamURL:          "https://api.openai.com/v1/responses",
+		UpstreamResponseBody: responseSecret,
+		Kind:                 "retry_exhausted",
+		Stage:                "inference",
+		Scope:                "request",
+		Reason:               "rate_limited",
+		Message:              responseSecret,
+		Detail:               promptSecret,
+	}
+
+	ops := service.NewOpsService(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+	r := gin.New()
+	r.Use(middleware2.WebChatIngress())
+	r.Use(OpsErrorLoggerMiddleware(ops))
+	r.POST("/api/v1/chat/completions", func(c *gin.Context) {
+		c.Set(string(middleware2.ContextKeyUser), middleware2.AuthSubject{UserID: 42})
+		c.Set(opsModelKey, "gpt-5")
+		c.Set(opsAccountIDKey, int64(91))
+		c.Set(service.OpsUpstreamStatusCodeKey, http.StatusTooManyRequests)
+		c.Set(service.OpsUpstreamErrorMessageKey, responseSecret)
+		c.Set(service.OpsUpstreamErrorDetailKey, promptSecret)
+		c.Set(service.OpsUpstreamErrorsKey, []*service.OpsUpstreamErrorEvent{originalEvent})
+		c.Header("X-Request-Id", "chat-request-failure")
+		c.JSON(http.StatusBadGateway, gin.H{"error": gin.H{
+			"type":    "upstream_error",
+			"code":    "UPSTREAM_FAILURE",
+			"message": responseSecret + ": " + promptSecret,
+		}})
+	})
+
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/api/v1/chat/completions", strings.NewReader(`{"messages":[{"role":"user","content":"`+promptSecret+`"}]}`))
+	r.ServeHTTP(recorder, request)
+
+	require.Equal(t, http.StatusBadGateway, recorder.Code)
+	job := <-opsErrorLogQueue
+	require.NotNil(t, job.entry)
+	require.Equal(t, http.StatusBadGateway, job.entry.StatusCode)
+	require.Equal(t, "chat-request-failure", job.entry.RequestID)
+	require.NotNil(t, job.entry.UserID)
+	require.Equal(t, int64(42), *job.entry.UserID)
+	require.NotNil(t, job.entry.AccountID)
+	require.Equal(t, int64(91), *job.entry.AccountID)
+	require.Equal(t, "upstream_error", job.entry.ErrorType)
+	require.Equal(t, "upstream", job.entry.ErrorPhase)
+	require.Equal(t, webChatOpsUpstreamFailedMessage, job.entry.ErrorMessage)
+	require.Empty(t, job.entry.ErrorBody)
+	require.Nil(t, job.entry.UpstreamErrorMessage)
+	require.Nil(t, job.entry.UpstreamErrorDetail)
+	require.Nil(t, job.entry.UpstreamErrorsJSON)
+	require.Len(t, job.entry.UpstreamErrors, 1)
+
+	storedEvent := job.entry.UpstreamErrors[0]
+	require.NotNil(t, storedEvent)
+	require.NotSame(t, originalEvent, storedEvent)
+	require.Equal(t, originalEvent.Platform, storedEvent.Platform)
+	require.Equal(t, originalEvent.AccountID, storedEvent.AccountID)
+	require.Equal(t, originalEvent.AccountName, storedEvent.AccountName)
+	require.Equal(t, originalEvent.UpstreamStatusCode, storedEvent.UpstreamStatusCode)
+	require.Equal(t, originalEvent.UpstreamRequestID, storedEvent.UpstreamRequestID)
+	require.Equal(t, originalEvent.UpstreamURL, storedEvent.UpstreamURL)
+	require.Equal(t, originalEvent.Kind, storedEvent.Kind)
+	require.Equal(t, originalEvent.Stage, storedEvent.Stage)
+	require.Equal(t, originalEvent.Scope, storedEvent.Scope)
+	require.Equal(t, originalEvent.Reason, storedEvent.Reason)
+	require.Empty(t, storedEvent.Message)
+	require.Empty(t, storedEvent.Detail)
+	require.Empty(t, storedEvent.UpstreamResponseBody)
+	require.NotContains(t, job.entry.ErrorMessage, promptSecret)
+	require.NotContains(t, job.entry.ErrorMessage, responseSecret)
+
+	require.Equal(t, responseSecret, originalEvent.Message)
+	require.Equal(t, promptSecret, originalEvent.Detail)
+	require.Equal(t, responseSecret, originalEvent.UpstreamResponseBody)
+}
+
+func TestOpsErrorLoggerMiddlewareGatewayStillCapturesAttemptedAPIKeyPrefix(t *testing.T) {
+	setupOpsErrorLogTestQueue(t, 4)
+	gin.SetMode(gin.TestMode)
+
+	ops := service.NewOpsService(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+	r := gin.New()
+	r.Use(OpsErrorLoggerMiddleware(ops))
+	r.POST("/v1/messages", func(c *gin.Context) {
+		middleware2.AbortWithError(c, http.StatusUnauthorized, opsCodeInvalidAPIKey, "Invalid API key")
+	})
+
+	const apiKey = "sk-gateway-credential-123456"
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+	request.Header.Set("Authorization", "Bearer "+apiKey)
+	r.ServeHTTP(recorder, request)
+
+	job := <-opsErrorLogQueue
+	require.NotNil(t, job.entry)
+	require.Equal(t, keyPrefix(apiKey, 8), job.entry.AttemptedKeyPrefix)
+}
+
 // 就地(in-band) SSE 错误挂在已固化的 HTTP 200 流上：wire 状态码为 200，
 // 常规 status>=400 采集路径不会触发。logOpsStreamError 必须据 MarkOpsStreamError
 // 补记一条错误日志，且用 IntendedStatus(429) 分级、StatusCode 仍记 wire 的 200。
@@ -180,6 +463,124 @@ func TestLogOpsStreamError_RecordsInBandConcurrencyLimit(t *testing.T) {
 	require.Equal(t, "P1", job.entry.Severity)            // 用 IntendedStatus 429 分级
 	require.Equal(t, "test-model", job.entry.Model)
 	require.Equal(t, "Concurrency limit exceeded for account, please retry later", job.entry.ErrorMessage)
+}
+
+func TestLogOpsStreamErrorRedactsWebChatAPIKeyPrefix(t *testing.T) {
+	setupOpsErrorLogTestQueue(t, 4)
+
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/api/v1/chat/completions", nil)
+	c.Request = c.Request.WithContext(context.WithValue(c.Request.Context(), ctxkey.WebChatIngress, true))
+	c.Set(string(middleware2.ContextKeyAPIKey), &service.APIKey{
+		ID:      77,
+		Key:     "sk-web-chat-internal-secret",
+		Purpose: service.APIKeyPurposeWebChat,
+	})
+	service.MarkOpsStreamError(c, "upstream_error", "Upstream request failed", http.StatusBadGateway)
+
+	ops := service.NewOpsService(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)
+	logOpsStreamError(c, ops, http.StatusOK)
+
+	job := <-opsErrorLogQueue
+	require.NotNil(t, job.entry.APIKeyID)
+	require.Equal(t, int64(77), *job.entry.APIKeyID)
+	require.Empty(t, job.entry.APIKeyPrefix)
+	require.Equal(t, webChatOpsUpstreamFailedMessage, job.entry.ErrorMessage)
+	require.Empty(t, job.entry.ErrorBody)
+}
+
+func TestEnqueueCyberSessionBlockedOpsEntryRedactsWebChatAPIKeyPrefix(t *testing.T) {
+	setupOpsErrorLogTestQueue(t, 4)
+
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/api/v1/chat/completions", nil)
+	c.Request = c.Request.WithContext(context.WithValue(c.Request.Context(), ctxkey.WebChatIngress, true))
+	principal := &service.APIKey{
+		ID:      88,
+		Key:     "sk-web-chat-internal-secret",
+		Purpose: service.APIKeyPurposeWebChat,
+	}
+	h := &OpenAIGatewayHandler{
+		opsService: service.NewOpsService(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil),
+	}
+
+	h.enqueueCyberSessionBlockedOpsEntry(c, principal, "gpt-5", "session-block")
+
+	job := <-opsErrorLogQueue
+	require.NotNil(t, job.entry.APIKeyID)
+	require.Equal(t, int64(88), *job.entry.APIKeyID)
+	require.Empty(t, job.entry.APIKeyPrefix)
+	require.Equal(t, webChatOpsRequestFailedMessage, job.entry.ErrorMessage)
+	require.Empty(t, job.entry.ErrorBody)
+}
+
+func TestRecordCyberPolicyIfMarkedScrubsWebChatMarkBeforeAsyncEnqueue(t *testing.T) {
+	setupOpsErrorLogTestQueue(t, 4)
+
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/api/v1/chat/completions", nil)
+	c.Request = c.Request.WithContext(context.WithValue(c.Request.Context(), ctxkey.WebChatIngress, true))
+	service.MarkOpsCyberPolicy(c, service.CyberPolicyMark{
+		Message:        "private cyber policy message",
+		Body:           `{"error":{"message":"private cyber policy body"}}`,
+		UpstreamStatus: http.StatusBadRequest,
+	})
+
+	h := &OpenAIGatewayHandler{
+		opsService: service.NewOpsService(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil),
+	}
+	h.recordCyberPolicyIfMarked(c, nil, nil, nil, "gpt-5", true, "", service.ChannelUsageFields{}, "")
+
+	select {
+	case job := <-opsErrorLogQueue:
+		require.NotNil(t, job.entry)
+		require.Equal(t, "cyber_policy", job.entry.ErrorType)
+		require.Equal(t, webChatOpsUpstreamFailedMessage, job.entry.ErrorMessage)
+		require.Empty(t, job.entry.ErrorBody)
+		require.NotContains(t, job.entry.ErrorMessage, "private cyber policy message")
+		require.NotContains(t, job.entry.ErrorBody, "private cyber policy body")
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for cyber policy Ops entry")
+	}
+}
+
+func TestPrepareOpsErrorLogForEnqueuePreservesOrdinaryAPIErrorContent(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+
+	upstreamMessage := "ordinary upstream message"
+	upstreamDetail := "ordinary upstream detail"
+	event := &service.OpsUpstreamErrorEvent{
+		Message:              "ordinary attempt message",
+		Detail:               "ordinary attempt detail",
+		UpstreamResponseBody: `{"error":"ordinary upstream body"}`,
+	}
+	entry := &service.OpsInsertErrorLogInput{
+		ErrorMessage:         "ordinary API request failed",
+		ErrorBody:            `{"error":"ordinary response body"}`,
+		UpstreamErrorMessage: &upstreamMessage,
+		UpstreamErrorDetail:  &upstreamDetail,
+		UpstreamErrors:       []*service.OpsUpstreamErrorEvent{event},
+	}
+
+	prepared := prepareOpsErrorLogForEnqueue(c, entry)
+
+	require.Same(t, entry, prepared)
+	require.Equal(t, `{"error":"ordinary response body"}`, prepared.ErrorBody)
+	require.Equal(t, upstreamMessage, *prepared.UpstreamErrorMessage)
+	require.Equal(t, upstreamDetail, *prepared.UpstreamErrorDetail)
+	require.Same(t, event, prepared.UpstreamErrors[0])
+	require.Equal(t, "ordinary attempt message", prepared.UpstreamErrors[0].Message)
+	require.Equal(t, "ordinary attempt detail", prepared.UpstreamErrors[0].Detail)
+	require.Equal(t, `{"error":"ordinary upstream body"}`, prepared.UpstreamErrors[0].UpstreamResponseBody)
 }
 
 // 未标记流内错误时 logOpsStreamError 必须是 no-op（不误记正常的 200 流）。
