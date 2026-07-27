@@ -20,6 +20,12 @@
               {{ d }}{{ t('payment.admin.daySuffix') }}
             </button>
           </div>
+          <Select
+            v-if="currencyOptions.length > 0"
+            v-model="currency"
+            :options="currencyOptions"
+            class="w-28"
+          />
           <button @click="loadDashboard" :disabled="loading" class="btn btn-secondary" :title="t('common.refresh')">
             <Icon name="refresh" size="md" :class="loading ? 'animate-spin' : ''" />
           </button>
@@ -32,7 +38,7 @@
       </div>
       <template v-else-if="stats">
         <OrderStatsCards :stats="stats" />
-        <DailyRevenueChart :data="stats.daily_series || []" :loading="loading" />
+        <DailyRevenueChart :data="stats.daily_series || []" :currency="stats.currency" :loading="loading" />
         <div class="grid grid-cols-1 gap-6 lg:grid-cols-2">
           <div class="card p-4">
             <h3 class="mb-4 text-sm font-semibold text-gray-900 dark:text-white">{{ t('payment.admin.paymentDistribution') }}</h3>
@@ -44,7 +50,7 @@
                   <span class="text-sm text-gray-700 dark:text-gray-300">{{ t('payment.methods.' + method.type, method.type) }}</span>
                 </div>
                 <div class="text-right">
-                  <span class="text-sm font-medium text-gray-900 dark:text-white">&yen;{{ method.amount.toFixed(2) }}</span>
+                  <span class="text-sm font-medium text-gray-900 dark:text-white">{{ formatPaymentAmount(method.amount, stats.currency) }}</span>
                   <span class="ml-2 text-xs text-gray-500 dark:text-gray-400">({{ method.count }})</span>
                 </div>
               </div>
@@ -59,7 +65,7 @@
                   <span :class="['flex h-6 w-6 items-center justify-center rounded-full text-xs font-bold', rankClass(idx)]">{{ idx + 1 }}</span>
                   <span class="text-sm text-gray-700 dark:text-gray-300">{{ user.email }}</span>
                 </div>
-                <span class="text-sm font-medium text-gray-900 dark:text-white">&yen;{{ user.amount.toFixed(2) }}</span>
+                <span class="text-sm font-medium text-gray-900 dark:text-white">{{ formatPaymentAmount(user.amount, stats.currency) }}</span>
               </div>
             </div>
           </div>
@@ -70,7 +76,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch, onMounted } from 'vue'
+import { computed, ref, watch, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
 import { adminPaymentAPI } from '@/api/admin/payment'
@@ -79,7 +85,9 @@ import type { DashboardStats } from '@/types/payment'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import AdminPageHeader from '@/components/layout/AdminPageHeader.vue'
 import LoadingSpinner from '@/components/common/LoadingSpinner.vue'
+import Select from '@/components/common/Select.vue'
 import Icon from '@/components/icons/Icon.vue'
+import { formatPaymentAmount } from '@/components/payment/currency'
 import OrderStatsCards from '@/components/admin/payment/OrderStatsCards.vue'
 import DailyRevenueChart from '@/components/admin/payment/DailyRevenueChart.vue'
 
@@ -88,8 +96,13 @@ const appStore = useAppStore()
 
 const DAYS_OPTIONS = [7, 30, 90] as const
 const days = ref<number>(30)
+const currency = ref('CNY')
 const loading = ref(false)
 const stats = ref<DashboardStats | null>(null)
+const currencyOptions = computed(() => (stats.value?.available_currencies || []).map((value) => ({
+  value,
+  label: value,
+})))
 
 function methodColor(type: string): string {
   const c: Record<string, string> = {
@@ -110,8 +123,11 @@ function rankClass(idx: number): string {
 async function loadDashboard() {
   loading.value = true
   try {
-    const res = await adminPaymentAPI.getDashboard(days.value)
+    const res = await adminPaymentAPI.getDashboard(days.value, currency.value)
     stats.value = res.data
+    if (res.data.currency && res.data.currency !== currency.value) {
+      currency.value = res.data.currency
+    }
   } catch (err: unknown) {
     appStore.showError(extractI18nErrorMessage(err, t, 'payment.errors', t('common.error')))
   } finally {
@@ -119,6 +135,6 @@ async function loadDashboard() {
   }
 }
 
-watch(days, () => loadDashboard())
+watch([days, currency], () => loadDashboard())
 onMounted(() => loadDashboard())
 </script>

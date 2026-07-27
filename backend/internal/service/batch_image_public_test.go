@@ -61,6 +61,7 @@ func TestBatchImagePublicService_Submit(t *testing.T) {
 		require.InDelta(t, 0.6, job.HoldMultiplier, 1e-12)
 		require.InDelta(t, 0.125, job.BillableUnitPrice, 1e-12)
 		require.InDelta(t, 0.15, job.HoldUnitPrice, 1e-12)
+		require.Equal(t, batchImageSettlementCurrency, job.Currency)
 	})
 
 	t.Run("combines user group image rate account rate discount and hold margin", func(t *testing.T) {

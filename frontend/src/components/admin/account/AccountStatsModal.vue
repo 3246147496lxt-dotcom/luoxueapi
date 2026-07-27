@@ -62,7 +62,8 @@
             <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
               {{ t('admin.accounts.stats.accumulatedCost') }}
               <span class="text-gray-400 dark:text-gray-500">
-                ({{ t('usage.userBilled') }}: ${{ formatCost(stats.summary.total_user_cost) }} ·
+                ({{ t('usage.userBilled') }}:
+                <CreditAmount :value="formatCost(stats.summary.total_user_cost)" icon-size="xs" /> ·
                 {{ t('admin.accounts.stats.standardCost') }}: ${{
                   formatCost(stats.summary.total_standard_cost)
                 }})
@@ -116,7 +117,8 @@
                 })
               }}
               <span class="text-gray-400 dark:text-gray-500">
-                ({{ t('usage.userBilled') }}: ${{ formatCost(stats.summary.avg_daily_user_cost) }})
+                ({{ t('usage.userBilled') }}:
+                <CreditAmount :value="formatCost(stats.summary.avg_daily_user_cost)" icon-size="xs" />)
               </span>
             </p>
           </div>
@@ -175,9 +177,11 @@
               </div>
               <div class="flex items-center justify-between">
                 <span class="text-xs text-gray-500 dark:text-gray-400">{{ t('usage.userBilled') }}</span>
-                <span class="text-sm font-semibold text-gray-900 dark:text-white"
-                  >${{ formatCost(stats.summary.today?.user_cost || 0) }}</span
-                >
+                <CreditAmount
+                  class="text-sm font-semibold text-gray-900 dark:text-white"
+                  :value="formatCost(stats.summary.today?.user_cost || 0)"
+                  icon-size="xs"
+                />
               </div>
               <div class="flex items-center justify-between">
                 <span class="text-xs text-gray-500 dark:text-gray-400">{{
@@ -225,9 +229,11 @@
               </div>
               <div class="flex items-center justify-between">
                 <span class="text-xs text-gray-500 dark:text-gray-400">{{ t('usage.userBilled') }}</span>
-                <span class="text-sm font-semibold text-gray-900 dark:text-white"
-                  >${{ formatCost(stats.summary.highest_cost_day?.user_cost || 0) }}</span
-                >
+                <CreditAmount
+                  class="text-sm font-semibold text-gray-900 dark:text-white"
+                  :value="formatCost(stats.summary.highest_cost_day?.user_cost || 0)"
+                  icon-size="xs"
+                />
               </div>
               <div class="flex items-center justify-between">
                 <span class="text-xs text-gray-500 dark:text-gray-400">{{
@@ -279,9 +285,11 @@
               </div>
               <div class="flex items-center justify-between">
                 <span class="text-xs text-gray-500 dark:text-gray-400">{{ t('usage.userBilled') }}</span>
-                <span class="text-sm font-semibold text-gray-900 dark:text-white"
-                  >${{ formatCost(stats.summary.highest_request_day?.user_cost || 0) }}</span
-                >
+                <CreditAmount
+                  class="text-sm font-semibold text-gray-900 dark:text-white"
+                  :value="formatCost(stats.summary.highest_request_day?.user_cost || 0)"
+                  icon-size="xs"
+                />
               </div>
             </div>
           </div>
@@ -463,6 +471,7 @@ import {
 } from 'chart.js'
 import { Line } from 'vue-chartjs'
 import BaseDialog from '@/components/common/BaseDialog.vue'
+import CreditAmount from '@/components/common/CreditAmount.vue'
 import LoadingSpinner from '@/components/common/LoadingSpinner.vue'
 import ModelDistributionChart from '@/components/charts/ModelDistributionChart.vue'
 import EndpointDistributionChart from '@/components/charts/EndpointDistributionChart.vue'
@@ -514,32 +523,35 @@ const trendChartData = computed(() => {
     labels: stats.value.history.map((h) => h.label),
     datasets: [
       {
-        label: t('usage.accountBilled') + ' (USD)',
+        label: `${t('usage.accountBilled')} (USD)`,
         data: stats.value.history.map((h) => h.actual_cost),
+        billingUnit: 'USD',
         borderColor: '#3b82f6',
         backgroundColor: 'rgba(59, 130, 246, 0.1)',
         fill: true,
         tension: 0.3,
-        yAxisID: 'y'
+        yAxisID: 'yUsd'
       },
       {
-        label: t('usage.userBilled') + ' (USD)',
+        label: `${t('usage.userBilled')} (${t('dashboard.creditUnit')})`,
         data: stats.value.history.map((h) => h.user_cost),
+        billingUnit: 'CREDIT',
         borderColor: '#10b981',
         backgroundColor: 'rgba(16, 185, 129, 0.08)',
         fill: false,
         tension: 0.3,
         borderDash: [5, 5],
-        yAxisID: 'y'
+        yAxisID: 'yCredit'
       },
       {
         label: t('admin.accounts.stats.requests'),
         data: stats.value.history.map((h) => h.requests),
+        billingUnit: 'COUNT',
         borderColor: '#f97316',
         backgroundColor: 'rgba(249, 115, 22, 0.1)',
         fill: false,
         tension: 0.3,
-        yAxisID: 'y1'
+        yAxisID: 'yRequests'
       }
     ]
   }
@@ -571,8 +583,11 @@ const lineChartOptions = computed(() => ({
         label: (context: any) => {
           const label = context.dataset.label || ''
           const value = context.raw
-          if (label.includes('USD')) {
+          if (context.dataset.billingUnit === 'USD') {
             return `${label}: $${formatCost(value)}`
+          }
+          if (context.dataset.billingUnit === 'CREDIT') {
+            return `${label}: ${formatCost(value)} ${t('dashboard.creditUnit')}`
           }
           return `${label}: ${formatNumber(value)}`
         }
@@ -593,7 +608,7 @@ const lineChartOptions = computed(() => ({
         minRotation: 0
       }
     },
-    y: {
+    yUsd: {
       type: 'linear' as const,
       display: true,
       position: 'left' as const,
@@ -609,14 +624,14 @@ const lineChartOptions = computed(() => ({
       },
       title: {
         display: true,
-        text: t('usage.accountBilled') + ' (USD)',
+        text: `${t('usage.accountBilled')} (USD)`,
         color: '#3b82f6',
         font: {
           size: 11
         }
       }
     },
-    y1: {
+    yCredit: {
       type: 'linear' as const,
       display: true,
       position: 'right' as const,
@@ -624,19 +639,27 @@ const lineChartOptions = computed(() => ({
         drawOnChartArea: false
       },
       ticks: {
-        color: '#f97316',
+        color: '#10b981',
         font: {
           size: 10
         },
-        callback: (value: string | number) => formatNumber(Number(value))
+        callback: (value: string | number) => formatCost(Number(value))
       },
       title: {
         display: true,
-        text: t('admin.accounts.stats.requests'),
-        color: '#f97316',
+        text: `${t('usage.userBilled')} (${t('dashboard.creditUnit')})`,
+        color: '#10b981',
         font: {
           size: 11
         }
+      }
+    },
+    yRequests: {
+      type: 'linear' as const,
+      display: false,
+      position: 'right' as const,
+      grid: {
+        drawOnChartArea: false
       }
     }
   }

@@ -82,9 +82,11 @@
           </template>
 
           <template #cell-bonus_amount="{ value }">
-            <span class="text-sm font-medium text-gray-900 dark:text-white">
-              ${{ value.toFixed(2) }}
-            </span>
+            <CreditAmount
+              class="text-sm font-medium text-gray-900 dark:text-white"
+              :value="value.toFixed(2)"
+              icon-size="xs"
+            />
           </template>
 
           <template #cell-usage="{ row }">
@@ -353,8 +355,9 @@
             </div>
           </div>
           <div class="text-right">
-            <span class="text-sm font-medium text-green-600 dark:text-green-400">
-              +${{ usage.bonus_amount.toFixed(2) }}
+            <span class="inline-flex items-center gap-0.5 text-sm font-medium text-green-600 dark:text-green-400">
+              <span aria-hidden="true">+</span>
+              <CreditAmount :value="usage.bonus_amount.toFixed(2)" icon-size="xs" />
             </span>
           </div>
         </div>
@@ -406,6 +409,7 @@ import AppLayout from '@/components/layout/AppLayout.vue'
 import AdminPageHeader from '@/components/layout/AdminPageHeader.vue'
 import TablePageLayout from '@/components/layout/TablePageLayout.vue'
 import DataTable from '@/components/common/DataTable.vue'
+import CreditAmount from '@/components/common/CreditAmount.vue'
 import Pagination from '@/components/common/Pagination.vue'
 import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
 import BaseDialog from '@/components/common/BaseDialog.vue'

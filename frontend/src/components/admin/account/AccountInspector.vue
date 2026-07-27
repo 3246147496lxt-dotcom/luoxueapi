@@ -191,11 +191,12 @@
             </div>
             <div>
               <dt>{{ t('admin.accounts.workbench.accountUserCost') }}</dt>
-              <dd>
-                {{ todayStats
-                  ? `${formatCurrency(todayStats.cost)} / ${formatCurrency(todayStats.user_cost)}`
-                  : placeholder }}
+              <dd v-if="todayStats" class="inline-flex items-center gap-1">
+                <span>{{ formatCurrency(todayStats.cost) }}</span>
+                <span aria-hidden="true">/</span>
+                <CreditAmount :value="(todayStats.user_cost ?? 0).toFixed(2)" icon-size="xs" />
               </dd>
+              <dd v-else>{{ placeholder }}</dd>
             </div>
           </dl>
         </section>
@@ -345,6 +346,7 @@ import { computed, nextTick, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import AccountUsageCell from '@/components/account/AccountUsageCell.vue'
 import OpenAIQuotaResetCell from '@/components/account/OpenAIQuotaResetCell.vue'
+import CreditAmount from '@/components/common/CreditAmount.vue'
 import GroupBadge from '@/components/common/GroupBadge.vue'
 import PlatformTypeBadge from '@/components/common/PlatformTypeBadge.vue'
 import Icon from '@/components/icons/Icon.vue'

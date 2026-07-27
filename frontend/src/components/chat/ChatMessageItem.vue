@@ -68,19 +68,22 @@
           <span v-if="message.grossCost !== undefined">
             {{ t('chat.receipt.grossCost', { amount: formatCurrency(message.grossCost) }) }}
           </span>
-          <span v-if="message.chargedAmount !== undefined" class="chat-message__receipt-charge">
-            {{ t('chat.receipt.chargedAmount', { amount: formatCurrency(message.chargedAmount) }) }}
+          <span
+            v-if="message.chargedAmount !== undefined"
+            class="chat-message__receipt-credit chat-message__receipt-charge"
+          >
+            <span>{{ t('chat.receipt.chargedAmount') }}</span>
+            <CreditAmount :value="formatCreditAmount(message.chargedAmount)" icon-size="xs" />
           </span>
-          <span v-if="hasBalanceRange">
-            {{
-              t('chat.receipt.balanceRange', {
-                before: formatCurrency(message.balanceBefore),
-                after: formatCurrency(message.balanceAfter),
-              })
-            }}
+          <span v-if="hasBalanceRange" class="chat-message__receipt-credit">
+            <span>{{ t('chat.receipt.balanceRange') }}</span>
+            <CreditAmount :value="formatCreditAmount(message.balanceBefore)" icon-size="xs" />
+            <span aria-hidden="true">→</span>
+            <CreditAmount :value="formatCreditAmount(message.balanceAfter)" icon-size="xs" />
           </span>
-          <span v-else-if="message.balanceAfter !== undefined">
-            {{ t('chat.receipt.balanceAfter', { amount: formatCurrency(message.balanceAfter) }) }}
+          <span v-else-if="message.balanceAfter !== undefined" class="chat-message__receipt-credit">
+            <span>{{ t('chat.receipt.balanceAfter') }}</span>
+            <CreditAmount :value="formatCreditAmount(message.balanceAfter)" icon-size="xs" />
           </span>
         </div>
 
@@ -127,6 +130,7 @@ import { computed, onBeforeUnmount, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import DOMPurify from 'dompurify'
 import { marked } from 'marked'
+import CreditAmount from '@/components/common/CreditAmount.vue'
 import Icon from '@/components/icons/Icon.vue'
 import type { ChatMessage } from '@/types/chat'
 import { formatCurrency } from '@/utils/format'
@@ -208,6 +212,17 @@ async function copyMessage() {
 
 function formatTokens(value: number): string {
   return new Intl.NumberFormat(undefined, { maximumFractionDigits: 0 }).format(value)
+}
+
+function formatCreditAmount(value: number | undefined): string {
+  const safeValue = Number(value)
+  if (!Number.isFinite(safeValue)) return '0.00'
+
+  const fractionDigits = safeValue > 0 && safeValue < 0.01 ? 6 : 2
+  return new Intl.NumberFormat(undefined, {
+    minimumFractionDigits: fractionDigits,
+    maximumFractionDigits: fractionDigits,
+  }).format(safeValue)
 }
 
 onBeforeUnmount(() => {
@@ -431,6 +446,12 @@ onBeforeUnmount(() => {
 
 .chat-message__receipt-details > span {
   white-space: nowrap;
+}
+
+.chat-message__receipt-credit {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
 }
 
 .chat-message__receipt-charge {

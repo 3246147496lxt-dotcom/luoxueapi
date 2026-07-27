@@ -79,10 +79,19 @@
             <AmountText :value="row.total_rebate" />
           </template>
           <template #cell-order_amount="{ row }">
-            <AmountText :value="row.order_amount" />
+            <CreditAmount
+              v-if="row.order_type === 'balance'"
+              :value="formatAmount(row.order_amount)"
+              icon-size="xs"
+            />
+            <span v-else class="text-sm text-gray-900 dark:text-white">
+              ${{ formatAmount(row.order_amount) }}
+            </span>
           </template>
           <template #cell-pay_amount="{ row }">
-            <span class="text-sm text-gray-900 dark:text-white">¥{{ formatAmount(row.pay_amount) }}</span>
+            <span class="text-sm text-gray-900 dark:text-white">
+              {{ formatPaymentAmount(row.pay_amount, row.currency) }}
+            </span>
           </template>
           <template #cell-rebate_amount="{ row }">
             <AmountText :value="row.rebate_amount" strong />
@@ -140,8 +149,8 @@
           <OverviewStat :label="t('admin.affiliates.overview.rebateRate')" :value="formatPercent(selectedOverview.rebate_rate_percent)" />
           <OverviewStat :label="t('admin.affiliates.overview.invitedCount')" :value="String(selectedOverview.invited_count)" />
           <OverviewStat :label="t('admin.affiliates.overview.rebatedInviteeCount')" :value="String(selectedOverview.rebated_invitee_count)" />
-          <OverviewStat :label="t('admin.affiliates.overview.availableQuota')" :value="'$' + formatAmount(selectedOverview.available_quota)" />
-          <OverviewStat :label="t('admin.affiliates.overview.historyQuota')" :value="'$' + formatAmount(selectedOverview.history_quota)" />
+          <OverviewStat :label="t('admin.affiliates.overview.availableQuota')" :credit-value="selectedOverview.available_quota" />
+          <OverviewStat :label="t('admin.affiliates.overview.historyQuota')" :credit-value="selectedOverview.history_quota" />
         </div>
       </div>
     </BaseDialog>
@@ -157,8 +166,10 @@ import TablePageLayout from '@/components/layout/TablePageLayout.vue'
 import DataTable from '@/components/common/DataTable.vue'
 import Pagination from '@/components/common/Pagination.vue'
 import BaseDialog from '@/components/common/BaseDialog.vue'
+import CreditAmount from '@/components/common/CreditAmount.vue'
 import Icon from '@/components/icons/Icon.vue'
 import OrderStatusBadge from '@/components/payment/OrderStatusBadge.vue'
+import { formatPaymentAmount } from '@/components/payment/currency'
 import type { Column } from '@/components/common/types'
 import { useAppStore } from '@/stores/app'
 import { affiliatesAPI, type AffiliateInviteRecord, type AffiliateRebateRecord, type AffiliateTransferRecord, type AffiliateUserOverview, type ListAffiliateRecordsParams } from '@/api/admin/affiliates'
@@ -382,11 +393,13 @@ const AmountText = defineComponent({
     strong: { type: Boolean, default: false },
   },
   setup(amountProps) {
-    return () => h('span', {
+    return () => h(CreditAmount, {
       class: amountProps.strong
         ? 'text-sm font-semibold text-emerald-600 dark:text-emerald-400'
         : 'text-sm text-gray-900 dark:text-white',
-    }, `$${formatAmount(amountProps.value)}`)
+      value: formatAmount(amountProps.value),
+      iconSize: 'xs',
+    })
   },
 })
 
@@ -408,7 +421,8 @@ const NullableAmountText = defineComponent({
 const OverviewStat = defineComponent({
   props: {
     label: { type: String, required: true },
-    value: { type: String, required: true },
+    value: { type: String, default: '' },
+    creditValue: { type: Number as PropType<number | null | undefined>, default: null },
     mono: { type: Boolean, default: false },
   },
   setup(statProps) {
@@ -418,7 +432,12 @@ const OverviewStat = defineComponent({
         class: statProps.mono
           ? 'mt-1 font-mono text-base font-semibold text-gray-900 dark:text-white'
           : 'mt-1 text-base font-semibold text-gray-900 dark:text-white',
-      }, statProps.value),
+      }, statProps.creditValue == null
+        ? statProps.value
+        : h(CreditAmount, {
+          value: formatAmount(statProps.creditValue),
+          iconSize: 'xs',
+        })),
     ])
   },
 })

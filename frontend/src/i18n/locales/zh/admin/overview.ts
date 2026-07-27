@@ -751,12 +751,12 @@ export default {
       platformQuota: {
         menuItem: '平台限额',
         title: '平台限额',
-        subtitle: '为用户 {email} 配置各上游平台的日 / 周 / 月用量上限',
+        subtitle: '为用户 {email} 配置各上游平台的日 / 周 / 月雪花额度上限',
         columns: {
           platform: '平台',
-          daily: '日 (USD)',
-          weekly: '周 (USD)',
-          monthly: '月 (USD, 30天滚动)',
+          daily: '日（雪花额度）',
+          weekly: '周（雪花额度）',
+          monthly: '月（雪花额度，30天滚动）',
           usage: '当前用量',
         },
         placeholder: '不限制',
@@ -926,7 +926,7 @@ export default {
         descriptionLabel: '描述',
         descriptionPlaceholder: '请输入描述（可选）',
         rateMultiplierLabel: '费率倍数',
-        rateMultiplierHint: '1.0 = 标准费率，0.5 = 半价，2.0 = 双倍',
+        rateMultiplierHint: '用户实扣雪花额度 = 渠道 USD 基础价 × 分组倍率；例如 5 USD/MTok × 70 = 350 雪花额度/MTok',
         rpmLimit: '每分钟请求数 (RPM)',
         rpmLimitPlaceholder: '0 表示不限制',
         rpmLimitHint: '每用户在本分组每分钟最大请求数，0 = 不限制；一旦设置即接管该用户的限流（覆盖用户级 rpm_limit）',
@@ -952,9 +952,9 @@ export default {
           '开启后，用户在创建 API Key 时将无法看到此分组。只有管理员手动将用户分配到此分组后，用户才能使用。',
         example: '使用场景：',
         exampleContent:
-          '公开分组费率 0.8，您可以创建一个费率 0.7 的专属分组，手动分配给 VIP 用户，让他们享受更优惠的价格。'
+          '公开分组倍率为 70 时，可以创建倍率为 63 的专属分组，手动分配给九折 VIP 用户。'
       },
-      rateMultiplierHint: '1.0 = 标准费率，0.5 = 半价，2.0 = 双倍',
+      rateMultiplierHint: '用户实扣雪花额度 = 渠道 USD 基础价 × 分组倍率；例如 5 USD/MTok × 70 = 350 雪花额度/MTok',
       platforms: {
         all: '全部平台',
         anthropic: 'Anthropic',
@@ -1039,9 +1039,9 @@ export default {
         typeNotEditable: '分组创建后无法修改计费类型。',
         standard: '标准（余额）',
         subscription: '订阅（配额）',
-        dailyLimit: '每日限额（USD）',
-        weeklyLimit: '每周限额（USD）',
-        monthlyLimit: '每月限额（USD）',
+        dailyLimit: '每日限额（雪花额度）',
+        weeklyLimit: '每周限额（雪花额度）',
+        monthlyLimit: '每月限额（雪花额度）',
         defaultValidityDays: '默认有效期（天）',
         validityHint: '分配给用户时订阅的有效天数',
         noLimit: '无限制'

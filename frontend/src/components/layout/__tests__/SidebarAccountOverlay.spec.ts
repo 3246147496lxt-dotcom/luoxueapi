@@ -35,8 +35,8 @@ const summary: AccountPanelSummary = {
   initials: 'RQ',
   avatarUrl: '',
   frozenBalance: 0,
-  formattedAvailableBalance: '$12.50',
-  formattedFrozenBalance: '$0.00',
+  formattedAvailableBalance: '12.50',
+  formattedFrozenBalance: '0.00',
   activeSubscriptionCount: 0,
   subscriptionsLoaded: true,
 }
@@ -111,7 +111,10 @@ function mountOverlay(
     global: {
       stubs: {
         AnnouncementBell: true,
-        CreditAmount: true,
+        CreditAmount: {
+          props: ['value', 'iconSize', 'label'],
+          template: '<span data-testid="credit-amount" :data-value="value" :aria-label="label">{{ value }}</span>',
+        },
         Icon: true,
         RouterLink: true,
       },
@@ -142,6 +145,26 @@ afterEach(() => {
 })
 
 describe('SidebarAccountOverlay', () => {
+  it('renders available and frozen balances as Snow credits', async () => {
+    mountOverlay(false, {
+      summary: {
+        ...summary,
+        frozenBalance: 3.5,
+        formattedFrozenBalance: '3.50',
+      },
+    })
+    await nextTick()
+
+    const amounts = Array.from(
+      document.body.querySelectorAll<HTMLElement>('[data-testid="credit-amount"]'),
+    )
+    expect(amounts.map((amount) => amount.dataset.value)).toEqual(['12.50', '3.50'])
+    expect(amounts.map((amount) => amount.getAttribute('aria-label'))).toEqual([
+      'accountDock.availableBalance 12.50',
+      'accountDock.frozenBalance 3.50',
+    ])
+  })
+
   it('uses the compact desktop menu measurements while retaining mobile touch targets', () => {
     expect(componentSource).toContain('width: 248px;')
     expect(componentSource).toContain('padding: 6px 0;')

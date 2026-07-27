@@ -109,6 +109,10 @@ vi.mock('vue-i18n', async () => {
 
 const simpleStub = { template: '<div><slot /></div>' }
 const chartStub = { template: '<div />' }
+const creditModeChartStub = {
+  props: { creditMode: Boolean },
+  template: '<div data-testid="credit-mode-chart" :data-credit-mode="String(creditMode)" />',
+}
 
 const usageLog = {
   id: 1,
@@ -152,10 +156,10 @@ function mountUsageView() {
         Icon: true,
         UsageStatsCards: chartStub,
         UsageTable: chartStub,
-        ModelDistributionChart: chartStub,
-        GroupDistributionChart: chartStub,
-        EndpointDistributionChart: chartStub,
-        TokenUsageTrend: chartStub,
+        ModelDistributionChart: creditModeChartStub,
+        GroupDistributionChart: creditModeChartStub,
+        EndpointDistributionChart: creditModeChartStub,
+        TokenUsageTrend: creditModeChartStub,
       },
     },
   })
@@ -207,7 +211,7 @@ describe('user UsageView', () => {
   })
 
   it('loads logs, stats, model stats, and snapshot on first render', async () => {
-    mountUsageView()
+    const wrapper = mountUsageView()
     await flushPromises()
 
     expect(query).toHaveBeenCalled()
@@ -220,6 +224,9 @@ describe('user UsageView', () => {
     }))
     expect(list).toHaveBeenCalledWith(1, 100)
     expect(getAvailable).toHaveBeenCalled()
+    expect(wrapper.findAll('[data-testid="credit-mode-chart"]')).toHaveLength(4)
+    expect(wrapper.findAll('[data-testid="credit-mode-chart"]')
+      .every((chart) => chart.attributes('data-credit-mode') === 'true')).toBe(true)
   })
 
   it('applies source and exact request ID deep links only to the usage list', async () => {

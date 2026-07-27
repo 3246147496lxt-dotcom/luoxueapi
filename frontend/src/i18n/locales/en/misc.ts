@@ -93,6 +93,12 @@ export default {
     viewAllPlans: 'View all plans',
     includes: 'Includes',
     validityDays: '{days} days',
+    metricLabels: {
+      rate: 'Billing rate',
+      daily: 'Daily quota',
+      weekly: 'Weekly quota',
+      monthly: 'Monthly quota'
+    },
     rateMultiplier: 'Billing rate ×{rate}',
     peakRateWindow: 'Peak-period rate: {window}',
     modelScopes: 'Supported models: {models}',
@@ -217,7 +223,7 @@ export default {
       },
       groupMultiplier: {
         title: '💰 3. Rate Multiplier',
-        description: '<div style="line-height: 1.7;"><p style="margin-bottom: 12px;">Set the billing multiplier to control user charges.</p><div style="padding: 8px 12px; background: #fef3c7; border-left: 3px solid #f59e0b; border-radius: 4px; font-size: 13px; margin-bottom: 12px;"><b>⚙️ Billing Rules:</b><ul style="margin: 8px 0 0 16px;"><li><b>1.0</b> - Original price (cost price)</li><li><b>1.5</b> - User consumes $1, charged $1.5</li><li><b>2.0</b> - User consumes $1, charged $2</li><li><b>0.8</b> - Subsidy mode (loss-making)</li></ul></div><p style="font-size: 13px; color: #6b7280;">Recommend setting test group to 1.0</p></div>',
+        description: '<div style="line-height: 1.7;"><p style="margin-bottom: 12px;">Snow credits charged to the user = channel USD base price × group multiplier.</p><div style="padding: 8px 12px; background: #fef3c7; border-left: 3px solid #f59e0b; border-radius: 4px; font-size: 13px; margin-bottom: 12px;"><b>⚙️ Billing Rules:</b><ul style="margin: 8px 0 0 16px;"><li>Keep channel prices entered in USD</li><li>The multiplier may include both the CNY/USD exchange rate and Snow-credit conversion</li><li><b>70</b> - 5 USD / MTok × 70 = 350 Snow credits / MTok</li><li><b>63</b> - 10% off a multiplier of 70 (70 × 0.9)</li></ul></div><p style="font-size: 13px; color: #6b7280;">When 1 CNY = 10 Snow credits and 1 USD = 7 CNY, the baseline multiplier is 70.</p></div>',
         nextBtn: 'Next'
       },
       groupExclusive: {
@@ -327,6 +333,9 @@ export default {
     title: 'Balance Top-up',
     checkoutTitle: 'Online Top-up',
     checkoutDescription: 'Fast and convenient ways to top up',
+    helpTitle: 'Top-up help',
+    previewHelpImage: 'View top-up help image',
+    helpImagePreview: 'Top-up help image preview',
     userTypeAdmin: 'Administrator',
     userTypeRegular: 'Regular user',
     purchaseOptions: 'Recharge or subscribe',
@@ -350,6 +359,9 @@ export default {
     customAmount: 'Custom Amount',
     enterAmount: 'Enter amount',
     paymentMethod: 'Payment Method',
+    choosePaymentMethod: 'Choose a payment method',
+    amountUnavailable: 'Unavailable for this amount',
+    alternativeDivider: 'or',
     fee: 'Fee',
     actualPay: 'Actual Payment',
     createOrder: 'Confirm Payment',
@@ -574,7 +586,7 @@ export default {
       deductBalanceHint: 'Subtract recharged amount from user balance',
       userBalance: 'User Balance',
       orderAmount: 'Order Amount',
-      insufficientBalance: 'Insufficient balance — will deduct to $0',
+      insufficientBalance: 'Insufficient balance; balance will be reduced to 0 Snow credits',
       noDeduction: 'Will NOT deduct user balance',
       forceRefund: 'Force refund (ignore balance check)',
       orderCancelled: 'Order Cancelled',

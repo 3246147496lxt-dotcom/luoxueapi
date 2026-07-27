@@ -191,7 +191,7 @@
               v-if="amountsDiffer(row.gross_cost, row.charged_amount)"
               class="text-[11px] text-gray-500 dark:text-gray-400"
             >
-              {{ t('usage.grossCost') }} {{ formatCredits(row.gross_cost) }}
+              {{ t('usage.grossCost') }} ${{ formatCredits(row.gross_cost) }}
             </div>
           </div>
         </template>

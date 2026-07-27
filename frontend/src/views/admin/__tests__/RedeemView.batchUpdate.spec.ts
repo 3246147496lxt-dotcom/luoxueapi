@@ -168,6 +168,8 @@ describe('admin RedeemView batch update', () => {
     })
 
     await flushPromises()
+    expect(wrapper.findAll('[data-testid="credit-amount"]')).toHaveLength(2)
+    expect(wrapper.text()).not.toContain('$10.00')
     await wrapper.findAll('[data-test="select-code"]')[0].setValue(true)
     await wrapper.get('[data-test="batch-update-open"]').trigger('click')
     await flushPromises()

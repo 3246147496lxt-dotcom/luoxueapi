@@ -566,11 +566,29 @@
             <div v-if="previewModel.pricing" class="mt-2 grid grid-cols-2 gap-3 text-sm">
               <div>
                 <span class="text-gray-500 dark:text-dark-400">{{ t('admin.modelCatalog.inputPrice') }}</span>
-                <p class="mt-0.5 font-semibold text-gray-950 dark:text-white">{{ formatPrice(previewModel.pricing.input_price, previewModel.pricing.currency, previewModel.pricing.unit) }}</p>
+                <p class="mt-0.5 font-semibold text-gray-950 dark:text-white">
+                  <CatalogPriceAmount
+                    :value="previewModel.pricing.input_price"
+                    :currency="previewModel.pricing.currency"
+                    :empty-text="t('common.notSet')"
+                  />
+                  <span v-if="previewModel.pricing.input_price != null && previewModel.pricing.unit">
+                    / {{ previewModel.pricing.unit }}
+                  </span>
+                </p>
               </div>
               <div>
                 <span class="text-gray-500 dark:text-dark-400">{{ t('admin.modelCatalog.outputPrice') }}</span>
-                <p class="mt-0.5 font-semibold text-gray-950 dark:text-white">{{ formatPrice(previewModel.pricing.output_price, previewModel.pricing.currency, previewModel.pricing.unit) }}</p>
+                <p class="mt-0.5 font-semibold text-gray-950 dark:text-white">
+                  <CatalogPriceAmount
+                    :value="previewModel.pricing.output_price"
+                    :currency="previewModel.pricing.currency"
+                    :empty-text="t('common.notSet')"
+                  />
+                  <span v-if="previewModel.pricing.output_price != null && previewModel.pricing.unit">
+                    / {{ previewModel.pricing.unit }}
+                  </span>
+                </p>
               </div>
             </div>
             <p v-else class="mt-2 text-sm text-gray-500 dark:text-dark-400">
@@ -614,6 +632,7 @@ import TablePageLayout from '@/components/layout/TablePageLayout.vue'
 import DataTable from '@/components/common/DataTable.vue'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
+import CatalogPriceAmount from '@/components/common/CatalogPriceAmount.vue'
 import EmptyState from '@/components/common/EmptyState.vue'
 import ModelIcon from '@/components/common/ModelIcon.vue'
 import Select from '@/components/common/Select.vue'
@@ -753,7 +772,7 @@ function emptyPricing() {
   return {
     label: '',
     billing_mode: 'token',
-    currency: 'USD',
+    currency: 'CREDIT',
     unit: '',
     input_price: null,
     output_price: null,
@@ -1111,12 +1130,6 @@ function formatTokenCount(value: number | null | undefined): string {
   if (value >= 1_000_000) return `${(value / 1_000_000).toLocaleString(undefined, { maximumFractionDigits: 2 })}M`
   if (value >= 1_000) return `${(value / 1_000).toLocaleString(undefined, { maximumFractionDigits: 1 })}K`
   return value.toLocaleString()
-}
-
-function formatPrice(value: number | null, currency: string, unit: string): string {
-  if (value === null || value === undefined) return t('common.notSet')
-  const formatted = value.toLocaleString(undefined, { maximumFractionDigits: 8 })
-  return `${currency === 'USD' ? '$' : `${currency} `}${formatted}${unit ? ` / ${unit}` : ''}`
 }
 
 onMounted(() => {

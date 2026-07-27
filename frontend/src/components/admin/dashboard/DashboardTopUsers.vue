@@ -78,7 +78,7 @@
             </td>
             <td><span class="top-users-model">{{ item.main_model?.trim() || '—' }}</span></td>
             <td><strong>{{ formatTokens(item.tokens) }}</strong></td>
-            <td>{{ formatCost(item.actual_cost) }}</td>
+            <td><CreditAmount :value="formatCreditAmount(item.actual_cost)" icon-size="xs" /></td>
             <td>{{ formatNumber(item.requests) }}</td>
             <td>
               <div
@@ -106,6 +106,7 @@
 <script setup lang="ts">
 import { computed, useId } from 'vue'
 import { useI18n } from 'vue-i18n'
+import CreditAmount from '@/components/common/CreditAmount.vue'
 import Icon from '@/components/icons/Icon.vue'
 import type { UserSpendingRankingItem, UserUsageTrendPoint } from '@/types'
 
@@ -228,9 +229,7 @@ const formatTokens = (value: unknown): string => new Intl.NumberFormat(locale.va
   maximumFractionDigits: 1
 }).format(toFiniteNumber(value))
 
-const formatCost = (value: unknown): string => new Intl.NumberFormat(locale.value, {
-  style: 'currency',
-  currency: 'USD',
+const formatCreditAmount = (value: unknown): string => new Intl.NumberFormat(locale.value, {
   minimumFractionDigits: 2,
   maximumFractionDigits: 4
 }).format(toFiniteNumber(value))

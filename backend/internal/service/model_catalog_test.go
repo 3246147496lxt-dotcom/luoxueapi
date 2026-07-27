@@ -67,6 +67,21 @@ func TestSynthesizeCatalogPricingPreservesExplicitZero(t *testing.T) {
 	require.Nil(t, pricing.OutputPrice)
 }
 
+func TestCatalogPricingLabelsEffectiveChargeAsCreditWithoutChangingRawPrice(t *testing.T) {
+	rawInputPrice := 5.0
+	pricing := &ChannelModelPricing{
+		BillingMode: BillingModeToken,
+		InputPrice:  &rawInputPrice,
+	}
+
+	public := catalogPricingFromChannel(pricing, &Group{RateMultiplier: 70})
+
+	require.NotNil(t, public)
+	require.Equal(t, "CREDIT", public.Currency)
+	require.InDelta(t, 350, *public.InputPrice, 1e-12)
+	require.InDelta(t, 5, *pricing.InputPrice, 1e-12, "catalog projection must not mutate the channel source price")
+}
+
 func TestCatalogGlobalImageTokenZeroMirrorsBillingTextFallback(t *testing.T) {
 	pricingService := &PricingService{pricingData: map[string]*LiteLLMModelPricing{
 		"image-token-zero": {
@@ -544,6 +559,7 @@ func TestPublicModelCatalogSnapshotFiltersAndHasStableETag(t *testing.T) {
 	require.Len(t, first.Items, 1)
 	require.Equal(t, "published", first.Items[0].Model)
 	require.NotNil(t, first.Items[0].Pricing.InputPrice)
+	require.Equal(t, "CREDIT", first.Items[0].Pricing.Currency)
 	require.Zero(t, *first.Items[0].Pricing.InputPrice)
 	require.InDelta(t, output*2, *first.Items[0].Pricing.OutputPrice, 1e-12)
 

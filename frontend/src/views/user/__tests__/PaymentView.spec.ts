@@ -3,6 +3,9 @@ import { flushPromises, shallowMount } from '@vue/test-utils'
 import PaymentView from '../PaymentView.vue'
 import CreditAmount from '@/components/common/CreditAmount.vue'
 import AmountInput from '@/components/payment/AmountInput.vue'
+import PaymentMethodSelector from '@/components/payment/PaymentMethodSelector.vue'
+import PaymentHelpPanel from '@/components/payment/PaymentHelpPanel.vue'
+import RedeemCodePanel from '@/components/payment/RedeemCodePanel.vue'
 import { PAYMENT_RECOVERY_STORAGE_KEY } from '@/components/payment/paymentFlow'
 import { formatPaymentAmount } from '@/components/payment/currency'
 import type { CheckoutInfoResponse, MethodLimit, SubscriptionPlan } from '@/types/payment'
@@ -138,6 +141,7 @@ function checkoutInfoFixture(overrides: Partial<CheckoutInfoResponse> = {}) {
 function checkoutInfoWithPlansFixture(options: {
   checkout?: Partial<CheckoutInfoResponse>
   method?: Partial<MethodLimit>
+  methods?: Record<string, MethodLimit>
   plan?: Partial<SubscriptionPlan>
 } = {}) {
   const base = checkoutInfoFixture(options.checkout).data
@@ -165,7 +169,7 @@ function checkoutInfoWithPlansFixture(options: {
   return {
     data: {
       ...base,
-      methods: {
+      methods: options.methods ?? {
         ...base.methods,
         wxpay: {
           ...base.methods.wxpay,
@@ -253,6 +257,78 @@ describe('PaymentView integrated purchase surface', () => {
     publicSettings.payment_enabled = true
   })
 
+  it.each([
+    ['balance recharge is disabled', { balance_disabled: true }],
+    ['no online payment method is available', { methods: {} }],
+  ])('keeps the redeem panel available when %s', async (_label, checkoutOverride) => {
+    getCheckoutInfo.mockResolvedValue(checkoutInfoFixture(checkoutOverride))
+    const wrapper = shallowMount(PaymentView, {
+      global: {
+        stubs: {
+          AppLayout: { template: '<div><slot /></div>' },
+          Teleport: true,
+          Transition: false,
+        },
+      },
+    })
+    await flushPromises()
+
+    expect(wrapper.find('[data-testid="payment-workbench"]').exists()).toBe(false)
+    expect(wrapper.findComponent(RedeemCodePanel).exists()).toBe(true)
+  })
+
+  it('keeps administrator-provided payment help when balance recharge is unavailable', async () => {
+    getCheckoutInfo.mockResolvedValue(checkoutInfoFixture({
+      balance_disabled: true,
+      help_text: 'Contact support before using an offline payment method.',
+      help_image_url: 'https://example.com/help.png',
+    }))
+    const wrapper = shallowMount(PaymentView, {
+      global: {
+        stubs: {
+          AppLayout: { template: '<div><slot /></div>' },
+          Teleport: true,
+          Transition: false,
+        },
+      },
+    })
+    await flushPromises()
+
+    const helpPanel = wrapper.getComponent(PaymentHelpPanel)
+    expect(helpPanel.props()).toMatchObject({
+      text: 'Contact support before using an offline payment method.',
+      imageUrl: 'https://example.com/help.png',
+    })
+    expect(wrapper.findComponent(RedeemCodePanel).exists()).toBe(true)
+  })
+
+  it('selects the first available payment method when an earlier channel is disabled', async () => {
+    const method = checkoutInfoFixture().data.methods.wxpay
+    getCheckoutInfo.mockResolvedValue(checkoutInfoFixture({
+      methods: {
+        alipay: { ...method, available: false },
+        wxpay: { ...method, available: true },
+      },
+    }))
+    const wrapper = shallowMount(PaymentView, {
+      global: {
+        stubs: {
+          AppLayout: { template: '<div><slot /></div>' },
+          Teleport: true,
+          Transition: false,
+        },
+      },
+    })
+    await flushPromises()
+
+    const selector = wrapper.getComponent(PaymentMethodSelector)
+    expect(selector.props('selected')).toBe('wxpay')
+    expect(selector.props('methods')).toEqual(expect.arrayContaining([
+      expect.objectContaining({ type: 'alipay', available: false }),
+      expect.objectContaining({ type: 'wxpay', available: true }),
+    ]))
+  })
+
   it('keeps the default purchase surface focused on balance recharge', async () => {
     const wrapper = shallowMount(PaymentView, {
       global: {
@@ -271,6 +347,15 @@ describe('PaymentView integrated purchase surface', () => {
     expect(rechargeRegion.attributes('role')).toBeUndefined()
     expect(rechargeRegion.attributes('aria-label')).toBe('payment.tabTopUp')
     expect(wrapper.find('#purchase-panel-subscription').exists()).toBe(false)
+    const workbench = wrapper.get('[data-testid="payment-workbench"]')
+    expect(workbench.classes()).toEqual(expect.arrayContaining(['grid', 'lg:grid-cols-12']))
+    const main = workbench.get('[data-testid="payment-workbench-main"]')
+    const summary = workbench.get('[data-testid="payment-workbench-summary"]')
+    expect(main.classes()).toContain('lg:col-span-8')
+    expect(summary.classes()).toContain('lg:col-span-4')
+    expect(main.element.nextElementSibling).toBe(summary.element)
+    expect(wrapper.text()).toContain('payment.alternativeDivider')
+    expect(wrapper.text()).not.toContain('redeem.dividerTitle')
   })
 
   it('uses snowflake credits for balances while keeping recharge amounts in CNY', async () => {
@@ -294,12 +379,13 @@ describe('PaymentView integrated purchase surface', () => {
     await flushPromises()
 
     expect(wrapper.get('[data-testid="payment-current-balance"]').findComponent(CreditAmount).props('value')).toBe('0.00')
-    expect(wrapper.get('[data-testid="payment-credited-balance"]').findComponent(CreditAmount).props('value')).toBe('0.00')
+    expect(wrapper.get('[data-testid="payment-credited-balance"]').findComponent(CreditAmount).props('value')).toBe('50.00')
     expect(wrapper.findComponent(AmountInput).props('currency')).toBe('CNY')
-    expect(wrapper.text()).toContain(formatPaymentAmount(0, 'CNY'))
+    expect(wrapper.findComponent(AmountInput).props('modelValue')).toBe(50)
+    expect(wrapper.text()).toContain(formatPaymentAmount(50, 'CNY'))
   })
 
-  it('shows the streamlined recharge heading, account identity, and real historical spend', async () => {
+  it('shows the Draft header metrics and real historical spend', async () => {
     const wrapper = shallowMount(PaymentView, {
       global: {
         stubs: {
@@ -313,32 +399,13 @@ describe('PaymentView integrated purchase surface', () => {
 
     expect(wrapper.text()).toContain('payment.checkoutTitle')
     expect(wrapper.text()).toContain('payment.checkoutDescription')
-    expect(wrapper.get('[data-testid="payment-account-identity"]').text()).toContain('demo-user (payment.userTypeRegular)')
-    const mobileIdentity = wrapper.get('[data-testid="payment-account-identity-mobile"]')
-    expect(mobileIdentity.text()).toContain('payment.rechargeAccount · demo-user')
-    expect(mobileIdentity.classes()).toContain('md:hidden')
-    expect(mobileIdentity.classes()).not.toContain('hidden')
     expect(wrapper.text()).toContain('dashboard.lifetimeSpend')
-    expect(wrapper.get('[data-testid="payment-historical-spend"]').findComponent(CreditAmount).props('value')).toBe('25.3400')
+    const accountStrip = wrapper.get('[data-testid="payment-account-strip"]')
+    expect(accountStrip.classes()).toContain('purchase-account-strip')
+    expect(accountStrip.classes()).toEqual(expect.arrayContaining(['flex', 'divide-x']))
+    expect(accountStrip.get('[data-testid="payment-current-balance"]').findComponent(CreditAmount).props('value')).toBe('0.00')
+    expect(accountStrip.get('[data-testid="payment-historical-spend"]').findComponent(CreditAmount).props('value')).toBe('25.3400')
     expect(getDashboardStats).toHaveBeenCalledOnce()
-  })
-
-  it('labels administrator accounts without changing the username', async () => {
-    authUser.role = 'admin'
-    const wrapper = shallowMount(PaymentView, {
-      global: {
-        stubs: {
-          AppLayout: { template: '<div><slot /></div>' },
-          Teleport: true,
-          Transition: false,
-        },
-      },
-    })
-    await flushPromises()
-
-    const identity = wrapper.get('[data-testid="payment-account-identity"]').text()
-    expect(identity).toContain('demo-user (payment.userTypeAdmin)')
-    expect(identity).not.toContain('payment.userTypeRegular')
   })
 
   it('uses one row-based order summary instead of four disconnected metric cards', async () => {
@@ -359,9 +426,11 @@ describe('PaymentView integrated purchase surface', () => {
     expect(summary.text()).toContain('payment.creditedBalance')
     expect(summary.text()).toContain('payment.fee')
     expect(summary.text()).toContain('payment.actualPay')
+    expect(wrapper.get('[data-testid="payment-workbench-summary"]').element.tagName).toBe('ASIDE')
+    expect(wrapper.get('[data-testid="payment-workbench-summary"]').find('[data-testid="payment-order-summary"]').exists()).toBe(true)
   })
 
-  it('keeps the recharge primary action in a mobile-safe sticky action region', async () => {
+  it('keeps the Draft submit action inside the right-hand summary', async () => {
     const wrapper = shallowMount(PaymentView, {
       global: {
         stubs: {
@@ -375,10 +444,16 @@ describe('PaymentView integrated purchase surface', () => {
 
     const mainCard = wrapper.get('[data-testid="purchase-main-card"]')
     const actionBar = wrapper.get('[data-testid="payment-recharge-action-bar"]')
-    expect(mainCard.classes()).not.toContain('overflow-hidden')
-    expect(mainCard.classes()).toContain('overflow-clip')
-    expect(actionBar.classes()).toContain('payment-mobile-sticky-action')
-    expect(actionBar.get('button').classes()).toEqual(expect.arrayContaining(['min-h-12', 'w-full']))
+    expect(mainCard.classes()).toContain('overflow-hidden')
+    expect(actionBar.classes()).toContain('mt-8')
+    expect(actionBar.classes()).not.toContain('payment-mobile-action')
+    expect(actionBar.get('button').classes()).toEqual(expect.arrayContaining([
+      'purchase-payment-submit',
+      'min-h-12',
+      'w-full',
+    ]))
+    expect(actionBar.get('button').text()).toBe('payment.createOrder')
+    expect(actionBar.get('button').text()).not.toContain('50')
   })
 })
 
@@ -449,13 +524,67 @@ describe('PaymentView subscription confirmation amounts', () => {
     expect(wrapper.findAll('button').some(button => button.text().includes(convertedPrice))).toBe(true)
     const actionBar = wrapper.get('[data-testid="payment-subscription-action-bar"]')
     expect(actionBar.classes()).toEqual(expect.arrayContaining([
-      'payment-mobile-sticky-action',
-      'grid-cols-[minmax(0,1fr)_auto]',
+      'payment-mobile-action',
+      'space-y-3',
     ]))
+    expect(actionBar.get('button').classes()).toContain('btn-primary')
+    expect(actionBar.get('[data-testid="payment-subscription-cancel"]').classes()).toEqual(expect.arrayContaining([
+      'btn-secondary',
+      'w-full',
+    ]))
+    expect(wrapper.get('[data-testid="payment-workbench-main"]').classes()).toContain('lg:col-span-8')
+    expect(wrapper.get('[data-testid="payment-workbench-summary"]').classes()).toContain('lg:col-span-4')
+    expect(wrapper.get('[data-testid="payment-subscription-summary"]').findAll('dl > div')).toHaveLength(3)
     const subscriptionRegion = wrapper.get('#purchase-panel-subscription')
     expect(subscriptionRegion.element.tagName).toBe('SECTION')
     expect(subscriptionRegion.attributes('role')).toBeUndefined()
     expect(subscriptionRegion.attributes('aria-label')).toBe('payment.tabSubscribe')
+  })
+
+  it('keeps administrator-provided payment help in a valid subscription checkout', async () => {
+    const wrapper = await mountSubscriptionConfirm({
+      checkout: {
+        help_text: 'Scan this guide before paying.',
+        help_image_url: 'https://example.com/subscription-help.png',
+      },
+    })
+
+    expect(wrapper.getComponent(PaymentHelpPanel).props()).toMatchObject({
+      text: 'Scan this guide before paying.',
+      imageUrl: 'https://example.com/subscription-help.png',
+    })
+  })
+
+  it('keeps redemption and help available when a valid plan has no payable channel', async () => {
+    const wrapper = await mountSubscriptionConfirm({
+      methods: {},
+      checkout: {
+        help_text: 'Contact support for this plan.',
+        help_image_url: 'https://example.com/plan-help.png',
+      },
+    })
+
+    expect(wrapper.find('[data-testid="payment-workbench"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="payment-subscription-action-bar"]').exists()).toBe(false)
+    expect(wrapper.get('[data-testid="payment-subscription-unavailable"]').text()).toContain('payment.notAvailable')
+    expect(wrapper.findComponent(RedeemCodePanel).exists()).toBe(true)
+    expect(wrapper.getComponent(PaymentHelpPanel).props()).toMatchObject({
+      text: 'Contact support for this plan.',
+      imageUrl: 'https://example.com/plan-help.png',
+    })
+  })
+
+  it('selects an available subscription channel when the first configured channel is disabled', async () => {
+    const method = checkoutInfoFixture().data.methods.wxpay
+    const wrapper = await mountSubscriptionConfirm({
+      methods: {
+        alipay: { ...method, available: false },
+        wxpay: { ...method, available: true },
+      },
+    })
+
+    expect(wrapper.getComponent(PaymentMethodSelector).props('selected')).toBe('wxpay')
+    expect(wrapper.get('[data-testid="payment-subscription-action-bar"] button').attributes('disabled')).toBeUndefined()
   })
 
   it('keeps plan price when the subscription rate is not configured or payment currency is not CNY', async () => {
@@ -575,6 +704,7 @@ describe('PaymentView subscription confirmation amounts', () => {
 
     expect(wrapper.find('#purchase-panel-subscription').exists()).toBe(false)
     expect(wrapper.find('[data-testid="payment-subscription-action-bar"]').exists()).toBe(false)
+    expect(wrapper.findComponent(RedeemCodePanel).exists()).toBe(true)
   })
 })
 

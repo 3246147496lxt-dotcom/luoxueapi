@@ -89,7 +89,7 @@
               </span>
             </span>
             <span class="personal-settings-row-value">
-              <span>{{ thresholdLabel }}</span>
+              <CreditAmount :value="thresholdLabel" icon-size="xs" />
               <Icon name="chevronRight" size="xs" aria-hidden="true" />
             </span>
           </button>
@@ -139,6 +139,7 @@
 import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { userAPI } from '@/api'
+import CreditAmount from '@/components/common/CreditAmount.vue'
 import Icon from '@/components/icons/Icon.vue'
 import ProfileBalanceNotifyCard from '@/components/user/profile/ProfileBalanceNotifyCard.vue'
 import type { PersonalSettingsDetail } from '@/navigation/personalSettingsRoute'

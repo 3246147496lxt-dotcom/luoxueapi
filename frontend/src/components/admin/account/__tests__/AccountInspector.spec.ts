@@ -24,6 +24,7 @@ vi.mock('vue-i18n', async () => {
 vi.mock('@/i18n', () => ({
   i18n: {
     global: {
+      te: () => true,
       t: (key: string) => key
     }
   },
@@ -197,6 +198,17 @@ describe('AccountInspector', () => {
 
     await wrapper.get('[data-testid="account-inspector-query-quota"]').trigger('click')
     expect(queryQuotaMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('keeps account cost in USD and renders user cost as snowflake credits', () => {
+    const wrapper = mount(AccountInspector, {
+      props: { account: makeAccount(), todayStats }
+    })
+
+    const usage = wrapper.get('[data-testid="account-inspector-usage"]')
+    expect(usage.text()).toContain('$1.25')
+    expect(usage.get('[data-testid="credit-amount-value"]').text()).toBe('1.80')
+    expect(usage.text()).not.toContain('$1.80')
   })
 
   it('renders real account groups with GroupBadge', () => {

@@ -30,9 +30,11 @@
           <!-- Current balance: prominent display on the right -->
           <div class="flex-shrink-0 text-right">
             <p class="text-xs text-gray-500 dark:text-dark-400">{{ t('admin.users.currentBalance') }}</p>
-            <p class="text-xl font-bold text-gray-900 dark:text-white">
-              ${{ user.balance?.toFixed(2) || '0.00' }}
-            </p>
+            <CreditAmount
+              class="text-xl font-bold text-gray-900 dark:text-white"
+              :value="(user.balance ?? 0).toFixed(2)"
+              icon-size="md"
+            />
           </div>
         </div>
         <!-- Row 2: notes + total recharged -->
@@ -42,7 +44,12 @@
             <template v-else>&nbsp;</template>
           </p>
           <p class="ml-4 flex-shrink-0 text-xs text-gray-500 dark:text-dark-400">
-            {{ t('admin.users.totalRecharged') }}: <span class="font-semibold text-emerald-600 dark:text-emerald-400">${{ totalRecharged.toFixed(2) }}</span>
+            <span>{{ t('admin.users.totalRecharged') }}:</span>
+            <CreditAmount
+              class="ml-1 font-semibold text-emerald-600 dark:text-emerald-400"
+              :value="totalRecharged.toFixed(2)"
+              icon-size="xs"
+            />
           </p>
         </div>
       </div>
@@ -106,7 +113,8 @@
                   getIconBg(item)
                 ]"
               >
-                <Icon :name="getIconName(item)" size="sm" :class="getIconColor(item)" />
+                <SnowflakeCreditIcon v-if="isBalanceType(item.type)" size="sm" />
+                <Icon v-else :name="getIconName(item)" size="sm" :class="getIconColor(item)" />
               </div>
               <div>
                 <p class="text-sm font-medium text-gray-900 dark:text-white">
@@ -128,7 +136,12 @@
             <!-- Right: value -->
             <div class="text-right">
               <p :class="['text-sm font-semibold', getValueColor(item)]">
-                {{ formatValue(item) }}
+                <CreditAmount
+                  v-if="isBalanceType(item.type)"
+                  :value="formatValue(item)"
+                  icon-size="xs"
+                />
+                <template v-else>{{ formatValue(item) }}</template>
               </p>
               <p
                 v-if="isAdminType(item.type)"
@@ -178,8 +191,10 @@ import { adminAPI, type BalanceHistoryItem } from '@/api/admin'
 import { formatDateTime } from '@/utils/format'
 import type { AdminUser } from '@/types'
 import BaseDialog from '@/components/common/BaseDialog.vue'
+import CreditAmount from '@/components/common/CreditAmount.vue'
 import Select from '@/components/common/Select.vue'
 import Icon from '@/components/icons/Icon.vue'
+import SnowflakeCreditIcon from '@/components/icons/SnowflakeCreditIcon.vue'
 
 const props = defineProps<{ show: boolean; user: AdminUser | null; hideActions?: boolean }>()
 const emit = defineEmits(['close', 'deposit', 'withdraw'])
@@ -314,7 +329,7 @@ const getItemTitle = (item: BalanceHistoryItem) => {
 const formatValue = (item: BalanceHistoryItem) => {
   if (isBalanceType(item.type)) {
     const sign = item.value >= 0 ? '+' : ''
-    return `${sign}$${item.value.toFixed(2)}`
+    return `${sign}${item.value.toFixed(2)}`
   }
   if (isSubscriptionType(item.type)) {
     const days = item.validity_days || Math.round(item.value)

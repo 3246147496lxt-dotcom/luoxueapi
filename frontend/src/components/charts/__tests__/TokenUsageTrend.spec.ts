@@ -22,6 +22,7 @@ const messages: Record<string, string> = {
   'admin.dashboard.totalCost': 'Total Cost',
   'admin.dashboard.currentRangeTotal': 'Selected-period total',
   'admin.dashboard.currentRangeCost': 'Selected-period cost',
+  'dashboard.creditUnit': 'Snow credits',
   'common.loading': 'Loading...',
   'usage.time': 'Time',
 }
@@ -190,6 +191,35 @@ describe('TokenUsageTrend', () => {
     ])
     expect(chartData.datasets[0].data).toEqual([0.25, 1.5])
     expect(chartData.datasets[1].data).toEqual([0.5, 2])
+  })
+
+  it('uses snow credits for actual cost while preserving standard USD', async () => {
+    const wrapper = mountTrend({
+      variant: 'home-clay',
+      creditMode: true,
+      trendData: [createPoint({ actual_cost: 0.25, cost: 0.5 })],
+    })
+
+    await wrapper.findAll('.token-trend-switch button')[1].trigger('click')
+
+    expect(wrapper.get('[data-testid="credit-amount-value"]').text()).toBe('0.25')
+    expect(wrapper.get('[role="img"]').attributes('aria-label'))
+      .toContain('Selected-period cost Snow credits 0.25')
+    expect(wrapper.get('table.sr-only').text()).toContain('Snow credits 0.25')
+    expect(wrapper.get('table.sr-only').text()).toContain('$0.50')
+
+    const options = (wrapper.vm as any).$?.setupState.lineOptions
+    expect(options.plugins.tooltip.callbacks.label({
+      dataset: { label: 'Actual' },
+      datasetIndex: 0,
+      raw: 0.25,
+    })).toBe('Actual: Snow credits 0.250')
+    expect(options.plugins.tooltip.callbacks.label({
+      dataset: { label: 'Standard' },
+      datasetIndex: 1,
+      raw: 0.5,
+    })).toBe('Standard: $0.500')
+    expect(options.scales.y.ticks.callback(0.5)).toBe('0.500')
   })
 
   it('uses the dark semantic chart palette when dark mode is active', () => {

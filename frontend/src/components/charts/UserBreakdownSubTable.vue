@@ -23,7 +23,12 @@
             {{ formatTokens(user.total_tokens) }}
           </td>
           <td class="py-1 text-right text-green-600 dark:text-green-400">
-            ${{ formatCost(user.actual_cost) }}
+            <CreditAmount
+              v-if="creditMode"
+              :value="formatCost(user.actual_cost)"
+              icon-size="xs"
+            />
+            <template v-else>${{ formatCost(user.actual_cost) }}</template>
           </td>
           <td v-if="showAccountCost" class="py-1 text-right text-orange-500 dark:text-orange-400">
             ${{ formatCost(user.account_cost) }}
@@ -40,6 +45,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
+import CreditAmount from '@/components/common/CreditAmount.vue'
 import LoadingSpinner from '@/components/common/LoadingSpinner.vue'
 import type { UserBreakdownItem } from '@/types'
 
@@ -49,12 +55,15 @@ const props = withDefaults(defineProps<{
   items: UserBreakdownItem[]
   loading?: boolean
   showAccountCost?: boolean
+  creditMode?: boolean
 }>(), {
   loading: false,
   showAccountCost: true,
+  creditMode: false,
 })
 
 const showAccountCost = computed(() => props.showAccountCost)
+const creditMode = computed(() => props.creditMode)
 
 const formatTokens = (value: number): string => {
   if (value >= 1_000_000_000) return `${(value / 1_000_000_000).toFixed(2)}B`

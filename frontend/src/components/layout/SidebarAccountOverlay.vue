@@ -42,12 +42,26 @@
                 {{ summary.displayName }}
               </h2>
               <p class="account-panel__identity-meta">
-                <span>{{ panelSummaryText }}</span>
+                <span class="account-panel__balance-line">
+                  <CreditAmount
+                    :value="summary.formattedAvailableBalance"
+                    icon-size="xs"
+                    :label="`${t('accountDock.availableBalance')} ${summary.formattedAvailableBalance}`"
+                  />
+                  <span aria-hidden="true">·</span>
+                  <span class="truncate">{{ subscriptionStatusText }}</span>
+                </span>
                 <span
                   v-if="summary.frozenBalance > 0"
                   class="account-panel__frozen"
                 >
-                  · {{ t('accountDock.frozenBalance') }} {{ summary.formattedFrozenBalance }}
+                  <span aria-hidden="true">·</span>
+                  <span>{{ t('accountDock.frozenBalance') }}</span>
+                  <CreditAmount
+                    :value="summary.formattedFrozenBalance"
+                    icon-size="xs"
+                    :label="`${t('accountDock.frozenBalance')} ${summary.formattedFrozenBalance}`"
+                  />
                 </span>
               </p>
             </div>
@@ -171,6 +185,7 @@ import {
   unregisterModalLayer,
 } from '@/utils/modalStack'
 import AnnouncementBell from '@/components/common/AnnouncementBell.vue'
+import CreditAmount from '@/components/common/CreditAmount.vue'
 import Icon from '@/components/icons/Icon.vue'
 import type {
   AccountPanelLink,
@@ -220,11 +235,6 @@ const subscriptionStatusText = computed(() => {
   }
   return t('accountDock.payAsYouGo')
 })
-const panelSummaryText = computed(() => t('accountDock.summary', {
-  balance: props.summary.formattedAvailableBalance,
-  subscription: subscriptionStatusText.value,
-}))
-
 function updateMediaQuery() {
   isMobile.value = mediaQuery?.matches ?? window.innerWidth < 1024
 }
@@ -432,7 +442,11 @@ onBeforeUnmount(() => {
 }
 
 .account-panel__identity-meta {
+  display: flex;
+  min-width: 0;
   overflow: hidden;
+  align-items: center;
+  gap: 3px;
   margin-top: 1px;
   color: rgb(100 116 139);
   font-size: 0.6875rem;
@@ -442,7 +456,16 @@ onBeforeUnmount(() => {
   white-space: nowrap;
 }
 
+.account-panel__balance-line,
 .account-panel__frozen {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  gap: 3px;
+}
+
+.account-panel__frozen {
+  flex: 0 0 auto;
   color: rgb(180 83 9);
 }
 

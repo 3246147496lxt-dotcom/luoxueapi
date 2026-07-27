@@ -1,120 +1,73 @@
 <template>
-  <div class="space-y-5">
-    <div class="space-y-3">
-      <p class="text-sm font-semibold text-gray-800 dark:text-gray-200">
-        {{ t('payment.amountType') }}
-      </p>
-      <div
-        class="flex flex-wrap items-center gap-2"
-        role="tablist"
-        :aria-label="t('payment.amountType')"
-        @keydown="handleModeKeydown"
-      >
-        <button
-          id="amount-mode-preset"
-          type="button"
-          role="tab"
-          :aria-selected="mode === 'preset'"
-          :tabindex="mode === 'preset' ? 0 : -1"
-          class="min-h-9 rounded-lg px-4 text-sm font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500/40"
-          :class="mode === 'preset'
-            ? 'bg-primary-50 text-primary-700 dark:bg-primary-950/60 dark:text-primary-300'
-            : 'bg-gray-100 text-gray-500 hover:text-gray-800 dark:bg-dark-700 dark:text-gray-400 dark:hover:text-gray-200'"
-          @click="setMode('preset')"
-        >
-          {{ t('payment.fixedAmount') }}
-        </button>
-        <button
-          id="amount-mode-custom"
-          type="button"
-          role="tab"
-          :aria-selected="mode === 'custom'"
-          :tabindex="mode === 'custom' ? 0 : -1"
-          class="min-h-9 rounded-lg px-4 text-sm font-semibold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500/40"
-          :class="mode === 'custom'
-            ? 'bg-primary-50 text-primary-700 dark:bg-primary-950/60 dark:text-primary-300'
-            : 'bg-gray-100 text-gray-500 hover:text-gray-800 dark:bg-dark-700 dark:text-gray-400 dark:hover:text-gray-200'"
-          @click="setMode('custom')"
-        >
-          {{ t('payment.customAmount') }}
-        </button>
-      </div>
-    </div>
+  <div class="space-y-6">
+    <h2 id="payment-amount-title" class="amount-section-title text-base font-bold">
+      {{ t('payment.chooseAmountTitle') }}
+    </h2>
 
     <div
-      v-if="mode === 'preset'"
-      id="amount-panel-preset"
-      role="tabpanel"
-      aria-labelledby="amount-mode-preset"
+      ref="presetGroupRef"
+      class="grid min-w-0 grid-cols-2 gap-3 sm:grid-cols-4"
+      role="radiogroup"
+      :aria-label="t('payment.quickAmounts')"
+      data-testid="preset-amount-grid"
     >
-      <p class="mb-3 text-sm font-semibold text-gray-800 dark:text-gray-200">
-        {{ t('payment.chooseAmountTitle') }}
-      </p>
-      <div
-        class="grid min-w-0 grid-cols-2 gap-3 sm:grid-cols-4"
-        role="radiogroup"
-        :aria-label="t('payment.quickAmounts')"
-        data-testid="preset-amount-grid"
+      <button
+        v-for="(amt, index) in filteredAmounts"
+        :key="amt"
+        type="button"
+        role="radio"
+        :aria-checked="isPresetSelected(amt)"
+        :aria-label="`${t('payment.selectThisAmount')} ${formatAmount(amt)}`"
+        :tabindex="presetOptionTabIndex(index)"
+        :class="[
+          'amount-preset-option flex min-w-0 flex-col items-center justify-center rounded-2xl border p-4 text-center',
+          { 'is-selected': isPresetSelected(amt) },
+        ]"
+        @click="selectAmount(amt)"
+        @keydown="handlePresetKeydown($event, index)"
       >
-        <button
-          v-for="amt in filteredAmounts"
-          :key="amt"
-          type="button"
-          role="radio"
-          :aria-checked="modelValue === amt"
-          :class="[
-            'flex min-h-[76px] min-w-0 flex-col items-center justify-center rounded-2xl border px-2 py-3 text-center transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500/40 focus-visible:ring-offset-2 sm:min-h-[92px] sm:px-3 dark:focus-visible:ring-offset-dark-900',
-            modelValue === amt
-              ? 'border-primary-500 bg-primary-50 text-primary-800 dark:border-primary-400 dark:bg-primary-950/50 dark:text-primary-200'
-              : 'border-gray-200 bg-white text-gray-700 hover:border-primary-200 hover:bg-primary-50/40 dark:border-dark-600 dark:bg-dark-800 dark:text-gray-200 dark:hover:border-primary-800 dark:hover:bg-primary-950/20',
-          ]"
-          @click="selectAmount(amt)"
+        <span
+          class="amount-preset-value max-w-full text-xl font-black tabular-nums [overflow-wrap:anywhere]"
+          data-testid="preset-amount-value"
         >
-          <span
-            class="max-w-full text-base font-bold tabular-nums [overflow-wrap:anywhere] sm:text-xl"
-            data-testid="preset-amount-value"
-          >
-            {{ formatAmount(amt) }}
-          </span>
-          <span class="mt-1 text-xs font-medium text-gray-400 dark:text-gray-500">
-            {{ t('payment.selectThisAmount') }}
-          </span>
-        </button>
-      </div>
+          {{ formatAmount(amt) }}
+        </span>
+      </button>
     </div>
 
-    <div
-      v-else
-      id="amount-panel-custom"
-      role="tabpanel"
-      aria-labelledby="amount-mode-custom"
-    >
-      <label for="custom-recharge-amount" class="mb-2 block text-sm font-medium text-gray-700 dark:text-gray-300">
-        {{ t('payment.customAmountLabel') }}
+    <div class="space-y-2">
+      <label
+        for="custom-recharge-amount"
+        class="amount-custom-label ml-1 block text-xs font-bold uppercase"
+      >
+        {{ t('payment.customAmount') }}
       </label>
       <div class="relative">
-        <span class="pointer-events-none absolute inset-y-0 left-4 flex items-center text-sm font-semibold text-gray-400 dark:text-gray-500">
+        <span
+          class="amount-currency-symbol pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 font-bold"
+          aria-hidden="true"
+        >
           {{ currencySymbol }}
         </span>
         <input
           id="custom-recharge-amount"
-          ref="customInputRef"
           type="text"
           inputmode="decimal"
           autocomplete="off"
           :value="customText"
-          :placeholder="placeholderText"
-          class="input min-h-12 w-full pl-10 pr-4 text-base tabular-nums"
+          placeholder="0.00"
+          aria-describedby="custom-recharge-amount-range"
+          class="amount-custom-input min-h-11 w-full pl-8 pr-4 text-base font-bold tabular-nums"
           @input="handleInput"
         />
       </div>
-      <p class="mt-2 text-xs text-gray-500 dark:text-gray-400">{{ rangeHint }}</p>
+      <p id="custom-recharge-amount-range" class="sr-only">{{ rangeHint }}</p>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, computed, nextTick, watch } from 'vue'
+import { computed, nextTick, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 
 const props = withDefaults(defineProps<{
@@ -139,20 +92,16 @@ const emit = defineEmits<{
 const { t } = useI18n()
 
 const customText = ref('')
-const mode = ref<'preset' | 'custom'>('preset')
-const customInputRef = ref<HTMLInputElement | null>(null)
+const selectionSource = ref<'preset' | 'custom'>('preset')
+const presetGroupRef = ref<HTMLElement | null>(null)
 
 // 0 = no limit
 const filteredAmounts = computed(() =>
-  props.amounts.filter((a) => (props.min <= 0 || a >= props.min) && (props.max <= 0 || a <= props.max))
+  props.amounts.filter((amount) =>
+    (props.min <= 0 || amount >= props.min)
+      && (props.max <= 0 || amount <= props.max),
+  )
 )
-
-const placeholderText = computed(() => {
-  if (props.min > 0 && props.max > 0) return `${props.min} - ${props.max}`
-  if (props.min > 0) return `≥ ${props.min}`
-  if (props.max > 0) return `≤ ${props.max}`
-  return t('payment.enterAmount')
-})
 
 const rangeHint = computed(() => {
   if (props.min > 0 && props.max > 0) {
@@ -181,9 +130,14 @@ const currencySymbol = computed(() => {
 
 const AMOUNT_PATTERN = /^\d*(\.\d{0,2})?$/
 
-function selectAmount(amt: number) {
-  customText.value = String(amt)
-  emit('update:modelValue', amt)
+function isPresetSelected(amount: number): boolean {
+  return selectionSource.value === 'preset' && props.modelValue === amount
+}
+
+function selectAmount(amount: number) {
+  selectionSource.value = 'preset'
+  customText.value = ''
+  emit('update:modelValue', amount)
 }
 
 function formatAmount(value: number): string {
@@ -200,48 +154,161 @@ function formatAmount(value: number): string {
   }
 }
 
-function setMode(nextMode: 'preset' | 'custom') {
-  mode.value = nextMode
-  if (nextMode === 'custom') {
-    nextTick(() => customInputRef.value?.focus())
-  } else {
-    nextTick(() => document.getElementById('amount-mode-preset')?.focus())
-  }
+function presetOptionTabIndex(index: number): 0 | -1 {
+  const selectedIndex = selectionSource.value === 'preset'
+    ? filteredAmounts.value.findIndex(amount => amount === props.modelValue)
+    : -1
+  const focusableIndex = selectedIndex >= 0 ? selectedIndex : 0
+  return index === focusableIndex ? 0 : -1
 }
 
-function handleModeKeydown(event: KeyboardEvent) {
-  if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return
+function handlePresetKeydown(event: KeyboardEvent, currentIndex: number) {
+  if (!['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown', 'Home', 'End'].includes(event.key)) return
+
+  const buttons = Array.from(
+    presetGroupRef.value?.querySelectorAll<HTMLButtonElement>('[role="radio"]') ?? [],
+  )
+  if (buttons.length === 0) return
+
   event.preventDefault()
-  const nextMode = event.key === 'ArrowLeft' || event.key === 'Home' ? 'preset' : 'custom'
-  setMode(nextMode)
+  let nextIndex = currentIndex
+  if (event.key === 'Home') nextIndex = 0
+  else if (event.key === 'End') nextIndex = buttons.length - 1
+  else if (event.key === 'ArrowRight' || event.key === 'ArrowDown') {
+    nextIndex = (currentIndex + 1) % buttons.length
+  } else {
+    nextIndex = (currentIndex - 1 + buttons.length) % buttons.length
+  }
+
+  const nextAmount = filteredAmounts.value[nextIndex]
+  if (!isPresetSelected(nextAmount)) selectAmount(nextAmount)
+  nextTick(() => buttons[nextIndex]?.focus())
 }
 
-function handleInput(e: Event) {
-  const val = (e.target as HTMLInputElement).value
-  if (!AMOUNT_PATTERN.test(val)) return
-  customText.value = val
-  if (val === '') {
+function customTextMatchesModel(value: number | null): boolean {
+  if (customText.value === '') return value === null
+  const parsed = Number.parseFloat(customText.value)
+  if (!Number.isFinite(parsed) || parsed <= 0) return value === null
+  return value === parsed
+}
+
+function handleInput(event: Event) {
+  const input = event.target as HTMLInputElement
+  const value = input.value
+  if (!AMOUNT_PATTERN.test(value)) {
+    input.value = customText.value
+    return
+  }
+
+  selectionSource.value = 'custom'
+  customText.value = value
+  if (value === '') {
     emit('update:modelValue', null)
     return
   }
-  const num = parseFloat(val)
-  if (!isNaN(num) && num > 0) {
-    emit('update:modelValue', num)
-  } else {
-    emit('update:modelValue', null)
-  }
+
+  const amount = Number.parseFloat(value)
+  emit('update:modelValue', Number.isFinite(amount) && amount > 0 ? amount : null)
 }
 
-watch(() => props.modelValue, (v) => {
-  if (v !== null && String(v) !== customText.value) {
-    customText.value = String(v)
-  }
-  if (v !== null && !filteredAmounts.value.includes(v)) {
-    mode.value = 'custom'
-  }
-}, { immediate: true })
+watch(
+  [() => props.modelValue, filteredAmounts],
+  ([value]) => {
+    if (selectionSource.value === 'custom' && customTextMatchesModel(value)) return
+    if (
+      selectionSource.value === 'preset'
+      && customText.value === ''
+      && (value === null || filteredAmounts.value.includes(value))
+    ) return
 
-watch(filteredAmounts, (values) => {
-  if (values.length === 0) mode.value = 'custom'
-}, { immediate: true })
+    if (value !== null && filteredAmounts.value.includes(value)) {
+      selectionSource.value = 'preset'
+      customText.value = ''
+      return
+    }
+
+    selectionSource.value = 'custom'
+    customText.value = value === null ? '' : String(value)
+  },
+  { immediate: true },
+)
 </script>
+
+<style scoped>
+.amount-section-title {
+  color: #111827;
+}
+
+.amount-preset-option {
+  color: #030712;
+  background: var(--lx-clay-surface);
+  border-color: var(--lx-clay-border);
+  transition:
+    border-color 150ms ease,
+    background-color 150ms ease,
+    color 150ms ease;
+}
+
+.amount-preset-option:hover {
+  color: #6d28d9;
+  border-color: #c4b5fd;
+}
+
+.amount-preset-option.is-selected {
+  color: #6d28d9;
+  background: color-mix(in srgb, #f5f3ff 30%, var(--lx-clay-surface));
+  border-color: #8b5cf6;
+}
+
+.amount-preset-option:focus-visible,
+.amount-custom-input:focus-visible {
+  outline: 3px solid color-mix(in srgb, var(--lx-clay-accent) 34%, transparent);
+  outline-offset: 2px;
+}
+
+.amount-custom-label {
+  color: #6b7280;
+}
+
+.amount-currency-symbol {
+  color: #9ca3af;
+}
+
+.amount-custom-input {
+  border: 1px solid var(--lx-clay-border);
+  border-radius: 13px;
+  color: var(--lx-clay-text);
+  background: var(--lx-clay-recessed);
+  transition:
+    border-color 150ms ease,
+    box-shadow 150ms ease;
+}
+
+.amount-custom-input::placeholder {
+  color: #9ca3af;
+}
+
+:global(.dark) .amount-section-title,
+:global(.dark) .amount-preset-option {
+  color: var(--lx-clay-text);
+}
+
+:global(.dark) .amount-custom-label,
+:global(.dark) .amount-currency-symbol,
+:global(.dark) .amount-custom-input::placeholder {
+  color: var(--lx-clay-text-muted);
+}
+
+.amount-custom-input:focus {
+  border-color: var(--lx-clay-accent);
+  outline: none;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--lx-clay-accent) 10%, transparent);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .amount-preset-option,
+  .amount-custom-input {
+    transition-duration: 0.01ms;
+  }
+}
+</style>

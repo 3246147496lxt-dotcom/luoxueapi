@@ -45,15 +45,16 @@ function paymentCurrencyFractionDigits(currency: string): number {
 export function formatPaymentAmount(amount: number, currency?: string | null, locale?: string): string {
   const normalized = normalizePaymentCurrency(currency)
   const fractionDigits = paymentCurrencyFractionDigits(normalized)
+  const value = Number.isFinite(amount) ? amount : 0
   try {
-    return new Intl.NumberFormat(locale || undefined, {
-      style: 'currency',
-      currency: normalized,
-      currencyDisplay: 'narrowSymbol',
+    const formatted = new Intl.NumberFormat(locale || undefined, {
+      style: 'decimal',
       minimumFractionDigits: fractionDigits,
       maximumFractionDigits: fractionDigits,
-    }).format(Number.isFinite(amount) ? amount : 0)
+    }).format(value)
+    const symbol = currencySymbol(normalized)
+    return `${symbol}${/^[A-Z]{3}$/.test(symbol) ? ' ' : ''}${formatted}`
   } catch {
-    return `${normalized} ${(Number.isFinite(amount) ? amount : 0).toFixed(fractionDigits)}`
+    return `${normalized} ${value.toFixed(fractionDigits)}`
   }
 }

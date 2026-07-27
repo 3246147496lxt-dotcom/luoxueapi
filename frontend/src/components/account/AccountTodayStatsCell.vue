@@ -42,9 +42,11 @@
       <!-- Cost (User/API Key) -->
       <div v-if="props.stats.user_cost != null" class="flex items-center gap-1">
         <span class="text-gray-500 dark:text-gray-400">{{ t('usage.userBilled') }}:</span>
-        <span class="font-medium text-gray-700 dark:text-gray-300">{{
-          formatCurrency(props.stats.user_cost)
-        }}</span>
+        <CreditAmount
+          class="font-medium text-gray-700 dark:text-gray-300"
+          :value="props.stats.user_cost.toFixed(2)"
+          icon-size="xs"
+        />
       </div>
     </div>
 
@@ -55,6 +57,7 @@
 
 <script setup lang="ts">
 import { useI18n } from 'vue-i18n'
+import CreditAmount from '@/components/common/CreditAmount.vue'
 import type { WindowStats } from '@/types'
 import { formatNumber, formatCurrency } from '@/utils/format'
 

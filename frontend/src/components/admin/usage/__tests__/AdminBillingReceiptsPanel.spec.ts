@@ -146,8 +146,10 @@ describe('AdminBillingReceiptsPanel', () => {
     expect(row.text()).toContain('340')
     expect(row.text()).toContain('128')
     expect(row.text()).toContain('0.020000')
+    expect(row.text()).toContain('$0.024000')
     expect(row.text()).toContain('4.500000')
     expect(row.text()).toContain('4.480000')
+    expect(row.findAll('[data-test="credit-amount"]')).toHaveLength(3)
     expect(row.text()).toContain('admin.usage.billingReceipts.statuses.charged')
   })
 

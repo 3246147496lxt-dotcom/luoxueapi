@@ -66,6 +66,23 @@ func TestNotificationEmailTemplateOverrideAndRestore(t *testing.T) {
 	require.ErrorIs(t, err, ErrSettingNotFound)
 }
 
+func TestNotificationEmailBalanceTemplatesUseSnowCredits(t *testing.T) {
+	ctx := context.Background()
+	svc := NewNotificationEmailService(newNotificationEmailMemorySettingRepo(), nil)
+
+	for _, event := range []string{
+		NotificationEmailEventBalanceLow,
+		NotificationEmailEventBalanceRechargeSuccess,
+	} {
+		for _, locale := range []string{"en", "zh"} {
+			template, err := svc.GetTemplate(ctx, event, locale)
+			require.NoError(t, err)
+			require.Contains(t, template.HTML, "❄")
+			require.NotContains(t, template.HTML, "${{")
+		}
+	}
+}
+
 func TestNotificationEmailTemplateRejectsUnsupportedPlaceholder(t *testing.T) {
 	ctx := context.Background()
 	svc := NewNotificationEmailService(newNotificationEmailMemorySettingRepo(), nil)

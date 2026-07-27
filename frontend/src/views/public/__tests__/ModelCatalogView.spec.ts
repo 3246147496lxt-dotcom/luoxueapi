@@ -4,6 +4,7 @@ import { createMemoryHistory, createRouter } from 'vue-router'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import ModelCatalogView from '../ModelCatalogView.vue'
+import CreditAmount from '@/components/common/CreditAmount.vue'
 import type { PublicModelCatalogItem, PublicModelCatalogResponse } from '@/api/catalog'
 
 const testState = vi.hoisted(() => ({
@@ -162,7 +163,7 @@ function model(overrides: Partial<PublicModelCatalogItem> = {}): PublicModelCata
     pricing: {
       label: '公开标准价',
       billing_mode: 'token',
-      currency: 'USD',
+      currency: 'CREDIT',
       unit: 'per_token',
       input_price: 0,
       output_price: 0.00001,
@@ -229,7 +230,7 @@ beforeEach(() => {
 })
 
 describe('ModelCatalogView', () => {
-  it('renders public prices and preserves a real zero price', async () => {
+  it('renders effective public prices as Snow credits and preserves a real zero price', async () => {
     testState.getCatalog.mockResolvedValue(catalogResponse([
       model(),
       model({
@@ -253,9 +254,32 @@ describe('ModelCatalogView', () => {
 
     expect(wrapper.findAll('.catalog-card')).toHaveLength(2)
     expect(wrapper.text()).toContain('GPT-4o')
+    expect(wrapper.findAllComponents(CreditAmount).map((amount) => amount.props('value'))).toEqual([
+      '0',
+      '10',
+      '3',
+      '15'
+    ])
+    expect(wrapper.findAll('[data-testid="snowflake-credit-icon"]')).toHaveLength(4)
+    expect(wrapper.text()).not.toMatch(/[$¥]/)
+    expect(wrapper.text()).toContain('128K')
+  })
+
+  it('keeps an explicitly USD-denominated catalog price in dollars', async () => {
+    testState.getCatalog.mockResolvedValue(catalogResponse([
+      model({
+        pricing: {
+          ...model().pricing,
+          currency: 'USD'
+        }
+      })
+    ]))
+
+    const { wrapper } = await mountCatalog()
+
     expect(wrapper.text()).toContain('$0')
     expect(wrapper.text()).toContain('$10')
-    expect(wrapper.text()).toContain('128K')
+    expect(wrapper.findComponent(CreditAmount).exists()).toBe(false)
   })
 
   it('filters by provider and writes filter state into the URL', async () => {
@@ -313,7 +337,8 @@ describe('ModelCatalogView', () => {
     const dialog = wrapper.get('dialog')
     expect(dialog.attributes('open')).toBeDefined()
     expect(dialog.text()).toContain('缓存读取')
-    expect(dialog.text()).toContain('$1')
+    expect(dialog.find('[data-testid="snowflake-credit-icon"]').exists()).toBe(true)
+    expect(dialog.text()).not.toContain('$1')
     expect(dialog.text()).toContain('缓存写入（1 小时）')
     expect(dialog.text()).toContain('Priority 输入')
     expect(dialog.text()).toContain('长上下文价格')

@@ -175,7 +175,7 @@
                     >
                       {{
                         t("admin.settings.payment.balanceRechargePreview", {
-                          usd: (
+                          credit: (
                             Number(form.payment_balance_recharge_multiplier) ||
                             1
                           ).toFixed(2),

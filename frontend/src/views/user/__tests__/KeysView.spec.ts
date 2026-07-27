@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
 import { nextTick } from 'vue'
 
@@ -33,53 +33,60 @@ const {
 
 const messages: Record<string, string> = {
   'common.actions': 'Actions',
+  'common.create': 'Create',
   'common.delete': 'Delete',
   'common.edit': 'Edit',
-  'common.filter': 'Filter',
   'common.loading': 'Loading',
   'common.name': 'Name',
+  'common.notAvailable': 'Not available',
   'common.refresh': 'Refresh',
   'common.status': 'Status',
   'keys.apiKey': 'API Key',
   'keys.cardDescription': 'API key description',
-  'keys.columnAlwaysVisible': 'Always visible',
-  'keys.columnSettings': 'Column Settings',
+  'keys.clickToChangeGroup': 'Change group',
+  'keys.compactList': 'Compact List',
+  'keys.comfortableList': 'Comfortable List',
   'keys.copyToClipboard': 'Copy',
   'keys.copied': 'Copied',
+  'keys.createFirstKey': 'Create your first API key.',
   'keys.createKey': 'Create API Key',
   'keys.created': 'Created',
   'keys.currentConcurrency': 'Current Concurrency',
   'keys.detailSettings': 'Detail Fields',
+  'keys.detailTitle': 'Key Details',
   'keys.disable': 'Disable',
   'keys.enable': 'Enable',
   'keys.expiresAt': 'Expires',
   'keys.group': 'Group',
-  'keys.hideActions': 'Hide Actions',
   'keys.hideKey': 'Hide key',
   'keys.id': 'ID',
   'keys.importToCcSwitch': 'Import to CCS',
   'keys.ipRestriction': 'IP restriction',
+  'keys.keyDisabledSuccess': 'Key disabled',
   'keys.lastUsedAt': 'Last Used',
   'keys.lastUsedIP': 'Last Used IP',
   'keys.noExpiration': 'Never',
   'keys.noGroup': 'No group',
-  'keys.noIpRestriction': 'No restrictions',
   'keys.noKeysYet': 'No API keys yet',
-  'keys.noRateLimit': 'Not set',
   'keys.quota': 'Quota',
+  'keys.quotaUsage': 'Quota usage',
   'keys.rateLimitColumn': 'Rate Limit',
-  'keys.rateLimitUsage': 'Rate limit usage',
   'keys.revealKey': 'Reveal key',
   'keys.searchPlaceholder': 'Search name or key...',
-  'keys.showActions': 'Show Actions',
-  'keys.sortConcurrency': 'Concurrency',
+  'keys.sortConcurrencyAsc': 'Concurrency lowest',
+  'keys.sortConcurrencyDesc': 'Concurrency highest',
   'keys.sortCreatedAsc': 'Created oldest',
   'keys.sortCreatedDesc': 'Created newest',
-  'keys.sortExpiration': 'Expiration',
-  'keys.sortLastUsed': 'Last used',
+  'keys.sortExpirationAsc': 'Expiration earliest',
+  'keys.sortExpirationDesc': 'Expiration latest',
+  'keys.sortIdAsc': 'ID ascending',
+  'keys.sortIdDesc': 'ID descending',
+  'keys.sortLastUsedAsc': 'Last used oldest',
+  'keys.sortLastUsedDesc': 'Last used newest',
   'keys.sortNameAsc': 'Name A-Z',
   'keys.sortNameDesc': 'Name Z-A',
-  'keys.sortStatus': 'Status',
+  'keys.sortStatusAsc': 'Status ascending',
+  'keys.sortStatusDesc': 'Status descending',
   'keys.status.active': 'Enabled',
   'keys.status.expired': 'Expired',
   'keys.status.inactive': 'Inactive',
@@ -89,7 +96,14 @@ const messages: Record<string, string> = {
   'keys.total': 'Last 30d',
   'keys.unlimitedQuota': 'Unlimited',
   'keys.usage': 'Usage',
-  'keys.useKey': 'Use key',
+  'keys.viewDetailsAndActions': 'View Details and Actions',
+  'keys.workspaceAssignedGroup': 'Assigned Group',
+  'keys.workspaceAvailableQuota': 'Available Quota',
+  'keys.workspaceCardThirtyDayUsage': '30-Day Billing Total',
+  'keys.workspaceCardTodayUsage': 'Today Billing Total',
+  'keys.workspaceKeyInfo': 'Key Information',
+  'keys.workspacePageOf': 'Page {page} of {total}',
+  'keys.workspaceQuotaProgress': 'Quota Usage Progress',
 }
 
 vi.mock('@/api', () => ({
@@ -133,8 +147,8 @@ vi.mock('vue-i18n', async () => {
 const createApiKey = (overrides: Partial<ApiKey> = {}): ApiKey => ({
   id: 1,
   user_id: 1,
-  key: 'sk-test-key',
-  name: 'test-key',
+  key: 'sk-test-key-one-1234',
+  name: 'Primary key',
   group_id: null,
   status: 'active',
   ip_whitelist: [],
@@ -162,6 +176,26 @@ const createApiKey = (overrides: Partial<ApiKey> = {}): ApiKey => ({
   ...overrides,
 })
 
+const createKeySet = () => [
+  createApiKey(),
+  createApiKey({
+    id: 2,
+    key: 'sk-test-key-two-5678',
+    name: 'Secondary key',
+    status: 'inactive',
+    quota: 20,
+    quota_used: 5,
+  }),
+]
+
+const keyResponse = (items: ApiKey[], page = 1, pageSize = 20) => ({
+  items,
+  total: items.length,
+  page,
+  page_size: pageSize,
+  pages: Math.max(1, Math.ceil(items.length / pageSize)),
+})
+
 const SelectStub = {
   name: 'Select',
   props: ['modelValue', 'options'],
@@ -171,7 +205,7 @@ const SelectStub = {
 
 const SearchInputStub = {
   name: 'SearchInput',
-  props: ['modelValue'],
+  props: ['modelValue', 'placeholder'],
   emits: ['update:modelValue', 'search'],
   template: '<input :value="modelValue" @input="$emit(\'update:modelValue\', $event.target.value)" />',
 }
@@ -180,10 +214,16 @@ const PaginationStub = {
   name: 'Pagination',
   props: ['page', 'total', 'pageSize'],
   emits: ['update:page', 'update:pageSize'],
-  template: '<button data-test="page-size-50" @click="$emit(\'update:pageSize\', 50)">50</button>',
+  template: `
+    <div data-test="pagination-stub">
+      <button data-test="page-2" @click="$emit('update:page', 2)">2</button>
+      <button data-test="page-size-50" @click="$emit('update:pageSize', 50)">50</button>
+    </div>
+  `,
 }
 
 const IconStub = {
+  name: 'Icon',
   props: ['name'],
   template: '<span :data-icon="name">{{ name }}</span>',
 }
@@ -194,11 +234,78 @@ const EmptyStateStub = {
   template: '<div data-test="empty-state"><span>{{ title }}</span><span>{{ description }}</span><slot name="action" /></div>',
 }
 
-const mountView = async (): Promise<VueWrapper> => {
+const ApiKeyInspectorStub = {
+  name: 'ApiKeyInspector',
+  props: [
+    'apiKey',
+    'usage',
+    'userGroupRate',
+    'publicSettings',
+    'copied',
+    'statusUpdating',
+    'now',
+    'showCcsImport',
+    'mode',
+    'visibleColumns',
+  ],
+  emits: [
+    'copy-key',
+    'toggle-status',
+    'change-group',
+    'reset-quota',
+    'reset-rate-limit',
+    'use-key',
+    'import-ccs',
+    'edit',
+    'delete',
+  ],
+  template: `
+    <div
+      data-test="inspector-stub"
+      :data-key-id="apiKey.id"
+      :data-key-name="apiKey.name"
+      :data-mode="mode"
+    />
+  `,
+}
+
+const ApiKeyDetailSheetStub = {
+  name: 'ApiKeyDetailSheet',
+  props: ['show', 'title', 'subtitle'],
+  emits: ['close'],
+  template: `
+    <div v-if="show" data-test="detail-sheet-stub">
+      <button data-test="detail-sheet-close" @click="$emit('close')">close</button>
+      <slot />
+    </div>
+  `,
+}
+
+const mountedWrappers: VueWrapper[] = []
+
+function installMatchMedia(matches: boolean) {
+  Object.defineProperty(window, 'matchMedia', {
+    configurable: true,
+    writable: true,
+    value: vi.fn((query: string) => ({
+      matches,
+      media: query,
+      onchange: null,
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      dispatchEvent: vi.fn(() => true),
+    })),
+  })
+}
+
+const mountView = async ({ inlineInspector = true } = {}): Promise<VueWrapper> => {
+  installMatchMedia(inlineInspector)
   const wrapper = mount(KeysView, {
     global: {
       stubs: {
-        AppLayout: { template: '<div><slot /></div>' },
+        AppLayout: { name: 'AppLayout', props: ['variant'], template: '<div><slot /></div>' },
         Pagination: PaginationStub,
         BaseDialog: true,
         ConfirmDialog: true,
@@ -206,6 +313,8 @@ const mountView = async (): Promise<VueWrapper> => {
         Select: SelectStub,
         SearchInput: SearchInputStub,
         Icon: IconStub,
+        ApiKeyInspector: ApiKeyInspectorStub,
+        ApiKeyDetailSheet: ApiKeyDetailSheetStub,
         UseKeyModal: true,
         EndpointPopover: true,
         GroupBadge: true,
@@ -214,18 +323,16 @@ const mountView = async (): Promise<VueWrapper> => {
       },
     },
   })
+  mountedWrappers.push(wrapper)
   await flushPromises()
   await nextTick()
   return wrapper
 }
 
-const getButtonByText = (wrapper: VueWrapper, text: string) => {
-  const button = wrapper.findAll('button').find((item) => item.text().includes(text))
-  if (!button) throw new Error(`Button not found: ${text}`)
-  return button
-}
+const inlineInspector = (wrapper: VueWrapper) =>
+  wrapper.get('[data-test="inspector-stub"][data-mode="inline"]')
 
-describe('user KeysView responsive key layout', () => {
+describe('user KeysView workspace integration', () => {
   beforeEach(() => {
     localStorage.clear()
     for (const mock of [
@@ -242,143 +349,146 @@ describe('user KeysView responsive key layout', () => {
       nextStep,
     ]) mock.mockReset()
 
-    listKeys.mockResolvedValue({
-      items: [createApiKey()],
-      total: 1,
-      page: 1,
-      page_size: 20,
-      pages: 1,
-    })
+    listKeys.mockResolvedValue(keyResponse(createKeySet()))
     toggleStatus.mockResolvedValue(undefined)
     getPublicSettings.mockResolvedValue({})
-    getDashboardApiKeysUsage.mockResolvedValue({
-      stats: { 1: { api_key_id: 1, today_actual_cost: 0.25, total_actual_cost: 1.5 } },
-    })
+    getDashboardApiKeysUsage.mockImplementation(async (keyIds: number[]) => ({
+      stats: Object.fromEntries(keyIds.map((id) => [String(id), {
+        api_key_id: id,
+        today_actual_cost: id * 0.25,
+        total_actual_cost: id * 1.5,
+      }])),
+    }))
     getAvailableGroups.mockResolvedValue([])
     getUserGroupRates.mockResolvedValue({})
     copyToClipboard.mockResolvedValue(true)
     isCurrentStep.mockReturnValue(false)
   })
 
-  it('renders the desktop table and mobile card branches from the same key data', async () => {
-    const wrapper = await mountView()
+  afterEach(() => {
+    for (const wrapper of mountedWrappers.splice(0)) wrapper.unmount()
+    document.body.classList.remove('api-key-detail-sheet-open')
+  })
 
-    expect(wrapper.find('[data-test="api-key-table"]').exists()).toBe(true)
-    expect(wrapper.find('[data-test="api-key-table-row-1"]').exists()).toBe(true)
-    expect(wrapper.find('[data-test="api-key-card-1"]').exists()).toBe(true)
-    expect(wrapper.get('[data-test="key-table-status-switch-1"]').attributes('aria-checked')).toBe('true')
-    expect(wrapper.get('[data-test="key-status-switch-1"]').attributes('aria-checked')).toBe('true')
-    expect(wrapper.text()).toContain('0.2500')
-    expect(wrapper.text()).toContain('1.5000')
-    expect(wrapper.text()).toContain('2.00/10.00')
-    expect(wrapper.findAll('[data-testid="credit-amount"]').length).toBeGreaterThanOrEqual(8)
+  it('automatically selects the first desktop row and renders both responsive branches', async () => {
+    const wrapper = await mountView()
+    const detailPane = wrapper.get('[data-test="key-inline-inspector"]')
+
+    expect(window.matchMedia).toHaveBeenCalledWith('(min-width: 768px)')
+    expect(detailPane.classes()).toContain('md:flex')
+    expect(detailPane.classes()).not.toContain('xl:flex')
+    expect(wrapper.get('[data-test="api-key-workspace-row-1"]').attributes('aria-selected')).toBe('true')
+    expect(wrapper.get('[data-test="api-key-workspace-row-2"]').attributes('aria-selected')).toBe('false')
+    expect(inlineInspector(wrapper).attributes('data-key-id')).toBe('1')
+    expect(wrapper.find('[data-test="api-key-summary-card-1"]').exists()).toBe(true)
+    expect(wrapper.find('[data-test="api-key-summary-card-2"]').exists()).toBe(true)
     expect(wrapper.text()).not.toContain('$')
   })
 
-  it('keeps mobile secondary filters collapsed behind an accessible 44px control', async () => {
+  it('switches the selected row and inspector by pointer and keyboard', async () => {
     const wrapper = await mountView()
-    const toggle = wrapper.get('[data-test="key-mobile-filter-toggle"]')
-    const secondaryFilters = wrapper.get('[data-test="key-mobile-secondary-filters"]')
 
-    expect(toggle.text()).toContain('Filter')
-    expect(toggle.classes()).toContain('min-h-11')
-    expect(toggle.attributes('aria-expanded')).toBe('false')
-    expect(toggle.attributes('aria-controls')).toBe('key-mobile-secondary-filters')
-    expect(secondaryFilters.attributes('id')).toBe('key-mobile-secondary-filters')
-    expect(secondaryFilters.classes()).toContain('hidden')
-    expect(secondaryFilters.classes()).toContain('md:contents')
-    expect(wrapper.findAllComponents({ name: 'Select' })).toHaveLength(3)
+    await wrapper.get('[data-test="api-key-workspace-row-2"]').trigger('click')
+    expect(inlineInspector(wrapper).attributes('data-key-id')).toBe('2')
+    expect(wrapper.get('[data-test="api-key-workspace-row-2"]').attributes('aria-selected')).toBe('true')
 
-    await toggle.trigger('click')
-
-    expect(toggle.attributes('aria-expanded')).toBe('true')
-    expect(secondaryFilters.classes()).not.toContain('hidden')
-    expect(secondaryFilters.classes()).toContain('grid')
-    expect(secondaryFilters.classes()).toContain('md:contents')
+    await wrapper.get('[data-test="api-key-workspace-row-1"]').trigger('keydown', { key: 'Enter' })
+    expect(inlineInspector(wrapper).attributes('data-key-id')).toBe('1')
+    expect(wrapper.get('[data-test="api-key-workspace-row-1"]').attributes('aria-selected')).toBe('true')
   })
 
-  it('keeps exactly one responsive create-key CTA for the empty state', async () => {
-    listKeys.mockResolvedValue({
-      items: [],
-      total: 0,
-      page: 1,
-      page_size: 20,
-      pages: 0,
-    })
+  it('preserves the selected key by ID when refresh returns new objects or order', async () => {
     const wrapper = await mountView()
+    await wrapper.get('[data-test="api-key-workspace-row-2"]').trigger('click')
 
-    const headerCta = wrapper.get('[data-test="key-create-header"]')
-    const emptyCta = wrapper.get('[data-test="key-create-empty"]')
+    const refreshed = [
+      createApiKey({ id: 2, key: 'sk-test-key-two-5678', name: 'Secondary key refreshed' }),
+      createApiKey(),
+    ]
+    listKeys.mockResolvedValueOnce(keyResponse(refreshed))
 
-    expect(wrapper.get('[data-test="empty-state"]').text()).toContain('No API keys yet')
-    expect(headerCta.classes()).toContain('key-header-create--empty')
-    expect(emptyCta.classes()).toContain('key-empty-create')
-    expect(emptyCta.classes()).toContain('min-h-11')
+    await wrapper.get('[data-test="key-refresh"]').trigger('click')
+    await flushPromises()
+
+    expect(inlineInspector(wrapper).attributes('data-key-id')).toBe('2')
+    expect(inlineInspector(wrapper).attributes('data-key-name')).toBe('Secondary key refreshed')
+    expect(wrapper.get('[data-test="api-key-workspace-row-2"]').attributes('aria-selected')).toBe('true')
   })
 
-  it('keeps low-frequency fields hidden and can reveal them from detail settings', async () => {
+  it('falls back to the first returned row when the selected key disappears', async () => {
+    const wrapper = await mountView()
+    await wrapper.get('[data-test="api-key-workspace-row-2"]').trigger('click')
+
+    const replacement = createApiKey({ id: 3, key: 'sk-replacement-key-9012', name: 'Replacement key' })
+    listKeys.mockResolvedValueOnce(keyResponse([replacement, createApiKey()]))
+
+    await wrapper.get('[data-test="key-refresh"]').trigger('click')
+    await flushPromises()
+
+    expect(inlineInspector(wrapper).attributes('data-key-id')).toBe('3')
+    expect(wrapper.get('[data-test="api-key-workspace-row-3"]').attributes('aria-selected')).toBe('true')
+    expect(wrapper.find('[data-test="detail-sheet-stub"]').exists()).toBe(false)
+  })
+
+  it('does not select a row when its status, copy, or group controls are used', async () => {
     const wrapper = await mountView()
 
-    expect(wrapper.text()).not.toContain('Rate limit usage')
-    await wrapper.get('[data-test="key-detail-settings"]').trigger('click')
-    await getButtonByText(wrapper, 'Rate Limit').trigger('click')
+    await wrapper.get('[data-test="key-workspace-status-switch-2"]').trigger('click')
+    await flushPromises()
+    expect(toggleStatus).toHaveBeenCalledWith(2, 'active')
+    expect(inlineInspector(wrapper).attributes('data-key-id')).toBe('1')
+
+    await wrapper.get('[data-test="key-workspace-copy-2"]').trigger('click')
+    await flushPromises()
+    expect(copyToClipboard).toHaveBeenCalledWith('sk-test-key-two-5678', 'Copied')
+    expect(inlineInspector(wrapper).attributes('data-key-id')).toBe('1')
+
+    const row = wrapper.get('[data-test="api-key-workspace-row-2"]')
+    const groupButton = row.findAll('button').find((button) => button.attributes('title') === 'Change group')
+    expect(groupButton).toBeDefined()
+    await groupButton!.trigger('click')
+    expect(inlineInspector(wrapper).attributes('data-key-id')).toBe('1')
+  })
+
+  it('opens and closes mobile key details without clearing the selected key', async () => {
+    const wrapper = await mountView({ inlineInspector: false })
+
+    expect(wrapper.find('[data-test="detail-sheet-stub"]').exists()).toBe(false)
+    await wrapper.get('[data-test="key-summary-open-details-2"]').trigger('click')
     await nextTick()
 
-    expect(wrapper.text()).toContain('Rate limit usage')
-    expect(localStorage.getItem('api-key-hidden-columns')).toBe(
-      JSON.stringify(['id', 'last_used_at', 'last_used_ip'])
-    )
+    expect(wrapper.find('[data-test="detail-sheet-stub"]').exists()).toBe(true)
+    expect(wrapper.get('[data-test="inspector-stub"][data-mode="sheet"]').attributes('data-key-id')).toBe('2')
+
+    await wrapper.get('[data-test="detail-sheet-close"]').trigger('click')
+    await nextTick()
+
+    expect(wrapper.find('[data-test="detail-sheet-stub"]').exists()).toBe(false)
+    expect(wrapper.get('[data-test="api-key-workspace-row-2"]').attributes('aria-selected')).toBe('true')
   })
 
-  it('keeps status, usage, key, and group always visible in detail settings', async () => {
-    const wrapper = await mountView()
-
-    await wrapper.get('[data-test="key-detail-settings"]').trigger('click')
-    const menuText = wrapper.get('[data-test="key-detail-menu"]').text()
-    expect(menuText).toContain('ID')
-    expect(menuText).toContain('Rate Limit')
-    expect(menuText).not.toContain('Actions')
-    expect(menuText).not.toContain('API Key')
-    expect(menuText).not.toContain('Usage')
-  })
-
-  it('collapses and restores the complete action area', async () => {
-    const wrapper = await mountView()
-
-    expect(wrapper.find('[data-test="key-actions-1"]').exists()).toBe(true)
-    await wrapper.get('[data-test="key-actions-toggle"]').trigger('click')
-    expect(wrapper.find('[data-test="key-actions-1"]').exists()).toBe(false)
-    expect(wrapper.get('[data-test="key-actions-toggle"]').attributes('aria-expanded')).toBe('false')
-  })
-
-  it('toggles an active key once and reloads the card data', async () => {
+  it('forwards page, page size, filters, and explicit sort to list requests', async () => {
+    getAvailableGroups.mockResolvedValue([{ id: 42, name: 'OpenAI' }])
     const wrapper = await mountView()
     listKeys.mockClear()
 
-    await wrapper.get('[data-test="key-status-switch-1"]').trigger('click')
+    await wrapper.get('[data-test="page-2"]').trigger('click')
     await flushPromises()
-
-    expect(toggleStatus).toHaveBeenCalledTimes(1)
-    expect(toggleStatus).toHaveBeenCalledWith(1, 'inactive')
-    expect(showSuccess).toHaveBeenCalledWith('keys.keyDisabledSuccess')
-    expect(listKeys).toHaveBeenCalledTimes(1)
-  })
-
-  it('copies the selected key through the existing clipboard flow', async () => {
-    const wrapper = await mountView()
-
-    await wrapper.get('[data-test="key-copy-1"]').trigger('click')
-    await flushPromises()
-
-    expect(copyToClipboard).toHaveBeenCalledWith('sk-test-key', 'Copied')
-  })
-
-  it('keeps filters, page size, and explicit sort selection in server requests', async () => {
-    getAvailableGroups.mockResolvedValue([{ id: 42, name: 'OpenAI' }])
-    const wrapper = await mountView()
+    expect(listKeys).toHaveBeenLastCalledWith(
+      2,
+      20,
+      { sort_by: 'created_at', sort_order: 'desc' },
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    )
 
     await wrapper.get('[data-test="page-size-50"]').trigger('click')
     await flushPromises()
+    expect(listKeys).toHaveBeenLastCalledWith(
+      1,
+      50,
+      { sort_by: 'created_at', sort_order: 'desc' },
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    )
 
     const search = wrapper.findComponent({ name: 'SearchInput' })
     await search.vm.$emit('update:modelValue', 'target')
@@ -386,12 +496,11 @@ describe('user KeysView responsive key layout', () => {
     await flushPromises()
 
     const selects = wrapper.findAllComponents({ name: 'Select' })
+    expect(selects).toHaveLength(3)
     await selects[0].vm.$emit('update:modelValue', 42)
     await flushPromises()
     await selects[1].vm.$emit('update:modelValue', 'active')
     await flushPromises()
-
-    listKeys.mockClear()
     await selects[2].vm.$emit('update:modelValue', 'current_concurrency:desc')
     await flushPromises()
 
@@ -405,7 +514,42 @@ describe('user KeysView responsive key layout', () => {
         sort_by: 'current_concurrency',
         sort_order: 'desc',
       },
-      expect.objectContaining({ signal: expect.any(AbortSignal) })
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
     )
+  })
+
+  it('keeps responsive create actions for an empty result', async () => {
+    listKeys.mockResolvedValueOnce({
+      items: [],
+      total: 0,
+      page: 1,
+      page_size: 20,
+      pages: 0,
+    })
+    const wrapper = await mountView()
+
+    expect(wrapper.get('[data-test="empty-state"]').text()).toContain('No API keys yet')
+    expect(wrapper.get('[data-test="key-create-header"]').classes()).toContain('key-header-create--empty')
+    expect(wrapper.get('[data-test="key-create-empty"]').classes()).toContain('key-empty-create')
+  })
+
+  it('continues persisting optional detail-field preferences', async () => {
+    const wrapper = await mountView()
+    const inspector = wrapper.getComponent(ApiKeyInspectorStub)
+
+    expect(inspector.props('visibleColumns')).toContain('id')
+    expect(inspector.props('visibleColumns')).toContain('rate_limit')
+    expect(wrapper.get('[data-test="api-key-summary-card-1"]').text()).toContain('ID: #1')
+
+    await wrapper.get('[data-test="key-detail-settings"]').trigger('click')
+    const menu = wrapper.get('[data-test="key-detail-menu"]')
+    const rateLimitButton = menu.findAll('button').find((button) => button.text().includes('Rate Limit'))
+    expect(rateLimitButton).toBeDefined()
+    await rateLimitButton!.trigger('click')
+
+    expect(localStorage.getItem('api-key-hidden-columns')).toBe(
+      JSON.stringify(['rate_limit']),
+    )
+    expect(inspector.props('visibleColumns')).not.toContain('rate_limit')
   })
 })

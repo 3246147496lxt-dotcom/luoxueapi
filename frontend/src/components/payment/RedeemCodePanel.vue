@@ -2,22 +2,30 @@
   <section
     id="redeem"
     :class="embedded
-      ? 'overflow-hidden rounded-2xl border border-gray-200 bg-white dark:border-dark-700 dark:bg-dark-800'
+      ? 'redeem-panel--embedded scroll-mt-24'
       : 'scroll-mt-24 overflow-hidden rounded-2xl border border-gray-200 bg-white dark:border-dark-700 dark:bg-dark-800'"
     aria-labelledby="redeem-panel-title"
   >
-    <div :class="embedded ? 'px-5 pt-5' : 'border-b border-gray-100 px-5 py-5 dark:border-dark-700 sm:px-6'">
-      <div :class="['flex gap-3', embedded ? 'items-center' : 'items-start']">
+    <div :class="embedded ? '' : 'border-b border-gray-100 px-5 py-5 dark:border-dark-700 sm:px-6'">
+      <div :class="['flex', embedded ? 'items-center gap-2' : 'items-start gap-3']">
         <span :class="[
-          'flex shrink-0 items-center justify-center bg-primary-50 text-primary-700 dark:bg-primary-950/60 dark:text-primary-300',
-          embedded ? 'h-8 w-8 rounded-lg' : 'h-10 w-10 rounded-xl',
+          'flex shrink-0 items-center justify-center',
+          embedded
+            ? 'redeem-panel__embedded-icon h-4 w-4'
+            : 'h-10 w-10 rounded-xl bg-primary-50 text-primary-700 dark:bg-primary-950/60 dark:text-primary-300',
         ]">
           <Icon name="gift" :size="embedded ? 'sm' : 'md'" />
         </span>
         <div>
-          <h2 id="redeem-panel-title" class="text-base font-semibold text-gray-950 dark:text-white">
+          <component
+            :is="embedded ? 'h3' : 'h2'"
+            id="redeem-panel-title"
+            :class="embedded
+              ? 'redeem-panel__embedded-title text-sm'
+              : 'text-base font-semibold text-gray-950 dark:text-white'"
+          >
             {{ t('redeem.quickRedeemTitle') }}
-          </h2>
+          </component>
           <p v-if="!embedded" class="mt-1 text-sm leading-6 text-gray-500 dark:text-gray-400">
             {{ t('redeem.quickRedeemDescription') }}
           </p>
@@ -25,15 +33,27 @@
       </div>
     </div>
 
-    <div :class="embedded ? 'space-y-4 px-5 pb-5 pt-4' : 'space-y-5 p-5 sm:p-6'">
+    <div :class="embedded ? 'space-y-4 pt-4' : 'space-y-5 p-5 sm:p-6'">
       <form :aria-busy="submitting" @submit.prevent="handleRedeem">
         <label for="integrated-redeem-code" :class="embedded ? 'sr-only' : 'input-label'">
           {{ t('redeem.redeemCodeLabel') }}
         </label>
-        <div :class="embedded ? 'space-y-3' : 'mt-2 grid gap-3 sm:grid-cols-[minmax(0,1fr)_10rem]'">
-          <div class="relative">
-            <span class="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-4">
-              <Icon name="gift" size="sm" class="text-gray-400 dark:text-gray-500" />
+        <div
+          data-testid="redeem-form-row"
+          :class="embedded
+            ? 'flex flex-col gap-3 sm:flex-row sm:items-center'
+            : 'mt-2 grid gap-3 sm:grid-cols-[minmax(0,1fr)_10rem]'"
+        >
+          <div :class="['relative', { 'min-w-0 flex-1': embedded }]">
+            <span
+              v-if="!embedded"
+              class="pointer-events-none absolute inset-y-0 left-0 flex items-center pl-4"
+            >
+              <Icon
+                name="gift"
+                size="sm"
+                class="text-gray-400 dark:text-gray-500"
+              />
             </span>
             <input
               id="integrated-redeem-code"
@@ -44,20 +64,35 @@
               spellcheck="false"
               :placeholder="t('redeem.redeemCodePlaceholder')"
               :disabled="submitting"
-              class="input min-h-12 w-full pl-11 pr-4 font-mono text-sm tracking-wide"
+              :class="[
+                'input w-full pr-4 font-mono text-sm',
+                embedded
+                  ? 'redeem-panel__embedded-input min-h-11 px-4'
+                  : 'min-h-12 pl-11 tracking-wide',
+              ]"
             />
           </div>
           <button
             type="submit"
             :disabled="!canRedeem || submitting"
-            class="btn btn-primary min-h-12 w-full justify-center"
+            :class="[
+              'btn w-full justify-center',
+              embedded
+                ? 'redeem-panel__embedded-button btn-secondary min-h-11 sm:w-auto sm:px-8'
+                : 'btn-primary min-h-12',
+            ]"
           >
             <span
               v-if="submitting"
-              class="h-4 w-4 animate-spin rounded-full border-2 border-white/40 border-t-white"
+              :class="[
+                'h-4 w-4 animate-spin rounded-full border-2',
+                embedded
+                  ? 'redeem-panel__embedded-spinner'
+                  : 'border-white/40 border-t-white',
+              ]"
               aria-hidden="true"
             ></span>
-            <Icon v-else name="checkCircle" size="sm" aria-hidden="true" />
+            <Icon v-else-if="!embedded" name="checkCircle" size="sm" aria-hidden="true" />
             <span>{{ submitting ? t('redeem.redeeming') : t('redeem.redeemButton') }}</span>
           </button>
         </div>
@@ -73,9 +108,21 @@
         role="status"
         aria-live="polite"
         tabindex="-1"
-        class="flex items-start gap-3 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-emerald-800 outline-none dark:border-emerald-800/60 dark:bg-emerald-950/30 dark:text-emerald-200"
+        :class="[
+          'flex items-start gap-3 rounded-xl border px-4 py-3 outline-none',
+          embedded
+            ? 'redeem-panel__feedback--success'
+            : 'border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-800/60 dark:bg-emerald-950/30 dark:text-emerald-200',
+        ]"
       >
-        <Icon name="checkCircle" size="md" class="mt-0.5 shrink-0 text-emerald-600 dark:text-emerald-400" />
+        <Icon
+          name="checkCircle"
+          size="md"
+          :class="[
+            'redeem-panel__feedback-icon mt-0.5 shrink-0',
+            { 'text-emerald-600 dark:text-emerald-400': !embedded },
+          ]"
+        />
         <div class="min-w-0">
           <p class="text-sm font-semibold">{{ t('redeem.redeemSuccess') }}</p>
           <p v-if="redeemResult.type === 'balance'" class="mt-1 flex flex-wrap items-center gap-x-1.5 gap-y-1 text-sm leading-6">
@@ -91,9 +138,21 @@
       <div
         v-if="errorMessage"
         role="alert"
-        class="flex items-start gap-3 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-red-800 dark:border-red-800/60 dark:bg-red-950/30 dark:text-red-200"
+        :class="[
+          'flex items-start gap-3 rounded-xl border px-4 py-3',
+          embedded
+            ? 'redeem-panel__feedback--error'
+            : 'border-red-200 bg-red-50 text-red-800 dark:border-red-800/60 dark:bg-red-950/30 dark:text-red-200',
+        ]"
       >
-        <Icon name="exclamationCircle" size="md" class="mt-0.5 shrink-0 text-red-600 dark:text-red-400" />
+        <Icon
+          name="exclamationCircle"
+          size="md"
+          :class="[
+            'redeem-panel__feedback-icon mt-0.5 shrink-0',
+            { 'text-red-600 dark:text-red-400': !embedded },
+          ]"
+        />
         <div class="min-w-0">
           <p class="text-sm font-semibold">{{ t('redeem.redeemFailed') }}</p>
           <p class="mt-1 break-words text-sm leading-6">{{ errorMessage }}</p>
@@ -303,3 +362,59 @@ onMounted(() => {
   if (!props.embedded) void fetchHistory()
 })
 </script>
+
+<style scoped>
+.redeem-panel--embedded {
+  color: var(--lx-clay-text);
+  background: transparent;
+  font-family: var(--lx-clay-font-ui);
+}
+
+.redeem-panel__embedded-icon {
+  color: var(--lx-clay-accent);
+}
+
+.redeem-panel__embedded-title {
+  color: var(--lx-clay-text);
+  font-family: var(--lx-clay-font-display);
+  font-weight: 700;
+  letter-spacing: 0;
+}
+
+.redeem-panel__embedded-input {
+  border-radius: 13px;
+  background: var(--lx-clay-recessed);
+  box-shadow: none;
+}
+
+.redeem-panel__embedded-button {
+  border-radius: 12px;
+  font-weight: 700;
+  box-shadow: none;
+}
+
+.redeem-panel__embedded-spinner {
+  border-color: var(--lx-clay-border-strong);
+  border-top-color: var(--lx-clay-accent);
+}
+
+.redeem-panel__feedback--success {
+  border-color: color-mix(in srgb, var(--lx-clay-success) 24%, transparent);
+  color: var(--lx-clay-success-text);
+  background: var(--lx-clay-success-soft);
+}
+
+.redeem-panel__feedback--success .redeem-panel__feedback-icon {
+  color: var(--lx-clay-success);
+}
+
+.redeem-panel__feedback--error {
+  border-color: color-mix(in srgb, var(--lx-clay-danger) 24%, transparent);
+  color: var(--lx-clay-danger);
+  background: var(--lx-clay-danger-soft);
+}
+
+.redeem-panel__feedback--error .redeem-panel__feedback-icon {
+  color: var(--lx-clay-danger);
+}
+</style>

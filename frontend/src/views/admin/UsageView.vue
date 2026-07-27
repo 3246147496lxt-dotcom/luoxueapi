@@ -5,7 +5,7 @@
         :title="t('admin.usage.title')"
         :description="t('admin.usage.description')"
       />
-      <UsageStatsCards :stats="usageStats" />
+      <UsageStatsCards :stats="usageStats" credit-mode />
       <!-- Charts Section -->
       <div class="space-y-4">
         <div class="card p-4">
@@ -37,6 +37,7 @@
             :loading="modelStatsLoading"
             :show-source-toggle="true"
             :show-metric-toggle="true"
+            credit-mode
             :start-date="startDate"
             :end-date="endDate"
             :filters="breakdownFilters"
@@ -46,6 +47,7 @@
             :group-stats="groupStats"
             :loading="chartsLoading"
             :show-metric-toggle="true"
+            credit-mode
             :start-date="startDate"
             :end-date="endDate"
             :filters="breakdownFilters"
@@ -61,12 +63,13 @@
             :loading="endpointStatsLoading"
             :show-source-toggle="true"
             :show-metric-toggle="true"
+            credit-mode
             :title="t('usage.endpointDistribution')"
             :start-date="startDate"
             :end-date="endDate"
             :filters="breakdownFilters"
           />
-          <TokenUsageTrend variant="home-clay" :trend-data="trendData" :loading="chartsLoading" />
+          <TokenUsageTrend variant="home-clay" :trend-data="trendData" :loading="chartsLoading" credit-mode />
         </div>
       </div>
       <!-- 明细区：tab 栏 + 筛选 + 内容收进同一张卡片，消除割裂感 -->
@@ -134,6 +137,7 @@
             :server-side-sort="true"
             :default-sort-key="'created_at'"
             :default-sort-order="'desc'"
+            credit-mode
             @sort="handleSort"
             @userClick="handleUserClick"
             @ipGeoBatchFailed="handleIpGeoBatchFailed"

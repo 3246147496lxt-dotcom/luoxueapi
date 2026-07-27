@@ -21,14 +21,20 @@
                   >
                     {{ t("admin.settings.defaults.defaultBalance") }}
                   </label>
-                  <input
-                    v-model.number="form.default_balance"
-                    type="number"
-                    step="0.01"
-                    min="0"
-                    class="input"
-                    placeholder="0.00"
-                  />
+                  <div class="relative">
+                    <SnowflakeCreditIcon
+                      class="absolute left-3 top-1/2 -translate-y-1/2"
+                      size="sm"
+                    />
+                    <input
+                      v-model.number="form.default_balance"
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      class="input pl-10"
+                      placeholder="0.00"
+                    />
+                  </div>
                   <p class="mt-1.5 text-xs text-gray-500 dark:text-gray-400">
                     {{ t("admin.settings.defaults.defaultBalanceHint") }}
                   </p>
@@ -340,16 +346,22 @@
                         >
                           {{ t("admin.settings.defaults.defaultBalance") }}
                         </label>
-                        <input
-                          v-model.number="
-                            authSourceDefaults[authSource.source].balance
-                          "
-                          type="number"
-                          step="0.01"
-                          min="0"
-                          class="input"
-                          placeholder="0.00"
-                        />
+                        <div class="relative">
+                          <SnowflakeCreditIcon
+                            class="absolute left-3 top-1/2 -translate-y-1/2"
+                            size="sm"
+                          />
+                          <input
+                            v-model.number="
+                              authSourceDefaults[authSource.source].balance
+                            "
+                            type="number"
+                            step="0.01"
+                            min="0"
+                            class="input pl-10"
+                            placeholder="0.00"
+                          />
+                        </div>
                       </div>
                       <div>
                         <label
@@ -622,6 +634,7 @@ import GroupBadge from "@/components/common/GroupBadge.vue";
 import GroupOptionItem from "@/components/common/GroupOptionItem.vue";
 import AppSelect from "@/components/common/Select.vue";
 import Toggle from "@/components/common/Toggle.vue";
+import SnowflakeCreditIcon from "@/components/icons/SnowflakeCreditIcon.vue";
 import { useSettingsPanelBindings } from "./settingsPanelContext";
 import type { DefaultSubscriptionGroupOption as _DefaultSubscriptionGroupOption } from "./settingsPanelContext";
 
@@ -632,6 +645,7 @@ export default defineComponent({
     GroupOptionItem,
     AppSelect,
     Toggle,
+    SnowflakeCreditIcon,
   },
   props: {
     active: {

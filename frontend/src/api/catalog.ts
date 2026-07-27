@@ -1,6 +1,12 @@
 import { apiClient } from './client'
 import type { BillingMode } from '@/constants/channel'
 
+export const PUBLIC_CATALOG_CREDIT_CURRENCY = 'CREDIT' as const
+export type PublicModelCatalogPricingCurrency =
+  | typeof PUBLIC_CATALOG_CREDIT_CURRENCY
+  | 'USD'
+  | (string & {})
+
 export interface PublicModelCatalogPricingInterval {
   min_tokens: number
   max_tokens: number | null
@@ -23,7 +29,7 @@ export interface PublicModelCatalogPeakRate {
 export interface PublicModelCatalogPricing {
   label: string
   billing_mode: BillingMode
-  currency: 'USD' | string
+  currency: PublicModelCatalogPricingCurrency
   unit: 'per_token' | 'per_request' | string
   input_price: number | null
   output_price: number | null
@@ -75,7 +81,9 @@ function normalizePricing(
   return {
     label: typeof pricing?.label === 'string' ? pricing.label : '',
     billing_mode: billingMode === 'per_request' || billingMode === 'image' ? billingMode : 'token',
-    currency: typeof pricing?.currency === 'string' ? pricing.currency : 'USD',
+    currency: typeof pricing?.currency === 'string' && pricing.currency.trim()
+      ? pricing.currency
+      : PUBLIC_CATALOG_CREDIT_CURRENCY,
     unit: typeof pricing?.unit === 'string' ? pricing.unit : 'per_token',
     input_price: nullableNumber(pricing?.input_price),
     output_price: nullableNumber(pricing?.output_price),

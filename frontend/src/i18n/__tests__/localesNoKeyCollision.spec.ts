@@ -89,3 +89,65 @@ describe('shared navigation copy', () => {
     expect(enCommon.nav.profile).toBe(enDashboard.profile.title)
   })
 })
+
+const keysWorkspaceLocalePaths = [
+  'workspaceSnowCreditsUnit',
+  'workspaceUnassignedGroup',
+  'workspaceThirtyDayShort',
+  'workspaceResetInInline',
+  'workspaceResetInSheet',
+  'workspaceIpConfigured',
+  'workspaceCreatedInline',
+  'workspaceLastUsedInline',
+  'workspaceLastIpInline',
+  'workspaceCreatedSheet',
+  'workspaceLastUsedSheet',
+  'workspaceLastIpSheet',
+  'workspaceStatus.active',
+  'workspaceStatus.inactive',
+  'workspaceStatus.quota_exhausted',
+  'workspaceStatus.expired',
+] as const
+
+function valueAtPath(source: Record<string, unknown>, path: string): unknown {
+  return path.split('.').reduce<unknown>((value, segment) => {
+    if (!value || typeof value !== 'object') return undefined
+    return (value as Record<string, unknown>)[segment]
+  }, source)
+}
+
+describe('API key Superdesign workspace copy', () => {
+  it('keeps the exact Chinese Scheme B labels', () => {
+    expect(zhDashboard.keys).toMatchObject({
+      workspaceSnowCreditsUnit: 'SNOW CREDITS',
+      workspaceUnassignedGroup: '未分配分组',
+      workspaceThirtyDayShort: '30D',
+      workspaceRateHeading: '额度限制（雪花额度）',
+      workspaceResetInInline: 'RESET IN: {time}',
+      workspaceResetInSheet: '{time} 后重置',
+      workspaceIpConfigured: '{count} 项配置',
+      workspaceCreatedInline: '创建于',
+      workspaceLastUsedInline: '最后使用',
+      workspaceLastIpInline: '最近使用 IP',
+      workspaceCreatedSheet: '创建时间',
+      workspaceLastUsedSheet: '上次使用',
+      workspaceLastIpSheet: '最后 IP',
+      workspaceStatus: {
+        active: 'ACTIVE',
+        inactive: 'INACTIVE',
+        quota_exhausted: 'QUOTA EXHAUSTED',
+        expired: 'EXPIRED',
+      },
+    })
+  })
+
+  it('keeps every Scheme B workspace key available in both locales', () => {
+    const enKeys = enDashboard.keys as Record<string, unknown>
+    const zhKeys = zhDashboard.keys as Record<string, unknown>
+
+    for (const path of keysWorkspaceLocalePaths) {
+      expect(valueAtPath(enKeys, path), `missing en keys.${path}`).toBeTypeOf('string')
+      expect(valueAtPath(zhKeys, path), `missing zh keys.${path}`).toBeTypeOf('string')
+    }
+  })
+})

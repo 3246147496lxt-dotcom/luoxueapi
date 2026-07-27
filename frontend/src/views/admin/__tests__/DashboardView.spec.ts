@@ -121,8 +121,18 @@ const ModelDistributionChartStub = {
     modelStats: Array,
     loading: Boolean,
     error: Boolean,
+    creditMode: Boolean,
   },
   template: '<div data-testid="model-distribution-chart" />',
+}
+
+const CreditAmountStub = {
+  name: 'CreditAmount',
+  props: {
+    value: [String, Number],
+    iconSize: String,
+  },
+  template: '<span data-testid="credit-amount" :data-icon-size="iconSize">{{ value }}</span>',
 }
 
 const DashboardTopUsersStub = {
@@ -144,6 +154,7 @@ const TokenUsageTrendStub = {
     trendData: Array,
     loading: Boolean,
     error: Boolean,
+    creditMode: Boolean,
   },
   template: '<div data-testid="token-usage-trend" />',
 }
@@ -280,6 +291,7 @@ const mountDashboard = () => mount(DashboardView, {
       Icon: true,
       DateRangePicker: true,
       Select: true,
+      CreditAmount: CreditAmountStub,
       ModelDistributionChart: ModelDistributionChartStub,
       TokenUsageTrend: TokenUsageTrendStub,
       DashboardTopUsers: DashboardTopUsersStub,
@@ -434,19 +446,28 @@ describe('admin DashboardView', () => {
     expect(newUserComparison.attributes('aria-label')).toContain('Beijing Time')
 
     const todayPerformance = wrapper.findAll('.performance-metrics article')[0]
-    expect(todayPerformance.find('[title="admin.dashboard.actual"]').text()).toBe('$123.45')
+    expect(todayPerformance.get('[title="admin.dashboard.actual"] [data-testid="credit-amount"]').text()).toBe('123.45')
+    expect(todayPerformance.find('[title="admin.dashboard.actual"]').text()).not.toContain('$')
     expect(todayPerformance.find('[title="admin.dashboard.accountCost"]').text()).toBe('$67.89')
     expect(todayPerformance.find('[title="admin.dashboard.standard"]').text()).toBe('$234.56')
+
+    const totalPerformance = wrapper.findAll('.performance-metrics article')[1]
+    expect(totalPerformance.get('[title="admin.dashboard.actual"] [data-testid="credit-amount"]').text()).toBe('987.65')
+    expect(totalPerformance.find('[title="admin.dashboard.actual"]').text()).not.toContain('$')
+    expect(totalPerformance.find('[title="admin.dashboard.accountCost"]').text()).toBe('$654.32')
+    expect(totalPerformance.find('[title="admin.dashboard.standard"]').text()).toBe('$1.23K')
 
     const modelChart = wrapper.getComponent(ModelDistributionChartStub)
     expect(modelChart.props('variant')).toBe('home-clay')
     expect(modelChart.props('modelStats')).toEqual(models)
     expect(modelChart.props('error')).toBeFalsy()
+    expect(modelChart.props('creditMode')).toBe(true)
 
     const tokenChart = wrapper.getComponent(TokenUsageTrendStub)
     expect(tokenChart.props('variant')).toBe('home-clay')
     expect(tokenChart.props('trendData')).toEqual(trend)
     expect(tokenChart.props('error')).toBeFalsy()
+    expect(tokenChart.props('creditMode')).toBe(true)
 
     const topUsers = wrapper.getComponent(DashboardTopUsersStub)
     expect(topUsers.props('items')).toEqual(ranking)

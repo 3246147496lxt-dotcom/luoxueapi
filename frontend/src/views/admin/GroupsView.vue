@@ -320,14 +320,18 @@
                           row.daily_limit_usd
                         )
                       "
-                      >{{
-                        formatUsd(usageMap.get(row.id)?.today_cost ?? 0)
-                      }}</span
                     >
+                      <CreditAmount
+                        :value="formatCost(usageMap.get(row.id)?.today_cost ?? 0)"
+                        icon-size="xs"
+                      />
+                    </span>
                     <span class="text-gray-400 dark:text-gray-500">
-                      / {{ formatUsd(row.daily_limit_usd) }}/{{
-                        t("admin.groups.limitDay")
-                      }}</span
+                      /
+                      <CreditAmount
+                        :value="formatCost(row.daily_limit_usd)"
+                        icon-size="xs"
+                      />/{{ t("admin.groups.limitDay") }}</span
                     >
                   </span>
                   <span
@@ -338,34 +342,36 @@
                     class="mx-1 text-gray-300 dark:text-gray-600"
                     >·</span
                   >
-                  <span v-if="row.weekly_limit_usd" class="whitespace-nowrap"
-                    >{{ formatUsd(row.weekly_limit_usd) }}/{{
-                      t("admin.groups.limitWeek")
-                    }}</span
-                  >
+                  <span v-if="row.weekly_limit_usd" class="inline-flex items-center whitespace-nowrap">
+                    <CreditAmount
+                      :value="formatCost(row.weekly_limit_usd)"
+                      icon-size="xs"
+                    />/{{ t("admin.groups.limitWeek") }}
+                  </span>
                   <span
                     v-if="row.weekly_limit_usd && row.monthly_limit_usd"
                     class="mx-1 text-gray-300 dark:text-gray-600"
                     >·</span
                   >
-                  <span v-if="row.monthly_limit_usd" class="whitespace-nowrap"
-                    >{{ formatUsd(row.monthly_limit_usd) }}/{{
-                      t("admin.groups.limitMonth")
-                    }}</span
-                  >
+                  <span v-if="row.monthly_limit_usd" class="inline-flex items-center whitespace-nowrap">
+                    <CreditAmount
+                      :value="formatCost(row.monthly_limit_usd)"
+                      icon-size="xs"
+                    />/{{ t("admin.groups.limitMonth") }}
+                  </span>
                 </div>
                 <span v-else class="text-gray-400 dark:text-gray-500">{{
                   t("admin.groups.subscription.noLimit")
                 }}</span>
                 <div class="text-gray-400 dark:text-gray-500">
                   {{ t("admin.groups.usageTotal") }}
-                  <span class="ml-1 font-medium text-gray-600 dark:text-gray-300"
-                    >{{
-                      usageLoading
-                        ? "—"
-                        : formatUsd(usageMap.get(row.id)?.total_cost ?? 0)
-                    }}</span
-                  >
+                  <span v-if="usageLoading" class="ml-1 font-medium text-gray-600 dark:text-gray-300">—</span>
+                  <CreditAmount
+                    v-else
+                    class="ml-1 font-medium text-gray-600 dark:text-gray-300"
+                    :value="formatCost(usageMap.get(row.id)?.total_cost ?? 0)"
+                    icon-size="xs"
+                  />
                 </div>
               </div>
             </div>
@@ -449,21 +455,21 @@
                 <span class="text-gray-400 dark:text-gray-500">{{
                   t("admin.groups.usageToday")
                 }}</span>
-                <span class="ml-1 font-medium text-gray-700 dark:text-gray-300"
-                  >${{
-                    formatCost(usageMap.get(row.id)?.today_cost ?? 0)
-                  }}</span
-                >
+                <CreditAmount
+                  class="ml-1 font-medium text-gray-700 dark:text-gray-300"
+                  :value="formatCost(usageMap.get(row.id)?.today_cost ?? 0)"
+                  icon-size="xs"
+                />
               </div>
               <div class="text-gray-500 dark:text-gray-400">
                 <span class="text-gray-400 dark:text-gray-500">{{
                   t("admin.groups.usageTotal")
                 }}</span>
-                <span class="ml-1 font-medium text-gray-700 dark:text-gray-300"
-                  >${{
-                    formatCost(usageMap.get(row.id)?.total_cost ?? 0)
-                  }}</span
-                >
+                <CreditAmount
+                  class="ml-1 font-medium text-gray-700 dark:text-gray-300"
+                  :value="formatCost(usageMap.get(row.id)?.total_cost ?? 0)"
+                  icon-size="xs"
+                />
               </div>
             </div>
           </template>
@@ -936,6 +942,7 @@ import AppLayout from "@/components/layout/AppLayout.vue";
 import AdminPageHeader from "@/components/layout/AdminPageHeader.vue";
 import TablePageLayout from "@/components/layout/TablePageLayout.vue";
 import DataTable from "@/components/common/DataTable.vue";
+import CreditAmount from "@/components/common/CreditAmount.vue";
 import Pagination from "@/components/common/Pagination.vue";
 import BaseDialog from "@/components/common/BaseDialog.vue";
 import ConfirmDialog from "@/components/common/ConfirmDialog.vue";
@@ -2011,14 +2018,12 @@ const loadEditorReferenceGroups = async () => {
   }
 };
 
-const formatCost = (cost: number): string => {
-  if (cost >= 1000) return cost.toFixed(0);
-  if (cost >= 100) return cost.toFixed(1);
-  return cost.toFixed(2);
+const formatCost = (cost: number | null | undefined): string => {
+  const value = cost ?? 0;
+  if (value >= 1000) return value.toFixed(0);
+  if (value >= 100) return value.toFixed(1);
+  return value.toFixed(2);
 };
-
-const formatUsd = (cost: number | null | undefined): string =>
-  `$${formatCost(cost ?? 0)}`;
 
 const getQuotaUsageClass = (
   used: number,

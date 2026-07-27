@@ -220,11 +220,14 @@ export interface CreateOrderResult {
 }
 
 export interface DashboardStats {
+  currency: string
+  available_currencies: string[]
   today_amount: number
   total_amount: number
   today_count: number
   total_count: number
   avg_amount: number
+  pending_orders: number
   daily_series: { date: string; amount: number; count: number }[]
   payment_methods: { type: string; amount: number; count: number }[]
   top_users: { user_id: number; email: string; amount: number }[]

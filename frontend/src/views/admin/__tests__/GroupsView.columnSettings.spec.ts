@@ -168,6 +168,10 @@ const DataTableStub = {
     <div>
       <div data-test="columns">{{ columns.map((col) => col.key).join(',') }}</div>
       <div data-test="rows">{{ data.map((row) => row.name).join(',') }}</div>
+      <div v-for="row in data" :key="row.id" data-test="billing-units">
+        <slot name="cell-billing_type" :row="row" />
+        <slot name="cell-usage" :row="row" />
+      </div>
     </div>
   `,
 }
@@ -399,5 +403,29 @@ describe('admin GroupsView column settings', () => {
     await clickColumnToggle(wrapper, 'Capacity')
     expect(getUsageSummary).toHaveBeenCalledTimes(1)
     expect(getCapacitySummary).toHaveBeenCalledTimes(1)
+  })
+
+  it('renders subscription limits and actual usage as Snow credits', async () => {
+    listGroups.mockResolvedValue({
+      items: [createGroup({
+        subscription_type: 'subscription',
+        daily_limit_usd: 100,
+        weekly_limit_usd: 500,
+        monthly_limit_usd: 1500,
+      })],
+      total: 1,
+      page: 1,
+      page_size: 20,
+      pages: 1,
+    })
+    getUsageSummary.mockResolvedValue([{ group_id: 1, today_cost: 35, total_cost: 70 }])
+
+    const wrapper = await mountView()
+    const units = wrapper.get('[data-test="billing-units"]')
+
+    expect(units.findAll('[data-testid="credit-amount"]')).toHaveLength(7)
+    expect(units.text()).not.toContain('$')
+    expect(units.text()).toContain('35.00')
+    expect(units.text()).toContain('70.00')
   })
 })

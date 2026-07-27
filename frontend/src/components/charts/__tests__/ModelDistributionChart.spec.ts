@@ -31,6 +31,7 @@ const messages: Record<string, string> = {
   'admin.dashboard.failedToLoad': 'Failed to load dashboard statistics',
   'admin.dashboard.retry': 'Reload',
   'admin.redeem.userPrefix': 'User #{id}',
+  'dashboard.creditUnit': 'Snow credits',
   'common.loading': 'Loading...',
   'usage.requestedModel': 'Requested',
   'usage.upstreamModel': 'Upstream',
@@ -150,6 +151,29 @@ describe('ModelDistributionChart', () => {
       dataset: { data: [1.4, 0.2] },
     })
     expect(label).toBe('model-b: $1.40 (87.5%)')
+  })
+
+  it('renders actual cost as snow credits when credit mode is enabled', () => {
+    const wrapper = mount(ModelDistributionChart, {
+      props: {
+        modelStats,
+        metric: 'actual_cost',
+        creditMode: true,
+      },
+    })
+
+    expect(wrapper.findAll('[data-testid="credit-amount-value"]').map((item) => item.text()))
+      .toEqual(['1.40', '0.200'])
+    expect(wrapper.text()).toContain('$0.50')
+    expect(wrapper.text()).toContain('$1.50')
+
+    const options = (wrapper.vm as any).$?.setupState.doughnutOptions
+    const label = options.plugins.tooltip.callbacks.label({
+      label: 'model-b',
+      raw: 1.4,
+      dataset: { data: [1.4, 0.2] },
+    })
+    expect(label).toBe('model-b: Snow credits 1.40 (87.5%)')
   })
 
   it('can hide account cost for user usage stats without account_cost', () => {
@@ -307,6 +331,7 @@ describe('ModelDistributionChart', () => {
       props: {
         modelStats,
         variant: 'home-clay',
+        creditMode: true,
         startDate: '2026-07-01',
         endDate: '2026-07-02',
       },
@@ -325,5 +350,8 @@ describe('ModelDistributionChart', () => {
       end_date: '2026-07-02',
     }))
     expect(wrapper.get('.home-model-breakdown').text()).toContain('person@example.com')
+    expect(wrapper.get('.home-model-breakdown [data-testid="credit-amount-value"]').text()).toBe('0.100')
+    expect(wrapper.get('.home-model-breakdown').text()).toContain('$0.080')
+    expect(wrapper.get('.home-model-breakdown').text()).toContain('$0.200')
   })
 })

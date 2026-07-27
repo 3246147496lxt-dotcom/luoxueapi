@@ -308,10 +308,10 @@
                   >{{ t("admin.settings.balanceNotify.threshold") }}</label
                 >
                 <div class="relative">
-                  <span
-                    class="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"
-                    >$</span
-                  >
+                  <SnowflakeCreditIcon
+                    size="sm"
+                    class="absolute left-3 top-1/2 -translate-y-1/2"
+                  />
                   <input
                     v-model.number="form.balance_low_notify_threshold"
                     type="number"
@@ -425,6 +425,7 @@
 import { defineComponent } from "vue";
 import EmailTemplateEditor from "@/views/admin/settings/EmailTemplateEditor.vue";
 import Icon from "@/components/icons/Icon.vue";
+import SnowflakeCreditIcon from "@/components/icons/SnowflakeCreditIcon.vue";
 import Toggle from "@/components/common/Toggle.vue";
 import { useSettingsPanelBindings } from "./settingsPanelContext";
 
@@ -433,6 +434,7 @@ export default defineComponent({
   components: {
     EmailTemplateEditor,
     Icon,
+    SnowflakeCreditIcon,
     Toggle,
   },
   props: {

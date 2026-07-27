@@ -77,7 +77,9 @@ describe('RedeemCodePanel', () => {
 
     expect(getHistory).toHaveBeenCalledTimes(1)
     expect(wrapper.get('section').attributes('aria-labelledby')).toBe('redeem-panel-title')
+    expect(wrapper.get('section').classes()).toContain('rounded-2xl')
     expect(wrapper.get('input').attributes('spellcheck')).toBe('false')
+    expect(wrapper.get('button[type="submit"]').classes()).toContain('btn-primary')
     expect(wrapper.get('button[type="submit"]').attributes()).toHaveProperty('disabled')
   })
 
@@ -91,8 +93,35 @@ describe('RedeemCodePanel', () => {
     expect(wrapper.text()).not.toContain('redeem.recentActivity')
     expect(wrapper.find('details').exists()).toBe(false)
     expect(wrapper.get('label').classes()).toContain('sr-only')
-    expect(wrapper.get('input').element.parentElement?.parentElement?.classList.contains('space-y-3')).toBe(true)
-    expect(wrapper.get('button[type="submit"]').element.parentElement?.classList.contains('space-y-3')).toBe(true)
+    expect(wrapper.get('section').classes()).toContain('redeem-panel--embedded')
+    expect(wrapper.get('section').classes()).not.toContain('rounded-2xl')
+    expect(wrapper.get('section').classes()).not.toContain('border')
+
+    const formRow = wrapper.get('[data-testid="redeem-form-row"]')
+    expect(formRow.classes()).toContain('flex-col')
+    expect(formRow.classes()).toContain('sm:flex-row')
+
+    const submitButton = wrapper.get('button[type="submit"]')
+    expect(submitButton.classes()).toContain('btn-secondary')
+    expect(submitButton.classes()).toContain('w-full')
+    expect(submitButton.classes()).toContain('sm:w-auto')
+    expect(submitButton.classes()).not.toContain('btn-primary')
+  })
+
+  it('keeps redemption behavior and live feedback in the embedded layout', async () => {
+    redeem.mockResolvedValue(redeemResult())
+    const wrapper = mount(RedeemCodePanel, { props: { embedded: true } })
+    await flushPromises()
+
+    await wrapper.get('input').setValue('EMBEDDED-001')
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+
+    expect(redeem).toHaveBeenCalledWith('EMBEDDED-001')
+    expect(refreshUser).toHaveBeenCalledTimes(1)
+    expect(getHistory).not.toHaveBeenCalled()
+    expect(wrapper.get('[role="status"]').classes()).toContain('redeem-panel__feedback--success')
+    expect(wrapper.emitted('redeemed')).toHaveLength(1)
   })
 
   it('trims the code, refreshes the account, and renders a live success result', async () => {

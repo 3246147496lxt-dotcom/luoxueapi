@@ -193,7 +193,13 @@
               <div v-if="priceSummaryRows(model.pricing).length" class="catalog-price-grid">
                 <div v-for="row in priceSummaryRows(model.pricing)" :key="row.label">
                   <span>{{ row.label }}</span>
-                  <strong>{{ row.value }}</strong>
+                  <strong>
+                    <CatalogPriceAmount
+                      :value="row.value"
+                      :scale="row.scale"
+                      :currency="model.pricing.currency"
+                    />
+                  </strong>
                   <small>{{ row.unit }}</small>
                 </div>
               </div>
@@ -247,7 +253,14 @@
           </div>
           <div v-for="row in detailPriceRows(selectedModel.pricing)" :key="row.label">
             <dt>{{ row.label }}</dt>
-            <dd>{{ row.value }} <small>{{ row.unit }}</small></dd>
+            <dd>
+              <CatalogPriceAmount
+                :value="row.value"
+                :scale="row.scale"
+                :currency="selectedModel.pricing.currency"
+              />
+              <small>{{ row.unit }}</small>
+            </dd>
           </div>
         </dl>
 
@@ -264,7 +277,25 @@
                 {{ formatIntervalRange(interval) }}
               </span>
             </div>
-            <span>{{ formatIntervalPrice(interval, selectedModel.pricing.billing_mode) }}</span>
+            <div class="catalog-interval-values">
+              <span
+                v-for="part in intervalPriceParts(interval, selectedModel.pricing.billing_mode)"
+                :key="part.key"
+                class="catalog-interval-value"
+              >
+                <span v-if="part.label">{{ part.label }}</span>
+                <template v-for="(value, valueIndex) in part.values" :key="valueIndex">
+                  <span v-if="valueIndex > 0" aria-hidden="true">/</span>
+                  <CatalogPriceAmount
+                    :value="value"
+                    :scale="part.scale"
+                    :currency="selectedModel.pricing.currency"
+                    icon-size="xs"
+                  />
+                </template>
+                <span>{{ part.unit }}</span>
+              </span>
+            </div>
           </div>
         </div>
 
@@ -289,6 +320,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
 import PublicSiteLayout from '@/components/public/PublicSiteLayout.vue'
+import CatalogPriceAmount from '@/components/common/CatalogPriceAmount.vue'
 import ModelIcon from '@/components/common/ModelIcon.vue'
 import Icon from '@/components/icons/Icon.vue'
 import { useAppStore, useAuthStore } from '@/stores'
@@ -302,7 +334,6 @@ import type {
 import type { BillingMode } from '@/constants/channel'
 import { BILLING_MODE_IMAGE, BILLING_MODE_PER_REQUEST, BILLING_MODE_TOKEN } from '@/constants/channel'
 import { resolveTutorialUrl } from '@/utils/documentationUrl'
-import { formatScaled } from '@/utils/pricing'
 import { sanitizeUrl } from '@/utils/url'
 
 type ErrorState = 'unavailable' | 'error' | null
@@ -494,15 +525,17 @@ function priceSummaryRows(pricing: PublicModelCatalogPricing) {
     return [
       {
         label: t('modelCatalog.pricing.input'),
-        value: formatScaled(pricing.input_price, 1_000_000),
+        value: pricing.input_price,
+        scale: 1_000_000,
         unit: t('modelCatalog.pricing.perMillionTokens')
       },
       {
         label: t('modelCatalog.pricing.output'),
-        value: formatScaled(pricing.output_price, 1_000_000),
+        value: pricing.output_price,
+        scale: 1_000_000,
         unit: t('modelCatalog.pricing.perMillionTokens')
       }
-    ].filter((row) => row.value !== '-')
+    ].filter((row) => row.value != null)
   }
 
   if (pricing.per_request_price != null) {
@@ -510,7 +543,8 @@ function priceSummaryRows(pricing: PublicModelCatalogPricing) {
       label: t(pricing.billing_mode === BILLING_MODE_IMAGE
         ? 'modelCatalog.pricing.image'
         : 'modelCatalog.pricing.request'),
-      value: formatScaled(pricing.per_request_price, 1),
+      value: pricing.per_request_price,
+      scale: 1,
       unit: t(pricing.billing_mode === BILLING_MODE_IMAGE
         ? 'modelCatalog.pricing.perImage'
         : 'modelCatalog.pricing.perRequest')
@@ -544,7 +578,6 @@ function detailPriceRows(pricing: PublicModelCatalogPricing) {
   ]
   return rows
     .filter((row) => row.value != null)
-    .map((row) => ({ ...row, value: formatScaled(row.value, row.scale) }))
 }
 
 function billingModeLabel(mode: BillingMode): string {
@@ -564,25 +597,63 @@ function intervalLabel(interval: PublicModelCatalogPricingInterval): string {
   return interval.tier_label || formatIntervalRange(interval)
 }
 
-function formatIntervalPrice(interval: PublicModelCatalogPricingInterval, mode: BillingMode): string {
+function intervalPriceParts(interval: PublicModelCatalogPricingInterval, mode: BillingMode) {
   if (mode === BILLING_MODE_PER_REQUEST || mode === BILLING_MODE_IMAGE) {
-    return `${formatScaled(interval.per_request_price, 1)} ${t(mode === BILLING_MODE_IMAGE ? 'modelCatalog.pricing.perImage' : 'modelCatalog.pricing.perRequest')}`
+    return [{
+      key: 'request',
+      label: '',
+      values: [interval.per_request_price],
+      scale: 1,
+      unit: t(mode === BILLING_MODE_IMAGE ? 'modelCatalog.pricing.perImage' : 'modelCatalog.pricing.perRequest')
+    }]
   }
   const unit = t('modelCatalog.pricing.perMillionTokens')
-  const parts: string[] = []
+  const parts: Array<{
+    key: string
+    label: string
+    values: Array<number | null>
+    scale: number
+    unit: string
+  }> = []
   if (interval.input_price != null || interval.output_price != null) {
-    parts.push(`${t('modelCatalog.pricing.input')}/${t('modelCatalog.pricing.output')} ${formatScaled(interval.input_price, 1_000_000)} / ${formatScaled(interval.output_price, 1_000_000)} ${unit}`)
+    parts.push({
+      key: 'input-output',
+      label: `${t('modelCatalog.pricing.input')}/${t('modelCatalog.pricing.output')}`,
+      values: [interval.input_price, interval.output_price],
+      scale: 1_000_000,
+      unit
+    })
   }
   if (interval.cache_write_price != null) {
-    parts.push(`${t('modelCatalog.pricing.cacheWrite')} ${formatScaled(interval.cache_write_price, 1_000_000)} ${unit}`)
+    parts.push({
+      key: 'cache-write',
+      label: t('modelCatalog.pricing.cacheWrite'),
+      values: [interval.cache_write_price],
+      scale: 1_000_000,
+      unit
+    })
   }
   if (interval.cache_write_1h_price != null) {
-    parts.push(`${t('modelCatalog.pricing.cacheWrite1h')} ${formatScaled(interval.cache_write_1h_price, 1_000_000)} ${unit}`)
+    parts.push({
+      key: 'cache-write-1h',
+      label: t('modelCatalog.pricing.cacheWrite1h'),
+      values: [interval.cache_write_1h_price],
+      scale: 1_000_000,
+      unit
+    })
   }
   if (interval.cache_read_price != null) {
-    parts.push(`${t('modelCatalog.pricing.cacheRead')} ${formatScaled(interval.cache_read_price, 1_000_000)} ${unit}`)
+    parts.push({
+      key: 'cache-read',
+      label: t('modelCatalog.pricing.cacheRead'),
+      values: [interval.cache_read_price],
+      scale: 1_000_000,
+      unit
+    })
   }
-  return parts.join(' · ') || '—'
+  return parts.length > 0
+    ? parts
+    : [{ key: 'unavailable', label: '', values: [null], scale: 1, unit: '' }]
 }
 
 async function openPricingDetails(model: PublicModelCatalogItem) {
@@ -1129,7 +1200,7 @@ onBeforeUnmount(() => {
   gap: 2px;
 }
 
-.catalog-price-grid span,
+.catalog-price-grid > div > span,
 .catalog-price-grid small {
   color: var(--muted);
   font-size: 10px;
@@ -1399,8 +1470,19 @@ onBeforeUnmount(() => {
   color: var(--ink);
 }
 
-.catalog-interval-row > span {
+.catalog-interval-values {
+  display: grid;
+  justify-items: end;
+  gap: 4px;
   text-align: right;
+}
+
+.catalog-interval-value {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 4px;
 }
 
 .catalog-peak-note {
@@ -1588,7 +1670,8 @@ onBeforeUnmount(() => {
     gap: 5px;
   }
 
-  .catalog-interval-row > span {
+  .catalog-interval-values {
+    justify-items: start;
     text-align: left;
   }
 }

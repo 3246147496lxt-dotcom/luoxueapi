@@ -63,6 +63,7 @@ import PersonalSettingsAccountPanel from '../PersonalSettingsAccountPanel.vue'
 import PersonalSettingsGeneralPanel from '../PersonalSettingsGeneralPanel.vue'
 import PersonalSettingsNotificationsPanel from '../PersonalSettingsNotificationsPanel.vue'
 import PersonalSettingsSecurityPanel from '../PersonalSettingsSecurityPanel.vue'
+import CreditAmount from '@/components/common/CreditAmount.vue'
 import SettingsChoiceMenu from '../SettingsChoiceMenu.vue'
 import { useAppStore } from '@/stores/app'
 
@@ -327,6 +328,24 @@ describe('PersonalSettingsSecurityPanel', () => {
 })
 
 describe('PersonalSettingsNotificationsPanel', () => {
+  it('marks the balance threshold summary as Snow credits', () => {
+    const wrapper = track(shallowMount(PersonalSettingsNotificationsPanel, {
+      props: {
+        user,
+        publicSettings,
+        detail: null,
+        loading: false,
+        error: false,
+      },
+    }))
+
+    const threshold = wrapper.getComponent(CreditAmount)
+    expect(threshold.props('value')).toBe(
+      'personalSettings.notifications.systemDefault:{"value":"10.00"}',
+    )
+    expect(threshold.props('iconSize')).toBe('xs')
+  })
+
   it('distinguishes a disabled system capability from a loading failure', () => {
     const disabled = track(shallowMount(PersonalSettingsNotificationsPanel, {
       props: {

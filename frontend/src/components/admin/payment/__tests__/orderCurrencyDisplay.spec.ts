@@ -52,7 +52,7 @@ function orderFactory(overrides: Partial<PaymentOrder> = {}): PaymentOrder {
 }
 
 describe('admin order currency display', () => {
-  it('uses order currency for paid/base/fee amounts and USD for credited/refund amounts', () => {
+  it('uses order currency for paid/base/fee amounts and USD for subscription amounts', () => {
     const wrapper = mount(AdminOrderDetail, {
       props: {
         show: true,
@@ -73,7 +73,36 @@ describe('admin order currency display', () => {
     expect(text).toContain('$25.00')
   })
 
-  it('uses order currency for pay_amount and USD for refundable balance amounts', () => {
+  it('uses Snow credits for a balance order amount and refund', () => {
+    const wrapper = mount(AdminOrderDetail, {
+      props: {
+        show: true,
+        order: orderFactory({
+          order_type: 'balance',
+          currency: 'CNY',
+          amount: 100,
+          pay_amount: 10.8,
+          refund_amount: 25,
+        }),
+      },
+      global: {
+        stubs: {
+          BaseDialog: BaseDialogStub,
+        },
+      },
+    })
+
+    const text = wrapper.text()
+    expect(text).toContain('¥10.00')
+    expect(text).toContain('¥0.80')
+    expect(text).toContain('¥10.80')
+    expect(wrapper.findAll('[data-testid="credit-amount"]')).toHaveLength(2)
+    expect(wrapper.findAll('[data-testid="credit-amount"]')[0]?.text()).toContain('100.00')
+    expect(wrapper.findAll('[data-testid="credit-amount"]')[1]?.text()).toContain('25.00')
+    expect(text).not.toContain('$100.00')
+  })
+
+  it('uses order currency for pay_amount, USD for subscription amounts, and Snow credits for user balance', () => {
     const wrapper = mount(AdminRefundDialog, {
       props: {
         show: true,
@@ -96,7 +125,36 @@ describe('admin order currency display', () => {
     expect(text).toContain('$100.00')
     expect(text).toContain('$20.00')
     expect(text).toContain('$80.00')
-    expect(text).toContain('$200.00')
+    expect(text).not.toContain('$200.00')
+    expect(wrapper.findAll('[data-testid="credit-amount"]')).toHaveLength(1)
+    expect(wrapper.find('[data-testid="credit-amount"]').text()).toContain('200.00')
+  })
+
+  it('uses Snow credits throughout the balance-order refund controls', () => {
+    const wrapper = mount(AdminRefundDialog, {
+      props: {
+        show: true,
+        order: orderFactory({
+          order_type: 'balance',
+          currency: 'CNY',
+          amount: 100,
+          pay_amount: 10.8,
+          status: 'PARTIALLY_REFUNDED',
+          refund_amount: 20,
+        }),
+        userBalance: 200,
+      },
+      global: {
+        stubs: {
+          BaseDialog: BaseDialogStub,
+        },
+      },
+    })
+
+    expect(wrapper.text()).toContain('¥10.80')
+    expect(wrapper.findAll('[data-testid="credit-amount"]')).toHaveLength(5)
+    expect(wrapper.findAll('[data-testid="snowflake-credit-icon"]').length).toBeGreaterThanOrEqual(6)
+    expect(wrapper.text()).not.toContain('$100.00')
   })
 
   it('renders payment currency consistently in the shared order table', () => {
@@ -132,11 +190,12 @@ describe('admin order currency display', () => {
         orders: [
           orderFactory({ id: 1, currency: 'USD', amount: 100, pay_amount: 108 }),
           orderFactory({ id: 2, currency: 'CNY', amount: 100, pay_amount: 108 }),
+          orderFactory({ id: 3, order_type: 'balance', currency: 'CNY', amount: 80, pay_amount: 8 }),
         ],
         loading: false,
         page: 1,
         pageSize: 20,
-        total: 2,
+        total: 3,
       },
       global: {
         stubs: {
@@ -152,5 +211,7 @@ describe('admin order currency display', () => {
     expect(text).toContain('$108.00')
     expect(text).toContain('¥108.00')
     expect(text).toContain('$100.00')
+    expect(wrapper.findAll('[data-testid="credit-amount"]')).toHaveLength(1)
+    expect(wrapper.find('[data-testid="credit-amount"]').text()).toContain('80.00')
   })
 })

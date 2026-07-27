@@ -62,6 +62,9 @@ describe('UserTokenRanking', () => {
 
     const rows = wrapper.findAll('tbody tr')
     expect(rows).toHaveLength(2)
+    expect(wrapper.findAll('[data-testid="credit-amount-value"]').map((value) => value.text()))
+      .toEqual(['0.5000', '0.5000'])
+    expect(wrapper.text()).not.toContain('$0.5000')
 
     await rows[0].trigger('click')
     expect(wrapper.emitted('select-user')![0]).toEqual([1, 'u1@test.com'])

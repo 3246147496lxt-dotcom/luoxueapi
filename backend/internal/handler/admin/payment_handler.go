@@ -4,6 +4,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/payment"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/response"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 
@@ -35,7 +36,12 @@ func (h *PaymentHandler) GetDashboard(c *gin.Context) {
 			days = v
 		}
 	}
-	stats, err := h.paymentService.GetDashboardStats(c.Request.Context(), days)
+	currency, err := payment.NormalizePaymentCurrency(c.Query("currency"))
+	if err != nil {
+		response.BadRequest(c, err.Error())
+		return
+	}
+	stats, err := h.paymentService.GetDashboardStats(c.Request.Context(), days, currency)
 	if err != nil {
 		response.ErrorFrom(c, err)
 		return

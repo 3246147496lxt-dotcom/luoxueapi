@@ -3,6 +3,7 @@ import { defineComponent, h } from 'vue'
 import { flushPromises, mount } from '@vue/test-utils'
 
 import ModelCatalogView from '../ModelCatalogView.vue'
+import CreditAmount from '@/components/common/CreditAmount.vue'
 
 const {
   list,
@@ -55,7 +56,7 @@ vi.mock('vue-i18n', async () => {
 const pricing = {
   label: '公开标准价',
   billing_mode: 'token',
-  currency: 'USD',
+  currency: 'CREDIT',
   unit: '1M tokens',
   input_price: 1,
   output_price: 5,
@@ -246,5 +247,31 @@ describe('admin ModelCatalogView', () => {
       public_group_id: null,
     }))
     expect(getById).toHaveBeenCalledWith(2)
+  })
+
+  it('previews effective catalog prices with Snow credit amounts', async () => {
+    const wrapper = mountView()
+    await flushPromises()
+
+    await wrapper.get('button[title="admin.modelCatalog.preview"]').trigger('click')
+
+    expect(wrapper.findAllComponents(CreditAmount).map((amount) => amount.props('value'))).toEqual(['1', '5'])
+    expect(wrapper.findAll('[data-testid="snowflake-credit-icon"]')).toHaveLength(2)
+    expect(wrapper.text()).not.toMatch(/[$¥]/)
+  })
+
+  it('keeps an explicitly USD-denominated preview in dollars', async () => {
+    list.mockResolvedValue({
+      items: [{ ...draft, pricing: { ...pricing, currency: 'USD' } }],
+      total: 1,
+    })
+    const wrapper = mountView()
+    await flushPromises()
+
+    await wrapper.get('button[title="admin.modelCatalog.preview"]').trigger('click')
+
+    expect(wrapper.text()).toContain('$1 / 1M tokens')
+    expect(wrapper.text()).toContain('$5 / 1M tokens')
+    expect(wrapper.findComponent(CreditAmount).exists()).toBe(false)
   })
 })

@@ -33,6 +33,7 @@ import {
 } from 'chart.js'
 import { Line } from 'vue-chartjs'
 import LoadingSpinner from '@/components/common/LoadingSpinner.vue'
+import { formatPaymentAmount } from '@/components/payment/currency'
 
 ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, Tooltip, Legend, Filler)
 
@@ -40,6 +41,7 @@ const { t } = useI18n()
 
 const props = defineProps<{
   data: { date: string; amount: number; count: number }[]
+  currency: string
   loading?: boolean
 }>()
 
@@ -49,7 +51,7 @@ const chartData = computed(() => {
     labels: props.data.map(d => d.date),
     datasets: [
       {
-        label: t('payment.admin.revenue'),
+        label: `${t('payment.admin.revenue')} (${props.currency})`,
         data: props.data.map(d => d.amount),
         borderColor: 'rgb(59, 130, 246)',
         backgroundColor: 'rgba(59, 130, 246, 0.1)',
@@ -73,7 +75,7 @@ const chartData = computed(() => {
   }
 })
 
-const chartOptions = {
+const chartOptions = computed(() => ({
   responsive: true,
   maintainAspectRatio: false,
   interaction: { mode: 'index' as const, intersect: false },
@@ -82,7 +84,10 @@ const chartOptions = {
       type: 'linear' as const,
       display: true,
       position: 'left' as const,
-      title: { display: true, text: t('payment.admin.revenue') },
+      ticks: {
+        callback: (value: string | number) => formatPaymentAmount(Number(value), props.currency),
+      },
+      title: { display: true, text: `${t('payment.admin.revenue')} (${props.currency})` },
     },
     y1: {
       type: 'linear' as const,
@@ -94,6 +99,17 @@ const chartOptions = {
   },
   plugins: {
     legend: { position: 'top' as const },
+    tooltip: {
+      callbacks: {
+        label: (context: { datasetIndex: number; dataset: { label?: string }; raw: unknown }) => {
+          const label = context.dataset.label || ''
+          if (context.datasetIndex === 0) {
+            return `${label}: ${formatPaymentAmount(Number(context.raw), props.currency)}`
+          }
+          return `${label}: ${Number(context.raw)}`
+        },
+      },
+    },
   }
-}
+}))
 </script>

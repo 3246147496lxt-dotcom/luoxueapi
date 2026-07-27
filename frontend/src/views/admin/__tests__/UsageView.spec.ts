@@ -107,6 +107,10 @@ beforeEach(() => {
 
 const AppLayoutStub = { template: '<div><slot /></div>' }
 const UsageFiltersStub = { template: '<div><slot name="after-reset" /></div>' }
+const CreditModeConsumerStub = {
+  props: { creditMode: Boolean },
+  template: '<div data-test="credit-mode-consumer" :data-credit-mode="String(creditMode)" />',
+}
 const UsageTableStub = {
   emits: ['userClick'],
   template: '<div data-test="usage-table"><button class="user-click" @click="$emit(\'userClick\', 2)">user</button></div>',
@@ -177,6 +181,38 @@ describe('admin UsageView distribution metric toggles', () => {
 
   afterEach(() => {
     vi.useRealTimers()
+  })
+
+  it('enables snow-credit mode for every actual-cost consumer on the admin usage page', async () => {
+    const wrapper = mount(UsageView, {
+      global: { stubs: {
+        AppLayout: AppLayoutStub,
+        UsageStatsCards: CreditModeConsumerStub,
+        UsageFilters: UsageFiltersStub,
+        UsageTable: CreditModeConsumerStub,
+        UsageExportProgress: true,
+        UsageCleanupDialog: true,
+        UserBalanceHistoryModal: true,
+        Pagination: true,
+        Select: true,
+        DateRangePicker: true,
+        Icon: true,
+        TokenUsageTrend: CreditModeConsumerStub,
+        ModelDistributionChart: CreditModeConsumerStub,
+        GroupDistributionChart: CreditModeConsumerStub,
+        EndpointDistributionChart: CreditModeConsumerStub,
+        UserTokenRanking: true,
+        OpsErrorLogTable: true,
+        OpsErrorDetailModal: true,
+      } },
+    })
+
+    vi.advanceTimersByTime(120)
+    await flushPromises()
+
+    const consumers = wrapper.findAll('[data-test="credit-mode-consumer"]')
+    expect(consumers).toHaveLength(6)
+    expect(consumers.every((consumer) => consumer.attributes('data-credit-mode') === 'true')).toBe(true)
   })
 
   it('keeps previous model stats visible during refresh until new data arrives', async () => {

@@ -3,7 +3,8 @@
     class="app-layout app-layout--snow-shell min-h-screen"
     :class="{
       'app-layout--flat-workspace-shell': isFlatWorkspaceShell,
-      'app-layout--admin-shell': isAdminShell
+      'app-layout--admin-shell': isAdminShell,
+      'app-layout--purchase': variant === 'purchase'
     }"
     :data-sidebar-collapsed="sidebarCollapsed"
   >
@@ -60,7 +61,7 @@ const PersonalSettingsDialog = defineAsyncComponent(
   () => import('@/components/settings/PersonalSettingsDialog.vue'),
 )
 
-export type AppLayoutVariant = 'default' | 'home-clay' | 'chat'
+export type AppLayoutVariant = 'default' | 'home-clay' | 'chat' | 'purchase'
 
 const props = withDefaults(defineProps<{
   variant?: AppLayoutVariant
@@ -183,6 +184,14 @@ defineExpose({ replayTour })
   --app-shell-sidebar-active-marker: none;
 }
 
+:global(html:not(.dark) .app-layout--snow-shell.app-layout--purchase) {
+  --app-shell-canvas: #f4f1fa;
+}
+
+.app-layout--snow-shell.app-layout--purchase .app-main-content {
+  padding: 40px;
+}
+
 :global(html:not(.dark) body.app-flat-workspace-active) {
   background: #ffffff;
 }
@@ -194,6 +203,12 @@ defineExpose({ replayTour })
 
   .app-layout--snow-shell .app-main-content {
     padding: 22px 16px 40px;
+  }
+}
+
+@media (max-width: 1023px) {
+  .app-layout--snow-shell.app-layout--purchase .app-main-content {
+    padding: 24px;
   }
 }
 

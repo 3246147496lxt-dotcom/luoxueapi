@@ -8,7 +8,7 @@ vi.mock('vue-i18n', () => ({
 }))
 
 describe('AmountInput', () => {
-  it('uses selectable amount cards and emits the selected preset', async () => {
+  it('keeps the preset grid visible directly above the custom amount input', () => {
     const wrapper = mount(AmountInput, {
       props: {
         modelValue: null,
@@ -18,51 +18,51 @@ describe('AmountInput', () => {
       },
     })
 
+    const grid = wrapper.get('[data-testid="preset-amount-grid"]')
+    const input = wrapper.get('#custom-recharge-amount')
     const choices = wrapper.findAll('[role="radio"]')
+
+    expect(wrapper.text()).toContain('payment.chooseAmountTitle')
+    expect(wrapper.text()).toContain('payment.customAmount')
+    expect(wrapper.find('[role="tablist"]').exists()).toBe(false)
+    expect(wrapper.find('[role="tab"]').exists()).toBe(false)
+    expect(wrapper.find('[role="tabpanel"]').exists()).toBe(false)
     expect(choices).toHaveLength(4)
-    expect(wrapper.get('#amount-panel-preset').text()).toContain('payment.chooseAmountTitle')
     expect(choices[0].text()).toContain('$10')
-    expect(wrapper.get('[data-testid="preset-amount-grid"]').classes()).toEqual(expect.arrayContaining([
+    expect(grid.classes()).toEqual(expect.arrayContaining([
       'grid',
       'grid-cols-2',
+      'gap-3',
       'sm:grid-cols-4',
     ]))
-    expect(choices[0].classes()).toEqual(expect.arrayContaining(['min-w-0']))
-    expect(choices[0].classes()).not.toEqual(expect.arrayContaining(['min-w-28', 'snap-start']))
-    await choices[1].trigger('click')
-    expect(wrapper.emitted('update:modelValue')?.[0]).toEqual([20])
+    expect(grid.element.compareDocumentPosition(input.element) & Node.DOCUMENT_POSITION_FOLLOWING)
+      .toBeTruthy()
   })
 
-  it('renders the amount modes as compact flat controls', () => {
+  it('selects a preset and keeps the custom input empty', async () => {
     const wrapper = mount(AmountInput, {
-      props: { modelValue: null, currency: 'CNY', locale: 'zh-CN' },
+      props: {
+        modelValue: 20,
+        amounts: [10, 20, 50],
+        currency: 'CNY',
+        locale: 'zh-CN',
+      },
     })
 
-    expect(wrapper.text()).toContain('payment.amountType')
-    const tabs = wrapper.findAll('[role="tab"]')
-    expect(tabs).toHaveLength(2)
-    expect(tabs[0].classes()).toEqual(expect.arrayContaining(['min-h-9', 'bg-primary-50']))
-    expect(tabs[0].classes()).not.toContain('shadow-sm')
-    expect(tabs[1].classes()).toContain('bg-gray-100')
+    const choices = wrapper.findAll('[role="radio"]')
+    expect(choices.map(choice => choice.attributes('aria-checked'))).toEqual(['false', 'true', 'false'])
+    expect(choices.map(choice => choice.attributes('tabindex'))).toEqual(['-1', '0', '-1'])
+    expect(wrapper.get('input').element.value).toBe('')
+
+    await choices[2].trigger('click')
+    await wrapper.setProps({ modelValue: 50 })
+
+    expect(wrapper.emitted('update:modelValue')?.at(-1)).toEqual([50])
+    expect(wrapper.get('input').element.value).toBe('')
+    expect(choices[2].attributes('aria-checked')).toBe('true')
   })
 
-  it('switches to a focused custom input without showing both modes at once', async () => {
-    const wrapper = mount(AmountInput, {
-      attachTo: document.body,
-      props: { modelValue: null, currency: 'CNY', locale: 'zh-CN' },
-    })
-
-    expect(wrapper.find('input').exists()).toBe(false)
-    await wrapper.findAll('[role="tab"]')[1].trigger('click')
-    await nextTick()
-
-    const input = wrapper.find('input')
-    expect(input.exists()).toBe(true)
-    expect(document.activeElement).toBe(input.element)
-    wrapper.unmount()
-  })
-
-  it('opens custom mode automatically when the current value is not a preset', () => {
+  it('renders a non-preset model value in the custom input without selecting a preset', () => {
     const wrapper = mount(AmountInput, {
       props: {
         modelValue: 35,
@@ -73,7 +73,8 @@ describe('AmountInput', () => {
     })
 
     expect(wrapper.get('input').element.value).toBe('35')
-    expect(wrapper.findAll('[role="tab"]')[1].attributes('aria-selected')).toBe('true')
+    expect(wrapper.findAll('[role="radio"]')
+      .every(choice => choice.attributes('aria-checked') === 'false')).toBe(true)
   })
 
   it('keeps long preset values wrap-safe inside the two-column mobile grid', () => {
@@ -92,5 +93,126 @@ describe('AmountInput', () => {
       'max-w-full',
       '[overflow-wrap:anywhere]',
     ]))
+  })
+
+  it('clears a custom value when a preset is clicked and keeps focus on that radio', async () => {
+    const wrapper = mount(AmountInput, {
+      attachTo: document.body,
+      props: {
+        modelValue: null,
+        amounts: [10, 20],
+        currency: 'CNY',
+        locale: 'zh-CN',
+      },
+    })
+
+    const input = wrapper.get('input')
+    await input.setValue('35')
+    await wrapper.setProps({ modelValue: 35 })
+    expect(wrapper.findAll('[role="radio"]')
+      .every(choice => choice.attributes('aria-checked') === 'false')).toBe(true)
+
+    const choices = wrapper.findAll('[role="radio"]')
+    ;(choices[1].element as HTMLElement).focus()
+    await choices[1].trigger('click')
+    await wrapper.setProps({ modelValue: 20 })
+
+    expect(wrapper.emitted('update:modelValue')).toEqual([[35], [20]])
+    expect(input.element.value).toBe('')
+    expect(choices[1].attributes('aria-checked')).toBe('true')
+    expect(choices.map(choice => choice.attributes('tabindex'))).toEqual(['-1', '0'])
+    expect(document.activeElement).toBe(choices[1].element)
+    wrapper.unmount()
+  })
+
+  it('emits custom decimal values and null when the input is cleared', async () => {
+    const wrapper = mount(AmountInput, {
+      props: {
+        modelValue: 20,
+        amounts: [10, 20, 50],
+        currency: 'CNY',
+        locale: 'zh-CN',
+      },
+    })
+
+    const input = wrapper.get('input')
+    await input.setValue('35.5')
+    await wrapper.setProps({ modelValue: 35.5 })
+
+    expect(wrapper.emitted('update:modelValue')?.at(-1)).toEqual([35.5])
+    expect(input.element.value).toBe('35.5')
+    expect(wrapper.findAll('[role="radio"]')
+      .every(choice => choice.attributes('aria-checked') === 'false')).toBe(true)
+
+    await input.setValue('')
+    await wrapper.setProps({ modelValue: null })
+    expect(wrapper.emitted('update:modelValue')?.at(-1)).toEqual([null])
+    expect(input.element.value).toBe('')
+  })
+
+  it('supports roving radio focus, arrow wrapping, and Home/End for presets', async () => {
+    const wrapper = mount(AmountInput, {
+      attachTo: document.body,
+      props: {
+        modelValue: 20,
+        amounts: [10, 20, 50],
+        currency: 'CNY',
+        locale: 'zh-CN',
+      },
+    })
+
+    const choices = wrapper.findAll('[role="radio"]')
+    expect(choices.map(choice => choice.attributes('tabindex'))).toEqual(['-1', '0', '-1'])
+
+    const move = async (fromIndex: number, key: string, amount: number, toIndex: number) => {
+      await choices[fromIndex].trigger('keydown', { key })
+      await nextTick()
+      await wrapper.setProps({ modelValue: amount })
+
+      expect(choices[toIndex].attributes('aria-checked')).toBe('true')
+      expect(choices.map(choice => choice.attributes('tabindex'))).toEqual(
+        choices.map((_, index) => index === toIndex ? '0' : '-1'),
+      )
+      expect(wrapper.get('input').element.value).toBe('')
+      expect(document.activeElement).toBe(choices[toIndex].element)
+    }
+
+    ;(choices[1].element as HTMLElement).focus()
+    await move(1, 'ArrowRight', 50, 2)
+    await move(2, 'ArrowRight', 10, 0)
+    await move(0, 'ArrowLeft', 50, 2)
+    await move(2, 'Home', 10, 0)
+    await move(0, 'End', 50, 2)
+    await move(2, 'ArrowDown', 10, 0)
+    await move(0, 'ArrowUp', 50, 2)
+
+    expect(wrapper.emitted('update:modelValue')).toEqual([
+      [50],
+      [10],
+      [50],
+      [10],
+      [50],
+      [10],
+      [50],
+    ])
+    wrapper.unmount()
+  })
+
+  it('keeps the custom input usable when all presets are outside the allowed range', async () => {
+    const wrapper = mount(AmountInput, {
+      props: {
+        modelValue: null,
+        amounts: [10, 20],
+        min: 100,
+        currency: 'CNY',
+        locale: 'zh-CN',
+      },
+    })
+
+    expect(wrapper.find('[data-testid="preset-amount-grid"]').exists()).toBe(true)
+    expect(wrapper.findAll('[role="radio"]')).toHaveLength(0)
+    const input = wrapper.get('input')
+    await input.setValue('150')
+    expect(wrapper.emitted('update:modelValue')?.at(-1)).toEqual([150])
   })
 })

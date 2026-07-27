@@ -171,8 +171,12 @@
           <transition name="fade">
             <div v-if="promoValidation.valid" class="mt-2 flex items-center gap-2 rounded-lg bg-green-50 px-3 py-2 dark:bg-green-900/20">
               <Icon name="gift" size="sm" class="text-green-600 dark:text-green-400" />
-              <span class="text-sm text-green-700 dark:text-green-400">
-                {{ t('auth.promoCodeValid', { amount: promoValidation.bonusAmount?.toFixed(2) }) }}
+              <span class="inline-flex flex-wrap items-center gap-1 text-sm text-green-700 dark:text-green-400">
+                <span>{{ t('auth.promoCodeValid') }}</span>
+                <CreditAmount
+                  :value="promoValidation.bonusAmount?.toFixed(2) || '0.00'"
+                  icon-size="xs"
+                />
               </span>
             </div>
           </transition>
@@ -285,6 +289,7 @@ import WechatOAuthSection from '@/components/auth/WechatOAuthSection.vue'
 import EmailOAuthButtons from '@/components/auth/EmailOAuthButtons.vue'
 import LoginAgreementPrompt from '@/components/auth/LoginAgreementPrompt.vue'
 import Icon from '@/components/icons/Icon.vue'
+import CreditAmount from '@/components/common/CreditAmount.vue'
 import TurnstileWidget from '@/components/TurnstileWidget.vue'
 import { useAuthStore, useAppStore } from '@/stores'
 import {

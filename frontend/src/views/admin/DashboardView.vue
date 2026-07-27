@@ -166,7 +166,9 @@
                   <p>{{ t('admin.dashboard.todayTokens') }}</p>
                   <strong>{{ formatTokens(stats.today_tokens) }}</strong>
                   <span class="cost-breakdown">
-                    <span :title="t('admin.dashboard.actual')">${{ formatCost(stats.today_actual_cost) }}</span>
+                    <span :title="t('admin.dashboard.actual')">
+                      <CreditAmount :value="formatCost(stats.today_actual_cost)" icon-size="xs" />
+                    </span>
                     <span :title="t('admin.dashboard.accountCost')">${{ formatCost(stats.today_account_cost) }}</span>
                     <span :title="t('admin.dashboard.standard')">${{ formatCost(stats.today_cost) }}</span>
                   </span>
@@ -178,7 +180,9 @@
                   <p>{{ t('admin.dashboard.totalTokens') }}</p>
                   <strong>{{ formatTokens(stats.total_tokens) }}</strong>
                   <span class="cost-breakdown">
-                    <span :title="t('admin.dashboard.actual')">${{ formatCost(stats.total_actual_cost) }}</span>
+                    <span :title="t('admin.dashboard.actual')">
+                      <CreditAmount :value="formatCost(stats.total_actual_cost)" icon-size="xs" />
+                    </span>
                     <span :title="t('admin.dashboard.accountCost')">${{ formatCost(stats.total_account_cost) }}</span>
                     <span :title="t('admin.dashboard.standard')">${{ formatCost(stats.total_cost) }}</span>
                   </span>
@@ -256,6 +260,7 @@
               :error="chartsError ? t('admin.dashboard.failedToLoad') : null"
               :start-date="startDate"
               :end-date="endDate"
+              credit-mode
               @retry="loadChartData"
             />
           </div>
@@ -265,6 +270,7 @@
               :trend-data="trendData"
               :loading="chartsLoading"
               :error="chartsError ? t('admin.dashboard.failedToLoad') : null"
+              credit-mode
               @retry="loadChartData"
             />
           </div>
@@ -301,6 +307,7 @@ import type {
   UserSpendingRankingItem
 } from '@/types'
 import AppLayout from '@/components/layout/AppLayout.vue'
+import CreditAmount from '@/components/common/CreditAmount.vue'
 import Icon from '@/components/icons/Icon.vue'
 import DateRangePicker from '@/components/common/DateRangePicker.vue'
 import Select from '@/components/common/Select.vue'

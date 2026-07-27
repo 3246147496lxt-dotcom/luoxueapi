@@ -21,6 +21,8 @@ func TestAffiliateRecordQueriesUseLedgerAuditFields(t *testing.T) {
 	content := string(source)
 
 	require.Contains(t, content, "JOIN payment_orders po ON po.id = ual.source_order_id")
+	require.Contains(t, content, "po.order_type")
+	require.Contains(t, content, "po.provider_snapshot->>'currency'")
 	require.Contains(t, content, "ual.amount::double precision")
 	require.Contains(t, content, "ual.balance_after::double precision")
 	require.NotContains(t, content, "parseAffiliateRebateAmount")

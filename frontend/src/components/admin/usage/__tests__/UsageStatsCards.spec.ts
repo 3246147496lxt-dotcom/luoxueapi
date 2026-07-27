@@ -64,4 +64,15 @@ describe('UsageStatsCards', () => {
     expect(text).toContain('Cache Read')
     expect(text).toContain('22')
   })
+
+  it('shows actual cost as snow credits while preserving account and standard USD', () => {
+    const wrapper = mount(UsageStatsCards, {
+      props: { stats, creditMode: true },
+      global: { stubs: { Icon: true } },
+    })
+
+    expect(wrapper.get('[data-testid="credit-amount-value"]').text()).toBe('0.0010')
+    expect(wrapper.text()).toContain('Cost $0.0010')
+    expect(wrapper.text()).toContain('Standard $0.0010')
+  })
 })

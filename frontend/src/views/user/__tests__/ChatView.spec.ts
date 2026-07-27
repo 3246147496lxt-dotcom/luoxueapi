@@ -766,6 +766,8 @@ describe('ChatView catalog and hydration gates', () => {
     expect(apiMocks.getChatModels).toHaveBeenCalledTimes(2)
     expect(view.get('[data-test="model-select"]').attributes('data-first-option')).toBe('gpt-new')
     expect(view.get('.chat-toolbar__balance strong').text()).toBe('3.00')
+    expect(view.get('.chat-toolbar__balance [data-testid="credit-amount"]').text()).toBe('3.00')
+    expect(view.find('.chat-toolbar__balance [data-testid="snowflake-credit-icon"]').exists()).toBe(true)
 
     resolveFirst({
       models: [{ id: 'gpt-old', display_name: 'GPT Old', recommended: true }],

@@ -42,6 +42,17 @@ const BaseDialogStub = {
   template: '<div><slot /><slot name="footer" /></div>',
 }
 
+const BalanceTableStub = {
+  props: ['data'],
+  template: `
+    <div>
+      <div v-for="row in data" :key="row.user_id">
+        <slot name="cell-balance" :value="row.balance" :row="row" />
+      </div>
+    </div>
+  `,
+}
+
 describe('AnnouncementReadStatusDialog', () => {
   beforeEach(() => {
     getReadStatus.mockReset()
@@ -91,5 +102,39 @@ describe('AnnouncementReadStatusDialog', () => {
     await flushPromises()
 
     expect(getReadStatus).toHaveBeenCalledTimes(1)
+  })
+
+  it('renders user balances as Snow credits', async () => {
+    getReadStatus.mockResolvedValue({
+      items: [{ user_id: 7, email: 'user@example.com', username: 'User', balance: 35, eligible: true, read_at: null }],
+      total: 1,
+      pages: 1,
+      page: 1,
+      page_size: 20,
+    })
+
+    const wrapper = mount(AnnouncementReadStatusDialog, {
+      props: {
+        show: false,
+        announcementId: 1,
+      },
+      global: {
+        stubs: {
+          BaseDialog: BaseDialogStub,
+          DataTable: BalanceTableStub,
+          Pagination: true,
+          Icon: true,
+        },
+      },
+    })
+
+    await wrapper.setProps({ show: true })
+    await flushPromises()
+
+    const balance = wrapper.get('[data-testid="credit-amount"]')
+
+    expect(balance.text()).toContain('35.00')
+    expect(balance.attributes('aria-label')).toMatch(/^35\.00 (Snow credits|雪花额度)$/)
+    expect(wrapper.text()).not.toContain('$35.00')
   })
 })

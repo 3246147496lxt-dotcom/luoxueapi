@@ -454,7 +454,7 @@
               class="rounded bg-gray-100 px-1.5 py-0.5 dark:bg-gray-800"
               :title="t('usage.userBilled')"
             >
-              U ${{ formatWindowUserCost(grokLocalUsage) }}
+              U <CreditAmount :value="formatWindowUserCost(grokLocalUsage)" icon-size="xs" />
             </span>
           </div>
         </div>
@@ -573,7 +573,7 @@
               class="rounded bg-gray-100 px-1.5 py-0.5 dark:bg-gray-800"
               :title="t('usage.userBilled')"
             >
-              U ${{ formatKeyUserCost }}
+              U <CreditAmount :value="formatKeyUserCost" icon-size="xs" />
             </span>
           </div>
         </div>
@@ -649,7 +649,7 @@
             class="rounded bg-gray-100 px-1.5 py-0.5 dark:bg-gray-800"
             :title="t('usage.userBilled')"
           >
-            U ${{ formatKeyUserCost }}
+            U <CreditAmount :value="formatKeyUserCost" icon-size="xs" />
           </span>
         </div>
       </div>
@@ -704,6 +704,7 @@ import {
   type AccountUsageRequestOptions as UsageLoadOptions
 } from '@/composables/useAccountUsageHealth'
 import { buildOpenAIUsageRefreshKey } from '@/utils/accountUsageRefresh'
+import CreditAmount from '@/components/common/CreditAmount.vue'
 import { formatCompactNumber, formatRelativeTime } from '@/utils/format'
 import UsageProgressBar from './UsageProgressBar.vue'
 import AccountQuotaInfo from './AccountQuotaInfo.vue'

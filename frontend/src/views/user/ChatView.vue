@@ -121,12 +121,14 @@
           <router-link
             class="chat-toolbar__balance"
             to="/purchase"
-            :aria-label="`${t('chat.balance.available')} ${formattedBalance}`"
+            :aria-label="`${t('chat.balance.available')} ${formattedBalance} ${t('dashboard.creditUnit')}`"
           >
             <Icon name="wallet" size="sm" />
             <span>
               <small>{{ t('chat.balance.available') }}</small>
-              <strong>{{ formattedBalance }}</strong>
+              <strong>
+                <CreditAmount :value="formattedBalance" icon-size="xs" />
+              </strong>
             </span>
           </router-link>
         </header>
@@ -305,6 +307,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import BaseDialog from '@/components/common/BaseDialog.vue'
+import CreditAmount from '@/components/common/CreditAmount.vue'
 import Select, { type SelectOption } from '@/components/common/Select.vue'
 import Icon from '@/components/icons/Icon.vue'
 import ChatComposer from '@/components/chat/ChatComposer.vue'

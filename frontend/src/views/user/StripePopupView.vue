@@ -5,7 +5,7 @@
     >
       <!-- Amount + Order ID -->
       <div v-if="amount" class="text-center">
-        <p class="text-3xl font-bold" :style="{ color: methodColor }">¥{{ amount }}</p>
+        <p class="text-3xl font-bold" :style="{ color: methodColor }">{{ formattedAmount }}</p>
         <p v-if="orderId" class="mt-1 text-sm text-gray-500 dark:text-slate-400">
           {{ t('payment.orders.orderId') }}: {{ orderId }}
         </p>
@@ -60,6 +60,7 @@ import { extractI18nErrorMessage } from '@/utils/apiError'
 import { isMobileDevice } from '@/utils/device'
 import { buildApiUrl } from '@/api/client'
 import { authSession } from '@/auth/authSession'
+import { formatPaymentAmount } from '@/components/payment/currency'
 
 interface StripeWithWechatPay {
   confirmWechatPayPayment(clientSecret: string, options: Record<string, unknown>): Promise<{ error?: { message?: string }; paymentIntent?: { status: string } }>
@@ -76,9 +77,11 @@ const route = useRoute()
 
 const orderId = String(route.query.order_id || '')
 const method = String(route.query.method || 'alipay')
-const amount = String(route.query.amount || '')
+const amount = Number(route.query.amount || 0)
+const currency = String(route.query.currency || '')
 
 const methodColor = computed(() => METHOD_COLORS[method] || DEFAULT_METHOD_COLOR)
+const formattedAmount = computed(() => formatPaymentAmount(amount, currency))
 
 const error = ref('')
 const success = ref(false)

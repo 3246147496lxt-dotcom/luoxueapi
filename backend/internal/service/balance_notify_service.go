@@ -146,7 +146,7 @@ type quotaDim struct {
 
 // resolvedThreshold converts the user-facing "remaining" threshold into a usage-based trigger point.
 // The threshold represents how much quota REMAINS when the alert fires:
-//   - Fixed ($): threshold=400, limit=1000 → fires when usage reaches 600 (remaining drops to 400)
+//   - Fixed (USD): threshold=400, limit=1000 → fires when usage reaches 600 (remaining drops to 400)
 //   - Percentage (%): threshold=30, limit=1000 → fires when usage reaches 700 (remaining drops to 30%)
 func (d quotaDim) resolvedThreshold() float64 {
 	if d.limit <= 0 {
@@ -480,10 +480,10 @@ const balanceLowEmailTemplate = `<!DOCTYPE html>
         <div class="content">
             <p style="font-size: 18px; color: #333;">%s，您的余额不足</p>
             <p style="color: #666;">Dear %s, your balance is running low</p>
-            <div class="balance">$%.2f</div>
+            <div class="balance">❄ %.2f</div>
             <div class="info">
-                <p>您的账户余额已低于提醒阈值 <strong>$%.2f</strong>。</p>
-                <p>Your account balance has fallen below the alert threshold of <strong>$%.2f</strong>.</p>
+                <p>您的账户余额已低于提醒阈值 <strong>❄ %.2f</strong>。</p>
+                <p>Your Snow credit balance has fallen below the alert threshold of <strong>❄ %.2f</strong>.</p>
                 <p>请及时充值以免服务中断。</p>
                 <p>Please top up to avoid service interruption.</p>
             </div>

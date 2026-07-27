@@ -330,6 +330,9 @@ describe('admin UsageTable tooltip', () => {
     expect(text).toContain('gpt-5.5')
     expect(text).toContain('gpt-5.5-2026-07-01')
     expect(text).toContain('0.020000')
+    expect(wrapper.findAll('[data-testid="credit-amount-value"]').map((value) => value.text()))
+      .toEqual(['0.020000'])
+    expect(text).not.toContain('$0.020000')
   })
 
   it.each([

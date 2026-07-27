@@ -35,7 +35,10 @@
         </template>
 
         <template #cell-balance="{ value }">
-          <span class="font-medium text-gray-900 dark:text-white">${{ Number(value ?? 0).toFixed(2) }}</span>
+          <CreditAmount
+            class="font-medium text-gray-900 dark:text-white"
+            :value="Number(value ?? 0).toFixed(2)"
+          />
         </template>
 
         <template #cell-eligible="{ value }">
@@ -80,6 +83,7 @@ import type { Column } from '@/components/common/types'
 import { getPersistedPageSize } from '@/composables/usePersistedPageSize'
 
 import BaseDialog from '@/components/common/BaseDialog.vue'
+import CreditAmount from '@/components/common/CreditAmount.vue'
 import DataTable from '@/components/common/DataTable.vue'
 import Pagination from '@/components/common/Pagination.vue'
 import Icon from '@/components/icons/Icon.vue'

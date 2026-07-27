@@ -150,7 +150,7 @@ describe('KeyUsageView daily detail', () => {
           limit: 10,
           used: 1,
           remaining: 9,
-          unit: 'USD',
+          unit: 'CREDIT',
         },
         usage: {
           today: {

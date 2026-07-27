@@ -1,61 +1,112 @@
 <template>
-  <AppLayout>
-    <section class="mx-auto w-full max-w-[1600px] pb-10">
-      <div class="overflow-visible rounded-3xl border border-gray-200 bg-white shadow-[0_18px_45px_rgba(15,23,42,0.055)] dark:border-dark-600 dark:bg-dark-800">
-        <div class="border-b border-gray-100 px-4 py-5 dark:border-dark-700 sm:px-6 lg:px-8">
-          <div class="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-            <div class="flex min-w-0 items-center gap-3">
-              <div class="flex h-11 w-11 shrink-0 items-center justify-center text-gray-500 dark:text-gray-300">
-                <Icon name="key" size="lg" :stroke-width="1.8" />
-              </div>
-              <div class="min-w-0">
-                <h1 class="text-xl font-semibold tracking-tight text-gray-950 dark:text-white">
-                  {{ t('keys.title') }}
-                </h1>
-                <p class="mt-1 max-w-3xl text-sm leading-6 text-gray-600 dark:text-gray-300 md:mt-0 md:text-base md:text-gray-800 md:dark:text-gray-100">
-                  {{ t('keys.cardDescription') }}
-                </p>
-              </div>
-            </div>
+  <AppLayout variant="chat">
+    <section
+      class="keys-workspace"
+      data-test="keys-workspace"
+    >
+      <header class="keys-mobile-header md:hidden">
+        <div class="keys-mobile-title">
+          <KeysLucideIcon name="key" :size="20" aria-hidden="true" />
+          <span>{{ t('keys.title') }}</span>
+        </div>
+        <div class="keys-mobile-actions">
+          <button
+            type="button"
+            class="keys-mobile-refresh"
+            :disabled="loading"
+            :title="t('common.refresh')"
+            :aria-label="t('common.refresh')"
+            data-test="key-refresh-mobile"
+            @click="loadApiKeys"
+          >
+            <KeysLucideIcon name="refreshCw" :size="18" :class="loading && 'animate-spin'" />
+          </button>
+          <button
+            type="button"
+            class="keys-mobile-create"
+            :class="{ 'key-header-create--empty': !loading && apiKeys.length === 0 }"
+            data-tour="keys-create-btn"
+            data-test="key-create-header-mobile"
+            @click="showCreateModal = true"
+          >
+            <KeysLucideIcon name="plus" :size="16" aria-hidden="true" />
+            <span>{{ t('common.create') }}</span>
+          </button>
+        </div>
+      </header>
 
-            <button
-              type="button"
-              class="hidden min-h-11 items-center gap-2 rounded-full bg-gray-100 px-4 text-sm font-semibold text-gray-700 transition-colors hover:bg-gray-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 dark:bg-dark-700 dark:text-gray-200 dark:hover:bg-dark-600 md:inline-flex"
-              :aria-pressed="compactTable"
-              data-test="key-density-toggle"
-              @click="compactTable = !compactTable"
-            >
-              <Icon name="grid" size="md" />
-              {{ compactTable ? t('keys.comfortableList') : t('keys.compactList') }}
-            </button>
+      <header class="keys-desktop-header hidden md:flex">
+        <div class="keys-desktop-title-wrap">
+          <div class="keys-desktop-title-icon">
+            <KeysLucideIcon name="key" :size="24" aria-hidden="true" />
           </div>
+          <div class="keys-desktop-title-copy">
+            <h1>{{ t('keys.title') }}</h1>
+            <p>{{ t('keys.workspaceSubtitle') }}</p>
+          </div>
+        </div>
+        <div class="keys-desktop-actions">
+          <button
+            type="button"
+            class="keys-desktop-refresh"
+            :disabled="loading"
+            :title="t('common.refresh')"
+            :aria-label="t('common.refresh')"
+            data-test="key-refresh"
+            @click="loadApiKeys"
+          >
+            <KeysLucideIcon name="refreshCw" :size="20" :class="loading && 'animate-spin'" />
+          </button>
+          <button
+            type="button"
+            class="key-header-create keys-desktop-create"
+            :class="{ 'key-header-create--empty': !loading && apiKeys.length === 0 }"
+            data-tour="keys-create-btn"
+            data-test="key-create-header"
+            @click="showCreateModal = true"
+          >
+            <KeysLucideIcon name="plus" :size="20" aria-hidden="true" />
+            <span>{{ t('keys.createKey') }}</span>
+          </button>
+        </div>
+      </header>
 
-          <div class="mt-5 flex flex-wrap items-center gap-2 border-t border-gray-100 pt-5 dark:border-dark-700">
-            <button
-              type="button"
-              class="key-header-create btn btn-primary h-11"
-              :class="{ 'key-header-create--empty': !loading && apiKeys.length === 0 }"
-              data-tour="keys-create-btn"
-              data-test="key-create-header"
-              @click="showCreateModal = true"
-            >
-              <Icon name="plus" size="md" class="mr-2" />
-              {{ t('keys.createKey') }}
-            </button>
-            <button
-              type="button"
-              class="btn btn-secondary h-11 min-w-11 px-3"
-              :disabled="loading"
-              :title="t('common.refresh')"
-              :aria-label="t('common.refresh')"
-              @click="loadApiKeys"
-            >
-              <Icon name="refresh" size="md" :class="loading && 'animate-spin'" />
-            </button>
-            <div ref="columnDropdownRef" class="relative">
+      <div class="keys-filter-toolbar">
+        <div class="keys-filter-grid">
+          <SearchInput
+            v-model="filterSearch"
+            class="key-filter-search"
+            :placeholder="t('keys.searchPlaceholder')"
+            data-test="key-filter-search"
+            @search="onFilterChange"
+          />
+          <Select
+            class="key-secondary-filter"
+            :model-value="filterGroupId"
+            :options="groupFilterOptions"
+            data-test="key-filter-group"
+            @update:model-value="onGroupFilterChange"
+          />
+          <Select
+            class="key-secondary-filter"
+            :model-value="filterStatus"
+            :options="statusFilterOptions"
+            data-test="key-filter-status"
+            @update:model-value="onStatusFilterChange"
+          />
+          <Select
+            class="key-secondary-filter key-sort-filter"
+            :model-value="sortSelection"
+            :options="sortOptions"
+            data-test="key-sort"
+            @update:model-value="onSortChange"
+          />
+
+          <div class="keys-filter-actions">
+            <div ref="columnDropdownRef" class="relative min-w-0">
               <button
                 type="button"
-                class="btn btn-secondary h-11 gap-2 px-3"
+                class="keys-detail-settings-button"
                 :title="t('keys.detailSettings')"
                 :aria-expanded="showColumnDropdown"
                 aria-controls="key-detail-menu"
@@ -63,7 +114,8 @@
                 data-test="key-detail-settings"
                 @click="showColumnDropdown = !showColumnDropdown"
               >
-                <Icon name="grid" size="md" />
+                <KeysLucideIcon class="keys-settings-icon keys-settings-icon--mobile" name="slidersHorizontal" :size="18" aria-hidden="true" />
+                <KeysLucideIcon class="keys-settings-icon keys-settings-icon--desktop" name="settings2" :size="18" aria-hidden="true" />
                 <span>{{ t('keys.detailSettings') }}</span>
               </button>
               <div
@@ -71,7 +123,7 @@
                 id="key-detail-menu"
                 role="menu"
                 :aria-label="t('keys.detailSettings')"
-                class="absolute left-0 top-full z-50 mt-2 max-h-80 w-56 overflow-y-auto rounded-2xl border border-gray-200 bg-white py-2 shadow-xl dark:border-dark-600 dark:bg-dark-800 md:left-auto md:right-0"
+                class="keys-detail-menu"
                 data-test="key-detail-menu"
               >
                 <button
@@ -80,185 +132,181 @@
                   type="button"
                   role="menuitemcheckbox"
                   :aria-checked="isColumnVisible(col.key)"
-                  class="flex min-h-11 w-full items-center justify-between px-4 text-left text-sm text-gray-700 transition-colors hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-dark-700"
+                  class="keys-detail-menu-item"
                   @click="toggleColumn(col.key)"
                 >
                   <span>{{ col.label }}</span>
-                  <Icon
-                    v-if="isColumnVisible(col.key)"
-                    name="check"
-                    size="sm"
-                    class="text-primary-600 dark:text-primary-400"
-                    :stroke-width="2"
-                  />
+                  <KeysLucideIcon v-if="isColumnVisible(col.key)" name="check" :size="16" class="text-primary-600 dark:text-primary-400" />
                 </button>
               </div>
             </div>
-            <EndpointPopover
-              v-if="publicSettings?.api_base_url || (publicSettings?.custom_endpoints?.length ?? 0) > 0"
-              :api-base-url="publicSettings?.api_base_url || ''"
-              :custom-endpoints="publicSettings?.custom_endpoints || []"
-            />
-          </div>
 
-          <div class="mt-5 grid grid-cols-[minmax(0,1fr)_auto] gap-3 border-t border-gray-100 pt-5 dark:border-dark-700 md:grid-cols-2 xl:grid-cols-[minmax(260px,1.35fr)_190px_190px_230px]">
-            <SearchInput
-              v-model="filterSearch"
-              class="key-filter-search min-w-0"
-              :placeholder="t('keys.searchPlaceholder')"
-              @search="onFilterChange"
-            />
             <button
               type="button"
-              class="inline-flex min-h-11 min-w-11 items-center justify-center gap-2 rounded-xl border border-gray-200 bg-white px-3 text-sm font-semibold text-gray-700 transition-colors hover:border-primary-300 hover:bg-primary-50 hover:text-primary-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500/40 dark:border-dark-600 dark:bg-dark-800 dark:text-gray-200 dark:hover:border-primary-700 dark:hover:bg-primary-900/20 dark:hover:text-primary-300 md:hidden"
-              :aria-expanded="mobileFiltersExpanded"
-              aria-controls="key-mobile-secondary-filters"
-              data-test="key-mobile-filter-toggle"
-              @click="mobileFiltersExpanded = !mobileFiltersExpanded"
+              class="keys-density-button"
+              :aria-pressed="compactTable"
+              data-test="key-density-toggle"
+              @click="compactTable = !compactTable"
             >
-              <Icon name="filter" size="md" aria-hidden="true" />
-              <span>{{ t('common.filter') }}</span>
-              <Icon
-                name="chevronDown"
-                size="sm"
-                class="transition-transform duration-200 motion-reduce:transition-none"
-                :class="mobileFiltersExpanded && 'rotate-180'"
-                aria-hidden="true"
-              />
+              <span>{{ compactTable ? t('keys.compactList') : t('keys.comfortableList') }}</span>
             </button>
-            <div
-              id="key-mobile-secondary-filters"
-              data-test="key-mobile-secondary-filters"
-              :class="mobileFiltersExpanded ? 'col-span-2 grid gap-3 md:contents' : 'hidden md:contents'"
-            >
-              <Select
-                class="key-secondary-filter"
-                :model-value="filterGroupId"
-                :options="groupFilterOptions"
-                @update:model-value="onGroupFilterChange"
-              />
-              <Select
-                class="key-secondary-filter"
-                :model-value="filterStatus"
-                :options="statusFilterOptions"
-                @update:model-value="onStatusFilterChange"
-              />
-              <Select
-                class="key-secondary-filter"
-                :model-value="sortSelection"
-                :options="sortOptions"
-                data-test="key-sort"
-                @update:model-value="onSortChange"
-              />
-            </div>
           </div>
-
-          <button
-            type="button"
-            class="mt-5 flex min-h-11 w-full items-center justify-center gap-2 rounded-full border border-gray-200 bg-gray-50 px-4 text-sm font-semibold text-gray-700 transition-colors hover:border-primary-200 hover:bg-primary-50 hover:text-primary-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500 dark:border-dark-600 dark:bg-dark-700 dark:text-gray-200 dark:hover:border-primary-700 dark:hover:bg-primary-900/20 dark:hover:text-primary-300 md:hidden"
-            :aria-expanded="showCardActions"
-            data-test="key-actions-toggle"
-            @click="showCardActions = !showCardActions"
-          >
-            <Icon :name="showCardActions ? 'eyeOff' : 'eye'" size="md" />
-            {{ showCardActions ? t('keys.hideActions') : t('keys.showActions') }}
-          </button>
         </div>
+      </div>
 
-        <div class="bg-gray-50/70 px-3 py-4 dark:bg-dark-900/35 sm:px-6 sm:py-6 md:bg-white md:px-0 md:py-0 md:dark:bg-dark-800">
-          <div v-if="loading" aria-live="polite" :aria-label="t('common.loading')">
-            <div class="hidden h-[310px] animate-pulse bg-gray-50 dark:bg-dark-700/40 md:block" />
-            <div class="space-y-4 md:hidden">
-              <div
-                v-for="index in 2"
-                :key="index"
-                class="h-[360px] animate-pulse rounded-2xl border border-gray-200 bg-white dark:border-dark-600 dark:bg-dark-800"
-              />
-            </div>
-          </div>
+      <div v-if="loading" class="min-h-0 flex-1 overflow-hidden" aria-live="polite" :aria-label="t('common.loading')">
+        <div class="hidden h-full grid-cols-[minmax(0,3fr)_minmax(0,2fr)] md:grid">
+          <div class="animate-pulse bg-gray-50 dark:bg-dark-800/60" />
+          <div class="animate-pulse border-l border-gray-100 bg-gray-100/70 dark:border-dark-700 dark:bg-dark-900" />
+        </div>
+        <div class="h-full space-y-4 overflow-hidden bg-gray-50 p-4 dark:bg-dark-900 md:hidden">
+          <div v-for="index in 2" :key="index" class="h-[360px] animate-pulse rounded-lg border border-gray-200 bg-white dark:border-dark-700 dark:bg-dark-800" />
+        </div>
+      </div>
 
-          <div v-else-if="apiKeys.length > 0">
-            <ApiKeyTable
-              class="hidden md:block"
+      <div v-else-if="apiKeys.length > 0" class="keys-content">
+        <div class="keys-master-pane">
+          <div class="min-h-0 flex-1 overflow-hidden">
+            <ApiKeyWorkspaceList
+              class="hidden h-full md:block"
               :api-keys="apiKeys"
               :usage-stats="usageStats"
               :user-group-rates="userGroupRates"
-              :visible-columns="visibleColumnKeys"
-              :show-actions="true"
-              :show-ccs-import="!publicSettings?.hide_ccs_import_button"
+              :selected-key-id="inspectedKeyId"
               :compact="compactTable"
               :copied-key-id="copiedKeyId"
               :status-updating-ids="statusUpdatingIds"
-              :sort-by="sortState.sort_by"
-              :sort-order="sortState.sort_order"
               :now="now"
+              @select="openKeyDetails"
               @copy-key="copyKey"
               @toggle-status="toggleKeyStatus"
               @change-group="openGroupSelector"
-              @use-key="openUseKeyModal"
-              @import-ccs="importToCcswitch"
-              @edit="editKey"
-              @delete="confirmDelete"
-              @reset-rate-limit="confirmResetRateLimitFromTable"
-              @sort="handleSort"
             />
 
-            <div class="space-y-4 md:hidden">
-              <ApiKeyCard
+            <div class="keys-mobile-list md:hidden" data-test="api-key-mobile-list">
+              <ApiKeySummaryCard
                 v-for="row in apiKeys"
                 :key="row.id"
                 :api-key="row"
                 :usage="usageStats[row.id]"
                 :user-group-rate="row.group ? userGroupRates[row.group.id] : null"
-                :visible-columns="visibleColumnKeys"
-                :show-actions="showCardActions"
-                :show-ccs-import="!publicSettings?.hide_ccs_import_button"
                 :copied="copiedKeyId === row.id"
                 :status-updating="statusUpdatingKeyIds.has(row.id)"
                 :now="now"
+                :visible-columns="visibleColumnKeys"
+                @open-details="openKeyDetails"
                 @copy-key="copyKey"
                 @toggle-status="toggleKeyStatus"
                 @change-group="openGroupSelector"
-                @use-key="openUseKeyModal"
-                @import-ccs="importToCcswitch"
-                @edit="editKey"
-                @delete="confirmDelete"
-                @reset-rate-limit="confirmResetRateLimitFromTable"
               />
+
+              <div v-if="pagination.total > 0" class="keys-mobile-pagination">
+                <p>{{ t('keys.workspacePageOf', { page: pagination.page, total: totalPageCount }) }}</p>
+                <div>
+                  <button
+                    type="button"
+                    :disabled="pagination.page <= 1"
+                    :aria-label="t('pagination.previous')"
+                    @click="handlePageChange(pagination.page - 1)"
+                  >
+                    <KeysLucideIcon name="chevronLeft" :size="16" />
+                  </button>
+                  <button
+                    type="button"
+                    :disabled="pagination.page >= totalPageCount"
+                    :aria-label="t('pagination.next')"
+                    @click="handlePageChange(pagination.page + 1)"
+                  >
+                    <KeysLucideIcon name="chevronRight" :size="16" />
+                  </button>
+                </div>
+              </div>
             </div>
           </div>
 
-          <div v-else class="rounded-2xl border border-gray-200 bg-white py-12 dark:border-dark-600 dark:bg-dark-800 md:rounded-none md:border-0">
-            <EmptyState
-              :title="t('keys.noKeysYet')"
-              :description="t('keys.createFirstKey')"
-            >
-              <template #action>
-                <button
-                  type="button"
-                  class="key-empty-create btn btn-primary min-h-11"
-                  data-test="key-create-empty"
-                  @click="showCreateModal = true"
-                >
-                  <Icon name="plus" size="md" class="mr-2" aria-hidden="true" />
-                  {{ t('keys.createKey') }}
-                </button>
-              </template>
-            </EmptyState>
+          <div v-if="pagination.total > 0" class="keys-desktop-pagination hidden md:block">
+            <Pagination
+              :page="pagination.page"
+              :total="pagination.total"
+              :page-size="pagination.page_size"
+              :show-page-size-selector="false"
+              @update:page="handlePageChange"
+              @update:pageSize="handlePageSizeChange"
+            />
           </div>
         </div>
 
-        <div v-if="pagination.total > 0" class="overflow-hidden rounded-b-3xl border-t border-gray-100 dark:border-dark-700">
-          <Pagination
-            :page="pagination.page"
-            :total="pagination.total"
-            :page-size="pagination.page_size"
-            @update:page="handlePageChange"
-            @update:pageSize="handlePageSizeChange"
+        <aside
+          class="keys-detail-pane hidden md:flex"
+          data-test="key-inline-inspector"
+        >
+          <ApiKeyInspector
+            v-if="inspectedKey"
+            class="h-full w-full"
+            mode="inline"
+            :api-key="inspectedKey"
+            :usage="inspectedUsage"
+            :user-group-rate="inspectedUserGroupRate"
+            :public-settings="publicSettings"
+            :copied="copiedKeyId === inspectedKey.id"
+            :status-updating="statusUpdatingKeyIds.has(inspectedKey.id)"
+            :now="now"
+            :show-ccs-import="!publicSettings?.hide_ccs_import_button"
+            :visible-columns="visibleColumnKeys"
+            @copy-key="copyKey"
+            @toggle-status="toggleKeyStatus"
+            @change-group="openGroupSelector"
+            @reset-quota="confirmResetQuotaFromInspector"
+            @reset-rate-limit="confirmResetRateLimitFromTable"
+            @use-key="openUseKeyFromInspector"
+            @import-ccs="importFromInspector"
+            @edit="editKeyFromInspector"
+            @delete="deleteKeyFromInspector"
           />
-        </div>
+        </aside>
+      </div>
+
+      <div v-else class="keys-empty-state">
+        <EmptyState :title="t('keys.noKeysYet')" :description="t('keys.createFirstKey')">
+          <template #action>
+            <button type="button" class="key-empty-create btn btn-primary min-h-11" data-test="key-create-empty" @click="showCreateModal = true">
+              <KeysLucideIcon name="plus" :size="20" class="mr-2" aria-hidden="true" />
+              {{ t('keys.createKey') }}
+            </button>
+          </template>
+        </EmptyState>
       </div>
     </section>
+
+    <ApiKeyDetailSheet
+      :show="showKeyDetailSheet && Boolean(inspectedKey)"
+      :title="t('keys.detailTitle')"
+      :subtitle="inspectedKey ? `#${inspectedKey.id} · ${inspectedKey.name}` : ''"
+      @close="closeKeyDetails"
+    >
+      <ApiKeyInspector
+        v-if="inspectedKey"
+        mode="sheet"
+        :api-key="inspectedKey"
+        :usage="inspectedUsage"
+        :user-group-rate="inspectedUserGroupRate"
+        :public-settings="publicSettings"
+        :copied="copiedKeyId === inspectedKey.id"
+        :status-updating="statusUpdatingKeyIds.has(inspectedKey.id)"
+        :now="now"
+        :show-ccs-import="!publicSettings?.hide_ccs_import_button"
+        :visible-columns="visibleColumnKeys"
+        @copy-key="copyKey"
+        @toggle-status="toggleKeyStatus"
+        @change-group="openGroupSelector"
+        @reset-quota="confirmResetQuotaFromInspector"
+        @reset-rate-limit="confirmResetRateLimitFromTable"
+        @use-key="openUseKeyFromInspector"
+        @import-ccs="importFromInspector"
+        @edit="editKeyFromInspector"
+        @delete="deleteKeyFromInspector"
+      />
+    </ApiKeyDetailSheet>
 
     <!-- Create/Edit Modal -->
     <BaseDialog
@@ -955,39 +1003,42 @@
 </template>
 
 <script setup lang="ts">
-	import { ref, reactive, computed, onMounted, onUnmounted } from 'vue'
-	import { useI18n } from 'vue-i18n'
-	import { useAppStore } from '@/stores/app'
-	import { useOnboardingStore } from '@/stores/onboarding'
-	import { useClipboard } from '@/composables/useClipboard'
-import { getPersistedPageSize } from '@/composables/usePersistedPageSize'
+import { computed, onMounted, onUnmounted, reactive, ref } from 'vue'
+import { useI18n } from 'vue-i18n'
 
-const { t } = useI18n()
-import { keysAPI, authAPI, usageAPI, userGroupsAPI } from '@/api'
-import AppLayout from '@/components/layout/AppLayout.vue'
-	import CreditAmount from '@/components/common/CreditAmount.vue'
-	import SnowflakeCreditIcon from '@/components/icons/SnowflakeCreditIcon.vue'
-	import Pagination from '@/components/common/Pagination.vue'
-	import BaseDialog from '@/components/common/BaseDialog.vue'
-	import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
-	import EmptyState from '@/components/common/EmptyState.vue'
-	import Select from '@/components/common/Select.vue'
-	import SearchInput from '@/components/common/SearchInput.vue'
-	import Icon from '@/components/icons/Icon.vue'
-	import ApiKeyCard from '@/components/keys/ApiKeyCard.vue'
-	import ApiKeyTable from '@/components/keys/ApiKeyTable.vue'
-	import UseKeyModal from '@/components/keys/UseKeyModal.vue'
-	import EndpointPopover from '@/components/keys/EndpointPopover.vue'
-	import GroupBadge from '@/components/common/GroupBadge.vue'
-	import GroupOptionItem from '@/components/common/GroupOptionItem.vue'
-	import type { ApiKey, Group, PublicSettings, SubscriptionType, GroupPlatform, UpdateApiKeyRequest } from '@/types'
-import type { Column } from '@/components/common/types'
+import { authAPI, keysAPI, usageAPI, userGroupsAPI } from '@/api'
 import type { BatchApiKeyUsageStats } from '@/api/usage'
+import BaseDialog from '@/components/common/BaseDialog.vue'
+import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
+import CreditAmount from '@/components/common/CreditAmount.vue'
+import EmptyState from '@/components/common/EmptyState.vue'
+import GroupBadge from '@/components/common/GroupBadge.vue'
+import GroupOptionItem from '@/components/common/GroupOptionItem.vue'
+import Pagination from '@/components/common/Pagination.vue'
+import SearchInput from '@/components/common/SearchInput.vue'
+import Select from '@/components/common/Select.vue'
+import type { Column } from '@/components/common/types'
+import Icon from '@/components/icons/Icon.vue'
+import KeysLucideIcon from '@/components/keys/KeysLucideIcon.vue'
+import SnowflakeCreditIcon from '@/components/icons/SnowflakeCreditIcon.vue'
+import ApiKeyDetailSheet from '@/components/keys/ApiKeyDetailSheet.vue'
+import ApiKeyInspector from '@/components/keys/ApiKeyInspector.vue'
+import ApiKeySummaryCard from '@/components/keys/ApiKeySummaryCard.vue'
+import ApiKeyWorkspaceList from '@/components/keys/ApiKeyWorkspaceList.vue'
+import UseKeyModal from '@/components/keys/UseKeyModal.vue'
+import AppLayout from '@/components/layout/AppLayout.vue'
+import { useClipboard } from '@/composables/useClipboard'
+import { getPersistedPageSize } from '@/composables/usePersistedPageSize'
+import { useAppStore } from '@/stores/app'
+import { useOnboardingStore } from '@/stores/onboarding'
+import type { ApiKey, Group, GroupPlatform, PublicSettings, SubscriptionType, UpdateApiKeyRequest } from '@/types'
 import { formatDateTime } from '@/utils/format'
 import {
   buildCcSwitchImportDeeplink,
   type CcSwitchClientType
 } from '@/utils/ccswitchImport'
+
+const { t } = useI18n()
 
 // Helper to format date for datetime-local input
 const formatDateTimeLocal = (isoDate: string): string => {
@@ -1030,14 +1081,17 @@ const allColumns = computed<Column[]>(() => [
   { key: 'actions', label: t('common.actions'), sortable: false }
 ])
 
-const ALWAYS_VISIBLE_COLUMNS = new Set(['name', 'status', 'usage', 'group', 'key', 'actions'])
-const DEFAULT_HIDDEN_COLUMNS = ['id', 'rate_limit', 'last_used_at', 'last_used_ip']
+const ALWAYS_VISIBLE_COLUMNS = new Set(['name', 'id', 'status', 'usage', 'group', 'key', 'actions'])
+const DEFAULT_HIDDEN_COLUMNS: string[] = []
 const HIDDEN_COLUMNS_KEY = 'api-key-hidden-columns'
 const COLUMN_SETTINGS_VERSION_KEY = 'api-key-column-settings-version'
-const COLUMN_SETTINGS_VERSION = 3
+const COLUMN_SETTINGS_VERSION = 4
 const VERSION_NEW_HIDDEN_COLUMNS: Record<number, string[]> = {
   2: ['last_used_ip'],
   3: ['id']
+}
+const VERSION_NEW_VISIBLE_COLUMNS: Record<number, string[]> = {
+  4: ['id', 'rate_limit', 'last_used_at', 'last_used_ip']
 }
 
 const toggleableColumns = computed(() =>
@@ -1077,6 +1131,9 @@ const loadSavedColumns = () => {
               hiddenColumns.add(key)
             }
           }
+          for (const key of VERSION_NEW_VISIBLE_COLUMNS[v] ?? []) {
+            hiddenColumns.delete(key)
+          }
         }
         saveColumnsToStorage()
       } else {
@@ -1106,8 +1163,8 @@ const isColumnVisible = (key: string) => !hiddenColumns.has(key)
 
 const visibleColumnKeys = computed(() =>
   allColumns.value
-    .filter((col) => ALWAYS_VISIBLE_COLUMNS.has(col.key) || !hiddenColumns.has(col.key))
-    .map((col) => col.key)
+    .filter((column) => isColumnVisible(column.key))
+    .map((column) => column.key)
 )
 
 const apiKeys = ref<ApiKey[]>([])
@@ -1125,6 +1182,10 @@ const pagination = ref({
   total: 0,
   pages: 0
 })
+const totalPageCount = computed(() => Math.max(
+  1,
+  pagination.value.pages || Math.ceil(pagination.value.total / pagination.value.page_size)
+))
 const sortState = ref({
   sort_by: 'created_at',
   sort_order: 'desc' as 'asc' | 'desc'
@@ -1162,13 +1223,14 @@ const showResetRateLimitDialog = ref(false)
 const showUseKeyModal = ref(false)
 const showCcsClientSelect = ref(false)
 const showColumnDropdown = ref(false)
-const showCardActions = ref(true)
-const mobileFiltersExpanded = ref(false)
 const compactTable = ref(false)
 const statusUpdatingKeyIds = reactive(new Set<number>())
 const statusUpdatingIds = computed(() => Array.from(statusUpdatingKeyIds))
 const pendingCcsRow = ref<ApiKey | null>(null)
 const selectedKey = ref<ApiKey | null>(null)
+const inspectedKeyId = ref<number | null>(null)
+const showKeyDetailSheet = ref(false)
+const hasInlineInspector = ref(true)
 const copiedKeyId = ref<number | null>(null)
 const groupSelectorKeyId = ref<number | null>(null)
 const publicSettings = ref<PublicSettings | null>(null)
@@ -1176,6 +1238,22 @@ const dropdownRef = ref<HTMLElement | null>(null)
 const columnDropdownRef = ref<HTMLElement | null>(null)
 const dropdownPosition = ref<{ top?: number; bottom?: number; left: number } | null>(null)
 let abortController: AbortController | null = null
+let inlineInspectorMediaQuery: MediaQueryList | null = null
+
+const inspectedKey = computed(() => {
+  if (inspectedKeyId.value === null) return null
+  return apiKeys.value.find((key) => key.id === inspectedKeyId.value) ?? null
+})
+
+const inspectedUsage = computed(() => {
+  if (!inspectedKey.value) return undefined
+  return usageStats.value[String(inspectedKey.value.id)]
+})
+
+const inspectedUserGroupRate = computed(() => {
+  const groupId = inspectedKey.value?.group?.id
+  return groupId === undefined ? null : userGroupRates.value[groupId] ?? null
+})
 
 // Get the currently selected key for group change
 const selectedKeyForGroup = computed(() => {
@@ -1310,6 +1388,41 @@ const copyToClipboard = async (text: string, keyId: number) => {
 
 const copyKey = (key: ApiKey) => copyToClipboard(key.key, key.id)
 
+const closeKeyDetails = () => {
+  showKeyDetailSheet.value = false
+  closeGroupSelectorMenu()
+}
+
+const openKeyDetails = (key: ApiKey) => {
+  inspectedKeyId.value = key.id
+  if (!hasInlineInspector.value) {
+    showKeyDetailSheet.value = true
+  }
+}
+
+const syncInspectedKey = (items: ApiKey[]) => {
+  if (items.length === 0) {
+    inspectedKeyId.value = null
+    showKeyDetailSheet.value = false
+    return
+  }
+
+  const currentId = inspectedKeyId.value
+  if (currentId !== null && items.some((key) => key.id === currentId)) return
+
+  inspectedKeyId.value = items[0].id
+  if (currentId !== null) {
+    showKeyDetailSheet.value = false
+  }
+}
+
+const handleInlineInspectorChange = (event: MediaQueryListEvent) => {
+  hasInlineInspector.value = event.matches
+  if (event.matches) {
+    showKeyDetailSheet.value = false
+  }
+}
+
 const isAbortError = (error: unknown) => {
   if (!error || typeof error !== 'object') return false
   const { name, code } = error as { name?: string; code?: string }
@@ -1342,6 +1455,7 @@ const loadApiKeys = async () => {
     })
     if (signal.aborted) return
     apiKeys.value = response.items
+    syncInspectedKey(response.items)
     pagination.value.total = response.total
     pagination.value.pages = response.pages
     usageStats.value = {}
@@ -1403,6 +1517,32 @@ const openUseKeyModal = (key: ApiKey) => {
 const closeUseKeyModal = () => {
   showUseKeyModal.value = false
   selectedKey.value = null
+}
+
+const openUseKeyFromInspector = (key: ApiKey) => {
+  showKeyDetailSheet.value = false
+  openUseKeyModal(key)
+}
+
+const editKeyFromInspector = (key: ApiKey) => {
+  showKeyDetailSheet.value = false
+  editKey(key)
+}
+
+const deleteKeyFromInspector = (key: ApiKey) => {
+  showKeyDetailSheet.value = false
+  confirmDelete(key)
+}
+
+const importFromInspector = (key: ApiKey) => {
+  showKeyDetailSheet.value = false
+  importToCcswitch(key)
+}
+
+const confirmResetQuotaFromInspector = (key: ApiKey) => {
+  showKeyDetailSheet.value = false
+  selectedKey.value = key
+  showResetQuotaDialog.value = true
 }
 
 const handlePageChange = (page: number) => {
@@ -1737,6 +1877,7 @@ const confirmResetRateLimit = () => {
 
 // Show reset rate limit confirmation dialog (from table row)
 const confirmResetRateLimitFromTable = (row: ApiKey) => {
+  showKeyDetailSheet.value = false
   selectedKey.value = row
   showResetRateLimitDialog.value = true
 }
@@ -1835,6 +1976,11 @@ const closeCcsClientSelect = () => {
 
 onMounted(() => {
   loadSavedColumns()
+  if (typeof window !== 'undefined' && typeof window.matchMedia === 'function') {
+    inlineInspectorMediaQuery = window.matchMedia('(min-width: 768px)')
+    hasInlineInspector.value = inlineInspectorMediaQuery.matches
+    inlineInspectorMediaQuery.addEventListener('change', handleInlineInspectorChange)
+  }
   loadApiKeys()
   loadGroups()
   loadUserGroupRates()
@@ -1845,27 +1991,733 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
+  abortController?.abort()
   document.removeEventListener('click', closeGroupSelector)
   document.removeEventListener('keydown', handleEscapeKey)
+  inlineInspectorMediaQuery?.removeEventListener('change', handleInlineInspectorChange)
+  inlineInspectorMediaQuery = null
   if (resetTimer) clearInterval(resetTimer)
 })
 </script>
 
 <style scoped>
-@media (max-width: 767px) {
-  .key-header-create--empty {
+.keys-workspace {
+  display: flex;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  flex-direction: column;
+  overflow: hidden;
+  color: #332f3a;
+  background: #fff;
+  font-family: "DM Sans", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0;
+  -webkit-font-smoothing: antialiased;
+}
+
+.keys-mobile-header,
+.keys-desktop-header,
+.keys-filter-toolbar {
+  flex: 0 0 auto;
+  border-bottom: 1px solid #f3f4f6;
+  background: #fff;
+}
+
+.keys-mobile-header {
+  display: flex;
+  height: 56px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 16px;
+}
+
+.keys-mobile-title,
+.keys-mobile-actions,
+.keys-desktop-title-wrap,
+.keys-desktop-actions {
+  display: flex;
+  align-items: center;
+}
+
+.keys-mobile-title {
+  gap: 8px;
+  min-width: 0;
+  color: #111827;
+  font-size: 16px;
+  font-weight: 900;
+  line-height: 24px;
+}
+
+.keys-mobile-title > :first-child {
+  color: #7c3aed;
+}
+
+.keys-mobile-actions {
+  gap: 8px;
+}
+
+.keys-mobile-refresh,
+.keys-mobile-create,
+.keys-desktop-refresh,
+.keys-desktop-create,
+.keys-detail-settings-button,
+.keys-density-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  outline: none;
+  transition: all 300ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.keys-mobile-refresh {
+  width: 40px;
+  height: 40px;
+  color: #9ca3af;
+  border-radius: 12px;
+}
+
+.keys-mobile-refresh :deep(svg) {
+  width: 18px;
+  height: 18px;
+}
+
+.keys-mobile-create {
+  height: 36px;
+  gap: 6px;
+  padding: 0 16px;
+  border-radius: 12px;
+  color: #fff;
+  background: #7c3aed;
+  box-shadow: 0 10px 15px -3px rgb(124 58 237 / 0.3), 0 4px 6px -4px rgb(124 58 237 / 0.3);
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.keys-mobile-create :deep(svg) {
+  width: 12px;
+  height: 12px;
+}
+
+.keys-mobile-refresh:active,
+.keys-mobile-create:active {
+  transform: scale(0.95);
+}
+
+.keys-desktop-header {
+  min-height: 89px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 20px 32px;
+}
+
+.keys-desktop-title-wrap {
+  min-width: 0;
+  gap: 16px;
+}
+
+.keys-desktop-title-icon {
+  display: grid;
+  width: 48px;
+  height: 48px;
+  flex: 0 0 48px;
+  place-items: center;
+  border-radius: 16px;
+  color: #7c3aed;
+  background: #ede9fe;
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.05);
+}
+
+.keys-desktop-title-copy {
+  min-width: 0;
+}
+
+.keys-desktop-title-copy h1 {
+  margin: 0;
+  color: #030712;
+  font-size: 20px;
+  font-weight: 900;
+  line-height: 28px;
+}
+
+.keys-desktop-title-copy p {
+  overflow: hidden;
+  margin: 0;
+  color: #9ca3af;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 16px;
+  letter-spacing: 0;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.keys-desktop-actions {
+  gap: 12px;
+}
+
+.keys-desktop-refresh {
+  width: 48px;
+  height: 48px;
+  flex: 0 0 48px;
+  border-radius: 12px;
+  color: #6b7280;
+  background: #f9fafb;
+}
+
+.keys-desktop-refresh:hover {
+  background: #f3f4f6;
+}
+
+.keys-desktop-create {
+  height: 48px;
+  gap: 8px;
+  padding: 0 24px;
+  border-radius: 12px;
+  color: #fff;
+  background: #7c3aed;
+  box-shadow: 0 10px 15px -3px rgb(124 58 237 / 0.3), 0 4px 6px -4px rgb(124 58 237 / 0.3);
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.keys-desktop-create:hover {
+  transform: translateY(-2px);
+}
+
+.keys-desktop-create:active {
+  transform: scale(0.95);
+}
+
+.keys-filter-toolbar {
+  padding: 16px;
+}
+
+.keys-filter-grid {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.key-filter-search,
+.key-secondary-filter {
+  min-width: 0;
+}
+
+.key-filter-search {
+  margin-bottom: 4px;
+}
+
+.key-filter-search :deep(.input),
+.key-secondary-filter :deep(.select-trigger) {
+  width: 100%;
+  min-height: 44px;
+  border: 0;
+  border-radius: 12px;
+  color: #111827;
+  background: #f9fafb;
+  box-shadow: none;
+  font-size: 14px;
+  font-weight: 400;
+}
+
+.key-filter-search :deep(.input) {
+  height: 44px;
+  padding-left: 48px;
+}
+
+.key-filter-search :deep(> div > div) {
+  padding-left: 16px;
+}
+
+.key-filter-search :deep(> div > div svg) {
+  width: 16px;
+  height: 16px;
+}
+
+.key-secondary-filter :deep(.select-trigger) {
+  height: 44px;
+  padding: 0 16px;
+}
+
+.key-secondary-filter :deep(.select-icon) {
+  display: none;
+}
+
+.key-filter-search :deep(.input:focus),
+.key-secondary-filter :deep(.select-trigger:focus-visible),
+.key-secondary-filter :deep(.select-trigger-open) {
+  border-color: transparent;
+  outline: none;
+  box-shadow: 0 0 0 2px rgb(139 92 246 / 0.2);
+}
+
+.keys-filter-actions {
+  display: flex;
+  min-width: 0;
+  height: 44px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.keys-detail-settings-button,
+.keys-density-button {
+  height: 40px;
+  border-radius: 8px;
+  font-weight: 900;
+}
+
+.keys-detail-settings-button {
+  gap: 8px;
+  padding: 0 12px;
+  color: #6d28d9;
+  background: #f5f3ff;
+  font-size: 12px;
+}
+
+.keys-detail-settings-button :deep(svg) {
+  width: 18px;
+  height: 18px;
+}
+
+.keys-settings-icon--desktop {
+  display: none;
+}
+
+.keys-density-button {
+  padding: 0 12px;
+  border: 1px solid #f3f4f6;
+  color: #9ca3af;
+  background: #f9fafb;
+  font-size: 10px;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
+.keys-detail-settings-button:focus-visible,
+.keys-density-button:focus-visible,
+.keys-mobile-refresh:focus-visible,
+.keys-mobile-create:focus-visible,
+.keys-desktop-refresh:focus-visible,
+.keys-desktop-create:focus-visible {
+  outline: 2px solid #7c3aed;
+  outline-offset: 2px;
+}
+
+.keys-detail-menu {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  z-index: 50;
+  width: 224px;
+  max-height: 320px;
+  overflow-y: auto;
+  margin-top: 8px;
+  border: 1px solid #f3f4f6;
+  border-radius: 12px;
+  padding: 8px 0;
+  background: #fff;
+  box-shadow: 0 20px 25px -5px rgb(0 0 0 / 0.1), 0 8px 10px -6px rgb(0 0 0 / 0.1);
+}
+
+.keys-detail-menu-item {
+  display: flex;
+  width: 100%;
+  min-height: 44px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 16px;
+  color: #374151;
+  font-size: 14px;
+  text-align: left;
+}
+
+.keys-detail-menu-item:hover {
+  background: #f3f4f6;
+}
+
+.keys-content {
+  display: flex;
+  min-height: 0;
+  flex: 1 1 0;
+  overflow: hidden;
+  background: #fff;
+}
+
+.keys-master-pane {
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  flex: 1 1 auto;
+  flex-direction: column;
+  overflow: hidden;
+  background: #fff;
+}
+
+.keys-detail-pane {
+  width: 40%;
+  min-width: 0;
+  flex: 0 0 40%;
+  overflow: hidden;
+  border-left: 1px solid #f3f4f6;
+  background: #f9f8fd;
+}
+
+.keys-mobile-list {
+  height: 100%;
+  overflow-y: auto;
+  padding: 16px;
+  background: #f4f1fa;
+  scrollbar-color: rgb(91 80 112 / 0.2) transparent;
+  scrollbar-width: thin;
+}
+
+.keys-mobile-list::-webkit-scrollbar {
+  width: 5px;
+}
+
+.keys-mobile-list::-webkit-scrollbar-thumb {
+  border-radius: 10px;
+  background: rgb(91 80 112 / 20%);
+}
+
+.keys-mobile-list > * + * {
+  margin-top: 16px;
+}
+
+.keys-mobile-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 0 32px;
+}
+
+.keys-mobile-pagination p {
+  margin: 0;
+  color: #9ca3af;
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
+.keys-mobile-pagination > div {
+  display: flex;
+  gap: 8px;
+}
+
+.keys-mobile-pagination button {
+  display: grid;
+  width: 40px;
+  height: 40px;
+  place-items: center;
+  border: 1px solid #f3f4f6;
+  border-radius: 12px;
+  color: #6b7280;
+  background: #fff;
+}
+
+.keys-mobile-pagination button:disabled {
+  opacity: 0.4;
+}
+
+.keys-desktop-pagination {
+  flex: 0 0 auto;
+  overflow: hidden;
+}
+
+.keys-desktop-pagination :deep(.pagination) {
+  min-height: 73px;
+  border-top: 1px solid #f3f4f6;
+  padding: 16px 32px;
+  background: #fff;
+}
+
+.keys-desktop-pagination :deep(.pagination-summary) {
+  color: #9ca3af;
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
+.keys-desktop-pagination :deep(.pagination-nav) {
+  display: flex;
+  gap: 8px;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+.keys-desktop-pagination :deep(.pagination-nav .pagination-button) {
+  display: inline-flex;
+  width: 40px;
+  height: 40px;
+  align-items: center;
+  justify-content: center;
+  margin: 0;
+  border: 1px solid #f3f4f6;
+  border-radius: 12px;
+  padding: 0;
+  color: #9ca3af;
+  background: #fff;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.keys-desktop-pagination :deep(.pagination-nav .pagination-button--active) {
+  border-color: #7c3aed;
+  color: #fff;
+  background: #7c3aed;
+  box-shadow: 0 4px 6px -1px rgb(124 58 237 / 0.2);
+}
+
+.keys-empty-state {
+  display: flex;
+  min-height: 0;
+  flex: 1 1 0;
+  align-items: center;
+  justify-content: center;
+  overflow-y: auto;
+  padding: 24px;
+  background: #f9fafb;
+}
+
+:global(.app-layout--snow-shell:has(.keys-workspace)) {
+  --app-shell-top-offset: 0px;
+}
+
+:global(.app-layout--snow-shell:has(.keys-workspace) .app-main-shell.app-layout--chat) {
+  position: relative;
+  z-index: 0;
+  background: #fff !important;
+  box-shadow: 0 25px 50px -12px rgb(0 0 0 / 0.25);
+}
+
+:global(.app-layout--snow-shell:has(.keys-workspace) .app-main-shell.app-layout--chat .app-main-content) {
+  padding: 0;
+}
+
+:global(.app-layout--snow-shell:has(.keys-workspace) .app-main-shell.app-layout--chat .app-main-content > div) {
+  max-width: none;
+}
+
+:global(.dark) .keys-workspace,
+:global(.dark) .keys-mobile-header,
+:global(.dark) .keys-desktop-header,
+:global(.dark) .keys-filter-toolbar,
+:global(.dark) .keys-content,
+:global(.dark) .keys-master-pane {
+  color: #f8f5fc;
+  background: #17131f;
+}
+
+:global(.dark .app-layout--snow-shell:has(.keys-workspace) .app-main-shell.app-layout--chat) {
+  background: #17131f !important;
+}
+
+:global(.dark) .keys-mobile-header,
+:global(.dark) .keys-desktop-header,
+:global(.dark) .keys-filter-toolbar,
+:global(.dark) .keys-detail-pane {
+  border-color: rgb(255 255 255 / 0.1);
+}
+
+:global(.dark) .keys-mobile-title,
+:global(.dark) .keys-desktop-title-copy h1 {
+  color: #fff;
+}
+
+:global(.dark) .keys-desktop-title-icon {
+  color: #a78bfa;
+  background: rgb(76 29 149 / 0.3);
+}
+
+:global(.dark) .keys-desktop-refresh,
+:global(.dark) .keys-filter-toolbar,
+:global(.dark) .keys-mobile-header,
+:global(.dark) .keys-desktop-header {
+  background: #251e2f;
+}
+
+:global(.dark) .key-filter-search :deep(.input),
+:global(.dark) .key-secondary-filter :deep(.select-trigger),
+:global(.dark) .keys-density-button {
+  border-color: rgb(255 255 255 / 0.05);
+  color: #f8f5fc;
+  background: rgb(255 255 255 / 0.05);
+}
+
+:global(.dark) .keys-detail-settings-button {
+  color: #a78bfa;
+  background: rgb(76 29 149 / 0.1);
+}
+
+:global(.dark) .keys-detail-menu {
+  border-color: rgb(255 255 255 / 0.1);
+  background: #251e2f;
+}
+
+:global(.dark) .keys-detail-menu-item {
+  color: #d1d5db;
+}
+
+:global(.dark) .keys-detail-menu-item:hover {
+  background: rgb(255 255 255 / 0.06);
+}
+
+:global(.dark) .keys-detail-pane {
+  background: rgb(0 0 0 / 0.2);
+}
+
+:global(.dark) .keys-mobile-list,
+:global(.dark) .keys-empty-state {
+  background: #17131f;
+}
+
+:global(.dark) .keys-mobile-pagination button,
+:global(.dark) .keys-desktop-pagination :deep(.pagination),
+:global(.dark) .keys-desktop-pagination :deep(.pagination-nav .pagination-button) {
+  border-color: rgb(255 255 255 / 0.1);
+  color: #c5bccf;
+  background: #251e2f;
+}
+
+@media (min-width: 768px) {
+  .keys-settings-icon--mobile {
     display: none;
+  }
+
+  .keys-settings-icon--desktop {
+    display: inline-flex;
+  }
+
+  .keys-filter-toolbar {
+    padding: 16px 32px;
+  }
+
+  .keys-filter-grid {
+    flex-direction: row;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .key-filter-search {
+    max-width: 512px;
+    flex: 1 1 260px;
+    margin: 0 8px 0 0;
+  }
+
+  .key-secondary-filter {
+    width: 110px;
+    flex: 0 0 110px;
+  }
+
+  .key-sort-filter {
+    width: 152px;
+    flex-basis: 152px;
   }
 
   .key-filter-search :deep(.input),
   .key-secondary-filter :deep(.select-trigger) {
-    min-height: 44px;
+    border: 1px solid #f3f4f6;
+  }
+
+  .key-secondary-filter :deep(.select-trigger) {
+    gap: 8px;
+    padding-right: 12px;
+    padding-left: 12px;
+    background: #fff;
+  }
+
+  .key-secondary-filter :deep(.select-icon) {
+    display: inline-flex;
+  }
+
+  .key-secondary-filter :deep(.select-icon svg) {
+    width: 16px;
+    height: 16px;
+  }
+
+  .keys-mobile-header {
+    display: none;
+  }
+
+  .keys-filter-actions {
+    width: 44px;
+    height: 44px;
+    flex: 0 0 44px;
+    margin: 0;
+  }
+
+  .keys-detail-settings-button {
+    width: 44px;
+    height: 44px;
+    padding: 0;
+    border: 1px solid #f3f4f6;
+    border-radius: 12px;
+    color: #6b7280;
+    background: #fff;
+  }
+
+  .keys-detail-settings-button:hover {
+    background: #f9fafb;
+  }
+
+  .keys-detail-settings-button span,
+  .keys-density-button {
+    display: none;
+  }
+
+  .keys-detail-menu {
+    right: 0;
+    left: auto;
+  }
+
+  .key-empty-create {
+    display: none;
+  }
+
+  :global(.dark) .key-secondary-filter :deep(.select-trigger),
+  :global(.dark) .keys-detail-settings-button {
+    border-color: rgb(255 255 255 / 0.1);
+    color: #c5bccf;
+    background: #120f18;
   }
 }
 
-@media (min-width: 768px) {
-  .key-empty-create {
-    display: none;
+@media (min-width: 1024px) {
+  :global(.app-layout--snow-shell:has(.keys-workspace)[data-sidebar-collapsed='false'] #app-sidebar) {
+    width: 208px !important;
+  }
+
+  :global(.app-layout--snow-shell:has(.keys-workspace)[data-sidebar-collapsed='false'] .app-main-shell) {
+    margin-left: 208px !important;
+  }
+}
+
+@media (max-width: 1023px) {
+  :global(.app-layout--snow-shell:has(.keys-workspace) [data-testid='app-mobile-header']) {
+    display: none !important;
+  }
+
+  :global(.app-layout--snow-shell:has(.keys-workspace) .app-main-shell.app-layout--chat) {
+    height: 100dvh;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .keys-mobile-refresh,
+  .keys-mobile-create,
+  .keys-desktop-refresh,
+  .keys-desktop-create,
+  .keys-detail-settings-button,
+  .keys-density-button {
+    transition: none;
   }
 }
 </style>

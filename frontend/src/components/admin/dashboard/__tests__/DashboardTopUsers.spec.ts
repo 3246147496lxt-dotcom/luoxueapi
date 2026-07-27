@@ -45,7 +45,13 @@ const mountComponent = (props: Record<string, unknown> = {}) => mount(DashboardT
     ...props,
   },
   global: {
-    stubs: { Icon: true },
+    stubs: {
+      Icon: true,
+      CreditAmount: {
+        props: ['value', 'iconSize'],
+        template: '<span data-testid="credit-amount" :data-icon-size="iconSize">{{ value }}</span>',
+      },
+    },
   },
 })
 
@@ -58,7 +64,10 @@ describe('DashboardTopUsers', () => {
     expect(wrapper.text()).toContain('operator@example.com')
     expect(wrapper.text()).toContain('claude-sonnet-4')
     expect(wrapper.text()).toContain('2.5M')
-    expect(wrapper.text()).toContain('$12.3456')
+    const actualCost = wrapper.get('[data-testid="credit-amount"]')
+    expect(actualCost.text()).toBe('12.3456')
+    expect(actualCost.attributes('data-icon-size')).toBe('xs')
+    expect(wrapper.text()).not.toContain('$12.3456')
     expect(wrapper.get('.top-users-bars').findAll('span')).toHaveLength(7)
 
     await wrapper.get('.top-users-user').trigger('click')

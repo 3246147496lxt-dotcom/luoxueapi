@@ -10,9 +10,6 @@
   >
     <div class="pricing-plan-card__heading">
       <div class="min-w-0">
-        <p v-if="plan.group_name" class="pricing-plan-card__group">
-          {{ plan.group_name }}
-        </p>
         <h2>{{ plan.name }}</h2>
       </div>
       <span v-if="renewal" class="pricing-plan-card__status">
@@ -46,7 +43,25 @@
     <p class="pricing-plan-card__includes">
       {{ t('pricing.includes') }}
     </p>
-    <ul>
+    <dl class="pricing-plan-card__metrics" data-testid="pricing-plan-metrics">
+      <div
+        v-for="metric in planMetrics"
+        :key="metric.key"
+        class="pricing-plan-card__metric"
+        :data-metric="metric.key"
+      >
+        <dt>{{ metric.label }}</dt>
+        <dd>
+          <CreditAmount
+            v-if="metric.isCredit"
+            :value="metric.value"
+            icon-size="xs"
+          />
+          <span v-else>{{ metric.value }}</span>
+        </dd>
+      </div>
+    </dl>
+    <ul v-if="planFacts.length > 0" class="pricing-plan-card__facts">
       <li v-for="item in planFacts" :key="item">
         <Icon name="check" size="sm" aria-hidden="true" />
         <span>{{ item }}</span>
@@ -58,6 +73,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
+import CreditAmount from '@/components/common/CreditAmount.vue'
 import Icon from '@/components/icons/Icon.vue'
 import { useAppStore } from '@/stores/app'
 import type { SubscriptionPlan } from '@/types/payment'
@@ -96,13 +112,6 @@ const validityLabel = computed(() => {
   return t('pricing.validityDays', { days: props.plan.validity_days })
 })
 
-function quotaLabel(
-  key: 'dailyQuota' | 'weeklyQuota' | 'monthlyQuota',
-  value: number | null | undefined,
-) {
-  return value == null ? null : t(`pricing.${key}`, { amount: value.toFixed(2) })
-}
-
 const MODEL_SCOPE_LABELS: Record<string, string> = {
   claude: 'Claude',
   gemini_text: 'Gemini',
@@ -131,26 +140,42 @@ const modelScopesFact = computed(() => {
   })
 })
 
+interface PlanMetric {
+  key: 'rate' | 'daily' | 'weekly' | 'monthly'
+  label: string
+  value: string
+  isCredit: boolean
+}
+
+const quotaMetric = (
+  key: PlanMetric['key'],
+  label: string,
+  value: number | null | undefined,
+): PlanMetric => ({
+  key,
+  label,
+  value: value == null ? t('payment.planCard.unlimited') : value.toFixed(2),
+  isCredit: value != null,
+})
+
+const planMetrics = computed<PlanMetric[]>(() => [
+  {
+    key: 'rate',
+    label: t('pricing.metricLabels.rate'),
+    value: `×${Number((props.plan.rate_multiplier ?? 1).toPrecision(10))}`,
+    isCredit: false,
+  },
+  quotaMetric('daily', t('pricing.metricLabels.daily'), props.plan.daily_limit_usd),
+  quotaMetric('weekly', t('pricing.metricLabels.weekly'), props.plan.weekly_limit_usd),
+  quotaMetric('monthly', t('pricing.metricLabels.monthly'), props.plan.monthly_limit_usd),
+])
+
 const planFacts = computed(() => {
   const facts = [
     ...(Array.isArray(props.plan.features) ? props.plan.features : []),
-    t('pricing.rateMultiplier', {
-      rate: Number((props.plan.rate_multiplier ?? 1).toPrecision(10)),
-    }),
     peakRateFact.value,
     modelScopesFact.value,
-    quotaLabel('dailyQuota', props.plan.daily_limit_usd),
-    quotaLabel('weeklyQuota', props.plan.weekly_limit_usd),
-    quotaLabel('monthlyQuota', props.plan.monthly_limit_usd),
   ].filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
-
-  if (
-    props.plan.daily_limit_usd == null
-    && props.plan.weekly_limit_usd == null
-    && props.plan.monthly_limit_usd == null
-  ) {
-    facts.push(t('pricing.unlimitedQuota'))
-  }
 
   return [...new Set(facts)]
 })
@@ -192,14 +217,6 @@ const planFacts = computed(() => {
   align-items: flex-start;
   justify-content: space-between;
   gap: 16px;
-}
-
-.pricing-plan-card__group {
-  margin-bottom: 5px;
-  color: #737373;
-  font-size: 12px;
-  font-weight: 600;
-  letter-spacing: 0.02em;
 }
 
 .pricing-plan-card h2 {
@@ -287,12 +304,52 @@ const planFacts = computed(() => {
   font-weight: 650;
 }
 
-.pricing-plan-card ul {
+.pricing-plan-card__metrics {
   display: grid;
-  gap: 12px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  column-gap: 18px;
+  row-gap: 4px;
+  padding: 8px 12px;
+  border-radius: 10px;
+  background: #f7f7f8;
 }
 
-.pricing-plan-card li {
+.pricing-plan-card__metric {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.pricing-plan-card__metric dt {
+  color: #9ca3af;
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 1.4;
+  white-space: nowrap;
+}
+
+.pricing-plan-card__metric dd {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: flex-end;
+  color: #374151;
+  font-size: 13px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  line-height: 1.4;
+  white-space: nowrap;
+}
+
+.pricing-plan-card__facts {
+  display: grid;
+  gap: 12px;
+  margin-top: 16px;
+}
+
+.pricing-plan-card__facts li {
   display: grid;
   grid-template-columns: 18px minmax(0, 1fr);
   align-items: start;
@@ -302,7 +359,7 @@ const planFacts = computed(() => {
   line-height: 1.5;
 }
 
-.pricing-plan-card li svg {
+.pricing-plan-card__facts li svg {
   margin-top: 1px;
   color: #171717;
   stroke-width: 2.1;
@@ -320,7 +377,6 @@ const planFacts = computed(() => {
   box-shadow: 0 12px 30px rgb(0 0 0 / 0.22);
 }
 
-:global(html.dark) .pricing-plan-card__group,
 :global(html.dark) .pricing-plan-card__description,
 :global(html.dark) .pricing-plan-card__price small {
   color: #a3a3a3;
@@ -344,11 +400,23 @@ const planFacts = computed(() => {
   background: #3d3d3d;
 }
 
-:global(html.dark) .pricing-plan-card li {
+:global(html.dark) .pricing-plan-card__metrics {
+  background: #2b2b2b;
+}
+
+:global(html.dark) .pricing-plan-card__metric dt {
+  color: #a3a3a3;
+}
+
+:global(html.dark) .pricing-plan-card__metric dd {
+  color: #f4f4f4;
+}
+
+:global(html.dark) .pricing-plan-card__facts li {
   color: #d0d0d0;
 }
 
-:global(html.dark) .pricing-plan-card li svg {
+:global(html.dark) .pricing-plan-card__facts li svg {
   color: #f4f4f4;
 }
 
@@ -372,6 +440,23 @@ const planFacts = computed(() => {
 
   .pricing-plan-card__description {
     min-height: 0;
+  }
+
+  .pricing-plan-card__metrics {
+    column-gap: 12px;
+    padding: 8px 10px;
+  }
+
+  .pricing-plan-card__metric {
+    gap: 6px;
+  }
+
+  .pricing-plan-card__metric dt {
+    font-size: 11px;
+  }
+
+  .pricing-plan-card__metric dd {
+    font-size: 12px;
   }
 }
 </style>

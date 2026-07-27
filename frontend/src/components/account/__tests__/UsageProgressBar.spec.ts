@@ -146,4 +146,25 @@ describe('UsageProgressBar', () => {
     expect(wrapper.get('.h-1\\.5 > div').attributes('style')).toContain('width: 100%')
     expect(wrapper.get('.h-1\\.5 > div').classes()).toContain('bg-red-500')
   })
+
+  it('keeps account cost in USD and renders user cost as snowflake credits', () => {
+    const wrapper = mount(UsageProgressBar, {
+      props: {
+        label: '1d',
+        utilization: 25,
+        color: 'indigo',
+        windowStats: {
+          requests: 8,
+          tokens: 1024,
+          cost: 1.234,
+          standard_cost: 1.234,
+          user_cost: 6.789
+        }
+      }
+    })
+
+    expect(wrapper.text()).toContain('A $1.23')
+    expect(wrapper.get('[data-testid="credit-amount-value"]').text()).toBe('6.79')
+    expect(wrapper.text()).not.toContain('U $6.79')
+  })
 })

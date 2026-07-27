@@ -74,7 +74,12 @@
                   {{ formatTokens(group.total_tokens) }}
                 </td>
                 <td class="py-1.5 text-right text-green-600 dark:text-green-400">
-                  ${{ formatCost(group.actual_cost) }}
+                  <CreditAmount
+                    v-if="creditMode"
+                    :value="formatCost(group.actual_cost)"
+                    icon-size="xs"
+                  />
+                  <template v-else>${{ formatCost(group.actual_cost) }}</template>
                 </td>
                 <td v-if="showAccountCost" class="py-1.5 text-right text-orange-500 dark:text-orange-400">
                   ${{ formatCost(group.account_cost) }}
@@ -90,6 +95,7 @@
                     :items="breakdownItems"
                     :loading="breakdownLoading"
                     :show-account-cost="showAccountCost"
+                    :credit-mode="creditMode"
                   />
                 </td>
               </tr>
@@ -112,6 +118,7 @@ import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Chart as ChartJS, ArcElement, Tooltip, Legend } from 'chart.js'
 import { Doughnut } from 'vue-chartjs'
+import CreditAmount from '@/components/common/CreditAmount.vue'
 import LoadingSpinner from '@/components/common/LoadingSpinner.vue'
 import UserBreakdownSubTable from './UserBreakdownSubTable.vue'
 import type { GroupStat, UserBreakdownItem } from '@/types'
@@ -134,12 +141,14 @@ const props = withDefaults(defineProps<{
   startDate?: string
   endDate?: string
   filters?: Record<string, any>
+  creditMode?: boolean
 }>(), {
   loading: false,
   metric: 'tokens',
   showMetricToggle: false,
   enableBreakdown: true,
   showAccountCost: true,
+  creditMode: false,
 })
 
 const emit = defineEmits<{
@@ -214,7 +223,7 @@ const doughnutOptions = computed(() => ({
           const total = context.dataset.data.reduce((a: number, b: number) => a + b, 0)
           const percentage = total > 0 ? ((value / total) * 100).toFixed(1) : '0.0'
           const formattedValue = props.metric === 'actual_cost'
-            ? `$${formatCost(value)}`
+            ? formatCostText(value)
             : formatTokens(value)
           return `${context.label}: ${formattedValue} (${percentage}%)`
         }
@@ -254,4 +263,10 @@ const formatCost = (value: number | null | undefined): string => {
   }
   return safeValue.toFixed(4)
 }
+
+const formatCostText = (value: number | null | undefined): string => (
+  props.creditMode
+    ? `${t('dashboard.creditUnit')} ${formatCost(value)}`
+    : `$${formatCost(value)}`
+)
 </script>

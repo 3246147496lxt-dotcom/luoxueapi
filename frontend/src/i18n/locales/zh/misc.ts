@@ -91,6 +91,12 @@ export default {
     viewAllPlans: '查看全部套餐',
     includes: '套餐包含',
     validityDays: '{days} 天',
+    metricLabels: {
+      rate: '计费倍率',
+      daily: '每日额度',
+      weekly: '每周额度',
+      monthly: '每月额度'
+    },
     rateMultiplier: '计费倍率 ×{rate}',
     peakRateWindow: '高峰时段倍率：{window}',
     modelScopes: '支持模型：{models}',
@@ -220,7 +226,7 @@ export default {
       groupMultiplier: {
         title: '💰 3. 费率倍数',
         description:
-          '<div style="line-height: 1.7;"><p style="margin-bottom: 12px;">设置该分组的计费倍率，控制用户的实际扣费。</p><div style="padding: 8px 12px; background: #fef3c7; border-left: 3px solid #f59e0b; border-radius: 4px; font-size: 13px; margin-bottom: 12px;"><b>⚙️ 计费规则：</b><ul style="margin: 8px 0 0 16px;"><li><b>1.0</b> - 原价计费（成本价）</li><li><b>1.5</b> - 用户消耗 $1，扣除 $1.5</li><li><b>2.0</b> - 用户消耗 $1，扣除 $2</li><li><b>0.8</b> - 补贴模式（亏本运营）</li></ul></div><p style="font-size: 13px; color: #6b7280;">建议测试分组设置为 1.0</p></div>',
+          '<div style="line-height: 1.7;"><p style="margin-bottom: 12px;">用户实扣雪花额度 = 渠道 USD 基础价 × 分组倍率。</p><div style="padding: 8px 12px; background: #fef3c7; border-left: 3px solid #f59e0b; border-radius: 4px; font-size: 13px; margin-bottom: 12px;"><b>⚙️ 计费规则：</b><ul style="margin: 8px 0 0 16px;"><li>渠道价格仍按 USD 录入</li><li>倍率可同时包含 CNY/USD 汇率和雪花兑换比例</li><li><b>70</b> - 5 USD / MTok × 70 = 350 雪花额度 / MTok</li><li><b>63</b> - 在倍率 70 基础上九折（70 × 0.9）</li></ul></div><p style="font-size: 13px; color: #6b7280;">若 1 CNY = 10 雪花额度且 1 USD = 7 CNY，则基准倍率为 70。</p></div>',
         nextBtn: '下一步'
       },
       groupExclusive: {
@@ -351,6 +357,9 @@ export default {
     title: '余额充值',
     checkoutTitle: '在线充值',
     checkoutDescription: '快速方便的充值方式',
+    helpTitle: '充值帮助',
+    previewHelpImage: '查看充值帮助图片',
+    helpImagePreview: '充值帮助图片预览',
     userTypeAdmin: '管理员',
     userTypeRegular: '普通用户',
     purchaseOptions: '充值或订阅',
@@ -374,6 +383,9 @@ export default {
     customAmount: '自定义金额',
     enterAmount: '输入金额',
     paymentMethod: '支付方式',
+    choosePaymentMethod: '选择支付方式',
+    amountUnavailable: '当前金额不可用',
+    alternativeDivider: '或者',
     fee: '手续费',
     actualPay: '实付金额',
     createOrder: '确认支付',
@@ -598,7 +610,7 @@ export default {
       deductBalanceHint: '从用户余额中扣回充值金额',
       userBalance: '用户余额',
       orderAmount: '订单金额',
-      insufficientBalance: '余额不足，将扣至 $0',
+      insufficientBalance: '余额不足，将扣至 0 雪花额度',
       noDeduction: '将不扣除用户余额',
       forceRefund: '强制退款（忽略余额检查）',
       orderCancelled: '订单已取消',

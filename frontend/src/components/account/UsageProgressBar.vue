@@ -20,7 +20,7 @@
           class="rounded bg-gray-100 px-1.5 py-0.5 dark:bg-gray-800"
           :title="t('usage.userBilled')"
         >
-          U ${{ formatUserCost }}
+          U <CreditAmount :value="formatUserCost" icon-size="xs" />
         </span>
       </div>
     </div>
@@ -59,6 +59,7 @@
 import { computed, ref, watch } from 'vue'
 import { useIntervalFn } from '@vueuse/core'
 import { useI18n } from 'vue-i18n'
+import CreditAmount from '@/components/common/CreditAmount.vue'
 import type { WindowStats } from '@/types'
 import { formatCompactNumber } from '@/utils/format'
 

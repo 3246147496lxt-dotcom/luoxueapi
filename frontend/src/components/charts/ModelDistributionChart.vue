@@ -165,7 +165,14 @@
               />
               <div class="home-model-total" aria-hidden="true">
                 <span>{{ distributionTotalLabel }}</span>
-                <strong>{{ distributionTotalDisplay }}</strong>
+                <strong>
+                  <CreditAmount
+                    v-if="metric === 'actual_cost' && creditMode"
+                    :value="formatCost(distributionTotal)"
+                    icon-size="sm"
+                  />
+                  <template v-else>{{ distributionTotalDisplay }}</template>
+                </strong>
               </div>
             </div>
 
@@ -185,7 +192,15 @@
                   <span class="home-model-dot" aria-hidden="true"></span>
                   <span class="home-model-copy">
                     <strong :title="item.model.model">{{ item.model.model }}</strong>
-                    <small>{{ item.valueLabel }} · {{ formatNumber(item.model.requests) }} {{ t('admin.dashboard.requestsShort') }}</small>
+                    <small>
+                      <CreditAmount
+                        v-if="metric === 'actual_cost' && creditMode"
+                        :value="formatCost(item.value)"
+                        icon-size="xs"
+                      />
+                      <template v-else>{{ item.valueLabel }}</template>
+                      · {{ formatNumber(item.model.requests) }} {{ t('admin.dashboard.requestsShort') }}
+                    </small>
                   </span>
                   <span class="home-model-share">{{ item.percentageLabel }}</span>
                   <Icon
@@ -200,7 +215,15 @@
                   <span class="home-model-dot" aria-hidden="true"></span>
                   <span class="home-model-copy">
                     <strong :title="item.model.model">{{ item.model.model }}</strong>
-                    <small>{{ item.valueLabel }} · {{ formatNumber(item.model.requests) }} {{ t('admin.dashboard.requestsShort') }}</small>
+                    <small>
+                      <CreditAmount
+                        v-if="metric === 'actual_cost' && creditMode"
+                        :value="formatCost(item.value)"
+                        icon-size="xs"
+                      />
+                      <template v-else>{{ item.valueLabel }}</template>
+                      · {{ formatNumber(item.model.requests) }} {{ t('admin.dashboard.requestsShort') }}
+                    </small>
                   </span>
                   <span class="home-model-share">{{ item.percentageLabel }}</span>
                 </div>
@@ -217,6 +240,7 @@
               :items="breakdownItems"
               :loading="breakdownLoading"
               :show-account-cost="showAccountCost"
+              :credit-mode="creditMode"
             />
           </div>
         </div>
@@ -272,7 +296,12 @@
                       {{ formatTokens(model.total_tokens) }}
                     </td>
                     <td class="py-1.5 text-right text-green-600 dark:text-green-400">
-                      ${{ formatCost(model.actual_cost) }}
+                      <CreditAmount
+                        v-if="creditMode"
+                        :value="formatCost(model.actual_cost)"
+                        icon-size="xs"
+                      />
+                      <template v-else>${{ formatCost(model.actual_cost) }}</template>
                     </td>
                     <td v-if="showAccountCost" class="py-1.5 text-right text-orange-500 dark:text-orange-400">
                       ${{ formatCost(model.account_cost) }}
@@ -287,6 +316,7 @@
                         :items="breakdownItems"
                         :loading="breakdownLoading"
                         :show-account-cost="showAccountCost"
+                        :credit-mode="creditMode"
                       />
                     </td>
                   </tr>
@@ -354,7 +384,12 @@
                 {{ formatTokens(item.tokens) }}
               </td>
               <td class="py-1.5 text-right text-green-600 dark:text-green-400">
-                ${{ formatCost(item.actual_cost) }}
+                <CreditAmount
+                  v-if="creditMode"
+                  :value="formatCost(item.actual_cost)"
+                  icon-size="xs"
+                />
+                <template v-else>${{ formatCost(item.actual_cost) }}</template>
               </td>
             </tr>
           </tbody>
@@ -375,6 +410,7 @@ import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { Chart as ChartJS, ArcElement, Tooltip, Legend } from 'chart.js'
 import { Doughnut } from 'vue-chartjs'
+import CreditAmount from '@/components/common/CreditAmount.vue'
 import LoadingSpinner from '@/components/common/LoadingSpinner.vue'
 import Icon from '@/components/icons/Icon.vue'
 import UserBreakdownSubTable from './UserBreakdownSubTable.vue'
@@ -412,6 +448,7 @@ const props = withDefaults(defineProps<{
   endDate?: string
   filters?: Record<string, any>
   variant?: 'default' | 'home-clay'
+  creditMode?: boolean
 }>(), {
   upstreamModelStats: () => [],
   mappingModelStats: () => [],
@@ -430,7 +467,8 @@ const props = withDefaults(defineProps<{
   rankingLoading: false,
   rankingError: false,
   error: false,
-  variant: 'default'
+  variant: 'default',
+  creditMode: false,
 })
 
 const expandedKey = ref<string | null>(null)
@@ -481,6 +519,7 @@ const showAccountCost = computed(() => props.showAccountCost)
 const distributionColspan = computed(() => showAccountCost.value ? 6 : 5)
 const activeView = ref<'model_distribution' | 'spending_ranking'>('model_distribution')
 const isHomeClay = computed(() => props.variant === 'home-clay')
+const creditMode = computed(() => props.creditMode)
 
 const chartColors = computed(() => [...LUOXUE_CLAY_CHART_CATEGORICAL])
 
@@ -536,7 +575,7 @@ const distributionTotalLabel = computed(() => props.metric === 'actual_cost'
   : t('admin.dashboard.totalTokens'))
 
 const distributionTotalDisplay = computed(() => props.metric === 'actual_cost'
-  ? `$${formatCost(distributionTotal.value)}`
+  ? formatActualCostText(distributionTotal.value)
   : formatTokens(distributionTotal.value))
 
 const formatPercentage = (value: number): string => {
@@ -551,7 +590,8 @@ const homeModelLegend = computed(() => chartModelStats.value.map((model, index) 
   return {
     model,
     color: getChartColor(index),
-    valueLabel: props.metric === 'actual_cost' ? `$${formatCost(value)}` : `${formatTokens(value)} Token`,
+    value,
+    valueLabel: props.metric === 'actual_cost' ? formatActualCostText(value) : `${formatTokens(value)} Token`,
     percentage,
     percentageLabel: formatPercentage(percentage),
   }
@@ -645,7 +685,7 @@ const doughnutOptions = computed(() => ({
           const total = context.dataset.data.reduce((a: number, b: number) => a + b, 0)
           const percentage = total > 0 ? ((value / total) * 100).toFixed(1) : '0.0'
           const formattedValue = props.metric === 'actual_cost'
-            ? `$${formatCost(value)}`
+            ? formatActualCostText(value)
             : formatTokens(value)
           return `${context.label}: ${formattedValue} (${percentage}%)`
         }
@@ -677,7 +717,7 @@ const rankingDoughnutOptions = computed(() => ({
           const value = context.raw as number
           const total = context.dataset.data.reduce((a: number, b: number) => a + b, 0)
           const percentage = total > 0 ? ((value / total) * 100).toFixed(1) : '0.0'
-          return `${context.label}: $${formatCost(value)} (${percentage}%)`
+          return `${context.label}: ${formatActualCostText(value)} (${percentage}%)`
         }
       }
     }
@@ -725,6 +765,12 @@ const formatCost = (value: number | null | undefined): string => {
   }
   return safeValue.toFixed(4)
 }
+
+const formatActualCostText = (value: number | null | undefined): string => (
+  creditMode.value
+    ? `${t('dashboard.creditUnit')} ${formatCost(value)}`
+    : `$${formatCost(value)}`
+)
 </script>
 
 <style scoped>

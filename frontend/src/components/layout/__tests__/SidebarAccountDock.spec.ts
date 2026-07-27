@@ -107,6 +107,10 @@ async function mountDock(settings: Partial<PublicSettings> = {}) {
     global: {
       plugins: [pinia, router],
       stubs: {
+        CreditAmount: {
+          props: ['value', 'iconSize', 'label'],
+          template: '<span data-testid="credit-amount" :data-value="value" :aria-label="label">{{ value }}</span>',
+        },
         Icon: {
           props: ['name'],
           template: '<span :data-icon="name" />',
@@ -192,6 +196,7 @@ describe('SidebarAccountDock', () => {
     const upgrade = wrapper.get('[data-testid="account-upgrade-link"]')
 
     expect(wrapper.get('[data-testid="sidebar-account-dock"]').text()).toContain('Riley Quinn')
+    expect(wrapper.get('[data-testid="credit-amount"]').attributes('data-value')).toBe('24.50')
     expect(wrapper.get('.sidebar-account-trigger__avatar').text()).toBe('R')
     expect(wrapper.find('.sidebar-account-trigger__badge').exists()).toBe(true)
     expect(trigger.element.tagName).toBe('BUTTON')

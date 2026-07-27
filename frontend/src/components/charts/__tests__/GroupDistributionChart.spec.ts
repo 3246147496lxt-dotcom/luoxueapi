@@ -15,6 +15,7 @@ const messages: Record<string, string> = {
   'admin.dashboard.metricTokens': 'By Tokens',
   'admin.dashboard.metricActualCost': 'By Actual Cost',
   'admin.dashboard.noDataAvailable': 'No data available',
+  'dashboard.creditUnit': 'Snow credits',
 }
 
 vi.mock('vue-i18n', async () => {
@@ -129,5 +130,28 @@ describe('GroupDistributionChart', () => {
     expect(wrapper.text()).not.toContain('Account Cost')
     expect(wrapper.findAll('thead th')).toHaveLength(5)
     expect(wrapper.findAll('tbody tr')[0].findAll('td')).toHaveLength(5)
+  })
+
+  it('renders actual cost as snow credits while preserving standard USD in credit mode', () => {
+    const wrapper = mount(GroupDistributionChart, {
+      props: {
+        groupStats,
+        metric: 'actual_cost',
+        showAccountCost: false,
+        creditMode: true,
+      },
+    })
+
+    expect(wrapper.findAll('[data-testid="credit-amount-value"]').map((item) => item.text()))
+      .toEqual(['0.900', '0.100'])
+    expect(wrapper.text()).toContain('$0.700')
+    expect(wrapper.text()).toContain('$1.80')
+
+    const options = (wrapper.vm as any).$?.setupState.doughnutOptions
+    expect(options.plugins.tooltip.callbacks.label({
+      label: 'group-b',
+      raw: 0.9,
+      dataset: { data: [0.9, 0.1] },
+    })).toBe('group-b: Snow credits 0.900 (90.0%)')
   })
 })

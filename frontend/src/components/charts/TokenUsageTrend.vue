@@ -74,7 +74,14 @@
         <div class="token-trend-summary">
           <div class="token-trend-total">
             <span>{{ summaryLabel }}</span>
-            <strong data-testid="token-trend-total">{{ summaryValue }}</strong>
+            <strong data-testid="token-trend-total">
+              <CreditAmount
+                v-if="activeMetric === 'cost' && creditMode"
+                :value="formatCostTotal(totalActualCost)"
+                icon-size="sm"
+              />
+              <template v-else>{{ summaryValue }}</template>
+            </strong>
           </div>
           <div class="token-trend-legend" aria-hidden="true">
             <template v-if="activeMetric === 'tokens'">
@@ -125,8 +132,8 @@
                 <td>{{ point.cacheTokens }}</td>
               </template>
               <template v-else>
-                <td>${{ formatCostTotal(point.actualCost) }}</td>
-                <td>${{ formatCostTotal(point.standardCost) }}</td>
+                <td>{{ formatActualCostText(point.actualCost, true) }}</td>
+                <td>{{ formatStandardCostText(point.standardCost, true) }}</td>
               </template>
             </tr>
           </tbody>
@@ -167,6 +174,7 @@ import {
   Filler
 } from 'chart.js'
 import { Line } from 'vue-chartjs'
+import CreditAmount from '@/components/common/CreditAmount.vue'
 import LoadingSpinner from '@/components/common/LoadingSpinner.vue'
 import Icon from '@/components/icons/Icon.vue'
 import type { TrendDataPoint } from '@/types'
@@ -204,10 +212,12 @@ const props = withDefaults(defineProps<{
   loading?: boolean
   error?: string | null
   variant?: 'default' | 'home-clay'
+  creditMode?: boolean
 }>(), {
   loading: false,
   error: null,
-  variant: 'default'
+  variant: 'default',
+  creditMode: false,
 })
 
 const emit = defineEmits<{
@@ -308,7 +318,7 @@ const summaryLabel = computed(() => {
 
 const summaryValue = computed(() => activeMetric.value === 'tokens'
   ? formatTokens(totalTokens.value)
-  : `$${formatCostTotal(totalActualCost.value)}`)
+  : formatActualCostText(totalActualCost.value, true))
 
 const chartAriaLabel = computed(() => (
   `${t('admin.dashboard.tokenUsageTrend')}: ${summaryLabel.value} ${summaryValue.value}`
@@ -460,14 +470,16 @@ const lineOptions = computed(() => {
           itemSort: (a: any, b: any) => toFiniteNumber(b.raw) - toFiniteNumber(a.raw),
           callbacks: {
             label: (context: any) => isCostMetric
-              ? `${context.dataset.label}: $${formatCost(toFiniteNumber(context.raw))}`
+              ? `${context.dataset.label}: ${context.datasetIndex === 0
+                ? formatActualCostText(toFiniteNumber(context.raw))
+                : formatStandardCostText(toFiniteNumber(context.raw))}`
               : `${context.dataset.label}: ${formatTokens(toFiniteNumber(context.raw))}`,
             footer: (tooltipItems: any[]) => {
               if (isCostMetric) return ''
               const dataIndex = tooltipItems[0]?.dataIndex
               const point = normalizedTrendData.value[dataIndex]
               if (!point) return ''
-              return `${t('admin.dashboard.actual')}: $${formatCost(point.actualCost)} · ${t('admin.dashboard.standard')}: $${formatCost(point.standardCost)}`
+              return `${t('admin.dashboard.actual')}: ${formatActualCostText(point.actualCost)} · ${t('admin.dashboard.standard')}: ${formatStandardCostText(point.standardCost)}`
             }
           }
         }
@@ -507,7 +519,7 @@ const lineOptions = computed(() => {
               size: 10
             },
             callback: (value: string | number) => isCostMetric
-              ? `$${formatCost(toFiniteNumber(value))}`
+              ? formatCostAxisText(toFiniteNumber(value))
               : formatTokens(toFiniteNumber(value))
           }
         }
@@ -547,7 +559,7 @@ const lineOptions = computed(() => {
             const dataIndex = tooltipItems[0]?.dataIndex
             const point = normalizedTrendData.value[dataIndex]
             if (!point) return ''
-            return `${t('admin.dashboard.actual')}: $${formatCost(point.actualCost)} | ${t('admin.dashboard.standard')}: $${formatCost(point.standardCost)}`
+            return `${t('admin.dashboard.actual')}: ${formatActualCostText(point.actualCost)} | ${t('admin.dashboard.standard')}: ${formatStandardCostText(point.standardCost)}`
           }
         }
       }
@@ -621,6 +633,25 @@ const formatCostTotal = (value: number): string => value.toLocaleString(undefine
   minimumFractionDigits: 2,
   maximumFractionDigits: value >= 1 ? 2 : 4
 })
+
+const formattedCost = (value: number, total = false): string => (
+  total ? formatCostTotal(value) : formatCost(value)
+)
+
+const formatActualCostText = (value: number, total = false): string => {
+  const formatted = formattedCost(value, total)
+  return props.creditMode
+    ? `${t('dashboard.creditUnit')} ${formatted}`
+    : `$${formatted}`
+}
+
+const formatStandardCostText = (value: number, total = false): string => (
+  `$${formattedCost(value, total)}`
+)
+
+const formatCostAxisText = (value: number): string => (
+  props.creditMode ? formatCost(value) : formatStandardCostText(value)
+)
 
 onMounted(() => {
   themeObserver = new MutationObserver(() => {

@@ -40,7 +40,15 @@
           :aria-hidden="sidebarCollapsed ? 'true' : undefined"
         >
           <span class="sidebar-account-trigger__name">{{ summary.displayName.value }}</span>
-          <span class="sidebar-account-trigger__meta">{{ dockSummaryText }}</span>
+          <span class="sidebar-account-trigger__meta">
+            <CreditAmount
+              :value="formatCredit(summary.availableBalance.value)"
+              icon-size="xs"
+              :label="`${t('accountDock.availableBalance')} ${formatCredit(summary.availableBalance.value)}`"
+            />
+            <span aria-hidden="true">·</span>
+            <span class="truncate">{{ subscriptionStatusText }}</span>
+          </span>
         </span>
       </button>
 
@@ -87,6 +95,7 @@ import { useAuthStore } from '@/stores/auth'
 import { useOnboardingStore } from '@/stores/onboarding'
 import { resolveDocumentationUrl } from '@/utils/documentationUrl'
 import { sanitizeUrl } from '@/utils/url'
+import CreditAmount from '@/components/common/CreditAmount.vue'
 import SidebarAccountOverlay from './SidebarAccountOverlay.vue'
 import type {
   AccountPanelIcon,
@@ -234,13 +243,6 @@ const subscriptionStatusText = computed(() => {
   }
   return t('accountDock.payAsYouGo')
 })
-
-const dockSummaryText = computed(
-  () => t('accountDock.summary', {
-    balance: formatCredit(summary.availableBalance.value),
-    subscription: subscriptionStatusText.value,
-  }),
-)
 
 const panelSummary = computed<AccountPanelSummary>(() => ({
   displayName: summary.displayName.value,
@@ -432,6 +434,10 @@ watch(sidebarCollapsed, () => closePanel(false))
 }
 
 .sidebar-account-trigger__meta {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 3px;
   color: rgb(100 116 139);
   font-size: 0.6875rem;
   font-weight: 400;

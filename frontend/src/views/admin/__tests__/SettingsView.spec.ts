@@ -187,9 +187,9 @@ vi.mock("vue-i18n", async () => {
     "admin.settings.site.uploadImage": "上传图片",
     "admin.settings.site.remove": "移除",
     "admin.settings.platformQuota.platform": "平台",
-    "admin.settings.platformQuota.daily": "日限额 (USD)",
-    "admin.settings.platformQuota.weekly": "周限额 (USD)",
-    "admin.settings.platformQuota.monthly": "月限额 (USD, 30天滚动)",
+    "admin.settings.platformQuota.daily": "日限额（雪花额度）",
+    "admin.settings.platformQuota.weekly": "周限额（雪花额度）",
+    "admin.settings.platformQuota.monthly": "月限额（雪花额度，30天滚动）",
     "admin.settings.platformQuota.placeholder": "不限",
     "admin.settings.defaults.defaultPlatformQuotas": "默认平台限额（注册时分配）",
     "admin.settings.defaults.defaultPlatformQuotasHint": "新用户注册时自动写入平台限额记录；已有用户不受影响。留空 = 该平台该窗口不限制。",
@@ -1392,6 +1392,8 @@ describe("admin SettingsView platform quota matrix", () => {
     expect(html).toContain("openai");
     expect(html).toContain("gemini");
     expect(html).toContain("antigravity");
+    expect(wrapper.text()).toContain("日限额（雪花额度）");
+    expect(wrapper.text()).not.toContain("日限额 (USD)");
   });
 
   it("保存时 updateSettings payload 应包含嵌套 default_platform_quotas 对象（含全 5 平台）", async () => {

@@ -35,7 +35,15 @@
         </div>
         <div class="mt-1 flex justify-between text-sm">
           <span class="text-gray-500 dark:text-gray-400">{{ t('payment.orders.creditedAmount') }}</span>
-          <span class="font-medium text-gray-900 dark:text-white">{{ creditedAmountSymbol }}{{ order?.amount?.toFixed(2) }}</span>
+          <span class="font-medium text-gray-900 dark:text-white">
+            <CreditAmount
+              v-if="isBalanceOrder"
+              :value="order?.amount?.toFixed(2) ?? '0.00'"
+              icon-size="xs"
+              :label="`${t('payment.orders.creditedAmount')} ${order?.amount?.toFixed(2) ?? '0.00'}`"
+            />
+            <span v-else>{{ subscriptionAmountSymbol }}{{ order?.amount?.toFixed(2) }}</span>
+          </span>
         </div>
         <div class="mt-1 flex justify-between text-sm">
           <span class="text-gray-500 dark:text-gray-400">{{ t('payment.orders.payAmount') }}</span>
@@ -43,7 +51,15 @@
         </div>
         <div v-if="actuallyRefunded > 0" class="mt-1 flex justify-between text-sm">
           <span class="text-gray-500 dark:text-gray-400">{{ t('payment.admin.alreadyRefunded') }}</span>
-          <span class="font-medium text-red-600 dark:text-red-400">{{ creditedAmountSymbol }}{{ actuallyRefunded.toFixed(2) }}</span>
+          <span class="font-medium text-red-600 dark:text-red-400">
+            <CreditAmount
+              v-if="isBalanceOrder"
+              :value="actuallyRefunded.toFixed(2)"
+              icon-size="xs"
+              :label="`${t('payment.admin.alreadyRefunded')} ${actuallyRefunded.toFixed(2)}`"
+            />
+            <span v-else>{{ subscriptionAmountSymbol }}{{ actuallyRefunded.toFixed(2) }}</span>
+          </span>
         </div>
       </div>
 
@@ -66,11 +82,25 @@
         <div v-if="form.deduct_balance && userBalance != null" class="mt-3 grid grid-cols-2 gap-3">
           <div class="rounded-lg bg-gray-50 p-3 text-sm dark:bg-dark-700">
             <div class="text-gray-500 dark:text-gray-400">{{ t('payment.admin.userBalance') }}</div>
-            <div class="mt-1 font-semibold text-gray-900 dark:text-white">{{ creditedAmountSymbol }}{{ userBalance.toFixed(2) }}</div>
+            <div class="mt-1 font-semibold text-gray-900 dark:text-white">
+              <CreditAmount
+                :value="userBalance.toFixed(2)"
+                icon-size="xs"
+                :label="`${t('payment.admin.userBalance')} ${userBalance.toFixed(2)}`"
+              />
+            </div>
           </div>
           <div class="rounded-lg bg-gray-50 p-3 text-sm dark:bg-dark-700">
             <div class="text-gray-500 dark:text-gray-400">{{ t('payment.admin.orderAmount') }}</div>
-            <div class="mt-1 font-semibold text-gray-900 dark:text-white">{{ creditedAmountSymbol }}{{ order?.amount?.toFixed(2) }}</div>
+            <div class="mt-1 font-semibold text-gray-900 dark:text-white">
+              <CreditAmount
+                v-if="isBalanceOrder"
+                :value="order?.amount?.toFixed(2) ?? '0.00'"
+                icon-size="xs"
+                :label="`${t('payment.admin.orderAmount')} ${order?.amount?.toFixed(2) ?? '0.00'}`"
+              />
+              <span v-else>{{ subscriptionAmountSymbol }}{{ order?.amount?.toFixed(2) }}</span>
+            </div>
           </div>
         </div>
 
@@ -95,7 +125,12 @@
       <div>
         <label class="input-label">{{ t('payment.admin.refundAmount') }}</label>
         <div class="relative">
-          <span class="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500">{{ creditedAmountSymbol }}</span>
+          <SnowflakeCreditIcon
+            v-if="isBalanceOrder"
+            size="sm"
+            class="absolute left-3 top-1/2 -translate-y-1/2"
+          />
+          <span v-else class="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500">{{ subscriptionAmountSymbol }}</span>
           <input
             v-model.number="form.amount"
             type="number"
@@ -107,7 +142,15 @@
           />
         </div>
         <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
-          {{ t('payment.admin.maxRefundable') }}: {{ creditedAmountSymbol }}{{ maxRefundable.toFixed(2) }}
+          <span>{{ t('payment.admin.maxRefundable') }}:</span>
+          <CreditAmount
+            v-if="isBalanceOrder"
+            class="ml-1"
+            :value="maxRefundable.toFixed(2)"
+            icon-size="xs"
+            :label="`${t('payment.admin.maxRefundable')} ${maxRefundable.toFixed(2)}`"
+          />
+          <span v-else class="ml-1">{{ subscriptionAmountSymbol }}{{ maxRefundable.toFixed(2) }}</span>
         </p>
       </div>
 
@@ -167,6 +210,8 @@
 import { reactive, computed, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import BaseDialog from '@/components/common/BaseDialog.vue'
+import CreditAmount from '@/components/common/CreditAmount.vue'
+import SnowflakeCreditIcon from '@/components/icons/SnowflakeCreditIcon.vue'
 import type { PaymentOrder } from '@/types/payment'
 import { formatOrderDateTime } from '@/components/payment/orderUtils'
 import { currencySymbol } from '@/components/payment/currency'
@@ -187,7 +232,8 @@ const emit = defineEmits<{
   (e: 'cancel'): void
 }>()
 
-const creditedAmountSymbol = currencySymbol('USD')
+const subscriptionAmountSymbol = currencySymbol('USD')
+const isBalanceOrder = computed(() => props.order?.order_type === 'balance')
 
 const paymentAmountSymbol = computed(() => currencySymbol(props.order?.currency))
 

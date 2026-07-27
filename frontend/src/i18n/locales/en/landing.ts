@@ -153,7 +153,7 @@ export default {
     navLabel: 'Models',
     title: 'Model Catalog',
     description: 'Browse published model IDs, capabilities, and public standard pricing without signing in.',
-    publicPriceNote: 'Prices shown here are public standard rates available to all registered users. Exclusive groups, subscription discounts, and user-specific multipliers are not included. Actual usage records are authoritative.',
+    publicPriceNote: 'Prices shown here are public standard rates in Snow credits. Exclusive groups, subscription discounts, and user-specific multipliers are not included. Actual usage records are authoritative.',
     modelCount: '{count} models',
     pricingUpdatedAt: 'Pricing updated {time}',
     searchLabel: 'Search models',
@@ -242,7 +242,7 @@ export default {
       publicLabel: 'Public standard price',
       details: 'Pricing details',
       dialogTitle: 'Public pricing details',
-      dialogDescription: 'All prices are in USD. Token-based models are shown per million tokens. 0 means free; “—” means that price is not available.',
+      dialogDescription: 'All prices are shown in Snow credits. Token-based models are shown per million tokens. 0 means free; “—” means that price is not available.',
       billingMode: 'Billing mode',
       billingModes: {
         token: 'Per token',
