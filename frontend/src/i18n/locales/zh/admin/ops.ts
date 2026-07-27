@@ -4,7 +4,6 @@ export default {
       description: '运维监控与排障',
       workspace: {
         label: '监控分类',
-        resources: '账号/IP',
         traffic: '流量性能',
         incidents: '异常告警',
         diagnostics: '日志排障',

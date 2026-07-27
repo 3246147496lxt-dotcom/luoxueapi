@@ -300,22 +300,26 @@ function Header({ authState, brand, theme, onToggleTheme, menuOpen, onToggleMenu
           </a>
 
           <div className="desktop-nav">
-            {siteConfig.navigation.map((item) => (
-              <a
-                key={item.label}
-                href={item.href}
-                className={item.active ? "active" : ""}
-                target={item.external ? "_blank" : undefined}
-                rel={item.external ? "noreferrer" : undefined}
-              >
-                {item.label}
-              </a>
-            ))}
-            <span className="nav-divider" aria-hidden="true" />
-            <button className="icon-button" type="button" onClick={onToggleTheme} aria-label="切换主题">
-              {theme === "dark" ? <Sun size={18} /> : <Moon size={18} />}
-            </button>
-            <AccountActions authState={authState} />
+            <div className="desktop-nav-links">
+              {siteConfig.navigation.map((item) => (
+                <a
+                  key={item.label}
+                  href={item.href}
+                  className={item.active ? "active" : ""}
+                  target={item.external ? "_blank" : undefined}
+                  rel={item.external ? "noreferrer" : undefined}
+                >
+                  {item.label}
+                </a>
+              ))}
+            </div>
+            <div className="desktop-nav-actions">
+              <span className="nav-divider" aria-hidden="true" />
+              <button className="icon-button" type="button" onClick={onToggleTheme} aria-label="切换主题">
+                {theme === "dark" ? <Sun size={18} /> : <Moon size={18} />}
+              </button>
+              <AccountActions authState={authState} />
+            </div>
           </div>
 
           <div className="mobile-actions">

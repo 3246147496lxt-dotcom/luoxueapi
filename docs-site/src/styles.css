@@ -227,12 +227,18 @@ select:focus-visible,
 }
 
 .desktop-nav,
+.desktop-nav-links,
+.desktop-nav-actions,
 .mobile-actions,
 .account-actions { display: flex; align-items: center; }
 
-.desktop-nav { min-width: 0; gap: 3px; }
+.desktop-nav,
+.desktop-nav-actions { min-width: 0; }
 
-.desktop-nav > a:not(.console-button):not(.user-chip) {
+.desktop-nav-links,
+.desktop-nav-actions { gap: 3px; }
+
+.desktop-nav-links > a {
   min-height: 44px;
   padding: 0 10px;
   border-radius: 13px;
@@ -245,8 +251,8 @@ select:focus-visible,
   transition: color 160ms ease, background 160ms ease;
 }
 
-.desktop-nav > a:hover,
-.desktop-nav > a.active {
+.desktop-nav-links > a:hover,
+.desktop-nav-links > a.active {
   color: var(--accent);
   background: color-mix(in srgb, var(--accent) 7%, transparent);
 }
@@ -797,6 +803,18 @@ select:focus-visible,
   .reading-balance { display: block; }
 
   .mobile-step-outline { display: none; }
+}
+
+@media (min-width: 1101px) {
+  .top-nav {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  }
+
+  .brand { justify-self: start; }
+  .desktop-nav { display: contents; }
+  .desktop-nav-links { grid-column: 2; justify-self: center; }
+  .desktop-nav-actions { grid-column: 3; justify-self: end; }
 }
 
 @media (max-width: 1100px) {

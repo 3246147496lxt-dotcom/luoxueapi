@@ -4,7 +4,6 @@ export default {
       description: 'Operational monitoring and troubleshooting',
       workspace: {
         label: 'Monitoring sections',
-        resources: 'Accounts / IP',
         traffic: 'Traffic Performance',
         incidents: 'Alerts',
         diagnostics: 'Logs & Diagnostics',

@@ -106,7 +106,7 @@ describe('PricingPlanCard', () => {
     expect(wrapper.text()).not.toContain('pricing.modelScopes')
   })
 
-  it('renders the four fixed metrics as a two-by-two grid and keeps optional facts separate', () => {
+  it('renders plan facts before four quota terms in one vertical feature list', () => {
     const wrapper = mount(PricingPlanCard, {
       props: {
         plan: planFixture({
@@ -128,21 +128,35 @@ describe('PricingPlanCard', () => {
       },
     })
 
-    const metrics = wrapper.findAll('.pricing-plan-card__metric')
+    const factsList = wrapper.get('.pricing-plan-card__facts')
+    const rows = factsList.findAll('li')
+    const metrics = factsList.findAll('[data-metric]')
+    expect(factsList.element.tagName).toBe('UL')
+    expect(rows.slice(0, 3).map((row) => row.text())).toEqual([
+      'Priority access',
+      'pricing.peakRateWindow:14:00-18:00 ×2 (UTC+08:00)',
+      'pricing.modelScopes:Claude',
+    ])
     expect(metrics).toHaveLength(4)
+    expect(metrics.every((metric) => metric.element.tagName === 'LI')).toBe(true)
+    expect(metrics.every((metric) => metric.element.parentElement === factsList.element)).toBe(true)
     expect(metrics.map((metric) => metric.attributes('data-metric'))).toEqual([
       'rate',
       'daily',
       'weekly',
       'monthly',
     ])
-    expect(metrics[0].text()).toContain('pricing.metricLabels.rate')
-    expect(metrics[0].text()).toContain('×1')
+    expect(metrics.map((metric) => metric.text())).toEqual([
+      'pricing.rateMultiplier:1',
+      'pricing.dailyQuota:0.00',
+      'pricing.weeklyQuota:200.00',
+      'pricing.monthlyQuota:0.00',
+    ])
+    expect(wrapper.find('dl').exists()).toBe(false)
+    expect(wrapper.find('.pricing-plan-card__metrics').exists()).toBe(false)
+    expect(wrapper.findAllComponents({ name: 'CreditAmount' })).toHaveLength(0)
 
-    const credits = wrapper.findAllComponents({ name: 'CreditAmount' })
-    expect(credits.map((credit) => credit.props('value'))).toEqual(['0.00', '200.00', '0.00'])
-
-    const facts = wrapper.get('.pricing-plan-card__facts').text()
+    const facts = factsList.text()
     expect(facts).toContain('Priority access')
     expect(facts).toContain('pricing.peakRateWindow')
     expect(facts).toContain('pricing.modelScopes')
@@ -168,12 +182,13 @@ describe('PricingPlanCard', () => {
       },
     })
 
-    const metrics = wrapper.findAll('.pricing-plan-card__metric')
+    const facts = wrapper.get('.pricing-plan-card__facts')
+    const metrics = facts.findAll('[data-metric]')
     expect(metrics).toHaveLength(4)
     expect(metrics.slice(1).every((metric) => (
       metric.text().includes('payment.planCard.unlimited')
     ))).toBe(true)
-    expect(wrapper.find('.pricing-plan-card__facts').exists()).toBe(false)
+    expect(facts.findAll('li')).toHaveLength(4)
     expect(wrapper.text()).not.toContain('pricing.unlimitedQuota')
   })
 

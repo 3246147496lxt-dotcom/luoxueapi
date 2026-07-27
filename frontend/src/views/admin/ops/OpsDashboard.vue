@@ -46,7 +46,6 @@
         :custom-start-time="customStartTime"
         :custom-end-time="customEndTime"
         :workspace="activeWorkspace"
-        :resource="activeWorkspace === 'resources' ? activeResource : undefined"
         @update:time-range="onTimeRangeChange"
         @update:platform="onPlatformChange"
         @update:group="onGroupChange"
@@ -63,7 +62,7 @@
 
       <div
         v-if="opsEnabled && !(loading && !hasLoadedOnce)"
-        :class="['ops-dashboard-body', { 'ops-dashboard-body--resources': activeWorkspace === 'resources' }]"
+        class="ops-dashboard-body"
         data-testid="ops-dashboard-body"
       >
         <OpsWorkspaceNav
@@ -73,30 +72,6 @@
           :label="t('admin.ops.workspace.label')"
           @update:model-value="onWorkspaceChange"
         />
-
-        <div
-          v-show="activeWorkspace === 'resources'"
-          id="ops-workspace-panel-resources"
-          class="ops-workspace-view"
-          role="tabpanel"
-          aria-labelledby="ops-workspace-tab-resources"
-          data-testid="ops-workspace-panel-resources"
-        >
-          <section
-            v-if="visitedWorkspaces.resources"
-            class="ops-workspace-section"
-            :aria-label="t('admin.ops.resourcesSectionTitle')"
-            data-testid="ops-resources-section"
-          >
-            <OpsResourceHealth
-              :resource="activeResource"
-              :platform-filter="platform"
-              :group-id-filter="groupId"
-              :refresh-token="dashboardRefreshToken"
-              @update:resource="onResourceChange"
-            />
-          </section>
-        </div>
 
         <div
           v-show="activeWorkspace === 'traffic'"
@@ -325,7 +300,6 @@ import OpsSystemLogTable from './components/OpsSystemLogTable.vue'
 import OpsRequestDetailsModal, { type OpsRequestDetailsPreset } from './components/OpsRequestDetailsModal.vue'
 import OpsSettingsDialog from './components/OpsSettingsDialog.vue'
 import OpsAlertRulesCard from './components/OpsAlertRulesCard.vue'
-import OpsResourceHealth from './components/OpsResourceHealth.vue'
 import OpsWorkspaceNav from './components/OpsWorkspaceNav.vue'
 import './OpsDashboard.clay.css'
 
@@ -343,11 +317,9 @@ const allowedTimeRanges = new Set<TimeRange>(['5m', '30m', '1h', '6h', '24h', 'c
 type QueryMode = 'auto' | 'raw' | 'preagg'
 const allowedQueryModes = new Set<QueryMode>(['auto', 'raw', 'preagg'])
 
-type OpsWorkspace = 'resources' | 'traffic' | 'incidents' | 'diagnostics'
-type OpsResourceView = 'overview' | 'accounts' | 'proxies'
+type OpsWorkspace = 'traffic' | 'incidents' | 'diagnostics'
 
-const allowedWorkspaces = new Set<OpsWorkspace>(['resources', 'traffic', 'incidents', 'diagnostics'])
-const allowedResourceViews = new Set<OpsResourceView>(['overview', 'accounts', 'proxies'])
+const allowedWorkspaces = new Set<OpsWorkspace>(['traffic', 'incidents', 'diagnostics'])
 const legacyWorkspaceMap: Record<string, OpsWorkspace> = {
   live: 'traffic',
   quality: 'incidents',
@@ -366,22 +338,18 @@ const groupId = ref<number | null>(null)
 const queryMode = ref<QueryMode>('auto')
 const customStartTime = ref<string | null>(null)
 const customEndTime = ref<string | null>(null)
-const activeWorkspace = ref<OpsWorkspace>('resources')
-const activeResource = ref<OpsResourceView>('overview')
+const activeWorkspace = ref<OpsWorkspace>('traffic')
 const visitedWorkspaces = ref<Record<OpsWorkspace, boolean>>({
-  resources: false,
   traffic: false,
   incidents: false,
   diagnostics: false
 })
 const loadedWorkspaces = ref<Record<OpsWorkspace, boolean>>({
-  resources: false,
   traffic: false,
   incidents: false,
   diagnostics: false
 })
 const workspaceItems = computed(() => [
-  { id: 'resources', label: t('admin.ops.workspace.resources') },
   { id: 'traffic', label: t('admin.ops.workspace.traffic') },
   { id: 'incidents', label: t('admin.ops.workspace.incidents') },
   { id: 'diagnostics', label: t('admin.ops.workspace.diagnostics') }
@@ -514,7 +482,7 @@ async function normalizeInvalidWorkspaceQuery() {
     }
   }
 
-  if (requestedResource && !allowedResourceViews.has(requestedResource as OpsResourceView)) {
+  if (requestedResource) {
     delete nextQuery[QUERY_KEYS.resource]
     changed = true
   }
@@ -526,13 +494,7 @@ const applyRouteQueryToState = () => {
   const requestedWorkspace = readQueryString(QUERY_KEYS.workspace)
   const resolvedWorkspace = resolveWorkspace(requestedWorkspace)
   const hasExplicitWorkspace = resolvedWorkspace !== null
-  let nextWorkspace: OpsWorkspace = resolvedWorkspace ?? 'resources'
-
-  const requestedResource = readQueryString(QUERY_KEYS.resource)
-  activeResource.value = allowedResourceViews.has(requestedResource as OpsResourceView)
-    ? (requestedResource as OpsResourceView)
-    : 'overview'
-  if (!hasExplicitWorkspace && requestedResource) nextWorkspace = 'resources'
+  let nextWorkspace: OpsWorkspace = resolvedWorkspace ?? 'traffic'
 
   const nextTimeRange = readQueryString(QUERY_KEYS.timeRange)
   if (nextTimeRange && allowedTimeRanges.has(nextTimeRange as TimeRange)) {
@@ -589,10 +551,7 @@ const buildQueryFromState = () => {
   if (platform.value) next[QUERY_KEYS.platform] = platform.value
   if (typeof groupId.value === 'number' && groupId.value > 0) next[QUERY_KEYS.groupId] = String(groupId.value)
   if (queryMode.value !== 'auto') next[QUERY_KEYS.queryMode] = queryMode.value
-  if (activeWorkspace.value !== 'resources') next[QUERY_KEYS.workspace] = activeWorkspace.value
-  if (activeWorkspace.value === 'resources' && activeResource.value !== 'overview') {
-    next[QUERY_KEYS.resource] = activeResource.value
-  }
+  if (activeWorkspace.value !== 'traffic') next[QUERY_KEYS.workspace] = activeWorkspace.value
 
   return next
 }
@@ -687,14 +646,6 @@ async function onWorkspaceChange(value: string) {
   }
   await nextTick()
   scrollWorkspaceIntoView(nextWorkspace)
-}
-
-async function onResourceChange(value: string) {
-  if (!allowedResourceViews.has(value as OpsResourceView)) return
-  const nextResource = value as OpsResourceView
-  if (activeResource.value === nextResource) return
-  activeResource.value = nextResource
-  await replaceQueryFromState(true)
 }
 
 applyRouteQueryToState()
@@ -1062,7 +1013,6 @@ watch(
     const prevGroupId = groupId.value
     const prevQueryMode = queryMode.value
     const prevWorkspace = activeWorkspace.value
-    const prevResource = activeResource.value
 
     isApplyingRouteQuery.value = true
     applyRouteQueryToState()
@@ -1088,9 +1038,6 @@ watch(
         await fetchData({ refreshChildren: false })
       }
       void nextTick(() => scrollWorkspaceIntoView(activeWorkspace.value))
-    }
-    if (prevResource !== activeResource.value && activeWorkspace.value === 'resources') {
-      void nextTick(() => scrollWorkspaceIntoView('resources'))
     }
   }
 )

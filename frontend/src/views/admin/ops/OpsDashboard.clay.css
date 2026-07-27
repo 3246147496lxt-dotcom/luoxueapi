@@ -65,10 +65,6 @@ html:not(.dark) body.admin-ops-fullscreen {
   gap: 26px;
 }
 
-.ops-dashboard-body--resources {
-  gap: 12px;
-}
-
 .ops-workspace-nav-host {
   position: sticky;
   top: calc(var(--app-shell-top-offset) + 8px);

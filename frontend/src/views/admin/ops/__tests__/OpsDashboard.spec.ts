@@ -178,30 +178,6 @@ const OpsThroughputTrendChartStub = defineComponent({
   `,
 })
 
-const OpsResourceHealthStub = defineComponent({
-  name: 'OpsResourceHealth',
-  props: {
-    resource: { type: String, default: 'overview' },
-    platformFilter: { type: String, default: '' },
-    groupIdFilter: { type: Number, default: null },
-    refreshToken: { type: Number, default: 0 },
-  },
-  emits: ['update:resource'],
-  template: `
-    <section
-      data-testid="resource-health"
-      :data-resource="resource"
-      :data-platform="platformFilter"
-      :data-group-id="groupIdFilter == null ? '' : String(groupIdFilter)"
-      :data-refresh-token="String(refreshToken)"
-    >
-      <button data-testid="resource-overview" type="button" @click="$emit('update:resource', 'overview')">overview</button>
-      <button data-testid="resource-accounts" type="button" @click="$emit('update:resource', 'accounts')">accounts</button>
-      <button data-testid="resource-proxies" type="button" @click="$emit('update:resource', 'proxies')">proxies</button>
-    </section>
-  `,
-})
-
 const componentStub = (name: string, testId: string) => defineComponent({
   name,
   template: `<section data-testid="${testId}" />`,
@@ -245,7 +221,6 @@ const globalStubs = {
   BaseDialog: BaseDialogStub,
   OpsDashboardHeader: OpsDashboardHeaderStub,
   OpsDashboardSkeleton: OpsDashboardSkeletonStub,
-  OpsResourceHealth: OpsResourceHealthStub,
   OpsConcurrencyCard: componentStub('OpsConcurrencyCard', 'concurrency-card'),
   OpsSwitchRateTrendChart: componentStub('OpsSwitchRateTrendChart', 'switch-rate-trend'),
   OpsThroughputTrendChart: OpsThroughputTrendChartStub,
@@ -352,7 +327,7 @@ describe('OpsDashboard integration shell', () => {
     vi.restoreAllMocks()
   })
 
-  it('keeps a stable page-kind contract and initially mounts only the resources workspace', async () => {
+  it('keeps a stable page-kind contract and initially mounts only the traffic workspace', async () => {
     const wrapper = mountDashboard()
     await flushPromises()
 
@@ -363,13 +338,13 @@ describe('OpsDashboard integration shell', () => {
     expect(wrapper.find('[data-testid="ops-dashboard-loading"]').exists()).toBe(false)
 
     expect(wrapper.get('[data-testid="ops-dashboard-body"]').classes()).toContain('ops-dashboard-body')
-    expect(wrapper.get('[data-testid="ops-resources-section"]').attributes('aria-label')).toBe('admin.ops.resourcesSectionTitle')
-    expect(wrapper.find('[data-testid="ops-traffic-section"]').exists()).toBe(false)
+    expect(wrapper.find('#ops-workspace-tab-resources').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="ops-workspace-panel-resources"]').exists()).toBe(false)
+    expect(wrapper.get('[data-testid="ops-traffic-section"]').attributes('aria-labelledby')).toBe('ops-traffic-heading')
     expect(wrapper.find('[data-testid="ops-incidents-section"]').exists()).toBe(false)
     expect(wrapper.find('[data-testid="ops-log-section"]').exists()).toBe(false)
-    expect(wrapper.findAll('.ops-panel')).toHaveLength(0)
 
-    for (const workspace of ['resources', 'traffic', 'incidents', 'diagnostics']) {
+    for (const workspace of ['traffic', 'incidents', 'diagnostics']) {
       const tab = wrapper.get(`#ops-workspace-tab-${workspace}`)
       const panel = wrapper.get(`#ops-workspace-panel-${workspace}`)
       expect(tab.attributes('aria-controls')).toBe(`ops-workspace-panel-${workspace}`)
@@ -379,21 +354,19 @@ describe('OpsDashboard integration shell', () => {
       })
     }
 
-    expect(wrapper.get('#ops-workspace-tab-resources').attributes('aria-selected')).toBe('true')
-    expect(wrapper.get('[data-testid="ops-workspace-panel-resources"]').attributes('style')).toBeUndefined()
-    expect(wrapper.get('[data-testid="ops-workspace-panel-traffic"]').attributes('style')).toContain('display: none')
+    expect(wrapper.get('#ops-workspace-tab-traffic').attributes('aria-selected')).toBe('true')
+    expect(wrapper.get('[data-testid="ops-workspace-panel-traffic"]').attributes('style')).toBeUndefined()
     expect(wrapper.find('[data-testid="ops-header"]').exists()).toBe(true)
-    expect(wrapper.get('[data-testid="resource-health"]').attributes('data-resource')).toBe('overview')
-    expect(wrapper.find('[data-testid="concurrency-card"]').exists()).toBe(false)
-    expect(wrapper.find('[data-testid="throughput-trend"]').exists()).toBe(false)
-    expect(wrapper.find('[data-testid="latency-chart"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="concurrency-card"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="throughput-trend"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="latency-chart"]').exists()).toBe(true)
     expect(wrapper.find('[data-testid="alert-events"]').exists()).toBe(false)
     expect(wrapper.find('[data-testid="system-log"]').exists()).toBe(false)
     expect(wrapper.find('[data-testid="openai-token-stats"]').exists()).toBe(false)
     expect(mocks.getDashboardSnapshotV2).not.toHaveBeenCalled()
-    expect(mocks.getDashboardOverview).not.toHaveBeenCalled()
-    expect(mocks.getThroughputTrend).not.toHaveBeenCalled()
-    expect(mocks.getLatencyHistogram).not.toHaveBeenCalled()
+    expect(mocks.getDashboardOverview).toHaveBeenCalledTimes(1)
+    expect(mocks.getThroughputTrend).toHaveBeenCalledTimes(1)
+    expect(mocks.getLatencyHistogram).toHaveBeenCalledTimes(1)
     expect(mocks.getErrorTrend).not.toHaveBeenCalled()
     expect(mocks.getErrorDistribution).not.toHaveBeenCalled()
   })
@@ -404,27 +377,13 @@ describe('OpsDashboard integration shell', () => {
     await flushPromises()
     mocks.routerReplace.mockClear()
 
-    await wrapper.get('#ops-workspace-tab-traffic').trigger('click')
-    await flushPromises()
-
     expect(wrapper.get('#ops-workspace-tab-traffic').attributes('aria-selected')).toBe('true')
     expect(wrapper.get('[data-testid="ops-traffic-section"]').attributes('aria-labelledby')).toBe('ops-traffic-heading')
-    expect(wrapper.get('[data-testid="ops-workspace-panel-resources"]').attributes('style')).toContain('display: none')
-    expect(wrapper.find('[data-testid="ops-resources-section"]').exists()).toBe(true)
     expect(mocks.getDashboardOverview).toHaveBeenCalledTimes(1)
     expect(mocks.getThroughputTrend).toHaveBeenCalledTimes(1)
     expect(mocks.getLatencyHistogram).toHaveBeenCalledTimes(1)
     expect(mocks.getErrorTrend).not.toHaveBeenCalled()
     expect(mocks.getErrorDistribution).not.toHaveBeenCalled()
-    expect(mocks.routerReplace).toHaveBeenLastCalledWith({
-      query: {
-        platform: 'gemini',
-        tr: '6h',
-        fullscreen: '1',
-        section: 'traffic',
-      },
-    })
-
     await wrapper.get('#ops-workspace-tab-incidents').trigger('click')
     await flushPromises()
     expect(wrapper.find('[data-testid="ops-incidents-section"]').exists()).toBe(true)
@@ -449,9 +408,6 @@ describe('OpsDashboard integration shell', () => {
     expect(mocks.getDashboardOverview).toHaveBeenCalledTimes(1)
     expect(mocks.getLatencyHistogram).toHaveBeenCalledTimes(1)
     expect(mocks.getThroughputTrend).toHaveBeenCalledTimes(2)
-
-    await wrapper.get('#ops-workspace-tab-resources').trigger('click')
-    await flushPromises()
     expect(mocks.routerReplace).toHaveBeenLastCalledWith({
       query: {
         platform: 'gemini',
@@ -466,14 +422,6 @@ describe('OpsDashboard integration shell', () => {
     await flushPromises()
 
     const header = () => wrapper.get('[data-testid="ops-header"]')
-    expect(header().attributes()).toMatchObject({
-      'data-workspace': 'resources',
-      'data-resource': 'overview',
-      'data-has-overview': 'false',
-    })
-
-    await wrapper.get('#ops-workspace-tab-traffic').trigger('click')
-    await flushPromises()
     expect(header().attributes()).toMatchObject({
       'data-workspace': 'traffic',
       'data-has-overview': 'true',
@@ -493,47 +441,30 @@ describe('OpsDashboard integration shell', () => {
       'data-has-overview': 'false',
     })
 
-    await wrapper.get('#ops-workspace-tab-resources').trigger('click')
+    await wrapper.get('#ops-workspace-tab-traffic').trigger('click')
     await flushPromises()
     expect(header().attributes()).toMatchObject({
-      'data-workspace': 'resources',
-      'data-resource': 'overview',
-      'data-has-overview': 'false',
+      'data-workspace': 'traffic',
+      'data-has-overview': 'true',
     })
   })
 
-  it('keeps the resource sub-navigation in the URL without refetching dashboard data', async () => {
-    const wrapper = mountDashboard()
-    await flushPromises()
-    mocks.getDashboardSnapshotV2.mockClear()
-    mocks.routerReplace.mockClear()
-
-    await wrapper.get('[data-testid="resource-accounts"]').trigger('click')
-    await flushPromises()
-
-    expect(wrapper.get('[data-testid="resource-health"]').attributes('data-resource')).toBe('accounts')
-    expect(mocks.routerReplace).toHaveBeenLastCalledWith({ query: { resource: 'accounts' } })
-    expect(mocks.getDashboardOverview).not.toHaveBeenCalled()
-    expect(mocks.getThroughputTrend).not.toHaveBeenCalled()
-    expect(mocks.getErrorTrend).not.toHaveBeenCalled()
-
-    await wrapper.get('[data-testid="resource-proxies"]').trigger('click')
-    await flushPromises()
-    expect(wrapper.get('[data-testid="resource-health"]').attributes('data-resource')).toBe('proxies')
-    expect(mocks.routerReplace).toHaveBeenLastCalledWith({ query: { resource: 'proxies' } })
-  })
-
-  it.each(['accounts', 'proxies'])('opens the %s resource workspace directly from the URL', async (resource) => {
-    mocks.route.query = { resource }
+  it.each([
+    ['removed workspace and resource view', { section: 'resources', resource: 'accounts', retained: 'yes' }],
+    ['resource-only deep link', { resource: 'proxies', retained: 'yes' }],
+  ])('removes the %s and falls back to traffic', async (_case, query) => {
+    mocks.route.query = query
 
     const wrapper = mountDashboard()
     await flushPromises()
 
-    expect(wrapper.get('[data-testid="resource-health"]').attributes('data-resource')).toBe(resource)
-    expect(wrapper.get('[data-testid="ops-header"]').attributes('data-resource')).toBe(resource)
-    expect(wrapper.get('#ops-workspace-tab-resources').attributes('aria-selected')).toBe('true')
-    expect(mocks.getDashboardOverview).not.toHaveBeenCalled()
-    expect(mocks.getThroughputTrend).not.toHaveBeenCalled()
+    expect(wrapper.find('#ops-workspace-tab-resources').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="ops-workspace-panel-resources"]').exists()).toBe(false)
+    expect(wrapper.get('#ops-workspace-tab-traffic').attributes('aria-selected')).toBe('true')
+    expect(wrapper.get('[data-testid="ops-header"]').attributes('data-workspace')).toBe('traffic')
+    expect(mocks.routerReplace).toHaveBeenCalledWith({ query: { retained: 'yes' } })
+    expect(mocks.getDashboardOverview).toHaveBeenCalledTimes(1)
+    expect(mocks.getThroughputTrend).toHaveBeenCalledTimes(1)
   })
 
   it.each([
@@ -564,7 +495,7 @@ describe('OpsDashboard integration shell', () => {
     const wrapper = mountDashboard()
     await flushPromises()
 
-    expect(wrapper.get('#ops-workspace-tab-resources').attributes('aria-selected')).toBe('true')
+    expect(wrapper.get('#ops-workspace-tab-traffic').attributes('aria-selected')).toBe('true')
     expect(mocks.routerReplace).toHaveBeenCalledWith({
       query: {
         fullscreen: '1',
