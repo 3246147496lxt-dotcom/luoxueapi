@@ -194,6 +194,7 @@ describe('Personal settings category introductions', () => {
       [
         'personalSettings.account.profileHint',
         'personalSettings.account.connectionsHint',
+        'personalSettings.account.desktopDevicesHint',
       ],
       [
         'personalSettings.security.passwordHint',

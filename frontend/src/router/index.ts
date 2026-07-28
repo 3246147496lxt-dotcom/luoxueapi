@@ -219,6 +219,29 @@ const routes: RouteRecordRaw[] = [
     }
   },
   {
+    path: '/desktop/authorize',
+    name: 'DesktopAuthorize',
+    component: () => import('@/views/user/DesktopAuthorizeView.vue'),
+    meta: {
+      requiresAuth: true,
+      requiresAdmin: false,
+      title: 'Desktop Authorization',
+      titleKey: 'desktopAuthorization.pageTitle'
+    }
+  },
+  {
+    path: '/desktop/devices',
+    name: 'DesktopDevices',
+    component: () => import('@/views/user/DesktopDevicesView.vue'),
+    meta: {
+      requiresAuth: true,
+      requiresAdmin: false,
+      title: 'Desktop Devices',
+      titleKey: 'desktopDevices.title',
+      descriptionKey: 'desktopDevices.description'
+    }
+  },
+  {
     path: '/chat',
     name: 'Chat',
     component: () => import('@/views/user/ChatView.vue'),
@@ -531,6 +554,18 @@ const routes: RouteRecordRaw[] = [
       title: 'Audit Logs',
       titleKey: 'admin.audit.title',
       descriptionKey: 'admin.audit.description'
+    }
+  },
+  {
+    path: '/admin/desktop-diagnostics',
+    name: 'AdminDesktopDiagnostics',
+    component: () => import('@/views/admin/DesktopDiagnosticsView.vue'),
+    meta: {
+      requiresAuth: true,
+      requiresAdmin: true,
+      title: 'Desktop Diagnostics',
+      titleKey: 'admin.desktopDiagnostics.title',
+      descriptionKey: 'admin.desktopDiagnostics.description'
     }
   },
   {

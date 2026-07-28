@@ -177,6 +177,42 @@ func (f ChannelMonitorRequestTemplateFunc) Mutate(ctx context.Context, m ent.Mut
 	return nil, fmt.Errorf("unexpected mutation type %T. expect *ent.ChannelMonitorRequestTemplateMutation", m)
 }
 
+// The DesktopDeviceFunc type is an adapter to allow the use of ordinary
+// function as DesktopDevice mutator.
+type DesktopDeviceFunc func(context.Context, *ent.DesktopDeviceMutation) (ent.Value, error)
+
+// Mutate calls f(ctx, m).
+func (f DesktopDeviceFunc) Mutate(ctx context.Context, m ent.Mutation) (ent.Value, error) {
+	if mv, ok := m.(*ent.DesktopDeviceMutation); ok {
+		return f(ctx, mv)
+	}
+	return nil, fmt.Errorf("unexpected mutation type %T. expect *ent.DesktopDeviceMutation", m)
+}
+
+// The DesktopDeviceSessionFunc type is an adapter to allow the use of ordinary
+// function as DesktopDeviceSession mutator.
+type DesktopDeviceSessionFunc func(context.Context, *ent.DesktopDeviceSessionMutation) (ent.Value, error)
+
+// Mutate calls f(ctx, m).
+func (f DesktopDeviceSessionFunc) Mutate(ctx context.Context, m ent.Mutation) (ent.Value, error) {
+	if mv, ok := m.(*ent.DesktopDeviceSessionMutation); ok {
+		return f(ctx, mv)
+	}
+	return nil, fmt.Errorf("unexpected mutation type %T. expect *ent.DesktopDeviceSessionMutation", m)
+}
+
+// The DesktopDiagnosticFunc type is an adapter to allow the use of ordinary
+// function as DesktopDiagnostic mutator.
+type DesktopDiagnosticFunc func(context.Context, *ent.DesktopDiagnosticMutation) (ent.Value, error)
+
+// Mutate calls f(ctx, m).
+func (f DesktopDiagnosticFunc) Mutate(ctx context.Context, m ent.Mutation) (ent.Value, error) {
+	if mv, ok := m.(*ent.DesktopDiagnosticMutation); ok {
+		return f(ctx, mv)
+	}
+	return nil, fmt.Errorf("unexpected mutation type %T. expect *ent.DesktopDiagnosticMutation", m)
+}
+
 // The ErrorPassthroughRuleFunc type is an adapter to allow the use of ordinary
 // function as ErrorPassthroughRule mutator.
 type ErrorPassthroughRuleFunc func(context.Context, *ent.ErrorPassthroughRuleMutation) (ent.Value, error)

@@ -15,6 +15,7 @@ import (
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/apicompat"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
 	"github.com/Wei-Shaw/sub2api/internal/util/responseheaders"
 	"github.com/gin-gonic/gin"
 	"github.com/tidwall/gjson"
@@ -446,10 +447,12 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 				forceFlushFailedEvent = true
 				sawFailedEvent = true
 			}
-			if normalizedData, normalized := normalizeCompletedImageGenerationStatus(dataBytes); normalized {
-				dataBytes = normalizedData
-				data = string(normalizedData)
-				line = "data: " + data
+			if !preserveCodexImageGenerationStatus(c) {
+				if normalizedData, normalized := normalizeCompletedImageGenerationStatus(dataBytes); normalized {
+					dataBytes = normalizedData
+					data = string(normalizedData)
+					line = "data: " + data
+				}
 			}
 			imageCounter.AddSSEData(dataBytes)
 
@@ -1407,6 +1410,19 @@ func normalizeCompletedImageGenerationStatus(data []byte) ([]byte, bool) {
 	default:
 		return data, false
 	}
+}
+
+// Codex persists hosted image results only when the output_item.done payload
+// retains the upstream generating status. Other Responses clients keep the
+// normalized completed status introduced for protocol compatibility.
+func preserveCodexImageGenerationStatus(c *gin.Context) bool {
+	if c == nil {
+		return false
+	}
+	return openai.IsCodexOfficialClientByHeaders(
+		c.GetHeader("User-Agent"),
+		c.GetHeader("originator"),
+	)
 }
 
 func normalizeResponsesStreamingTerminalOutput(data []byte, acc *apicompat.BufferedResponseAccumulator, imageOutputs []json.RawMessage) ([]byte, bool) {

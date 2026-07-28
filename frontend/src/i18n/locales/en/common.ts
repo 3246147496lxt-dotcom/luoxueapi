@@ -220,6 +220,7 @@ export default {
     channelStatus: 'Channel Status',
     riskControl: 'Risk Control',
     auditLogs: 'Audit Logs',
+    desktopDiagnostics: 'Desktop Diagnostics',
   },
 
   accountDock: {

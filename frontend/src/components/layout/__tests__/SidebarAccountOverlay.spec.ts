@@ -51,6 +51,12 @@ const defaultProps = {
     to: '/purchase',
     icon: 'wallet',
   } as AccountPanelLink,
+  subscriptionLink: {
+    id: 'subscriptions',
+    label: 'My subscriptions',
+    to: '/subscriptions',
+    icon: 'creditCard',
+  } as AccountPanelLink | null,
   resourceLinks: [
     {
       id: 'home',
@@ -271,15 +277,29 @@ describe('SidebarAccountOverlay', () => {
     expect(wrapper.emitted('close')).toEqual([[false]])
   })
 
-  it('closes for purchase navigation without restoring focus', async () => {
-    const { wrapper } = mountOverlay()
+  it.each(['/purchase', '/subscriptions'])(
+    'closes for %s navigation without restoring focus',
+    async (path) => {
+      const { wrapper } = mountOverlay()
+      await nextTick()
+
+      const link = document.body.querySelector<HTMLElement>(
+        `router-link-stub[to="${path}"]`,
+      )
+      expect(link).not.toBeNull()
+
+      link?.click()
+      expect(wrapper.emitted('close')).toEqual([[false]])
+    },
+  )
+
+  it('hides the subscriptions row when no visible destination is provided', async () => {
+    mountOverlay(false, { subscriptionLink: null })
     await nextTick()
 
-    const purchase = document.body.querySelector<HTMLElement>('router-link-stub')
-    expect(purchase).not.toBeNull()
-
-    purchase?.click()
-    expect(wrapper.emitted('close')).toEqual([[false]])
+    expect(
+      document.body.querySelector('router-link-stub[to="/subscriptions"]'),
+    ).toBeNull()
   })
 
   it('renders a modal bottom sheet on mobile and restores the background lock on unmount', async () => {
@@ -308,18 +328,26 @@ describe('SidebarAccountOverlay', () => {
     expect(document.body.style.overflow).toBe('')
   })
 
-  it('keeps preferences and deep account pages out of the first level', async () => {
+  it('exposes subscriptions while keeping preferences and other deep pages out', async () => {
     const { wrapper } = mountOverlay()
     await nextTick()
 
     const panel = document.body.querySelector<HTMLElement>('[data-testid="sidebar-account-panel"]')
-    const firstLevelLinks = panel?.querySelectorAll('a') ?? []
+    const routes = Array.from(panel?.querySelectorAll('router-link-stub') ?? [])
+      .map((link) => link.getAttribute('to'))
+    const subscriptionLink = panel?.querySelector<HTMLElement>(
+      '[data-testid="account-subscriptions-link"]',
+    )
 
     expect(document.body.querySelector('[data-testid="account-theme-toggle"]')).toBeNull()
     expect(document.body.querySelector('.account-panel__locale-switcher')).toBeNull()
-    expect(Array.from(firstLevelLinks).map((link) => link.getAttribute('href'))).not.toEqual(
-      expect.arrayContaining(['/profile', '/subscriptions', '/orders']),
+    expect(routes).toContain('/subscriptions')
+    expect(routes).not.toEqual(
+      expect.arrayContaining(['/profile', '/orders']),
     )
+    expect(subscriptionLink?.previousElementSibling?.getAttribute('to')).toBe('/purchase')
+    expect(subscriptionLink?.nextElementSibling?.getAttribute('data-testid'))
+      .toBe('account-open-settings')
     expect(wrapper.emitted('toggle-theme')).toBeUndefined()
   })
 

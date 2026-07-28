@@ -44,6 +44,28 @@ export default {
       recommended: 'Recommended',
       loadFailed: 'Could not load models',
     },
+    settings: {
+      label: 'Model {model}, reasoning effort {effort}',
+      menuLabel: 'Model and reasoning settings',
+      model: 'Model',
+      reasoning: 'Reasoning effort',
+      back: 'Back to settings',
+      searchModels: 'Search models',
+      reasoningLevels: {
+        auto: 'Auto',
+        low: 'Low',
+        medium: 'Medium',
+        high: 'High',
+        xhigh: 'Extra high',
+      },
+      reasoningDescriptions: {
+        auto: 'Use the model default',
+        low: 'Prioritize response speed',
+        medium: 'Balance speed and depth',
+        high: 'Use deeper reasoning',
+        xhigh: 'Use the longest thinking time',
+      },
+    },
     balance: {
       available: 'Available balance',
       insufficient: 'Your balance is too low to send another message.',

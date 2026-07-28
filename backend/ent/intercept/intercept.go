@@ -22,6 +22,9 @@ import (
 	"github.com/Wei-Shaw/sub2api/ent/channelmonitordailyrollup"
 	"github.com/Wei-Shaw/sub2api/ent/channelmonitorhistory"
 	"github.com/Wei-Shaw/sub2api/ent/channelmonitorrequesttemplate"
+	"github.com/Wei-Shaw/sub2api/ent/desktopdevice"
+	"github.com/Wei-Shaw/sub2api/ent/desktopdevicesession"
+	"github.com/Wei-Shaw/sub2api/ent/desktopdiagnostic"
 	"github.com/Wei-Shaw/sub2api/ent/errorpassthroughrule"
 	"github.com/Wei-Shaw/sub2api/ent/group"
 	"github.com/Wei-Shaw/sub2api/ent/idempotencyrecord"
@@ -482,6 +485,87 @@ func (f TraverseChannelMonitorRequestTemplate) Traverse(ctx context.Context, q e
 		return f(ctx, q)
 	}
 	return fmt.Errorf("unexpected query type %T. expect *ent.ChannelMonitorRequestTemplateQuery", q)
+}
+
+// The DesktopDeviceFunc type is an adapter to allow the use of ordinary function as a Querier.
+type DesktopDeviceFunc func(context.Context, *ent.DesktopDeviceQuery) (ent.Value, error)
+
+// Query calls f(ctx, q).
+func (f DesktopDeviceFunc) Query(ctx context.Context, q ent.Query) (ent.Value, error) {
+	if q, ok := q.(*ent.DesktopDeviceQuery); ok {
+		return f(ctx, q)
+	}
+	return nil, fmt.Errorf("unexpected query type %T. expect *ent.DesktopDeviceQuery", q)
+}
+
+// The TraverseDesktopDevice type is an adapter to allow the use of ordinary function as Traverser.
+type TraverseDesktopDevice func(context.Context, *ent.DesktopDeviceQuery) error
+
+// Intercept is a dummy implementation of Intercept that returns the next Querier in the pipeline.
+func (f TraverseDesktopDevice) Intercept(next ent.Querier) ent.Querier {
+	return next
+}
+
+// Traverse calls f(ctx, q).
+func (f TraverseDesktopDevice) Traverse(ctx context.Context, q ent.Query) error {
+	if q, ok := q.(*ent.DesktopDeviceQuery); ok {
+		return f(ctx, q)
+	}
+	return fmt.Errorf("unexpected query type %T. expect *ent.DesktopDeviceQuery", q)
+}
+
+// The DesktopDeviceSessionFunc type is an adapter to allow the use of ordinary function as a Querier.
+type DesktopDeviceSessionFunc func(context.Context, *ent.DesktopDeviceSessionQuery) (ent.Value, error)
+
+// Query calls f(ctx, q).
+func (f DesktopDeviceSessionFunc) Query(ctx context.Context, q ent.Query) (ent.Value, error) {
+	if q, ok := q.(*ent.DesktopDeviceSessionQuery); ok {
+		return f(ctx, q)
+	}
+	return nil, fmt.Errorf("unexpected query type %T. expect *ent.DesktopDeviceSessionQuery", q)
+}
+
+// The TraverseDesktopDeviceSession type is an adapter to allow the use of ordinary function as Traverser.
+type TraverseDesktopDeviceSession func(context.Context, *ent.DesktopDeviceSessionQuery) error
+
+// Intercept is a dummy implementation of Intercept that returns the next Querier in the pipeline.
+func (f TraverseDesktopDeviceSession) Intercept(next ent.Querier) ent.Querier {
+	return next
+}
+
+// Traverse calls f(ctx, q).
+func (f TraverseDesktopDeviceSession) Traverse(ctx context.Context, q ent.Query) error {
+	if q, ok := q.(*ent.DesktopDeviceSessionQuery); ok {
+		return f(ctx, q)
+	}
+	return fmt.Errorf("unexpected query type %T. expect *ent.DesktopDeviceSessionQuery", q)
+}
+
+// The DesktopDiagnosticFunc type is an adapter to allow the use of ordinary function as a Querier.
+type DesktopDiagnosticFunc func(context.Context, *ent.DesktopDiagnosticQuery) (ent.Value, error)
+
+// Query calls f(ctx, q).
+func (f DesktopDiagnosticFunc) Query(ctx context.Context, q ent.Query) (ent.Value, error) {
+	if q, ok := q.(*ent.DesktopDiagnosticQuery); ok {
+		return f(ctx, q)
+	}
+	return nil, fmt.Errorf("unexpected query type %T. expect *ent.DesktopDiagnosticQuery", q)
+}
+
+// The TraverseDesktopDiagnostic type is an adapter to allow the use of ordinary function as Traverser.
+type TraverseDesktopDiagnostic func(context.Context, *ent.DesktopDiagnosticQuery) error
+
+// Intercept is a dummy implementation of Intercept that returns the next Querier in the pipeline.
+func (f TraverseDesktopDiagnostic) Intercept(next ent.Querier) ent.Querier {
+	return next
+}
+
+// Traverse calls f(ctx, q).
+func (f TraverseDesktopDiagnostic) Traverse(ctx context.Context, q ent.Query) error {
+	if q, ok := q.(*ent.DesktopDiagnosticQuery); ok {
+		return f(ctx, q)
+	}
+	return fmt.Errorf("unexpected query type %T. expect *ent.DesktopDiagnosticQuery", q)
 }
 
 // The ErrorPassthroughRuleFunc type is an adapter to allow the use of ordinary function as a Querier.
@@ -1190,6 +1274,12 @@ func NewQuery(q ent.Query) (Query, error) {
 		return &query[*ent.ChannelMonitorHistoryQuery, predicate.ChannelMonitorHistory, channelmonitorhistory.OrderOption]{typ: ent.TypeChannelMonitorHistory, tq: q}, nil
 	case *ent.ChannelMonitorRequestTemplateQuery:
 		return &query[*ent.ChannelMonitorRequestTemplateQuery, predicate.ChannelMonitorRequestTemplate, channelmonitorrequesttemplate.OrderOption]{typ: ent.TypeChannelMonitorRequestTemplate, tq: q}, nil
+	case *ent.DesktopDeviceQuery:
+		return &query[*ent.DesktopDeviceQuery, predicate.DesktopDevice, desktopdevice.OrderOption]{typ: ent.TypeDesktopDevice, tq: q}, nil
+	case *ent.DesktopDeviceSessionQuery:
+		return &query[*ent.DesktopDeviceSessionQuery, predicate.DesktopDeviceSession, desktopdevicesession.OrderOption]{typ: ent.TypeDesktopDeviceSession, tq: q}, nil
+	case *ent.DesktopDiagnosticQuery:
+		return &query[*ent.DesktopDiagnosticQuery, predicate.DesktopDiagnostic, desktopdiagnostic.OrderOption]{typ: ent.TypeDesktopDiagnostic, tq: q}, nil
 	case *ent.ErrorPassthroughRuleQuery:
 		return &query[*ent.ErrorPassthroughRuleQuery, predicate.ErrorPassthroughRule, errorpassthroughrule.OrderOption]{typ: ent.TypeErrorPassthroughRule, tq: q}, nil
 	case *ent.GroupQuery:

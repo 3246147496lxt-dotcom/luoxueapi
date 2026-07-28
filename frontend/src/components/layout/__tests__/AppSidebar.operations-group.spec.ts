@@ -282,6 +282,7 @@ describe('AppSidebar grouped admin navigation', () => {
     expect(sections[3].findAll('a[href]').map(link => link.attributes('href'))).toEqual([
       '/admin/risk-control',
       '/admin/audit-logs',
+      '/admin/desktop-diagnostics',
       '/admin/documentation',
       '/admin/settings',
     ])

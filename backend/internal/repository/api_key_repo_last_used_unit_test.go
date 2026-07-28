@@ -164,6 +164,44 @@ func TestAPIKeyRepository_CreateWithLastUsedAt(t *testing.T) {
 	require.WithinDuration(t, lastUsed, *got.LastUsedAt, time.Second)
 }
 
+func TestAPIKeyRepositoryUserListHidesDesktopManagedKeys(t *testing.T) {
+	repo, client := newAPIKeyRepoSQLite(t)
+	ctx := context.Background()
+	user := mustCreateAPIKeyRepoUser(t, ctx, client, "desktop-hidden@test.com")
+	group, err := client.Group.Create().SetName("desktop-hidden-group").Save(ctx)
+	require.NoError(t, err)
+	device, err := client.DesktopDevice.Create().
+		SetUserID(user.ID).
+		SetPublicID("c7d06b34-7c6a-4a59-ad48-648ade0525e1").
+		SetInstallationIDHash(strings.Repeat("a", 64)).
+		SetName("Work Mac").
+		SetArchitecture("arm64").
+		SetStatus("active").
+		SetPairingExpiresAt(time.Now().Add(time.Hour)).
+		Save(ctx)
+	require.NoError(t, err)
+
+	_, err = client.APIKey.Create().
+		SetUserID(user.ID).
+		SetKey("sk-desktop-hidden").
+		SetName("Desktop managed key").
+		SetStatus(service.StatusActive).
+		SetPurpose(service.APIKeyPurposeDesktop).
+		SetGroupID(group.ID).
+		SetManagedDeviceID(device.ID).
+		Save(ctx)
+	require.NoError(t, err)
+	require.NoError(t, repo.Create(ctx, &service.APIKey{
+		UserID: user.ID, Key: "sk-user-visible", Name: "Visible user key", Status: service.StatusActive,
+	}))
+
+	keys, err := repo.ListAllByUserID(ctx, user.ID, service.APIKeyListFilters{})
+	require.NoError(t, err)
+	require.Len(t, keys, 1)
+	require.Equal(t, "sk-user-visible", keys[0].Key)
+	require.Equal(t, service.APIKeyPurposeUser, keys[0].Purpose)
+}
+
 func TestAPIKeyRepository_UpdateLastUsed(t *testing.T) {
 	repo, client := newAPIKeyRepoSQLite(t)
 	ctx := context.Background()

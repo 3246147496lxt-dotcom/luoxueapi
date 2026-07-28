@@ -96,6 +96,7 @@ type Config struct {
 	Idempotency             IdempotencyConfig             `mapstructure:"idempotency"`
 	BatchImage              BatchImageConfig              `mapstructure:"batch_image"`
 	ImageStorage            ImageStorageConfig            `mapstructure:"image_storage"`
+	Desktop                 DesktopConfig                 `mapstructure:"desktop"`
 }
 
 type LogConfig struct {
@@ -157,6 +158,26 @@ type UpdateConfig struct {
 	// 支持 http/https/socks5/socks5h 协议
 	// 例如: "http://127.0.0.1:7890", "socks5://127.0.0.1:1080"
 	ProxyURL string `mapstructure:"proxy_url"`
+}
+
+type DesktopConfig struct {
+	DiagnosticsEncryptionKey string                 `mapstructure:"diagnostics_encryption_key"`
+	InternalUserIDs          []int64                `mapstructure:"internal_user_ids"`
+	Releases                 []DesktopReleaseConfig `mapstructure:"releases"`
+}
+
+type DesktopReleaseConfig struct {
+	Version      string `mapstructure:"version"`
+	Notes        string `mapstructure:"notes"`
+	PubDate      string `mapstructure:"pub_date"`
+	URL          string `mapstructure:"url"`
+	InstallerURL string `mapstructure:"installer_url"`
+	SHA256       string `mapstructure:"sha256"`
+	Signature    string `mapstructure:"signature"`
+	Channel      string `mapstructure:"channel"`
+	Target       string `mapstructure:"target"`
+	Arch         string `mapstructure:"arch"`
+	Enabled      bool   `mapstructure:"enabled"`
 }
 
 type IdempotencyConfig struct {

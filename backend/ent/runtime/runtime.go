@@ -19,6 +19,9 @@ import (
 	"github.com/Wei-Shaw/sub2api/ent/channelmonitordailyrollup"
 	"github.com/Wei-Shaw/sub2api/ent/channelmonitorhistory"
 	"github.com/Wei-Shaw/sub2api/ent/channelmonitorrequesttemplate"
+	"github.com/Wei-Shaw/sub2api/ent/desktopdevice"
+	"github.com/Wei-Shaw/sub2api/ent/desktopdevicesession"
+	"github.com/Wei-Shaw/sub2api/ent/desktopdiagnostic"
 	"github.com/Wei-Shaw/sub2api/ent/errorpassthroughrule"
 	"github.com/Wei-Shaw/sub2api/ent/group"
 	"github.com/Wei-Shaw/sub2api/ent/idempotencyrecord"
@@ -120,35 +123,35 @@ func init() {
 	// apikey.PurposeValidator is a validator for the "purpose" field. It is called by the builders before save.
 	apikey.PurposeValidator = apikeyDescPurpose.Validators[0].(func(string) error)
 	// apikeyDescQuota is the schema descriptor for quota field.
-	apikeyDescQuota := apikeyFields[9].Descriptor()
+	apikeyDescQuota := apikeyFields[10].Descriptor()
 	// apikey.DefaultQuota holds the default value on creation for the quota field.
 	apikey.DefaultQuota = apikeyDescQuota.Default.(float64)
 	// apikeyDescQuotaUsed is the schema descriptor for quota_used field.
-	apikeyDescQuotaUsed := apikeyFields[10].Descriptor()
+	apikeyDescQuotaUsed := apikeyFields[11].Descriptor()
 	// apikey.DefaultQuotaUsed holds the default value on creation for the quota_used field.
 	apikey.DefaultQuotaUsed = apikeyDescQuotaUsed.Default.(float64)
 	// apikeyDescRateLimit5h is the schema descriptor for rate_limit_5h field.
-	apikeyDescRateLimit5h := apikeyFields[12].Descriptor()
+	apikeyDescRateLimit5h := apikeyFields[13].Descriptor()
 	// apikey.DefaultRateLimit5h holds the default value on creation for the rate_limit_5h field.
 	apikey.DefaultRateLimit5h = apikeyDescRateLimit5h.Default.(float64)
 	// apikeyDescRateLimit1d is the schema descriptor for rate_limit_1d field.
-	apikeyDescRateLimit1d := apikeyFields[13].Descriptor()
+	apikeyDescRateLimit1d := apikeyFields[14].Descriptor()
 	// apikey.DefaultRateLimit1d holds the default value on creation for the rate_limit_1d field.
 	apikey.DefaultRateLimit1d = apikeyDescRateLimit1d.Default.(float64)
 	// apikeyDescRateLimit7d is the schema descriptor for rate_limit_7d field.
-	apikeyDescRateLimit7d := apikeyFields[14].Descriptor()
+	apikeyDescRateLimit7d := apikeyFields[15].Descriptor()
 	// apikey.DefaultRateLimit7d holds the default value on creation for the rate_limit_7d field.
 	apikey.DefaultRateLimit7d = apikeyDescRateLimit7d.Default.(float64)
 	// apikeyDescUsage5h is the schema descriptor for usage_5h field.
-	apikeyDescUsage5h := apikeyFields[15].Descriptor()
+	apikeyDescUsage5h := apikeyFields[16].Descriptor()
 	// apikey.DefaultUsage5h holds the default value on creation for the usage_5h field.
 	apikey.DefaultUsage5h = apikeyDescUsage5h.Default.(float64)
 	// apikeyDescUsage1d is the schema descriptor for usage_1d field.
-	apikeyDescUsage1d := apikeyFields[16].Descriptor()
+	apikeyDescUsage1d := apikeyFields[17].Descriptor()
 	// apikey.DefaultUsage1d holds the default value on creation for the usage_1d field.
 	apikey.DefaultUsage1d = apikeyDescUsage1d.Default.(float64)
 	// apikeyDescUsage7d is the schema descriptor for usage_7d field.
-	apikeyDescUsage7d := apikeyFields[17].Descriptor()
+	apikeyDescUsage7d := apikeyFields[18].Descriptor()
 	// apikey.DefaultUsage7d holds the default value on creation for the usage_7d field.
 	apikey.DefaultUsage7d = apikeyDescUsage7d.Default.(float64)
 	accountMixin := schema.Account{}.Mixin()
@@ -872,6 +875,153 @@ func init() {
 	channelmonitorrequesttemplate.DefaultBodyOverrideMode = channelmonitorrequesttemplateDescBodyOverrideMode.Default.(string)
 	// channelmonitorrequesttemplate.BodyOverrideModeValidator is a validator for the "body_override_mode" field. It is called by the builders before save.
 	channelmonitorrequesttemplate.BodyOverrideModeValidator = channelmonitorrequesttemplateDescBodyOverrideMode.Validators[0].(func(string) error)
+	desktopdeviceMixin := schema.DesktopDevice{}.Mixin()
+	desktopdeviceMixinFields0 := desktopdeviceMixin[0].Fields()
+	_ = desktopdeviceMixinFields0
+	desktopdeviceFields := schema.DesktopDevice{}.Fields()
+	_ = desktopdeviceFields
+	// desktopdeviceDescCreatedAt is the schema descriptor for created_at field.
+	desktopdeviceDescCreatedAt := desktopdeviceMixinFields0[0].Descriptor()
+	// desktopdevice.DefaultCreatedAt holds the default value on creation for the created_at field.
+	desktopdevice.DefaultCreatedAt = desktopdeviceDescCreatedAt.Default.(func() time.Time)
+	// desktopdeviceDescUpdatedAt is the schema descriptor for updated_at field.
+	desktopdeviceDescUpdatedAt := desktopdeviceMixinFields0[1].Descriptor()
+	// desktopdevice.DefaultUpdatedAt holds the default value on creation for the updated_at field.
+	desktopdevice.DefaultUpdatedAt = desktopdeviceDescUpdatedAt.Default.(func() time.Time)
+	// desktopdevice.UpdateDefaultUpdatedAt holds the default value on update for the updated_at field.
+	desktopdevice.UpdateDefaultUpdatedAt = desktopdeviceDescUpdatedAt.UpdateDefault.(func() time.Time)
+	// desktopdeviceDescInstallationIDHash is the schema descriptor for installation_id_hash field.
+	desktopdeviceDescInstallationIDHash := desktopdeviceFields[2].Descriptor()
+	// desktopdevice.InstallationIDHashValidator is a validator for the "installation_id_hash" field. It is called by the builders before save.
+	desktopdevice.InstallationIDHashValidator = desktopdeviceDescInstallationIDHash.Validators[0].(func(string) error)
+	// desktopdeviceDescName is the schema descriptor for name field.
+	desktopdeviceDescName := desktopdeviceFields[3].Descriptor()
+	// desktopdevice.NameValidator is a validator for the "name" field. It is called by the builders before save.
+	desktopdevice.NameValidator = func() func(string) error {
+		validators := desktopdeviceDescName.Validators
+		fns := [...]func(string) error{
+			validators[0].(func(string) error),
+			validators[1].(func(string) error),
+		}
+		return func(name string) error {
+			for _, fn := range fns {
+				if err := fn(name); err != nil {
+					return err
+				}
+			}
+			return nil
+		}
+	}()
+	// desktopdeviceDescPlatform is the schema descriptor for platform field.
+	desktopdeviceDescPlatform := desktopdeviceFields[4].Descriptor()
+	// desktopdevice.DefaultPlatform holds the default value on creation for the platform field.
+	desktopdevice.DefaultPlatform = desktopdeviceDescPlatform.Default.(string)
+	// desktopdevice.PlatformValidator is a validator for the "platform" field. It is called by the builders before save.
+	desktopdevice.PlatformValidator = desktopdeviceDescPlatform.Validators[0].(func(string) error)
+	// desktopdeviceDescArchitecture is the schema descriptor for architecture field.
+	desktopdeviceDescArchitecture := desktopdeviceFields[5].Descriptor()
+	// desktopdevice.ArchitectureValidator is a validator for the "architecture" field. It is called by the builders before save.
+	desktopdevice.ArchitectureValidator = desktopdeviceDescArchitecture.Validators[0].(func(string) error)
+	// desktopdeviceDescOsVersion is the schema descriptor for os_version field.
+	desktopdeviceDescOsVersion := desktopdeviceFields[6].Descriptor()
+	// desktopdevice.DefaultOsVersion holds the default value on creation for the os_version field.
+	desktopdevice.DefaultOsVersion = desktopdeviceDescOsVersion.Default.(string)
+	// desktopdevice.OsVersionValidator is a validator for the "os_version" field. It is called by the builders before save.
+	desktopdevice.OsVersionValidator = desktopdeviceDescOsVersion.Validators[0].(func(string) error)
+	// desktopdeviceDescAppVersion is the schema descriptor for app_version field.
+	desktopdeviceDescAppVersion := desktopdeviceFields[7].Descriptor()
+	// desktopdevice.DefaultAppVersion holds the default value on creation for the app_version field.
+	desktopdevice.DefaultAppVersion = desktopdeviceDescAppVersion.Default.(string)
+	// desktopdevice.AppVersionValidator is a validator for the "app_version" field. It is called by the builders before save.
+	desktopdevice.AppVersionValidator = desktopdeviceDescAppVersion.Validators[0].(func(string) error)
+	// desktopdeviceDescStatus is the schema descriptor for status field.
+	desktopdeviceDescStatus := desktopdeviceFields[8].Descriptor()
+	// desktopdevice.DefaultStatus holds the default value on creation for the status field.
+	desktopdevice.DefaultStatus = desktopdeviceDescStatus.Default.(string)
+	// desktopdevice.StatusValidator is a validator for the "status" field. It is called by the builders before save.
+	desktopdevice.StatusValidator = desktopdeviceDescStatus.Validators[0].(func(string) error)
+	// desktopdeviceDescTokenVersion is the schema descriptor for token_version field.
+	desktopdeviceDescTokenVersion := desktopdeviceFields[9].Descriptor()
+	// desktopdevice.DefaultTokenVersion holds the default value on creation for the token_version field.
+	desktopdevice.DefaultTokenVersion = desktopdeviceDescTokenVersion.Default.(int64)
+	// desktopdeviceDescReleaseChannel is the schema descriptor for release_channel field.
+	desktopdeviceDescReleaseChannel := desktopdeviceFields[10].Descriptor()
+	// desktopdevice.DefaultReleaseChannel holds the default value on creation for the release_channel field.
+	desktopdevice.DefaultReleaseChannel = desktopdeviceDescReleaseChannel.Default.(string)
+	// desktopdevice.ReleaseChannelValidator is a validator for the "release_channel" field. It is called by the builders before save.
+	desktopdevice.ReleaseChannelValidator = desktopdeviceDescReleaseChannel.Validators[0].(func(string) error)
+	desktopdevicesessionMixin := schema.DesktopDeviceSession{}.Mixin()
+	desktopdevicesessionMixinFields0 := desktopdevicesessionMixin[0].Fields()
+	_ = desktopdevicesessionMixinFields0
+	desktopdevicesessionFields := schema.DesktopDeviceSession{}.Fields()
+	_ = desktopdevicesessionFields
+	// desktopdevicesessionDescCreatedAt is the schema descriptor for created_at field.
+	desktopdevicesessionDescCreatedAt := desktopdevicesessionMixinFields0[0].Descriptor()
+	// desktopdevicesession.DefaultCreatedAt holds the default value on creation for the created_at field.
+	desktopdevicesession.DefaultCreatedAt = desktopdevicesessionDescCreatedAt.Default.(func() time.Time)
+	// desktopdevicesessionDescUpdatedAt is the schema descriptor for updated_at field.
+	desktopdevicesessionDescUpdatedAt := desktopdevicesessionMixinFields0[1].Descriptor()
+	// desktopdevicesession.DefaultUpdatedAt holds the default value on creation for the updated_at field.
+	desktopdevicesession.DefaultUpdatedAt = desktopdevicesessionDescUpdatedAt.Default.(func() time.Time)
+	// desktopdevicesession.UpdateDefaultUpdatedAt holds the default value on update for the updated_at field.
+	desktopdevicesession.UpdateDefaultUpdatedAt = desktopdevicesessionDescUpdatedAt.UpdateDefault.(func() time.Time)
+	// desktopdevicesessionDescRefreshTokenHash is the schema descriptor for refresh_token_hash field.
+	desktopdevicesessionDescRefreshTokenHash := desktopdevicesessionFields[2].Descriptor()
+	// desktopdevicesession.RefreshTokenHashValidator is a validator for the "refresh_token_hash" field. It is called by the builders before save.
+	desktopdevicesession.RefreshTokenHashValidator = desktopdevicesessionDescRefreshTokenHash.Validators[0].(func(string) error)
+	// desktopdevicesessionDescStatus is the schema descriptor for status field.
+	desktopdevicesessionDescStatus := desktopdevicesessionFields[3].Descriptor()
+	// desktopdevicesession.DefaultStatus holds the default value on creation for the status field.
+	desktopdevicesession.DefaultStatus = desktopdevicesessionDescStatus.Default.(string)
+	// desktopdevicesession.StatusValidator is a validator for the "status" field. It is called by the builders before save.
+	desktopdevicesession.StatusValidator = desktopdevicesessionDescStatus.Validators[0].(func(string) error)
+	desktopdiagnosticMixin := schema.DesktopDiagnostic{}.Mixin()
+	desktopdiagnosticMixinFields0 := desktopdiagnosticMixin[0].Fields()
+	_ = desktopdiagnosticMixinFields0
+	desktopdiagnosticFields := schema.DesktopDiagnostic{}.Fields()
+	_ = desktopdiagnosticFields
+	// desktopdiagnosticDescCreatedAt is the schema descriptor for created_at field.
+	desktopdiagnosticDescCreatedAt := desktopdiagnosticMixinFields0[0].Descriptor()
+	// desktopdiagnostic.DefaultCreatedAt holds the default value on creation for the created_at field.
+	desktopdiagnostic.DefaultCreatedAt = desktopdiagnosticDescCreatedAt.Default.(func() time.Time)
+	// desktopdiagnosticDescUpdatedAt is the schema descriptor for updated_at field.
+	desktopdiagnosticDescUpdatedAt := desktopdiagnosticMixinFields0[1].Descriptor()
+	// desktopdiagnostic.DefaultUpdatedAt holds the default value on creation for the updated_at field.
+	desktopdiagnostic.DefaultUpdatedAt = desktopdiagnosticDescUpdatedAt.Default.(func() time.Time)
+	// desktopdiagnostic.UpdateDefaultUpdatedAt holds the default value on update for the updated_at field.
+	desktopdiagnostic.UpdateDefaultUpdatedAt = desktopdiagnosticDescUpdatedAt.UpdateDefault.(func() time.Time)
+	// desktopdiagnosticDescAppVersion is the schema descriptor for app_version field.
+	desktopdiagnosticDescAppVersion := desktopdiagnosticFields[3].Descriptor()
+	// desktopdiagnostic.AppVersionValidator is a validator for the "app_version" field. It is called by the builders before save.
+	desktopdiagnostic.AppVersionValidator = desktopdiagnosticDescAppVersion.Validators[0].(func(string) error)
+	// desktopdiagnosticDescPlatform is the schema descriptor for platform field.
+	desktopdiagnosticDescPlatform := desktopdiagnosticFields[4].Descriptor()
+	// desktopdiagnostic.PlatformValidator is a validator for the "platform" field. It is called by the builders before save.
+	desktopdiagnostic.PlatformValidator = desktopdiagnosticDescPlatform.Validators[0].(func(string) error)
+	// desktopdiagnosticDescArchitecture is the schema descriptor for architecture field.
+	desktopdiagnosticDescArchitecture := desktopdiagnosticFields[5].Descriptor()
+	// desktopdiagnostic.ArchitectureValidator is a validator for the "architecture" field. It is called by the builders before save.
+	desktopdiagnostic.ArchitectureValidator = desktopdiagnosticDescArchitecture.Validators[0].(func(string) error)
+	// desktopdiagnosticDescOsVersion is the schema descriptor for os_version field.
+	desktopdiagnosticDescOsVersion := desktopdiagnosticFields[6].Descriptor()
+	// desktopdiagnostic.OsVersionValidator is a validator for the "os_version" field. It is called by the builders before save.
+	desktopdiagnostic.OsVersionValidator = desktopdiagnosticDescOsVersion.Validators[0].(func(string) error)
+	// desktopdiagnosticDescGatewayStatus is the schema descriptor for gateway_status field.
+	desktopdiagnosticDescGatewayStatus := desktopdiagnosticFields[7].Descriptor()
+	// desktopdiagnostic.GatewayStatusValidator is a validator for the "gateway_status" field. It is called by the builders before save.
+	desktopdiagnostic.GatewayStatusValidator = desktopdiagnosticDescGatewayStatus.Validators[0].(func(string) error)
+	// desktopdiagnosticDescCodexConfigStatus is the schema descriptor for codex_config_status field.
+	desktopdiagnosticDescCodexConfigStatus := desktopdiagnosticFields[8].Descriptor()
+	// desktopdiagnostic.CodexConfigStatusValidator is a validator for the "codex_config_status" field. It is called by the builders before save.
+	desktopdiagnostic.CodexConfigStatusValidator = desktopdiagnosticDescCodexConfigStatus.Validators[0].(func(string) error)
+	// desktopdiagnosticDescRequestSampleCount is the schema descriptor for request_sample_count field.
+	desktopdiagnosticDescRequestSampleCount := desktopdiagnosticFields[9].Descriptor()
+	// desktopdiagnostic.DefaultRequestSampleCount holds the default value on creation for the request_sample_count field.
+	desktopdiagnostic.DefaultRequestSampleCount = desktopdiagnosticDescRequestSampleCount.Default.(int)
+	// desktopdiagnosticDescRequestErrorCount is the schema descriptor for request_error_count field.
+	desktopdiagnosticDescRequestErrorCount := desktopdiagnosticFields[10].Descriptor()
+	// desktopdiagnostic.DefaultRequestErrorCount holds the default value on creation for the request_error_count field.
+	desktopdiagnostic.DefaultRequestErrorCount = desktopdiagnosticDescRequestErrorCount.Default.(int)
 	errorpassthroughruleMixin := schema.ErrorPassthroughRule{}.Mixin()
 	errorpassthroughruleMixinFields0 := errorpassthroughruleMixin[0].Fields()
 	_ = errorpassthroughruleMixinFields0

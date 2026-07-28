@@ -14,6 +14,8 @@ import (
 	"github.com/Wei-Shaw/sub2api/ent/announcementread"
 	"github.com/Wei-Shaw/sub2api/ent/apikey"
 	"github.com/Wei-Shaw/sub2api/ent/authidentity"
+	"github.com/Wei-Shaw/sub2api/ent/desktopdevice"
+	"github.com/Wei-Shaw/sub2api/ent/desktopdiagnostic"
 	"github.com/Wei-Shaw/sub2api/ent/group"
 	"github.com/Wei-Shaw/sub2api/ent/paymentorder"
 	"github.com/Wei-Shaw/sub2api/ent/pendingauthsession"
@@ -549,6 +551,36 @@ func (_c *UserCreate) AddPlatformQuotas(v ...*UserPlatformQuota) *UserCreate {
 	return _c.AddPlatformQuotaIDs(ids...)
 }
 
+// AddDesktopDeviceIDs adds the "desktop_devices" edge to the DesktopDevice entity by IDs.
+func (_c *UserCreate) AddDesktopDeviceIDs(ids ...int64) *UserCreate {
+	_c.mutation.AddDesktopDeviceIDs(ids...)
+	return _c
+}
+
+// AddDesktopDevices adds the "desktop_devices" edges to the DesktopDevice entity.
+func (_c *UserCreate) AddDesktopDevices(v ...*DesktopDevice) *UserCreate {
+	ids := make([]int64, len(v))
+	for i := range v {
+		ids[i] = v[i].ID
+	}
+	return _c.AddDesktopDeviceIDs(ids...)
+}
+
+// AddDesktopDiagnosticIDs adds the "desktop_diagnostics" edge to the DesktopDiagnostic entity by IDs.
+func (_c *UserCreate) AddDesktopDiagnosticIDs(ids ...int64) *UserCreate {
+	_c.mutation.AddDesktopDiagnosticIDs(ids...)
+	return _c
+}
+
+// AddDesktopDiagnostics adds the "desktop_diagnostics" edges to the DesktopDiagnostic entity.
+func (_c *UserCreate) AddDesktopDiagnostics(v ...*DesktopDiagnostic) *UserCreate {
+	ids := make([]int64, len(v))
+	for i := range v {
+		ids[i] = v[i].ID
+	}
+	return _c.AddDesktopDiagnosticIDs(ids...)
+}
+
 // Mutation returns the UserMutation object of the builder.
 func (_c *UserCreate) Mutation() *UserMutation {
 	return _c.mutation
@@ -1073,6 +1105,38 @@ func (_c *UserCreate) createSpec() (*User, *sqlgraph.CreateSpec) {
 			Bidi:    false,
 			Target: &sqlgraph.EdgeTarget{
 				IDSpec: sqlgraph.NewFieldSpec(userplatformquota.FieldID, field.TypeInt64),
+			},
+		}
+		for _, k := range nodes {
+			edge.Target.Nodes = append(edge.Target.Nodes, k)
+		}
+		_spec.Edges = append(_spec.Edges, edge)
+	}
+	if nodes := _c.mutation.DesktopDevicesIDs(); len(nodes) > 0 {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.O2M,
+			Inverse: false,
+			Table:   user.DesktopDevicesTable,
+			Columns: []string{user.DesktopDevicesColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(desktopdevice.FieldID, field.TypeInt64),
+			},
+		}
+		for _, k := range nodes {
+			edge.Target.Nodes = append(edge.Target.Nodes, k)
+		}
+		_spec.Edges = append(_spec.Edges, edge)
+	}
+	if nodes := _c.mutation.DesktopDiagnosticsIDs(); len(nodes) > 0 {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.O2M,
+			Inverse: false,
+			Table:   user.DesktopDiagnosticsTable,
+			Columns: []string{user.DesktopDiagnosticsColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(desktopdiagnostic.FieldID, field.TypeInt64),
 			},
 		}
 		for _, k := range nodes {

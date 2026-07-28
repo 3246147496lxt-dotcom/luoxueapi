@@ -33,6 +33,8 @@ const (
 	FieldStatus = "status"
 	// FieldPurpose holds the string denoting the purpose field in the database.
 	FieldPurpose = "purpose"
+	// FieldManagedDeviceID holds the string denoting the managed_device_id field in the database.
+	FieldManagedDeviceID = "managed_device_id"
 	// FieldLastUsedAt holds the string denoting the last_used_at field in the database.
 	FieldLastUsedAt = "last_used_at"
 	// FieldIPWhitelist holds the string denoting the ip_whitelist field in the database.
@@ -67,6 +69,8 @@ const (
 	EdgeUser = "user"
 	// EdgeGroup holds the string denoting the group edge name in mutations.
 	EdgeGroup = "group"
+	// EdgeManagedDevice holds the string denoting the managed_device edge name in mutations.
+	EdgeManagedDevice = "managed_device"
 	// EdgeUsageLogs holds the string denoting the usage_logs edge name in mutations.
 	EdgeUsageLogs = "usage_logs"
 	// Table holds the table name of the apikey in the database.
@@ -85,6 +89,13 @@ const (
 	GroupInverseTable = "groups"
 	// GroupColumn is the table column denoting the group relation/edge.
 	GroupColumn = "group_id"
+	// ManagedDeviceTable is the table that holds the managed_device relation/edge.
+	ManagedDeviceTable = "api_keys"
+	// ManagedDeviceInverseTable is the table name for the DesktopDevice entity.
+	// It exists in this package in order to avoid circular dependency with the "desktopdevice" package.
+	ManagedDeviceInverseTable = "desktop_devices"
+	// ManagedDeviceColumn is the table column denoting the managed_device relation/edge.
+	ManagedDeviceColumn = "managed_device_id"
 	// UsageLogsTable is the table that holds the usage_logs relation/edge.
 	UsageLogsTable = "usage_logs"
 	// UsageLogsInverseTable is the table name for the UsageLog entity.
@@ -106,6 +117,7 @@ var Columns = []string{
 	FieldGroupID,
 	FieldStatus,
 	FieldPurpose,
+	FieldManagedDeviceID,
 	FieldLastUsedAt,
 	FieldIPWhitelist,
 	FieldIPBlacklist,
@@ -230,6 +242,11 @@ func ByPurpose(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldPurpose, opts...).ToFunc()
 }
 
+// ByManagedDeviceID orders the results by the managed_device_id field.
+func ByManagedDeviceID(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldManagedDeviceID, opts...).ToFunc()
+}
+
 // ByLastUsedAt orders the results by the last_used_at field.
 func ByLastUsedAt(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldLastUsedAt, opts...).ToFunc()
@@ -309,6 +326,13 @@ func ByGroupField(field string, opts ...sql.OrderTermOption) OrderOption {
 	}
 }
 
+// ByManagedDeviceField orders the results by managed_device field.
+func ByManagedDeviceField(field string, opts ...sql.OrderTermOption) OrderOption {
+	return func(s *sql.Selector) {
+		sqlgraph.OrderByNeighborTerms(s, newManagedDeviceStep(), sql.OrderByField(field, opts...))
+	}
+}
+
 // ByUsageLogsCount orders the results by usage_logs count.
 func ByUsageLogsCount(opts ...sql.OrderTermOption) OrderOption {
 	return func(s *sql.Selector) {
@@ -334,6 +358,13 @@ func newGroupStep() *sqlgraph.Step {
 		sqlgraph.From(Table, FieldID),
 		sqlgraph.To(GroupInverseTable, FieldID),
 		sqlgraph.Edge(sqlgraph.M2O, true, GroupTable, GroupColumn),
+	)
+}
+func newManagedDeviceStep() *sqlgraph.Step {
+	return sqlgraph.NewStep(
+		sqlgraph.From(Table, FieldID),
+		sqlgraph.To(ManagedDeviceInverseTable, FieldID),
+		sqlgraph.Edge(sqlgraph.M2O, true, ManagedDeviceTable, ManagedDeviceColumn),
 	)
 }
 func newUsageLogsStep() *sqlgraph.Step {

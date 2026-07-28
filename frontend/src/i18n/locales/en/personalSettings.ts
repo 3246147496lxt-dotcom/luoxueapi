@@ -35,6 +35,8 @@ export default {
       profileHint: 'Change your avatar and display name',
       connections: 'Identity connections',
       connectionsHint: 'Manage email and third-party sign-in methods',
+      desktopDevices: 'Signed-in devices',
+      desktopDevicesHint: 'Manage LuoxueAPI Desktop device access',
       email: 'Sign-in email',
       noEmail: 'No email set',
       loadError: 'We could not refresh your account. Cached information is still shown.',

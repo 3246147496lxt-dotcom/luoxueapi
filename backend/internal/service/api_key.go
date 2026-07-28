@@ -17,6 +17,7 @@ const (
 const (
 	APIKeyPurposeUser    = "user"
 	APIKeyPurposeWebChat = "web_chat"
+	APIKeyPurposeDesktop = "desktop"
 )
 
 // Rate limit window durations
@@ -33,15 +34,16 @@ func IsWindowExpired(windowStart *time.Time, duration time.Duration) bool {
 }
 
 type APIKey struct {
-	ID          int64
-	UserID      int64
-	Key         string
-	Name        string
-	GroupID     *int64
-	Status      string
-	Purpose     string
-	IPWhitelist []string
-	IPBlacklist []string
+	ID              int64
+	UserID          int64
+	Key             string
+	Name            string
+	GroupID         *int64
+	Status          string
+	Purpose         string
+	ManagedDeviceID *int64
+	IPWhitelist     []string
+	IPBlacklist     []string
 	// 预编译的 IP 规则，用于认证热路径避免重复 ParseIP/ParseCIDR。
 	CompiledIPWhitelist *ip.CompiledIPRules `json:"-"`
 	CompiledIPBlacklist *ip.CompiledIPRules `json:"-"`

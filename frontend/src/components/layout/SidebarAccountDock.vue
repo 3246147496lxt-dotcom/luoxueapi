@@ -68,6 +68,7 @@
       :anchor-element="dockRowRef"
       :summary="panelSummary"
       :purchase-link="purchaseLink"
+      :subscription-link="subscriptionLink"
       :resource-links="resourceLinks"
       :show-onboarding="showOnboarding"
       @close="closePanel"
@@ -167,6 +168,24 @@ const purchaseLink = computed<AccountPanelLink | null>(() => {
     label: t('accountDock.recharge'),
     to: walletSpec.target.path,
     icon: 'wallet',
+  }
+})
+
+const subscriptionLink = computed<AccountPanelLink | null>(() => {
+  const subscriptionSpec = selectVisibleShellDestinations(
+    getShellDestinationSpecs(audience.value),
+    destinationContext.value,
+    'account',
+  )
+    .find((spec) => spec.id === 'subscriptions' && spec.target.kind === 'route')
+
+  if (!subscriptionSpec || subscriptionSpec.target.kind !== 'route') return null
+
+  return {
+    id: subscriptionSpec.id,
+    label: t(subscriptionSpec.labelKey),
+    to: subscriptionSpec.target.path,
+    icon: 'creditCard',
   }
 })
 

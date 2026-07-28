@@ -104,6 +104,7 @@
                   :error="accountError || publicSettingsError"
                   @retry="retryAccountData"
                   @open-detail="openDetail"
+                  @open-devices="openDesktopDevices"
                 />
               </div>
 
@@ -408,6 +409,10 @@ function selectSection(target: PersonalSettingsSection) {
 
 function openDetail(target: PersonalSettingsDetail) {
   void replacePersonalSettingsDetail(router, route, target)
+}
+
+function openDesktopDevices() {
+  void router.push('/desktop/devices')
 }
 
 function goBackToSection() {

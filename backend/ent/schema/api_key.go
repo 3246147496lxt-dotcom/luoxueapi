@@ -50,7 +50,10 @@ func (APIKey) Fields() []ent.Field {
 		field.String("purpose").
 			MaxLen(20).
 			Default("user").
-			Comment("API key purpose: user or web_chat"),
+			Comment("API key purpose: user, web_chat, or desktop"),
+		field.Int64("managed_device_id").
+			Optional().
+			Nillable(),
 		field.Time("last_used_at").
 			Optional().
 			Nillable().
@@ -133,6 +136,10 @@ func (APIKey) Edges() []ent.Edge {
 			Ref("api_keys").
 			Field("group_id").
 			Unique(),
+		edge.From("managed_device", DesktopDevice.Type).
+			Ref("managed_keys").
+			Field("managed_device_id").
+			Unique(),
 		edge.To("usage_logs", UsageLog.Type),
 	}
 }
@@ -144,10 +151,15 @@ func (APIKey) Indexes() []ent.Index {
 		index.Fields("group_id"),
 		index.Fields("status"),
 		index.Fields("purpose"),
+		index.Fields("managed_device_id"),
 		index.Fields("user_id", "group_id").
 			Unique().
 			StorageKey("idx_api_keys_web_chat_principal_user_group").
 			Annotations(entsql.IndexWhere("purpose = 'web_chat' AND status = 'active'")),
+		index.Fields("managed_device_id", "group_id").
+			Unique().
+			StorageKey("idx_api_keys_desktop_device_group").
+			Annotations(entsql.IndexWhere("purpose = 'desktop' AND deleted_at IS NULL")),
 		index.Fields("deleted_at"),
 		index.Fields("last_used_at"),
 		// Index for quota queries

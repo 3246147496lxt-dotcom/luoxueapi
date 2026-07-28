@@ -48,6 +48,15 @@ type ChannelMonitorHistory func(*sql.Selector)
 // ChannelMonitorRequestTemplate is the predicate function for channelmonitorrequesttemplate builders.
 type ChannelMonitorRequestTemplate func(*sql.Selector)
 
+// DesktopDevice is the predicate function for desktopdevice builders.
+type DesktopDevice func(*sql.Selector)
+
+// DesktopDeviceSession is the predicate function for desktopdevicesession builders.
+type DesktopDeviceSession func(*sql.Selector)
+
+// DesktopDiagnostic is the predicate function for desktopdiagnostic builders.
+type DesktopDiagnostic func(*sql.Selector)
+
 // ErrorPassthroughRule is the predicate function for errorpassthroughrule builders.
 type ErrorPassthroughRule func(*sql.Selector)
 

@@ -69,6 +69,26 @@
             <Icon name="chevronRight" size="xs" aria-hidden="true" />
           </span>
         </button>
+
+        <button
+          type="button"
+          class="personal-settings-row"
+          data-testid="personal-settings-open-desktop-devices"
+          @click="emit('open-devices')"
+        >
+          <Icon name="cpu" size="sm" class="text-[var(--lx-clay-text-muted)]" aria-hidden="true" />
+          <span class="personal-settings-row-copy">
+            <span class="personal-settings-row-title">
+              {{ t('personalSettings.account.desktopDevices') }}
+            </span>
+            <span class="personal-settings-row-description">
+              {{ t('personalSettings.account.desktopDevicesHint') }}
+            </span>
+          </span>
+          <span class="personal-settings-row-value">
+            <Icon name="chevronRight" size="xs" aria-hidden="true" />
+          </span>
+        </button>
       </div>
     </template>
 
@@ -145,6 +165,7 @@ const props = defineProps<{
 const emit = defineEmits<{
   retry: []
   'open-detail': [detail: 'profile' | 'connections']
+  'open-devices': []
 }>()
 
 const { t } = useI18n()

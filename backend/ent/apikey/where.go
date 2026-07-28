@@ -100,6 +100,11 @@ func Purpose(v string) predicate.APIKey {
 	return predicate.APIKey(sql.FieldEQ(FieldPurpose, v))
 }
 
+// ManagedDeviceID applies equality check predicate on the "managed_device_id" field. It's identical to ManagedDeviceIDEQ.
+func ManagedDeviceID(v int64) predicate.APIKey {
+	return predicate.APIKey(sql.FieldEQ(FieldManagedDeviceID, v))
+}
+
 // LastUsedAt applies equality check predicate on the "last_used_at" field. It's identical to LastUsedAtEQ.
 func LastUsedAt(v time.Time) predicate.APIKey {
 	return predicate.APIKey(sql.FieldEQ(FieldLastUsedAt, v))
@@ -603,6 +608,36 @@ func PurposeEqualFold(v string) predicate.APIKey {
 // PurposeContainsFold applies the ContainsFold predicate on the "purpose" field.
 func PurposeContainsFold(v string) predicate.APIKey {
 	return predicate.APIKey(sql.FieldContainsFold(FieldPurpose, v))
+}
+
+// ManagedDeviceIDEQ applies the EQ predicate on the "managed_device_id" field.
+func ManagedDeviceIDEQ(v int64) predicate.APIKey {
+	return predicate.APIKey(sql.FieldEQ(FieldManagedDeviceID, v))
+}
+
+// ManagedDeviceIDNEQ applies the NEQ predicate on the "managed_device_id" field.
+func ManagedDeviceIDNEQ(v int64) predicate.APIKey {
+	return predicate.APIKey(sql.FieldNEQ(FieldManagedDeviceID, v))
+}
+
+// ManagedDeviceIDIn applies the In predicate on the "managed_device_id" field.
+func ManagedDeviceIDIn(vs ...int64) predicate.APIKey {
+	return predicate.APIKey(sql.FieldIn(FieldManagedDeviceID, vs...))
+}
+
+// ManagedDeviceIDNotIn applies the NotIn predicate on the "managed_device_id" field.
+func ManagedDeviceIDNotIn(vs ...int64) predicate.APIKey {
+	return predicate.APIKey(sql.FieldNotIn(FieldManagedDeviceID, vs...))
+}
+
+// ManagedDeviceIDIsNil applies the IsNil predicate on the "managed_device_id" field.
+func ManagedDeviceIDIsNil() predicate.APIKey {
+	return predicate.APIKey(sql.FieldIsNull(FieldManagedDeviceID))
+}
+
+// ManagedDeviceIDNotNil applies the NotNil predicate on the "managed_device_id" field.
+func ManagedDeviceIDNotNil() predicate.APIKey {
+	return predicate.APIKey(sql.FieldNotNull(FieldManagedDeviceID))
 }
 
 // LastUsedAtEQ applies the EQ predicate on the "last_used_at" field.
@@ -1233,6 +1268,29 @@ func HasGroup() predicate.APIKey {
 func HasGroupWith(preds ...predicate.Group) predicate.APIKey {
 	return predicate.APIKey(func(s *sql.Selector) {
 		step := newGroupStep()
+		sqlgraph.HasNeighborsWith(s, step, func(s *sql.Selector) {
+			for _, p := range preds {
+				p(s)
+			}
+		})
+	})
+}
+
+// HasManagedDevice applies the HasEdge predicate on the "managed_device" edge.
+func HasManagedDevice() predicate.APIKey {
+	return predicate.APIKey(func(s *sql.Selector) {
+		step := sqlgraph.NewStep(
+			sqlgraph.From(Table, FieldID),
+			sqlgraph.Edge(sqlgraph.M2O, true, ManagedDeviceTable, ManagedDeviceColumn),
+		)
+		sqlgraph.HasNeighbors(s, step)
+	})
+}
+
+// HasManagedDeviceWith applies the HasEdge predicate on the "managed_device" edge with a given conditions (other predicates).
+func HasManagedDeviceWith(preds ...predicate.DesktopDevice) predicate.APIKey {
+	return predicate.APIKey(func(s *sql.Selector) {
+		step := newManagedDeviceStep()
 		sqlgraph.HasNeighborsWith(s, step, func(s *sql.Selector) {
 			for _, p := range preds {
 				p(s)

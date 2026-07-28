@@ -225,6 +225,7 @@ func (h *ChatHandler) Completions(c *gin.Context) {
 		&service.PrepareChatCompletionInput{
 			ConversationID:        req.ConversationID,
 			Model:                 req.Model,
+			ReasoningEffort:       req.ReasoningEffort,
 			ExpectedHeadMessageID: req.ExpectedHeadMessageID,
 			UserMessage:           chatCompletionUserMessageFromRequest(req.UserMessage),
 			RetryOfMessageID:      req.RetryOfMessageID,
@@ -256,9 +257,10 @@ func (h *ChatHandler) Completions(c *gin.Context) {
 		}
 	}
 	body, err := json.Marshal(openAIWebChatCompletionRequest{
-		Model:    req.Model,
-		Messages: messages,
-		Stream:   true,
+		Model:           req.Model,
+		Messages:        messages,
+		ReasoningEffort: req.ReasoningEffort,
+		Stream:          true,
 	})
 	if err != nil {
 		response.InternalError(c, "Failed to initialize chat request")
@@ -495,6 +497,7 @@ func (h *ChatHandler) finalizeChatCompletion(
 type webChatCompletionRequest struct {
 	ConversationID        string                        `json:"conversation_id"`
 	Model                 string                        `json:"model"`
+	ReasoningEffort       string                        `json:"reasoning_effort,omitempty"`
 	ExpectedHeadMessageID *string                       `json:"expected_head_message_id"`
 	UserMessage           *webChatCompletionUserMessage `json:"user_message,omitempty"`
 	RetryOfMessageID      string                        `json:"retry_of_message_id,omitempty"`
@@ -507,9 +510,10 @@ type webChatCompletionUserMessage struct {
 }
 
 type openAIWebChatCompletionRequest struct {
-	Model    string           `json:"model"`
-	Messages []webChatMessage `json:"messages"`
-	Stream   bool             `json:"stream"`
+	Model           string           `json:"model"`
+	Messages        []webChatMessage `json:"messages"`
+	ReasoningEffort string           `json:"reasoning_effort,omitempty"`
+	Stream          bool             `json:"stream"`
 }
 
 type webChatMessage struct {
@@ -528,6 +532,13 @@ func decodeWebChatCompletionRequest(c *gin.Context) (*webChatCompletionRequest, 
 	var trailing any
 	if err := decoder.Decode(&trailing); err != io.EOF {
 		return nil, err
+	}
+
+	req.ReasoningEffort = strings.ToLower(strings.TrimSpace(req.ReasoningEffort))
+	switch req.ReasoningEffort {
+	case "", "low", "medium", "high", "xhigh", "max":
+	default:
+		return nil, errors.New("invalid reasoning effort")
 	}
 
 	return &req, nil

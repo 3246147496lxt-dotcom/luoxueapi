@@ -444,6 +444,7 @@ func TestChatCompletionsClaimsAttemptBeforeForwarding(t *testing.T) {
 		strings.NewReader(`{
 			"conversation_id":"conversation-12345678",
 			"model":"gpt-5.5",
+			"reasoning_effort":"high",
 			"expected_head_message_id":"message-head-12345678",
 			"user_message":{"id":"message-user-12345678","content":"client-only user message"},
 			"assistant_message_id":"message-assistant-12345678"
@@ -486,7 +487,9 @@ func TestChatCompletionsClaimsAttemptBeforeForwarding(t *testing.T) {
 	require.Equal(t, int64(42), lease.userID)
 	require.Equal(t, "attempt-12345678", lease.attemptID)
 	require.Equal(t, "server-request-id", recorder.Header().Get("X-Client-Request-ID"))
+	require.Equal(t, "high", history.prepareInput.ReasoningEffort)
 	require.Contains(t, gateway.requestBody, `"content":"server-owned context"`)
+	require.Contains(t, gateway.requestBody, `"reasoning_effort":"high"`)
 	require.NotContains(t, gateway.requestBody, "client-only user message")
 }
 

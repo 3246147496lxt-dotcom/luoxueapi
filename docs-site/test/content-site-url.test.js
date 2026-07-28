@@ -5,6 +5,7 @@ import {
   DEVELOPMENT_MAIN_SITE_URL,
   PRODUCTION_MAIN_SITE_URL,
   resolveMainSiteUrl,
+  tutorials,
 } from "../src/content.js";
 
 test("开发环境默认返回本地主站，生产环境继续返回正式域名", () => {
@@ -33,4 +34,17 @@ test("无效覆盖值不会生成损坏或不安全的反向链接", () => {
       DEVELOPMENT_MAIN_SITE_URL,
     );
   }
+});
+
+test("Desktop 教程固定使用公开稳定版下载入口并覆盖 Gatekeeper 恢复路径", () => {
+  const desktop = tutorials.find((tutorial) => tutorial.id === "desktop");
+
+  assert.ok(desktop);
+  assert.equal(
+    desktop.steps[0].link.href,
+    `${PRODUCTION_MAIN_SITE_URL}/api/v1/public/desktop/releases/macos/latest/download`,
+  );
+  assert.match(desktop.steps[2].description, /隐私与安全/);
+  assert.match(desktop.steps[2].description, /仍要打开/);
+  assert.match(desktop.steps.at(-1).note.text, /恢复并准备卸载/);
 });

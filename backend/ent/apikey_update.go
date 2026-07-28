@@ -13,6 +13,7 @@ import (
 	"entgo.io/ent/dialect/sql/sqljson"
 	"entgo.io/ent/schema/field"
 	"github.com/Wei-Shaw/sub2api/ent/apikey"
+	"github.com/Wei-Shaw/sub2api/ent/desktopdevice"
 	"github.com/Wei-Shaw/sub2api/ent/group"
 	"github.com/Wei-Shaw/sub2api/ent/predicate"
 	"github.com/Wei-Shaw/sub2api/ent/usagelog"
@@ -145,6 +146,26 @@ func (_u *APIKeyUpdate) SetNillablePurpose(v *string) *APIKeyUpdate {
 	if v != nil {
 		_u.SetPurpose(*v)
 	}
+	return _u
+}
+
+// SetManagedDeviceID sets the "managed_device_id" field.
+func (_u *APIKeyUpdate) SetManagedDeviceID(v int64) *APIKeyUpdate {
+	_u.mutation.SetManagedDeviceID(v)
+	return _u
+}
+
+// SetNillableManagedDeviceID sets the "managed_device_id" field if the given value is not nil.
+func (_u *APIKeyUpdate) SetNillableManagedDeviceID(v *int64) *APIKeyUpdate {
+	if v != nil {
+		_u.SetManagedDeviceID(*v)
+	}
+	return _u
+}
+
+// ClearManagedDeviceID clears the value of the "managed_device_id" field.
+func (_u *APIKeyUpdate) ClearManagedDeviceID() *APIKeyUpdate {
+	_u.mutation.ClearManagedDeviceID()
 	return _u
 }
 
@@ -462,6 +483,11 @@ func (_u *APIKeyUpdate) SetGroup(v *Group) *APIKeyUpdate {
 	return _u.SetGroupID(v.ID)
 }
 
+// SetManagedDevice sets the "managed_device" edge to the DesktopDevice entity.
+func (_u *APIKeyUpdate) SetManagedDevice(v *DesktopDevice) *APIKeyUpdate {
+	return _u.SetManagedDeviceID(v.ID)
+}
+
 // AddUsageLogIDs adds the "usage_logs" edge to the UsageLog entity by IDs.
 func (_u *APIKeyUpdate) AddUsageLogIDs(ids ...int64) *APIKeyUpdate {
 	_u.mutation.AddUsageLogIDs(ids...)
@@ -491,6 +517,12 @@ func (_u *APIKeyUpdate) ClearUser() *APIKeyUpdate {
 // ClearGroup clears the "group" edge to the Group entity.
 func (_u *APIKeyUpdate) ClearGroup() *APIKeyUpdate {
 	_u.mutation.ClearGroup()
+	return _u
+}
+
+// ClearManagedDevice clears the "managed_device" edge to the DesktopDevice entity.
+func (_u *APIKeyUpdate) ClearManagedDevice() *APIKeyUpdate {
+	_u.mutation.ClearManagedDevice()
 	return _u
 }
 
@@ -776,6 +808,35 @@ func (_u *APIKeyUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 		}
 		_spec.Edges.Add = append(_spec.Edges.Add, edge)
 	}
+	if _u.mutation.ManagedDeviceCleared() {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.M2O,
+			Inverse: true,
+			Table:   apikey.ManagedDeviceTable,
+			Columns: []string{apikey.ManagedDeviceColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(desktopdevice.FieldID, field.TypeInt64),
+			},
+		}
+		_spec.Edges.Clear = append(_spec.Edges.Clear, edge)
+	}
+	if nodes := _u.mutation.ManagedDeviceIDs(); len(nodes) > 0 {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.M2O,
+			Inverse: true,
+			Table:   apikey.ManagedDeviceTable,
+			Columns: []string{apikey.ManagedDeviceColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(desktopdevice.FieldID, field.TypeInt64),
+			},
+		}
+		for _, k := range nodes {
+			edge.Target.Nodes = append(edge.Target.Nodes, k)
+		}
+		_spec.Edges.Add = append(_spec.Edges.Add, edge)
+	}
 	if _u.mutation.UsageLogsCleared() {
 		edge := &sqlgraph.EdgeSpec{
 			Rel:     sqlgraph.O2M,
@@ -954,6 +1015,26 @@ func (_u *APIKeyUpdateOne) SetNillablePurpose(v *string) *APIKeyUpdateOne {
 	if v != nil {
 		_u.SetPurpose(*v)
 	}
+	return _u
+}
+
+// SetManagedDeviceID sets the "managed_device_id" field.
+func (_u *APIKeyUpdateOne) SetManagedDeviceID(v int64) *APIKeyUpdateOne {
+	_u.mutation.SetManagedDeviceID(v)
+	return _u
+}
+
+// SetNillableManagedDeviceID sets the "managed_device_id" field if the given value is not nil.
+func (_u *APIKeyUpdateOne) SetNillableManagedDeviceID(v *int64) *APIKeyUpdateOne {
+	if v != nil {
+		_u.SetManagedDeviceID(*v)
+	}
+	return _u
+}
+
+// ClearManagedDeviceID clears the value of the "managed_device_id" field.
+func (_u *APIKeyUpdateOne) ClearManagedDeviceID() *APIKeyUpdateOne {
+	_u.mutation.ClearManagedDeviceID()
 	return _u
 }
 
@@ -1271,6 +1352,11 @@ func (_u *APIKeyUpdateOne) SetGroup(v *Group) *APIKeyUpdateOne {
 	return _u.SetGroupID(v.ID)
 }
 
+// SetManagedDevice sets the "managed_device" edge to the DesktopDevice entity.
+func (_u *APIKeyUpdateOne) SetManagedDevice(v *DesktopDevice) *APIKeyUpdateOne {
+	return _u.SetManagedDeviceID(v.ID)
+}
+
 // AddUsageLogIDs adds the "usage_logs" edge to the UsageLog entity by IDs.
 func (_u *APIKeyUpdateOne) AddUsageLogIDs(ids ...int64) *APIKeyUpdateOne {
 	_u.mutation.AddUsageLogIDs(ids...)
@@ -1300,6 +1386,12 @@ func (_u *APIKeyUpdateOne) ClearUser() *APIKeyUpdateOne {
 // ClearGroup clears the "group" edge to the Group entity.
 func (_u *APIKeyUpdateOne) ClearGroup() *APIKeyUpdateOne {
 	_u.mutation.ClearGroup()
+	return _u
+}
+
+// ClearManagedDevice clears the "managed_device" edge to the DesktopDevice entity.
+func (_u *APIKeyUpdateOne) ClearManagedDevice() *APIKeyUpdateOne {
+	_u.mutation.ClearManagedDevice()
 	return _u
 }
 
@@ -1608,6 +1700,35 @@ func (_u *APIKeyUpdateOne) sqlSave(ctx context.Context) (_node *APIKey, err erro
 			Bidi:    false,
 			Target: &sqlgraph.EdgeTarget{
 				IDSpec: sqlgraph.NewFieldSpec(group.FieldID, field.TypeInt64),
+			},
+		}
+		for _, k := range nodes {
+			edge.Target.Nodes = append(edge.Target.Nodes, k)
+		}
+		_spec.Edges.Add = append(_spec.Edges.Add, edge)
+	}
+	if _u.mutation.ManagedDeviceCleared() {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.M2O,
+			Inverse: true,
+			Table:   apikey.ManagedDeviceTable,
+			Columns: []string{apikey.ManagedDeviceColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(desktopdevice.FieldID, field.TypeInt64),
+			},
+		}
+		_spec.Edges.Clear = append(_spec.Edges.Clear, edge)
+	}
+	if nodes := _u.mutation.ManagedDeviceIDs(); len(nodes) > 0 {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.M2O,
+			Inverse: true,
+			Table:   apikey.ManagedDeviceTable,
+			Columns: []string{apikey.ManagedDeviceColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(desktopdevice.FieldID, field.TypeInt64),
 			},
 		}
 		for _, k := range nodes {

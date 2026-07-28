@@ -12,6 +12,7 @@ import (
 	"entgo.io/ent/dialect/sql/sqlgraph"
 	"entgo.io/ent/schema/field"
 	"github.com/Wei-Shaw/sub2api/ent/apikey"
+	"github.com/Wei-Shaw/sub2api/ent/desktopdevice"
 	"github.com/Wei-Shaw/sub2api/ent/group"
 	"github.com/Wei-Shaw/sub2api/ent/usagelog"
 	"github.com/Wei-Shaw/sub2api/ent/user"
@@ -123,6 +124,20 @@ func (_c *APIKeyCreate) SetPurpose(v string) *APIKeyCreate {
 func (_c *APIKeyCreate) SetNillablePurpose(v *string) *APIKeyCreate {
 	if v != nil {
 		_c.SetPurpose(*v)
+	}
+	return _c
+}
+
+// SetManagedDeviceID sets the "managed_device_id" field.
+func (_c *APIKeyCreate) SetManagedDeviceID(v int64) *APIKeyCreate {
+	_c.mutation.SetManagedDeviceID(v)
+	return _c
+}
+
+// SetNillableManagedDeviceID sets the "managed_device_id" field if the given value is not nil.
+func (_c *APIKeyCreate) SetNillableManagedDeviceID(v *int64) *APIKeyCreate {
+	if v != nil {
+		_c.SetManagedDeviceID(*v)
 	}
 	return _c
 }
@@ -329,6 +344,11 @@ func (_c *APIKeyCreate) SetUser(v *User) *APIKeyCreate {
 // SetGroup sets the "group" edge to the Group entity.
 func (_c *APIKeyCreate) SetGroup(v *Group) *APIKeyCreate {
 	return _c.SetGroupID(v.ID)
+}
+
+// SetManagedDevice sets the "managed_device" edge to the DesktopDevice entity.
+func (_c *APIKeyCreate) SetManagedDevice(v *DesktopDevice) *APIKeyCreate {
+	return _c.SetManagedDeviceID(v.ID)
 }
 
 // AddUsageLogIDs adds the "usage_logs" edge to the UsageLog entity by IDs.
@@ -659,6 +679,23 @@ func (_c *APIKeyCreate) createSpec() (*APIKey, *sqlgraph.CreateSpec) {
 		_node.GroupID = &nodes[0]
 		_spec.Edges = append(_spec.Edges, edge)
 	}
+	if nodes := _c.mutation.ManagedDeviceIDs(); len(nodes) > 0 {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.M2O,
+			Inverse: true,
+			Table:   apikey.ManagedDeviceTable,
+			Columns: []string{apikey.ManagedDeviceColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(desktopdevice.FieldID, field.TypeInt64),
+			},
+		}
+		for _, k := range nodes {
+			edge.Target.Nodes = append(edge.Target.Nodes, k)
+		}
+		_node.ManagedDeviceID = &nodes[0]
+		_spec.Edges = append(_spec.Edges, edge)
+	}
 	if nodes := _c.mutation.UsageLogsIDs(); len(nodes) > 0 {
 		edge := &sqlgraph.EdgeSpec{
 			Rel:     sqlgraph.O2M,
@@ -832,6 +869,24 @@ func (u *APIKeyUpsert) SetPurpose(v string) *APIKeyUpsert {
 // UpdatePurpose sets the "purpose" field to the value that was provided on create.
 func (u *APIKeyUpsert) UpdatePurpose() *APIKeyUpsert {
 	u.SetExcluded(apikey.FieldPurpose)
+	return u
+}
+
+// SetManagedDeviceID sets the "managed_device_id" field.
+func (u *APIKeyUpsert) SetManagedDeviceID(v int64) *APIKeyUpsert {
+	u.Set(apikey.FieldManagedDeviceID, v)
+	return u
+}
+
+// UpdateManagedDeviceID sets the "managed_device_id" field to the value that was provided on create.
+func (u *APIKeyUpsert) UpdateManagedDeviceID() *APIKeyUpsert {
+	u.SetExcluded(apikey.FieldManagedDeviceID)
+	return u
+}
+
+// ClearManagedDeviceID clears the value of the "managed_device_id" field.
+func (u *APIKeyUpsert) ClearManagedDeviceID() *APIKeyUpsert {
+	u.SetNull(apikey.FieldManagedDeviceID)
 	return u
 }
 
@@ -1273,6 +1328,27 @@ func (u *APIKeyUpsertOne) SetPurpose(v string) *APIKeyUpsertOne {
 func (u *APIKeyUpsertOne) UpdatePurpose() *APIKeyUpsertOne {
 	return u.Update(func(s *APIKeyUpsert) {
 		s.UpdatePurpose()
+	})
+}
+
+// SetManagedDeviceID sets the "managed_device_id" field.
+func (u *APIKeyUpsertOne) SetManagedDeviceID(v int64) *APIKeyUpsertOne {
+	return u.Update(func(s *APIKeyUpsert) {
+		s.SetManagedDeviceID(v)
+	})
+}
+
+// UpdateManagedDeviceID sets the "managed_device_id" field to the value that was provided on create.
+func (u *APIKeyUpsertOne) UpdateManagedDeviceID() *APIKeyUpsertOne {
+	return u.Update(func(s *APIKeyUpsert) {
+		s.UpdateManagedDeviceID()
+	})
+}
+
+// ClearManagedDeviceID clears the value of the "managed_device_id" field.
+func (u *APIKeyUpsertOne) ClearManagedDeviceID() *APIKeyUpsertOne {
+	return u.Update(func(s *APIKeyUpsert) {
+		s.ClearManagedDeviceID()
 	})
 }
 
@@ -1925,6 +2001,27 @@ func (u *APIKeyUpsertBulk) SetPurpose(v string) *APIKeyUpsertBulk {
 func (u *APIKeyUpsertBulk) UpdatePurpose() *APIKeyUpsertBulk {
 	return u.Update(func(s *APIKeyUpsert) {
 		s.UpdatePurpose()
+	})
+}
+
+// SetManagedDeviceID sets the "managed_device_id" field.
+func (u *APIKeyUpsertBulk) SetManagedDeviceID(v int64) *APIKeyUpsertBulk {
+	return u.Update(func(s *APIKeyUpsert) {
+		s.SetManagedDeviceID(v)
+	})
+}
+
+// UpdateManagedDeviceID sets the "managed_device_id" field to the value that was provided on create.
+func (u *APIKeyUpsertBulk) UpdateManagedDeviceID() *APIKeyUpsertBulk {
+	return u.Update(func(s *APIKeyUpsert) {
+		s.UpdateManagedDeviceID()
+	})
+}
+
+// ClearManagedDeviceID clears the value of the "managed_device_id" field.
+func (u *APIKeyUpsertBulk) ClearManagedDeviceID() *APIKeyUpsertBulk {
+	return u.Update(func(s *APIKeyUpsert) {
+		s.ClearManagedDeviceID()
 	})
 }
 

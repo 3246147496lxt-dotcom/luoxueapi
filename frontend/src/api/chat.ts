@@ -1143,6 +1143,9 @@ async function postCompletion(
     body: JSON.stringify({
       conversation_id: request.conversationId,
       model: request.model.trim(),
+      ...(request.reasoningEffort
+        ? { reasoning_effort: request.reasoningEffort }
+        : {}),
       expected_head_message_id: request.expectedHeadMessageId,
       ...(request.userMessage
         ? {

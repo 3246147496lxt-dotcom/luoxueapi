@@ -57,6 +57,7 @@ func buildApplicationSupervisor(
 	contentModeration *service.ContentModerationService,
 	batchImageCleanup *service.BatchImageCleanupService,
 	idempotencyCleanup *service.IdempotencyCleanupService,
+	desktopCleanup *service.DesktopCleanupService,
 	chatAttemptRecovery *service.ChatAttemptService,
 	dashboardAggregation *service.DashboardAggregationService,
 	usageCleanup *service.UsageCleanupService,
@@ -254,6 +255,7 @@ func buildApplicationSupervisor(
 		// Periodic producers start last, so shutdown disables them first.
 		applicationVoidLifecycleComponent("batch-image-cleanup", batchImageCleanup.Start, batchImageCleanup.Stop),
 		applicationVoidLifecycleComponent("idempotency-cleanup", idempotencyCleanup.Start, idempotencyCleanup.Stop),
+		applicationVoidLifecycleComponent("desktop-cleanup", desktopCleanup.Start, desktopCleanup.Stop),
 		lifecycle.ComponentFuncs{
 			ComponentName: "chat-attempt-recovery",
 			StartFunc:     chatAttemptRecovery.StartRecovery,

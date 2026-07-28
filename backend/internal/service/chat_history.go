@@ -177,6 +177,7 @@ type ChatCompletionHistoryUserMessage struct {
 type PrepareChatCompletionInput struct {
 	ConversationID        string
 	Model                 string
+	ReasoningEffort       string
 	ExpectedHeadMessageID *string
 	UserMessage           *ChatCompletionHistoryUserMessage
 	RetryOfMessageID      string
@@ -419,6 +420,7 @@ func (s *ChatHistoryService) PrepareCompletion(
 	normalized := *input
 	normalized.ConversationID = strings.TrimSpace(normalized.ConversationID)
 	normalized.Model = strings.TrimSpace(normalized.Model)
+	normalized.ReasoningEffort = strings.TrimSpace(normalized.ReasoningEffort)
 	normalized.AssistantMessageID = strings.TrimSpace(normalized.AssistantMessageID)
 	normalized.RetryOfMessageID = strings.TrimSpace(normalized.RetryOfMessageID)
 	normalized.AttemptID = strings.TrimSpace(attemptID)
@@ -464,6 +466,7 @@ func (s *ChatHistoryService) PrepareCompletion(
 	hashPayload := struct {
 		ConversationID        string                            `json:"conversation_id"`
 		Model                 string                            `json:"model"`
+		ReasoningEffort       string                            `json:"reasoning_effort,omitempty"`
 		ExpectedHeadMessageID *string                           `json:"expected_head_message_id"`
 		UserMessage           *ChatCompletionHistoryUserMessage `json:"user_message,omitempty"`
 		RetryOfMessageID      string                            `json:"retry_of_message_id,omitempty"`
@@ -471,6 +474,7 @@ func (s *ChatHistoryService) PrepareCompletion(
 	}{
 		ConversationID:        normalized.ConversationID,
 		Model:                 normalized.Model,
+		ReasoningEffort:       normalized.ReasoningEffort,
 		ExpectedHeadMessageID: normalized.ExpectedHeadMessageID,
 		UserMessage:           normalized.UserMessage,
 		RetryOfMessageID:      normalized.RetryOfMessageID,

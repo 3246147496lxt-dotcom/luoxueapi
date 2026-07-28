@@ -211,6 +211,7 @@ func TestChatHistoryPrepareCompletionCanonicalizesEnvelopeAndHashesIt(t *testing
 		&PrepareChatCompletionInput{
 			ConversationID:        " conversation-12345678 ",
 			Model:                 " gpt-5.5 ",
+			ReasoningEffort:       " high ",
 			ExpectedHeadMessageID: &expectedHead,
 			UserMessage: &ChatCompletionHistoryUserMessage{
 				ID:      " message-user-12345678 ",
@@ -223,6 +224,7 @@ func TestChatHistoryPrepareCompletionCanonicalizesEnvelopeAndHashesIt(t *testing
 	require.NoError(t, err)
 	require.True(t, result.Claimed)
 	require.Equal(t, "conversation-12345678", repo.prepareInput.ConversationID)
+	require.Equal(t, "high", repo.prepareInput.ReasoningEffort)
 	require.Equal(t, "message-head-12345678", *repo.prepareInput.ExpectedHeadMessageID)
 	require.Equal(t, "  preserve prompt spacing  ", repo.prepareInput.UserMessage.Content)
 	require.Equal(t, maxChatCompletionContextMessages, repo.prepareInput.ContextMessageLimit)

@@ -35,6 +35,8 @@ export default {
       profileHint: '修改头像与昵称',
       connections: '身份绑定',
       connectionsHint: '管理邮箱和第三方登录方式',
+      desktopDevices: '已登录设备',
+      desktopDevicesHint: '管理落雪API Desktop 的设备授权',
       email: '登录邮箱',
       noEmail: '尚未设置邮箱',
       loadError: '账户信息刷新失败，当前仍显示已缓存的信息。',

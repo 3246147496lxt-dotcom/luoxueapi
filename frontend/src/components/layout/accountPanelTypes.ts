@@ -1,5 +1,6 @@
 export type AccountPanelIcon =
   | 'wallet'
+  | 'creditCard'
   | 'destinationHome'
   | 'destinationModels'
   | 'destinationContact'

@@ -27,3 +27,15 @@ func TestAdminChatContentReadIsRegisteredAsSensitiveRead(t *testing.T) {
 		t.Fatalf("sensitive read action = %q, want admin.chat.conversation.view", got)
 	}
 }
+
+func TestDesktopDiagnosticDetailAndDownloadAreRegisteredAsSensitiveReads(t *testing.T) {
+	cases := map[string]string{
+		"GET /api/v1/admin/desktop/diagnostics/:id":          "admin.desktop_diagnostics.view",
+		"GET /api/v1/admin/desktop/diagnostics/:id/download": "admin.desktop_diagnostics.download",
+	}
+	for route, action := range cases {
+		if got := auditSensitiveReads[route]; got != action {
+			t.Fatalf("sensitive read action for %s = %q, want %q", route, got, action)
+		}
+	}
+}

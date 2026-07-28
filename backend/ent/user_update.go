@@ -14,6 +14,8 @@ import (
 	"github.com/Wei-Shaw/sub2api/ent/announcementread"
 	"github.com/Wei-Shaw/sub2api/ent/apikey"
 	"github.com/Wei-Shaw/sub2api/ent/authidentity"
+	"github.com/Wei-Shaw/sub2api/ent/desktopdevice"
+	"github.com/Wei-Shaw/sub2api/ent/desktopdiagnostic"
 	"github.com/Wei-Shaw/sub2api/ent/group"
 	"github.com/Wei-Shaw/sub2api/ent/paymentorder"
 	"github.com/Wei-Shaw/sub2api/ent/pendingauthsession"
@@ -627,6 +629,36 @@ func (_u *UserUpdate) AddPlatformQuotas(v ...*UserPlatformQuota) *UserUpdate {
 	return _u.AddPlatformQuotaIDs(ids...)
 }
 
+// AddDesktopDeviceIDs adds the "desktop_devices" edge to the DesktopDevice entity by IDs.
+func (_u *UserUpdate) AddDesktopDeviceIDs(ids ...int64) *UserUpdate {
+	_u.mutation.AddDesktopDeviceIDs(ids...)
+	return _u
+}
+
+// AddDesktopDevices adds the "desktop_devices" edges to the DesktopDevice entity.
+func (_u *UserUpdate) AddDesktopDevices(v ...*DesktopDevice) *UserUpdate {
+	ids := make([]int64, len(v))
+	for i := range v {
+		ids[i] = v[i].ID
+	}
+	return _u.AddDesktopDeviceIDs(ids...)
+}
+
+// AddDesktopDiagnosticIDs adds the "desktop_diagnostics" edge to the DesktopDiagnostic entity by IDs.
+func (_u *UserUpdate) AddDesktopDiagnosticIDs(ids ...int64) *UserUpdate {
+	_u.mutation.AddDesktopDiagnosticIDs(ids...)
+	return _u
+}
+
+// AddDesktopDiagnostics adds the "desktop_diagnostics" edges to the DesktopDiagnostic entity.
+func (_u *UserUpdate) AddDesktopDiagnostics(v ...*DesktopDiagnostic) *UserUpdate {
+	ids := make([]int64, len(v))
+	for i := range v {
+		ids[i] = v[i].ID
+	}
+	return _u.AddDesktopDiagnosticIDs(ids...)
+}
+
 // Mutation returns the UserMutation object of the builder.
 func (_u *UserUpdate) Mutation() *UserMutation {
 	return _u.mutation
@@ -903,6 +935,48 @@ func (_u *UserUpdate) RemovePlatformQuotas(v ...*UserPlatformQuota) *UserUpdate 
 		ids[i] = v[i].ID
 	}
 	return _u.RemovePlatformQuotaIDs(ids...)
+}
+
+// ClearDesktopDevices clears all "desktop_devices" edges to the DesktopDevice entity.
+func (_u *UserUpdate) ClearDesktopDevices() *UserUpdate {
+	_u.mutation.ClearDesktopDevices()
+	return _u
+}
+
+// RemoveDesktopDeviceIDs removes the "desktop_devices" edge to DesktopDevice entities by IDs.
+func (_u *UserUpdate) RemoveDesktopDeviceIDs(ids ...int64) *UserUpdate {
+	_u.mutation.RemoveDesktopDeviceIDs(ids...)
+	return _u
+}
+
+// RemoveDesktopDevices removes "desktop_devices" edges to DesktopDevice entities.
+func (_u *UserUpdate) RemoveDesktopDevices(v ...*DesktopDevice) *UserUpdate {
+	ids := make([]int64, len(v))
+	for i := range v {
+		ids[i] = v[i].ID
+	}
+	return _u.RemoveDesktopDeviceIDs(ids...)
+}
+
+// ClearDesktopDiagnostics clears all "desktop_diagnostics" edges to the DesktopDiagnostic entity.
+func (_u *UserUpdate) ClearDesktopDiagnostics() *UserUpdate {
+	_u.mutation.ClearDesktopDiagnostics()
+	return _u
+}
+
+// RemoveDesktopDiagnosticIDs removes the "desktop_diagnostics" edge to DesktopDiagnostic entities by IDs.
+func (_u *UserUpdate) RemoveDesktopDiagnosticIDs(ids ...int64) *UserUpdate {
+	_u.mutation.RemoveDesktopDiagnosticIDs(ids...)
+	return _u
+}
+
+// RemoveDesktopDiagnostics removes "desktop_diagnostics" edges to DesktopDiagnostic entities.
+func (_u *UserUpdate) RemoveDesktopDiagnostics(v ...*DesktopDiagnostic) *UserUpdate {
+	ids := make([]int64, len(v))
+	for i := range v {
+		ids[i] = v[i].ID
+	}
+	return _u.RemoveDesktopDiagnosticIDs(ids...)
 }
 
 // Save executes the query and returns the number of nodes affected by the update operation.
@@ -1696,6 +1770,96 @@ func (_u *UserUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 		}
 		_spec.Edges.Add = append(_spec.Edges.Add, edge)
 	}
+	if _u.mutation.DesktopDevicesCleared() {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.O2M,
+			Inverse: false,
+			Table:   user.DesktopDevicesTable,
+			Columns: []string{user.DesktopDevicesColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(desktopdevice.FieldID, field.TypeInt64),
+			},
+		}
+		_spec.Edges.Clear = append(_spec.Edges.Clear, edge)
+	}
+	if nodes := _u.mutation.RemovedDesktopDevicesIDs(); len(nodes) > 0 && !_u.mutation.DesktopDevicesCleared() {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.O2M,
+			Inverse: false,
+			Table:   user.DesktopDevicesTable,
+			Columns: []string{user.DesktopDevicesColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(desktopdevice.FieldID, field.TypeInt64),
+			},
+		}
+		for _, k := range nodes {
+			edge.Target.Nodes = append(edge.Target.Nodes, k)
+		}
+		_spec.Edges.Clear = append(_spec.Edges.Clear, edge)
+	}
+	if nodes := _u.mutation.DesktopDevicesIDs(); len(nodes) > 0 {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.O2M,
+			Inverse: false,
+			Table:   user.DesktopDevicesTable,
+			Columns: []string{user.DesktopDevicesColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(desktopdevice.FieldID, field.TypeInt64),
+			},
+		}
+		for _, k := range nodes {
+			edge.Target.Nodes = append(edge.Target.Nodes, k)
+		}
+		_spec.Edges.Add = append(_spec.Edges.Add, edge)
+	}
+	if _u.mutation.DesktopDiagnosticsCleared() {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.O2M,
+			Inverse: false,
+			Table:   user.DesktopDiagnosticsTable,
+			Columns: []string{user.DesktopDiagnosticsColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(desktopdiagnostic.FieldID, field.TypeInt64),
+			},
+		}
+		_spec.Edges.Clear = append(_spec.Edges.Clear, edge)
+	}
+	if nodes := _u.mutation.RemovedDesktopDiagnosticsIDs(); len(nodes) > 0 && !_u.mutation.DesktopDiagnosticsCleared() {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.O2M,
+			Inverse: false,
+			Table:   user.DesktopDiagnosticsTable,
+			Columns: []string{user.DesktopDiagnosticsColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(desktopdiagnostic.FieldID, field.TypeInt64),
+			},
+		}
+		for _, k := range nodes {
+			edge.Target.Nodes = append(edge.Target.Nodes, k)
+		}
+		_spec.Edges.Clear = append(_spec.Edges.Clear, edge)
+	}
+	if nodes := _u.mutation.DesktopDiagnosticsIDs(); len(nodes) > 0 {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.O2M,
+			Inverse: false,
+			Table:   user.DesktopDiagnosticsTable,
+			Columns: []string{user.DesktopDiagnosticsColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(desktopdiagnostic.FieldID, field.TypeInt64),
+			},
+		}
+		for _, k := range nodes {
+			edge.Target.Nodes = append(edge.Target.Nodes, k)
+		}
+		_spec.Edges.Add = append(_spec.Edges.Add, edge)
+	}
 	if _node, err = sqlgraph.UpdateNodes(ctx, _u.driver, _spec); err != nil {
 		if _, ok := err.(*sqlgraph.NotFoundError); ok {
 			err = &NotFoundError{user.Label}
@@ -2303,6 +2467,36 @@ func (_u *UserUpdateOne) AddPlatformQuotas(v ...*UserPlatformQuota) *UserUpdateO
 	return _u.AddPlatformQuotaIDs(ids...)
 }
 
+// AddDesktopDeviceIDs adds the "desktop_devices" edge to the DesktopDevice entity by IDs.
+func (_u *UserUpdateOne) AddDesktopDeviceIDs(ids ...int64) *UserUpdateOne {
+	_u.mutation.AddDesktopDeviceIDs(ids...)
+	return _u
+}
+
+// AddDesktopDevices adds the "desktop_devices" edges to the DesktopDevice entity.
+func (_u *UserUpdateOne) AddDesktopDevices(v ...*DesktopDevice) *UserUpdateOne {
+	ids := make([]int64, len(v))
+	for i := range v {
+		ids[i] = v[i].ID
+	}
+	return _u.AddDesktopDeviceIDs(ids...)
+}
+
+// AddDesktopDiagnosticIDs adds the "desktop_diagnostics" edge to the DesktopDiagnostic entity by IDs.
+func (_u *UserUpdateOne) AddDesktopDiagnosticIDs(ids ...int64) *UserUpdateOne {
+	_u.mutation.AddDesktopDiagnosticIDs(ids...)
+	return _u
+}
+
+// AddDesktopDiagnostics adds the "desktop_diagnostics" edges to the DesktopDiagnostic entity.
+func (_u *UserUpdateOne) AddDesktopDiagnostics(v ...*DesktopDiagnostic) *UserUpdateOne {
+	ids := make([]int64, len(v))
+	for i := range v {
+		ids[i] = v[i].ID
+	}
+	return _u.AddDesktopDiagnosticIDs(ids...)
+}
+
 // Mutation returns the UserMutation object of the builder.
 func (_u *UserUpdateOne) Mutation() *UserMutation {
 	return _u.mutation
@@ -2579,6 +2773,48 @@ func (_u *UserUpdateOne) RemovePlatformQuotas(v ...*UserPlatformQuota) *UserUpda
 		ids[i] = v[i].ID
 	}
 	return _u.RemovePlatformQuotaIDs(ids...)
+}
+
+// ClearDesktopDevices clears all "desktop_devices" edges to the DesktopDevice entity.
+func (_u *UserUpdateOne) ClearDesktopDevices() *UserUpdateOne {
+	_u.mutation.ClearDesktopDevices()
+	return _u
+}
+
+// RemoveDesktopDeviceIDs removes the "desktop_devices" edge to DesktopDevice entities by IDs.
+func (_u *UserUpdateOne) RemoveDesktopDeviceIDs(ids ...int64) *UserUpdateOne {
+	_u.mutation.RemoveDesktopDeviceIDs(ids...)
+	return _u
+}
+
+// RemoveDesktopDevices removes "desktop_devices" edges to DesktopDevice entities.
+func (_u *UserUpdateOne) RemoveDesktopDevices(v ...*DesktopDevice) *UserUpdateOne {
+	ids := make([]int64, len(v))
+	for i := range v {
+		ids[i] = v[i].ID
+	}
+	return _u.RemoveDesktopDeviceIDs(ids...)
+}
+
+// ClearDesktopDiagnostics clears all "desktop_diagnostics" edges to the DesktopDiagnostic entity.
+func (_u *UserUpdateOne) ClearDesktopDiagnostics() *UserUpdateOne {
+	_u.mutation.ClearDesktopDiagnostics()
+	return _u
+}
+
+// RemoveDesktopDiagnosticIDs removes the "desktop_diagnostics" edge to DesktopDiagnostic entities by IDs.
+func (_u *UserUpdateOne) RemoveDesktopDiagnosticIDs(ids ...int64) *UserUpdateOne {
+	_u.mutation.RemoveDesktopDiagnosticIDs(ids...)
+	return _u
+}
+
+// RemoveDesktopDiagnostics removes "desktop_diagnostics" edges to DesktopDiagnostic entities.
+func (_u *UserUpdateOne) RemoveDesktopDiagnostics(v ...*DesktopDiagnostic) *UserUpdateOne {
+	ids := make([]int64, len(v))
+	for i := range v {
+		ids[i] = v[i].ID
+	}
+	return _u.RemoveDesktopDiagnosticIDs(ids...)
 }
 
 // Where appends a list predicates to the UserUpdate builder.
@@ -3395,6 +3631,96 @@ func (_u *UserUpdateOne) sqlSave(ctx context.Context) (_node *User, err error) {
 			Bidi:    false,
 			Target: &sqlgraph.EdgeTarget{
 				IDSpec: sqlgraph.NewFieldSpec(userplatformquota.FieldID, field.TypeInt64),
+			},
+		}
+		for _, k := range nodes {
+			edge.Target.Nodes = append(edge.Target.Nodes, k)
+		}
+		_spec.Edges.Add = append(_spec.Edges.Add, edge)
+	}
+	if _u.mutation.DesktopDevicesCleared() {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.O2M,
+			Inverse: false,
+			Table:   user.DesktopDevicesTable,
+			Columns: []string{user.DesktopDevicesColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(desktopdevice.FieldID, field.TypeInt64),
+			},
+		}
+		_spec.Edges.Clear = append(_spec.Edges.Clear, edge)
+	}
+	if nodes := _u.mutation.RemovedDesktopDevicesIDs(); len(nodes) > 0 && !_u.mutation.DesktopDevicesCleared() {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.O2M,
+			Inverse: false,
+			Table:   user.DesktopDevicesTable,
+			Columns: []string{user.DesktopDevicesColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(desktopdevice.FieldID, field.TypeInt64),
+			},
+		}
+		for _, k := range nodes {
+			edge.Target.Nodes = append(edge.Target.Nodes, k)
+		}
+		_spec.Edges.Clear = append(_spec.Edges.Clear, edge)
+	}
+	if nodes := _u.mutation.DesktopDevicesIDs(); len(nodes) > 0 {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.O2M,
+			Inverse: false,
+			Table:   user.DesktopDevicesTable,
+			Columns: []string{user.DesktopDevicesColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(desktopdevice.FieldID, field.TypeInt64),
+			},
+		}
+		for _, k := range nodes {
+			edge.Target.Nodes = append(edge.Target.Nodes, k)
+		}
+		_spec.Edges.Add = append(_spec.Edges.Add, edge)
+	}
+	if _u.mutation.DesktopDiagnosticsCleared() {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.O2M,
+			Inverse: false,
+			Table:   user.DesktopDiagnosticsTable,
+			Columns: []string{user.DesktopDiagnosticsColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(desktopdiagnostic.FieldID, field.TypeInt64),
+			},
+		}
+		_spec.Edges.Clear = append(_spec.Edges.Clear, edge)
+	}
+	if nodes := _u.mutation.RemovedDesktopDiagnosticsIDs(); len(nodes) > 0 && !_u.mutation.DesktopDiagnosticsCleared() {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.O2M,
+			Inverse: false,
+			Table:   user.DesktopDiagnosticsTable,
+			Columns: []string{user.DesktopDiagnosticsColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(desktopdiagnostic.FieldID, field.TypeInt64),
+			},
+		}
+		for _, k := range nodes {
+			edge.Target.Nodes = append(edge.Target.Nodes, k)
+		}
+		_spec.Edges.Clear = append(_spec.Edges.Clear, edge)
+	}
+	if nodes := _u.mutation.DesktopDiagnosticsIDs(); len(nodes) > 0 {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.O2M,
+			Inverse: false,
+			Table:   user.DesktopDiagnosticsTable,
+			Columns: []string{user.DesktopDiagnosticsColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(desktopdiagnostic.FieldID, field.TypeInt64),
 			},
 		}
 		for _, k := range nodes {

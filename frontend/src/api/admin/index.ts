@@ -37,6 +37,7 @@ import auditAPI from './audit'
 import modelCatalogAPI from './modelCatalog'
 import documentationAPI from './documentation'
 import chatHistoryAPI from './chatHistory'
+import desktopDiagnosticsAPI from './desktopDiagnostics'
 
 /**
  * Unified admin API object for convenient access
@@ -75,7 +76,8 @@ export const adminAPI = {
   audit: auditAPI,
   modelCatalog: modelCatalogAPI,
   documentation: documentationAPI,
-  chatHistory: chatHistoryAPI
+  chatHistory: chatHistoryAPI,
+  desktopDiagnostics: desktopDiagnosticsAPI
 }
 
 export {
@@ -112,7 +114,8 @@ export {
   auditAPI,
   modelCatalogAPI,
   documentationAPI,
-  chatHistoryAPI
+  chatHistoryAPI,
+  desktopDiagnosticsAPI
 }
 
 export default adminAPI
@@ -163,3 +166,9 @@ export type {
   AdminChatMessage,
   AdminChatRequestOptions,
 } from './chatHistory'
+export type {
+  DesktopDiagnosticDetail,
+  DesktopDiagnosticListResponse,
+  DesktopDiagnosticMetadata,
+  DesktopDiagnosticUpload,
+} from './desktopDiagnostics'

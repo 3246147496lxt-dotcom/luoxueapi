@@ -44,6 +44,28 @@ export default {
       recommended: '推荐',
       loadFailed: '模型列表加载失败',
     },
+    settings: {
+      label: '模型 {model}，推理强度 {effort}',
+      menuLabel: '模型与推理设置',
+      model: '模型',
+      reasoning: '推理强度',
+      back: '返回设置',
+      searchModels: '搜索模型',
+      reasoningLevels: {
+        auto: '自动',
+        low: '低',
+        medium: '中',
+        high: '高',
+        xhigh: '极高',
+      },
+      reasoningDescriptions: {
+        auto: '使用模型默认设置',
+        low: '优先响应速度',
+        medium: '平衡速度与思考',
+        high: '进行更深入的推理',
+        xhigh: '使用最长的思考时间',
+      },
+    },
     balance: {
       available: '可用余额',
       insufficient: '余额不足，暂时无法继续发送消息。',

@@ -127,6 +127,8 @@ type authCacheStub struct {
 	getAuthCache   func(ctx context.Context, key string) (*APIKeyAuthCacheEntry, error)
 	setAuthKeys    []string
 	deleteAuthKeys []string
+	deleteAuthErr  error
+	publishAuthErr error
 }
 
 func (s *authCacheStub) GetCreateAttemptCount(ctx context.Context, userID int64) (int, error) {
@@ -163,11 +165,11 @@ func (s *authCacheStub) SetAuthCache(ctx context.Context, key string, entry *API
 
 func (s *authCacheStub) DeleteAuthCache(ctx context.Context, key string) error {
 	s.deleteAuthKeys = append(s.deleteAuthKeys, key)
-	return nil
+	return s.deleteAuthErr
 }
 
 func (s *authCacheStub) PublishAuthCacheInvalidation(ctx context.Context, cacheKey string) error {
-	return nil
+	return s.publishAuthErr
 }
 
 func (s *authCacheStub) SubscribeAuthCacheInvalidation(ctx context.Context, handler func(cacheKey string)) error {
@@ -507,6 +509,17 @@ func TestAPIKeyService_InvalidateAuthCacheByKey(t *testing.T) {
 	svc := NewAPIKeyService(repo, nil, nil, nil, nil, cache, cfg)
 
 	svc.InvalidateAuthCacheByKey(context.Background(), "k1")
+	require.Len(t, cache.deleteAuthKeys, 1)
+}
+
+func TestAPIKeyService_InvalidateAuthCacheByKeyCheckedReportsSharedCacheFailure(t *testing.T) {
+	cache := &authCacheStub{deleteAuthErr: errors.New("redis unavailable")}
+	repo := &authRepoStub{}
+	cfg := &config.Config{APIKeyAuth: config.APIKeyAuthCacheConfig{L2TTLSeconds: 60}}
+	svc := NewAPIKeyService(repo, nil, nil, nil, nil, cache, cfg)
+
+	err := svc.InvalidateAuthCacheByKeyChecked(context.Background(), "k1")
+	require.ErrorContains(t, err, "redis unavailable")
 	require.Len(t, cache.deleteAuthKeys, 1)
 }
 

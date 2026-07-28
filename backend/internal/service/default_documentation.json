@@ -54,6 +54,43 @@
       ]
     },
     {
+      "id": "desktop",
+      "tab_label": "Desktop 客户端",
+      "icon": "terminal",
+      "description": "在 macOS 上安装落雪API Desktop，完成网页配对，并让 Codex 通过本地安全网关使用所选线路。",
+      "steps": [
+        {
+          "title": "下载 macOS 安装包",
+          "description": "下载适用于 macOS 13 及以上系统的 Universal DMG；同一个安装包同时支持 Apple Silicon 与 Intel Mac。",
+          "link": {"label": "下载落雪API Desktop", "href": "/api/v1/public/desktop/releases/macos/latest/download"},
+          "note": {"tone": "warning", "text": "当前安装包没有 Apple 公证，首次打开时 macOS 会显示安全拦截，这是预期行为。请只从落雪API官方地址下载。"}
+        },
+        {
+          "title": "安装到应用程序",
+          "description": "打开下载完成的 DMG，将“落雪API Desktop”拖入“应用程序”文件夹，再从“应用程序”中打开。"
+        },
+        {
+          "title": "允许首次打开",
+          "description": "如 macOS 阻止打开，请进入“系统设置 → 隐私与安全”，在页面下方找到落雪API Desktop 的拦截提示，点击“仍要打开”，再按系统提示确认。",
+          "note": {"text": "不要关闭系统的整体安全检查，也不要执行来源不明的终端命令。只需要为本次下载的落雪API Desktop 单独授权。"}
+        },
+        {
+          "title": "在网页批准设备",
+          "description": "App 会打开落雪API登录页。登录后核对设备名称和申请权限并批准；配对完成后凭据只保存在这台 Mac 的钥匙串中。",
+          "note": {"text": "每个账号最多绑定 5 台设备。Desktop 不会读取或保存你的网页登录密码。"}
+        },
+        {
+          "title": "选择线路和默认模型",
+          "description": "回到 App，选择一个可用的 OpenAI 分组及默认模型并启用接管。若余额不足、没有可用分组、配置无法解析或检测到 CC Switch 接管，App 会停止修改并给出处理入口。"
+        },
+        {
+          "title": "重启 Codex 并验证",
+          "description": "按 App 提示重启 Codex Desktop，或复制 CLI 启动命令。发送一条简短消息；首个 Responses 请求成功后，Desktop 总览会显示网关运行状态和本机用量。关闭主窗口后 App 会继续在菜单栏运行。",
+          "note": {"text": "卸载前请先在 Desktop 设置中执行“恢复并准备卸载”，确保 Codex 配置和开机启动均已恢复。"}
+        }
+      ]
+    },
+    {
       "id": "clients",
       "tab_label": "客户端配置",
       "icon": "client",

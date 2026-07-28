@@ -89,6 +89,10 @@ const (
 	EdgePendingAuthSessions = "pending_auth_sessions"
 	// EdgePlatformQuotas holds the string denoting the platform_quotas edge name in mutations.
 	EdgePlatformQuotas = "platform_quotas"
+	// EdgeDesktopDevices holds the string denoting the desktop_devices edge name in mutations.
+	EdgeDesktopDevices = "desktop_devices"
+	// EdgeDesktopDiagnostics holds the string denoting the desktop_diagnostics edge name in mutations.
+	EdgeDesktopDiagnostics = "desktop_diagnostics"
 	// EdgeUserAllowedGroups holds the string denoting the user_allowed_groups edge name in mutations.
 	EdgeUserAllowedGroups = "user_allowed_groups"
 	// Table holds the table name of the user in the database.
@@ -182,6 +186,20 @@ const (
 	PlatformQuotasInverseTable = "user_platform_quotas"
 	// PlatformQuotasColumn is the table column denoting the platform_quotas relation/edge.
 	PlatformQuotasColumn = "user_id"
+	// DesktopDevicesTable is the table that holds the desktop_devices relation/edge.
+	DesktopDevicesTable = "desktop_devices"
+	// DesktopDevicesInverseTable is the table name for the DesktopDevice entity.
+	// It exists in this package in order to avoid circular dependency with the "desktopdevice" package.
+	DesktopDevicesInverseTable = "desktop_devices"
+	// DesktopDevicesColumn is the table column denoting the desktop_devices relation/edge.
+	DesktopDevicesColumn = "user_id"
+	// DesktopDiagnosticsTable is the table that holds the desktop_diagnostics relation/edge.
+	DesktopDiagnosticsTable = "desktop_diagnostics"
+	// DesktopDiagnosticsInverseTable is the table name for the DesktopDiagnostic entity.
+	// It exists in this package in order to avoid circular dependency with the "desktopdiagnostic" package.
+	DesktopDiagnosticsInverseTable = "desktop_diagnostics"
+	// DesktopDiagnosticsColumn is the table column denoting the desktop_diagnostics relation/edge.
+	DesktopDiagnosticsColumn = "user_id"
 	// UserAllowedGroupsTable is the table that holds the user_allowed_groups relation/edge.
 	UserAllowedGroupsTable = "user_allowed_groups"
 	// UserAllowedGroupsInverseTable is the table name for the UserAllowedGroup entity.
@@ -602,6 +620,34 @@ func ByPlatformQuotas(term sql.OrderTerm, terms ...sql.OrderTerm) OrderOption {
 	}
 }
 
+// ByDesktopDevicesCount orders the results by desktop_devices count.
+func ByDesktopDevicesCount(opts ...sql.OrderTermOption) OrderOption {
+	return func(s *sql.Selector) {
+		sqlgraph.OrderByNeighborsCount(s, newDesktopDevicesStep(), opts...)
+	}
+}
+
+// ByDesktopDevices orders the results by desktop_devices terms.
+func ByDesktopDevices(term sql.OrderTerm, terms ...sql.OrderTerm) OrderOption {
+	return func(s *sql.Selector) {
+		sqlgraph.OrderByNeighborTerms(s, newDesktopDevicesStep(), append([]sql.OrderTerm{term}, terms...)...)
+	}
+}
+
+// ByDesktopDiagnosticsCount orders the results by desktop_diagnostics count.
+func ByDesktopDiagnosticsCount(opts ...sql.OrderTermOption) OrderOption {
+	return func(s *sql.Selector) {
+		sqlgraph.OrderByNeighborsCount(s, newDesktopDiagnosticsStep(), opts...)
+	}
+}
+
+// ByDesktopDiagnostics orders the results by desktop_diagnostics terms.
+func ByDesktopDiagnostics(term sql.OrderTerm, terms ...sql.OrderTerm) OrderOption {
+	return func(s *sql.Selector) {
+		sqlgraph.OrderByNeighborTerms(s, newDesktopDiagnosticsStep(), append([]sql.OrderTerm{term}, terms...)...)
+	}
+}
+
 // ByUserAllowedGroupsCount orders the results by user_allowed_groups count.
 func ByUserAllowedGroupsCount(opts ...sql.OrderTermOption) OrderOption {
 	return func(s *sql.Selector) {
@@ -704,6 +750,20 @@ func newPlatformQuotasStep() *sqlgraph.Step {
 		sqlgraph.From(Table, FieldID),
 		sqlgraph.To(PlatformQuotasInverseTable, FieldID),
 		sqlgraph.Edge(sqlgraph.O2M, false, PlatformQuotasTable, PlatformQuotasColumn),
+	)
+}
+func newDesktopDevicesStep() *sqlgraph.Step {
+	return sqlgraph.NewStep(
+		sqlgraph.From(Table, FieldID),
+		sqlgraph.To(DesktopDevicesInverseTable, FieldID),
+		sqlgraph.Edge(sqlgraph.O2M, false, DesktopDevicesTable, DesktopDevicesColumn),
+	)
+}
+func newDesktopDiagnosticsStep() *sqlgraph.Step {
+	return sqlgraph.NewStep(
+		sqlgraph.From(Table, FieldID),
+		sqlgraph.To(DesktopDiagnosticsInverseTable, FieldID),
+		sqlgraph.Edge(sqlgraph.O2M, false, DesktopDiagnosticsTable, DesktopDiagnosticsColumn),
 	)
 }
 func newUserAllowedGroupsStep() *sqlgraph.Step {

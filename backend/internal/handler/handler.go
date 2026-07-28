@@ -42,6 +42,7 @@ type AdminHandlers struct {
 	AuditLog               *admin.AuditLogHandler
 	ModelCatalog           *admin.ModelCatalogHandler
 	Documentation          *admin.DocumentationHandler
+	DesktopDiagnostic      *admin.DesktopDiagnosticHandler
 }
 
 // Handlers contains all HTTP handlers
@@ -67,6 +68,7 @@ type Handlers struct {
 	ModelCatalog     *ModelCatalogHandler
 	Documentation    *DocumentationHandler
 	Chat             *ChatHandler
+	Desktop          *DesktopHandler
 }
 
 // BuildInfo contains build-time information

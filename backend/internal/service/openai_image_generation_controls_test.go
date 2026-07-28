@@ -596,6 +596,29 @@ func TestOpenAIGatewayServiceHandleResponsesImageOutputs_Streaming(t *testing.T)
 	require.Equal(t, 2, strings.Count(recorder.Body.String(), `"status":"completed"`))
 }
 
+func TestOpenAIGatewayServiceHandleResponsesImageOutputs_StreamingPreservesCodexStatus(t *testing.T) {
+	setGinTestMode()
+
+	svc := newOpenAIImageGenerationControlTestService(&httpUpstreamRecorder{})
+	c, recorder := newOpenAIImageGenerationControlTestContext(true, "codex_cli_rs/0.146.0")
+	resp := &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+		Body: io.NopCloser(strings.NewReader(
+			"data: {\"type\":\"response.output_item.done\",\"item\":{\"id\":\"ig_stream_1\",\"type\":\"image_generation_call\",\"status\":\"generating\",\"result\":\"final-image\"}}\n\n" +
+				"data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_image_stream\",\"model\":\"gpt-5.4\",\"output\":[{\"id\":\"ig_stream_1\",\"type\":\"image_generation_call\",\"status\":\"generating\",\"result\":\"final-image\"}],\"usage\":{\"input_tokens\":11,\"output_tokens\":5}}}\n\n",
+		)),
+	}
+
+	result, err := svc.handleStreamingResponse(context.Background(), resp, c, &Account{ID: 1}, time.Now(), "gpt-5.4", "gpt-5.4")
+
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.Equal(t, 1, result.imageCount)
+	require.Equal(t, 2, strings.Count(recorder.Body.String(), `"status":"generating"`))
+	require.NotContains(t, recorder.Body.String(), `"status":"completed"`)
+}
+
 func TestOpenAIGatewayServiceHandleResponsesImageOutputs_StreamingPassthrough(t *testing.T) {
 	setGinTestMode()
 
@@ -616,6 +639,28 @@ func TestOpenAIGatewayServiceHandleResponsesImageOutputs_StreamingPassthrough(t 
 	require.NotNil(t, result)
 	require.NotContains(t, recorder.Body.String(), `"status":"in_progress"`)
 	require.Equal(t, 2, strings.Count(recorder.Body.String(), `"status":"completed"`))
+}
+
+func TestOpenAIGatewayServiceHandleResponsesImageOutputs_StreamingPassthroughPreservesCodexStatus(t *testing.T) {
+	setGinTestMode()
+
+	svc := newOpenAIImageGenerationControlTestService(&httpUpstreamRecorder{})
+	c, recorder := newOpenAIImageGenerationControlTestContext(true, "codex_cli_rs/0.146.0")
+	resp := &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+		Body: io.NopCloser(strings.NewReader(
+			"data: {\"type\":\"response.output_item.done\",\"item\":{\"id\":\"ig_stream_1\",\"type\":\"image_generation_call\",\"status\":\"generating\",\"result\":\"final-image\"}}\n\n" +
+				"data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_image_stream\",\"model\":\"gpt-5.4\",\"output\":[{\"id\":\"ig_stream_1\",\"type\":\"image_generation_call\",\"status\":\"generating\",\"result\":\"final-image\"}],\"usage\":{\"input_tokens\":11,\"output_tokens\":5}}}\n\n",
+		)),
+	}
+
+	result, err := svc.handleStreamingResponsePassthrough(context.Background(), resp, c, &Account{ID: 1}, time.Now(), "gpt-5.4", "gpt-5.4")
+
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.Equal(t, 2, strings.Count(recorder.Body.String(), `"status":"generating"`))
+	require.NotContains(t, recorder.Body.String(), `"status":"completed"`)
 }
 
 func TestNormalizeCompletedImageGenerationStatus(t *testing.T) {

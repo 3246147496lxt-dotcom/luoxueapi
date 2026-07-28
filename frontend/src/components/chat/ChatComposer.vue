@@ -21,6 +21,8 @@
         @keydown="onKeydown"
       ></textarea>
 
+      <slot name="controls"></slot>
+
       <button
         v-if="streaming"
         type="button"
@@ -266,6 +268,21 @@ defineExpose({ focus })
 @media (max-width: 640px) {
   .chat-composer__balance {
     align-items: flex-start;
+  }
+
+  .chat-composer {
+    flex-wrap: wrap;
+    gap: 8px;
+    padding-left: 12px;
+  }
+
+  .chat-composer textarea {
+    flex-basis: 100%;
+  }
+
+  .chat-composer :deep(.chat-model-settings) {
+    min-width: 0;
+    flex: 1;
   }
 
   .chat-composer__notice > span {

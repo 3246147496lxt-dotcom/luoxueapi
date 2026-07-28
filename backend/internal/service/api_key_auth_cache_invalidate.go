@@ -4,11 +4,17 @@ import "context"
 
 // InvalidateAuthCacheByKey 清除指定 API Key 的认证缓存
 func (s *APIKeyService) InvalidateAuthCacheByKey(ctx context.Context, key string) {
+	_ = s.InvalidateAuthCacheByKeyChecked(ctx, key)
+}
+
+// InvalidateAuthCacheByKeyChecked removes local, shared, and cross-instance
+// authentication cache state and reports shared-cache delivery failures.
+func (s *APIKeyService) InvalidateAuthCacheByKeyChecked(ctx context.Context, key string) error {
 	if key == "" {
-		return
+		return nil
 	}
 	cacheKey := s.authCacheKey(key)
-	s.deleteAuthCache(ctx, cacheKey)
+	return s.deleteAuthCache(ctx, cacheKey)
 }
 
 // InvalidateAuthCacheByUserID 清除用户相关的 API Key 认证缓存
@@ -43,6 +49,6 @@ func (s *APIKeyService) deleteAuthCacheByKeys(ctx context.Context, keys []string
 		if key == "" {
 			continue
 		}
-		s.deleteAuthCache(ctx, s.authCacheKey(key))
+		_ = s.deleteAuthCache(ctx, s.authCacheKey(key))
 	}
 }

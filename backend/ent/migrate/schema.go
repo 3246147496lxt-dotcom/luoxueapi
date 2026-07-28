@@ -34,6 +34,7 @@ var (
 		{Name: "window_5h_start", Type: field.TypeTime, Nullable: true},
 		{Name: "window_1d_start", Type: field.TypeTime, Nullable: true},
 		{Name: "window_7d_start", Type: field.TypeTime, Nullable: true},
+		{Name: "managed_device_id", Type: field.TypeInt64, Nullable: true},
 		{Name: "group_id", Type: field.TypeInt64, Nullable: true},
 		{Name: "user_id", Type: field.TypeInt64},
 	}
@@ -44,14 +45,20 @@ var (
 		PrimaryKey: []*schema.Column{APIKeysColumns[0]},
 		ForeignKeys: []*schema.ForeignKey{
 			{
-				Symbol:     "api_keys_groups_api_keys",
+				Symbol:     "api_keys_desktop_devices_managed_keys",
 				Columns:    []*schema.Column{APIKeysColumns[23]},
+				RefColumns: []*schema.Column{DesktopDevicesColumns[0]},
+				OnDelete:   schema.Restrict,
+			},
+			{
+				Symbol:     "api_keys_groups_api_keys",
+				Columns:    []*schema.Column{APIKeysColumns[24]},
 				RefColumns: []*schema.Column{GroupsColumns[0]},
 				OnDelete:   schema.SetNull,
 			},
 			{
 				Symbol:     "api_keys_users_api_keys",
-				Columns:    []*schema.Column{APIKeysColumns[24]},
+				Columns:    []*schema.Column{APIKeysColumns[25]},
 				RefColumns: []*schema.Column{UsersColumns[0]},
 				OnDelete:   schema.NoAction,
 			},
@@ -60,12 +67,12 @@ var (
 			{
 				Name:    "apikey_user_id",
 				Unique:  false,
-				Columns: []*schema.Column{APIKeysColumns[24]},
+				Columns: []*schema.Column{APIKeysColumns[25]},
 			},
 			{
 				Name:    "apikey_group_id",
 				Unique:  false,
-				Columns: []*schema.Column{APIKeysColumns[23]},
+				Columns: []*schema.Column{APIKeysColumns[24]},
 			},
 			{
 				Name:    "apikey_status",
@@ -78,11 +85,24 @@ var (
 				Columns: []*schema.Column{APIKeysColumns[7]},
 			},
 			{
+				Name:    "apikey_managed_device_id",
+				Unique:  false,
+				Columns: []*schema.Column{APIKeysColumns[23]},
+			},
+			{
 				Name:    "idx_api_keys_web_chat_principal_user_group",
 				Unique:  true,
-				Columns: []*schema.Column{APIKeysColumns[24], APIKeysColumns[23]},
+				Columns: []*schema.Column{APIKeysColumns[25], APIKeysColumns[24]},
 				Annotation: &entsql.IndexAnnotation{
 					Where: "purpose = 'web_chat' AND status = 'active'",
+				},
+			},
+			{
+				Name:    "idx_api_keys_desktop_device_group",
+				Unique:  true,
+				Columns: []*schema.Column{APIKeysColumns[23], APIKeysColumns[24]},
+				Annotation: &entsql.IndexAnnotation{
+					Where: "purpose = 'desktop' AND deleted_at IS NULL",
 				},
 			},
 			{
@@ -804,6 +824,164 @@ var (
 				Name:    "channelmonitorrequesttemplate_provider_api_mode",
 				Unique:  false,
 				Columns: []*schema.Column{ChannelMonitorRequestTemplatesColumns[4], ChannelMonitorRequestTemplatesColumns[5]},
+			},
+		},
+	}
+	// DesktopDevicesColumns holds the columns for the "desktop_devices" table.
+	DesktopDevicesColumns = []*schema.Column{
+		{Name: "id", Type: field.TypeInt64, Increment: true},
+		{Name: "created_at", Type: field.TypeTime, SchemaType: map[string]string{"postgres": "timestamptz"}},
+		{Name: "updated_at", Type: field.TypeTime, SchemaType: map[string]string{"postgres": "timestamptz"}},
+		{Name: "public_id", Type: field.TypeString, Unique: true, SchemaType: map[string]string{"postgres": "uuid"}},
+		{Name: "installation_id_hash", Type: field.TypeString, Size: 64},
+		{Name: "name", Type: field.TypeString, Size: 100},
+		{Name: "platform", Type: field.TypeString, Size: 20, Default: "macos"},
+		{Name: "architecture", Type: field.TypeString, Size: 20},
+		{Name: "os_version", Type: field.TypeString, Size: 50, Default: ""},
+		{Name: "app_version", Type: field.TypeString, Size: 50, Default: ""},
+		{Name: "status", Type: field.TypeString, Size: 20, Default: "pending"},
+		{Name: "token_version", Type: field.TypeInt64, Default: 1},
+		{Name: "release_channel", Type: field.TypeString, Size: 20, Default: "stable"},
+		{Name: "pairing_expires_at", Type: field.TypeTime, SchemaType: map[string]string{"postgres": "timestamptz"}},
+		{Name: "approved_at", Type: field.TypeTime, Nullable: true, SchemaType: map[string]string{"postgres": "timestamptz"}},
+		{Name: "activated_at", Type: field.TypeTime, Nullable: true, SchemaType: map[string]string{"postgres": "timestamptz"}},
+		{Name: "last_seen_at", Type: field.TypeTime, Nullable: true, SchemaType: map[string]string{"postgres": "timestamptz"}},
+		{Name: "revoked_at", Type: field.TypeTime, Nullable: true, SchemaType: map[string]string{"postgres": "timestamptz"}},
+		{Name: "user_id", Type: field.TypeInt64},
+	}
+	// DesktopDevicesTable holds the schema information for the "desktop_devices" table.
+	DesktopDevicesTable = &schema.Table{
+		Name:       "desktop_devices",
+		Columns:    DesktopDevicesColumns,
+		PrimaryKey: []*schema.Column{DesktopDevicesColumns[0]},
+		ForeignKeys: []*schema.ForeignKey{
+			{
+				Symbol:     "desktop_devices_users_desktop_devices",
+				Columns:    []*schema.Column{DesktopDevicesColumns[18]},
+				RefColumns: []*schema.Column{UsersColumns[0]},
+				OnDelete:   schema.Cascade,
+			},
+		},
+		Indexes: []*schema.Index{
+			{
+				Name:    "desktopdevice_user_id",
+				Unique:  false,
+				Columns: []*schema.Column{DesktopDevicesColumns[18]},
+			},
+			{
+				Name:    "desktopdevice_user_id_status",
+				Unique:  false,
+				Columns: []*schema.Column{DesktopDevicesColumns[18], DesktopDevicesColumns[10]},
+			},
+			{
+				Name:    "desktopdevice_installation_id_hash",
+				Unique:  false,
+				Columns: []*schema.Column{DesktopDevicesColumns[4]},
+			},
+			{
+				Name:    "desktopdevice_pairing_expires_at",
+				Unique:  false,
+				Columns: []*schema.Column{DesktopDevicesColumns[13]},
+			},
+		},
+	}
+	// DesktopDeviceSessionsColumns holds the columns for the "desktop_device_sessions" table.
+	DesktopDeviceSessionsColumns = []*schema.Column{
+		{Name: "id", Type: field.TypeInt64, Increment: true},
+		{Name: "created_at", Type: field.TypeTime, SchemaType: map[string]string{"postgres": "timestamptz"}},
+		{Name: "updated_at", Type: field.TypeTime, SchemaType: map[string]string{"postgres": "timestamptz"}},
+		{Name: "family_id", Type: field.TypeString, SchemaType: map[string]string{"postgres": "uuid"}},
+		{Name: "refresh_token_hash", Type: field.TypeString, Unique: true, Size: 64},
+		{Name: "status", Type: field.TypeString, Size: 20, Default: "active"},
+		{Name: "expires_at", Type: field.TypeTime, SchemaType: map[string]string{"postgres": "timestamptz"}},
+		{Name: "consumed_at", Type: field.TypeTime, Nullable: true, SchemaType: map[string]string{"postgres": "timestamptz"}},
+		{Name: "revoked_at", Type: field.TypeTime, Nullable: true, SchemaType: map[string]string{"postgres": "timestamptz"}},
+		{Name: "device_id", Type: field.TypeInt64},
+	}
+	// DesktopDeviceSessionsTable holds the schema information for the "desktop_device_sessions" table.
+	DesktopDeviceSessionsTable = &schema.Table{
+		Name:       "desktop_device_sessions",
+		Columns:    DesktopDeviceSessionsColumns,
+		PrimaryKey: []*schema.Column{DesktopDeviceSessionsColumns[0]},
+		ForeignKeys: []*schema.ForeignKey{
+			{
+				Symbol:     "desktop_device_sessions_desktop_devices_sessions",
+				Columns:    []*schema.Column{DesktopDeviceSessionsColumns[9]},
+				RefColumns: []*schema.Column{DesktopDevicesColumns[0]},
+				OnDelete:   schema.Cascade,
+			},
+		},
+		Indexes: []*schema.Index{
+			{
+				Name:    "desktopdevicesession_device_id_status",
+				Unique:  false,
+				Columns: []*schema.Column{DesktopDeviceSessionsColumns[9], DesktopDeviceSessionsColumns[5]},
+			},
+			{
+				Name:    "desktopdevicesession_family_id",
+				Unique:  false,
+				Columns: []*schema.Column{DesktopDeviceSessionsColumns[3]},
+			},
+			{
+				Name:    "desktopdevicesession_expires_at",
+				Unique:  false,
+				Columns: []*schema.Column{DesktopDeviceSessionsColumns[6]},
+			},
+		},
+	}
+	// DesktopDiagnosticsColumns holds the columns for the "desktop_diagnostics" table.
+	DesktopDiagnosticsColumns = []*schema.Column{
+		{Name: "id", Type: field.TypeInt64, Increment: true},
+		{Name: "created_at", Type: field.TypeTime, SchemaType: map[string]string{"postgres": "timestamptz"}},
+		{Name: "updated_at", Type: field.TypeTime, SchemaType: map[string]string{"postgres": "timestamptz"}},
+		{Name: "public_id", Type: field.TypeString, Unique: true, SchemaType: map[string]string{"postgres": "uuid"}},
+		{Name: "app_version", Type: field.TypeString, Size: 50},
+		{Name: "platform", Type: field.TypeString, Size: 20},
+		{Name: "architecture", Type: field.TypeString, Size: 20},
+		{Name: "os_version", Type: field.TypeString, Size: 50},
+		{Name: "gateway_status", Type: field.TypeString, Size: 20},
+		{Name: "codex_config_status", Type: field.TypeString, Size: 20},
+		{Name: "request_sample_count", Type: field.TypeInt, Default: 0},
+		{Name: "request_error_count", Type: field.TypeInt, Default: 0},
+		{Name: "encrypted_payload", Type: field.TypeString, SchemaType: map[string]string{"postgres": "text"}},
+		{Name: "expires_at", Type: field.TypeTime, SchemaType: map[string]string{"postgres": "timestamptz"}},
+		{Name: "device_id", Type: field.TypeInt64},
+		{Name: "user_id", Type: field.TypeInt64},
+	}
+	// DesktopDiagnosticsTable holds the schema information for the "desktop_diagnostics" table.
+	DesktopDiagnosticsTable = &schema.Table{
+		Name:       "desktop_diagnostics",
+		Columns:    DesktopDiagnosticsColumns,
+		PrimaryKey: []*schema.Column{DesktopDiagnosticsColumns[0]},
+		ForeignKeys: []*schema.ForeignKey{
+			{
+				Symbol:     "desktop_diagnostics_desktop_devices_diagnostics",
+				Columns:    []*schema.Column{DesktopDiagnosticsColumns[14]},
+				RefColumns: []*schema.Column{DesktopDevicesColumns[0]},
+				OnDelete:   schema.Cascade,
+			},
+			{
+				Symbol:     "desktop_diagnostics_users_desktop_diagnostics",
+				Columns:    []*schema.Column{DesktopDiagnosticsColumns[15]},
+				RefColumns: []*schema.Column{UsersColumns[0]},
+				OnDelete:   schema.Cascade,
+			},
+		},
+		Indexes: []*schema.Index{
+			{
+				Name:    "desktopdiagnostic_device_id_created_at",
+				Unique:  false,
+				Columns: []*schema.Column{DesktopDiagnosticsColumns[14], DesktopDiagnosticsColumns[1]},
+			},
+			{
+				Name:    "desktopdiagnostic_user_id_created_at",
+				Unique:  false,
+				Columns: []*schema.Column{DesktopDiagnosticsColumns[15], DesktopDiagnosticsColumns[1]},
+			},
+			{
+				Name:    "desktopdiagnostic_expires_at",
+				Unique:  false,
+				Columns: []*schema.Column{DesktopDiagnosticsColumns[13]},
 			},
 		},
 	}
@@ -2066,6 +2244,9 @@ var (
 		ChannelMonitorDailyRollupsTable,
 		ChannelMonitorHistoriesTable,
 		ChannelMonitorRequestTemplatesTable,
+		DesktopDevicesTable,
+		DesktopDeviceSessionsTable,
+		DesktopDiagnosticsTable,
 		ErrorPassthroughRulesTable,
 		GroupsTable,
 		IdempotencyRecordsTable,
@@ -2095,8 +2276,9 @@ var (
 )
 
 func init() {
-	APIKeysTable.ForeignKeys[0].RefTable = GroupsTable
-	APIKeysTable.ForeignKeys[1].RefTable = UsersTable
+	APIKeysTable.ForeignKeys[0].RefTable = DesktopDevicesTable
+	APIKeysTable.ForeignKeys[1].RefTable = GroupsTable
+	APIKeysTable.ForeignKeys[2].RefTable = UsersTable
 	APIKeysTable.Annotation = &entsql.Annotation{
 		Table: "api_keys",
 	}
@@ -2149,6 +2331,19 @@ func init() {
 	}
 	ChannelMonitorRequestTemplatesTable.Annotation = &entsql.Annotation{
 		Table: "channel_monitor_request_templates",
+	}
+	DesktopDevicesTable.ForeignKeys[0].RefTable = UsersTable
+	DesktopDevicesTable.Annotation = &entsql.Annotation{
+		Table: "desktop_devices",
+	}
+	DesktopDeviceSessionsTable.ForeignKeys[0].RefTable = DesktopDevicesTable
+	DesktopDeviceSessionsTable.Annotation = &entsql.Annotation{
+		Table: "desktop_device_sessions",
+	}
+	DesktopDiagnosticsTable.ForeignKeys[0].RefTable = DesktopDevicesTable
+	DesktopDiagnosticsTable.ForeignKeys[1].RefTable = UsersTable
+	DesktopDiagnosticsTable.Annotation = &entsql.Annotation{
+		Table: "desktop_diagnostics",
 	}
 	ErrorPassthroughRulesTable.Annotation = &entsql.Annotation{
 		Table: "error_passthrough_rules",

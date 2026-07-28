@@ -739,6 +739,10 @@ const ChatIcon = {
   render: () => h(Icon, { name: 'chat', size: 'md', strokeWidth: 1.7 })
 }
 
+const DiagnosticsIcon = {
+  render: () => h(Icon, { name: 'activity', size: 'md', strokeWidth: 1.7 })
+}
+
 const navigationNavItems = computed((): NavItem[] => (
   selectVisibleShellDestinations(
     getShellDestinationSpecs(isAdmin.value ? 'admin' : 'user'),
@@ -938,6 +942,12 @@ const adminNavItems = computed((): NavItem[] => {
       iconSvg: auditLogIconSvg,
       hideInSimpleMode: true,
     },
+    {
+      path: '/admin/desktop-diagnostics',
+      label: t('nav.desktopDiagnostics'),
+      icon: DiagnosticsIcon,
+      hideInSimpleMode: true,
+    },
     { path: '/admin/documentation', label: t('nav.documentationManagement'), icon: BookIcon, hideInSimpleMode: true },
   ]
 
@@ -983,6 +993,7 @@ const ADMIN_NAV_SECTION_BY_PATH: Record<string, AdminNavSectionId> = {
   '/admin/announcements': 'operations',
   '/admin/risk-control': 'system',
   '/admin/audit-logs': 'system',
+  '/admin/desktop-diagnostics': 'system',
   '/admin/documentation': 'system',
   '/admin/settings': 'system',
 }

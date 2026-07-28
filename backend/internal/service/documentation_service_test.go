@@ -16,12 +16,13 @@ func TestBundledDocumentationIsValidAndComplete(t *testing.T) {
 	var content DocumentationContent
 	require.NoError(t, json.Unmarshal(canonical, &content))
 	require.Equal(t, DocumentationSchemaVersion, content.SchemaVersion)
-	require.Len(t, content.Tutorials, 4)
-	require.Equal(t, []string{"quick-start", "clients", "api", "recharge"}, []string{
+	require.Len(t, content.Tutorials, 5)
+	require.Equal(t, []string{"quick-start", "desktop", "clients", "api", "recharge"}, []string{
 		content.Tutorials[0].ID,
 		content.Tutorials[1].ID,
 		content.Tutorials[2].ID,
 		content.Tutorials[3].ID,
+		content.Tutorials[4].ID,
 	})
 }
 

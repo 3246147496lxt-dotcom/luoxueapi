@@ -45,6 +45,7 @@ func ProvideAdminHandlers(
 	auditLogHandler *admin.AuditLogHandler,
 	modelCatalogHandler *admin.ModelCatalogHandler,
 	documentationHandler *admin.DocumentationHandler,
+	desktopDiagnosticHandler *admin.DesktopDiagnosticHandler,
 	upstreamBillingProbe *service.UpstreamBillingProbeService,
 	proxyHealthService *service.ProxyHealthService,
 ) *AdminHandlers {
@@ -88,6 +89,7 @@ func ProvideAdminHandlers(
 		AuditLog:               auditLogHandler,
 		ModelCatalog:           modelCatalogHandler,
 		Documentation:          documentationHandler,
+		DesktopDiagnostic:      desktopDiagnosticHandler,
 	}
 }
 
@@ -152,6 +154,7 @@ func ProvideHandlers(
 	modelCatalogHandler *ModelCatalogHandler,
 	documentationHandler *DocumentationHandler,
 	chatHandler *ChatHandler,
+	desktopHandler *DesktopHandler,
 	_ *service.IdempotencyCoordinator,
 	_ *service.IdempotencyCleanupService,
 ) *Handlers {
@@ -177,6 +180,7 @@ func ProvideHandlers(
 		ModelCatalog:     modelCatalogHandler,
 		Documentation:    documentationHandler,
 		Chat:             chatHandler,
+		Desktop:          desktopHandler,
 	}
 }
 
@@ -203,6 +207,7 @@ var ProviderSet = wire.NewSet(
 	NewModelCatalogHandler,
 	NewDocumentationHandler,
 	ProvideChatHandler,
+	NewDesktopHandler,
 	ProvideAccountAdminUseCases,
 	ProvideGroupAdminUseCases,
 	ProvideUserAdminUseCases,
@@ -245,6 +250,7 @@ var ProviderSet = wire.NewSet(
 	admin.NewAuditLogHandler,
 	admin.NewModelCatalogHandler,
 	admin.NewDocumentationHandler,
+	admin.NewDesktopDiagnosticHandler,
 
 	// AdminHandlers and Handlers constructors
 	ProvideAdminHandlers,

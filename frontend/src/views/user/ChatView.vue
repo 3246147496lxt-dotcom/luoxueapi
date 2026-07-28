@@ -81,37 +81,6 @@
               <Icon name="menu" size="sm" />
             </button>
 
-            <Select
-              v-model="selectedModel"
-              class="chat-toolbar__model"
-              :options="modelOptions"
-              :disabled="modelsLoading || chatStore.isStreaming || modelOptions.length === 0"
-              :placeholder="modelsLoading ? t('chat.models.loading') : t('chat.models.select')"
-              :aria-label="t('chat.models.select')"
-              :empty-text="t('chat.models.empty')"
-            >
-              <template #selected="{ option }">
-                <span v-if="option" class="chat-model-option chat-model-option--selected">
-                  <Icon name="sparkles" size="xs" />
-                  <span>{{ option.label }}</span>
-                </span>
-              </template>
-              <template #option="{ option, selected }">
-                <span class="chat-model-option">
-                  <span class="chat-model-option__mark"><Icon name="sparkles" size="xs" /></span>
-                  <span class="chat-model-option__copy">
-                    <strong>{{ option.label }}</strong>
-                    <small v-if="option.description">{{ option.description }}</small>
-                  </span>
-                  <span v-if="option.recommended" class="chat-model-option__recommended">
-                    {{ t('chat.models.recommended') }}
-                  </span>
-                  <Icon v-if="selected" name="check" size="sm" class="chat-model-option__check" />
-                </span>
-              </template>
-            </Select>
-
-            <span class="chat-toolbar__divider" aria-hidden="true"></span>
             <div class="chat-toolbar__session" :title="activeTitle">
               <Icon name="chatBubble" size="xs" />
               <span>{{ activeTitle }}</span>
@@ -254,7 +223,17 @@
             :insufficient-balance="insufficientBalance"
             @send="sendMessage"
             @stop="stopStreaming"
-          />
+          >
+            <template #controls>
+              <ChatModelSettings
+                v-model="selectedModel"
+                v-model:reasoning-effort="selectedReasoningEffort"
+                :model-options="modelOptions"
+                :loading="modelsLoading"
+                :disabled="modelsLoading || chatStore.isStreaming || modelOptions.length === 0"
+              />
+            </template>
+          </ChatComposer>
         </div>
       </section>
     </div>
@@ -308,11 +287,13 @@ import { useI18n } from 'vue-i18n'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import CreditAmount from '@/components/common/CreditAmount.vue'
-import Select, { type SelectOption } from '@/components/common/Select.vue'
 import Icon from '@/components/icons/Icon.vue'
 import ChatComposer from '@/components/chat/ChatComposer.vue'
 import ChatHistoryPanel from '@/components/chat/ChatHistoryPanel.vue'
 import ChatMessageItem from '@/components/chat/ChatMessageItem.vue'
+import ChatModelSettings, {
+  type ChatModelSettingsOption,
+} from '@/components/chat/ChatModelSettings.vue'
 import {
   ChatAPIError,
   createChatAttemptId,
@@ -327,15 +308,9 @@ import type {
   ChatCompletionRequest,
   ChatMessage,
   ChatModel,
+  ChatReasoningEffort,
   ChatReceipt,
 } from '@/types/chat'
-
-interface ChatModelOption extends SelectOption {
-  value: string
-  label: string
-  description: string
-  recommended: boolean
-}
 
 type Confirmation =
   | { kind: 'delete'; conversationId: string }
@@ -357,6 +332,7 @@ const authBalanceStateVersion = ref(0)
 const balanceRejected = ref(false)
 const persistenceRetrying = ref(false)
 const composerDraft = ref('')
+const selectedReasoningEffort = ref<ChatReasoningEffort>('')
 const historySearchQuery = ref('')
 const legacyImportPromptVisible = ref(true)
 const historyOpen = ref(false)
@@ -413,7 +389,7 @@ const currentBalance = computed(() => {
 const formattedBalance = computed(() => currentBalance.value.toFixed(2))
 const insufficientBalance = computed(() => currentBalance.value <= 0 || balanceRejected.value)
 
-const modelOptions = computed<ChatModelOption[]>(() => models.value.map((model) => {
+const modelOptions = computed<ChatModelSettingsOption[]>(() => models.value.map((model) => {
   const label = model.display_name?.trim() || model.id
   const description = model.description?.trim() || ''
   return {
@@ -472,6 +448,7 @@ watch(
     abortReceiptPolls()
     if (observedAuthUserId !== undefined && observedAuthUserId !== normalizedUserId) {
       composerDraft.value = ''
+      selectedReasoningEffort.value = ''
       historySearchQuery.value = ''
     }
     observedAuthUserId = normalizedUserId
@@ -877,6 +854,9 @@ async function sendMessage(content: string) {
   await runStream({
     conversationId: conversation.id,
     model: requestModel,
+    ...(selectedReasoningEffort.value
+      ? { reasoningEffort: selectedReasoningEffort.value }
+      : {}),
     expectedHeadMessageId,
     userMessage: {
       id: userMessage.id,
@@ -922,6 +902,9 @@ async function retryMessage(messageId: string) {
   await runStream({
     conversationId: conversation.id,
     model: requestModel,
+    ...(selectedReasoningEffort.value
+      ? { reasoningEffort: selectedReasoningEffort.value }
+      : {}),
     expectedHeadMessageId,
     assistantMessageId: replacement.id,
     retryOfMessageId: messageId,
@@ -1370,18 +1353,6 @@ function scheduleScrollToBottom() {
   background: var(--lx-clay-surface);
 }
 
-.chat-toolbar__model {
-  width: min(220px, 28vw);
-  flex: 0 1 220px;
-}
-
-.chat-toolbar__divider {
-  width: 1px;
-  height: 18px;
-  flex: 0 0 1px;
-  background: var(--lx-clay-border);
-}
-
 .chat-toolbar__session {
   display: flex;
   min-width: 0;
@@ -1397,62 +1368,6 @@ function scheduleScrollToBottom() {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.chat-model-option {
-  display: flex;
-  min-width: 0;
-  width: 100%;
-  align-items: center;
-  gap: 8px;
-}
-
-.chat-model-option--selected > span {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.chat-model-option__mark {
-  display: grid;
-  place-items: center;
-  width: 26px;
-  height: 26px;
-  flex: 0 0 26px;
-  border-radius: 7px;
-  color: var(--lx-clay-accent);
-  background: var(--lx-clay-accent-soft);
-}
-
-.chat-model-option__copy {
-  display: flex;
-  min-width: 0;
-  flex: 1;
-  flex-direction: column;
-}
-
-.chat-model-option__copy strong,
-.chat-model-option__copy small {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.chat-model-option__copy strong { font-size: 13px; }
-.chat-model-option__copy small { color: var(--lx-clay-text-muted); font-size: 10px; }
-
-.chat-model-option__recommended {
-  border-radius: 6px;
-  padding: 2px 5px;
-  color: var(--lx-clay-accent-deep);
-  background: var(--lx-clay-accent-soft);
-  font-size: 9px;
-  font-weight: 800;
-}
-
-.chat-model-option__check {
-  flex: 0 0 auto;
-  color: var(--lx-clay-accent);
 }
 
 .chat-toolbar__balance {
@@ -1709,8 +1624,6 @@ function scheduleScrollToBottom() {
   }
 
   .chat-toolbar__primary { gap: 8px; }
-  .chat-toolbar__model { min-width: 0; width: auto; flex: 1; }
-  .chat-toolbar__divider,
   .chat-toolbar__session { display: none; }
   .chat-toolbar__balance { min-width: 88px; padding-inline: 9px; }
   .chat-toolbar__balance small { display: none; }

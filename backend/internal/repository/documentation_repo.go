@@ -29,7 +29,15 @@ INSERT INTO documentation_documents (
   id, draft_content, draft_version, draft_updated_at,
   published_content, published_version, published_at
 ) VALUES (1, $1::jsonb, 1, NOW(), $1::jsonb, 1, NOW())
-ON CONFLICT (id) DO NOTHING
+ON CONFLICT (id) DO UPDATE SET
+  draft_content = EXCLUDED.draft_content,
+  draft_updated_at = NOW(),
+  published_content = EXCLUDED.published_content,
+  published_at = NOW()
+WHERE documentation_documents.draft_version = 1
+  AND documentation_documents.published_version = 1
+  AND documentation_documents.draft_updated_by IS NULL
+  AND documentation_documents.published_by IS NULL
 RETURNING id`, string(content)).Scan(&insertedID)
 	if err != nil && err != sql.ErrNoRows {
 		return fmt.Errorf("seed documentation state: %w", err)
@@ -38,7 +46,10 @@ RETURNING id`, string(content)).Scan(&insertedID)
 		if _, err := tx.ExecContext(ctx, `
 INSERT INTO documentation_revisions (version, content, published_at)
 VALUES (1, $1::jsonb, NOW())
-ON CONFLICT (version) DO NOTHING`, string(content)); err != nil {
+ON CONFLICT (version) DO UPDATE SET
+  content = EXCLUDED.content,
+  published_at = EXCLUDED.published_at
+WHERE documentation_revisions.published_by IS NULL`, string(content)); err != nil {
 			return fmt.Errorf("seed documentation revision: %w", err)
 		}
 	}

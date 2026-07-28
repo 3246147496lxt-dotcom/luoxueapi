@@ -87,6 +87,18 @@
               <Icon name="chevronRight" size="xs" aria-hidden="true" />
             </RouterLink>
 
+            <RouterLink
+              v-if="subscriptionLink"
+              :to="subscriptionLink.to"
+              class="account-panel__row"
+              data-testid="account-subscriptions-link"
+              @click="emit('close', false)"
+            >
+              <Icon :name="subscriptionLink.icon" size="sm" aria-hidden="true" />
+              <span class="min-w-0 flex-1 truncate">{{ subscriptionLink.label }}</span>
+              <Icon name="chevronRight" size="xs" aria-hidden="true" />
+            </RouterLink>
+
             <button
               type="button"
               data-testid="account-open-settings"
@@ -198,6 +210,7 @@ const props = defineProps<{
   anchorElement: HTMLElement | null
   summary: AccountPanelSummary
   purchaseLink: AccountPanelLink | null
+  subscriptionLink: AccountPanelLink | null
   resourceLinks: AccountResourceLink[]
   showOnboarding: boolean
 }>()

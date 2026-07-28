@@ -101,6 +101,7 @@ export interface ChatCatalog {
 }
 
 export type ChatCompletionMessageRole = 'system' | 'developer' | ChatMessageRole
+export type ChatReasoningEffort = '' | 'low' | 'medium' | 'high' | 'xhigh'
 
 export interface ChatCompletionMessage {
   role: ChatCompletionMessageRole
@@ -115,6 +116,7 @@ export interface ChatCompletionUserMessage {
 interface ChatCompletionHistoryRequestBase {
   conversationId: string
   model: string
+  reasoningEffort?: Exclude<ChatReasoningEffort, ''>
   expectedHeadMessageId: string | null
   assistantMessageId: string
 }

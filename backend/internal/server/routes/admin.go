@@ -122,6 +122,17 @@ func RegisterAdminRoutes(
 
 		// 操作审计日志
 		registerAuditLogRoutes(admin, h, stepUpAuth)
+
+		registerDesktopDiagnosticRoutes(admin, h)
+	}
+}
+
+func registerDesktopDiagnosticRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
+	diagnostics := admin.Group("/desktop/diagnostics")
+	{
+		diagnostics.GET("", h.Admin.DesktopDiagnostic.List)
+		diagnostics.GET("/:id", h.Admin.DesktopDiagnostic.Get)
+		diagnostics.GET("/:id/download", h.Admin.DesktopDiagnostic.Download)
 	}
 }
 

@@ -5,6 +5,7 @@ import admin from './admin'
 import misc from './misc'
 import chat from './chat'
 import personalSettings from './personalSettings'
+import desktop from './desktop'
 
 export default {
   ...landing,
@@ -14,4 +15,5 @@ export default {
   ...misc,
   ...chat,
   ...personalSettings,
+  ...desktop,
 }

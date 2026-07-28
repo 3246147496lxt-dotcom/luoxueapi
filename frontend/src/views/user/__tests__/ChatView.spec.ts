@@ -138,20 +138,22 @@ const ChatComposerStub = {
       :data-insufficient-balance="String(insufficientBalance)"
     >
       <textarea ref="input" data-test="composer-input"></textarea>
+      <slot name="controls" />
       <button type="button" data-test="composer-stop" @click="$emit('stop')">Stop</button>
     </div>
   `,
 }
 
-const SelectStub = {
-  props: ['modelValue', 'options', 'disabled'],
-  emits: ['update:modelValue'],
+const ChatModelSettingsStub = {
+  props: ['modelValue', 'reasoningEffort', 'modelOptions', 'disabled', 'loading'],
+  emits: ['update:modelValue', 'update:reasoningEffort'],
   template: `
     <div
-      data-test="model-select"
+      data-test="chat-model-settings"
       :data-disabled="String(disabled)"
-      :data-option-count="String(options.length)"
-      :data-first-option="options[0]?.value || ''"
+      :data-option-count="String(modelOptions.length)"
+      :data-first-option="modelOptions[0]?.value || ''"
+      :data-reasoning-effort="reasoningEffort"
     />
   `,
 }
@@ -274,9 +276,9 @@ async function mountView(): Promise<VueWrapper> {
         ChatComposer: ChatComposerStub,
         ChatHistoryPanel: ChatHistoryPanelStub,
         ChatMessageItem: ChatMessageItemStub,
+        ChatModelSettings: ChatModelSettingsStub,
         Icon: IconStub,
         RouterLink: RouterLinkStub,
-        Select: SelectStub,
         Transition: true,
       },
     },
@@ -764,7 +766,7 @@ describe('ChatView catalog and hydration gates', () => {
     await nextTick()
 
     expect(apiMocks.getChatModels).toHaveBeenCalledTimes(2)
-    expect(view.get('[data-test="model-select"]').attributes('data-first-option')).toBe('gpt-new')
+    expect(view.get('[data-test="chat-model-settings"]').attributes('data-first-option')).toBe('gpt-new')
     expect(view.get('.chat-toolbar__balance strong').text()).toBe('3.00')
     expect(view.get('.chat-toolbar__balance [data-testid="credit-amount"]').text()).toBe('3.00')
     expect(view.find('.chat-toolbar__balance [data-testid="snowflake-credit-icon"]').exists()).toBe(true)
@@ -776,7 +778,7 @@ describe('ChatView catalog and hydration gates', () => {
     await flushPromises()
     await nextTick()
 
-    expect(view.get('[data-test="model-select"]').attributes('data-first-option')).toBe('gpt-new')
+    expect(view.get('[data-test="chat-model-settings"]').attributes('data-first-option')).toBe('gpt-new')
     expect(view.get('.chat-toolbar__balance strong').text()).toBe('3.00')
   })
 
@@ -830,7 +832,7 @@ describe('ChatView catalog and hydration gates', () => {
 
     expect(view.get('.chat-catalog-error').text()).toContain('chat.errors.noModelsAvailable')
     expect(view.get('[data-test="chat-composer"]').attributes('data-disabled')).toBe('true')
-    expect(view.get('[data-test="model-select"]').attributes('data-option-count')).toBe('0')
+    expect(view.get('[data-test="chat-model-settings"]').attributes('data-option-count')).toBe('0')
 
     await view.get('.chat-catalog-error button').trigger('click')
     await flushPromises()
@@ -838,7 +840,7 @@ describe('ChatView catalog and hydration gates', () => {
 
     expect(apiMocks.getChatModels).toHaveBeenCalledTimes(2)
     expect(view.find('.chat-catalog-error').exists()).toBe(false)
-    expect(view.get('[data-test="model-select"]').attributes('data-option-count')).toBe('1')
+    expect(view.get('[data-test="chat-model-settings"]').attributes('data-option-count')).toBe('1')
     expect(view.get('[data-test="chat-composer"]').attributes('data-disabled')).toBe('false')
   })
 
@@ -1526,7 +1528,7 @@ describe('ChatView catalog and hydration gates', () => {
     })
   })
 
-  it('后续消息只上传新增消息信封，不再由客户端上传历史上下文', async () => {
+  it('后续消息上传新增信封与所选推理强度，不再由客户端上传历史上下文', async () => {
     const conversation: ChatConversation = {
       id: 'context-conversation',
       userId: '7',
@@ -1567,12 +1569,15 @@ describe('ChatView catalog and hydration gates', () => {
     chatStore.activeConversation = conversation
 
     const view = await mountView()
+    view.findComponent(ChatModelSettingsStub).vm.$emit('update:reasoningEffort', 'high')
+    await nextTick()
     view.findComponent(ChatComposerStub).vm.$emit('send', 'Follow up')
     await flushPromises()
 
     expect(apiMocks.streamChatCompletion.mock.calls[0]?.[0]).toEqual({
       conversationId: 'context-conversation',
       model: 'gpt-5',
+      reasoningEffort: 'high',
       expectedHeadMessageId: 'assistant-current',
       userMessage: {
         id: 'generated-message-1',

@@ -7,6 +7,7 @@ import settings from './settings'
 import audit from './audit'
 import modelCatalog from './modelCatalog'
 import documentation from './documentation'
+import desktopDiagnostics from './desktopDiagnostics'
 
 export default {
   ...overview,
@@ -18,4 +19,5 @@ export default {
   ...audit,
   ...modelCatalog,
   ...documentation,
+  ...desktopDiagnostics,
 }

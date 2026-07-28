@@ -1,0 +1,50 @@
+[package]
+name = "luoxueapi-desktop"
+version = "0.1.0"
+description = "Luoxue API Desktop"
+authors = ["Luoxue API"]
+edition = "2021"
+rust-version = "1.78"
+
+[lib]
+name = "luoxueapi_desktop_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+aes-gcm = "0.10"
+async-stream = "0.3"
+axum = { version = "0.8", features = ["json", "macros"] }
+base64 = "0.22"
+bytes = "1"
+chrono = { version = "0.4", features = ["serde"] }
+directories = "6"
+fs2 = "0.4"
+futures-util = "0.3"
+hmac = "0.12"
+hostname = "0.4"
+keyring = { version = "3", features = ["apple-native"] }
+rand = "0.8"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "stream"] }
+rusqlite = { version = "0.32", features = ["bundled"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+subtle = "2"
+tauri = { version = "2", features = ["tray-icon"] }
+tauri-plugin-autostart = "2"
+tauri-plugin-notification = "2"
+tauri-plugin-opener = "2"
+tauri-plugin-single-instance = "2"
+tauri-plugin-updater = "2"
+thiserror = "2"
+tokio = { version = "1", features = ["macros", "net", "rt-multi-thread", "sync", "time"] }
+toml_edit = "0.22"
+url = "2"
+uuid = { version = "1", features = ["serde", "v4"] }
+zeroize = { version = "1", features = ["serde"] }
+
+[dev-dependencies]
+tempfile = "3"

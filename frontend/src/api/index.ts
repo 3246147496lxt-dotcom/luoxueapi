@@ -22,6 +22,7 @@ export { totpAPI } from './totp'
 export { default as announcementsAPI } from './announcements'
 export { channelMonitorUserAPI } from './channelMonitor'
 export { requestCustomPageLaunch } from './customPages'
+export { desktopAPI } from './desktop'
 
 // Admin APIs
 export { adminAPI } from './admin'

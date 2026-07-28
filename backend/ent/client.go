@@ -29,6 +29,9 @@ import (
 	"github.com/Wei-Shaw/sub2api/ent/channelmonitordailyrollup"
 	"github.com/Wei-Shaw/sub2api/ent/channelmonitorhistory"
 	"github.com/Wei-Shaw/sub2api/ent/channelmonitorrequesttemplate"
+	"github.com/Wei-Shaw/sub2api/ent/desktopdevice"
+	"github.com/Wei-Shaw/sub2api/ent/desktopdevicesession"
+	"github.com/Wei-Shaw/sub2api/ent/desktopdiagnostic"
 	"github.com/Wei-Shaw/sub2api/ent/errorpassthroughrule"
 	"github.com/Wei-Shaw/sub2api/ent/group"
 	"github.com/Wei-Shaw/sub2api/ent/idempotencyrecord"
@@ -91,6 +94,12 @@ type Client struct {
 	ChannelMonitorHistory *ChannelMonitorHistoryClient
 	// ChannelMonitorRequestTemplate is the client for interacting with the ChannelMonitorRequestTemplate builders.
 	ChannelMonitorRequestTemplate *ChannelMonitorRequestTemplateClient
+	// DesktopDevice is the client for interacting with the DesktopDevice builders.
+	DesktopDevice *DesktopDeviceClient
+	// DesktopDeviceSession is the client for interacting with the DesktopDeviceSession builders.
+	DesktopDeviceSession *DesktopDeviceSessionClient
+	// DesktopDiagnostic is the client for interacting with the DesktopDiagnostic builders.
+	DesktopDiagnostic *DesktopDiagnosticClient
 	// ErrorPassthroughRule is the client for interacting with the ErrorPassthroughRule builders.
 	ErrorPassthroughRule *ErrorPassthroughRuleClient
 	// Group is the client for interacting with the Group builders.
@@ -166,6 +175,9 @@ func (c *Client) init() {
 	c.ChannelMonitorDailyRollup = NewChannelMonitorDailyRollupClient(c.config)
 	c.ChannelMonitorHistory = NewChannelMonitorHistoryClient(c.config)
 	c.ChannelMonitorRequestTemplate = NewChannelMonitorRequestTemplateClient(c.config)
+	c.DesktopDevice = NewDesktopDeviceClient(c.config)
+	c.DesktopDeviceSession = NewDesktopDeviceSessionClient(c.config)
+	c.DesktopDiagnostic = NewDesktopDiagnosticClient(c.config)
 	c.ErrorPassthroughRule = NewErrorPassthroughRuleClient(c.config)
 	c.Group = NewGroupClient(c.config)
 	c.IdempotencyRecord = NewIdempotencyRecordClient(c.config)
@@ -297,6 +309,9 @@ func (c *Client) Tx(ctx context.Context) (*Tx, error) {
 		ChannelMonitorDailyRollup:     NewChannelMonitorDailyRollupClient(cfg),
 		ChannelMonitorHistory:         NewChannelMonitorHistoryClient(cfg),
 		ChannelMonitorRequestTemplate: NewChannelMonitorRequestTemplateClient(cfg),
+		DesktopDevice:                 NewDesktopDeviceClient(cfg),
+		DesktopDeviceSession:          NewDesktopDeviceSessionClient(cfg),
+		DesktopDiagnostic:             NewDesktopDiagnosticClient(cfg),
 		ErrorPassthroughRule:          NewErrorPassthroughRuleClient(cfg),
 		Group:                         NewGroupClient(cfg),
 		IdempotencyRecord:             NewIdempotencyRecordClient(cfg),
@@ -355,6 +370,9 @@ func (c *Client) BeginTx(ctx context.Context, opts *sql.TxOptions) (*Tx, error) 
 		ChannelMonitorDailyRollup:     NewChannelMonitorDailyRollupClient(cfg),
 		ChannelMonitorHistory:         NewChannelMonitorHistoryClient(cfg),
 		ChannelMonitorRequestTemplate: NewChannelMonitorRequestTemplateClient(cfg),
+		DesktopDevice:                 NewDesktopDeviceClient(cfg),
+		DesktopDeviceSession:          NewDesktopDeviceSessionClient(cfg),
+		DesktopDiagnostic:             NewDesktopDiagnosticClient(cfg),
 		ErrorPassthroughRule:          NewErrorPassthroughRuleClient(cfg),
 		Group:                         NewGroupClient(cfg),
 		IdempotencyRecord:             NewIdempotencyRecordClient(cfg),
@@ -412,14 +430,15 @@ func (c *Client) Use(hooks ...Hook) {
 		c.APIKey, c.Account, c.AccountGroup, c.Announcement, c.AnnouncementRead,
 		c.AuthIdentity, c.AuthIdentityChannel, c.BatchImageEvent, c.BatchImageItem,
 		c.BatchImageJob, c.ChannelMonitor, c.ChannelMonitorDailyRollup,
-		c.ChannelMonitorHistory, c.ChannelMonitorRequestTemplate,
-		c.ErrorPassthroughRule, c.Group, c.IdempotencyRecord,
-		c.IdentityAdoptionDecision, c.ModelCatalogModel, c.PaymentAuditLog,
-		c.PaymentOrder, c.PaymentProviderInstance, c.PendingAuthSession, c.PromoCode,
-		c.PromoCodeUsage, c.Proxy, c.RedeemCode, c.SecuritySecret, c.Setting,
-		c.SubscriptionPlan, c.TLSFingerprintProfile, c.UsageCleanupTask, c.UsageLog,
-		c.User, c.UserAllowedGroup, c.UserAttributeDefinition, c.UserAttributeValue,
-		c.UserPlatformQuota, c.UserSubscription,
+		c.ChannelMonitorHistory, c.ChannelMonitorRequestTemplate, c.DesktopDevice,
+		c.DesktopDeviceSession, c.DesktopDiagnostic, c.ErrorPassthroughRule, c.Group,
+		c.IdempotencyRecord, c.IdentityAdoptionDecision, c.ModelCatalogModel,
+		c.PaymentAuditLog, c.PaymentOrder, c.PaymentProviderInstance,
+		c.PendingAuthSession, c.PromoCode, c.PromoCodeUsage, c.Proxy, c.RedeemCode,
+		c.SecuritySecret, c.Setting, c.SubscriptionPlan, c.TLSFingerprintProfile,
+		c.UsageCleanupTask, c.UsageLog, c.User, c.UserAllowedGroup,
+		c.UserAttributeDefinition, c.UserAttributeValue, c.UserPlatformQuota,
+		c.UserSubscription,
 	} {
 		n.Use(hooks...)
 	}
@@ -432,14 +451,15 @@ func (c *Client) Intercept(interceptors ...Interceptor) {
 		c.APIKey, c.Account, c.AccountGroup, c.Announcement, c.AnnouncementRead,
 		c.AuthIdentity, c.AuthIdentityChannel, c.BatchImageEvent, c.BatchImageItem,
 		c.BatchImageJob, c.ChannelMonitor, c.ChannelMonitorDailyRollup,
-		c.ChannelMonitorHistory, c.ChannelMonitorRequestTemplate,
-		c.ErrorPassthroughRule, c.Group, c.IdempotencyRecord,
-		c.IdentityAdoptionDecision, c.ModelCatalogModel, c.PaymentAuditLog,
-		c.PaymentOrder, c.PaymentProviderInstance, c.PendingAuthSession, c.PromoCode,
-		c.PromoCodeUsage, c.Proxy, c.RedeemCode, c.SecuritySecret, c.Setting,
-		c.SubscriptionPlan, c.TLSFingerprintProfile, c.UsageCleanupTask, c.UsageLog,
-		c.User, c.UserAllowedGroup, c.UserAttributeDefinition, c.UserAttributeValue,
-		c.UserPlatformQuota, c.UserSubscription,
+		c.ChannelMonitorHistory, c.ChannelMonitorRequestTemplate, c.DesktopDevice,
+		c.DesktopDeviceSession, c.DesktopDiagnostic, c.ErrorPassthroughRule, c.Group,
+		c.IdempotencyRecord, c.IdentityAdoptionDecision, c.ModelCatalogModel,
+		c.PaymentAuditLog, c.PaymentOrder, c.PaymentProviderInstance,
+		c.PendingAuthSession, c.PromoCode, c.PromoCodeUsage, c.Proxy, c.RedeemCode,
+		c.SecuritySecret, c.Setting, c.SubscriptionPlan, c.TLSFingerprintProfile,
+		c.UsageCleanupTask, c.UsageLog, c.User, c.UserAllowedGroup,
+		c.UserAttributeDefinition, c.UserAttributeValue, c.UserPlatformQuota,
+		c.UserSubscription,
 	} {
 		n.Intercept(interceptors...)
 	}
@@ -476,6 +496,12 @@ func (c *Client) Mutate(ctx context.Context, m Mutation) (Value, error) {
 		return c.ChannelMonitorHistory.mutate(ctx, m)
 	case *ChannelMonitorRequestTemplateMutation:
 		return c.ChannelMonitorRequestTemplate.mutate(ctx, m)
+	case *DesktopDeviceMutation:
+		return c.DesktopDevice.mutate(ctx, m)
+	case *DesktopDeviceSessionMutation:
+		return c.DesktopDeviceSession.mutate(ctx, m)
+	case *DesktopDiagnosticMutation:
+		return c.DesktopDiagnostic.mutate(ctx, m)
 	case *ErrorPassthroughRuleMutation:
 		return c.ErrorPassthroughRule.mutate(ctx, m)
 	case *GroupMutation:
@@ -664,6 +690,22 @@ func (c *APIKeyClient) QueryGroup(_m *APIKey) *GroupQuery {
 			sqlgraph.From(apikey.Table, apikey.FieldID, id),
 			sqlgraph.To(group.Table, group.FieldID),
 			sqlgraph.Edge(sqlgraph.M2O, true, apikey.GroupTable, apikey.GroupColumn),
+		)
+		fromV = sqlgraph.Neighbors(_m.driver.Dialect(), step)
+		return fromV, nil
+	}
+	return query
+}
+
+// QueryManagedDevice queries the managed_device edge of a APIKey.
+func (c *APIKeyClient) QueryManagedDevice(_m *APIKey) *DesktopDeviceQuery {
+	query := (&DesktopDeviceClient{config: c.config}).Query()
+	query.path = func(context.Context) (fromV *sql.Selector, _ error) {
+		id := _m.ID
+		step := sqlgraph.NewStep(
+			sqlgraph.From(apikey.Table, apikey.FieldID, id),
+			sqlgraph.To(desktopdevice.Table, desktopdevice.FieldID),
+			sqlgraph.Edge(sqlgraph.M2O, true, apikey.ManagedDeviceTable, apikey.ManagedDeviceColumn),
 		)
 		fromV = sqlgraph.Neighbors(_m.driver.Dialect(), step)
 		return fromV, nil
@@ -2729,6 +2771,517 @@ func (c *ChannelMonitorRequestTemplateClient) mutate(ctx context.Context, m *Cha
 		return (&ChannelMonitorRequestTemplateDelete{config: c.config, hooks: c.Hooks(), mutation: m}).Exec(ctx)
 	default:
 		return nil, fmt.Errorf("ent: unknown ChannelMonitorRequestTemplate mutation op: %q", m.Op())
+	}
+}
+
+// DesktopDeviceClient is a client for the DesktopDevice schema.
+type DesktopDeviceClient struct {
+	config
+}
+
+// NewDesktopDeviceClient returns a client for the DesktopDevice from the given config.
+func NewDesktopDeviceClient(c config) *DesktopDeviceClient {
+	return &DesktopDeviceClient{config: c}
+}
+
+// Use adds a list of mutation hooks to the hooks stack.
+// A call to `Use(f, g, h)` equals to `desktopdevice.Hooks(f(g(h())))`.
+func (c *DesktopDeviceClient) Use(hooks ...Hook) {
+	c.hooks.DesktopDevice = append(c.hooks.DesktopDevice, hooks...)
+}
+
+// Intercept adds a list of query interceptors to the interceptors stack.
+// A call to `Intercept(f, g, h)` equals to `desktopdevice.Intercept(f(g(h())))`.
+func (c *DesktopDeviceClient) Intercept(interceptors ...Interceptor) {
+	c.inters.DesktopDevice = append(c.inters.DesktopDevice, interceptors...)
+}
+
+// Create returns a builder for creating a DesktopDevice entity.
+func (c *DesktopDeviceClient) Create() *DesktopDeviceCreate {
+	mutation := newDesktopDeviceMutation(c.config, OpCreate)
+	return &DesktopDeviceCreate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// CreateBulk returns a builder for creating a bulk of DesktopDevice entities.
+func (c *DesktopDeviceClient) CreateBulk(builders ...*DesktopDeviceCreate) *DesktopDeviceCreateBulk {
+	return &DesktopDeviceCreateBulk{config: c.config, builders: builders}
+}
+
+// MapCreateBulk creates a bulk creation builder from the given slice. For each item in the slice, the function creates
+// a builder and applies setFunc on it.
+func (c *DesktopDeviceClient) MapCreateBulk(slice any, setFunc func(*DesktopDeviceCreate, int)) *DesktopDeviceCreateBulk {
+	rv := reflect.ValueOf(slice)
+	if rv.Kind() != reflect.Slice {
+		return &DesktopDeviceCreateBulk{err: fmt.Errorf("calling to DesktopDeviceClient.MapCreateBulk with wrong type %T, need slice", slice)}
+	}
+	builders := make([]*DesktopDeviceCreate, rv.Len())
+	for i := 0; i < rv.Len(); i++ {
+		builders[i] = c.Create()
+		setFunc(builders[i], i)
+	}
+	return &DesktopDeviceCreateBulk{config: c.config, builders: builders}
+}
+
+// Update returns an update builder for DesktopDevice.
+func (c *DesktopDeviceClient) Update() *DesktopDeviceUpdate {
+	mutation := newDesktopDeviceMutation(c.config, OpUpdate)
+	return &DesktopDeviceUpdate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// UpdateOne returns an update builder for the given entity.
+func (c *DesktopDeviceClient) UpdateOne(_m *DesktopDevice) *DesktopDeviceUpdateOne {
+	mutation := newDesktopDeviceMutation(c.config, OpUpdateOne, withDesktopDevice(_m))
+	return &DesktopDeviceUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// UpdateOneID returns an update builder for the given id.
+func (c *DesktopDeviceClient) UpdateOneID(id int64) *DesktopDeviceUpdateOne {
+	mutation := newDesktopDeviceMutation(c.config, OpUpdateOne, withDesktopDeviceID(id))
+	return &DesktopDeviceUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// Delete returns a delete builder for DesktopDevice.
+func (c *DesktopDeviceClient) Delete() *DesktopDeviceDelete {
+	mutation := newDesktopDeviceMutation(c.config, OpDelete)
+	return &DesktopDeviceDelete{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// DeleteOne returns a builder for deleting the given entity.
+func (c *DesktopDeviceClient) DeleteOne(_m *DesktopDevice) *DesktopDeviceDeleteOne {
+	return c.DeleteOneID(_m.ID)
+}
+
+// DeleteOneID returns a builder for deleting the given entity by its id.
+func (c *DesktopDeviceClient) DeleteOneID(id int64) *DesktopDeviceDeleteOne {
+	builder := c.Delete().Where(desktopdevice.ID(id))
+	builder.mutation.id = &id
+	builder.mutation.op = OpDeleteOne
+	return &DesktopDeviceDeleteOne{builder}
+}
+
+// Query returns a query builder for DesktopDevice.
+func (c *DesktopDeviceClient) Query() *DesktopDeviceQuery {
+	return &DesktopDeviceQuery{
+		config: c.config,
+		ctx:    &QueryContext{Type: TypeDesktopDevice},
+		inters: c.Interceptors(),
+	}
+}
+
+// Get returns a DesktopDevice entity by its id.
+func (c *DesktopDeviceClient) Get(ctx context.Context, id int64) (*DesktopDevice, error) {
+	return c.Query().Where(desktopdevice.ID(id)).Only(ctx)
+}
+
+// GetX is like Get, but panics if an error occurs.
+func (c *DesktopDeviceClient) GetX(ctx context.Context, id int64) *DesktopDevice {
+	obj, err := c.Get(ctx, id)
+	if err != nil {
+		panic(err)
+	}
+	return obj
+}
+
+// QueryUser queries the user edge of a DesktopDevice.
+func (c *DesktopDeviceClient) QueryUser(_m *DesktopDevice) *UserQuery {
+	query := (&UserClient{config: c.config}).Query()
+	query.path = func(context.Context) (fromV *sql.Selector, _ error) {
+		id := _m.ID
+		step := sqlgraph.NewStep(
+			sqlgraph.From(desktopdevice.Table, desktopdevice.FieldID, id),
+			sqlgraph.To(user.Table, user.FieldID),
+			sqlgraph.Edge(sqlgraph.M2O, true, desktopdevice.UserTable, desktopdevice.UserColumn),
+		)
+		fromV = sqlgraph.Neighbors(_m.driver.Dialect(), step)
+		return fromV, nil
+	}
+	return query
+}
+
+// QuerySessions queries the sessions edge of a DesktopDevice.
+func (c *DesktopDeviceClient) QuerySessions(_m *DesktopDevice) *DesktopDeviceSessionQuery {
+	query := (&DesktopDeviceSessionClient{config: c.config}).Query()
+	query.path = func(context.Context) (fromV *sql.Selector, _ error) {
+		id := _m.ID
+		step := sqlgraph.NewStep(
+			sqlgraph.From(desktopdevice.Table, desktopdevice.FieldID, id),
+			sqlgraph.To(desktopdevicesession.Table, desktopdevicesession.FieldID),
+			sqlgraph.Edge(sqlgraph.O2M, false, desktopdevice.SessionsTable, desktopdevice.SessionsColumn),
+		)
+		fromV = sqlgraph.Neighbors(_m.driver.Dialect(), step)
+		return fromV, nil
+	}
+	return query
+}
+
+// QueryManagedKeys queries the managed_keys edge of a DesktopDevice.
+func (c *DesktopDeviceClient) QueryManagedKeys(_m *DesktopDevice) *APIKeyQuery {
+	query := (&APIKeyClient{config: c.config}).Query()
+	query.path = func(context.Context) (fromV *sql.Selector, _ error) {
+		id := _m.ID
+		step := sqlgraph.NewStep(
+			sqlgraph.From(desktopdevice.Table, desktopdevice.FieldID, id),
+			sqlgraph.To(apikey.Table, apikey.FieldID),
+			sqlgraph.Edge(sqlgraph.O2M, false, desktopdevice.ManagedKeysTable, desktopdevice.ManagedKeysColumn),
+		)
+		fromV = sqlgraph.Neighbors(_m.driver.Dialect(), step)
+		return fromV, nil
+	}
+	return query
+}
+
+// QueryDiagnostics queries the diagnostics edge of a DesktopDevice.
+func (c *DesktopDeviceClient) QueryDiagnostics(_m *DesktopDevice) *DesktopDiagnosticQuery {
+	query := (&DesktopDiagnosticClient{config: c.config}).Query()
+	query.path = func(context.Context) (fromV *sql.Selector, _ error) {
+		id := _m.ID
+		step := sqlgraph.NewStep(
+			sqlgraph.From(desktopdevice.Table, desktopdevice.FieldID, id),
+			sqlgraph.To(desktopdiagnostic.Table, desktopdiagnostic.FieldID),
+			sqlgraph.Edge(sqlgraph.O2M, false, desktopdevice.DiagnosticsTable, desktopdevice.DiagnosticsColumn),
+		)
+		fromV = sqlgraph.Neighbors(_m.driver.Dialect(), step)
+		return fromV, nil
+	}
+	return query
+}
+
+// Hooks returns the client hooks.
+func (c *DesktopDeviceClient) Hooks() []Hook {
+	return c.hooks.DesktopDevice
+}
+
+// Interceptors returns the client interceptors.
+func (c *DesktopDeviceClient) Interceptors() []Interceptor {
+	return c.inters.DesktopDevice
+}
+
+func (c *DesktopDeviceClient) mutate(ctx context.Context, m *DesktopDeviceMutation) (Value, error) {
+	switch m.Op() {
+	case OpCreate:
+		return (&DesktopDeviceCreate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdate:
+		return (&DesktopDeviceUpdate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdateOne:
+		return (&DesktopDeviceUpdateOne{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpDelete, OpDeleteOne:
+		return (&DesktopDeviceDelete{config: c.config, hooks: c.Hooks(), mutation: m}).Exec(ctx)
+	default:
+		return nil, fmt.Errorf("ent: unknown DesktopDevice mutation op: %q", m.Op())
+	}
+}
+
+// DesktopDeviceSessionClient is a client for the DesktopDeviceSession schema.
+type DesktopDeviceSessionClient struct {
+	config
+}
+
+// NewDesktopDeviceSessionClient returns a client for the DesktopDeviceSession from the given config.
+func NewDesktopDeviceSessionClient(c config) *DesktopDeviceSessionClient {
+	return &DesktopDeviceSessionClient{config: c}
+}
+
+// Use adds a list of mutation hooks to the hooks stack.
+// A call to `Use(f, g, h)` equals to `desktopdevicesession.Hooks(f(g(h())))`.
+func (c *DesktopDeviceSessionClient) Use(hooks ...Hook) {
+	c.hooks.DesktopDeviceSession = append(c.hooks.DesktopDeviceSession, hooks...)
+}
+
+// Intercept adds a list of query interceptors to the interceptors stack.
+// A call to `Intercept(f, g, h)` equals to `desktopdevicesession.Intercept(f(g(h())))`.
+func (c *DesktopDeviceSessionClient) Intercept(interceptors ...Interceptor) {
+	c.inters.DesktopDeviceSession = append(c.inters.DesktopDeviceSession, interceptors...)
+}
+
+// Create returns a builder for creating a DesktopDeviceSession entity.
+func (c *DesktopDeviceSessionClient) Create() *DesktopDeviceSessionCreate {
+	mutation := newDesktopDeviceSessionMutation(c.config, OpCreate)
+	return &DesktopDeviceSessionCreate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// CreateBulk returns a builder for creating a bulk of DesktopDeviceSession entities.
+func (c *DesktopDeviceSessionClient) CreateBulk(builders ...*DesktopDeviceSessionCreate) *DesktopDeviceSessionCreateBulk {
+	return &DesktopDeviceSessionCreateBulk{config: c.config, builders: builders}
+}
+
+// MapCreateBulk creates a bulk creation builder from the given slice. For each item in the slice, the function creates
+// a builder and applies setFunc on it.
+func (c *DesktopDeviceSessionClient) MapCreateBulk(slice any, setFunc func(*DesktopDeviceSessionCreate, int)) *DesktopDeviceSessionCreateBulk {
+	rv := reflect.ValueOf(slice)
+	if rv.Kind() != reflect.Slice {
+		return &DesktopDeviceSessionCreateBulk{err: fmt.Errorf("calling to DesktopDeviceSessionClient.MapCreateBulk with wrong type %T, need slice", slice)}
+	}
+	builders := make([]*DesktopDeviceSessionCreate, rv.Len())
+	for i := 0; i < rv.Len(); i++ {
+		builders[i] = c.Create()
+		setFunc(builders[i], i)
+	}
+	return &DesktopDeviceSessionCreateBulk{config: c.config, builders: builders}
+}
+
+// Update returns an update builder for DesktopDeviceSession.
+func (c *DesktopDeviceSessionClient) Update() *DesktopDeviceSessionUpdate {
+	mutation := newDesktopDeviceSessionMutation(c.config, OpUpdate)
+	return &DesktopDeviceSessionUpdate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// UpdateOne returns an update builder for the given entity.
+func (c *DesktopDeviceSessionClient) UpdateOne(_m *DesktopDeviceSession) *DesktopDeviceSessionUpdateOne {
+	mutation := newDesktopDeviceSessionMutation(c.config, OpUpdateOne, withDesktopDeviceSession(_m))
+	return &DesktopDeviceSessionUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// UpdateOneID returns an update builder for the given id.
+func (c *DesktopDeviceSessionClient) UpdateOneID(id int64) *DesktopDeviceSessionUpdateOne {
+	mutation := newDesktopDeviceSessionMutation(c.config, OpUpdateOne, withDesktopDeviceSessionID(id))
+	return &DesktopDeviceSessionUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// Delete returns a delete builder for DesktopDeviceSession.
+func (c *DesktopDeviceSessionClient) Delete() *DesktopDeviceSessionDelete {
+	mutation := newDesktopDeviceSessionMutation(c.config, OpDelete)
+	return &DesktopDeviceSessionDelete{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// DeleteOne returns a builder for deleting the given entity.
+func (c *DesktopDeviceSessionClient) DeleteOne(_m *DesktopDeviceSession) *DesktopDeviceSessionDeleteOne {
+	return c.DeleteOneID(_m.ID)
+}
+
+// DeleteOneID returns a builder for deleting the given entity by its id.
+func (c *DesktopDeviceSessionClient) DeleteOneID(id int64) *DesktopDeviceSessionDeleteOne {
+	builder := c.Delete().Where(desktopdevicesession.ID(id))
+	builder.mutation.id = &id
+	builder.mutation.op = OpDeleteOne
+	return &DesktopDeviceSessionDeleteOne{builder}
+}
+
+// Query returns a query builder for DesktopDeviceSession.
+func (c *DesktopDeviceSessionClient) Query() *DesktopDeviceSessionQuery {
+	return &DesktopDeviceSessionQuery{
+		config: c.config,
+		ctx:    &QueryContext{Type: TypeDesktopDeviceSession},
+		inters: c.Interceptors(),
+	}
+}
+
+// Get returns a DesktopDeviceSession entity by its id.
+func (c *DesktopDeviceSessionClient) Get(ctx context.Context, id int64) (*DesktopDeviceSession, error) {
+	return c.Query().Where(desktopdevicesession.ID(id)).Only(ctx)
+}
+
+// GetX is like Get, but panics if an error occurs.
+func (c *DesktopDeviceSessionClient) GetX(ctx context.Context, id int64) *DesktopDeviceSession {
+	obj, err := c.Get(ctx, id)
+	if err != nil {
+		panic(err)
+	}
+	return obj
+}
+
+// QueryDevice queries the device edge of a DesktopDeviceSession.
+func (c *DesktopDeviceSessionClient) QueryDevice(_m *DesktopDeviceSession) *DesktopDeviceQuery {
+	query := (&DesktopDeviceClient{config: c.config}).Query()
+	query.path = func(context.Context) (fromV *sql.Selector, _ error) {
+		id := _m.ID
+		step := sqlgraph.NewStep(
+			sqlgraph.From(desktopdevicesession.Table, desktopdevicesession.FieldID, id),
+			sqlgraph.To(desktopdevice.Table, desktopdevice.FieldID),
+			sqlgraph.Edge(sqlgraph.M2O, true, desktopdevicesession.DeviceTable, desktopdevicesession.DeviceColumn),
+		)
+		fromV = sqlgraph.Neighbors(_m.driver.Dialect(), step)
+		return fromV, nil
+	}
+	return query
+}
+
+// Hooks returns the client hooks.
+func (c *DesktopDeviceSessionClient) Hooks() []Hook {
+	return c.hooks.DesktopDeviceSession
+}
+
+// Interceptors returns the client interceptors.
+func (c *DesktopDeviceSessionClient) Interceptors() []Interceptor {
+	return c.inters.DesktopDeviceSession
+}
+
+func (c *DesktopDeviceSessionClient) mutate(ctx context.Context, m *DesktopDeviceSessionMutation) (Value, error) {
+	switch m.Op() {
+	case OpCreate:
+		return (&DesktopDeviceSessionCreate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdate:
+		return (&DesktopDeviceSessionUpdate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdateOne:
+		return (&DesktopDeviceSessionUpdateOne{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpDelete, OpDeleteOne:
+		return (&DesktopDeviceSessionDelete{config: c.config, hooks: c.Hooks(), mutation: m}).Exec(ctx)
+	default:
+		return nil, fmt.Errorf("ent: unknown DesktopDeviceSession mutation op: %q", m.Op())
+	}
+}
+
+// DesktopDiagnosticClient is a client for the DesktopDiagnostic schema.
+type DesktopDiagnosticClient struct {
+	config
+}
+
+// NewDesktopDiagnosticClient returns a client for the DesktopDiagnostic from the given config.
+func NewDesktopDiagnosticClient(c config) *DesktopDiagnosticClient {
+	return &DesktopDiagnosticClient{config: c}
+}
+
+// Use adds a list of mutation hooks to the hooks stack.
+// A call to `Use(f, g, h)` equals to `desktopdiagnostic.Hooks(f(g(h())))`.
+func (c *DesktopDiagnosticClient) Use(hooks ...Hook) {
+	c.hooks.DesktopDiagnostic = append(c.hooks.DesktopDiagnostic, hooks...)
+}
+
+// Intercept adds a list of query interceptors to the interceptors stack.
+// A call to `Intercept(f, g, h)` equals to `desktopdiagnostic.Intercept(f(g(h())))`.
+func (c *DesktopDiagnosticClient) Intercept(interceptors ...Interceptor) {
+	c.inters.DesktopDiagnostic = append(c.inters.DesktopDiagnostic, interceptors...)
+}
+
+// Create returns a builder for creating a DesktopDiagnostic entity.
+func (c *DesktopDiagnosticClient) Create() *DesktopDiagnosticCreate {
+	mutation := newDesktopDiagnosticMutation(c.config, OpCreate)
+	return &DesktopDiagnosticCreate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// CreateBulk returns a builder for creating a bulk of DesktopDiagnostic entities.
+func (c *DesktopDiagnosticClient) CreateBulk(builders ...*DesktopDiagnosticCreate) *DesktopDiagnosticCreateBulk {
+	return &DesktopDiagnosticCreateBulk{config: c.config, builders: builders}
+}
+
+// MapCreateBulk creates a bulk creation builder from the given slice. For each item in the slice, the function creates
+// a builder and applies setFunc on it.
+func (c *DesktopDiagnosticClient) MapCreateBulk(slice any, setFunc func(*DesktopDiagnosticCreate, int)) *DesktopDiagnosticCreateBulk {
+	rv := reflect.ValueOf(slice)
+	if rv.Kind() != reflect.Slice {
+		return &DesktopDiagnosticCreateBulk{err: fmt.Errorf("calling to DesktopDiagnosticClient.MapCreateBulk with wrong type %T, need slice", slice)}
+	}
+	builders := make([]*DesktopDiagnosticCreate, rv.Len())
+	for i := 0; i < rv.Len(); i++ {
+		builders[i] = c.Create()
+		setFunc(builders[i], i)
+	}
+	return &DesktopDiagnosticCreateBulk{config: c.config, builders: builders}
+}
+
+// Update returns an update builder for DesktopDiagnostic.
+func (c *DesktopDiagnosticClient) Update() *DesktopDiagnosticUpdate {
+	mutation := newDesktopDiagnosticMutation(c.config, OpUpdate)
+	return &DesktopDiagnosticUpdate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// UpdateOne returns an update builder for the given entity.
+func (c *DesktopDiagnosticClient) UpdateOne(_m *DesktopDiagnostic) *DesktopDiagnosticUpdateOne {
+	mutation := newDesktopDiagnosticMutation(c.config, OpUpdateOne, withDesktopDiagnostic(_m))
+	return &DesktopDiagnosticUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// UpdateOneID returns an update builder for the given id.
+func (c *DesktopDiagnosticClient) UpdateOneID(id int64) *DesktopDiagnosticUpdateOne {
+	mutation := newDesktopDiagnosticMutation(c.config, OpUpdateOne, withDesktopDiagnosticID(id))
+	return &DesktopDiagnosticUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// Delete returns a delete builder for DesktopDiagnostic.
+func (c *DesktopDiagnosticClient) Delete() *DesktopDiagnosticDelete {
+	mutation := newDesktopDiagnosticMutation(c.config, OpDelete)
+	return &DesktopDiagnosticDelete{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// DeleteOne returns a builder for deleting the given entity.
+func (c *DesktopDiagnosticClient) DeleteOne(_m *DesktopDiagnostic) *DesktopDiagnosticDeleteOne {
+	return c.DeleteOneID(_m.ID)
+}
+
+// DeleteOneID returns a builder for deleting the given entity by its id.
+func (c *DesktopDiagnosticClient) DeleteOneID(id int64) *DesktopDiagnosticDeleteOne {
+	builder := c.Delete().Where(desktopdiagnostic.ID(id))
+	builder.mutation.id = &id
+	builder.mutation.op = OpDeleteOne
+	return &DesktopDiagnosticDeleteOne{builder}
+}
+
+// Query returns a query builder for DesktopDiagnostic.
+func (c *DesktopDiagnosticClient) Query() *DesktopDiagnosticQuery {
+	return &DesktopDiagnosticQuery{
+		config: c.config,
+		ctx:    &QueryContext{Type: TypeDesktopDiagnostic},
+		inters: c.Interceptors(),
+	}
+}
+
+// Get returns a DesktopDiagnostic entity by its id.
+func (c *DesktopDiagnosticClient) Get(ctx context.Context, id int64) (*DesktopDiagnostic, error) {
+	return c.Query().Where(desktopdiagnostic.ID(id)).Only(ctx)
+}
+
+// GetX is like Get, but panics if an error occurs.
+func (c *DesktopDiagnosticClient) GetX(ctx context.Context, id int64) *DesktopDiagnostic {
+	obj, err := c.Get(ctx, id)
+	if err != nil {
+		panic(err)
+	}
+	return obj
+}
+
+// QueryDevice queries the device edge of a DesktopDiagnostic.
+func (c *DesktopDiagnosticClient) QueryDevice(_m *DesktopDiagnostic) *DesktopDeviceQuery {
+	query := (&DesktopDeviceClient{config: c.config}).Query()
+	query.path = func(context.Context) (fromV *sql.Selector, _ error) {
+		id := _m.ID
+		step := sqlgraph.NewStep(
+			sqlgraph.From(desktopdiagnostic.Table, desktopdiagnostic.FieldID, id),
+			sqlgraph.To(desktopdevice.Table, desktopdevice.FieldID),
+			sqlgraph.Edge(sqlgraph.M2O, true, desktopdiagnostic.DeviceTable, desktopdiagnostic.DeviceColumn),
+		)
+		fromV = sqlgraph.Neighbors(_m.driver.Dialect(), step)
+		return fromV, nil
+	}
+	return query
+}
+
+// QueryUser queries the user edge of a DesktopDiagnostic.
+func (c *DesktopDiagnosticClient) QueryUser(_m *DesktopDiagnostic) *UserQuery {
+	query := (&UserClient{config: c.config}).Query()
+	query.path = func(context.Context) (fromV *sql.Selector, _ error) {
+		id := _m.ID
+		step := sqlgraph.NewStep(
+			sqlgraph.From(desktopdiagnostic.Table, desktopdiagnostic.FieldID, id),
+			sqlgraph.To(user.Table, user.FieldID),
+			sqlgraph.Edge(sqlgraph.M2O, true, desktopdiagnostic.UserTable, desktopdiagnostic.UserColumn),
+		)
+		fromV = sqlgraph.Neighbors(_m.driver.Dialect(), step)
+		return fromV, nil
+	}
+	return query
+}
+
+// Hooks returns the client hooks.
+func (c *DesktopDiagnosticClient) Hooks() []Hook {
+	return c.hooks.DesktopDiagnostic
+}
+
+// Interceptors returns the client interceptors.
+func (c *DesktopDiagnosticClient) Interceptors() []Interceptor {
+	return c.inters.DesktopDiagnostic
+}
+
+func (c *DesktopDiagnosticClient) mutate(ctx context.Context, m *DesktopDiagnosticMutation) (Value, error) {
+	switch m.Op() {
+	case OpCreate:
+		return (&DesktopDiagnosticCreate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdate:
+		return (&DesktopDiagnosticUpdate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdateOne:
+		return (&DesktopDiagnosticUpdateOne{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpDelete, OpDeleteOne:
+		return (&DesktopDiagnosticDelete{config: c.config, hooks: c.Hooks(), mutation: m}).Exec(ctx)
+	default:
+		return nil, fmt.Errorf("ent: unknown DesktopDiagnostic mutation op: %q", m.Op())
 	}
 }
 
@@ -5979,6 +6532,38 @@ func (c *UserClient) QueryPlatformQuotas(_m *User) *UserPlatformQuotaQuery {
 	return query
 }
 
+// QueryDesktopDevices queries the desktop_devices edge of a User.
+func (c *UserClient) QueryDesktopDevices(_m *User) *DesktopDeviceQuery {
+	query := (&DesktopDeviceClient{config: c.config}).Query()
+	query.path = func(context.Context) (fromV *sql.Selector, _ error) {
+		id := _m.ID
+		step := sqlgraph.NewStep(
+			sqlgraph.From(user.Table, user.FieldID, id),
+			sqlgraph.To(desktopdevice.Table, desktopdevice.FieldID),
+			sqlgraph.Edge(sqlgraph.O2M, false, user.DesktopDevicesTable, user.DesktopDevicesColumn),
+		)
+		fromV = sqlgraph.Neighbors(_m.driver.Dialect(), step)
+		return fromV, nil
+	}
+	return query
+}
+
+// QueryDesktopDiagnostics queries the desktop_diagnostics edge of a User.
+func (c *UserClient) QueryDesktopDiagnostics(_m *User) *DesktopDiagnosticQuery {
+	query := (&DesktopDiagnosticClient{config: c.config}).Query()
+	query.path = func(context.Context) (fromV *sql.Selector, _ error) {
+		id := _m.ID
+		step := sqlgraph.NewStep(
+			sqlgraph.From(user.Table, user.FieldID, id),
+			sqlgraph.To(desktopdiagnostic.Table, desktopdiagnostic.FieldID),
+			sqlgraph.Edge(sqlgraph.O2M, false, user.DesktopDiagnosticsTable, user.DesktopDiagnosticsColumn),
+		)
+		fromV = sqlgraph.Neighbors(_m.driver.Dialect(), step)
+		return fromV, nil
+	}
+	return query
+}
+
 // QueryUserAllowedGroups queries the user_allowed_groups edge of a User.
 func (c *UserClient) QueryUserAllowedGroups(_m *User) *UserAllowedGroupQuery {
 	query := (&UserAllowedGroupClient{config: c.config}).Query()
@@ -6810,7 +7395,8 @@ type (
 		APIKey, Account, AccountGroup, Announcement, AnnouncementRead, AuthIdentity,
 		AuthIdentityChannel, BatchImageEvent, BatchImageItem, BatchImageJob,
 		ChannelMonitor, ChannelMonitorDailyRollup, ChannelMonitorHistory,
-		ChannelMonitorRequestTemplate, ErrorPassthroughRule, Group, IdempotencyRecord,
+		ChannelMonitorRequestTemplate, DesktopDevice, DesktopDeviceSession,
+		DesktopDiagnostic, ErrorPassthroughRule, Group, IdempotencyRecord,
 		IdentityAdoptionDecision, ModelCatalogModel, PaymentAuditLog, PaymentOrder,
 		PaymentProviderInstance, PendingAuthSession, PromoCode, PromoCodeUsage, Proxy,
 		RedeemCode, SecuritySecret, Setting, SubscriptionPlan, TLSFingerprintProfile,
@@ -6821,7 +7407,8 @@ type (
 		APIKey, Account, AccountGroup, Announcement, AnnouncementRead, AuthIdentity,
 		AuthIdentityChannel, BatchImageEvent, BatchImageItem, BatchImageJob,
 		ChannelMonitor, ChannelMonitorDailyRollup, ChannelMonitorHistory,
-		ChannelMonitorRequestTemplate, ErrorPassthroughRule, Group, IdempotencyRecord,
+		ChannelMonitorRequestTemplate, DesktopDevice, DesktopDeviceSession,
+		DesktopDiagnostic, ErrorPassthroughRule, Group, IdempotencyRecord,
 		IdentityAdoptionDecision, ModelCatalogModel, PaymentAuditLog, PaymentOrder,
 		PaymentProviderInstance, PendingAuthSession, PromoCode, PromoCodeUsage, Proxy,
 		RedeemCode, SecuritySecret, Setting, SubscriptionPlan, TLSFingerprintProfile,

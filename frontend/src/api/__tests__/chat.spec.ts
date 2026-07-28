@@ -633,7 +633,10 @@ describe('chatAPI', () => {
     const onReceiptId = vi.fn()
 
     const result = await streamChatCompletion(
-      historyCompletionRequest(' gpt-5 '),
+      {
+        ...historyCompletionRequest(' gpt-5 '),
+        reasoningEffort: 'xhigh',
+      },
       {
         onContent: (delta) => content.push(delta),
         onReceiptId,
@@ -654,6 +657,7 @@ describe('chatAPI', () => {
     expect(JSON.parse(String(init.body))).toMatchObject({
       conversation_id: 'conversation-1',
       model: 'gpt-5',
+      reasoning_effort: 'xhigh',
       expected_head_message_id: 'assistant-previous',
       user_message: { id: 'user-1', content: 'Hi' },
       assistant_message_id: 'assistant-1',
@@ -663,6 +667,7 @@ describe('chatAPI', () => {
       'conversation_id',
       'expected_head_message_id',
       'model',
+      'reasoning_effort',
       'user_message',
     ])
   })
