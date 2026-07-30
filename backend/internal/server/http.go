@@ -35,6 +35,7 @@ func ProvideRouter(
 	adminAuth middleware2.AdminAuthMiddleware,
 	apiKeyAuth middleware2.APIKeyAuthMiddleware,
 	desktopAuth middleware2.DesktopAuthMiddleware,
+	quotaAuth middleware2.QuotaAuthMiddleware,
 	auditLog middleware2.AuditLogMiddleware,
 	stepUpAuth middleware2.StepUpAuthMiddleware,
 	apiKeyService *service.APIKeyService,
@@ -60,7 +61,7 @@ func ProvideRouter(
 		}
 	}
 
-	return SetupRouter(r, handlers, jwtAuth, adminAuth, apiKeyAuth, desktopAuth, auditLog, stepUpAuth, apiKeyService, subscriptionService, opsService, settingService, cfg, redisClient, readinessProbe, routerSettingsRuntime)
+	return SetupRouter(r, handlers, jwtAuth, adminAuth, apiKeyAuth, desktopAuth, quotaAuth, auditLog, stepUpAuth, apiKeyService, subscriptionService, opsService, settingService, cfg, redisClient, readinessProbe, routerSettingsRuntime)
 }
 
 // ProvideHTTPServer 提供 HTTP 服务器

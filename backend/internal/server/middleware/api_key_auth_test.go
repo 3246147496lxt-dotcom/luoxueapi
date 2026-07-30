@@ -29,7 +29,7 @@ func TestSimpleModeBypassesQuotaCheck(t *testing.T) {
 		Status:           service.StatusActive,
 		Hydrated:         true,
 		SubscriptionType: service.SubscriptionTypeSubscription,
-		DailyLimitUSD:    &limit,
+		WeeklyLimitUSD:   &limit,
 	}
 	user := &service.User{
 		ID:          7,
@@ -65,17 +65,16 @@ func TestSimpleModeBypassesQuotaCheck(t *testing.T) {
 
 		apiKeyService := service.NewAPIKeyService(apiKeyRepo, nil, nil, nil, nil, nil, cfg)
 
-		past := time.Now().Add(-48 * time.Hour)
+		now := time.Now()
+		startsAt := now.Add(-15 * 24 * time.Hour)
 		sub := &service.UserSubscription{
-			ID:                 55,
-			UserID:             user.ID,
-			GroupID:            group.ID,
-			Status:             service.SubscriptionStatusActive,
-			ExpiresAt:          time.Now().Add(24 * time.Hour),
-			DailyWindowStart:   &past,
-			WeeklyWindowStart:  &past,
-			MonthlyWindowStart: &past,
-			DailyUsageUSD:      0,
+			ID:                55,
+			UserID:            user.ID,
+			GroupID:           group.ID,
+			Status:            service.SubscriptionStatusActive,
+			StartsAt:          startsAt,
+			ExpiresAt:         now.Add(24 * time.Hour),
+			WeeklyWindowStart: &startsAt,
 		}
 		maintenanceCalled := make(chan struct{}, 1)
 		subscriptionRepo := &stubUserSubscriptionRepo{
@@ -97,6 +96,8 @@ func TestSimpleModeBypassesQuotaCheck(t *testing.T) {
 			},
 			resetWeekly: func(ctx context.Context, id int64, start time.Time) error {
 				sub.WeeklyWindowStart = &start
+				sub.WeeklyUsageUSD = 0
+				maintenanceCalled <- struct{}{}
 				return nil
 			},
 			resetMonthly: func(ctx context.Context, id int64, start time.Time) error {
@@ -128,24 +129,23 @@ func TestSimpleModeBypassesQuotaCheck(t *testing.T) {
 		cfg := &config.Config{RunMode: config.RunModeStandard}
 		apiKeyService := service.NewAPIKeyService(apiKeyRepo, nil, nil, nil, nil, nil, cfg)
 
-		past := time.Now().Add(-48 * time.Hour)
 		current := time.Now()
+		startsAt := current.Add(-15 * 24 * time.Hour)
+		currentWeeklyStart, _, ok := service.AnchoredWeeklyWindow(startsAt, current)
+		require.True(t, ok)
 		stale := &service.UserSubscription{
-			ID:                 56,
-			UserID:             user.ID,
-			GroupID:            group.ID,
-			Status:             service.SubscriptionStatusActive,
-			ExpiresAt:          current.Add(24 * time.Hour),
-			DailyWindowStart:   &past,
-			WeeklyWindowStart:  &past,
-			MonthlyWindowStart: &past,
-			DailyUsageUSD:      10,
+			ID:                56,
+			UserID:            user.ID,
+			GroupID:           group.ID,
+			Status:            service.SubscriptionStatusActive,
+			StartsAt:          startsAt,
+			ExpiresAt:         current.Add(24 * time.Hour),
+			WeeklyWindowStart: &startsAt,
+			WeeklyUsageUSD:    10,
 		}
 		fresh := *stale
-		fresh.DailyWindowStart = &current
-		fresh.WeeklyWindowStart = &current
-		fresh.MonthlyWindowStart = &current
-		fresh.DailyUsageUSD = 2
+		fresh.WeeklyWindowStart = &currentWeeklyStart
+		fresh.WeeklyUsageUSD = 2
 
 		subscriptionRepo := &stubUserSubscriptionRepo{
 			getActive: func(context.Context, int64, int64) (*service.UserSubscription, error) {
@@ -211,13 +211,14 @@ func TestSimpleModeBypassesQuotaCheck(t *testing.T) {
 
 		now := time.Now()
 		sub := &service.UserSubscription{
-			ID:               55,
-			UserID:           user.ID,
-			GroupID:          group.ID,
-			Status:           service.SubscriptionStatusActive,
-			ExpiresAt:        now.Add(24 * time.Hour),
-			DailyWindowStart: &now,
-			DailyUsageUSD:    10,
+			ID:                55,
+			UserID:            user.ID,
+			GroupID:           group.ID,
+			Status:            service.SubscriptionStatusActive,
+			StartsAt:          now,
+			ExpiresAt:         now.Add(24 * time.Hour),
+			WeeklyWindowStart: &now,
+			WeeklyUsageUSD:    10,
 		}
 		subscriptionRepo := &stubUserSubscriptionRepo{
 			getActive: func(ctx context.Context, userID, groupID int64) (*service.UserSubscription, error) {
@@ -676,6 +677,45 @@ func TestAPIKeyAuthGoogleSetsOpsFallbackKeyOnEarlyAbort(t *testing.T) {
 	require.Equal(t, apiKey.ID, fallback.ID)
 	require.NotNil(t, fallback.User)
 	require.Equal(t, user.ID, fallback.User.ID)
+}
+
+func TestValidateAPIKeyGroupAvailableRejectsUntrustedBillingContext(t *testing.T) {
+	groupID := int64(202)
+	tests := []struct {
+		name   string
+		apiKey *service.APIKey
+		ok     bool
+		code   string
+	}{
+		{
+			name:   "ungrouped key with group snapshot",
+			apiKey: &service.APIKey{Group: &service.Group{ID: groupID, Status: service.StatusActive, Hydrated: true}},
+			code:   "GROUP_CONTEXT_INVALID",
+		},
+		{
+			name:   "group snapshot is not trusted",
+			apiKey: &service.APIKey{GroupID: &groupID, Group: &service.Group{ID: groupID, Status: service.StatusActive}},
+			code:   "GROUP_CONTEXT_INVALID",
+		},
+		{
+			name:   "group id mismatch",
+			apiKey: &service.APIKey{GroupID: &groupID, Group: &service.Group{ID: groupID + 1, Status: service.StatusActive, Hydrated: true}},
+			code:   "GROUP_CONTEXT_INVALID",
+		},
+		{
+			name:   "trusted matching group",
+			apiKey: &service.APIKey{GroupID: &groupID, Group: &service.Group{ID: groupID, Status: service.StatusActive, Hydrated: true}},
+			ok:     true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			code, _, ok := validateAPIKeyGroupAvailable(tt.apiKey)
+			require.Equal(t, tt.ok, ok)
+			require.Equal(t, tt.code, code)
+		})
+	}
 }
 
 func TestRequireGroupAssignmentMarksUngroupedKeyBusinessLimited(t *testing.T) {

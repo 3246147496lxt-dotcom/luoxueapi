@@ -23,6 +23,7 @@ func SetupRouter(
 	adminAuth middleware2.AdminAuthMiddleware,
 	apiKeyAuth middleware2.APIKeyAuthMiddleware,
 	desktopAuth middleware2.DesktopAuthMiddleware,
+	quotaAuth middleware2.QuotaAuthMiddleware,
 	auditLog middleware2.AuditLogMiddleware,
 	stepUpAuth middleware2.StepUpAuthMiddleware,
 	apiKeyService *service.APIKeyService,
@@ -65,7 +66,7 @@ func SetupRouter(
 	}
 
 	// 注册路由
-	registerRoutes(r, handlers, jwtAuth, adminAuth, apiKeyAuth, desktopAuth, auditLog, stepUpAuth, apiKeyService, subscriptionService, opsService, settingService, cfg, redisClient, readinessProbe)
+	registerRoutes(r, handlers, jwtAuth, adminAuth, apiKeyAuth, desktopAuth, quotaAuth, auditLog, stepUpAuth, apiKeyService, subscriptionService, opsService, settingService, cfg, redisClient, readinessProbe)
 
 	return r
 }
@@ -78,6 +79,7 @@ func registerRoutes(
 	adminAuth middleware2.AdminAuthMiddleware,
 	apiKeyAuth middleware2.APIKeyAuthMiddleware,
 	desktopAuth middleware2.DesktopAuthMiddleware,
+	quotaAuth middleware2.QuotaAuthMiddleware,
 	auditLog middleware2.AuditLogMiddleware,
 	stepUpAuth middleware2.StepUpAuthMiddleware,
 	apiKeyService *service.APIKeyService,
@@ -98,6 +100,7 @@ func registerRoutes(
 	routes.RegisterAuthRoutes(v1, h, jwtAuth, auditLog, redisClient, settingService)
 	routes.RegisterUserRoutes(v1, h, jwtAuth, auditLog, settingService)
 	routes.RegisterDesktopRoutes(v1, h, jwtAuth, desktopAuth, auditLog, settingService, redisClient)
+	routes.RegisterQuotaRoutes(v1, h, jwtAuth, quotaAuth, auditLog, settingService, redisClient)
 	routes.RegisterChatRoutes(v1, h, jwtAuth, opsService, settingService, cfg)
 	routes.RegisterAdminRoutes(v1, h, adminAuth, auditLog, stepUpAuth, settingService)
 	routes.RegisterModelCatalogRoutes(v1, h, redisClient)

@@ -212,6 +212,7 @@ func TestGatewayServiceRecordUsage_EmptyImageSizeDefaultsBeforeBillingAndPersist
 			GroupID: i64p(groupID),
 			Group: &Group{
 				ID:             groupID,
+				Hydrated:       true,
 				RateMultiplier: 1.0,
 				ImagePrice2K:   &imagePrice2K,
 			},
@@ -235,9 +236,11 @@ func TestGatewayServiceRecordUsage_EmptyImageSizeDefaultsBeforeBillingAndPersist
 
 func TestGatewayServiceRecordUsage_PeakRateAffectsTokenModeImageOutputTokens(t *testing.T) {
 	groupID := int64(902)
+	subscriptionID := int64(1902)
 	usageRepo := &openAIRecordUsageLogRepoStub{inserted: true}
 	userRepo := &openAIRecordUsageUserRepoStub{}
-	svc := newGatewayRecordUsageServiceForTest(usageRepo, userRepo, &openAIRecordUsageSubRepoStub{})
+	subRepo := &openAIRecordUsageSubRepoStub{}
+	svc := newGatewayRecordUsageServiceForTest(usageRepo, userRepo, subRepo)
 	svc.resolver = newOpenAITokenImageChannelPricingResolverForTest(t, groupID, "gemini-image")
 
 	err := svc.RecordUsage(context.Background(), &RecordUsageInput{
@@ -254,9 +257,11 @@ func TestGatewayServiceRecordUsage_PeakRateAffectsTokenModeImageOutputTokens(t *
 		},
 		APIKey: &APIKey{
 			ID:      802,
+			UserID:  602,
 			GroupID: i64p(groupID),
 			Group: &Group{
 				ID:                 groupID,
+				Hydrated:           true,
 				RateMultiplier:     1.0,
 				SubscriptionType:   SubscriptionTypeSubscription,
 				PeakRateEnabled:    true,
@@ -265,8 +270,9 @@ func TestGatewayServiceRecordUsage_PeakRateAffectsTokenModeImageOutputTokens(t *
 				PeakRateMultiplier: 3.0,
 			},
 		},
-		User:    &User{ID: 602},
-		Account: &Account{ID: 702},
+		User:         &User{ID: 602},
+		Account:      &Account{ID: 702},
+		Subscription: &UserSubscription{ID: subscriptionID, UserID: 602, GroupID: groupID},
 	})
 
 	require.NoError(t, err)
@@ -283,7 +289,8 @@ func TestGatewayServiceRecordUsage_PeakRateAffectsTokenModeImageOutputTokens(t *
 	require.InDelta(t, textInput+textOutput+imageOutput, usageRepo.lastLog.TotalCost, 1e-12)
 	require.InDelta(t, imageOutput, usageRepo.lastLog.ImageOutputCost, 1e-12)
 	require.InDelta(t, expectedActual, usageRepo.lastLog.ActualCost, 1e-12)
-	require.InDelta(t, expectedActual, userRepo.lastAmount, 1e-12)
+	require.Equal(t, 1, subRepo.incrementCalls)
+	require.Zero(t, userRepo.deductCalls)
 }
 
 func TestGatewayServiceRecordUsage_UsageLogWriteErrorDoesNotSkipBilling(t *testing.T) {

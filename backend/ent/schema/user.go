@@ -137,6 +137,8 @@ func (User) Edges() []ent.Edge {
 		edge.To("platform_quotas", UserPlatformQuota.Type),
 		edge.To("desktop_devices", DesktopDevice.Type).
 			Annotations(entsql.OnDelete(entsql.Cascade)),
+		edge.To("quota_viewer_devices", QuotaViewerDevice.Type).
+			Annotations(entsql.OnDelete(entsql.Cascade)),
 		edge.To("desktop_diagnostics", DesktopDiagnostic.Type).
 			Annotations(entsql.OnDelete(entsql.Cascade)),
 	}

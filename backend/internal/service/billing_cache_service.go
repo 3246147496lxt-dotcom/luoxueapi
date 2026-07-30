@@ -43,12 +43,16 @@ var (
 
 // subscriptionCacheData 订阅缓存数据结构（内部使用）
 type subscriptionCacheData struct {
-	Status       string
-	ExpiresAt    time.Time
-	DailyUsage   float64
-	WeeklyUsage  float64
-	MonthlyUsage float64
-	Version      int64
+	SubscriptionID    int64
+	Status            string
+	StartsAt          time.Time
+	ExpiresAt         time.Time
+	WeeklyWindowStart *time.Time
+	WeeklyWindowEnd   time.Time
+	DailyUsage        float64
+	WeeklyUsage       float64
+	MonthlyUsage      float64
+	Version           int64
 }
 
 // 缓存写入任务类型
@@ -436,7 +440,12 @@ func (s *BillingCacheService) GetSubscriptionStatus(ctx context.Context, userID,
 	// 尝试从缓存读取
 	cacheData, err := s.cache.GetSubscriptionCache(ctx, userID, groupID)
 	if err == nil && cacheData != nil {
-		return s.convertFromPortsData(cacheData), nil
+		converted := s.convertFromPortsData(cacheData)
+		if subscriptionCacheWindowIsCurrent(converted, time.Now()) {
+			return converted, nil
+		}
+		// Never consume a cache entry across a reset boundary.
+		_ = s.cache.InvalidateSubscriptionCache(ctx, userID, groupID)
 	}
 
 	// 缓存未命中，从数据库读取
@@ -445,36 +454,51 @@ func (s *BillingCacheService) GetSubscriptionStatus(ctx context.Context, userID,
 		return nil, err
 	}
 
-	// 异步建立缓存
-	_ = s.enqueueCacheWrite(cacheWriteTask{
-		kind:             cacheWriteSetSubscription,
-		userID:           userID,
-		groupID:          groupID,
-		subscriptionData: data,
-	})
+	// Establish the cache synchronously so the returned snapshot and Redis have
+	// the same period marker. The write TTL is capped at reset/expiry below.
+	s.setSubscriptionCache(ctx, userID, groupID, data)
 
 	return data, nil
 }
 
+func subscriptionCacheWindowIsCurrent(data *subscriptionCacheData, now time.Time) bool {
+	if data == nil || data.WeeklyWindowStart == nil {
+		return false
+	}
+	expectedStart, expectedEnd, ok := AnchoredWeeklyWindow(data.StartsAt, now)
+	return ok &&
+		data.WeeklyWindowStart.Equal(expectedStart) &&
+		data.WeeklyWindowEnd.Equal(expectedEnd) &&
+		now.Before(data.WeeklyWindowEnd)
+}
+
 func (s *BillingCacheService) convertFromPortsData(data *SubscriptionCacheData) *subscriptionCacheData {
 	return &subscriptionCacheData{
-		Status:       data.Status,
-		ExpiresAt:    data.ExpiresAt,
-		DailyUsage:   data.DailyUsage,
-		WeeklyUsage:  data.WeeklyUsage,
-		MonthlyUsage: data.MonthlyUsage,
-		Version:      data.Version,
+		SubscriptionID:    data.SubscriptionID,
+		Status:            data.Status,
+		StartsAt:          data.StartsAt,
+		ExpiresAt:         data.ExpiresAt,
+		WeeklyWindowStart: data.WeeklyWindowStart,
+		WeeklyWindowEnd:   data.WeeklyWindowEnd,
+		DailyUsage:        data.DailyUsage,
+		WeeklyUsage:       data.WeeklyUsage,
+		MonthlyUsage:      data.MonthlyUsage,
+		Version:           data.Version,
 	}
 }
 
 func (s *BillingCacheService) convertToPortsData(data *subscriptionCacheData) *SubscriptionCacheData {
 	return &SubscriptionCacheData{
-		Status:       data.Status,
-		ExpiresAt:    data.ExpiresAt,
-		DailyUsage:   data.DailyUsage,
-		WeeklyUsage:  data.WeeklyUsage,
-		MonthlyUsage: data.MonthlyUsage,
-		Version:      data.Version,
+		SubscriptionID:    data.SubscriptionID,
+		Status:            data.Status,
+		StartsAt:          data.StartsAt,
+		ExpiresAt:         data.ExpiresAt,
+		WeeklyWindowStart: data.WeeklyWindowStart,
+		WeeklyWindowEnd:   data.WeeklyWindowEnd,
+		DailyUsage:        data.DailyUsage,
+		WeeklyUsage:       data.WeeklyUsage,
+		MonthlyUsage:      data.MonthlyUsage,
+		Version:           data.Version,
 	}
 }
 
@@ -484,14 +508,20 @@ func (s *BillingCacheService) getSubscriptionFromDB(ctx context.Context, userID,
 	if err != nil {
 		return nil, fmt.Errorf("get subscription: %w", err)
 	}
+	periodStart, periodEnd, ok := sub.WeeklyWindowAt(time.Now())
+	if !ok || sub.WeeklyWindowStart == nil || !sub.WeeklyWindowStart.Equal(periodStart) {
+		return nil, fmt.Errorf("get subscription: anchored weekly window is not maintained")
+	}
 
 	return &subscriptionCacheData{
-		Status:       sub.Status,
-		ExpiresAt:    sub.ExpiresAt,
-		DailyUsage:   sub.DailyUsageUSD,
-		WeeklyUsage:  sub.WeeklyUsageUSD,
-		MonthlyUsage: sub.MonthlyUsageUSD,
-		Version:      sub.UpdatedAt.Unix(),
+		SubscriptionID:    sub.ID,
+		Status:            sub.Status,
+		StartsAt:          sub.StartsAt,
+		ExpiresAt:         sub.ExpiresAt,
+		WeeklyWindowStart: sub.WeeklyWindowStart,
+		WeeklyWindowEnd:   periodEnd,
+		WeeklyUsage:       sub.WeeklyUsageUSD,
+		Version:           sub.UpdatedAt.UnixMicro(),
 	}, nil
 }
 
@@ -505,7 +535,9 @@ func (s *BillingCacheService) setSubscriptionCache(ctx context.Context, userID, 
 	}
 }
 
-// UpdateSubscriptionUsage 更新订阅用量缓存（同步调用）
+// UpdateSubscriptionUsage invalidates the subscription snapshot after an
+// authoritative DB usage update. Incrementing Redis independently can double
+// count across a concurrent DB reload.
 func (s *BillingCacheService) UpdateSubscriptionUsage(ctx context.Context, userID, groupID int64, costUSD float64) error {
 	if s.cache == nil {
 		return nil
@@ -513,7 +545,7 @@ func (s *BillingCacheService) UpdateSubscriptionUsage(ctx context.Context, userI
 	return s.cache.UpdateSubscriptionUsage(ctx, userID, groupID, costUSD)
 }
 
-// QueueUpdateSubscriptionUsage 异步更新订阅用量缓存
+// QueueUpdateSubscriptionUsage queues the legacy post-usage invalidation path.
 func (s *BillingCacheService) QueueUpdateSubscriptionUsage(userID, groupID int64, costUSD float64) {
 	if s.cache == nil {
 		return
@@ -892,8 +924,31 @@ func (s *BillingCacheService) CheckBillingEligibility(ctx context.Context, user 
 		return ErrBillingServiceUnavailable
 	}
 
-	// 判断计费模式
-	isSubscriptionMode := group != nil && group.IsSubscriptionType() && subscription != nil
+	if user == nil || user.ID <= 0 {
+		return ErrBillingServiceUnavailable
+	}
+
+	if apiKey != nil {
+		if apiKey.GroupID != nil {
+			if group == nil || group.ID != *apiKey.GroupID || !group.Hydrated ||
+				apiKey.Group == nil || apiKey.Group.ID != *apiKey.GroupID || !apiKey.Group.Hydrated {
+				return ErrBillingServiceUnavailable.WithCause(errors.New("trusted API key group billing context is required"))
+			}
+		} else if group != nil || apiKey.Group != nil {
+			return ErrBillingServiceUnavailable.WithCause(errors.New("ungrouped API key has mismatched group billing context"))
+		}
+		if _, err := resolveUsageSubscriptionBilling(apiKey, subscription); err != nil {
+			return ErrBillingServiceUnavailable.WithCause(err)
+		}
+	}
+
+	// The API key group is the sole billing-source selector. A membership group
+	// without a matching subscription snapshot fails closed and must never fall
+	// through to wallet eligibility.
+	isSubscriptionMode := group != nil && group.IsSubscriptionType()
+	if isSubscriptionMode && subscription == nil {
+		return ErrSubscriptionInvalid
+	}
 
 	if isSubscriptionMode {
 		if err := s.checkSubscriptionEligibility(ctx, user.ID, group, subscription); err != nil {
@@ -1062,6 +1117,27 @@ func (s *BillingCacheService) checkSubscriptionEligibility(ctx context.Context, 
 		s.circuitBreaker.OnSuccess()
 	}
 
+	// The caller's entitlement and the cache must describe the same concrete
+	// subscription term. Internal cache self-consistency alone cannot detect a
+	// stale row left behind by expiry/reopen or a plan switch.
+	now := time.Now()
+	if !subscriptionCacheMatchesEntitlement(subData, subscription, now) {
+		if s.cache != nil {
+			_ = s.cache.InvalidateSubscriptionCache(ctx, userID, group.ID)
+		}
+		subData, err = s.getSubscriptionFromDB(ctx, userID, group.ID)
+		if err != nil {
+			if s.circuitBreaker != nil {
+				s.circuitBreaker.OnFailure(err)
+			}
+			return ErrBillingServiceUnavailable.WithCause(err)
+		}
+		s.setSubscriptionCache(ctx, userID, group.ID, subData)
+		if !subscriptionCacheMatchesEntitlement(subData, subscription, now) {
+			return ErrSubscriptionInvalid
+		}
+	}
+
 	// 检查订阅状态
 	if subData.Status != SubscriptionStatusActive {
 		return ErrSubscriptionInvalid
@@ -1072,20 +1148,36 @@ func (s *BillingCacheService) checkSubscriptionEligibility(ctx context.Context, 
 		return ErrSubscriptionInvalid
 	}
 
-	// 检查限额（使用传入的Group限额配置）
-	if group.HasDailyLimit() && subData.DailyUsage >= *group.DailyLimitUSD {
-		return ErrDailyLimitExceeded
-	}
-
+	// P0 membership has one anchored 7-day limit. Legacy daily/monthly cache
+	// fields are ignored and cannot block a membership request.
 	if group.HasWeeklyLimit() && subData.WeeklyUsage >= *group.WeeklyLimitUSD {
 		return ErrWeeklyLimitExceeded
 	}
 
-	if group.HasMonthlyLimit() && subData.MonthlyUsage >= *group.MonthlyLimitUSD {
-		return ErrMonthlyLimitExceeded
-	}
-
 	return nil
+}
+
+func subscriptionCacheMatchesEntitlement(data *subscriptionCacheData, subscription *UserSubscription, now time.Time) bool {
+	if data == nil || subscription == nil || subscription.WeeklyWindowStart == nil {
+		return false
+	}
+	expectedStart, expectedEnd, ok := subscription.WeeklyWindowAt(now)
+	if !ok || !subscription.WeeklyWindowStart.Equal(expectedStart) {
+		return false
+	}
+	if data.SubscriptionID != subscription.ID ||
+		data.Status != subscription.Status ||
+		!data.StartsAt.Equal(subscription.StartsAt) ||
+		!data.ExpiresAt.Equal(subscription.ExpiresAt) ||
+		data.WeeklyWindowStart == nil ||
+		!data.WeeklyWindowStart.Equal(expectedStart) ||
+		!data.WeeklyWindowEnd.Equal(expectedEnd) {
+		return false
+	}
+	if !subscription.UpdatedAt.IsZero() && data.Version != subscription.UpdatedAt.UnixMicro() {
+		return false
+	}
+	return true
 }
 
 type billingCircuitBreakerState int

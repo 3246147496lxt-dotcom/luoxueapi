@@ -196,6 +196,58 @@ jobs:
           retention-days: 1
           if-no-files-found: error
 
+  quota-viewer:
+    runs-on: macos-15
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ inputs.checkout_ref || github.sha }}
+          persist-credentials: false
+      - name: Setup pnpm
+        uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6
+        with:
+          version: 9.15.9
+      - name: Setup Node.js
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: '24'
+          cache: 'pnpm'
+          cache-dependency-path: quota-viewer/pnpm-lock.yaml
+      - name: Install Rust toolchain
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          rustup toolchain install 1.96.0 --profile minimal --component rustfmt,clippy
+          rustup default 1.96.0
+      - name: Verify quota viewer toolchain versions
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          node -e 'if (Number(process.versions.node.split(".")[0]) < 24) process.exit(1)'
+          test "$(pnpm --version)" = "9.15.9"
+          test "$(rustc --version | awk '{print $2}')" = "1.96.0"
+      - name: Install quota viewer dependencies
+        working-directory: quota-viewer
+        run: pnpm install --frozen-lockfile
+      - name: Typecheck, test and build quota viewer frontend
+        working-directory: quota-viewer
+        run: |
+          pnpm run typecheck
+          pnpm run test
+          pnpm run build
+          if grep -R -E '128\.64|1,906,000|Pro 月度会员' dist; then
+            echo "Production quota viewer bundle contains demo quota data" >&2
+            exit 1
+          fi
+      - name: Format, check, lint and test quota viewer Rust core
+        working-directory: quota-viewer/src-tauri
+        run: |
+          cargo fmt --all -- --check
+          cargo check --locked --all-targets
+          cargo clippy --locked --all-targets -- -D warnings
+          cargo test --locked --all-targets
+
   docs-site:
     runs-on: ubuntu-latest
     steps:

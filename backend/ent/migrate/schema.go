@@ -1596,6 +1596,123 @@ var (
 			},
 		},
 	}
+	// QuotaViewerDevicesColumns holds the columns for the "quota_viewer_devices" table.
+	QuotaViewerDevicesColumns = []*schema.Column{
+		{Name: "id", Type: field.TypeInt64, Increment: true},
+		{Name: "created_at", Type: field.TypeTime, SchemaType: map[string]string{"postgres": "timestamptz"}},
+		{Name: "updated_at", Type: field.TypeTime, SchemaType: map[string]string{"postgres": "timestamptz"}},
+		{Name: "public_id", Type: field.TypeString, Unique: true, SchemaType: map[string]string{"postgres": "uuid"}},
+		{Name: "client_id", Type: field.TypeString, Size: 64},
+		{Name: "scope", Type: field.TypeString, Size: 64},
+		{Name: "installation_id_hash", Type: field.TypeString, Size: 64},
+		{Name: "name", Type: field.TypeString, Size: 100},
+		{Name: "platform", Type: field.TypeString, Size: 20},
+		{Name: "architecture", Type: field.TypeString, Size: 20},
+		{Name: "os_version", Type: field.TypeString, Size: 50, Default: ""},
+		{Name: "app_version", Type: field.TypeString, Size: 50, Default: ""},
+		{Name: "status", Type: field.TypeString, Size: 20, Default: "pending"},
+		{Name: "token_version", Type: field.TypeInt64, Default: 1},
+		{Name: "pairing_expires_at", Type: field.TypeTime, SchemaType: map[string]string{"postgres": "timestamptz"}},
+		{Name: "approved_at", Type: field.TypeTime, Nullable: true, SchemaType: map[string]string{"postgres": "timestamptz"}},
+		{Name: "activated_at", Type: field.TypeTime, Nullable: true, SchemaType: map[string]string{"postgres": "timestamptz"}},
+		{Name: "last_seen_at", Type: field.TypeTime, Nullable: true, SchemaType: map[string]string{"postgres": "timestamptz"}},
+		{Name: "revoked_at", Type: field.TypeTime, Nullable: true, SchemaType: map[string]string{"postgres": "timestamptz"}},
+		{Name: "user_id", Type: field.TypeInt64},
+	}
+	// QuotaViewerDevicesTable holds the schema information for the "quota_viewer_devices" table.
+	QuotaViewerDevicesTable = &schema.Table{
+		Name:       "quota_viewer_devices",
+		Columns:    QuotaViewerDevicesColumns,
+		PrimaryKey: []*schema.Column{QuotaViewerDevicesColumns[0]},
+		ForeignKeys: []*schema.ForeignKey{
+			{
+				Symbol:     "quota_viewer_devices_users_quota_viewer_devices",
+				Columns:    []*schema.Column{QuotaViewerDevicesColumns[19]},
+				RefColumns: []*schema.Column{UsersColumns[0]},
+				OnDelete:   schema.Cascade,
+			},
+		},
+		Indexes: []*schema.Index{
+			{
+				Name:    "quotaviewerdevice_user_id_status",
+				Unique:  false,
+				Columns: []*schema.Column{QuotaViewerDevicesColumns[19], QuotaViewerDevicesColumns[12]},
+			},
+			{
+				Name:    "quotaviewerdevice_installation_id_hash",
+				Unique:  false,
+				Columns: []*schema.Column{QuotaViewerDevicesColumns[6]},
+			},
+			{
+				Name:    "quotaviewerdevice_pairing_expires_at",
+				Unique:  false,
+				Columns: []*schema.Column{QuotaViewerDevicesColumns[14]},
+			},
+		},
+	}
+	// QuotaViewerDeviceSessionsColumns holds the columns for the "quota_viewer_device_sessions" table.
+	QuotaViewerDeviceSessionsColumns = []*schema.Column{
+		{Name: "id", Type: field.TypeInt64, Increment: true},
+		{Name: "created_at", Type: field.TypeTime, SchemaType: map[string]string{"postgres": "timestamptz"}},
+		{Name: "updated_at", Type: field.TypeTime, SchemaType: map[string]string{"postgres": "timestamptz"}},
+		{Name: "family_id", Type: field.TypeString, SchemaType: map[string]string{"postgres": "uuid"}},
+		{Name: "refresh_token_hash", Type: field.TypeString, Unique: true, Size: 64},
+		{Name: "status", Type: field.TypeString, Size: 20, Default: "active"},
+		{Name: "expires_at", Type: field.TypeTime, SchemaType: map[string]string{"postgres": "timestamptz"}},
+		{Name: "consumed_at", Type: field.TypeTime, Nullable: true, SchemaType: map[string]string{"postgres": "timestamptz"}},
+		{Name: "rotation_id", Type: field.TypeString, Nullable: true, SchemaType: map[string]string{"postgres": "uuid"}},
+		{Name: "replacement_token_hash", Type: field.TypeString, Nullable: true, Size: 64},
+		{Name: "recovery_expires_at", Type: field.TypeTime, Nullable: true, SchemaType: map[string]string{"postgres": "timestamptz"}},
+		{Name: "revoked_at", Type: field.TypeTime, Nullable: true, SchemaType: map[string]string{"postgres": "timestamptz"}},
+		{Name: "device_id", Type: field.TypeInt64},
+	}
+	// QuotaViewerDeviceSessionsTable holds the schema information for the "quota_viewer_device_sessions" table.
+	QuotaViewerDeviceSessionsTable = &schema.Table{
+		Name:       "quota_viewer_device_sessions",
+		Columns:    QuotaViewerDeviceSessionsColumns,
+		PrimaryKey: []*schema.Column{QuotaViewerDeviceSessionsColumns[0]},
+		ForeignKeys: []*schema.ForeignKey{
+			{
+				Symbol:     "quota_viewer_device_sessions_quota_viewer_devices_sessions",
+				Columns:    []*schema.Column{QuotaViewerDeviceSessionsColumns[12]},
+				RefColumns: []*schema.Column{QuotaViewerDevicesColumns[0]},
+				OnDelete:   schema.Cascade,
+			},
+		},
+		Indexes: []*schema.Index{
+			{
+				Name:    "quotaviewerdevicesession_device_id_status",
+				Unique:  false,
+				Columns: []*schema.Column{QuotaViewerDeviceSessionsColumns[12], QuotaViewerDeviceSessionsColumns[5]},
+			},
+			{
+				Name:    "quotaviewerdevicesession_family_id",
+				Unique:  false,
+				Columns: []*schema.Column{QuotaViewerDeviceSessionsColumns[3]},
+			},
+			{
+				Name:    "quotaviewerdevicesession_expires_at",
+				Unique:  false,
+				Columns: []*schema.Column{QuotaViewerDeviceSessionsColumns[6]},
+			},
+			{
+				Name:    "idx_quota_viewer_device_sessions_device_rotation",
+				Unique:  true,
+				Columns: []*schema.Column{QuotaViewerDeviceSessionsColumns[12], QuotaViewerDeviceSessionsColumns[8]},
+				Annotation: &entsql.IndexAnnotation{
+					Where: "rotation_id IS NOT NULL",
+				},
+			},
+			{
+				Name:    "idx_quota_viewer_device_sessions_recovery_expires",
+				Unique:  false,
+				Columns: []*schema.Column{QuotaViewerDeviceSessionsColumns[10]},
+				Annotation: &entsql.IndexAnnotation{
+					Where: "recovery_expires_at IS NOT NULL",
+				},
+			},
+		},
+	}
 	// RedeemCodesColumns holds the columns for the "redeem_codes" table.
 	RedeemCodesColumns = []*schema.Column{
 		{Name: "id", Type: field.TypeInt64, Increment: true},
@@ -2259,6 +2376,8 @@ var (
 		PromoCodesTable,
 		PromoCodeUsagesTable,
 		ProxiesTable,
+		QuotaViewerDevicesTable,
+		QuotaViewerDeviceSessionsTable,
 		RedeemCodesTable,
 		SecuritySecretsTable,
 		SettingsTable,
@@ -2387,6 +2506,14 @@ func init() {
 	ProxiesTable.ForeignKeys[0].RefTable = ProxiesTable
 	ProxiesTable.Annotation = &entsql.Annotation{
 		Table: "proxies",
+	}
+	QuotaViewerDevicesTable.ForeignKeys[0].RefTable = UsersTable
+	QuotaViewerDevicesTable.Annotation = &entsql.Annotation{
+		Table: "quota_viewer_devices",
+	}
+	QuotaViewerDeviceSessionsTable.ForeignKeys[0].RefTable = QuotaViewerDevicesTable
+	QuotaViewerDeviceSessionsTable.Annotation = &entsql.Annotation{
+		Table: "quota_viewer_device_sessions",
 	}
 	RedeemCodesTable.ForeignKeys[0].RefTable = GroupsTable
 	RedeemCodesTable.ForeignKeys[1].RefTable = UsersTable

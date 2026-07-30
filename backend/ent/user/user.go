@@ -91,6 +91,8 @@ const (
 	EdgePlatformQuotas = "platform_quotas"
 	// EdgeDesktopDevices holds the string denoting the desktop_devices edge name in mutations.
 	EdgeDesktopDevices = "desktop_devices"
+	// EdgeQuotaViewerDevices holds the string denoting the quota_viewer_devices edge name in mutations.
+	EdgeQuotaViewerDevices = "quota_viewer_devices"
 	// EdgeDesktopDiagnostics holds the string denoting the desktop_diagnostics edge name in mutations.
 	EdgeDesktopDiagnostics = "desktop_diagnostics"
 	// EdgeUserAllowedGroups holds the string denoting the user_allowed_groups edge name in mutations.
@@ -193,6 +195,13 @@ const (
 	DesktopDevicesInverseTable = "desktop_devices"
 	// DesktopDevicesColumn is the table column denoting the desktop_devices relation/edge.
 	DesktopDevicesColumn = "user_id"
+	// QuotaViewerDevicesTable is the table that holds the quota_viewer_devices relation/edge.
+	QuotaViewerDevicesTable = "quota_viewer_devices"
+	// QuotaViewerDevicesInverseTable is the table name for the QuotaViewerDevice entity.
+	// It exists in this package in order to avoid circular dependency with the "quotaviewerdevice" package.
+	QuotaViewerDevicesInverseTable = "quota_viewer_devices"
+	// QuotaViewerDevicesColumn is the table column denoting the quota_viewer_devices relation/edge.
+	QuotaViewerDevicesColumn = "user_id"
 	// DesktopDiagnosticsTable is the table that holds the desktop_diagnostics relation/edge.
 	DesktopDiagnosticsTable = "desktop_diagnostics"
 	// DesktopDiagnosticsInverseTable is the table name for the DesktopDiagnostic entity.
@@ -634,6 +643,20 @@ func ByDesktopDevices(term sql.OrderTerm, terms ...sql.OrderTerm) OrderOption {
 	}
 }
 
+// ByQuotaViewerDevicesCount orders the results by quota_viewer_devices count.
+func ByQuotaViewerDevicesCount(opts ...sql.OrderTermOption) OrderOption {
+	return func(s *sql.Selector) {
+		sqlgraph.OrderByNeighborsCount(s, newQuotaViewerDevicesStep(), opts...)
+	}
+}
+
+// ByQuotaViewerDevices orders the results by quota_viewer_devices terms.
+func ByQuotaViewerDevices(term sql.OrderTerm, terms ...sql.OrderTerm) OrderOption {
+	return func(s *sql.Selector) {
+		sqlgraph.OrderByNeighborTerms(s, newQuotaViewerDevicesStep(), append([]sql.OrderTerm{term}, terms...)...)
+	}
+}
+
 // ByDesktopDiagnosticsCount orders the results by desktop_diagnostics count.
 func ByDesktopDiagnosticsCount(opts ...sql.OrderTermOption) OrderOption {
 	return func(s *sql.Selector) {
@@ -757,6 +780,13 @@ func newDesktopDevicesStep() *sqlgraph.Step {
 		sqlgraph.From(Table, FieldID),
 		sqlgraph.To(DesktopDevicesInverseTable, FieldID),
 		sqlgraph.Edge(sqlgraph.O2M, false, DesktopDevicesTable, DesktopDevicesColumn),
+	)
+}
+func newQuotaViewerDevicesStep() *sqlgraph.Step {
+	return sqlgraph.NewStep(
+		sqlgraph.From(Table, FieldID),
+		sqlgraph.To(QuotaViewerDevicesInverseTable, FieldID),
+		sqlgraph.Edge(sqlgraph.O2M, false, QuotaViewerDevicesTable, QuotaViewerDevicesColumn),
 	)
 }
 func newDesktopDiagnosticsStep() *sqlgraph.Step {

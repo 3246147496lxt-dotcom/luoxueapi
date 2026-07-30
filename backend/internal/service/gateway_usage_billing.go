@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"strings"
 	"time"
@@ -11,6 +12,37 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/timezone"
 )
+
+var ErrSubscriptionBillingContextRequired = errors.New("subscription billing context is required for a subscription API key group")
+
+func resolveUsageSubscriptionBilling(apiKey *APIKey, subscription *UserSubscription) (bool, error) {
+	if apiKey == nil {
+		return false, errors.New("API key billing context is required")
+	}
+	if apiKey.GroupID == nil {
+		if apiKey.Group != nil || subscription != nil {
+			return false, errors.New("billing context does not match ungrouped API key")
+		}
+		// An explicitly ungrouped key is standard balance billing.
+		return false, nil
+	}
+	if apiKey.Group == nil || apiKey.Group.ID != *apiKey.GroupID || !apiKey.Group.Hydrated {
+		return false, errors.New("trusted API key group billing context is required")
+	}
+	if !apiKey.Group.IsSubscriptionType() {
+		if subscription != nil {
+			return false, errors.New("subscription billing context does not match API key group")
+		}
+		return false, nil
+	}
+	if subscription == nil {
+		return false, ErrSubscriptionBillingContextRequired
+	}
+	if apiKey.UserID != subscription.UserID || *apiKey.GroupID != subscription.GroupID {
+		return false, errors.New("subscription billing context ownership mismatch")
+	}
+	return true, nil
+}
 
 func (s *GatewayService) getUserGroupRateMultiplier(ctx context.Context, userID, groupID int64, groupDefaultMultiplier float64) float64 {
 	if s == nil {
@@ -135,6 +167,14 @@ func postUsageBilling(ctx context.Context, p *postUsageBillingParams, deps *bill
 		if cost.ActualCost > 0 {
 			if err := deps.userSubRepo.IncrementUsage(billingCtx, p.Subscription.ID, cost.ActualCost); err != nil {
 				slog.Error("increment subscription usage failed", "subscription_id", p.Subscription.ID, "error", err)
+			} else if deps.billingCacheService != nil && p.User != nil && p.APIKey != nil && p.APIKey.GroupID != nil {
+				if err := deps.billingCacheService.InvalidateSubscription(billingCtx, p.User.ID, *p.APIKey.GroupID); err != nil {
+					slog.Warn("invalidate subscription cache after legacy increment failed",
+						"user_id", p.User.ID,
+						"group_id", *p.APIKey.GroupID,
+						"error", err,
+					)
+				}
 			}
 		}
 	} else {
@@ -272,9 +312,11 @@ func buildUsageBillingCommand(requestID string, usageLog *UsageLog, p *postUsage
 	// user-specific) rate multiplier consumes subscription quota at the expected
 	// speed. TotalCost remains the raw (pre-multiplier) value; downstream guards
 	// on "> 0" still correctly skip free subscriptions (RateMultiplier == 0).
-	if p.IsSubscriptionBill && p.Subscription != nil && p.Cost.TotalCost > 0 {
-		cmd.SubscriptionID = &p.Subscription.ID
-		cmd.SubscriptionCost = p.Cost.ActualCost
+	if p.IsSubscriptionBill {
+		if p.Subscription != nil && p.Cost.TotalCost > 0 {
+			cmd.SubscriptionID = &p.Subscription.ID
+			cmd.SubscriptionCost = p.Cost.ActualCost
+		}
 	} else if p.Cost.ActualCost > 0 {
 		cmd.BalanceCost = p.Cost.ActualCost
 	}
@@ -312,6 +354,9 @@ func applyUsageBilling(
 ) (*UsageBillingApplyResult, error) {
 	if p == nil || deps == nil {
 		return &UsageBillingApplyResult{}, nil
+	}
+	if p.IsSubscriptionBill && p.Subscription == nil {
+		return nil, ErrSubscriptionBillingContextRequired
 	}
 
 	cmd := buildUsageBillingCommand(requestID, usageLog, p)
@@ -367,13 +412,24 @@ func finalizePostUsageBilling(ctx context.Context, p *postUsageBillingParams, de
 
 	if p.IsSubscriptionBill {
 		if p.Cost.ActualCost > 0 && p.User != nil && p.APIKey != nil && p.APIKey.GroupID != nil {
-			deps.billingCacheService.QueueUpdateSubscriptionUsage(p.User.ID, *p.APIKey.GroupID, p.Cost.ActualCost)
+			// DB is authoritative. Blind asynchronous HINCR can double-count
+			// when another reader repopulates Redis from the post-commit DB
+			// before the queued task runs, so evict and let the next read reload.
+			if deps.billingCacheService != nil {
+				if err := deps.billingCacheService.InvalidateSubscription(ctx, p.User.ID, *p.APIKey.GroupID); err != nil {
+					slog.Warn("invalidate subscription cache after billing failed",
+						"user_id", p.User.ID,
+						"group_id", *p.APIKey.GroupID,
+						"error", err,
+					)
+				}
+			}
 		}
 	} else if p.Cost.ActualCost > 0 && p.User != nil {
 		syncBalanceCacheAfterDeduction(ctx, p, deps, result)
 	}
 
-	if p.Cost.ActualCost > 0 && p.APIKey != nil && p.APIKey.HasRateLimits() {
+	if p.Cost.ActualCost > 0 && p.APIKey != nil && p.APIKey.HasRateLimits() && deps.billingCacheService != nil {
 		deps.billingCacheService.QueueUpdateAPIKeyRateLimitUsage(p.APIKey.ID, p.Cost.ActualCost)
 	}
 
@@ -746,7 +802,14 @@ func (s *GatewayService) recordUsageCore(ctx context.Context, input *recordUsage
 	cost := s.calculateRecordUsageCost(ctx, result, apiKey, billingModel, multiplier, imageMultiplier, opts)
 
 	// 判断计费方式：订阅模式 vs 余额模式
-	isSubscriptionBilling := subscription != nil && apiKey.Group != nil && apiKey.Group.IsSubscriptionType()
+	isSubscriptionBilling := false
+	if s.cfg == nil || s.cfg.RunMode != config.RunModeSimple {
+		var billingModeErr error
+		isSubscriptionBilling, billingModeErr = resolveUsageSubscriptionBilling(apiKey, subscription)
+		if billingModeErr != nil {
+			return billingModeErr
+		}
+	}
 	billingType := BillingTypeBalance
 	if isSubscriptionBilling {
 		billingType = BillingTypeSubscription

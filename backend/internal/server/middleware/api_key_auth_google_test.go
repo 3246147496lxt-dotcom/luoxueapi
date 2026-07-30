@@ -766,7 +766,7 @@ func TestApiKeyAuthWithSubscriptionGoogle_SubscriptionLimitExceededReturns429(t 
 		Platform:         service.PlatformGemini,
 		Hydrated:         true,
 		SubscriptionType: service.SubscriptionTypeSubscription,
-		DailyLimitUSD:    &limit,
+		WeeklyLimitUSD:   &limit,
 	}
 	user := &service.User{
 		ID:          999,
@@ -796,14 +796,16 @@ func TestApiKeyAuthWithSubscriptionGoogle_SubscriptionLimitExceededReturns429(t 
 	})
 
 	now := time.Now()
+	startsAt := now.Add(-time.Hour)
 	sub := &service.UserSubscription{
-		ID:               601,
-		UserID:           user.ID,
-		GroupID:          group.ID,
-		Status:           service.SubscriptionStatusActive,
-		ExpiresAt:        now.Add(24 * time.Hour),
-		DailyWindowStart: &now,
-		DailyUsageUSD:    10,
+		ID:                601,
+		UserID:            user.ID,
+		GroupID:           group.ID,
+		Status:            service.SubscriptionStatusActive,
+		StartsAt:          startsAt,
+		ExpiresAt:         now.Add(24 * time.Hour),
+		WeeklyWindowStart: &startsAt,
+		WeeklyUsageUSD:    10,
 	}
 	subscriptionService := service.NewSubscriptionService(nil, fakeGoogleSubscriptionRepo{
 		getActive: func(ctx context.Context, userID, groupID int64) (*service.UserSubscription, error) {
@@ -836,5 +838,5 @@ func TestApiKeyAuthWithSubscriptionGoogle_SubscriptionLimitExceededReturns429(t 
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
 	require.Equal(t, http.StatusTooManyRequests, resp.Error.Code)
 	require.Equal(t, "RESOURCE_EXHAUSTED", resp.Error.Status)
-	require.Contains(t, resp.Error.Message, "daily usage limit exceeded")
+	require.Contains(t, resp.Error.Message, "weekly usage limit exceeded")
 }

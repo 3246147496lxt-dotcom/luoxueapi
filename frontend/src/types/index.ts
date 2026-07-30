@@ -1796,27 +1796,28 @@ export interface UserSubscription {
 }
 
 export interface SubscriptionProgress {
-  subscription_id: number
-  daily: {
-    used: number
-    limit: number | null
-    percentage: number
-    reset_in_seconds: number | null
-  } | null
-  weekly: {
-    used: number
-    limit: number | null
-    percentage: number
-    reset_in_seconds: number | null
-  } | null
-  monthly: {
-    used: number
-    limit: number | null
-    percentage: number
-    reset_in_seconds: number | null
-  } | null
-  expires_at: string | null
-  days_remaining: number | null
+  id: number
+  group_name: string
+  expires_at: string
+  expires_in_days: number
+  daily?: SubscriptionUsageWindowProgress
+  weekly?: SubscriptionUsageWindowProgress
+  monthly?: SubscriptionUsageWindowProgress
+}
+
+export interface SubscriptionUsageWindowProgress {
+  limit_usd: number
+  used_usd: number
+  remaining_usd: number
+  percentage: number
+  window_start: string
+  resets_at: string
+  resets_in_seconds: number
+}
+
+export interface SubscriptionProgressInfo {
+  subscription: UserSubscription
+  progress: SubscriptionProgress
 }
 
 export interface AssignSubscriptionRequest {

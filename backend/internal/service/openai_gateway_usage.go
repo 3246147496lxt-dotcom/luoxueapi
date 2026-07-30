@@ -225,8 +225,15 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 		cost = &CostBreakdown{BillingMode: string(BillingModeToken)}
 	}
 
-	// Determine billing type
-	isSubscriptionBilling := subscription != nil && apiKey.Group != nil && apiKey.Group.IsSubscriptionType()
+	// Determine billing type from the API key group. A missing subscription
+	// context for a membership key is a hard failure, never a wallet fallback.
+	isSubscriptionBilling := false
+	if s.cfg == nil || s.cfg.RunMode != config.RunModeSimple {
+		isSubscriptionBilling, err = resolveUsageSubscriptionBilling(apiKey, subscription)
+		if err != nil {
+			return err
+		}
+	}
 	billingType := BillingTypeBalance
 	if isSubscriptionBilling {
 		billingType = BillingTypeSubscription

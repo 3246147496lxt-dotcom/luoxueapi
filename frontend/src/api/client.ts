@@ -15,6 +15,7 @@ import {
 import { getAPIBaseURL } from './url'
 import { AuthSessionChangedError, authSession } from '@/auth/authSession'
 import { refreshAuthSession } from '@/auth/authRefresh'
+import { sessionExpiredLoginURL } from '@/auth/quotaViewerAuthorizationRedirect'
 export { buildApiUrl, buildGatewayUrl } from './url'
 
 type AuthenticatedRequestConfig = InternalAxiosRequestConfig & {
@@ -363,7 +364,7 @@ apiClient.interceptors.response.use(
               sessionStorage.setItem('auth_expired', '1')
 
               if (!window.location.pathname.includes('/login')) {
-                window.location.href = '/login'
+                window.location.href = sessionExpiredLoginURL(window.location)
               }
 
               return Promise.reject({
@@ -400,7 +401,7 @@ apiClient.interceptors.response.use(
         }
         // Only redirect if not already on login page
         if (!window.location.pathname.includes('/login')) {
-          window.location.href = '/login'
+          window.location.href = sessionExpiredLoginURL(window.location)
         }
       }
 

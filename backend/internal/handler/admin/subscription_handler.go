@@ -129,7 +129,7 @@ func (h *SubscriptionHandler) GetProgress(c *gin.Context) {
 		return
 	}
 
-	response.Success(c, progress)
+	response.Success(c, dto.SubscriptionProgressFromService(progress))
 }
 
 // Assign handles assigning a subscription to a user

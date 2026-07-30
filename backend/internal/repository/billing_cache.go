@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"math"
 	"math/rand/v2"
 	"strconv"
 	"strings"
@@ -50,12 +51,22 @@ func billingSubKey(userID, groupID int64) string {
 }
 
 const (
-	subFieldStatus       = "status"
-	subFieldExpiresAt    = "expires_at"
-	subFieldDailyUsage   = "daily_usage"
-	subFieldWeeklyUsage  = "weekly_usage"
-	subFieldMonthlyUsage = "monthly_usage"
-	subFieldVersion      = "version"
+	subscriptionCacheSchemaV3 = int64(3)
+	subFieldSchemaVersion     = "schema_version"
+	subFieldSubscriptionID    = "subscription_id"
+	subFieldStatus            = "status"
+	subFieldStartsAt          = "starts_at"
+	subFieldStartsAtExact     = "starts_at_exact"
+	subFieldExpiresAt         = "expires_at"
+	subFieldExpiresAtExact    = "expires_at_exact"
+	subFieldWeeklyWindowStart = "weekly_window_start"
+	subFieldWeeklyStartExact  = "weekly_window_start_exact"
+	subFieldWeeklyWindowEnd   = "weekly_window_end"
+	subFieldWeeklyEndExact    = "weekly_window_end_exact"
+	subFieldDailyUsage        = "daily_usage"
+	subFieldWeeklyUsage       = "weekly_usage"
+	subFieldMonthlyUsage      = "monthly_usage"
+	subFieldVersion           = "version"
 )
 
 // billingRateLimitKey generates the Redis key for API key rate limit cache.
@@ -80,19 +91,6 @@ var (
 		end
 		local newVal = tonumber(current) - tonumber(ARGV[1])
 		redis.call('SET', KEYS[1], newVal)
-		redis.call('EXPIRE', KEYS[1], ARGV[2])
-		return 1
-	`)
-
-	updateSubUsageScript = redis.NewScript(`
-		local exists = redis.call('EXISTS', KEYS[1])
-		if exists == 0 then
-			return 0
-		end
-		local cost = tonumber(ARGV[1])
-		redis.call('HINCRBYFLOAT', KEYS[1], 'daily_usage', cost)
-		redis.call('HINCRBYFLOAT', KEYS[1], 'weekly_usage', cost)
-		redis.call('HINCRBYFLOAT', KEYS[1], 'monthly_usage', cost)
 		redis.call('EXPIRE', KEYS[1], ARGV[2])
 		return 1
 	`)
@@ -188,68 +186,208 @@ func (c *billingCache) GetSubscriptionCache(ctx context.Context, userID, groupID
 func (c *billingCache) parseSubscriptionCache(data map[string]string) (*service.SubscriptionCacheData, error) {
 	result := &service.SubscriptionCacheData{}
 
+	schemaVersion, err := strconv.ParseInt(data[subFieldSchemaVersion], 10, 64)
+	if err != nil || schemaVersion != subscriptionCacheSchemaV3 {
+		return nil, errors.New("invalid cache: unsupported subscription schema")
+	}
+
+	subscriptionID, err := strconv.ParseInt(data[subFieldSubscriptionID], 10, 64)
+	if err != nil || subscriptionID <= 0 {
+		return nil, errors.New("invalid cache: invalid subscription_id")
+	}
+	result.SubscriptionID = subscriptionID
+
 	result.Status = data[subFieldStatus]
 	if result.Status == "" {
 		return nil, errors.New("invalid cache: missing status")
 	}
 
-	if expiresStr, ok := data[subFieldExpiresAt]; ok {
-		expiresAt, err := strconv.ParseInt(expiresStr, 10, 64)
-		if err == nil {
-			result.ExpiresAt = time.Unix(expiresAt, 0)
-		}
+	startsAt, err := time.Parse(time.RFC3339Nano, data[subFieldStartsAtExact])
+	if err != nil || startsAt.IsZero() {
+		return nil, errors.New("invalid cache: invalid starts_at")
+	}
+	result.StartsAt = startsAt
+	if err := validateUnixTimeField(data, subFieldStartsAt, startsAt); err != nil {
+		return nil, err
+	}
+
+	expiresAt, err := time.Parse(time.RFC3339Nano, data[subFieldExpiresAtExact])
+	if err != nil || expiresAt.IsZero() || !expiresAt.After(startsAt) {
+		return nil, errors.New("invalid cache: invalid expires_at")
+	}
+	result.ExpiresAt = expiresAt
+	if err := validateUnixTimeField(data, subFieldExpiresAt, expiresAt); err != nil {
+		return nil, err
+	}
+
+	windowStart, err := time.Parse(time.RFC3339Nano, data[subFieldWeeklyStartExact])
+	if err != nil || windowStart.IsZero() {
+		return nil, errors.New("invalid cache: invalid weekly_window_start")
+	}
+	result.WeeklyWindowStart = &windowStart
+	if err := validateUnixTimeField(data, subFieldWeeklyWindowStart, windowStart); err != nil {
+		return nil, err
+	}
+
+	windowEnd, err := time.Parse(time.RFC3339Nano, data[subFieldWeeklyEndExact])
+	if err != nil || !windowEnd.Equal(windowStart.Add(service.SubscriptionWeeklyWindowDuration)) {
+		return nil, errors.New("invalid cache: invalid weekly_window_end")
+	}
+	result.WeeklyWindowEnd = windowEnd
+	if err := validateUnixTimeField(data, subFieldWeeklyWindowEnd, windowEnd); err != nil {
+		return nil, err
+	}
+	expectedStart, expectedEnd, ok := service.AnchoredWeeklyWindow(startsAt, windowStart)
+	if !ok || !windowStart.Equal(expectedStart) || !windowEnd.Equal(expectedEnd) {
+		return nil, errors.New("invalid cache: weekly window is not anchored")
 	}
 
 	if dailyStr, ok := data[subFieldDailyUsage]; ok {
-		result.DailyUsage, _ = strconv.ParseFloat(dailyStr, 64)
+		result.DailyUsage, err = parseNonnegativeFiniteFloat(dailyStr)
+		if err != nil {
+			return nil, errors.New("invalid cache: invalid daily_usage")
+		}
 	}
 
-	if weeklyStr, ok := data[subFieldWeeklyUsage]; ok {
-		result.WeeklyUsage, _ = strconv.ParseFloat(weeklyStr, 64)
+	weeklyStr, ok := data[subFieldWeeklyUsage]
+	if !ok {
+		return nil, errors.New("invalid cache: missing weekly_usage")
+	}
+	result.WeeklyUsage, err = parseNonnegativeFiniteFloat(weeklyStr)
+	if err != nil {
+		return nil, errors.New("invalid cache: invalid weekly_usage")
 	}
 
 	if monthlyStr, ok := data[subFieldMonthlyUsage]; ok {
-		result.MonthlyUsage, _ = strconv.ParseFloat(monthlyStr, 64)
+		result.MonthlyUsage, err = parseNonnegativeFiniteFloat(monthlyStr)
+		if err != nil {
+			return nil, errors.New("invalid cache: invalid monthly_usage")
+		}
 	}
 
-	if versionStr, ok := data[subFieldVersion]; ok {
-		result.Version, _ = strconv.ParseInt(versionStr, 10, 64)
+	versionStr, ok := data[subFieldVersion]
+	if !ok {
+		return nil, errors.New("invalid cache: missing version")
+	}
+	result.Version, err = strconv.ParseInt(versionStr, 10, 64)
+	if err != nil || result.Version <= 0 {
+		return nil, errors.New("invalid cache: invalid version")
 	}
 
 	return result, nil
 }
 
+func validateUnixTimeField(data map[string]string, field string, exact time.Time) error {
+	value, ok := data[field]
+	if !ok {
+		return fmt.Errorf("invalid cache: missing %s", field)
+	}
+	unix, err := strconv.ParseInt(value, 10, 64)
+	if err != nil || unix != exact.Unix() {
+		return fmt.Errorf("invalid cache: invalid %s", field)
+	}
+	return nil
+}
+
+func parseNonnegativeFiniteFloat(value string) (float64, error) {
+	parsed, err := strconv.ParseFloat(value, 64)
+	if err != nil || math.IsNaN(parsed) || math.IsInf(parsed, 0) || parsed < 0 {
+		return 0, errors.New("invalid nonnegative finite float")
+	}
+	return parsed, nil
+}
+
 func (c *billingCache) SetSubscriptionCache(ctx context.Context, userID, groupID int64, data *service.SubscriptionCacheData) error {
-	if data == nil {
-		return nil
+	if err := validateSubscriptionCacheData(data); err != nil {
+		return err
 	}
 
 	key := billingSubKey(userID, groupID)
 
 	fields := map[string]any{
-		subFieldStatus:       data.Status,
-		subFieldExpiresAt:    data.ExpiresAt.Unix(),
-		subFieldDailyUsage:   data.DailyUsage,
-		subFieldWeeklyUsage:  data.WeeklyUsage,
-		subFieldMonthlyUsage: data.MonthlyUsage,
-		subFieldVersion:      data.Version,
+		subFieldSchemaVersion:     subscriptionCacheSchemaV3,
+		subFieldSubscriptionID:    data.SubscriptionID,
+		subFieldStatus:            data.Status,
+		subFieldStartsAt:          data.StartsAt.Unix(),
+		subFieldStartsAtExact:     data.StartsAt.Format(time.RFC3339Nano),
+		subFieldExpiresAt:         data.ExpiresAt.Unix(),
+		subFieldExpiresAtExact:    data.ExpiresAt.Format(time.RFC3339Nano),
+		subFieldWeeklyWindowStart: data.WeeklyWindowStart.Unix(),
+		subFieldWeeklyStartExact:  data.WeeklyWindowStart.Format(time.RFC3339Nano),
+		subFieldWeeklyWindowEnd:   data.WeeklyWindowEnd.Unix(),
+		subFieldWeeklyEndExact:    data.WeeklyWindowEnd.Format(time.RFC3339Nano),
+		subFieldDailyUsage:        0,
+		subFieldWeeklyUsage:       data.WeeklyUsage,
+		subFieldMonthlyUsage:      0,
+		subFieldVersion:           data.Version,
+	}
+	ttl := subscriptionCacheTTL(data, time.Now())
+	if ttl <= 0 {
+		return c.rdb.Del(ctx, key).Err()
 	}
 
-	pipe := c.rdb.Pipeline()
+	// MULTI/EXEC keeps the hash contents and boundary-capped TTL inseparable:
+	// a transport failure must not leave a valid-looking key without expiry.
+	pipe := c.rdb.TxPipeline()
 	pipe.HSet(ctx, key, fields)
-	pipe.Expire(ctx, key, jitteredTTL())
+	pipe.Expire(ctx, key, ttl)
 	_, err := pipe.Exec(ctx)
 	return err
 }
 
+func validateSubscriptionCacheData(data *service.SubscriptionCacheData) error {
+	if data == nil || data.SubscriptionID <= 0 {
+		return errors.New("invalid subscription cache data: missing subscription_id")
+	}
+	if data.Status == "" || data.StartsAt.IsZero() || !data.ExpiresAt.After(data.StartsAt) {
+		return errors.New("invalid subscription cache data: invalid entitlement")
+	}
+	if data.WeeklyWindowStart == nil ||
+		!data.WeeklyWindowEnd.Equal(data.WeeklyWindowStart.Add(service.SubscriptionWeeklyWindowDuration)) {
+		return errors.New("invalid subscription cache data: invalid weekly window")
+	}
+	expectedStart, expectedEnd, ok := service.AnchoredWeeklyWindow(data.StartsAt, *data.WeeklyWindowStart)
+	if !ok || !data.WeeklyWindowStart.Equal(expectedStart) || !data.WeeklyWindowEnd.Equal(expectedEnd) {
+		return errors.New("invalid subscription cache data: weekly window is not anchored")
+	}
+	if _, err := parseNonnegativeFiniteFloat(strconv.FormatFloat(data.WeeklyUsage, 'g', -1, 64)); err != nil {
+		return errors.New("invalid subscription cache data: invalid weekly usage")
+	}
+	if data.Version <= 0 {
+		return errors.New("invalid subscription cache data: invalid version")
+	}
+	return nil
+}
+
 func (c *billingCache) UpdateSubscriptionUsage(ctx context.Context, userID, groupID int64, cost float64) error {
-	key := billingSubKey(userID, groupID)
-	_, err := updateSubUsageScript.Run(ctx, c.rdb, []string{key}, cost, int(jitteredTTL().Seconds())).Result()
-	if err != nil && !errors.Is(err, redis.Nil) {
-		log.Printf("Warning: update subscription usage cache failed for user %d group %d: %v", userID, groupID, err)
+	// The DB increment is authoritative. Applying a detached HINCR here can
+	// double-count when another request repopulates Redis from the committed DB
+	// before this call arrives, so every legacy "update" is an eviction.
+	_ = cost
+	if err := c.InvalidateSubscriptionCache(ctx, userID, groupID); err != nil {
+		log.Printf("Warning: invalidate subscription usage cache failed for user %d group %d: %v", userID, groupID, err)
 		return err
 	}
 	return nil
+}
+
+func subscriptionCacheTTL(data *service.SubscriptionCacheData, now time.Time) time.Duration {
+	if data == nil {
+		return 0
+	}
+	ttl := jitteredTTL()
+	if untilReset := data.WeeklyWindowEnd.Sub(now); untilReset < ttl {
+		ttl = untilReset
+	}
+	if untilExpiry := data.ExpiresAt.Sub(now); untilExpiry < ttl {
+		ttl = untilExpiry
+	}
+	if ttl <= 0 {
+		return 0
+	}
+	// Redis expiration is second-granular here. Truncation ensures a cache key
+	// cannot survive beyond an entitlement boundary.
+	return time.Duration(int64(ttl.Seconds())) * time.Second
 }
 
 func (c *billingCache) InvalidateSubscriptionCache(ctx context.Context, userID, groupID int64) error {

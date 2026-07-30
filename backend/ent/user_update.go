@@ -21,6 +21,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/ent/pendingauthsession"
 	"github.com/Wei-Shaw/sub2api/ent/predicate"
 	"github.com/Wei-Shaw/sub2api/ent/promocodeusage"
+	"github.com/Wei-Shaw/sub2api/ent/quotaviewerdevice"
 	"github.com/Wei-Shaw/sub2api/ent/redeemcode"
 	"github.com/Wei-Shaw/sub2api/ent/usagelog"
 	"github.com/Wei-Shaw/sub2api/ent/user"
@@ -644,6 +645,21 @@ func (_u *UserUpdate) AddDesktopDevices(v ...*DesktopDevice) *UserUpdate {
 	return _u.AddDesktopDeviceIDs(ids...)
 }
 
+// AddQuotaViewerDeviceIDs adds the "quota_viewer_devices" edge to the QuotaViewerDevice entity by IDs.
+func (_u *UserUpdate) AddQuotaViewerDeviceIDs(ids ...int64) *UserUpdate {
+	_u.mutation.AddQuotaViewerDeviceIDs(ids...)
+	return _u
+}
+
+// AddQuotaViewerDevices adds the "quota_viewer_devices" edges to the QuotaViewerDevice entity.
+func (_u *UserUpdate) AddQuotaViewerDevices(v ...*QuotaViewerDevice) *UserUpdate {
+	ids := make([]int64, len(v))
+	for i := range v {
+		ids[i] = v[i].ID
+	}
+	return _u.AddQuotaViewerDeviceIDs(ids...)
+}
+
 // AddDesktopDiagnosticIDs adds the "desktop_diagnostics" edge to the DesktopDiagnostic entity by IDs.
 func (_u *UserUpdate) AddDesktopDiagnosticIDs(ids ...int64) *UserUpdate {
 	_u.mutation.AddDesktopDiagnosticIDs(ids...)
@@ -956,6 +972,27 @@ func (_u *UserUpdate) RemoveDesktopDevices(v ...*DesktopDevice) *UserUpdate {
 		ids[i] = v[i].ID
 	}
 	return _u.RemoveDesktopDeviceIDs(ids...)
+}
+
+// ClearQuotaViewerDevices clears all "quota_viewer_devices" edges to the QuotaViewerDevice entity.
+func (_u *UserUpdate) ClearQuotaViewerDevices() *UserUpdate {
+	_u.mutation.ClearQuotaViewerDevices()
+	return _u
+}
+
+// RemoveQuotaViewerDeviceIDs removes the "quota_viewer_devices" edge to QuotaViewerDevice entities by IDs.
+func (_u *UserUpdate) RemoveQuotaViewerDeviceIDs(ids ...int64) *UserUpdate {
+	_u.mutation.RemoveQuotaViewerDeviceIDs(ids...)
+	return _u
+}
+
+// RemoveQuotaViewerDevices removes "quota_viewer_devices" edges to QuotaViewerDevice entities.
+func (_u *UserUpdate) RemoveQuotaViewerDevices(v ...*QuotaViewerDevice) *UserUpdate {
+	ids := make([]int64, len(v))
+	for i := range v {
+		ids[i] = v[i].ID
+	}
+	return _u.RemoveQuotaViewerDeviceIDs(ids...)
 }
 
 // ClearDesktopDiagnostics clears all "desktop_diagnostics" edges to the DesktopDiagnostic entity.
@@ -1815,6 +1852,51 @@ func (_u *UserUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 		}
 		_spec.Edges.Add = append(_spec.Edges.Add, edge)
 	}
+	if _u.mutation.QuotaViewerDevicesCleared() {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.O2M,
+			Inverse: false,
+			Table:   user.QuotaViewerDevicesTable,
+			Columns: []string{user.QuotaViewerDevicesColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(quotaviewerdevice.FieldID, field.TypeInt64),
+			},
+		}
+		_spec.Edges.Clear = append(_spec.Edges.Clear, edge)
+	}
+	if nodes := _u.mutation.RemovedQuotaViewerDevicesIDs(); len(nodes) > 0 && !_u.mutation.QuotaViewerDevicesCleared() {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.O2M,
+			Inverse: false,
+			Table:   user.QuotaViewerDevicesTable,
+			Columns: []string{user.QuotaViewerDevicesColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(quotaviewerdevice.FieldID, field.TypeInt64),
+			},
+		}
+		for _, k := range nodes {
+			edge.Target.Nodes = append(edge.Target.Nodes, k)
+		}
+		_spec.Edges.Clear = append(_spec.Edges.Clear, edge)
+	}
+	if nodes := _u.mutation.QuotaViewerDevicesIDs(); len(nodes) > 0 {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.O2M,
+			Inverse: false,
+			Table:   user.QuotaViewerDevicesTable,
+			Columns: []string{user.QuotaViewerDevicesColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(quotaviewerdevice.FieldID, field.TypeInt64),
+			},
+		}
+		for _, k := range nodes {
+			edge.Target.Nodes = append(edge.Target.Nodes, k)
+		}
+		_spec.Edges.Add = append(_spec.Edges.Add, edge)
+	}
 	if _u.mutation.DesktopDiagnosticsCleared() {
 		edge := &sqlgraph.EdgeSpec{
 			Rel:     sqlgraph.O2M,
@@ -2482,6 +2564,21 @@ func (_u *UserUpdateOne) AddDesktopDevices(v ...*DesktopDevice) *UserUpdateOne {
 	return _u.AddDesktopDeviceIDs(ids...)
 }
 
+// AddQuotaViewerDeviceIDs adds the "quota_viewer_devices" edge to the QuotaViewerDevice entity by IDs.
+func (_u *UserUpdateOne) AddQuotaViewerDeviceIDs(ids ...int64) *UserUpdateOne {
+	_u.mutation.AddQuotaViewerDeviceIDs(ids...)
+	return _u
+}
+
+// AddQuotaViewerDevices adds the "quota_viewer_devices" edges to the QuotaViewerDevice entity.
+func (_u *UserUpdateOne) AddQuotaViewerDevices(v ...*QuotaViewerDevice) *UserUpdateOne {
+	ids := make([]int64, len(v))
+	for i := range v {
+		ids[i] = v[i].ID
+	}
+	return _u.AddQuotaViewerDeviceIDs(ids...)
+}
+
 // AddDesktopDiagnosticIDs adds the "desktop_diagnostics" edge to the DesktopDiagnostic entity by IDs.
 func (_u *UserUpdateOne) AddDesktopDiagnosticIDs(ids ...int64) *UserUpdateOne {
 	_u.mutation.AddDesktopDiagnosticIDs(ids...)
@@ -2794,6 +2891,27 @@ func (_u *UserUpdateOne) RemoveDesktopDevices(v ...*DesktopDevice) *UserUpdateOn
 		ids[i] = v[i].ID
 	}
 	return _u.RemoveDesktopDeviceIDs(ids...)
+}
+
+// ClearQuotaViewerDevices clears all "quota_viewer_devices" edges to the QuotaViewerDevice entity.
+func (_u *UserUpdateOne) ClearQuotaViewerDevices() *UserUpdateOne {
+	_u.mutation.ClearQuotaViewerDevices()
+	return _u
+}
+
+// RemoveQuotaViewerDeviceIDs removes the "quota_viewer_devices" edge to QuotaViewerDevice entities by IDs.
+func (_u *UserUpdateOne) RemoveQuotaViewerDeviceIDs(ids ...int64) *UserUpdateOne {
+	_u.mutation.RemoveQuotaViewerDeviceIDs(ids...)
+	return _u
+}
+
+// RemoveQuotaViewerDevices removes "quota_viewer_devices" edges to QuotaViewerDevice entities.
+func (_u *UserUpdateOne) RemoveQuotaViewerDevices(v ...*QuotaViewerDevice) *UserUpdateOne {
+	ids := make([]int64, len(v))
+	for i := range v {
+		ids[i] = v[i].ID
+	}
+	return _u.RemoveQuotaViewerDeviceIDs(ids...)
 }
 
 // ClearDesktopDiagnostics clears all "desktop_diagnostics" edges to the DesktopDiagnostic entity.
@@ -3676,6 +3794,51 @@ func (_u *UserUpdateOne) sqlSave(ctx context.Context) (_node *User, err error) {
 			Bidi:    false,
 			Target: &sqlgraph.EdgeTarget{
 				IDSpec: sqlgraph.NewFieldSpec(desktopdevice.FieldID, field.TypeInt64),
+			},
+		}
+		for _, k := range nodes {
+			edge.Target.Nodes = append(edge.Target.Nodes, k)
+		}
+		_spec.Edges.Add = append(_spec.Edges.Add, edge)
+	}
+	if _u.mutation.QuotaViewerDevicesCleared() {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.O2M,
+			Inverse: false,
+			Table:   user.QuotaViewerDevicesTable,
+			Columns: []string{user.QuotaViewerDevicesColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(quotaviewerdevice.FieldID, field.TypeInt64),
+			},
+		}
+		_spec.Edges.Clear = append(_spec.Edges.Clear, edge)
+	}
+	if nodes := _u.mutation.RemovedQuotaViewerDevicesIDs(); len(nodes) > 0 && !_u.mutation.QuotaViewerDevicesCleared() {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.O2M,
+			Inverse: false,
+			Table:   user.QuotaViewerDevicesTable,
+			Columns: []string{user.QuotaViewerDevicesColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(quotaviewerdevice.FieldID, field.TypeInt64),
+			},
+		}
+		for _, k := range nodes {
+			edge.Target.Nodes = append(edge.Target.Nodes, k)
+		}
+		_spec.Edges.Clear = append(_spec.Edges.Clear, edge)
+	}
+	if nodes := _u.mutation.QuotaViewerDevicesIDs(); len(nodes) > 0 {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.O2M,
+			Inverse: false,
+			Table:   user.QuotaViewerDevicesTable,
+			Columns: []string{user.QuotaViewerDevicesColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(quotaviewerdevice.FieldID, field.TypeInt64),
 			},
 		}
 		for _, k := range nodes {

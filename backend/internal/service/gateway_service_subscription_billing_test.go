@@ -3,6 +3,7 @@
 package service
 
 import (
+	"errors"
 	"testing"
 )
 
@@ -79,6 +80,92 @@ func TestBuildUsageBillingCommand_SubscriptionAppliesRateMultiplier(t *testing.T
 			}
 			if cmd.BalanceCost != tt.wantBalance {
 				t.Errorf("BalanceCost = %v, want %v", cmd.BalanceCost, tt.wantBalance)
+			}
+		})
+	}
+}
+
+func TestBuildUsageBillingCommand_MissingSubscriptionNeverFallsBackToBalance(t *testing.T) {
+	t.Parallel()
+
+	groupID := int64(7)
+	p := &postUsageBillingParams{
+		Cost:               &CostBreakdown{TotalCost: 1, ActualCost: 2},
+		User:               &User{ID: 1},
+		APIKey:             &APIKey{ID: 2, GroupID: &groupID},
+		Account:            &Account{ID: 3},
+		IsSubscriptionBill: true,
+	}
+
+	cmd := buildUsageBillingCommand("req-1", nil, p)
+	if cmd == nil {
+		t.Fatal("buildUsageBillingCommand returned nil")
+	}
+	if cmd.BalanceCost != 0 {
+		t.Fatalf("BalanceCost = %v, want 0", cmd.BalanceCost)
+	}
+	if cmd.SubscriptionCost != 0 {
+		t.Fatalf("SubscriptionCost = %v, want 0", cmd.SubscriptionCost)
+	}
+}
+
+func TestApplyUsageBilling_MissingSubscriptionFailsClosed(t *testing.T) {
+	t.Parallel()
+
+	p := &postUsageBillingParams{
+		Cost:               &CostBreakdown{TotalCost: 1, ActualCost: 1},
+		IsSubscriptionBill: true,
+	}
+
+	_, err := applyUsageBilling(t.Context(), "req-1", nil, p, &billingDeps{}, nil)
+	if !errors.Is(err, ErrSubscriptionBillingContextRequired) {
+		t.Fatalf("applyUsageBilling error = %v, want %v", err, ErrSubscriptionBillingContextRequired)
+	}
+}
+
+func TestResolveUsageSubscriptionBillingRequiresTrustedMatchingGroup(t *testing.T) {
+	t.Parallel()
+
+	groupID := int64(7)
+	sub := &UserSubscription{ID: 9, UserID: 1, GroupID: groupID}
+
+	tests := []struct {
+		name   string
+		apiKey *APIKey
+		sub    *UserSubscription
+		want   bool
+	}{
+		{name: "missing API key", apiKey: nil, sub: nil},
+		{name: "group id without group", apiKey: &APIKey{UserID: 1, GroupID: &groupID}, sub: nil},
+		{name: "untrusted group", apiKey: &APIKey{UserID: 1, GroupID: &groupID, Group: &Group{ID: groupID, SubscriptionType: SubscriptionTypeSubscription}}, sub: sub},
+		{name: "standard group with subscription", apiKey: &APIKey{UserID: 1, GroupID: &groupID, Group: &Group{ID: groupID, Hydrated: true}}, sub: sub},
+		{name: "subscription group missing subscription", apiKey: &APIKey{UserID: 1, GroupID: &groupID, Group: &Group{ID: groupID, Hydrated: true, SubscriptionType: SubscriptionTypeSubscription}}, sub: nil},
+		{
+			name: "trusted matching subscription",
+			apiKey: &APIKey{
+				UserID:  1,
+				GroupID: &groupID,
+				Group:   &Group{ID: groupID, Hydrated: true, SubscriptionType: SubscriptionTypeSubscription},
+			},
+			sub:  sub,
+			want: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := resolveUsageSubscriptionBilling(tt.apiKey, tt.sub)
+			if tt.want {
+				if err != nil {
+					t.Fatalf("resolveUsageSubscriptionBilling error = %v", err)
+				}
+				if !got {
+					t.Fatal("resolveUsageSubscriptionBilling returned balance mode")
+				}
+				return
+			}
+			if err == nil {
+				t.Fatalf("resolveUsageSubscriptionBilling = %v, want error", got)
 			}
 		})
 	}

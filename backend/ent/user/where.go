@@ -1707,6 +1707,29 @@ func HasDesktopDevicesWith(preds ...predicate.DesktopDevice) predicate.User {
 	})
 }
 
+// HasQuotaViewerDevices applies the HasEdge predicate on the "quota_viewer_devices" edge.
+func HasQuotaViewerDevices() predicate.User {
+	return predicate.User(func(s *sql.Selector) {
+		step := sqlgraph.NewStep(
+			sqlgraph.From(Table, FieldID),
+			sqlgraph.Edge(sqlgraph.O2M, false, QuotaViewerDevicesTable, QuotaViewerDevicesColumn),
+		)
+		sqlgraph.HasNeighbors(s, step)
+	})
+}
+
+// HasQuotaViewerDevicesWith applies the HasEdge predicate on the "quota_viewer_devices" edge with a given conditions (other predicates).
+func HasQuotaViewerDevicesWith(preds ...predicate.QuotaViewerDevice) predicate.User {
+	return predicate.User(func(s *sql.Selector) {
+		step := newQuotaViewerDevicesStep()
+		sqlgraph.HasNeighborsWith(s, step, func(s *sql.Selector) {
+			for _, p := range preds {
+				p(s)
+			}
+		})
+	})
+}
+
 // HasDesktopDiagnostics applies the HasEdge predicate on the "desktop_diagnostics" edge.
 func HasDesktopDiagnostics() predicate.User {
 	return predicate.User(func(s *sql.Selector) {

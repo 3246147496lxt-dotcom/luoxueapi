@@ -2,11 +2,13 @@ package service
 
 import (
 	"database/sql"
+	"strings"
 	"time"
 
 	dbent "github.com/Wei-Shaw/sub2api/ent"
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/modules/desktop"
+	"github.com/Wei-Shaw/sub2api/internal/modules/quotaauth"
 	"github.com/Wei-Shaw/sub2api/internal/payment"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/google/wire"
@@ -584,6 +586,30 @@ func ProvideBillingCacheService(
 	return NewBillingCacheService(cache, userRepo, subRepo, apiKeyRepo, rpmCache, rateRepo, cfg, userPlatformQuotaRepo)
 }
 
+// ProvideQuotaOverviewService attaches website action URLs while keeping all
+// quota values and state computation inside the read-only service.
+func ProvideQuotaOverviewService(
+	repo QuotaOverviewRepository,
+	checker QuotaOverviewConsistencyChecker,
+	cfg *config.Config,
+) *QuotaOverviewService {
+	svc := NewQuotaOverviewService(repo, checker)
+	baseURL := ""
+	if cfg != nil {
+		baseURL = strings.TrimRight(strings.TrimSpace(cfg.Server.FrontendURL), "/")
+	}
+	svc.SetActions(QuotaOverviewActions{
+		RechargeURL:            baseURL + "/purchase",
+		ManageKeysURL:          baseURL + "/keys",
+		ManageSubscriptionsURL: baseURL + "/subscriptions",
+	})
+	return svc
+}
+
+func ProvideBillingQuotaOverviewConsistencyChecker(cache BillingCache) QuotaOverviewConsistencyChecker {
+	return NewBillingQuotaOverviewConsistencyChecker(cache)
+}
+
 // ProvideAPIKeyService wires APIKeyService and connects rate-limit cache invalidation.
 func ProvideAPIKeyService(
 	apiKeyRepo APIKeyRepository,
@@ -607,6 +633,7 @@ var ProviderSet = wire.NewSet(
 	// Core services
 	NewAuthService,
 	desktop.NewService,
+	quotaauth.NewService,
 	NewAuthModuleFacade,
 	NewUserService,
 	ProvideAPIKeyService,
@@ -627,6 +654,8 @@ var ProviderSet = wire.NewSet(
 	ProvidePricingService,
 	NewBillingService,
 	ProvideBillingCacheService,
+	ProvideBillingQuotaOverviewConsistencyChecker,
+	ProvideQuotaOverviewService,
 	NewAnnouncementService,
 	NewAdminService,
 	NewGatewayService,

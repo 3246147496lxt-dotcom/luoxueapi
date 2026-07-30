@@ -180,6 +180,10 @@ func apiKeyAuthWithSubscription(apiKeyService *service.APIKeyService, subscripti
 		// ── 6. 计费执行（skipBilling 时整块跳过） ────────────────────
 
 		if !skipBilling {
+			if isSubscriptionType && subscriptionService == nil {
+				AbortWithError(c, 503, "SUBSCRIPTION_SERVICE_UNAVAILABLE", "Subscription validation is temporarily unavailable")
+				return
+			}
 			// Key 状态检查
 			switch apiKey.Status {
 			case service.StatusAPIKeyQuotaExhausted:
@@ -224,8 +228,12 @@ func apiKeyAuthWithSubscription(apiKeyService *service.APIKeyService, subscripti
 					AbortWithError(c, status, code, validateErr.Error())
 					return
 				}
+			} else if isSubscriptionType {
+				// Billing source is selected by the API key group. Missing
+				// subscription state is fail-closed, never a wallet fallback.
+				AbortWithError(c, 403, "SUBSCRIPTION_NOT_FOUND", "No active subscription found for this group")
+				return
 			} else {
-				// 非订阅模式 或 订阅模式但 subscriptionService 未注入：回退到余额检查
 				if apiKeyBalanceBelowAuthThreshold(apiKey.User.Balance, cfg) {
 					AbortWithError(c, 403, "INSUFFICIENT_BALANCE", "Insufficient account balance")
 					return
@@ -377,12 +385,21 @@ func validateAPIKeyGroupAllowed(apiKey *service.APIKey) bool {
 }
 
 func validateAPIKeyGroupAvailable(apiKey *service.APIKey) (string, string, bool) {
-	if apiKey == nil || apiKey.GroupID == nil {
+	if apiKey == nil {
+		return "", "", true
+	}
+	if apiKey.GroupID == nil {
+		if apiKey.Group != nil {
+			return "GROUP_CONTEXT_INVALID", "API Key 计费分组上下文不一致", false
+		}
 		return "", "", true
 	}
 	group := apiKey.Group
 	if group == nil || strings.EqualFold(group.Status, "deleted") {
 		return "GROUP_DELETED", "API Key 所属分组已删除", false
+	}
+	if group.ID != *apiKey.GroupID || !group.Hydrated {
+		return "GROUP_CONTEXT_INVALID", "API Key 计费分组上下文不可信", false
 	}
 	if !group.IsActive() {
 		return "GROUP_DISABLED", "API Key 所属分组已停用", false

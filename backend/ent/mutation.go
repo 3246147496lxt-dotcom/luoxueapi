@@ -42,6 +42,8 @@ import (
 	"github.com/Wei-Shaw/sub2api/ent/promocode"
 	"github.com/Wei-Shaw/sub2api/ent/promocodeusage"
 	"github.com/Wei-Shaw/sub2api/ent/proxy"
+	"github.com/Wei-Shaw/sub2api/ent/quotaviewerdevice"
+	"github.com/Wei-Shaw/sub2api/ent/quotaviewerdevicesession"
 	"github.com/Wei-Shaw/sub2api/ent/redeemcode"
 	"github.com/Wei-Shaw/sub2api/ent/securitysecret"
 	"github.com/Wei-Shaw/sub2api/ent/setting"
@@ -96,6 +98,8 @@ const (
 	TypePromoCode                     = "PromoCode"
 	TypePromoCodeUsage                = "PromoCodeUsage"
 	TypeProxy                         = "Proxy"
+	TypeQuotaViewerDevice             = "QuotaViewerDevice"
+	TypeQuotaViewerDeviceSession      = "QuotaViewerDeviceSession"
 	TypeRedeemCode                    = "RedeemCode"
 	TypeSecuritySecret                = "SecuritySecret"
 	TypeSetting                       = "Setting"
@@ -41731,6 +41735,2633 @@ func (m *ProxyMutation) ResetEdge(name string) error {
 	return fmt.Errorf("unknown Proxy edge %s", name)
 }
 
+// QuotaViewerDeviceMutation represents an operation that mutates the QuotaViewerDevice nodes in the graph.
+type QuotaViewerDeviceMutation struct {
+	config
+	op                   Op
+	typ                  string
+	id                   *int64
+	created_at           *time.Time
+	updated_at           *time.Time
+	public_id            *string
+	client_id            *string
+	scope                *string
+	installation_id_hash *string
+	name                 *string
+	platform             *string
+	architecture         *string
+	os_version           *string
+	app_version          *string
+	status               *string
+	token_version        *int64
+	addtoken_version     *int64
+	pairing_expires_at   *time.Time
+	approved_at          *time.Time
+	activated_at         *time.Time
+	last_seen_at         *time.Time
+	revoked_at           *time.Time
+	clearedFields        map[string]struct{}
+	user                 *int64
+	cleareduser          bool
+	sessions             map[int64]struct{}
+	removedsessions      map[int64]struct{}
+	clearedsessions      bool
+	done                 bool
+	oldValue             func(context.Context) (*QuotaViewerDevice, error)
+	predicates           []predicate.QuotaViewerDevice
+}
+
+var _ ent.Mutation = (*QuotaViewerDeviceMutation)(nil)
+
+// quotaviewerdeviceOption allows management of the mutation configuration using functional options.
+type quotaviewerdeviceOption func(*QuotaViewerDeviceMutation)
+
+// newQuotaViewerDeviceMutation creates new mutation for the QuotaViewerDevice entity.
+func newQuotaViewerDeviceMutation(c config, op Op, opts ...quotaviewerdeviceOption) *QuotaViewerDeviceMutation {
+	m := &QuotaViewerDeviceMutation{
+		config:        c,
+		op:            op,
+		typ:           TypeQuotaViewerDevice,
+		clearedFields: make(map[string]struct{}),
+	}
+	for _, opt := range opts {
+		opt(m)
+	}
+	return m
+}
+
+// withQuotaViewerDeviceID sets the ID field of the mutation.
+func withQuotaViewerDeviceID(id int64) quotaviewerdeviceOption {
+	return func(m *QuotaViewerDeviceMutation) {
+		var (
+			err   error
+			once  sync.Once
+			value *QuotaViewerDevice
+		)
+		m.oldValue = func(ctx context.Context) (*QuotaViewerDevice, error) {
+			once.Do(func() {
+				if m.done {
+					err = errors.New("querying old values post mutation is not allowed")
+				} else {
+					value, err = m.Client().QuotaViewerDevice.Get(ctx, id)
+				}
+			})
+			return value, err
+		}
+		m.id = &id
+	}
+}
+
+// withQuotaViewerDevice sets the old QuotaViewerDevice of the mutation.
+func withQuotaViewerDevice(node *QuotaViewerDevice) quotaviewerdeviceOption {
+	return func(m *QuotaViewerDeviceMutation) {
+		m.oldValue = func(context.Context) (*QuotaViewerDevice, error) {
+			return node, nil
+		}
+		m.id = &node.ID
+	}
+}
+
+// Client returns a new `ent.Client` from the mutation. If the mutation was
+// executed in a transaction (ent.Tx), a transactional client is returned.
+func (m QuotaViewerDeviceMutation) Client() *Client {
+	client := &Client{config: m.config}
+	client.init()
+	return client
+}
+
+// Tx returns an `ent.Tx` for mutations that were executed in transactions;
+// it returns an error otherwise.
+func (m QuotaViewerDeviceMutation) Tx() (*Tx, error) {
+	if _, ok := m.driver.(*txDriver); !ok {
+		return nil, errors.New("ent: mutation is not running in a transaction")
+	}
+	tx := &Tx{config: m.config}
+	tx.init()
+	return tx, nil
+}
+
+// ID returns the ID value in the mutation. Note that the ID is only available
+// if it was provided to the builder or after it was returned from the database.
+func (m *QuotaViewerDeviceMutation) ID() (id int64, exists bool) {
+	if m.id == nil {
+		return
+	}
+	return *m.id, true
+}
+
+// IDs queries the database and returns the entity ids that match the mutation's predicate.
+// That means, if the mutation is applied within a transaction with an isolation level such
+// as sql.LevelSerializable, the returned ids match the ids of the rows that will be updated
+// or updated by the mutation.
+func (m *QuotaViewerDeviceMutation) IDs(ctx context.Context) ([]int64, error) {
+	switch {
+	case m.op.Is(OpUpdateOne | OpDeleteOne):
+		id, exists := m.ID()
+		if exists {
+			return []int64{id}, nil
+		}
+		fallthrough
+	case m.op.Is(OpUpdate | OpDelete):
+		return m.Client().QuotaViewerDevice.Query().Where(m.predicates...).IDs(ctx)
+	default:
+		return nil, fmt.Errorf("IDs is not allowed on %s operations", m.op)
+	}
+}
+
+// SetCreatedAt sets the "created_at" field.
+func (m *QuotaViewerDeviceMutation) SetCreatedAt(t time.Time) {
+	m.created_at = &t
+}
+
+// CreatedAt returns the value of the "created_at" field in the mutation.
+func (m *QuotaViewerDeviceMutation) CreatedAt() (r time.Time, exists bool) {
+	v := m.created_at
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldCreatedAt returns the old "created_at" field's value of the QuotaViewerDevice entity.
+// If the QuotaViewerDevice object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *QuotaViewerDeviceMutation) OldCreatedAt(ctx context.Context) (v time.Time, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldCreatedAt is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldCreatedAt requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldCreatedAt: %w", err)
+	}
+	return oldValue.CreatedAt, nil
+}
+
+// ResetCreatedAt resets all changes to the "created_at" field.
+func (m *QuotaViewerDeviceMutation) ResetCreatedAt() {
+	m.created_at = nil
+}
+
+// SetUpdatedAt sets the "updated_at" field.
+func (m *QuotaViewerDeviceMutation) SetUpdatedAt(t time.Time) {
+	m.updated_at = &t
+}
+
+// UpdatedAt returns the value of the "updated_at" field in the mutation.
+func (m *QuotaViewerDeviceMutation) UpdatedAt() (r time.Time, exists bool) {
+	v := m.updated_at
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldUpdatedAt returns the old "updated_at" field's value of the QuotaViewerDevice entity.
+// If the QuotaViewerDevice object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *QuotaViewerDeviceMutation) OldUpdatedAt(ctx context.Context) (v time.Time, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldUpdatedAt is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldUpdatedAt requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldUpdatedAt: %w", err)
+	}
+	return oldValue.UpdatedAt, nil
+}
+
+// ResetUpdatedAt resets all changes to the "updated_at" field.
+func (m *QuotaViewerDeviceMutation) ResetUpdatedAt() {
+	m.updated_at = nil
+}
+
+// SetUserID sets the "user_id" field.
+func (m *QuotaViewerDeviceMutation) SetUserID(i int64) {
+	m.user = &i
+}
+
+// UserID returns the value of the "user_id" field in the mutation.
+func (m *QuotaViewerDeviceMutation) UserID() (r int64, exists bool) {
+	v := m.user
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldUserID returns the old "user_id" field's value of the QuotaViewerDevice entity.
+// If the QuotaViewerDevice object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *QuotaViewerDeviceMutation) OldUserID(ctx context.Context) (v int64, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldUserID is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldUserID requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldUserID: %w", err)
+	}
+	return oldValue.UserID, nil
+}
+
+// ResetUserID resets all changes to the "user_id" field.
+func (m *QuotaViewerDeviceMutation) ResetUserID() {
+	m.user = nil
+}
+
+// SetPublicID sets the "public_id" field.
+func (m *QuotaViewerDeviceMutation) SetPublicID(s string) {
+	m.public_id = &s
+}
+
+// PublicID returns the value of the "public_id" field in the mutation.
+func (m *QuotaViewerDeviceMutation) PublicID() (r string, exists bool) {
+	v := m.public_id
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldPublicID returns the old "public_id" field's value of the QuotaViewerDevice entity.
+// If the QuotaViewerDevice object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *QuotaViewerDeviceMutation) OldPublicID(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldPublicID is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldPublicID requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldPublicID: %w", err)
+	}
+	return oldValue.PublicID, nil
+}
+
+// ResetPublicID resets all changes to the "public_id" field.
+func (m *QuotaViewerDeviceMutation) ResetPublicID() {
+	m.public_id = nil
+}
+
+// SetClientID sets the "client_id" field.
+func (m *QuotaViewerDeviceMutation) SetClientID(s string) {
+	m.client_id = &s
+}
+
+// ClientID returns the value of the "client_id" field in the mutation.
+func (m *QuotaViewerDeviceMutation) ClientID() (r string, exists bool) {
+	v := m.client_id
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldClientID returns the old "client_id" field's value of the QuotaViewerDevice entity.
+// If the QuotaViewerDevice object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *QuotaViewerDeviceMutation) OldClientID(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldClientID is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldClientID requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldClientID: %w", err)
+	}
+	return oldValue.ClientID, nil
+}
+
+// ResetClientID resets all changes to the "client_id" field.
+func (m *QuotaViewerDeviceMutation) ResetClientID() {
+	m.client_id = nil
+}
+
+// SetScope sets the "scope" field.
+func (m *QuotaViewerDeviceMutation) SetScope(s string) {
+	m.scope = &s
+}
+
+// Scope returns the value of the "scope" field in the mutation.
+func (m *QuotaViewerDeviceMutation) Scope() (r string, exists bool) {
+	v := m.scope
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldScope returns the old "scope" field's value of the QuotaViewerDevice entity.
+// If the QuotaViewerDevice object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *QuotaViewerDeviceMutation) OldScope(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldScope is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldScope requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldScope: %w", err)
+	}
+	return oldValue.Scope, nil
+}
+
+// ResetScope resets all changes to the "scope" field.
+func (m *QuotaViewerDeviceMutation) ResetScope() {
+	m.scope = nil
+}
+
+// SetInstallationIDHash sets the "installation_id_hash" field.
+func (m *QuotaViewerDeviceMutation) SetInstallationIDHash(s string) {
+	m.installation_id_hash = &s
+}
+
+// InstallationIDHash returns the value of the "installation_id_hash" field in the mutation.
+func (m *QuotaViewerDeviceMutation) InstallationIDHash() (r string, exists bool) {
+	v := m.installation_id_hash
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldInstallationIDHash returns the old "installation_id_hash" field's value of the QuotaViewerDevice entity.
+// If the QuotaViewerDevice object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *QuotaViewerDeviceMutation) OldInstallationIDHash(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldInstallationIDHash is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldInstallationIDHash requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldInstallationIDHash: %w", err)
+	}
+	return oldValue.InstallationIDHash, nil
+}
+
+// ResetInstallationIDHash resets all changes to the "installation_id_hash" field.
+func (m *QuotaViewerDeviceMutation) ResetInstallationIDHash() {
+	m.installation_id_hash = nil
+}
+
+// SetName sets the "name" field.
+func (m *QuotaViewerDeviceMutation) SetName(s string) {
+	m.name = &s
+}
+
+// Name returns the value of the "name" field in the mutation.
+func (m *QuotaViewerDeviceMutation) Name() (r string, exists bool) {
+	v := m.name
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldName returns the old "name" field's value of the QuotaViewerDevice entity.
+// If the QuotaViewerDevice object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *QuotaViewerDeviceMutation) OldName(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldName is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldName requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldName: %w", err)
+	}
+	return oldValue.Name, nil
+}
+
+// ResetName resets all changes to the "name" field.
+func (m *QuotaViewerDeviceMutation) ResetName() {
+	m.name = nil
+}
+
+// SetPlatform sets the "platform" field.
+func (m *QuotaViewerDeviceMutation) SetPlatform(s string) {
+	m.platform = &s
+}
+
+// Platform returns the value of the "platform" field in the mutation.
+func (m *QuotaViewerDeviceMutation) Platform() (r string, exists bool) {
+	v := m.platform
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldPlatform returns the old "platform" field's value of the QuotaViewerDevice entity.
+// If the QuotaViewerDevice object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *QuotaViewerDeviceMutation) OldPlatform(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldPlatform is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldPlatform requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldPlatform: %w", err)
+	}
+	return oldValue.Platform, nil
+}
+
+// ResetPlatform resets all changes to the "platform" field.
+func (m *QuotaViewerDeviceMutation) ResetPlatform() {
+	m.platform = nil
+}
+
+// SetArchitecture sets the "architecture" field.
+func (m *QuotaViewerDeviceMutation) SetArchitecture(s string) {
+	m.architecture = &s
+}
+
+// Architecture returns the value of the "architecture" field in the mutation.
+func (m *QuotaViewerDeviceMutation) Architecture() (r string, exists bool) {
+	v := m.architecture
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldArchitecture returns the old "architecture" field's value of the QuotaViewerDevice entity.
+// If the QuotaViewerDevice object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *QuotaViewerDeviceMutation) OldArchitecture(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldArchitecture is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldArchitecture requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldArchitecture: %w", err)
+	}
+	return oldValue.Architecture, nil
+}
+
+// ResetArchitecture resets all changes to the "architecture" field.
+func (m *QuotaViewerDeviceMutation) ResetArchitecture() {
+	m.architecture = nil
+}
+
+// SetOsVersion sets the "os_version" field.
+func (m *QuotaViewerDeviceMutation) SetOsVersion(s string) {
+	m.os_version = &s
+}
+
+// OsVersion returns the value of the "os_version" field in the mutation.
+func (m *QuotaViewerDeviceMutation) OsVersion() (r string, exists bool) {
+	v := m.os_version
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldOsVersion returns the old "os_version" field's value of the QuotaViewerDevice entity.
+// If the QuotaViewerDevice object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *QuotaViewerDeviceMutation) OldOsVersion(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldOsVersion is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldOsVersion requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldOsVersion: %w", err)
+	}
+	return oldValue.OsVersion, nil
+}
+
+// ResetOsVersion resets all changes to the "os_version" field.
+func (m *QuotaViewerDeviceMutation) ResetOsVersion() {
+	m.os_version = nil
+}
+
+// SetAppVersion sets the "app_version" field.
+func (m *QuotaViewerDeviceMutation) SetAppVersion(s string) {
+	m.app_version = &s
+}
+
+// AppVersion returns the value of the "app_version" field in the mutation.
+func (m *QuotaViewerDeviceMutation) AppVersion() (r string, exists bool) {
+	v := m.app_version
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldAppVersion returns the old "app_version" field's value of the QuotaViewerDevice entity.
+// If the QuotaViewerDevice object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *QuotaViewerDeviceMutation) OldAppVersion(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldAppVersion is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldAppVersion requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldAppVersion: %w", err)
+	}
+	return oldValue.AppVersion, nil
+}
+
+// ResetAppVersion resets all changes to the "app_version" field.
+func (m *QuotaViewerDeviceMutation) ResetAppVersion() {
+	m.app_version = nil
+}
+
+// SetStatus sets the "status" field.
+func (m *QuotaViewerDeviceMutation) SetStatus(s string) {
+	m.status = &s
+}
+
+// Status returns the value of the "status" field in the mutation.
+func (m *QuotaViewerDeviceMutation) Status() (r string, exists bool) {
+	v := m.status
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldStatus returns the old "status" field's value of the QuotaViewerDevice entity.
+// If the QuotaViewerDevice object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *QuotaViewerDeviceMutation) OldStatus(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldStatus is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldStatus requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldStatus: %w", err)
+	}
+	return oldValue.Status, nil
+}
+
+// ResetStatus resets all changes to the "status" field.
+func (m *QuotaViewerDeviceMutation) ResetStatus() {
+	m.status = nil
+}
+
+// SetTokenVersion sets the "token_version" field.
+func (m *QuotaViewerDeviceMutation) SetTokenVersion(i int64) {
+	m.token_version = &i
+	m.addtoken_version = nil
+}
+
+// TokenVersion returns the value of the "token_version" field in the mutation.
+func (m *QuotaViewerDeviceMutation) TokenVersion() (r int64, exists bool) {
+	v := m.token_version
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldTokenVersion returns the old "token_version" field's value of the QuotaViewerDevice entity.
+// If the QuotaViewerDevice object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *QuotaViewerDeviceMutation) OldTokenVersion(ctx context.Context) (v int64, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldTokenVersion is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldTokenVersion requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldTokenVersion: %w", err)
+	}
+	return oldValue.TokenVersion, nil
+}
+
+// AddTokenVersion adds i to the "token_version" field.
+func (m *QuotaViewerDeviceMutation) AddTokenVersion(i int64) {
+	if m.addtoken_version != nil {
+		*m.addtoken_version += i
+	} else {
+		m.addtoken_version = &i
+	}
+}
+
+// AddedTokenVersion returns the value that was added to the "token_version" field in this mutation.
+func (m *QuotaViewerDeviceMutation) AddedTokenVersion() (r int64, exists bool) {
+	v := m.addtoken_version
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// ResetTokenVersion resets all changes to the "token_version" field.
+func (m *QuotaViewerDeviceMutation) ResetTokenVersion() {
+	m.token_version = nil
+	m.addtoken_version = nil
+}
+
+// SetPairingExpiresAt sets the "pairing_expires_at" field.
+func (m *QuotaViewerDeviceMutation) SetPairingExpiresAt(t time.Time) {
+	m.pairing_expires_at = &t
+}
+
+// PairingExpiresAt returns the value of the "pairing_expires_at" field in the mutation.
+func (m *QuotaViewerDeviceMutation) PairingExpiresAt() (r time.Time, exists bool) {
+	v := m.pairing_expires_at
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldPairingExpiresAt returns the old "pairing_expires_at" field's value of the QuotaViewerDevice entity.
+// If the QuotaViewerDevice object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *QuotaViewerDeviceMutation) OldPairingExpiresAt(ctx context.Context) (v time.Time, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldPairingExpiresAt is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldPairingExpiresAt requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldPairingExpiresAt: %w", err)
+	}
+	return oldValue.PairingExpiresAt, nil
+}
+
+// ResetPairingExpiresAt resets all changes to the "pairing_expires_at" field.
+func (m *QuotaViewerDeviceMutation) ResetPairingExpiresAt() {
+	m.pairing_expires_at = nil
+}
+
+// SetApprovedAt sets the "approved_at" field.
+func (m *QuotaViewerDeviceMutation) SetApprovedAt(t time.Time) {
+	m.approved_at = &t
+}
+
+// ApprovedAt returns the value of the "approved_at" field in the mutation.
+func (m *QuotaViewerDeviceMutation) ApprovedAt() (r time.Time, exists bool) {
+	v := m.approved_at
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldApprovedAt returns the old "approved_at" field's value of the QuotaViewerDevice entity.
+// If the QuotaViewerDevice object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *QuotaViewerDeviceMutation) OldApprovedAt(ctx context.Context) (v *time.Time, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldApprovedAt is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldApprovedAt requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldApprovedAt: %w", err)
+	}
+	return oldValue.ApprovedAt, nil
+}
+
+// ClearApprovedAt clears the value of the "approved_at" field.
+func (m *QuotaViewerDeviceMutation) ClearApprovedAt() {
+	m.approved_at = nil
+	m.clearedFields[quotaviewerdevice.FieldApprovedAt] = struct{}{}
+}
+
+// ApprovedAtCleared returns if the "approved_at" field was cleared in this mutation.
+func (m *QuotaViewerDeviceMutation) ApprovedAtCleared() bool {
+	_, ok := m.clearedFields[quotaviewerdevice.FieldApprovedAt]
+	return ok
+}
+
+// ResetApprovedAt resets all changes to the "approved_at" field.
+func (m *QuotaViewerDeviceMutation) ResetApprovedAt() {
+	m.approved_at = nil
+	delete(m.clearedFields, quotaviewerdevice.FieldApprovedAt)
+}
+
+// SetActivatedAt sets the "activated_at" field.
+func (m *QuotaViewerDeviceMutation) SetActivatedAt(t time.Time) {
+	m.activated_at = &t
+}
+
+// ActivatedAt returns the value of the "activated_at" field in the mutation.
+func (m *QuotaViewerDeviceMutation) ActivatedAt() (r time.Time, exists bool) {
+	v := m.activated_at
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldActivatedAt returns the old "activated_at" field's value of the QuotaViewerDevice entity.
+// If the QuotaViewerDevice object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *QuotaViewerDeviceMutation) OldActivatedAt(ctx context.Context) (v *time.Time, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldActivatedAt is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldActivatedAt requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldActivatedAt: %w", err)
+	}
+	return oldValue.ActivatedAt, nil
+}
+
+// ClearActivatedAt clears the value of the "activated_at" field.
+func (m *QuotaViewerDeviceMutation) ClearActivatedAt() {
+	m.activated_at = nil
+	m.clearedFields[quotaviewerdevice.FieldActivatedAt] = struct{}{}
+}
+
+// ActivatedAtCleared returns if the "activated_at" field was cleared in this mutation.
+func (m *QuotaViewerDeviceMutation) ActivatedAtCleared() bool {
+	_, ok := m.clearedFields[quotaviewerdevice.FieldActivatedAt]
+	return ok
+}
+
+// ResetActivatedAt resets all changes to the "activated_at" field.
+func (m *QuotaViewerDeviceMutation) ResetActivatedAt() {
+	m.activated_at = nil
+	delete(m.clearedFields, quotaviewerdevice.FieldActivatedAt)
+}
+
+// SetLastSeenAt sets the "last_seen_at" field.
+func (m *QuotaViewerDeviceMutation) SetLastSeenAt(t time.Time) {
+	m.last_seen_at = &t
+}
+
+// LastSeenAt returns the value of the "last_seen_at" field in the mutation.
+func (m *QuotaViewerDeviceMutation) LastSeenAt() (r time.Time, exists bool) {
+	v := m.last_seen_at
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldLastSeenAt returns the old "last_seen_at" field's value of the QuotaViewerDevice entity.
+// If the QuotaViewerDevice object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *QuotaViewerDeviceMutation) OldLastSeenAt(ctx context.Context) (v *time.Time, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldLastSeenAt is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldLastSeenAt requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldLastSeenAt: %w", err)
+	}
+	return oldValue.LastSeenAt, nil
+}
+
+// ClearLastSeenAt clears the value of the "last_seen_at" field.
+func (m *QuotaViewerDeviceMutation) ClearLastSeenAt() {
+	m.last_seen_at = nil
+	m.clearedFields[quotaviewerdevice.FieldLastSeenAt] = struct{}{}
+}
+
+// LastSeenAtCleared returns if the "last_seen_at" field was cleared in this mutation.
+func (m *QuotaViewerDeviceMutation) LastSeenAtCleared() bool {
+	_, ok := m.clearedFields[quotaviewerdevice.FieldLastSeenAt]
+	return ok
+}
+
+// ResetLastSeenAt resets all changes to the "last_seen_at" field.
+func (m *QuotaViewerDeviceMutation) ResetLastSeenAt() {
+	m.last_seen_at = nil
+	delete(m.clearedFields, quotaviewerdevice.FieldLastSeenAt)
+}
+
+// SetRevokedAt sets the "revoked_at" field.
+func (m *QuotaViewerDeviceMutation) SetRevokedAt(t time.Time) {
+	m.revoked_at = &t
+}
+
+// RevokedAt returns the value of the "revoked_at" field in the mutation.
+func (m *QuotaViewerDeviceMutation) RevokedAt() (r time.Time, exists bool) {
+	v := m.revoked_at
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldRevokedAt returns the old "revoked_at" field's value of the QuotaViewerDevice entity.
+// If the QuotaViewerDevice object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *QuotaViewerDeviceMutation) OldRevokedAt(ctx context.Context) (v *time.Time, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldRevokedAt is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldRevokedAt requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldRevokedAt: %w", err)
+	}
+	return oldValue.RevokedAt, nil
+}
+
+// ClearRevokedAt clears the value of the "revoked_at" field.
+func (m *QuotaViewerDeviceMutation) ClearRevokedAt() {
+	m.revoked_at = nil
+	m.clearedFields[quotaviewerdevice.FieldRevokedAt] = struct{}{}
+}
+
+// RevokedAtCleared returns if the "revoked_at" field was cleared in this mutation.
+func (m *QuotaViewerDeviceMutation) RevokedAtCleared() bool {
+	_, ok := m.clearedFields[quotaviewerdevice.FieldRevokedAt]
+	return ok
+}
+
+// ResetRevokedAt resets all changes to the "revoked_at" field.
+func (m *QuotaViewerDeviceMutation) ResetRevokedAt() {
+	m.revoked_at = nil
+	delete(m.clearedFields, quotaviewerdevice.FieldRevokedAt)
+}
+
+// ClearUser clears the "user" edge to the User entity.
+func (m *QuotaViewerDeviceMutation) ClearUser() {
+	m.cleareduser = true
+	m.clearedFields[quotaviewerdevice.FieldUserID] = struct{}{}
+}
+
+// UserCleared reports if the "user" edge to the User entity was cleared.
+func (m *QuotaViewerDeviceMutation) UserCleared() bool {
+	return m.cleareduser
+}
+
+// UserIDs returns the "user" edge IDs in the mutation.
+// Note that IDs always returns len(IDs) <= 1 for unique edges, and you should use
+// UserID instead. It exists only for internal usage by the builders.
+func (m *QuotaViewerDeviceMutation) UserIDs() (ids []int64) {
+	if id := m.user; id != nil {
+		ids = append(ids, *id)
+	}
+	return
+}
+
+// ResetUser resets all changes to the "user" edge.
+func (m *QuotaViewerDeviceMutation) ResetUser() {
+	m.user = nil
+	m.cleareduser = false
+}
+
+// AddSessionIDs adds the "sessions" edge to the QuotaViewerDeviceSession entity by ids.
+func (m *QuotaViewerDeviceMutation) AddSessionIDs(ids ...int64) {
+	if m.sessions == nil {
+		m.sessions = make(map[int64]struct{})
+	}
+	for i := range ids {
+		m.sessions[ids[i]] = struct{}{}
+	}
+}
+
+// ClearSessions clears the "sessions" edge to the QuotaViewerDeviceSession entity.
+func (m *QuotaViewerDeviceMutation) ClearSessions() {
+	m.clearedsessions = true
+}
+
+// SessionsCleared reports if the "sessions" edge to the QuotaViewerDeviceSession entity was cleared.
+func (m *QuotaViewerDeviceMutation) SessionsCleared() bool {
+	return m.clearedsessions
+}
+
+// RemoveSessionIDs removes the "sessions" edge to the QuotaViewerDeviceSession entity by IDs.
+func (m *QuotaViewerDeviceMutation) RemoveSessionIDs(ids ...int64) {
+	if m.removedsessions == nil {
+		m.removedsessions = make(map[int64]struct{})
+	}
+	for i := range ids {
+		delete(m.sessions, ids[i])
+		m.removedsessions[ids[i]] = struct{}{}
+	}
+}
+
+// RemovedSessions returns the removed IDs of the "sessions" edge to the QuotaViewerDeviceSession entity.
+func (m *QuotaViewerDeviceMutation) RemovedSessionsIDs() (ids []int64) {
+	for id := range m.removedsessions {
+		ids = append(ids, id)
+	}
+	return
+}
+
+// SessionsIDs returns the "sessions" edge IDs in the mutation.
+func (m *QuotaViewerDeviceMutation) SessionsIDs() (ids []int64) {
+	for id := range m.sessions {
+		ids = append(ids, id)
+	}
+	return
+}
+
+// ResetSessions resets all changes to the "sessions" edge.
+func (m *QuotaViewerDeviceMutation) ResetSessions() {
+	m.sessions = nil
+	m.clearedsessions = false
+	m.removedsessions = nil
+}
+
+// Where appends a list predicates to the QuotaViewerDeviceMutation builder.
+func (m *QuotaViewerDeviceMutation) Where(ps ...predicate.QuotaViewerDevice) {
+	m.predicates = append(m.predicates, ps...)
+}
+
+// WhereP appends storage-level predicates to the QuotaViewerDeviceMutation builder. Using this method,
+// users can use type-assertion to append predicates that do not depend on any generated package.
+func (m *QuotaViewerDeviceMutation) WhereP(ps ...func(*sql.Selector)) {
+	p := make([]predicate.QuotaViewerDevice, len(ps))
+	for i := range ps {
+		p[i] = ps[i]
+	}
+	m.Where(p...)
+}
+
+// Op returns the operation name.
+func (m *QuotaViewerDeviceMutation) Op() Op {
+	return m.op
+}
+
+// SetOp allows setting the mutation operation.
+func (m *QuotaViewerDeviceMutation) SetOp(op Op) {
+	m.op = op
+}
+
+// Type returns the node type of this mutation (QuotaViewerDevice).
+func (m *QuotaViewerDeviceMutation) Type() string {
+	return m.typ
+}
+
+// Fields returns all fields that were changed during this mutation. Note that in
+// order to get all numeric fields that were incremented/decremented, call
+// AddedFields().
+func (m *QuotaViewerDeviceMutation) Fields() []string {
+	fields := make([]string, 0, 19)
+	if m.created_at != nil {
+		fields = append(fields, quotaviewerdevice.FieldCreatedAt)
+	}
+	if m.updated_at != nil {
+		fields = append(fields, quotaviewerdevice.FieldUpdatedAt)
+	}
+	if m.user != nil {
+		fields = append(fields, quotaviewerdevice.FieldUserID)
+	}
+	if m.public_id != nil {
+		fields = append(fields, quotaviewerdevice.FieldPublicID)
+	}
+	if m.client_id != nil {
+		fields = append(fields, quotaviewerdevice.FieldClientID)
+	}
+	if m.scope != nil {
+		fields = append(fields, quotaviewerdevice.FieldScope)
+	}
+	if m.installation_id_hash != nil {
+		fields = append(fields, quotaviewerdevice.FieldInstallationIDHash)
+	}
+	if m.name != nil {
+		fields = append(fields, quotaviewerdevice.FieldName)
+	}
+	if m.platform != nil {
+		fields = append(fields, quotaviewerdevice.FieldPlatform)
+	}
+	if m.architecture != nil {
+		fields = append(fields, quotaviewerdevice.FieldArchitecture)
+	}
+	if m.os_version != nil {
+		fields = append(fields, quotaviewerdevice.FieldOsVersion)
+	}
+	if m.app_version != nil {
+		fields = append(fields, quotaviewerdevice.FieldAppVersion)
+	}
+	if m.status != nil {
+		fields = append(fields, quotaviewerdevice.FieldStatus)
+	}
+	if m.token_version != nil {
+		fields = append(fields, quotaviewerdevice.FieldTokenVersion)
+	}
+	if m.pairing_expires_at != nil {
+		fields = append(fields, quotaviewerdevice.FieldPairingExpiresAt)
+	}
+	if m.approved_at != nil {
+		fields = append(fields, quotaviewerdevice.FieldApprovedAt)
+	}
+	if m.activated_at != nil {
+		fields = append(fields, quotaviewerdevice.FieldActivatedAt)
+	}
+	if m.last_seen_at != nil {
+		fields = append(fields, quotaviewerdevice.FieldLastSeenAt)
+	}
+	if m.revoked_at != nil {
+		fields = append(fields, quotaviewerdevice.FieldRevokedAt)
+	}
+	return fields
+}
+
+// Field returns the value of a field with the given name. The second boolean
+// return value indicates that this field was not set, or was not defined in the
+// schema.
+func (m *QuotaViewerDeviceMutation) Field(name string) (ent.Value, bool) {
+	switch name {
+	case quotaviewerdevice.FieldCreatedAt:
+		return m.CreatedAt()
+	case quotaviewerdevice.FieldUpdatedAt:
+		return m.UpdatedAt()
+	case quotaviewerdevice.FieldUserID:
+		return m.UserID()
+	case quotaviewerdevice.FieldPublicID:
+		return m.PublicID()
+	case quotaviewerdevice.FieldClientID:
+		return m.ClientID()
+	case quotaviewerdevice.FieldScope:
+		return m.Scope()
+	case quotaviewerdevice.FieldInstallationIDHash:
+		return m.InstallationIDHash()
+	case quotaviewerdevice.FieldName:
+		return m.Name()
+	case quotaviewerdevice.FieldPlatform:
+		return m.Platform()
+	case quotaviewerdevice.FieldArchitecture:
+		return m.Architecture()
+	case quotaviewerdevice.FieldOsVersion:
+		return m.OsVersion()
+	case quotaviewerdevice.FieldAppVersion:
+		return m.AppVersion()
+	case quotaviewerdevice.FieldStatus:
+		return m.Status()
+	case quotaviewerdevice.FieldTokenVersion:
+		return m.TokenVersion()
+	case quotaviewerdevice.FieldPairingExpiresAt:
+		return m.PairingExpiresAt()
+	case quotaviewerdevice.FieldApprovedAt:
+		return m.ApprovedAt()
+	case quotaviewerdevice.FieldActivatedAt:
+		return m.ActivatedAt()
+	case quotaviewerdevice.FieldLastSeenAt:
+		return m.LastSeenAt()
+	case quotaviewerdevice.FieldRevokedAt:
+		return m.RevokedAt()
+	}
+	return nil, false
+}
+
+// OldField returns the old value of the field from the database. An error is
+// returned if the mutation operation is not UpdateOne, or the query to the
+// database failed.
+func (m *QuotaViewerDeviceMutation) OldField(ctx context.Context, name string) (ent.Value, error) {
+	switch name {
+	case quotaviewerdevice.FieldCreatedAt:
+		return m.OldCreatedAt(ctx)
+	case quotaviewerdevice.FieldUpdatedAt:
+		return m.OldUpdatedAt(ctx)
+	case quotaviewerdevice.FieldUserID:
+		return m.OldUserID(ctx)
+	case quotaviewerdevice.FieldPublicID:
+		return m.OldPublicID(ctx)
+	case quotaviewerdevice.FieldClientID:
+		return m.OldClientID(ctx)
+	case quotaviewerdevice.FieldScope:
+		return m.OldScope(ctx)
+	case quotaviewerdevice.FieldInstallationIDHash:
+		return m.OldInstallationIDHash(ctx)
+	case quotaviewerdevice.FieldName:
+		return m.OldName(ctx)
+	case quotaviewerdevice.FieldPlatform:
+		return m.OldPlatform(ctx)
+	case quotaviewerdevice.FieldArchitecture:
+		return m.OldArchitecture(ctx)
+	case quotaviewerdevice.FieldOsVersion:
+		return m.OldOsVersion(ctx)
+	case quotaviewerdevice.FieldAppVersion:
+		return m.OldAppVersion(ctx)
+	case quotaviewerdevice.FieldStatus:
+		return m.OldStatus(ctx)
+	case quotaviewerdevice.FieldTokenVersion:
+		return m.OldTokenVersion(ctx)
+	case quotaviewerdevice.FieldPairingExpiresAt:
+		return m.OldPairingExpiresAt(ctx)
+	case quotaviewerdevice.FieldApprovedAt:
+		return m.OldApprovedAt(ctx)
+	case quotaviewerdevice.FieldActivatedAt:
+		return m.OldActivatedAt(ctx)
+	case quotaviewerdevice.FieldLastSeenAt:
+		return m.OldLastSeenAt(ctx)
+	case quotaviewerdevice.FieldRevokedAt:
+		return m.OldRevokedAt(ctx)
+	}
+	return nil, fmt.Errorf("unknown QuotaViewerDevice field %s", name)
+}
+
+// SetField sets the value of a field with the given name. It returns an error if
+// the field is not defined in the schema, or if the type mismatched the field
+// type.
+func (m *QuotaViewerDeviceMutation) SetField(name string, value ent.Value) error {
+	switch name {
+	case quotaviewerdevice.FieldCreatedAt:
+		v, ok := value.(time.Time)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetCreatedAt(v)
+		return nil
+	case quotaviewerdevice.FieldUpdatedAt:
+		v, ok := value.(time.Time)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetUpdatedAt(v)
+		return nil
+	case quotaviewerdevice.FieldUserID:
+		v, ok := value.(int64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetUserID(v)
+		return nil
+	case quotaviewerdevice.FieldPublicID:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetPublicID(v)
+		return nil
+	case quotaviewerdevice.FieldClientID:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetClientID(v)
+		return nil
+	case quotaviewerdevice.FieldScope:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetScope(v)
+		return nil
+	case quotaviewerdevice.FieldInstallationIDHash:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetInstallationIDHash(v)
+		return nil
+	case quotaviewerdevice.FieldName:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetName(v)
+		return nil
+	case quotaviewerdevice.FieldPlatform:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetPlatform(v)
+		return nil
+	case quotaviewerdevice.FieldArchitecture:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetArchitecture(v)
+		return nil
+	case quotaviewerdevice.FieldOsVersion:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetOsVersion(v)
+		return nil
+	case quotaviewerdevice.FieldAppVersion:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetAppVersion(v)
+		return nil
+	case quotaviewerdevice.FieldStatus:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetStatus(v)
+		return nil
+	case quotaviewerdevice.FieldTokenVersion:
+		v, ok := value.(int64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetTokenVersion(v)
+		return nil
+	case quotaviewerdevice.FieldPairingExpiresAt:
+		v, ok := value.(time.Time)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetPairingExpiresAt(v)
+		return nil
+	case quotaviewerdevice.FieldApprovedAt:
+		v, ok := value.(time.Time)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetApprovedAt(v)
+		return nil
+	case quotaviewerdevice.FieldActivatedAt:
+		v, ok := value.(time.Time)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetActivatedAt(v)
+		return nil
+	case quotaviewerdevice.FieldLastSeenAt:
+		v, ok := value.(time.Time)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetLastSeenAt(v)
+		return nil
+	case quotaviewerdevice.FieldRevokedAt:
+		v, ok := value.(time.Time)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetRevokedAt(v)
+		return nil
+	}
+	return fmt.Errorf("unknown QuotaViewerDevice field %s", name)
+}
+
+// AddedFields returns all numeric fields that were incremented/decremented during
+// this mutation.
+func (m *QuotaViewerDeviceMutation) AddedFields() []string {
+	var fields []string
+	if m.addtoken_version != nil {
+		fields = append(fields, quotaviewerdevice.FieldTokenVersion)
+	}
+	return fields
+}
+
+// AddedField returns the numeric value that was incremented/decremented on a field
+// with the given name. The second boolean return value indicates that this field
+// was not set, or was not defined in the schema.
+func (m *QuotaViewerDeviceMutation) AddedField(name string) (ent.Value, bool) {
+	switch name {
+	case quotaviewerdevice.FieldTokenVersion:
+		return m.AddedTokenVersion()
+	}
+	return nil, false
+}
+
+// AddField adds the value to the field with the given name. It returns an error if
+// the field is not defined in the schema, or if the type mismatched the field
+// type.
+func (m *QuotaViewerDeviceMutation) AddField(name string, value ent.Value) error {
+	switch name {
+	case quotaviewerdevice.FieldTokenVersion:
+		v, ok := value.(int64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.AddTokenVersion(v)
+		return nil
+	}
+	return fmt.Errorf("unknown QuotaViewerDevice numeric field %s", name)
+}
+
+// ClearedFields returns all nullable fields that were cleared during this
+// mutation.
+func (m *QuotaViewerDeviceMutation) ClearedFields() []string {
+	var fields []string
+	if m.FieldCleared(quotaviewerdevice.FieldApprovedAt) {
+		fields = append(fields, quotaviewerdevice.FieldApprovedAt)
+	}
+	if m.FieldCleared(quotaviewerdevice.FieldActivatedAt) {
+		fields = append(fields, quotaviewerdevice.FieldActivatedAt)
+	}
+	if m.FieldCleared(quotaviewerdevice.FieldLastSeenAt) {
+		fields = append(fields, quotaviewerdevice.FieldLastSeenAt)
+	}
+	if m.FieldCleared(quotaviewerdevice.FieldRevokedAt) {
+		fields = append(fields, quotaviewerdevice.FieldRevokedAt)
+	}
+	return fields
+}
+
+// FieldCleared returns a boolean indicating if a field with the given name was
+// cleared in this mutation.
+func (m *QuotaViewerDeviceMutation) FieldCleared(name string) bool {
+	_, ok := m.clearedFields[name]
+	return ok
+}
+
+// ClearField clears the value of the field with the given name. It returns an
+// error if the field is not defined in the schema.
+func (m *QuotaViewerDeviceMutation) ClearField(name string) error {
+	switch name {
+	case quotaviewerdevice.FieldApprovedAt:
+		m.ClearApprovedAt()
+		return nil
+	case quotaviewerdevice.FieldActivatedAt:
+		m.ClearActivatedAt()
+		return nil
+	case quotaviewerdevice.FieldLastSeenAt:
+		m.ClearLastSeenAt()
+		return nil
+	case quotaviewerdevice.FieldRevokedAt:
+		m.ClearRevokedAt()
+		return nil
+	}
+	return fmt.Errorf("unknown QuotaViewerDevice nullable field %s", name)
+}
+
+// ResetField resets all changes in the mutation for the field with the given name.
+// It returns an error if the field is not defined in the schema.
+func (m *QuotaViewerDeviceMutation) ResetField(name string) error {
+	switch name {
+	case quotaviewerdevice.FieldCreatedAt:
+		m.ResetCreatedAt()
+		return nil
+	case quotaviewerdevice.FieldUpdatedAt:
+		m.ResetUpdatedAt()
+		return nil
+	case quotaviewerdevice.FieldUserID:
+		m.ResetUserID()
+		return nil
+	case quotaviewerdevice.FieldPublicID:
+		m.ResetPublicID()
+		return nil
+	case quotaviewerdevice.FieldClientID:
+		m.ResetClientID()
+		return nil
+	case quotaviewerdevice.FieldScope:
+		m.ResetScope()
+		return nil
+	case quotaviewerdevice.FieldInstallationIDHash:
+		m.ResetInstallationIDHash()
+		return nil
+	case quotaviewerdevice.FieldName:
+		m.ResetName()
+		return nil
+	case quotaviewerdevice.FieldPlatform:
+		m.ResetPlatform()
+		return nil
+	case quotaviewerdevice.FieldArchitecture:
+		m.ResetArchitecture()
+		return nil
+	case quotaviewerdevice.FieldOsVersion:
+		m.ResetOsVersion()
+		return nil
+	case quotaviewerdevice.FieldAppVersion:
+		m.ResetAppVersion()
+		return nil
+	case quotaviewerdevice.FieldStatus:
+		m.ResetStatus()
+		return nil
+	case quotaviewerdevice.FieldTokenVersion:
+		m.ResetTokenVersion()
+		return nil
+	case quotaviewerdevice.FieldPairingExpiresAt:
+		m.ResetPairingExpiresAt()
+		return nil
+	case quotaviewerdevice.FieldApprovedAt:
+		m.ResetApprovedAt()
+		return nil
+	case quotaviewerdevice.FieldActivatedAt:
+		m.ResetActivatedAt()
+		return nil
+	case quotaviewerdevice.FieldLastSeenAt:
+		m.ResetLastSeenAt()
+		return nil
+	case quotaviewerdevice.FieldRevokedAt:
+		m.ResetRevokedAt()
+		return nil
+	}
+	return fmt.Errorf("unknown QuotaViewerDevice field %s", name)
+}
+
+// AddedEdges returns all edge names that were set/added in this mutation.
+func (m *QuotaViewerDeviceMutation) AddedEdges() []string {
+	edges := make([]string, 0, 2)
+	if m.user != nil {
+		edges = append(edges, quotaviewerdevice.EdgeUser)
+	}
+	if m.sessions != nil {
+		edges = append(edges, quotaviewerdevice.EdgeSessions)
+	}
+	return edges
+}
+
+// AddedIDs returns all IDs (to other nodes) that were added for the given edge
+// name in this mutation.
+func (m *QuotaViewerDeviceMutation) AddedIDs(name string) []ent.Value {
+	switch name {
+	case quotaviewerdevice.EdgeUser:
+		if id := m.user; id != nil {
+			return []ent.Value{*id}
+		}
+	case quotaviewerdevice.EdgeSessions:
+		ids := make([]ent.Value, 0, len(m.sessions))
+		for id := range m.sessions {
+			ids = append(ids, id)
+		}
+		return ids
+	}
+	return nil
+}
+
+// RemovedEdges returns all edge names that were removed in this mutation.
+func (m *QuotaViewerDeviceMutation) RemovedEdges() []string {
+	edges := make([]string, 0, 2)
+	if m.removedsessions != nil {
+		edges = append(edges, quotaviewerdevice.EdgeSessions)
+	}
+	return edges
+}
+
+// RemovedIDs returns all IDs (to other nodes) that were removed for the edge with
+// the given name in this mutation.
+func (m *QuotaViewerDeviceMutation) RemovedIDs(name string) []ent.Value {
+	switch name {
+	case quotaviewerdevice.EdgeSessions:
+		ids := make([]ent.Value, 0, len(m.removedsessions))
+		for id := range m.removedsessions {
+			ids = append(ids, id)
+		}
+		return ids
+	}
+	return nil
+}
+
+// ClearedEdges returns all edge names that were cleared in this mutation.
+func (m *QuotaViewerDeviceMutation) ClearedEdges() []string {
+	edges := make([]string, 0, 2)
+	if m.cleareduser {
+		edges = append(edges, quotaviewerdevice.EdgeUser)
+	}
+	if m.clearedsessions {
+		edges = append(edges, quotaviewerdevice.EdgeSessions)
+	}
+	return edges
+}
+
+// EdgeCleared returns a boolean which indicates if the edge with the given name
+// was cleared in this mutation.
+func (m *QuotaViewerDeviceMutation) EdgeCleared(name string) bool {
+	switch name {
+	case quotaviewerdevice.EdgeUser:
+		return m.cleareduser
+	case quotaviewerdevice.EdgeSessions:
+		return m.clearedsessions
+	}
+	return false
+}
+
+// ClearEdge clears the value of the edge with the given name. It returns an error
+// if that edge is not defined in the schema.
+func (m *QuotaViewerDeviceMutation) ClearEdge(name string) error {
+	switch name {
+	case quotaviewerdevice.EdgeUser:
+		m.ClearUser()
+		return nil
+	}
+	return fmt.Errorf("unknown QuotaViewerDevice unique edge %s", name)
+}
+
+// ResetEdge resets all changes to the edge with the given name in this mutation.
+// It returns an error if the edge is not defined in the schema.
+func (m *QuotaViewerDeviceMutation) ResetEdge(name string) error {
+	switch name {
+	case quotaviewerdevice.EdgeUser:
+		m.ResetUser()
+		return nil
+	case quotaviewerdevice.EdgeSessions:
+		m.ResetSessions()
+		return nil
+	}
+	return fmt.Errorf("unknown QuotaViewerDevice edge %s", name)
+}
+
+// QuotaViewerDeviceSessionMutation represents an operation that mutates the QuotaViewerDeviceSession nodes in the graph.
+type QuotaViewerDeviceSessionMutation struct {
+	config
+	op                     Op
+	typ                    string
+	id                     *int64
+	created_at             *time.Time
+	updated_at             *time.Time
+	family_id              *string
+	refresh_token_hash     *string
+	status                 *string
+	expires_at             *time.Time
+	consumed_at            *time.Time
+	rotation_id            *string
+	replacement_token_hash *string
+	recovery_expires_at    *time.Time
+	revoked_at             *time.Time
+	clearedFields          map[string]struct{}
+	device                 *int64
+	cleareddevice          bool
+	done                   bool
+	oldValue               func(context.Context) (*QuotaViewerDeviceSession, error)
+	predicates             []predicate.QuotaViewerDeviceSession
+}
+
+var _ ent.Mutation = (*QuotaViewerDeviceSessionMutation)(nil)
+
+// quotaviewerdevicesessionOption allows management of the mutation configuration using functional options.
+type quotaviewerdevicesessionOption func(*QuotaViewerDeviceSessionMutation)
+
+// newQuotaViewerDeviceSessionMutation creates new mutation for the QuotaViewerDeviceSession entity.
+func newQuotaViewerDeviceSessionMutation(c config, op Op, opts ...quotaviewerdevicesessionOption) *QuotaViewerDeviceSessionMutation {
+	m := &QuotaViewerDeviceSessionMutation{
+		config:        c,
+		op:            op,
+		typ:           TypeQuotaViewerDeviceSession,
+		clearedFields: make(map[string]struct{}),
+	}
+	for _, opt := range opts {
+		opt(m)
+	}
+	return m
+}
+
+// withQuotaViewerDeviceSessionID sets the ID field of the mutation.
+func withQuotaViewerDeviceSessionID(id int64) quotaviewerdevicesessionOption {
+	return func(m *QuotaViewerDeviceSessionMutation) {
+		var (
+			err   error
+			once  sync.Once
+			value *QuotaViewerDeviceSession
+		)
+		m.oldValue = func(ctx context.Context) (*QuotaViewerDeviceSession, error) {
+			once.Do(func() {
+				if m.done {
+					err = errors.New("querying old values post mutation is not allowed")
+				} else {
+					value, err = m.Client().QuotaViewerDeviceSession.Get(ctx, id)
+				}
+			})
+			return value, err
+		}
+		m.id = &id
+	}
+}
+
+// withQuotaViewerDeviceSession sets the old QuotaViewerDeviceSession of the mutation.
+func withQuotaViewerDeviceSession(node *QuotaViewerDeviceSession) quotaviewerdevicesessionOption {
+	return func(m *QuotaViewerDeviceSessionMutation) {
+		m.oldValue = func(context.Context) (*QuotaViewerDeviceSession, error) {
+			return node, nil
+		}
+		m.id = &node.ID
+	}
+}
+
+// Client returns a new `ent.Client` from the mutation. If the mutation was
+// executed in a transaction (ent.Tx), a transactional client is returned.
+func (m QuotaViewerDeviceSessionMutation) Client() *Client {
+	client := &Client{config: m.config}
+	client.init()
+	return client
+}
+
+// Tx returns an `ent.Tx` for mutations that were executed in transactions;
+// it returns an error otherwise.
+func (m QuotaViewerDeviceSessionMutation) Tx() (*Tx, error) {
+	if _, ok := m.driver.(*txDriver); !ok {
+		return nil, errors.New("ent: mutation is not running in a transaction")
+	}
+	tx := &Tx{config: m.config}
+	tx.init()
+	return tx, nil
+}
+
+// ID returns the ID value in the mutation. Note that the ID is only available
+// if it was provided to the builder or after it was returned from the database.
+func (m *QuotaViewerDeviceSessionMutation) ID() (id int64, exists bool) {
+	if m.id == nil {
+		return
+	}
+	return *m.id, true
+}
+
+// IDs queries the database and returns the entity ids that match the mutation's predicate.
+// That means, if the mutation is applied within a transaction with an isolation level such
+// as sql.LevelSerializable, the returned ids match the ids of the rows that will be updated
+// or updated by the mutation.
+func (m *QuotaViewerDeviceSessionMutation) IDs(ctx context.Context) ([]int64, error) {
+	switch {
+	case m.op.Is(OpUpdateOne | OpDeleteOne):
+		id, exists := m.ID()
+		if exists {
+			return []int64{id}, nil
+		}
+		fallthrough
+	case m.op.Is(OpUpdate | OpDelete):
+		return m.Client().QuotaViewerDeviceSession.Query().Where(m.predicates...).IDs(ctx)
+	default:
+		return nil, fmt.Errorf("IDs is not allowed on %s operations", m.op)
+	}
+}
+
+// SetCreatedAt sets the "created_at" field.
+func (m *QuotaViewerDeviceSessionMutation) SetCreatedAt(t time.Time) {
+	m.created_at = &t
+}
+
+// CreatedAt returns the value of the "created_at" field in the mutation.
+func (m *QuotaViewerDeviceSessionMutation) CreatedAt() (r time.Time, exists bool) {
+	v := m.created_at
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldCreatedAt returns the old "created_at" field's value of the QuotaViewerDeviceSession entity.
+// If the QuotaViewerDeviceSession object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *QuotaViewerDeviceSessionMutation) OldCreatedAt(ctx context.Context) (v time.Time, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldCreatedAt is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldCreatedAt requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldCreatedAt: %w", err)
+	}
+	return oldValue.CreatedAt, nil
+}
+
+// ResetCreatedAt resets all changes to the "created_at" field.
+func (m *QuotaViewerDeviceSessionMutation) ResetCreatedAt() {
+	m.created_at = nil
+}
+
+// SetUpdatedAt sets the "updated_at" field.
+func (m *QuotaViewerDeviceSessionMutation) SetUpdatedAt(t time.Time) {
+	m.updated_at = &t
+}
+
+// UpdatedAt returns the value of the "updated_at" field in the mutation.
+func (m *QuotaViewerDeviceSessionMutation) UpdatedAt() (r time.Time, exists bool) {
+	v := m.updated_at
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldUpdatedAt returns the old "updated_at" field's value of the QuotaViewerDeviceSession entity.
+// If the QuotaViewerDeviceSession object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *QuotaViewerDeviceSessionMutation) OldUpdatedAt(ctx context.Context) (v time.Time, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldUpdatedAt is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldUpdatedAt requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldUpdatedAt: %w", err)
+	}
+	return oldValue.UpdatedAt, nil
+}
+
+// ResetUpdatedAt resets all changes to the "updated_at" field.
+func (m *QuotaViewerDeviceSessionMutation) ResetUpdatedAt() {
+	m.updated_at = nil
+}
+
+// SetDeviceID sets the "device_id" field.
+func (m *QuotaViewerDeviceSessionMutation) SetDeviceID(i int64) {
+	m.device = &i
+}
+
+// DeviceID returns the value of the "device_id" field in the mutation.
+func (m *QuotaViewerDeviceSessionMutation) DeviceID() (r int64, exists bool) {
+	v := m.device
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldDeviceID returns the old "device_id" field's value of the QuotaViewerDeviceSession entity.
+// If the QuotaViewerDeviceSession object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *QuotaViewerDeviceSessionMutation) OldDeviceID(ctx context.Context) (v int64, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldDeviceID is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldDeviceID requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldDeviceID: %w", err)
+	}
+	return oldValue.DeviceID, nil
+}
+
+// ResetDeviceID resets all changes to the "device_id" field.
+func (m *QuotaViewerDeviceSessionMutation) ResetDeviceID() {
+	m.device = nil
+}
+
+// SetFamilyID sets the "family_id" field.
+func (m *QuotaViewerDeviceSessionMutation) SetFamilyID(s string) {
+	m.family_id = &s
+}
+
+// FamilyID returns the value of the "family_id" field in the mutation.
+func (m *QuotaViewerDeviceSessionMutation) FamilyID() (r string, exists bool) {
+	v := m.family_id
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldFamilyID returns the old "family_id" field's value of the QuotaViewerDeviceSession entity.
+// If the QuotaViewerDeviceSession object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *QuotaViewerDeviceSessionMutation) OldFamilyID(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldFamilyID is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldFamilyID requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldFamilyID: %w", err)
+	}
+	return oldValue.FamilyID, nil
+}
+
+// ResetFamilyID resets all changes to the "family_id" field.
+func (m *QuotaViewerDeviceSessionMutation) ResetFamilyID() {
+	m.family_id = nil
+}
+
+// SetRefreshTokenHash sets the "refresh_token_hash" field.
+func (m *QuotaViewerDeviceSessionMutation) SetRefreshTokenHash(s string) {
+	m.refresh_token_hash = &s
+}
+
+// RefreshTokenHash returns the value of the "refresh_token_hash" field in the mutation.
+func (m *QuotaViewerDeviceSessionMutation) RefreshTokenHash() (r string, exists bool) {
+	v := m.refresh_token_hash
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldRefreshTokenHash returns the old "refresh_token_hash" field's value of the QuotaViewerDeviceSession entity.
+// If the QuotaViewerDeviceSession object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *QuotaViewerDeviceSessionMutation) OldRefreshTokenHash(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldRefreshTokenHash is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldRefreshTokenHash requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldRefreshTokenHash: %w", err)
+	}
+	return oldValue.RefreshTokenHash, nil
+}
+
+// ResetRefreshTokenHash resets all changes to the "refresh_token_hash" field.
+func (m *QuotaViewerDeviceSessionMutation) ResetRefreshTokenHash() {
+	m.refresh_token_hash = nil
+}
+
+// SetStatus sets the "status" field.
+func (m *QuotaViewerDeviceSessionMutation) SetStatus(s string) {
+	m.status = &s
+}
+
+// Status returns the value of the "status" field in the mutation.
+func (m *QuotaViewerDeviceSessionMutation) Status() (r string, exists bool) {
+	v := m.status
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldStatus returns the old "status" field's value of the QuotaViewerDeviceSession entity.
+// If the QuotaViewerDeviceSession object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *QuotaViewerDeviceSessionMutation) OldStatus(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldStatus is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldStatus requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldStatus: %w", err)
+	}
+	return oldValue.Status, nil
+}
+
+// ResetStatus resets all changes to the "status" field.
+func (m *QuotaViewerDeviceSessionMutation) ResetStatus() {
+	m.status = nil
+}
+
+// SetExpiresAt sets the "expires_at" field.
+func (m *QuotaViewerDeviceSessionMutation) SetExpiresAt(t time.Time) {
+	m.expires_at = &t
+}
+
+// ExpiresAt returns the value of the "expires_at" field in the mutation.
+func (m *QuotaViewerDeviceSessionMutation) ExpiresAt() (r time.Time, exists bool) {
+	v := m.expires_at
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldExpiresAt returns the old "expires_at" field's value of the QuotaViewerDeviceSession entity.
+// If the QuotaViewerDeviceSession object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *QuotaViewerDeviceSessionMutation) OldExpiresAt(ctx context.Context) (v time.Time, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldExpiresAt is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldExpiresAt requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldExpiresAt: %w", err)
+	}
+	return oldValue.ExpiresAt, nil
+}
+
+// ResetExpiresAt resets all changes to the "expires_at" field.
+func (m *QuotaViewerDeviceSessionMutation) ResetExpiresAt() {
+	m.expires_at = nil
+}
+
+// SetConsumedAt sets the "consumed_at" field.
+func (m *QuotaViewerDeviceSessionMutation) SetConsumedAt(t time.Time) {
+	m.consumed_at = &t
+}
+
+// ConsumedAt returns the value of the "consumed_at" field in the mutation.
+func (m *QuotaViewerDeviceSessionMutation) ConsumedAt() (r time.Time, exists bool) {
+	v := m.consumed_at
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldConsumedAt returns the old "consumed_at" field's value of the QuotaViewerDeviceSession entity.
+// If the QuotaViewerDeviceSession object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *QuotaViewerDeviceSessionMutation) OldConsumedAt(ctx context.Context) (v *time.Time, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldConsumedAt is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldConsumedAt requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldConsumedAt: %w", err)
+	}
+	return oldValue.ConsumedAt, nil
+}
+
+// ClearConsumedAt clears the value of the "consumed_at" field.
+func (m *QuotaViewerDeviceSessionMutation) ClearConsumedAt() {
+	m.consumed_at = nil
+	m.clearedFields[quotaviewerdevicesession.FieldConsumedAt] = struct{}{}
+}
+
+// ConsumedAtCleared returns if the "consumed_at" field was cleared in this mutation.
+func (m *QuotaViewerDeviceSessionMutation) ConsumedAtCleared() bool {
+	_, ok := m.clearedFields[quotaviewerdevicesession.FieldConsumedAt]
+	return ok
+}
+
+// ResetConsumedAt resets all changes to the "consumed_at" field.
+func (m *QuotaViewerDeviceSessionMutation) ResetConsumedAt() {
+	m.consumed_at = nil
+	delete(m.clearedFields, quotaviewerdevicesession.FieldConsumedAt)
+}
+
+// SetRotationID sets the "rotation_id" field.
+func (m *QuotaViewerDeviceSessionMutation) SetRotationID(s string) {
+	m.rotation_id = &s
+}
+
+// RotationID returns the value of the "rotation_id" field in the mutation.
+func (m *QuotaViewerDeviceSessionMutation) RotationID() (r string, exists bool) {
+	v := m.rotation_id
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldRotationID returns the old "rotation_id" field's value of the QuotaViewerDeviceSession entity.
+// If the QuotaViewerDeviceSession object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *QuotaViewerDeviceSessionMutation) OldRotationID(ctx context.Context) (v *string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldRotationID is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldRotationID requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldRotationID: %w", err)
+	}
+	return oldValue.RotationID, nil
+}
+
+// ClearRotationID clears the value of the "rotation_id" field.
+func (m *QuotaViewerDeviceSessionMutation) ClearRotationID() {
+	m.rotation_id = nil
+	m.clearedFields[quotaviewerdevicesession.FieldRotationID] = struct{}{}
+}
+
+// RotationIDCleared returns if the "rotation_id" field was cleared in this mutation.
+func (m *QuotaViewerDeviceSessionMutation) RotationIDCleared() bool {
+	_, ok := m.clearedFields[quotaviewerdevicesession.FieldRotationID]
+	return ok
+}
+
+// ResetRotationID resets all changes to the "rotation_id" field.
+func (m *QuotaViewerDeviceSessionMutation) ResetRotationID() {
+	m.rotation_id = nil
+	delete(m.clearedFields, quotaviewerdevicesession.FieldRotationID)
+}
+
+// SetReplacementTokenHash sets the "replacement_token_hash" field.
+func (m *QuotaViewerDeviceSessionMutation) SetReplacementTokenHash(s string) {
+	m.replacement_token_hash = &s
+}
+
+// ReplacementTokenHash returns the value of the "replacement_token_hash" field in the mutation.
+func (m *QuotaViewerDeviceSessionMutation) ReplacementTokenHash() (r string, exists bool) {
+	v := m.replacement_token_hash
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldReplacementTokenHash returns the old "replacement_token_hash" field's value of the QuotaViewerDeviceSession entity.
+// If the QuotaViewerDeviceSession object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *QuotaViewerDeviceSessionMutation) OldReplacementTokenHash(ctx context.Context) (v *string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldReplacementTokenHash is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldReplacementTokenHash requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldReplacementTokenHash: %w", err)
+	}
+	return oldValue.ReplacementTokenHash, nil
+}
+
+// ClearReplacementTokenHash clears the value of the "replacement_token_hash" field.
+func (m *QuotaViewerDeviceSessionMutation) ClearReplacementTokenHash() {
+	m.replacement_token_hash = nil
+	m.clearedFields[quotaviewerdevicesession.FieldReplacementTokenHash] = struct{}{}
+}
+
+// ReplacementTokenHashCleared returns if the "replacement_token_hash" field was cleared in this mutation.
+func (m *QuotaViewerDeviceSessionMutation) ReplacementTokenHashCleared() bool {
+	_, ok := m.clearedFields[quotaviewerdevicesession.FieldReplacementTokenHash]
+	return ok
+}
+
+// ResetReplacementTokenHash resets all changes to the "replacement_token_hash" field.
+func (m *QuotaViewerDeviceSessionMutation) ResetReplacementTokenHash() {
+	m.replacement_token_hash = nil
+	delete(m.clearedFields, quotaviewerdevicesession.FieldReplacementTokenHash)
+}
+
+// SetRecoveryExpiresAt sets the "recovery_expires_at" field.
+func (m *QuotaViewerDeviceSessionMutation) SetRecoveryExpiresAt(t time.Time) {
+	m.recovery_expires_at = &t
+}
+
+// RecoveryExpiresAt returns the value of the "recovery_expires_at" field in the mutation.
+func (m *QuotaViewerDeviceSessionMutation) RecoveryExpiresAt() (r time.Time, exists bool) {
+	v := m.recovery_expires_at
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldRecoveryExpiresAt returns the old "recovery_expires_at" field's value of the QuotaViewerDeviceSession entity.
+// If the QuotaViewerDeviceSession object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *QuotaViewerDeviceSessionMutation) OldRecoveryExpiresAt(ctx context.Context) (v *time.Time, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldRecoveryExpiresAt is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldRecoveryExpiresAt requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldRecoveryExpiresAt: %w", err)
+	}
+	return oldValue.RecoveryExpiresAt, nil
+}
+
+// ClearRecoveryExpiresAt clears the value of the "recovery_expires_at" field.
+func (m *QuotaViewerDeviceSessionMutation) ClearRecoveryExpiresAt() {
+	m.recovery_expires_at = nil
+	m.clearedFields[quotaviewerdevicesession.FieldRecoveryExpiresAt] = struct{}{}
+}
+
+// RecoveryExpiresAtCleared returns if the "recovery_expires_at" field was cleared in this mutation.
+func (m *QuotaViewerDeviceSessionMutation) RecoveryExpiresAtCleared() bool {
+	_, ok := m.clearedFields[quotaviewerdevicesession.FieldRecoveryExpiresAt]
+	return ok
+}
+
+// ResetRecoveryExpiresAt resets all changes to the "recovery_expires_at" field.
+func (m *QuotaViewerDeviceSessionMutation) ResetRecoveryExpiresAt() {
+	m.recovery_expires_at = nil
+	delete(m.clearedFields, quotaviewerdevicesession.FieldRecoveryExpiresAt)
+}
+
+// SetRevokedAt sets the "revoked_at" field.
+func (m *QuotaViewerDeviceSessionMutation) SetRevokedAt(t time.Time) {
+	m.revoked_at = &t
+}
+
+// RevokedAt returns the value of the "revoked_at" field in the mutation.
+func (m *QuotaViewerDeviceSessionMutation) RevokedAt() (r time.Time, exists bool) {
+	v := m.revoked_at
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldRevokedAt returns the old "revoked_at" field's value of the QuotaViewerDeviceSession entity.
+// If the QuotaViewerDeviceSession object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *QuotaViewerDeviceSessionMutation) OldRevokedAt(ctx context.Context) (v *time.Time, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldRevokedAt is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldRevokedAt requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldRevokedAt: %w", err)
+	}
+	return oldValue.RevokedAt, nil
+}
+
+// ClearRevokedAt clears the value of the "revoked_at" field.
+func (m *QuotaViewerDeviceSessionMutation) ClearRevokedAt() {
+	m.revoked_at = nil
+	m.clearedFields[quotaviewerdevicesession.FieldRevokedAt] = struct{}{}
+}
+
+// RevokedAtCleared returns if the "revoked_at" field was cleared in this mutation.
+func (m *QuotaViewerDeviceSessionMutation) RevokedAtCleared() bool {
+	_, ok := m.clearedFields[quotaviewerdevicesession.FieldRevokedAt]
+	return ok
+}
+
+// ResetRevokedAt resets all changes to the "revoked_at" field.
+func (m *QuotaViewerDeviceSessionMutation) ResetRevokedAt() {
+	m.revoked_at = nil
+	delete(m.clearedFields, quotaviewerdevicesession.FieldRevokedAt)
+}
+
+// ClearDevice clears the "device" edge to the QuotaViewerDevice entity.
+func (m *QuotaViewerDeviceSessionMutation) ClearDevice() {
+	m.cleareddevice = true
+	m.clearedFields[quotaviewerdevicesession.FieldDeviceID] = struct{}{}
+}
+
+// DeviceCleared reports if the "device" edge to the QuotaViewerDevice entity was cleared.
+func (m *QuotaViewerDeviceSessionMutation) DeviceCleared() bool {
+	return m.cleareddevice
+}
+
+// DeviceIDs returns the "device" edge IDs in the mutation.
+// Note that IDs always returns len(IDs) <= 1 for unique edges, and you should use
+// DeviceID instead. It exists only for internal usage by the builders.
+func (m *QuotaViewerDeviceSessionMutation) DeviceIDs() (ids []int64) {
+	if id := m.device; id != nil {
+		ids = append(ids, *id)
+	}
+	return
+}
+
+// ResetDevice resets all changes to the "device" edge.
+func (m *QuotaViewerDeviceSessionMutation) ResetDevice() {
+	m.device = nil
+	m.cleareddevice = false
+}
+
+// Where appends a list predicates to the QuotaViewerDeviceSessionMutation builder.
+func (m *QuotaViewerDeviceSessionMutation) Where(ps ...predicate.QuotaViewerDeviceSession) {
+	m.predicates = append(m.predicates, ps...)
+}
+
+// WhereP appends storage-level predicates to the QuotaViewerDeviceSessionMutation builder. Using this method,
+// users can use type-assertion to append predicates that do not depend on any generated package.
+func (m *QuotaViewerDeviceSessionMutation) WhereP(ps ...func(*sql.Selector)) {
+	p := make([]predicate.QuotaViewerDeviceSession, len(ps))
+	for i := range ps {
+		p[i] = ps[i]
+	}
+	m.Where(p...)
+}
+
+// Op returns the operation name.
+func (m *QuotaViewerDeviceSessionMutation) Op() Op {
+	return m.op
+}
+
+// SetOp allows setting the mutation operation.
+func (m *QuotaViewerDeviceSessionMutation) SetOp(op Op) {
+	m.op = op
+}
+
+// Type returns the node type of this mutation (QuotaViewerDeviceSession).
+func (m *QuotaViewerDeviceSessionMutation) Type() string {
+	return m.typ
+}
+
+// Fields returns all fields that were changed during this mutation. Note that in
+// order to get all numeric fields that were incremented/decremented, call
+// AddedFields().
+func (m *QuotaViewerDeviceSessionMutation) Fields() []string {
+	fields := make([]string, 0, 12)
+	if m.created_at != nil {
+		fields = append(fields, quotaviewerdevicesession.FieldCreatedAt)
+	}
+	if m.updated_at != nil {
+		fields = append(fields, quotaviewerdevicesession.FieldUpdatedAt)
+	}
+	if m.device != nil {
+		fields = append(fields, quotaviewerdevicesession.FieldDeviceID)
+	}
+	if m.family_id != nil {
+		fields = append(fields, quotaviewerdevicesession.FieldFamilyID)
+	}
+	if m.refresh_token_hash != nil {
+		fields = append(fields, quotaviewerdevicesession.FieldRefreshTokenHash)
+	}
+	if m.status != nil {
+		fields = append(fields, quotaviewerdevicesession.FieldStatus)
+	}
+	if m.expires_at != nil {
+		fields = append(fields, quotaviewerdevicesession.FieldExpiresAt)
+	}
+	if m.consumed_at != nil {
+		fields = append(fields, quotaviewerdevicesession.FieldConsumedAt)
+	}
+	if m.rotation_id != nil {
+		fields = append(fields, quotaviewerdevicesession.FieldRotationID)
+	}
+	if m.replacement_token_hash != nil {
+		fields = append(fields, quotaviewerdevicesession.FieldReplacementTokenHash)
+	}
+	if m.recovery_expires_at != nil {
+		fields = append(fields, quotaviewerdevicesession.FieldRecoveryExpiresAt)
+	}
+	if m.revoked_at != nil {
+		fields = append(fields, quotaviewerdevicesession.FieldRevokedAt)
+	}
+	return fields
+}
+
+// Field returns the value of a field with the given name. The second boolean
+// return value indicates that this field was not set, or was not defined in the
+// schema.
+func (m *QuotaViewerDeviceSessionMutation) Field(name string) (ent.Value, bool) {
+	switch name {
+	case quotaviewerdevicesession.FieldCreatedAt:
+		return m.CreatedAt()
+	case quotaviewerdevicesession.FieldUpdatedAt:
+		return m.UpdatedAt()
+	case quotaviewerdevicesession.FieldDeviceID:
+		return m.DeviceID()
+	case quotaviewerdevicesession.FieldFamilyID:
+		return m.FamilyID()
+	case quotaviewerdevicesession.FieldRefreshTokenHash:
+		return m.RefreshTokenHash()
+	case quotaviewerdevicesession.FieldStatus:
+		return m.Status()
+	case quotaviewerdevicesession.FieldExpiresAt:
+		return m.ExpiresAt()
+	case quotaviewerdevicesession.FieldConsumedAt:
+		return m.ConsumedAt()
+	case quotaviewerdevicesession.FieldRotationID:
+		return m.RotationID()
+	case quotaviewerdevicesession.FieldReplacementTokenHash:
+		return m.ReplacementTokenHash()
+	case quotaviewerdevicesession.FieldRecoveryExpiresAt:
+		return m.RecoveryExpiresAt()
+	case quotaviewerdevicesession.FieldRevokedAt:
+		return m.RevokedAt()
+	}
+	return nil, false
+}
+
+// OldField returns the old value of the field from the database. An error is
+// returned if the mutation operation is not UpdateOne, or the query to the
+// database failed.
+func (m *QuotaViewerDeviceSessionMutation) OldField(ctx context.Context, name string) (ent.Value, error) {
+	switch name {
+	case quotaviewerdevicesession.FieldCreatedAt:
+		return m.OldCreatedAt(ctx)
+	case quotaviewerdevicesession.FieldUpdatedAt:
+		return m.OldUpdatedAt(ctx)
+	case quotaviewerdevicesession.FieldDeviceID:
+		return m.OldDeviceID(ctx)
+	case quotaviewerdevicesession.FieldFamilyID:
+		return m.OldFamilyID(ctx)
+	case quotaviewerdevicesession.FieldRefreshTokenHash:
+		return m.OldRefreshTokenHash(ctx)
+	case quotaviewerdevicesession.FieldStatus:
+		return m.OldStatus(ctx)
+	case quotaviewerdevicesession.FieldExpiresAt:
+		return m.OldExpiresAt(ctx)
+	case quotaviewerdevicesession.FieldConsumedAt:
+		return m.OldConsumedAt(ctx)
+	case quotaviewerdevicesession.FieldRotationID:
+		return m.OldRotationID(ctx)
+	case quotaviewerdevicesession.FieldReplacementTokenHash:
+		return m.OldReplacementTokenHash(ctx)
+	case quotaviewerdevicesession.FieldRecoveryExpiresAt:
+		return m.OldRecoveryExpiresAt(ctx)
+	case quotaviewerdevicesession.FieldRevokedAt:
+		return m.OldRevokedAt(ctx)
+	}
+	return nil, fmt.Errorf("unknown QuotaViewerDeviceSession field %s", name)
+}
+
+// SetField sets the value of a field with the given name. It returns an error if
+// the field is not defined in the schema, or if the type mismatched the field
+// type.
+func (m *QuotaViewerDeviceSessionMutation) SetField(name string, value ent.Value) error {
+	switch name {
+	case quotaviewerdevicesession.FieldCreatedAt:
+		v, ok := value.(time.Time)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetCreatedAt(v)
+		return nil
+	case quotaviewerdevicesession.FieldUpdatedAt:
+		v, ok := value.(time.Time)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetUpdatedAt(v)
+		return nil
+	case quotaviewerdevicesession.FieldDeviceID:
+		v, ok := value.(int64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetDeviceID(v)
+		return nil
+	case quotaviewerdevicesession.FieldFamilyID:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetFamilyID(v)
+		return nil
+	case quotaviewerdevicesession.FieldRefreshTokenHash:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetRefreshTokenHash(v)
+		return nil
+	case quotaviewerdevicesession.FieldStatus:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetStatus(v)
+		return nil
+	case quotaviewerdevicesession.FieldExpiresAt:
+		v, ok := value.(time.Time)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetExpiresAt(v)
+		return nil
+	case quotaviewerdevicesession.FieldConsumedAt:
+		v, ok := value.(time.Time)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetConsumedAt(v)
+		return nil
+	case quotaviewerdevicesession.FieldRotationID:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetRotationID(v)
+		return nil
+	case quotaviewerdevicesession.FieldReplacementTokenHash:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetReplacementTokenHash(v)
+		return nil
+	case quotaviewerdevicesession.FieldRecoveryExpiresAt:
+		v, ok := value.(time.Time)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetRecoveryExpiresAt(v)
+		return nil
+	case quotaviewerdevicesession.FieldRevokedAt:
+		v, ok := value.(time.Time)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetRevokedAt(v)
+		return nil
+	}
+	return fmt.Errorf("unknown QuotaViewerDeviceSession field %s", name)
+}
+
+// AddedFields returns all numeric fields that were incremented/decremented during
+// this mutation.
+func (m *QuotaViewerDeviceSessionMutation) AddedFields() []string {
+	var fields []string
+	return fields
+}
+
+// AddedField returns the numeric value that was incremented/decremented on a field
+// with the given name. The second boolean return value indicates that this field
+// was not set, or was not defined in the schema.
+func (m *QuotaViewerDeviceSessionMutation) AddedField(name string) (ent.Value, bool) {
+	switch name {
+	}
+	return nil, false
+}
+
+// AddField adds the value to the field with the given name. It returns an error if
+// the field is not defined in the schema, or if the type mismatched the field
+// type.
+func (m *QuotaViewerDeviceSessionMutation) AddField(name string, value ent.Value) error {
+	switch name {
+	}
+	return fmt.Errorf("unknown QuotaViewerDeviceSession numeric field %s", name)
+}
+
+// ClearedFields returns all nullable fields that were cleared during this
+// mutation.
+func (m *QuotaViewerDeviceSessionMutation) ClearedFields() []string {
+	var fields []string
+	if m.FieldCleared(quotaviewerdevicesession.FieldConsumedAt) {
+		fields = append(fields, quotaviewerdevicesession.FieldConsumedAt)
+	}
+	if m.FieldCleared(quotaviewerdevicesession.FieldRotationID) {
+		fields = append(fields, quotaviewerdevicesession.FieldRotationID)
+	}
+	if m.FieldCleared(quotaviewerdevicesession.FieldReplacementTokenHash) {
+		fields = append(fields, quotaviewerdevicesession.FieldReplacementTokenHash)
+	}
+	if m.FieldCleared(quotaviewerdevicesession.FieldRecoveryExpiresAt) {
+		fields = append(fields, quotaviewerdevicesession.FieldRecoveryExpiresAt)
+	}
+	if m.FieldCleared(quotaviewerdevicesession.FieldRevokedAt) {
+		fields = append(fields, quotaviewerdevicesession.FieldRevokedAt)
+	}
+	return fields
+}
+
+// FieldCleared returns a boolean indicating if a field with the given name was
+// cleared in this mutation.
+func (m *QuotaViewerDeviceSessionMutation) FieldCleared(name string) bool {
+	_, ok := m.clearedFields[name]
+	return ok
+}
+
+// ClearField clears the value of the field with the given name. It returns an
+// error if the field is not defined in the schema.
+func (m *QuotaViewerDeviceSessionMutation) ClearField(name string) error {
+	switch name {
+	case quotaviewerdevicesession.FieldConsumedAt:
+		m.ClearConsumedAt()
+		return nil
+	case quotaviewerdevicesession.FieldRotationID:
+		m.ClearRotationID()
+		return nil
+	case quotaviewerdevicesession.FieldReplacementTokenHash:
+		m.ClearReplacementTokenHash()
+		return nil
+	case quotaviewerdevicesession.FieldRecoveryExpiresAt:
+		m.ClearRecoveryExpiresAt()
+		return nil
+	case quotaviewerdevicesession.FieldRevokedAt:
+		m.ClearRevokedAt()
+		return nil
+	}
+	return fmt.Errorf("unknown QuotaViewerDeviceSession nullable field %s", name)
+}
+
+// ResetField resets all changes in the mutation for the field with the given name.
+// It returns an error if the field is not defined in the schema.
+func (m *QuotaViewerDeviceSessionMutation) ResetField(name string) error {
+	switch name {
+	case quotaviewerdevicesession.FieldCreatedAt:
+		m.ResetCreatedAt()
+		return nil
+	case quotaviewerdevicesession.FieldUpdatedAt:
+		m.ResetUpdatedAt()
+		return nil
+	case quotaviewerdevicesession.FieldDeviceID:
+		m.ResetDeviceID()
+		return nil
+	case quotaviewerdevicesession.FieldFamilyID:
+		m.ResetFamilyID()
+		return nil
+	case quotaviewerdevicesession.FieldRefreshTokenHash:
+		m.ResetRefreshTokenHash()
+		return nil
+	case quotaviewerdevicesession.FieldStatus:
+		m.ResetStatus()
+		return nil
+	case quotaviewerdevicesession.FieldExpiresAt:
+		m.ResetExpiresAt()
+		return nil
+	case quotaviewerdevicesession.FieldConsumedAt:
+		m.ResetConsumedAt()
+		return nil
+	case quotaviewerdevicesession.FieldRotationID:
+		m.ResetRotationID()
+		return nil
+	case quotaviewerdevicesession.FieldReplacementTokenHash:
+		m.ResetReplacementTokenHash()
+		return nil
+	case quotaviewerdevicesession.FieldRecoveryExpiresAt:
+		m.ResetRecoveryExpiresAt()
+		return nil
+	case quotaviewerdevicesession.FieldRevokedAt:
+		m.ResetRevokedAt()
+		return nil
+	}
+	return fmt.Errorf("unknown QuotaViewerDeviceSession field %s", name)
+}
+
+// AddedEdges returns all edge names that were set/added in this mutation.
+func (m *QuotaViewerDeviceSessionMutation) AddedEdges() []string {
+	edges := make([]string, 0, 1)
+	if m.device != nil {
+		edges = append(edges, quotaviewerdevicesession.EdgeDevice)
+	}
+	return edges
+}
+
+// AddedIDs returns all IDs (to other nodes) that were added for the given edge
+// name in this mutation.
+func (m *QuotaViewerDeviceSessionMutation) AddedIDs(name string) []ent.Value {
+	switch name {
+	case quotaviewerdevicesession.EdgeDevice:
+		if id := m.device; id != nil {
+			return []ent.Value{*id}
+		}
+	}
+	return nil
+}
+
+// RemovedEdges returns all edge names that were removed in this mutation.
+func (m *QuotaViewerDeviceSessionMutation) RemovedEdges() []string {
+	edges := make([]string, 0, 1)
+	return edges
+}
+
+// RemovedIDs returns all IDs (to other nodes) that were removed for the edge with
+// the given name in this mutation.
+func (m *QuotaViewerDeviceSessionMutation) RemovedIDs(name string) []ent.Value {
+	return nil
+}
+
+// ClearedEdges returns all edge names that were cleared in this mutation.
+func (m *QuotaViewerDeviceSessionMutation) ClearedEdges() []string {
+	edges := make([]string, 0, 1)
+	if m.cleareddevice {
+		edges = append(edges, quotaviewerdevicesession.EdgeDevice)
+	}
+	return edges
+}
+
+// EdgeCleared returns a boolean which indicates if the edge with the given name
+// was cleared in this mutation.
+func (m *QuotaViewerDeviceSessionMutation) EdgeCleared(name string) bool {
+	switch name {
+	case quotaviewerdevicesession.EdgeDevice:
+		return m.cleareddevice
+	}
+	return false
+}
+
+// ClearEdge clears the value of the edge with the given name. It returns an error
+// if that edge is not defined in the schema.
+func (m *QuotaViewerDeviceSessionMutation) ClearEdge(name string) error {
+	switch name {
+	case quotaviewerdevicesession.EdgeDevice:
+		m.ClearDevice()
+		return nil
+	}
+	return fmt.Errorf("unknown QuotaViewerDeviceSession unique edge %s", name)
+}
+
+// ResetEdge resets all changes to the edge with the given name in this mutation.
+// It returns an error if the edge is not defined in the schema.
+func (m *QuotaViewerDeviceSessionMutation) ResetEdge(name string) error {
+	switch name {
+	case quotaviewerdevicesession.EdgeDevice:
+		m.ResetDevice()
+		return nil
+	}
+	return fmt.Errorf("unknown QuotaViewerDeviceSession edge %s", name)
+}
+
 // RedeemCodeMutation represents an operation that mutates the RedeemCode nodes in the graph.
 type RedeemCodeMutation struct {
 	config
@@ -51578,6 +54209,9 @@ type UserMutation struct {
 	desktop_devices               map[int64]struct{}
 	removeddesktop_devices        map[int64]struct{}
 	cleareddesktop_devices        bool
+	quota_viewer_devices          map[int64]struct{}
+	removedquota_viewer_devices   map[int64]struct{}
+	clearedquota_viewer_devices   bool
 	desktop_diagnostics           map[int64]struct{}
 	removeddesktop_diagnostics    map[int64]struct{}
 	cleareddesktop_diagnostics    bool
@@ -53503,6 +56137,60 @@ func (m *UserMutation) ResetDesktopDevices() {
 	m.removeddesktop_devices = nil
 }
 
+// AddQuotaViewerDeviceIDs adds the "quota_viewer_devices" edge to the QuotaViewerDevice entity by ids.
+func (m *UserMutation) AddQuotaViewerDeviceIDs(ids ...int64) {
+	if m.quota_viewer_devices == nil {
+		m.quota_viewer_devices = make(map[int64]struct{})
+	}
+	for i := range ids {
+		m.quota_viewer_devices[ids[i]] = struct{}{}
+	}
+}
+
+// ClearQuotaViewerDevices clears the "quota_viewer_devices" edge to the QuotaViewerDevice entity.
+func (m *UserMutation) ClearQuotaViewerDevices() {
+	m.clearedquota_viewer_devices = true
+}
+
+// QuotaViewerDevicesCleared reports if the "quota_viewer_devices" edge to the QuotaViewerDevice entity was cleared.
+func (m *UserMutation) QuotaViewerDevicesCleared() bool {
+	return m.clearedquota_viewer_devices
+}
+
+// RemoveQuotaViewerDeviceIDs removes the "quota_viewer_devices" edge to the QuotaViewerDevice entity by IDs.
+func (m *UserMutation) RemoveQuotaViewerDeviceIDs(ids ...int64) {
+	if m.removedquota_viewer_devices == nil {
+		m.removedquota_viewer_devices = make(map[int64]struct{})
+	}
+	for i := range ids {
+		delete(m.quota_viewer_devices, ids[i])
+		m.removedquota_viewer_devices[ids[i]] = struct{}{}
+	}
+}
+
+// RemovedQuotaViewerDevices returns the removed IDs of the "quota_viewer_devices" edge to the QuotaViewerDevice entity.
+func (m *UserMutation) RemovedQuotaViewerDevicesIDs() (ids []int64) {
+	for id := range m.removedquota_viewer_devices {
+		ids = append(ids, id)
+	}
+	return
+}
+
+// QuotaViewerDevicesIDs returns the "quota_viewer_devices" edge IDs in the mutation.
+func (m *UserMutation) QuotaViewerDevicesIDs() (ids []int64) {
+	for id := range m.quota_viewer_devices {
+		ids = append(ids, id)
+	}
+	return
+}
+
+// ResetQuotaViewerDevices resets all changes to the "quota_viewer_devices" edge.
+func (m *UserMutation) ResetQuotaViewerDevices() {
+	m.quota_viewer_devices = nil
+	m.clearedquota_viewer_devices = false
+	m.removedquota_viewer_devices = nil
+}
+
 // AddDesktopDiagnosticIDs adds the "desktop_diagnostics" edge to the DesktopDiagnostic entity by ids.
 func (m *UserMutation) AddDesktopDiagnosticIDs(ids ...int64) {
 	if m.desktop_diagnostics == nil {
@@ -54195,7 +56883,7 @@ func (m *UserMutation) ResetField(name string) error {
 
 // AddedEdges returns all edge names that were set/added in this mutation.
 func (m *UserMutation) AddedEdges() []string {
-	edges := make([]string, 0, 15)
+	edges := make([]string, 0, 16)
 	if m.api_keys != nil {
 		edges = append(edges, user.EdgeAPIKeys)
 	}
@@ -54237,6 +56925,9 @@ func (m *UserMutation) AddedEdges() []string {
 	}
 	if m.desktop_devices != nil {
 		edges = append(edges, user.EdgeDesktopDevices)
+	}
+	if m.quota_viewer_devices != nil {
+		edges = append(edges, user.EdgeQuotaViewerDevices)
 	}
 	if m.desktop_diagnostics != nil {
 		edges = append(edges, user.EdgeDesktopDiagnostics)
@@ -54332,6 +57023,12 @@ func (m *UserMutation) AddedIDs(name string) []ent.Value {
 			ids = append(ids, id)
 		}
 		return ids
+	case user.EdgeQuotaViewerDevices:
+		ids := make([]ent.Value, 0, len(m.quota_viewer_devices))
+		for id := range m.quota_viewer_devices {
+			ids = append(ids, id)
+		}
+		return ids
 	case user.EdgeDesktopDiagnostics:
 		ids := make([]ent.Value, 0, len(m.desktop_diagnostics))
 		for id := range m.desktop_diagnostics {
@@ -54344,7 +57041,7 @@ func (m *UserMutation) AddedIDs(name string) []ent.Value {
 
 // RemovedEdges returns all edge names that were removed in this mutation.
 func (m *UserMutation) RemovedEdges() []string {
-	edges := make([]string, 0, 15)
+	edges := make([]string, 0, 16)
 	if m.removedapi_keys != nil {
 		edges = append(edges, user.EdgeAPIKeys)
 	}
@@ -54386,6 +57083,9 @@ func (m *UserMutation) RemovedEdges() []string {
 	}
 	if m.removeddesktop_devices != nil {
 		edges = append(edges, user.EdgeDesktopDevices)
+	}
+	if m.removedquota_viewer_devices != nil {
+		edges = append(edges, user.EdgeQuotaViewerDevices)
 	}
 	if m.removeddesktop_diagnostics != nil {
 		edges = append(edges, user.EdgeDesktopDiagnostics)
@@ -54481,6 +57181,12 @@ func (m *UserMutation) RemovedIDs(name string) []ent.Value {
 			ids = append(ids, id)
 		}
 		return ids
+	case user.EdgeQuotaViewerDevices:
+		ids := make([]ent.Value, 0, len(m.removedquota_viewer_devices))
+		for id := range m.removedquota_viewer_devices {
+			ids = append(ids, id)
+		}
+		return ids
 	case user.EdgeDesktopDiagnostics:
 		ids := make([]ent.Value, 0, len(m.removeddesktop_diagnostics))
 		for id := range m.removeddesktop_diagnostics {
@@ -54493,7 +57199,7 @@ func (m *UserMutation) RemovedIDs(name string) []ent.Value {
 
 // ClearedEdges returns all edge names that were cleared in this mutation.
 func (m *UserMutation) ClearedEdges() []string {
-	edges := make([]string, 0, 15)
+	edges := make([]string, 0, 16)
 	if m.clearedapi_keys {
 		edges = append(edges, user.EdgeAPIKeys)
 	}
@@ -54536,6 +57242,9 @@ func (m *UserMutation) ClearedEdges() []string {
 	if m.cleareddesktop_devices {
 		edges = append(edges, user.EdgeDesktopDevices)
 	}
+	if m.clearedquota_viewer_devices {
+		edges = append(edges, user.EdgeQuotaViewerDevices)
+	}
 	if m.cleareddesktop_diagnostics {
 		edges = append(edges, user.EdgeDesktopDiagnostics)
 	}
@@ -54574,6 +57283,8 @@ func (m *UserMutation) EdgeCleared(name string) bool {
 		return m.clearedplatform_quotas
 	case user.EdgeDesktopDevices:
 		return m.cleareddesktop_devices
+	case user.EdgeQuotaViewerDevices:
+		return m.clearedquota_viewer_devices
 	case user.EdgeDesktopDiagnostics:
 		return m.cleareddesktop_diagnostics
 	}
@@ -54633,6 +57344,9 @@ func (m *UserMutation) ResetEdge(name string) error {
 		return nil
 	case user.EdgeDesktopDevices:
 		m.ResetDesktopDevices()
+		return nil
+	case user.EdgeQuotaViewerDevices:
+		m.ResetQuotaViewerDevices()
 		return nil
 	case user.EdgeDesktopDiagnostics:
 		m.ResetDesktopDiagnostics()

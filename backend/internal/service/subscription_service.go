@@ -437,13 +437,13 @@ func (s *SubscriptionService) withSubscriptionUpdateTx(ctx context.Context, fn f
 
 func renewedSubscriptionTerm(existingSub *UserSubscription, notes string, startsAt, expiresAt time.Time) *UserSubscription {
 	renewed := *existingSub
-	windowStart := startOfDay(startsAt)
+	windowStart := startsAt
 	renewed.StartsAt = startsAt
 	renewed.ExpiresAt = expiresAt
 	renewed.Status = SubscriptionStatusActive
-	renewed.DailyWindowStart = &windowStart
 	renewed.WeeklyWindowStart = &windowStart
-	renewed.MonthlyWindowStart = &windowStart
+	renewed.DailyWindowStart = nil
+	renewed.MonthlyWindowStart = nil
 	renewed.DailyUsageUSD = 0
 	renewed.WeeklyUsageUSD = 0
 	renewed.MonthlyUsageUSD = 0
@@ -478,15 +478,16 @@ func (s *SubscriptionService) createSubscription(ctx context.Context, input *Ass
 	}
 
 	sub := &UserSubscription{
-		UserID:     input.UserID,
-		GroupID:    input.GroupID,
-		StartsAt:   now,
-		ExpiresAt:  expiresAt,
-		Status:     SubscriptionStatusActive,
-		AssignedAt: now,
-		Notes:      input.Notes,
-		CreatedAt:  now,
-		UpdatedAt:  now,
+		UserID:            input.UserID,
+		GroupID:           input.GroupID,
+		StartsAt:          now,
+		ExpiresAt:         expiresAt,
+		Status:            SubscriptionStatusActive,
+		WeeklyWindowStart: &now,
+		AssignedAt:        now,
+		Notes:             input.Notes,
+		CreatedAt:         now,
+		UpdatedAt:         now,
 	}
 	// 只有当 AssignedBy > 0 时才设置（0 表示系统分配，如兑换码）
 	if input.AssignedBy > 0 {
@@ -735,13 +736,15 @@ func (s *SubscriptionService) ExtendSubscription(ctx context.Context, subscripti
 		return nil, ErrAdjustWouldExpire
 	}
 
-	if err := s.userSubRepo.ExtendExpiry(ctx, subscriptionID, newExpiresAt); err != nil {
-		return nil, err
-	}
-
-	// 如果订阅已过期，恢复为active状态
-	if sub.Status == SubscriptionStatusExpired {
-		if err := s.userSubRepo.UpdateStatus(ctx, subscriptionID, SubscriptionStatusActive); err != nil {
+	if isExpired {
+		// Extending an expired subscription starts a new continuous term. The
+		// exact reopening instant becomes the new immutable weekly anchor.
+		if err := s.updateExistingSubscriptionTerm(ctx, sub, "", now, newExpiresAt, true); err != nil {
+			return nil, err
+		}
+	} else {
+		// An uninterrupted renewal only extends expiry and preserves StartsAt.
+		if err := s.userSubRepo.ExtendExpiry(ctx, subscriptionID, newExpiresAt); err != nil {
 			return nil, err
 		}
 	}
@@ -853,22 +856,17 @@ func (s *SubscriptionService) List(ctx context.Context, page, pageSize int, user
 // normalizeExpiredWindows 将已过期窗口的数据清零（仅影响返回数据，不影响数据库）
 // 这确保前端显示正确的当前窗口状态，而不是过期窗口的历史数据
 func normalizeExpiredWindows(subs []UserSubscription) {
+	now := time.Now()
 	for i := range subs {
 		sub := &subs[i]
-		// 日窗口过期：清零展示数据
-		if sub.NeedsDailyReset() {
-			sub.DailyWindowStart = nil
-			sub.DailyUsageUSD = 0
-		}
-		// 周窗口过期：清零展示数据
-		if sub.NeedsWeeklyReset() {
-			sub.WeeklyWindowStart = nil
+		// P0 exposes and enforces only the anchored 7-day membership window.
+		sub.DailyWindowStart = nil
+		sub.DailyUsageUSD = 0
+		sub.MonthlyWindowStart = nil
+		sub.MonthlyUsageUSD = 0
+		if expectedStart, _, ok := sub.WeeklyWindowAt(now); ok && sub.NeedsWeeklyResetAt(now) {
+			sub.WeeklyWindowStart = &expectedStart
 			sub.WeeklyUsageUSD = 0
-		}
-		// 月窗口过期：清零展示数据
-		if sub.NeedsMonthlyReset() {
-			sub.MonthlyWindowStart = nil
-			sub.MonthlyUsageUSD = 0
 		}
 	}
 }
@@ -896,13 +894,20 @@ func (s *SubscriptionService) CheckAndActivateWindow(ctx context.Context, sub *U
 		return nil
 	}
 
-	// 使用当天零点作为窗口起始时间
-	windowStart := startOfDay(time.Now())
-	return s.userSubRepo.ActivateWindows(ctx, sub.ID, windowStart)
+	windowStart, _, ok := sub.WeeklyWindowAt(time.Now())
+	if !ok {
+		return ErrSubscriptionInvalid
+	}
+	if err := s.userSubRepo.ActivateWindows(ctx, sub.ID, windowStart); err != nil {
+		return err
+	}
+	sub.WeeklyWindowStart = &windowStart
+	sub.WeeklyUsageUSD = 0
+	return nil
 }
 
-// AdminResetQuota manually resets the daily, weekly, and/or monthly usage windows.
-// Uses startOfDay(now) as the new window start, matching automatic resets.
+// AdminResetQuota manually clears selected counters. A weekly reset never
+// changes the anchored period boundary.
 func (s *SubscriptionService) AdminResetQuota(ctx context.Context, subscriptionID int64, resetDaily, resetWeekly, resetMonthly bool) (*UserSubscription, error) {
 	if !resetDaily && !resetWeekly && !resetMonthly {
 		return nil, ErrInvalidInput
@@ -911,7 +916,10 @@ func (s *SubscriptionService) AdminResetQuota(ctx context.Context, subscriptionI
 	if err != nil {
 		return nil, err
 	}
-	windowStart := startOfDay(time.Now())
+	windowStart, _, ok := sub.WeeklyWindowAt(time.Now())
+	if !ok {
+		return nil, ErrSubscriptionInvalid
+	}
 	if err := s.userSubRepo.ResetUsageWindows(ctx, sub.ID, resetDaily, resetWeekly, resetMonthly, windowStart); err != nil {
 		return nil, err
 	}
@@ -928,40 +936,22 @@ func (s *SubscriptionService) AdminResetQuota(ctx context.Context, subscriptionI
 
 // CheckAndResetWindows 检查并重置过期的窗口
 func (s *SubscriptionService) CheckAndResetWindows(ctx context.Context, sub *UserSubscription) error {
-	// 使用当天零点作为新窗口起始时间
-	windowStart := startOfDay(time.Now())
+	now := time.Now()
+	windowStart, _, ok := sub.WeeklyWindowAt(now)
+	if !ok {
+		return ErrSubscriptionInvalid
+	}
 	needsInvalidateCache := false
 
-	// 日窗口重置（24小时）
-	if sub.NeedsDailyReset() {
-		expectedWindowStart := sub.DailyWindowStart
-		if err := s.userSubRepo.ResetDailyUsage(ctx, sub.ID, expectedWindowStart, windowStart); err != nil {
-			return err
-		}
-		sub.DailyWindowStart = &windowStart
-		sub.DailyUsageUSD = 0
-		needsInvalidateCache = true
-	}
-
-	// 周窗口重置（7天）
-	if sub.NeedsWeeklyReset() {
+	// The current period is always derived from StartsAt. A delayed request may
+	// skip any number of periods without shifting the anchor.
+	if sub.NeedsWeeklyResetAt(now) {
 		expectedWindowStart := sub.WeeklyWindowStart
 		if err := s.userSubRepo.ResetWeeklyUsage(ctx, sub.ID, expectedWindowStart, windowStart); err != nil {
 			return err
 		}
 		sub.WeeklyWindowStart = &windowStart
 		sub.WeeklyUsageUSD = 0
-		needsInvalidateCache = true
-	}
-
-	// 月窗口重置（30天）
-	if sub.NeedsMonthlyReset() {
-		expectedWindowStart := sub.MonthlyWindowStart
-		if err := s.userSubRepo.ResetMonthlyUsage(ctx, sub.ID, expectedWindowStart, windowStart); err != nil {
-			return err
-		}
-		sub.MonthlyWindowStart = &windowStart
-		sub.MonthlyUsageUSD = 0
 		needsInvalidateCache = true
 	}
 
@@ -1005,14 +995,8 @@ func (s *SubscriptionService) EnsureWindowMaintenance(ctx context.Context, sub *
 // CheckUsageLimits 检查使用限额（返回错误如果超限）
 // 用于中间件的快速预检查，additionalCost 通常为 0
 func (s *SubscriptionService) CheckUsageLimits(ctx context.Context, sub *UserSubscription, group *Group, additionalCost float64) error {
-	if !sub.CheckDailyLimit(group, additionalCost) {
-		return ErrDailyLimitExceeded
-	}
 	if !sub.CheckWeeklyLimit(group, additionalCost) {
 		return ErrWeeklyLimitExceeded
-	}
-	if !sub.CheckMonthlyLimit(group, additionalCost) {
-		return ErrMonthlyLimitExceeded
 	}
 	return nil
 }
@@ -1032,33 +1016,20 @@ func (s *SubscriptionService) ValidateAndCheckLimits(sub *UserSubscription, grou
 		return false, ErrSubscriptionExpired
 	}
 
-	// 2. 内存中修正过期窗口的用量，确保预检查不会误拒绝用户。
-	//    调用方随后同步推进 DB 窗口，并用回读快照重新校验。
-	if sub.NeedsDailyReset() {
-		sub.DailyUsageUSD = 0
-		needsMaintenance = true
-	}
-	if sub.NeedsWeeklyReset() {
+	// 2. 内存中修正已跨越的 anchored 7-day 窗口。调用方随后同步推进
+	//    DB 窗口，并用回读快照重新校验。
+	if sub.NeedsWeeklyResetAt(time.Now()) {
 		sub.WeeklyUsageUSD = 0
-		needsMaintenance = true
-	}
-	if sub.NeedsMonthlyReset() {
-		sub.MonthlyUsageUSD = 0
 		needsMaintenance = true
 	}
 	if !sub.IsWindowActivated() {
 		needsMaintenance = true
 	}
 
-	// 3. 检查用量限额
-	if !sub.CheckDailyLimit(group, 0) {
-		return needsMaintenance, ErrDailyLimitExceeded
-	}
+	// 3. Membership enforcement has one quota only. Legacy daily/monthly
+	// columns are deliberately ignored and cannot secretly block a P0 member.
 	if !sub.CheckWeeklyLimit(group, 0) {
 		return needsMaintenance, ErrWeeklyLimitExceeded
-	}
-	if !sub.CheckMonthlyLimit(group, 0) {
-		return needsMaintenance, ErrMonthlyLimitExceeded
 	}
 
 	return needsMaintenance, nil
@@ -1160,45 +1131,28 @@ func (s *SubscriptionService) calculateProgress(sub *UserSubscription, group *Gr
 		ExpiresInDays: sub.DaysRemaining(),
 	}
 
-	// 日进度
-	if group.HasDailyLimit() && sub.DailyWindowStart != nil {
-		limit := *group.DailyLimitUSD
-		resetsAt := sub.DailyWindowStart.Add(24 * time.Hour)
-		if dailyResetTime := sub.DailyResetTime(); dailyResetTime != nil {
-			resetsAt = *dailyResetTime
+	// P0 only exposes the authoritative anchored 7-day progress. When no
+	// request has performed maintenance yet, derive the new period in memory
+	// and report zero usage instead of carrying the prior period forward.
+	now := time.Now()
+	if group.HasWeeklyLimit() {
+		windowStart, resetsAt, ok := sub.WeeklyWindowAt(now)
+		if !ok {
+			return progress
 		}
-		progress.Daily = &UsageWindowProgress{
-			LimitUSD:        limit,
-			UsedUSD:         sub.DailyUsageUSD,
-			RemainingUSD:    limit - sub.DailyUsageUSD,
-			Percentage:      (sub.DailyUsageUSD / limit) * 100,
-			WindowStart:     *sub.DailyWindowStart,
-			ResetsAt:        resetsAt,
-			ResetsInSeconds: int64(time.Until(resetsAt).Seconds()),
-		}
-		if progress.Daily.RemainingUSD < 0 {
-			progress.Daily.RemainingUSD = 0
-		}
-		if progress.Daily.Percentage > 100 {
-			progress.Daily.Percentage = 100
-		}
-		if progress.Daily.ResetsInSeconds < 0 {
-			progress.Daily.ResetsInSeconds = 0
-		}
-	}
-
-	// 周进度
-	if group.HasWeeklyLimit() && sub.WeeklyWindowStart != nil {
 		limit := *group.WeeklyLimitUSD
-		resetsAt := sub.WeeklyWindowStart.Add(7 * 24 * time.Hour)
+		used := 0.0
+		if sub.WeeklyWindowStart != nil && sub.WeeklyWindowStart.Equal(windowStart) {
+			used = sub.WeeklyUsageUSD
+		}
 		progress.Weekly = &UsageWindowProgress{
 			LimitUSD:        limit,
-			UsedUSD:         sub.WeeklyUsageUSD,
-			RemainingUSD:    limit - sub.WeeklyUsageUSD,
-			Percentage:      (sub.WeeklyUsageUSD / limit) * 100,
-			WindowStart:     *sub.WeeklyWindowStart,
+			UsedUSD:         used,
+			RemainingUSD:    limit - used,
+			Percentage:      (used / limit) * 100,
+			WindowStart:     windowStart,
 			ResetsAt:        resetsAt,
-			ResetsInSeconds: int64(time.Until(resetsAt).Seconds()),
+			ResetsInSeconds: int64(resetsAt.Sub(now).Seconds()),
 		}
 		if progress.Weekly.RemainingUSD < 0 {
 			progress.Weekly.RemainingUSD = 0
@@ -1208,30 +1162,6 @@ func (s *SubscriptionService) calculateProgress(sub *UserSubscription, group *Gr
 		}
 		if progress.Weekly.ResetsInSeconds < 0 {
 			progress.Weekly.ResetsInSeconds = 0
-		}
-	}
-
-	// 月进度
-	if group.HasMonthlyLimit() && sub.MonthlyWindowStart != nil {
-		limit := *group.MonthlyLimitUSD
-		resetsAt := sub.MonthlyWindowStart.Add(30 * 24 * time.Hour)
-		progress.Monthly = &UsageWindowProgress{
-			LimitUSD:        limit,
-			UsedUSD:         sub.MonthlyUsageUSD,
-			RemainingUSD:    limit - sub.MonthlyUsageUSD,
-			Percentage:      (sub.MonthlyUsageUSD / limit) * 100,
-			WindowStart:     *sub.MonthlyWindowStart,
-			ResetsAt:        resetsAt,
-			ResetsInSeconds: int64(time.Until(resetsAt).Seconds()),
-		}
-		if progress.Monthly.RemainingUSD < 0 {
-			progress.Monthly.RemainingUSD = 0
-		}
-		if progress.Monthly.Percentage > 100 {
-			progress.Monthly.Percentage = 100
-		}
-		if progress.Monthly.ResetsInSeconds < 0 {
-			progress.Monthly.ResetsInSeconds = 0
 		}
 	}
 

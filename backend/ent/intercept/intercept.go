@@ -38,6 +38,8 @@ import (
 	"github.com/Wei-Shaw/sub2api/ent/promocode"
 	"github.com/Wei-Shaw/sub2api/ent/promocodeusage"
 	"github.com/Wei-Shaw/sub2api/ent/proxy"
+	"github.com/Wei-Shaw/sub2api/ent/quotaviewerdevice"
+	"github.com/Wei-Shaw/sub2api/ent/quotaviewerdevicesession"
 	"github.com/Wei-Shaw/sub2api/ent/redeemcode"
 	"github.com/Wei-Shaw/sub2api/ent/securitysecret"
 	"github.com/Wei-Shaw/sub2api/ent/setting"
@@ -892,6 +894,60 @@ func (f TraverseProxy) Traverse(ctx context.Context, q ent.Query) error {
 	return fmt.Errorf("unexpected query type %T. expect *ent.ProxyQuery", q)
 }
 
+// The QuotaViewerDeviceFunc type is an adapter to allow the use of ordinary function as a Querier.
+type QuotaViewerDeviceFunc func(context.Context, *ent.QuotaViewerDeviceQuery) (ent.Value, error)
+
+// Query calls f(ctx, q).
+func (f QuotaViewerDeviceFunc) Query(ctx context.Context, q ent.Query) (ent.Value, error) {
+	if q, ok := q.(*ent.QuotaViewerDeviceQuery); ok {
+		return f(ctx, q)
+	}
+	return nil, fmt.Errorf("unexpected query type %T. expect *ent.QuotaViewerDeviceQuery", q)
+}
+
+// The TraverseQuotaViewerDevice type is an adapter to allow the use of ordinary function as Traverser.
+type TraverseQuotaViewerDevice func(context.Context, *ent.QuotaViewerDeviceQuery) error
+
+// Intercept is a dummy implementation of Intercept that returns the next Querier in the pipeline.
+func (f TraverseQuotaViewerDevice) Intercept(next ent.Querier) ent.Querier {
+	return next
+}
+
+// Traverse calls f(ctx, q).
+func (f TraverseQuotaViewerDevice) Traverse(ctx context.Context, q ent.Query) error {
+	if q, ok := q.(*ent.QuotaViewerDeviceQuery); ok {
+		return f(ctx, q)
+	}
+	return fmt.Errorf("unexpected query type %T. expect *ent.QuotaViewerDeviceQuery", q)
+}
+
+// The QuotaViewerDeviceSessionFunc type is an adapter to allow the use of ordinary function as a Querier.
+type QuotaViewerDeviceSessionFunc func(context.Context, *ent.QuotaViewerDeviceSessionQuery) (ent.Value, error)
+
+// Query calls f(ctx, q).
+func (f QuotaViewerDeviceSessionFunc) Query(ctx context.Context, q ent.Query) (ent.Value, error) {
+	if q, ok := q.(*ent.QuotaViewerDeviceSessionQuery); ok {
+		return f(ctx, q)
+	}
+	return nil, fmt.Errorf("unexpected query type %T. expect *ent.QuotaViewerDeviceSessionQuery", q)
+}
+
+// The TraverseQuotaViewerDeviceSession type is an adapter to allow the use of ordinary function as Traverser.
+type TraverseQuotaViewerDeviceSession func(context.Context, *ent.QuotaViewerDeviceSessionQuery) error
+
+// Intercept is a dummy implementation of Intercept that returns the next Querier in the pipeline.
+func (f TraverseQuotaViewerDeviceSession) Intercept(next ent.Querier) ent.Querier {
+	return next
+}
+
+// Traverse calls f(ctx, q).
+func (f TraverseQuotaViewerDeviceSession) Traverse(ctx context.Context, q ent.Query) error {
+	if q, ok := q.(*ent.QuotaViewerDeviceSessionQuery); ok {
+		return f(ctx, q)
+	}
+	return fmt.Errorf("unexpected query type %T. expect *ent.QuotaViewerDeviceSessionQuery", q)
+}
+
 // The RedeemCodeFunc type is an adapter to allow the use of ordinary function as a Querier.
 type RedeemCodeFunc func(context.Context, *ent.RedeemCodeQuery) (ent.Value, error)
 
@@ -1304,6 +1360,10 @@ func NewQuery(q ent.Query) (Query, error) {
 		return &query[*ent.PromoCodeUsageQuery, predicate.PromoCodeUsage, promocodeusage.OrderOption]{typ: ent.TypePromoCodeUsage, tq: q}, nil
 	case *ent.ProxyQuery:
 		return &query[*ent.ProxyQuery, predicate.Proxy, proxy.OrderOption]{typ: ent.TypeProxy, tq: q}, nil
+	case *ent.QuotaViewerDeviceQuery:
+		return &query[*ent.QuotaViewerDeviceQuery, predicate.QuotaViewerDevice, quotaviewerdevice.OrderOption]{typ: ent.TypeQuotaViewerDevice, tq: q}, nil
+	case *ent.QuotaViewerDeviceSessionQuery:
+		return &query[*ent.QuotaViewerDeviceSessionQuery, predicate.QuotaViewerDeviceSession, quotaviewerdevicesession.OrderOption]{typ: ent.TypeQuotaViewerDeviceSession, tq: q}, nil
 	case *ent.RedeemCodeQuery:
 		return &query[*ent.RedeemCodeQuery, predicate.RedeemCode, redeemcode.OrderOption]{typ: ent.TypeRedeemCode, tq: q}, nil
 	case *ent.SecuritySecretQuery:

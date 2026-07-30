@@ -129,7 +129,11 @@ func APIKeyAuthWithSubscriptionGoogle(apiKeyService *service.APIKeyService, subs
 		}
 
 		isSubscriptionType := apiKey.Group != nil && apiKey.Group.IsSubscriptionType()
-		if isSubscriptionType && subscriptionService != nil {
+		if isSubscriptionType && subscriptionService == nil {
+			abortWithGoogleError(c, 503, "Subscription validation is temporarily unavailable")
+			return
+		}
+		if isSubscriptionType {
 			subscription, err := subscriptionService.GetActiveSubscription(
 				c.Request.Context(),
 				apiKey.User.ID,

@@ -357,6 +357,30 @@ func (f ProxyFunc) Mutate(ctx context.Context, m ent.Mutation) (ent.Value, error
 	return nil, fmt.Errorf("unexpected mutation type %T. expect *ent.ProxyMutation", m)
 }
 
+// The QuotaViewerDeviceFunc type is an adapter to allow the use of ordinary
+// function as QuotaViewerDevice mutator.
+type QuotaViewerDeviceFunc func(context.Context, *ent.QuotaViewerDeviceMutation) (ent.Value, error)
+
+// Mutate calls f(ctx, m).
+func (f QuotaViewerDeviceFunc) Mutate(ctx context.Context, m ent.Mutation) (ent.Value, error) {
+	if mv, ok := m.(*ent.QuotaViewerDeviceMutation); ok {
+		return f(ctx, mv)
+	}
+	return nil, fmt.Errorf("unexpected mutation type %T. expect *ent.QuotaViewerDeviceMutation", m)
+}
+
+// The QuotaViewerDeviceSessionFunc type is an adapter to allow the use of ordinary
+// function as QuotaViewerDeviceSession mutator.
+type QuotaViewerDeviceSessionFunc func(context.Context, *ent.QuotaViewerDeviceSessionMutation) (ent.Value, error)
+
+// Mutate calls f(ctx, m).
+func (f QuotaViewerDeviceSessionFunc) Mutate(ctx context.Context, m ent.Mutation) (ent.Value, error) {
+	if mv, ok := m.(*ent.QuotaViewerDeviceSessionMutation); ok {
+		return f(ctx, mv)
+	}
+	return nil, fmt.Errorf("unexpected mutation type %T. expect *ent.QuotaViewerDeviceSessionMutation", m)
+}
+
 // The RedeemCodeFunc type is an adapter to allow the use of ordinary
 // function as RedeemCode mutator.
 type RedeemCodeFunc func(context.Context, *ent.RedeemCodeMutation) (ent.Value, error)

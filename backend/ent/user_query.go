@@ -23,6 +23,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/ent/pendingauthsession"
 	"github.com/Wei-Shaw/sub2api/ent/predicate"
 	"github.com/Wei-Shaw/sub2api/ent/promocodeusage"
+	"github.com/Wei-Shaw/sub2api/ent/quotaviewerdevice"
 	"github.com/Wei-Shaw/sub2api/ent/redeemcode"
 	"github.com/Wei-Shaw/sub2api/ent/usagelog"
 	"github.com/Wei-Shaw/sub2api/ent/user"
@@ -53,6 +54,7 @@ type UserQuery struct {
 	withPendingAuthSessions   *PendingAuthSessionQuery
 	withPlatformQuotas        *UserPlatformQuotaQuery
 	withDesktopDevices        *DesktopDeviceQuery
+	withQuotaViewerDevices    *QuotaViewerDeviceQuery
 	withDesktopDiagnostics    *DesktopDiagnosticQuery
 	withUserAllowedGroups     *UserAllowedGroupQuery
 	modifiers                 []func(*sql.Selector)
@@ -400,6 +402,28 @@ func (_q *UserQuery) QueryDesktopDevices() *DesktopDeviceQuery {
 	return query
 }
 
+// QueryQuotaViewerDevices chains the current query on the "quota_viewer_devices" edge.
+func (_q *UserQuery) QueryQuotaViewerDevices() *QuotaViewerDeviceQuery {
+	query := (&QuotaViewerDeviceClient{config: _q.config}).Query()
+	query.path = func(ctx context.Context) (fromU *sql.Selector, err error) {
+		if err := _q.prepareQuery(ctx); err != nil {
+			return nil, err
+		}
+		selector := _q.sqlQuery(ctx)
+		if err := selector.Err(); err != nil {
+			return nil, err
+		}
+		step := sqlgraph.NewStep(
+			sqlgraph.From(user.Table, user.FieldID, selector),
+			sqlgraph.To(quotaviewerdevice.Table, quotaviewerdevice.FieldID),
+			sqlgraph.Edge(sqlgraph.O2M, false, user.QuotaViewerDevicesTable, user.QuotaViewerDevicesColumn),
+		)
+		fromU = sqlgraph.SetNeighbors(_q.driver.Dialect(), step)
+		return fromU, nil
+	}
+	return query
+}
+
 // QueryDesktopDiagnostics chains the current query on the "desktop_diagnostics" edge.
 func (_q *UserQuery) QueryDesktopDiagnostics() *DesktopDiagnosticQuery {
 	query := (&DesktopDiagnosticClient{config: _q.config}).Query()
@@ -650,6 +674,7 @@ func (_q *UserQuery) Clone() *UserQuery {
 		withPendingAuthSessions:   _q.withPendingAuthSessions.Clone(),
 		withPlatformQuotas:        _q.withPlatformQuotas.Clone(),
 		withDesktopDevices:        _q.withDesktopDevices.Clone(),
+		withQuotaViewerDevices:    _q.withQuotaViewerDevices.Clone(),
 		withDesktopDiagnostics:    _q.withDesktopDiagnostics.Clone(),
 		withUserAllowedGroups:     _q.withUserAllowedGroups.Clone(),
 		// clone intermediate query.
@@ -812,6 +837,17 @@ func (_q *UserQuery) WithDesktopDevices(opts ...func(*DesktopDeviceQuery)) *User
 	return _q
 }
 
+// WithQuotaViewerDevices tells the query-builder to eager-load the nodes that are connected to
+// the "quota_viewer_devices" edge. The optional arguments are used to configure the query builder of the edge.
+func (_q *UserQuery) WithQuotaViewerDevices(opts ...func(*QuotaViewerDeviceQuery)) *UserQuery {
+	query := (&QuotaViewerDeviceClient{config: _q.config}).Query()
+	for _, opt := range opts {
+		opt(query)
+	}
+	_q.withQuotaViewerDevices = query
+	return _q
+}
+
 // WithDesktopDiagnostics tells the query-builder to eager-load the nodes that are connected to
 // the "desktop_diagnostics" edge. The optional arguments are used to configure the query builder of the edge.
 func (_q *UserQuery) WithDesktopDiagnostics(opts ...func(*DesktopDiagnosticQuery)) *UserQuery {
@@ -912,7 +948,7 @@ func (_q *UserQuery) sqlAll(ctx context.Context, hooks ...queryHook) ([]*User, e
 	var (
 		nodes       = []*User{}
 		_spec       = _q.querySpec()
-		loadedTypes = [16]bool{
+		loadedTypes = [17]bool{
 			_q.withAPIKeys != nil,
 			_q.withRedeemCodes != nil,
 			_q.withSubscriptions != nil,
@@ -927,6 +963,7 @@ func (_q *UserQuery) sqlAll(ctx context.Context, hooks ...queryHook) ([]*User, e
 			_q.withPendingAuthSessions != nil,
 			_q.withPlatformQuotas != nil,
 			_q.withDesktopDevices != nil,
+			_q.withQuotaViewerDevices != nil,
 			_q.withDesktopDiagnostics != nil,
 			_q.withUserAllowedGroups != nil,
 		}
@@ -1051,6 +1088,15 @@ func (_q *UserQuery) sqlAll(ctx context.Context, hooks ...queryHook) ([]*User, e
 		if err := _q.loadDesktopDevices(ctx, query, nodes,
 			func(n *User) { n.Edges.DesktopDevices = []*DesktopDevice{} },
 			func(n *User, e *DesktopDevice) { n.Edges.DesktopDevices = append(n.Edges.DesktopDevices, e) }); err != nil {
+			return nil, err
+		}
+	}
+	if query := _q.withQuotaViewerDevices; query != nil {
+		if err := _q.loadQuotaViewerDevices(ctx, query, nodes,
+			func(n *User) { n.Edges.QuotaViewerDevices = []*QuotaViewerDevice{} },
+			func(n *User, e *QuotaViewerDevice) {
+				n.Edges.QuotaViewerDevices = append(n.Edges.QuotaViewerDevices, e)
+			}); err != nil {
 			return nil, err
 		}
 	}
@@ -1518,6 +1564,36 @@ func (_q *UserQuery) loadDesktopDevices(ctx context.Context, query *DesktopDevic
 	}
 	query.Where(predicate.DesktopDevice(func(s *sql.Selector) {
 		s.Where(sql.InValues(s.C(user.DesktopDevicesColumn), fks...))
+	}))
+	neighbors, err := query.All(ctx)
+	if err != nil {
+		return err
+	}
+	for _, n := range neighbors {
+		fk := n.UserID
+		node, ok := nodeids[fk]
+		if !ok {
+			return fmt.Errorf(`unexpected referenced foreign-key "user_id" returned %v for node %v`, fk, n.ID)
+		}
+		assign(node, n)
+	}
+	return nil
+}
+func (_q *UserQuery) loadQuotaViewerDevices(ctx context.Context, query *QuotaViewerDeviceQuery, nodes []*User, init func(*User), assign func(*User, *QuotaViewerDevice)) error {
+	fks := make([]driver.Value, 0, len(nodes))
+	nodeids := make(map[int64]*User)
+	for i := range nodes {
+		fks = append(fks, nodes[i].ID)
+		nodeids[nodes[i].ID] = nodes[i]
+		if init != nil {
+			init(nodes[i])
+		}
+	}
+	if len(query.ctx.Fields) > 0 {
+		query.ctx.AppendFieldOnce(quotaviewerdevice.FieldUserID)
+	}
+	query.Where(predicate.QuotaViewerDevice(func(s *sql.Selector) {
+		s.Where(sql.InValues(s.C(user.QuotaViewerDevicesColumn), fks...))
 	}))
 	neighbors, err := query.All(ctx)
 	if err != nil {

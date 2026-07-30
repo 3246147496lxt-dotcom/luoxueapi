@@ -20,6 +20,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/ent/paymentorder"
 	"github.com/Wei-Shaw/sub2api/ent/pendingauthsession"
 	"github.com/Wei-Shaw/sub2api/ent/promocodeusage"
+	"github.com/Wei-Shaw/sub2api/ent/quotaviewerdevice"
 	"github.com/Wei-Shaw/sub2api/ent/redeemcode"
 	"github.com/Wei-Shaw/sub2api/ent/usagelog"
 	"github.com/Wei-Shaw/sub2api/ent/user"
@@ -564,6 +565,21 @@ func (_c *UserCreate) AddDesktopDevices(v ...*DesktopDevice) *UserCreate {
 		ids[i] = v[i].ID
 	}
 	return _c.AddDesktopDeviceIDs(ids...)
+}
+
+// AddQuotaViewerDeviceIDs adds the "quota_viewer_devices" edge to the QuotaViewerDevice entity by IDs.
+func (_c *UserCreate) AddQuotaViewerDeviceIDs(ids ...int64) *UserCreate {
+	_c.mutation.AddQuotaViewerDeviceIDs(ids...)
+	return _c
+}
+
+// AddQuotaViewerDevices adds the "quota_viewer_devices" edges to the QuotaViewerDevice entity.
+func (_c *UserCreate) AddQuotaViewerDevices(v ...*QuotaViewerDevice) *UserCreate {
+	ids := make([]int64, len(v))
+	for i := range v {
+		ids[i] = v[i].ID
+	}
+	return _c.AddQuotaViewerDeviceIDs(ids...)
 }
 
 // AddDesktopDiagnosticIDs adds the "desktop_diagnostics" edge to the DesktopDiagnostic entity by IDs.
@@ -1121,6 +1137,22 @@ func (_c *UserCreate) createSpec() (*User, *sqlgraph.CreateSpec) {
 			Bidi:    false,
 			Target: &sqlgraph.EdgeTarget{
 				IDSpec: sqlgraph.NewFieldSpec(desktopdevice.FieldID, field.TypeInt64),
+			},
+		}
+		for _, k := range nodes {
+			edge.Target.Nodes = append(edge.Target.Nodes, k)
+		}
+		_spec.Edges = append(_spec.Edges, edge)
+	}
+	if nodes := _c.mutation.QuotaViewerDevicesIDs(); len(nodes) > 0 {
+		edge := &sqlgraph.EdgeSpec{
+			Rel:     sqlgraph.O2M,
+			Inverse: false,
+			Table:   user.QuotaViewerDevicesTable,
+			Columns: []string{user.QuotaViewerDevicesColumn},
+			Bidi:    false,
+			Target: &sqlgraph.EdgeTarget{
+				IDSpec: sqlgraph.NewFieldSpec(quotaviewerdevice.FieldID, field.TypeInt64),
 			},
 		}
 		for _, k := range nodes {

@@ -44,6 +44,8 @@ import (
 	"github.com/Wei-Shaw/sub2api/ent/promocode"
 	"github.com/Wei-Shaw/sub2api/ent/promocodeusage"
 	"github.com/Wei-Shaw/sub2api/ent/proxy"
+	"github.com/Wei-Shaw/sub2api/ent/quotaviewerdevice"
+	"github.com/Wei-Shaw/sub2api/ent/quotaviewerdevicesession"
 	"github.com/Wei-Shaw/sub2api/ent/redeemcode"
 	"github.com/Wei-Shaw/sub2api/ent/securitysecret"
 	"github.com/Wei-Shaw/sub2api/ent/setting"
@@ -124,6 +126,10 @@ type Client struct {
 	PromoCodeUsage *PromoCodeUsageClient
 	// Proxy is the client for interacting with the Proxy builders.
 	Proxy *ProxyClient
+	// QuotaViewerDevice is the client for interacting with the QuotaViewerDevice builders.
+	QuotaViewerDevice *QuotaViewerDeviceClient
+	// QuotaViewerDeviceSession is the client for interacting with the QuotaViewerDeviceSession builders.
+	QuotaViewerDeviceSession *QuotaViewerDeviceSessionClient
 	// RedeemCode is the client for interacting with the RedeemCode builders.
 	RedeemCode *RedeemCodeClient
 	// SecuritySecret is the client for interacting with the SecuritySecret builders.
@@ -190,6 +196,8 @@ func (c *Client) init() {
 	c.PromoCode = NewPromoCodeClient(c.config)
 	c.PromoCodeUsage = NewPromoCodeUsageClient(c.config)
 	c.Proxy = NewProxyClient(c.config)
+	c.QuotaViewerDevice = NewQuotaViewerDeviceClient(c.config)
+	c.QuotaViewerDeviceSession = NewQuotaViewerDeviceSessionClient(c.config)
 	c.RedeemCode = NewRedeemCodeClient(c.config)
 	c.SecuritySecret = NewSecuritySecretClient(c.config)
 	c.Setting = NewSettingClient(c.config)
@@ -324,6 +332,8 @@ func (c *Client) Tx(ctx context.Context) (*Tx, error) {
 		PromoCode:                     NewPromoCodeClient(cfg),
 		PromoCodeUsage:                NewPromoCodeUsageClient(cfg),
 		Proxy:                         NewProxyClient(cfg),
+		QuotaViewerDevice:             NewQuotaViewerDeviceClient(cfg),
+		QuotaViewerDeviceSession:      NewQuotaViewerDeviceSessionClient(cfg),
 		RedeemCode:                    NewRedeemCodeClient(cfg),
 		SecuritySecret:                NewSecuritySecretClient(cfg),
 		Setting:                       NewSettingClient(cfg),
@@ -385,6 +395,8 @@ func (c *Client) BeginTx(ctx context.Context, opts *sql.TxOptions) (*Tx, error) 
 		PromoCode:                     NewPromoCodeClient(cfg),
 		PromoCodeUsage:                NewPromoCodeUsageClient(cfg),
 		Proxy:                         NewProxyClient(cfg),
+		QuotaViewerDevice:             NewQuotaViewerDeviceClient(cfg),
+		QuotaViewerDeviceSession:      NewQuotaViewerDeviceSessionClient(cfg),
 		RedeemCode:                    NewRedeemCodeClient(cfg),
 		SecuritySecret:                NewSecuritySecretClient(cfg),
 		Setting:                       NewSettingClient(cfg),
@@ -434,7 +446,8 @@ func (c *Client) Use(hooks ...Hook) {
 		c.DesktopDeviceSession, c.DesktopDiagnostic, c.ErrorPassthroughRule, c.Group,
 		c.IdempotencyRecord, c.IdentityAdoptionDecision, c.ModelCatalogModel,
 		c.PaymentAuditLog, c.PaymentOrder, c.PaymentProviderInstance,
-		c.PendingAuthSession, c.PromoCode, c.PromoCodeUsage, c.Proxy, c.RedeemCode,
+		c.PendingAuthSession, c.PromoCode, c.PromoCodeUsage, c.Proxy,
+		c.QuotaViewerDevice, c.QuotaViewerDeviceSession, c.RedeemCode,
 		c.SecuritySecret, c.Setting, c.SubscriptionPlan, c.TLSFingerprintProfile,
 		c.UsageCleanupTask, c.UsageLog, c.User, c.UserAllowedGroup,
 		c.UserAttributeDefinition, c.UserAttributeValue, c.UserPlatformQuota,
@@ -455,7 +468,8 @@ func (c *Client) Intercept(interceptors ...Interceptor) {
 		c.DesktopDeviceSession, c.DesktopDiagnostic, c.ErrorPassthroughRule, c.Group,
 		c.IdempotencyRecord, c.IdentityAdoptionDecision, c.ModelCatalogModel,
 		c.PaymentAuditLog, c.PaymentOrder, c.PaymentProviderInstance,
-		c.PendingAuthSession, c.PromoCode, c.PromoCodeUsage, c.Proxy, c.RedeemCode,
+		c.PendingAuthSession, c.PromoCode, c.PromoCodeUsage, c.Proxy,
+		c.QuotaViewerDevice, c.QuotaViewerDeviceSession, c.RedeemCode,
 		c.SecuritySecret, c.Setting, c.SubscriptionPlan, c.TLSFingerprintProfile,
 		c.UsageCleanupTask, c.UsageLog, c.User, c.UserAllowedGroup,
 		c.UserAttributeDefinition, c.UserAttributeValue, c.UserPlatformQuota,
@@ -526,6 +540,10 @@ func (c *Client) Mutate(ctx context.Context, m Mutation) (Value, error) {
 		return c.PromoCodeUsage.mutate(ctx, m)
 	case *ProxyMutation:
 		return c.Proxy.mutate(ctx, m)
+	case *QuotaViewerDeviceMutation:
+		return c.QuotaViewerDevice.mutate(ctx, m)
+	case *QuotaViewerDeviceSessionMutation:
+		return c.QuotaViewerDeviceSession.mutate(ctx, m)
 	case *RedeemCodeMutation:
 		return c.RedeemCode.mutate(ctx, m)
 	case *SecuritySecretMutation:
@@ -5173,6 +5191,320 @@ func (c *ProxyClient) mutate(ctx context.Context, m *ProxyMutation) (Value, erro
 	}
 }
 
+// QuotaViewerDeviceClient is a client for the QuotaViewerDevice schema.
+type QuotaViewerDeviceClient struct {
+	config
+}
+
+// NewQuotaViewerDeviceClient returns a client for the QuotaViewerDevice from the given config.
+func NewQuotaViewerDeviceClient(c config) *QuotaViewerDeviceClient {
+	return &QuotaViewerDeviceClient{config: c}
+}
+
+// Use adds a list of mutation hooks to the hooks stack.
+// A call to `Use(f, g, h)` equals to `quotaviewerdevice.Hooks(f(g(h())))`.
+func (c *QuotaViewerDeviceClient) Use(hooks ...Hook) {
+	c.hooks.QuotaViewerDevice = append(c.hooks.QuotaViewerDevice, hooks...)
+}
+
+// Intercept adds a list of query interceptors to the interceptors stack.
+// A call to `Intercept(f, g, h)` equals to `quotaviewerdevice.Intercept(f(g(h())))`.
+func (c *QuotaViewerDeviceClient) Intercept(interceptors ...Interceptor) {
+	c.inters.QuotaViewerDevice = append(c.inters.QuotaViewerDevice, interceptors...)
+}
+
+// Create returns a builder for creating a QuotaViewerDevice entity.
+func (c *QuotaViewerDeviceClient) Create() *QuotaViewerDeviceCreate {
+	mutation := newQuotaViewerDeviceMutation(c.config, OpCreate)
+	return &QuotaViewerDeviceCreate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// CreateBulk returns a builder for creating a bulk of QuotaViewerDevice entities.
+func (c *QuotaViewerDeviceClient) CreateBulk(builders ...*QuotaViewerDeviceCreate) *QuotaViewerDeviceCreateBulk {
+	return &QuotaViewerDeviceCreateBulk{config: c.config, builders: builders}
+}
+
+// MapCreateBulk creates a bulk creation builder from the given slice. For each item in the slice, the function creates
+// a builder and applies setFunc on it.
+func (c *QuotaViewerDeviceClient) MapCreateBulk(slice any, setFunc func(*QuotaViewerDeviceCreate, int)) *QuotaViewerDeviceCreateBulk {
+	rv := reflect.ValueOf(slice)
+	if rv.Kind() != reflect.Slice {
+		return &QuotaViewerDeviceCreateBulk{err: fmt.Errorf("calling to QuotaViewerDeviceClient.MapCreateBulk with wrong type %T, need slice", slice)}
+	}
+	builders := make([]*QuotaViewerDeviceCreate, rv.Len())
+	for i := 0; i < rv.Len(); i++ {
+		builders[i] = c.Create()
+		setFunc(builders[i], i)
+	}
+	return &QuotaViewerDeviceCreateBulk{config: c.config, builders: builders}
+}
+
+// Update returns an update builder for QuotaViewerDevice.
+func (c *QuotaViewerDeviceClient) Update() *QuotaViewerDeviceUpdate {
+	mutation := newQuotaViewerDeviceMutation(c.config, OpUpdate)
+	return &QuotaViewerDeviceUpdate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// UpdateOne returns an update builder for the given entity.
+func (c *QuotaViewerDeviceClient) UpdateOne(_m *QuotaViewerDevice) *QuotaViewerDeviceUpdateOne {
+	mutation := newQuotaViewerDeviceMutation(c.config, OpUpdateOne, withQuotaViewerDevice(_m))
+	return &QuotaViewerDeviceUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// UpdateOneID returns an update builder for the given id.
+func (c *QuotaViewerDeviceClient) UpdateOneID(id int64) *QuotaViewerDeviceUpdateOne {
+	mutation := newQuotaViewerDeviceMutation(c.config, OpUpdateOne, withQuotaViewerDeviceID(id))
+	return &QuotaViewerDeviceUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// Delete returns a delete builder for QuotaViewerDevice.
+func (c *QuotaViewerDeviceClient) Delete() *QuotaViewerDeviceDelete {
+	mutation := newQuotaViewerDeviceMutation(c.config, OpDelete)
+	return &QuotaViewerDeviceDelete{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// DeleteOne returns a builder for deleting the given entity.
+func (c *QuotaViewerDeviceClient) DeleteOne(_m *QuotaViewerDevice) *QuotaViewerDeviceDeleteOne {
+	return c.DeleteOneID(_m.ID)
+}
+
+// DeleteOneID returns a builder for deleting the given entity by its id.
+func (c *QuotaViewerDeviceClient) DeleteOneID(id int64) *QuotaViewerDeviceDeleteOne {
+	builder := c.Delete().Where(quotaviewerdevice.ID(id))
+	builder.mutation.id = &id
+	builder.mutation.op = OpDeleteOne
+	return &QuotaViewerDeviceDeleteOne{builder}
+}
+
+// Query returns a query builder for QuotaViewerDevice.
+func (c *QuotaViewerDeviceClient) Query() *QuotaViewerDeviceQuery {
+	return &QuotaViewerDeviceQuery{
+		config: c.config,
+		ctx:    &QueryContext{Type: TypeQuotaViewerDevice},
+		inters: c.Interceptors(),
+	}
+}
+
+// Get returns a QuotaViewerDevice entity by its id.
+func (c *QuotaViewerDeviceClient) Get(ctx context.Context, id int64) (*QuotaViewerDevice, error) {
+	return c.Query().Where(quotaviewerdevice.ID(id)).Only(ctx)
+}
+
+// GetX is like Get, but panics if an error occurs.
+func (c *QuotaViewerDeviceClient) GetX(ctx context.Context, id int64) *QuotaViewerDevice {
+	obj, err := c.Get(ctx, id)
+	if err != nil {
+		panic(err)
+	}
+	return obj
+}
+
+// QueryUser queries the user edge of a QuotaViewerDevice.
+func (c *QuotaViewerDeviceClient) QueryUser(_m *QuotaViewerDevice) *UserQuery {
+	query := (&UserClient{config: c.config}).Query()
+	query.path = func(context.Context) (fromV *sql.Selector, _ error) {
+		id := _m.ID
+		step := sqlgraph.NewStep(
+			sqlgraph.From(quotaviewerdevice.Table, quotaviewerdevice.FieldID, id),
+			sqlgraph.To(user.Table, user.FieldID),
+			sqlgraph.Edge(sqlgraph.M2O, true, quotaviewerdevice.UserTable, quotaviewerdevice.UserColumn),
+		)
+		fromV = sqlgraph.Neighbors(_m.driver.Dialect(), step)
+		return fromV, nil
+	}
+	return query
+}
+
+// QuerySessions queries the sessions edge of a QuotaViewerDevice.
+func (c *QuotaViewerDeviceClient) QuerySessions(_m *QuotaViewerDevice) *QuotaViewerDeviceSessionQuery {
+	query := (&QuotaViewerDeviceSessionClient{config: c.config}).Query()
+	query.path = func(context.Context) (fromV *sql.Selector, _ error) {
+		id := _m.ID
+		step := sqlgraph.NewStep(
+			sqlgraph.From(quotaviewerdevice.Table, quotaviewerdevice.FieldID, id),
+			sqlgraph.To(quotaviewerdevicesession.Table, quotaviewerdevicesession.FieldID),
+			sqlgraph.Edge(sqlgraph.O2M, false, quotaviewerdevice.SessionsTable, quotaviewerdevice.SessionsColumn),
+		)
+		fromV = sqlgraph.Neighbors(_m.driver.Dialect(), step)
+		return fromV, nil
+	}
+	return query
+}
+
+// Hooks returns the client hooks.
+func (c *QuotaViewerDeviceClient) Hooks() []Hook {
+	return c.hooks.QuotaViewerDevice
+}
+
+// Interceptors returns the client interceptors.
+func (c *QuotaViewerDeviceClient) Interceptors() []Interceptor {
+	return c.inters.QuotaViewerDevice
+}
+
+func (c *QuotaViewerDeviceClient) mutate(ctx context.Context, m *QuotaViewerDeviceMutation) (Value, error) {
+	switch m.Op() {
+	case OpCreate:
+		return (&QuotaViewerDeviceCreate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdate:
+		return (&QuotaViewerDeviceUpdate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdateOne:
+		return (&QuotaViewerDeviceUpdateOne{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpDelete, OpDeleteOne:
+		return (&QuotaViewerDeviceDelete{config: c.config, hooks: c.Hooks(), mutation: m}).Exec(ctx)
+	default:
+		return nil, fmt.Errorf("ent: unknown QuotaViewerDevice mutation op: %q", m.Op())
+	}
+}
+
+// QuotaViewerDeviceSessionClient is a client for the QuotaViewerDeviceSession schema.
+type QuotaViewerDeviceSessionClient struct {
+	config
+}
+
+// NewQuotaViewerDeviceSessionClient returns a client for the QuotaViewerDeviceSession from the given config.
+func NewQuotaViewerDeviceSessionClient(c config) *QuotaViewerDeviceSessionClient {
+	return &QuotaViewerDeviceSessionClient{config: c}
+}
+
+// Use adds a list of mutation hooks to the hooks stack.
+// A call to `Use(f, g, h)` equals to `quotaviewerdevicesession.Hooks(f(g(h())))`.
+func (c *QuotaViewerDeviceSessionClient) Use(hooks ...Hook) {
+	c.hooks.QuotaViewerDeviceSession = append(c.hooks.QuotaViewerDeviceSession, hooks...)
+}
+
+// Intercept adds a list of query interceptors to the interceptors stack.
+// A call to `Intercept(f, g, h)` equals to `quotaviewerdevicesession.Intercept(f(g(h())))`.
+func (c *QuotaViewerDeviceSessionClient) Intercept(interceptors ...Interceptor) {
+	c.inters.QuotaViewerDeviceSession = append(c.inters.QuotaViewerDeviceSession, interceptors...)
+}
+
+// Create returns a builder for creating a QuotaViewerDeviceSession entity.
+func (c *QuotaViewerDeviceSessionClient) Create() *QuotaViewerDeviceSessionCreate {
+	mutation := newQuotaViewerDeviceSessionMutation(c.config, OpCreate)
+	return &QuotaViewerDeviceSessionCreate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// CreateBulk returns a builder for creating a bulk of QuotaViewerDeviceSession entities.
+func (c *QuotaViewerDeviceSessionClient) CreateBulk(builders ...*QuotaViewerDeviceSessionCreate) *QuotaViewerDeviceSessionCreateBulk {
+	return &QuotaViewerDeviceSessionCreateBulk{config: c.config, builders: builders}
+}
+
+// MapCreateBulk creates a bulk creation builder from the given slice. For each item in the slice, the function creates
+// a builder and applies setFunc on it.
+func (c *QuotaViewerDeviceSessionClient) MapCreateBulk(slice any, setFunc func(*QuotaViewerDeviceSessionCreate, int)) *QuotaViewerDeviceSessionCreateBulk {
+	rv := reflect.ValueOf(slice)
+	if rv.Kind() != reflect.Slice {
+		return &QuotaViewerDeviceSessionCreateBulk{err: fmt.Errorf("calling to QuotaViewerDeviceSessionClient.MapCreateBulk with wrong type %T, need slice", slice)}
+	}
+	builders := make([]*QuotaViewerDeviceSessionCreate, rv.Len())
+	for i := 0; i < rv.Len(); i++ {
+		builders[i] = c.Create()
+		setFunc(builders[i], i)
+	}
+	return &QuotaViewerDeviceSessionCreateBulk{config: c.config, builders: builders}
+}
+
+// Update returns an update builder for QuotaViewerDeviceSession.
+func (c *QuotaViewerDeviceSessionClient) Update() *QuotaViewerDeviceSessionUpdate {
+	mutation := newQuotaViewerDeviceSessionMutation(c.config, OpUpdate)
+	return &QuotaViewerDeviceSessionUpdate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// UpdateOne returns an update builder for the given entity.
+func (c *QuotaViewerDeviceSessionClient) UpdateOne(_m *QuotaViewerDeviceSession) *QuotaViewerDeviceSessionUpdateOne {
+	mutation := newQuotaViewerDeviceSessionMutation(c.config, OpUpdateOne, withQuotaViewerDeviceSession(_m))
+	return &QuotaViewerDeviceSessionUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// UpdateOneID returns an update builder for the given id.
+func (c *QuotaViewerDeviceSessionClient) UpdateOneID(id int64) *QuotaViewerDeviceSessionUpdateOne {
+	mutation := newQuotaViewerDeviceSessionMutation(c.config, OpUpdateOne, withQuotaViewerDeviceSessionID(id))
+	return &QuotaViewerDeviceSessionUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// Delete returns a delete builder for QuotaViewerDeviceSession.
+func (c *QuotaViewerDeviceSessionClient) Delete() *QuotaViewerDeviceSessionDelete {
+	mutation := newQuotaViewerDeviceSessionMutation(c.config, OpDelete)
+	return &QuotaViewerDeviceSessionDelete{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// DeleteOne returns a builder for deleting the given entity.
+func (c *QuotaViewerDeviceSessionClient) DeleteOne(_m *QuotaViewerDeviceSession) *QuotaViewerDeviceSessionDeleteOne {
+	return c.DeleteOneID(_m.ID)
+}
+
+// DeleteOneID returns a builder for deleting the given entity by its id.
+func (c *QuotaViewerDeviceSessionClient) DeleteOneID(id int64) *QuotaViewerDeviceSessionDeleteOne {
+	builder := c.Delete().Where(quotaviewerdevicesession.ID(id))
+	builder.mutation.id = &id
+	builder.mutation.op = OpDeleteOne
+	return &QuotaViewerDeviceSessionDeleteOne{builder}
+}
+
+// Query returns a query builder for QuotaViewerDeviceSession.
+func (c *QuotaViewerDeviceSessionClient) Query() *QuotaViewerDeviceSessionQuery {
+	return &QuotaViewerDeviceSessionQuery{
+		config: c.config,
+		ctx:    &QueryContext{Type: TypeQuotaViewerDeviceSession},
+		inters: c.Interceptors(),
+	}
+}
+
+// Get returns a QuotaViewerDeviceSession entity by its id.
+func (c *QuotaViewerDeviceSessionClient) Get(ctx context.Context, id int64) (*QuotaViewerDeviceSession, error) {
+	return c.Query().Where(quotaviewerdevicesession.ID(id)).Only(ctx)
+}
+
+// GetX is like Get, but panics if an error occurs.
+func (c *QuotaViewerDeviceSessionClient) GetX(ctx context.Context, id int64) *QuotaViewerDeviceSession {
+	obj, err := c.Get(ctx, id)
+	if err != nil {
+		panic(err)
+	}
+	return obj
+}
+
+// QueryDevice queries the device edge of a QuotaViewerDeviceSession.
+func (c *QuotaViewerDeviceSessionClient) QueryDevice(_m *QuotaViewerDeviceSession) *QuotaViewerDeviceQuery {
+	query := (&QuotaViewerDeviceClient{config: c.config}).Query()
+	query.path = func(context.Context) (fromV *sql.Selector, _ error) {
+		id := _m.ID
+		step := sqlgraph.NewStep(
+			sqlgraph.From(quotaviewerdevicesession.Table, quotaviewerdevicesession.FieldID, id),
+			sqlgraph.To(quotaviewerdevice.Table, quotaviewerdevice.FieldID),
+			sqlgraph.Edge(sqlgraph.M2O, true, quotaviewerdevicesession.DeviceTable, quotaviewerdevicesession.DeviceColumn),
+		)
+		fromV = sqlgraph.Neighbors(_m.driver.Dialect(), step)
+		return fromV, nil
+	}
+	return query
+}
+
+// Hooks returns the client hooks.
+func (c *QuotaViewerDeviceSessionClient) Hooks() []Hook {
+	return c.hooks.QuotaViewerDeviceSession
+}
+
+// Interceptors returns the client interceptors.
+func (c *QuotaViewerDeviceSessionClient) Interceptors() []Interceptor {
+	return c.inters.QuotaViewerDeviceSession
+}
+
+func (c *QuotaViewerDeviceSessionClient) mutate(ctx context.Context, m *QuotaViewerDeviceSessionMutation) (Value, error) {
+	switch m.Op() {
+	case OpCreate:
+		return (&QuotaViewerDeviceSessionCreate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdate:
+		return (&QuotaViewerDeviceSessionUpdate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdateOne:
+		return (&QuotaViewerDeviceSessionUpdateOne{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpDelete, OpDeleteOne:
+		return (&QuotaViewerDeviceSessionDelete{config: c.config, hooks: c.Hooks(), mutation: m}).Exec(ctx)
+	default:
+		return nil, fmt.Errorf("ent: unknown QuotaViewerDeviceSession mutation op: %q", m.Op())
+	}
+}
+
 // RedeemCodeClient is a client for the RedeemCode schema.
 type RedeemCodeClient struct {
 	config
@@ -6548,6 +6880,22 @@ func (c *UserClient) QueryDesktopDevices(_m *User) *DesktopDeviceQuery {
 	return query
 }
 
+// QueryQuotaViewerDevices queries the quota_viewer_devices edge of a User.
+func (c *UserClient) QueryQuotaViewerDevices(_m *User) *QuotaViewerDeviceQuery {
+	query := (&QuotaViewerDeviceClient{config: c.config}).Query()
+	query.path = func(context.Context) (fromV *sql.Selector, _ error) {
+		id := _m.ID
+		step := sqlgraph.NewStep(
+			sqlgraph.From(user.Table, user.FieldID, id),
+			sqlgraph.To(quotaviewerdevice.Table, quotaviewerdevice.FieldID),
+			sqlgraph.Edge(sqlgraph.O2M, false, user.QuotaViewerDevicesTable, user.QuotaViewerDevicesColumn),
+		)
+		fromV = sqlgraph.Neighbors(_m.driver.Dialect(), step)
+		return fromV, nil
+	}
+	return query
+}
+
 // QueryDesktopDiagnostics queries the desktop_diagnostics edge of a User.
 func (c *UserClient) QueryDesktopDiagnostics(_m *User) *DesktopDiagnosticQuery {
 	query := (&DesktopDiagnosticClient{config: c.config}).Query()
@@ -7399,9 +7747,10 @@ type (
 		DesktopDiagnostic, ErrorPassthroughRule, Group, IdempotencyRecord,
 		IdentityAdoptionDecision, ModelCatalogModel, PaymentAuditLog, PaymentOrder,
 		PaymentProviderInstance, PendingAuthSession, PromoCode, PromoCodeUsage, Proxy,
-		RedeemCode, SecuritySecret, Setting, SubscriptionPlan, TLSFingerprintProfile,
-		UsageCleanupTask, UsageLog, User, UserAllowedGroup, UserAttributeDefinition,
-		UserAttributeValue, UserPlatformQuota, UserSubscription []ent.Hook
+		QuotaViewerDevice, QuotaViewerDeviceSession, RedeemCode, SecuritySecret,
+		Setting, SubscriptionPlan, TLSFingerprintProfile, UsageCleanupTask, UsageLog,
+		User, UserAllowedGroup, UserAttributeDefinition, UserAttributeValue,
+		UserPlatformQuota, UserSubscription []ent.Hook
 	}
 	inters struct {
 		APIKey, Account, AccountGroup, Announcement, AnnouncementRead, AuthIdentity,
@@ -7411,9 +7760,10 @@ type (
 		DesktopDiagnostic, ErrorPassthroughRule, Group, IdempotencyRecord,
 		IdentityAdoptionDecision, ModelCatalogModel, PaymentAuditLog, PaymentOrder,
 		PaymentProviderInstance, PendingAuthSession, PromoCode, PromoCodeUsage, Proxy,
-		RedeemCode, SecuritySecret, Setting, SubscriptionPlan, TLSFingerprintProfile,
-		UsageCleanupTask, UsageLog, User, UserAllowedGroup, UserAttributeDefinition,
-		UserAttributeValue, UserPlatformQuota, UserSubscription []ent.Interceptor
+		QuotaViewerDevice, QuotaViewerDeviceSession, RedeemCode, SecuritySecret,
+		Setting, SubscriptionPlan, TLSFingerprintProfile, UsageCleanupTask, UsageLog,
+		User, UserAllowedGroup, UserAttributeDefinition, UserAttributeValue,
+		UserPlatformQuota, UserSubscription []ent.Interceptor
 	}
 )
 

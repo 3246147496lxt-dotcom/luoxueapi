@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"math"
 	"net/http"
@@ -38,6 +39,7 @@ func TestAPIContracts(t *testing.T) {
 		headers    map[string]string
 		wantStatus int
 		wantJSON   string
+		wantJSONFn func(deps *contractDeps) string
 	}{
 		{
 			name:       "GET /api/v1/auth/me",
@@ -392,30 +394,37 @@ func TestAPIContracts(t *testing.T) {
 			name: "GET /api/v1/subscriptions",
 			setup: func(t *testing.T, deps *contractDeps) {
 				t.Helper()
+				startsAt := time.Now().UTC().Add(-24 * time.Hour).Truncate(time.Second)
+				windowStart, _, ok := service.AnchoredWeeklyWindow(startsAt, time.Now())
+				require.True(t, ok)
+				deps.expectedSubscriptionStartsAt = startsAt
+				deps.expectedWeeklyWindowStart = windowStart
 				// 普通用户订阅接口不应包含 assigned_* / notes 等管理员字段。
 				deps.userSubRepo.SetByUserID(1, []service.UserSubscription{
 					{
-						ID:              501,
-						UserID:          1,
-						GroupID:         10,
-						StartsAt:        deps.now,
-						ExpiresAt:       time.Date(2099, 1, 2, 3, 4, 5, 0, time.UTC), // 使用未来日期避免 normalizeSubscriptionStatus 标记为过期
-						Status:          service.SubscriptionStatusActive,
-						DailyUsageUSD:   1.23,
-						WeeklyUsageUSD:  2.34,
-						MonthlyUsageUSD: 3.45,
-						AssignedBy:      ptr(int64(999)),
-						AssignedAt:      deps.now,
-						Notes:           "admin-note",
-						CreatedAt:       deps.now,
-						UpdatedAt:       deps.now,
+						ID:                501,
+						UserID:            1,
+						GroupID:           10,
+						StartsAt:          startsAt,
+						ExpiresAt:         time.Date(2099, 1, 2, 3, 4, 5, 0, time.UTC), // 使用未来日期避免 normalizeSubscriptionStatus 标记为过期
+						Status:            service.SubscriptionStatusActive,
+						DailyUsageUSD:     1.23,
+						WeeklyWindowStart: &windowStart,
+						WeeklyUsageUSD:    2.34,
+						MonthlyUsageUSD:   3.45,
+						AssignedBy:        ptr(int64(999)),
+						AssignedAt:        deps.now,
+						Notes:             "admin-note",
+						CreatedAt:         deps.now,
+						UpdatedAt:         deps.now,
 					},
 				})
 			},
 			method:     http.MethodGet,
 			path:       "/api/v1/subscriptions",
 			wantStatus: http.StatusOK,
-			wantJSON: `{
+			wantJSONFn: func(deps *contractDeps) string {
+				return fmt.Sprintf(`{
 				"code": 0,
 				"message": "success",
 				"data": [
@@ -423,20 +432,24 @@ func TestAPIContracts(t *testing.T) {
 						"id": 501,
 						"user_id": 1,
 						"group_id": 10,
-						"starts_at": "2025-01-02T03:04:05Z",
+						"starts_at": %q,
 						"expires_at": "2099-01-02T03:04:05Z",
 						"status": "active",
 						"daily_window_start": null,
-						"weekly_window_start": null,
+						"weekly_window_start": %q,
 						"monthly_window_start": null,
-						"daily_usage_usd": 1.23,
+						"daily_usage_usd": 0,
 						"weekly_usage_usd": 2.34,
-						"monthly_usage_usd": 3.45,
+						"monthly_usage_usd": 0,
 						"created_at": "2025-01-02T03:04:05Z",
 						"updated_at": "2025-01-02T03:04:05Z"
 					}
 				]
 			}`,
+					deps.expectedSubscriptionStartsAt.Format(time.RFC3339),
+					deps.expectedWeeklyWindowStart.Format(time.RFC3339),
+				)
+			},
 		},
 		{
 			name: "GET /api/v1/redeem/history",
@@ -596,6 +609,7 @@ func TestAPIContracts(t *testing.T) {
 						"rate_multiplier": 1,
 						"long_context_billing_applied": false,
 						"billing_type": 0,
+							"source": "api",
 							"stream": true,
 							"duration_ms": 100,
 							"first_token_ms": 50,
@@ -1322,21 +1336,27 @@ func TestAPIContracts(t *testing.T) {
 
 			status, body := doRequest(t, deps.router, tt.method, tt.path, tt.body, tt.headers)
 			require.Equal(t, tt.wantStatus, status)
-			require.JSONEq(t, tt.wantJSON, body)
+			wantJSON := tt.wantJSON
+			if tt.wantJSONFn != nil {
+				wantJSON = tt.wantJSONFn(deps)
+			}
+			require.JSONEq(t, wantJSON, body)
 		})
 	}
 }
 
 type contractDeps struct {
-	now         time.Time
-	router      http.Handler
-	cfg         *config.Config
-	apiKeyRepo  *stubApiKeyRepo
-	groupRepo   *stubGroupRepo
-	userSubRepo *stubUserSubscriptionRepo
-	usageRepo   *stubUsageLogRepo
-	settingRepo *stubSettingRepo
-	redeemRepo  *stubRedeemCodeRepo
+	now                          time.Time
+	router                       http.Handler
+	cfg                          *config.Config
+	apiKeyRepo                   *stubApiKeyRepo
+	groupRepo                    *stubGroupRepo
+	userSubRepo                  *stubUserSubscriptionRepo
+	usageRepo                    *stubUsageLogRepo
+	settingRepo                  *stubSettingRepo
+	redeemRepo                   *stubRedeemCodeRepo
+	expectedSubscriptionStartsAt time.Time
+	expectedWeeklyWindowStart    time.Time
 }
 
 func newContractDeps(t *testing.T) *contractDeps {

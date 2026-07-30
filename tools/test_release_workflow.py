@@ -26,6 +26,9 @@ GORELEASER_DOCKERFILE = (ROOT / "Dockerfile.goreleaser").read_text(
     encoding="utf-8"
 )
 FRONTEND_PACKAGE = (ROOT / "frontend/package.json").read_text(encoding="utf-8")
+QUOTA_VIEWER_PACKAGE = (ROOT / "quota-viewer/package.json").read_text(
+    encoding="utf-8"
+)
 E2E_SCRIPT = (ROOT / "backend/scripts/e2e-test.sh").read_text(encoding="utf-8")
 SMOKE_COMPOSE = (ROOT / "deploy/docker-compose.smoke.yml").read_text(encoding="utf-8")
 INSTALL_SCRIPT = (ROOT / "deploy/install.sh").read_text(encoding="utf-8")
@@ -89,6 +92,7 @@ class ReleaseWorkflowSecurityTest(unittest.TestCase):
             "release-contract",
             "test",
             "frontend",
+            "quota-viewer",
             "docs-site",
             "embedded-web",
             "compose-smoke",
@@ -338,6 +342,40 @@ class DeliveryPipelineContractTest(unittest.TestCase):
             self.assertIn('test "$(pnpm --version)" = "9.15.9"', workflow)
         self.assertIn("pnpm audit --audit-level=high --json", SECURITY)
         self.assertNotIn("pnpm audit --prod", SECURITY)
+
+    def test_quota_viewer_is_a_reproducible_release_quality_gate(self) -> None:
+        self.assertIn('"packageManager": "pnpm@9.15.9"', QUOTA_VIEWER_PACKAGE)
+        quota_job = BACKEND_CI.split("  quota-viewer:", 1)[1].split(
+            "\n  docs-site:", 1
+        )[0]
+
+        self.assertIn("runs-on: macos-15", quota_job)
+        self.assertIn("timeout-minutes: 45", quota_job)
+        self.assertIn("node-version: '24'", quota_job)
+        self.assertIn("version: 9.15.9", quota_job)
+        self.assertIn(
+            "cache-dependency-path: quota-viewer/pnpm-lock.yaml", quota_job
+        )
+        self.assertIn('test "$(pnpm --version)" = "9.15.9"', quota_job)
+        self.assertIn(
+            "test \"$(rustc --version | awk '{print $2}')\" = \"1.96.0\"",
+            quota_job,
+        )
+        self.assertIn("pnpm install --frozen-lockfile", quota_job)
+        for command in [
+            "pnpm run typecheck",
+            "pnpm run test",
+            "pnpm run build",
+            "Production quota viewer bundle contains demo quota data",
+            "cargo fmt --all -- --check",
+            "cargo check --locked --all-targets",
+            "cargo clippy --locked --all-targets -- -D warnings",
+            "cargo test --locked --all-targets",
+        ]:
+            with self.subTest(command=command):
+                self.assertIn(command, quota_job)
+        self.assertNotIn("tauri build", quota_job)
+        self.assertNotIn("quota-viewer", RELEASE)
 
     def test_disconnected_compose_smoke_exercises_fallback(self) -> None:
         self.assertIn("internal: true", SMOKE_COMPOSE)

@@ -69,6 +69,7 @@ func (s *UserRepoSuite) mustCreateGroup(name string) *service.Group {
 	g, err := s.client.Group.Create().
 		SetName(name).
 		SetStatus(service.StatusActive).
+		SetSubscriptionType(service.SubscriptionTypeSubscription).
 		Save(s.ctx)
 	s.Require().NoError(err, "create group")
 	return groupEntityToService(g)
@@ -78,10 +79,12 @@ func (s *UserRepoSuite) mustCreateSubscription(userID, groupID int64, mutate fun
 	s.T().Helper()
 
 	now := time.Now()
+	startsAt := now.Add(-1 * time.Hour)
 	create := s.client.UserSubscription.Create().
 		SetUserID(userID).
 		SetGroupID(groupID).
-		SetStartsAt(now.Add(-1 * time.Hour)).
+		SetStartsAt(startsAt).
+		SetWeeklyWindowStart(startsAt).
 		SetExpiresAt(now.Add(24 * time.Hour)).
 		SetStatus(service.SubscriptionStatusActive).
 		SetAssignedAt(now).

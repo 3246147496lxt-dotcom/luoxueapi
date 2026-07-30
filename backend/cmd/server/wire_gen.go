@@ -14,6 +14,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/handler/admin"
 	"github.com/Wei-Shaw/sub2api/internal/lifecycle"
 	"github.com/Wei-Shaw/sub2api/internal/modules/desktop"
+	"github.com/Wei-Shaw/sub2api/internal/modules/quotaauth"
 	"github.com/Wei-Shaw/sub2api/internal/payment"
 	"github.com/Wei-Shaw/sub2api/internal/repository"
 	"github.com/Wei-Shaw/sub2api/internal/server"
@@ -304,13 +305,22 @@ func initializeApplication(buildInfo handler.BuildInfo, cfg *config.Config, entC
 	chatHistoryService := service.NewChatHistoryService(chatHistoryRepository)
 	chatHandler := handler.ProvideChatHandler(chatService, chatAttemptService, billingReceiptService, chatHistoryService, openAIGatewayHandler)
 	desktopHandler := handler.NewDesktopHandler(desktopService)
+	quotaauthPairingStore := repository.NewQuotaAuthPairingStore(redisClient)
+	quotaauthRepository := repository.NewQuotaAuthRepository(db)
+	quotaauthService := quotaauth.NewService(quotaauthPairingStore, quotaauthRepository, cfg)
+	quotaAuthHandler := handler.NewQuotaAuthHandler(quotaauthService)
+	quotaOverviewRepository := repository.NewQuotaOverviewRepository(db)
+	quotaOverviewConsistencyChecker := service.ProvideBillingQuotaOverviewConsistencyChecker(billingCache)
+	quotaOverviewService := service.ProvideQuotaOverviewService(quotaOverviewRepository, quotaOverviewConsistencyChecker, cfg)
+	quotaOverviewHandler := handler.NewQuotaOverviewHandler(quotaOverviewService)
 	idempotencyCoordinator := service.ProvideIdempotencyCoordinator(idempotencyRepository, cfg)
 	idempotencyCleanupService := service.ProvideIdempotencyCleanupService(idempotencyRepository, cfg)
-	handlers := handler.ProvideHandlers(authHandler, userHandler, apiKeyHandler, usageHandler, redeemHandler, subscriptionHandler, announcementHandler, channelMonitorUserHandler, adminHandlers, gatewayHandler, openAIGatewayHandler, handlerSettingHandler, totpHandler, handlerPaymentHandler, paymentWebhookHandler, availableChannelHandler, asyncImageHandler, batchImageHandler, handlerModelCatalogHandler, handlerDocumentationHandler, chatHandler, desktopHandler, idempotencyCoordinator, idempotencyCleanupService)
+	handlers := handler.ProvideHandlers(authHandler, userHandler, apiKeyHandler, usageHandler, redeemHandler, subscriptionHandler, announcementHandler, channelMonitorUserHandler, adminHandlers, gatewayHandler, openAIGatewayHandler, handlerSettingHandler, totpHandler, handlerPaymentHandler, paymentWebhookHandler, availableChannelHandler, asyncImageHandler, batchImageHandler, handlerModelCatalogHandler, handlerDocumentationHandler, chatHandler, desktopHandler, quotaAuthHandler, quotaOverviewHandler, idempotencyCoordinator, idempotencyCleanupService)
 	jwtAuthMiddleware := middleware.NewJWTAuthMiddleware(authService, userService, settingService, auditLogService)
 	adminAuthMiddleware := middleware.NewAdminAuthMiddleware(authService, userService, settingService, auditLogService)
 	apiKeyAuthMiddleware := middleware.NewAPIKeyAuthMiddleware(apiKeyService, subscriptionService, cfg)
 	desktopAuthMiddleware := middleware.NewDesktopAuthMiddleware(desktopService)
+	quotaAuthMiddleware := middleware.NewQuotaAuthMiddleware(quotaauthService)
 	auditLogMiddleware := middleware.NewAuditLogMiddleware(auditLogService)
 	stepUpAuthMiddleware := middleware.NewStepUpAuthMiddleware(totpService, userService)
 	routerSettingsRuntime := server.ProvideRouterSettingsRuntime(settingService)
@@ -335,7 +345,7 @@ func initializeApplication(buildInfo handler.BuildInfo, cfg *config.Config, entC
 	channelMonitorRunner := service.ProvideChannelMonitorRunner(channelMonitorService, settingService)
 	supervisor := buildApplicationSupervisor(pricingService, settingService, routerSettingsRuntime, opsService, idempotencyCoordinator, subscriptionService, oAuthService, openAIOAuthService, geminiOAuthService, antigravityOAuthService, grokOAuthService, openAIGatewayService, digestSessionStore, tlsFingerprintProfileService, errorPassthroughService, timingWheelService, deferredService, userPlatformQuotaUsageFlusher, billingCacheService, auditLogService, opsSystemLogSink, emailQueueService, usageLogBatchRuntime, usageRecordWorkerPool, batchImageWorkerRuntime, schedulerSnapshotService, applicationFacade, apiKeyService, concurrencyService, userMessageQueueService, contentModerationService, batchImageCleanupService, idempotencyCleanupService, desktopCleanupService, chatAttemptService, dashboardAggregationService, usageCleanupService, opsMetricsCollector, opsAggregationService, opsAlertEvaluatorService, opsCleanupService, opsScheduledReportService, tokenRefreshService, accountExpiryService, proxyExpiryService, subscriptionExpiryService, proxyHealthService, scheduledTestRunnerService, backupService, paymentOrderExpiryService, channelMonitorRunner, upstreamBillingProbeService, redisClient, cfg)
 	readinessProbe := server.ProvideReadinessProbe(db, redisClient, schedulerSnapshotService, cfg, supervisor)
-	engine := server.ProvideRouter(cfg, handlers, jwtAuthMiddleware, adminAuthMiddleware, apiKeyAuthMiddleware, desktopAuthMiddleware, auditLogMiddleware, stepUpAuthMiddleware, apiKeyService, subscriptionService, opsService, settingService, redisClient, readinessProbe, routerSettingsRuntime)
+	engine := server.ProvideRouter(cfg, handlers, jwtAuthMiddleware, adminAuthMiddleware, apiKeyAuthMiddleware, desktopAuthMiddleware, quotaAuthMiddleware, auditLogMiddleware, stepUpAuthMiddleware, apiKeyService, subscriptionService, opsService, settingService, redisClient, readinessProbe, routerSettingsRuntime)
 	requestDrainer := server.NewRequestDrainer()
 	httpServer := server.ProvideHTTPServer(cfg, engine, requestDrainer)
 	v := provideCleanup(entClient, redisClient)

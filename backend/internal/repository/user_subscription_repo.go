@@ -27,24 +27,29 @@ func (r *userSubscriptionRepository) Create(ctx context.Context, sub *service.Us
 		return service.ErrSubscriptionNilInput
 	}
 
+	startsAt := sub.StartsAt
+	if startsAt.IsZero() {
+		startsAt = time.Now()
+	}
+	weeklyWindowStart := sub.WeeklyWindowStart
+	if weeklyWindowStart == nil {
+		weeklyWindowStart = &startsAt
+	}
+
 	client := clientFromContext(ctx, r.client)
 	builder := client.UserSubscription.Create().
 		SetUserID(sub.UserID).
 		SetGroupID(sub.GroupID).
+		SetStartsAt(startsAt).
 		SetExpiresAt(sub.ExpiresAt).
 		SetNillableDailyWindowStart(sub.DailyWindowStart).
-		SetNillableWeeklyWindowStart(sub.WeeklyWindowStart).
+		SetNillableWeeklyWindowStart(weeklyWindowStart).
 		SetNillableMonthlyWindowStart(sub.MonthlyWindowStart).
 		SetDailyUsageUsd(sub.DailyUsageUSD).
 		SetWeeklyUsageUsd(sub.WeeklyUsageUSD).
 		SetMonthlyUsageUsd(sub.MonthlyUsageUSD).
 		SetNillableAssignedBy(sub.AssignedBy)
 
-	if sub.StartsAt.IsZero() {
-		builder.SetStartsAt(time.Now())
-	} else {
-		builder.SetStartsAt(sub.StartsAt)
-	}
 	if sub.Status != "" {
 		builder.SetStatus(sub.Status)
 	}
@@ -359,9 +364,7 @@ func (r *userSubscriptionRepository) UpdateNotes(ctx context.Context, subscripti
 func (r *userSubscriptionRepository) ActivateWindows(ctx context.Context, id int64, start time.Time) error {
 	client := clientFromContext(ctx, r.client)
 	_, err := client.UserSubscription.UpdateOneID(id).
-		SetDailyWindowStart(start).
 		SetWeeklyWindowStart(start).
-		SetMonthlyWindowStart(start).
 		Save(ctx)
 	return translatePersistenceError(err, service.ErrSubscriptionNotFound, nil)
 }
@@ -452,17 +455,33 @@ func (r *userSubscriptionRepository) translateConditionalWindowReset(ctx context
 // 此处仅负责记录实际消费，确保消费数据的完整性。
 func (r *userSubscriptionRepository) IncrementUsage(ctx context.Context, id int64, costUSD float64) error {
 	const updateSQL = `
+		WITH anchored AS (
+			SELECT
+				us.id,
+				us.starts_at
+					+ FLOOR(
+						GREATEST(
+							0,
+							EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP - us.starts_at))
+						) / 604800
+					) * INTERVAL '7 days' AS period_start
+			FROM user_subscriptions us
+			JOIN groups g ON g.id = us.group_id AND g.deleted_at IS NULL
+			WHERE us.id = $2
+				AND us.deleted_at IS NULL
+				AND g.subscription_type = 'subscription'
+		)
 		UPDATE user_subscriptions us
 		SET
-			daily_usage_usd = us.daily_usage_usd + $1,
-			weekly_usage_usd = us.weekly_usage_usd + $1,
-			monthly_usage_usd = us.monthly_usage_usd + $1,
+			weekly_usage_usd = CASE
+				WHEN us.weekly_window_start = anchored.period_start
+					THEN us.weekly_usage_usd + $1
+				ELSE $1
+			END,
+			weekly_window_start = anchored.period_start,
 			updated_at = NOW()
-		FROM groups g
-		WHERE us.id = $2
-			AND us.deleted_at IS NULL
-			AND us.group_id = g.id
-			AND g.deleted_at IS NULL
+		FROM anchored
+		WHERE us.id = anchored.id
 	`
 
 	client := clientFromContext(ctx, r.client)

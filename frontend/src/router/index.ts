@@ -230,6 +230,29 @@ const routes: RouteRecordRaw[] = [
     }
   },
   {
+    path: '/quota-viewer/authorize',
+    name: 'QuotaViewerAuthorize',
+    component: () => import('@/views/user/QuotaViewerAuthorizeView.vue'),
+    meta: {
+      requiresAuth: true,
+      requiresAdmin: false,
+      title: 'Quota Viewer Authorization',
+      titleKey: 'quotaViewerAuthorization.pageTitle'
+    }
+  },
+  {
+    path: '/quota-viewer/devices',
+    name: 'QuotaViewerDevices',
+    component: () => import('@/views/user/QuotaViewerDevicesView.vue'),
+    meta: {
+      requiresAuth: true,
+      requiresAdmin: false,
+      title: 'Quota Viewer Devices',
+      titleKey: 'quotaViewerDevices.title',
+      descriptionKey: 'quotaViewerDevices.description'
+    }
+  },
+  {
     path: '/desktop/devices',
     name: 'DesktopDevices',
     component: () => import('@/views/user/DesktopDevicesView.vue'),

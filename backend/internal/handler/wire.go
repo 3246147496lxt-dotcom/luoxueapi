@@ -155,6 +155,8 @@ func ProvideHandlers(
 	documentationHandler *DocumentationHandler,
 	chatHandler *ChatHandler,
 	desktopHandler *DesktopHandler,
+	quotaAuthHandler *QuotaAuthHandler,
+	quotaOverviewHandler *QuotaOverviewHandler,
 	_ *service.IdempotencyCoordinator,
 	_ *service.IdempotencyCleanupService,
 ) *Handlers {
@@ -181,6 +183,8 @@ func ProvideHandlers(
 		Documentation:    documentationHandler,
 		Chat:             chatHandler,
 		Desktop:          desktopHandler,
+		QuotaAuth:        quotaAuthHandler,
+		QuotaOverview:    quotaOverviewHandler,
 	}
 }
 
@@ -208,6 +212,8 @@ var ProviderSet = wire.NewSet(
 	NewDocumentationHandler,
 	ProvideChatHandler,
 	NewDesktopHandler,
+	NewQuotaAuthHandler,
+	NewQuotaOverviewHandler,
 	ProvideAccountAdminUseCases,
 	ProvideGroupAdminUseCases,
 	ProvideUserAdminUseCases,

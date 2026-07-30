@@ -289,7 +289,7 @@ func TestOpenAIGatewayServiceRecordUsage_ZeroUsageStillWritesUsageLog(t *testing
 			Model:     "gpt-5.1",
 			Duration:  time.Second,
 		},
-		APIKey:        &APIKey{ID: 1000, Quota: 100, Group: &Group{RateMultiplier: 1}},
+		APIKey:        &APIKey{ID: 1000, Quota: 100},
 		User:          &User{ID: 2000},
 		Account:       &Account{ID: 3000, Type: AccountTypeAPIKey},
 		APIKeyService: quotaSvc,
@@ -342,7 +342,7 @@ func TestOpenAIGatewayServiceRecordUsage_MissingPricingRecordsZeroCostUsageLog(t
 			Model:    "pricing-missing-test-model",
 			Duration: time.Second,
 		},
-		APIKey:        &APIKey{ID: 1002, Quota: 100, Group: &Group{RateMultiplier: 1}},
+		APIKey:        &APIKey{ID: 1002, Quota: 100},
 		User:          &User{ID: 2002},
 		Account:       &Account{ID: 3002, Type: AccountTypeAPIKey},
 		APIKeyService: quotaSvc,
@@ -400,6 +400,7 @@ func TestOpenAIGatewayServiceRecordUsage_UsesUserSpecificGroupRate(t *testing.T)
 			Group: &Group{
 				ID:             groupID,
 				RateMultiplier: groupRate,
+				Hydrated:       true,
 			},
 		},
 		User:    &User{ID: 2001},
@@ -421,6 +422,7 @@ func TestOpenAIGatewayServiceRecordUsage_UsesUserSpecificGroupRate(t *testing.T)
 
 func TestOpenAIGatewayServiceRecordUsage_PeakRateAffectsTokenModeImageOutputTokens(t *testing.T) {
 	groupID := int64(14)
+	subscriptionID := int64(24)
 	groupRate := 1.0
 	usage := OpenAIUsage{
 		InputTokens:       1000,
@@ -444,19 +446,22 @@ func TestOpenAIGatewayServiceRecordUsage_PeakRateAffectsTokenModeImageOutputToke
 		},
 		APIKey: &APIKey{
 			ID:      1004,
+			UserID:  2004,
 			GroupID: i64p(groupID),
 			Group: &Group{
 				ID:                 groupID,
 				RateMultiplier:     groupRate,
-				SubscriptionType:   "subscription",
+				Hydrated:           true,
+				SubscriptionType:   SubscriptionTypeSubscription,
 				PeakRateEnabled:    true,
 				PeakStart:          "00:00",
 				PeakEnd:            "23:59",
 				PeakRateMultiplier: 3.0,
 			},
 		},
-		User:    &User{ID: 2004},
-		Account: &Account{ID: 3004},
+		User:         &User{ID: 2004},
+		Account:      &Account{ID: 3004},
+		Subscription: &UserSubscription{ID: subscriptionID, UserID: 2004, GroupID: groupID},
 	})
 
 	require.NoError(t, err)
@@ -482,7 +487,8 @@ func TestOpenAIGatewayServiceRecordUsage_PeakRateAffectsTokenModeImageOutputToke
 	require.InDelta(t, expected.TotalCost, usageRepo.lastLog.TotalCost, 1e-12)
 	require.InDelta(t, expected.ImageOutputCost, usageRepo.lastLog.ImageOutputCost, 1e-12)
 	require.InDelta(t, expectedActual, usageRepo.lastLog.ActualCost, 1e-12)
-	require.InDelta(t, expectedActual, userRepo.lastAmount, 1e-12)
+	require.Equal(t, 1, subRepo.incrementCalls)
+	require.Zero(t, userRepo.deductCalls)
 }
 
 func TestOpenAIGatewayServiceRecordUsage_IncludesEndpointMetadata(t *testing.T) {
@@ -502,10 +508,7 @@ func TestOpenAIGatewayServiceRecordUsage_IncludesEndpointMetadata(t *testing.T) 
 			Model:    "gpt-5.1",
 			Duration: time.Second,
 		},
-		APIKey: &APIKey{
-			ID:    1002,
-			Group: &Group{RateMultiplier: 1},
-		},
+		APIKey:           &APIKey{ID: 1002},
 		User:             &User{ID: 2002},
 		Account:          &Account{ID: 3002},
 		InboundEndpoint:  " /v1/chat/completions ",
@@ -544,6 +547,7 @@ func TestOpenAIGatewayServiceRecordUsage_FallsBackToGroupDefaultRateOnResolverEr
 			Group: &Group{
 				ID:             groupID,
 				RateMultiplier: groupRate,
+				Hydrated:       true,
 			},
 		},
 		User:    &User{ID: 2002},
@@ -583,6 +587,7 @@ func TestOpenAIGatewayServiceRecordUsage_FallsBackToGroupDefaultRateWhenResolver
 			Group: &Group{
 				ID:             groupID,
 				RateMultiplier: groupRate,
+				Hydrated:       true,
 			},
 		},
 		User:    &User{ID: 2003},
@@ -1309,7 +1314,7 @@ func TestOpenAIGatewayServiceRecordUsage_UsesRequestedModelAndUpstreamModelMetad
 			Duration:     2 * time.Second,
 			FirstTokenMs: func() *int { v := 120; return &v }(),
 		},
-		APIKey:    &APIKey{ID: 10, GroupID: i64p(11), Group: &Group{ID: 11, RateMultiplier: 1.2}},
+		APIKey:    &APIKey{ID: 10, GroupID: i64p(11), Group: &Group{ID: 11, RateMultiplier: 1.2, Hydrated: true}},
 		User:      &User{ID: 20},
 		Account:   &Account{ID: 30},
 		UserAgent: "codex-cli/1.0",
@@ -1618,7 +1623,7 @@ func TestOpenAIGatewayServiceRecordUsage_SubscriptionBillingSetsSubscriptionFiel
 	userRepo := &openAIRecordUsageUserRepoStub{}
 	subRepo := &openAIRecordUsageSubRepoStub{}
 	svc := newOpenAIRecordUsageServiceForTest(usageRepo, userRepo, subRepo, nil)
-	subscription := &UserSubscription{ID: 99}
+	subscription := &UserSubscription{ID: 99, UserID: 200, GroupID: 88}
 
 	err := svc.RecordUsage(context.Background(), &OpenAIRecordUsageInput{
 		Result: &OpenAIForwardResult{
@@ -1627,7 +1632,7 @@ func TestOpenAIGatewayServiceRecordUsage_SubscriptionBillingSetsSubscriptionFiel
 			Model:     "gpt-5.1",
 			Duration:  time.Second,
 		},
-		APIKey:       &APIKey{ID: 100, GroupID: i64p(88), Group: &Group{ID: 88, SubscriptionType: SubscriptionTypeSubscription, RateMultiplier: 1.0}},
+		APIKey:       &APIKey{ID: 100, UserID: 200, GroupID: i64p(88), Group: &Group{ID: 88, SubscriptionType: SubscriptionTypeSubscription, RateMultiplier: 1.0, Hydrated: true}},
 		User:         &User{ID: 200},
 		Account:      &Account{ID: 300},
 		Subscription: subscription,
@@ -1804,6 +1809,7 @@ func TestOpenAIGatewayServiceRecordUsage_EmptyImageSizeDefaultsBeforeBillingAndP
 			GroupID: i64p(groupID),
 			Group: &Group{
 				ID:             groupID,
+				Hydrated:       true,
 				RateMultiplier: 1.0,
 				ImagePrice2K:   &imagePrice2K,
 			},
@@ -1848,6 +1854,7 @@ func TestOpenAIGatewayServiceRecordUsage_OutputImageSizeWinsBeforeBillingAndPers
 			GroupID: i64p(groupID),
 			Group: &Group{
 				ID:             groupID,
+				Hydrated:       true,
 				RateMultiplier: 1.0,
 				ImagePrice1K:   &imagePrice1K,
 				ImagePrice4K:   &imagePrice4K,
@@ -1899,6 +1906,7 @@ func TestOpenAIGatewayServiceRecordUsage_ImageUsesPerImageBillingEvenWithUsageTo
 			GroupID: i64p(groupID),
 			Group: &Group{
 				ID:             groupID,
+				Hydrated:       true,
 				RateMultiplier: 1.0,
 				ImagePrice1K:   &imagePrice,
 			},
@@ -1939,6 +1947,7 @@ func TestOpenAIGatewayServiceRecordUsage_ImageSharedMultiplierPreservesExistingB
 			GroupID: i64p(groupID),
 			Group: &Group{
 				ID:                   groupID,
+				Hydrated:             true,
 				RateMultiplier:       0.15,
 				ImageRateIndependent: false,
 				ImageRateMultiplier:  1,
@@ -1984,6 +1993,7 @@ func TestOpenAIGatewayServiceRecordUsage_ImageSharedMultiplierUsesUserGroupOverr
 			GroupID: i64p(groupID),
 			Group: &Group{
 				ID:                   groupID,
+				Hydrated:             true,
 				RateMultiplier:       0.15,
 				ImageRateIndependent: false,
 				ImageRateMultiplier:  1,
@@ -2021,6 +2031,7 @@ func TestOpenAIGatewayServiceRecordUsage_ImageIndependentMultiplierUsesImageRate
 			GroupID: i64p(groupID),
 			Group: &Group{
 				ID:                   groupID,
+				Hydrated:             true,
 				RateMultiplier:       0.15,
 				ImageRateIndependent: true,
 				ImageRateMultiplier:  1,
@@ -2065,6 +2076,7 @@ func TestGrokVideoBillingUsesSeparateVideoRateMultiplier(t *testing.T) {
 			GroupID: i64p(groupID),
 			Group: &Group{
 				ID:                   groupID,
+				Hydrated:             true,
 				Platform:             PlatformGrok,
 				RateMultiplier:       0.15,
 				ImageRateIndependent: true,
@@ -2117,6 +2129,7 @@ func TestOpenAIGatewayServiceRecordUsage_GrokVideoUsesDefaultRateCard(t *testing
 			GroupID: i64p(groupID),
 			Group: &Group{
 				ID:             groupID,
+				Hydrated:       true,
 				Platform:       PlatformGrok,
 				RateMultiplier: 1,
 			},
@@ -2161,6 +2174,7 @@ func TestOpenAIGatewayServiceRecordUsage_GroupImagePriceOverridesChannelImagePri
 			GroupID: i64p(groupID),
 			Group: &Group{
 				ID:                   groupID,
+				Hydrated:             true,
 				Platform:             PlatformGrok,
 				RateMultiplier:       1,
 				ImageRateIndependent: true,
@@ -2206,6 +2220,7 @@ func TestOpenAIGatewayServiceRecordUsage_GroupVideoPriceOverridesChannelImagePri
 			GroupID: i64p(groupID),
 			Group: &Group{
 				ID:                   groupID,
+				Hydrated:             true,
 				Platform:             PlatformGrok,
 				RateMultiplier:       1,
 				VideoRateIndependent: true,
@@ -2234,6 +2249,7 @@ func TestOpenAIGatewayServiceRecordUsage_HydratesGroupImagePriceWhenAuthSnapshot
 	svc := newOpenAIRecordUsageServiceForTest(usageRepo, &openAIRecordUsageUserRepoStub{}, &openAIRecordUsageSubRepoStub{}, nil)
 	channelService := &ChannelService{groupRepo: &openAIMediaPriceGroupRepoStub{group: &Group{
 		ID:             groupID,
+		Hydrated:       true,
 		Platform:       PlatformGrok,
 		RateMultiplier: 1,
 		ImagePrice2K:   &groupImagePrice2K,
@@ -2242,7 +2258,7 @@ func TestOpenAIGatewayServiceRecordUsage_HydratesGroupImagePriceWhenAuthSnapshot
 	channelCache.loadedAt = time.Now()
 	channelService.cache.Store(channelCache)
 	svc.channelService = channelService
-	refreshed := svc.apiKeyWithFreshGroupMediaPricing(context.Background(), &APIKey{GroupID: i64p(groupID), Group: &Group{ID: groupID}})
+	refreshed := svc.apiKeyWithFreshGroupMediaPricing(context.Background(), &APIKey{GroupID: i64p(groupID), Group: &Group{ID: groupID, Hydrated: true}})
 	require.NotNil(t, refreshed.Group.ImagePrice2K)
 
 	err := svc.RecordUsage(context.Background(), &OpenAIRecordUsageInput{
@@ -2259,6 +2275,7 @@ func TestOpenAIGatewayServiceRecordUsage_HydratesGroupImagePriceWhenAuthSnapshot
 			GroupID: i64p(groupID),
 			Group: &Group{
 				ID:             groupID,
+				Hydrated:       true,
 				Platform:       PlatformGrok,
 				RateMultiplier: 1,
 			},
@@ -2281,6 +2298,7 @@ func TestOpenAIGatewayServiceRecordUsage_HydratesGroupVideoPriceWhenAuthSnapshot
 	svc := newOpenAIRecordUsageServiceForTest(usageRepo, &openAIRecordUsageUserRepoStub{}, &openAIRecordUsageSubRepoStub{}, nil)
 	channelService := &ChannelService{groupRepo: &openAIMediaPriceGroupRepoStub{group: &Group{
 		ID:             groupID,
+		Hydrated:       true,
 		Platform:       PlatformGrok,
 		RateMultiplier: 1,
 		VideoPrice720P: &groupVideoPrice720P,
@@ -2289,7 +2307,7 @@ func TestOpenAIGatewayServiceRecordUsage_HydratesGroupVideoPriceWhenAuthSnapshot
 	channelCache.loadedAt = time.Now()
 	channelService.cache.Store(channelCache)
 	svc.channelService = channelService
-	refreshed := svc.apiKeyWithFreshGroupMediaPricing(context.Background(), &APIKey{GroupID: i64p(groupID), Group: &Group{ID: groupID}})
+	refreshed := svc.apiKeyWithFreshGroupMediaPricing(context.Background(), &APIKey{GroupID: i64p(groupID), Group: &Group{ID: groupID, Hydrated: true}})
 	require.NotNil(t, refreshed.Group.VideoPrice720P)
 
 	err := svc.RecordUsage(context.Background(), &OpenAIRecordUsageInput{
@@ -2308,6 +2326,7 @@ func TestOpenAIGatewayServiceRecordUsage_HydratesGroupVideoPriceWhenAuthSnapshot
 			GroupID: i64p(groupID),
 			Group: &Group{
 				ID:             groupID,
+				Hydrated:       true,
 				Platform:       PlatformGrok,
 				RateMultiplier: 1,
 			},
@@ -2350,6 +2369,7 @@ func TestOpenAIGatewayServiceRecordUsage_GrokVideoWithTokenChannelPricingKeepsVi
 			GroupID: i64p(groupID),
 			Group: &Group{
 				ID:             groupID,
+				Hydrated:       true,
 				Platform:       PlatformGrok,
 				RateMultiplier: 1,
 			},
@@ -2390,6 +2410,7 @@ func TestOpenAIGatewayServiceRecordUsage_ChannelImageBillingUsesImageCountAndSha
 			GroupID: i64p(groupID),
 			Group: &Group{
 				ID:                   groupID,
+				Hydrated:             true,
 				RateMultiplier:       0.15,
 				ImageRateIndependent: false,
 				ImageRateMultiplier:  1,
@@ -2428,6 +2449,7 @@ func TestOpenAIGatewayServiceRecordUsage_ChannelImageBillingUsesImageCountAndInd
 			GroupID: i64p(groupID),
 			Group: &Group{
 				ID:                   groupID,
+				Hydrated:             true,
 				RateMultiplier:       0.15,
 				ImageRateIndependent: true,
 				ImageRateMultiplier:  1,
@@ -2604,7 +2626,7 @@ func TestRecordUsageMarksCyberRequestType(t *testing.T) {
 			Duration: time.Second,
 			Usage:    OpenAIUsage{InputTokens: 100, OutputTokens: 0},
 		},
-		APIKey:  &APIKey{ID: 2, Group: &Group{RateMultiplier: 1}},
+		APIKey:  &APIKey{ID: 2},
 		User:    &User{ID: 1},
 		Account: &Account{ID: 3},
 	}

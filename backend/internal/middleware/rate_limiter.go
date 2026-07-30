@@ -118,7 +118,7 @@ func (r *RateLimiter) LimitWithOptions(key string, limit int, window time.Durati
 
 		// 超过限制
 		if count > int64(limit) {
-			abortRateLimit(c)
+			abortRateLimit(c, window)
 			return
 		}
 
@@ -134,7 +134,12 @@ func windowTTLMillis(window time.Duration) int64 {
 	return ttl
 }
 
-func abortRateLimit(c *gin.Context) {
+func abortRateLimit(c *gin.Context, retryAfter time.Duration) {
+	retryAfterSeconds := int64((retryAfter + time.Second - 1) / time.Second)
+	if retryAfterSeconds < 1 {
+		retryAfterSeconds = 1
+	}
+	c.Header("Retry-After", strconv.FormatInt(retryAfterSeconds, 10))
 	c.AbortWithStatusJSON(http.StatusTooManyRequests, gin.H{
 		"error":   "rate limit exceeded",
 		"message": "Too many requests, please try again later",
@@ -144,7 +149,7 @@ func abortRateLimit(c *gin.Context) {
 func abortRateLimitBackendFailure(c *gin.Context, opts RateLimitOptions) {
 	status := opts.BackendFailureStatus
 	if status == 0 && opts.BackendFailureReason == "" {
-		abortRateLimit(c)
+		abortRateLimit(c, time.Second)
 		return
 	}
 	if status < http.StatusBadRequest || status > 599 {

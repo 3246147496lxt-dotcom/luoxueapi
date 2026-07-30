@@ -989,6 +989,12 @@ func (s *BatchImagePublicService) ensureGroupAllowsBatchImage(ctx context.Contex
 	if !group.AllowBatchImageGeneration {
 		return ErrBatchImageGroupDisabled
 	}
+	// Batch jobs currently have wallet-only hold/capture settlement. Until that
+	// pipeline carries an explicit subscription window, membership keys must be
+	// rejected instead of silently freezing or charging account balance.
+	if group.IsSubscriptionType() {
+		return ErrBatchImageGroupDisabled
+	}
 	if group.Platform != PlatformGemini {
 		return ErrBatchImageGroupDisabled
 	}

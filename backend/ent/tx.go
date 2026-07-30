@@ -72,6 +72,10 @@ type Tx struct {
 	PromoCodeUsage *PromoCodeUsageClient
 	// Proxy is the client for interacting with the Proxy builders.
 	Proxy *ProxyClient
+	// QuotaViewerDevice is the client for interacting with the QuotaViewerDevice builders.
+	QuotaViewerDevice *QuotaViewerDeviceClient
+	// QuotaViewerDeviceSession is the client for interacting with the QuotaViewerDeviceSession builders.
+	QuotaViewerDeviceSession *QuotaViewerDeviceSessionClient
 	// RedeemCode is the client for interacting with the RedeemCode builders.
 	RedeemCode *RedeemCodeClient
 	// SecuritySecret is the client for interacting with the SecuritySecret builders.
@@ -258,6 +262,8 @@ func (tx *Tx) init() {
 	tx.PromoCode = NewPromoCodeClient(tx.config)
 	tx.PromoCodeUsage = NewPromoCodeUsageClient(tx.config)
 	tx.Proxy = NewProxyClient(tx.config)
+	tx.QuotaViewerDevice = NewQuotaViewerDeviceClient(tx.config)
+	tx.QuotaViewerDeviceSession = NewQuotaViewerDeviceSessionClient(tx.config)
 	tx.RedeemCode = NewRedeemCodeClient(tx.config)
 	tx.SecuritySecret = NewSecuritySecretClient(tx.config)
 	tx.Setting = NewSettingClient(tx.config)

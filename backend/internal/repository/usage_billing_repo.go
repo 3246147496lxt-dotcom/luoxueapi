@@ -275,7 +275,7 @@ func (r *usageBillingRepository) applyBatchImageBalanceHold(
 
 func (r *usageBillingRepository) applyUsageBillingEffects(ctx context.Context, tx *sql.Tx, cmd *service.UsageBillingCommand, result *service.UsageBillingApplyResult) error {
 	if cmd.SubscriptionCost > 0 && cmd.SubscriptionID != nil {
-		if err := incrementUsageBillingSubscription(ctx, tx, *cmd.SubscriptionID, cmd.SubscriptionCost); err != nil {
+		if err := incrementUsageBillingSubscription(ctx, tx, *cmd.SubscriptionID, cmd.UserID, cmd.APIKeyID, cmd.SubscriptionCost); err != nil {
 			return err
 		}
 	}
@@ -315,21 +315,45 @@ func (r *usageBillingRepository) applyUsageBillingEffects(ctx context.Context, t
 	return nil
 }
 
-func incrementUsageBillingSubscription(ctx context.Context, tx *sql.Tx, subscriptionID int64, costUSD float64) error {
+func incrementUsageBillingSubscription(ctx context.Context, tx *sql.Tx, subscriptionID, userID, apiKeyID int64, costUSD float64) error {
 	const updateSQL = `
+		WITH anchored AS (
+			SELECT
+				us.id,
+				us.starts_at
+					+ FLOOR(
+						GREATEST(
+							0,
+							EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP - us.starts_at))
+						) / 604800
+					) * INTERVAL '7 days' AS period_start
+			FROM user_subscriptions us
+			JOIN groups g
+				ON g.id = us.group_id
+				AND g.deleted_at IS NULL
+				AND g.subscription_type = 'subscription'
+			JOIN api_keys ak
+				ON ak.id = $4
+				AND ak.deleted_at IS NULL
+				AND ak.user_id = us.user_id
+				AND ak.group_id = us.group_id
+			WHERE us.id = $2
+				AND us.user_id = $3
+				AND us.deleted_at IS NULL
+		)
 		UPDATE user_subscriptions us
 		SET
-			daily_usage_usd = us.daily_usage_usd + $1,
-			weekly_usage_usd = us.weekly_usage_usd + $1,
-			monthly_usage_usd = us.monthly_usage_usd + $1,
+			weekly_usage_usd = CASE
+				WHEN us.weekly_window_start = anchored.period_start
+					THEN us.weekly_usage_usd + $1
+				ELSE $1
+			END,
+			weekly_window_start = anchored.period_start,
 			updated_at = NOW()
-		FROM groups g
-		WHERE us.id = $2
-			AND us.deleted_at IS NULL
-			AND us.group_id = g.id
-			AND g.deleted_at IS NULL
+		FROM anchored
+		WHERE us.id = anchored.id
 	`
-	res, err := tx.ExecContext(ctx, updateSQL, costUSD, subscriptionID)
+	res, err := tx.ExecContext(ctx, updateSQL, costUSD, subscriptionID, userID, apiKeyID)
 	if err != nil {
 		return err
 	}

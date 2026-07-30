@@ -172,4 +172,5 @@ func TestRateLimiterSuccessAndLimit(t *testing.T) {
 	recorder = httptest.NewRecorder()
 	router.ServeHTTP(recorder, req)
 	require.Equal(t, http.StatusTooManyRequests, recorder.Code)
+	require.Equal(t, "1", recorder.Header().Get("Retry-After"))
 }

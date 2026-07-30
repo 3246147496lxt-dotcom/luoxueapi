@@ -34,6 +34,8 @@ import (
 	"github.com/Wei-Shaw/sub2api/ent/promocode"
 	"github.com/Wei-Shaw/sub2api/ent/promocodeusage"
 	"github.com/Wei-Shaw/sub2api/ent/proxy"
+	"github.com/Wei-Shaw/sub2api/ent/quotaviewerdevice"
+	"github.com/Wei-Shaw/sub2api/ent/quotaviewerdevicesession"
 	"github.com/Wei-Shaw/sub2api/ent/redeemcode"
 	"github.com/Wei-Shaw/sub2api/ent/schema"
 	"github.com/Wei-Shaw/sub2api/ent/securitysecret"
@@ -1876,6 +1878,110 @@ func init() {
 	proxyDescExpiryWarnDays := proxyFields[10].Descriptor()
 	// proxy.DefaultExpiryWarnDays holds the default value on creation for the expiry_warn_days field.
 	proxy.DefaultExpiryWarnDays = proxyDescExpiryWarnDays.Default.(int)
+	quotaviewerdeviceMixin := schema.QuotaViewerDevice{}.Mixin()
+	quotaviewerdeviceMixinFields0 := quotaviewerdeviceMixin[0].Fields()
+	_ = quotaviewerdeviceMixinFields0
+	quotaviewerdeviceFields := schema.QuotaViewerDevice{}.Fields()
+	_ = quotaviewerdeviceFields
+	// quotaviewerdeviceDescCreatedAt is the schema descriptor for created_at field.
+	quotaviewerdeviceDescCreatedAt := quotaviewerdeviceMixinFields0[0].Descriptor()
+	// quotaviewerdevice.DefaultCreatedAt holds the default value on creation for the created_at field.
+	quotaviewerdevice.DefaultCreatedAt = quotaviewerdeviceDescCreatedAt.Default.(func() time.Time)
+	// quotaviewerdeviceDescUpdatedAt is the schema descriptor for updated_at field.
+	quotaviewerdeviceDescUpdatedAt := quotaviewerdeviceMixinFields0[1].Descriptor()
+	// quotaviewerdevice.DefaultUpdatedAt holds the default value on creation for the updated_at field.
+	quotaviewerdevice.DefaultUpdatedAt = quotaviewerdeviceDescUpdatedAt.Default.(func() time.Time)
+	// quotaviewerdevice.UpdateDefaultUpdatedAt holds the default value on update for the updated_at field.
+	quotaviewerdevice.UpdateDefaultUpdatedAt = quotaviewerdeviceDescUpdatedAt.UpdateDefault.(func() time.Time)
+	// quotaviewerdeviceDescClientID is the schema descriptor for client_id field.
+	quotaviewerdeviceDescClientID := quotaviewerdeviceFields[2].Descriptor()
+	// quotaviewerdevice.ClientIDValidator is a validator for the "client_id" field. It is called by the builders before save.
+	quotaviewerdevice.ClientIDValidator = quotaviewerdeviceDescClientID.Validators[0].(func(string) error)
+	// quotaviewerdeviceDescScope is the schema descriptor for scope field.
+	quotaviewerdeviceDescScope := quotaviewerdeviceFields[3].Descriptor()
+	// quotaviewerdevice.ScopeValidator is a validator for the "scope" field. It is called by the builders before save.
+	quotaviewerdevice.ScopeValidator = quotaviewerdeviceDescScope.Validators[0].(func(string) error)
+	// quotaviewerdeviceDescInstallationIDHash is the schema descriptor for installation_id_hash field.
+	quotaviewerdeviceDescInstallationIDHash := quotaviewerdeviceFields[4].Descriptor()
+	// quotaviewerdevice.InstallationIDHashValidator is a validator for the "installation_id_hash" field. It is called by the builders before save.
+	quotaviewerdevice.InstallationIDHashValidator = quotaviewerdeviceDescInstallationIDHash.Validators[0].(func(string) error)
+	// quotaviewerdeviceDescName is the schema descriptor for name field.
+	quotaviewerdeviceDescName := quotaviewerdeviceFields[5].Descriptor()
+	// quotaviewerdevice.NameValidator is a validator for the "name" field. It is called by the builders before save.
+	quotaviewerdevice.NameValidator = func() func(string) error {
+		validators := quotaviewerdeviceDescName.Validators
+		fns := [...]func(string) error{
+			validators[0].(func(string) error),
+			validators[1].(func(string) error),
+		}
+		return func(name string) error {
+			for _, fn := range fns {
+				if err := fn(name); err != nil {
+					return err
+				}
+			}
+			return nil
+		}
+	}()
+	// quotaviewerdeviceDescPlatform is the schema descriptor for platform field.
+	quotaviewerdeviceDescPlatform := quotaviewerdeviceFields[6].Descriptor()
+	// quotaviewerdevice.PlatformValidator is a validator for the "platform" field. It is called by the builders before save.
+	quotaviewerdevice.PlatformValidator = quotaviewerdeviceDescPlatform.Validators[0].(func(string) error)
+	// quotaviewerdeviceDescArchitecture is the schema descriptor for architecture field.
+	quotaviewerdeviceDescArchitecture := quotaviewerdeviceFields[7].Descriptor()
+	// quotaviewerdevice.ArchitectureValidator is a validator for the "architecture" field. It is called by the builders before save.
+	quotaviewerdevice.ArchitectureValidator = quotaviewerdeviceDescArchitecture.Validators[0].(func(string) error)
+	// quotaviewerdeviceDescOsVersion is the schema descriptor for os_version field.
+	quotaviewerdeviceDescOsVersion := quotaviewerdeviceFields[8].Descriptor()
+	// quotaviewerdevice.DefaultOsVersion holds the default value on creation for the os_version field.
+	quotaviewerdevice.DefaultOsVersion = quotaviewerdeviceDescOsVersion.Default.(string)
+	// quotaviewerdevice.OsVersionValidator is a validator for the "os_version" field. It is called by the builders before save.
+	quotaviewerdevice.OsVersionValidator = quotaviewerdeviceDescOsVersion.Validators[0].(func(string) error)
+	// quotaviewerdeviceDescAppVersion is the schema descriptor for app_version field.
+	quotaviewerdeviceDescAppVersion := quotaviewerdeviceFields[9].Descriptor()
+	// quotaviewerdevice.DefaultAppVersion holds the default value on creation for the app_version field.
+	quotaviewerdevice.DefaultAppVersion = quotaviewerdeviceDescAppVersion.Default.(string)
+	// quotaviewerdevice.AppVersionValidator is a validator for the "app_version" field. It is called by the builders before save.
+	quotaviewerdevice.AppVersionValidator = quotaviewerdeviceDescAppVersion.Validators[0].(func(string) error)
+	// quotaviewerdeviceDescStatus is the schema descriptor for status field.
+	quotaviewerdeviceDescStatus := quotaviewerdeviceFields[10].Descriptor()
+	// quotaviewerdevice.DefaultStatus holds the default value on creation for the status field.
+	quotaviewerdevice.DefaultStatus = quotaviewerdeviceDescStatus.Default.(string)
+	// quotaviewerdevice.StatusValidator is a validator for the "status" field. It is called by the builders before save.
+	quotaviewerdevice.StatusValidator = quotaviewerdeviceDescStatus.Validators[0].(func(string) error)
+	// quotaviewerdeviceDescTokenVersion is the schema descriptor for token_version field.
+	quotaviewerdeviceDescTokenVersion := quotaviewerdeviceFields[11].Descriptor()
+	// quotaviewerdevice.DefaultTokenVersion holds the default value on creation for the token_version field.
+	quotaviewerdevice.DefaultTokenVersion = quotaviewerdeviceDescTokenVersion.Default.(int64)
+	quotaviewerdevicesessionMixin := schema.QuotaViewerDeviceSession{}.Mixin()
+	quotaviewerdevicesessionMixinFields0 := quotaviewerdevicesessionMixin[0].Fields()
+	_ = quotaviewerdevicesessionMixinFields0
+	quotaviewerdevicesessionFields := schema.QuotaViewerDeviceSession{}.Fields()
+	_ = quotaviewerdevicesessionFields
+	// quotaviewerdevicesessionDescCreatedAt is the schema descriptor for created_at field.
+	quotaviewerdevicesessionDescCreatedAt := quotaviewerdevicesessionMixinFields0[0].Descriptor()
+	// quotaviewerdevicesession.DefaultCreatedAt holds the default value on creation for the created_at field.
+	quotaviewerdevicesession.DefaultCreatedAt = quotaviewerdevicesessionDescCreatedAt.Default.(func() time.Time)
+	// quotaviewerdevicesessionDescUpdatedAt is the schema descriptor for updated_at field.
+	quotaviewerdevicesessionDescUpdatedAt := quotaviewerdevicesessionMixinFields0[1].Descriptor()
+	// quotaviewerdevicesession.DefaultUpdatedAt holds the default value on creation for the updated_at field.
+	quotaviewerdevicesession.DefaultUpdatedAt = quotaviewerdevicesessionDescUpdatedAt.Default.(func() time.Time)
+	// quotaviewerdevicesession.UpdateDefaultUpdatedAt holds the default value on update for the updated_at field.
+	quotaviewerdevicesession.UpdateDefaultUpdatedAt = quotaviewerdevicesessionDescUpdatedAt.UpdateDefault.(func() time.Time)
+	// quotaviewerdevicesessionDescRefreshTokenHash is the schema descriptor for refresh_token_hash field.
+	quotaviewerdevicesessionDescRefreshTokenHash := quotaviewerdevicesessionFields[2].Descriptor()
+	// quotaviewerdevicesession.RefreshTokenHashValidator is a validator for the "refresh_token_hash" field. It is called by the builders before save.
+	quotaviewerdevicesession.RefreshTokenHashValidator = quotaviewerdevicesessionDescRefreshTokenHash.Validators[0].(func(string) error)
+	// quotaviewerdevicesessionDescStatus is the schema descriptor for status field.
+	quotaviewerdevicesessionDescStatus := quotaviewerdevicesessionFields[3].Descriptor()
+	// quotaviewerdevicesession.DefaultStatus holds the default value on creation for the status field.
+	quotaviewerdevicesession.DefaultStatus = quotaviewerdevicesessionDescStatus.Default.(string)
+	// quotaviewerdevicesession.StatusValidator is a validator for the "status" field. It is called by the builders before save.
+	quotaviewerdevicesession.StatusValidator = quotaviewerdevicesessionDescStatus.Validators[0].(func(string) error)
+	// quotaviewerdevicesessionDescReplacementTokenHash is the schema descriptor for replacement_token_hash field.
+	quotaviewerdevicesessionDescReplacementTokenHash := quotaviewerdevicesessionFields[7].Descriptor()
+	// quotaviewerdevicesession.ReplacementTokenHashValidator is a validator for the "replacement_token_hash" field. It is called by the builders before save.
+	quotaviewerdevicesession.ReplacementTokenHashValidator = quotaviewerdevicesessionDescReplacementTokenHash.Validators[0].(func(string) error)
 	redeemcodeFields := schema.RedeemCode{}.Fields()
 	_ = redeemcodeFields
 	// redeemcodeDescCode is the schema descriptor for code field.

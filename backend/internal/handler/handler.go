@@ -69,6 +69,8 @@ type Handlers struct {
 	Documentation    *DocumentationHandler
 	Chat             *ChatHandler
 	Desktop          *DesktopHandler
+	QuotaAuth        *QuotaAuthHandler
+	QuotaOverview    *QuotaOverviewHandler
 }
 
 // BuildInfo contains build-time information

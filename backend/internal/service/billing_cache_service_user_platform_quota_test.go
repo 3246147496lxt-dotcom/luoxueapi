@@ -499,7 +499,8 @@ func TestIncrementUserPlatformQuotaUsage_GuardsAgainstEmpty(t *testing.T) {
 // fakeZeroQuotaCache 模拟 cache 命中且 daily limit=0（quota 耗尽）。
 type fakeZeroQuotaCache struct {
 	BillingCache
-	called bool
+	called       bool
+	subscription *SubscriptionCacheData
 }
 
 func (f *fakeZeroQuotaCache) GetUserPlatformQuotaCache(_ context.Context, _ int64, _ string) (*UserPlatformQuotaCacheEntry, bool, error) {
@@ -527,13 +528,7 @@ func (f *fakeZeroQuotaCache) SetUserPlatformQuotaCache(_ context.Context, _ int6
 // GetSubscriptionCache 返回有效订阅（active、未过期、usage 远低于 limit），
 // 用于支持 checkSubscriptionEligibility 通过，以便验证 quota 检查不被触发。
 func (f *fakeZeroQuotaCache) GetSubscriptionCache(_ context.Context, _ int64, _ int64) (*SubscriptionCacheData, error) {
-	return &SubscriptionCacheData{
-		Status:       SubscriptionStatusActive,
-		ExpiresAt:    time.Now().Add(30 * 24 * time.Hour),
-		DailyUsage:   0,
-		WeeklyUsage:  0,
-		MonthlyUsage: 0,
-	}, nil
+	return f.subscription, nil
 }
 
 func (f *fakeZeroQuotaCache) GetUserBalanceCache(_ context.Context, _ int64) (float64, bool, error) {
@@ -563,7 +558,23 @@ func TestCheckUserPlatformQuotaEligibility_StandardMode_BlocksWhenLimitZero(t *t
 // TestCheckBillingEligibility_SubscriptionMode_BypassesPlatformQuota 验证（C-NEW-2）：
 // 订阅模式用户不受 user×platform quota 拦截，GetUserPlatformQuotaCache 不应被调用。
 func TestCheckBillingEligibility_SubscriptionMode_BypassesPlatformQuota(t *testing.T) {
-	fake := &fakeZeroQuotaCache{} // GetUserPlatformQuotaCache 返回 limit=0，若被调用则拦截
+	now := time.Now()
+	startsAt := now.Add(-time.Hour)
+	expiresAt := now.Add(30 * 24 * time.Hour)
+	windowStart, windowEnd, ok := AnchoredWeeklyWindow(startsAt, now)
+	if !ok {
+		t.Fatal("expected current anchored weekly window")
+	}
+	fake := &fakeZeroQuotaCache{ // GetUserPlatformQuotaCache 返回 limit=0，若被调用则拦截
+		subscription: &SubscriptionCacheData{
+			SubscriptionID:    501,
+			Status:            SubscriptionStatusActive,
+			StartsAt:          startsAt,
+			ExpiresAt:         expiresAt,
+			WeeklyWindowStart: &windowStart,
+			WeeklyWindowEnd:   windowEnd,
+		},
+	}
 	cfg := &config.Config{}
 	cfg.Billing.UserPlatformQuotaCacheTTLSeconds = 60
 	s := &BillingCacheService{
@@ -578,7 +589,13 @@ func TestCheckBillingEligibility_SubscriptionMode_BypassesPlatformQuota(t *testi
 		Status:           "active",
 		// 无 DailyLimitUSD → checkSubscriptionEligibility 不会因超限失败
 	}
-	sub := &UserSubscription{Status: "active"}
+	sub := &UserSubscription{
+		ID:                501,
+		Status:            SubscriptionStatusActive,
+		StartsAt:          startsAt,
+		ExpiresAt:         expiresAt,
+		WeeklyWindowStart: &windowStart,
+	}
 	user := &User{ID: 42}
 
 	err := s.CheckBillingEligibility(context.Background(), user, nil, subGroup, sub, "anthropic")
@@ -769,9 +786,9 @@ func TestHasUserPlatformQuotaLimit(t *testing.T) {
 	daily := 5.0
 
 	tests := []struct {
-		name    string
-		setup   func() *BillingCacheService
-		want    bool
+		name  string
+		setup func() *BillingCacheService
+		want  bool
 	}{
 		{
 			name: "has_limit",

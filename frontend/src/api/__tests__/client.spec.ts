@@ -455,6 +455,50 @@ describe('API Client', () => {
       })
     })
 
+    it('额度授权深链会在 401 失效登录时安全保留完整回跳地址', async () => {
+      localStorage.setItem('auth_token', 'expired-token')
+
+      const originalLocation = window.location
+      Object.defineProperty(window, 'location', {
+        configurable: true,
+        value: {
+          ...originalLocation,
+          pathname: '/quota-viewer/authorize',
+          search: '?user_code=ABCD-EFGH',
+          hash: '#confirm',
+          href: '/quota-viewer/authorize?user_code=ABCD-EFGH#confirm',
+        },
+        writable: true,
+      })
+
+      try {
+        const adapter = vi.fn().mockRejectedValue({
+          response: {
+            status: 401,
+            data: { code: 'TOKEN_EXPIRED', message: 'Token expired' },
+          },
+          config: {
+            url: '/quota/authorizations/ABCD-EFGH',
+            headers: { Authorization: 'Bearer expired-token' },
+          },
+          code: 'ERR_BAD_REQUEST',
+        })
+        apiClient.defaults.adapter = adapter
+
+        await expect(apiClient.get('/quota/authorizations/ABCD-EFGH')).rejects.toBeDefined()
+
+        expect(window.location.href).toBe(
+          '/login?redirect=%2Fquota-viewer%2Fauthorize%3Fuser_code%3DABCD-EFGH%23confirm',
+        )
+      } finally {
+        Object.defineProperty(window, 'location', {
+          configurable: true,
+          value: originalLocation,
+          writable: true,
+        })
+      }
+    })
+
     it('并发 401 只刷新一次并用同一新 token 重试', async () => {
       localStorage.setItem('auth_token', 'expired-token')
       localStorage.setItem('refresh_token', 'refresh-once')

@@ -18,6 +18,21 @@ type BillingCacheSuite struct {
 	IntegrationRedisSuite
 }
 
+func integrationSubscriptionCacheData(subscriptionID int64, weeklyUsage float64, version int64) *service.SubscriptionCacheData {
+	startsAt := time.Now().Add(-time.Hour)
+	windowStart, windowEnd, _ := service.AnchoredWeeklyWindow(startsAt, time.Now())
+	return &service.SubscriptionCacheData{
+		SubscriptionID:    subscriptionID,
+		Status:            service.SubscriptionStatusActive,
+		StartsAt:          startsAt,
+		ExpiresAt:         time.Now().Add(time.Hour),
+		WeeklyWindowStart: &windowStart,
+		WeeklyWindowEnd:   windowEnd,
+		WeeklyUsage:       weeklyUsage,
+		Version:           version,
+	}
+}
+
 func (s *BillingCacheSuite) TestUserBalance() {
 	tests := []struct {
 		name string
@@ -166,21 +181,15 @@ func (s *BillingCacheSuite) TestSubscriptionCache() {
 				groupID := int64(22)
 				subKey := fmt.Sprintf("%s%d:%d", billingSubKeyPrefix, userID, groupID)
 
-				data := &service.SubscriptionCacheData{
-					Status:       "active",
-					ExpiresAt:    time.Now().Add(1 * time.Hour),
-					DailyUsage:   1.0,
-					WeeklyUsage:  2.0,
-					MonthlyUsage: 3.0,
-					Version:      7,
-				}
+				data := integrationSubscriptionCacheData(12022, 2, 7)
 				require.NoError(s.T(), cache.SetSubscriptionCache(ctx, userID, groupID, data), "SetSubscriptionCache")
 
 				gotSub, err := cache.GetSubscriptionCache(ctx, userID, groupID)
 				require.NoError(s.T(), err, "GetSubscriptionCache")
 				require.Equal(s.T(), "active", gotSub.Status)
 				require.Equal(s.T(), int64(7), gotSub.Version)
-				require.Equal(s.T(), 1.0, gotSub.DailyUsage)
+				require.Equal(s.T(), int64(12022), gotSub.SubscriptionID)
+				require.Equal(s.T(), 0.0, gotSub.DailyUsage)
 
 				ttl, err := rdb.TTL(ctx, subKey).Result()
 				require.NoError(s.T(), err, "TTL subKey")
@@ -188,28 +197,18 @@ func (s *BillingCacheSuite) TestSubscriptionCache() {
 			},
 		},
 		{
-			name: "update_usage_increments_all_fields",
+			name: "update_usage_evicts_authoritative_snapshot",
 			fn: func(ctx context.Context, rdb *redis.Client, cache service.BillingCache) {
 				userID := int64(13)
 				groupID := int64(23)
 
-				data := &service.SubscriptionCacheData{
-					Status:       "active",
-					ExpiresAt:    time.Now().Add(1 * time.Hour),
-					DailyUsage:   1.0,
-					WeeklyUsage:  2.0,
-					MonthlyUsage: 3.0,
-					Version:      1,
-				}
+				data := integrationSubscriptionCacheData(13023, 2, 1)
 				require.NoError(s.T(), cache.SetSubscriptionCache(ctx, userID, groupID, data), "SetSubscriptionCache")
 
 				require.NoError(s.T(), cache.UpdateSubscriptionUsage(ctx, userID, groupID, 0.5), "UpdateSubscriptionUsage")
 
-				gotSub, err := cache.GetSubscriptionCache(ctx, userID, groupID)
-				require.NoError(s.T(), err, "GetSubscriptionCache after update")
-				require.Equal(s.T(), 1.5, gotSub.DailyUsage)
-				require.Equal(s.T(), 2.5, gotSub.WeeklyUsage)
-				require.Equal(s.T(), 3.5, gotSub.MonthlyUsage)
+				_, err := cache.GetSubscriptionCache(ctx, userID, groupID)
+				require.ErrorIs(s.T(), err, redis.Nil, "post-commit usage update must evict stale snapshot")
 			},
 		},
 		{
@@ -219,14 +218,7 @@ func (s *BillingCacheSuite) TestSubscriptionCache() {
 				groupID := int64(10)
 				subKey := fmt.Sprintf("%s%d:%d", billingSubKeyPrefix, userID, groupID)
 
-				data := &service.SubscriptionCacheData{
-					Status:       "active",
-					ExpiresAt:    time.Now().Add(1 * time.Hour),
-					DailyUsage:   1.0,
-					WeeklyUsage:  2.0,
-					MonthlyUsage: 3.0,
-					Version:      1,
-				}
+				data := integrationSubscriptionCacheData(10110, 2, 1)
 				require.NoError(s.T(), cache.SetSubscriptionCache(ctx, userID, groupID, data), "SetSubscriptionCache")
 
 				exists, err := rdb.Exists(ctx, subKey).Result()
@@ -250,12 +242,11 @@ func (s *BillingCacheSuite) TestSubscriptionCache() {
 				groupID := int64(11)
 				subKey := fmt.Sprintf("%s%d:%d", billingSubKeyPrefix, userID, groupID)
 
-				fields := map[string]any{
-					"expires_at":    time.Now().Add(1 * time.Hour).Unix(),
-					"daily_usage":   1.0,
-					"weekly_usage":  2.0,
-					"monthly_usage": 3.0,
-					"version":       1,
+				fields := make(map[string]any)
+				for key, value := range validSubscriptionCacheV3Fields() {
+					if key != subFieldStatus {
+						fields[key] = value
+					}
 				}
 				require.NoError(s.T(), rdb.HSet(ctx, subKey, fields).Err(), "HSet")
 
@@ -347,11 +338,7 @@ func (s *BillingCacheSuite) TestUpdateSubscriptionUsage_ErrorPropagation() {
 		cache := NewBillingCache(rdb)
 		ctx := context.Background()
 
-		data := &service.SubscriptionCacheData{
-			Status:    "active",
-			ExpiresAt: time.Now().Add(1 * time.Hour),
-			Version:   1,
-		}
+		data := integrationSubscriptionCacheData(301401, 0, 1)
 		require.NoError(s.T(), cache.SetSubscriptionCache(ctx, 301, 401, data))
 
 		cancelCtx, cancel := context.WithCancel(ctx)

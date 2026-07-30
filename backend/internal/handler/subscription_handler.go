@@ -24,12 +24,6 @@ type SubscriptionSummaryItem struct {
 	ExpiresAt       *string `json:"expires_at,omitempty"`
 }
 
-// SubscriptionProgressInfo represents subscription with progress info
-type SubscriptionProgressInfo struct {
-	Subscription *dto.UserSubscription         `json:"subscription"`
-	Progress     *service.SubscriptionProgress `json:"progress"`
-}
-
 // SubscriptionHandler handles user subscription operations
 type SubscriptionHandler struct {
 	subscriptionService *service.SubscriptionService
@@ -102,17 +96,19 @@ func (h *SubscriptionHandler) GetProgress(c *gin.Context) {
 		return
 	}
 
-	result := make([]SubscriptionProgressInfo, 0, len(subscriptions))
+	result := make([]dto.SubscriptionProgressInfo, 0, len(subscriptions))
 	for i := range subscriptions {
 		sub := &subscriptions[i]
 		progress, err := h.subscriptionService.GetSubscriptionProgress(c.Request.Context(), sub.ID)
 		if err != nil {
-			// Skip subscriptions with errors
-			continue
+			// Returning a shorter successful list would make an incomplete
+			// snapshot indistinguishable from a complete one.
+			response.ErrorFrom(c, err)
+			return
 		}
-		result = append(result, SubscriptionProgressInfo{
+		result = append(result, dto.SubscriptionProgressInfo{
 			Subscription: dto.UserSubscriptionFromService(sub),
-			Progress:     progress,
+			Progress:     dto.SubscriptionProgressFromService(progress),
 		})
 	}
 

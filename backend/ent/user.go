@@ -101,13 +101,15 @@ type UserEdges struct {
 	PlatformQuotas []*UserPlatformQuota `json:"platform_quotas,omitempty"`
 	// DesktopDevices holds the value of the desktop_devices edge.
 	DesktopDevices []*DesktopDevice `json:"desktop_devices,omitempty"`
+	// QuotaViewerDevices holds the value of the quota_viewer_devices edge.
+	QuotaViewerDevices []*QuotaViewerDevice `json:"quota_viewer_devices,omitempty"`
 	// DesktopDiagnostics holds the value of the desktop_diagnostics edge.
 	DesktopDiagnostics []*DesktopDiagnostic `json:"desktop_diagnostics,omitempty"`
 	// UserAllowedGroups holds the value of the user_allowed_groups edge.
 	UserAllowedGroups []*UserAllowedGroup `json:"user_allowed_groups,omitempty"`
 	// loadedTypes holds the information for reporting if a
 	// type was loaded (or requested) in eager-loading or not.
-	loadedTypes [16]bool
+	loadedTypes [17]bool
 }
 
 // APIKeysOrErr returns the APIKeys value or an error if the edge
@@ -236,10 +238,19 @@ func (e UserEdges) DesktopDevicesOrErr() ([]*DesktopDevice, error) {
 	return nil, &NotLoadedError{edge: "desktop_devices"}
 }
 
+// QuotaViewerDevicesOrErr returns the QuotaViewerDevices value or an error if the edge
+// was not loaded in eager-loading.
+func (e UserEdges) QuotaViewerDevicesOrErr() ([]*QuotaViewerDevice, error) {
+	if e.loadedTypes[14] {
+		return e.QuotaViewerDevices, nil
+	}
+	return nil, &NotLoadedError{edge: "quota_viewer_devices"}
+}
+
 // DesktopDiagnosticsOrErr returns the DesktopDiagnostics value or an error if the edge
 // was not loaded in eager-loading.
 func (e UserEdges) DesktopDiagnosticsOrErr() ([]*DesktopDiagnostic, error) {
-	if e.loadedTypes[14] {
+	if e.loadedTypes[15] {
 		return e.DesktopDiagnostics, nil
 	}
 	return nil, &NotLoadedError{edge: "desktop_diagnostics"}
@@ -248,7 +259,7 @@ func (e UserEdges) DesktopDiagnosticsOrErr() ([]*DesktopDiagnostic, error) {
 // UserAllowedGroupsOrErr returns the UserAllowedGroups value or an error if the edge
 // was not loaded in eager-loading.
 func (e UserEdges) UserAllowedGroupsOrErr() ([]*UserAllowedGroup, error) {
-	if e.loadedTypes[15] {
+	if e.loadedTypes[16] {
 		return e.UserAllowedGroups, nil
 	}
 	return nil, &NotLoadedError{edge: "user_allowed_groups"}
@@ -521,6 +532,11 @@ func (_m *User) QueryPlatformQuotas() *UserPlatformQuotaQuery {
 // QueryDesktopDevices queries the "desktop_devices" edge of the User entity.
 func (_m *User) QueryDesktopDevices() *DesktopDeviceQuery {
 	return NewUserClient(_m.config).QueryDesktopDevices(_m)
+}
+
+// QueryQuotaViewerDevices queries the "quota_viewer_devices" edge of the User entity.
+func (_m *User) QueryQuotaViewerDevices() *QuotaViewerDeviceQuery {
+	return NewUserClient(_m.config).QueryQuotaViewerDevices(_m)
 }
 
 // QueryDesktopDiagnostics queries the "desktop_diagnostics" edge of the User entity.
