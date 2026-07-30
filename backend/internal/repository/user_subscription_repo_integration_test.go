@@ -457,8 +457,13 @@ func (s *UserSubscriptionRepoSuite) TestActivateWindows() {
 	group := s.mustCreateGroup("g-activate")
 	sub := s.mustCreateSubscription(user.ID, group.ID, nil)
 
+	_, err := s.client.UserSubscription.UpdateOneID(sub.ID).
+		ClearWeeklyWindowStart().
+		Save(s.ctx)
+	s.Require().NoError(err, "clear weekly window before activation")
+
 	activateAt := sub.StartsAt
-	err := s.repo.ActivateWindows(s.ctx, sub.ID, activateAt)
+	err = s.repo.ActivateWindows(s.ctx, sub.ID, activateAt)
 	s.Require().NoError(err, "ActivateWindows")
 
 	got, err := s.repo.GetByID(s.ctx, sub.ID)
@@ -466,7 +471,7 @@ func (s *UserSubscriptionRepoSuite) TestActivateWindows() {
 	s.Require().Nil(got.DailyWindowStart)
 	s.Require().NotNil(got.WeeklyWindowStart)
 	s.Require().Nil(got.MonthlyWindowStart)
-	s.Require().WithinDuration(activateAt, *got.DailyWindowStart, time.Microsecond)
+	s.Require().WithinDuration(activateAt, *got.WeeklyWindowStart, time.Microsecond)
 }
 
 func (s *UserSubscriptionRepoSuite) TestResetDailyUsage() {

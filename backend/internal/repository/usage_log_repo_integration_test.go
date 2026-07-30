@@ -64,6 +64,28 @@ func (s *UsageLogRepoSuite) createUsageLog(user *service.User, apiKey *service.A
 	return log
 }
 
+func (s *UsageLogRepoSuite) resetDashboardUsageFixtures() {
+	s.T().Helper()
+
+	// Dashboard statistics are global. Other package-level integration tests
+	// intentionally commit usage fixtures, so isolate these assertions inside
+	// the suite transaction and let its rollback restore the shared test data.
+	fixtures := []struct {
+		name  string
+		query string
+	}{
+		{name: "hourly active users", query: "DELETE FROM usage_dashboard_hourly_users"},
+		{name: "daily active users", query: "DELETE FROM usage_dashboard_daily_users"},
+		{name: "hourly aggregates", query: "DELETE FROM usage_dashboard_hourly"},
+		{name: "daily aggregates", query: "DELETE FROM usage_dashboard_daily"},
+		{name: "usage logs", query: "DELETE FROM usage_logs"},
+	}
+	for _, fixture := range fixtures {
+		_, err := s.tx.ExecContext(s.ctx, fixture.query)
+		s.Require().NoError(err, "reset dashboard fixture: %s", fixture.name)
+	}
+}
+
 // --- Create / GetByID ---
 
 func (s *UsageLogRepoSuite) TestCreate() {
@@ -725,6 +747,8 @@ func (s *UsageLogRepoSuite) TestDashboardUserStats_CurrentPreviousAndSoftDeleted
 }
 
 func (s *UsageLogRepoSuite) TestDashboardStats_TodayTotalsAndPerformance() {
+	s.resetDashboardUsageFixtures()
+
 	now := time.Now().UTC()
 	todayStart := truncateToDayUTC(now)
 	baseStats, err := s.repo.GetDashboardStats(s.ctx)
@@ -858,6 +882,8 @@ func (s *UsageLogRepoSuite) TestDashboardStats_TodayTotalsAndPerformance() {
 }
 
 func (s *UsageLogRepoSuite) TestDashboardStatsWithRange_Fallback() {
+	s.resetDashboardUsageFixtures()
+
 	now := time.Now().UTC()
 	todayStart := truncateToDayUTC(now)
 	rangeStart := todayStart.Add(-24 * time.Hour)
