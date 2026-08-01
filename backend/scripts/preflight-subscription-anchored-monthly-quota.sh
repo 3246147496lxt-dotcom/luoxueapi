@@ -252,6 +252,7 @@ SELECT CASE WHEN
     AND to_regclass('public.user_subscriptions') IS NOT NULL
     AND to_regclass('public.billing_usage_entries') IS NOT NULL
     AND to_regclass('public.usage_logs') IS NOT NULL
+    AND to_regclass('public.api_keys') IS NOT NULL
     AND to_regclass('public.groups') IS NOT NULL
 THEN '1' ELSE '0' END;
 ")"

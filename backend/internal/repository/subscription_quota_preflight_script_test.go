@@ -57,6 +57,22 @@ func TestMigration195PreflightScriptRequiresStableMaintenanceObservation(t *test
 	require.Equal(t, true, payload["writer_process_stop_acknowledged"])
 }
 
+func TestMigration195PreflightScriptChecksEveryRequiredTable(t *testing.T) {
+	content, err := os.ReadFile(migration195PreflightScriptPath(t))
+	require.NoError(t, err)
+
+	for _, table := range []string{
+		"schema_migrations",
+		"user_subscriptions",
+		"billing_usage_entries",
+		"usage_logs",
+		"api_keys",
+		"groups",
+	} {
+		require.Contains(t, string(content), "to_regclass('public."+table+"') IS NOT NULL")
+	}
+}
+
 func runMigration195PreflightScriptWithStub(t *testing.T, mode string) map[string]any {
 	t.Helper()
 	if runtime.GOOS == "windows" {
