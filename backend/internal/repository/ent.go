@@ -36,33 +36,10 @@ import (
 //   - *sql.DB: 底层的 SQL 数据库连接，可用于直接执行原生 SQL
 //   - error: 初始化过程中的错误
 func InitEnt(cfg *config.Config) (*ent.Client, *sql.DB, error) {
-	// 优先初始化时区设置，确保所有时间操作使用统一的时区。
-	// 这对于跨时区部署和日志时间戳的一致性至关重要。
-	if err := timezone.Init(cfg.Timezone); err != nil {
+	drv, err := openConfiguredEntDriver(cfg)
+	if err != nil {
 		return nil, nil, err
 	}
-
-	// 构建包含时区信息的数据库连接字符串 (DSN)。
-	// 时区信息会传递给 PostgreSQL，确保数据库层面的时间处理正确。
-	dsn := cfg.Database.DSNWithTimezone(cfg.Timezone)
-
-	// 使用 Ent 的 SQL 驱动打开 PostgreSQL 连接。
-	// dialect.Postgres 指定使用 PostgreSQL 方言进行 SQL 生成。
-	var drv *entsql.Driver
-	if cfg.Server.EnableServerTiming {
-		connector, err := pq.NewConnector(dsn)
-		if err != nil {
-			return nil, nil, err
-		}
-		drv = entsql.OpenDB(dialect.Postgres, sql.OpenDB(newServerTimingConnector(connector)))
-	} else {
-		var err error
-		drv, err = entsql.Open(dialect.Postgres, dsn)
-		if err != nil {
-			return nil, nil, err
-		}
-	}
-	applyDBPoolSettings(drv.DB(), cfg)
 
 	// 确保数据库 schema 已准备就绪。
 	// SQL 迁移文件是 schema 的权威来源（source of truth）。
@@ -106,4 +83,60 @@ func InitEnt(cfg *config.Config) (*ent.Client, *sql.DB, error) {
 	}
 
 	return client, drv.DB(), nil
+}
+
+// ApplyConfiguredMigrations applies the embedded SQL migrations and exits
+// without performing any other application bootstrap writes. It is intended
+// for maintenance-window releases where HTTP handlers, workers, Redis-backed
+// flushers, secret initialization, and simple-mode seed data must remain off.
+func ApplyConfiguredMigrations(ctx context.Context, cfg *config.Config) error {
+	if ctx == nil {
+		return fmt.Errorf("apply configured migrations: context is nil")
+	}
+
+	drv, err := openConfiguredEntDriver(cfg)
+	if err != nil {
+		return fmt.Errorf("open migration database: %w", err)
+	}
+	defer drv.Close()
+
+	if err := applyMigrationsFS(ctx, drv.DB(), migrations.FS); err != nil {
+		return fmt.Errorf("apply embedded migrations: %w", err)
+	}
+	return nil
+}
+
+func openConfiguredEntDriver(cfg *config.Config) (*entsql.Driver, error) {
+	if cfg == nil {
+		return nil, fmt.Errorf("database config is nil")
+	}
+
+	// 优先初始化时区设置，确保所有时间操作使用统一的时区。
+	// 这对于跨时区部署和日志时间戳的一致性至关重要。
+	if err := timezone.Init(cfg.Timezone); err != nil {
+		return nil, err
+	}
+
+	// 构建包含时区信息的数据库连接字符串 (DSN)。
+	// 时区信息会传递给 PostgreSQL，确保数据库层面的时间处理正确。
+	dsn := cfg.Database.DSNWithTimezone(cfg.Timezone)
+
+	// 使用 Ent 的 SQL 驱动打开 PostgreSQL 连接。
+	// dialect.Postgres 指定使用 PostgreSQL 方言进行 SQL 生成。
+	var drv *entsql.Driver
+	if cfg.Server.EnableServerTiming {
+		connector, err := pq.NewConnector(dsn)
+		if err != nil {
+			return nil, err
+		}
+		drv = entsql.OpenDB(dialect.Postgres, sql.OpenDB(newServerTimingConnector(connector)))
+	} else {
+		var err error
+		drv, err = entsql.Open(dialect.Postgres, dsn)
+		if err != nil {
+			return nil, err
+		}
+	}
+	applyDBPoolSettings(drv.DB(), cfg)
+	return drv, nil
 }

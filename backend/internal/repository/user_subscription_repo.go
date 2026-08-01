@@ -35,6 +35,10 @@ func (r *userSubscriptionRepository) Create(ctx context.Context, sub *service.Us
 	if weeklyWindowStart == nil {
 		weeklyWindowStart = &startsAt
 	}
+	monthlyWindowStart := sub.MonthlyWindowStart
+	if monthlyWindowStart == nil {
+		monthlyWindowStart = &startsAt
+	}
 
 	client := clientFromContext(ctx, r.client)
 	builder := client.UserSubscription.Create().
@@ -44,7 +48,7 @@ func (r *userSubscriptionRepository) Create(ctx context.Context, sub *service.Us
 		SetExpiresAt(sub.ExpiresAt).
 		SetNillableDailyWindowStart(sub.DailyWindowStart).
 		SetNillableWeeklyWindowStart(weeklyWindowStart).
-		SetNillableMonthlyWindowStart(sub.MonthlyWindowStart).
+		SetNillableMonthlyWindowStart(monthlyWindowStart).
 		SetDailyUsageUsd(sub.DailyUsageUSD).
 		SetWeeklyUsageUsd(sub.WeeklyUsageUSD).
 		SetMonthlyUsageUsd(sub.MonthlyUsageUSD).
@@ -73,6 +77,25 @@ func (r *userSubscriptionRepository) GetByID(ctx context.Context, id int64) (*se
 		WithUser().
 		WithGroup().
 		WithAssignedByUser().
+		Only(ctx)
+	if err != nil {
+		return nil, translatePersistenceError(err, service.ErrSubscriptionNotFound, nil)
+	}
+	return userSubscriptionEntityToService(m), nil
+}
+
+// GetByIDForUpdate returns the current subscription snapshot while holding a
+// row-level lock until the transaction in ctx finishes. Callers must invoke it
+// from a transaction context; it is intentionally exposed as an optional
+// repository capability rather than part of the broad service port.
+func (r *userSubscriptionRepository) GetByIDForUpdate(ctx context.Context, id int64) (*service.UserSubscription, error) {
+	client := clientFromContext(ctx, r.client)
+	m, err := client.UserSubscription.Query().
+		Where(usersubscription.IDEQ(id)).
+		WithUser().
+		WithGroup().
+		WithAssignedByUser().
+		ForUpdate().
 		Only(ctx)
 	if err != nil {
 		return nil, translatePersistenceError(err, service.ErrSubscriptionNotFound, nil)
@@ -454,6 +477,30 @@ func (r *userSubscriptionRepository) translateConditionalWindowReset(ctx context
 // 限额检查已在请求前由 BillingCacheService.CheckBillingEligibility 完成，
 // 此处仅负责记录实际消费，确保消费数据的完整性。
 func (r *userSubscriptionRepository) IncrementUsage(ctx context.Context, id int64, costUSD float64) error {
+	return r.incrementUsage(ctx, id, nil, costUSD)
+}
+
+// IncrementUsageForTerm is the term-aware legacy billing fallback. The
+// starts_at predicate is repeated on the UPDATE itself so a concurrent reopen
+// of the same subscription row cannot receive usage from the prior term.
+func (r *userSubscriptionRepository) IncrementUsageForTerm(
+	ctx context.Context,
+	id int64,
+	startsAt time.Time,
+	costUSD float64,
+) error {
+	if startsAt.IsZero() {
+		return service.ErrUsageBillingSubscriptionTermRequired
+	}
+	return r.incrementUsage(ctx, id, &startsAt, costUSD)
+}
+
+func (r *userSubscriptionRepository) incrementUsage(
+	ctx context.Context,
+	id int64,
+	expectedStartsAt *time.Time,
+	costUSD float64,
+) error {
 	const updateSQL = `
 		WITH anchored AS (
 			SELECT
@@ -464,28 +511,47 @@ func (r *userSubscriptionRepository) IncrementUsage(ctx context.Context, id int6
 							0,
 							EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP - us.starts_at))
 						) / 604800
-					) * INTERVAL '7 days' AS period_start
+					) * 604800 * INTERVAL '1 second' AS weekly_period_start,
+				us.starts_at
+					+ FLOOR(
+						GREATEST(
+							0,
+							EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP - us.starts_at))
+						) / 2592000
+					) * 2592000 * INTERVAL '1 second' AS monthly_period_start
 			FROM user_subscriptions us
 			JOIN groups g ON g.id = us.group_id AND g.deleted_at IS NULL
 			WHERE us.id = $2
 				AND us.deleted_at IS NULL
 				AND g.subscription_type = 'subscription'
+				AND ($3::timestamptz IS NULL OR us.starts_at = $3)
 		)
 		UPDATE user_subscriptions us
 		SET
 			weekly_usage_usd = CASE
-				WHEN us.weekly_window_start = anchored.period_start
+				WHEN us.weekly_window_start = anchored.weekly_period_start
 					THEN us.weekly_usage_usd + $1
 				ELSE $1
 			END,
-			weekly_window_start = anchored.period_start,
+			weekly_window_start = anchored.weekly_period_start,
+			monthly_usage_usd = CASE
+				WHEN us.monthly_window_start = anchored.monthly_period_start
+					THEN us.monthly_usage_usd + $1
+				ELSE $1
+			END,
+			monthly_window_start = anchored.monthly_period_start,
 			updated_at = NOW()
 		FROM anchored
 		WHERE us.id = anchored.id
+			AND ($3::timestamptz IS NULL OR us.starts_at = $3)
 	`
 
 	client := clientFromContext(ctx, r.client)
-	result, err := client.ExecContext(ctx, updateSQL, costUSD, id)
+	var startsAtArg any
+	if expectedStartsAt != nil {
+		startsAtArg = *expectedStartsAt
+	}
+	result, err := client.ExecContext(ctx, updateSQL, costUSD, id, startsAtArg)
 	if err != nil {
 		return err
 	}
@@ -499,7 +565,20 @@ func (r *userSubscriptionRepository) IncrementUsage(ctx context.Context, id int6
 		return nil
 	}
 
-	// affected == 0：订阅不存在或已删除
+	if expectedStartsAt != nil {
+		current, currentErr := client.UserSubscription.Query().
+			Where(usersubscription.IDEQ(id)).
+			Select(usersubscription.FieldStartsAt).
+			Only(ctx)
+		if currentErr != nil {
+			return translatePersistenceError(currentErr, service.ErrSubscriptionNotFound, nil)
+		}
+		if !current.StartsAt.Equal(*expectedStartsAt) {
+			return service.ErrUsageBillingSubscriptionTermMismatch
+		}
+	}
+
+	// affected == 0：订阅不存在、已删除或不再属于可计费会员组。
 	return service.ErrSubscriptionNotFound
 }
 

@@ -39,11 +39,11 @@ const stateCopy: Record<
   },
   connecting: {
     title: '等待浏览器确认',
-    description: '完成只读授权后，这里会自动加载账户余额和会员额度。'
+    description: '完成只读授权后，这里会自动加载会员周额度。'
   },
   loading: {
     title: '正在获取额度',
-    description: '正在读取余额、会员额度和计费分组。'
+    description: '正在读取会员套餐与本周剩余额度。'
   },
   unavailable: {
     title: '暂时无法获取额度',
@@ -69,22 +69,14 @@ const visibleStatus = computed(() =>
 <template>
   <section
     class="monitor-panel monitor-panel--main connection-panel window-drag-region"
+    aria-label="落雪额度"
     @mousedown="startQuotaViewerDrag"
   >
     <header class="panel-header">
-      <div class="brand-lockup">
-        <span class="brand-mark" aria-hidden="true">
-          <img src="/logo.png" alt="" />
-        </span>
-        <div>
-          <h1 id="quota-viewer-title">落雪额度</h1>
-          <p>独立只读查看器</p>
-        </div>
-      </div>
       <nav class="header-actions" aria-label="面板操作">
         <button
           type="button"
-          class="icon-button"
+          class="icon-button icon-button--hide-panel"
           aria-label="隐藏额度面板"
           title="隐藏"
           @click="emit('close')"

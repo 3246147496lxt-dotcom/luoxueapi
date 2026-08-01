@@ -11,17 +11,17 @@ import (
 
 // SubscriptionSummaryItem represents a subscription item in summary
 type SubscriptionSummaryItem struct {
-	ID              int64   `json:"id"`
-	GroupID         int64   `json:"group_id"`
-	GroupName       string  `json:"group_name"`
-	Status          string  `json:"status"`
-	DailyUsedUSD    float64 `json:"daily_used_usd,omitempty"`
-	DailyLimitUSD   float64 `json:"daily_limit_usd,omitempty"`
-	WeeklyUsedUSD   float64 `json:"weekly_used_usd,omitempty"`
-	WeeklyLimitUSD  float64 `json:"weekly_limit_usd,omitempty"`
-	MonthlyUsedUSD  float64 `json:"monthly_used_usd,omitempty"`
-	MonthlyLimitUSD float64 `json:"monthly_limit_usd,omitempty"`
-	ExpiresAt       *string `json:"expires_at,omitempty"`
+	ID              int64    `json:"id"`
+	GroupID         int64    `json:"group_id"`
+	GroupName       string   `json:"group_name"`
+	Status          string   `json:"status"`
+	DailyUsedUSD    float64  `json:"daily_used_usd,omitempty"`
+	DailyLimitUSD   *float64 `json:"daily_limit_usd,omitempty"`
+	WeeklyUsedUSD   float64  `json:"weekly_used_usd,omitempty"`
+	WeeklyLimitUSD  *float64 `json:"weekly_limit_usd,omitempty"`
+	MonthlyUsedUSD  float64  `json:"monthly_used_usd,omitempty"`
+	MonthlyLimitUSD *float64 `json:"monthly_limit_usd,omitempty"`
+	ExpiresAt       *string  `json:"expires_at,omitempty"`
 }
 
 // SubscriptionHandler handles user subscription operations
@@ -147,14 +147,10 @@ func (h *SubscriptionHandler) GetSummary(c *gin.Context) {
 		// Add group info if preloaded
 		if sub.Group != nil {
 			item.GroupName = sub.Group.Name
-			if sub.Group.DailyLimitUSD != nil {
-				item.DailyLimitUSD = *sub.Group.DailyLimitUSD
-			}
-			if sub.Group.WeeklyLimitUSD != nil {
-				item.WeeklyLimitUSD = *sub.Group.WeeklyLimitUSD
-			}
-			if sub.Group.MonthlyLimitUSD != nil {
-				item.MonthlyLimitUSD = *sub.Group.MonthlyLimitUSD
+			item.DailyLimitUSD = sub.Group.DailyLimitUSD
+			item.WeeklyLimitUSD = sub.Group.WeeklyLimitUSD
+			if monthlyLimit, configured := sub.Group.EffectiveMonthlyLimitUSD(); configured {
+				item.MonthlyLimitUSD = &monthlyLimit
 			}
 		}
 

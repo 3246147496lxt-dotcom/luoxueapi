@@ -12,6 +12,7 @@ import type { DailyUsagePoint, QuotaItem } from '@/types'
 
 const props = defineProps<{
   quota: QuotaItem
+  draggable?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -70,13 +71,14 @@ const segmentHeight = (point: DailyUsagePoint, value: number) => {
 
 <template>
   <section
-    class="monitor-panel monitor-panel--detail window-drag-region"
+    class="monitor-panel monitor-panel--detail"
     :class="[
       `monitor-panel--${quota.tone}`,
-      `monitor-panel--state-${quota.state}`
+      `monitor-panel--state-${quota.state}`,
+      { 'window-drag-region': draggable !== false }
     ]"
     :aria-labelledby="`quota-detail-${quota.id}`"
-    @mousedown="startQuotaViewerDrag"
+    @mousedown="draggable !== false && startQuotaViewerDrag($event)"
   >
     <div class="detail-header-card">
       <span class="detail-icon" aria-hidden="true">

@@ -43,6 +43,11 @@ func quotaOverviewHandlerFixture() *service.QuotaOverview {
 	used := "12.3456789012"
 	remaining := "187.6543210988"
 	percent := 6.1728394506
+	monthlyPeriodEnd := asOf.Add(29 * 24 * time.Hour)
+	monthlyLimit := "800.0000000000"
+	monthlyUsed := "125.0000000000"
+	monthlyRemaining := "675.0000000000"
+	monthlyPercent := 15.625
 	totalRequests := int64(58)
 	totalTokens := int64(182000)
 	cacheHitTokens := int64(92000)
@@ -100,6 +105,13 @@ func quotaOverviewHandlerFixture() *service.QuotaOverview {
 					AnchorAt: asOf.Add(-24 * time.Hour), PeriodStart: timePtr(asOf.Add(-24 * time.Hour)),
 					PeriodEnd: &periodEnd, ResetsAt: &periodEnd,
 					Limit: &limit, Used: &used, Remaining: &remaining, UsedPercent: &percent,
+				},
+				MonthlyWindow: service.QuotaOverviewMonthlyWindow{
+					Kind: "30d_from_subscription_start", State: service.QuotaWindowActive,
+					AnchorAt: asOf.Add(-24 * time.Hour), PeriodStart: timePtr(asOf.Add(-24 * time.Hour)),
+					PeriodEnd: &monthlyPeriodEnd, ResetsAt: &monthlyPeriodEnd,
+					Limit: &monthlyLimit, Used: &monthlyUsed, Remaining: &monthlyRemaining,
+					UsedPercent: &monthlyPercent,
 				},
 				PeriodUsage: service.QuotaOverviewPeriodUsage{
 					State:         service.QuotaPeriodUsageAvailable,
@@ -196,6 +208,14 @@ func TestQuotaOverviewHandlerUsesDeviceSubjectAndSafeWireContract(t *testing.T) 
 					Limit string `json:"limit"`
 					Used  string `json:"used"`
 				} `json:"weekly_window"`
+				MonthlyWindow struct {
+					Kind        string  `json:"kind"`
+					State       string  `json:"state"`
+					Limit       string  `json:"limit"`
+					Used        string  `json:"used"`
+					Remaining   string  `json:"remaining"`
+					UsedPercent float64 `json:"used_percent"`
+				} `json:"monthly_window"`
 				PeriodUsage struct {
 					State         string    `json:"state"`
 					ObservedUntil time.Time `json:"observed_until"`
@@ -227,6 +247,12 @@ func TestQuotaOverviewHandlerUsesDeviceSubjectAndSafeWireContract(t *testing.T) 
 	require.Equal(t, "9007199254740995", payload.Data.Subscriptions[0].ID)
 	require.Equal(t, "200.0000000000", payload.Data.Subscriptions[0].WeeklyWindow.Limit)
 	require.Equal(t, "12.3456789012", payload.Data.Subscriptions[0].WeeklyWindow.Used)
+	require.Equal(t, "30d_from_subscription_start", payload.Data.Subscriptions[0].MonthlyWindow.Kind)
+	require.Equal(t, service.QuotaWindowActive, payload.Data.Subscriptions[0].MonthlyWindow.State)
+	require.Equal(t, "800.0000000000", payload.Data.Subscriptions[0].MonthlyWindow.Limit)
+	require.Equal(t, "125.0000000000", payload.Data.Subscriptions[0].MonthlyWindow.Used)
+	require.Equal(t, "675.0000000000", payload.Data.Subscriptions[0].MonthlyWindow.Remaining)
+	require.Equal(t, 15.625, payload.Data.Subscriptions[0].MonthlyWindow.UsedPercent)
 	require.Equal(t, service.QuotaPeriodUsageAvailable, payload.Data.Subscriptions[0].PeriodUsage.State)
 	require.Equal(t, expectedAsOf, payload.Data.Subscriptions[0].PeriodUsage.ObservedUntil)
 	require.Equal(t, service.QuotaPeriodUsageBucketAnchored24h, payload.Data.Subscriptions[0].PeriodUsage.BucketKind)

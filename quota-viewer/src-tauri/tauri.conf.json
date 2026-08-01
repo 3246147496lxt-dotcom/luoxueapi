@@ -10,20 +10,44 @@
     "frontendDist": "../dist"
   },
   "app": {
+    "macOSPrivateApi": true,
     "windows": [
       {
         "label": "main",
         "title": "落雪额度",
-        "width": 406,
-        "height": 620,
+        "width": 80,
+        "height": 80,
         "center": true,
         "decorations": false,
         "transparent": true,
         "resizable": false,
+        "maximizable": false,
+        "minimizable": false,
         "alwaysOnTop": true,
         "skipTaskbar": true,
         "shadow": false,
+        "acceptFirstMouse": true,
         "visible": true
+      },
+      {
+        "label": "tray",
+        "title": "落雪额度",
+        "url": "index.html?surface=tray",
+        "width": 406,
+        "height": 500,
+        "decorations": false,
+        "transparent": true,
+        "resizable": false,
+        "maximizable": false,
+        "minimizable": false,
+        "closable": false,
+        "alwaysOnTop": true,
+        "visibleOnAllWorkspaces": true,
+        "skipTaskbar": true,
+        "shadow": false,
+        "acceptFirstMouse": true,
+        "focus": false,
+        "visible": false
       }
     ],
     "security": {
@@ -33,9 +57,20 @@
   "bundle": {
     "active": true,
     "targets": "all",
-    "icon": ["icons/icon.png"],
+    "icon": ["icons/icon.png", "icons/icon.ico"],
     "macOS": {
       "minimumSystemVersion": "13.0"
+    },
+    "windows": {
+      "allowDowngrades": false,
+      "webviewInstallMode": {
+        "type": "embedBootstrapper",
+        "silent": true
+      },
+      "nsis": {
+        "installerIcon": "icons/icon.ico",
+        "installMode": "currentUser"
+      }
     }
   }
 }

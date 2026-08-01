@@ -19,17 +19,22 @@ type BillingCacheSuite struct {
 }
 
 func integrationSubscriptionCacheData(subscriptionID int64, weeklyUsage float64, version int64) *service.SubscriptionCacheData {
-	startsAt := time.Now().Add(-time.Hour)
-	windowStart, windowEnd, _ := service.AnchoredWeeklyWindow(startsAt, time.Now())
+	now := time.Now()
+	startsAt := now.Add(-time.Hour)
+	weeklyWindowStart, weeklyWindowEnd, _ := service.AnchoredWeeklyWindow(startsAt, now)
+	monthlyWindowStart, monthlyWindowEnd, _ := service.AnchoredMonthlyWindow(startsAt, now)
 	return &service.SubscriptionCacheData{
-		SubscriptionID:    subscriptionID,
-		Status:            service.SubscriptionStatusActive,
-		StartsAt:          startsAt,
-		ExpiresAt:         time.Now().Add(time.Hour),
-		WeeklyWindowStart: &windowStart,
-		WeeklyWindowEnd:   windowEnd,
-		WeeklyUsage:       weeklyUsage,
-		Version:           version,
+		SubscriptionID:     subscriptionID,
+		Status:             service.SubscriptionStatusActive,
+		StartsAt:           startsAt,
+		ExpiresAt:          now.Add(time.Hour),
+		WeeklyWindowStart:  &weeklyWindowStart,
+		WeeklyWindowEnd:    weeklyWindowEnd,
+		MonthlyWindowStart: &monthlyWindowStart,
+		MonthlyWindowEnd:   monthlyWindowEnd,
+		WeeklyUsage:        weeklyUsage,
+		MonthlyUsage:       weeklyUsage * 4,
+		Version:            version,
 	}
 }
 
@@ -190,6 +195,8 @@ func (s *BillingCacheSuite) TestSubscriptionCache() {
 				require.Equal(s.T(), int64(7), gotSub.Version)
 				require.Equal(s.T(), int64(12022), gotSub.SubscriptionID)
 				require.Equal(s.T(), 0.0, gotSub.DailyUsage)
+				require.Equal(s.T(), 8.0, gotSub.MonthlyUsage)
+				require.NotNil(s.T(), gotSub.MonthlyWindowStart)
 
 				ttl, err := rdb.TTL(ctx, subKey).Result()
 				require.NoError(s.T(), err, "TTL subKey")
@@ -243,7 +250,7 @@ func (s *BillingCacheSuite) TestSubscriptionCache() {
 				subKey := fmt.Sprintf("%s%d:%d", billingSubKeyPrefix, userID, groupID)
 
 				fields := make(map[string]any)
-				for key, value := range validSubscriptionCacheV3Fields() {
+				for key, value := range validSubscriptionCacheV4Fields() {
 					if key != subFieldStatus {
 						fields[key] = value
 					}

@@ -37,3 +37,10 @@ type UserSubscriptionRepository interface {
 
 	BatchUpdateExpiredStatus(ctx context.Context) (int64, error)
 }
+
+// userSubscriptionLockingRepository is an optional production capability.
+// Keeping it separate from UserSubscriptionRepository avoids forcing every
+// alternate implementation and unit stub to provide database-specific locks.
+type userSubscriptionLockingRepository interface {
+	GetByIDForUpdate(ctx context.Context, id int64) (*UserSubscription, error)
+}

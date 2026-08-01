@@ -565,14 +565,20 @@ func TestCheckBillingEligibility_SubscriptionMode_BypassesPlatformQuota(t *testi
 	if !ok {
 		t.Fatal("expected current anchored weekly window")
 	}
+	monthlyWindowStart, monthlyWindowEnd, ok := AnchoredMonthlyWindow(startsAt, now)
+	if !ok {
+		t.Fatal("expected current anchored monthly window")
+	}
 	fake := &fakeZeroQuotaCache{ // GetUserPlatformQuotaCache 返回 limit=0，若被调用则拦截
 		subscription: &SubscriptionCacheData{
-			SubscriptionID:    501,
-			Status:            SubscriptionStatusActive,
-			StartsAt:          startsAt,
-			ExpiresAt:         expiresAt,
-			WeeklyWindowStart: &windowStart,
-			WeeklyWindowEnd:   windowEnd,
+			SubscriptionID:     501,
+			Status:             SubscriptionStatusActive,
+			StartsAt:           startsAt,
+			ExpiresAt:          expiresAt,
+			WeeklyWindowStart:  &windowStart,
+			WeeklyWindowEnd:    windowEnd,
+			MonthlyWindowStart: &monthlyWindowStart,
+			MonthlyWindowEnd:   monthlyWindowEnd,
 		},
 	}
 	cfg := &config.Config{}
@@ -590,11 +596,12 @@ func TestCheckBillingEligibility_SubscriptionMode_BypassesPlatformQuota(t *testi
 		// 无 DailyLimitUSD → checkSubscriptionEligibility 不会因超限失败
 	}
 	sub := &UserSubscription{
-		ID:                501,
-		Status:            SubscriptionStatusActive,
-		StartsAt:          startsAt,
-		ExpiresAt:         expiresAt,
-		WeeklyWindowStart: &windowStart,
+		ID:                 501,
+		Status:             SubscriptionStatusActive,
+		StartsAt:           startsAt,
+		ExpiresAt:          expiresAt,
+		WeeklyWindowStart:  &windowStart,
+		MonthlyWindowStart: &monthlyWindowStart,
 	}
 	user := &User{ID: 42}
 

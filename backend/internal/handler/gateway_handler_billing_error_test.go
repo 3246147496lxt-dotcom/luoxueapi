@@ -2,6 +2,7 @@ package handler
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
 	"testing"
 	"time"
@@ -38,6 +39,29 @@ func TestBillingErrorDetails_APIKeyRateLimitStillMaps(t *testing.T) {
 		status, code, _, _ := billingErrorDetails(err)
 		require.Equal(t, http.StatusTooManyRequests, status, "status for %v", err)
 		require.Equal(t, "rate_limit_exceeded", code)
+	}
+}
+
+func TestBillingErrorDetails_SubscriptionLimitsMapToTooManyRequestsWithoutGuessedRetryAfter(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+	}{
+		{name: "weekly", err: service.ErrWeeklyLimitExceeded},
+		{name: "monthly", err: service.ErrMonthlyLimitExceeded},
+		{name: "wrapped weekly", err: fmt.Errorf("authoritative admission: %w", service.ErrWeeklyLimitExceeded)},
+		{name: "wrapped monthly", err: fmt.Errorf("authoritative admission: %w", service.ErrMonthlyLimitExceeded)},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			status, code, message, retryAfter := billingErrorDetails(tt.err)
+
+			require.Equal(t, http.StatusTooManyRequests, status)
+			require.Equal(t, "rate_limit_exceeded", code)
+			require.NotEmpty(t, message)
+			require.Zero(t, retryAfter, "subscription limit errors have no authoritative reset metadata")
+		})
 	}
 }
 

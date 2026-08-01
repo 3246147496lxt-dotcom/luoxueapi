@@ -6,12 +6,119 @@ import (
 	"context"
 	"database/sql"
 	"testing"
+	"time"
 
 	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/stretchr/testify/require"
 
 	"github.com/Wei-Shaw/sub2api/internal/service"
 )
+
+func TestUsageBillingRepositoryApply_RequiresSubscriptionTermIdentity(t *testing.T) {
+	ctx := context.Background()
+	db, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	defer func() { _ = db.Close() }()
+
+	subscriptionID := int64(42)
+	result, err := (&usageBillingRepository{db: db}).Apply(ctx, &service.UsageBillingCommand{
+		RequestID:        "request-without-term",
+		APIKeyID:         7,
+		UserID:           9,
+		SubscriptionID:   &subscriptionID,
+		SubscriptionCost: 2.5,
+	})
+
+	require.Nil(t, result)
+	require.ErrorIs(t, err, service.ErrUsageBillingSubscriptionTermRequired)
+	require.NoError(t, mock.ExpectationsWereMet(), "validation must fail before opening or mutating a transaction")
+}
+
+func TestIncrementUsageBillingSubscription_RejectsChangedTerm(t *testing.T) {
+	ctx := context.Background()
+	db, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	defer func() { _ = db.Close() }()
+
+	priorStartsAt := time.Date(2026, time.July, 1, 2, 3, 4, 0, time.UTC)
+	currentStartsAt := priorStartsAt.Add(24 * time.Hour)
+	mock.ExpectBegin()
+	tx, err := db.BeginTx(ctx, nil)
+	require.NoError(t, err)
+	mock.ExpectExec(`(?s)UPDATE user_subscriptions us.*WHERE us\.id = anchored\.id\s+AND us\.starts_at = \$5`).
+		WithArgs(2.5, int64(42), int64(9), int64(7), priorStartsAt).
+		WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectQuery(`(?s)SELECT starts_at\s+FROM user_subscriptions\s+WHERE id = \$1\s+AND user_id = \$2\s+AND deleted_at IS NULL`).
+		WithArgs(int64(42), int64(9)).
+		WillReturnRows(sqlmock.NewRows([]string{"starts_at"}).AddRow(currentStartsAt))
+	mock.ExpectRollback()
+
+	err = incrementUsageBillingSubscription(ctx, tx, 42, 9, 7, priorStartsAt, 2.5)
+	require.ErrorIs(t, err, service.ErrUsageBillingSubscriptionTermMismatch)
+	require.NoError(t, tx.Rollback())
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestInsertUsageBillingReceiptPersistsExactSubscriptionAmount(t *testing.T) {
+	ctx := context.Background()
+	db, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	defer func() { _ = db.Close() }()
+
+	subscriptionID := int64(42)
+	cmd := &service.UsageBillingCommand{
+		RequestID:          "request-subscription-receipt",
+		RequestFingerprint: "fingerprint",
+		Source:             service.BillingReceiptSourceAPI,
+		UserID:             9,
+		APIKeyID:           7,
+		SubscriptionID:     &subscriptionID,
+		BillingType:        service.BillingTypeSubscription,
+		Model:              "claude",
+		RequestedModel:     "claude",
+		GrossCost:          1,
+		SubscriptionCost:   2.5,
+	}
+
+	mock.ExpectBegin()
+	tx, err := db.BeginTx(ctx, nil)
+	require.NoError(t, err)
+	mock.ExpectQuery(`(?s)INSERT INTO billing_usage_entries.*subscription_amount.*ELSE \$21::numeric`).
+		WithArgs(
+			cmd.RequestID,
+			cmd.APIKeyID,
+			cmd.UserID,
+			subscriptionID,
+			cmd.BillingType,
+			0.0,
+			cmd.RequestFingerprint,
+			cmd.Source,
+			int64(0),
+			cmd.Model,
+			cmd.RequestedModel,
+			0,
+			0,
+			0,
+			0,
+			cmd.GrossCost,
+			nil,
+			nil,
+			service.BillingReceiptStatusSubscription,
+			false,
+			cmd.SubscriptionCost,
+		).
+		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(int64(1)))
+	mock.ExpectRollback()
+
+	require.NoError(t, insertUsageBillingReceipt(
+		ctx,
+		tx,
+		cmd,
+		&service.UsageBillingApplyResult{},
+	))
+	require.NoError(t, tx.Rollback())
+	require.NoError(t, mock.ExpectationsWereMet())
+}
 
 const (
 	conditionalBalanceDeductSQL = `(?s)UPDATE users\s+SET balance = balance - \$1,\s+updated_at = NOW\(\)\s+WHERE id = \$2 AND deleted_at IS NULL AND balance >= \$1\s+RETURNING balance \+ \$1, balance`

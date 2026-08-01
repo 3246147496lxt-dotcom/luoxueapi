@@ -66,6 +66,7 @@ func (s *quotaOverviewCacheStub) GetSubscriptionCache(_ context.Context, _, grou
 func quotaOverviewTestSnapshot(asOf time.Time) *QuotaOverviewSnapshot {
 	anchor := time.Date(2026, 7, 25, 9, 30, 0, 0, time.UTC)
 	windowStart, windowEnd, _ := AnchoredWeeklyWindow(anchor, asOf)
+	monthlyWindowStart, _, _ := AnchoredMonthlyWindow(anchor, asOf)
 	limit := decimal.RequireFromString("200")
 	balanceGroupID := int64(10)
 	memberGroupID := int64(20)
@@ -119,12 +120,14 @@ func quotaOverviewTestSnapshot(asOf time.Time) *QuotaOverviewSnapshot {
 			{
 				ID: 8, GroupID: memberGroupID, GroupName: "Pro 会员", GroupStatus: StatusActive,
 				Status: SubscriptionStatusActive, StartsAt: anchor,
-				ExpiresAt:         anchor.Add(31 * 24 * time.Hour),
-				WeeklyWindowStart: &windowStart,
-				WeeklyLimit:       &limit,
-				WeeklyUsed:        decimal.RequireFromString("200"),
-				UpdatedAt:         asOf.Add(-time.Second),
-				PeriodUsage:       periodUsage,
+				ExpiresAt:          anchor.Add(31 * 24 * time.Hour),
+				WeeklyWindowStart:  &windowStart,
+				WeeklyLimit:        &limit,
+				WeeklyUsed:         decimal.RequireFromString("200"),
+				MonthlyWindowStart: &monthlyWindowStart,
+				MonthlyUsed:        decimal.RequireFromString("100"),
+				UpdatedAt:          asOf.Add(-time.Second),
+				PeriodUsage:        periodUsage,
 			},
 		},
 	}
@@ -195,6 +198,241 @@ func TestQuotaOverviewEmptyBalanceDoesNotBlockUsableMembership(t *testing.T) {
 	}
 	require.Equal(t, QuotaGroupBlocked, states[QuotaBillingBalance])
 	require.Equal(t, QuotaGroupUsable, states[QuotaBillingSubscription])
+}
+
+func TestQuotaOverviewMonthlyWindowUsesConfiguredLimitOrWeeklyFallback(t *testing.T) {
+	asOf := time.Date(2026, 7, 29, 7, 30, 0, 0, time.UTC)
+	configuredMonthly := decimal.RequireFromString("500")
+	tests := []struct {
+		name           string
+		configured     *decimal.Decimal
+		wantLimit      string
+		wantRemaining  string
+		wantPercentage float64
+	}{
+		{
+			name:           "configured monthly limit",
+			configured:     &configuredMonthly,
+			wantLimit:      "500.0000000000",
+			wantRemaining:  "375.0000000000",
+			wantPercentage: 25,
+		},
+		{
+			name:           "nil monthly limit falls back to weekly times four",
+			wantLimit:      "800.0000000000",
+			wantRemaining:  "675.0000000000",
+			wantPercentage: 15.625,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			snapshot := quotaOverviewTestSnapshot(asOf)
+			snapshot.Subscriptions[0].WeeklyUsed = decimal.RequireFromString("12.5")
+			snapshot.Subscriptions[0].MonthlyLimit = test.configured
+			snapshot.Subscriptions[0].MonthlyUsed = decimal.RequireFromString("125")
+
+			overview, err := newConsistentQuotaOverviewService(snapshot).
+				GetOverview(context.Background(), 42, "UTC")
+			require.NoError(t, err)
+			require.Contains(t, overview.Coverage.Included, "subscription_30d")
+			require.Len(t, overview.Subscriptions, 1)
+
+			window := overview.Subscriptions[0].MonthlyWindow
+			require.Equal(t, "30d_from_subscription_start", window.Kind)
+			require.Equal(t, QuotaWindowActive, window.State)
+			require.Equal(t, snapshot.Subscriptions[0].StartsAt, window.AnchorAt)
+			require.Equal(t, snapshot.Subscriptions[0].StartsAt, *window.PeriodStart)
+			require.Equal(t, snapshot.Subscriptions[0].StartsAt.Add(SubscriptionMonthlyWindowDuration), *window.PeriodEnd)
+			require.Equal(t, *window.PeriodEnd, *window.ResetsAt)
+			require.Equal(t, test.wantLimit, *window.Limit)
+			require.Equal(t, "125.0000000000", *window.Used)
+			require.Equal(t, test.wantRemaining, *window.Remaining)
+			require.Equal(t, test.wantPercentage, *window.UsedPercent)
+		})
+	}
+}
+
+func TestQuotaOverviewExplicitZeroMonthlyLimitBlocksWithoutFallback(t *testing.T) {
+	asOf := time.Date(2026, 7, 29, 7, 30, 0, 0, time.UTC)
+	snapshot := quotaOverviewTestSnapshot(asOf)
+	zero := decimal.Zero
+	snapshot.Subscriptions[0].WeeklyUsed = decimal.RequireFromString("12.5")
+	snapshot.Subscriptions[0].MonthlyLimit = &zero
+	snapshot.Subscriptions[0].MonthlyUsed = decimal.Zero
+
+	overview, err := newConsistentQuotaOverviewService(snapshot).
+		GetOverview(context.Background(), 42, "UTC")
+	require.NoError(t, err)
+
+	window := overview.Subscriptions[0].MonthlyWindow
+	require.Equal(t, QuotaWindowExhausted, window.State)
+	require.Equal(t, "0.0000000000", *window.Limit)
+	require.Equal(t, "0.0000000000", *window.Used)
+	require.Equal(t, "0.0000000000", *window.Remaining)
+	require.Equal(t, float64(100), *window.UsedPercent)
+
+	var memberGroup *QuotaOverviewBillingGroup
+	for i := range overview.BillingGroups {
+		if overview.BillingGroups[i].BillingMode == QuotaBillingSubscription {
+			memberGroup = &overview.BillingGroups[i]
+			break
+		}
+	}
+	require.NotNil(t, memberGroup)
+	require.Equal(t, QuotaGroupBlocked, memberGroup.State)
+	require.Equal(t, "subscription_monthly_exhausted", *memberGroup.ReasonCode)
+	require.Equal(t, "none", memberGroup.FallbackPolicy)
+	require.NotNil(t, overview.Account.PrimaryIssue)
+	require.Equal(t, *window.PeriodEnd, *overview.Account.PrimaryIssue.RecoversAt)
+}
+
+func TestQuotaOverviewExplicitZeroWeeklyLimitIsExhaustedNotUnknown(t *testing.T) {
+	asOf := time.Date(2026, 7, 29, 7, 30, 0, 0, time.UTC)
+	snapshot := quotaOverviewTestSnapshot(asOf)
+	zero := decimal.Zero
+	monthlyLimit := decimal.RequireFromString("500")
+	snapshot.Subscriptions[0].WeeklyLimit = &zero
+	snapshot.Subscriptions[0].WeeklyUsed = decimal.Zero
+	snapshot.Subscriptions[0].MonthlyLimit = &monthlyLimit
+	snapshot.Subscriptions[0].MonthlyUsed = decimal.Zero
+
+	overview, err := newConsistentQuotaOverviewService(snapshot).
+		GetOverview(context.Background(), 42, "UTC")
+	require.NoError(t, err)
+	require.Equal(t, QuotaFreshnessFresh, overview.Freshness)
+
+	window := overview.Subscriptions[0].WeeklyWindow
+	require.Equal(t, QuotaWindowExhausted, window.State)
+	require.Equal(t, "0.0000000000", *window.Limit)
+	require.Equal(t, "0.0000000000", *window.Remaining)
+	require.Equal(t, float64(100), *window.UsedPercent)
+	require.NotNil(t, overview.Account.PrimaryIssue)
+	require.Equal(t, "subscription_weekly_exhausted", overview.Account.PrimaryIssue.ReasonCode)
+}
+
+func TestQuotaOverviewCombinedExhaustionRecoversOnlyAfterBothWindowsReset(t *testing.T) {
+	asOf := time.Date(2026, 7, 29, 7, 30, 0, 0, time.UTC)
+	snapshot := quotaOverviewTestSnapshot(asOf)
+	snapshot.Subscriptions[0].WeeklyUsed = decimal.RequireFromString("200")
+	snapshot.Subscriptions[0].MonthlyUsed = decimal.RequireFromString("800")
+
+	overview, err := newConsistentQuotaOverviewService(snapshot).
+		GetOverview(context.Background(), 42, "UTC")
+	require.NoError(t, err)
+
+	subscription := overview.Subscriptions[0]
+	require.Equal(t, QuotaWindowExhausted, subscription.WeeklyWindow.State)
+	require.Equal(t, QuotaWindowExhausted, subscription.MonthlyWindow.State)
+	require.NotNil(t, overview.Account.PrimaryIssue)
+	require.Equal(t, "subscription_monthly_exhausted", overview.Account.PrimaryIssue.ReasonCode)
+	require.Equal(t, *subscription.MonthlyWindow.PeriodEnd, *overview.Account.PrimaryIssue.RecoversAt)
+	require.True(t, overview.Account.PrimaryIssue.RecoversAt.After(*subscription.WeeklyWindow.PeriodEnd))
+}
+
+func TestQuotaOverviewOrdersNewestCurrentMembershipFirstAndKeepsHistory(t *testing.T) {
+	asOf := time.Date(2026, 7, 29, 7, 30, 0, 0, time.UTC)
+	snapshot := quotaOverviewTestSnapshot(asOf)
+	limit := decimal.RequireFromString("200")
+
+	currentSubscription := func(
+		id, groupID int64,
+		name string,
+		startsAt, expiresAt time.Time,
+	) QuotaOverviewSubscriptionSnapshot {
+		windowStart, _, ok := AnchoredWeeklyWindow(startsAt, asOf)
+		require.True(t, ok)
+		monthlyWindowStart, _, ok := AnchoredMonthlyWindow(startsAt, asOf)
+		require.True(t, ok)
+		return QuotaOverviewSubscriptionSnapshot{
+			ID:                 id,
+			GroupID:            groupID,
+			GroupName:          name,
+			GroupStatus:        StatusActive,
+			Status:             SubscriptionStatusActive,
+			StartsAt:           startsAt,
+			ExpiresAt:          expiresAt,
+			WeeklyWindowStart:  &windowStart,
+			WeeklyLimit:        &limit,
+			WeeklyUsed:         decimal.Zero,
+			MonthlyWindowStart: &monthlyWindowStart,
+			MonthlyUsed:        decimal.Zero,
+			UpdatedAt:          asOf.Add(-time.Second),
+		}
+	}
+
+	oldHistorical := QuotaOverviewSubscriptionSnapshot{
+		ID:          100,
+		GroupID:     10,
+		GroupName:   "很久以前的会员",
+		GroupStatus: StatusActive,
+		Status:      SubscriptionStatusExpired,
+		StartsAt:    time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC),
+		ExpiresAt:   time.Date(2024, 2, 1, 0, 0, 0, 0, time.UTC),
+		UpdatedAt:   asOf.Add(-time.Hour),
+	}
+	olderCurrent := currentSubscription(
+		200,
+		20,
+		"较早的当前会员",
+		time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC),
+		time.Date(2026, 8, 1, 0, 0, 0, 0, time.UTC),
+	)
+	newestCurrent := currentSubscription(
+		300,
+		30,
+		"最新会员",
+		time.Date(2026, 7, 20, 0, 0, 0, 0, time.UTC),
+		time.Date(2026, 8, 20, 0, 0, 0, 0, time.UTC),
+	)
+	newerRevokedHistory := QuotaOverviewSubscriptionSnapshot{
+		ID:          400,
+		GroupID:     40,
+		GroupName:   "最近撤销的会员",
+		GroupStatus: StatusActive,
+		Status:      SubscriptionStatusActive,
+		Revoked:     true,
+		StartsAt:    time.Date(2026, 7, 25, 0, 0, 0, 0, time.UTC),
+		ExpiresAt:   time.Date(2026, 8, 25, 0, 0, 0, 0, time.UTC),
+		UpdatedAt:   asOf,
+	}
+
+	// Mirrors the old repository order by ascending group_id.
+	snapshot.Subscriptions = []QuotaOverviewSubscriptionSnapshot{
+		oldHistorical,
+		olderCurrent,
+		newestCurrent,
+		newerRevokedHistory,
+	}
+
+	overview, err := newConsistentQuotaOverviewService(snapshot).
+		GetOverview(context.Background(), 42, "UTC")
+	require.NoError(t, err)
+	require.Equal(t, []string{"300", "200", "400", "100"}, []string{
+		overview.Subscriptions[0].ID,
+		overview.Subscriptions[1].ID,
+		overview.Subscriptions[2].ID,
+		overview.Subscriptions[3].ID,
+	})
+	require.Equal(t, "最新会员", overview.Subscriptions[0].Name)
+	require.Equal(t, SubscriptionStatusActive, overview.Subscriptions[0].Status)
+	require.Equal(t, SubscriptionStatusRevoked, overview.Subscriptions[2].Status)
+	require.Equal(t, SubscriptionStatusExpired, overview.Subscriptions[3].Status)
+}
+
+func TestOrderQuotaOverviewSubscriptionsUsesTermTieBreakersWithoutMutatingInput(t *testing.T) {
+	asOf := time.Date(2026, 7, 29, 7, 30, 0, 0, time.UTC)
+	startsAt := asOf.Add(-24 * time.Hour)
+	expiresAt := asOf.Add(24 * time.Hour)
+	input := []QuotaOverviewSubscriptionSnapshot{
+		{ID: 1, Status: SubscriptionStatusActive, StartsAt: startsAt, ExpiresAt: expiresAt},
+		{ID: 3, Status: SubscriptionStatusActive, StartsAt: startsAt, ExpiresAt: expiresAt.Add(time.Hour)},
+		{ID: 2, Status: SubscriptionStatusActive, StartsAt: startsAt, ExpiresAt: expiresAt.Add(time.Hour)},
+	}
+
+	ordered := orderQuotaOverviewSubscriptions(input, asOf)
+
+	require.Equal(t, []int64{3, 2, 1}, []int64{ordered[0].ID, ordered[1].ID, ordered[2].ID})
+	require.Equal(t, []int64{1, 3, 2}, []int64{input[0].ID, input[1].ID, input[2].ID})
 }
 
 func TestQuotaOverviewNoEnabledKeysAndKeyOwnLimit(t *testing.T) {
@@ -297,6 +535,51 @@ func TestQuotaOverviewProjectsEmptyNewAnchoredPeriodLikeAdmission(t *testing.T) 
 	require.Equal(t, anchor, *snapshot.Subscriptions[0].WeeklyWindowProjectedFrom)
 }
 
+func TestQuotaOverviewDoesNotProjectElapsedMonthlyWindowWithoutAuthoritativeProof(t *testing.T) {
+	anchor := time.Date(2026, 7, 25, 9, 30, 0, 0, time.UTC)
+	asOf := anchor.Add(SubscriptionMonthlyWindowDuration)
+	snapshot := quotaOverviewTestSnapshot(asOf)
+	snapshot.Subscriptions[0].MonthlyWindowStart = timePointer(anchor)
+	snapshot.Subscriptions[0].MonthlyUsed = decimal.RequireFromString("800")
+
+	service := NewQuotaOverviewService(
+		&quotaOverviewRepoStub{snapshots: []*QuotaOverviewSnapshot{snapshot}},
+		NewBillingQuotaOverviewConsistencyChecker(&quotaOverviewCacheStub{
+			balance: 128.64,
+		}),
+	)
+	service.now = func() time.Time { return asOf }
+	overview, err := service.GetOverview(context.Background(), 42, "UTC")
+	require.NoError(t, err)
+
+	window := overview.Subscriptions[0].MonthlyWindow
+	require.Equal(t, QuotaFreshnessUnknown, overview.Freshness)
+	require.Equal(t, QuotaWindowUnknown, window.State)
+	require.Equal(t, asOf, *window.PeriodStart)
+	require.Nil(t, window.Limit)
+	require.Nil(t, window.Used)
+	require.Nil(t, window.Remaining)
+	require.Nil(t, window.UsedPercent)
+	require.Equal(t, anchor, *snapshot.Subscriptions[0].MonthlyWindowStart)
+	require.Equal(t, "800", snapshot.Subscriptions[0].MonthlyUsed.String())
+	require.Nil(t, snapshot.Subscriptions[0].MonthlyWindowProjectedFrom)
+}
+
+func TestQuotaOverviewInvalidMonthlyWindowMarkerIsUnknown(t *testing.T) {
+	anchor := time.Date(2026, 7, 25, 9, 30, 0, 0, time.UTC)
+	asOf := anchor.Add(SubscriptionMonthlyWindowDuration + time.Minute)
+	snapshot := quotaOverviewTestSnapshot(asOf)
+	offAnchor := anchor.Add(time.Second)
+	snapshot.Subscriptions[0].MonthlyWindowStart = &offAnchor
+
+	overview, err := newConsistentQuotaOverviewService(snapshot).
+		GetOverview(context.Background(), 42, "UTC")
+	require.NoError(t, err)
+	require.Equal(t, QuotaFreshnessUnknown, overview.Freshness)
+	require.Equal(t, QuotaWindowUnknown, overview.Subscriptions[0].MonthlyWindow.State)
+	require.Nil(t, snapshot.Subscriptions[0].MonthlyWindowProjectedFrom)
+}
+
 func TestQuotaOverviewDoesNotProjectStaleWindowWithCurrentUsageOrInvalidMarker(t *testing.T) {
 	anchor := time.Date(2026, 7, 25, 9, 30, 0, 0, time.UTC)
 	asOf := anchor.Add(SubscriptionWeeklyWindowDuration + time.Minute)
@@ -354,18 +637,23 @@ func TestQuotaOverviewProjectedWindowRequiresSubscriptionCacheMiss(t *testing.T)
 	sub := snapshot.Subscriptions[0]
 	_, periodEnd, ok := AnchoredWeeklyWindow(sub.StartsAt, asOf)
 	require.True(t, ok)
+	_, monthlyPeriodEnd, ok := AnchoredMonthlyWindow(sub.StartsAt, asOf)
+	require.True(t, ok)
 	checker := NewBillingQuotaOverviewConsistencyChecker(&quotaOverviewCacheStub{
 		balance: 128.64,
 		subs: map[int64]*SubscriptionCacheData{
 			sub.GroupID: {
-				SubscriptionID:    sub.ID,
-				Status:            sub.Status,
-				StartsAt:          sub.StartsAt,
-				ExpiresAt:         sub.ExpiresAt,
-				WeeklyWindowStart: sub.WeeklyWindowStart,
-				WeeklyWindowEnd:   periodEnd,
-				WeeklyUsage:       0,
-				Version:           sub.UpdatedAt.UnixMicro(),
+				SubscriptionID:     sub.ID,
+				Status:             sub.Status,
+				StartsAt:           sub.StartsAt,
+				ExpiresAt:          sub.ExpiresAt,
+				WeeklyWindowStart:  sub.WeeklyWindowStart,
+				WeeklyWindowEnd:    periodEnd,
+				MonthlyWindowStart: sub.MonthlyWindowStart,
+				MonthlyWindowEnd:   monthlyPeriodEnd,
+				WeeklyUsage:        0,
+				MonthlyUsage:       100,
+				Version:            sub.UpdatedAt.UnixMicro(),
 			},
 		},
 	})
@@ -563,6 +851,8 @@ func TestCloneQuotaOverviewDeepCopiesPeriodUsagePointers(t *testing.T) {
 		GetOverview(context.Background(), 42, "UTC")
 	require.NoError(t, err)
 	require.Equal(t, QuotaPeriodUsageAvailable, overview.Subscriptions[0].PeriodUsage.State)
+	canMakeRequest := false
+	overview.Account.CanMakeRequest = &canMakeRequest
 
 	clone := cloneQuotaOverview(*overview)
 	*clone.Subscriptions[0].PeriodUsage.TotalRequests = 999
@@ -570,12 +860,41 @@ func TestCloneQuotaOverviewDeepCopiesPeriodUsagePointers(t *testing.T) {
 	*clone.Subscriptions[0].PeriodUsage.Points[0].Requests = 999
 	*clone.Subscriptions[0].PeriodUsage.Points[0].TotalTokens = 999
 	*clone.Subscriptions[0].PeriodUsage.ObservedUntil = asOf.Add(time.Hour)
+	*clone.Subscriptions[0].MonthlyWindow.Used = "999.0000000000"
+	*clone.Subscriptions[0].MonthlyWindow.UsedPercent = 99
+	*clone.Subscriptions[0].MonthlyWindow.PeriodEnd = asOf
+	*clone.Account.CanMakeRequest = true
+	require.NotNil(t, clone.Account.PrimaryIssue)
+	require.NotNil(t, clone.Account.PrimaryIssue.RecoversAt)
+	originalRecovery := *overview.Account.PrimaryIssue.RecoversAt
+	*clone.Account.PrimaryIssue.RecoversAt = asOf.Add(48 * time.Hour)
+	memberGroupIndex := -1
+	for i := range clone.BillingGroups {
+		if clone.BillingGroups[i].ResourceRef.Kind == "subscription" {
+			memberGroupIndex = i
+			break
+		}
+	}
+	require.NotEqual(t, -1, memberGroupIndex)
+	require.NotNil(t, clone.BillingGroups[memberGroupIndex].ReasonCode)
+	require.NotNil(t, clone.BillingGroups[memberGroupIndex].ResourceRef.ID)
+	originalReason := *overview.BillingGroups[memberGroupIndex].ReasonCode
+	originalResourceID := *overview.BillingGroups[memberGroupIndex].ResourceRef.ID
+	*clone.BillingGroups[memberGroupIndex].ReasonCode = "mutated"
+	*clone.BillingGroups[memberGroupIndex].ResourceRef.ID = "mutated"
 
 	require.Equal(t, int64(279), *overview.Subscriptions[0].PeriodUsage.TotalRequests)
 	require.Equal(t, int64(901000), *overview.Subscriptions[0].PeriodUsage.TotalTokens)
 	require.Equal(t, int64(58), *overview.Subscriptions[0].PeriodUsage.Points[0].Requests)
 	require.Equal(t, int64(182000), *overview.Subscriptions[0].PeriodUsage.Points[0].TotalTokens)
 	require.Equal(t, asOf, *overview.Subscriptions[0].PeriodUsage.ObservedUntil)
+	require.Equal(t, "100.0000000000", *overview.Subscriptions[0].MonthlyWindow.Used)
+	require.Equal(t, float64(12.5), *overview.Subscriptions[0].MonthlyWindow.UsedPercent)
+	require.NotEqual(t, asOf, *overview.Subscriptions[0].MonthlyWindow.PeriodEnd)
+	require.False(t, *overview.Account.CanMakeRequest)
+	require.Equal(t, originalRecovery, *overview.Account.PrimaryIssue.RecoversAt)
+	require.Equal(t, originalReason, *overview.BillingGroups[memberGroupIndex].ReasonCode)
+	require.Equal(t, originalResourceID, *overview.BillingGroups[memberGroupIndex].ResourceRef.ID)
 }
 
 func TestQuotaOverviewFreshUntilStopsAtRequestedTimezoneMidnight(t *testing.T) {
@@ -584,6 +903,17 @@ func TestQuotaOverviewFreshUntilStopsAtRequestedTimezoneMidnight(t *testing.T) {
 		GetOverview(context.Background(), 42, "Asia/Shanghai")
 	require.NoError(t, err)
 	require.Equal(t, time.Date(2026, 7, 29, 16, 0, 0, 0, time.UTC), overview.FreshUntil)
+}
+
+func TestQuotaOverviewFreshUntilStopsAtMonthlyReset(t *testing.T) {
+	anchor := time.Date(2026, 7, 25, 9, 30, 0, 0, time.UTC)
+	asOf := anchor.Add(SubscriptionMonthlyWindowDuration - 2*time.Minute)
+	snapshot := quotaOverviewTestSnapshot(asOf)
+
+	overview, err := newConsistentQuotaOverviewService(snapshot).
+		GetOverview(context.Background(), 42, "UTC")
+	require.NoError(t, err)
+	require.Equal(t, anchor.Add(SubscriptionMonthlyWindowDuration), overview.FreshUntil)
 }
 
 func TestQuotaOverviewExpiryPrecedesResetAndUsedAboveLimitIsPreserved(t *testing.T) {
@@ -651,6 +981,9 @@ func TestQuotaOverviewInvalidNegativeUsageAndConsistencyMismatchAreUnknown(t *te
 	require.Equal(t, QuotaFreshnessUnknown, overview.Freshness)
 	require.Equal(t, "200.0000000000", *overview.Subscriptions[0].WeeklyWindow.Used)
 	require.Nil(t, overview.Subscriptions[0].WeeklyWindow.UsedPercent)
+	require.Equal(t, "100.0000000000", *overview.Subscriptions[0].MonthlyWindow.Used)
+	require.Equal(t, QuotaWindowUnknown, overview.Subscriptions[0].MonthlyWindow.State)
+	require.Nil(t, overview.Subscriptions[0].MonthlyWindow.UsedPercent)
 	require.Equal(t, QuotaPeriodUsageUnknown, overview.Subscriptions[0].PeriodUsage.State)
 	require.Nil(t, overview.Subscriptions[0].PeriodUsage.TotalRequests)
 	require.Nil(t, overview.Subscriptions[0].PeriodUsage.Points)
@@ -682,6 +1015,9 @@ func TestQuotaOverviewRepositoryFailureUsesStaleWithoutInventingZero(t *testing.
 	require.Equal(t, "10.7400000000", stale.Wallet.MonthSpend)
 	require.Equal(t, "200.0000000000", *stale.Subscriptions[0].WeeklyWindow.Used)
 	require.Nil(t, stale.Subscriptions[0].WeeklyWindow.UsedPercent)
+	require.Equal(t, "100.0000000000", *stale.Subscriptions[0].MonthlyWindow.Used)
+	require.Equal(t, QuotaWindowUnknown, stale.Subscriptions[0].MonthlyWindow.State)
+	require.Nil(t, stale.Subscriptions[0].MonthlyWindow.UsedPercent)
 	require.Equal(t, QuotaPeriodUsageUnknown, stale.Subscriptions[0].PeriodUsage.State)
 	require.Nil(t, stale.Subscriptions[0].PeriodUsage.TotalTokens)
 	require.Nil(t, stale.Subscriptions[0].PeriodUsage.Points)
@@ -727,15 +1063,20 @@ func TestBillingQuotaOverviewConsistencyCheckerCacheMissAndStrictMatches(t *test
 	sub := snapshot.Subscriptions[0]
 	_, periodEnd, ok := AnchoredWeeklyWindow(sub.StartsAt, asOf)
 	require.True(t, ok)
+	_, monthlyPeriodEnd, ok := AnchoredMonthlyWindow(sub.StartsAt, asOf)
+	require.True(t, ok)
 	cacheData := &SubscriptionCacheData{
-		SubscriptionID:    sub.ID,
-		Status:            sub.Status,
-		StartsAt:          sub.StartsAt,
-		ExpiresAt:         sub.ExpiresAt,
-		WeeklyWindowStart: sub.WeeklyWindowStart,
-		WeeklyWindowEnd:   periodEnd,
-		WeeklyUsage:       200,
-		Version:           sub.UpdatedAt.UnixMicro(),
+		SubscriptionID:     sub.ID,
+		Status:             sub.Status,
+		StartsAt:           sub.StartsAt,
+		ExpiresAt:          sub.ExpiresAt,
+		WeeklyWindowStart:  sub.WeeklyWindowStart,
+		WeeklyWindowEnd:    periodEnd,
+		MonthlyWindowStart: sub.MonthlyWindowStart,
+		MonthlyWindowEnd:   monthlyPeriodEnd,
+		WeeklyUsage:        200,
+		MonthlyUsage:       100,
+		Version:            sub.UpdatedAt.UnixMicro(),
 	}
 	cache := &quotaOverviewCacheStub{
 		// The insignificant binary/11th-decimal drift must not turn a
@@ -752,8 +1093,14 @@ func TestBillingQuotaOverviewConsistencyCheckerCacheMissAndStrictMatches(t *test
 		"identity": func(value *SubscriptionCacheData) { value.SubscriptionID++ },
 		"anchor":   func(value *SubscriptionCacheData) { value.StartsAt = value.StartsAt.Add(time.Second) },
 		"window":   func(value *SubscriptionCacheData) { value.WeeklyWindowEnd = value.WeeklyWindowEnd.Add(time.Second) },
-		"version":  func(value *SubscriptionCacheData) { value.Version++ },
-		"usage":    func(value *SubscriptionCacheData) { value.WeeklyUsage++ },
+		"monthly_window": func(value *SubscriptionCacheData) {
+			value.MonthlyWindowEnd = value.MonthlyWindowEnd.Add(time.Second)
+		},
+		"version": func(value *SubscriptionCacheData) { value.Version++ },
+		"usage":   func(value *SubscriptionCacheData) { value.WeeklyUsage++ },
+		"monthly_usage": func(value *SubscriptionCacheData) {
+			value.MonthlyUsage++
+		},
 	}
 	for name, mutate := range tests {
 		t.Run(name, func(t *testing.T) {

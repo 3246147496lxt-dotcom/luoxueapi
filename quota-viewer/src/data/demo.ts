@@ -7,8 +7,10 @@ import type {
 
 export type DemoPreviewState = QuotaState | 'no-membership'
 
-// Visual-reference data only. The production quota overview contract does not
-// yet provide request counts or categorized Token usage for the active period.
+// Visual-reference data only. The illustrative monthly percentage is never
+// derived in production; production shows —% unless quota overview supplies an
+// authoritative monthly_window. Request counts and categorized Token usage are
+// likewise only present here for visual-state previews.
 const proPoints: DailyUsagePoint[] = [
   { date: '2026-07-25', label: '7/25', state: 'complete', amount: 2.80, totalTokens: 346000, cacheHitTokens: 170000, cacheMissTokens: 82000, outputTokens: 94000, requests: 110 },
   { date: '2026-07-26', label: '7/26', state: 'complete', amount: 3.05, totalTokens: 382000, cacheHitTokens: 188000, cacheMissTokens: 90000, outputTokens: 104000, requests: 118 },
@@ -24,12 +26,16 @@ const baseQuota: QuotaItem = {
   periodLabel: '本周期',
   membershipStatus: 'active',
   statusDetailLabel: '',
+  expiresAt: '2026-08-25T09:30:00Z',
+  isCurrentMembership: true,
   state: 'available',
   usedPercent: 68,
   usedLabel: '已用 ❄136.20',
   limitLabel: '额度 ❄200.00',
   remainingLabel: '剩余 ❄63.80',
   resetLabel: '2 天 14 小时后重置',
+  resetsAt: '2026-08-01T06:00:00Z',
+  monthlyRemainingPercent: 74,
   periodStartLabel: '7/25 14:00',
   periodEndLabel: '8/1 14:00',
   tone: 'violet',
@@ -65,11 +71,15 @@ const quotaStateOverrides: Record<QuotaState, Partial<QuotaItem>> = {
   expired: {
     membershipStatus: 'expired',
     statusDetailLabel: '已于 7/29 14:00 到期',
+    expiresAt: '2026-07-29T06:00:00Z',
+    isCurrentMembership: false,
     state: 'expired',
     usedPercent: 100,
     usedLabel: '已用 ❄136.20',
     remainingLabel: '剩余 ❄0.00',
     resetLabel: '已于 7/29 14:00 到期',
+    resetsAt: null,
+    monthlyRemainingPercent: null,
     periodStartLabel: null,
     periodEndLabel: null,
     usageAvailable: false,
@@ -83,6 +93,7 @@ const quotaStateOverrides: Record<QuotaState, Partial<QuotaItem>> = {
     usedLabel: '已用 —',
     remainingLabel: '剩余 —',
     resetLabel: '重置时间待确认',
+    resetsAt: null,
     usageAvailable: false,
     totalTokens: null,
     totalRequests: null,

@@ -18,7 +18,7 @@ GET /api/v1/quota/overview
 - 每个 Key 属于余额计费还是会员计费；
 - 各计费分组当前是否可用；
 - 账户余额、今日消费与本月累计消费；
-- 每份会员唯一的 7 天额度、剩余量、准确重置时间和到期时间；
+- 每份会员的 7 天与 30 天额度、剩余量、准确重置时间和到期时间；
 - 按会员聚合的当前 7 天额度周期真实请求数与 Token 用量。
 
 接口不返回：
@@ -39,9 +39,9 @@ GET /api/v1/quota/overview
 - `scope = quota:read`
 - Access Token 有效期建议 10–15 分钟；
 - Refresh Token 每次使用时轮换，服务端只保存哈希；
-- 查看器刷新时使用 `candidate-v1`：客户端先在系统钥匙串持久化一次性的
-  `rotation_id` 与候选 Refresh Token，再发送请求；超时或 `503` 时必须重试
-  完全相同的组合，不能降级旧协议或生成新候选；
+- 查看器刷新时使用 `candidate-v1`：客户端先在应用数据目录的私有凭据文件中
+  原子持久化一次性的 `rotation_id` 与候选 Refresh Token，再发送请求；超时或
+  `503` 时必须重试完全相同的组合，不能降级旧协议或生成新候选；
 - 服务端对同一 predecessor、`rotation_id` 和候选 Token 哈希提供 10 分钟幂等
   恢复窗口，恢复时不延长候选 Token 的有效期；不同组合仍按重放攻击处理；
 - 每台设备可单独撤销；
@@ -81,7 +81,7 @@ Accept: application/json
     "display_timezone": "Asia/Shanghai",
     "freshness": "fresh",
     "coverage": {
-      "included": ["wallet", "account_spend_today", "account_spend_month_to_date", "api_key_billing_groups", "subscription_7d", "subscription_period_usage"],
+      "included": ["wallet", "account_spend_today", "account_spend_month_to_date", "api_key_billing_groups", "subscription_7d", "subscription_30d", "subscription_period_usage"],
       "excluded": ["routing", "rpm", "concurrency", "upstream_quota", "codex_quota"]
     },
     "account": {
@@ -172,6 +172,18 @@ Accept: application/json
           "used": "200.0000000000",
           "remaining": "0.0000000000",
           "used_percent": 100
+        },
+        "monthly_window": {
+          "kind": "30d_from_subscription_start",
+          "state": "active",
+          "anchor_at": "2026-07-25T09:30:00Z",
+          "period_start": "2026-07-25T09:30:00Z",
+          "period_end": "2026-08-24T09:30:00Z",
+          "resets_at": "2026-08-24T09:30:00Z",
+          "limit": "800.0000000000",
+          "used": "600.0000000000",
+          "remaining": "200.0000000000",
+          "used_percent": 75
         },
         "period_usage": {
           "state": "available",
@@ -319,11 +331,11 @@ Accept: application/json
 
 分组状态还应考虑 Key 是否启用、Key 自身限额和所关联资源状态，不能只看余额或会员剩余。
 
-### 5.4 会员 7 天周期
+### 5.4 会员周/月额度周期
 
-会员只有 `weekly_window`，不存在 `daily_window` 或 `monthly_window`。
+会员同时返回 `weekly_window` 与 `monthly_window`，不存在 `daily_window`。
 
-对于 `as_of >= anchor_at`：
+对于 `as_of >= anchor_at`，周窗口为：
 
 ```text
 N = floor((as_of - anchor_at) / (7 × 24 小时))
@@ -332,17 +344,29 @@ period_end = anchor_at + (N + 1) × 7 天
 resets_at = period_end
 ```
 
+月窗口为：
+
+```text
+M = floor((as_of - anchor_at) / (30 × 24 小时))
+period_start = anchor_at + M × 30 天
+period_end = anchor_at + (M + 1) × 30 天
+resets_at = period_end
+```
+
 规则：
 
 - `anchor_at` 必须等于当前连续会员期限的准确 `starts_at`；
-- 时间计算使用 UTC 时间点和连续 `7 × 24` 小时，不按自然周、时区零点或夏令时重排；
+- 时间计算使用 UTC 时间点和连续 `7 × 24` / `30 × 24` 小时，不按自然周、
+  自然月、时区零点或夏令时重排；
+- `monthly_limit_usd` 非 `NULL` 时作为月上限，包括显式 `0`；仅当其为
+  `NULL` 时，服务端使用 `weekly_limit_usd × 4`，客户端不得自行换算；
 - 未中断续费只延长 `expires_at`，不改变 `anchor_at`；
 - 过期后重新开通或更换套餐，以新的 `starts_at` 建立新锚点；
 - `period_start` 和 `period_end` 采用半开区间 `[start, end)`；
-- 如果会员到期早于下一次重置，`next_event.kind` 必须为 `expiry`；
+- 如果会员到期早于任一下一次重置，`next_event.kind` 必须为 `expiry`；
 - 客户端不得自行推算周期，只显示服务端值。
 
-`weekly_window.state`：
+`weekly_window.state` 与 `monthly_window.state`：
 
 - `active`
 - `exhausted`
@@ -350,7 +374,8 @@ resets_at = period_end
 
 `used_percent`：
 
-- 仅在 `limit > 0` 且数据可确认时返回数字；
+- 数据可确认且 `limit > 0` 时按 `used / limit` 返回数字；
+- 显式 `limit = 0` 表示额度耗尽，返回 100；
 - 语义固定为已用百分比；
 - 展示值封顶 100，但 `used` 保留真实值；
 - 未知时返回 `null`，不能返回 0。
@@ -392,6 +417,7 @@ resets_at = period_end
 
 - `wallet_empty`
 - `subscription_weekly_exhausted`
+- `subscription_monthly_exhausted`
 - `subscription_expired`
 - `subscription_suspended`
 - `subscription_revoked`
@@ -444,20 +470,23 @@ Vary: Authorization
 
 ## 7. 发布门槛与实现差距
 
-该契约不能只做展示层换算。发布前，计费拦截、额度累计、重置和接口展示必须使用同一套 7 天窗口。
+该契约不能只做展示层换算。发布前，计费拦截、额度累计、重置和接口展示必须
+分别使用同一套 starts_at 锚定 7 天与 30 天窗口。
 
-当前实现需要修正：
+审计基线中发现、实现与迁移必须消除的差距：
 
 - 新会员创建时 `weekly_window_start` 可能为空，实际从首次使用开始计时；
 - 过期会员重新开通时窗口起点可能被截到当天零点；
-- 现有分组仍支持日、周、月多个限额；
+- 现有月计数在旧版本中停止累计，不能直接作为权威值恢复；
 - 旧接口和前端类型对订阅进度的 JSON 结构不一致。
 
 P0 发布前必须保证：
 
 1. 新会员开通时立即初始化准确的 `anchor_at = starts_at`；
-2. 计费拦截和用量累计使用 `[anchor + N×7d, anchor + (N+1)×7d)`；
-3. 日额度和月额度不再参与该会员分组的拦截；
+2. 计费拦截和用量累计同时使用周窗口
+   `[anchor + N×7d, anchor + (N+1)×7d)` 与月窗口
+   `[anchor + M×30d, anchor + (M+1)×30d)`；
+3. 日额度不再参与该会员分组的拦截；月额度按显式配置或周额度乘 4 参与拦截；
 4. 未中断续费不改变锚点；
 5. 过期后重新开通使用准确的新生效时间，不截到零点；
 6. Redis、数据库和接口快照对同一请求返回一致的周期与用量；
@@ -471,11 +500,14 @@ P0 发布前必须保证：
 - 错误 audience、缺少 `quota:read`、过期令牌和已撤销设备；
 - 用户 A 无法读取用户 B 的余额、分组、会员或 Key 摘要；
 - 响应、日志和本地缓存均不包含完整 API Key；
-- 会员开通瞬间、周期结束前 1 毫秒和周期结束时的半开区间边界；
+- 会员开通瞬间、7 天/30 天周期结束前 1 毫秒和周期结束时的半开区间边界；
 - `as_of = period_start` 时本周期 totals 为真实 0，所有未来桶均为 `null`；
 - `as_of = period_end` 时立即进入新周期，旧周期数据不得泄漏到新周期；
 - 非零点开通、跨月、跨年和夏令时不改变 7 个锚定的连续 24 小时桶；
 - 跨越多个 7 天周期后仍以原开通时间为锚点；
+- 跨越多个 30 天周期后仍以原开通时间为锚点；
+- 未配置月额度时由服务端使用周额度乘 4，显式月额度（包括 0）优先；
+- 第 28–30 天周窗口已重置而月窗口仍未重置；
 - 未中断续费、过期重开和更换套餐；
 - 会员到期早于下一次重置；
 - 会员耗尽但余额充足时，会员组仍为 `blocked`，余额组为 `usable`；

@@ -18,8 +18,8 @@ use zeroize::Zeroizing;
 use crate::{
     cache::{cache_is_fresh, OverviewCache},
     cloud::QuotaCloudClient,
+    credentials::CredentialStore,
     error::{AppError, AppResult},
-    keychain::CredentialStore,
     models::{
         AccessSession, CachedOverview, PairingContext, PairingExchange, PairingState,
         PendingRefreshRotation, RefreshTokenBundle, ViewerSnapshot,
@@ -87,15 +87,15 @@ impl CloudPort for QuotaCloudClient {
 trait CredentialPort: Send + Sync {
     fn refresh_token(&self) -> AppResult<Option<Zeroizing<String>>>;
     fn require_refresh_token(&self) -> AppResult<Zeroizing<String>>;
-    fn set_refresh_token(&self, token: &str) -> AppResult<()>;
-    fn clear_refresh_token(&self) -> AppResult<()>;
+    fn commit_pairing(&self, refresh_token: &str) -> AppResult<()>;
+    fn commit_refresh_rotation(&self, refresh_token: &str) -> AppResult<()>;
+    fn clear_authorization(&self) -> AppResult<()>;
     fn pending_refresh_rotation(&self) -> AppResult<Option<PendingRefreshRotation>>;
     fn set_pending_refresh_rotation(&self, pending: &PendingRefreshRotation) -> AppResult<()>;
     fn clear_pending_refresh_rotation(&self) -> AppResult<()>;
     fn installation_id(&self) -> AppResult<Zeroizing<String>>;
     fn cache_id(&self) -> AppResult<Option<Zeroizing<String>>>;
     fn rotate_cache_id(&self) -> AppResult<Zeroizing<String>>;
-    fn clear_cache_id(&self) -> AppResult<()>;
 }
 
 impl CredentialPort for CredentialStore {
@@ -107,12 +107,16 @@ impl CredentialPort for CredentialStore {
         CredentialStore::require_refresh_token(self)
     }
 
-    fn set_refresh_token(&self, token: &str) -> AppResult<()> {
-        CredentialStore::set_refresh_token(self, token)
+    fn commit_pairing(&self, refresh_token: &str) -> AppResult<()> {
+        CredentialStore::commit_pairing(self, refresh_token)
     }
 
-    fn clear_refresh_token(&self) -> AppResult<()> {
-        CredentialStore::clear_refresh_token(self)
+    fn commit_refresh_rotation(&self, refresh_token: &str) -> AppResult<()> {
+        CredentialStore::commit_refresh_rotation(self, refresh_token)
+    }
+
+    fn clear_authorization(&self) -> AppResult<()> {
+        CredentialStore::clear_authorization(self)
     }
 
     fn pending_refresh_rotation(&self) -> AppResult<Option<PendingRefreshRotation>> {
@@ -137,10 +141,6 @@ impl CredentialPort for CredentialStore {
 
     fn rotate_cache_id(&self) -> AppResult<Zeroizing<String>> {
         CredentialStore::rotate_cache_id(self)
-    }
-
-    fn clear_cache_id(&self) -> AppResult<()> {
-        CredentialStore::clear_cache_id(self)
     }
 }
 
@@ -261,8 +261,8 @@ impl AuthorizationGate {
 }
 
 impl AppRuntime {
-    pub fn new(cache_path: PathBuf) -> AppResult<Self> {
-        let credentials = CredentialStore;
+    pub fn new(cache_path: PathBuf, credential_path: PathBuf) -> AppResult<Self> {
+        let credentials = CredentialStore::open(credential_path)?;
         let snapshot_key = credentials.snapshot_key()?;
         Ok(Self {
             cloud: Arc::new(QuotaCloudClient::new()?),
@@ -476,10 +476,8 @@ impl AppRuntime {
             #[cfg(test)]
             self.pause_at_write(TestWritePoint::PairingCredentials)
                 .await;
-            self.credentials.clear_pending_refresh_rotation()?;
-            self.credentials.rotate_cache_id()?;
             self.credentials
-                .set_refresh_token(tokens.refresh_token.as_str())?;
+                .commit_pairing(tokens.refresh_token.as_str())?;
             *self.access_session.write().await = Some(AccessSession::from_bundle(tokens));
             *self.pairing.lock().await = None;
         }
@@ -667,8 +665,7 @@ impl AppRuntime {
             self.pause_at_write(TestWritePoint::RefreshedCredentials)
                 .await;
             self.credentials
-                .set_refresh_token(pending.candidate_refresh_token.as_str())?;
-            self.credentials.clear_pending_refresh_rotation()?;
+                .commit_refresh_rotation(pending.candidate_refresh_token.as_str())?;
             let token = bundle.access_token.clone();
             *self.access_session.write().await = Some(AccessSession::from_refresh_bundle(&bundle));
             token
@@ -688,7 +685,6 @@ impl AppRuntime {
                 // The process previously promoted the candidate but exited before
                 // deleting the journal. Reconcile that committed local state before
                 // beginning a new, independently recoverable rotation.
-                self.credentials.clear_pending_refresh_rotation()?;
                 let next = PendingRefreshRotation::generate(refresh_token.as_str());
                 self.credentials.set_pending_refresh_rotation(&next)?;
                 next
@@ -758,18 +754,8 @@ impl AppRuntime {
         let mut first_error = None;
         {
             let _guard = self.authorization.lock_commit().await;
-            if let Err(error) = self.credentials.clear_refresh_token() {
+            if let Err(error) = self.credentials.clear_authorization() {
                 first_error = Some(error);
-            }
-            if let Err(error) = self.credentials.clear_pending_refresh_rotation() {
-                if first_error.is_none() {
-                    first_error = Some(error);
-                }
-            }
-            if let Err(error) = self.credentials.clear_cache_id() {
-                if first_error.is_none() {
-                    first_error = Some(error);
-                }
             }
             *self.access_session.write().await = None;
             *self.pairing.lock().await = None;
@@ -1049,13 +1035,30 @@ mod tests {
                 .ok_or_else(|| AppError::Message("not connected".into()))
         }
 
-        fn set_refresh_token(&self, token: &str) -> AppResult<()> {
-            self.state.lock().unwrap().refresh_token = Some(token.into());
+        fn commit_pairing(&self, refresh_token: &str) -> AppResult<()> {
+            let cache_id = format!(
+                "test-cache-{}",
+                self.rotations.fetch_add(1, AtomicOrdering::SeqCst) + 1
+            );
+            let mut state = self.state.lock().unwrap();
+            state.refresh_token = Some(refresh_token.into());
+            state.pending_refresh_rotation = None;
+            state.cache_id = Some(cache_id);
             Ok(())
         }
 
-        fn clear_refresh_token(&self) -> AppResult<()> {
-            self.state.lock().unwrap().refresh_token = None;
+        fn commit_refresh_rotation(&self, refresh_token: &str) -> AppResult<()> {
+            let mut state = self.state.lock().unwrap();
+            state.refresh_token = Some(refresh_token.into());
+            state.pending_refresh_rotation = None;
+            Ok(())
+        }
+
+        fn clear_authorization(&self) -> AppResult<()> {
+            let mut state = self.state.lock().unwrap();
+            state.refresh_token = None;
+            state.pending_refresh_rotation = None;
+            state.cache_id = None;
             Ok(())
         }
 
@@ -1094,11 +1097,6 @@ mod tests {
             );
             self.state.lock().unwrap().cache_id = Some(id.clone());
             Ok(Zeroizing::new(id))
-        }
-
-        fn clear_cache_id(&self) -> AppResult<()> {
-            self.state.lock().unwrap().cache_id = None;
-            Ok(())
         }
     }
 

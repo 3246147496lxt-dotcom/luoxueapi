@@ -85,7 +85,7 @@ func (c *billingQuotaOverviewConsistencyChecker) CheckQuotaOverviewConsistency(
 			// Normal eviction/miss: admission will use the same DB row.
 			continue
 		}
-		if sub.WeeklyWindowProjectedFrom != nil {
+		if sub.WeeklyWindowProjectedFrom != nil || sub.MonthlyWindowProjectedFrom != nil {
 			// A projected read is allowed only when Redis is absent. Any cache
 			// entry would be a second source of admission state that cannot be
 			// proven identical to the still-unmaintained DB row.
@@ -110,25 +110,39 @@ func quotaSubscriptionCacheMatchesSnapshot(
 	sub QuotaOverviewSubscriptionSnapshot,
 	asOf time.Time,
 ) bool {
-	if cached == nil || cached.WeeklyWindowStart == nil || sub.WeeklyWindowStart == nil {
+	if cached == nil ||
+		cached.WeeklyWindowStart == nil ||
+		sub.WeeklyWindowStart == nil ||
+		cached.MonthlyWindowStart == nil ||
+		sub.MonthlyWindowStart == nil {
 		return false
 	}
-	periodStart, periodEnd, ok := AnchoredWeeklyWindow(sub.StartsAt, asOf)
+	weeklyPeriodStart, weeklyPeriodEnd, ok := AnchoredWeeklyWindow(sub.StartsAt, asOf)
 	if !ok {
 		return false
 	}
-	if !sub.WeeklyWindowStart.Equal(periodStart) ||
+	monthlyPeriodStart, monthlyPeriodEnd, ok := AnchoredMonthlyWindow(sub.StartsAt, asOf)
+	if !ok {
+		return false
+	}
+	if !sub.WeeklyWindowStart.Equal(weeklyPeriodStart) ||
+		!sub.MonthlyWindowStart.Equal(monthlyPeriodStart) ||
 		cached.SubscriptionID != sub.ID ||
 		!cached.StartsAt.Equal(sub.StartsAt) ||
 		!cached.ExpiresAt.Equal(sub.ExpiresAt) ||
-		!cached.WeeklyWindowStart.Equal(periodStart) ||
-		!cached.WeeklyWindowEnd.Equal(periodEnd) ||
+		!cached.WeeklyWindowStart.Equal(weeklyPeriodStart) ||
+		!cached.WeeklyWindowEnd.Equal(weeklyPeriodEnd) ||
+		!cached.MonthlyWindowStart.Equal(monthlyPeriodStart) ||
+		!cached.MonthlyWindowEnd.Equal(monthlyPeriodEnd) ||
 		cached.Status != sub.Status ||
 		sub.UpdatedAt.IsZero() ||
 		cached.Version != sub.UpdatedAt.UnixMicro() ||
 		math.IsNaN(cached.WeeklyUsage) ||
 		math.IsInf(cached.WeeklyUsage, 0) ||
-		decimal.NewFromFloat(cached.WeeklyUsage).StringFixed(10) != sub.WeeklyUsed.StringFixed(10) {
+		decimal.NewFromFloat(cached.WeeklyUsage).StringFixed(10) != sub.WeeklyUsed.StringFixed(10) ||
+		math.IsNaN(cached.MonthlyUsage) ||
+		math.IsInf(cached.MonthlyUsage, 0) ||
+		decimal.NewFromFloat(cached.MonthlyUsage).StringFixed(10) != sub.MonthlyUsed.StringFixed(10) {
 		return false
 	}
 	return true
@@ -183,7 +197,8 @@ func validQuotaOverviewSnapshot(snapshot *QuotaOverviewSnapshot, expectedUserID 
 			sub.StartsAt.IsZero() ||
 			sub.ExpiresAt.IsZero() ||
 			!sub.ExpiresAt.After(sub.StartsAt) ||
-			sub.WeeklyUsed.IsNegative() {
+			sub.WeeklyUsed.IsNegative() ||
+			sub.MonthlyUsed.IsNegative() {
 			return false
 		}
 		if _, duplicate := groups[sub.GroupID]; duplicate {
@@ -193,15 +208,24 @@ func validQuotaOverviewSnapshot(snapshot *QuotaOverviewSnapshot, expectedUserID 
 		if sub.WeeklyLimit != nil && sub.WeeklyLimit.IsNegative() {
 			return false
 		}
+		if sub.MonthlyLimit != nil && sub.MonthlyLimit.IsNegative() {
+			return false
+		}
 		if sub.Revoked || sub.Status != SubscriptionStatusActive || !snapshot.AsOf.Before(sub.ExpiresAt) {
 			continue
 		}
-		periodStart, _, ok := AnchoredWeeklyWindow(sub.StartsAt, snapshot.AsOf)
-		if !ok ||
+		weeklyPeriodStart, _, weeklyOK := AnchoredWeeklyWindow(sub.StartsAt, snapshot.AsOf)
+		monthlyPeriodStart, _, monthlyOK := AnchoredMonthlyWindow(sub.StartsAt, snapshot.AsOf)
+		_, hasMonthlyLimit := quotaOverviewEffectiveMonthlyLimit(sub)
+		if !weeklyOK ||
+			!monthlyOK ||
 			sub.WeeklyWindowStart == nil ||
-			!sub.WeeklyWindowStart.Equal(periodStart) ||
+			!sub.WeeklyWindowStart.Equal(weeklyPeriodStart) ||
+			sub.MonthlyWindowStart == nil ||
+			!sub.MonthlyWindowStart.Equal(monthlyPeriodStart) ||
 			sub.WeeklyLimit == nil ||
-			!sub.WeeklyLimit.GreaterThan(decimal.Zero) ||
+			sub.WeeklyLimit.IsNegative() ||
+			!hasMonthlyLimit ||
 			sub.UpdatedAt.IsZero() {
 			return false
 		}
@@ -211,18 +235,27 @@ func validQuotaOverviewSnapshot(snapshot *QuotaOverviewSnapshot, expectedUserID 
 				!quotaOverviewIsStrictPastAnchoredWindow(
 					sub.StartsAt,
 					*sub.WeeklyWindowProjectedFrom,
-					periodStart,
+					weeklyPeriodStart,
 				) ||
 				!sub.WeeklyUsed.IsZero() ||
 				!quotaOverviewPeriodUsageProvesEmpty(
 					sub.PeriodUsage,
-					periodStart,
+					weeklyPeriodStart,
 					periodEnd,
 					snapshot.AsOf,
 					sub.ExpiresAt,
 				) {
 				return false
 			}
+		}
+		if sub.MonthlyWindowProjectedFrom != nil &&
+			(!quotaOverviewIsStrictPastMonthlyAnchoredWindow(
+				sub.StartsAt,
+				*sub.MonthlyWindowProjectedFrom,
+				monthlyPeriodStart,
+			) ||
+				!sub.MonthlyUsed.IsZero()) {
+			return false
 		}
 	}
 	return true

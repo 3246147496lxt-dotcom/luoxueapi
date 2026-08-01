@@ -117,21 +117,25 @@ type QuotaOverviewKeySnapshot struct {
 }
 
 type QuotaOverviewSubscriptionSnapshot struct {
-	ID                        int64
-	GroupID                   int64
-	GroupName                 string
-	GroupStatus               string
-	GroupDeleted              bool
-	Status                    string
-	Revoked                   bool
-	StartsAt                  time.Time
-	ExpiresAt                 time.Time
-	WeeklyWindowStart         *time.Time
-	WeeklyWindowProjectedFrom *time.Time
-	WeeklyLimit               *decimal.Decimal
-	WeeklyUsed                decimal.Decimal
-	UpdatedAt                 time.Time
-	PeriodUsage               *QuotaOverviewPeriodUsageSnapshot
+	ID                         int64
+	GroupID                    int64
+	GroupName                  string
+	GroupStatus                string
+	GroupDeleted               bool
+	Status                     string
+	Revoked                    bool
+	StartsAt                   time.Time
+	ExpiresAt                  time.Time
+	WeeklyWindowStart          *time.Time
+	WeeklyWindowProjectedFrom  *time.Time
+	WeeklyLimit                *decimal.Decimal
+	WeeklyUsed                 decimal.Decimal
+	MonthlyWindowStart         *time.Time
+	MonthlyWindowProjectedFrom *time.Time
+	MonthlyLimit               *decimal.Decimal
+	MonthlyUsed                decimal.Decimal
+	UpdatedAt                  time.Time
+	PeriodUsage                *QuotaOverviewPeriodUsageSnapshot
 }
 
 type QuotaOverviewPeriodUsageSnapshot struct {
@@ -224,15 +228,16 @@ type QuotaOverviewKey struct {
 }
 
 type QuotaOverviewSubscription struct {
-	ID           string
-	GroupID      string
-	Name         string
-	Status       string
-	StartsAt     time.Time
-	ExpiresAt    time.Time
-	WeeklyWindow QuotaOverviewWeeklyWindow
-	PeriodUsage  QuotaOverviewPeriodUsage
-	NextEvent    *QuotaOverviewNextEvent
+	ID            string
+	GroupID       string
+	Name          string
+	Status        string
+	StartsAt      time.Time
+	ExpiresAt     time.Time
+	WeeklyWindow  QuotaOverviewWeeklyWindow
+	MonthlyWindow QuotaOverviewMonthlyWindow
+	PeriodUsage   QuotaOverviewPeriodUsage
+	NextEvent     *QuotaOverviewNextEvent
 }
 
 type QuotaOverviewPeriodUsage struct {
@@ -257,6 +262,19 @@ type QuotaOverviewPeriodUsagePoint struct {
 }
 
 type QuotaOverviewWeeklyWindow struct {
+	Kind        string
+	State       string
+	AnchorAt    time.Time
+	PeriodStart *time.Time
+	PeriodEnd   *time.Time
+	ResetsAt    *time.Time
+	Limit       *string
+	Used        *string
+	Remaining   *string
+	UsedPercent *float64
+}
+
+type QuotaOverviewMonthlyWindow struct {
 	Kind        string
 	State       string
 	AnchorAt    time.Time
@@ -430,6 +448,7 @@ func buildQuotaOverview(snapshot *QuotaOverviewSnapshot, generatedAt time.Time, 
 				"account_spend_month_to_date",
 				"api_key_billing_groups",
 				"subscription_7d",
+				"subscription_30d",
 				"subscription_period_usage",
 			},
 			Excluded: []string{"routing", "rpm", "concurrency", "upstream_quota", "codex_quota"},
@@ -462,10 +481,11 @@ func buildQuotaOverview(snapshot *QuotaOverviewSnapshot, generatedAt time.Time, 
 		out.Warnings = appendUniqueStrings(out.Warnings, "invalid_wallet_snapshot")
 	}
 
-	subscriptionByGroup := make(map[int64]QuotaOverviewSubscriptionSnapshot, len(snapshot.Subscriptions))
-	subscriptionStateByGroup := make(map[int64]quotaResourceState, len(snapshot.Subscriptions))
-	for i := range snapshot.Subscriptions {
-		sub := snapshot.Subscriptions[i]
+	orderedSubscriptions := orderQuotaOverviewSubscriptions(snapshot.Subscriptions, asOf)
+	subscriptionByGroup := make(map[int64]QuotaOverviewSubscriptionSnapshot, len(orderedSubscriptions))
+	subscriptionStateByGroup := make(map[int64]quotaResourceState, len(orderedSubscriptions))
+	for i := range orderedSubscriptions {
+		sub := orderedSubscriptions[i]
 		subscriptionByGroup[sub.GroupID] = sub
 		view, state := buildSubscriptionOverview(sub, asOf)
 		if view.WeeklyWindow.State != QuotaWindowUnknown &&
@@ -548,8 +568,8 @@ func buildQuotaOverview(snapshot *QuotaOverviewSnapshot, generatedAt time.Time, 
 	}
 
 	// Active or historical subscriptions may exist without an enabled key.
-	for i := range snapshot.Subscriptions {
-		sub := snapshot.Subscriptions[i]
+	for i := range orderedSubscriptions {
+		sub := orderedSubscriptions[i]
 		groupID := strconv.FormatInt(sub.GroupID, 10)
 		if _, exists := groups[groupID]; exists {
 			continue
@@ -662,6 +682,49 @@ func buildQuotaOverview(snapshot *QuotaOverviewSnapshot, generatedAt time.Time, 
 	return out
 }
 
+// orderQuotaOverviewSubscriptions defines the response ordering contract used
+// by compact quota clients: the first item is the newest currently effective
+// membership. Historical memberships remain in the response after all current
+// ones so billing-group coverage and expiry/revocation diagnostics stay intact.
+//
+// UpdatedAt is deliberately not a recency signal here because quota accounting
+// and window maintenance update it without starting a new membership term.
+func orderQuotaOverviewSubscriptions(
+	subscriptions []QuotaOverviewSubscriptionSnapshot,
+	asOf time.Time,
+) []QuotaOverviewSubscriptionSnapshot {
+	ordered := append([]QuotaOverviewSubscriptionSnapshot(nil), subscriptions...)
+	sort.SliceStable(ordered, func(i, j int) bool {
+		left, right := ordered[i], ordered[j]
+		leftCurrent := quotaOverviewSubscriptionIsDisplayCurrent(left, asOf)
+		rightCurrent := quotaOverviewSubscriptionIsDisplayCurrent(right, asOf)
+		if leftCurrent != rightCurrent {
+			return leftCurrent
+		}
+		if !left.StartsAt.Equal(right.StartsAt) {
+			return left.StartsAt.After(right.StartsAt)
+		}
+		if !left.ExpiresAt.Equal(right.ExpiresAt) {
+			return left.ExpiresAt.After(right.ExpiresAt)
+		}
+		return left.ID > right.ID
+	})
+	return ordered
+}
+
+func quotaOverviewSubscriptionIsDisplayCurrent(
+	sub QuotaOverviewSubscriptionSnapshot,
+	asOf time.Time,
+) bool {
+	return !sub.Revoked &&
+		sub.Status == SubscriptionStatusActive &&
+		!sub.StartsAt.IsZero() &&
+		!sub.ExpiresAt.IsZero() &&
+		sub.ExpiresAt.After(sub.StartsAt) &&
+		!asOf.Before(sub.StartsAt) &&
+		asOf.Before(sub.ExpiresAt)
+}
+
 func buildSubscriptionOverview(sub QuotaOverviewSubscriptionSnapshot, asOf time.Time) (QuotaOverviewSubscription, quotaResourceState) {
 	id := strconv.FormatInt(sub.ID, 10)
 	groupID := strconv.FormatInt(sub.GroupID, 10)
@@ -674,6 +737,11 @@ func buildSubscriptionOverview(sub QuotaOverviewSubscriptionSnapshot, asOf time.
 		ExpiresAt: sub.ExpiresAt.UTC(),
 		WeeklyWindow: QuotaOverviewWeeklyWindow{
 			Kind:     "7d_from_subscription_start",
+			State:    QuotaWindowUnknown,
+			AnchorAt: sub.StartsAt.UTC(),
+		},
+		MonthlyWindow: QuotaOverviewMonthlyWindow{
+			Kind:     "30d_from_subscription_start",
 			State:    QuotaWindowUnknown,
 			AnchorAt: sub.StartsAt.UTC(),
 		},
@@ -699,34 +767,134 @@ func buildSubscriptionOverview(sub QuotaOverviewSubscriptionSnapshot, asOf time.
 		out.Status = "unknown"
 		return out, state
 	}
-	if asOf.Before(sub.StartsAt) || sub.WeeklyLimit == nil || !sub.WeeklyLimit.GreaterThan(decimal.Zero) {
+	if asOf.Before(sub.StartsAt) || sub.WeeklyLimit == nil || sub.WeeklyLimit.IsNegative() {
 		return out, state
 	}
 
-	periodStart, periodEnd, ok := AnchoredWeeklyWindow(sub.StartsAt, asOf)
+	weeklyPeriodStart, weeklyPeriodEnd, ok := AnchoredWeeklyWindow(sub.StartsAt, asOf)
 	if !ok {
 		return out, state
 	}
-	out.WeeklyWindow.PeriodStart = timePointer(periodStart)
-	out.WeeklyWindow.PeriodEnd = timePointer(periodEnd)
-	out.WeeklyWindow.ResetsAt = timePointer(periodEnd)
-	if sub.WeeklyWindowStart == nil || !sub.WeeklyWindowStart.Equal(periodStart) {
+	monthlyPeriodStart, monthlyPeriodEnd, ok := AnchoredMonthlyWindow(sub.StartsAt, asOf)
+	if !ok {
 		return out, state
 	}
-	limit := *sub.WeeklyLimit
-	used := sub.WeeklyUsed
-	limitString := fixedQuotaAmount(limit)
-	usedString := fixedQuotaAmount(used)
-	out.WeeklyWindow.Limit = &limitString
-	out.WeeklyWindow.Used = &usedString
-	if used.IsNegative() {
+	out.WeeklyWindow.PeriodStart = timePointer(weeklyPeriodStart)
+	out.WeeklyWindow.PeriodEnd = timePointer(weeklyPeriodEnd)
+	out.WeeklyWindow.ResetsAt = timePointer(weeklyPeriodEnd)
+	out.MonthlyWindow.PeriodStart = timePointer(monthlyPeriodStart)
+	out.MonthlyWindow.PeriodEnd = timePointer(monthlyPeriodEnd)
+	out.MonthlyWindow.ResetsAt = timePointer(monthlyPeriodEnd)
+
+	if sub.WeeklyWindowStart == nil || !sub.WeeklyWindowStart.Equal(weeklyPeriodStart) {
 		return out, state
 	}
-	remaining := limit.Sub(used)
-	if remaining.IsNegative() {
-		remaining = decimal.Zero
+	weeklyLimit := *sub.WeeklyLimit
+	weeklyUsed := sub.WeeklyUsed
+	if weeklyUsed.IsNegative() {
+		return out, state
 	}
-	remainingString := fixedQuotaAmount(remaining)
+	weeklyLimitString := fixedQuotaAmount(weeklyLimit)
+	weeklyUsedString := fixedQuotaAmount(weeklyUsed)
+	weeklyRemaining := weeklyLimit.Sub(weeklyUsed)
+	if weeklyRemaining.IsNegative() {
+		weeklyRemaining = decimal.Zero
+	}
+	weeklyRemainingString := fixedQuotaAmount(weeklyRemaining)
+	weeklyPercent := quotaOverviewUsedPercent(weeklyUsed, weeklyLimit)
+	out.WeeklyWindow.Limit = &weeklyLimitString
+	out.WeeklyWindow.Used = &weeklyUsedString
+	out.WeeklyWindow.Remaining = &weeklyRemainingString
+	out.WeeklyWindow.UsedPercent = weeklyPercent
+	out.WeeklyWindow.State = QuotaWindowActive
+	out.PeriodUsage = buildQuotaOverviewPeriodUsage(
+		sub.PeriodUsage,
+		weeklyPeriodStart,
+		weeklyPeriodEnd,
+		asOf,
+		sub.ExpiresAt,
+	)
+
+	monthlyLimit, ok := quotaOverviewEffectiveMonthlyLimit(sub)
+	if !ok || sub.MonthlyWindowStart == nil || !sub.MonthlyWindowStart.Equal(monthlyPeriodStart) {
+		return out, state
+	}
+	monthlyUsed := sub.MonthlyUsed
+	if monthlyUsed.IsNegative() {
+		return out, state
+	}
+	monthlyLimitString := fixedQuotaAmount(monthlyLimit)
+	monthlyUsedString := fixedQuotaAmount(monthlyUsed)
+	monthlyRemaining := monthlyLimit.Sub(monthlyUsed)
+	if monthlyRemaining.IsNegative() {
+		monthlyRemaining = decimal.Zero
+	}
+	monthlyRemainingString := fixedQuotaAmount(monthlyRemaining)
+	out.MonthlyWindow.Limit = &monthlyLimitString
+	out.MonthlyWindow.Used = &monthlyUsedString
+	out.MonthlyWindow.Remaining = &monthlyRemainingString
+	out.MonthlyWindow.UsedPercent = quotaOverviewUsedPercent(monthlyUsed, monthlyLimit)
+	out.MonthlyWindow.State = QuotaWindowActive
+
+	weeklyExhausted := !weeklyUsed.LessThan(weeklyLimit)
+	monthlyExhausted := !monthlyUsed.LessThan(monthlyLimit)
+	if weeklyExhausted {
+		out.WeeklyWindow.State = QuotaWindowExhausted
+	}
+	if monthlyExhausted {
+		out.MonthlyWindow.State = QuotaWindowExhausted
+	}
+
+	state = quotaResourceState{state: QuotaGroupUsable, action: "none", resourceID: &id}
+	if weeklyExhausted || monthlyExhausted {
+		reason := "subscription_weekly_exhausted"
+		recoveryAt := weeklyPeriodEnd
+		if monthlyExhausted && (!weeklyExhausted || monthlyPeriodEnd.After(recoveryAt)) {
+			reason = "subscription_monthly_exhausted"
+			recoveryAt = monthlyPeriodEnd
+		}
+		state = quotaResourceState{
+			state: QuotaGroupBlocked, reason: reason,
+			action: "manage_api_keys", resourceID: &id,
+		}
+		// All exhausted windows must have reset before requests can resume.
+		// Do not advertise recovery at or after entitlement expiry.
+		if recoveryAt.Before(sub.ExpiresAt) {
+			reset := recoveryAt
+			state.recoversAt = &reset
+		}
+	}
+
+	nextReset := weeklyPeriodEnd
+	if monthlyPeriodEnd.Before(nextReset) {
+		nextReset = monthlyPeriodEnd
+	}
+	if !sub.ExpiresAt.After(nextReset) {
+		out.NextEvent = &QuotaOverviewNextEvent{Kind: "expiry", At: sub.ExpiresAt.UTC()}
+	} else {
+		out.NextEvent = &QuotaOverviewNextEvent{Kind: "reset", At: nextReset.UTC()}
+	}
+	return out, state
+}
+
+func quotaOverviewEffectiveMonthlyLimit(sub QuotaOverviewSubscriptionSnapshot) (decimal.Decimal, bool) {
+	if sub.MonthlyLimit != nil {
+		if sub.MonthlyLimit.IsNegative() {
+			return decimal.Zero, false
+		}
+		return *sub.MonthlyLimit, true
+	}
+	if sub.WeeklyLimit == nil || sub.WeeklyLimit.IsNegative() {
+		return decimal.Zero, false
+	}
+	return sub.WeeklyLimit.Mul(decimal.NewFromInt(4)), true
+}
+
+func quotaOverviewUsedPercent(used, limit decimal.Decimal) *float64 {
+	if limit.IsZero() {
+		percent := float64(100)
+		return &percent
+	}
 	percentDecimal := used.Mul(decimal.NewFromInt(100)).Div(limit)
 	percent, _ := percentDecimal.Float64()
 	if percent > 100 {
@@ -735,47 +903,21 @@ func buildSubscriptionOverview(sub QuotaOverviewSubscriptionSnapshot, asOf time.
 	if percent < 0 {
 		percent = 0
 	}
-	out.WeeklyWindow.Remaining = &remainingString
-	out.WeeklyWindow.UsedPercent = &percent
-	out.WeeklyWindow.State = QuotaWindowActive
-	out.PeriodUsage = buildQuotaOverviewPeriodUsage(
-		sub.PeriodUsage,
-		periodStart,
-		periodEnd,
-		asOf,
-		sub.ExpiresAt,
-	)
-	state = quotaResourceState{state: QuotaGroupUsable, action: "none", resourceID: &id}
-	if !used.LessThan(limit) {
-		out.WeeklyWindow.State = QuotaWindowExhausted
-		state = quotaResourceState{
-			state: QuotaGroupBlocked, reason: "subscription_weekly_exhausted",
-			action: "manage_api_keys", resourceID: &id,
-		}
-		// A reset cannot restore availability after the entitlement has
-		// already expired. Avoid advertising a false recovery time.
-		if periodEnd.Before(sub.ExpiresAt) {
-			reset := periodEnd
-			state.recoversAt = &reset
-		}
-	}
-	if sub.ExpiresAt.Before(periodEnd) {
-		out.NextEvent = &QuotaOverviewNextEvent{Kind: "expiry", At: sub.ExpiresAt.UTC()}
-	} else {
-		out.NextEvent = &QuotaOverviewNextEvent{Kind: "reset", At: periodEnd}
-	}
-	return out, state
+	return &percent
 }
 
 // normalizeQuotaOverviewElapsedEmptyWindows mirrors request admission's
-// EffectiveWeeklyUsageAt rule for one narrow maintenance gap: the persisted
-// marker is an exact, older anchored period and the current period has no
-// successful usage at all. In that case admission treats the stale counter as
-// zero, so the read model may project the current period without writing DB.
+// effective weekly-usage rule for a narrow maintenance gap: a persisted marker
+// can still identify an exact older anchored period immediately after a
+// boundary. Admission treats that elapsed weekly counter as zero, so the read
+// model may project the current weekly start without writing DB.
 //
 // The original marker is retained as evidence for validation and cache
-// consistency checks. A missing, future or off-anchor marker, unavailable
-// period usage, or any current-period activity remains unknown.
+// consistency checks. Projection requires current-period usage-log proof
+// because that optional weekly aggregation is already available. There is no
+// equivalent authoritative 30d aggregation for monthly usage, so a stale
+// monthly marker remains unknown instead of being rendered as zero. Missing,
+// future or off-anchor markers also remain unknown.
 func normalizeQuotaOverviewElapsedEmptyWindows(snapshot *QuotaOverviewSnapshot) {
 	if snapshot == nil {
 		return
@@ -786,21 +928,22 @@ func normalizeQuotaOverviewElapsedEmptyWindows(snapshot *QuotaOverviewSnapshot) 
 		if sub.Revoked ||
 			sub.Status != SubscriptionStatusActive ||
 			asOf.Before(sub.StartsAt) ||
-			!asOf.Before(sub.ExpiresAt) ||
-			sub.WeeklyWindowStart == nil {
+			!asOf.Before(sub.ExpiresAt) {
 			continue
 		}
-		periodStart, periodEnd, ok := AnchoredWeeklyWindow(sub.StartsAt, asOf)
-		if !ok ||
+
+		weeklyPeriodStart, weeklyPeriodEnd, weeklyOK := AnchoredWeeklyWindow(sub.StartsAt, asOf)
+		if !weeklyOK ||
+			sub.WeeklyWindowStart == nil ||
 			!quotaOverviewIsStrictPastAnchoredWindow(
 				sub.StartsAt,
 				*sub.WeeklyWindowStart,
-				periodStart,
+				weeklyPeriodStart,
 			) ||
 			!quotaOverviewPeriodUsageProvesEmpty(
 				sub.PeriodUsage,
-				periodStart,
-				periodEnd,
+				weeklyPeriodStart,
+				weeklyPeriodEnd,
 				asOf,
 				sub.ExpiresAt,
 			) {
@@ -808,7 +951,7 @@ func normalizeQuotaOverviewElapsedEmptyWindows(snapshot *QuotaOverviewSnapshot) 
 		}
 
 		projectedFrom := sub.WeeklyWindowStart.UTC()
-		currentStart := periodStart.UTC()
+		currentStart := weeklyPeriodStart.UTC()
 		sub.WeeklyWindowProjectedFrom = &projectedFrom
 		sub.WeeklyWindowStart = &currentStart
 		sub.WeeklyUsed = decimal.Zero
@@ -824,6 +967,18 @@ func quotaOverviewIsStrictPastAnchoredWindow(
 		return false
 	}
 	candidateStart, _, ok := AnchoredWeeklyWindow(anchor, candidate)
+	return ok && candidate.Equal(candidateStart)
+}
+
+func quotaOverviewIsStrictPastMonthlyAnchoredWindow(
+	anchor time.Time,
+	candidate time.Time,
+	currentStart time.Time,
+) bool {
+	if !candidate.Before(currentStart) {
+		return false
+	}
+	candidateStart, _, ok := AnchoredMonthlyWindow(anchor, candidate)
 	return ok && candidate.Equal(candidateStart)
 }
 
@@ -1064,6 +1219,9 @@ func quotaOverviewFreshUntil(
 		if _, periodEnd, ok := AnchoredWeeklyWindow(sub.StartsAt, asOf); ok {
 			clamp(periodEnd)
 		}
+		if _, periodEnd, ok := AnchoredMonthlyWindow(sub.StartsAt, asOf); ok {
+			clamp(periodEnd)
+		}
 	}
 	return freshUntil
 }
@@ -1115,6 +1273,8 @@ func degradeQuotaOverview(overview *QuotaOverview, freshness, warning string) {
 	for i := range overview.Subscriptions {
 		overview.Subscriptions[i].WeeklyWindow.State = QuotaWindowUnknown
 		overview.Subscriptions[i].WeeklyWindow.UsedPercent = nil
+		overview.Subscriptions[i].MonthlyWindow.State = QuotaWindowUnknown
+		overview.Subscriptions[i].MonthlyWindow.UsedPercent = nil
 		overview.Subscriptions[i].PeriodUsage = unknownQuotaOverviewPeriodUsage()
 	}
 }
@@ -1124,18 +1284,32 @@ func cloneQuotaOverview(in QuotaOverview) QuotaOverview {
 	out.Coverage.Included = append([]string(nil), in.Coverage.Included...)
 	out.Coverage.Excluded = append([]string(nil), in.Coverage.Excluded...)
 	out.Warnings = append([]string(nil), in.Warnings...)
+	out.Account.CanMakeRequest = cloneQuotaOverviewBoolPointer(in.Account.CanMakeRequest)
 	if in.Account.PrimaryIssue != nil {
 		issue := *in.Account.PrimaryIssue
+		issue.RecoversAt = cloneQuotaOverviewTimePointer(in.Account.PrimaryIssue.RecoversAt)
 		out.Account.PrimaryIssue = &issue
 	}
 	out.BillingGroups = make([]QuotaOverviewBillingGroup, len(in.BillingGroups))
 	for i := range in.BillingGroups {
 		out.BillingGroups[i] = in.BillingGroups[i]
+		out.BillingGroups[i].ReasonCode = cloneQuotaOverviewStringPointer(
+			in.BillingGroups[i].ReasonCode,
+		)
+		out.BillingGroups[i].ResourceRef.ID = cloneQuotaOverviewStringPointer(
+			in.BillingGroups[i].ResourceRef.ID,
+		)
 		out.BillingGroups[i].Keys = append([]QuotaOverviewKey(nil), in.BillingGroups[i].Keys...)
 	}
 	out.Subscriptions = make([]QuotaOverviewSubscription, len(in.Subscriptions))
 	copy(out.Subscriptions, in.Subscriptions)
 	for i := range out.Subscriptions {
+		out.Subscriptions[i].WeeklyWindow = cloneQuotaOverviewWeeklyWindow(
+			in.Subscriptions[i].WeeklyWindow,
+		)
+		out.Subscriptions[i].MonthlyWindow = cloneQuotaOverviewMonthlyWindow(
+			in.Subscriptions[i].MonthlyWindow,
+		)
 		if in.Subscriptions[i].NextEvent != nil {
 			event := *in.Subscriptions[i].NextEvent
 			out.Subscriptions[i].NextEvent = &event
@@ -1157,6 +1331,62 @@ func cloneQuotaOverview(in QuotaOverview) QuotaOverview {
 		)
 	}
 	return out
+}
+
+func cloneQuotaOverviewWeeklyWindow(in QuotaOverviewWeeklyWindow) QuotaOverviewWeeklyWindow {
+	out := in
+	out.PeriodStart = cloneQuotaOverviewTimePointer(in.PeriodStart)
+	out.PeriodEnd = cloneQuotaOverviewTimePointer(in.PeriodEnd)
+	out.ResetsAt = cloneQuotaOverviewTimePointer(in.ResetsAt)
+	out.Limit = cloneQuotaOverviewStringPointer(in.Limit)
+	out.Used = cloneQuotaOverviewStringPointer(in.Used)
+	out.Remaining = cloneQuotaOverviewStringPointer(in.Remaining)
+	out.UsedPercent = cloneQuotaOverviewFloat64Pointer(in.UsedPercent)
+	return out
+}
+
+func cloneQuotaOverviewMonthlyWindow(in QuotaOverviewMonthlyWindow) QuotaOverviewMonthlyWindow {
+	out := in
+	out.PeriodStart = cloneQuotaOverviewTimePointer(in.PeriodStart)
+	out.PeriodEnd = cloneQuotaOverviewTimePointer(in.PeriodEnd)
+	out.ResetsAt = cloneQuotaOverviewTimePointer(in.ResetsAt)
+	out.Limit = cloneQuotaOverviewStringPointer(in.Limit)
+	out.Used = cloneQuotaOverviewStringPointer(in.Used)
+	out.Remaining = cloneQuotaOverviewStringPointer(in.Remaining)
+	out.UsedPercent = cloneQuotaOverviewFloat64Pointer(in.UsedPercent)
+	return out
+}
+
+func cloneQuotaOverviewTimePointer(value *time.Time) *time.Time {
+	if value == nil {
+		return nil
+	}
+	cloned := *value
+	return &cloned
+}
+
+func cloneQuotaOverviewStringPointer(value *string) *string {
+	if value == nil {
+		return nil
+	}
+	cloned := *value
+	return &cloned
+}
+
+func cloneQuotaOverviewFloat64Pointer(value *float64) *float64 {
+	if value == nil {
+		return nil
+	}
+	cloned := *value
+	return &cloned
+}
+
+func cloneQuotaOverviewBoolPointer(value *bool) *bool {
+	if value == nil {
+		return nil
+	}
+	cloned := *value
+	return &cloned
 }
 
 func cloneQuotaOverviewPeriodUsagePoints(

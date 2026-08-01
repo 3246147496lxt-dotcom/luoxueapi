@@ -20,10 +20,11 @@ type SubscriptionProgress struct {
 }
 
 type UsageWindowProgress struct {
+	State           string    `json:"state"`
 	LimitUSD        float64   `json:"limit_usd"`
-	UsedUSD         float64   `json:"used_usd"`
-	RemainingUSD    float64   `json:"remaining_usd"`
-	Percentage      float64   `json:"percentage"`
+	UsedUSD         *float64  `json:"used_usd"`
+	RemainingUSD    *float64  `json:"remaining_usd"`
+	Percentage      *float64  `json:"percentage"`
 	WindowStart     time.Time `json:"window_start"`
 	ResetsAt        time.Time `json:"resets_at"`
 	ResetsInSeconds int64     `json:"resets_in_seconds"`
@@ -57,6 +58,7 @@ func usageWindowProgressFromService(progress *service.UsageWindowProgress) *Usag
 		return nil
 	}
 	return &UsageWindowProgress{
+		State:           progress.State,
 		LimitUSD:        progress.LimitUSD,
 		UsedUSD:         progress.UsedUSD,
 		RemainingUSD:    progress.RemainingUSD,

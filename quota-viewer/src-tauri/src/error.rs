@@ -9,8 +9,6 @@ pub enum AppError {
     Network(#[from] reqwest::Error),
     #[error("invalid URL")]
     Url(#[from] url::ParseError),
-    #[error("secure storage is unavailable")]
-    Keyring(#[from] keyring::Error),
     #[error("local cache is unavailable")]
     Io(#[from] std::io::Error),
     #[error("local cache is invalid")]
@@ -66,7 +64,6 @@ impl AppError {
             Self::Network(error) if error.is_timeout() => "NETWORK_TIMEOUT".into(),
             Self::Network(_) => "NETWORK_UNAVAILABLE".into(),
             Self::Url(_) => "INVALID_URL".into(),
-            Self::Keyring(_) => "SECURE_STORAGE_UNAVAILABLE".into(),
             Self::Io(_) | Self::Json(_) => "LOCAL_CACHE_UNAVAILABLE".into(),
             Self::CloudRejected { reason, .. } if !reason.is_empty() => reason.clone(),
             Self::CloudRejected { status, .. } => format!("HTTP_{status}"),

@@ -168,6 +168,17 @@ func (s *openAIRecordUsageSubRepoStub) IncrementUsage(ctx context.Context, id in
 	return s.incrementErr
 }
 
+func (s *openAIRecordUsageSubRepoStub) IncrementUsageForTerm(
+	ctx context.Context,
+	_ int64,
+	_ time.Time,
+	_ float64,
+) error {
+	s.incrementCalls++
+	s.lastCtxErr = ctx.Err()
+	return s.incrementErr
+}
+
 type openAIRecordUsageAPIKeyQuotaStub struct {
 	quotaCalls          int
 	rateLimitCalls      int
@@ -459,9 +470,14 @@ func TestOpenAIGatewayServiceRecordUsage_PeakRateAffectsTokenModeImageOutputToke
 				PeakRateMultiplier: 3.0,
 			},
 		},
-		User:         &User{ID: 2004},
-		Account:      &Account{ID: 3004},
-		Subscription: &UserSubscription{ID: subscriptionID, UserID: 2004, GroupID: groupID},
+		User:    &User{ID: 2004},
+		Account: &Account{ID: 3004},
+		Subscription: &UserSubscription{
+			ID:       subscriptionID,
+			UserID:   2004,
+			GroupID:  groupID,
+			StartsAt: time.Date(2026, time.July, 29, 13, 47, 12, 0, time.UTC),
+		},
 	})
 
 	require.NoError(t, err)
@@ -1623,7 +1639,12 @@ func TestOpenAIGatewayServiceRecordUsage_SubscriptionBillingSetsSubscriptionFiel
 	userRepo := &openAIRecordUsageUserRepoStub{}
 	subRepo := &openAIRecordUsageSubRepoStub{}
 	svc := newOpenAIRecordUsageServiceForTest(usageRepo, userRepo, subRepo, nil)
-	subscription := &UserSubscription{ID: 99, UserID: 200, GroupID: 88}
+	subscription := &UserSubscription{
+		ID:       99,
+		UserID:   200,
+		GroupID:  88,
+		StartsAt: time.Date(2026, time.July, 29, 13, 47, 12, 0, time.UTC),
+	}
 
 	err := svc.RecordUsage(context.Background(), &OpenAIRecordUsageInput{
 		Result: &OpenAIForwardResult{

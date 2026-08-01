@@ -1,0 +1,9 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "identifier": "cc.luoxueapi.quota-viewer.dev",
+  "bundle": {
+    "macOS": {
+      "signingIdentity": "Luoxue Quota Viewer Development"
+    }
+  }
+}

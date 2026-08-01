@@ -1806,10 +1806,11 @@ export interface SubscriptionProgress {
 }
 
 export interface SubscriptionUsageWindowProgress {
+  state: 'active' | 'exhausted' | 'unknown'
   limit_usd: number
-  used_usd: number
-  remaining_usd: number
-  percentage: number
+  used_usd: number | null
+  remaining_usd: number | null
+  percentage: number | null
   window_start: string
   resets_at: string
   resets_in_seconds: number

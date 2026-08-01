@@ -253,29 +253,19 @@ func (s *Service) RefreshSessionWithInput(ctx context.Context, input RefreshSess
 
 	hasRotationID := input.RotationID != nil
 	hasCandidate := input.CandidateRefreshToken != nil
-	if hasRotationID != hasCandidate {
+	if !hasRotationID || !hasCandidate {
 		return nil, ErrInvalidAuthorizationRequest
 	}
 
-	replacement := ""
-	rotationID := ""
-	if hasRotationID {
-		rotationID = *input.RotationID
-		replacement = *input.CandidateRefreshToken
-		parsedRotationID, err := uuid.Parse(rotationID)
-		if err != nil || parsedRotationID.Version() != uuid.Version(4) ||
-			parsedRotationID.Variant() != uuid.RFC4122 ||
-			parsedRotationID.String() != rotationID ||
-			!validCandidateRefreshToken(replacement) ||
-			subtle.ConstantTimeCompare([]byte(replacement), []byte(refreshToken)) == 1 {
-			return nil, ErrInvalidAuthorizationRequest
-		}
-	} else {
-		var err error
-		replacement, err = randomOpaqueToken(refreshTokenPrefix, 32)
-		if err != nil {
-			return nil, ErrServiceUnavailable.WithCause(fmt.Errorf("generate replacement quota viewer refresh token: %w", err))
-		}
+	rotationID := *input.RotationID
+	replacement := *input.CandidateRefreshToken
+	parsedRotationID, err := uuid.Parse(rotationID)
+	if err != nil || parsedRotationID.Version() != uuid.Version(4) ||
+		parsedRotationID.Variant() != uuid.RFC4122 ||
+		parsedRotationID.String() != rotationID ||
+		!validCandidateRefreshToken(replacement) ||
+		subtle.ConstantTimeCompare([]byte(replacement), []byte(refreshToken)) == 1 {
+		return nil, ErrInvalidAuthorizationRequest
 	}
 
 	now := s.now().UTC()
@@ -296,14 +286,12 @@ func (s *Service) RefreshSessionWithInput(ctx context.Context, input RefreshSess
 	if err != nil {
 		return nil, err
 	}
-	if hasRotationID {
-		if outcome.Result != RefreshRotationCommitted && outcome.Result != RefreshRotationRecovered {
-			return nil, ErrServiceUnavailable
-		}
-		pair.RefreshProtocol = RefreshProtocolCandidateV1
-		pair.RotationID = rotationID
-		pair.RotationResult = outcome.Result
+	if outcome.Result != RefreshRotationCommitted && outcome.Result != RefreshRotationRecovered {
+		return nil, ErrServiceUnavailable
 	}
+	pair.RefreshProtocol = RefreshProtocolCandidateV1
+	pair.RotationID = rotationID
+	pair.RotationResult = outcome.Result
 	return pair, nil
 }
 

@@ -100,6 +100,14 @@ type usageLogBestEffortWriter interface {
 	CreateBestEffort(ctx context.Context, log *UsageLog) error
 }
 
+// subscriptionTermUsageIncrementer is an optional repository capability used
+// only by the legacy repo=nil billing fallback. The main repository interface
+// stays compatible with alternate implementations, while the fallback fails
+// closed instead of incrementing a possibly reopened subscription by ID alone.
+type subscriptionTermUsageIncrementer interface {
+	IncrementUsageForTerm(ctx context.Context, id int64, startsAt time.Time, costUSD float64) error
+}
+
 // postUsageBillingParams 统一扣费所需的参数
 type postUsageBillingParams struct {
 	Cost                  *CostBreakdown
@@ -155,7 +163,7 @@ func (p *postUsageBillingParams) shouldUpdateAccountQuota() bool {
 // postUsageBilling is the legacy fallback billing path used when the unified
 // billing repo is unavailable (nil). Production uses applyUsageBilling → repo.Apply
 // for atomic billing. This path only runs in tests or degraded mode.
-func postUsageBilling(ctx context.Context, p *postUsageBillingParams, deps *billingDeps) {
+func postUsageBilling(ctx context.Context, p *postUsageBillingParams, deps *billingDeps) error {
 	billingCtx, cancel := detachedBillingContext(ctx)
 	defer cancel()
 
@@ -165,16 +173,29 @@ func postUsageBilling(ctx context.Context, p *postUsageBillingParams, deps *bill
 		// Subscription usage tracked by ActualCost so group rate multiplier
 		// consumes the quota at the expected speed.
 		if cost.ActualCost > 0 {
-			if err := deps.userSubRepo.IncrementUsage(billingCtx, p.Subscription.ID, cost.ActualCost); err != nil {
-				slog.Error("increment subscription usage failed", "subscription_id", p.Subscription.ID, "error", err)
-			} else if deps.billingCacheService != nil && p.User != nil && p.APIKey != nil && p.APIKey.GroupID != nil {
-				if err := deps.billingCacheService.InvalidateSubscription(billingCtx, p.User.ID, *p.APIKey.GroupID); err != nil {
-					slog.Warn("invalidate subscription cache after legacy increment failed",
-						"user_id", p.User.ID,
-						"group_id", *p.APIKey.GroupID,
-						"error", err,
-					)
+			if err := incrementSubscriptionUsageForTerm(
+				billingCtx,
+				deps.userSubRepo,
+				p.Subscription,
+				cost.ActualCost,
+			); err != nil {
+				subscriptionID := int64(0)
+				if p.Subscription != nil {
+					subscriptionID = p.Subscription.ID
 				}
+				slog.Error("increment subscription usage failed",
+					"subscription_id", subscriptionID,
+					"error", err,
+				)
+				return err
+			} else if deps.billingCacheService != nil && p.User != nil && p.APIKey != nil && p.APIKey.GroupID != nil {
+				invalidateSubscriptionBillingCaches(
+					billingCtx,
+					deps.billingCacheService,
+					p.User.ID,
+					*p.APIKey.GroupID,
+					"legacy increment",
+				)
 			}
 		}
 	} else {
@@ -232,6 +253,23 @@ func postUsageBilling(ctx context.Context, p *postUsageBillingParams, deps *bill
 	// cache updates. The legacy path does DB writes directly; the finalize path
 	// does cache queue + notifications. Notifications are dispatched separately
 	// by the caller after recording the usage log.
+	return nil
+}
+
+func incrementSubscriptionUsageForTerm(
+	ctx context.Context,
+	repo UserSubscriptionRepository,
+	subscription *UserSubscription,
+	costUSD float64,
+) error {
+	if subscription == nil || subscription.StartsAt.IsZero() {
+		return ErrUsageBillingSubscriptionTermRequired
+	}
+	termRepo, ok := repo.(subscriptionTermUsageIncrementer)
+	if !ok {
+		return ErrUsageBillingSubscriptionTermUnsupported
+	}
+	return termRepo.IncrementUsageForTerm(ctx, subscription.ID, subscription.StartsAt, costUSD)
 }
 
 func resolveUsageBillingRequestID(ctx context.Context, upstreamRequestID string) string {
@@ -313,9 +351,13 @@ func buildUsageBillingCommand(requestID string, usageLog *UsageLog, p *postUsage
 	// speed. TotalCost remains the raw (pre-multiplier) value; downstream guards
 	// on "> 0" still correctly skip free subscriptions (RateMultiplier == 0).
 	if p.IsSubscriptionBill {
-		if p.Subscription != nil && p.Cost.TotalCost > 0 {
-			cmd.SubscriptionID = &p.Subscription.ID
-			cmd.SubscriptionCost = p.Cost.ActualCost
+		if p.Subscription != nil {
+			subscriptionStartsAt := p.Subscription.StartsAt
+			cmd.SubscriptionStartsAt = &subscriptionStartsAt
+			if p.Cost.TotalCost > 0 {
+				cmd.SubscriptionID = &p.Subscription.ID
+				cmd.SubscriptionCost = p.Cost.ActualCost
+			}
 		}
 	} else if p.Cost.ActualCost > 0 {
 		cmd.BalanceCost = p.Cost.ActualCost
@@ -332,6 +374,7 @@ func buildUsageBillingCommand(requestID string, usageLog *UsageLog, p *postUsage
 	}
 	if p.ForceNoCharge {
 		cmd.SubscriptionID = nil
+		cmd.SubscriptionStartsAt = nil
 		cmd.BillingType = BillingTypeBalance
 		cmd.BalanceCost = 0
 		cmd.SubscriptionCost = 0
@@ -367,7 +410,9 @@ func applyUsageBilling(
 		if cmd.Source == BillingReceiptSourceWebChat {
 			return nil, ErrUsageBillingRepositoryUnavailable
 		}
-		postUsageBilling(ctx, p, deps)
+		if err := postUsageBilling(ctx, p, deps); err != nil {
+			return nil, err
+		}
 		return &UsageBillingApplyResult{Applied: true}, nil
 	}
 
@@ -415,15 +460,13 @@ func finalizePostUsageBilling(ctx context.Context, p *postUsageBillingParams, de
 			// DB is authoritative. Blind asynchronous HINCR can double-count
 			// when another reader repopulates Redis from the post-commit DB
 			// before the queued task runs, so evict and let the next read reload.
-			if deps.billingCacheService != nil {
-				if err := deps.billingCacheService.InvalidateSubscription(ctx, p.User.ID, *p.APIKey.GroupID); err != nil {
-					slog.Warn("invalidate subscription cache after billing failed",
-						"user_id", p.User.ID,
-						"group_id", *p.APIKey.GroupID,
-						"error", err,
-					)
-				}
-			}
+			invalidateSubscriptionBillingCaches(
+				ctx,
+				deps.billingCacheService,
+				p.User.ID,
+				*p.APIKey.GroupID,
+				"billing",
+			)
 		}
 	} else if p.Cost.ActualCost > 0 && p.User != nil {
 		syncBalanceCacheAfterDeduction(ctx, p, deps, result)
@@ -473,6 +516,37 @@ func finalizePostUsageBilling(ctx context.Context, p *postUsageBillingParams, de
 	// no dependency on the request context or upstream connection.
 	go notifyBalanceLow(p, deps, result)
 	go notifyAccountQuota(p, deps, result)
+}
+
+func invalidateSubscriptionBillingCaches(
+	ctx context.Context,
+	cacheService *BillingCacheService,
+	userID, groupID int64,
+	reason string,
+) {
+	if cacheService == nil {
+		return
+	}
+
+	if err := cacheService.InvalidateSubscription(ctx, userID, groupID); err != nil {
+		slog.Warn("invalidate subscription cache after usage failed",
+			"reason", reason,
+			"user_id", userID,
+			"group_id", groupID,
+			"error", err,
+		)
+	}
+	// Notify every process even when DEL fails. Each process drops its L1
+	// entitlement snapshot; readers then either observe authoritative DB state
+	// or fail closed behind the local dirty fence.
+	if err := cacheService.PublishSubscriptionCacheInvalidation(ctx, subCacheKey(userID, groupID)); err != nil {
+		slog.Warn("publish subscription cache invalidation after usage failed",
+			"reason", reason,
+			"user_id", userID,
+			"group_id", groupID,
+			"error", err,
+		)
+	}
 }
 
 func syncBalanceCacheAfterDeduction(ctx context.Context, p *postUsageBillingParams, deps *billingDeps, result *UsageBillingApplyResult) {

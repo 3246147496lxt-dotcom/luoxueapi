@@ -397,8 +397,11 @@ func TestAPIContracts(t *testing.T) {
 				startsAt := time.Now().UTC().Add(-24 * time.Hour).Truncate(time.Second)
 				windowStart, _, ok := service.AnchoredWeeklyWindow(startsAt, time.Now())
 				require.True(t, ok)
+				monthlyWindowStart, _, ok := service.AnchoredMonthlyWindow(startsAt, time.Now())
+				require.True(t, ok)
 				deps.expectedSubscriptionStartsAt = startsAt
 				deps.expectedWeeklyWindowStart = windowStart
+				deps.expectedMonthlyWindowStart = monthlyWindowStart
 				// 普通用户订阅接口不应包含 assigned_* / notes 等管理员字段。
 				deps.userSubRepo.SetByUserID(1, []service.UserSubscription{
 					{
@@ -437,7 +440,7 @@ func TestAPIContracts(t *testing.T) {
 						"status": "active",
 						"daily_window_start": null,
 						"weekly_window_start": %q,
-						"monthly_window_start": null,
+						"monthly_window_start": %q,
 						"daily_usage_usd": 0,
 						"weekly_usage_usd": 2.34,
 						"monthly_usage_usd": 0,
@@ -448,6 +451,7 @@ func TestAPIContracts(t *testing.T) {
 			}`,
 					deps.expectedSubscriptionStartsAt.Format(time.RFC3339),
 					deps.expectedWeeklyWindowStart.Format(time.RFC3339),
+					deps.expectedMonthlyWindowStart.Format(time.RFC3339),
 				)
 			},
 		},
@@ -1357,6 +1361,7 @@ type contractDeps struct {
 	redeemRepo                   *stubRedeemCodeRepo
 	expectedSubscriptionStartsAt time.Time
 	expectedWeeklyWindowStart    time.Time
+	expectedMonthlyWindowStart   time.Time
 }
 
 func newContractDeps(t *testing.T) *contractDeps {

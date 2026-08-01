@@ -26,6 +26,11 @@ export type ViewerUiStatus =
 
 const AUTO_REFRESH_MS = 5 * 60 * 1000
 
+interface UseQuotaViewerOptions {
+  autoRefresh?: boolean
+  refreshOnBoot?: boolean
+}
+
 const displayTimezone = () =>
   Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'
 
@@ -37,7 +42,7 @@ const normalizeError = (error: unknown) => {
   }
 }
 
-export const useQuotaViewer = () => {
+export const useQuotaViewer = (options: UseQuotaViewerOptions = {}) => {
   const status = ref<ViewerUiStatus>('loading')
   const overview = ref<QuotaOverview | null>(null)
   const pairing = ref<PairingState | null>(null)
@@ -221,9 +226,10 @@ export const useQuotaViewer = () => {
       const snapshot = await getViewerSnapshot(displayTimezone())
       applySnapshot(snapshot, sequence)
       if (
-        snapshot.status === 'loading' ||
-        snapshot.status === 'ready' ||
-        snapshot.status === 'stale'
+        options.refreshOnBoot !== false &&
+        (snapshot.status === 'loading' ||
+          snapshot.status === 'ready' ||
+          snapshot.status === 'stale')
       ) {
         void refresh()
       }
@@ -233,15 +239,17 @@ export const useQuotaViewer = () => {
       errorMessage.value = normalized.message
       status.value = 'unavailable'
     }
-    autoRefreshTimer = window.setInterval(() => {
-      if (
-        status.value === 'ready' ||
-        status.value === 'stale' ||
-        status.value === 'unavailable'
-      ) {
-        void refresh()
-      }
-    }, AUTO_REFRESH_MS)
+    if (options.autoRefresh !== false) {
+      autoRefreshTimer = window.setInterval(() => {
+        if (
+          status.value === 'ready' ||
+          status.value === 'stale' ||
+          status.value === 'unavailable'
+        ) {
+          void refresh()
+        }
+      }, AUTO_REFRESH_MS)
+    }
   }
 
   onBeforeUnmount(() => {

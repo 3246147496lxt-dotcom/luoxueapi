@@ -36,12 +36,16 @@ export interface QuotaItem {
   periodLabel: string
   membershipStatus: MembershipStatus
   statusDetailLabel: string
+  expiresAt: string | null
+  isCurrentMembership: boolean
   state: QuotaState
   usedPercent: number | null
   usedLabel: string
   limitLabel: string
   remainingLabel: string
   resetLabel: string
+  resetsAt: string | null
+  monthlyRemainingPercent: number | null
   periodStartLabel: string | null
   periodEndLabel: string | null
   tone: QuotaTone

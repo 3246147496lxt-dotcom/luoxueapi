@@ -311,12 +311,13 @@ func TestUsageBillingRepositoryApply_DeduplicatesSubscriptionBilling(t *testing.
 
 	requestID := uuid.NewString()
 	cmd := &service.UsageBillingCommand{
-		RequestID:        requestID,
-		APIKeyID:         apiKey.ID,
-		UserID:           user.ID,
-		AccountID:        0,
-		SubscriptionID:   &subscription.ID,
-		SubscriptionCost: 2.5,
+		RequestID:            requestID,
+		APIKeyID:             apiKey.ID,
+		UserID:               user.ID,
+		AccountID:            0,
+		SubscriptionID:       &subscription.ID,
+		SubscriptionStartsAt: &subscription.StartsAt,
+		SubscriptionCost:     2.5,
 	}
 
 	result1, err := repo.Apply(ctx, cmd)
@@ -335,7 +336,193 @@ func TestUsageBillingRepositoryApply_DeduplicatesSubscriptionBilling(t *testing.
 	).Scan(&dailyUsage, &weeklyUsage, &monthlyUsage))
 	require.InDelta(t, 0, dailyUsage, 0.000001)
 	require.InDelta(t, 2.5, weeklyUsage, 0.000001)
-	require.InDelta(t, 0, monthlyUsage, 0.000001)
+	require.InDelta(t, 2.5, monthlyUsage, 0.000001)
+
+	var receiptSubscriptionAmount float64
+	require.NoError(t, integrationDB.QueryRowContext(
+		ctx,
+		`SELECT subscription_amount
+		 FROM billing_usage_entries
+		 WHERE request_id = $1 AND api_key_id = $2`,
+		requestID,
+		apiKey.ID,
+	).Scan(&receiptSubscriptionAmount))
+	require.InDelta(t, 2.5, receiptSubscriptionAmount, 0.000001)
+}
+
+func TestUsageBillingRepositoryApply_RejectsPriorSubscriptionTermAfterReopen(t *testing.T) {
+	ctx := context.Background()
+	client := testEntClient(t)
+	repo := NewUsageBillingRepository(client, integrationDB)
+
+	user := mustCreateUser(t, client, &service.User{
+		Email:        fmt.Sprintf("usage-billing-stale-term-user-%d@example.com", time.Now().UnixNano()),
+		PasswordHash: "hash",
+	})
+	group := mustCreateGroup(t, client, &service.Group{
+		Name:             "usage-billing-stale-term-group-" + uuid.NewString(),
+		Platform:         service.PlatformAnthropic,
+		SubscriptionType: service.SubscriptionTypeSubscription,
+	})
+	apiKey := mustCreateApiKey(t, client, &service.APIKey{
+		UserID:  user.ID,
+		GroupID: &group.ID,
+		Key:     "sk-usage-billing-stale-term-" + uuid.NewString(),
+		Name:    "billing-stale-term",
+	})
+	priorStartsAt := time.Now().UTC().Add(-time.Hour).Truncate(time.Microsecond)
+	subscription := mustCreateSubscription(t, client, &service.UserSubscription{
+		UserID:             user.ID,
+		GroupID:            group.ID,
+		StartsAt:           priorStartsAt,
+		ExpiresAt:          time.Now().UTC().Add(24 * time.Hour),
+		WeeklyWindowStart:  &priorStartsAt,
+		MonthlyWindowStart: &priorStartsAt,
+	})
+
+	requestID := uuid.NewString()
+	priorTerm := subscription.StartsAt
+	cmd := &service.UsageBillingCommand{
+		RequestID:            requestID,
+		APIKeyID:             apiKey.ID,
+		UserID:               user.ID,
+		SubscriptionID:       &subscription.ID,
+		SubscriptionStartsAt: &priorTerm,
+		SubscriptionCost:     2.5,
+	}
+
+	reopenedStartsAt := time.Now().UTC().Add(-30 * time.Minute).Truncate(time.Microsecond)
+	_, err := integrationDB.ExecContext(ctx, `
+		UPDATE user_subscriptions
+		SET starts_at = $1,
+			expires_at = $2,
+			weekly_window_start = $1,
+			monthly_window_start = $1,
+			weekly_usage_usd = 0,
+			monthly_usage_usd = 0,
+			updated_at = NOW()
+		WHERE id = $3
+	`, reopenedStartsAt, reopenedStartsAt.Add(30*24*time.Hour), subscription.ID)
+	require.NoError(t, err)
+
+	result, err := repo.Apply(ctx, cmd)
+	require.Nil(t, result)
+	require.ErrorIs(t, err, service.ErrUsageBillingSubscriptionTermMismatch)
+
+	var (
+		weeklyUsage  float64
+		monthlyUsage float64
+		dedupCount   int
+		receiptCount int
+	)
+	require.NoError(t, integrationDB.QueryRowContext(ctx, `
+		SELECT weekly_usage_usd, monthly_usage_usd
+		FROM user_subscriptions
+		WHERE id = $1
+	`, subscription.ID).Scan(&weeklyUsage, &monthlyUsage))
+	require.Zero(t, weeklyUsage)
+	require.Zero(t, monthlyUsage)
+	require.NoError(t, integrationDB.QueryRowContext(ctx, `
+		SELECT COUNT(*)
+		FROM usage_billing_dedup
+		WHERE request_id = $1 AND api_key_id = $2
+	`, requestID, apiKey.ID).Scan(&dedupCount))
+	require.Zero(t, dedupCount, "failed term validation must roll back the dedup claim")
+	require.NoError(t, integrationDB.QueryRowContext(ctx, `
+		SELECT COUNT(*)
+		FROM billing_usage_entries
+		WHERE request_id = $1 AND api_key_id = $2
+	`, requestID, apiKey.ID).Scan(&receiptCount))
+	require.Zero(t, receiptCount)
+
+	legacyRepo := &userSubscriptionRepository{client: client}
+	err = legacyRepo.IncrementUsageForTerm(ctx, subscription.ID, priorTerm, 2.5)
+	require.ErrorIs(t, err, service.ErrUsageBillingSubscriptionTermMismatch)
+	require.NoError(t, integrationDB.QueryRowContext(ctx, `
+		SELECT weekly_usage_usd, monthly_usage_usd
+		FROM user_subscriptions
+		WHERE id = $1
+	`, subscription.ID).Scan(&weeklyUsage, &monthlyUsage))
+	require.Zero(t, weeklyUsage)
+	require.Zero(t, monthlyUsage)
+}
+
+func TestIncrementUsageBillingSubscription_RollsFixedDurationWindowsAcrossDST(t *testing.T) {
+	ctx := context.Background()
+	client := testEntClient(t)
+
+	user := mustCreateUser(t, client, &service.User{
+		Email:        fmt.Sprintf("usage-billing-roll-sub-user-%d@example.com", time.Now().UnixNano()),
+		PasswordHash: "hash",
+	})
+	group := mustCreateGroup(t, client, &service.Group{
+		Name:             "usage-billing-roll-group-" + uuid.NewString(),
+		Platform:         service.PlatformAnthropic,
+		SubscriptionType: service.SubscriptionTypeSubscription,
+	})
+	apiKey := mustCreateApiKey(t, client, &service.APIKey{
+		UserID:  user.ID,
+		GroupID: &group.ID,
+		Key:     "sk-usage-billing-roll-sub-" + uuid.NewString(),
+		Name:    "billing-roll-sub",
+	})
+	// Span the America/New_York spring DST boundary. Anchored periods remain
+	// exact multiples of 7x24h and 30x24h rather than calendar-day intervals.
+	// Use the database clock and stay clear of an exact window boundary so a
+	// small host/VM clock skew cannot select the adjacent 30-day window.
+	var databaseNow time.Time
+	require.NoError(t, integrationDB.QueryRowContext(ctx, "SELECT CURRENT_TIMESTAMP").Scan(&databaseNow))
+	startsAt := databaseNow.UTC().Add(-240*24*time.Hour - time.Hour).Truncate(time.Microsecond)
+	subscription := mustCreateSubscription(t, client, &service.UserSubscription{
+		UserID:             user.ID,
+		GroupID:            group.ID,
+		StartsAt:           startsAt,
+		ExpiresAt:          databaseNow.UTC().Add(24 * time.Hour),
+		WeeklyWindowStart:  &startsAt,
+		MonthlyWindowStart: &startsAt,
+		WeeklyUsageUSD:     40,
+		MonthlyUsageUSD:    80,
+	})
+
+	tx, err := integrationDB.BeginTx(ctx, nil)
+	require.NoError(t, err)
+	defer func() { _ = tx.Rollback() }()
+	_, err = tx.ExecContext(ctx, "SET LOCAL TIME ZONE 'America/New_York'")
+	require.NoError(t, err)
+	require.NoError(t, incrementUsageBillingSubscription(
+		ctx,
+		tx,
+		subscription.ID,
+		user.ID,
+		apiKey.ID,
+		subscription.StartsAt,
+		2.5,
+	))
+	require.NoError(t, tx.Commit())
+
+	var (
+		weeklyUsage        float64
+		monthlyUsage       float64
+		weeklyWindowStart  time.Time
+		monthlyWindowStart time.Time
+	)
+	require.NoError(t, integrationDB.QueryRowContext(
+		ctx,
+		`SELECT weekly_usage_usd, monthly_usage_usd, weekly_window_start, monthly_window_start
+		 FROM user_subscriptions
+		 WHERE id = $1`,
+		subscription.ID,
+	).Scan(&weeklyUsage, &monthlyUsage, &weeklyWindowStart, &monthlyWindowStart))
+	require.NoError(t, integrationDB.QueryRowContext(ctx, "SELECT CURRENT_TIMESTAMP").Scan(&databaseNow))
+	now := databaseNow.UTC()
+	expectedWeeklyStart, _, ok := service.AnchoredWeeklyWindow(startsAt, now)
+	require.True(t, ok)
+	expectedMonthlyStart, _, ok := service.AnchoredMonthlyWindow(startsAt, now)
+	require.True(t, ok)
+	require.InDelta(t, 2.5, weeklyUsage, 0.000001)
+	require.InDelta(t, 2.5, monthlyUsage, 0.000001)
+	require.WithinDuration(t, expectedWeeklyStart, weeklyWindowStart, time.Microsecond)
+	require.WithinDuration(t, expectedMonthlyStart, monthlyWindowStart, time.Microsecond)
 }
 
 func TestUsageBillingRepositoryApply_RequestFingerprintConflict(t *testing.T) {

@@ -82,15 +82,16 @@ type QuotaOverviewKey struct {
 }
 
 type QuotaOverviewSubscription struct {
-	ID           string                    `json:"id"`
-	GroupID      string                    `json:"group_id"`
-	Name         string                    `json:"name"`
-	Status       string                    `json:"status"`
-	StartsAt     time.Time                 `json:"starts_at"`
-	ExpiresAt    time.Time                 `json:"expires_at"`
-	WeeklyWindow QuotaOverviewWeeklyWindow `json:"weekly_window"`
-	PeriodUsage  QuotaOverviewPeriodUsage  `json:"period_usage"`
-	NextEvent    *QuotaOverviewNextEvent   `json:"next_event"`
+	ID            string                     `json:"id"`
+	GroupID       string                     `json:"group_id"`
+	Name          string                     `json:"name"`
+	Status        string                     `json:"status"`
+	StartsAt      time.Time                  `json:"starts_at"`
+	ExpiresAt     time.Time                  `json:"expires_at"`
+	WeeklyWindow  QuotaOverviewWeeklyWindow  `json:"weekly_window"`
+	MonthlyWindow QuotaOverviewMonthlyWindow `json:"monthly_window"`
+	PeriodUsage   QuotaOverviewPeriodUsage   `json:"period_usage"`
+	NextEvent     *QuotaOverviewNextEvent    `json:"next_event"`
 }
 
 type QuotaOverviewPeriodUsage struct {
@@ -115,6 +116,19 @@ type QuotaOverviewPeriodUsagePoint struct {
 }
 
 type QuotaOverviewWeeklyWindow struct {
+	Kind        string     `json:"kind"`
+	State       string     `json:"state"`
+	AnchorAt    time.Time  `json:"anchor_at"`
+	PeriodStart *time.Time `json:"period_start"`
+	PeriodEnd   *time.Time `json:"period_end"`
+	ResetsAt    *time.Time `json:"resets_at"`
+	Limit       *string    `json:"limit"`
+	Used        *string    `json:"used"`
+	Remaining   *string    `json:"remaining"`
+	UsedPercent *float64   `json:"used_percent"`
+}
+
+type QuotaOverviewMonthlyWindow struct {
 	Kind        string     `json:"kind"`
 	State       string     `json:"state"`
 	AnchorAt    time.Time  `json:"anchor_at"`
@@ -237,6 +251,18 @@ func QuotaOverviewFromService(in *service.QuotaOverview) *QuotaOverview {
 				Used:        sub.WeeklyWindow.Used,
 				Remaining:   sub.WeeklyWindow.Remaining,
 				UsedPercent: sub.WeeklyWindow.UsedPercent,
+			},
+			MonthlyWindow: QuotaOverviewMonthlyWindow{
+				Kind:        sub.MonthlyWindow.Kind,
+				State:       sub.MonthlyWindow.State,
+				AnchorAt:    sub.MonthlyWindow.AnchorAt,
+				PeriodStart: sub.MonthlyWindow.PeriodStart,
+				PeriodEnd:   sub.MonthlyWindow.PeriodEnd,
+				ResetsAt:    sub.MonthlyWindow.ResetsAt,
+				Limit:       sub.MonthlyWindow.Limit,
+				Used:        sub.MonthlyWindow.Used,
+				Remaining:   sub.MonthlyWindow.Remaining,
+				UsedPercent: sub.MonthlyWindow.UsedPercent,
 			},
 			PeriodUsage: QuotaOverviewPeriodUsage{
 				State:         sub.PeriodUsage.State,

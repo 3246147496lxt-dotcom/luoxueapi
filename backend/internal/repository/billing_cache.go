@@ -51,22 +51,26 @@ func billingSubKey(userID, groupID int64) string {
 }
 
 const (
-	subscriptionCacheSchemaV3 = int64(3)
-	subFieldSchemaVersion     = "schema_version"
-	subFieldSubscriptionID    = "subscription_id"
-	subFieldStatus            = "status"
-	subFieldStartsAt          = "starts_at"
-	subFieldStartsAtExact     = "starts_at_exact"
-	subFieldExpiresAt         = "expires_at"
-	subFieldExpiresAtExact    = "expires_at_exact"
-	subFieldWeeklyWindowStart = "weekly_window_start"
-	subFieldWeeklyStartExact  = "weekly_window_start_exact"
-	subFieldWeeklyWindowEnd   = "weekly_window_end"
-	subFieldWeeklyEndExact    = "weekly_window_end_exact"
-	subFieldDailyUsage        = "daily_usage"
-	subFieldWeeklyUsage       = "weekly_usage"
-	subFieldMonthlyUsage      = "monthly_usage"
-	subFieldVersion           = "version"
+	subscriptionCacheSchemaV4  = int64(4)
+	subFieldSchemaVersion      = "schema_version"
+	subFieldSubscriptionID     = "subscription_id"
+	subFieldStatus             = "status"
+	subFieldStartsAt           = "starts_at"
+	subFieldStartsAtExact      = "starts_at_exact"
+	subFieldExpiresAt          = "expires_at"
+	subFieldExpiresAtExact     = "expires_at_exact"
+	subFieldWeeklyWindowStart  = "weekly_window_start"
+	subFieldWeeklyStartExact   = "weekly_window_start_exact"
+	subFieldWeeklyWindowEnd    = "weekly_window_end"
+	subFieldWeeklyEndExact     = "weekly_window_end_exact"
+	subFieldMonthlyWindowStart = "monthly_window_start"
+	subFieldMonthlyStartExact  = "monthly_window_start_exact"
+	subFieldMonthlyWindowEnd   = "monthly_window_end"
+	subFieldMonthlyEndExact    = "monthly_window_end_exact"
+	subFieldDailyUsage         = "daily_usage"
+	subFieldWeeklyUsage        = "weekly_usage"
+	subFieldMonthlyUsage       = "monthly_usage"
+	subFieldVersion            = "version"
 )
 
 // billingRateLimitKey generates the Redis key for API key rate limit cache.
@@ -187,7 +191,7 @@ func (c *billingCache) parseSubscriptionCache(data map[string]string) (*service.
 	result := &service.SubscriptionCacheData{}
 
 	schemaVersion, err := strconv.ParseInt(data[subFieldSchemaVersion], 10, 64)
-	if err != nil || schemaVersion != subscriptionCacheSchemaV3 {
+	if err != nil || schemaVersion != subscriptionCacheSchemaV4 {
 		return nil, errors.New("invalid cache: unsupported subscription schema")
 	}
 
@@ -242,6 +246,30 @@ func (c *billingCache) parseSubscriptionCache(data map[string]string) (*service.
 		return nil, errors.New("invalid cache: weekly window is not anchored")
 	}
 
+	monthlyWindowStart, err := time.Parse(time.RFC3339Nano, data[subFieldMonthlyStartExact])
+	if err != nil || monthlyWindowStart.IsZero() {
+		return nil, errors.New("invalid cache: invalid monthly_window_start")
+	}
+	result.MonthlyWindowStart = &monthlyWindowStart
+	if err := validateUnixTimeField(data, subFieldMonthlyWindowStart, monthlyWindowStart); err != nil {
+		return nil, err
+	}
+
+	monthlyWindowEnd, err := time.Parse(time.RFC3339Nano, data[subFieldMonthlyEndExact])
+	if err != nil || !monthlyWindowEnd.Equal(monthlyWindowStart.Add(service.SubscriptionMonthlyWindowDuration)) {
+		return nil, errors.New("invalid cache: invalid monthly_window_end")
+	}
+	result.MonthlyWindowEnd = monthlyWindowEnd
+	if err := validateUnixTimeField(data, subFieldMonthlyWindowEnd, monthlyWindowEnd); err != nil {
+		return nil, err
+	}
+	expectedMonthlyStart, expectedMonthlyEnd, ok := service.AnchoredMonthlyWindow(startsAt, monthlyWindowStart)
+	if !ok ||
+		!monthlyWindowStart.Equal(expectedMonthlyStart) ||
+		!monthlyWindowEnd.Equal(expectedMonthlyEnd) {
+		return nil, errors.New("invalid cache: monthly window is not anchored")
+	}
+
 	if dailyStr, ok := data[subFieldDailyUsage]; ok {
 		result.DailyUsage, err = parseNonnegativeFiniteFloat(dailyStr)
 		if err != nil {
@@ -258,11 +286,13 @@ func (c *billingCache) parseSubscriptionCache(data map[string]string) (*service.
 		return nil, errors.New("invalid cache: invalid weekly_usage")
 	}
 
-	if monthlyStr, ok := data[subFieldMonthlyUsage]; ok {
-		result.MonthlyUsage, err = parseNonnegativeFiniteFloat(monthlyStr)
-		if err != nil {
-			return nil, errors.New("invalid cache: invalid monthly_usage")
-		}
+	monthlyStr, ok := data[subFieldMonthlyUsage]
+	if !ok {
+		return nil, errors.New("invalid cache: missing monthly_usage")
+	}
+	result.MonthlyUsage, err = parseNonnegativeFiniteFloat(monthlyStr)
+	if err != nil {
+		return nil, errors.New("invalid cache: invalid monthly_usage")
 	}
 
 	versionStr, ok := data[subFieldVersion]
@@ -305,21 +335,25 @@ func (c *billingCache) SetSubscriptionCache(ctx context.Context, userID, groupID
 	key := billingSubKey(userID, groupID)
 
 	fields := map[string]any{
-		subFieldSchemaVersion:     subscriptionCacheSchemaV3,
-		subFieldSubscriptionID:    data.SubscriptionID,
-		subFieldStatus:            data.Status,
-		subFieldStartsAt:          data.StartsAt.Unix(),
-		subFieldStartsAtExact:     data.StartsAt.Format(time.RFC3339Nano),
-		subFieldExpiresAt:         data.ExpiresAt.Unix(),
-		subFieldExpiresAtExact:    data.ExpiresAt.Format(time.RFC3339Nano),
-		subFieldWeeklyWindowStart: data.WeeklyWindowStart.Unix(),
-		subFieldWeeklyStartExact:  data.WeeklyWindowStart.Format(time.RFC3339Nano),
-		subFieldWeeklyWindowEnd:   data.WeeklyWindowEnd.Unix(),
-		subFieldWeeklyEndExact:    data.WeeklyWindowEnd.Format(time.RFC3339Nano),
-		subFieldDailyUsage:        0,
-		subFieldWeeklyUsage:       data.WeeklyUsage,
-		subFieldMonthlyUsage:      0,
-		subFieldVersion:           data.Version,
+		subFieldSchemaVersion:      subscriptionCacheSchemaV4,
+		subFieldSubscriptionID:     data.SubscriptionID,
+		subFieldStatus:             data.Status,
+		subFieldStartsAt:           data.StartsAt.Unix(),
+		subFieldStartsAtExact:      data.StartsAt.Format(time.RFC3339Nano),
+		subFieldExpiresAt:          data.ExpiresAt.Unix(),
+		subFieldExpiresAtExact:     data.ExpiresAt.Format(time.RFC3339Nano),
+		subFieldWeeklyWindowStart:  data.WeeklyWindowStart.Unix(),
+		subFieldWeeklyStartExact:   data.WeeklyWindowStart.Format(time.RFC3339Nano),
+		subFieldWeeklyWindowEnd:    data.WeeklyWindowEnd.Unix(),
+		subFieldWeeklyEndExact:     data.WeeklyWindowEnd.Format(time.RFC3339Nano),
+		subFieldMonthlyWindowStart: data.MonthlyWindowStart.Unix(),
+		subFieldMonthlyStartExact:  data.MonthlyWindowStart.Format(time.RFC3339Nano),
+		subFieldMonthlyWindowEnd:   data.MonthlyWindowEnd.Unix(),
+		subFieldMonthlyEndExact:    data.MonthlyWindowEnd.Format(time.RFC3339Nano),
+		subFieldDailyUsage:         0,
+		subFieldWeeklyUsage:        data.WeeklyUsage,
+		subFieldMonthlyUsage:       data.MonthlyUsage,
+		subFieldVersion:            data.Version,
 	}
 	ttl := subscriptionCacheTTL(data, time.Now())
 	if ttl <= 0 {
@@ -350,8 +384,21 @@ func validateSubscriptionCacheData(data *service.SubscriptionCacheData) error {
 	if !ok || !data.WeeklyWindowStart.Equal(expectedStart) || !data.WeeklyWindowEnd.Equal(expectedEnd) {
 		return errors.New("invalid subscription cache data: weekly window is not anchored")
 	}
+	if data.MonthlyWindowStart == nil ||
+		!data.MonthlyWindowEnd.Equal(data.MonthlyWindowStart.Add(service.SubscriptionMonthlyWindowDuration)) {
+		return errors.New("invalid subscription cache data: invalid monthly window")
+	}
+	expectedMonthlyStart, expectedMonthlyEnd, ok := service.AnchoredMonthlyWindow(data.StartsAt, *data.MonthlyWindowStart)
+	if !ok ||
+		!data.MonthlyWindowStart.Equal(expectedMonthlyStart) ||
+		!data.MonthlyWindowEnd.Equal(expectedMonthlyEnd) {
+		return errors.New("invalid subscription cache data: monthly window is not anchored")
+	}
 	if _, err := parseNonnegativeFiniteFloat(strconv.FormatFloat(data.WeeklyUsage, 'g', -1, 64)); err != nil {
 		return errors.New("invalid subscription cache data: invalid weekly usage")
+	}
+	if _, err := parseNonnegativeFiniteFloat(strconv.FormatFloat(data.MonthlyUsage, 'g', -1, 64)); err != nil {
+		return errors.New("invalid subscription cache data: invalid monthly usage")
 	}
 	if data.Version <= 0 {
 		return errors.New("invalid subscription cache data: invalid version")
@@ -377,6 +424,9 @@ func subscriptionCacheTTL(data *service.SubscriptionCacheData, now time.Time) ti
 	}
 	ttl := jitteredTTL()
 	if untilReset := data.WeeklyWindowEnd.Sub(now); untilReset < ttl {
+		ttl = untilReset
+	}
+	if untilReset := data.MonthlyWindowEnd.Sub(now); untilReset < ttl {
 		ttl = untilReset
 	}
 	if untilExpiry := data.ExpiresAt.Sub(now); untilExpiry < ttl {

@@ -5,9 +5,11 @@ package main
 import (
 	"context"
 	_ "embed"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"os"
@@ -68,8 +70,20 @@ func run() error {
 
 	// Parse command line flags
 	setupMode := flag.Bool("setup", false, "Run setup wizard in CLI mode")
+	migrateOnly := flag.Bool("migrate-only", false, "Apply database migrations and exit without starting application components")
+	migrationManifest := flag.Bool("migration-manifest", false, "Print the embedded SQL migration manifest as JSON and exit")
 	showVersion := flag.Bool("version", false, "Show version information")
 	flag.Parse()
+	if *setupMode && *migrateOnly {
+		return fmt.Errorf("--setup and --migrate-only cannot be used together")
+	}
+	if *migrationManifest && (*setupMode || *migrateOnly || *showVersion) {
+		return fmt.Errorf("--migration-manifest cannot be combined with --setup, --migrate-only, or --version")
+	}
+
+	if *migrationManifest {
+		return writeMigrationManifest(os.Stdout)
+	}
 
 	if *showVersion {
 		log.Printf("LuoxueAPI %s (commit: %s, built: %s)\n", Version, Commit, Date)
@@ -82,6 +96,10 @@ func run() error {
 			return fmt.Errorf("setup failed: %w", err)
 		}
 		return nil
+	}
+
+	if *migrateOnly {
+		return runMigrationsOnly()
 	}
 
 	// Check if setup is needed
@@ -101,6 +119,42 @@ func run() error {
 
 	// Normal server mode
 	return runMainServer()
+}
+
+func writeMigrationManifest(w io.Writer) error {
+	if w == nil {
+		return fmt.Errorf("migration manifest writer is nil")
+	}
+	manifest, err := repository.EmbeddedMigrationManifest()
+	if err != nil {
+		return err
+	}
+	if err := json.NewEncoder(w).Encode(manifest); err != nil {
+		return fmt.Errorf("encode migration manifest: %w", err)
+	}
+	return nil
+}
+
+func runMigrationsOnly() error {
+	cfg, err := config.LoadForBootstrap()
+	if err != nil {
+		return fmt.Errorf("load migration config: %w", err)
+	}
+
+	signalCtx, stopSignals := signal.NotifyContext(
+		context.Background(),
+		syscall.SIGINT,
+		syscall.SIGTERM,
+	)
+	defer stopSignals()
+	migrationCtx, cancel := context.WithTimeout(signalCtx, 10*time.Minute)
+	defer cancel()
+
+	if err := repository.ApplyConfiguredMigrations(migrationCtx, cfg); err != nil {
+		return fmt.Errorf("run database migrations: %w", err)
+	}
+	log.Println("Database migrations completed successfully")
+	return nil
 }
 
 func runSetupServer() error {

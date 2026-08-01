@@ -5,6 +5,7 @@ package repository
 import (
 	"context"
 	"fmt"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -21,6 +22,27 @@ type UserSubscriptionRepoSuite struct {
 	repo   *userSubscriptionRepository
 }
 
+type concurrentRenewalBarrierRepo struct {
+	service.UserSubscriptionRepository
+	lockingRepo *userSubscriptionRepository
+	arrived     chan<- struct{}
+	release     <-chan struct{}
+	reads       atomic.Int32
+}
+
+func (r *concurrentRenewalBarrierRepo) GetByUserIDAndGroupID(ctx context.Context, userID, groupID int64) (*service.UserSubscription, error) {
+	sub, err := r.UserSubscriptionRepository.GetByUserIDAndGroupID(ctx, userID, groupID)
+	if err == nil && r.reads.Add(1) <= 2 {
+		r.arrived <- struct{}{}
+		<-r.release
+	}
+	return sub, err
+}
+
+func (r *concurrentRenewalBarrierRepo) GetByIDForUpdate(ctx context.Context, id int64) (*service.UserSubscription, error) {
+	return r.lockingRepo.GetByIDForUpdate(ctx, id)
+}
+
 func (s *UserSubscriptionRepoSuite) SetupTest() {
 	s.ctx = context.Background()
 	tx := testEntTx(s.T())
@@ -30,6 +52,127 @@ func (s *UserSubscriptionRepoSuite) SetupTest() {
 
 func TestUserSubscriptionRepoSuite(t *testing.T) {
 	suite.Run(t, new(UserSubscriptionRepoSuite))
+}
+
+func TestAssignOrExtendSubscription_ConcurrentRenewalsAccumulateValidity(t *testing.T) {
+	client := testEntClient(t)
+	ctx := context.Background()
+	suffix := fmt.Sprintf("%d", time.Now().UnixNano())
+
+	user, err := client.User.Create().
+		SetEmail("concurrent-renewal-" + suffix + "@example.com").
+		SetPasswordHash("test-password-hash").
+		SetStatus(service.StatusActive).
+		SetRole(service.RoleUser).
+		Save(ctx)
+	if err != nil {
+		t.Fatalf("create user: %v", err)
+	}
+	group, err := client.Group.Create().
+		SetName("concurrent-renewal-" + suffix).
+		SetStatus(service.StatusActive).
+		SetSubscriptionType(service.SubscriptionTypeSubscription).
+		Save(ctx)
+	if err != nil {
+		t.Fatalf("create group: %v", err)
+	}
+
+	startsAt := time.Now().UTC().Add(-48 * time.Hour).Truncate(time.Microsecond)
+	expiresAt := time.Now().UTC().Add(10 * 24 * time.Hour).Truncate(time.Microsecond)
+	sub, err := client.UserSubscription.Create().
+		SetUserID(user.ID).
+		SetGroupID(group.ID).
+		SetStartsAt(startsAt).
+		SetExpiresAt(expiresAt).
+		SetStatus(service.SubscriptionStatusActive).
+		SetWeeklyWindowStart(startsAt).
+		SetMonthlyWindowStart(startsAt).
+		SetAssignedAt(startsAt).
+		SetNotes("").
+		Save(ctx)
+	if err != nil {
+		t.Fatalf("create subscription: %v", err)
+	}
+	t.Cleanup(func() {
+		_, _ = integrationDB.ExecContext(context.Background(), "DELETE FROM user_subscriptions WHERE id = $1", sub.ID)
+		_, _ = integrationDB.ExecContext(context.Background(), "DELETE FROM groups WHERE id = $1", group.ID)
+		_, _ = integrationDB.ExecContext(context.Background(), "DELETE FROM users WHERE id = $1", user.ID)
+	})
+
+	baseRepo := NewUserSubscriptionRepository(client)
+	arrived := make(chan struct{}, 2)
+	release := make(chan struct{})
+	released := false
+	defer func() {
+		if !released {
+			close(release)
+		}
+	}()
+	barrierRepo := &concurrentRenewalBarrierRepo{
+		UserSubscriptionRepository: baseRepo,
+		lockingRepo:                baseRepo.(*userSubscriptionRepository),
+		arrived:                    arrived,
+		release:                    release,
+	}
+	svc := service.NewSubscriptionService(
+		NewGroupRepository(client, integrationDB),
+		barrierRepo,
+		nil,
+		client,
+		nil,
+	)
+
+	type renewalResult struct {
+		sub *service.UserSubscription
+		err error
+	}
+	results := make(chan renewalResult, 2)
+	for i := 0; i < 2; i++ {
+		go func() {
+			renewed, _, renewErr := svc.AssignOrExtendSubscription(ctx, &service.AssignSubscriptionInput{
+				UserID:       user.ID,
+				GroupID:      group.ID,
+				ValidityDays: 7,
+			})
+			results <- renewalResult{sub: renewed, err: renewErr}
+		}()
+	}
+
+	for i := 0; i < 2; i++ {
+		select {
+		case <-arrived:
+		case <-time.After(5 * time.Second):
+			t.Fatal("timed out waiting for both renewals to read the same initial expiry")
+		}
+	}
+	close(release)
+	released = true
+
+	for i := 0; i < 2; i++ {
+		select {
+		case result := <-results:
+			if result.err != nil {
+				t.Fatalf("renewal %d failed: %v", i+1, result.err)
+			}
+			if result.sub == nil {
+				t.Fatalf("renewal %d returned nil subscription", i+1)
+			}
+		case <-time.After(10 * time.Second):
+			t.Fatal("timed out waiting for concurrent renewal")
+		}
+	}
+
+	got, err := baseRepo.GetByID(ctx, sub.ID)
+	if err != nil {
+		t.Fatalf("reload subscription: %v", err)
+	}
+	if !got.StartsAt.Equal(startsAt) {
+		t.Fatalf("uninterrupted renewals changed starts_at: got %s want %s", got.StartsAt, startsAt)
+	}
+	expectedExpiry := expiresAt.AddDate(0, 0, 14)
+	if delta := got.ExpiresAt.Sub(expectedExpiry); delta < -time.Microsecond || delta > time.Microsecond {
+		t.Fatalf("concurrent renewals lost validity: got %s want %s", got.ExpiresAt, expectedExpiry)
+	}
 }
 
 func (s *UserSubscriptionRepoSuite) mustCreateUser(email string, role string) *service.User {
@@ -109,6 +252,8 @@ func (s *UserSubscriptionRepoSuite) TestCreate() {
 	s.Require().False(got.StartsAt.IsZero())
 	s.Require().NotNil(got.WeeklyWindowStart)
 	s.Require().True(got.WeeklyWindowStart.Equal(got.StartsAt))
+	s.Require().NotNil(got.MonthlyWindowStart)
+	s.Require().True(got.MonthlyWindowStart.Equal(got.StartsAt))
 }
 
 func (s *UserSubscriptionRepoSuite) TestGetByID_WithPreloads() {
@@ -436,7 +581,9 @@ func (s *UserSubscriptionRepoSuite) TestIncrementUsage() {
 	s.Require().NoError(err)
 	s.Require().InDelta(0, got.DailyUsageUSD, 1e-6)
 	s.Require().InDelta(1.25, got.WeeklyUsageUSD, 1e-6)
-	s.Require().InDelta(0, got.MonthlyUsageUSD, 1e-6)
+	s.Require().InDelta(1.25, got.MonthlyUsageUSD, 1e-6)
+	s.Require().NotNil(got.MonthlyWindowStart)
+	s.Require().True(got.MonthlyWindowStart.Equal(got.StartsAt))
 }
 
 func (s *UserSubscriptionRepoSuite) TestIncrementUsage_Accumulates() {
@@ -450,6 +597,37 @@ func (s *UserSubscriptionRepoSuite) TestIncrementUsage_Accumulates() {
 	got, err := s.repo.GetByID(s.ctx, sub.ID)
 	s.Require().NoError(err)
 	s.Require().InDelta(3.5, got.WeeklyUsageUSD, 1e-6)
+	s.Require().InDelta(3.5, got.MonthlyUsageUSD, 1e-6)
+}
+
+func (s *UserSubscriptionRepoSuite) TestIncrementUsage_RollsAnchoredWeeklyAndMonthlyWindows() {
+	user := s.mustCreateUser("roll-anchored@test.com", service.RoleUser)
+	group := s.mustCreateGroup("g-roll-anchored")
+	startsAt := time.Now().UTC().Add(-31 * 24 * time.Hour).Truncate(time.Microsecond)
+	sub := s.mustCreateSubscription(user.ID, group.ID, func(c *dbent.UserSubscriptionCreate) {
+		c.SetStartsAt(startsAt)
+		c.SetExpiresAt(time.Now().UTC().Add(24 * time.Hour))
+		c.SetWeeklyWindowStart(startsAt)
+		c.SetMonthlyWindowStart(startsAt)
+		c.SetWeeklyUsageUsd(40)
+		c.SetMonthlyUsageUsd(80)
+	})
+
+	s.Require().NoError(s.repo.IncrementUsage(s.ctx, sub.ID, 2.5))
+
+	got, err := s.repo.GetByID(s.ctx, sub.ID)
+	s.Require().NoError(err)
+	now := time.Now().UTC()
+	expectedWeeklyStart, _, ok := service.AnchoredWeeklyWindow(startsAt, now)
+	s.Require().True(ok)
+	expectedMonthlyStart, _, ok := service.AnchoredMonthlyWindow(startsAt, now)
+	s.Require().True(ok)
+	s.Require().NotNil(got.WeeklyWindowStart)
+	s.Require().NotNil(got.MonthlyWindowStart)
+	s.Require().WithinDuration(expectedWeeklyStart, *got.WeeklyWindowStart, time.Microsecond)
+	s.Require().WithinDuration(expectedMonthlyStart, *got.MonthlyWindowStart, time.Microsecond)
+	s.Require().InDelta(2.5, got.WeeklyUsageUSD, 1e-6)
+	s.Require().InDelta(2.5, got.MonthlyUsageUSD, 1e-6)
 }
 
 func (s *UserSubscriptionRepoSuite) TestActivateWindows() {
@@ -562,7 +740,7 @@ func (s *UserSubscriptionRepoSuite) TestResetMonthlyUsage() {
 		c.SetMonthlyUsageUsd(25.0)
 	})
 
-	resetAt := time.Date(2025, 2, 1, 0, 0, 0, 0, time.UTC)
+	resetAt := sub.StartsAt.Add(service.SubscriptionMonthlyWindowDuration)
 	err := s.repo.ResetMonthlyUsage(s.ctx, sub.ID, sub.MonthlyWindowStart, resetAt)
 	s.Require().NoError(err, "ResetMonthlyUsage")
 
@@ -769,10 +947,11 @@ func (s *UserSubscriptionRepoSuite) TestActiveExpiredBoundaries_UsageAndReset_Ba
 	s.Require().NoError(err, "GetByID")
 	s.Require().InDelta(0, after.DailyUsageUSD, 1e-6)
 	s.Require().InDelta(1.25, after.WeeklyUsageUSD, 1e-6)
-	s.Require().InDelta(0, after.MonthlyUsageUSD, 1e-6)
+	s.Require().InDelta(1.25, after.MonthlyUsageUSD, 1e-6)
 	s.Require().Nil(after.DailyWindowStart, "daily window is retained only for rollback compatibility")
 	s.Require().NotNil(after.WeeklyWindowStart, "expected WeeklyWindowStart activated")
-	s.Require().Nil(after.MonthlyWindowStart, "monthly window is retained only for rollback compatibility")
+	s.Require().NotNil(after.MonthlyWindowStart, "expected MonthlyWindowStart activated")
+	s.Require().WithinDuration(after.StartsAt, *after.MonthlyWindowStart, time.Microsecond)
 
 	resetAt := time.Now().Truncate(time.Microsecond) // truncate to microsecond for DB precision
 	s.Require().NoError(s.repo.ResetDailyUsage(s.ctx, active.ID, after.DailyWindowStart, resetAt), "ResetDailyUsage")
@@ -858,7 +1037,7 @@ func (s *UserSubscriptionRepoSuite) TestIncrementUsage_Concurrent() {
 	expectedUsage := float64(numGoroutines) * incrementPerGoroutine
 	s.Require().InDelta(0, got.DailyUsageUSD, 1e-6, "daily usage is not accumulated for P0 memberships")
 	s.Require().InDelta(expectedUsage, got.WeeklyUsageUSD, 1e-6, "weekly usage should be correctly accumulated")
-	s.Require().InDelta(0, got.MonthlyUsageUSD, 1e-6, "monthly usage is not accumulated for P0 memberships")
+	s.Require().InDelta(expectedUsage, got.MonthlyUsageUSD, 1e-6, "monthly usage should be correctly accumulated")
 }
 
 func (s *UserSubscriptionRepoSuite) TestTxContext_RollbackIsolation() {

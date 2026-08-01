@@ -63,11 +63,13 @@ func TestQuotaOverviewRepositoryUsesUserScopedMinimalExactProjection(t *testing.
 		WillReturnRows(sqlmock.NewRows([]string{
 			"id", "group_id", "group_name", "group_status", "group_deleted", "status",
 			"revoked", "starts_at", "expires_at", "weekly_window_start",
-			"weekly_limit", "weekly_used", "updated_at",
+			"weekly_limit", "weekly_used", "monthly_window_start",
+			"monthly_limit", "monthly_used", "updated_at",
 		}).AddRow(
 			int64(8), int64(20), "Pro 会员", service.StatusActive, false,
 			service.SubscriptionStatusActive, false, anchor, expiry, anchor,
-			"200.00000000", "12.3456789012", updatedAt,
+			"200.00000000", "12.3456789012", anchor,
+			"500.00000000", "123.4567890123", updatedAt,
 		))
 	mock.ExpectExec(regexp.QuoteMeta(quotaOverviewPeriodUsageSavepointCreate)).
 		WillReturnResult(sqlmock.NewResult(0, 0))
@@ -97,6 +99,11 @@ func TestQuotaOverviewRepositoryUsesUserScopedMinimalExactProjection(t *testing.
 	require.Equal(t, "12.3456789", snapshot.Keys[0].QuotaUsed.String())
 	require.Len(t, snapshot.Subscriptions, 1)
 	require.Equal(t, "12.3456789012", snapshot.Subscriptions[0].WeeklyUsed.String())
+	require.NotNil(t, snapshot.Subscriptions[0].MonthlyWindowStart)
+	require.Equal(t, anchor, *snapshot.Subscriptions[0].MonthlyWindowStart)
+	require.NotNil(t, snapshot.Subscriptions[0].MonthlyLimit)
+	require.Equal(t, "500", snapshot.Subscriptions[0].MonthlyLimit.String())
+	require.Equal(t, "123.4567890123", snapshot.Subscriptions[0].MonthlyUsed.String())
 	require.False(t, snapshot.PeriodUsageAggregationError)
 	require.NotNil(t, snapshot.Subscriptions[0].PeriodUsage)
 	require.Equal(t, anchor, snapshot.Subscriptions[0].PeriodUsage.PeriodStart)
@@ -114,6 +121,9 @@ func TestQuotaOverviewRepositoryUsesUserScopedMinimalExactProjection(t *testing.
 	require.NotContains(t, quotaOverviewKeysQuery, "SELECT k.key")
 	require.NotContains(t, quotaOverviewKeysQuery, "last_used_ip")
 	require.NotContains(t, quotaOverviewKeysQuery, "ip_whitelist")
+	require.Contains(t, quotaOverviewSubscriptionsQuery, "g.monthly_limit_usd::text")
+	require.Contains(t, quotaOverviewSubscriptionsQuery, "us.monthly_usage_usd::text")
+	require.Contains(t, quotaOverviewSubscriptionsQuery, "us.monthly_window_start")
 	require.Contains(t, quotaOverviewPeriodUsageQuery, "ul.user_id = $1")
 	require.Contains(t, quotaOverviewPeriodUsageQuery, "ul.subscription_id = $2")
 	require.Contains(t, quotaOverviewPeriodUsageQuery, "ul.created_at >= $3")
@@ -162,11 +172,12 @@ func TestQuotaOverviewRepositoryPeriodUsageFailureDegradesOnlyOptionalUsage(t *t
 		WillReturnRows(sqlmock.NewRows([]string{
 			"id", "group_id", "group_name", "group_status", "group_deleted", "status",
 			"revoked", "starts_at", "expires_at", "weekly_window_start",
-			"weekly_limit", "weekly_used", "updated_at",
+			"weekly_limit", "weekly_used", "monthly_window_start",
+			"monthly_limit", "monthly_used", "updated_at",
 		}).AddRow(
 			int64(8), int64(20), "Pro 会员", service.StatusActive, false,
 			service.SubscriptionStatusActive, false, anchor, expiry, anchor,
-			"200", "12.34", asOf.Add(-time.Second),
+			"200", "12.34", anchor, nil, "50.25", asOf.Add(-time.Second),
 		))
 	mock.ExpectExec(regexp.QuoteMeta(quotaOverviewPeriodUsageSavepointCreate)).
 		WillReturnResult(sqlmock.NewResult(0, 0))
@@ -188,6 +199,8 @@ func TestQuotaOverviewRepositoryPeriodUsageFailureDegradesOnlyOptionalUsage(t *t
 	require.Equal(t, "10.74", snapshot.MonthSpend.String())
 	require.True(t, snapshot.PeriodUsageAggregationError)
 	require.Len(t, snapshot.Subscriptions, 1)
+	require.Nil(t, snapshot.Subscriptions[0].MonthlyLimit)
+	require.Equal(t, "50.25", snapshot.Subscriptions[0].MonthlyUsed.String())
 	require.Nil(t, snapshot.Subscriptions[0].PeriodUsage)
 }
 

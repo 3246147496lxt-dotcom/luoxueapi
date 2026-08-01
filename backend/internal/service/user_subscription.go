@@ -2,7 +2,10 @@ package service
 
 import "time"
 
-const SubscriptionWeeklyWindowDuration = 7 * 24 * time.Hour
+const (
+	SubscriptionWeeklyWindowDuration  = 7 * 24 * time.Hour
+	SubscriptionMonthlyWindowDuration = 30 * 24 * time.Hour
+)
 
 type UserSubscription struct {
 	ID      int64
@@ -39,7 +42,11 @@ func (s *UserSubscription) IsActive() bool {
 }
 
 func (s *UserSubscription) IsExpired() bool {
-	return time.Now().After(s.ExpiresAt)
+	return s.IsExpiredAt(time.Now())
+}
+
+func (s *UserSubscription) IsExpiredAt(at time.Time) bool {
+	return s == nil || !at.Before(s.ExpiresAt)
 }
 
 func (s *UserSubscription) DaysRemaining() int {
@@ -50,7 +57,7 @@ func (s *UserSubscription) DaysRemaining() int {
 }
 
 func (s *UserSubscription) IsWindowActivated() bool {
-	return s != nil && s.WeeklyWindowStart != nil
+	return s != nil && s.WeeklyWindowStart != nil && s.MonthlyWindowStart != nil
 }
 
 // AnchoredWeeklyWindow returns the authoritative half-open 7x24h window
@@ -65,11 +72,30 @@ func AnchoredWeeklyWindow(anchor, at time.Time) (start, end time.Time, ok bool) 
 	return start, start.Add(SubscriptionWeeklyWindowDuration), true
 }
 
+// AnchoredMonthlyWindow returns the authoritative half-open 30x24h window
+// [start, end) containing at. Like the weekly window, it is anchored to the
+// exact subscription start and never to first use or a local calendar boundary.
+func AnchoredMonthlyWindow(anchor, at time.Time) (start, end time.Time, ok bool) {
+	if anchor.IsZero() || at.Before(anchor) {
+		return time.Time{}, time.Time{}, false
+	}
+	windowIndex := at.Sub(anchor) / SubscriptionMonthlyWindowDuration
+	start = anchor.Add(windowIndex * SubscriptionMonthlyWindowDuration)
+	return start, start.Add(SubscriptionMonthlyWindowDuration), true
+}
+
 func (s *UserSubscription) WeeklyWindowAt(at time.Time) (start, end time.Time, ok bool) {
 	if s == nil {
 		return time.Time{}, time.Time{}, false
 	}
 	return AnchoredWeeklyWindow(s.StartsAt, at)
+}
+
+func (s *UserSubscription) MonthlyWindowAt(at time.Time) (start, end time.Time, ok bool) {
+	if s == nil {
+		return time.Time{}, time.Time{}, false
+	}
+	return AnchoredMonthlyWindow(s.StartsAt, at)
 }
 
 func (s *UserSubscription) HasOneTimeDailyQuota() bool {
@@ -106,10 +132,15 @@ func (s *UserSubscription) NeedsWeeklyResetAt(now time.Time) bool {
 }
 
 func (s *UserSubscription) NeedsMonthlyReset() bool {
-	if s.MonthlyWindowStart == nil {
+	return s.NeedsMonthlyResetAt(time.Now())
+}
+
+func (s *UserSubscription) NeedsMonthlyResetAt(now time.Time) bool {
+	expectedStart, _, ok := s.MonthlyWindowAt(now)
+	if !ok {
 		return false
 	}
-	return time.Since(*s.MonthlyWindowStart) >= 30*24*time.Hour
+	return s.MonthlyWindowStart == nil || !s.MonthlyWindowStart.Equal(expectedStart)
 }
 
 func (s *UserSubscription) DailyResetTime() *time.Time {
@@ -133,11 +164,11 @@ func (s *UserSubscription) WeeklyResetTime() *time.Time {
 }
 
 func (s *UserSubscription) MonthlyResetTime() *time.Time {
-	if s.MonthlyWindowStart == nil {
+	_, end, ok := s.MonthlyWindowAt(time.Now())
+	if !ok {
 		return nil
 	}
-	t := s.MonthlyWindowStart.Add(30 * 24 * time.Hour)
-	return &t
+	return &end
 }
 
 func (s *UserSubscription) CheckDailyLimit(group *Group, additionalCost float64) bool {
@@ -148,10 +179,14 @@ func (s *UserSubscription) CheckDailyLimit(group *Group, additionalCost float64)
 }
 
 func (s *UserSubscription) CheckWeeklyLimit(group *Group, additionalCost float64) bool {
+	return s.CheckWeeklyLimitAt(group, additionalCost, time.Now())
+}
+
+func (s *UserSubscription) CheckWeeklyLimitAt(group *Group, additionalCost float64, at time.Time) bool {
 	if !group.HasWeeklyLimit() {
 		return true
 	}
-	used := s.EffectiveWeeklyUsageAt(time.Now())
+	used := s.EffectiveWeeklyUsageAt(at)
 	if additionalCost <= 0 {
 		return used < *group.WeeklyLimitUSD
 	}
@@ -173,18 +208,39 @@ func (s *UserSubscription) EffectiveWeeklyUsageAt(at time.Time) float64 {
 }
 
 func (s *UserSubscription) CheckMonthlyLimit(group *Group, additionalCost float64) bool {
-	if !group.HasMonthlyLimit() {
+	return s.CheckMonthlyLimitAt(group, additionalCost, time.Now())
+}
+
+func (s *UserSubscription) CheckMonthlyLimitAt(group *Group, additionalCost float64, at time.Time) bool {
+	limit, ok := group.EffectiveMonthlyLimitUSD()
+	if !ok {
 		return true
 	}
-	return s.MonthlyUsageUSD+additionalCost <= *group.MonthlyLimitUSD
+	used := s.EffectiveMonthlyUsageAt(at)
+	if additionalCost <= 0 {
+		return used < limit
+	}
+	return used+additionalCost <= limit
+}
+
+// EffectiveMonthlyUsageAt returns usage only when its persisted marker belongs
+// to the starts_at-anchored 30-day period containing at.
+func (s *UserSubscription) EffectiveMonthlyUsageAt(at time.Time) float64 {
+	if s == nil || s.MonthlyWindowStart == nil {
+		return 0
+	}
+	expectedStart, _, ok := s.MonthlyWindowAt(at)
+	if !ok || !s.MonthlyWindowStart.Equal(expectedStart) {
+		return 0
+	}
+	return s.MonthlyUsageUSD
 }
 
 func (s *UserSubscription) CheckAllLimits(group *Group, additionalCost float64) (daily, weekly, monthly bool) {
-	// P0 subscriptions have one authoritative anchored 7-day quota. Legacy
-	// daily/monthly columns remain readable during compatibility rollout but
-	// must never block a subscription request.
+	// Daily remains a legacy compatibility field. Weekly and monthly are the
+	// authoritative membership limits.
 	daily = true
 	weekly = s.CheckWeeklyLimit(group, additionalCost)
-	monthly = true
+	monthly = s.CheckMonthlyLimit(group, additionalCost)
 	return
 }

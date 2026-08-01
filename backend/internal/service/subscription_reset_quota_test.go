@@ -18,12 +18,15 @@ type resetQuotaUserSubRepoStub struct {
 
 	sub *UserSubscription
 
-	resetDailyCalled   bool
-	resetWeeklyCalled  bool
-	resetMonthlyCalled bool
-	resetDailyErr      error
-	resetWeeklyErr     error
-	resetMonthlyErr    error
+	resetDailyCalled              bool
+	resetWeeklyCalled             bool
+	resetMonthlyCalled            bool
+	conditionalMonthlyResetCalled bool
+	getByIDForUpdateCalled        bool
+	resetWindowStarts             []time.Time
+	resetDailyErr                 error
+	resetWeeklyErr                error
+	resetMonthlyErr               error
 }
 
 func (r *resetQuotaUserSubRepoStub) GetByID(_ context.Context, id int64) (*UserSubscription, error) {
@@ -34,10 +37,16 @@ func (r *resetQuotaUserSubRepoStub) GetByID(_ context.Context, id int64) (*UserS
 	return &cp, nil
 }
 
+func (r *resetQuotaUserSubRepoStub) GetByIDForUpdate(ctx context.Context, id int64) (*UserSubscription, error) {
+	r.getByIDForUpdateCalled = true
+	return r.GetByID(ctx, id)
+}
+
 func (r *resetQuotaUserSubRepoStub) ResetUsageWindows(_ context.Context, _ int64, resetDaily, resetWeekly, resetMonthly bool, windowStart time.Time) error {
-	r.resetDailyCalled = resetDaily
-	r.resetWeeklyCalled = resetWeekly
-	r.resetMonthlyCalled = resetMonthly
+	r.resetDailyCalled = r.resetDailyCalled || resetDaily
+	r.resetWeeklyCalled = r.resetWeeklyCalled || resetWeekly
+	r.resetMonthlyCalled = r.resetMonthlyCalled || resetMonthly
+	r.resetWindowStarts = append(r.resetWindowStarts, windowStart)
 	if resetDaily && r.resetDailyErr != nil {
 		return r.resetDailyErr
 	}
@@ -80,6 +89,7 @@ func (r *resetQuotaUserSubRepoStub) ResetWeeklyUsage(_ context.Context, _ int64,
 }
 
 func (r *resetQuotaUserSubRepoStub) ResetMonthlyUsage(_ context.Context, _ int64, _ *time.Time, _ time.Time) error {
+	r.conditionalMonthlyResetCalled = true
 	r.resetMonthlyCalled = true
 	return r.resetMonthlyErr
 }
@@ -214,6 +224,12 @@ func TestAdminResetQuota_ResetMonthlyOnly(t *testing.T) {
 	require.False(t, stub.resetDailyCalled, "不应调用 ResetDailyUsage")
 	require.False(t, stub.resetWeeklyCalled, "不应调用 ResetWeeklyUsage")
 	require.True(t, stub.resetMonthlyCalled, "应调用 ResetMonthlyUsage")
+	require.True(t, stub.getByIDForUpdateCalled, "应在事务内锁定并读取当前订阅")
+	require.False(t, stub.conditionalMonthlyResetCalled, "持锁后应直接重置当前窗口，不能依赖会静默 no-op 的陈旧 CAS")
+	require.Len(t, stub.resetWindowStarts, 1)
+	expectedStart, _, ok := stub.sub.MonthlyWindowAt(time.Now())
+	require.True(t, ok)
+	require.True(t, stub.resetWindowStarts[0].Equal(expectedStart))
 }
 
 func TestAdminResetQuota_ResetMonthlyUsageError(t *testing.T) {

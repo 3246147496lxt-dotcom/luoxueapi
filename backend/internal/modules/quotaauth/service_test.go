@@ -422,21 +422,30 @@ func TestQuotaRefreshRotationAndDeviceRevocation(t *testing.T) {
 		},
 	})
 	current := refreshTokenPrefix + strings.Repeat("d", 64)
-	pair, err := service.RefreshSession(context.Background(), ClientID, current)
+
+	_, err := service.RefreshSession(context.Background(), ClientID, current)
+	require.ErrorIs(t, err, ErrInvalidAuthorizationRequest)
+	require.Empty(t, repo.replacementHash, "refresh without a persisted candidate must not rotate")
+
+	candidate := refreshTokenPrefix + strings.Repeat("e", 64)
+	rotationID := "fb3b5595-9c6f-4891-8860-216003304151"
+	refreshInput := RefreshSessionInput{
+		ClientID:              ClientID,
+		RefreshToken:          current,
+		RotationID:            &rotationID,
+		CandidateRefreshToken: &candidate,
+	}
+	pair, err := service.RefreshSessionWithInput(context.Background(), refreshInput)
 	require.NoError(t, err)
-	require.NotEqual(t, current, pair.RefreshToken)
-	require.Equal(t, hashToken(pair.RefreshToken), repo.replacementHash)
-	legacyJSON, err := json.Marshal(pair)
-	require.NoError(t, err)
-	require.NotContains(t, string(legacyJSON), "refresh_protocol")
-	require.NotContains(t, string(legacyJSON), "rotation_id")
-	require.NotContains(t, string(legacyJSON), "rotation_result")
+	require.Equal(t, candidate, pair.RefreshToken)
+	require.Equal(t, RefreshProtocolCandidateV1, pair.RefreshProtocol)
+	require.Equal(t, hashToken(candidate), repo.replacementHash)
 
 	repo.rotateErr = ErrRefreshReplay
-	_, err = service.RefreshSession(context.Background(), ClientID, current)
+	_, err = service.RefreshSessionWithInput(context.Background(), refreshInput)
 	require.ErrorIs(t, err, ErrRefreshReplay)
 
-	accessPair, err := service.issueTokenPair(&repo.device, refreshTokenPrefix+strings.Repeat("e", 64))
+	accessPair, err := service.issueTokenPair(&repo.device, refreshTokenPrefix+strings.Repeat("f", 64))
 	require.NoError(t, err)
 	revoked, err := service.RevokeDevice(context.Background(), repo.device.UserID, repo.device.PublicID)
 	require.NoError(t, err)
@@ -504,6 +513,7 @@ func TestQuotaRefreshCandidateV1StrictValidation(t *testing.T) {
 		rotationID *string
 		candidate  *string
 	}{
+		{name: "candidate-v1 tuple missing"},
 		{name: "rotation id without candidate", rotationID: &validRotationID},
 		{name: "candidate without rotation id", candidate: &validCandidate},
 		{name: "empty candidate", rotationID: &validRotationID, candidate: stringPointer("")},

@@ -100,13 +100,14 @@ func TestQuotaBearerCannotUseWebsiteDeviceManagementHandler(t *testing.T) {
 	require.Equal(t, "private, no-store", recorder.Header().Get("Cache-Control"))
 }
 
-func TestQuotaRefreshHandlerRequiresRotationIDAndCandidateTogether(t *testing.T) {
+func TestQuotaRefreshHandlerRequiresCompleteCandidateV1Tuple(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	h := NewQuotaAuthHandler(nil)
 	router := gin.New()
 	router.POST("/api/v1/quota/session/refresh", h.RefreshSession)
 
 	requests := []string{
+		`{"client_id":"luoxue-quota-viewer","refresh_token":"qvrt_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}`,
 		`{"client_id":"luoxue-quota-viewer","refresh_token":"qvrt_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","rotation_id":"af69f4b4-5824-4f48-9149-3e55f1b5ca2d"}`,
 		`{"client_id":"luoxue-quota-viewer","refresh_token":"qvrt_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","candidate_refresh_token":"qvrt_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"}`,
 	}

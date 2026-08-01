@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"strings"
+	"time"
 
 	dbent "github.com/Wei-Shaw/sub2api/ent"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
@@ -30,6 +31,14 @@ func (r *usageBillingRepository) Apply(ctx context.Context, cmd *service.UsageBi
 	cmd.Normalize()
 	if cmd.RequestID == "" {
 		return nil, service.ErrUsageBillingRequestIDRequired
+	}
+	if cmd.SubscriptionCost > 0 {
+		if cmd.SubscriptionID == nil {
+			return nil, service.ErrSubscriptionBillingContextRequired
+		}
+		if cmd.SubscriptionStartsAt == nil || cmd.SubscriptionStartsAt.IsZero() {
+			return nil, service.ErrUsageBillingSubscriptionTermRequired
+		}
 	}
 
 	tx, err := r.db.BeginTx(ctx, nil)
@@ -275,7 +284,15 @@ func (r *usageBillingRepository) applyBatchImageBalanceHold(
 
 func (r *usageBillingRepository) applyUsageBillingEffects(ctx context.Context, tx *sql.Tx, cmd *service.UsageBillingCommand, result *service.UsageBillingApplyResult) error {
 	if cmd.SubscriptionCost > 0 && cmd.SubscriptionID != nil {
-		if err := incrementUsageBillingSubscription(ctx, tx, *cmd.SubscriptionID, cmd.UserID, cmd.APIKeyID, cmd.SubscriptionCost); err != nil {
+		if err := incrementUsageBillingSubscription(
+			ctx,
+			tx,
+			*cmd.SubscriptionID,
+			cmd.UserID,
+			cmd.APIKeyID,
+			*cmd.SubscriptionStartsAt,
+			cmd.SubscriptionCost,
+		); err != nil {
 			return err
 		}
 	}
@@ -315,7 +332,13 @@ func (r *usageBillingRepository) applyUsageBillingEffects(ctx context.Context, t
 	return nil
 }
 
-func incrementUsageBillingSubscription(ctx context.Context, tx *sql.Tx, subscriptionID, userID, apiKeyID int64, costUSD float64) error {
+func incrementUsageBillingSubscription(
+	ctx context.Context,
+	tx *sql.Tx,
+	subscriptionID, userID, apiKeyID int64,
+	subscriptionStartsAt time.Time,
+	costUSD float64,
+) error {
 	const updateSQL = `
 		WITH anchored AS (
 			SELECT
@@ -326,7 +349,14 @@ func incrementUsageBillingSubscription(ctx context.Context, tx *sql.Tx, subscrip
 							0,
 							EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP - us.starts_at))
 						) / 604800
-					) * INTERVAL '7 days' AS period_start
+					) * 604800 * INTERVAL '1 second' AS weekly_period_start,
+				us.starts_at
+					+ FLOOR(
+						GREATEST(
+							0,
+							EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP - us.starts_at))
+						) / 2592000
+					) * 2592000 * INTERVAL '1 second' AS monthly_period_start
 			FROM user_subscriptions us
 			JOIN groups g
 				ON g.id = us.group_id
@@ -344,16 +374,31 @@ func incrementUsageBillingSubscription(ctx context.Context, tx *sql.Tx, subscrip
 		UPDATE user_subscriptions us
 		SET
 			weekly_usage_usd = CASE
-				WHEN us.weekly_window_start = anchored.period_start
+				WHEN us.weekly_window_start = anchored.weekly_period_start
 					THEN us.weekly_usage_usd + $1
 				ELSE $1
 			END,
-			weekly_window_start = anchored.period_start,
+			weekly_window_start = anchored.weekly_period_start,
+			monthly_usage_usd = CASE
+				WHEN us.monthly_window_start = anchored.monthly_period_start
+					THEN us.monthly_usage_usd + $1
+				ELSE $1
+			END,
+			monthly_window_start = anchored.monthly_period_start,
 			updated_at = NOW()
 		FROM anchored
 		WHERE us.id = anchored.id
+			AND us.starts_at = $5
 	`
-	res, err := tx.ExecContext(ctx, updateSQL, costUSD, subscriptionID, userID, apiKeyID)
+	res, err := tx.ExecContext(
+		ctx,
+		updateSQL,
+		costUSD,
+		subscriptionID,
+		userID,
+		apiKeyID,
+		subscriptionStartsAt,
+	)
 	if err != nil {
 		return err
 	}
@@ -363,6 +408,24 @@ func incrementUsageBillingSubscription(ctx context.Context, tx *sql.Tx, subscrip
 	}
 	if affected > 0 {
 		return nil
+	}
+
+	var currentStartsAt time.Time
+	err = tx.QueryRowContext(ctx, `
+		SELECT starts_at
+		FROM user_subscriptions
+		WHERE id = $1
+		  AND user_id = $2
+		  AND deleted_at IS NULL
+	`, subscriptionID, userID).Scan(&currentStartsAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return service.ErrSubscriptionNotFound
+	}
+	if err != nil {
+		return err
+	}
+	if !currentStartsAt.Equal(subscriptionStartsAt) {
+		return service.ErrUsageBillingSubscriptionTermMismatch
 	}
 	return service.ErrSubscriptionNotFound
 }
@@ -416,6 +479,7 @@ func insertUsageBillingReceipt(
 			user_id,
 			api_key_id,
 			subscription_id,
+			subscription_amount,
 			billing_type,
 			applied,
 			delta_usd,
@@ -447,6 +511,10 @@ func insertUsageBillingReceipt(
 			ak.user_id,
 			ak.id,
 			$4::bigint,
+			CASE
+				WHEN $4::bigint IS NULL THEN NULL
+				ELSE $21::numeric
+			END,
 			$5::smallint,
 			TRUE,
 			-($6::numeric),
@@ -492,6 +560,7 @@ func insertUsageBillingReceipt(
 		result.NewBalance,
 		cmd.ReceiptStatus(),
 		result.BalanceOverdrafted,
+		cmd.SubscriptionCost,
 	).Scan(&receiptID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return service.ErrUsageBillingPrincipalMismatch

@@ -1461,17 +1461,34 @@ func (h *GatewayHandler) usageUnrestricted(c *gin.Context, ctx context.Context, 
 		// 订阅信息可能不在 context 中（/v1/usage 路径跳过了中间件的计费检查）
 		subscription, ok := middleware2.GetSubscriptionFromContext(c)
 		if ok {
-			remaining := h.calculateSubscriptionRemaining(apiKey.Group, subscription)
+			now := time.Now()
+			remaining := h.calculateSubscriptionRemainingAt(apiKey.Group, subscription, now)
+			var effectiveMonthlyLimit *float64
+			if value, configured := apiKey.Group.EffectiveMonthlyLimitUSD(); configured {
+				effectiveMonthlyLimit = &value
+			}
+			// Preserve the legacy marker when an old/incomplete record has no
+			// usable starts_at anchor. Valid records always expose the derived
+			// current period instead of a stale persisted marker.
+			weeklyWindowStart := subscription.WeeklyWindowStart
+			monthlyWindowStart := subscription.MonthlyWindowStart
+			if value, _, valid := subscription.WeeklyWindowAt(now); valid {
+				weeklyWindowStart = &value
+			}
+			if value, _, valid := subscription.MonthlyWindowAt(now); valid {
+				monthlyWindowStart = &value
+			}
 			resp["remaining"] = remaining
 			resp["subscription"] = gin.H{
-				"daily_usage_usd":     subscription.DailyUsageUSD,
-				"weekly_usage_usd":    subscription.WeeklyUsageUSD,
-				"monthly_usage_usd":   subscription.MonthlyUsageUSD,
-				"daily_limit_usd":     apiKey.Group.DailyLimitUSD,
-				"weekly_limit_usd":    apiKey.Group.WeeklyLimitUSD,
-				"monthly_limit_usd":   apiKey.Group.MonthlyLimitUSD,
-				"weekly_window_start": subscription.WeeklyWindowStart,
-				"expires_at":          subscription.ExpiresAt,
+				"daily_usage_usd":      0,
+				"weekly_usage_usd":     subscription.EffectiveWeeklyUsageAt(now),
+				"monthly_usage_usd":    subscription.EffectiveMonthlyUsageAt(now),
+				"daily_limit_usd":      apiKey.Group.DailyLimitUSD,
+				"weekly_limit_usd":     apiKey.Group.WeeklyLimitUSD,
+				"monthly_limit_usd":    effectiveMonthlyLimit,
+				"weekly_window_start":  weeklyWindowStart,
+				"monthly_window_start": monthlyWindowStart,
+				"expires_at":           subscription.ExpiresAt,
 			}
 		}
 
@@ -1516,24 +1533,22 @@ func (h *GatewayHandler) usageUnrestricted(c *gin.Context, ctx context.Context, 
 }
 
 // calculateSubscriptionRemaining 计算订阅剩余可用额度
-// 逻辑：
-// 1. 如果日/周/月任一限额达到100%，返回0
-// 2. 否则返回所有已配置周期中剩余额度的最小值
+// Weekly and monthly membership limits are both authoritative. Daily remains
+// a legacy compatibility field and cannot block a membership request.
 func (h *GatewayHandler) calculateSubscriptionRemaining(group *service.Group, sub *service.UserSubscription) float64 {
+	return h.calculateSubscriptionRemainingAt(group, sub, time.Now())
+}
+
+func (h *GatewayHandler) calculateSubscriptionRemainingAt(
+	group *service.Group,
+	sub *service.UserSubscription,
+	now time.Time,
+) float64 {
 	var remainingValues []float64
 
-	// 检查日限额
-	if group.HasDailyLimit() {
-		remaining := *group.DailyLimitUSD - sub.DailyUsageUSD
-		if remaining <= 0 {
-			return 0
-		}
-		remainingValues = append(remainingValues, remaining)
-	}
-
 	// 检查周限额
-	if group.HasWeeklyLimit() {
-		remaining := *group.WeeklyLimitUSD - sub.WeeklyUsageUSD
+	if group.WeeklyLimitUSD != nil && *group.WeeklyLimitUSD >= 0 {
+		remaining := *group.WeeklyLimitUSD - sub.EffectiveWeeklyUsageAt(now)
 		if remaining <= 0 {
 			return 0
 		}
@@ -1541,8 +1556,8 @@ func (h *GatewayHandler) calculateSubscriptionRemaining(group *service.Group, su
 	}
 
 	// 检查月限额
-	if group.HasMonthlyLimit() {
-		remaining := *group.MonthlyLimitUSD - sub.MonthlyUsageUSD
+	if monthlyLimit, configured := group.EffectiveMonthlyLimitUSD(); configured {
+		remaining := monthlyLimit - sub.EffectiveMonthlyUsageAt(now)
 		if remaining <= 0 {
 			return 0
 		}
@@ -2133,6 +2148,17 @@ func billingErrorDetails(err error) (status int, code, message string, retryAfte
 		return http.StatusTooManyRequests, "rate_limit_exceeded", msg, 0
 	}
 	if errors.Is(err, service.ErrAPIKeyRateLimit7dExceeded) {
+		msg := pkgerrors.Message(err)
+		return http.StatusTooManyRequests, "rate_limit_exceeded", msg, 0
+	}
+	// Subscription limit errors may surface here when the second, authoritative
+	// admission check observes fresher Redis/DB usage than the auth middleware's
+	// short-lived subscription snapshot. Keep that path semantically identical
+	// to the middleware: quota exhaustion is HTTP 429, never a generic 403.
+	// These errors currently carry no authoritative reset metadata, so do not
+	// synthesize a Retry-After value.
+	if errors.Is(err, service.ErrWeeklyLimitExceeded) ||
+		errors.Is(err, service.ErrMonthlyLimitExceeded) {
 		msg := pkgerrors.Message(err)
 		return http.StatusTooManyRequests, "rate_limit_exceeded", msg, 0
 	}

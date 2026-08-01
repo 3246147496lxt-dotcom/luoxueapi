@@ -106,15 +106,40 @@ func (g *Group) IsSubscriptionType() bool {
 }
 
 func (g *Group) HasDailyLimit() bool {
-	return g.DailyLimitUSD != nil && *g.DailyLimitUSD > 0
+	return g != nil && g.DailyLimitUSD != nil && *g.DailyLimitUSD >= 0
 }
 
 func (g *Group) HasWeeklyLimit() bool {
-	return g.WeeklyLimitUSD != nil && *g.WeeklyLimitUSD > 0
+	return g != nil && g.WeeklyLimitUSD != nil && *g.WeeklyLimitUSD >= 0
 }
 
 func (g *Group) HasMonthlyLimit() bool {
-	return g.MonthlyLimitUSD != nil && *g.MonthlyLimitUSD > 0
+	return g != nil && g.MonthlyLimitUSD != nil && *g.MonthlyLimitUSD >= 0
+}
+
+// EffectiveMonthlyLimitUSD returns the authoritative membership monthly
+// allowance. Plans may override it explicitly; otherwise four weekly
+// allowances form the monthly allowance.
+func (g *Group) EffectiveMonthlyLimitUSD() (float64, bool) {
+	if g == nil {
+		return 0, false
+	}
+	// Only nil means "not configured"; zero is an explicit exhausted
+	// allowance, while a corrupt negative value must fail closed instead of
+	// silently falling back to the weekly plan.
+	if g.MonthlyLimitUSD != nil {
+		if *g.MonthlyLimitUSD < 0 {
+			// A present but invalid value is not the same as an omitted limit.
+			// Treat it as an exhausted allowance so every admission path blocks
+			// instead of silently downgrading to weekly-only enforcement.
+			return 0, true
+		}
+		return *g.MonthlyLimitUSD, true
+	}
+	if g.WeeklyLimitUSD != nil && *g.WeeklyLimitUSD >= 0 {
+		return *g.WeeklyLimitUSD * 4, true
+	}
+	return 0, false
 }
 
 // GetImagePrice 根据 image_size 返回对应的图片生成价格

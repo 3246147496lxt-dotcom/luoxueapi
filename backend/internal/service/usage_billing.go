@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 )
 
 var ErrUsageBillingRequestIDRequired = errors.New("usage billing request_id is required")
@@ -15,6 +16,9 @@ var ErrUsageBillingPrincipalMismatch = errors.New("usage billing api key owner d
 var ErrUsageBillingAttemptNotFound = errors.New("web chat billing attempt not found")
 var ErrUsageBillingRepositoryUnavailable = errors.New("web chat usage billing repository unavailable")
 var ErrUsageBillingSettlementClosed = errors.New("web chat usage settlement is closed")
+var ErrUsageBillingSubscriptionTermRequired = errors.New("usage billing subscription starts_at term identity is required")
+var ErrUsageBillingSubscriptionTermMismatch = errors.New("usage billing subscription term no longer matches")
+var ErrUsageBillingSubscriptionTermUnsupported = errors.New("subscription repository does not support starts_at term-aware usage increments")
 
 // UsageBillingCommand describes one billable request that must be applied at most once.
 type UsageBillingCommand struct {
@@ -24,21 +28,22 @@ type UsageBillingCommand struct {
 	RequestPayloadHash string
 	Source             string
 
-	UserID              int64
-	AccountID           int64
-	SubscriptionID      *int64
-	AccountType         string
-	Model               string
-	RequestedModel      string
-	ServiceTier         string
-	ReasoningEffort     string
-	BillingType         int8
-	InputTokens         int
-	OutputTokens        int
-	CacheCreationTokens int
-	CacheReadTokens     int
-	ImageCount          int
-	MediaType           string
+	UserID               int64
+	AccountID            int64
+	SubscriptionID       *int64
+	SubscriptionStartsAt *time.Time
+	AccountType          string
+	Model                string
+	RequestedModel       string
+	ServiceTier          string
+	ReasoningEffort      string
+	BillingType          int8
+	InputTokens          int
+	OutputTokens         int
+	CacheCreationTokens  int
+	CacheReadTokens      int
+	ImageCount           int
+	MediaType            string
 
 	GrossCost           float64
 	BalanceCost         float64
@@ -69,6 +74,10 @@ func (c *UsageBillingCommand) Normalize() {
 		case c.SubscriptionCost > 0:
 			c.GrossCost = c.SubscriptionCost
 		}
+	}
+	if c.SubscriptionStartsAt != nil {
+		startsAt := c.SubscriptionStartsAt.UTC()
+		c.SubscriptionStartsAt = &startsAt
 	}
 	if strings.TrimSpace(c.RequestFingerprint) == "" {
 		c.RequestFingerprint = buildUsageBillingFingerprint(c)
@@ -115,6 +124,9 @@ func buildUsageBillingFingerprint(c *UsageBillingCommand) string {
 		c.APIKeyRateLimitCost,
 		c.AccountQuotaCost,
 	)
+	if c.SubscriptionStartsAt != nil && !c.SubscriptionStartsAt.IsZero() {
+		raw += "|subscription_starts_at=" + c.SubscriptionStartsAt.UTC().Format(time.RFC3339Nano)
+	}
 	if payloadHash := strings.TrimSpace(c.RequestPayloadHash); payloadHash != "" {
 		raw += "|" + payloadHash
 	}

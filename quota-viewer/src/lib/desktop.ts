@@ -1,3 +1,5 @@
+import { getCurrentWindow } from '@tauri-apps/api/window'
+
 export type ViewerSnapshotStatus =
   | 'disconnected'
   | 'loading'
@@ -33,10 +35,14 @@ export const hasTauriRuntime = () =>
   typeof window !== 'undefined' && Boolean(window.__TAURI_INTERNALS__)
 
 const interactiveDragTargets =
-  'button, a, input, select, textarea, [role="button"], [data-no-window-drag]'
+  'button, a, input, select, textarea, [data-no-window-drag]'
 
-export const startQuotaViewerDrag = (event: MouseEvent) => {
-  if (!hasTauriRuntime() || event.button !== 0) return
+export const startQuotaViewerDrag = (event: MouseEvent | PointerEvent) => {
+  const primaryButtonHeld =
+    event.type === 'pointermove'
+      ? (event.buttons & 1) === 1
+      : event.button === 0
+  if (!hasTauriRuntime() || !primaryButtonHeld) return
 
   const target = event.target
   if (
@@ -46,9 +52,7 @@ export const startQuotaViewerDrag = (event: MouseEvent) => {
     return
   }
 
-  void import('@tauri-apps/api/window')
-    .then(({ getCurrentWindow }) => getCurrentWindow().startDragging())
-    .catch(() => undefined)
+  void getCurrentWindow().startDragging().catch(() => undefined)
 }
 
 const call = async <T>(command: string, args?: Record<string, unknown>) => {
@@ -58,12 +62,22 @@ const call = async <T>(command: string, args?: Record<string, unknown>) => {
 
 export const markRuntime = () => {
   document.documentElement.dataset.runtime = hasTauriRuntime() ? 'tauri' : 'browser'
+  document.documentElement.dataset.surface =
+    new URLSearchParams(window.location.search).get('surface') === 'tray'
+      ? 'tray'
+      : 'main'
 }
 
-export const setDetailPanelOpen = async (open: boolean) => {
-  if (!hasTauriRuntime()) return
+export const setMainPanelExpanded = async (expanded: boolean) => {
+  if (!hasTauriRuntime()) return expanded
 
-  await call('set_detail_open', { open })
+  return call<boolean>('set_main_panel_expanded', { expanded })
+}
+
+export const setTrayDetailPanelOpen = async (open: boolean) => {
+  if (!hasTauriRuntime()) return open
+
+  return call<boolean>('set_tray_detail_open', { open })
 }
 
 export const hideQuotaViewer = async () => {
@@ -72,11 +86,52 @@ export const hideQuotaViewer = async () => {
   await call('hide_panel')
 }
 
+export const hideTrayPopover = async () => {
+  if (!hasTauriRuntime()) return
+
+  await call('hide_tray_panel')
+}
+
+export const openMainPanel = async () => {
+  if (!hasTauriRuntime()) return
+
+  await call('open_main_panel')
+}
+
 export const onQuotaViewerShown = async (callback: () => void) => {
   if (!hasTauriRuntime()) return () => {}
 
   const { listen } = await import('@tauri-apps/api/event')
   return listen('quota-panel-shown', callback)
+}
+
+export const onTrayPopoverShown = async (callback: () => void) => {
+  if (!hasTauriRuntime()) return () => {}
+
+  const { listen } = await import('@tauri-apps/api/event')
+  return listen('quota-tray-shown', callback)
+}
+
+export const onMainPanelLayoutChanged = async (
+  callback: (expanded: boolean) => void
+) => {
+  if (!hasTauriRuntime()) return () => {}
+
+  const { listen } = await import('@tauri-apps/api/event')
+  return listen<boolean>('quota-main-layout-changed', (event) => {
+    callback(event.payload)
+  })
+}
+
+export const onTrayPanelLayoutChanged = async (
+  callback: (open: boolean) => void
+) => {
+  if (!hasTauriRuntime()) return () => {}
+
+  const { listen } = await import('@tauri-apps/api/event')
+  return listen<boolean>('quota-tray-layout-changed', (event) => {
+    callback(event.payload)
+  })
 }
 
 export const getViewerSnapshot = async (

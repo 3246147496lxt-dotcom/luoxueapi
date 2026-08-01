@@ -3,8 +3,10 @@
 package service
 
 import (
+	"context"
 	"errors"
 	"testing"
+	"time"
 )
 
 // TestBuildUsageBillingCommand_SubscriptionAppliesRateMultiplier locks in the fix
@@ -16,6 +18,7 @@ func TestBuildUsageBillingCommand_SubscriptionAppliesRateMultiplier(t *testing.T
 
 	groupID := int64(7)
 	subID := int64(42)
+	subscriptionStartsAt := time.Date(2026, time.July, 31, 9, 8, 7, 654321000, time.FixedZone("UTC+8", 8*60*60))
 
 	tests := []struct {
 		name           string
@@ -67,7 +70,7 @@ func TestBuildUsageBillingCommand_SubscriptionAppliesRateMultiplier(t *testing.T
 				User:               &User{ID: 1},
 				APIKey:             &APIKey{ID: 2, GroupID: &groupID},
 				Account:            &Account{ID: 3},
-				Subscription:       &UserSubscription{ID: subID},
+				Subscription:       &UserSubscription{ID: subID, StartsAt: subscriptionStartsAt},
 				IsSubscriptionBill: tt.isSubscription,
 			}
 
@@ -81,7 +84,109 @@ func TestBuildUsageBillingCommand_SubscriptionAppliesRateMultiplier(t *testing.T
 			if cmd.BalanceCost != tt.wantBalance {
 				t.Errorf("BalanceCost = %v, want %v", cmd.BalanceCost, tt.wantBalance)
 			}
+			if tt.isSubscription {
+				if cmd.SubscriptionStartsAt == nil || !cmd.SubscriptionStartsAt.Equal(subscriptionStartsAt) {
+					t.Errorf("SubscriptionStartsAt = %v, want %v", cmd.SubscriptionStartsAt, subscriptionStartsAt)
+				}
+			} else if cmd.SubscriptionStartsAt != nil {
+				t.Errorf("SubscriptionStartsAt = %v, want nil for balance billing", cmd.SubscriptionStartsAt)
+			}
 		})
+	}
+}
+
+func TestUsageBillingFingerprintIncludesSubscriptionTerm(t *testing.T) {
+	t.Parallel()
+
+	subscriptionID := int64(42)
+	firstStartsAt := time.Date(2026, time.July, 1, 3, 4, 5, 6000, time.UTC)
+	secondStartsAt := firstStartsAt.Add(24 * time.Hour)
+	first := &UsageBillingCommand{
+		RequestID:            "req-1",
+		APIKeyID:             2,
+		UserID:               1,
+		SubscriptionID:       &subscriptionID,
+		SubscriptionStartsAt: &firstStartsAt,
+		SubscriptionCost:     1,
+	}
+	second := *first
+	second.SubscriptionStartsAt = &secondStartsAt
+
+	first.Normalize()
+	second.Normalize()
+
+	if first.RequestFingerprint == second.RequestFingerprint {
+		t.Fatal("subscription terms with the same row ID must have different billing fingerprints")
+	}
+}
+
+type termAwareUsageRepoStub struct {
+	userSubRepoNoop
+	called   bool
+	id       int64
+	startsAt time.Time
+	costUSD  float64
+	err      error
+}
+
+func (s *termAwareUsageRepoStub) IncrementUsageForTerm(
+	_ context.Context,
+	id int64,
+	startsAt time.Time,
+	costUSD float64,
+) error {
+	s.called = true
+	s.id = id
+	s.startsAt = startsAt
+	s.costUSD = costUSD
+	return s.err
+}
+
+func TestLegacySubscriptionBillingRequiresTermAwareRepository(t *testing.T) {
+	t.Parallel()
+
+	startsAt := time.Date(2026, time.July, 31, 9, 8, 7, 0, time.UTC)
+	subscription := &UserSubscription{ID: 42, StartsAt: startsAt}
+
+	err := incrementSubscriptionUsageForTerm(
+		t.Context(),
+		userSubRepoNoop{},
+		subscription,
+		2.5,
+	)
+	if !errors.Is(err, ErrUsageBillingSubscriptionTermUnsupported) {
+		t.Fatalf("incrementSubscriptionUsageForTerm error = %v, want %v", err, ErrUsageBillingSubscriptionTermUnsupported)
+	}
+
+	repo := &termAwareUsageRepoStub{}
+	err = incrementSubscriptionUsageForTerm(t.Context(), repo, subscription, 2.5)
+	if err != nil {
+		t.Fatalf("incrementSubscriptionUsageForTerm returned error: %v", err)
+	}
+	if !repo.called || repo.id != subscription.ID || !repo.startsAt.Equal(startsAt) || repo.costUSD != 2.5 {
+		t.Fatalf("term-aware increment = called:%v id:%d starts_at:%v cost:%v", repo.called, repo.id, repo.startsAt, repo.costUSD)
+	}
+}
+
+func TestLegacySubscriptionBillingDoesNotFallBackToIDOnlyIncrement(t *testing.T) {
+	t.Parallel()
+
+	// userSubRepoNoop.IncrementUsage panics. The legacy path must detect that
+	// the repository lacks IncrementUsageForTerm and skip the unsafe ID-only
+	// method instead.
+	result, err := applyUsageBilling(t.Context(), "req-legacy-term", nil, &postUsageBillingParams{
+		Cost:               &CostBreakdown{TotalCost: 1, ActualCost: 1},
+		User:               &User{ID: 1},
+		APIKey:             &APIKey{ID: 2},
+		Account:            &Account{ID: 3},
+		Subscription:       &UserSubscription{ID: 42, StartsAt: time.Now().UTC()},
+		IsSubscriptionBill: true,
+	}, &billingDeps{userSubRepo: userSubRepoNoop{}}, nil)
+	if result != nil {
+		t.Fatalf("applyUsageBilling result = %+v, want nil", result)
+	}
+	if !errors.Is(err, ErrUsageBillingSubscriptionTermUnsupported) {
+		t.Fatalf("applyUsageBilling error = %v, want %v", err, ErrUsageBillingSubscriptionTermUnsupported)
 	}
 }
 

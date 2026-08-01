@@ -333,6 +333,8 @@ struct SafeQuotaOverviewSubscription {
     starts_at: String,
     expires_at: String,
     weekly_window: SafeQuotaOverviewWeeklyWindow,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    monthly_window: Option<SafeQuotaOverviewWeeklyWindow>,
     period_usage: Option<SafeQuotaOverviewPeriodUsage>,
     next_event: Option<SafeQuotaOverviewNextEvent>,
 }
@@ -536,6 +538,19 @@ mod tests {
                     "used_percent": 68,
                     "admission_cache_key": "subscription-secret"
                 },
+                "monthly_window": {
+                    "kind": "30d_from_subscription_start",
+                    "state": "active",
+                    "anchor_at": "2026-07-25T09:30:00Z",
+                    "period_start": "2026-07-25T09:30:00Z",
+                    "period_end": "2026-08-24T09:30:00Z",
+                    "resets_at": "2026-08-24T09:30:00Z",
+                    "limit": "800.0000000000",
+                    "used": "208.0000000000",
+                    "remaining": "592.0000000000",
+                    "used_percent": 26,
+                    "internal_monthly_ledger": "monthly-secret"
+                },
                 "period_usage": {
                     "state": "available",
                     "observed_until": "2026-07-30T00:00:00Z",
@@ -593,6 +608,18 @@ mod tests {
             1_906_000
         );
         assert_eq!(
+            sanitized["subscriptions"][0]["monthly_window"]["used_percent"].as_f64(),
+            Some(26.0)
+        );
+        assert_eq!(
+            sanitized["subscriptions"][0]["monthly_window"]["kind"],
+            "30d_from_subscription_start"
+        );
+        assert_eq!(
+            sanitized["subscriptions"][0]["monthly_window"]["period_end"],
+            "2026-08-24T09:30:00Z"
+        );
+        assert_eq!(
             sanitized["actions"]["manage_keys_url"],
             "https://luoxueapi.cc/keys"
         );
@@ -605,6 +632,8 @@ mod tests {
             "wallet-secret",
             "billing-group-secret",
             "subscription-secret",
+            "monthly-secret",
+            "internal_monthly_ledger",
             "point-secret",
             "period-secret",
             "next-event-secret",

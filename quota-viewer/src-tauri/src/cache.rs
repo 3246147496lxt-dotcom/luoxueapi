@@ -16,6 +16,7 @@ use zeroize::Zeroizing;
 
 use crate::{
     error::{AppError, AppResult},
+    file_replace::replace_file,
     models::{sanitize_quota_overview, CachedOverview},
 };
 
@@ -127,7 +128,7 @@ impl OverviewCache {
         let bytes = serde_json::to_vec(&envelope)?;
         fs::write(&temporary, bytes)?;
         restrict_file_permissions(&temporary)?;
-        fs::rename(&temporary, &self.path)?;
+        replace_file(&temporary, &self.path)?;
         Ok(cache)
     }
 
@@ -257,6 +258,29 @@ mod tests {
 
         store.clear().unwrap();
         assert!(store.load("session-a", "Asia/Shanghai").unwrap().is_none());
+    }
+
+    #[test]
+    fn repeated_saves_replace_the_existing_cache_file() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = OverviewCache::new(
+            directory.path().join("overview.json"),
+            Zeroizing::new(vec![7_u8; 32]),
+        )
+        .unwrap();
+        let fresh_until = (Utc::now() + chrono::Duration::minutes(5)).to_rfc3339();
+        store
+            .save(quota_overview(&fresh_until), "session-a", "Asia/Shanghai")
+            .unwrap();
+
+        let mut replacement = quota_overview(&fresh_until);
+        replacement["wallet"]["available"] = serde_json::json!("64.3200000000");
+        store
+            .save(replacement, "session-a", "Asia/Shanghai")
+            .unwrap();
+
+        let loaded = store.load("session-a", "Asia/Shanghai").unwrap().unwrap();
+        assert_eq!(loaded.overview["wallet"]["available"], "64.3200000000");
     }
 
     #[test]

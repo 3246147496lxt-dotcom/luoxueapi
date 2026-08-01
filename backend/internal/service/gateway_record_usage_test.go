@@ -270,9 +270,14 @@ func TestGatewayServiceRecordUsage_PeakRateAffectsTokenModeImageOutputTokens(t *
 				PeakRateMultiplier: 3.0,
 			},
 		},
-		User:         &User{ID: 602},
-		Account:      &Account{ID: 702},
-		Subscription: &UserSubscription{ID: subscriptionID, UserID: 602, GroupID: groupID},
+		User:    &User{ID: 602},
+		Account: &Account{ID: 702},
+		Subscription: &UserSubscription{
+			ID:       subscriptionID,
+			UserID:   602,
+			GroupID:  groupID,
+			StartsAt: time.Date(2026, time.July, 29, 13, 47, 12, 0, time.UTC),
+		},
 	})
 
 	require.NoError(t, err)

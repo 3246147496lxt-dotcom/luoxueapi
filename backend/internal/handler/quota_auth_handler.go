@@ -124,7 +124,7 @@ func (h *QuotaAuthHandler) RefreshSession(c *gin.Context) {
 		response.ErrorFrom(c, quotaauth.ErrInvalidAuthorizationRequest.WithCause(err))
 		return
 	}
-	if (req.RotationID == nil) != (req.CandidateRefreshToken == nil) {
+	if req.RotationID == nil || req.CandidateRefreshToken == nil {
 		response.ErrorFrom(c, quotaauth.ErrInvalidAuthorizationRequest)
 		return
 	}

@@ -798,14 +798,15 @@ func TestApiKeyAuthWithSubscriptionGoogle_SubscriptionLimitExceededReturns429(t 
 	now := time.Now()
 	startsAt := now.Add(-time.Hour)
 	sub := &service.UserSubscription{
-		ID:                601,
-		UserID:            user.ID,
-		GroupID:           group.ID,
-		Status:            service.SubscriptionStatusActive,
-		StartsAt:          startsAt,
-		ExpiresAt:         now.Add(24 * time.Hour),
-		WeeklyWindowStart: &startsAt,
-		WeeklyUsageUSD:    10,
+		ID:                 601,
+		UserID:             user.ID,
+		GroupID:            group.ID,
+		Status:             service.SubscriptionStatusActive,
+		StartsAt:           startsAt,
+		ExpiresAt:          now.Add(24 * time.Hour),
+		WeeklyWindowStart:  &startsAt,
+		MonthlyWindowStart: &startsAt,
+		WeeklyUsageUSD:     10,
 	}
 	subscriptionService := service.NewSubscriptionService(nil, fakeGoogleSubscriptionRepo{
 		getActive: func(ctx context.Context, userID, groupID int64) (*service.UserSubscription, error) {

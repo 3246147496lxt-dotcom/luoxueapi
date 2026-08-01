@@ -93,6 +93,7 @@ func TestSubscriptionProgressContractUsesNestedExplicitDTO(t *testing.T) {
 				ID        int64  `json:"id"`
 				GroupName string `json:"group_name"`
 				Weekly    struct {
+					State        string  `json:"state"`
 					LimitUSD     float64 `json:"limit_usd"`
 					UsedUSD      float64 `json:"used_usd"`
 					RemainingUSD float64 `json:"remaining_usd"`
@@ -106,6 +107,7 @@ func TestSubscriptionProgressContractUsesNestedExplicitDTO(t *testing.T) {
 	require.Equal(t, int64(9), payload.Data[0].Subscription.ID)
 	require.Equal(t, int64(9), payload.Data[0].Progress.ID)
 	require.Equal(t, "Pro", payload.Data[0].Progress.GroupName)
+	require.Equal(t, "active", payload.Data[0].Progress.Weekly.State)
 	require.Equal(t, 50.0, payload.Data[0].Progress.Weekly.LimitUSD)
 	require.Equal(t, 12.5, payload.Data[0].Progress.Weekly.UsedUSD)
 	require.Equal(t, 37.5, payload.Data[0].Progress.Weekly.RemainingUSD)
@@ -117,6 +119,95 @@ func TestSubscriptionProgressContractUsesNestedExplicitDTO(t *testing.T) {
 	require.NotContains(t, item, "subscription_id")
 	require.Contains(t, item, "subscription")
 	require.Contains(t, item, "progress")
+}
+
+func TestSubscriptionProgressStaleWindowIsUnknownNotZero(t *testing.T) {
+	now := time.Now().UTC().Truncate(time.Second)
+	anchor := now.Add(-15 * 24 * time.Hour)
+	staleStart := anchor.Add(7 * 24 * time.Hour)
+	limit := 50.0
+	group := &service.Group{ID: 7, Name: "Pro", WeeklyLimitUSD: &limit}
+	sub := service.UserSubscription{
+		ID:                9,
+		UserID:            42,
+		GroupID:           group.ID,
+		Status:            service.SubscriptionStatusActive,
+		StartsAt:          anchor,
+		ExpiresAt:         now.Add(30 * 24 * time.Hour),
+		WeeklyWindowStart: &staleStart,
+		WeeklyUsageUSD:    999,
+		Group:             group,
+	}
+	repo := &subscriptionProgressRepoStub{
+		active: []service.UserSubscription{sub},
+		byID:   map[int64]*service.UserSubscription{sub.ID: &sub},
+	}
+	handler := NewSubscriptionHandler(
+		service.NewSubscriptionService(nil, repo, nil, nil, nil),
+	)
+	recorder, ctx := newSubscriptionProgressTestContext(t, handler)
+
+	handler.GetProgress(ctx)
+
+	require.Equal(t, http.StatusOK, recorder.Code)
+	var payload struct {
+		Data []struct {
+			Progress struct {
+				Weekly struct {
+					State        string   `json:"state"`
+					UsedUSD      *float64 `json:"used_usd"`
+					RemainingUSD *float64 `json:"remaining_usd"`
+					Percentage   *float64 `json:"percentage"`
+				} `json:"weekly"`
+			} `json:"progress"`
+		} `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &payload))
+	require.Len(t, payload.Data, 1)
+	require.Equal(t, "unknown", payload.Data[0].Progress.Weekly.State)
+	require.Nil(t, payload.Data[0].Progress.Weekly.UsedUSD)
+	require.Nil(t, payload.Data[0].Progress.Weekly.RemainingUSD)
+	require.Nil(t, payload.Data[0].Progress.Weekly.Percentage)
+}
+
+func TestSubscriptionSummaryPreservesExplicitZeroMonthlyLimit(t *testing.T) {
+	now := time.Now().UTC().Truncate(time.Second)
+	weeklyLimit := 50.0
+	monthlyLimit := 0.0
+	group := &service.Group{
+		ID:              7,
+		Name:            "Zero Month",
+		WeeklyLimitUSD:  &weeklyLimit,
+		MonthlyLimitUSD: &monthlyLimit,
+	}
+	sub := service.UserSubscription{
+		ID:                 9,
+		UserID:             42,
+		GroupID:            group.ID,
+		Status:             service.SubscriptionStatusActive,
+		StartsAt:           now,
+		ExpiresAt:          now.Add(30 * 24 * time.Hour),
+		WeeklyWindowStart:  &now,
+		MonthlyWindowStart: &now,
+		Group:              group,
+	}
+	repo := &subscriptionProgressRepoStub{active: []service.UserSubscription{sub}}
+	handler := NewSubscriptionHandler(service.NewSubscriptionService(nil, repo, nil, nil, nil))
+	recorder, ctx := newSubscriptionProgressTestContext(t, handler)
+
+	handler.GetSummary(ctx)
+
+	require.Equal(t, http.StatusOK, recorder.Code)
+	var payload struct {
+		Data struct {
+			Subscriptions []map[string]any `json:"subscriptions"`
+		} `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &payload))
+	require.Len(t, payload.Data.Subscriptions, 1)
+	value, exists := payload.Data.Subscriptions[0]["monthly_limit_usd"]
+	require.True(t, exists)
+	require.Equal(t, float64(0), value)
 }
 
 func TestSubscriptionProgressReadFailureDoesNotReturnPartialSuccess(t *testing.T) {

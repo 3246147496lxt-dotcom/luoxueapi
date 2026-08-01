@@ -99,6 +99,7 @@ func TestMigrationsRunner_IsIdempotent_AndSchemaIsUpToDate(t *testing.T) {
 	requireColumn(t, tx, "billing_usage_entries", "source", "character varying", 20, false)
 	requireColumn(t, tx, "billing_usage_entries", "model", "character varying", 255, false)
 	requireColumn(t, tx, "billing_usage_entries", "requested_model", "character varying", 255, false)
+	requireColumn(t, tx, "billing_usage_entries", "subscription_amount", "numeric", 0, true)
 	requireColumn(t, tx, "billing_usage_entries", "charged_amount", "numeric", 0, false)
 	requireColumn(t, tx, "billing_usage_entries", "balance_before", "numeric", 0, true)
 	requireColumn(t, tx, "billing_usage_entries", "balance_after", "numeric", 0, true)

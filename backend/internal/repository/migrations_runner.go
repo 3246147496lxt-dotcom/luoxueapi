@@ -99,6 +99,24 @@ type validatedMigrationFile struct {
 	checksum string
 }
 
+const EmbeddedMigrationManifestContract = "sub2api-migration-manifest/v1"
+
+// MigrationManifestEntry identifies one embedded SQL migration by the exact
+// checksum used by the migration runner.
+type MigrationManifestEntry struct {
+	Filename string `json:"filename"`
+	SHA256   string `json:"sha256"`
+}
+
+// MigrationManifest is a deterministic, database-free projection of the SQL
+// migrations embedded in this binary. Release tooling uses it to bind a
+// reviewed checkout to the immutable candidate image before maintenance begins.
+type MigrationManifest struct {
+	Contract  string                   `json:"contract"`
+	SetSHA256 string                   `json:"set_sha256"`
+	Entries   []MigrationManifestEntry `json:"migrations"`
+}
+
 type migrationChecksumCompatibilityRule struct {
 	fileChecksum       string
 	acceptedDBChecksum map[string]struct{}
@@ -142,6 +160,31 @@ func ApplyMigrations(ctx context.Context, db *sql.DB) error {
 		return errors.New("nil sql db")
 	}
 	return applyMigrationsFS(ctx, db, migrations.FS)
+}
+
+// EmbeddedMigrationManifest returns the validated embedded migration set
+// without loading application configuration or opening a database connection.
+func EmbeddedMigrationManifest() (MigrationManifest, error) {
+	files, err := collectValidatedMigrationFiles(migrations.FS)
+	if err != nil {
+		return MigrationManifest{}, fmt.Errorf("validate embedded migrations: %w", err)
+	}
+
+	entries := make([]MigrationManifestEntry, 0, len(files))
+	setDigest := sha256.New()
+	for _, file := range files {
+		entries = append(entries, MigrationManifestEntry{
+			Filename: file.name,
+			SHA256:   file.checksum,
+		})
+		_, _ = fmt.Fprintf(setDigest, "%s\x00%s\n", file.name, file.checksum)
+	}
+
+	return MigrationManifest{
+		Contract:  EmbeddedMigrationManifestContract,
+		SetSHA256: hex.EncodeToString(setDigest.Sum(nil)),
+		Entries:   entries,
+	}, nil
 }
 
 // applyMigrationsFS 是迁移执行的核心实现。

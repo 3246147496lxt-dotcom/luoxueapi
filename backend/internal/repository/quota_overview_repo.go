@@ -118,6 +118,9 @@ const quotaOverviewSubscriptionsQuery = `
 		us.weekly_window_start,
 		g.weekly_limit_usd::text,
 		us.weekly_usage_usd::text,
+		us.monthly_window_start,
+		g.monthly_limit_usd::text,
+		us.monthly_usage_usd::text,
 		us.updated_at
 	FROM ranked_subscriptions us
 	JOIN groups g ON g.id = us.group_id
@@ -486,10 +489,13 @@ func loadQuotaOverviewSubscriptions(ctx context.Context, tx *sql.Tx, userID int6
 	subscriptions := make([]service.QuotaOverviewSubscriptionSnapshot, 0)
 	for rows.Next() {
 		var (
-			sub             service.QuotaOverviewSubscriptionSnapshot
-			windowStart     sql.NullTime
-			weeklyLimitText sql.NullString
-			weeklyUsedText  string
+			sub                service.QuotaOverviewSubscriptionSnapshot
+			weeklyWindowStart  sql.NullTime
+			weeklyLimitText    sql.NullString
+			weeklyUsedText     string
+			monthlyWindowStart sql.NullTime
+			monthlyLimitText   sql.NullString
+			monthlyUsedText    string
 		)
 		if err := rows.Scan(
 			&sub.ID,
@@ -501,9 +507,12 @@ func loadQuotaOverviewSubscriptions(ctx context.Context, tx *sql.Tx, userID int6
 			&sub.Revoked,
 			&sub.StartsAt,
 			&sub.ExpiresAt,
-			&windowStart,
+			&weeklyWindowStart,
 			&weeklyLimitText,
 			&weeklyUsedText,
+			&monthlyWindowStart,
+			&monthlyLimitText,
+			&monthlyUsedText,
 			&sub.UpdatedAt,
 		); err != nil {
 			return nil, fmt.Errorf("scan quota overview subscription: %w", err)
@@ -511,8 +520,8 @@ func loadQuotaOverviewSubscriptions(ctx context.Context, tx *sql.Tx, userID int6
 		sub.StartsAt = sub.StartsAt.UTC()
 		sub.ExpiresAt = sub.ExpiresAt.UTC()
 		sub.UpdatedAt = sub.UpdatedAt.UTC()
-		if windowStart.Valid {
-			value := windowStart.Time.UTC()
+		if weeklyWindowStart.Valid {
+			value := weeklyWindowStart.Time.UTC()
 			sub.WeeklyWindowStart = &value
 		}
 		if weeklyLimitText.Valid {
@@ -524,6 +533,20 @@ func loadQuotaOverviewSubscriptions(ctx context.Context, tx *sql.Tx, userID int6
 		}
 		if sub.WeeklyUsed, err = parseQuotaOverviewDecimal(weeklyUsedText); err != nil {
 			return nil, fmt.Errorf("parse quota overview subscription %d usage: %w", sub.ID, err)
+		}
+		if monthlyWindowStart.Valid {
+			value := monthlyWindowStart.Time.UTC()
+			sub.MonthlyWindowStart = &value
+		}
+		if monthlyLimitText.Valid {
+			value, err := parseQuotaOverviewDecimal(monthlyLimitText.String)
+			if err != nil {
+				return nil, fmt.Errorf("parse quota overview subscription %d monthly limit: %w", sub.ID, err)
+			}
+			sub.MonthlyLimit = &value
+		}
+		if sub.MonthlyUsed, err = parseQuotaOverviewDecimal(monthlyUsedText); err != nil {
+			return nil, fmt.Errorf("parse quota overview subscription %d monthly usage: %w", sub.ID, err)
 		}
 		subscriptions = append(subscriptions, sub)
 	}
