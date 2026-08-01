@@ -72,8 +72,11 @@ func TestSubscriptionProgressContractUsesNestedExplicitDTO(t *testing.T) {
 		WeeklyUsageUSD:    12.5,
 		Group:             group,
 	}
+	listedSub := sub
+	listedSub.WeeklyWindowStart = nil
+	listedSub.WeeklyUsageUSD = 0
 	repo := &subscriptionProgressRepoStub{
-		active: []service.UserSubscription{sub},
+		active: []service.UserSubscription{listedSub},
 		byID:   map[int64]*service.UserSubscription{sub.ID: &sub},
 	}
 	subscriptionService := service.NewSubscriptionService(nil, repo, nil, nil, nil)
@@ -87,16 +90,19 @@ func TestSubscriptionProgressContractUsesNestedExplicitDTO(t *testing.T) {
 		Code int `json:"code"`
 		Data []struct {
 			Subscription struct {
-				ID int64 `json:"id"`
+				ID                int64      `json:"id"`
+				WeeklyWindowStart *time.Time `json:"weekly_window_start"`
+				WeeklyUsageUSD    *float64   `json:"weekly_usage_usd"`
 			} `json:"subscription"`
 			Progress struct {
 				ID        int64  `json:"id"`
 				GroupName string `json:"group_name"`
 				Weekly    struct {
-					State        string  `json:"state"`
-					LimitUSD     float64 `json:"limit_usd"`
-					UsedUSD      float64 `json:"used_usd"`
-					RemainingUSD float64 `json:"remaining_usd"`
+					State        string    `json:"state"`
+					LimitUSD     float64   `json:"limit_usd"`
+					UsedUSD      float64   `json:"used_usd"`
+					RemainingUSD float64   `json:"remaining_usd"`
+					WindowStart  time.Time `json:"window_start"`
 				} `json:"weekly"`
 			} `json:"progress"`
 		} `json:"data"`
@@ -105,6 +111,10 @@ func TestSubscriptionProgressContractUsesNestedExplicitDTO(t *testing.T) {
 	require.Equal(t, 0, payload.Code)
 	require.Len(t, payload.Data, 1)
 	require.Equal(t, int64(9), payload.Data[0].Subscription.ID)
+	require.NotNil(t, payload.Data[0].Subscription.WeeklyWindowStart)
+	require.Equal(t, payload.Data[0].Progress.Weekly.WindowStart, *payload.Data[0].Subscription.WeeklyWindowStart)
+	require.NotNil(t, payload.Data[0].Subscription.WeeklyUsageUSD)
+	require.Equal(t, 12.5, *payload.Data[0].Subscription.WeeklyUsageUSD)
 	require.Equal(t, int64(9), payload.Data[0].Progress.ID)
 	require.Equal(t, "Pro", payload.Data[0].Progress.GroupName)
 	require.Equal(t, "active", payload.Data[0].Progress.Weekly.State)
@@ -135,7 +145,7 @@ func TestSubscriptionProgressStaleWindowIsUnknownNotZero(t *testing.T) {
 		StartsAt:          anchor,
 		ExpiresAt:         now.Add(30 * 24 * time.Hour),
 		WeeklyWindowStart: &staleStart,
-		WeeklyUsageUSD:    999,
+		WeeklyUsageUSD:    0,
 		Group:             group,
 	}
 	repo := &subscriptionProgressRepoStub{
@@ -152,22 +162,61 @@ func TestSubscriptionProgressStaleWindowIsUnknownNotZero(t *testing.T) {
 	require.Equal(t, http.StatusOK, recorder.Code)
 	var payload struct {
 		Data []struct {
+			Subscription struct {
+				WeeklyWindowStart  *time.Time `json:"weekly_window_start"`
+				MonthlyWindowStart *time.Time `json:"monthly_window_start"`
+				WeeklyUsageUSD     *float64   `json:"weekly_usage_usd"`
+				MonthlyUsageUSD    *float64   `json:"monthly_usage_usd"`
+			} `json:"subscription"`
 			Progress struct {
 				Weekly struct {
-					State        string   `json:"state"`
-					UsedUSD      *float64 `json:"used_usd"`
-					RemainingUSD *float64 `json:"remaining_usd"`
-					Percentage   *float64 `json:"percentage"`
+					State        string    `json:"state"`
+					UsedUSD      *float64  `json:"used_usd"`
+					RemainingUSD *float64  `json:"remaining_usd"`
+					Percentage   *float64  `json:"percentage"`
+					WindowStart  time.Time `json:"window_start"`
 				} `json:"weekly"`
+				Monthly struct {
+					State        string    `json:"state"`
+					UsedUSD      *float64  `json:"used_usd"`
+					RemainingUSD *float64  `json:"remaining_usd"`
+					Percentage   *float64  `json:"percentage"`
+					WindowStart  time.Time `json:"window_start"`
+				} `json:"monthly"`
 			} `json:"progress"`
 		} `json:"data"`
 	}
 	require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &payload))
 	require.Len(t, payload.Data, 1)
+	require.NotNil(t, payload.Data[0].Subscription.WeeklyWindowStart)
+	require.Equal(t, payload.Data[0].Progress.Weekly.WindowStart, *payload.Data[0].Subscription.WeeklyWindowStart)
+	require.False(t, staleStart.Equal(*payload.Data[0].Subscription.WeeklyWindowStart))
+	require.NotNil(t, payload.Data[0].Subscription.MonthlyWindowStart)
+	require.Equal(t, payload.Data[0].Progress.Monthly.WindowStart, *payload.Data[0].Subscription.MonthlyWindowStart)
+	require.Nil(t, payload.Data[0].Subscription.WeeklyUsageUSD)
+	require.Nil(t, payload.Data[0].Subscription.MonthlyUsageUSD)
 	require.Equal(t, "unknown", payload.Data[0].Progress.Weekly.State)
 	require.Nil(t, payload.Data[0].Progress.Weekly.UsedUSD)
 	require.Nil(t, payload.Data[0].Progress.Weekly.RemainingUSD)
 	require.Nil(t, payload.Data[0].Progress.Weekly.Percentage)
+	require.Equal(t, "unknown", payload.Data[0].Progress.Monthly.State)
+	require.Nil(t, payload.Data[0].Progress.Monthly.UsedUSD)
+	require.Nil(t, payload.Data[0].Progress.Monthly.RemainingUSD)
+	require.Nil(t, payload.Data[0].Progress.Monthly.Percentage)
+
+	var raw struct {
+		Data []struct {
+			Subscription map[string]any `json:"subscription"`
+		} `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &raw))
+	require.Len(t, raw.Data, 1)
+	weeklyUsage, exists := raw.Data[0].Subscription["weekly_usage_usd"]
+	require.True(t, exists)
+	require.Nil(t, weeklyUsage)
+	monthlyUsage, exists := raw.Data[0].Subscription["monthly_usage_usd"]
+	require.True(t, exists)
+	require.Nil(t, monthlyUsage)
 }
 
 func TestSubscriptionSummaryPreservesExplicitZeroMonthlyLimit(t *testing.T) {

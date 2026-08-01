@@ -1816,8 +1816,17 @@ export interface SubscriptionUsageWindowProgress {
   resets_in_seconds: number
 }
 
+export type SubscriptionProgressSubscription = Omit<
+  UserSubscription,
+  'daily_usage_usd' | 'weekly_usage_usd' | 'monthly_usage_usd'
+> & {
+  daily_usage_usd: number | null
+  weekly_usage_usd: number | null
+  monthly_usage_usd: number | null
+}
+
 export interface SubscriptionProgressInfo {
-  subscription: UserSubscription
+  subscription: SubscriptionProgressSubscription
   progress: SubscriptionProgress
 }
 

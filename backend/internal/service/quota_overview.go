@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/config"
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/shopspring/decimal"
 )
@@ -299,8 +300,9 @@ type QuotaOverviewActions struct {
 }
 
 type cachedQuotaOverview struct {
-	overview QuotaOverview
-	storedAt time.Time
+	overview     QuotaOverview
+	storedAt     time.Time
+	hardBoundary time.Time
 }
 
 type quotaOverviewCacheKey struct {
@@ -311,6 +313,7 @@ type quotaOverviewCacheKey struct {
 type QuotaOverviewService struct {
 	repo               QuotaOverviewRepository
 	consistencyChecker QuotaOverviewConsistencyChecker
+	runMode            string
 	now                func() time.Time
 	freshFor           time.Duration
 	staleRetention     time.Duration
@@ -319,8 +322,12 @@ type QuotaOverviewService struct {
 	actions            QuotaOverviewActions
 }
 
-func NewQuotaOverviewService(repo QuotaOverviewRepository, checker QuotaOverviewConsistencyChecker) *QuotaOverviewService {
-	return &QuotaOverviewService{
+func NewQuotaOverviewService(
+	repo QuotaOverviewRepository,
+	checker QuotaOverviewConsistencyChecker,
+	cfg *config.Config,
+) *QuotaOverviewService {
+	service := &QuotaOverviewService{
 		repo:               repo,
 		consistencyChecker: checker,
 		now:                time.Now,
@@ -328,6 +335,10 @@ func NewQuotaOverviewService(repo QuotaOverviewRepository, checker QuotaOverview
 		staleRetention:     24 * time.Hour,
 		lastGood:           make(map[quotaOverviewCacheKey]cachedQuotaOverview),
 	}
+	if cfg != nil {
+		service.runMode = cfg.RunMode
+	}
+	return service
 }
 
 func (s *QuotaOverviewService) SetActions(actions QuotaOverviewActions) {
@@ -340,13 +351,19 @@ func (s *QuotaOverviewService) GetOverview(ctx context.Context, userID int64, di
 	if s == nil || s.repo == nil {
 		return nil, ErrQuotaOverviewUnavailable
 	}
+	// Simple mode deliberately bypasses quota admission and accounting, so no
+	// snapshot can truthfully claim authoritative availability in that mode.
+	if s.runMode == config.RunModeSimple {
+		return nil, ErrQuotaOverviewUnavailable
+	}
 	if displayTimezone == "" {
 		displayTimezone = "UTC"
 	}
 	snapshot, err := s.repo.LoadQuotaOverviewSnapshot(ctx, userID, displayTimezone)
 	if err != nil {
-		if stale := s.loadStale(userID, displayTimezone); stale != nil {
-			stale.GeneratedAt = s.now().UTC()
+		now := s.now().UTC()
+		if stale := s.loadStale(userID, displayTimezone, now); stale != nil {
+			stale.GeneratedAt = now
 			degradeQuotaOverview(stale, QuotaFreshnessStale, "data_stale")
 			return stale, nil
 		}
@@ -376,18 +393,29 @@ func (s *QuotaOverviewService) GetOverview(ctx context.Context, userID int64, di
 	}
 
 	overview.Warnings = appendUniqueStrings(overview.Warnings, consistency.WarningCodes...)
-	s.storeFresh(userID, displayTimezone, overview)
+	hardBoundary := quotaOverviewNextHardBoundary(snapshot, snapshot.AsOf.UTC(), displayTimezone)
+	s.storeFresh(userID, displayTimezone, overview, hardBoundary)
 	return &overview, nil
 }
 
-func (s *QuotaOverviewService) storeFresh(userID int64, displayTimezone string, overview QuotaOverview) {
+func (s *QuotaOverviewService) storeFresh(
+	userID int64,
+	displayTimezone string,
+	overview QuotaOverview,
+	hardBoundary time.Time,
+) {
 	s.cacheMu.Lock()
 	defer s.cacheMu.Unlock()
-	now := s.now()
+	now := s.now().UTC()
 	for key, cached := range s.lastGood {
-		if now.Sub(cached.storedAt) > s.staleRetention {
+		if quotaOverviewStaleCacheExpired(cached, now, s.staleRetention) {
 			delete(s.lastGood, key)
 		}
+	}
+	key := quotaOverviewCacheKey{userID: userID, displayTimezone: displayTimezone}
+	if !hardBoundary.IsZero() && !now.Before(hardBoundary) {
+		delete(s.lastGood, key)
+		return
 	}
 	// Keep this process-local safety cache bounded. It contains only the
 	// redacted overview, never credentials.
@@ -401,11 +429,18 @@ func (s *QuotaOverviewService) storeFresh(userID int64, displayTimezone string, 
 		}
 		delete(s.lastGood, oldestKey)
 	}
-	key := quotaOverviewCacheKey{userID: userID, displayTimezone: displayTimezone}
-	s.lastGood[key] = cachedQuotaOverview{overview: cloneQuotaOverview(overview), storedAt: now}
+	s.lastGood[key] = cachedQuotaOverview{
+		overview:     cloneQuotaOverview(overview),
+		storedAt:     now,
+		hardBoundary: hardBoundary.UTC(),
+	}
 }
 
-func (s *QuotaOverviewService) loadStale(userID int64, displayTimezone string) *QuotaOverview {
+func (s *QuotaOverviewService) loadStale(
+	userID int64,
+	displayTimezone string,
+	now time.Time,
+) *QuotaOverview {
 	s.cacheMu.Lock()
 	defer s.cacheMu.Unlock()
 	key := quotaOverviewCacheKey{userID: userID, displayTimezone: displayTimezone}
@@ -413,12 +448,21 @@ func (s *QuotaOverviewService) loadStale(userID int64, displayTimezone string) *
 	if !ok {
 		return nil
 	}
-	if s.now().Sub(cached.storedAt) > s.staleRetention {
+	if quotaOverviewStaleCacheExpired(cached, now.UTC(), s.staleRetention) {
 		delete(s.lastGood, key)
 		return nil
 	}
 	clone := cloneQuotaOverview(cached.overview)
 	return &clone
+}
+
+func quotaOverviewStaleCacheExpired(
+	cached cachedQuotaOverview,
+	now time.Time,
+	staleRetention time.Duration,
+) bool {
+	return now.Sub(cached.storedAt) > staleRetention ||
+		(!cached.hardBoundary.IsZero() && !now.Before(cached.hardBoundary))
 }
 
 type quotaResourceState struct {
@@ -1195,10 +1239,22 @@ func quotaOverviewFreshUntil(
 	displayTimezone string,
 ) time.Time {
 	freshUntil := asOf.Add(freshFor)
+	if hardBoundary := quotaOverviewNextHardBoundary(snapshot, asOf, displayTimezone); !hardBoundary.IsZero() && hardBoundary.Before(freshUntil) {
+		freshUntil = hardBoundary
+	}
+	return freshUntil
+}
+
+func quotaOverviewNextHardBoundary(
+	snapshot *QuotaOverviewSnapshot,
+	asOf time.Time,
+	displayTimezone string,
+) time.Time {
+	var next time.Time
 	clamp := func(boundary time.Time) {
 		boundary = boundary.UTC()
-		if boundary.After(asOf) && boundary.Before(freshUntil) {
-			freshUntil = boundary
+		if boundary.After(asOf) && (next.IsZero() || boundary.Before(next)) {
+			next = boundary
 		}
 	}
 	if nextMidnight, ok := quotaOverviewNextLocalMidnight(asOf, displayTimezone); ok {
@@ -1223,7 +1279,7 @@ func quotaOverviewFreshUntil(
 			clamp(periodEnd)
 		}
 	}
-	return freshUntil
+	return next
 }
 
 func quotaOverviewNextLocalMidnight(asOf time.Time, displayTimezone string) (time.Time, bool) {

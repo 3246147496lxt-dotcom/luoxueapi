@@ -106,10 +106,7 @@ func (h *SubscriptionHandler) GetProgress(c *gin.Context) {
 			response.ErrorFrom(c, err)
 			return
 		}
-		result = append(result, dto.SubscriptionProgressInfo{
-			Subscription: dto.UserSubscriptionFromService(sub),
-			Progress:     dto.SubscriptionProgressFromService(progress),
-		})
+		result = append(result, dto.SubscriptionProgressInfoFromService(sub, progress))
 	}
 
 	response.Success(c, result)

@@ -4,8 +4,10 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/handler"
 	basemiddleware "github.com/Wei-Shaw/sub2api/internal/middleware"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/response"
 	"github.com/Wei-Shaw/sub2api/internal/server/middleware"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/gin-gonic/gin"
@@ -24,6 +26,7 @@ func RegisterQuotaRoutes(
 	quotaAuth middleware.QuotaAuthMiddleware,
 	auditLog middleware.AuditLogMiddleware,
 	settingService *service.SettingService,
+	cfg *config.Config,
 	redisClient *redis.Client,
 ) {
 	rateLimiter := basemiddleware.NewRateLimiter(redisClient)
@@ -71,9 +74,24 @@ func RegisterQuotaRoutes(
 	readOnly := root.Group("")
 	readOnly.Use(gin.HandlerFunc(quotaAuth))
 	readOnly.Use(middleware.RequireQuotaRead())
+	readOnly.Use(quotaOverviewModeGuard(cfg))
 	readOnly.GET(
 		"/overview",
 		rateLimiter.LimitWithOptions("quota-overview-read", 12, time.Minute, failClose),
 		h.QuotaOverview.GetOverview,
 	)
+}
+
+func quotaOverviewModeGuard(cfg *config.Config) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		if cfg == nil || cfg.RunMode != config.RunModeSimple {
+			c.Next()
+			return
+		}
+
+		c.Header("Cache-Control", "private, no-store")
+		c.Header("Vary", "Authorization")
+		response.ErrorFrom(c, service.ErrQuotaOverviewUnavailable)
+		c.Abort()
+	}
 }

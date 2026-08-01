@@ -73,8 +73,10 @@ corepack pnpm build
 corepack pnpm tauri dev
 ```
 
-生产构建默认连接 `https://luoxueapi.cc/`。本地联调时可在编译前设置独立查看器
-专用地址，例如：
+生产构建默认连接 `https://luoxueapi.cc/`。服务端必须运行在 `standard` 模式；
+`simple` 模式会绕过额度拦截与累计，因此已通过设备鉴权的 overview 请求也会
+fail-closed 返回 `503 QUOTA_OVERVIEW_UNAVAILABLE`。本地联调时可在编译前设置
+独立查看器专用地址，例如：
 
 ```bash
 LUOXUE_QUOTA_API_BASE_URL=http://127.0.0.1:8080/ corepack pnpm tauri dev
@@ -83,7 +85,8 @@ LUOXUE_QUOTA_API_BASE_URL=http://127.0.0.1:8080/ corepack pnpm tauri dev
 ## Windows 构建
 
 Windows 版本支持 Windows 10 / 11 x64，使用 NSIS 生成安装程序。安装包内嵌
-Microsoft Edge WebView2 Bootstrapper，并拒绝用旧版本安装包覆盖较新版本。
+Microsoft Edge WebView2 Bootstrapper，并拒绝用旧版本安装包覆盖较新版本；
+目标机器未安装 WebView2 Runtime 时，Bootstrapper 需要联网下载运行时。
 
 构建机需要 Node.js 24、pnpm 9.15.9、Rust 1.96.0 和 Visual Studio 2022 C++
 生成工具。构建前还必须提供 Windows 多尺寸图标：

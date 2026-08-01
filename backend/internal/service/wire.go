@@ -593,7 +593,7 @@ func ProvideQuotaOverviewService(
 	checker QuotaOverviewConsistencyChecker,
 	cfg *config.Config,
 ) *QuotaOverviewService {
-	svc := NewQuotaOverviewService(repo, checker)
+	svc := NewQuotaOverviewService(repo, checker, cfg)
 	baseURL := ""
 	if cfg != nil {
 		baseURL = strings.TrimRight(strings.TrimSpace(cfg.Server.FrontendURL), "/")

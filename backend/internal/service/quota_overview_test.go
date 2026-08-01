@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/shopspring/decimal"
 	"github.com/stretchr/testify/require"
 )
@@ -136,9 +137,47 @@ func newConsistentQuotaOverviewService(snapshot *QuotaOverviewSnapshot) *QuotaOv
 	service := NewQuotaOverviewService(
 		&quotaOverviewRepoStub{snapshots: []*QuotaOverviewSnapshot{snapshot}},
 		quotaOverviewCheckerStub{result: QuotaOverviewConsistency{Consistent: true}},
+		nil,
 	)
 	service.now = func() time.Time { return snapshot.AsOf.Add(time.Second) }
 	return service
+}
+
+func TestQuotaOverviewSimpleModeFailsClosedBeforeSnapshotRead(t *testing.T) {
+	repo := &quotaOverviewRepoStub{
+		snapshots: []*QuotaOverviewSnapshot{
+			quotaOverviewTestSnapshot(time.Date(2026, 7, 29, 7, 30, 0, 0, time.UTC)),
+		},
+	}
+	service := NewQuotaOverviewService(
+		repo,
+		quotaOverviewCheckerStub{result: QuotaOverviewConsistency{Consistent: true}},
+		&config.Config{RunMode: config.RunModeSimple},
+	)
+
+	overview, err := service.GetOverview(context.Background(), 42, "UTC")
+
+	require.Nil(t, overview)
+	require.ErrorIs(t, err, ErrQuotaOverviewUnavailable)
+	require.Zero(t, repo.calls, "simple mode must not read or cache non-authoritative quota data")
+}
+
+func TestQuotaOverviewStandardModeStillReturnsFreshSnapshot(t *testing.T) {
+	asOf := time.Date(2026, 7, 29, 7, 30, 0, 0, time.UTC)
+	repo := &quotaOverviewRepoStub{snapshots: []*QuotaOverviewSnapshot{quotaOverviewTestSnapshot(asOf)}}
+	service := NewQuotaOverviewService(
+		repo,
+		quotaOverviewCheckerStub{result: QuotaOverviewConsistency{Consistent: true}},
+		&config.Config{RunMode: config.RunModeStandard},
+	)
+	service.now = func() time.Time { return asOf.Add(time.Second) }
+
+	overview, err := service.GetOverview(context.Background(), 42, "UTC")
+
+	require.NoError(t, err)
+	require.NotNil(t, overview)
+	require.Equal(t, QuotaFreshnessFresh, overview.Freshness)
+	require.Equal(t, 1, repo.calls)
 }
 
 func TestQuotaOverviewMemberExhaustionNeverFallsBackToBalance(t *testing.T) {
@@ -516,6 +555,7 @@ func TestQuotaOverviewProjectsEmptyNewAnchoredPeriodLikeAdmission(t *testing.T) 
 		NewBillingQuotaOverviewConsistencyChecker(&quotaOverviewCacheStub{
 			balance: 128.64,
 		}),
+		nil,
 	)
 	service.now = func() time.Time { return asOf }
 	overview, err := service.GetOverview(context.Background(), 42, "UTC")
@@ -546,6 +586,7 @@ func TestQuotaOverviewDoesNotProjectElapsedMonthlyWindowWithoutAuthoritativeProo
 		NewBillingQuotaOverviewConsistencyChecker(&quotaOverviewCacheStub{
 			balance: 128.64,
 		}),
+		nil,
 	)
 	service.now = func() time.Time { return asOf }
 	overview, err := service.GetOverview(context.Background(), 42, "UTC")
@@ -974,6 +1015,7 @@ func TestQuotaOverviewInvalidNegativeUsageAndConsistencyMismatchAreUnknown(t *te
 	service := NewQuotaOverviewService(
 		&quotaOverviewRepoStub{snapshots: []*QuotaOverviewSnapshot{mismatch}},
 		quotaOverviewCheckerStub{result: inconsistentQuotaOverview("quota_subscription_cache_mismatch")},
+		nil,
 	)
 	overview, err = service.GetOverview(context.Background(), 42, "UTC")
 	require.NoError(t, err)
@@ -999,6 +1041,7 @@ func TestQuotaOverviewRepositoryFailureUsesStaleWithoutInventingZero(t *testing.
 	service := NewQuotaOverviewService(
 		repo,
 		quotaOverviewCheckerStub{result: QuotaOverviewConsistency{Consistent: true}},
+		nil,
 	)
 	now := asOf.Add(time.Second)
 	service.now = func() time.Time { return now }
@@ -1024,9 +1067,125 @@ func TestQuotaOverviewRepositoryFailureUsesStaleWithoutInventingZero(t *testing.
 	firstFailure := NewQuotaOverviewService(
 		&quotaOverviewRepoStub{errs: []error{errors.New("database unavailable")}},
 		quotaOverviewCheckerStub{result: QuotaOverviewConsistency{Consistent: true}},
+		nil,
 	)
 	_, err = firstFailure.GetOverview(context.Background(), 42, "UTC")
 	require.ErrorIs(t, err, ErrQuotaOverviewUnavailable)
+}
+
+func TestQuotaOverviewStaleCacheDoesNotCrossHardBoundaries(t *testing.T) {
+	anchor := time.Date(2026, 7, 25, 9, 30, 0, 0, time.UTC)
+	baseAsOf := time.Date(2026, 7, 29, 7, 30, 0, 0, time.UTC)
+	tests := []struct {
+		name     string
+		timezone string
+		prepare  func() (*QuotaOverviewSnapshot, time.Time)
+	}{
+		{
+			name:     "weekly reset",
+			timezone: "UTC",
+			prepare: func() (*QuotaOverviewSnapshot, time.Time) {
+				boundary := anchor.Add(SubscriptionWeeklyWindowDuration)
+				return quotaOverviewTestSnapshot(boundary.Add(-time.Minute)), boundary
+			},
+		},
+		{
+			name:     "monthly reset",
+			timezone: "UTC",
+			prepare: func() (*QuotaOverviewSnapshot, time.Time) {
+				boundary := anchor.Add(SubscriptionMonthlyWindowDuration)
+				return quotaOverviewTestSnapshot(boundary.Add(-time.Minute)), boundary
+			},
+		},
+		{
+			name:     "subscription expiry",
+			timezone: "UTC",
+			prepare: func() (*QuotaOverviewSnapshot, time.Time) {
+				snapshot := quotaOverviewTestSnapshot(baseAsOf)
+				boundary := baseAsOf.Add(time.Minute)
+				snapshot.Subscriptions[0].ExpiresAt = boundary
+				return snapshot, boundary
+			},
+		},
+		{
+			name:     "api key expiry",
+			timezone: "UTC",
+			prepare: func() (*QuotaOverviewSnapshot, time.Time) {
+				snapshot := quotaOverviewTestSnapshot(baseAsOf)
+				boundary := baseAsOf.Add(time.Minute)
+				snapshot.Keys[0].ExpiresAt = &boundary
+				return snapshot, boundary
+			},
+		},
+		{
+			name:     "requested timezone midnight",
+			timezone: "Asia/Shanghai",
+			prepare: func() (*QuotaOverviewSnapshot, time.Time) {
+				asOf := time.Date(2026, 7, 29, 15, 59, 0, 0, time.UTC)
+				boundary := time.Date(2026, 7, 29, 16, 0, 0, 0, time.UTC)
+				return quotaOverviewTestSnapshot(asOf), boundary
+			},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			snapshot, boundary := test.prepare()
+			repo := &quotaOverviewRepoStub{
+				snapshots: []*QuotaOverviewSnapshot{snapshot},
+				errs: []error{
+					nil,
+					errors.New("database unavailable"),
+					errors.New("database unavailable"),
+				},
+			}
+			service := NewQuotaOverviewService(
+				repo,
+				quotaOverviewCheckerStub{result: QuotaOverviewConsistency{Consistent: true}},
+				nil,
+			)
+			now := snapshot.AsOf.Add(time.Second)
+			service.now = func() time.Time { return now }
+
+			_, err := service.GetOverview(context.Background(), 42, test.timezone)
+			require.NoError(t, err)
+
+			now = boundary.Add(-time.Nanosecond)
+			stale, err := service.GetOverview(context.Background(), 42, test.timezone)
+			require.NoError(t, err)
+			require.Equal(t, QuotaFreshnessStale, stale.Freshness)
+
+			now = boundary
+			_, err = service.GetOverview(context.Background(), 42, test.timezone)
+			require.ErrorIs(t, err, ErrQuotaOverviewUnavailable)
+			require.Empty(t, service.lastGood)
+		})
+	}
+}
+
+func TestQuotaOverviewStaleCacheSurvivesFreshnessTTLBeforeHardBoundary(t *testing.T) {
+	asOf := time.Date(2026, 7, 29, 7, 30, 0, 0, time.UTC)
+	snapshot := quotaOverviewTestSnapshot(asOf)
+	repo := &quotaOverviewRepoStub{
+		snapshots: []*QuotaOverviewSnapshot{snapshot},
+		errs:      []error{nil, errors.New("database unavailable")},
+	}
+	service := NewQuotaOverviewService(
+		repo,
+		quotaOverviewCheckerStub{result: QuotaOverviewConsistency{Consistent: true}},
+		nil,
+	)
+	now := asOf.Add(time.Second)
+	service.now = func() time.Time { return now }
+
+	fresh, err := service.GetOverview(context.Background(), 42, "UTC")
+	require.NoError(t, err)
+	require.Equal(t, asOf.Add(service.freshFor), fresh.FreshUntil)
+
+	now = fresh.FreshUntil.Add(time.Minute)
+	stale, err := service.GetOverview(context.Background(), 42, "UTC")
+	require.NoError(t, err)
+	require.Equal(t, QuotaFreshnessStale, stale.Freshness)
 }
 
 func TestQuotaOverviewStaleCacheIsIsolatedByDisplayTimezone(t *testing.T) {
@@ -1038,6 +1197,7 @@ func TestQuotaOverviewStaleCacheIsIsolatedByDisplayTimezone(t *testing.T) {
 	service := NewQuotaOverviewService(
 		repo,
 		quotaOverviewCheckerStub{result: QuotaOverviewConsistency{Consistent: true}},
+		nil,
 	)
 	service.now = func() time.Time { return asOf.Add(time.Second) }
 

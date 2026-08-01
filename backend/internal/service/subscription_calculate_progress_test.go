@@ -166,6 +166,37 @@ func TestCalculateProgress_StaleWeeklyCounterIsNotCarriedIntoCurrentPeriod(t *te
 	assert.True(t, progress.Weekly.ResetsAt.Equal(currentEnd))
 }
 
+func TestCalculateProgress_StaleZeroCountersRemainUnknown(t *testing.T) {
+	svc := newTestSubscriptionService()
+	now := time.Now()
+	anchor := now.Add(-45 * 24 * time.Hour)
+	staleWeeklyStart := anchor.Add(35 * 24 * time.Hour)
+	staleMonthlyStart := anchor
+	sub := &UserSubscription{
+		ID:                 1,
+		StartsAt:           anchor,
+		ExpiresAt:          now.Add(20 * 24 * time.Hour),
+		WeeklyWindowStart:  &staleWeeklyStart,
+		MonthlyWindowStart: &staleMonthlyStart,
+		WeeklyUsageUSD:     0,
+		MonthlyUsageUSD:    0,
+	}
+	group := &Group{Name: "Pro", WeeklyLimitUSD: ptrFloat64(50)}
+
+	progress := svc.calculateProgress(sub, group)
+
+	require.NotNil(t, progress.Weekly)
+	assert.Equal(t, usageWindowProgressUnknown, progress.Weekly.State)
+	assert.Nil(t, progress.Weekly.UsedUSD)
+	assert.Nil(t, progress.Weekly.RemainingUSD)
+	assert.Nil(t, progress.Weekly.Percentage)
+	require.NotNil(t, progress.Monthly)
+	assert.Equal(t, usageWindowProgressUnknown, progress.Monthly.State)
+	assert.Nil(t, progress.Monthly.UsedUSD)
+	assert.Nil(t, progress.Monthly.RemainingUSD)
+	assert.Nil(t, progress.Monthly.Percentage)
+}
+
 func TestCalculateProgress_WeeklyOverLimitIsClamped(t *testing.T) {
 	svc := newTestSubscriptionService()
 	now := time.Now()

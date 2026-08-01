@@ -100,7 +100,7 @@ func registerRoutes(
 	routes.RegisterAuthRoutes(v1, h, jwtAuth, auditLog, redisClient, settingService)
 	routes.RegisterUserRoutes(v1, h, jwtAuth, auditLog, settingService)
 	routes.RegisterDesktopRoutes(v1, h, jwtAuth, desktopAuth, auditLog, settingService, redisClient)
-	routes.RegisterQuotaRoutes(v1, h, jwtAuth, quotaAuth, auditLog, settingService, redisClient)
+	routes.RegisterQuotaRoutes(v1, h, jwtAuth, quotaAuth, auditLog, settingService, cfg, redisClient)
 	routes.RegisterChatRoutes(v1, h, jwtAuth, opsService, settingService, cfg)
 	routes.RegisterAdminRoutes(v1, h, adminAuth, auditLog, stepUpAuth, settingService)
 	routes.RegisterModelCatalogRoutes(v1, h, redisClient)
