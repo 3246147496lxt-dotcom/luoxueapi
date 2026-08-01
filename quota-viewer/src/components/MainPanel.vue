@@ -8,6 +8,7 @@ defineProps<{
   status?: ViewerUiStatus
   dataStatus?: ViewerDataStatus
   refreshing?: boolean
+  lastRefreshAt?: number | null
   errorCode?: string | null
   errorMessage?: string | null
   pairingCode?: string | null
@@ -33,6 +34,7 @@ const emit = defineEmits<{
       :status="status"
       :data-status="dataStatus"
       :refreshing="refreshing"
+      :last-refresh-at="lastRefreshAt"
       :error-code="errorCode"
       :error-message="errorMessage"
       :pairing-code="pairingCode"

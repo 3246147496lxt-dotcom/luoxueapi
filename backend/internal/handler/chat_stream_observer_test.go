@@ -11,9 +11,9 @@ import (
 
 func TestDeliveredChatStreamObserverCapturesOnlyCompleteWrittenEvents(t *testing.T) {
 	observer := newDeliveredChatStreamObserver()
-	observer.Observe([]byte("data: {\"choices\":[{\"delta\":{\"content\":\"hel"))
-	observer.Observe([]byte("lo\"},\"finish_reason\":\"stop\"}]}\n\n"))
-	observer.Observe([]byte("data: [DONE]\n\n"))
+	require.NoError(t, observer.Observe([]byte("data: {\"choices\":[{\"delta\":{\"content\":\"hel")))
+	require.NoError(t, observer.Observe([]byte("lo\"},\"finish_reason\":\"stop\"}]}\n\n")))
+	require.NoError(t, observer.Observe([]byte("data: [DONE]\n\n")))
 
 	snapshot := observer.Snapshot()
 
@@ -24,16 +24,16 @@ func TestDeliveredChatStreamObserverCapturesOnlyCompleteWrittenEvents(t *testing
 
 func TestDeliveredChatStreamObserverDoesNotCompleteOnUnclosedDoneFrame(t *testing.T) {
 	observer := newDeliveredChatStreamObserver()
-	observer.Observe([]byte("data: [DONE]"))
+	require.NoError(t, observer.Observe([]byte("data: [DONE]")))
 
 	require.False(t, observer.Snapshot().Done)
 }
 
 func TestDeliveredChatStreamObserverCapturesStreamError(t *testing.T) {
 	observer := newDeliveredChatStreamObserver()
-	observer.Observe([]byte(
+	require.NoError(t, observer.Observe([]byte(
 		"data: {\"error\":{\"code\":\"upstream_error\",\"message\":\"failed\"}}\n\n",
-	))
+	)))
 
 	snapshot := observer.Snapshot()
 
@@ -44,10 +44,10 @@ func TestDeliveredChatStreamObserverCapturesStreamError(t *testing.T) {
 
 func TestDeliveredChatStreamObserverErrorTakesPrecedenceOverDone(t *testing.T) {
 	observer := newDeliveredChatStreamObserver()
-	observer.Observe([]byte(
-		"data: {\"error\":{\"code\":\"blocked\",\"message\":\"denied\"}}\n\n" +
+	require.NoError(t, observer.Observe([]byte(
+		"data: {\"error\":{\"code\":\"blocked\",\"message\":\"denied\"}}\n\n"+
 			"data: [DONE]\n\n",
-	))
+	)))
 
 	snapshot := observer.Snapshot()
 
@@ -66,8 +66,8 @@ func TestDeliveredChatStreamObserverCheckpointsMonotonicPrefixes(t *testing.T) {
 		return nil
 	})
 
-	observer.Observe([]byte("data: {\"choices\":[{\"delta\":{\"content\":\"a\"}}]}\n\n"))
-	observer.Observe([]byte("data: {\"choices\":[{\"delta\":{\"content\":\"b\"}}]}\n\n"))
+	require.NoError(t, observer.Observe([]byte("data: {\"choices\":[{\"delta\":{\"content\":\"a\"}}]}\n\n")))
+	require.NoError(t, observer.Observe([]byte("data: {\"choices\":[{\"delta\":{\"content\":\"b\"}}]}\n\n")))
 	finalSequence, err := observer.ForceCheckpoint()
 
 	require.NoError(t, err)
@@ -81,9 +81,9 @@ func TestDeliveredChatStreamObserverCheckpointsMonotonicPrefixes(t *testing.T) {
 
 func TestDeliveredChatStreamObserverFreezeIgnoresDetachedDrain(t *testing.T) {
 	observer := newDeliveredChatStreamObserver()
-	observer.Observe([]byte("data: {\"choices\":[{\"delta\":{\"content\":\"kept\"}}]}\n\n"))
+	require.NoError(t, observer.Observe([]byte("data: {\"choices\":[{\"delta\":{\"content\":\"kept\"}}]}\n\n")))
 	observer.Freeze()
-	observer.Observe([]byte("data: {\"choices\":[{\"delta\":{\"content\":\"dropped\"}}]}\n\n"))
+	require.NoError(t, observer.Observe([]byte("data: {\"choices\":[{\"delta\":{\"content\":\"dropped\"}}]}\n\n")))
 
 	require.Equal(t, "kept", observer.Snapshot().Content)
 }

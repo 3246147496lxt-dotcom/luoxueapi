@@ -333,7 +333,7 @@ func (s *Service) AuthenticateAccessToken(ctx context.Context, tokenString strin
 		claims.ExpiresAt == nil || claims.IssuedAt == nil || claims.NotBefore == nil {
 		return nil, ErrAccessTokenInvalid
 	}
-	lifetime := claims.ExpiresAt.Time.Sub(claims.IssuedAt.Time)
+	lifetime := claims.ExpiresAt.Sub(claims.IssuedAt.Time)
 	if lifetime <= 0 || lifetime > accessTokenTTL {
 		return nil, ErrAccessTokenInvalid
 	}

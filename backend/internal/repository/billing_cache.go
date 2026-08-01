@@ -149,6 +149,9 @@ func NewBillingCache(rdb *redis.Client) service.BillingCache {
 func (c *billingCache) GetUserBalance(ctx context.Context, userID int64) (float64, error) {
 	key := billingBalanceKey(userID)
 	val, err := c.rdb.Get(ctx, key).Result()
+	if errors.Is(err, redis.Nil) {
+		return 0, service.ErrBillingCacheMiss
+	}
 	if err != nil {
 		return 0, err
 	}
@@ -182,7 +185,7 @@ func (c *billingCache) GetSubscriptionCache(ctx context.Context, userID, groupID
 		return nil, err
 	}
 	if len(result) == 0 {
-		return nil, redis.Nil
+		return nil, service.ErrBillingCacheMiss
 	}
 	return c.parseSubscriptionCache(result)
 }

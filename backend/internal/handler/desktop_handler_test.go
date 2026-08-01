@@ -236,7 +236,9 @@ func TestDesktopDiagnosticUploadAcceptsFixedDTOAndRejectsUnknownOrOversizedField
 		forbiddenHeaders[key] = value
 	}
 	requestSummary := make(map[string]any)
-	for key, value := range valid["requests"].(map[string]any) {
+	validRequestSummary, ok := valid["requests"].(map[string]any)
+	require.True(t, ok)
+	for key, value := range validRequestSummary {
 		requestSummary[key] = value
 	}
 	requestSummary["headers"] = map[string]string{"Authorization": "redacted"}

@@ -336,7 +336,7 @@ func loadQuotaOverviewPeriodUsage(
 	if err != nil {
 		return nil, fmt.Errorf("query quota overview subscription %d period usage: %w", sub.ID, err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	seen := [7]bool{}
 	for rows.Next() {
@@ -415,7 +415,7 @@ func loadQuotaOverviewKeys(ctx context.Context, tx *sql.Tx, userID int64) ([]ser
 	if err != nil {
 		return nil, fmt.Errorf("query quota overview keys: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	keys := make([]service.QuotaOverviewKeySnapshot, 0)
 	for rows.Next() {
@@ -484,7 +484,7 @@ func loadQuotaOverviewSubscriptions(ctx context.Context, tx *sql.Tx, userID int6
 	if err != nil {
 		return nil, fmt.Errorf("query quota overview subscriptions: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	subscriptions := make([]service.QuotaOverviewSubscriptionSnapshot, 0)
 	for rows.Next() {

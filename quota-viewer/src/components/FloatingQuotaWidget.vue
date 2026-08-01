@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, useId } from 'vue'
+import { LoaderCircle, RefreshCw } from 'lucide-vue-next'
 import type { ViewerUiStatus } from '@/composables/useQuotaViewer'
 import { startQuotaViewerDrag } from '@/lib/desktop'
 import type { QuotaItem, QuotaOverview, ViewerDataStatus } from '@/types'
@@ -19,6 +20,7 @@ const props = withDefaults(
     status?: ViewerUiStatus
     dataStatus?: ViewerDataStatus
     refreshing?: boolean
+    lastRefreshAt?: number | null
     errorCode?: string | null
     errorMessage?: string | null
     pairingCode?: string | null
@@ -28,6 +30,7 @@ const props = withDefaults(
     status: 'ready',
     dataStatus: 'ready',
     refreshing: false,
+    lastRefreshAt: null,
     errorCode: null,
     errorMessage: null,
     pairingCode: null,
@@ -210,6 +213,31 @@ const showsMonthlyRemaining = computed(() =>
   ['available', 'warning', 'exhausted', 'stale'].includes(visualState.value)
 )
 
+const refreshFeedbackLine = computed(() => {
+  if (props.refreshing) return '正在重新获取额度'
+  if (props.lastRefreshAt == null) return null
+
+  const refreshedAt = new Date(props.lastRefreshAt)
+  if (!Number.isFinite(refreshedAt.getTime())) return null
+  const checkedAt = new Intl.DateTimeFormat('zh-CN', {
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false
+  }).format(refreshedAt)
+
+  if (props.dataStatus === 'stale' || props.status === 'stale') {
+    return `${checkedAt} 已检查，当前显示旧数据`
+  }
+  if (!props.overview || props.status === 'unavailable') {
+    return `${checkedAt} 获取失败，可再次重试`
+  }
+  if (visualState.value === 'unavailable') {
+    return `${checkedAt} 已检查，服务端额度待更新`
+  }
+  return `${checkedAt} 已更新`
+})
+
 const statusLabel: Record<FloatingQuotaVisualState, string> = {
   available: '可用',
   warning: '即将耗尽',
@@ -238,7 +266,7 @@ const supportingLine = computed(() => {
       if (props.status === 'disconnected') return '连接后显示会员周剩余额度'
       if (props.status === 'auth-invalid') return '重新连接后获取最新额度'
       if (props.status === 'pairing-expired') return '请重新发起连接'
-      return props.refreshing ? '正在重新获取额度' : '暂时无法获取额度'
+      return refreshFeedbackLine.value ?? '暂时无法获取额度'
     case 'no-membership':
       return '开通后显示每周剩余额度与重置时间'
     case 'stale':
@@ -257,7 +285,7 @@ const recoveryAction = computed<null | {
   label: string
   event: 'refresh' | 'connect' | 'reopen'
 }>(() => {
-  if (visualState.value !== 'unavailable' || props.collapsed || props.refreshing) {
+  if (visualState.value !== 'unavailable' || props.collapsed) {
     return null
   }
 
@@ -271,12 +299,15 @@ const recoveryAction = computed<null | {
     case 'loading':
       return null
     default:
-      return { label: '重新获取', event: 'refresh' }
+      return {
+        label: props.refreshing ? '获取中' : '重新获取',
+        event: 'refresh'
+      }
   }
 })
 
 const runRecoveryAction = () => {
-  if (!recoveryAction.value) return
+  if (!recoveryAction.value || props.refreshing) return
   switch (recoveryAction.value.event) {
     case 'connect':
       emit('connect')
@@ -443,15 +474,24 @@ const onCardClick = (event: MouseEvent) => {
           </span>
           <em v-if="visualState === 'stale'">旧数据</em>
         </span>
-        <span v-else>{{ supportingLine }}</span>
+        <span v-else aria-live="polite">{{ supportingLine }}</span>
         <button
           v-if="recoveryAction"
           type="button"
           class="floating-quota-widget__refresh"
           data-no-window-drag
+          :disabled="refreshing"
+          :aria-busy="refreshing"
           @click.stop="runRecoveryAction"
         >
-          {{ recoveryAction.label }}
+          <LoaderCircle
+            v-if="refreshing"
+            class="floating-quota-widget__refresh-spinner"
+            :size="13"
+            aria-hidden="true"
+          />
+          <RefreshCw v-else :size="13" aria-hidden="true" />
+          <span>{{ recoveryAction.label }}</span>
         </button>
       </footer>
     </template>
@@ -689,6 +729,10 @@ const onCardClick = (event: MouseEvent) => {
 }
 
 .floating-quota-widget__refresh {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 4px;
   padding: 0;
   border: 0;
   color: #234977;
@@ -696,6 +740,21 @@ const onCardClick = (event: MouseEvent) => {
   font: inherit;
   font-weight: 700;
   cursor: pointer;
+}
+
+.floating-quota-widget__refresh:disabled {
+  cursor: wait;
+  opacity: 0.72;
+}
+
+.floating-quota-widget__refresh-spinner {
+  animation: floating-quota-refresh-spin 0.8s linear infinite;
+}
+
+@keyframes floating-quota-refresh-spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 .floating-quota-widget__refresh:hover {

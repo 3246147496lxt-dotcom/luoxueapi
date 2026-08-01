@@ -410,7 +410,8 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 				)
 			}
 			turnBeginLocked := false
-			if eventType == "response.create" {
+			switch eventType {
+			case "response.create":
 				// Classify a frame that arrives while the previous turn is still
 				// finishing as pipelined. Waiting for AfterTurn to release the
 				// lifecycle lock must not turn it into a valid next turn.
@@ -471,7 +472,7 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 					)
 				}
 				unwrittenClientTurn.Store(true)
-			} else if eventType == "session.update" {
+			case "session.update":
 				normalizedPayload, modelErr := normalizeOpenAIWSPassthroughLockedModelFrame(
 					payload,
 					eventType,

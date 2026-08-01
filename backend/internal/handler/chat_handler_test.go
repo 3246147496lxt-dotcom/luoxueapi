@@ -94,45 +94,6 @@ func (s *chatCompletionDelegatorStub) ChatCompletions(c *gin.Context) {
 	}
 }
 
-type chatAttemptClaimerStub struct {
-	calls         int
-	outcomeCalls  int
-	outcomeStatus string
-	result        *service.ChatAttemptClaimResult
-	err           error
-}
-
-func (s *chatAttemptClaimerStub) Claim(
-	context.Context,
-	int64,
-	string,
-	string,
-	[]byte,
-) (*service.ChatAttemptClaimResult, error) {
-	s.calls++
-	if s.result != nil || s.err != nil {
-		return s.result, s.err
-	}
-	return &service.ChatAttemptClaimResult{
-		Claimed:         true,
-		ClientRequestID: "server-request-id",
-	}, nil
-}
-
-func (s *chatAttemptClaimerStub) MarkOutcome(
-	_ context.Context,
-	_ int64,
-	_ string,
-	status string,
-	_ int,
-	_ string,
-	_ string,
-) error {
-	s.outcomeCalls++
-	s.outcomeStatus = status
-	return nil
-}
-
 type trackedChatRequestBody struct {
 	read bool
 }

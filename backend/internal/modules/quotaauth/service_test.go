@@ -231,7 +231,7 @@ func TestQuotaAccessTokenHasExactReadOnlyAuthorizationDomain(t *testing.T) {
 	require.Equal(t, ClientID, claims.ClientID)
 	require.Equal(t, ScopeRead, claims.Scope)
 	require.Equal(t, quotaAuthTestDevicePublicID, claims.Subject)
-	require.Equal(t, accessTokenTTL, claims.ExpiresAt.Time.Sub(claims.IssuedAt.Time))
+	require.Equal(t, accessTokenTTL, claims.ExpiresAt.Sub(claims.IssuedAt.Time))
 
 	payload := map[string]any{}
 	parts := strings.Split(pair.AccessToken, ".")

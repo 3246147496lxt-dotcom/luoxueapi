@@ -44,10 +44,10 @@ func (s *BillingCacheSuite) TestUserBalance() {
 		fn   func(ctx context.Context, rdb *redis.Client, cache service.BillingCache)
 	}{
 		{
-			name: "missing_key_returns_redis_nil",
+			name: "missing_key_returns_cache_miss",
 			fn: func(ctx context.Context, rdb *redis.Client, cache service.BillingCache) {
 				_, err := cache.GetUserBalance(ctx, 1)
-				require.ErrorIs(s.T(), err, redis.Nil, "expected redis.Nil for missing balance key")
+				require.ErrorIs(s.T(), err, service.ErrBillingCacheMiss, "expected cache miss for missing balance key")
 			},
 		},
 		{
@@ -111,7 +111,7 @@ func (s *BillingCacheSuite) TestUserBalance() {
 				require.Equal(s.T(), int64(0), exists, "expected balance key to be removed after invalidate")
 
 				_, err = cache.GetUserBalance(ctx, userID)
-				require.ErrorIs(s.T(), err, redis.Nil, "expected redis.Nil after invalidate")
+				require.ErrorIs(s.T(), err, service.ErrBillingCacheMiss, "expected cache miss after invalidate")
 			},
 		},
 		{
@@ -156,13 +156,13 @@ func (s *BillingCacheSuite) TestSubscriptionCache() {
 		fn   func(ctx context.Context, rdb *redis.Client, cache service.BillingCache)
 	}{
 		{
-			name: "missing_key_returns_redis_nil",
+			name: "missing_key_returns_cache_miss",
 			fn: func(ctx context.Context, rdb *redis.Client, cache service.BillingCache) {
 				userID := int64(10)
 				groupID := int64(20)
 
 				_, err := cache.GetSubscriptionCache(ctx, userID, groupID)
-				require.ErrorIs(s.T(), err, redis.Nil, "expected redis.Nil for missing subscription key")
+				require.ErrorIs(s.T(), err, service.ErrBillingCacheMiss, "expected cache miss for missing subscription key")
 			},
 		},
 		{
@@ -215,7 +215,7 @@ func (s *BillingCacheSuite) TestSubscriptionCache() {
 				require.NoError(s.T(), cache.UpdateSubscriptionUsage(ctx, userID, groupID, 0.5), "UpdateSubscriptionUsage")
 
 				_, err := cache.GetSubscriptionCache(ctx, userID, groupID)
-				require.ErrorIs(s.T(), err, redis.Nil, "post-commit usage update must evict stale snapshot")
+				require.ErrorIs(s.T(), err, service.ErrBillingCacheMiss, "post-commit usage update must evict stale snapshot")
 			},
 		},
 		{
@@ -239,7 +239,7 @@ func (s *BillingCacheSuite) TestSubscriptionCache() {
 				require.Equal(s.T(), int64(0), exists, "expected subscription key to be removed after invalidate")
 
 				_, err = cache.GetSubscriptionCache(ctx, userID, groupID)
-				require.ErrorIs(s.T(), err, redis.Nil, "expected redis.Nil after invalidate")
+				require.ErrorIs(s.T(), err, service.ErrBillingCacheMiss, "expected cache miss after invalidate")
 			},
 		},
 		{
@@ -259,7 +259,7 @@ func (s *BillingCacheSuite) TestSubscriptionCache() {
 
 				_, err := cache.GetSubscriptionCache(ctx, userID, groupID)
 				require.Error(s.T(), err, "expected error for missing status field")
-				require.NotErrorIs(s.T(), err, redis.Nil, "expected parsing error, not redis.Nil")
+				require.NotErrorIs(s.T(), err, service.ErrBillingCacheMiss, "expected parsing error, not a cache miss")
 				require.Equal(s.T(), "invalid cache: missing status", err.Error())
 			},
 		},

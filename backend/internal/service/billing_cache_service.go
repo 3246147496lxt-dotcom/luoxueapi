@@ -250,7 +250,9 @@ func (s *BillingCacheService) cacheWriteWorker(ch <-chan cacheWriteTask) {
 		case cacheWriteSetBalance:
 			s.setBalanceCache(ctx, task.userID, task.balance)
 		case cacheWriteSetSubscription:
-			s.setSubscriptionCache(ctx, task.userID, task.groupID, task.subscriptionData)
+			if err := s.setSubscriptionCache(ctx, task.userID, task.groupID, task.subscriptionData); err != nil {
+				logger.LegacyPrintf("service.billing_cache", "Warning: async set subscription cache failed for user %d group %d: %v", task.userID, task.groupID, err)
+			}
 		case cacheWriteUpdateSubscriptionUsage:
 			if s.cache != nil {
 				if err := s.cache.UpdateSubscriptionUsage(ctx, task.userID, task.groupID, task.amount); err != nil {
@@ -1227,7 +1229,9 @@ func (s *BillingCacheService) checkSubscriptionEligibility(ctx context.Context, 
 			}
 			return ErrBillingServiceUnavailable.WithCause(err)
 		}
-		s.setSubscriptionCache(ctx, userID, group.ID, subData)
+		if err := s.setSubscriptionCache(ctx, userID, group.ID, subData); err != nil {
+			logger.LegacyPrintf("service.billing_cache", "Warning: refresh subscription cache failed for user %d group %d: %v", userID, group.ID, err)
+		}
 		if !subscriptionCacheMatchesEntitlement(subData, subscription, now) {
 			return ErrSubscriptionInvalid
 		}

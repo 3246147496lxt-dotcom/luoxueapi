@@ -47,6 +47,7 @@ export const useQuotaViewer = (options: UseQuotaViewerOptions = {}) => {
   const overview = ref<QuotaOverview | null>(null)
   const pairing = ref<PairingState | null>(null)
   const refreshing = ref(false)
+  const lastRefreshAt = ref<number | null>(null)
   const errorCode = ref<string | null>(null)
   const errorMessage = ref<string | null>(null)
   let requestSequence = 0
@@ -135,7 +136,10 @@ export const useQuotaViewer = (options: UseQuotaViewerOptions = {}) => {
       errorMessage.value = normalized.message
       status.value = overview.value ? 'stale' : 'unavailable'
     } finally {
-      if (sequence === requestSequence) refreshing.value = false
+      if (sequence === requestSequence) {
+        refreshing.value = false
+        lastRefreshAt.value = Date.now()
+      }
     }
   }
 
@@ -170,6 +174,7 @@ export const useQuotaViewer = (options: UseQuotaViewerOptions = {}) => {
     errorCode.value = null
     errorMessage.value = null
     status.value = 'connecting'
+    lastRefreshAt.value = null
     try {
       pairing.value = await startQuotaPairing()
       pollTimer = window.setTimeout(
@@ -209,6 +214,7 @@ export const useQuotaViewer = (options: UseQuotaViewerOptions = {}) => {
     overview.value = null
     status.value = 'disconnected'
     refreshing.value = false
+    lastRefreshAt.value = null
     errorCode.value = null
     errorMessage.value = null
     try {
@@ -264,6 +270,7 @@ export const useQuotaViewer = (options: UseQuotaViewerOptions = {}) => {
     overview,
     pairing,
     refreshing,
+    lastRefreshAt,
     errorCode,
     errorMessage,
     dataStatus,

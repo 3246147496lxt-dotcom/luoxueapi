@@ -2216,12 +2216,13 @@ func runWebChatUsageRecordTask(
 		lastErr  error
 		attempts int
 	)
+retryLoop:
 	for attempt := 1; attempt <= webChatUsageSettlementMaxAttempts; attempt++ {
 		if err := budgetCtx.Err(); err != nil {
 			if lastErr == nil {
 				lastErr = err
 			}
-			break
+			break retryLoop
 		}
 		attempts = attempt
 		lastErr = task(budgetCtx)
@@ -2241,7 +2242,7 @@ func runWebChatUsageRecordTask(
 			if lastErr == nil {
 				lastErr = budgetCtx.Err()
 			}
-			break
+			break retryLoop
 		}
 	}
 	if lastErr == nil {

@@ -92,6 +92,7 @@ describe('quota viewer runtime state', () => {
 
     expect(viewer.overview.value?.todaySpend).toBe('1.1600000000')
     expect(viewer.dataStatus.value).toBe('stale')
+    expect(viewer.lastRefreshAt.value).not.toBeNull()
     wrapper.unmount()
   })
 

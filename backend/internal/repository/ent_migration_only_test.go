@@ -8,7 +8,8 @@ import (
 )
 
 func TestApplyConfiguredMigrationsRejectsNilContext(t *testing.T) {
-	err := ApplyConfiguredMigrations(nil, nil)
+	var nilContext context.Context
+	err := ApplyConfiguredMigrations(nilContext, nil)
 	require.ErrorContains(t, err, "context is nil")
 }
 

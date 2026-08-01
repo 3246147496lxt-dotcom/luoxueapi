@@ -376,17 +376,22 @@ func (a *OpenAIWSIngressClientAttempt) WriteFrame(
 		return ErrOpenAIWSIngressClientAttemptClosed
 	default:
 	}
-	if err := a.session.Err(); err != nil {
-		return err
-	}
 
+	// Keep the physical read pump from enqueueing a frame between the
+	// successful socket write and the commit boundary snapshot. A client can
+	// receive the frame and immediately send its next response.create before
+	// Conn.Write returns to this goroutine; without this lock that valid frame
+	// can be misclassified as pre-commit input.
+	a.session.mu.Lock()
+	defer a.session.mu.Unlock()
+	if a.session.terminalErr != nil {
+		return a.session.terminalErr
+	}
 	if err := a.session.conn.Write(ctx, msgType, payload); err != nil {
 		return err
 	}
 	a.commitOnce.Do(func() {
-		a.session.mu.Lock()
 		a.committedThrough.Store(a.session.lastArrival)
-		a.session.mu.Unlock()
 		a.didCommit.Store(true)
 		close(a.committed)
 	})

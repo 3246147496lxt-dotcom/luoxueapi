@@ -220,7 +220,7 @@ func (r *desktopRepository) ListDevices(ctx context.Context, userID int64) ([]de
 	if err != nil {
 		return nil, fmt.Errorf("list desktop devices: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	devices := make([]desktop.Device, 0)
 	for rows.Next() {
@@ -537,7 +537,7 @@ func (r *desktopRepository) ListDiagnostics(ctx context.Context, page, pageSize 
 	if err != nil {
 		return nil, fmt.Errorf("list desktop diagnostics: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	items := make([]desktop.DiagnosticMetadata, 0)
 	for rows.Next() {
 		var item desktop.DiagnosticMetadata

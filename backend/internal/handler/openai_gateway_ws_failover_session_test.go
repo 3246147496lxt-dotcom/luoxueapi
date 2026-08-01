@@ -426,7 +426,7 @@ func TestOpenAIResponsesWebSocket_FailoverSessionSurvivesPassthroughToCtxPool(t 
 		concurrencyCache.openAIWSPassthroughConcurrencyCache,
 		2,
 	)
-	slots := concurrencyCache.openAIWSPassthroughConcurrencyCache.snapshot()
+	slots := concurrencyCache.snapshot()
 	require.Equal(t, []openAIWSFailoverSessionSlotEvent{
 		{slotType: "user", action: "acquire", ownerID: 4965, requestID: slots.userAcquires[0]},
 		{slotType: "account", action: "acquire", ownerID: 4962, requestID: slots.accountAcquires[0]},

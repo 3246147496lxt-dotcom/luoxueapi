@@ -204,7 +204,7 @@ func (o *deliveredChatStreamObserver) processEvent() {
 	contentChanged := false
 	for i := range event.Choices {
 		if event.Choices[i].Delta.Content != nil {
-			o.content.WriteString(*event.Choices[i].Delta.Content)
+			_, _ = o.content.WriteString(*event.Choices[i].Delta.Content)
 			contentChanged = true
 		}
 		if event.Choices[i].FinishReason != nil &&

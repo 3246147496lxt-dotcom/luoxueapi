@@ -184,16 +184,6 @@ type openAIWSPassthroughConcurrencyHarness struct {
 	gatewayService *service.OpenAIGatewayService
 }
 
-func newOpenAIWSPassthroughConcurrencyClient(
-	t *testing.T,
-	upstreamURL string,
-	cache *openAIWSPassthroughConcurrencyCache,
-) (*coderws.Conn, <-chan struct{}) {
-	t.Helper()
-	harness := newOpenAIWSPassthroughConcurrencyHarness(t, upstreamURL, cache)
-	return harness.clientConn, harness.handlerDone
-}
-
 func newOpenAIWSPassthroughConcurrencyHarness(
 	t *testing.T,
 	upstreamURL string,

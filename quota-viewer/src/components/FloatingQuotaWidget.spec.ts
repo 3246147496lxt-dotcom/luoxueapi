@@ -147,6 +147,17 @@ describe('FloatingQuotaWidget', () => {
     expect(unavailable.text()).toContain('网络暂不可用')
     await unavailable.get('.floating-quota-widget__refresh').trigger('click')
     expect(unavailable.emitted('refresh')).toHaveLength(1)
+    await unavailable.setProps({ refreshing: true })
+    expect(unavailable.text()).toContain('正在重新获取额度')
+    expect(unavailable.get('.floating-quota-widget__refresh').text()).toBe('获取中')
+    expect(unavailable.get('.floating-quota-widget__refresh').attributes()).toHaveProperty(
+      'disabled'
+    )
+    await unavailable.setProps({
+      refreshing: false,
+      lastRefreshAt: beforeReset.getTime()
+    })
+    expect(unavailable.text()).toContain('获取失败，可再次重试')
     expect(stale.get('.floating-quota-widget').classes()).toContain(
       'floating-quota-widget--stale'
     )
@@ -158,6 +169,17 @@ describe('FloatingQuotaWidget', () => {
     noMembership.unmount()
     unavailable.unmount()
     stale.unmount()
+  })
+
+  it('confirms a completed refresh when the server quota contract is incomplete', () => {
+    const wrapper = mountWidget(createDemoOverview('unknown'), {
+      status: 'ready',
+      lastRefreshAt: beforeReset.getTime()
+    })
+
+    expect(wrapper.text()).toContain('已检查，服务端额度待更新')
+    expect(wrapper.get('.floating-quota-widget__refresh').text()).toBe('重新获取')
+    wrapper.unmount()
   })
 
   it('does not render a historical membership as the current floating quota', () => {

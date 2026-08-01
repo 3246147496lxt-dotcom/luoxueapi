@@ -5,6 +5,7 @@ package repository
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"time"
 
@@ -89,7 +90,7 @@ func InitEnt(cfg *config.Config) (*ent.Client, *sql.DB, error) {
 // without performing any other application bootstrap writes. It is intended
 // for maintenance-window releases where HTTP handlers, workers, Redis-backed
 // flushers, secret initialization, and simple-mode seed data must remain off.
-func ApplyConfiguredMigrations(ctx context.Context, cfg *config.Config) error {
+func ApplyConfiguredMigrations(ctx context.Context, cfg *config.Config) (retErr error) {
 	if ctx == nil {
 		return fmt.Errorf("apply configured migrations: context is nil")
 	}
@@ -98,7 +99,9 @@ func ApplyConfiguredMigrations(ctx context.Context, cfg *config.Config) error {
 	if err != nil {
 		return fmt.Errorf("open migration database: %w", err)
 	}
-	defer drv.Close()
+	defer func() {
+		retErr = errors.Join(retErr, drv.Close())
+	}()
 
 	if err := applyMigrationsFS(ctx, drv.DB(), migrations.FS); err != nil {
 		return fmt.Errorf("apply embedded migrations: %w", err)

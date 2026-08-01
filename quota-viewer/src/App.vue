@@ -248,6 +248,7 @@ onBeforeUnmount(() => {
         :status="viewer.status.value"
         :data-status="isTauri ? viewer.dataStatus.value : previewDataStatus"
         :refreshing="isTauri && viewer.refreshing.value"
+        :last-refresh-at="isTauri ? viewer.lastRefreshAt.value : null"
         :error-code="viewer.errorCode.value"
         :error-message="viewer.errorMessage.value"
         :pairing-code="viewer.pairing.value?.user_code"

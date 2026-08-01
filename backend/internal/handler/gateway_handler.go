@@ -1532,13 +1532,8 @@ func (h *GatewayHandler) usageUnrestricted(c *gin.Context, ctx context.Context, 
 	c.JSON(http.StatusOK, resp)
 }
 
-// calculateSubscriptionRemaining 计算订阅剩余可用额度
 // Weekly and monthly membership limits are both authoritative. Daily remains
 // a legacy compatibility field and cannot block a membership request.
-func (h *GatewayHandler) calculateSubscriptionRemaining(group *service.Group, sub *service.UserSubscription) float64 {
-	return h.calculateSubscriptionRemainingAt(group, sub, time.Now())
-}
-
 func (h *GatewayHandler) calculateSubscriptionRemainingAt(
 	group *service.Group,
 	sub *service.UserSubscription,

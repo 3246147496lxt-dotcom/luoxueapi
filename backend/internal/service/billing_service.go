@@ -54,6 +54,11 @@ type UserPlatformQuotaCacheEntry struct {
 	MonthlyWindowStart *time.Time
 }
 
+// ErrBillingCacheMiss is returned by BillingCache read methods when no cached
+// value exists. It keeps cache consumers independent from the backing store's
+// native miss representation.
+var ErrBillingCacheMiss = errors.New("billing cache miss")
+
 // BillingCache defines cache operations for billing service
 type BillingCache interface {
 	// Balance operations

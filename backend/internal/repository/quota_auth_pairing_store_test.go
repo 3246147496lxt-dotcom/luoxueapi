@@ -16,7 +16,8 @@ func TestQuotaAuthPairingStoreIsNamespacedExpiresAndConsumesOnce(t *testing.T) {
 	server := miniredis.RunT(t)
 	client := redis.NewClient(&redis.Options{Addr: server.Addr()})
 	t.Cleanup(func() { _ = client.Close() })
-	store := NewQuotaAuthPairingStore(client).(*quotaAuthPairingStore)
+	store, ok := NewQuotaAuthPairingStore(client).(*quotaAuthPairingStore)
+	require.True(t, ok)
 	ctx := context.Background()
 	pairing := quotaauth.Pairing{
 		DeviceCodeHash: quotaAuthDeviceCodeHash("device-secret"),

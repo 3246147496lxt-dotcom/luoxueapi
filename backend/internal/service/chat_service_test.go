@@ -199,7 +199,8 @@ func TestChatServiceBillingDependencyFailureReturns503(t *testing.T) {
 
 func TestChatServiceUserDependencyFailureReturnsCatalog503WithoutSideEffects(t *testing.T) {
 	svc, groups, catalog, scheduler, billing, principals := newChatServiceBehaviorTest()
-	users := svc.users.(*chatTestUserReader)
+	users, ok := svc.users.(*chatTestUserReader)
+	require.True(t, ok)
 	dependencyErr := infraerrors.ServiceUnavailable("DATABASE_UNAVAILABLE", "user database unavailable")
 	users.err = dependencyErr
 
@@ -217,7 +218,8 @@ func TestChatServiceUserDependencyFailureReturnsCatalog503WithoutSideEffects(t *
 
 func TestChatServiceGroupDependencyFailureReturnsCatalog503WithoutLaterSideEffects(t *testing.T) {
 	svc, groups, catalog, scheduler, billing, principals := newChatServiceBehaviorTest()
-	users := svc.users.(*chatTestUserReader)
+	users, ok := svc.users.(*chatTestUserReader)
+	require.True(t, ok)
 	dependencyErr := errors.New("group database unavailable")
 	groups.err = dependencyErr
 
@@ -236,7 +238,8 @@ func TestChatServiceGroupDependencyFailureReturnsCatalog503WithoutLaterSideEffec
 func TestChatServiceUserBusinessRejectionsKeepNotFoundSemantics(t *testing.T) {
 	t.Run("repository not found", func(t *testing.T) {
 		svc, groups, catalog, scheduler, billing, principals := newChatServiceBehaviorTest()
-		users := svc.users.(*chatTestUserReader)
+		users, ok := svc.users.(*chatTestUserReader)
+		require.True(t, ok)
 		users.err = ErrUserNotFound
 
 		_, err := svc.ListModels(context.Background(), 7)
@@ -252,7 +255,8 @@ func TestChatServiceUserBusinessRejectionsKeepNotFoundSemantics(t *testing.T) {
 
 	t.Run("inactive user", func(t *testing.T) {
 		svc, groups, catalog, scheduler, billing, principals := newChatServiceBehaviorTest()
-		users := svc.users.(*chatTestUserReader)
+		users, ok := svc.users.(*chatTestUserReader)
+		require.True(t, ok)
 		users.user.Status = StatusDisabled
 
 		_, err := svc.ListModels(context.Background(), 7)
@@ -284,7 +288,8 @@ func TestChatServiceUserBusinessRejectionsKeepNotFoundSemantics(t *testing.T) {
 func TestChatServiceDependencyCancellationIsNotCatalogFailure(t *testing.T) {
 	t.Run("user lookup canceled", func(t *testing.T) {
 		svc, groups, catalog, scheduler, billing, principals := newChatServiceBehaviorTest()
-		users := svc.users.(*chatTestUserReader)
+		users, ok := svc.users.(*chatTestUserReader)
+		require.True(t, ok)
 		users.err = context.Canceled
 
 		_, err := svc.ListModels(context.Background(), 7)

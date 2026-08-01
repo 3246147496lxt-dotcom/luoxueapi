@@ -428,7 +428,7 @@ func (r *quotaAuthRepository) ListDevices(ctx context.Context, userID int64) ([]
 	if err != nil {
 		return nil, fmt.Errorf("list quota viewer devices: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	devices := make([]quotaauth.Device, 0)
 	for rows.Next() {

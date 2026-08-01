@@ -134,7 +134,7 @@ func insertWebChatPrincipal(ctx context.Context, exec sqlExecutor, userID, group
 	if err != nil {
 		return 0, false, err
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	if !rows.Next() {
 		if err := rows.Err(); err != nil {

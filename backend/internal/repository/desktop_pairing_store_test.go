@@ -16,7 +16,8 @@ func TestDesktopPairingStoreExpiresAndConsumesOnce(t *testing.T) {
 	server := miniredis.RunT(t)
 	client := redis.NewClient(&redis.Options{Addr: server.Addr()})
 	t.Cleanup(func() { _ = client.Close() })
-	store := NewDesktopPairingStore(client).(*desktopPairingStore)
+	store, ok := NewDesktopPairingStore(client).(*desktopPairingStore)
+	require.True(t, ok)
 	ctx := context.Background()
 	pairing := desktop.Pairing{
 		DeviceCodeHash: desktopDeviceCodeHash("device-secret"), UserCode: "ABCD-EFGH",

@@ -685,18 +685,15 @@ mod tests {
     fn plaintext_windows_credentials_are_rejected() {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("credentials-v1.json");
-        fs::write(
-            &path,
-            serde_json::to_vec(&CredentialFile::default()).unwrap(),
-        )
-        .unwrap();
+        let plaintext = serde_json::to_vec(&CredentialFile::default()).unwrap();
+        let unseal_error = unseal_credential_bytes(&plaintext).unwrap_err();
+        assert_eq!(unseal_error.kind(), std::io::ErrorKind::InvalidData);
+        assert_eq!(
+            unseal_error.to_string(),
+            "credential file is not protected for the current Windows user"
+        );
+        fs::write(&path, plaintext).unwrap();
 
-        let error = match CredentialStore::open(path) {
-            Ok(_) => panic!("plaintext Windows credentials must fail closed"),
-            Err(error) => error,
-        };
-        assert!(error
-            .to_string()
-            .contains("not protected for the current Windows user"));
+        assert!(CredentialStore::open(path).is_err());
     }
 }

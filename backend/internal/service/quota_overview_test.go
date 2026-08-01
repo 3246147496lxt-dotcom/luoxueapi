@@ -8,7 +8,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/redis/go-redis/v9"
 	"github.com/shopspring/decimal"
 	"github.com/stretchr/testify/require"
 )
@@ -60,7 +59,7 @@ func (s *quotaOverviewCacheStub) GetSubscriptionCache(_ context.Context, _, grou
 	if sub, ok := s.subs[groupID]; ok {
 		return sub, nil
 	}
-	return nil, redis.Nil
+	return nil, ErrBillingCacheMiss
 }
 
 func quotaOverviewTestSnapshot(asOf time.Time) *QuotaOverviewSnapshot {
@@ -1054,7 +1053,7 @@ func TestBillingQuotaOverviewConsistencyCheckerCacheMissAndStrictMatches(t *test
 	snapshot := quotaOverviewTestSnapshot(asOf)
 
 	missChecker := NewBillingQuotaOverviewConsistencyChecker(&quotaOverviewCacheStub{
-		balanceErr: redis.Nil,
+		balanceErr: ErrBillingCacheMiss,
 	})
 	result, err := missChecker.CheckQuotaOverviewConsistency(context.Background(), snapshot)
 	require.NoError(t, err)

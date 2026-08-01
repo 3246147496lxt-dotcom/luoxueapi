@@ -6,7 +6,6 @@ import (
 	"math"
 	"time"
 
-	"github.com/redis/go-redis/v9"
 	"github.com/shopspring/decimal"
 )
 
@@ -40,7 +39,7 @@ func (c *billingQuotaOverviewConsistencyChecker) CheckQuotaOverviewConsistency(
 
 	cachedBalance, err := c.cache.GetUserBalance(ctx, snapshot.Account.ID)
 	switch {
-	case errors.Is(err, redis.Nil):
+	case errors.Is(err, ErrBillingCacheMiss):
 		// A cache miss is not an alternate source of truth.
 	case err != nil:
 		return inconsistentQuotaOverview("quota_balance_cache_unavailable"), nil
@@ -66,7 +65,7 @@ func (c *billingQuotaOverviewConsistencyChecker) CheckQuotaOverviewConsistency(
 	}
 	for groupID := range groupsToCheck {
 		cached, cacheErr := c.cache.GetSubscriptionCache(ctx, snapshot.Account.ID, groupID)
-		if errors.Is(cacheErr, redis.Nil) {
+		if errors.Is(cacheErr, ErrBillingCacheMiss) {
 			continue
 		}
 		if cacheErr != nil {
