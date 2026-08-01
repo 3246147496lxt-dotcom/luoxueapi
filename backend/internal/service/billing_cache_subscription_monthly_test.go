@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"math"
 	"testing"
 	"time"
 
@@ -199,6 +200,119 @@ func TestBillingCacheSubscriptionEligibilityEnforcesEffectiveMonthlyLimit(t *tes
 			} else {
 				require.True(t, errors.Is(err, tt.expectedError), "unexpected error: %v", err)
 			}
+		})
+	}
+}
+
+func TestBillingCacheSubscriptionEligibilityReloadsInvalidCachedUsage(t *testing.T) {
+	invalidValues := []struct {
+		name  string
+		value float64
+	}{
+		{name: "NaN", value: math.NaN()},
+		{name: "positive infinity", value: math.Inf(1)},
+		{name: "negative infinity", value: math.Inf(-1)},
+	}
+
+	for _, invalid := range invalidValues {
+		t.Run("weekly "+invalid.name, func(t *testing.T) {
+			subscription, cacheData, _ := billingCacheMonthlyFixture(t)
+			cacheData.WeeklyUsage = invalid.value
+			subscription.WeeklyUsageUSD = 10
+			subscription.MonthlyUsageUSD = 1
+			cache := &subscriptionMonthlyCacheStub{data: cacheData}
+			repo := &subscriptionMonthlyRepoStub{sub: subscription}
+			svc := &BillingCacheService{cache: cache, subRepo: repo}
+
+			err := svc.checkSubscriptionEligibility(
+				context.Background(),
+				subscription.UserID,
+				&Group{
+					ID:               subscription.GroupID,
+					SubscriptionType: SubscriptionTypeSubscription,
+					WeeklyLimitUSD:   billingCacheFloat64Ptr(10),
+					MonthlyLimitUSD:  billingCacheFloat64Ptr(25),
+				},
+				subscription,
+			)
+
+			require.ErrorIs(t, err, ErrWeeklyLimitExceeded)
+			require.Equal(t, 1, cache.invalidations)
+			require.Equal(t, 1, repo.calls)
+		})
+
+		t.Run("monthly "+invalid.name, func(t *testing.T) {
+			subscription, cacheData, _ := billingCacheMonthlyFixture(t)
+			cacheData.MonthlyUsage = invalid.value
+			subscription.WeeklyUsageUSD = 1
+			subscription.MonthlyUsageUSD = 25
+			cache := &subscriptionMonthlyCacheStub{data: cacheData}
+			repo := &subscriptionMonthlyRepoStub{sub: subscription}
+			svc := &BillingCacheService{cache: cache, subRepo: repo}
+
+			err := svc.checkSubscriptionEligibility(
+				context.Background(),
+				subscription.UserID,
+				&Group{
+					ID:               subscription.GroupID,
+					SubscriptionType: SubscriptionTypeSubscription,
+					WeeklyLimitUSD:   billingCacheFloat64Ptr(10),
+					MonthlyLimitUSD:  billingCacheFloat64Ptr(25),
+				},
+				subscription,
+			)
+
+			require.ErrorIs(t, err, ErrMonthlyLimitExceeded)
+			require.Equal(t, 1, cache.invalidations)
+			require.Equal(t, 1, repo.calls)
+		})
+	}
+}
+
+func TestBillingCacheSubscriptionEligibilityFailsClosedOnInvalidDatabaseUsage(t *testing.T) {
+	tests := []struct {
+		name   string
+		mutate func(*UserSubscription, *SubscriptionCacheData)
+	}{
+		{
+			name: "weekly NaN",
+			mutate: func(subscription *UserSubscription, cacheData *SubscriptionCacheData) {
+				cacheData.WeeklyUsage = math.NaN()
+				subscription.WeeklyUsageUSD = math.NaN()
+			},
+		},
+		{
+			name: "monthly infinity",
+			mutate: func(subscription *UserSubscription, cacheData *SubscriptionCacheData) {
+				cacheData.MonthlyUsage = math.Inf(1)
+				subscription.MonthlyUsageUSD = math.Inf(1)
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			subscription, cacheData, _ := billingCacheMonthlyFixture(t)
+			tt.mutate(subscription, cacheData)
+			cache := &subscriptionMonthlyCacheStub{data: cacheData}
+			repo := &subscriptionMonthlyRepoStub{sub: subscription}
+			svc := &BillingCacheService{cache: cache, subRepo: repo}
+
+			err := svc.checkSubscriptionEligibility(
+				context.Background(),
+				subscription.UserID,
+				&Group{
+					ID:               subscription.GroupID,
+					SubscriptionType: SubscriptionTypeSubscription,
+					WeeklyLimitUSD:   billingCacheFloat64Ptr(10),
+					MonthlyLimitUSD:  billingCacheFloat64Ptr(25),
+				},
+				subscription,
+			)
+
+			require.ErrorIs(t, err, ErrBillingServiceUnavailable)
+			require.Equal(t, 1, cache.invalidations)
+			require.Equal(t, 1, repo.calls)
 		})
 	}
 }

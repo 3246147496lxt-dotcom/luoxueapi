@@ -7,6 +7,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/ent"
@@ -19,12 +20,23 @@ import (
 	"github.com/lib/pq"
 )
 
+const ConfiguredDatabaseIdentityContract = "sub2api-database-identity/v2"
+
+// ConfiguredDatabaseIdentity is the non-secret identity used to prove that
+// preflight, backup, and migrate-only all target the same PostgreSQL database.
+type ConfiguredDatabaseIdentity struct {
+	Contract         string `json:"contract"`
+	Database         string `json:"database"`
+	SystemIdentifier string `json:"system_identifier"`
+	InRecovery       bool   `json:"in_recovery"`
+}
+
 // InitEnt 初始化 Ent ORM 客户端并返回客户端实例和底层的 *sql.DB。
 //
 // 该函数执行以下操作：
 //  1. 初始化全局时区设置，确保时间处理一致性
 //  2. 建立 PostgreSQL 数据库连接
-//  3. 自动执行数据库迁移，确保 schema 与代码同步
+//  3. 自动执行普通数据库迁移；已有库若存在 maintenance-only migration 则拒绝启动
 //  4. 创建并返回 Ent 客户端实例
 //
 // 重要提示：调用者必须负责关闭返回的 ent.Client（关闭时会自动关闭底层的 driver/db）。
@@ -47,7 +59,7 @@ func InitEnt(cfg *config.Config) (*ent.Client, *sql.DB, error) {
 	// 这种方式比 Ent 的自动迁移更可控，支持复杂的迁移场景。
 	migrationCtx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 	defer cancel()
-	if err := applyMigrationsFS(migrationCtx, drv.DB(), migrations.FS); err != nil {
+	if err := ApplyMigrations(migrationCtx, drv.DB()); err != nil {
 		_ = drv.Close() // 迁移失败时关闭驱动，避免资源泄露
 		return nil, nil, err
 	}
@@ -90,9 +102,16 @@ func InitEnt(cfg *config.Config) (*ent.Client, *sql.DB, error) {
 // without performing any other application bootstrap writes. It is intended
 // for maintenance-window releases where HTTP handlers, workers, Redis-backed
 // flushers, secret initialization, and simple-mode seed data must remain off.
-func ApplyConfiguredMigrations(ctx context.Context, cfg *config.Config) (retErr error) {
+func ApplyConfiguredMigrations(
+	ctx context.Context,
+	cfg *config.Config,
+	expectedIdentity ConfiguredDatabaseIdentity,
+) (retErr error) {
 	if ctx == nil {
 		return fmt.Errorf("apply configured migrations: context is nil")
+	}
+	if err := ValidateExpectedDatabaseIdentity(expectedIdentity); err != nil {
+		return fmt.Errorf("apply configured migrations: %w", err)
 	}
 
 	drv, err := openConfiguredEntDriver(cfg)
@@ -103,8 +122,113 @@ func ApplyConfiguredMigrations(ctx context.Context, cfg *config.Config) (retErr 
 		retErr = errors.Join(retErr, drv.Close())
 	}()
 
-	if err := applyMigrationsFS(ctx, drv.DB(), migrations.FS); err != nil {
+	if err := applyMigrationsFSWithExpectedDatabaseIdentity(
+		ctx,
+		drv.DB(),
+		migrations.FS,
+		&expectedIdentity,
+	); err != nil {
 		return fmt.Errorf("apply embedded migrations: %w", err)
+	}
+	return nil
+}
+
+// ReadConfiguredDatabaseIdentity loads the same database configuration as the
+// migration entrypoint and performs one read-only identity query. It does not
+// run migrations or initialize any application component.
+func ReadConfiguredDatabaseIdentity(
+	ctx context.Context,
+	cfg *config.Config,
+) (identity ConfiguredDatabaseIdentity, retErr error) {
+	if ctx == nil {
+		return identity, fmt.Errorf("read configured database identity: context is nil")
+	}
+
+	drv, err := openConfiguredEntDriver(cfg)
+	if err != nil {
+		return identity, fmt.Errorf("open database identity connection: %w", err)
+	}
+	defer func() {
+		retErr = errors.Join(retErr, drv.Close())
+	}()
+
+	return queryDatabaseIdentity(ctx, drv.DB())
+}
+
+func queryDatabaseIdentity(
+	ctx context.Context,
+	db migrationQueryExecer,
+) (ConfiguredDatabaseIdentity, error) {
+	identity := ConfiguredDatabaseIdentity{Contract: ConfiguredDatabaseIdentityContract}
+	if err := db.QueryRowContext(ctx, `
+		SELECT current_database(), system_identifier::text, pg_is_in_recovery()
+		FROM pg_control_system()
+	`).Scan(
+		&identity.Database,
+		&identity.SystemIdentifier,
+		&identity.InRecovery,
+	); err != nil {
+		return ConfiguredDatabaseIdentity{}, fmt.Errorf("query database identity: %w", err)
+	}
+	identity.Database = strings.TrimSpace(identity.Database)
+	identity.SystemIdentifier = strings.TrimSpace(identity.SystemIdentifier)
+	if identity.Database == "" || identity.SystemIdentifier == "" {
+		return ConfiguredDatabaseIdentity{}, fmt.Errorf("query database identity: empty identity field")
+	}
+	return identity, nil
+}
+
+// ValidateExpectedDatabaseIdentity validates operator-supplied identity
+// evidence before a maintenance migration opens its database connection.
+func ValidateExpectedDatabaseIdentity(identity ConfiguredDatabaseIdentity) error {
+	if identity.Contract != ConfiguredDatabaseIdentityContract {
+		return fmt.Errorf(
+			"expected database identity contract must be %q",
+			ConfiguredDatabaseIdentityContract,
+		)
+	}
+	if identity.Database == "" || identity.Database != strings.TrimSpace(identity.Database) {
+		return fmt.Errorf("expected database identity has invalid database name")
+	}
+	if identity.SystemIdentifier == "" ||
+		identity.SystemIdentifier != strings.TrimSpace(identity.SystemIdentifier) {
+		return fmt.Errorf("expected database identity has invalid system identifier")
+	}
+	for _, ch := range identity.SystemIdentifier {
+		if ch < '0' || ch > '9' {
+			return fmt.Errorf("expected database identity system identifier must be decimal")
+		}
+	}
+	if identity.InRecovery {
+		return fmt.Errorf("expected database identity must identify a writable primary")
+	}
+	return nil
+}
+
+func verifyExpectedDatabaseIdentity(
+	ctx context.Context,
+	db migrationQueryExecer,
+	expected ConfiguredDatabaseIdentity,
+) error {
+	if err := ValidateExpectedDatabaseIdentity(expected); err != nil {
+		return err
+	}
+	actual, err := queryDatabaseIdentity(ctx, db)
+	if err != nil {
+		return err
+	}
+	if actual.InRecovery {
+		return fmt.Errorf("configured migration database is in recovery; refusing standby target")
+	}
+	if actual.Database != expected.Database ||
+		actual.SystemIdentifier != expected.SystemIdentifier {
+		return fmt.Errorf(
+			"configured migration database identity mismatch (expected database=%q system_identifier=%q, got database=%q system_identifier=%q)",
+			expected.Database,
+			expected.SystemIdentifier,
+			actual.Database,
+			actual.SystemIdentifier,
+		)
 	}
 	return nil
 }

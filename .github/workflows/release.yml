@@ -33,6 +33,7 @@ jobs:
       tag: ${{ steps.resolve.outputs.tag }}
       version: ${{ steps.resolve.outputs.version }}
       commit: ${{ steps.resolve.outputs.commit }}
+      simple_release: ${{ steps.resolve.outputs.simple_release }}
     steps:
       - name: Checkout repository history
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
@@ -49,6 +50,7 @@ jobs:
           INPUT_TAG: ${{ inputs.tag }}
           PUSH_TAG: ${{ github.ref_name }}
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          SIMPLE_RELEASE_REQUESTED: ${{ (github.event_name == 'workflow_dispatch' && inputs.simple_release) || (github.event_name != 'workflow_dispatch' && vars.SIMPLE_RELEASE == 'true') }}
         run: |
           set -Eeuo pipefail
 
@@ -81,6 +83,11 @@ jobs:
             printf 'tag=%s\n' "$tag"
             printf 'version=%s\n' "${tag#v}"
             printf 'commit=%s\n' "$commit"
+            if [[ "$SIMPLE_RELEASE_REQUESTED" == "true" ]]; then
+              printf 'simple_release=true\n'
+            else
+              printf 'simple_release=false\n'
+            fi
           } >> "$GITHUB_OUTPUT"
 
   quality-gates:
@@ -88,6 +95,7 @@ jobs:
     uses: ./.github/workflows/backend-ci.yml
     with:
       checkout_ref: ${{ needs.resolve-release.outputs.commit }}
+      quota_viewer_release_version: ${{ needs.resolve-release.outputs.simple_release != 'true' && needs.resolve-release.outputs.version || '' }}
 
   security-gates:
     needs: resolve-release
@@ -95,13 +103,120 @@ jobs:
     with:
       checkout_ref: ${{ needs.resolve-release.outputs.commit }}
 
-  release:
+  quota-viewer-windows-release:
     needs: [resolve-release, quality-gates, security-gates]
+    if: ${{ needs.resolve-release.outputs.simple_release != 'true' }}
+    runs-on: windows-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    env:
+      RELEASE_VERSION: ${{ needs.resolve-release.outputs.version }}
+      RELEASE_COMMIT: ${{ needs.resolve-release.outputs.commit }}
+    steps:
+      - name: Checkout validated release commit
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ needs.resolve-release.outputs.commit }}
+          persist-credentials: false
+
+      - name: Verify immutable Windows signing checkout
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $checkoutCommit = git rev-parse --verify 'HEAD^{commit}'
+          if ($checkoutCommit -ne $env:RELEASE_COMMIT) {
+            throw 'Windows signing checkout does not match the validated release commit.'
+          }
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6
+        with:
+          version: 9.15.9
+
+      - name: Setup Node.js
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: '24'
+          cache: 'pnpm'
+          cache-dependency-path: quota-viewer/pnpm-lock.yaml
+
+      - name: Install Rust toolchain
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          rustup toolchain install 1.96.0 --profile minimal
+          rustup default 1.96.0
+
+      - name: Verify Windows release toolchain versions
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if ([int](node -p "process.versions.node.split('.')[0]") -lt 24) { exit 1 }
+          if ((pnpm --version) -ne '9.15.9') { exit 1 }
+          if ((rustc --version).Split(' ')[1] -ne '1.96.0') { exit 1 }
+          if ((rustc -vV) -notcontains 'host: x86_64-pc-windows-msvc') { exit 1 }
+
+      - name: Stamp release version into Windows Tauri sources
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          ./quota-viewer/scripts/prepare-windows-release.ps1 `
+            -QuotaViewerDirectory 'quota-viewer' `
+            -ReleaseVersion $env:RELEASE_VERSION
+
+      - name: Install quota viewer release dependencies
+        working-directory: quota-viewer
+        run: pnpm install --frozen-lockfile
+
+      - name: Download unsigned release-versioned Windows application
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: luoxue-quota-viewer-windows-x64-release-app-unsigned
+          path: release-input/windows-app/
+
+      - name: Build, sign and verify Windows x64 NSIS release
+        shell: pwsh
+        env:
+          WINDOWS_SIGNING_CERTIFICATE_PFX_BASE64: ${{ secrets.WINDOWS_SIGNING_CERTIFICATE_PFX_BASE64 }}
+          WINDOWS_SIGNING_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_SIGNING_CERTIFICATE_PASSWORD }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          ./quota-viewer/scripts/sign-windows-release.ps1 `
+            -QuotaViewerDirectory 'quota-viewer' `
+            -UnsignedExecutablePath 'release-input/windows-app/luoxue-quota-viewer.exe' `
+            -SignedOutputDirectory 'release-output/windows-signed' `
+            -ReleaseVersion $env:RELEASE_VERSION
+
+      - name: Upload verified signed Windows release assets
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: luoxue-quota-viewer-windows-x64-nsis-release-signed
+          path: |
+            release-output/windows-signed/*.exe
+            release-output/windows-signed/*.sha256
+          retention-days: 7
+          if-no-files-found: error
+
+  release:
+    needs: [resolve-release, quality-gates, security-gates, quota-viewer-windows-release]
+    if: >-
+      ${{
+        always() &&
+        needs.resolve-release.result == 'success' &&
+        needs.quality-gates.result == 'success' &&
+        needs.security-gates.result == 'success' &&
+        (
+          needs.resolve-release.outputs.simple_release == 'true' ||
+          needs.quota-viewer-windows-release.result == 'success'
+        )
+      }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
       packages: write
     env:
+      SIMPLE_RELEASE: ${{ needs.resolve-release.outputs.simple_release }}
       RELEASE_TAG: ${{ needs.resolve-release.outputs.tag }}
       RELEASE_VERSION: ${{ needs.resolve-release.outputs.version }}
       RELEASE_COMMIT: ${{ needs.resolve-release.outputs.commit }}
@@ -137,6 +252,30 @@ jobs:
         with:
           name: ci-docs-dist
           path: backend/internal/web/dist/tutorial-docs/
+
+      - name: Download signed Windows release assets
+        if: ${{ env.SIMPLE_RELEASE != 'true' }}
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with:
+          name: luoxue-quota-viewer-windows-x64-nsis-release-signed
+          path: release-assets/windows/
+
+      - name: Verify signed Windows release asset checksum
+        if: ${{ env.SIMPLE_RELEASE != 'true' }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          shopt -s nullglob
+          installers=(release-assets/windows/*.exe)
+          checksums=(release-assets/windows/*.sha256)
+          if [[ "${#installers[@]}" -ne 1 || "${#checksums[@]}" -ne 1 ]]; then
+            echo "Expected exactly one signed Windows installer and one checksum" >&2
+            exit 1
+          fi
+          (
+            cd release-assets/windows
+            sha256sum --check "$(basename "${checksums[0]}")"
+          )
 
       - name: Set up Go
         uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
@@ -231,6 +370,39 @@ jobs:
           GITHUB_REPO_OWNER_LOWER: ${{ steps.registry.outputs.owner }}
           GITHUB_REPO_NAME: ${{ github.event.repository.name }}
           DOCKERHUB_USERNAME: skip
+
+      - name: Attach signed Windows assets to GitHub Release
+        if: ${{ env.SIMPLE_RELEASE != 'true' }}
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -Eeuo pipefail
+          shopt -s nullglob
+          installers=(release-assets/windows/*.exe)
+          checksums=(release-assets/windows/*.sha256)
+          if [[ "${#installers[@]}" -ne 1 || "${#checksums[@]}" -ne 1 ]]; then
+            echo "Signed Windows release assets are incomplete" >&2
+            exit 1
+          fi
+
+          gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null
+          gh release upload "$RELEASE_TAG" \
+            "${installers[0]}" \
+            "${checksums[0]}" \
+            --repo "$GITHUB_REPOSITORY" \
+            --clobber
+
+          installer_name="$(basename "${installers[0]}")"
+          checksum_name="$(basename "${checksums[0]}")"
+          remote_assets="$(
+            gh release view "$RELEASE_TAG" \
+              --repo "$GITHUB_REPOSITORY" \
+              --json assets \
+              --jq '.assets[].name'
+          )"
+          grep -Fx "$installer_name" <<< "$remote_assets"
+          grep -Fx "$checksum_name" <<< "$remote_assets"
 
       - name: Verify GoReleaser binary metadata
         shell: bash

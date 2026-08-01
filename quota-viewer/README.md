@@ -104,3 +104,24 @@ release-profile NSIS 安装包输出到
 `src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/`。CI 上传的 Windows
 artifact 未签名，只用于安装和兼容性验证。任何面向用户的正式 Windows 发布都必须
 先完成可验证的 Authenticode 代码签名；未签名安装包不得发布。
+
+正式 GitHub Release 的完整发布链路需要配置以下 repository secrets：
+
+- `WINDOWS_SIGNING_CERTIFICATE_PFX_BASE64`：代码签名 PFX 文件的 base64 内容；
+- `WINDOWS_SIGNING_CERTIFICATE_PASSWORD`：PFX 密码。
+
+PFX 必须只包含一张当前有效、具有私钥的代码签名证书，并且证书链需受 Windows
+信任。完整发布缺少任一 secret 时会失败关闭；`simple_release` 仍只发布 x86_64
+容器镜像，不生成桌面安装包。完整发布会先把已验证 tag 的 SemVer 同步注入临时
+checkout 中的 `package.json`、`Cargo.toml`、`Cargo.lock` 和
+`tauri.conf.json`，再构建 Windows 应用；源版本发生漂移或 Windows 版本号超出格式
+范围时会直接失败。应用 EXE 与 NSIS 安装包的 `FileVersion`、`ProductVersion` 及其
+数值版本必须在签名前匹配发布版本，签名后还会复验一次。
+
+发布任务会把 PFX 临时导入当前 runner 用户证书库，并在启动 Tauri 前清除证书和密码
+环境变量。Tauri 的同一个自定义签名命令会用 SHA-256 和受信任时间戳依次签署主程序
+EXE、NSIS `!uninstfinalize` 生成的卸载器和最终 setup；每次调用都必须分别通过
+`signtool` 与 `Get-AuthenticodeSignature` 对签名、签名者和时间戳的校验。任务还会把
+setup 静默安装到 runner 临时目录，复验实际落盘的主程序与 `uninstall.exe`，再静默
+卸载。任务结束时会同时删除临时证书及其私钥容器；只有版本、三段签名、安装后复验
+和清理全部成功的安装包及其 `.sha256` 文件会附加到 GitHub Release。

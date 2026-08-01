@@ -136,6 +136,7 @@ scripts
 !backend/scripts/resolve-version.sh
 !docs-site/scripts/
 !docs-site/scripts/verify-build.mjs
+!quota-viewer/scripts/
 .code-review-state
 #openspec/
 code-reviews/

@@ -7,9 +7,11 @@ prevent GitHub input and annotated-tag text from becoming shell source.
 
 from __future__ import annotations
 
+import json
 import re
 import secrets
 import sys
+import tomllib
 import unittest
 from pathlib import Path
 
@@ -29,6 +31,31 @@ FRONTEND_PACKAGE = (ROOT / "frontend/package.json").read_text(encoding="utf-8")
 QUOTA_VIEWER_PACKAGE = (ROOT / "quota-viewer/package.json").read_text(
     encoding="utf-8"
 )
+QUOTA_VIEWER_PACKAGE_JSON = json.loads(QUOTA_VIEWER_PACKAGE)
+QUOTA_VIEWER_TAURI_CONFIG = json.loads(
+    (ROOT / "quota-viewer/src-tauri/tauri.conf.json").read_text(encoding="utf-8")
+)
+QUOTA_VIEWER_CARGO = tomllib.loads(
+    (ROOT / "quota-viewer/src-tauri/Cargo.toml").read_text(encoding="utf-8")
+)
+QUOTA_VIEWER_CARGO_LOCK = tomllib.loads(
+    (ROOT / "quota-viewer/src-tauri/Cargo.lock").read_text(encoding="utf-8")
+)
+WINDOWS_RELEASE_PREPARE_SCRIPT = (
+    ROOT / "quota-viewer/scripts/prepare-windows-release.ps1"
+).read_text(encoding="utf-8")
+WINDOWS_RELEASE_VERSION_SCRIPT = (
+    ROOT / "quota-viewer/scripts/verify-windows-release-version.ps1"
+).read_text(encoding="utf-8")
+WINDOWS_AUTHENTICODE_SCRIPT = (
+    ROOT / "quota-viewer/scripts/verify-windows-authenticode.ps1"
+).read_text(encoding="utf-8")
+WINDOWS_FILE_SIGNING_SCRIPT = (
+    ROOT / "quota-viewer/scripts/sign-windows-file.ps1"
+).read_text(encoding="utf-8")
+WINDOWS_SIGNING_SCRIPT = (
+    ROOT / "quota-viewer/scripts/sign-windows-release.ps1"
+).read_text(encoding="utf-8")
 E2E_SCRIPT = (ROOT / "backend/scripts/e2e-test.sh").read_text(encoding="utf-8")
 SMOKE_COMPOSE = (ROOT / "deploy/docker-compose.smoke.yml").read_text(encoding="utf-8")
 INSTALL_SCRIPT = (ROOT / "deploy/install.sh").read_text(encoding="utf-8")
@@ -93,6 +120,7 @@ class ReleaseWorkflowSecurityTest(unittest.TestCase):
             "test",
             "frontend",
             "quota-viewer",
+            "quota-viewer-windows",
             "docs-site",
             "embedded-web",
             "compose-smoke",
@@ -157,6 +185,217 @@ class ReleaseWorkflowSecurityTest(unittest.TestCase):
                 self.assertIn(f"name: {artifact_name}", BACKEND_CI)
                 self.assertIn(f"name: {artifact_name}", RELEASE)
         self.assertIn("needs: [resolve-release, quality-gates, security-gates]", RELEASE)
+
+    def test_windows_installer_is_signed_verified_and_attached(self) -> None:
+        ci_installer_artifact = (
+            "luoxue-quota-viewer-windows-x64-nsis-release-unsigned"
+        )
+        release_app_artifact = (
+            "luoxue-quota-viewer-windows-x64-release-app-unsigned"
+        )
+        signed_artifact = "luoxue-quota-viewer-windows-x64-nsis-release-signed"
+        self.assertIn("  quota-viewer-windows-release:", RELEASE)
+        self.assertIn(ci_installer_artifact, BACKEND_CI)
+        self.assertNotIn(ci_installer_artifact, RELEASE)
+        self.assertIn(release_app_artifact, BACKEND_CI)
+        self.assertIn(release_app_artifact, RELEASE)
+        self.assertIn(signed_artifact, RELEASE)
+        self.assertIn(
+            "needs: [resolve-release, quality-gates, security-gates, "
+            "quota-viewer-windows-release]",
+            RELEASE,
+        )
+        self.assertIn(
+            "needs.resolve-release.outputs.simple_release != 'true'", RELEASE
+        )
+        self.assertIn(
+            "SIMPLE_RELEASE: ${{ needs.resolve-release.outputs.simple_release }}",
+            RELEASE,
+        )
+        self.assertIn(
+            "secrets.WINDOWS_SIGNING_CERTIFICATE_PFX_BASE64", RELEASE
+        )
+        self.assertIn("secrets.WINDOWS_SIGNING_CERTIFICATE_PASSWORD", RELEASE)
+        self.assertIn("sign-windows-release.ps1", RELEASE)
+        self.assertIn("Verify signed Windows release asset checksum", RELEASE)
+        self.assertIn("sha256sum --check", RELEASE)
+        self.assertIn("gh release upload", RELEASE)
+        self.assertIn("--clobber", RELEASE)
+
+        for required in [
+            "WINDOWS_SIGNING_CERTIFICATE_PFX_BASE64 is required",
+            "WINDOWS_SIGNING_CERTIFICATE_PASSWORD is required",
+            "[Convert]::FromBase64String",
+            "$securePassword = $null",
+            "Import-PfxCertificate",
+            "Get-AuthenticodeSignature",
+            "SignatureStatus]::NotSigned",
+            "verify-windows-release-version.ps1",
+            "verify-windows-authenticode.ps1",
+            "sign-windows-file.ps1",
+            "signCommand",
+            "certificateThumbprint",
+            "digestAlgorithm = 'sha256'",
+            "timestampUrl = $TimestampUrl.AbsoluteUri",
+            "tsp = $true",
+            "pnpm run tauri:bundle:windows --config $signingConfigPath",
+            "NSIS !uninstfinalize",
+            "luoxue-quota-viewer.exe",
+            "uninstall.exe",
+            "Start-Process",
+            "Get-FileHash -LiteralPath $signedInstaller -Algorithm SHA256",
+            "finally {",
+            "foreach ($temporaryFile in @($pfxPath, $signingConfigPath, $signingLogPath))",
+            "if ($certificateItem.HasPrivateKey)",
+            "Remove-Item -LiteralPath $certificatePath -DeleteKey -Force",
+            "The imported signing certificate still exists after removal.",
+            "Failed to clean Windows signing state",
+        ]:
+            with self.subTest(required=required):
+                self.assertIn(required, WINDOWS_SIGNING_SCRIPT)
+
+        self.assertNotIn("Write-Host $certificate", WINDOWS_SIGNING_SCRIPT)
+        self.assertNotIn("Write-Output $certificate", WINDOWS_SIGNING_SCRIPT)
+        self.assertNotIn(
+            "pnpm run tauri:bundle:windows -- --config",
+            WINDOWS_SIGNING_SCRIPT,
+        )
+        self.assertGreaterEqual(WINDOWS_SIGNING_SCRIPT.count("& $versionVerifier"), 4)
+        self.assertLess(
+            WINDOWS_SIGNING_SCRIPT.index("& $versionVerifier"),
+            WINDOWS_SIGNING_SCRIPT.index("[Environment]::GetEnvironmentVariable"),
+        )
+        self.assertLess(
+            WINDOWS_SIGNING_SCRIPT.index(
+                "Remove-Item Env:WINDOWS_SIGNING_CERTIFICATE_PASSWORD"
+            ),
+            WINDOWS_SIGNING_SCRIPT.index("pnpm run tauri:bundle:windows"),
+        )
+
+    def test_tauri_authenticode_chain_signs_every_installable_executable(self) -> None:
+        bundle_command = QUOTA_VIEWER_PACKAGE_JSON["scripts"][
+            "tauri:bundle:windows"
+        ]
+        self.assertIn("tauri bundle", bundle_command)
+        self.assertIn("--bundles nsis", bundle_command)
+        self.assertNotIn("--no-sign", bundle_command)
+
+        for required in [
+            "signtool.exe",
+            "Get-AuthenticodeSignature",
+            "SignatureStatus]::NotSigned",
+            "/sha1 $normalizedThumbprint",
+            "/fd SHA256",
+            "/tr $TimestampUrl.AbsoluteUri",
+            "/td SHA256",
+            "verify-windows-authenticode.ps1",
+            "AppendAllText",
+            "signer_thumbprint",
+        ]:
+            with self.subTest(file_signing_requirement=required):
+                self.assertIn(required, WINDOWS_FILE_SIGNING_SCRIPT)
+
+        for required in [
+            "signtool.exe",
+            "verify /pa /all /v",
+            "Get-AuthenticodeSignature",
+            "SignatureStatus]::Valid",
+            "SignerCertificate.Thumbprint",
+            "TimeStamperCertificate",
+        ]:
+            with self.subTest(authenticode_requirement=required):
+                self.assertIn(required, WINDOWS_AUTHENTICODE_SCRIPT)
+
+        release_job = RELEASE.split(
+            "  quota-viewer-windows-release:", 1
+        )[1].split("\n  release:", 1)[0]
+        for required in [
+            "node-version: '24'",
+            "version: 9.15.9",
+            "rustup toolchain install 1.96.0",
+            "prepare-windows-release.ps1",
+            "pnpm install --frozen-lockfile",
+            "luoxue-quota-viewer.exe",
+            "Build, sign and verify Windows x64 NSIS release",
+        ]:
+            with self.subTest(release_job_requirement=required):
+                self.assertIn(required, release_job)
+
+    def test_windows_release_version_is_stamped_and_verified(self) -> None:
+        lock_packages = [
+            package
+            for package in QUOTA_VIEWER_CARGO_LOCK["package"]
+            if package["name"] == "luoxue-quota-viewer"
+        ]
+        self.assertEqual(len(lock_packages), 1)
+        self.assertEqual(
+            {
+                QUOTA_VIEWER_PACKAGE_JSON["version"],
+                QUOTA_VIEWER_TAURI_CONFIG["version"],
+                QUOTA_VIEWER_CARGO["package"]["version"],
+                lock_packages[0]["version"],
+            },
+            {QUOTA_VIEWER_PACKAGE_JSON["version"]},
+        )
+
+        self.assertIn("quota_viewer_release_version:", BACKEND_CI)
+        self.assertIn(
+            "quota_viewer_release_version: "
+            "${{ needs.resolve-release.outputs.simple_release != 'true' && "
+            "needs.resolve-release.outputs.version || '' }}",
+            RELEASE,
+        )
+        windows_job = BACKEND_CI.split("  quota-viewer-windows:", 1)[1].split(
+            "\n  docs-site:", 1
+        )[0]
+        for required in [
+            "QUOTA_VIEWER_RELEASE_VERSION: ${{ inputs.quota_viewer_release_version }}",
+            "Stamp release version into Windows Tauri sources",
+            "prepare-windows-release.ps1",
+            "pnpm run tauri:build:windows",
+            "Verify Windows Tauri release version metadata",
+            "luoxue-quota-viewer.exe",
+            "verify-windows-release-version.ps1",
+            "*-setup.exe",
+        ]:
+            with self.subTest(workflow_requirement=required):
+                self.assertIn(required, windows_job)
+        self.assertLess(
+            windows_job.index("prepare-windows-release.ps1"),
+            windows_job.index("pnpm run tauri:build:windows"),
+        )
+        self.assertLess(
+            windows_job.index("pnpm run tauri:build:windows"),
+            windows_job.index("Verify Windows Tauri release version metadata"),
+        )
+
+        for required in [
+            "package.json",
+            "tauri.conf.json",
+            "Cargo.toml",
+            "Cargo.lock",
+            "ConvertFrom-Json",
+            "version sources have drifted",
+            "[uint16]::MaxValue",
+            "cargo metadata",
+            "--locked",
+            "--manifest-path $cargoManifestPath",
+        ]:
+            with self.subTest(prepare_script_requirement=required):
+                self.assertIn(required, WINDOWS_RELEASE_PREPARE_SCRIPT)
+
+        for required in [
+            "[Diagnostics.FileVersionInfo]::GetVersionInfo",
+            ".FileVersion",
+            ".ProductVersion",
+            ".FileVersionRaw",
+            ".ProductVersionRaw",
+            "$fileVersion -cne $ReleaseVersion",
+            "$productVersion -cne $ReleaseVersion",
+            "[uint16]::MaxValue",
+        ]:
+            with self.subTest(version_script_requirement=required):
+                self.assertIn(required, WINDOWS_RELEASE_VERSION_SCRIPT)
 
     def test_release_toolchain_versions_are_bounded(self) -> None:
         self.assertEqual(RELEASE.count("version: 'v2.17.0'"), 2)
@@ -375,7 +614,7 @@ class DeliveryPipelineContractTest(unittest.TestCase):
             with self.subTest(command=command):
                 self.assertIn(command, quota_job)
         self.assertNotIn("tauri build", quota_job)
-        self.assertNotIn("quota-viewer", RELEASE)
+        self.assertIn("quota-viewer-windows-release", RELEASE)
 
     def test_disconnected_compose_smoke_exercises_fallback(self) -> None:
         self.assertIn("internal: true", SMOKE_COMPOSE)

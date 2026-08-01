@@ -1185,13 +1185,13 @@ func (s *SubscriptionService) calculateProgress(sub *UserSubscription, group *Gr
 	// Expose only counters whose persisted marker matches the exact anchored
 	// period. A missing/stale marker is unknown, never an invented zero.
 	now := time.Now()
-	if group.HasWeeklyLimit() {
+	if weeklyLimit, configured := group.EffectiveWeeklyLimitUSD(); configured {
 		windowStart, resetsAt, ok := sub.WeeklyWindowAt(now)
 		if !ok {
 			return progress
 		}
 		progress.Weekly = calculateUsageWindowProgress(
-			*group.WeeklyLimitUSD,
+			weeklyLimit,
 			sub.WeeklyUsageUSD,
 			sub.WeeklyWindowStart,
 			windowStart,

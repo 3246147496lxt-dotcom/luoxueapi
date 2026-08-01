@@ -12,7 +12,8 @@
     "test": "vitest run",
     "tauri": "tauri",
     "tauri:build:dev-signed": "tauri build --debug --bundles app --skip-stapling --ci --config src-tauri/tauri.dev-signing.conf.json",
-    "tauri:build:windows": "tauri build --bundles nsis --ci --no-sign --target x86_64-pc-windows-msvc"
+    "tauri:build:windows": "tauri build --bundles nsis --ci --no-sign --target x86_64-pc-windows-msvc",
+    "tauri:bundle:windows": "tauri bundle --bundles nsis --ci --target x86_64-pc-windows-msvc"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.8.0",

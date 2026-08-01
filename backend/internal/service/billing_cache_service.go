@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
 	"sync"
@@ -534,7 +535,10 @@ func (s *BillingCacheService) reloadSubscriptionCacheFromDB(
 }
 
 func subscriptionCacheWindowIsCurrent(data *subscriptionCacheData, now time.Time) bool {
-	if data == nil || data.WeeklyWindowStart == nil || data.MonthlyWindowStart == nil {
+	if data == nil ||
+		data.WeeklyWindowStart == nil ||
+		data.MonthlyWindowStart == nil ||
+		!subscriptionUsageSnapshotIsValid(data) {
 		return false
 	}
 	expectedWeeklyStart, expectedWeeklyEnd, weeklyOK := AnchoredWeeklyWindow(data.StartsAt, now)
@@ -598,6 +602,10 @@ func (s *BillingCacheService) getSubscriptionFromDB(ctx context.Context, userID,
 	monthlyStart, monthlyEnd, monthlyOK := sub.MonthlyWindowAt(now)
 	if !monthlyOK || sub.MonthlyWindowStart == nil || !sub.MonthlyWindowStart.Equal(monthlyStart) {
 		return nil, fmt.Errorf("get subscription: anchored monthly window is not maintained")
+	}
+	if !subscriptionUsageValueIsValid(sub.WeeklyUsageUSD) ||
+		!subscriptionUsageValueIsValid(sub.MonthlyUsageUSD) {
+		return nil, fmt.Errorf("get subscription: invalid usage snapshot")
 	}
 
 	return &subscriptionCacheData{
@@ -1248,7 +1256,8 @@ func (s *BillingCacheService) checkSubscriptionEligibility(ctx context.Context, 
 	}
 
 	// Membership requests must satisfy both authoritative anchored windows.
-	if group.HasWeeklyLimit() && subData.WeeklyUsage >= *group.WeeklyLimitUSD {
+	if weeklyLimit, ok := group.EffectiveWeeklyLimitUSD(); ok &&
+		subData.WeeklyUsage >= weeklyLimit {
 		return ErrWeeklyLimitExceeded
 	}
 	if monthlyLimit, ok := group.EffectiveMonthlyLimitUSD(); ok &&
@@ -1263,7 +1272,8 @@ func subscriptionCacheMatchesEntitlement(data *subscriptionCacheData, subscripti
 	if data == nil ||
 		subscription == nil ||
 		subscription.WeeklyWindowStart == nil ||
-		subscription.MonthlyWindowStart == nil {
+		subscription.MonthlyWindowStart == nil ||
+		!subscriptionUsageSnapshotIsValid(data) {
 		return false
 	}
 	expectedWeeklyStart, expectedWeeklyEnd, weeklyOK := subscription.WeeklyWindowAt(now)
@@ -1299,6 +1309,16 @@ func subscriptionCacheMatchesEntitlement(data *subscriptionCacheData, subscripti
 	// counters from DB. ID/status/anchor/expiry/window comparisons above bind
 	// the cache to the concrete term without rejecting that normal sequence.
 	return true
+}
+
+func subscriptionUsageSnapshotIsValid(data *subscriptionCacheData) bool {
+	return data != nil &&
+		subscriptionUsageValueIsValid(data.WeeklyUsage) &&
+		subscriptionUsageValueIsValid(data.MonthlyUsage)
+}
+
+func subscriptionUsageValueIsValid(value float64) bool {
+	return !math.IsNaN(value) && !math.IsInf(value, 0) && value >= 0
 }
 
 type billingCircuitBreakerState int

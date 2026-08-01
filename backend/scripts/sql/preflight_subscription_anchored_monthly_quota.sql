@@ -28,11 +28,14 @@ schema_state AS (
             FROM pg_constraint c
             WHERE c.conname IN (
                 'billing_usage_entries_subscription_amount_check',
+                'groups_subscription_quota_limits_check',
+                'user_subscriptions_usage_amounts_check',
                 'user_subscriptions_weekly_window_anchored_check',
                 'user_subscriptions_monthly_window_anchored_check'
             )
               AND c.conrelid IN (
                   to_regclass('public.billing_usage_entries'),
+                  to_regclass('public.groups'),
                   to_regclass('public.user_subscriptions')
               )
         ), FALSE) AS quota_constraints_validated,
@@ -41,11 +44,14 @@ schema_state AS (
             FROM pg_constraint c
             WHERE c.conname IN (
                 'billing_usage_entries_subscription_amount_check',
+                'groups_subscription_quota_limits_check',
+                'user_subscriptions_usage_amounts_check',
                 'user_subscriptions_weekly_window_anchored_check',
                 'user_subscriptions_monthly_window_anchored_check'
             )
               AND c.conrelid IN (
                   to_regclass('public.billing_usage_entries'),
+                  to_regclass('public.groups'),
                   to_regclass('public.user_subscriptions')
               )
         ) AS quota_constraint_count
@@ -53,6 +59,7 @@ schema_state AS (
 anchored AS MATERIALIZED (
     SELECT
         us.id,
+        us.user_id,
         us.group_id,
         us.status,
         us.created_at,
@@ -84,19 +91,24 @@ relevant_receipts AS MATERIALIZED (
         bue.id,
         bue.usage_log_id,
         bue.subscription_id,
+        bue.user_id AS receipt_user_id,
         bue.api_key_id,
+        receipt_key.user_id AS receipt_api_key_user_id,
         bue.request_id,
         bue.billing_type,
         bue.created_at,
         NULLIF(to_jsonb(bue) ->> 'subscription_amount', '')::numeric
             AS subscription_amount,
         a.starts_at,
+        a.user_id AS subscription_user_id,
         a.created_at AS subscription_created_at,
         a.weekly_period_start,
         a.monthly_period_start
     FROM billing_usage_entries bue
     JOIN anchored a
         ON a.id = bue.subscription_id
+    LEFT JOIN api_keys receipt_key
+        ON receipt_key.id = bue.api_key_id
     WHERE bue.applied
       AND bue.status = 'subscription'
       AND bue.subscription_id IS NOT NULL
@@ -115,7 +127,15 @@ receipt_classified AS MATERIALIZED (
         COALESCE(matches.all_candidate_count, 0) AS all_candidate_count,
         COALESCE(matches.valid_candidate_count, 0) AS valid_candidate_count,
         COALESCE(matches.invalid_candidate_count, 0) AS invalid_candidate_count,
-        COALESCE(matches.negative_candidate_count, 0) AS negative_candidate_count,
+        COALESCE(matches.invalid_amount_candidate_count, 0)
+            AS invalid_amount_candidate_count,
+        (
+            rr.receipt_user_id IS NOT DISTINCT FROM rr.subscription_user_id
+            AND rr.receipt_api_key_user_id
+                IS NOT DISTINCT FROM rr.subscription_user_id
+            AND rr.receipt_api_key_user_id
+                IS NOT DISTINCT FROM rr.receipt_user_id
+        ) AS receipt_identity_valid,
         matches.matched_actual_cost,
         matches.matched_created_at
     FROM relevant_receipts rr
@@ -123,22 +143,56 @@ receipt_classified AS MATERIALIZED (
         SELECT
             COUNT(*) AS all_candidate_count,
             COUNT(*) FILTER (
-                WHERE ul.billing_type = 1
+                WHERE ul.subscription_id = rr.subscription_id
+                  AND ul.billing_type = 1
+                  AND ul.user_id = rr.subscription_user_id
+                  AND ul.user_id = rr.receipt_user_id
+                  AND ul.api_key_id = rr.api_key_id
+                  AND (
+                      ul.id IS DISTINCT FROM rr.usage_log_id
+                      OR rr.request_id IS NULL
+                      OR ul.request_id IS NULL
+                      OR ul.request_id = rr.request_id
+                  )
             ) AS valid_candidate_count,
             COUNT(*) FILTER (
-                WHERE ul.billing_type <> 1
+                WHERE ul.subscription_id IS DISTINCT FROM rr.subscription_id
+                   OR ul.billing_type <> 1
+                   OR ul.user_id IS DISTINCT FROM rr.subscription_user_id
+                   OR ul.user_id IS DISTINCT FROM rr.receipt_user_id
+                   OR ul.api_key_id IS DISTINCT FROM rr.api_key_id
+                   OR (
+                       ul.id IS NOT DISTINCT FROM rr.usage_log_id
+                       AND rr.request_id IS NOT NULL
+                       AND ul.request_id IS NOT NULL
+                       AND ul.request_id IS DISTINCT FROM rr.request_id
+                   )
             ) AS invalid_candidate_count,
             COUNT(*) FILTER (
-                WHERE ul.billing_type = 1
-                  AND ul.actual_cost < 0
-            ) AS negative_candidate_count,
+                WHERE ul.actual_cost < 0
+                   OR ul.actual_cost = 'NaN'::numeric
+                   OR ul.actual_cost = 'Infinity'::numeric
+                   OR ul.actual_cost = '-Infinity'::numeric
+            ) AS invalid_amount_candidate_count,
             (
                 ARRAY_AGG(
                     ul.actual_cost
                     ORDER BY
                         CASE WHEN ul.id = rr.usage_log_id THEN 0 ELSE 1 END,
                         ul.id
-                ) FILTER (WHERE ul.billing_type = 1)
+                ) FILTER (
+                    WHERE ul.subscription_id = rr.subscription_id
+                      AND ul.billing_type = 1
+                      AND ul.user_id = rr.subscription_user_id
+                      AND ul.user_id = rr.receipt_user_id
+                      AND ul.api_key_id = rr.api_key_id
+                      AND (
+                          ul.id IS DISTINCT FROM rr.usage_log_id
+                          OR rr.request_id IS NULL
+                          OR ul.request_id IS NULL
+                          OR ul.request_id = rr.request_id
+                      )
+                )
             )[1] AS matched_actual_cost,
             (
                 ARRAY_AGG(
@@ -146,41 +200,92 @@ receipt_classified AS MATERIALIZED (
                     ORDER BY
                         CASE WHEN ul.id = rr.usage_log_id THEN 0 ELSE 1 END,
                         ul.id
-                ) FILTER (WHERE ul.billing_type = 1)
+                ) FILTER (
+                    WHERE ul.subscription_id = rr.subscription_id
+                      AND ul.billing_type = 1
+                      AND ul.user_id = rr.subscription_user_id
+                      AND ul.user_id = rr.receipt_user_id
+                      AND ul.api_key_id = rr.api_key_id
+                      AND (
+                          ul.id IS DISTINCT FROM rr.usage_log_id
+                          OR rr.request_id IS NULL
+                          OR ul.request_id IS NULL
+                          OR ul.request_id = rr.request_id
+                      )
+                )
             )[1] AS matched_created_at
         FROM usage_logs ul
-        WHERE ul.subscription_id = rr.subscription_id
-          AND (
-              ul.id = rr.usage_log_id
-              OR (
-                  rr.request_id IS NOT NULL
-                  AND ul.request_id = rr.request_id
-                  AND ul.api_key_id = rr.api_key_id
-              )
-          )
+        WHERE ul.id = rr.usage_log_id
+           OR (
+               rr.request_id IS NOT NULL
+               AND ul.request_id = rr.request_id
+               AND ul.api_key_id = rr.api_key_id
+           )
     ) matches ON TRUE
 ),
-unreceipted_logs AS MATERIALIZED (
+window_logs AS MATERIALIZED (
     SELECT
         ul.id,
         ul.subscription_id,
+        ul.user_id,
+        ul.api_key_id,
         ul.billing_type,
         ul.actual_cost,
         ul.created_at,
         a.starts_at,
+        a.subscription_user_id,
+        log_key.user_id AS log_api_key_user_id,
         a.subscription_created_at,
         a.weekly_period_start,
-        a.monthly_period_start
+        a.monthly_period_start,
+        COALESCE(receipts.all_receipt_count, 0) AS all_receipt_count,
+        COALESCE(receipts.valid_receipt_count, 0) AS valid_receipt_count,
+        (
+            ul.user_id IS NOT DISTINCT FROM a.subscription_user_id
+            AND log_key.user_id IS NOT DISTINCT FROM a.subscription_user_id
+            AND log_key.user_id IS NOT DISTINCT FROM ul.user_id
+        ) AS log_identity_valid
     FROM usage_logs ul
     JOIN (
         SELECT
             id,
+            user_id AS subscription_user_id,
             starts_at,
             created_at AS subscription_created_at,
             weekly_period_start,
             monthly_period_start
         FROM anchored
     ) a ON a.id = ul.subscription_id
+    LEFT JOIN api_keys log_key
+        ON log_key.id = ul.api_key_id
+    LEFT JOIN LATERAL (
+        SELECT
+            COUNT(*) AS all_receipt_count,
+            COUNT(*) FILTER (
+                WHERE bue.applied
+                  AND bue.status = 'subscription'
+                  AND bue.billing_type = 1
+                  AND bue.subscription_id = ul.subscription_id
+                  AND bue.user_id = a.subscription_user_id
+                  AND bue.user_id = ul.user_id
+                  AND bue.api_key_id = ul.api_key_id
+                  AND log_key.user_id = a.subscription_user_id
+                  AND log_key.user_id = ul.user_id
+                  AND (
+                      bue.usage_log_id IS DISTINCT FROM ul.id
+                      OR bue.request_id IS NULL
+                      OR ul.request_id IS NULL
+                      OR bue.request_id = ul.request_id
+                  )
+            ) AS valid_receipt_count
+        FROM billing_usage_entries bue
+        WHERE bue.usage_log_id = ul.id
+           OR (
+               bue.request_id IS NOT NULL
+               AND ul.request_id = bue.request_id
+               AND bue.api_key_id = ul.api_key_id
+           )
+    ) receipts ON TRUE
     WHERE ul.created_at >= LEAST(
           a.weekly_period_start,
           a.monthly_period_start
@@ -189,21 +294,23 @@ unreceipted_logs AS MATERIALIZED (
           a.weekly_period_start + 604800 * INTERVAL '1 second',
           a.monthly_period_start + 2592000 * INTERVAL '1 second'
       )
-      AND NOT EXISTS (
-          SELECT 1
-          FROM billing_usage_entries bue
-          WHERE bue.applied
-            AND bue.status = 'subscription'
-            AND bue.subscription_id = ul.subscription_id
-            AND (
-                bue.usage_log_id = ul.id
-                OR (
-                    bue.request_id IS NOT NULL
-                    AND ul.request_id = bue.request_id
-                    AND bue.api_key_id = ul.api_key_id
-                )
-            )
-      )
+),
+unreceipted_logs AS MATERIALIZED (
+    SELECT
+        wl.id,
+        wl.subscription_id,
+        wl.user_id,
+        wl.api_key_id,
+        wl.billing_type,
+        wl.actual_cost,
+        wl.created_at,
+        wl.starts_at,
+        wl.subscription_created_at,
+        wl.weekly_period_start,
+        wl.monthly_period_start
+    FROM window_logs wl
+    WHERE wl.all_receipt_count = 0
+      AND wl.log_identity_valid
 ),
 receipt_usage AS MATERIALIZED (
     SELECT
@@ -213,10 +320,17 @@ receipt_usage AS MATERIALIZED (
             AS amount
     FROM receipt_classified rc
     WHERE rc.billing_type = 1
+      AND rc.receipt_identity_valid
       AND rc.valid_candidate_count <= 1
       AND rc.invalid_candidate_count = 0
-      AND rc.negative_candidate_count = 0
+      AND rc.invalid_amount_candidate_count = 0
       AND COALESCE(rc.subscription_amount, rc.matched_actual_cost) >= 0
+      AND COALESCE(rc.subscription_amount, rc.matched_actual_cost)
+            <> 'NaN'::numeric
+      AND COALESCE(rc.subscription_amount, rc.matched_actual_cost)
+            <> 'Infinity'::numeric
+      AND COALESCE(rc.subscription_amount, rc.matched_actual_cost)
+            <> '-Infinity'::numeric
 ),
 legacy_usage AS MATERIALIZED (
     SELECT
@@ -226,6 +340,9 @@ legacy_usage AS MATERIALIZED (
     FROM unreceipted_logs ul
     WHERE ul.billing_type = 1
       AND ul.actual_cost >= 0
+      AND ul.actual_cost <> 'NaN'::numeric
+      AND ul.actual_cost <> 'Infinity'::numeric
+      AND ul.actual_cost <> '-Infinity'::numeric
 ),
 accounted_usage AS MATERIALIZED (
     SELECT id, occurred_at, amount
@@ -259,11 +376,16 @@ aggregated_usage AS MATERIALIZED (
     LEFT JOIN accounted_usage au ON au.id = a.id
     GROUP BY a.id
 ),
-term_risk AS (
+definite_term_risk AS (
     SELECT
         COUNT(*) FILTER (
-            WHERE rc.matched_created_at < rc.starts_at
-        ) AS definite_old_term_receipts,
+            WHERE rc.matched_created_at IS NOT NULL
+              AND rc.matched_created_at < rc.starts_at
+        ) AS definite_old_term_receipts
+    FROM receipt_classified rc
+),
+ambiguous_term_risk AS (
+    SELECT
         COUNT(*) FILTER (
             WHERE rc.matched_created_at IS NOT NULL
               AND rc.matched_created_at >= rc.starts_at
@@ -348,18 +470,64 @@ summary AS (
         (SELECT COUNT(*) FROM receipt_classified
          WHERE billing_type <> 1) AS receipt_billing_type_mismatches,
         (SELECT COUNT(*) FROM receipt_classified
+         WHERE NOT receipt_identity_valid) AS receipt_identity_conflicts,
+        (SELECT COUNT(*) FROM receipt_classified
          WHERE valid_candidate_count > 1
             OR invalid_candidate_count > 0) AS ambiguous_or_mixed_receipt_matches,
+        (SELECT COUNT(*) FROM window_logs
+         WHERE billing_type = 1
+           AND (
+               NOT log_identity_valid
+               OR (
+                   all_receipt_count > 0
+                   AND (
+                       all_receipt_count <> 1
+                       OR valid_receipt_count <> 1
+                   )
+               )
+           )) AS usage_log_receipt_identity_conflicts,
         (SELECT COUNT(*) FROM receipt_classified
          WHERE subscription_amount < 0
-            OR negative_candidate_count > 0) AS negative_receipt_amounts,
+            OR subscription_amount = 'NaN'::numeric
+            OR subscription_amount = 'Infinity'::numeric
+            OR subscription_amount = '-Infinity'::numeric
+            OR invalid_amount_candidate_count > 0) AS invalid_receipt_amounts,
         (SELECT COUNT(*) FROM unreceipted_logs
          WHERE billing_type = 1) AS legacy_subscription_logs,
         (SELECT COUNT(*) FROM unreceipted_logs
          WHERE billing_type <> 1) AS excluded_balance_logs,
-        (SELECT COUNT(*) FROM unreceipted_logs
+        (SELECT COUNT(*) FROM window_logs
          WHERE billing_type = 1
-           AND actual_cost < 0) AS negative_legacy_amounts,
+           AND (
+               actual_cost < 0
+               OR actual_cost = 'NaN'::numeric
+               OR actual_cost = 'Infinity'::numeric
+               OR actual_cost = '-Infinity'::numeric
+           )) AS invalid_subscription_log_amounts,
+        (SELECT COUNT(*) FROM anchored
+         WHERE weekly_usage_usd < 0
+            OR weekly_usage_usd = 'NaN'::numeric
+            OR weekly_usage_usd = 'Infinity'::numeric
+            OR weekly_usage_usd = '-Infinity'::numeric
+            OR monthly_usage_usd < 0
+            OR monthly_usage_usd = 'NaN'::numeric
+            OR monthly_usage_usd = 'Infinity'::numeric
+            OR monthly_usage_usd = '-Infinity'::numeric
+        ) AS invalid_subscription_counters,
+        (SELECT COUNT(*)
+         FROM groups g
+         WHERE g.subscription_type = 'subscription'
+           AND (
+               g.weekly_limit_usd < 0
+               OR g.weekly_limit_usd = 'NaN'::numeric
+               OR g.weekly_limit_usd = 'Infinity'::numeric
+               OR g.weekly_limit_usd = '-Infinity'::numeric
+               OR g.monthly_limit_usd < 0
+               OR g.monthly_limit_usd = 'NaN'::numeric
+               OR g.monthly_limit_usd = 'Infinity'::numeric
+               OR g.monthly_limit_usd = '-Infinity'::numeric
+           )
+        ) AS invalid_subscription_plan_limit_values,
         (SELECT COUNT(*)
          FROM anchored a
          JOIN aggregated_usage au ON au.id = a.id
@@ -373,16 +541,23 @@ summary AS (
         ) AS windows_requiring_reanchor,
         (SELECT COUNT(*)
          FROM anchored a
-         JOIN groups g ON g.id = a.group_id
+         LEFT JOIN groups g ON g.id = a.group_id
          WHERE a.deleted_at IS NULL
            AND a.status = 'active'
            AND a.expires_at > CURRENT_TIMESTAMP
            AND (
-               g.deleted_at IS NOT NULL
+               g.id IS NULL
+               OR g.deleted_at IS NOT NULL
                OR g.subscription_type <> 'subscription'
                OR g.weekly_limit_usd IS NULL
                OR g.weekly_limit_usd < 0
+               OR g.weekly_limit_usd = 'NaN'::numeric
+               OR g.weekly_limit_usd = 'Infinity'::numeric
+               OR g.weekly_limit_usd = '-Infinity'::numeric
                OR g.monthly_limit_usd < 0
+               OR g.monthly_limit_usd = 'NaN'::numeric
+               OR g.monthly_limit_usd = 'Infinity'::numeric
+               OR g.monthly_limit_usd = '-Infinity'::numeric
            )
         ) AS invalid_active_plan_configuration,
         (SELECT COUNT(*)
@@ -393,15 +568,16 @@ summary AS (
                OR (a.status = 'active' AND a.starts_at > CURRENT_TIMESTAMP)
            )
         ) AS invalid_subscription_times,
-        tr.definite_old_term_receipts,
-        tr.ambiguous_receipts + tr.ambiguous_legacy_logs
+        dtr.definite_old_term_receipts,
+        atr.ambiguous_receipts + atr.ambiguous_legacy_logs
             AS ambiguous_reopened_term_events,
         tls.writer_sessions,
         tls.waiting_locks,
         ts.idle_in_transaction_sessions,
         pts.prepared_transactions,
         sos.can_observe_all_sessions
-    FROM term_risk tr
+    FROM definite_term_risk dtr
+    CROSS JOIN ambiguous_term_risk atr
     CROSS JOIN target_lock_state tls
     CROSS JOIN transaction_state ts
     CROSS JOIN prepared_transaction_state pts
@@ -419,7 +595,7 @@ checks AS (
             WHEN ss.recorded_checksum <> '' AND NOT ss.has_subscription_amount
                 THEN 'BLOCK'
             WHEN ss.recorded_checksum <> ''
-             AND (ss.quota_constraint_count <> 3 OR NOT ss.quota_constraints_validated)
+             AND (ss.quota_constraint_count <> 5 OR NOT ss.quota_constraints_validated)
                 THEN 'BLOCK'
             ELSE 'PASS'
         END AS status,
@@ -452,13 +628,17 @@ checks AS (
         'receipt_billing_identity',
         CASE
             WHEN s.receipt_billing_type_mismatches = 0
+             AND s.receipt_identity_conflicts = 0
              AND s.ambiguous_or_mixed_receipt_matches = 0
+             AND s.usage_log_receipt_identity_conflicts = 0
                 THEN 'PASS'
             ELSE 'BLOCK'
         END,
         s.receipt_billing_type_mismatches
-            + s.ambiguous_or_mixed_receipt_matches,
-        'receipt billing_type and matched usage-log identity must be unambiguous membership billing'
+            + s.receipt_identity_conflicts
+            + s.ambiguous_or_mixed_receipt_matches
+            + s.usage_log_receipt_identity_conflicts,
+        'receipt and usage-log identities must agree bidirectionally on one applied membership receipt'
     FROM summary s
 
     UNION ALL
@@ -466,13 +646,37 @@ checks AS (
     SELECT
         'nonnegative_usage_amounts',
         CASE
-            WHEN s.negative_receipt_amounts = 0
-             AND s.negative_legacy_amounts = 0
+            WHEN s.invalid_receipt_amounts = 0
+             AND s.invalid_subscription_log_amounts = 0
                 THEN 'PASS'
             ELSE 'BLOCK'
         END,
-        s.negative_receipt_amounts + s.negative_legacy_amounts,
-        'quota reconstruction never accepts negative usage amounts'
+        s.invalid_receipt_amounts + s.invalid_subscription_log_amounts,
+        'quota reconstruction accepts only finite nonnegative usage amounts'
+    FROM summary s
+
+    UNION ALL
+
+    SELECT
+        'subscription_counter_values',
+        CASE
+            WHEN s.invalid_subscription_counters = 0 THEN 'PASS'
+            ELSE 'BLOCK'
+        END,
+        s.invalid_subscription_counters,
+        'persisted weekly and monthly counters must be finite and nonnegative'
+    FROM summary s
+
+    UNION ALL
+
+    SELECT
+        'subscription_plan_limit_values',
+        CASE
+            WHEN s.invalid_subscription_plan_limit_values = 0 THEN 'PASS'
+            ELSE 'BLOCK'
+        END,
+        s.invalid_subscription_plan_limit_values,
+        'subscription plan weekly/monthly limits must be null or finite and nonnegative'
     FROM summary s
 
     UNION ALL
@@ -498,7 +702,7 @@ checks AS (
             ELSE 'BLOCK'
         END,
         s.invalid_active_plan_configuration,
-        'active memberships require a subscription group, weekly limit, and nonnegative explicit monthly limit'
+        'active memberships require finite nonnegative plan limits; an explicit monthly limit is optional'
     FROM summary s
 
     UNION ALL
@@ -516,13 +720,8 @@ checks AS (
         'definite_old_term_events',
         CASE WHEN s.definite_old_term_receipts = 0 THEN 'PASS' ELSE 'BLOCK' END,
         s.definite_old_term_receipts,
-        CASE
-            WHEN p.legacy_writers_stopped_at IS NULL
-                THEN 'not evaluated until legacy_writers_stopped_at is supplied'
-            ELSE 'a matched usage log predates the reopened starts_at while its receipt falls in the new term'
-        END
+        'a matched usage log predates starts_at while its current-window receipt falls in the current term'
     FROM summary s
-    CROSS JOIN params p
 
     UNION ALL
 
@@ -680,10 +879,17 @@ result AS (
             'current_window_receipts', s.current_window_receipts::text,
             'unresolved_receipts', s.unresolved_receipts::text,
             'receipt_billing_type_mismatches', s.receipt_billing_type_mismatches::text,
+            'receipt_identity_conflicts', s.receipt_identity_conflicts::text,
             'ambiguous_or_mixed_receipt_matches', s.ambiguous_or_mixed_receipt_matches::text,
+            'usage_log_receipt_identity_conflicts',
+                s.usage_log_receipt_identity_conflicts::text,
             'negative_usage_amounts', (
-                s.negative_receipt_amounts + s.negative_legacy_amounts
+                s.invalid_receipt_amounts
+                    + s.invalid_subscription_log_amounts
             )::text,
+            'invalid_subscription_counters', s.invalid_subscription_counters::text,
+            'invalid_subscription_plan_limit_values',
+                s.invalid_subscription_plan_limit_values::text,
             'legacy_subscription_logs', s.legacy_subscription_logs::text,
             'excluded_balance_logs', s.excluded_balance_logs::text,
             'authoritative_weekly_ledger_mismatches',

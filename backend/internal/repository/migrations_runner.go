@@ -76,7 +76,12 @@ const latestAPIKeyIPIndex = "idx_usage_logs_api_key_latest_ip"
 const apiKeyPurposeWebChatIndexesMigration = "183a_api_key_purpose_web_chat_indexes_notx.sql"
 const apiKeyPurposeIndex = "idx_api_keys_purpose"
 const apiKeyWebChatActiveUserGroupIndex = "idx_api_keys_web_chat_active_user_group"
+const subscriptionAnchoredMonthlyQuotaMigration = "195_subscription_anchored_monthly_quota.sql"
 const schemaMigrationOriginStateKey = "schema_origin"
+
+var maintenanceOnlyMigrations = []string{
+	subscriptionAnchoredMonthlyQuotaMigration,
+}
 
 type schemaMigrationOrigin string
 
@@ -97,6 +102,11 @@ type validatedMigrationFile struct {
 	name     string
 	content  string
 	checksum string
+}
+
+type migrationRunnerPolicy struct {
+	expectedIdentity     *ConfiguredDatabaseIdentity
+	allowMaintenanceOnly bool
 }
 
 const EmbeddedMigrationManifestContract = "sub2api-migration-manifest/v1"
@@ -159,7 +169,66 @@ func ApplyMigrations(ctx context.Context, db *sql.DB) error {
 	if db == nil {
 		return errors.New("nil sql db")
 	}
-	return applyMigrationsFS(ctx, db, migrations.FS)
+	return applyMigrationsFSWithPolicy(ctx, db, migrations.FS, migrationRunnerPolicy{})
+}
+
+// rejectPendingMaintenanceOnlyMigrations keeps ordinary application startup
+// from applying migrations that require an externally verified maintenance
+// window. Only a database with no existing public tables may initialize the
+// complete schema. Once application tables or schema_migrations exist, even a
+// historically fresh-origin database must use the explicit migration entrypoint.
+func rejectPendingMaintenanceOnlyMigrations(ctx context.Context, db migrationQueryExecer) error {
+	if db == nil {
+		return errors.New("check maintenance-only migrations: nil database session")
+	}
+
+	hasSchemaMigrations, err := tableExists(ctx, db, "schema_migrations")
+	if err != nil {
+		return fmt.Errorf("check maintenance-only migrations table: %w", err)
+	}
+	if !hasSchemaMigrations {
+		var hasExistingTables bool
+		if err := db.QueryRowContext(ctx, `
+			SELECT EXISTS (
+				SELECT 1
+				FROM pg_catalog.pg_class c
+				JOIN pg_catalog.pg_namespace n ON n.oid = c.relnamespace
+				WHERE n.nspname = 'public'
+				  AND c.relkind IN ('r', 'p', 'v', 'm', 'f')
+				  AND c.relname <> 'schema_migration_runner_state'
+			)
+		`).Scan(&hasExistingTables); err != nil {
+			return fmt.Errorf("check existing public tables before migration bootstrap: %w", err)
+		}
+		if !hasExistingTables {
+			return nil
+		}
+		return fmt.Errorf(
+			"maintenance-only migration %s may be pending on a database with existing public tables but no schema_migrations metadata; refusing automatic application startup migration; reconcile the migration state and complete the reviewed maintenance runbook with --migrate-only",
+			subscriptionAnchoredMonthlyQuotaMigration,
+		)
+	}
+
+	for _, name := range maintenanceOnlyMigrations {
+		var applied bool
+		if err := db.QueryRowContext(ctx, `
+			SELECT EXISTS (
+				SELECT 1
+				FROM schema_migrations
+				WHERE filename = $1
+			)
+		`, name).Scan(&applied); err != nil {
+			return fmt.Errorf("check maintenance-only migration %s: %w", name, err)
+		}
+		if !applied {
+			return fmt.Errorf(
+				"maintenance-only migration %s is pending on an existing database; refusing automatic application startup migration; complete the reviewed maintenance runbook with --migrate-only",
+				name,
+			)
+		}
+	}
+
+	return nil
 }
 
 // EmbeddedMigrationManifest returns the validated embedded migration set
@@ -207,6 +276,32 @@ func EmbeddedMigrationManifest() (MigrationManifest, error) {
 //   - db: 数据库连接
 //   - fsys: 包含迁移文件的文件系统（通常是 embed.FS）
 func applyMigrationsFS(ctx context.Context, db *sql.DB, fsys fs.FS) (retErr error) {
+	return applyMigrationsFSWithPolicy(ctx, db, fsys, migrationRunnerPolicy{
+		allowMaintenanceOnly: true,
+	})
+}
+
+func applyMigrationsFSWithExpectedDatabaseIdentity(
+	ctx context.Context,
+	db *sql.DB,
+	fsys fs.FS,
+	expectedIdentity *ConfiguredDatabaseIdentity,
+) (retErr error) {
+	if expectedIdentity == nil {
+		return errors.New("maintenance migrations require an expected database identity")
+	}
+	return applyMigrationsFSWithPolicy(ctx, db, fsys, migrationRunnerPolicy{
+		expectedIdentity:     expectedIdentity,
+		allowMaintenanceOnly: true,
+	})
+}
+
+func applyMigrationsFSWithPolicy(
+	ctx context.Context,
+	db *sql.DB,
+	fsys fs.FS,
+	policy migrationRunnerPolicy,
+) (retErr error) {
 	if db == nil {
 		return errors.New("nil sql db")
 	}
@@ -217,6 +312,10 @@ func applyMigrationsFS(ctx context.Context, db *sql.DB, fsys fs.FS) (retErr erro
 	files, err := collectValidatedMigrationFiles(fsys)
 	if err != nil {
 		return fmt.Errorf("validate migrations: %w", err)
+	}
+	if policy.allowMaintenanceOnly && policy.expectedIdentity == nil &&
+		containsMaintenanceOnlyMigration(files) {
+		return errors.New("maintenance-only migrations require an expected database identity")
 	}
 
 	// PostgreSQL advisory lock 是 session-scoped。整个锁生命周期及所有迁移 SQL
@@ -250,6 +349,16 @@ func applyMigrationsFS(ctx context.Context, db *sql.DB, fsys fs.FS) (retErr erro
 		}
 	}()
 
+	// A maintenance migration must verify the operator-approved identity on
+	// this exact physical session before taking a lock or issuing schema SQL.
+	// This closes the DNS/load-balancer gap between a separate identity probe
+	// and the connection that actually performs the migration.
+	if policy.expectedIdentity != nil {
+		if err := verifyExpectedDatabaseIdentity(ctx, conn, *policy.expectedIdentity); err != nil {
+			return fmt.Errorf("verify migration database identity: %w", err)
+		}
+	}
+
 	// 获取分布式锁，确保多实例部署时只有一个实例执行迁移。
 	// 锁查询本身失败时结果可能不确定，因此同样丢弃该 session。
 	if err := pgAdvisoryLock(ctx, conn); err != nil {
@@ -257,6 +366,15 @@ func applyMigrationsFS(ctx context.Context, db *sql.DB, fsys fs.FS) (retErr erro
 		return err
 	}
 	locked = true
+
+	// The ordinary-startup maintenance gate must run on the exact session that
+	// holds the migration lock. A pooled precheck can observe a different
+	// backend after DNS or proxy failover and must never authorize schema writes.
+	if !policy.allowMaintenanceOnly {
+		if err := rejectPendingMaintenanceOnlyMigrations(ctx, conn); err != nil {
+			return err
+		}
+	}
 
 	// origin 必须在创建 schema_migrations 之前持久化。这样即使新库首次迁移失败，
 	// 后续重试或等待锁的第二实例也仍会读到 fresh，不会因迁移记录表已创建而误判
@@ -372,6 +490,17 @@ func applyMigrationsFS(ctx context.Context, db *sql.DB, fsys fs.FS) (retErr erro
 	}
 
 	return nil
+}
+
+func containsMaintenanceOnlyMigration(files []validatedMigrationFile) bool {
+	for _, file := range files {
+		for _, maintenanceName := range maintenanceOnlyMigrations {
+			if file.name == maintenanceName {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func ensureSchemaMigrationOrigin(ctx context.Context, db migrationQueryExecer) (schemaMigrationOrigin, error) {

@@ -16,8 +16,10 @@ import (
 
 type migration195Fixture struct {
 	userID         int64
+	otherUserID    int64
 	groupID        int64
 	apiKeyID       int64
+	otherAPIKeyID  int64
 	accountID      int64
 	subscriptionID int64
 	startsAt       time.Time
@@ -57,8 +59,15 @@ VALUES ($1, 'migration-195-test', 'user', 'active', 0, 5)
 RETURNING id
 `, "migration-195-"+suffix+"@example.com").Scan(&fixture.userID))
 	require.NoError(t, tx.QueryRowContext(ctx, `
-INSERT INTO groups (name, platform, subscription_type, status)
-VALUES ($1, 'openai', 'subscription', 'active')
+INSERT INTO groups (
+    name,
+    platform,
+    subscription_type,
+    status,
+    weekly_limit_usd,
+    monthly_limit_usd
+)
+VALUES ($1, 'openai', 'subscription', 'active', 100, 400)
 RETURNING id
 `, "migration-195-"+suffix).Scan(&fixture.groupID))
 	require.NoError(t, tx.QueryRowContext(ctx, `
@@ -210,6 +219,12 @@ func TestMigration195RebuildsMonthlyUsageWithoutBalanceLogLeakageOrReceiptDouble
 	receiptRequestID := migration195RequestID("receipt")
 	receiptLogID := insertMigration195UsageLog(t, tx, fixture, receiptRequestID, 1, 4)
 	insertMigration195LegacyReceipt(t, tx, fixture, receiptLogID, receiptRequestID, 4)
+	_, err := tx.ExecContext(ctx, `
+UPDATE user_subscriptions
+SET weekly_usage_usd = 7
+WHERE id = $1
+`, fixture.subscriptionID)
+	require.NoError(t, err)
 
 	migrationSQL, err := dbmigrations.FS.ReadFile("195_subscription_anchored_monthly_quota.sql")
 	require.NoError(t, err)
@@ -233,12 +248,71 @@ WHERE id = $1
 		&monthlyWindowStart,
 	))
 
-	require.Equal(t, 17.0, weeklyUsage,
+	require.Equal(t, 7.0, weeklyUsage,
 		"an already-authoritative current weekly counter must be preserved")
 	require.Equal(t, 7.0, monthlyUsage,
 		"monthly usage must count each subscription charge once and ignore balance-billed logs")
 	require.True(t, weeklyWindowStart.Equal(fixture.weeklyStart))
 	require.True(t, monthlyWindowStart.Equal(fixture.monthlyStart))
+}
+
+func TestMigration195FailsClosedWhenAuthoritativeWeeklyCounterDiffersFromLedger(t *testing.T) {
+	tx := testTx(t)
+	newMigration195Fixture(t, tx, 10*24*time.Hour)
+
+	err := applyMigration195(t, tx)
+	require.ErrorContains(t, err, "authoritative weekly counter")
+}
+
+func TestMigration195UsesHalfOpenWeeklyAndMonthlyBoundaries(t *testing.T) {
+	tx := testTx(t)
+	ctx := context.Background()
+	fixture := newMigration195Fixture(t, tx, 40*24*time.Hour)
+
+	testCases := []struct {
+		label      string
+		occurredAt time.Time
+		amount     float64
+	}{
+		{"monthly-start", fixture.monthlyStart, 1},
+		{"weekly-start", fixture.weeklyStart, 2},
+		{"weekly-end", fixture.weeklyStart.Add(7 * 24 * time.Hour), 4},
+		{"monthly-end", fixture.monthlyStart.Add(30 * 24 * time.Hour), 8},
+	}
+	for _, testCase := range testCases {
+		usageLogID := insertMigration195UsageLog(
+			t,
+			tx,
+			fixture,
+			migration195RequestID(testCase.label),
+			1,
+			testCase.amount,
+		)
+		_, err := tx.ExecContext(ctx, `
+UPDATE usage_logs
+SET created_at = $1
+WHERE id = $2
+`, testCase.occurredAt, usageLogID)
+		require.NoError(t, err)
+	}
+
+	_, err := tx.ExecContext(ctx, `
+UPDATE user_subscriptions
+SET weekly_window_start = starts_at,
+    weekly_usage_usd = 999
+WHERE id = $1
+`, fixture.subscriptionID)
+	require.NoError(t, err)
+	require.NoError(t, applyMigration195(t, tx))
+
+	var weeklyUsage, monthlyUsage float64
+	require.NoError(t, tx.QueryRowContext(ctx, `
+SELECT weekly_usage_usd, monthly_usage_usd
+FROM user_subscriptions
+WHERE id = $1
+`, fixture.subscriptionID).Scan(&weeklyUsage, &monthlyUsage))
+	require.Equal(t, 2.0, weeklyUsage)
+	require.Equal(t, 7.0, monthlyUsage)
 }
 
 func TestMigration195FailsClosedWhenSubscriptionReceiptMatchesOnlyBalanceBilledLog(t *testing.T) {
@@ -247,10 +321,61 @@ func TestMigration195FailsClosedWhenSubscriptionReceiptMatchesOnlyBalanceBilledL
 	requestID := migration195RequestID("mismatched")
 	balanceLogID := insertMigration195UsageLog(t, tx, fixture, requestID, 0, 9)
 	insertMigration195LegacyReceipt(t, tx, fixture, balanceLogID, requestID, 9)
+	_, err := tx.ExecContext(context.Background(), `
+UPDATE usage_logs
+SET subscription_id = NULL
+WHERE id = $1
+`, balanceLogID)
+	require.NoError(t, err)
+	_, err = tx.ExecContext(context.Background(), `
+UPDATE billing_usage_entries
+SET subscription_amount = 9
+WHERE request_id = $1 AND api_key_id = $2
+`, requestID, fixture.apiKeyID)
+	require.NoError(t, err)
 
 	migrationSQL, err := dbmigrations.FS.ReadFile("195_subscription_anchored_monthly_quota.sql")
 	require.NoError(t, err)
 	_, err = tx.ExecContext(context.Background(), string(migrationSQL))
+	require.ErrorContains(t, err, "cannot rebuild anchored subscription quota")
+}
+
+func TestMigration195FailsClosedWhenSubscriptionLogMatchesBalanceReceiptWithNoSubscription(t *testing.T) {
+	tx := testTx(t)
+	fixture := newMigration195Fixture(t, tx, 10*24*time.Hour)
+	requestID := migration195RequestID("reverse-balance-receipt")
+	usageLogID := insertMigration195UsageLog(t, tx, fixture, requestID, 1, 9)
+	insertMigration195LegacyReceipt(t, tx, fixture, usageLogID, requestID, 9)
+
+	_, err := tx.ExecContext(context.Background(), `
+UPDATE billing_usage_entries
+SET subscription_id = NULL,
+    billing_type = 0,
+    status = 'charged',
+    charged_amount = 9
+WHERE request_id = $1 AND api_key_id = $2
+`, requestID, fixture.apiKeyID)
+	require.NoError(t, err)
+
+	err = applyMigration195(t, tx)
+	require.ErrorContains(t, err, "cannot rebuild anchored subscription quota")
+}
+
+func TestMigration195FailsClosedWhenCurrentReceiptMatchesOldTermLogOutsideGuard(t *testing.T) {
+	tx := testTx(t)
+	fixture := newMigration195Fixture(t, tx, 10*24*time.Hour)
+	requestID := migration195RequestID("old-term-outside-guard")
+	usageLogID := insertMigration195UsageLog(t, tx, fixture, requestID, 1, 4)
+	insertMigration195LegacyReceipt(t, tx, fixture, usageLogID, requestID, 4)
+
+	_, err := tx.ExecContext(context.Background(), `
+UPDATE usage_logs
+SET created_at = $1
+WHERE id = $2
+`, fixture.startsAt.Add(-time.Hour), usageLogID)
+	require.NoError(t, err)
+
+	err = applyMigration195(t, tx)
 	require.ErrorContains(t, err, "cannot rebuild anchored subscription quota")
 }
 
@@ -277,6 +402,29 @@ WHERE request_id = $1 AND api_key_id = $2
 	require.ErrorContains(t, err, "billing_usage_entries_subscription_amount_check")
 }
 
+func TestMigration195FailsClosedOnNaNSubscriptionAmount(t *testing.T) {
+	tx := testTx(t)
+	fixture := newMigration195Fixture(t, tx, 10*24*time.Hour)
+	requestID := migration195RequestID("nan-receipt")
+	usageLogID := insertMigration195UsageLog(t, tx, fixture, requestID, 1, 4)
+	insertMigration195LegacyReceipt(t, tx, fixture, usageLogID, requestID, 4)
+
+	_, err := tx.ExecContext(context.Background(), `
+ALTER TABLE billing_usage_entries
+DROP CONSTRAINT billing_usage_entries_subscription_amount_check
+`)
+	require.NoError(t, err)
+	_, err = tx.ExecContext(context.Background(), `
+UPDATE billing_usage_entries
+SET subscription_amount = 'NaN'::numeric
+WHERE usage_log_id = $1
+`, usageLogID)
+	require.NoError(t, err)
+
+	err = applyMigration195(t, tx)
+	require.ErrorContains(t, err, "billing_usage_entries_subscription_amount_check")
+}
+
 func TestMigration195FailsClosedOnNegativeReceiptFallbackActualCost(t *testing.T) {
 	tx := testTx(t)
 	fixture := newMigration195Fixture(t, tx, 10*24*time.Hour)
@@ -287,6 +435,24 @@ func TestMigration195FailsClosedOnNegativeReceiptFallbackActualCost(t *testing.T
 	_, err := tx.ExecContext(context.Background(), `
 UPDATE usage_logs
 SET actual_cost = -4
+WHERE id = $1
+`, usageLogID)
+	require.NoError(t, err)
+
+	err = applyMigration195(t, tx)
+	require.ErrorContains(t, err, "cannot rebuild anchored subscription quota")
+}
+
+func TestMigration195FailsClosedOnNaNReceiptFallbackActualCost(t *testing.T) {
+	tx := testTx(t)
+	fixture := newMigration195Fixture(t, tx, 10*24*time.Hour)
+	requestID := migration195RequestID("nan-fallback")
+	usageLogID := insertMigration195UsageLog(t, tx, fixture, requestID, 1, 4)
+	insertMigration195LegacyReceipt(t, tx, fixture, usageLogID, requestID, 4)
+
+	_, err := tx.ExecContext(context.Background(), `
+UPDATE usage_logs
+SET actual_cost = 'NaN'::numeric
 WHERE id = $1
 `, usageLogID)
 	require.NoError(t, err)
@@ -315,7 +481,7 @@ WHERE id = $1
 	require.NoError(t, err)
 
 	err = applyMigration195(t, tx)
-	require.ErrorContains(t, err, "invalid unmatched subscription usage log")
+	require.ErrorContains(t, err, "invalid current-window subscription usage log")
 }
 
 func TestMigration195FailsClosedOnSubscriptionReceiptBillingTypeMismatch(t *testing.T) {
@@ -353,4 +519,176 @@ func TestMigration195FailsClosedWhenReceiptMatchesMultipleUsageLogs(t *testing.T
 
 	err := applyMigration195(t, tx)
 	require.ErrorContains(t, err, "cannot rebuild anchored subscription quota")
+}
+
+func TestMigration195FailsClosedWhenDirectReceiptRequestIDConflicts(t *testing.T) {
+	tx := testTx(t)
+	fixture := newMigration195Fixture(t, tx, 10*24*time.Hour)
+	usageLogID := insertMigration195UsageLog(
+		t,
+		tx,
+		fixture,
+		migration195RequestID("direct-log-request"),
+		1,
+		4,
+	)
+	insertMigration195LegacyReceipt(
+		t,
+		tx,
+		fixture,
+		usageLogID,
+		migration195RequestID("direct-receipt-request"),
+		4,
+	)
+
+	err := applyMigration195(t, tx)
+	require.ErrorContains(t, err, "cannot rebuild anchored subscription quota")
+}
+
+func TestMigration195FailsClosedOnNaNUsageInsideMonthlyButOutsideWeeklyWindow(t *testing.T) {
+	tx := testTx(t)
+	fixture := newMigration195Fixture(t, tx, 10*24*time.Hour)
+	usageLogID := insertMigration195UsageLog(
+		t,
+		tx,
+		fixture,
+		migration195RequestID("nan-monthly-only"),
+		1,
+		4,
+	)
+
+	_, err := tx.ExecContext(context.Background(), `
+UPDATE usage_logs
+SET actual_cost = 'NaN'::numeric,
+    created_at = $1
+WHERE id = $2
+`, fixture.weeklyStart.Add(-time.Hour), usageLogID)
+	require.NoError(t, err)
+
+	err = applyMigration195(t, tx)
+	require.ErrorContains(t, err, "invalid current-window subscription usage log")
+}
+
+func TestMigration195FailsClosedOnNaNExistingSubscriptionCounter(t *testing.T) {
+	tx := testTx(t)
+	fixture := newMigration195Fixture(t, tx, 10*24*time.Hour)
+
+	_, err := tx.ExecContext(context.Background(), `
+ALTER TABLE user_subscriptions
+DROP CONSTRAINT user_subscriptions_usage_amounts_check
+`)
+	require.NoError(t, err)
+	_, err = tx.ExecContext(context.Background(), `
+UPDATE user_subscriptions
+SET monthly_usage_usd = 'NaN'::numeric
+WHERE id = $1
+`, fixture.subscriptionID)
+	require.NoError(t, err)
+
+	err = applyMigration195(t, tx)
+	require.ErrorContains(t, err, "user_subscriptions_usage_amounts_check")
+}
+
+func TestMigration195FailsClosedOnInvalidSubscriptionTimeRange(t *testing.T) {
+	tx := testTx(t)
+	fixture := newMigration195Fixture(t, tx, 10*24*time.Hour)
+
+	_, err := tx.ExecContext(context.Background(), `
+UPDATE user_subscriptions
+SET expires_at = starts_at
+WHERE id = $1
+`, fixture.subscriptionID)
+	require.NoError(t, err)
+
+	err = applyMigration195(t, tx)
+	require.ErrorContains(t, err, "invalid subscription time range")
+}
+
+func TestMigration195FailsClosedOnNaNActivePlanLimit(t *testing.T) {
+	tx := testTx(t)
+	fixture := newMigration195Fixture(t, tx, 10*24*time.Hour)
+
+	_, err := tx.ExecContext(context.Background(), `
+ALTER TABLE groups
+DROP CONSTRAINT groups_subscription_quota_limits_check
+`)
+	require.NoError(t, err)
+	_, err = tx.ExecContext(context.Background(), `
+UPDATE groups
+SET weekly_limit_usd = 'NaN'::numeric
+WHERE id = $1
+`, fixture.groupID)
+	require.NoError(t, err)
+
+	err = applyMigration195(t, tx)
+	require.ErrorContains(t, err, "groups_subscription_quota_limits_check")
+}
+
+func TestMigration195KeepsNegativeLimitCompatibilityForStandardGroups(t *testing.T) {
+	tx := testTx(t)
+	var groupID int64
+	require.NoError(t, tx.QueryRowContext(context.Background(), `
+INSERT INTO groups (
+    name,
+    platform,
+    subscription_type,
+    status,
+    weekly_limit_usd,
+    monthly_limit_usd
+)
+VALUES ($1, 'openai', 'standard', 'active', -1, -1)
+RETURNING id
+`, "migration-195-standard-"+uuid.NewString()).Scan(&groupID))
+
+	require.NoError(t, applyMigration195(t, tx))
+	var weeklyLimit, monthlyLimit float64
+	require.NoError(t, tx.QueryRowContext(context.Background(), `
+SELECT weekly_limit_usd, monthly_limit_usd
+FROM groups
+WHERE id = $1
+`, groupID).Scan(&weeklyLimit, &monthlyLimit))
+	require.Equal(t, -1.0, weeklyLimit)
+	require.Equal(t, -1.0, monthlyLimit)
+}
+
+func TestMigration195FailsClosedOnCrossOwnerDirectReceiptLinks(t *testing.T) {
+	testCases := []struct {
+		name          string
+		updateReceipt string
+	}{
+		{
+			name:          "cross user",
+			updateReceipt: "SET user_id = $1, subscription_amount = 4",
+		},
+		{
+			name:          "cross API key",
+			updateReceipt: "SET api_key_id = $1, subscription_amount = 4",
+		},
+	}
+
+	for _, testCase := range testCases {
+		t.Run(testCase.name, func(t *testing.T) {
+			tx := testTx(t)
+			fixture := newMigration195Fixture(t, tx, 10*24*time.Hour)
+			other := newMigration195Fixture(t, tx, 10*24*time.Hour)
+			requestID := migration195RequestID("cross-owner-direct")
+			usageLogID := insertMigration195UsageLog(t, tx, fixture, requestID, 1, 4)
+			insertMigration195LegacyReceipt(t, tx, fixture, usageLogID, requestID, 4)
+
+			foreignIdentityID := other.userID
+			if testCase.name == "cross API key" {
+				foreignIdentityID = other.apiKeyID
+			}
+			_, err := tx.ExecContext(
+				context.Background(),
+				"UPDATE billing_usage_entries "+testCase.updateReceipt+" WHERE usage_log_id = $2",
+				foreignIdentityID,
+				usageLogID,
+			)
+			require.NoError(t, err)
+
+			err = applyMigration195(t, tx)
+			require.ErrorContains(t, err, "cannot rebuild anchored subscription quota")
+		})
+	}
 }

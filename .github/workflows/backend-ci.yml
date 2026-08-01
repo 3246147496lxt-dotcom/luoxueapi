@@ -10,6 +10,11 @@ on:
         required: false
         type: string
         default: ''
+      quota_viewer_release_version:
+        description: SemVer to stamp into the Windows quota viewer release build
+        required: false
+        type: string
+        default: ''
 
 permissions:
   contents: read
@@ -251,6 +256,8 @@ jobs:
   quota-viewer-windows:
     runs-on: windows-latest
     timeout-minutes: 60
+    env:
+      QUOTA_VIEWER_RELEASE_VERSION: ${{ inputs.quota_viewer_release_version }}
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
         with:
@@ -280,6 +287,14 @@ jobs:
           if ((pnpm --version) -ne '9.15.9') { exit 1 }
           if ((rustc --version).Split(' ')[1] -ne '1.96.0') { exit 1 }
           if ((rustc -vV) -notcontains 'host: x86_64-pc-windows-msvc') { exit 1 }
+      - name: Stamp release version into Windows Tauri sources
+        if: ${{ env.QUOTA_VIEWER_RELEASE_VERSION != '' }}
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          ./quota-viewer/scripts/prepare-windows-release.ps1 `
+            -QuotaViewerDirectory 'quota-viewer' `
+            -ReleaseVersion $env:QUOTA_VIEWER_RELEASE_VERSION
       - name: Install quota viewer dependencies
         working-directory: quota-viewer
         run: pnpm install --frozen-lockfile
@@ -305,6 +320,35 @@ jobs:
             throw 'Missing required Windows icon: quota-viewer/src-tauri/icons/icon.ico'
           }
           pnpm run tauri:build:windows
+      - name: Verify Windows Tauri release version metadata
+        if: ${{ env.QUOTA_VIEWER_RELEASE_VERSION != '' }}
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $appExecutable = 'quota-viewer/src-tauri/target/x86_64-pc-windows-msvc/release/luoxue-quota-viewer.exe'
+          $installers = @(
+            Get-ChildItem `
+              -LiteralPath 'quota-viewer/src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis' `
+              -Filter '*-setup.exe' `
+              -File
+          )
+          if ($installers.Count -ne 1) {
+            throw 'Expected exactly one release-versioned NSIS installer.'
+          }
+          ./quota-viewer/scripts/verify-windows-release-version.ps1 `
+            -FilePath $appExecutable `
+            -ReleaseVersion $env:QUOTA_VIEWER_RELEASE_VERSION
+          ./quota-viewer/scripts/verify-windows-release-version.ps1 `
+            -FilePath $installers[0].FullName `
+            -ReleaseVersion $env:QUOTA_VIEWER_RELEASE_VERSION
+      - name: Upload unsigned release-versioned Windows application
+        if: ${{ env.QUOTA_VIEWER_RELEASE_VERSION != '' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: luoxue-quota-viewer-windows-x64-release-app-unsigned
+          path: quota-viewer/src-tauri/target/x86_64-pc-windows-msvc/release/luoxue-quota-viewer.exe
+          retention-days: 1
+          if-no-files-found: error
       - name: Upload unsigned Windows x64 release NSIS installer
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:

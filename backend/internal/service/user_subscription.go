@@ -183,14 +183,15 @@ func (s *UserSubscription) CheckWeeklyLimit(group *Group, additionalCost float64
 }
 
 func (s *UserSubscription) CheckWeeklyLimitAt(group *Group, additionalCost float64, at time.Time) bool {
-	if !group.HasWeeklyLimit() {
+	limit, configured := group.EffectiveWeeklyLimitUSD()
+	if !configured {
 		return true
 	}
 	used := s.EffectiveWeeklyUsageAt(at)
 	if additionalCost <= 0 {
-		return used < *group.WeeklyLimitUSD
+		return used < limit
 	}
-	return used+additionalCost <= *group.WeeklyLimitUSD
+	return used+additionalCost <= limit
 }
 
 // EffectiveWeeklyUsageAt returns usage only when its persisted marker belongs

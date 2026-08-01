@@ -1542,8 +1542,8 @@ func (h *GatewayHandler) calculateSubscriptionRemainingAt(
 	var remainingValues []float64
 
 	// 检查周限额
-	if group.WeeklyLimitUSD != nil && *group.WeeklyLimitUSD >= 0 {
-		remaining := *group.WeeklyLimitUSD - sub.EffectiveWeeklyUsageAt(now)
+	if weeklyLimit, configured := group.EffectiveWeeklyLimitUSD(); configured {
+		remaining := weeklyLimit - sub.EffectiveWeeklyUsageAt(now)
 		if remaining <= 0 {
 			return 0
 		}

@@ -3,6 +3,7 @@ package service
 import (
 	"errors"
 	"fmt"
+	"math"
 	"strings"
 	"time"
 
@@ -106,15 +107,32 @@ func (g *Group) IsSubscriptionType() bool {
 }
 
 func (g *Group) HasDailyLimit() bool {
-	return g != nil && g.DailyLimitUSD != nil && *g.DailyLimitUSD >= 0
+	return g != nil && g.DailyLimitUSD != nil && isFiniteNonNegativeLimit(*g.DailyLimitUSD)
 }
 
 func (g *Group) HasWeeklyLimit() bool {
-	return g != nil && g.WeeklyLimitUSD != nil && *g.WeeklyLimitUSD >= 0
+	return g != nil && g.WeeklyLimitUSD != nil && isFiniteNonNegativeLimit(*g.WeeklyLimitUSD)
 }
 
 func (g *Group) HasMonthlyLimit() bool {
-	return g != nil && g.MonthlyLimitUSD != nil && *g.MonthlyLimitUSD >= 0
+	return g != nil && g.MonthlyLimitUSD != nil && isFiniteNonNegativeLimit(*g.MonthlyLimitUSD)
+}
+
+func isFiniteNonNegativeLimit(limit float64) bool {
+	return limit >= 0 && !math.IsNaN(limit) && !math.IsInf(limit, 0)
+}
+
+// EffectiveWeeklyLimitUSD distinguishes an omitted weekly limit from a
+// present-but-corrupt value. Corrupt values are configured as an exhausted
+// zero allowance so admission cannot silently treat them as unlimited.
+func (g *Group) EffectiveWeeklyLimitUSD() (float64, bool) {
+	if g == nil || g.WeeklyLimitUSD == nil {
+		return 0, false
+	}
+	if !isFiniteNonNegativeLimit(*g.WeeklyLimitUSD) {
+		return 0, true
+	}
+	return *g.WeeklyLimitUSD, true
 }
 
 // EffectiveMonthlyLimitUSD returns the authoritative membership monthly
@@ -125,10 +143,10 @@ func (g *Group) EffectiveMonthlyLimitUSD() (float64, bool) {
 		return 0, false
 	}
 	// Only nil means "not configured"; zero is an explicit exhausted
-	// allowance, while a corrupt negative value must fail closed instead of
-	// silently falling back to the weekly plan.
+	// allowance, while corrupt values must fail closed instead of silently
+	// falling back to the weekly plan.
 	if g.MonthlyLimitUSD != nil {
-		if *g.MonthlyLimitUSD < 0 {
+		if !isFiniteNonNegativeLimit(*g.MonthlyLimitUSD) {
 			// A present but invalid value is not the same as an omitted limit.
 			// Treat it as an exhausted allowance so every admission path blocks
 			// instead of silently downgrading to weekly-only enforcement.
@@ -136,8 +154,15 @@ func (g *Group) EffectiveMonthlyLimitUSD() (float64, bool) {
 		}
 		return *g.MonthlyLimitUSD, true
 	}
-	if g.WeeklyLimitUSD != nil && *g.WeeklyLimitUSD >= 0 {
-		return *g.WeeklyLimitUSD * 4, true
+	if weeklyLimit, configured := g.EffectiveWeeklyLimitUSD(); configured {
+		if weeklyLimit == 0 && !isFiniteNonNegativeLimit(*g.WeeklyLimitUSD) {
+			return 0, true
+		}
+		limit := weeklyLimit * 4
+		if !isFiniteNonNegativeLimit(limit) {
+			return 0, true
+		}
+		return limit, true
 	}
 	return 0, false
 }

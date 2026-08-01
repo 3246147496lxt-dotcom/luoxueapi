@@ -3,6 +3,7 @@ package main
 //go:generate go run github.com/google/wire/cmd/wire@v0.7.0
 
 import (
+	"bytes"
 	"context"
 	_ "embed"
 	"encoding/json"
@@ -72,6 +73,12 @@ func run() error {
 	setupMode := flag.Bool("setup", false, "Run setup wizard in CLI mode")
 	migrateOnly := flag.Bool("migrate-only", false, "Apply database migrations and exit without starting application components")
 	migrationManifest := flag.Bool("migration-manifest", false, "Print the embedded SQL migration manifest as JSON and exit")
+	databaseIdentity := flag.Bool("database-identity", false, "Print the configured PostgreSQL database identity as JSON and exit")
+	expectedDatabaseIdentityFile := flag.String(
+		"expected-database-identity-file",
+		"",
+		"Read the required migration target identity from this JSON file (requires --migrate-only)",
+	)
 	showVersion := flag.Bool("version", false, "Show version information")
 	flag.Parse()
 	if *setupMode && *migrateOnly {
@@ -79,6 +86,16 @@ func run() error {
 	}
 	if *migrationManifest && (*setupMode || *migrateOnly || *showVersion) {
 		return fmt.Errorf("--migration-manifest cannot be combined with --setup, --migrate-only, or --version")
+	}
+	if *databaseIdentity && (*setupMode || *migrateOnly || *migrationManifest || *showVersion) {
+		return fmt.Errorf("--database-identity cannot be combined with --setup, --migrate-only, --migration-manifest, or --version")
+	}
+	expectedIdentityPath := strings.TrimSpace(*expectedDatabaseIdentityFile)
+	if *migrateOnly && expectedIdentityPath == "" {
+		return fmt.Errorf("--migrate-only requires --expected-database-identity-file")
+	}
+	if !*migrateOnly && expectedIdentityPath != "" {
+		return fmt.Errorf("--expected-database-identity-file requires --migrate-only")
 	}
 
 	if *migrationManifest {
@@ -90,6 +107,10 @@ func run() error {
 		return nil
 	}
 
+	if *databaseIdentity {
+		return writeConfiguredDatabaseIdentity(os.Stdout)
+	}
+
 	// CLI setup mode
 	if *setupMode {
 		if err := setup.RunCLI(); err != nil {
@@ -99,7 +120,7 @@ func run() error {
 	}
 
 	if *migrateOnly {
-		return runMigrationsOnly()
+		return runMigrationsOnly(expectedIdentityPath)
 	}
 
 	// Check if setup is needed
@@ -135,7 +156,12 @@ func writeMigrationManifest(w io.Writer) error {
 	return nil
 }
 
-func runMigrationsOnly() error {
+func runMigrationsOnly(expectedIdentityPath string) error {
+	expectedIdentity, err := readExpectedDatabaseIdentityFile(expectedIdentityPath)
+	if err != nil {
+		return err
+	}
+
 	cfg, err := config.LoadForBootstrap()
 	if err != nil {
 		return fmt.Errorf("load migration config: %w", err)
@@ -150,10 +176,143 @@ func runMigrationsOnly() error {
 	migrationCtx, cancel := context.WithTimeout(signalCtx, 10*time.Minute)
 	defer cancel()
 
-	if err := repository.ApplyConfiguredMigrations(migrationCtx, cfg); err != nil {
+	if err := repository.ApplyConfiguredMigrations(
+		migrationCtx,
+		cfg,
+		expectedIdentity,
+	); err != nil {
 		return fmt.Errorf("run database migrations: %w", err)
 	}
 	log.Println("Database migrations completed successfully")
+	return nil
+}
+
+const maxExpectedDatabaseIdentityFileBytes = 4096
+
+type expectedDatabaseIdentityDocument struct {
+	Contract         string `json:"contract"`
+	Database         string `json:"database"`
+	SystemIdentifier string `json:"system_identifier"`
+	InRecovery       *bool  `json:"in_recovery"`
+}
+
+func readExpectedDatabaseIdentityFile(path string) (repository.ConfiguredDatabaseIdentity, error) {
+	var identity repository.ConfiguredDatabaseIdentity
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return identity, fmt.Errorf("expected database identity file path is empty")
+	}
+
+	f, err := os.Open(path)
+	if err != nil {
+		return identity, fmt.Errorf("open expected database identity file: %w", err)
+	}
+	defer func() { _ = f.Close() }()
+	info, err := f.Stat()
+	if err != nil {
+		return identity, fmt.Errorf("stat expected database identity file: %w", err)
+	}
+	if !info.Mode().IsRegular() {
+		return identity, fmt.Errorf("expected database identity path must be a regular file")
+	}
+
+	raw, err := io.ReadAll(io.LimitReader(f, maxExpectedDatabaseIdentityFileBytes+1))
+	if err != nil {
+		return identity, fmt.Errorf("read expected database identity file: %w", err)
+	}
+	if len(raw) > maxExpectedDatabaseIdentityFileBytes {
+		return identity, fmt.Errorf("expected database identity file exceeds %d bytes", maxExpectedDatabaseIdentityFileBytes)
+	}
+	if err := rejectDuplicateExpectedDatabaseIdentityFields(raw); err != nil {
+		return identity, fmt.Errorf("decode expected database identity file: %w", err)
+	}
+
+	var document expectedDatabaseIdentityDocument
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&document); err != nil {
+		return identity, fmt.Errorf("decode expected database identity file: %w", err)
+	}
+	var trailing any
+	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
+		if err == nil {
+			return identity, fmt.Errorf("decode expected database identity file: multiple JSON values")
+		}
+		return identity, fmt.Errorf("decode expected database identity file trailing data: %w", err)
+	}
+	if document.InRecovery == nil {
+		return identity, fmt.Errorf("decode expected database identity file: in_recovery is required")
+	}
+	identity = repository.ConfiguredDatabaseIdentity{
+		Contract:         document.Contract,
+		Database:         document.Database,
+		SystemIdentifier: document.SystemIdentifier,
+		InRecovery:       *document.InRecovery,
+	}
+	if err := repository.ValidateExpectedDatabaseIdentity(identity); err != nil {
+		return identity, fmt.Errorf("validate expected database identity file: %w", err)
+	}
+	return identity, nil
+}
+
+func rejectDuplicateExpectedDatabaseIdentityFields(raw []byte) error {
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	opening, err := decoder.Token()
+	if err != nil {
+		return err
+	}
+	if opening != json.Delim('{') {
+		return fmt.Errorf("identity document must be a JSON object")
+	}
+
+	seen := make(map[string]struct{}, 4)
+	for decoder.More() {
+		keyToken, err := decoder.Token()
+		if err != nil {
+			return err
+		}
+		key, ok := keyToken.(string)
+		if !ok {
+			return fmt.Errorf("identity document contains a non-string field name")
+		}
+		if _, exists := seen[key]; exists {
+			return fmt.Errorf("identity document contains duplicate field %q", key)
+		}
+		seen[key] = struct{}{}
+
+		var value json.RawMessage
+		if err := decoder.Decode(&value); err != nil {
+			return err
+		}
+	}
+	closing, err := decoder.Token()
+	if err != nil {
+		return err
+	}
+	if closing != json.Delim('}') {
+		return fmt.Errorf("identity document has an invalid closing token")
+	}
+	return nil
+}
+
+func writeConfiguredDatabaseIdentity(w io.Writer) error {
+	if w == nil {
+		return fmt.Errorf("database identity writer is nil")
+	}
+	cfg, err := config.LoadForBootstrap()
+	if err != nil {
+		return fmt.Errorf("load database identity config: %w", err)
+	}
+
+	identityCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	identity, err := repository.ReadConfiguredDatabaseIdentity(identityCtx, cfg)
+	if err != nil {
+		return err
+	}
+	if err := json.NewEncoder(w).Encode(identity); err != nil {
+		return fmt.Errorf("encode database identity: %w", err)
+	}
 	return nil
 }
 
