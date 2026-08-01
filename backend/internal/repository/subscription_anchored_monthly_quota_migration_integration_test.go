@@ -5,12 +5,14 @@ package repository
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
 
 	dbmigrations "github.com/Wei-Shaw/sub2api/migrations"
 	"github.com/google/uuid"
+	"github.com/lib/pq"
 	"github.com/stretchr/testify/require"
 )
 
@@ -26,6 +28,13 @@ type migration195Fixture struct {
 	weeklyStart    time.Time
 	monthlyStart   time.Time
 	occurredAt     time.Time
+}
+
+type migration195BlockerCounts struct {
+	receipts         int
+	subscriptionLogs int
+	activePlans      int
+	times            int
 }
 
 func migration195RequestID(label string) string {
@@ -209,6 +218,26 @@ func applyMigration195(t *testing.T, tx *sql.Tx) error {
 	return err
 }
 
+func requireMigration195Blockers(
+	t *testing.T,
+	err error,
+	want migration195BlockerCounts,
+) {
+	t.Helper()
+	require.Error(t, err)
+
+	var postgresErr *pq.Error
+	require.ErrorAs(t, err, &postgresErr)
+	require.Equal(t, "P0001", string(postgresErr.Code))
+	require.Equal(t, fmt.Sprintf(
+		"cannot rebuild anchored subscription quota: %d invalid current-window receipt(s), %d invalid current-window subscription usage log(s), %d invalid active plan(s), %d invalid subscription time range(s)",
+		want.receipts,
+		want.subscriptionLogs,
+		want.activePlans,
+		want.times,
+	), postgresErr.Message)
+}
+
 func TestMigration195RebuildsMonthlyUsageWithoutBalanceLogLeakageOrReceiptDoubleCount(t *testing.T) {
 	tx := testTx(t)
 	ctx := context.Background()
@@ -337,7 +366,7 @@ WHERE request_id = $1 AND api_key_id = $2
 	migrationSQL, err := dbmigrations.FS.ReadFile("195_subscription_anchored_monthly_quota.sql")
 	require.NoError(t, err)
 	_, err = tx.ExecContext(context.Background(), string(migrationSQL))
-	require.ErrorContains(t, err, "cannot rebuild anchored subscription quota")
+	requireMigration195Blockers(t, err, migration195BlockerCounts{receipts: 1})
 }
 
 func TestMigration195FailsClosedWhenSubscriptionLogMatchesBalanceReceiptWithNoSubscription(t *testing.T) {
@@ -358,7 +387,7 @@ WHERE request_id = $1 AND api_key_id = $2
 	require.NoError(t, err)
 
 	err = applyMigration195(t, tx)
-	require.ErrorContains(t, err, "cannot rebuild anchored subscription quota")
+	requireMigration195Blockers(t, err, migration195BlockerCounts{subscriptionLogs: 1})
 }
 
 func TestMigration195FailsClosedWhenCurrentReceiptMatchesOldTermLogOutsideGuard(t *testing.T) {
@@ -376,7 +405,7 @@ WHERE id = $2
 	require.NoError(t, err)
 
 	err = applyMigration195(t, tx)
-	require.ErrorContains(t, err, "cannot rebuild anchored subscription quota")
+	requireMigration195Blockers(t, err, migration195BlockerCounts{receipts: 1})
 }
 
 func TestMigration195FailsClosedOnNegativeSubscriptionAmount(t *testing.T) {
@@ -440,7 +469,10 @@ WHERE id = $1
 	require.NoError(t, err)
 
 	err = applyMigration195(t, tx)
-	require.ErrorContains(t, err, "cannot rebuild anchored subscription quota")
+	requireMigration195Blockers(t, err, migration195BlockerCounts{
+		receipts:         1,
+		subscriptionLogs: 1,
+	})
 }
 
 func TestMigration195FailsClosedOnNaNReceiptFallbackActualCost(t *testing.T) {
@@ -458,7 +490,10 @@ WHERE id = $1
 	require.NoError(t, err)
 
 	err = applyMigration195(t, tx)
-	require.ErrorContains(t, err, "cannot rebuild anchored subscription quota")
+	requireMigration195Blockers(t, err, migration195BlockerCounts{
+		receipts:         1,
+		subscriptionLogs: 1,
+	})
 }
 
 func TestMigration195FailsClosedOnNegativeUnmatchedSubscriptionLog(t *testing.T) {
@@ -481,7 +516,7 @@ WHERE id = $1
 	require.NoError(t, err)
 
 	err = applyMigration195(t, tx)
-	require.ErrorContains(t, err, "invalid current-window subscription usage log")
+	requireMigration195Blockers(t, err, migration195BlockerCounts{subscriptionLogs: 1})
 }
 
 func TestMigration195FailsClosedOnSubscriptionReceiptBillingTypeMismatch(t *testing.T) {
@@ -499,7 +534,10 @@ WHERE request_id = $1 AND api_key_id = $2
 	require.NoError(t, err)
 
 	err = applyMigration195(t, tx)
-	require.ErrorContains(t, err, "cannot rebuild anchored subscription quota")
+	requireMigration195Blockers(t, err, migration195BlockerCounts{
+		receipts:         1,
+		subscriptionLogs: 1,
+	})
 }
 
 func TestMigration195FailsClosedWhenReceiptMatchesMultipleUsageLogs(t *testing.T) {
@@ -518,7 +556,10 @@ func TestMigration195FailsClosedWhenReceiptMatchesMultipleUsageLogs(t *testing.T
 	insertMigration195LegacyReceipt(t, tx, fixture, usageLogID, requestMatchedLogID, 4)
 
 	err := applyMigration195(t, tx)
-	require.ErrorContains(t, err, "cannot rebuild anchored subscription quota")
+	requireMigration195Blockers(t, err, migration195BlockerCounts{
+		receipts:         1,
+		subscriptionLogs: 1,
+	})
 }
 
 func TestMigration195FailsClosedWhenDirectReceiptRequestIDConflicts(t *testing.T) {
@@ -542,7 +583,10 @@ func TestMigration195FailsClosedWhenDirectReceiptRequestIDConflicts(t *testing.T
 	)
 
 	err := applyMigration195(t, tx)
-	require.ErrorContains(t, err, "cannot rebuild anchored subscription quota")
+	requireMigration195Blockers(t, err, migration195BlockerCounts{
+		receipts:         1,
+		subscriptionLogs: 1,
+	})
 }
 
 func TestMigration195FailsClosedOnNaNUsageInsideMonthlyButOutsideWeeklyWindow(t *testing.T) {
@@ -566,7 +610,7 @@ WHERE id = $2
 	require.NoError(t, err)
 
 	err = applyMigration195(t, tx)
-	require.ErrorContains(t, err, "invalid current-window subscription usage log")
+	requireMigration195Blockers(t, err, migration195BlockerCounts{subscriptionLogs: 1})
 }
 
 func TestMigration195FailsClosedOnNaNExistingSubscriptionCounter(t *testing.T) {
@@ -601,7 +645,7 @@ WHERE id = $1
 	require.NoError(t, err)
 
 	err = applyMigration195(t, tx)
-	require.ErrorContains(t, err, "invalid subscription time range")
+	requireMigration195Blockers(t, err, migration195BlockerCounts{times: 1})
 }
 
 func TestMigration195FailsClosedOnNaNActivePlanLimit(t *testing.T) {
@@ -622,6 +666,21 @@ WHERE id = $1
 
 	err = applyMigration195(t, tx)
 	require.ErrorContains(t, err, "groups_subscription_quota_limits_check")
+}
+
+func TestMigration195FailsClosedWhenActiveSubscriptionHasNoWeeklyLimit(t *testing.T) {
+	tx := testTx(t)
+	fixture := newMigration195Fixture(t, tx, 10*24*time.Hour)
+
+	_, err := tx.ExecContext(context.Background(), `
+UPDATE groups
+SET weekly_limit_usd = NULL
+WHERE id = $1
+`, fixture.groupID)
+	require.NoError(t, err)
+
+	err = applyMigration195(t, tx)
+	requireMigration195Blockers(t, err, migration195BlockerCounts{activePlans: 1})
 }
 
 func TestMigration195KeepsNegativeLimitCompatibilityForStandardGroups(t *testing.T) {
@@ -688,7 +747,10 @@ func TestMigration195FailsClosedOnCrossOwnerDirectReceiptLinks(t *testing.T) {
 			require.NoError(t, err)
 
 			err = applyMigration195(t, tx)
-			require.ErrorContains(t, err, "cannot rebuild anchored subscription quota")
+			requireMigration195Blockers(t, err, migration195BlockerCounts{
+				receipts:         1,
+				subscriptionLogs: 1,
+			})
 		})
 	}
 }

@@ -181,7 +181,8 @@ func TestEntSoftDelete_UserSubscription_DeleteIdempotent(t *testing.T) {
 
 func TestEntSoftDelete_UserSubscription_ListExcludesDeleted(t *testing.T) {
 	ctx := context.Background()
-	client := testEntClient(t)
+	tx := testEntTx(t)
+	client := tx.Client()
 
 	u := createEntUser(t, ctx, client, uniqueSoftDeleteValue(t, "sd-sub-user3")+"@example.com")
 	g1 := createEntGroup(t, ctx, client, uniqueSoftDeleteValue(t, "sd-sub-group3a"))

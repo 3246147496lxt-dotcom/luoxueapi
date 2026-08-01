@@ -484,14 +484,14 @@ func newMigration195PreflightReadRole(t *testing.T, db *sql.DB) string {
 	require.NoError(t, err)
 	_, err = db.ExecContext(
 		context.Background(),
-		"GRANT SELECT ON groups, user_subscriptions, billing_usage_entries, usage_logs, schema_migrations TO "+pq.QuoteIdentifier(role),
+		"GRANT SELECT ON groups, user_subscriptions, billing_usage_entries, usage_logs, api_keys, schema_migrations TO "+pq.QuoteIdentifier(role),
 	)
 	require.NoError(t, err)
 
 	t.Cleanup(func() {
 		_, revokeErr := db.ExecContext(
 			context.Background(),
-			"REVOKE ALL PRIVILEGES ON groups, user_subscriptions, billing_usage_entries, usage_logs, schema_migrations FROM "+pq.QuoteIdentifier(role),
+			"REVOKE ALL PRIVILEGES ON groups, user_subscriptions, billing_usage_entries, usage_logs, api_keys, schema_migrations FROM "+pq.QuoteIdentifier(role),
 		)
 		require.NoError(t, revokeErr)
 		_, revokeErr = db.ExecContext(
