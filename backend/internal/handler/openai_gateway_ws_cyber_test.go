@@ -173,7 +173,11 @@ func TestOpenAIResponsesWebSocketCyberSchedulerContract(t *testing.T) {
 				})
 				c.Next()
 			})
-			router.GET("/openai/v1/responses", h.ResponsesWebSocket)
+			handlerDone := make(chan struct{})
+			router.GET("/openai/v1/responses", func(c *gin.Context) {
+				defer close(handlerDone)
+				h.ResponsesWebSocket(c)
+			})
 			handlerServer := httptest.NewServer(router)
 			t.Cleanup(handlerServer.Close)
 
@@ -215,6 +219,12 @@ func TestOpenAIResponsesWebSocketCyberSchedulerContract(t *testing.T) {
 				require.Equal(t, coderws.StatusPolicyViolation, coderws.CloseStatus(err))
 			} else {
 				_ = clientConn.Close(coderws.StatusNormalClosure, "done")
+			}
+
+			select {
+			case <-handlerDone:
+			case <-time.After(3 * time.Second):
+				t.Fatal("websocket handler did not finish before contract assertions")
 			}
 
 			require.Equal(t, int32(1), upstreamCalls.Load(), "follow-up Cyber turn must not reach upstream")
