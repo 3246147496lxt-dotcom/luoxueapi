@@ -59,6 +59,7 @@ describe('FloatingQuotaWidget', () => {
     expect(wrapper.get('.floating-quota-widget').classes()).toContain(
       'floating-quota-widget--available'
     )
+    expect(wrapper.get('.floating-quota-widget').attributes('role')).toBe('group')
     expect(wrapper.get('.floating-quota-widget__plan').text()).toBe(
       'CODEX · PRO'
     )
@@ -145,6 +146,10 @@ describe('FloatingQuotaWidget', () => {
       'floating-quota-widget--unavailable'
     )
     expect(unavailable.text()).toContain('网络暂不可用')
+    expect(unavailable.get('.floating-quota-widget').attributes('role')).toBe('group')
+    expect(unavailable.get('.floating-quota-widget__refresh').attributes('type')).toBe(
+      'button'
+    )
     await unavailable.get('.floating-quota-widget__refresh').trigger('click')
     expect(unavailable.emitted('refresh')).toHaveLength(1)
     await unavailable.setProps({ refreshing: true })
@@ -200,6 +205,7 @@ describe('FloatingQuotaWidget', () => {
     expect(wrapper.get('.floating-quota-widget').classes()).toContain(
       'floating-quota-widget--collapsed'
     )
+    expect(wrapper.get('.floating-quota-widget').attributes('role')).toBe('button')
     expect(wrapper.get('.floating-quota-widget__compact').text()).toBe('32%')
     expect(wrapper.find('.floating-quota-widget__header').exists()).toBe(false)
     expect(wrapper.find('.floating-quota-widget__ring').exists()).toBe(false)

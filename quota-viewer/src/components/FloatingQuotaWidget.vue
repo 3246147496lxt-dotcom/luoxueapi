@@ -382,14 +382,14 @@ const onCardClick = (event: MouseEvent) => {
       }
     ]"
     :aria-label="cardAriaLabel"
-    role="button"
+    :role="collapsed ? 'button' : 'group'"
     tabindex="0"
     @mousedown="onCardMouseDown"
     @mousemove="onCardMouseMove"
     @mouseup="onCardMouseUp"
     @click="onCardClick"
-    @keydown.enter.prevent="emit('toggle')"
-    @keydown.space.prevent="emit('toggle')"
+    @keydown.enter.self.prevent="emit('toggle')"
+    @keydown.space.self.prevent="emit('toggle')"
   >
     <template v-if="collapsed">
       <div class="floating-quota-widget__compact" aria-hidden="true">
