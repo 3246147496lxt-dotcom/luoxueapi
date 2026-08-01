@@ -1174,7 +1174,9 @@ func subscriptionCacheMatchesEntitlement(data *subscriptionCacheData, subscripti
 		!data.WeeklyWindowEnd.Equal(expectedEnd) {
 		return false
 	}
-	if !subscription.UpdatedAt.IsZero() && data.Version != subscription.UpdatedAt.UnixMicro() {
+	// Usage writes advance UpdatedAt without changing the entitlement term. A
+	// newer billing snapshot is compatible with a short-lived stale L1 snapshot.
+	if !subscription.UpdatedAt.IsZero() && data.Version < subscription.UpdatedAt.UnixMicro() {
 		return false
 	}
 	return true

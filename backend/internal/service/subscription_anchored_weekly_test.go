@@ -176,4 +176,9 @@ func TestSubscriptionCacheMatchBindsConcreteEntitlementVersion(t *testing.T) {
 	staleVersion := *data
 	staleVersion.Version--
 	require.False(t, subscriptionCacheMatchesEntitlement(&staleVersion, sub, now))
+
+	newerVersion := *data
+	newerVersion.Version++
+	require.True(t, subscriptionCacheMatchesEntitlement(&newerVersion, sub, now),
+		"a newer billing snapshot must remain compatible with a stale L1 entitlement")
 }
