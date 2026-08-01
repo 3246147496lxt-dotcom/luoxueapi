@@ -329,11 +329,11 @@ m195_record_compose_input_checksums \
 
 - 目标数据库 `CONNECT`；
 - `public` schema `USAGE`；
-- `groups`、`user_subscriptions`、`billing_usage_entries`、`usage_logs`、`schema_migrations` 的 `SELECT`；
+- `groups`、`user_subscriptions`、`billing_usage_entries`、`usage_logs`、`api_keys`、`schema_migrations` 的 `SELECT`；
 - `pg_control_system()` 的受控 `EXECUTE` 权限，仅用于比对非敏感的 PostgreSQL `system_identifier`；
 - `pg_read_all_stats` 成员资格，或等价的受控监控角色，以完整观察其他角色的 writer/transaction。
 
-不需要读取 `users`、`accounts`、`api_keys`。`pg_read_all_stats` 具有较广的运行状态可见性，账号应受管、审计并按组织策略撤销。缺少该能力时 online 模式只会告警，maintenance 模式会直接阻断。
+不需要读取 `users`、`accounts`。`pg_read_all_stats` 具有较广的运行状态可见性，账号应受管、审计并按组织策略撤销。缺少该能力时 online 模式只会告警，maintenance 模式会直接阻断。
 
 预检脚本同时使用 PostgreSQL `default_transaction_read_only=on` 与 `REPEATABLE READ READ ONLY`，只输出无维度聚合 JSON，不输出 ID、PII、完整 Key、单条金额或请求样本。
 
