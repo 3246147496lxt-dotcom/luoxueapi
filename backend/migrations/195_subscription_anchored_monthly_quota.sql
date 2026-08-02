@@ -107,106 +107,71 @@ ALTER TABLE groups
 ALTER TABLE groups
     VALIDATE CONSTRAINT groups_subscription_quota_limits_check;
 
--- Abort publication when current-window ledger evidence cannot be
--- reconstructed unambiguously. An explicit subscription_amount may replace a
--- missing usage log, but it cannot make contradictory receipt metadata,
--- cross-owner links, multiple matching logs, or invalid membership usage safe
--- to publish.
-DO $$
-DECLARE
-    invalid_receipt_count BIGINT;
-    invalid_subscription_log_count BIGINT;
-    invalid_active_plan_count BIGINT;
-    invalid_subscription_time_count BIGINT;
-    authoritative_weekly_ledger_mismatch_count BIGINT;
-BEGIN
-    WITH anchored AS (
-        SELECT
-            us.id,
-            us.user_id,
-            us.starts_at,
-            us.starts_at
-                + FLOOR(
-                    GREATEST(
-                        0,
-                        EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP - us.starts_at))
-                    ) / 604800
-                ) * 604800 * INTERVAL '1 second' AS weekly_period_start,
-            us.starts_at
-                + FLOOR(
-                    GREATEST(
-                        0,
-                        EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP - us.starts_at))
-                    ) / 2592000
-                ) * 2592000 * INTERVAL '1 second' AS monthly_period_start
-        FROM user_subscriptions us
-    )
-    SELECT COUNT(*)
-    INTO invalid_receipt_count
+-- Materialize the current subscription/ledger classification once for the
+-- remainder of this transaction. The previous migration text repeated the
+-- same correlated receipt/log matching four times; on a production-sized
+-- ledger those repeated LATERAL probes could exceed the migrate-only deadline.
+-- CURRENT_TIMESTAMP is transaction-stable, and ON COMMIT DROP keeps these
+-- snapshots private to this one migration attempt (including rollback).
+CREATE TEMP TABLE migration_195_anchored
+ON COMMIT DROP
+AS
+SELECT
+    us.id,
+    us.user_id,
+    us.group_id,
+    us.status,
+    us.created_at,
+    us.starts_at,
+    us.expires_at,
+    us.weekly_window_start,
+    us.monthly_window_start,
+    us.weekly_usage_usd,
+    us.monthly_usage_usd,
+    us.deleted_at,
+    us.starts_at
+        + FLOOR(
+            GREATEST(
+                0,
+                EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP - us.starts_at))
+            ) / 604800
+        ) * 604800 * INTERVAL '1 second' AS weekly_period_start,
+    us.starts_at
+        + FLOOR(
+            GREATEST(
+                0,
+                EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP - us.starts_at))
+            ) / 2592000
+        ) * 2592000 * INTERVAL '1 second' AS monthly_period_start
+FROM user_subscriptions us;
+
+CREATE UNIQUE INDEX migration_195_anchored_id_idx
+    ON migration_195_anchored (id);
+
+CREATE TEMP TABLE migration_195_receipt_classification
+ON COMMIT DROP
+AS
+WITH relevant_receipts AS MATERIALIZED (
+    SELECT
+        bue.id,
+        bue.usage_log_id,
+        bue.subscription_id,
+        bue.user_id AS receipt_user_id,
+        bue.api_key_id,
+        receipt_key.user_id AS receipt_api_key_user_id,
+        bue.request_id,
+        bue.billing_type,
+        bue.created_at AS receipt_created_at,
+        bue.subscription_amount,
+        a.starts_at,
+        a.user_id AS subscription_user_id,
+        a.weekly_period_start,
+        a.monthly_period_start
     FROM billing_usage_entries bue
-    JOIN anchored a
+    JOIN migration_195_anchored a
         ON a.id = bue.subscription_id
     LEFT JOIN api_keys receipt_key
         ON receipt_key.id = bue.api_key_id
-    LEFT JOIN LATERAL (
-        SELECT
-            COUNT(*) AS candidate_count,
-            COUNT(*) FILTER (
-                WHERE ul.subscription_id IS DISTINCT FROM bue.subscription_id
-                   OR ul.billing_type <> 1
-                   OR ul.user_id IS DISTINCT FROM a.user_id
-                   OR ul.user_id IS DISTINCT FROM bue.user_id
-                   OR ul.api_key_id IS DISTINCT FROM bue.api_key_id
-                   OR (
-                       ul.id IS NOT DISTINCT FROM bue.usage_log_id
-                       AND bue.request_id IS NOT NULL
-                       AND ul.request_id IS NOT NULL
-                       AND ul.request_id IS DISTINCT FROM bue.request_id
-                   )
-            ) AS invalid_identity_count,
-            COUNT(*) FILTER (
-                WHERE ul.actual_cost < 0
-                   OR ul.actual_cost = 'NaN'::numeric
-                   OR ul.actual_cost = 'Infinity'::numeric
-                   OR ul.actual_cost = '-Infinity'::numeric
-            ) AS invalid_actual_cost_count
-        FROM usage_logs ul
-        WHERE ul.id = bue.usage_log_id
-           OR (
-               bue.request_id IS NOT NULL
-               AND ul.request_id = bue.request_id
-               AND ul.api_key_id = bue.api_key_id
-           )
-    ) candidate_scan ON TRUE
-    LEFT JOIN LATERAL (
-        SELECT
-            ul.actual_cost,
-            ul.created_at
-        FROM usage_logs ul
-        WHERE ul.subscription_id = bue.subscription_id
-          AND ul.billing_type = 1
-          AND ul.user_id = a.user_id
-          AND ul.user_id = bue.user_id
-          AND ul.api_key_id = bue.api_key_id
-          AND (
-              ul.id IS DISTINCT FROM bue.usage_log_id
-              OR bue.request_id IS NULL
-              OR ul.request_id IS NULL
-              OR ul.request_id = bue.request_id
-          )
-          AND (
-              ul.id = bue.usage_log_id
-              OR (
-                  bue.request_id IS NOT NULL
-                  AND ul.request_id = bue.request_id
-                  AND ul.api_key_id = bue.api_key_id
-              )
-          )
-        ORDER BY
-            CASE WHEN ul.id = bue.usage_log_id THEN 0 ELSE 1 END,
-            ul.id
-        LIMIT 1
-    ) matched_log ON TRUE
     WHERE bue.applied
       AND bue.status = 'subscription'
       AND bue.subscription_id IS NOT NULL
@@ -218,80 +183,103 @@ BEGIN
           a.weekly_period_start + 604800 * INTERVAL '1 second',
           a.monthly_period_start + 2592000 * INTERVAL '1 second'
       )
-      AND (
-          bue.billing_type <> 1
-          OR bue.user_id IS DISTINCT FROM a.user_id
-          OR receipt_key.user_id IS DISTINCT FROM a.user_id
-          OR receipt_key.user_id IS DISTINCT FROM bue.user_id
-          OR candidate_scan.candidate_count > 1
-          OR candidate_scan.invalid_identity_count > 0
-          OR candidate_scan.invalid_actual_cost_count > 0
-          OR matched_log.created_at < a.starts_at
-          OR (
-              bue.subscription_amount IS NULL
-              AND matched_log.actual_cost IS NULL
-          )
-      );
-
-    -- A subscription-billed usage log is a compatibility fallback only when
-    -- it has no receipt at all. Any linked receipt must be exactly one applied
-    -- membership receipt; otherwise source identity is contradictory and the
-    -- migration must fail instead of replaying the log as legacy usage.
-    WITH anchored AS (
-        SELECT
-            us.id,
-            us.user_id,
-            us.starts_at
-                + FLOOR(
-                    GREATEST(
-                        0,
-                        EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP - us.starts_at))
-                    ) / 604800
-                ) * 604800 * INTERVAL '1 second' AS weekly_period_start,
-            us.starts_at
-                + FLOOR(
-                    GREATEST(
-                        0,
-                        EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP - us.starts_at))
-                    ) / 2592000
-                ) * 2592000 * INTERVAL '1 second' AS monthly_period_start
-        FROM user_subscriptions us
-    )
-    SELECT COUNT(*)
-    INTO invalid_subscription_log_count
+)
+SELECT
+    rr.*,
+    COALESCE(candidate_scan.candidate_count, 0) AS candidate_count,
+    COALESCE(candidate_scan.invalid_identity_count, 0)
+        AS invalid_identity_count,
+    COALESCE(candidate_scan.invalid_actual_cost_count, 0)
+        AS invalid_actual_cost_count,
+    matched_log.actual_cost AS matched_actual_cost,
+    matched_log.created_at AS matched_created_at
+FROM relevant_receipts rr
+LEFT JOIN LATERAL (
+    SELECT
+        COUNT(*) AS candidate_count,
+        COUNT(*) FILTER (
+            WHERE ul.subscription_id IS DISTINCT FROM rr.subscription_id
+               OR ul.billing_type <> 1
+               OR ul.user_id IS DISTINCT FROM rr.subscription_user_id
+               OR ul.user_id IS DISTINCT FROM rr.receipt_user_id
+               OR ul.api_key_id IS DISTINCT FROM rr.api_key_id
+               OR (
+                   ul.id IS NOT DISTINCT FROM rr.usage_log_id
+                   AND rr.request_id IS NOT NULL
+                   AND ul.request_id IS NOT NULL
+                   AND ul.request_id IS DISTINCT FROM rr.request_id
+               )
+        ) AS invalid_identity_count,
+        COUNT(*) FILTER (
+            WHERE ul.actual_cost < 0
+               OR ul.actual_cost = 'NaN'::numeric
+               OR ul.actual_cost = 'Infinity'::numeric
+               OR ul.actual_cost = '-Infinity'::numeric
+        ) AS invalid_actual_cost_count
     FROM usage_logs ul
-    JOIN anchored a
+    WHERE ul.id = rr.usage_log_id
+       OR (
+           rr.request_id IS NOT NULL
+           AND ul.request_id = rr.request_id
+           AND ul.api_key_id = rr.api_key_id
+       )
+) candidate_scan ON TRUE
+LEFT JOIN LATERAL (
+    SELECT
+        ul.actual_cost,
+        ul.created_at
+    FROM usage_logs ul
+    WHERE ul.subscription_id = rr.subscription_id
+      AND ul.billing_type = 1
+      AND ul.user_id = rr.subscription_user_id
+      AND ul.user_id = rr.receipt_user_id
+      AND ul.api_key_id = rr.api_key_id
+      AND (
+          ul.id IS DISTINCT FROM rr.usage_log_id
+          OR rr.request_id IS NULL
+          OR ul.request_id IS NULL
+          OR ul.request_id = rr.request_id
+      )
+      AND (
+          ul.id = rr.usage_log_id
+          OR (
+              rr.request_id IS NOT NULL
+              AND ul.request_id = rr.request_id
+              AND ul.api_key_id = rr.api_key_id
+          )
+      )
+    ORDER BY
+        CASE WHEN ul.id = rr.usage_log_id THEN 0 ELSE 1 END,
+        ul.id
+    LIMIT 1
+) matched_log ON TRUE;
+
+CREATE INDEX migration_195_receipt_subscription_idx
+    ON migration_195_receipt_classification (subscription_id);
+
+CREATE TEMP TABLE migration_195_window_log_classification
+ON COMMIT DROP
+AS
+WITH window_logs AS MATERIALIZED (
+    SELECT
+        ul.id,
+        ul.subscription_id,
+        ul.user_id AS log_user_id,
+        ul.api_key_id,
+        ul.request_id,
+        ul.billing_type,
+        ul.actual_cost,
+        ul.created_at AS log_created_at,
+        a.starts_at,
+        a.user_id AS subscription_user_id,
+        log_key.user_id AS log_api_key_user_id,
+        a.weekly_period_start,
+        a.monthly_period_start
+    FROM usage_logs ul
+    JOIN migration_195_anchored a
         ON a.id = ul.subscription_id
     LEFT JOIN api_keys log_key
         ON log_key.id = ul.api_key_id
-    LEFT JOIN LATERAL (
-        SELECT
-            COUNT(*) AS all_receipt_count,
-            COUNT(*) FILTER (
-                WHERE bue.applied
-                  AND bue.status = 'subscription'
-                  AND bue.billing_type = 1
-                  AND bue.subscription_id = ul.subscription_id
-                  AND bue.user_id = a.user_id
-                  AND bue.user_id = ul.user_id
-                  AND bue.api_key_id = ul.api_key_id
-                  AND log_key.user_id = a.user_id
-                  AND log_key.user_id = ul.user_id
-                  AND (
-                      bue.usage_log_id IS DISTINCT FROM ul.id
-                      OR bue.request_id IS NULL
-                      OR ul.request_id IS NULL
-                      OR bue.request_id = ul.request_id
-                  )
-            ) AS valid_receipt_count
-        FROM billing_usage_entries bue
-        WHERE bue.usage_log_id = ul.id
-           OR (
-               bue.request_id IS NOT NULL
-               AND ul.request_id = bue.request_id
-               AND bue.api_key_id = ul.api_key_id
-           )
-    ) receipt_scan ON TRUE
     WHERE ul.billing_type = 1
       AND ul.created_at >= LEAST(
           a.weekly_period_start,
@@ -301,26 +289,106 @@ BEGIN
           a.weekly_period_start + 604800 * INTERVAL '1 second',
           a.monthly_period_start + 2592000 * INTERVAL '1 second'
       )
-      AND (
-          ul.actual_cost < 0
-          OR ul.actual_cost = 'NaN'::numeric
-          OR ul.actual_cost = 'Infinity'::numeric
-          OR ul.actual_cost = '-Infinity'::numeric
-          OR ul.user_id IS DISTINCT FROM a.user_id
-          OR log_key.user_id IS DISTINCT FROM a.user_id
-          OR log_key.user_id IS DISTINCT FROM ul.user_id
-          OR (
-              receipt_scan.all_receipt_count > 0
+)
+SELECT
+    wl.*,
+    COALESCE(receipt_scan.all_receipt_count, 0) AS all_receipt_count,
+    COALESCE(receipt_scan.valid_receipt_count, 0) AS valid_receipt_count
+FROM window_logs wl
+LEFT JOIN LATERAL (
+    SELECT
+        COUNT(*) AS all_receipt_count,
+        COUNT(*) FILTER (
+            WHERE bue.applied
+              AND bue.status = 'subscription'
+              AND bue.billing_type = 1
+              AND bue.subscription_id = wl.subscription_id
+              AND bue.user_id = wl.subscription_user_id
+              AND bue.user_id = wl.log_user_id
+              AND bue.api_key_id = wl.api_key_id
+              AND wl.log_api_key_user_id = wl.subscription_user_id
+              AND wl.log_api_key_user_id = wl.log_user_id
               AND (
-                  receipt_scan.all_receipt_count <> 1
-                  OR receipt_scan.valid_receipt_count <> 1
+                  bue.usage_log_id IS DISTINCT FROM wl.id
+                  OR bue.request_id IS NULL
+                  OR wl.request_id IS NULL
+                  OR bue.request_id = wl.request_id
+              )
+        ) AS valid_receipt_count
+    FROM billing_usage_entries bue
+    WHERE bue.usage_log_id = wl.id
+       OR (
+           bue.request_id IS NOT NULL
+           AND wl.request_id = bue.request_id
+           AND bue.api_key_id = wl.api_key_id
+       )
+) receipt_scan ON TRUE;
+
+CREATE INDEX migration_195_window_log_subscription_idx
+    ON migration_195_window_log_classification (subscription_id);
+
+ANALYZE migration_195_anchored;
+ANALYZE migration_195_receipt_classification;
+ANALYZE migration_195_window_log_classification;
+
+-- Abort publication when current-window ledger evidence cannot be
+-- reconstructed unambiguously. An explicit subscription_amount may replace a
+-- missing usage log, but it cannot make contradictory receipt metadata,
+-- cross-owner links, multiple matching logs, or invalid membership usage safe
+-- to publish.
+DO $$
+DECLARE
+    invalid_receipt_count BIGINT;
+    invalid_subscription_log_count BIGINT;
+    invalid_active_plan_count BIGINT;
+    invalid_subscription_time_count BIGINT;
+BEGIN
+    SELECT COUNT(*)
+    INTO invalid_receipt_count
+    FROM migration_195_receipt_classification rc
+    WHERE rc.billing_type <> 1
+       OR rc.receipt_user_id IS DISTINCT FROM rc.subscription_user_id
+       OR rc.receipt_api_key_user_id
+            IS DISTINCT FROM rc.subscription_user_id
+       OR rc.receipt_api_key_user_id IS DISTINCT FROM rc.receipt_user_id
+       OR rc.candidate_count > 1
+       OR rc.invalid_identity_count > 0
+       OR rc.invalid_actual_cost_count > 0
+       OR rc.matched_created_at < rc.starts_at
+       OR (
+          rc.subscription_amount IS NULL
+          AND rc.matched_actual_cost IS NULL
+       );
+
+    -- A subscription-billed usage log is a compatibility fallback only when
+    -- it has no receipt at all. Any linked receipt must be exactly one applied
+    -- membership receipt; otherwise source identity is contradictory and the
+    -- migration must fail instead of replaying the log as legacy usage.
+    SELECT COUNT(*)
+    INTO invalid_subscription_log_count
+    FROM migration_195_window_log_classification wl
+    WHERE wl.billing_type = 1
+      AND (
+          wl.actual_cost < 0
+          OR wl.actual_cost = 'NaN'::numeric
+          OR wl.actual_cost = 'Infinity'::numeric
+          OR wl.actual_cost = '-Infinity'::numeric
+          OR wl.log_user_id IS DISTINCT FROM wl.subscription_user_id
+          OR wl.log_api_key_user_id
+                IS DISTINCT FROM wl.subscription_user_id
+          OR wl.log_api_key_user_id IS DISTINCT FROM wl.log_user_id
+          OR (
+              wl.all_receipt_count > 0
+              AND (
+                  wl.all_receipt_count <> 1
+                  OR wl.valid_receipt_count <> 1
               )
           )
       );
 
     SELECT COUNT(*)
     INTO invalid_active_plan_count
-    FROM user_subscriptions us
+    FROM migration_195_anchored us
     LEFT JOIN groups g ON g.id = us.group_id
     WHERE us.deleted_at IS NULL
       AND us.status = 'active'
@@ -342,7 +410,7 @@ BEGIN
 
     SELECT COUNT(*)
     INTO invalid_subscription_time_count
-    FROM user_subscriptions us
+    FROM migration_195_anchored us
     WHERE us.deleted_at IS NULL
       AND (
           us.expires_at <= us.starts_at
@@ -363,143 +431,84 @@ BEGIN
                 'Drain billing traffic, reconcile missing, ambiguous, cross-owner, mismatched, negative, or non-finite ledger evidence, then retry migration 195.';
     END IF;
 
-    WITH anchored AS (
-        SELECT
-            us.id,
-            us.user_id,
-            us.weekly_window_start,
-            us.weekly_usage_usd,
-            us.starts_at
-                + FLOOR(
-                    GREATEST(
-                        0,
-                        EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP - us.starts_at))
-                    ) / 604800
-                ) * 604800 * INTERVAL '1 second' AS weekly_period_start,
-            us.starts_at
-                + FLOOR(
-                    GREATEST(
-                        0,
-                        EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP - us.starts_at))
-                    ) / 2592000
-                ) * 2592000 * INTERVAL '1 second' AS monthly_period_start
-        FROM user_subscriptions us
-    ),
-    receipt_usage AS (
-        SELECT
-            bue.subscription_id AS id,
-            bue.created_at AS occurred_at,
-            COALESCE(
-                bue.subscription_amount,
-                matched_log.actual_cost
-            )::DECIMAL(20, 10) AS amount
-        FROM billing_usage_entries bue
-        JOIN anchored a
-            ON a.id = bue.subscription_id
-        JOIN api_keys receipt_key
-            ON receipt_key.id = bue.api_key_id
-           AND receipt_key.user_id = a.user_id
-        LEFT JOIN LATERAL (
-            SELECT ul.actual_cost
-            FROM usage_logs ul
-            WHERE ul.subscription_id = bue.subscription_id
-              AND ul.billing_type = 1
-              AND ul.user_id = a.user_id
-              AND ul.user_id = bue.user_id
-              AND ul.api_key_id = bue.api_key_id
-              AND (
-                  ul.id IS DISTINCT FROM bue.usage_log_id
-                  OR bue.request_id IS NULL
-                  OR ul.request_id IS NULL
-                  OR ul.request_id = bue.request_id
-              )
-              AND (
-                  ul.id = bue.usage_log_id
-                  OR (
-                      bue.request_id IS NOT NULL
-                      AND ul.request_id = bue.request_id
-                      AND ul.api_key_id = bue.api_key_id
-                  )
-              )
-            ORDER BY
-                CASE WHEN ul.id = bue.usage_log_id THEN 0 ELSE 1 END,
-                ul.id
-            LIMIT 1
-        ) matched_log ON TRUE
-        WHERE bue.applied
-          AND bue.status = 'subscription'
-          AND bue.subscription_id IS NOT NULL
-          AND bue.user_id = a.user_id
-          AND receipt_key.user_id = bue.user_id
-          AND bue.created_at >= LEAST(
-              a.weekly_period_start,
-              a.monthly_period_start
-          )
-          AND bue.created_at < GREATEST(
-              a.weekly_period_start + 604800 * INTERVAL '1 second',
-              a.monthly_period_start + 2592000 * INTERVAL '1 second'
-          )
-    ),
-    legacy_log_usage AS (
-        SELECT
-            ul.subscription_id AS id,
-            ul.created_at AS occurred_at,
-            ul.actual_cost::DECIMAL(20, 10) AS amount
-        FROM usage_logs ul
-        JOIN anchored a
-            ON a.id = ul.subscription_id
-        JOIN api_keys log_key
-            ON log_key.id = ul.api_key_id
-           AND log_key.user_id = a.user_id
-           AND log_key.user_id = ul.user_id
-        WHERE ul.billing_type = 1
-          AND ul.created_at >= LEAST(
-              a.weekly_period_start,
-              a.monthly_period_start
-          )
-          AND ul.created_at < GREATEST(
-              a.weekly_period_start + 604800 * INTERVAL '1 second',
-              a.monthly_period_start + 2592000 * INTERVAL '1 second'
-          )
-          AND NOT EXISTS (
-              SELECT 1
-              FROM billing_usage_entries bue
-              WHERE bue.usage_log_id = ul.id
-                 OR (
-                     bue.request_id IS NOT NULL
-                     AND ul.request_id = bue.request_id
-                     AND bue.api_key_id = ul.api_key_id
-                 )
-          )
-    ),
-    accounted_usage AS (
-        SELECT id, occurred_at, amount
-        FROM receipt_usage
+END $$;
 
-        UNION ALL
+-- Derive the authoritative weekly/monthly totals once from the validated
+-- classifications. Both the weekly mismatch gate and the final UPDATE reuse
+-- this snapshot instead of rescanning the durable ledger.
+CREATE TEMP TABLE migration_195_aggregated_usage
+ON COMMIT DROP
+AS
+WITH receipt_usage AS MATERIALIZED (
+    SELECT
+        rc.subscription_id AS id,
+        rc.receipt_created_at AS occurred_at,
+        COALESCE(
+            rc.subscription_amount,
+            rc.matched_actual_cost
+        )::DECIMAL(20, 10) AS amount
+    FROM migration_195_receipt_classification rc
+    WHERE rc.billing_type = 1
+      AND rc.receipt_user_id = rc.subscription_user_id
+      AND rc.receipt_api_key_user_id = rc.subscription_user_id
+      AND rc.receipt_api_key_user_id = rc.receipt_user_id
+),
+legacy_log_usage AS MATERIALIZED (
+    SELECT
+        wl.subscription_id AS id,
+        wl.log_created_at AS occurred_at,
+        wl.actual_cost::DECIMAL(20, 10) AS amount
+    FROM migration_195_window_log_classification wl
+    WHERE wl.billing_type = 1
+      AND wl.log_user_id = wl.subscription_user_id
+      AND wl.log_api_key_user_id = wl.subscription_user_id
+      AND wl.log_api_key_user_id = wl.log_user_id
+      AND wl.all_receipt_count = 0
+),
+accounted_usage AS MATERIALIZED (
+    SELECT id, occurred_at, amount
+    FROM receipt_usage
 
-        SELECT id, occurred_at, amount
-        FROM legacy_log_usage
-    ),
-    aggregated_usage AS (
-        SELECT
-            a.id,
-            COALESCE(
-                SUM(au.amount) FILTER (
-                    WHERE au.occurred_at >= a.weekly_period_start
-                      AND au.occurred_at < a.weekly_period_start
-                          + 604800 * INTERVAL '1 second'
-                ),
-                0
-            )::DECIMAL(20, 10) AS weekly_used
-        FROM anchored a
-        LEFT JOIN accounted_usage au ON au.id = a.id
-        GROUP BY a.id
-    )
+    UNION ALL
+
+    SELECT id, occurred_at, amount
+    FROM legacy_log_usage
+)
+SELECT
+    a.id,
+    COALESCE(
+        SUM(au.amount) FILTER (
+            WHERE au.occurred_at >= a.weekly_period_start
+              AND au.occurred_at < a.weekly_period_start
+                  + 604800 * INTERVAL '1 second'
+        ),
+        0
+    )::DECIMAL(20, 10) AS weekly_used,
+    COALESCE(
+        SUM(au.amount) FILTER (
+            WHERE au.occurred_at >= a.monthly_period_start
+              AND au.occurred_at < a.monthly_period_start
+                  + 2592000 * INTERVAL '1 second'
+        ),
+        0
+    )::DECIMAL(20, 10) AS monthly_used
+FROM migration_195_anchored a
+LEFT JOIN accounted_usage au ON au.id = a.id
+GROUP BY a.id;
+
+CREATE UNIQUE INDEX migration_195_aggregated_usage_id_idx
+    ON migration_195_aggregated_usage (id);
+
+ANALYZE migration_195_aggregated_usage;
+
+DO $$
+DECLARE
+    authoritative_weekly_ledger_mismatch_count BIGINT;
+BEGIN
     SELECT COUNT(*)
     INTO authoritative_weekly_ledger_mismatch_count
-    FROM anchored a
-    JOIN aggregated_usage au ON au.id = a.id
+    FROM migration_195_anchored a
+    JOIN migration_195_aggregated_usage au ON au.id = a.id
     WHERE a.weekly_window_start = a.weekly_period_start
       AND ABS(a.weekly_usage_usd - au.weekly_used) > 0.00000001;
 
@@ -512,142 +521,6 @@ BEGIN
     END IF;
 END $$;
 
-WITH anchored AS (
-    SELECT
-        us.id,
-        us.user_id,
-        us.starts_at
-            + FLOOR(
-                GREATEST(
-                    0,
-                    EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP - us.starts_at))
-                ) / 604800
-            ) * 604800 * INTERVAL '1 second' AS weekly_period_start,
-        us.starts_at
-            + FLOOR(
-                GREATEST(
-                    0,
-                    EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP - us.starts_at))
-                ) / 2592000
-            ) * 2592000 * INTERVAL '1 second' AS monthly_period_start
-    FROM user_subscriptions us
-),
-receipt_usage AS (
-    SELECT
-        bue.subscription_id AS id,
-        bue.created_at AS occurred_at,
-        COALESCE(bue.subscription_amount, matched_log.actual_cost)::DECIMAL(20, 10) AS amount
-    FROM billing_usage_entries bue
-    JOIN anchored a
-        ON a.id = bue.subscription_id
-    JOIN api_keys receipt_key
-        ON receipt_key.id = bue.api_key_id
-       AND receipt_key.user_id = a.user_id
-    LEFT JOIN LATERAL (
-        SELECT ul.actual_cost
-        FROM usage_logs ul
-        WHERE ul.subscription_id = bue.subscription_id
-          AND ul.billing_type = 1
-          AND ul.user_id = a.user_id
-          AND ul.user_id = bue.user_id
-          AND ul.api_key_id = bue.api_key_id
-          AND (
-              ul.id IS DISTINCT FROM bue.usage_log_id
-              OR bue.request_id IS NULL
-              OR ul.request_id IS NULL
-              OR ul.request_id = bue.request_id
-          )
-          AND (
-              ul.id = bue.usage_log_id
-              OR (
-                  bue.request_id IS NOT NULL
-                  AND ul.request_id = bue.request_id
-                  AND ul.api_key_id = bue.api_key_id
-              )
-          )
-        ORDER BY
-            CASE WHEN ul.id = bue.usage_log_id THEN 0 ELSE 1 END,
-            ul.id
-        LIMIT 1
-    ) matched_log ON TRUE
-    WHERE bue.applied
-      AND bue.status = 'subscription'
-      AND bue.subscription_id IS NOT NULL
-      AND bue.user_id = a.user_id
-      AND receipt_key.user_id = bue.user_id
-      AND bue.created_at >= LEAST(
-          a.weekly_period_start,
-          a.monthly_period_start
-      )
-      AND bue.created_at < GREATEST(
-          a.weekly_period_start + 604800 * INTERVAL '1 second',
-          a.monthly_period_start + 2592000 * INTERVAL '1 second'
-      )
-),
-legacy_log_usage AS (
-    SELECT
-        ul.subscription_id AS id,
-        ul.created_at AS occurred_at,
-        ul.actual_cost::DECIMAL(20, 10) AS amount
-    FROM usage_logs ul
-    JOIN anchored a
-        ON a.id = ul.subscription_id
-    JOIN api_keys log_key
-        ON log_key.id = ul.api_key_id
-       AND log_key.user_id = a.user_id
-       AND log_key.user_id = ul.user_id
-    WHERE ul.billing_type = 1
-      AND ul.created_at >= LEAST(
-          a.weekly_period_start,
-          a.monthly_period_start
-      )
-      AND ul.created_at < GREATEST(
-          a.weekly_period_start + 604800 * INTERVAL '1 second',
-          a.monthly_period_start + 2592000 * INTERVAL '1 second'
-      )
-      AND NOT EXISTS (
-          SELECT 1
-          FROM billing_usage_entries bue
-          WHERE bue.usage_log_id = ul.id
-             OR (
-                 bue.request_id IS NOT NULL
-                 AND ul.request_id = bue.request_id
-                 AND bue.api_key_id = ul.api_key_id
-             )
-      )
-),
-accounted_usage AS (
-    SELECT id, occurred_at, amount
-    FROM receipt_usage
-
-    UNION ALL
-
-    SELECT id, occurred_at, amount
-    FROM legacy_log_usage
-),
-aggregated_usage AS (
-    SELECT
-        a.id,
-        COALESCE(
-            SUM(au.amount) FILTER (
-                WHERE au.occurred_at >= a.weekly_period_start
-                  AND au.occurred_at < a.weekly_period_start
-                      + 604800 * INTERVAL '1 second'
-            ),
-            0
-        )::DECIMAL(20, 10) AS weekly_used,
-        COALESCE(
-            SUM(au.amount) FILTER (
-                WHERE au.occurred_at >= a.monthly_period_start
-                  AND au.occurred_at < a.monthly_period_start
-                      + 2592000 * INTERVAL '1 second'
-            ),
-            0
-        )::DECIMAL(20, 10) AS monthly_used
-    FROM anchored a
-    LEFT JOIN accounted_usage au ON au.id = a.id
-    GROUP BY a.id
-)
 UPDATE user_subscriptions us
 SET weekly_window_start = a.weekly_period_start,
     weekly_usage_usd = CASE
@@ -658,8 +531,8 @@ SET weekly_window_start = a.weekly_period_start,
     monthly_window_start = a.monthly_period_start,
     monthly_usage_usd = au.monthly_used,
     updated_at = NOW()
-FROM anchored a
-JOIN aggregated_usage au ON au.id = a.id
+FROM migration_195_anchored a
+JOIN migration_195_aggregated_usage au ON au.id = a.id
 WHERE us.id = a.id;
 
 ALTER TABLE user_subscriptions

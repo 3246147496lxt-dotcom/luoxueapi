@@ -67,7 +67,7 @@ function Get-SingleVersionFromTomlBlock {
 
     $matches = [regex]::Matches(
         $Block,
-        '(?m)^version[ \t]*=[ \t]*"(?<value>[^"\r\n]+)"[ \t]*$'
+        '(?m)^version[ \t]*=[ \t]*"(?<value>[^"\r\n]+)"[ \t]*(?=\r?$)'
     )
     if ($matches.Count -ne 1) {
         throw "$Label must contain exactly one version field."
@@ -84,7 +84,7 @@ function Set-SingleVersionInTomlBlock {
 
     $pattern = [regex]::new(
         '(?m)^(?<prefix>version[ \t]*=[ \t]*")[^"\r\n]+' +
-        '(?<suffix>"[ \t]*)$'
+        '(?<suffix>"[ \t]*)(?=\r?$)'
     )
     $matches = $pattern.Matches($Block)
     if ($matches.Count -ne 1) {
@@ -157,7 +157,7 @@ $cargoLockPackages = [regex]::Matches(
 $quotaViewerLockPackages = @(
     $cargoLockPackages | Where-Object {
         $_.Value -match (
-            '(?m)^name[ \t]*=[ \t]*"luoxue-quota-viewer"[ \t]*$'
+            '(?m)^name[ \t]*=[ \t]*"luoxue-quota-viewer"[ \t]*(?=\r?$)'
         )
     }
 )

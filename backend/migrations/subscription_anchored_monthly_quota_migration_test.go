@@ -13,9 +13,11 @@ func TestSubscriptionAnchoredMonthlyQuotaMigrationLocksBeforeAggregation(t *test
 
 	upperSQL := strings.ToUpper(strings.Join(strings.Fields(string(content)), " "))
 	lock := "LOCK TABLE USER_SUBSCRIPTIONS IN SHARE ROW EXCLUSIVE MODE"
+	anchoredSnapshot := "CREATE TEMP TABLE MIGRATION_195_ANCHORED"
 	require.Contains(t, upperSQL, lock)
+	require.Contains(t, upperSQL, anchoredSnapshot)
 	require.Less(t, strings.Index(upperSQL, lock), strings.Index(upperSQL, "ALTER TABLE BILLING_USAGE_ENTRIES"))
-	require.Less(t, strings.Index(upperSQL, lock), strings.Index(upperSQL, "WITH ANCHORED AS"))
+	require.Less(t, strings.Index(upperSQL, lock), strings.Index(upperSQL, anchoredSnapshot))
 	require.Contains(t, upperSQL, "DRAIN OLD/DEGRADED WRITERS")
 	require.Contains(t, upperSQL, "SAME TRANSACTION")
 }
@@ -37,30 +39,31 @@ func TestSubscriptionAnchoredMonthlyQuotaMigrationUsesReceiptLedgerWithDeduplica
 	require.Contains(t, sql, "bue.status = 'subscription'")
 	require.Contains(t, sql, "bue.subscription_amount")
 	require.Contains(t, sql, "matched_log.actual_cost")
-	require.Contains(t, sql, "COALESCE(bue.subscription_amount, matched_log.actual_cost)")
+	require.Contains(t, sql, "COALESCE( rc.subscription_amount, rc.matched_actual_cost )")
 	require.NotContains(t, sql, "bue.gross_amount")
 	require.NotContains(t, sql, "bue.charged_amount")
 	require.Contains(t, sql, "FROM usage_logs ul")
 	require.Contains(t, sql, "ul.billing_type = 1",
 		"receipt matching and legacy replay must accept only membership-billed usage logs")
-	require.Contains(t, upperSQL, "NOT EXISTS")
-	require.Contains(t, sql, "bue.usage_log_id = ul.id")
-	require.Contains(t, sql, "ul.request_id = bue.request_id")
-	require.Contains(t, sql, "bue.api_key_id = ul.api_key_id")
-	require.Contains(t, sql, "ul.api_key_id IS DISTINCT FROM bue.api_key_id")
-	require.Contains(t, sql, "ul.id IS NOT DISTINCT FROM bue.usage_log_id")
-	require.Contains(t, sql, "ul.request_id IS DISTINCT FROM bue.request_id")
-	require.Contains(t, sql, "bue.request_id IS NULL OR ul.request_id IS NULL OR ul.request_id = bue.request_id")
-	require.Contains(t, sql, "ul.user_id IS DISTINCT FROM a.user_id")
-	require.Contains(t, sql, "bue.user_id IS DISTINCT FROM a.user_id")
-	require.Contains(t, sql, "receipt_key.user_id IS DISTINCT FROM bue.user_id")
-	require.Contains(t, sql, "log_key.user_id IS DISTINCT FROM ul.user_id")
-	require.Contains(t, sql, "receipt_scan.all_receipt_count > 0")
-	require.Contains(t, sql, "receipt_scan.all_receipt_count <> 1")
-	require.Contains(t, sql, "receipt_scan.valid_receipt_count <> 1")
-	require.Contains(t, sql, "AND bue.subscription_id = ul.subscription_id")
-	require.Contains(t, sql, "ul.subscription_id IS DISTINCT FROM bue.subscription_id")
-	require.Contains(t, sql, "FROM billing_usage_entries bue WHERE bue.usage_log_id = ul.id OR")
+	require.Contains(t, sql, "bue.usage_log_id = wl.id")
+	require.Contains(t, sql, "wl.request_id = bue.request_id")
+	require.Contains(t, sql, "bue.api_key_id = wl.api_key_id")
+	require.Contains(t, sql, "ul.api_key_id IS DISTINCT FROM rr.api_key_id")
+	require.Contains(t, sql, "ul.id IS NOT DISTINCT FROM rr.usage_log_id")
+	require.Contains(t, sql, "ul.request_id IS DISTINCT FROM rr.request_id")
+	require.Contains(t, sql, "rr.request_id IS NULL OR ul.request_id IS NULL OR ul.request_id = rr.request_id")
+	require.Contains(t, sql, "ul.user_id IS DISTINCT FROM rr.subscription_user_id")
+	require.Contains(t, sql, "rc.receipt_user_id IS DISTINCT FROM rc.subscription_user_id")
+	require.Contains(t, sql, "rc.receipt_api_key_user_id IS DISTINCT FROM rc.receipt_user_id")
+	require.Contains(t, sql, "wl.log_api_key_user_id IS DISTINCT FROM wl.log_user_id")
+	require.Contains(t, sql, "wl.all_receipt_count > 0")
+	require.Contains(t, sql, "wl.all_receipt_count <> 1")
+	require.Contains(t, sql, "wl.valid_receipt_count <> 1")
+	require.Contains(t, sql, "AND bue.subscription_id = wl.subscription_id")
+	require.Contains(t, sql, "ul.subscription_id IS DISTINCT FROM rr.subscription_id")
+	require.Contains(t, sql, "FROM billing_usage_entries bue WHERE bue.usage_log_id = wl.id OR")
+	require.Contains(t, sql, "wl.all_receipt_count = 0",
+		"legacy usage must be replayed only when no receipt exists")
 	require.Contains(t, upperSQL, "UNION ALL")
 	require.Contains(t, sql, "604800 * INTERVAL '1 second'")
 	require.Contains(t, sql, "2592000 * INTERVAL '1 second'")
@@ -88,9 +91,9 @@ func TestSubscriptionAnchoredMonthlyQuotaMigrationFailsClosedOnUnreconstructable
 
 	require.Contains(t, upperSQL, "ADD COLUMN IF NOT EXISTS SUBSCRIPTION_AMOUNT DECIMAL(20, 10)")
 	require.NotContains(t, upperSQL, "ALTER COLUMN SUBSCRIPTION_AMOUNT SET NOT NULL")
-	require.Contains(t, sql, "bue.subscription_amount IS NULL")
-	require.Contains(t, sql, "matched_log.actual_cost IS NULL")
-	require.Contains(t, sql, "matched_log.created_at < a.starts_at")
+	require.Contains(t, sql, "rc.subscription_amount IS NULL")
+	require.Contains(t, sql, "rc.matched_actual_cost IS NULL")
+	require.Contains(t, sql, "rc.matched_created_at < rc.starts_at")
 	require.Contains(t, upperSQL, "RAISE EXCEPTION")
 	require.Contains(t, upperSQL, "DRAIN BILLING TRAFFIC")
 	require.Contains(t, sql, "billing_usage_entries_subscription_amount_check")
@@ -109,6 +112,33 @@ func TestSubscriptionAnchoredMonthlyQuotaMigrationFailsClosedOnUnreconstructable
 	require.Contains(t, sql, "ABS(a.weekly_usage_usd - au.weekly_used) > 0.00000001")
 	require.Contains(t, sql, "us.expires_at <= us.starts_at")
 	require.Contains(t, sql, "us.status = 'active' AND us.starts_at > CURRENT_TIMESTAMP")
+}
+
+func TestSubscriptionAnchoredMonthlyQuotaMigrationMaterializesLedgerClassificationOnce(t *testing.T) {
+	content, err := FS.ReadFile("195_subscription_anchored_monthly_quota.sql")
+	require.NoError(t, err)
+
+	sql := strings.ToUpper(strings.Join(strings.Fields(string(content)), " "))
+
+	require.Equal(t, 1, strings.Count(sql,
+		"CREATE TEMP TABLE MIGRATION_195_ANCHORED ON COMMIT DROP"))
+	require.Equal(t, 1, strings.Count(sql,
+		"CREATE TEMP TABLE MIGRATION_195_RECEIPT_CLASSIFICATION ON COMMIT DROP"))
+	require.Equal(t, 1, strings.Count(sql,
+		"CREATE TEMP TABLE MIGRATION_195_WINDOW_LOG_CLASSIFICATION ON COMMIT DROP"))
+	require.Equal(t, 1, strings.Count(sql,
+		"CREATE TEMP TABLE MIGRATION_195_AGGREGATED_USAGE ON COMMIT DROP"))
+	require.Equal(t, 1, strings.Count(sql, "WITH RELEVANT_RECEIPTS AS MATERIALIZED"))
+	require.Equal(t, 1, strings.Count(sql, "WITH WINDOW_LOGS AS MATERIALIZED"))
+	require.Equal(t, 1, strings.Count(sql, "WITH RECEIPT_USAGE AS MATERIALIZED"))
+
+	updateStart := strings.LastIndex(sql, "UPDATE USER_SUBSCRIPTIONS US SET WEEKLY_WINDOW_START")
+	require.GreaterOrEqual(t, updateStart, 0)
+	updateSQL := sql[updateStart:]
+	require.Contains(t, updateSQL,
+		"FROM MIGRATION_195_ANCHORED A JOIN MIGRATION_195_AGGREGATED_USAGE AU")
+	require.NotContains(t, updateSQL, "FROM BILLING_USAGE_ENTRIES")
+	require.NotContains(t, updateSQL, "FROM USAGE_LOGS")
 }
 
 func TestSubscriptionAnchoredMonthlyQuotaMigrationPreservesPlanConfiguration(t *testing.T) {
