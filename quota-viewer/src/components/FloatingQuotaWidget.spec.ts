@@ -25,8 +25,8 @@ const hiddenDashboardCopy = [
 const resetAt = new Date(demoOverview.quotas[0]?.resetsAt ?? 0)
 const expiresAt = new Date(demoOverview.quotas[0]?.expiresAt ?? 0)
 const beforeReset = new Date(resetAt.getTime() - 3 * 24 * 60 * 60 * 1000)
-const formatLocalDateTime = (value: Date) =>
-  `${value.getMonth() + 1}/${value.getDate()} ${String(value.getHours()).padStart(2, '0')}:${String(value.getMinutes()).padStart(2, '0')}`
+const formatLocalDate = (value: Date) =>
+  `${value.getMonth() + 1}/${value.getDate()}`
 
 const mountWidget = (overview: QuotaOverview | null = demoOverview, extra = {}) =>
   mount(FloatingQuotaWidget, {
@@ -74,11 +74,10 @@ describe('FloatingQuotaWidget', () => {
     expect(wrapper.get('.floating-quota-widget__status-dot').attributes('title')).toBe(
       '可用'
     )
-    expect(wrapper.text()).toContain(
-      `3 天 0 小时后重置 · ${formatLocalDateTime(resetAt)}`
-    )
+    expect(wrapper.text()).toContain('3 天 0 小时后重置')
+    expect(wrapper.text()).not.toContain(formatLocalDate(resetAt))
     expect(wrapper.get('.floating-quota-widget__monthly-remaining').text()).toBe(
-      `月剩余74% · ${formatLocalDateTime(expiresAt)} 到期`
+      `月剩余74% · ${formatLocalDate(expiresAt)} 到期`
     )
     expectMembershipOnly(wrapper.text())
     wrapper.unmount()
@@ -167,7 +166,7 @@ describe('FloatingQuotaWidget', () => {
       'floating-quota-widget--stale'
     )
     expect(stale.get('.floating-quota-widget__monthly-remaining').text()).toBe(
-      `月剩余74% · ${formatLocalDateTime(expiresAt)} 到期 旧数据`
+      `月剩余74% · ${formatLocalDate(expiresAt)} 到期 旧数据`
     )
     expect(stale.get('.floating-quota-widget__percent').text()).toBe('32%')
 
@@ -196,6 +195,22 @@ describe('FloatingQuotaWidget', () => {
     expect(wrapper.text()).toContain('暂无会员订阅')
     expect(wrapper.text()).not.toContain('已于 7/29 14:00 到期')
     expect(wrapper.get('.floating-quota-widget__percent').text()).toBe('—')
+    wrapper.unmount()
+  })
+
+  it('keeps an expired membership date compact when explicitly previewed', () => {
+    const expired = createDemoOverview('expired')
+    expired.quotas[0].isCurrentMembership = true
+    const wrapper = mountWidget(expired)
+    const expiredAt = new Date(expired.quotas[0].expiresAt ?? 0)
+
+    expect(wrapper.get('.floating-quota-widget').classes()).toContain(
+      'floating-quota-widget--expired'
+    )
+    expect(wrapper.get('.floating-quota-widget__reset').text()).toBe(
+      `已于 ${formatLocalDate(expiredAt)} 到期`
+    )
+    expect(wrapper.get('.floating-quota-widget__reset').text()).not.toContain(':')
     wrapper.unmount()
   })
 

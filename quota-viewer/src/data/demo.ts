@@ -7,6 +7,12 @@ import type {
 
 export type DemoPreviewState = QuotaState | 'no-membership'
 
+const demoTimestampFromNow = (milliseconds: number) =>
+  new Date(Date.now() + milliseconds).toISOString()
+const demoResetsAt = demoTimestampFromNow((2 * 24 + 14) * 60 * 60 * 1000)
+const demoExpiresAt = demoTimestampFromNow(23 * 24 * 60 * 60 * 1000)
+const demoExpiredAt = demoTimestampFromNow(-4 * 24 * 60 * 60 * 1000)
+
 // Visual-reference data only. The illustrative monthly percentage is never
 // derived in production; production shows —% unless quota overview supplies an
 // authoritative monthly_window. Request counts and categorized Token usage are
@@ -26,7 +32,7 @@ const baseQuota: QuotaItem = {
   periodLabel: '本周期',
   membershipStatus: 'active',
   statusDetailLabel: '',
-  expiresAt: '2026-08-25T09:30:00Z',
+  expiresAt: demoExpiresAt,
   isCurrentMembership: true,
   state: 'available',
   usedPercent: 68,
@@ -34,7 +40,7 @@ const baseQuota: QuotaItem = {
   limitLabel: '额度 ❄200.00',
   remainingLabel: '剩余 ❄63.80',
   resetLabel: '2 天 14 小时后重置',
-  resetsAt: '2026-08-01T06:00:00Z',
+  resetsAt: demoResetsAt,
   monthlyRemainingPercent: 74,
   periodStartLabel: '7/25 14:00',
   periodEndLabel: '8/1 14:00',
@@ -70,14 +76,14 @@ const quotaStateOverrides: Record<QuotaState, Partial<QuotaItem>> = {
   },
   expired: {
     membershipStatus: 'expired',
-    statusDetailLabel: '已于 7/29 14:00 到期',
-    expiresAt: '2026-07-29T06:00:00Z',
+    statusDetailLabel: '会员已到期',
+    expiresAt: demoExpiredAt,
     isCurrentMembership: false,
     state: 'expired',
     usedPercent: 100,
     usedLabel: '已用 ❄136.20',
     remainingLabel: '剩余 ❄0.00',
-    resetLabel: '已于 7/29 14:00 到期',
+    resetLabel: '会员已到期',
     resetsAt: null,
     monthlyRemainingPercent: null,
     periodStartLabel: null,

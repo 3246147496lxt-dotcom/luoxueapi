@@ -138,21 +138,16 @@ const parseTimestamp = (value: string | null | undefined) => {
   return Number.isNaN(parsed.getTime()) ? null : parsed
 }
 
-const formatCompactDateTime = (value: Date | null) => {
+const formatCompactDate = (value: Date | null) => {
   if (!value) return null
   const month = value.getMonth() + 1
   const day = value.getDate()
-  const hours = String(value.getHours()).padStart(2, '0')
-  const minutes = String(value.getMinutes()).padStart(2, '0')
-  return `${month}/${day} ${hours}:${minutes}`
+  return `${month}/${day}`
 }
 
 const resetAt = computed(() => parseTimestamp(quota.value?.resetsAt))
-const formattedResetAt = computed(() => formatCompactDateTime(resetAt.value))
 const expiresAt = computed(() => parseTimestamp(quota.value?.expiresAt))
-const formattedExpiresAt = computed(() =>
-  formatCompactDateTime(expiresAt.value)
-)
+const formattedExpiresAt = computed(() => formatCompactDate(expiresAt.value))
 
 const resetCountdown = computed(() => {
   if (!resetAt.value) return null
@@ -174,7 +169,9 @@ const resetLine = computed(() => {
     case 'no-membership':
       return '暂无会员订阅'
     case 'expired':
-      return quota.value?.statusDetailLabel || '会员已失效'
+      return formattedExpiresAt.value
+        ? `已于 ${formattedExpiresAt.value} 到期`
+        : quota.value?.statusDetailLabel || '会员已失效'
     case 'unavailable':
       switch (props.status) {
         case 'disconnected':
@@ -191,8 +188,7 @@ const resetLine = computed(() => {
           return props.errorMessage || '暂时无法读取额度'
       }
     default:
-      if (!resetCountdown.value || !formattedResetAt.value) return '重置时间待确认'
-      return `${resetCountdown.value} · ${formattedResetAt.value}`
+      return resetCountdown.value || '重置时间待确认'
   }
 })
 
@@ -760,6 +756,10 @@ const onCardClick = (event: MouseEvent) => {
 .floating-quota-widget__refresh:hover {
   text-decoration: underline;
   text-underline-offset: 2px;
+}
+
+.floating-quota-widget--available {
+  --widget-surface: rgba(241, 235, 250, 0.72);
 }
 
 .floating-quota-widget--warning {
