@@ -40,6 +40,7 @@ export default {
     loading: '正在读取设备',
     emptyTitle: '还没有已授权设备',
     emptyDescription: '在额度查看器中发起连接并完成只读授权后，设备会显示在这里。',
+    getViewer: '获取额度查看器',
     active: '已连接',
     pending: '待激活',
     revoked: '已撤销',

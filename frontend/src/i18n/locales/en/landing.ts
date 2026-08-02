@@ -69,6 +69,11 @@ export default {
           title: 'Troubleshoot faster',
           description:
             'Use request records and channel status to narrow down the cause of failed calls.'
+        },
+        quotaViewer: {
+          title: 'Keep quota on your desktop',
+          description: 'See weekly remaining, reset countdowns, and monthly expiry without repeatedly opening the web app.',
+          link: 'View the desktop app'
         }
       }
     },

@@ -46,6 +46,7 @@ function mountView() {
         AppLayout: { template: '<main><slot /></main>' },
         AdminPageHeader: { template: '<header><slot name="secondary-actions" /></header>' },
         Icon: true,
+        RouterLink: { props: ['to'], template: '<a :href="to"><slot /></a>' },
         ConfirmDialog: {
           props: ['show'],
           emits: ['confirm', 'cancel'],

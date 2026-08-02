@@ -289,6 +289,7 @@ func (s *FrontendServer) injectSettingsForPath(settingsJSON []byte, requestPath 
 const (
 	homeHTMLCacheKey         = "home"
 	modelCatalogHTMLCacheKey = "models.html"
+	quotaViewerHTMLCacheKey  = "quota-viewer"
 	noIndexHTMLCacheKey      = "noindex"
 )
 
@@ -307,6 +308,8 @@ func htmlRouteCacheKey(requestPath string) string {
 		return homeHTMLCacheKey
 	case "/models.html":
 		return modelCatalogHTMLCacheKey
+	case "/quota-viewer":
+		return quotaViewerHTMLCacheKey
 	default:
 		// All other SPA routes are application, authentication, callback, or
 		// unknown routes. They should remain usable in a browser but must not
@@ -336,6 +339,12 @@ func injectRouteMetadata(html, settingsJSON []byte, requestPath string) []byte {
 			return injectNoIndexMetadata(html)
 		}
 		return injectModelCatalogMetadata(html, settingsJSON)
+	case quotaViewerHTMLCacheKey:
+		backendMode, _ := publicSEOFlags(settingsJSON)
+		if backendMode {
+			return injectNoIndexMetadata(html)
+		}
+		return injectQuotaViewerMetadata(html, settingsJSON)
 	case noIndexHTMLCacheKey:
 		return injectNoIndexMetadata(html)
 	default:
@@ -386,6 +395,15 @@ func injectModelCatalogMetadata(html, settingsJSON []byte) []byte {
 	return injectIndexablePageMetadata(html, siteName, title, description, publicSiteOrigin+"/models.html")
 }
 
+// injectQuotaViewerMetadata makes the public desktop companion discoverable
+// without exposing its authenticated installer endpoints.
+func injectQuotaViewerMetadata(html, settingsJSON []byte) []byte {
+	siteName := publicSiteName(settingsJSON)
+	title := "桌面额度查看器 · " + siteName
+	description := "在 macOS 和 Windows 桌面查看周剩余、重置倒计时与月到期日，并通过只读授权连接 " + siteName + "。"
+	return injectIndexablePageMetadata(html, siteName, title, description, publicSiteOrigin+"/quota-viewer")
+}
+
 func injectIndexablePageMetadata(html []byte, siteName, title, description, canonicalURL string) []byte {
 	result := replaceHTMLTitle(html, title)
 
@@ -414,6 +432,7 @@ func injectIndexablePageMetadata(html []byte, siteName, title, description, cano
 			`<p>` + htmlpkg.EscapeString(description) + `</p>` +
 			`<nav aria-label="公开页面">` +
 			`<a href="/home">首页</a> ` +
+			`<a href="/quota-viewer">桌面额度查看器</a> ` +
 			`<a href="/tutorial-docs/">使用教程</a>` +
 			`</nav></main></noscript>`,
 	)

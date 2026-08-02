@@ -40,6 +40,18 @@ vi.mock('@/composables/useRoutePrefetch', () => ({
 }))
 
 describe('quota viewer routes', () => {
+  it('registers the product page as a public route', async () => {
+    const { default: router } = await import('@/router')
+    const route = router.getRoutes().find((record) => record.name === 'QuotaViewerLanding')
+
+    expect(route?.path).toBe('/quota-viewer')
+    expect(route?.components?.default).toBeTypeOf('function')
+    expect(route?.meta).toMatchObject({
+      requiresAuth: false,
+      titleKey: 'quotaViewerLanding.meta.title',
+    })
+  })
+
   it('registers the authorization page as an authenticated user route', async () => {
     const { default: router } = await import('@/router')
     const route = router.getRoutes().find((record) => record.name === 'QuotaViewerAuthorize')

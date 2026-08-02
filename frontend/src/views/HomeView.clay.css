@@ -445,6 +445,26 @@
   color: var(--emerald);
 }
 
+.home-page .capability-marker--4 {
+  color: var(--primary-violet);
+}
+
+.home-page .capability-inline-link {
+  width: fit-content;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 4px;
+  color: var(--lx-clay-accent-deep);
+  font-size: 13px;
+  font-weight: 800;
+  text-decoration: none;
+}
+
+.home-page .capability-inline-link:hover {
+  color: var(--primary-violet);
+}
+
 .home-page :where(.capability-list, .steps-list) h3 {
   color: var(--text-primary);
   font-size: 20px;

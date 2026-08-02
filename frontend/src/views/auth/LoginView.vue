@@ -154,7 +154,7 @@
       <p class="login-footer text-gray-500 dark:text-dark-400">
         {{ t('auth.dontHaveAccount') }}
         <router-link
-          to="/register"
+          :to="registerRoute"
           class="login-link ml-1 font-semibold text-primary-700 transition-colors hover:text-primary-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500/50 dark:text-primary-300 dark:hover:text-primary-200"
         >
           {{ t('auth.signUp') }}
@@ -176,7 +176,7 @@
 
 <script setup lang="ts">
 import { computed, ref, reactive, onMounted, watch } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { AuthLayout } from '@/components/layout'
 import LinuxDoOAuthSection from '@/components/auth/LinuxDoOAuthSection.vue'
@@ -193,6 +193,7 @@ import { getPublicSettings, isTotp2FARequired, isWeChatWebOAuthEnabled } from '@
 import type { LoginAgreementDocument, TotpLoginResponse } from '@/types'
 import { extractI18nErrorMessage } from '@/utils/apiError'
 import { clearAllAffiliateReferralCodes } from '@/utils/oauthAffiliate'
+import { authRedirectRoute, sanitizeInternalRedirect } from '@/auth/safeRedirect'
 
 const { t } = useI18n()
 const LOGIN_AGREEMENT_STORAGE_KEY = 'sub2api_login_agreement_consent'
@@ -200,8 +201,10 @@ const LOGIN_AGREEMENT_STORAGE_KEY = 'sub2api_login_agreement_consent'
 // ==================== Router & Stores ====================
 
 const router = useRouter()
+const route = useRoute()
 const authStore = useAuthStore()
 const appStore = useAppStore()
+const registerRoute = computed(() => authRedirectRoute('/register', route.query.redirect))
 
 // ==================== State ====================
 
@@ -475,7 +478,7 @@ async function handleLogin(): Promise<void> {
     appStore.showSuccess(t('auth.loginSuccess'))
 
     // Redirect to dashboard or intended route
-    const redirectTo = (router.currentRoute.value.query.redirect as string) || '/dashboard'
+    const redirectTo = sanitizeInternalRedirect(router.currentRoute.value.query.redirect)
     await router.push(redirectTo)
   } catch (error: unknown) {
     // Reset Turnstile on error
@@ -509,7 +512,7 @@ async function handle2FAVerify(code: string): Promise<void> {
     appStore.showSuccess(t('auth.loginSuccess'))
 
     // Redirect to dashboard or intended route
-    const redirectTo = (router.currentRoute.value.query.redirect as string) || '/dashboard'
+    const redirectTo = sanitizeInternalRedirect(router.currentRoute.value.query.redirect)
     await router.push(redirectTo)
   } catch (error: unknown) {
     const err = error as { message?: string; response?: { data?: { message?: string } } }

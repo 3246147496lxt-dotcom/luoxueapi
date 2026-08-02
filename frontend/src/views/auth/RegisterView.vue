@@ -268,7 +268,7 @@
       <p class="register-footer text-gray-500 dark:text-dark-400">
         {{ t('auth.alreadyHaveAccount') }}
         <router-link
-          to="/login"
+          :to="loginRoute"
           class="register-link ml-1 font-semibold text-primary-700 transition-colors hover:text-primary-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500/50 dark:text-primary-300 dark:hover:text-primary-200"
         >
           {{ t('auth.signIn') }}
@@ -310,6 +310,7 @@ import {
   resolveAffiliateReferralCode
 } from '@/utils/oauthAffiliate'
 import type { LoginAgreementDocument } from '@/types'
+import { authRedirectRoute, sanitizeInternalRedirect } from '@/auth/safeRedirect'
 
 const { t, locale } = useI18n()
 const LOGIN_AGREEMENT_STORAGE_KEY = 'sub2api_login_agreement_consent'
@@ -320,6 +321,8 @@ const router = useRouter()
 const route = useRoute()
 const authStore = useAuthStore()
 const appStore = useAppStore()
+const pendingRedirectPath = computed(() => sanitizeInternalRedirect(route.query.redirect, ''))
+const loginRoute = computed(() => authRedirectRoute('/login', route.query.redirect))
 
 // ==================== State ====================
 
@@ -854,6 +857,7 @@ async function handleRegister(): Promise<void> {
           turnstile_token: turnstileToken.value,
           promo_code: formData.promo_code || undefined,
           invitation_code: formData.invitation_code || undefined,
+          pending_redirect: pendingRedirectPath.value || undefined,
           ...(affCode ? { aff_code: affCode } : {})
         })
       )
@@ -877,8 +881,7 @@ async function handleRegister(): Promise<void> {
     // Show success toast
     appStore.showSuccess(t('auth.accountCreatedSuccess', { siteName: siteName.value }))
 
-    // Redirect to dashboard
-    await router.push('/dashboard')
+    await router.push(pendingRedirectPath.value || '/dashboard')
   } catch (error: unknown) {
     // Reset Turnstile on error
     if (turnstileRef.value) {

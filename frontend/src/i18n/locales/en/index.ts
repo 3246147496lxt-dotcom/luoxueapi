@@ -6,6 +6,7 @@ import misc from './misc'
 import chat from './chat'
 import personalSettings from './personalSettings'
 import desktop from './desktop'
+import quotaViewerLanding from './quotaViewerLanding'
 
 export default {
   ...landing,
@@ -16,4 +17,5 @@ export default {
   ...chat,
   ...personalSettings,
   ...desktop,
+  ...quotaViewerLanding,
 }

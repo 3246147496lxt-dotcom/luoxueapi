@@ -4,7 +4,8 @@
     :class="{
       'public-site-page--dark': isDark,
       'public-site-page--home': page === 'home',
-      'public-site-page--models': page === 'models'
+      'public-site-page--models': page === 'models',
+      'public-site-page--quota-viewer': page === 'quota-viewer'
     }"
   >
     <header class="public-site-header" :class="{ 'public-site-header--elevated': isHeaderElevated }">
@@ -168,7 +169,7 @@ import { resolveDocumentationUrl, resolveTutorialUrl } from '@/utils/documentati
 import { sanitizeUrl } from '@/utils/url'
 
 const props = withDefaults(defineProps<{
-  page?: 'home' | 'models'
+  page?: 'home' | 'models' | 'quota-viewer'
   showModelCatalog?: boolean
 }>(), {
   page: 'home',

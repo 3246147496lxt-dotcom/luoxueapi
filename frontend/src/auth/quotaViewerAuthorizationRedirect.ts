@@ -1,4 +1,5 @@
 const QUOTA_VIEWER_AUTHORIZATION_PATH = '/quota-viewer/authorize'
+const QUOTA_VIEWER_LANDING_PATH = '/quota-viewer'
 const QUOTA_VIEWER_CODE_PATTERN = /^[23456789ABCDEFGHJKLMNPQRSTUVWXYZ]{8}$/
 
 export interface LocationSnapshot {
@@ -16,15 +17,26 @@ function hasValidQuotaViewerCode(search: string): boolean {
   return QUOTA_VIEWER_CODE_PATTERN.test(compact)
 }
 
+function hasValidQuotaViewerDownload(search: string): boolean {
+  const params = new URLSearchParams(search)
+  const platforms = params.getAll('download')
+  if (platforms.length !== 1 || Array.from(params.keys()).some((key) => key !== 'download')) {
+    return false
+  }
+  return platforms[0] === 'macos' || platforms[0] === 'windows'
+}
+
 export function sessionExpiredLoginURL(location: LocationSnapshot): string {
   const pathname = location.pathname || ''
   const search = location.search || ''
   const hash = location.hash || ''
 
-  if (
-    pathname !== QUOTA_VIEWER_AUTHORIZATION_PATH
-    || !hasValidQuotaViewerCode(search)
-  ) {
+  const validAuthorization = pathname === QUOTA_VIEWER_AUTHORIZATION_PATH
+    && hasValidQuotaViewerCode(search)
+  const validDownload = pathname === QUOTA_VIEWER_LANDING_PATH
+    && hasValidQuotaViewerDownload(search)
+
+  if (!validAuthorization && !validDownload) {
     return '/login'
   }
 

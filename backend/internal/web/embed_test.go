@@ -252,6 +252,40 @@ func TestFrontendServer_InjectSettings(t *testing.T) {
 		assert.Contains(t, string(result), `<noscript><main`)
 	})
 
+	t.Run("injects_route_specific_quota_viewer_metadata", func(t *testing.T) {
+		provider := &mockSettingsProvider{settings: map[string]any{"site_name": "落雪API"}}
+		server, err := NewFrontendServer(provider)
+		require.NoError(t, err)
+
+		result := server.injectSettingsForPath([]byte(`{"site_name":"落雪API"}`), "/quota-viewer")
+		body := string(result)
+
+		assert.Contains(t, body, "<title>桌面额度查看器 · 落雪API</title>")
+		assert.Contains(t, body, `content="在 macOS 和 Windows 桌面查看周剩余`)
+		assert.Contains(t, body, `<meta name="robots" content="index, follow`)
+		assert.Contains(t, body, `<link rel="canonical" href="https://luoxueapi.cc/quota-viewer" />`)
+		assert.Contains(t, body, `<meta property="og:url" content="https://luoxueapi.cc/quota-viewer" />`)
+		assert.Contains(t, body, `<noscript><main`)
+	})
+
+	t.Run("marks_quota_viewer_noindex_in_backend_mode", func(t *testing.T) {
+		provider := &mockSettingsProvider{settings: map[string]any{
+			"site_name":            "落雪API",
+			"backend_mode_enabled": true,
+		}}
+		server, err := NewFrontendServer(provider)
+		require.NoError(t, err)
+
+		result := server.injectSettingsForPath(
+			[]byte(`{"site_name":"落雪API","backend_mode_enabled":true}`),
+			"/quota-viewer",
+		)
+		body := string(result)
+
+		assert.Contains(t, body, `<meta name="robots" content="noindex, nofollow" />`)
+		assert.NotContains(t, body, `rel="canonical"`)
+	})
+
 	t.Run("marks_disabled_model_catalog_noindex", func(t *testing.T) {
 		provider := &mockSettingsProvider{settings: map[string]any{
 			"site_name":                    "落雪API",
@@ -327,6 +361,8 @@ func TestHTMLRouteCacheKey(t *testing.T) {
 		{path: "/index.html", want: homeHTMLCacheKey},
 		{path: "/models.html", want: modelCatalogHTMLCacheKey},
 		{path: "/models.html/", want: modelCatalogHTMLCacheKey},
+		{path: "/quota-viewer", want: quotaViewerHTMLCacheKey},
+		{path: "/quota-viewer/", want: quotaViewerHTMLCacheKey},
 		{path: "/dashboard", want: noIndexHTMLCacheKey},
 		{path: "/admin/dashboard", want: noIndexHTMLCacheKey},
 		{path: "/not-found", want: noIndexHTMLCacheKey},
@@ -528,6 +564,7 @@ func TestFrontendServer_ServeIndexHTML(t *testing.T) {
 		home := request("/home")
 		private := request("/dashboard")
 		models := request("/models.html")
+		quotaViewer := request("/quota-viewer")
 		homeAgain := request("/")
 
 		assert.Contains(t, home.Body.String(), `<link rel="canonical" href="https://luoxueapi.cc/home" />`)
@@ -535,8 +572,10 @@ func TestFrontendServer_ServeIndexHTML(t *testing.T) {
 		assert.Contains(t, private.Body.String(), `content="noindex, nofollow"`)
 		assert.Equal(t, "noindex, nofollow", private.Header().Get("X-Robots-Tag"))
 		assert.Contains(t, models.Body.String(), `<link rel="canonical" href="https://luoxueapi.cc/models.html" />`)
+		assert.Contains(t, quotaViewer.Body.String(), `<link rel="canonical" href="https://luoxueapi.cc/quota-viewer" />`)
+		assert.Empty(t, quotaViewer.Header().Get("X-Robots-Tag"))
 		assert.Contains(t, homeAgain.Body.String(), `<link rel="canonical" href="https://luoxueapi.cc/home" />`)
-		assert.Equal(t, 3, provider.called)
+		assert.Equal(t, 4, provider.called)
 	})
 }
 
@@ -887,6 +926,7 @@ func TestFrontendServer_Middleware(t *testing.T) {
 		assert.Contains(t, sitemapWriter.Header().Get("Content-Type"), "xml")
 		assert.Contains(t, sitemapWriter.Body.String(), `<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">`)
 		assert.Contains(t, sitemapWriter.Body.String(), `<loc>https://luoxueapi.cc/home</loc>`)
+		assert.Contains(t, sitemapWriter.Body.String(), `<loc>https://luoxueapi.cc/quota-viewer</loc>`)
 		assert.NotContains(t, sitemapWriter.Body.String(), `<loc>https://luoxueapi.cc/models.html</loc>`)
 		assert.NotContains(t, sitemapWriter.Body.String(), "<!doctype html>")
 	})

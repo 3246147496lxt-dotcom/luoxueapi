@@ -30,6 +30,7 @@ describe('shellDestinations', () => {
     expect(ACCOUNT_DESTINATION_PATHS).toEqual({
       pricing: '/pricing',
       subscriptions: '/subscriptions',
+      quotaViewer: '/quota-viewer',
       wallet: '/purchase',
       orders: '/orders',
       profile: '/profile',
@@ -51,6 +52,7 @@ describe('shellDestinations', () => {
     expect(REGULAR_ACCOUNT_DESTINATION_SPECS.map(({ id }) => id)).toEqual([
       'pricing',
       'subscriptions',
+      'quotaViewer',
       'wallet',
       'settings',
       'orders',
@@ -59,6 +61,7 @@ describe('shellDestinations', () => {
     expect(ADMIN_ACCOUNT_DESTINATION_SPECS.map(({ id }) => id)).toEqual([
       'pricing',
       'subscriptions',
+      'quotaViewer',
       'wallet',
       'settings',
       'orders',
@@ -77,6 +80,7 @@ describe('shellDestinations', () => {
       },
     }
     const subscriptions = findSpec(REGULAR_SHELL_DESTINATION_SPECS, 'subscriptions')
+    const quotaViewer = findSpec(REGULAR_SHELL_DESTINATION_SPECS, 'quotaViewer')
     const pricing = findSpec(REGULAR_SHELL_DESTINATION_SPECS, 'pricing')
     const wallet = findSpec(REGULAR_SHELL_DESTINATION_SPECS, 'wallet')
     const settings = findSpec(REGULAR_SHELL_DESTINATION_SPECS, 'settings')
@@ -87,6 +91,8 @@ describe('shellDestinations', () => {
     expect(isShellDestinationAccessible(pricing, context)).toBe(false)
     expect(isShellDestinationVisible(subscriptions, context)).toBe(false)
     expect(isShellDestinationAccessible(subscriptions, context)).toBe(false)
+    expect(isShellDestinationVisible(quotaViewer, context)).toBe(true)
+    expect(isShellDestinationAccessible(quotaViewer, context)).toBe(true)
     expect(isShellDestinationVisible(orders, context)).toBe(false)
     expect(isShellDestinationAccessible(orders, context)).toBe(true)
     expect(isShellDestinationVisible(wallet, context)).toBe(true)
@@ -147,7 +153,7 @@ describe('shellDestinations', () => {
         context,
         'account',
       ).map(({ id }) => id),
-    ).toEqual(['wallet', 'settings', 'profile'])
+    ).toEqual(['quotaViewer', 'wallet', 'settings', 'profile'])
     expect(
       selectVisibleShellDestinations(
         REGULAR_SHELL_DESTINATION_SPECS,

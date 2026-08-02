@@ -40,6 +40,7 @@ export default {
     loading: 'Loading devices',
     emptyTitle: 'No authorized devices',
     emptyDescription: 'Start a connection in the quota viewer and complete read-only authorization to see a device here.',
+    getViewer: 'Get the quota viewer',
     active: 'Connected',
     pending: 'Pending activation',
     revoked: 'Revoked',

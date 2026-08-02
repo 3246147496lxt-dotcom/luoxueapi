@@ -167,6 +167,10 @@
               </span>
               <h3>{{ t(item.titleKey) }}</h3>
               <p>{{ t(item.descriptionKey) }}</p>
+              <RouterLink v-if="item.to" :to="item.to" class="capability-inline-link">
+                {{ t(item.linkKey) }}
+                <Icon name="arrowRight" size="xs" aria-hidden="true" />
+              </RouterLink>
             </li>
           </ul>
         </div>
@@ -330,17 +334,30 @@ const capabilityItems = [
   {
     titleKey: 'home.capabilities.items.usage.title',
     descriptionKey: 'home.capabilities.items.usage.description',
-    icon: 'search'
+    icon: 'search',
+    to: '',
+    linkKey: ''
   },
   {
     titleKey: 'home.capabilities.items.keys.title',
     descriptionKey: 'home.capabilities.items.keys.description',
-    icon: 'cog'
+    icon: 'cog',
+    to: '',
+    linkKey: ''
   },
   {
     titleKey: 'home.capabilities.items.diagnostics.title',
     descriptionKey: 'home.capabilities.items.diagnostics.description',
-    icon: 'zap'
+    icon: 'zap',
+    to: '',
+    linkKey: ''
+  },
+  {
+    titleKey: 'home.capabilities.items.quotaViewer.title',
+    descriptionKey: 'home.capabilities.items.quotaViewer.description',
+    icon: 'download',
+    to: '/quota-viewer',
+    linkKey: 'home.capabilities.items.quotaViewer.link'
   }
 ] as const
 

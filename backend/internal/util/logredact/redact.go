@@ -20,6 +20,7 @@ var defaultSensitiveKeys = map[string]struct{}{
 	"id_token":           {},
 	"s2a_launch_code":    {},
 	"launch_url":         {},
+	"download_path":      {},
 	"client_secret":      {},
 	"password":           {},
 }
@@ -33,6 +34,7 @@ var defaultSensitiveKeyList = []string{
 	"id_token",
 	"s2a_launch_code",
 	"launch_url",
+	"download_path",
 	"client_secret",
 	"password",
 }

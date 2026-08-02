@@ -49,6 +49,17 @@ func TestRedactText_EmbeddedPageLaunchURLInsideJSON(t *testing.T) {
 	}
 }
 
+func TestRedactText_QuotaViewerDownloadPathInsideJSON(t *testing.T) {
+	in := `{"download_path":"/api/v1/quota/releases/macos/latest/download?code=raw-one-time-code"}`
+	out := RedactText(in)
+	if strings.Contains(out, "raw-one-time-code") || strings.Contains(out, "/api/v1/quota/") {
+		t.Fatalf("expected full quota viewer download path redacted, got %q", out)
+	}
+	if !strings.Contains(out, `"download_path":"***"`) {
+		t.Fatalf("expected download-path key redacted in %q", out)
+	}
+}
+
 func TestRedactText_GOCSPX(t *testing.T) {
 	in := "client_secret=GOCSPX-your-client-secret"
 	out := RedactText(in)

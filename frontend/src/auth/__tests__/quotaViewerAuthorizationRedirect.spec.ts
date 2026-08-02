@@ -26,4 +26,19 @@ describe('quota viewer authorization session expiry redirect', () => {
       search: '?user_code=ABCD-EFGH&user_code=JKLM-NPQR',
     })).toBe('/login')
   })
+
+  it('preserves only a supported installer intent on the public product page', () => {
+    expect(sessionExpiredLoginURL({
+      pathname: '/quota-viewer',
+      search: '?download=macos',
+    })).toBe('/login?redirect=%2Fquota-viewer%3Fdownload%3Dmacos')
+    expect(sessionExpiredLoginURL({
+      pathname: '/quota-viewer',
+      search: '?download=linux',
+    })).toBe('/login')
+    expect(sessionExpiredLoginURL({
+      pathname: '/quota-viewer',
+      search: '?download=windows&next=https://example.com',
+    })).toBe('/login')
+  })
 })

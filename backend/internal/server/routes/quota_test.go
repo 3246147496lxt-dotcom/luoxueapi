@@ -4,6 +4,7 @@ package routes
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -131,4 +132,121 @@ func TestQuotaOverviewRouteRemainsAvailableInStandardMode(t *testing.T) {
 	require.Equal(t, "private, no-store", recorder.Header().Get("Cache-Control"))
 	require.Equal(t, "Authorization", recorder.Header().Get("Vary"))
 	require.Equal(t, 1, repo.calls)
+}
+
+func TestQuotaViewerInstallerDownloadIssueRouteRequiresJWT(t *testing.T) {
+	redisServer := miniredis.RunT(t)
+	redisClient := redis.NewClient(&redis.Options{Addr: redisServer.Addr()})
+	t.Cleanup(func() { require.NoError(t, redisClient.Close()) })
+
+	jwtCalls := 0
+	jwtAuth := func(c *gin.Context) {
+		jwtCalls++
+		c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"message": "authentication required"})
+	}
+	pass := func(c *gin.Context) { c.Next() }
+
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	RegisterQuotaRoutes(
+		router.Group("/api/v1"),
+		&handler.Handlers{
+			QuotaAuth:     handler.NewQuotaAuthHandler(nil),
+			QuotaOverview: handler.NewQuotaOverviewHandler(nil),
+		},
+		middleware.JWTAuthMiddleware(jwtAuth),
+		middleware.QuotaAuthMiddleware(pass),
+		middleware.AuditLogMiddleware(pass),
+		nil,
+		&config.Config{RunMode: config.RunModeStandard},
+		redisClient,
+	)
+
+	var routeExists bool
+	for _, route := range router.Routes() {
+		if route.Method == http.MethodPost && route.Path == "/api/v1/quota/releases/:platform/latest/download" {
+			routeExists = true
+			break
+		}
+	}
+	require.True(t, routeExists)
+
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(
+		http.MethodPost,
+		"/api/v1/quota/releases/macos/latest/download",
+		nil,
+	)
+	router.ServeHTTP(recorder, request)
+
+	require.Equal(t, http.StatusUnauthorized, recorder.Code)
+	require.Equal(t, 1, jwtCalls)
+	require.Equal(t, "no-store", recorder.Header().Get("Cache-Control"))
+	require.Equal(t, "no-referrer", recorder.Header().Get("Referrer-Policy"))
+}
+
+func TestQuotaViewerInstallerDownloadRoutesIssueAuditAndRedirectOnce(t *testing.T) {
+	redisServer := miniredis.RunT(t)
+	redisClient := redis.NewClient(&redis.Options{Addr: redisServer.Addr()})
+	t.Cleanup(func() { require.NoError(t, redisClient.Close()) })
+
+	jwtAuth := func(c *gin.Context) {
+		c.Set(string(middleware.ContextKeyUser), middleware.AuthSubject{UserID: 42})
+		c.Set(string(middleware.ContextKeyUserRole), "user")
+		c.Next()
+	}
+	var auditAction string
+	audit := func(c *gin.Context) {
+		c.Next()
+		auditAction = c.GetString("audit_action")
+	}
+	pass := func(c *gin.Context) { c.Next() }
+
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	RegisterQuotaRoutes(
+		router.Group("/api/v1"),
+		&handler.Handlers{
+			QuotaAuth:     handler.NewQuotaAuthHandler(nil),
+			QuotaOverview: handler.NewQuotaOverviewHandler(nil),
+		},
+		middleware.JWTAuthMiddleware(jwtAuth),
+		middleware.QuotaAuthMiddleware(pass),
+		middleware.AuditLogMiddleware(audit),
+		nil,
+		&config.Config{RunMode: config.RunModeStandard},
+		redisClient,
+	)
+
+	issueRecorder := httptest.NewRecorder()
+	issueRequest := httptest.NewRequest(
+		http.MethodPost,
+		"/api/v1/quota/releases/windows/latest/download",
+		nil,
+	)
+	router.ServeHTTP(issueRecorder, issueRequest)
+	require.Equal(t, http.StatusOK, issueRecorder.Code, issueRecorder.Body.String())
+	require.Equal(t, handler.QuotaViewerInstallerDownloadAuditAction, auditAction)
+
+	var issueResponse struct {
+		Data service.QuotaViewerInstallerDownload `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(issueRecorder.Body.Bytes(), &issueResponse))
+	require.Equal(t, "windows", issueResponse.Data.Platform)
+	require.Equal(t, "2.0.0-rc.5", issueResponse.Data.Version)
+
+	downloadRecorder := httptest.NewRecorder()
+	downloadRequest := httptest.NewRequest(http.MethodGet, issueResponse.Data.DownloadPath, nil)
+	router.ServeHTTP(downloadRecorder, downloadRequest)
+	require.Equal(t, http.StatusTemporaryRedirect, downloadRecorder.Code)
+	require.Equal(
+		t,
+		"https://github.com/3246147496lxt-dotcom/luoxueapi/releases/download/v2.0.0-rc.5/Luoxue-Quota-Viewer_2.0.0-rc.5_windows-x64_NSIS-UNSIGNED.exe",
+		downloadRecorder.Header().Get("Location"),
+	)
+
+	replayRecorder := httptest.NewRecorder()
+	replayRequest := httptest.NewRequest(http.MethodGet, issueResponse.Data.DownloadPath, nil)
+	router.ServeHTTP(replayRecorder, replayRequest)
+	require.Equal(t, http.StatusUnauthorized, replayRecorder.Code)
 }

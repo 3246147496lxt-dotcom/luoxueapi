@@ -39,8 +39,12 @@
         </span>
         <div>
           <h2>{{ t('quotaViewerDevices.emptyTitle') }}</h2>
-          <p>{{ t('quotaViewerDevices.emptyDescription') }}</p>
-        </div>
+        <p>{{ t('quotaViewerDevices.emptyDescription') }}</p>
+        <RouterLink to="/quota-viewer" class="btn btn-secondary mt-2">
+          <Icon name="download" size="sm" aria-hidden="true" />
+          {{ t('quotaViewerDevices.getViewer') }}
+        </RouterLink>
+      </div>
       </div>
 
       <section v-else class="quota-viewer-device-list" :aria-label="t('quotaViewerDevices.title')">

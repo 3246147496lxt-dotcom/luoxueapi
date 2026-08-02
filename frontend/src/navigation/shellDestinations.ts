@@ -9,6 +9,7 @@ import type { PersonalSettingsSection } from './personalSettingsRoute'
 export const ACCOUNT_DESTINATION_PATHS = Object.freeze({
   pricing: '/pricing',
   subscriptions: '/subscriptions',
+  quotaViewer: '/quota-viewer',
   wallet: '/purchase',
   orders: '/orders',
   profile: '/profile',
@@ -128,6 +129,16 @@ export const ACCOUNT_DESTINATION_DEFINITIONS = [
       visibility: 'hidden',
       access: 'blocked',
     },
+  },
+  {
+    id: 'quotaViewer',
+    labelKey: 'quotaViewerLanding.meta.title',
+    placement: 'account',
+    target: {
+      kind: 'route',
+      path: ACCOUNT_DESTINATION_PATHS.quotaViewer,
+    },
+    simpleMode: VISIBLE_IN_SIMPLE_MODE,
   },
   {
     id: 'wallet',

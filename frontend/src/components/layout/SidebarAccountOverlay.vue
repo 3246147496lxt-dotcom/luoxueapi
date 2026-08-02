@@ -99,6 +99,18 @@
               <Icon name="chevronRight" size="xs" aria-hidden="true" />
             </RouterLink>
 
+            <RouterLink
+              v-if="quotaViewerLink"
+              :to="quotaViewerLink.to"
+              class="account-panel__row"
+              data-testid="account-quota-viewer-link"
+              @click="emit('close', false)"
+            >
+              <Icon :name="quotaViewerLink.icon" size="sm" aria-hidden="true" />
+              <span class="min-w-0 flex-1 truncate">{{ quotaViewerLink.label }}</span>
+              <Icon name="chevronRight" size="xs" aria-hidden="true" />
+            </RouterLink>
+
             <button
               type="button"
               data-testid="account-open-settings"
@@ -211,6 +223,7 @@ const props = defineProps<{
   summary: AccountPanelSummary
   purchaseLink: AccountPanelLink | null
   subscriptionLink: AccountPanelLink | null
+  quotaViewerLink?: AccountPanelLink | null
   resourceLinks: AccountResourceLink[]
   showOnboarding: boolean
 }>()

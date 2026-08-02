@@ -66,6 +66,11 @@ export default {
         diagnostics: {
           title: '快速排查异常',
           description: '发生调用异常时，结合使用记录与渠道状态缩小排查范围。'
+        },
+        quotaViewer: {
+          title: '额度留在桌面',
+          description: '查看周剩余、重置倒计时和月到期日，不必反复打开网页。',
+          link: '查看桌面版'
         }
       }
     },

@@ -173,6 +173,7 @@ import {
   loadAffiliateReferralCode,
   oauthAffiliatePayload
 } from '@/utils/oauthAffiliate'
+import { authRedirectRoute, sanitizeInternalRedirect } from '@/auth/safeRedirect'
 
 const { t, locale } = useI18n()
 
@@ -554,7 +555,7 @@ async function handleVerify(): Promise<void> {
     appStore.showSuccess(t('auth.accountCreatedSuccess', { siteName: siteName.value }))
 
     // Redirect to dashboard
-    await router.push(pendingRedirect.value || '/dashboard')
+    await router.push(sanitizeInternalRedirect(pendingRedirect.value))
   } catch (error: unknown) {
     errorMessage.value = buildAuthErrorMessage(error, {
       fallback: t('auth.verifyFailed')
@@ -571,7 +572,7 @@ function handleBack(): void {
   sessionStorage.removeItem('register_data')
 
   // Go back to registration
-  router.push('/register')
+  router.push(authRedirectRoute('/register', pendingRedirect.value))
 }
 
 function buildEmailSuffixNotAllowedMessage(): string {

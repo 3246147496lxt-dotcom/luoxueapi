@@ -65,6 +65,17 @@ const routes: RouteRecordRaw[] = [
     }
   },
   {
+    path: '/quota-viewer',
+    name: 'QuotaViewerLanding',
+    component: () => import('@/views/public/QuotaViewerLandingView.vue'),
+    meta: {
+      requiresAuth: false,
+      title: 'Desktop Quota Viewer',
+      titleKey: 'quotaViewerLanding.meta.title',
+      descriptionKey: 'quotaViewerLanding.meta.description'
+    }
+  },
+  {
     path: '/login',
     name: 'Login',
     component: () => import('@/views/auth/LoginView.vue'),

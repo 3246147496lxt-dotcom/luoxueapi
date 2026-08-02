@@ -4,7 +4,14 @@
       <AdminPageHeader
         :title="t('userSubscriptions.title')"
         :description="t('userSubscriptions.description')"
-      />
+      >
+        <template #secondary-actions>
+          <RouterLink to="/quota-viewer" class="btn btn-secondary min-h-11">
+            <Icon name="download" size="sm" aria-hidden="true" />
+            {{ t('quotaViewerLanding.entry.subscription') }}
+          </RouterLink>
+        </template>
+      </AdminPageHeader>
 
       <!-- Loading State -->
       <div v-if="loading" class="flex justify-center py-12">

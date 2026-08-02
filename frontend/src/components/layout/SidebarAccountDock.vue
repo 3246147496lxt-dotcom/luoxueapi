@@ -69,6 +69,7 @@
       :summary="panelSummary"
       :purchase-link="purchaseLink"
       :subscription-link="subscriptionLink"
+      :quota-viewer-link="quotaViewerLink"
       :resource-links="resourceLinks"
       :show-onboarding="showOnboarding"
       @close="closePanel"
@@ -186,6 +187,23 @@ const subscriptionLink = computed<AccountPanelLink | null>(() => {
     label: t(subscriptionSpec.labelKey),
     to: subscriptionSpec.target.path,
     icon: 'creditCard',
+  }
+})
+
+const quotaViewerLink = computed<AccountPanelLink | null>(() => {
+  const quotaViewerSpec = selectVisibleShellDestinations(
+    getShellDestinationSpecs(audience.value),
+    destinationContext.value,
+    'account',
+  ).find((spec) => spec.id === 'quotaViewer' && spec.target.kind === 'route')
+
+  if (!quotaViewerSpec || quotaViewerSpec.target.kind !== 'route') return null
+
+  return {
+    id: quotaViewerSpec.id,
+    label: t(quotaViewerSpec.labelKey),
+    to: quotaViewerSpec.target.path,
+    icon: 'download',
   }
 })
 
