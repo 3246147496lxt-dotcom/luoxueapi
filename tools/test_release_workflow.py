@@ -384,6 +384,14 @@ class ReleaseWorkflowSecurityTest(unittest.TestCase):
             with self.subTest(prepare_script_requirement=required):
                 self.assertIn(required, WINDOWS_RELEASE_PREPARE_SCRIPT)
 
+        for crlf_safe_pattern in [
+            r'(?m)^version[ \t]*=[ \t]*"(?<value>[^"\r\n]+)"[ \t]*(?=\r?$)',
+            r'(?<suffix>"[ \t]*)(?=\r?$)',
+            r'(?m)^name[ \t]*=[ \t]*"luoxue-quota-viewer"[ \t]*(?=\r?$)',
+        ]:
+            with self.subTest(crlf_safe_pattern=crlf_safe_pattern):
+                self.assertIn(crlf_safe_pattern, WINDOWS_RELEASE_PREPARE_SCRIPT)
+
         for required in [
             "[Diagnostics.FileVersionInfo]::GetVersionInfo",
             ".FileVersion",
