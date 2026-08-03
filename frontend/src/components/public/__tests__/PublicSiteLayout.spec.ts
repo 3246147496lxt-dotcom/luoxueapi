@@ -21,7 +21,8 @@ const testState = vi.hoisted(() => ({
       site_name: '落雪API',
       site_logo: '',
       doc_url: '/tutorial-docs/',
-      public_model_catalog_enabled: false
+      public_model_catalog_enabled: false,
+      skill_marketplace_enabled: false
     },
     siteName: '落雪API',
     siteLogo: '',
@@ -48,7 +49,8 @@ const messages: Record<string, string> = {
   'home.footer.tutorial': '使用教程',
   'home.footer.apiDocs': 'API 文档',
   'home.footer.channelStatus': '渠道状态',
-  'modelCatalog.navLabel': '模型广场'
+  'modelCatalog.navLabel': '模型广场',
+  'skills.navLabel': 'Skill 市场'
 }
 
 vi.mock('vue-i18n', async (importOriginal) => {
@@ -77,7 +79,7 @@ const RouterLinkStub = defineComponent({
   template: '<a v-bind="$attrs" :data-to="typeof to === \'string\' ? to : JSON.stringify(to)"><slot /></a>'
 })
 
-function mountLayout(page: 'home' | 'models' = 'home') {
+function mountLayout(page: 'home' | 'models' | 'skills' = 'home') {
   return mount(PublicSiteLayout, {
     props: { page },
     slots: { default: '<main data-testid="content">Content</main>' },
@@ -101,6 +103,7 @@ beforeEach(() => {
   testState.appStore.cachedPublicSettings.doc_url = '/tutorial-docs/'
   testState.appStore.docUrl = ''
   testState.appStore.cachedPublicSettings.public_model_catalog_enabled = false
+  testState.appStore.cachedPublicSettings.skill_marketplace_enabled = false
   testState.appStore.backendModeEnabled = false
   document.documentElement.classList.remove('dark')
   localStorage.clear()
@@ -146,7 +149,7 @@ describe('PublicSiteLayout', () => {
     expect(homeWrapper.classes()).toContain('public-site-page--home')
     expect(homeWrapper.classes()).not.toContain('public-site-page--models')
     expect(homeWrapper.get('[data-testid="public-site-brand-logo"]').attributes('src'))
-      .toBe('/brand/luoxue-snowpuff-extracted.svg')
+      .toBe('/logo.png')
 
     homeWrapper.unmount()
     const modelsWrapper = mountLayout('models')
@@ -155,7 +158,7 @@ describe('PublicSiteLayout', () => {
     expect(modelsWrapper.classes()).toContain('public-site-page--models')
     expect(modelsWrapper.classes()).not.toContain('public-site-page--home')
     expect(modelsWrapper.get('[data-testid="public-site-brand-logo"]').attributes('src'))
-      .toBe('/brand/luoxue-snowpuff-extracted.svg')
+      .toBe('/logo.png')
     expect(modelsWrapper.find('.public-site-footer-mark').exists()).toBe(true)
     const localeSwitcher = modelsWrapper.get('.public-site-desktop-action locale-switcher-stub')
     expect(localeSwitcher.attributes('icon-variant') ?? localeSwitcher.attributes('iconvariant'))
@@ -212,6 +215,23 @@ describe('PublicSiteLayout', () => {
     expect(wrapper.get('[data-testid="mobile-menu-toggle"]').attributes('aria-expanded')).toBe('true')
   })
 
+  it('shows the Skill market entry only when its opt-in flag is enabled', async () => {
+    const hiddenWrapper = mountLayout()
+    expect(hiddenWrapper.find('[data-to="/skills"]').exists()).toBe(false)
+    hiddenWrapper.unmount()
+
+    testState.appStore.cachedPublicSettings.skill_marketplace_enabled = true
+    const wrapper = mountLayout('skills')
+
+    expect(wrapper.classes()).toContain('public-site-page--skills')
+    expect(wrapper.findAll('[data-to="/skills"]')).toHaveLength(2)
+    expect(wrapper.findAll('[data-to="/skills"]')
+      .some((link) => link.attributes('aria-current') === 'page')).toBe(true)
+
+    await wrapper.get('[data-testid="mobile-menu-toggle"]').trigger('click')
+    expect(wrapper.findAll('[data-to="/skills"]')).toHaveLength(3)
+  })
+
   it('provides a locale switcher in the compact home menu', async () => {
     const wrapper = mountLayout('home')
 
@@ -245,11 +265,13 @@ describe('PublicSiteLayout', () => {
 
   it('hides every catalog entry in backend mode even when the feature is enabled', () => {
     testState.appStore.cachedPublicSettings.public_model_catalog_enabled = true
+    testState.appStore.cachedPublicSettings.skill_marketplace_enabled = true
     testState.appStore.backendModeEnabled = true
 
     const wrapper = mountLayout('models')
 
     expect(wrapper.find('[data-to="/models.html"]').exists()).toBe(false)
+    expect(wrapper.find('[data-to="/skills"]').exists()).toBe(false)
   })
 
   it('keeps the current models page visible and marks its primary navigation entry', () => {

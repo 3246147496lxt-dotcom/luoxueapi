@@ -78,13 +78,15 @@ fallback. The compact title supplements rather than replaces the page's `h1`.
 
 ### `SidebarAccountDock.vue` and `SidebarAccountOverlay.vue`
 
-The account dock is the single entry point for identity and account actions. Its
-collapsed state keeps the avatar trigger visible. Opening it shows:
+The account dock is the single entry point for identity and personal account
+actions. Its expanded state keeps the capability-gated Upgrade action beside the
+account summary; its collapsed state keeps the avatar trigger visible. Opening it
+shows identity and balance details, personal profile and preferences, theme,
+language, onboarding, and logout.
 
-- identity, available balance, frozen balance, and subscription status;
-- subscriptions, wallet, orders, and profile destinations when available;
-- theme, language, announcements, help, and onboarding actions;
-- logout.
+Task destinations such as subscriptions, wallet, orders, and quota tools belong to
+the workspace navigation. Announcements and help resources belong to the scrolling
+sidebar's `Support` group; do not add them back to the account overlay.
 
 The overlay is anchored to the dock on desktop and becomes a modal bottom sheet on
 mobile. It handles focus return, Escape dismissal, outside-click dismissal, and

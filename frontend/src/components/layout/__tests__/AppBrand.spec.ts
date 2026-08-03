@@ -53,7 +53,7 @@ describe('AppBrand', () => {
     useAuthStore().user = createUser('user')
   })
 
-  it('renders the default Luoxue mark as a logo-only link', () => {
+  it('renders the canonical default logo as a logo-only link', () => {
     const appStore = useAppStore()
     appStore.siteName = '落雪API'
     appStore.siteLogo = ''
@@ -63,9 +63,9 @@ describe('AppBrand', () => {
     expect(brand.attributes('aria-label')).toBe('落雪API')
     expect(brand.text()).toBe('')
     expect(wrapper.get('[data-testid="sidebar-brand-logo"] img').attributes('src'))
-      .toBe('/brand/luoxue-snowflake-cloud-palette.png')
+      .toBe('/logo.png')
     expect(wrapper.get('[data-testid="sidebar-brand-logo"] img').classes())
-      .toContain('app-brand-logo-image-luoxue')
+      .toContain('app-brand-logo-image-default')
   })
 
   it('renders a configured logo with the configured accessible name', () => {
@@ -77,11 +77,11 @@ describe('AppBrand', () => {
     const brand = wrapper.get('[data-testid="header-brand"]')
     expect(brand.attributes('aria-label')).toBe('Snow Console')
     expect(brand.get('img').attributes('src')).toBe('/brand/custom.svg')
-    expect(brand.get('img').classes()).not.toContain('app-brand-logo-image-luoxue')
+    expect(brand.get('img').classes()).not.toContain('app-brand-logo-image-default')
     expect(brand.text()).toBe('')
   })
 
-  it('does not replace an uploaded Luoxue data-image logo with the legacy snowflake', async () => {
+  it('does not replace an uploaded data-image logo with the canonical default', async () => {
     const appStore = useAppStore()
     appStore.siteName = '落雪API'
     appStore.siteLogo = 'data:image/svg+xml;base64,PHN2Zy8+'
@@ -89,13 +89,13 @@ describe('AppBrand', () => {
     const image = wrapper.get('[data-testid="sidebar-brand-logo"] img')
 
     expect(image.attributes('src')).toBe('data:image/svg+xml;base64,PHN2Zy8+')
-    expect(image.classes()).not.toContain('app-brand-logo-image-luoxue')
+    expect(image.classes()).not.toContain('app-brand-logo-image-default')
 
     appStore.siteLogo = 'data:image/png;base64,iVBORw0KGgo='
     await wrapper.vm.$nextTick()
 
     expect(image.attributes('src')).toBe('data:image/png;base64,iVBORw0KGgo=')
-    expect(image.classes()).not.toContain('app-brand-logo-image-luoxue')
+    expect(image.classes()).not.toContain('app-brand-logo-image-default')
   })
 
   it('links users and administrators to their respective dashboards', async () => {

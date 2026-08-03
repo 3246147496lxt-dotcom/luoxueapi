@@ -158,10 +158,29 @@ export default {
   userSubscriptions: {
     title: 'My Subscriptions',
     description: 'View your subscription plans and usage',
-    noActiveSubscriptions: 'No Active Subscriptions',
-    noActiveSubscriptionsDesc:
-      "You don't have any active subscriptions. Contact administrator to get one.",
+    loading: 'Loading subscriptions',
+    emptyWithPlansTitle: 'No subscription yet',
+    emptyWithPlansDesc:
+      'Compare available plans, quotas, validity periods, and billing terms to find the right option.',
+    noPlansTitle: 'No subscription plans are listed yet',
+    noPlansDesc:
+      'There are no plans available to purchase right now. You can redeem a code or contact the administrator to request a subscription.',
+    selfServiceDisabledTitle: 'Self-service subscriptions are not available',
+    selfServiceDisabledDesc:
+      'Online subscription purchases have not been enabled. You can redeem a code or contact the administrator to request a subscription.',
+    purchaseOptionsUnknownTitle: 'Subscription purchase status is unavailable',
+    purchaseOptionsUnknownDesc:
+      'You can still top up or redeem a code, or contact the administrator for subscription options.',
+    payAsYouGoAvailable:
+      'You can keep using pay-as-you-go balance billing without a subscription.',
+    viewPlans: 'View subscription plans',
+    rechargeOrRedeem: 'Top up / Redeem',
+    contactAdmin: 'Contact administrator',
+    viewSubscriptionHelp: 'View subscription help',
     failedToLoad: 'Failed to load subscriptions',
+    failedToLoadDesc:
+      'We could not retrieve your subscription information. Check your connection and try again.',
+    retry: 'Reload',
     status: {
       active: 'Active',
       expired: 'Expired',

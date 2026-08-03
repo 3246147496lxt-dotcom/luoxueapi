@@ -673,7 +673,7 @@ export default {
       platformBreakdownEmpty: '暂无平台明细',
       platformBreakdownHint: '悬浮查看各平台用量',
       platformOther: '其他',
-      balanceHistoryTitle: '用户充值和并发变动记录',
+      balanceHistoryTitle: '用户充值、并发和订阅信息',
       noBalanceHistory: '暂无变动记录',
       allTypes: '全部类型',
       typeBalance: '余额（兑换码）',
@@ -683,6 +683,8 @@ export default {
       typeAdminConcurrency: '并发（管理员调整）',
       typeSubscription: '订阅',
       failedToLoadBalanceHistory: '加载余额记录失败',
+      subscriptionStartsAt: '生效时间',
+      retry: '重新加载',
       createdAt: '创建时间',
       totalRecharged: '总充值',
       // Settings Dropdowns

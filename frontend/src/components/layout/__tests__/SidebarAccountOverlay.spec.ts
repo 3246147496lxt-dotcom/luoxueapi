@@ -2,19 +2,15 @@ import { readFileSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-import { afterEach, describe, expect, it, vi } from 'vitest'
 import { mount, type VueWrapper } from '@vue/test-utils'
 import { nextTick } from 'vue'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import {
   registerModalLayer,
   unregisterModalLayer,
 } from '@/utils/modalStack'
 import SidebarAccountOverlay from '../SidebarAccountOverlay.vue'
-import type {
-  AccountPanelLink,
-  AccountPanelSummary,
-  AccountResourceLink,
-} from '../accountPanelTypes'
+import type { AccountPanelSummary } from '../accountPanelTypes'
 
 const componentPath = resolve(dirname(fileURLToPath(import.meta.url)), '../SidebarAccountOverlay.vue')
 const componentSource = readFileSync(componentPath, 'utf8')
@@ -45,26 +41,6 @@ const defaultProps = {
   open: true,
   anchorElement: null as HTMLElement | null,
   summary,
-  purchaseLink: {
-    id: 'wallet',
-    label: 'Add funds',
-    to: '/purchase',
-    icon: 'wallet',
-  } as AccountPanelLink,
-  subscriptionLink: {
-    id: 'subscriptions',
-    label: 'My subscriptions',
-    to: '/subscriptions',
-    icon: 'creditCard',
-  } as AccountPanelLink | null,
-  resourceLinks: [
-    {
-      id: 'home',
-      label: 'Home',
-      href: '/home',
-      icon: 'destinationHome',
-    },
-  ] as AccountResourceLink[],
   showOnboarding: false,
 }
 
@@ -116,13 +92,14 @@ function mountOverlay(
     },
     global: {
       stubs: {
-        AnnouncementBell: true,
         CreditAmount: {
           props: ['value', 'iconSize', 'label'],
           template: '<span data-testid="credit-amount" :data-value="value" :aria-label="label">{{ value }}</span>',
         },
-        Icon: true,
-        RouterLink: true,
+        Icon: {
+          props: ['name'],
+          template: '<span :data-icon="name" />',
+        },
       },
     },
   })
@@ -151,7 +128,7 @@ afterEach(() => {
 })
 
 describe('SidebarAccountOverlay', () => {
-  it('renders available and frozen balances as Snow credits', async () => {
+  it('renders labeled available and frozen balances as Snow credits', async () => {
     mountOverlay(false, {
       summary: {
         ...summary,
@@ -161,9 +138,11 @@ describe('SidebarAccountOverlay', () => {
     })
     await nextTick()
 
+    const panel = document.body.querySelector<HTMLElement>('[data-testid="sidebar-account-panel"]')
     const amounts = Array.from(
       document.body.querySelectorAll<HTMLElement>('[data-testid="credit-amount"]'),
     )
+    expect(panel?.textContent).toContain('accountDock.balanceShort')
     expect(amounts.map((amount) => amount.dataset.value)).toEqual(['12.50', '3.50'])
     expect(amounts.map((amount) => amount.getAttribute('aria-label'))).toEqual([
       'accountDock.availableBalance 12.50',
@@ -171,15 +150,14 @@ describe('SidebarAccountOverlay', () => {
     ])
   })
 
-  it('uses the compact desktop menu measurements while retaining mobile touch targets', () => {
+  it('uses compact desktop measurements while retaining mobile touch targets', () => {
     expect(componentSource).toContain('width: 248px;')
     expect(componentSource).toContain('padding: 6px 0;')
     expect(componentSource).toContain('border-radius: 16px;')
     expect(componentSource).toContain('min-height: 36px;')
     expect(componentSource).toMatch(
-      /@media \(max-width: 1023px\)[\s\S]*\.account-panel__row,[\s\S]*min-height: 44px;/,
+      /@media \(max-width: 1023px\)[\s\S]*\.account-panel__row \{[\s\S]*min-height: 44px;/,
     )
-    expect(componentSource).not.toContain('account-panel__summary')
   })
 
   it('teleports an open desktop panel to body and exposes it as a dialog', async () => {
@@ -264,7 +242,7 @@ describe('SidebarAccountOverlay', () => {
     expect(wrapper.emitted('close')).toEqual([[true]])
   })
 
-  it('closes an open desktop panel only when pointerdown occurs outside the panel and anchor', async () => {
+  it('closes a desktop panel only when pointerdown occurs outside the panel and anchor', async () => {
     const { anchor, wrapper } = mountOverlay()
     await nextTick()
     const panel = document.body.querySelector<HTMLElement>('[data-testid="sidebar-account-panel"]')
@@ -275,31 +253,6 @@ describe('SidebarAccountOverlay', () => {
 
     document.body.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true }))
     expect(wrapper.emitted('close')).toEqual([[false]])
-  })
-
-  it.each(['/purchase', '/subscriptions'])(
-    'closes for %s navigation without restoring focus',
-    async (path) => {
-      const { wrapper } = mountOverlay()
-      await nextTick()
-
-      const link = document.body.querySelector<HTMLElement>(
-        `router-link-stub[to="${path}"]`,
-      )
-      expect(link).not.toBeNull()
-
-      link?.click()
-      expect(wrapper.emitted('close')).toEqual([[false]])
-    },
-  )
-
-  it('hides the subscriptions row when no visible destination is provided', async () => {
-    mountOverlay(false, { subscriptionLink: null })
-    await nextTick()
-
-    expect(
-      document.body.querySelector('router-link-stub[to="/subscriptions"]'),
-    ).toBeNull()
   })
 
   it('renders a modal bottom sheet on mobile and restores the background lock on unmount', async () => {
@@ -328,67 +281,56 @@ describe('SidebarAccountOverlay', () => {
     expect(document.body.style.overflow).toBe('')
   })
 
-  it('exposes subscriptions while keeping preferences and other deep pages out', async () => {
+  it('only keeps profile, preferences, and logout in the regular account menu', async () => {
     const { wrapper } = mountOverlay()
     await nextTick()
 
     const panel = document.body.querySelector<HTMLElement>('[data-testid="sidebar-account-panel"]')
-    const routes = Array.from(panel?.querySelectorAll('router-link-stub') ?? [])
-      .map((link) => link.getAttribute('to'))
-    const subscriptionLink = panel?.querySelector<HTMLElement>(
-      '[data-testid="account-subscriptions-link"]',
+    const profile = panel?.querySelector<HTMLButtonElement>('[data-testid="account-open-profile"]')
+    const preferences = panel?.querySelector<HTMLButtonElement>(
+      '[data-testid="account-open-preferences"]',
     )
 
-    expect(document.body.querySelector('[data-testid="account-theme-toggle"]')).toBeNull()
-    expect(document.body.querySelector('.account-panel__locale-switcher')).toBeNull()
-    expect(routes).toContain('/subscriptions')
-    expect(routes).not.toEqual(
-      expect.arrayContaining(['/profile', '/orders']),
-    )
-    expect(subscriptionLink?.previousElementSibling?.getAttribute('to')).toBe('/purchase')
-    expect(subscriptionLink?.nextElementSibling?.getAttribute('data-testid'))
-      .toBe('account-open-settings')
-    expect(wrapper.emitted('toggle-theme')).toBeUndefined()
+    expect(profile?.textContent).toContain('accountDock.personalProfile')
+    expect(preferences?.textContent).toContain('accountDock.personalPreferences')
+    expect(panel?.querySelector('[data-testid="account-admin-guide"]')).toBeNull()
+    expect(panel?.querySelector('[data-testid="account-logout"]')).not.toBeNull()
+    expect(panel?.querySelector('a')).toBeNull()
+    expect(panel?.querySelector('[data-testid="account-resources-toggle"]')).toBeNull()
+    expect(panel?.querySelector('[data-testid="account-subscriptions-link"]')).toBeNull()
+
+    profile?.click()
+    preferences?.click()
+    expect(wrapper.emitted('open-settings')).toEqual([['account'], ['general']])
   })
 
-  it('keeps hidden disclosure and section controls out of the mobile focus loop', async () => {
-    const hasHiddenAncestor = (element: HTMLElement | null): boolean => {
-      if (!element) return false
-      if (
-        element.hidden
-        || element.inert
-        || element.style.display === 'none'
-        || element.style.visibility === 'hidden'
-      ) {
-        return true
-      }
-      return hasHiddenAncestor(element.parentElement)
-    }
+  it('only exposes the administrator guide when requested and emits replay directly', async () => {
+    const { wrapper } = mountOverlay(false, { showOnboarding: true })
+    await nextTick()
 
-    vi.spyOn(HTMLElement.prototype, 'getClientRects').mockImplementation(function getClientRects(
-      this: HTMLElement,
-    ) {
-      if (hasHiddenAncestor(this)) return [] as unknown as DOMRectList
-      return [{} as DOMRect] as unknown as DOMRectList
-    })
+    const guide = document.body.querySelector<HTMLButtonElement>(
+      '[data-testid="account-admin-guide"]',
+    )
+    expect(guide?.textContent).toContain('accountDock.adminGuide')
+
+    guide?.click()
+    expect(wrapper.emitted('replay')).toEqual([[]])
+  })
+
+  it('keeps every visible mobile action inside the focus loop', async () => {
+    vi.spyOn(HTMLElement.prototype, 'getClientRects').mockImplementation(
+      () => ([{} as DOMRect] as unknown as DOMRectList),
+    )
 
     mountOverlay(true)
     await nextTick()
     await nextTick()
 
     const close = document.body.querySelector<HTMLButtonElement>('.account-panel__close')
-    const resourcesButton = document.body.querySelector<HTMLButtonElement>(
-      '[data-testid="account-resources-toggle"]',
-    )
-    const dangerSection = document.body.querySelector<HTMLElement>(
-      '.account-panel__section--danger',
-    )
-
+    const logout = document.body.querySelector<HTMLButtonElement>('[data-testid="account-logout"]')
     expect(close).not.toBeNull()
-    expect(resourcesButton).not.toBeNull()
-    expect(dangerSection).not.toBeNull()
+    expect(logout).not.toBeNull()
 
-    if (dangerSection) dangerSection.style.display = 'none'
     close?.focus()
     document.dispatchEvent(new KeyboardEvent('keydown', {
       key: 'Tab',
@@ -397,56 +339,6 @@ describe('SidebarAccountOverlay', () => {
       cancelable: true,
     }))
 
-    expect(document.activeElement).toBe(resourcesButton)
-  })
-
-  it('emits the settings action and progressively reveals the remaining help resources', async () => {
-    const { wrapper } = mountOverlay()
-    await nextTick()
-
-    const settingsButton = document.body.querySelector<HTMLButtonElement>(
-      '[data-testid="account-open-settings"]',
-    )
-    const resourcesButton = document.body.querySelector<HTMLButtonElement>(
-      '[data-testid="account-resources-toggle"]',
-    )
-    const resources = document.body.querySelector<HTMLElement>('#account-resource-links')
-
-    expect(settingsButton).not.toBeNull()
-    expect(resourcesButton?.getAttribute('aria-expanded')).toBe('false')
-    expect(resources?.style.display).toBe('none')
-
-    settingsButton?.click()
-    expect(wrapper.emitted('open-settings')).toEqual([[]])
-
-    resourcesButton?.click()
-    await nextTick()
-
-    expect(resourcesButton?.getAttribute('aria-expanded')).toBe('true')
-    expect(resources?.style.display).not.toBe('none')
-    expect(Array.from(resources?.querySelectorAll('a') ?? []).map((link) => link.getAttribute('href')))
-      .toEqual(['/home'])
-    expect(resources?.textContent).not.toContain('Documentation')
-
-    resources?.querySelector<HTMLAnchorElement>('a')?.click()
-    expect(wrapper.emitted('close')).toEqual([[false]])
-  })
-
-  it('keeps the administrator guide inside the resources disclosure', async () => {
-    mountOverlay(false, { showOnboarding: true })
-    await nextTick()
-
-    const resourcesButton = document.body.querySelector<HTMLButtonElement>(
-      '[data-testid="account-resources-toggle"]',
-    )
-    const resources = document.body.querySelector<HTMLElement>('#account-resource-links')
-
-    expect(resources?.textContent).toContain('accountDock.adminGuide')
-    expect(resources?.style.display).toBe('none')
-
-    resourcesButton?.click()
-    await nextTick()
-
-    expect(resources?.style.display).not.toBe('none')
+    expect(document.activeElement).toBe(logout)
   })
 })

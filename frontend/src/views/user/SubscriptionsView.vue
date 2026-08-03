@@ -14,26 +14,121 @@
       </AdminPageHeader>
 
       <!-- Loading State -->
-      <div v-if="loading" class="flex justify-center py-12">
+      <div
+        v-if="loading"
+        class="flex justify-center py-12"
+        role="status"
+        :aria-label="t('userSubscriptions.loading')"
+      >
         <div
           class="h-8 w-8 animate-spin rounded-full border-2 border-primary-500 border-t-transparent"
         ></div>
       </div>
 
-      <!-- Empty State -->
-      <div v-else-if="subscriptions.length === 0" class="card p-12 text-center">
-        <div
-          class="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-gray-100 dark:bg-dark-700"
-        >
-          <Icon name="creditCard" size="xl" class="text-gray-400" />
+      <!-- Load Error -->
+      <section
+        v-else-if="loadFailed"
+        class="max-w-3xl rounded-2xl border border-red-200 bg-white px-6 py-7 dark:border-red-900/60 dark:bg-dark-800 sm:px-8"
+        data-testid="subscriptions-load-error"
+        role="alert"
+      >
+        <div class="flex flex-col items-center gap-4 text-center sm:flex-row sm:items-start sm:text-left">
+          <span
+            class="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-red-50 text-red-600 dark:bg-red-950/50 dark:text-red-300"
+            aria-hidden="true"
+          >
+            <Icon name="exclamationCircle" size="lg" />
+          </span>
+          <div>
+            <h2 class="text-lg font-semibold text-gray-900 dark:text-white">
+              {{ t('userSubscriptions.failedToLoad') }}
+            </h2>
+            <p class="mt-2 max-w-2xl text-sm leading-6 text-gray-600 dark:text-dark-300">
+              {{ t('userSubscriptions.failedToLoadDesc') }}
+            </p>
+            <button type="button" class="btn btn-secondary mt-5 !min-h-11" @click="loadPage">
+              <Icon name="refresh" size="sm" aria-hidden="true" />
+              {{ t('userSubscriptions.retry') }}
+            </button>
+          </div>
         </div>
-        <h3 class="mb-2 text-lg font-semibold text-gray-900 dark:text-white">
-          {{ t('userSubscriptions.noActiveSubscriptions') }}
-        </h3>
-        <p class="text-gray-500 dark:text-dark-400">
-          {{ t('userSubscriptions.noActiveSubscriptionsDesc') }}
-        </p>
-      </div>
+      </section>
+
+      <!-- Empty State -->
+      <section
+        v-else-if="subscriptions.length === 0"
+        class="max-w-3xl rounded-2xl border border-gray-200 bg-white px-6 py-7 dark:border-dark-700 dark:bg-dark-800 sm:px-8 sm:py-8"
+        data-testid="subscriptions-empty-state"
+      >
+        <div class="flex flex-col items-center gap-5 text-center sm:flex-row sm:items-start sm:text-left">
+          <span
+            class="flex h-12 w-12 shrink-0 items-center justify-center rounded-xl bg-primary-50 text-primary-700 dark:bg-primary-950/50 dark:text-primary-300"
+            aria-hidden="true"
+          >
+            <Icon name="creditCard" size="lg" />
+          </span>
+          <div class="min-w-0 flex-1">
+            <h2
+              class="text-xl font-semibold tracking-tight text-gray-900 dark:text-white"
+              data-testid="subscriptions-empty-title"
+            >
+              {{ t(emptyStateTitleKey) }}
+            </h2>
+            <p class="mt-2 max-w-2xl text-sm leading-6 text-gray-600 dark:text-dark-300">
+              {{ t(emptyStateDescriptionKey) }}
+            </p>
+            <p
+              class="mt-4 flex items-start justify-center gap-2 text-sm leading-6 text-gray-600 dark:text-dark-300 sm:justify-start"
+            >
+              <Icon
+                name="infoCircle"
+                size="sm"
+                class="mt-1 shrink-0 text-primary-600 dark:text-primary-300"
+                aria-hidden="true"
+              />
+              <span>{{ t('userSubscriptions.payAsYouGoAvailable') }}</span>
+            </p>
+            <div class="mt-6 flex flex-col gap-3 sm:flex-row sm:flex-wrap">
+              <RouterLink
+                v-if="hasPurchasablePlans"
+                to="/pricing"
+                class="btn btn-primary !min-h-11 w-full sm:w-auto"
+                data-testid="subscriptions-view-plans"
+              >
+                {{ t('userSubscriptions.viewPlans') }}
+              </RouterLink>
+              <RouterLink
+                v-else
+                to="/purchase"
+                class="btn btn-primary !min-h-11 w-full sm:w-auto"
+                data-testid="subscriptions-recharge"
+              >
+                {{ t('userSubscriptions.rechargeOrRedeem') }}
+              </RouterLink>
+              <RouterLink
+                v-if="hasPurchasablePlans"
+                to="/purchase"
+                class="btn btn-secondary !min-h-11 w-full sm:w-auto"
+                data-testid="subscriptions-recharge"
+              >
+                {{ t('userSubscriptions.rechargeOrRedeem') }}
+              </RouterLink>
+              <a
+                v-else
+                :href="supportDestination.url"
+                class="btn btn-secondary !min-h-11 w-full sm:w-auto"
+                target="_blank"
+                rel="noopener noreferrer"
+                :aria-label="`${t(supportActionLabelKey)} · ${t('purchase.openInNewTab')}`"
+                data-testid="subscriptions-support"
+              >
+                {{ t(supportActionLabelKey) }}
+                <Icon name="externalLink" size="sm" aria-hidden="true" />
+              </a>
+            </div>
+          </div>
+        </div>
+      </section>
 
       <!-- Subscriptions Grid -->
       <div v-else class="grid gap-6 lg:grid-cols-2">
@@ -260,10 +355,11 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { computed, ref, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
 import { useAppStore } from '@/stores/app'
+import { usePaymentStore } from '@/stores/payment'
 import subscriptionsAPI from '@/api/subscriptions'
 import type { UserSubscription } from '@/types'
 import AppLayout from '@/components/layout/AppLayout.vue'
@@ -274,6 +370,7 @@ import { formatDateOnly } from '@/utils/format'
 import { hasPeakRate, formatPeakRateWindow, serverTimezoneLabel } from '@/utils/peak-rate'
 import { platformBorderClass, platformBadgeClass, platformButtonClass, platformLabel } from '@/utils/platformColors'
 import { getRemainingDurationParts, isOneTimeDailyQuota, type RemainingDurationParts } from '@/utils/subscriptionQuota'
+import { resolveSupportContactDestination } from '@/utils/supportUrl'
 
 function platformAccentDotClass(p: string): string {
   switch (p) {
@@ -288,9 +385,35 @@ function platformAccentDotClass(p: string): string {
 const { t } = useI18n()
 const router = useRouter()
 const appStore = useAppStore()
+const paymentStore = usePaymentStore()
 
 const subscriptions = ref<UserSubscription[]>([])
 const loading = ref(true)
+const loadFailed = ref(false)
+const purchaseCapability = ref<'unknown' | 'disabled' | 'no-plans' | 'available'>('unknown')
+
+const hasPurchasablePlans = computed(() => purchaseCapability.value === 'available')
+const emptyStateTitleKey = computed(() => {
+  if (purchaseCapability.value === 'available') return 'userSubscriptions.emptyWithPlansTitle'
+  if (purchaseCapability.value === 'disabled') return 'userSubscriptions.selfServiceDisabledTitle'
+  if (purchaseCapability.value === 'no-plans') return 'userSubscriptions.noPlansTitle'
+  return 'userSubscriptions.purchaseOptionsUnknownTitle'
+})
+const emptyStateDescriptionKey = computed(() => {
+  if (purchaseCapability.value === 'available') return 'userSubscriptions.emptyWithPlansDesc'
+  if (purchaseCapability.value === 'disabled') return 'userSubscriptions.selfServiceDisabledDesc'
+  if (purchaseCapability.value === 'no-plans') return 'userSubscriptions.noPlansDesc'
+  return 'userSubscriptions.purchaseOptionsUnknownDesc'
+})
+const supportDestination = computed(() => resolveSupportContactDestination(
+  appStore.cachedPublicSettings?.contact_info || appStore.contactInfo,
+  appStore.cachedPublicSettings?.doc_url || appStore.docUrl,
+))
+const supportActionLabelKey = computed(() => (
+  supportDestination.value.kind === 'contact'
+    ? 'userSubscriptions.contactAdmin'
+    : 'userSubscriptions.viewSubscriptionHelp'
+))
 
 function subscriptionHasPeakRate(subscription: UserSubscription): boolean {
   return hasPeakRate(subscription.group)
@@ -300,16 +423,47 @@ function subscriptionPeakRateLabel(subscription: UserSubscription): string {
   return formatPeakRateWindow(subscription.group, serverTimezoneLabel(appStore.cachedPublicSettings?.server_utc_offset))
 }
 
-async function loadSubscriptions() {
-  try {
-    loading.value = true
-    subscriptions.value = await subscriptionsAPI.getMySubscriptions()
-  } catch (error) {
-    console.error('Failed to load subscriptions:', error)
-    appStore.showError(t('userSubscriptions.failedToLoad'))
-  } finally {
-    loading.value = false
+async function loadPurchaseOptions(): Promise<void> {
+  purchaseCapability.value = 'unknown'
+
+  const settings = await appStore.fetchPublicSettings()
+  const paymentEnabled = settings?.payment_enabled
+    ?? appStore.cachedPublicSettings?.payment_enabled
+
+  if (paymentEnabled === false) {
+    purchaseCapability.value = 'disabled'
+    return
   }
+
+  if (paymentEnabled !== true) {
+    return
+  }
+
+  try {
+    const checkoutInfo = await paymentStore.ensureCheckoutInfo()
+    purchaseCapability.value = checkoutInfo.plans.length > 0 ? 'available' : 'no-plans'
+  } catch (error) {
+    console.warn('Failed to load subscription purchase options:', error)
+  }
+}
+
+async function loadPage(): Promise<void> {
+  loading.value = true
+  loadFailed.value = false
+
+  const [subscriptionsResult] = await Promise.allSettled([
+    subscriptionsAPI.getMySubscriptions(),
+    loadPurchaseOptions(),
+  ])
+
+  if (subscriptionsResult.status === 'fulfilled') {
+    subscriptions.value = subscriptionsResult.value
+  } else {
+    loadFailed.value = true
+    console.error('Failed to load subscriptions:', subscriptionsResult.reason)
+  }
+
+  loading.value = false
 }
 
 function getProgressWidth(used: number | undefined, limit: number | null | undefined): string {
@@ -399,6 +553,6 @@ function formatResetTime(windowStart: string | null, windowHours: number): strin
 }
 
 onMounted(() => {
-  loadSubscriptions()
+  loadPage()
 })
 </script>

@@ -672,7 +672,7 @@ export default {
       platformBreakdownEmpty: 'No platform usage yet',
       platformBreakdownHint: 'Hover for per-platform usage',
       platformOther: 'Other',
-      balanceHistoryTitle: 'User Recharge & Concurrency History',
+      balanceHistoryTitle: 'User Recharge, Concurrency & Subscriptions',
       noBalanceHistory: 'No records found for this user',
       allTypes: 'All Types',
       typeBalance: 'Balance (Redeem)',
@@ -682,6 +682,8 @@ export default {
       typeAdminConcurrency: 'Concurrency (Admin)',
       typeSubscription: 'Subscription',
       failedToLoadBalanceHistory: 'Failed to load balance history',
+      subscriptionStartsAt: 'Starts',
+      retry: 'Try again',
       createdAt: 'Created',
       totalRecharged: 'Total Recharged',
       roles: {

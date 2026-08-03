@@ -337,7 +337,7 @@ Dark-theme shadows must replace white highlights with low-opacity white and use 
 - Desktop maximum width: 1180px to 1240px.
 - Mobile gutter: 16px. Desktop gutter: 24px to 32px.
 - Hero is an asymmetric split and fits the first viewport with both actions visible.
-- The 3D snowflake or code example is a first-viewport visual signal.
+- The product dashboard or code example is a first-viewport visual signal.
 - Vary section rhythm. Use at least four layout families across the page.
 - Keep the current anchor order and page information architecture.
 - Do not add decorative scroll cues, numbered section eyebrows, weather, location strips, version labels, or fake metrics.
@@ -345,12 +345,12 @@ Dark-theme shadows must replace white highlights with low-opacity white and use 
 
 ## Imagery and Icons
 
-- Brand logo: `frontend/public/brand/luoxue-snowflake-cloud-palette-light.svg`.
-- Hero visual: `frontend/public/brand/luoxue-snowflake-3d.png`.
+- Brand logo: `frontend/public/logo.png`.
+- Hero visual: `frontend/public/brand/home-dashboard.webp`.
 - Product visual: `frontend/public/brand/home-dashboard.webp`.
 - Provider icons: existing `PlatformIcon.vue` paths.
 - UI icons: existing `Icon.vue` paths.
-- Superdesign should use the real logo SVG and recognizable icon shapes. Raster images may be represented as labeled placeholders in drafts.
+- Superdesign should use the canonical logo PNG and recognizable icon shapes. Raster images may be represented as labeled placeholders in drafts.
 
 ## Motion
 

@@ -99,6 +99,7 @@ func (h *SettingHandler) GetPublicSettings(c *gin.Context) {
 
 		AvailableChannelsEnabled:  settings.AvailableChannelsEnabled,
 		PublicModelCatalogEnabled: settings.PublicModelCatalogEnabled,
+		SkillMarketplaceEnabled:   settings.SkillMarketplaceEnabled,
 
 		AffiliateEnabled: settings.AffiliateEnabled,
 

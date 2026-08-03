@@ -19,12 +19,12 @@ describe('syncFavicon', () => {
       .forEach((link) => link.remove())
   })
 
-  it('uses the Snowpuff browser and touch icons when no custom logo is configured', () => {
+  it('uses the canonical browser and touch icons when no custom logo is configured', () => {
     const link = syncFavicon('')
     const touchLink = document.head.querySelector<HTMLLinkElement>('link[rel="apple-touch-icon"]')
 
     expect(link.getAttribute('href')).toBe(DEFAULT_FAVICON)
-    expect(link.type).toBe('image/svg+xml')
+    expect(link.type).toBe('image/png')
     expect(touchLink?.getAttribute('href')).toBe(DEFAULT_APPLE_TOUCH_ICON)
     expect(touchLink?.getAttribute('sizes')).toBe('180x180')
   })
@@ -45,7 +45,7 @@ describe('syncFavicon', () => {
 
     expect(defaultLink).toBe(customLink)
     expect(defaultLink.getAttribute('href')).toBe(DEFAULT_FAVICON)
-    expect(defaultLink.type).toBe('image/svg+xml')
+    expect(defaultLink.type).toBe('image/png')
     expect(touchLink?.getAttribute('href')).toBe(DEFAULT_APPLE_TOUCH_ICON)
     expect(document.head.querySelectorAll('link[rel="icon"]')).toHaveLength(1)
     expect(document.head.querySelectorAll('link[rel="apple-touch-icon"]')).toHaveLength(1)
@@ -63,7 +63,7 @@ describe('syncFavicon', () => {
   it('keeps the initial HTML icon fallbacks aligned with the runtime defaults', () => {
     const indexHtml = readFileSync(resolve(frontendDirectory, 'index.html'), 'utf8')
 
-    expect(indexHtml).toContain(`rel="icon" type="image/svg+xml" href="${DEFAULT_FAVICON}"`)
+    expect(indexHtml).toContain(`rel="icon" type="image/png" href="${DEFAULT_FAVICON}"`)
     expect(indexHtml).toContain(
       `rel="apple-touch-icon" sizes="180x180" href="${DEFAULT_APPLE_TOUCH_ICON}"`
     )

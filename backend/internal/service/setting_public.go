@@ -222,6 +222,7 @@ func (s *SettingService) GetPublicSettings(ctx context.Context) (*PublicSettings
 		SettingKeyChannelMonitorDefaultIntervalSeconds,
 		SettingKeyAvailableChannelsEnabled,
 		SettingKeyPublicModelCatalogEnabled,
+		SettingKeySkillMarketplaceEnabled,
 		SettingKeyAffiliateEnabled,
 		SettingKeyRiskControlEnabled,
 		SettingKeyAllowUserViewErrorRequests,
@@ -338,6 +339,7 @@ func (s *SettingService) GetPublicSettings(ctx context.Context) (*PublicSettings
 
 		AvailableChannelsEnabled:  settings[SettingKeyAvailableChannelsEnabled] == "true",
 		PublicModelCatalogEnabled: settings[SettingKeyPublicModelCatalogEnabled] == "true" && !backendModeEnabled,
+		SkillMarketplaceEnabled:   settings[SettingKeySkillMarketplaceEnabled] == "true" && !backendModeEnabled,
 
 		AffiliateEnabled: settings[SettingKeyAffiliateEnabled] == "true",
 
@@ -565,6 +567,7 @@ type PublicSettingsInjectionPayload struct {
 	ChannelMonitorDefaultIntervalSeconds int  `json:"channel_monitor_default_interval_seconds"`
 	AvailableChannelsEnabled             bool `json:"available_channels_enabled"`
 	PublicModelCatalogEnabled            bool `json:"public_model_catalog_enabled"`
+	SkillMarketplaceEnabled              bool `json:"skill_marketplace_enabled"`
 	AffiliateEnabled                     bool `json:"affiliate_enabled"`
 	RiskControlEnabled                   bool `json:"risk_control_enabled"`
 	AllowUserViewErrorRequests           bool `json:"allow_user_view_error_requests"`
@@ -632,6 +635,7 @@ func (s *SettingService) GetPublicSettingsForInjection(ctx context.Context) (any
 		ChannelMonitorDefaultIntervalSeconds: settings.ChannelMonitorDefaultIntervalSeconds,
 		AvailableChannelsEnabled:             settings.AvailableChannelsEnabled,
 		PublicModelCatalogEnabled:            settings.PublicModelCatalogEnabled,
+		SkillMarketplaceEnabled:              settings.SkillMarketplaceEnabled,
 		AffiliateEnabled:                     settings.AffiliateEnabled,
 		RiskControlEnabled:                   settings.RiskControlEnabled,
 		AllowUserViewErrorRequests:           settings.AllowUserViewErrorRequests,

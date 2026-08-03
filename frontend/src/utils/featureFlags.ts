@@ -109,6 +109,11 @@ export const FeatureFlags = {
     mode: 'opt-in',
     label: 'Public Model Catalog',
   }),
+  skillMarketplace: defineFlag({
+    key: 'skill_marketplace_enabled',
+    mode: 'opt-in',
+    label: 'Skill Marketplace',
+  }),
   payment: defineFlag({
     key: 'payment_enabled',
     mode: 'opt-out',

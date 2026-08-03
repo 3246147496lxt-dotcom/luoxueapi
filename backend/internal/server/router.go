@@ -104,6 +104,7 @@ func registerRoutes(
 	routes.RegisterChatRoutes(v1, h, jwtAuth, opsService, settingService, cfg)
 	routes.RegisterAdminRoutes(v1, h, adminAuth, auditLog, stepUpAuth, settingService)
 	routes.RegisterModelCatalogRoutes(v1, h, redisClient)
+	routes.RegisterSkillMarketRoutes(v1, h, redisClient)
 	routes.RegisterDocumentationRoutes(v1, h, redisClient, settingService)
 	routes.RegisterEmbeddedPageRoutes(v1, jwtAuth, auditLog, settingService, redisClient)
 	routes.RegisterGatewayRoutes(r, h, apiKeyAuth, apiKeyService, subscriptionService, opsService, settingService, cfg)

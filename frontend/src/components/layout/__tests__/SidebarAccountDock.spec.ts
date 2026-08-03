@@ -87,6 +87,16 @@ async function mountDock(settings: Partial<PublicSettings> = {}) {
       { path: '/', component: { template: '<div />' } },
       { path: '/dashboard', component: { template: '<div />' } },
       { path: '/admin/dashboard', component: { template: '<div />' } },
+      {
+        path: '/monitor',
+        component: { template: '<div />' },
+        meta: { requiresAuth: true },
+      },
+      {
+        path: '/admin/users',
+        component: { template: '<div />' },
+        meta: { requiresAuth: true, requiresAdmin: true },
+      },
       { path: '/pricing', component: { template: '<div />' } },
       { path: '/subscriptions', component: { template: '<div />' } },
       { path: '/login', component: { template: '<div />' } },
@@ -112,44 +122,24 @@ async function mountDock(settings: Partial<PublicSettings> = {}) {
           props: ['value', 'iconSize', 'label'],
           template: '<span data-testid="credit-amount" :data-value="value" :aria-label="label">{{ value }}</span>',
         },
-        Icon: {
-          props: ['name'],
-          template: '<span :data-icon="name" />',
-        },
         SidebarAccountOverlay: {
-          props: [
-            'open',
-            'anchorElement',
-            'summary',
-            'purchaseLink',
-            'subscriptionLink',
-            'resourceLinks',
-            'showOnboarding',
-          ],
+          props: ['open', 'anchorElement', 'summary', 'showOnboarding'],
           emits: ['close', 'logout', 'replay', 'open-settings'],
           template: `
             <section v-if="open" data-testid="overlay-stub">
-              <a
-                v-if="purchaseLink"
-                :data-account-link="purchaseLink.id"
-                :href="purchaseLink.to"
-              >{{ purchaseLink.label }}</a>
-              <RouterLink
-                v-if="subscriptionLink"
-                data-testid="stub-subscriptions"
-                :data-account-link="subscriptionLink.id"
-                :data-account-label="subscriptionLink.label"
-                :data-account-icon="subscriptionLink.icon"
-                :to="subscriptionLink.to"
-                @click="$emit('close', false)"
-              >{{ subscriptionLink.label }}</RouterLink>
-              <a
-                v-for="link in resourceLinks"
-                :key="link.id"
-                :data-resource-link="link.id"
-                :href="link.href"
-              >{{ link.label }}</a>
-              <button data-testid="stub-settings" @click="$emit('open-settings')" />
+              <button
+                data-testid="stub-profile"
+                @click="$emit('open-settings', 'account')"
+              />
+              <button
+                data-testid="stub-preferences"
+                @click="$emit('open-settings', 'general')"
+              />
+              <button
+                v-if="showOnboarding"
+                data-testid="stub-admin-guide"
+                @click="$emit('replay')"
+              />
               <button data-testid="stub-close" @click="$emit('close', true)" />
               <button data-testid="stub-logout" @click="$emit('logout')" />
             </section>
@@ -161,10 +151,6 @@ async function mountDock(settings: Partial<PublicSettings> = {}) {
   mountedWrappers.push(wrapper)
 
   return { wrapper, router, appStore, authStore: useAuthStore() }
-}
-
-function renderedIds(wrapper: VueWrapper, attribute: string) {
-  return wrapper.findAll(`[${attribute}]`).map((element) => element.attributes(attribute))
 }
 
 describe('SidebarAccountDock', () => {
@@ -201,19 +187,31 @@ describe('SidebarAccountDock', () => {
     expect(componentSource).not.toContain('setInterval(')
   })
 
-  it('renders the passive identity summary and exposes dialog trigger semantics', async () => {
+  it('keeps announcements and help out of the account dock', async () => {
+    const { wrapper } = await mountDock()
+
+    expect(wrapper.find('[data-testid="sidebar-account-tools"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="account-notifications-tool"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="account-help-link"]').exists()).toBe(false)
+    expect(componentSource).not.toContain('AnnouncementBell')
+    expect(componentSource).not.toContain('resolveDocumentationUrl')
+    expect(componentSource).not.toContain('.sidebar-account-tool')
+  })
+
+  it('renders a labeled balance and a complete accessible account summary', async () => {
     const { wrapper } = await mountDock()
     const trigger = wrapper.get('.sidebar-account-trigger')
-    const upgrade = wrapper.get('[data-testid="account-upgrade-link"]')
 
     expect(wrapper.get('[data-testid="sidebar-account-dock"]').text()).toContain('Riley Quinn')
+    expect(wrapper.get('.sidebar-account-trigger__balance-label').text()).toBe(
+      'accountDock.balanceShort',
+    )
     expect(wrapper.get('[data-testid="credit-amount"]').attributes('data-value')).toBe('24.50')
     expect(wrapper.get('.sidebar-account-trigger__avatar').text()).toBe('R')
-    expect(wrapper.find('.sidebar-account-trigger__badge').exists()).toBe(true)
-    expect(trigger.element.tagName).toBe('BUTTON')
-    expect(upgrade.element.tagName).toBe('A')
-    expect(trigger.element.contains(upgrade.element)).toBe(false)
-    expect(upgrade.attributes('href')).toBe('/pricing')
+    expect(wrapper.find('.sidebar-account-trigger__badge').exists()).toBe(false)
+    expect(trigger.attributes('aria-label')).toContain('Riley Quinn')
+    expect(trigger.attributes('aria-label')).toContain('24.50')
+    expect(trigger.attributes('aria-label')).toContain('accountDock.activeSubscriptions')
     expect(trigger.attributes('aria-haspopup')).toBe('dialog')
     expect(trigger.attributes('aria-controls')).toBe('sidebar-account-panel')
     expect(trigger.attributes('aria-expanded')).toBe('false')
@@ -237,145 +235,104 @@ describe('SidebarAccountDock', () => {
     expect(focus.mock.instances).toContain(trigger.element)
   })
 
-  it('applies feature gates to account and resource destinations', async () => {
-    const disabled = await mountDock({
-      payment_enabled: false,
-      public_model_catalog_enabled: false,
-    })
-    await disabled.wrapper.get('.sidebar-account-trigger').trigger('click')
+  it('always offers Upgrade to pricing for an active subscription', async () => {
+    const { wrapper } = await mountDock()
+    const upgrade = wrapper.get('[data-testid="account-upgrade-link"]')
 
+    expect(upgrade.attributes('href')).toBe('/pricing')
+    expect(upgrade.text()).toBe('accountDock.upgrade')
+    expect(componentSource).not.toContain("findVisibleRouteDestination('subscriptions')")
+    expect(componentSource).not.toContain('accountDock.manageSubscription')
+  })
+
+  it('uses destination visibility gates without waiting for subscriptions to load', async () => {
+    const disabled = await mountDock({ payment_enabled: false })
     expect(disabled.wrapper.find('[data-testid="account-upgrade-link"]').exists()).toBe(false)
-    expect(renderedIds(disabled.wrapper, 'data-account-link')).toEqual([
-      'wallet',
-      'subscriptions',
-    ])
-    expect(renderedIds(disabled.wrapper, 'data-resource-link')).toEqual([
-      'home',
-      'contact',
-    ])
 
-    const enabled = await mountDock()
-    await enabled.wrapper.get('.sidebar-account-trigger').trigger('click')
+    summaryState.subscriptionsLoaded = false
+    const loading = await mountDock()
+    expect(loading.wrapper.get('[data-testid="account-upgrade-link"]').attributes('href'))
+      .toBe('/pricing')
+    expect(loading.wrapper.text()).toContain('accountDock.subscriptionLoading')
 
-    expect(enabled.wrapper.get('[data-testid="account-upgrade-link"]').attributes('href')).toBe(
-      '/pricing',
-    )
-    expect(renderedIds(enabled.wrapper, 'data-account-link')).toEqual([
-      'wallet',
-      'subscriptions',
-    ])
-    const subscriptionLink = enabled.wrapper.get('[data-testid="stub-subscriptions"]')
-    expect(subscriptionLink.attributes('href')).toBe('/subscriptions')
-    expect(subscriptionLink.attributes('data-account-label')).toBe('nav.mySubscriptions')
-    expect(subscriptionLink.attributes('data-account-icon')).toBe('creditCard')
-    expect(renderedIds(enabled.wrapper, 'data-resource-link')).toEqual([
-      'home',
-      'models',
-      'contact',
-    ])
-  })
-
-  it('keeps the recharge entry visible without exposing deep pages in simple mode', async () => {
     summaryState.isSimpleMode = true
-    const { wrapper } = await mountDock()
-
-    await wrapper.get('.sidebar-account-trigger').trigger('click')
-
-    expect(wrapper.find('[data-testid="account-upgrade-link"]').exists()).toBe(false)
-    expect(renderedIds(wrapper, 'data-account-link')).toEqual(['wallet'])
-    expect(wrapper.find('[data-testid="stub-subscriptions"]').exists()).toBe(false)
+    const simple = await mountDock()
+    expect(simple.wrapper.find('[data-testid="account-upgrade-link"]').exists()).toBe(false)
   })
 
-  it('exposes the subscriptions destination for administrator accounts', async () => {
-    summaryState.isAdmin = true
-    const { wrapper } = await mountDock()
-
-    await wrapper.get('.sidebar-account-trigger').trigger('click')
-
-    expect(wrapper.get('[data-testid="stub-subscriptions"]').attributes('href'))
-      .toBe('/subscriptions')
-  })
-
-  it('keeps the upgrade destination visible while payment capability is unknown', async () => {
+  it('keeps Upgrade available while payment capability is unknown', async () => {
     const { wrapper } = await mountDock({ payment_enabled: undefined })
 
-    expect(wrapper.get('[data-testid="account-upgrade-link"]').attributes('href')).toBe('/pricing')
+    expect(wrapper.get('[data-testid="account-upgrade-link"]').attributes('href'))
+      .toBe('/pricing')
   })
 
-  it('navigates with the independent upgrade link without reopening the account panel', async () => {
-    const { wrapper, router } = await mountDock()
-    const trigger = wrapper.get('.sidebar-account-trigger')
-
-    await trigger.trigger('click')
-    expect(trigger.attributes('aria-expanded')).toBe('true')
-
-    await wrapper.get('[data-testid="account-upgrade-link"]').trigger('click')
-    await flushPromises()
-
-    expect(router.currentRoute.value.path).toBe('/pricing')
-    expect(trigger.attributes('aria-expanded')).toBe('false')
-    expect(wrapper.find('[data-testid="overlay-stub"]').exists()).toBe(false)
-  })
-
-  it.each([
-    { label: 'desktop', mobile: false },
-    { label: 'mobile', mobile: true },
-  ])('navigates to subscriptions and closes the $label account panel', async ({ mobile }) => {
-    installMatchMedia(mobile)
-    const { wrapper, router } = await mountDock()
-    const trigger = wrapper.get('.sidebar-account-trigger')
-
-    await trigger.trigger('click')
-    expect(trigger.attributes('aria-expanded')).toBe('true')
-
-    await wrapper.get('[data-testid="stub-subscriptions"]').trigger('click')
-    await flushPromises()
-
-    expect(router.currentRoute.value.path).toBe('/subscriptions')
-    expect(trigger.attributes('aria-expanded')).toBe('false')
-    expect(wrapper.find('[data-testid="overlay-stub"]').exists()).toBe(false)
-  })
-
-  it('hides the upgrade action when the desktop sidebar is collapsed', async () => {
+  it('hides the upgrade CTA and preserves an accessible trigger when collapsed', async () => {
     const { wrapper, appStore } = await mountDock()
-
-    expect(wrapper.find('[data-testid="account-upgrade-link"]').exists()).toBe(true)
     appStore.setSidebarCollapsed(true)
     await flushPromises()
 
     expect(wrapper.find('[data-testid="account-upgrade-link"]').exists()).toBe(false)
+    expect(wrapper.get('.sidebar-account-trigger').attributes('title')).toContain('Riley Quinn')
   })
 
-  it('opens general settings in place and preserves unrelated route state', async () => {
+  it.each([
+    { control: 'stub-profile', section: 'account' },
+    { control: 'stub-preferences', section: 'general' },
+  ])('opens the $section personal settings section and preserves route state', async ({
+    control,
+    section,
+  }) => {
     const { wrapper, router } = await mountDock()
     await router.replace({
-      path: '/',
+      path: '/monitor',
       query: { source: 'account-menu' },
       hash: '#usage',
     })
     await wrapper.get('.sidebar-account-trigger').trigger('click')
 
-    await wrapper.get('[data-testid="stub-settings"]').trigger('click')
+    await wrapper.get(`[data-testid="${control}"]`).trigger('click')
     await flushPromises()
 
     expect(router.currentRoute.value.query).toEqual({
       source: 'account-menu',
-      account_settings: 'general',
+      account_settings: section,
     })
-    expect(router.currentRoute.value.path).toBe('/dashboard')
+    expect(router.currentRoute.value.path).toBe('/monitor')
     expect(router.currentRoute.value.hash).toBe('#usage')
     expect(wrapper.find('[data-testid="overlay-stub"]').exists()).toBe(false)
   })
 
-  it('uses the admin settings host for administrator accounts', async () => {
+  it.each([
+    { control: 'stub-profile', section: 'account' },
+    { control: 'stub-preferences', section: 'general' },
+  ])('keeps an admin\'s $section settings over the personal workspace', async ({
+    control,
+    section,
+  }) => {
     summaryState.isAdmin = true
     const { wrapper, router } = await mountDock()
+    await router.replace('/monitor')
     await wrapper.get('.sidebar-account-trigger').trigger('click')
 
-    await wrapper.get('[data-testid="stub-settings"]').trigger('click')
+    await wrapper.get(`[data-testid="${control}"]`).trigger('click')
     await flushPromises()
 
-    expect(router.currentRoute.value.path).toBe('/admin/dashboard')
+    expect(router.currentRoute.value.path).toBe('/monitor')
+    expect(router.currentRoute.value.query.account_settings).toBe(section)
+  })
+
+  it('keeps admin settings over the current admin workspace and exposes the guide', async () => {
+    summaryState.isAdmin = true
+    const { wrapper, router } = await mountDock()
+    await router.replace('/admin/users')
+    await wrapper.get('.sidebar-account-trigger').trigger('click')
+
+    expect(wrapper.find('[data-testid="stub-admin-guide"]').exists()).toBe(true)
+    await wrapper.get('[data-testid="stub-preferences"]').trigger('click')
+    await flushPromises()
+
+    expect(router.currentRoute.value.path).toBe('/admin/users')
     expect(router.currentRoute.value.query.account_settings).toBe('general')
   })
 
@@ -402,8 +359,9 @@ describe('SidebarAccountDock', () => {
     expect(wrapper.get('.sidebar-account-trigger').attributes('aria-expanded')).toBe('true')
   })
 
-  it('closes the mobile sidebar when the independent upgrade link is activated', async () => {
+  it('closes the mobile sidebar when Upgrade is activated', async () => {
     installMatchMedia(true)
+    summaryState.subscriptionsLoaded = false
     const { wrapper, appStore, router } = await mountDock()
     appStore.setMobileOpen(true)
 

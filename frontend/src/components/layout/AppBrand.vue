@@ -17,7 +17,7 @@
         :src="brandLogoSrc"
         alt=""
         class="app-brand-logo-image block h-full w-full max-w-none object-contain"
-        :class="{ 'app-brand-logo-image-luoxue': isLuoxueLogo }"
+        :class="{ 'app-brand-logo-image-default': isDefaultLogo }"
       >
     </span>
   </router-link>
@@ -41,23 +41,12 @@ const placement = computed(() => props.placement)
 const collapsed = computed(() => props.collapsed)
 
 const siteName = computed(() => appStore.siteName || '落雪API')
-const isLuoxueBrand = computed(() => /^落雪\s*API$/i.test(siteName.value.trim()))
 const siteLogo = computed(() => sanitizeUrl(appStore.siteLogo || '', {
   allowRelative: true,
   allowDataUrl: true,
 }))
-const brandLogoSrc = computed(() => {
-  if (siteLogo.value) return siteLogo.value
-
-  return isLuoxueBrand.value
-    ? '/brand/luoxue-snowflake-cloud-palette.png'
-    : '/logo.png'
-})
-const isLuoxueLogo = computed(() => {
-  if (!isLuoxueBrand.value) return false
-
-  return /luoxue-snowflake-cloud-palette\.(?:png|svg)(?:[?#].*)?$/i.test(brandLogoSrc.value)
-})
+const brandLogoSrc = computed(() => siteLogo.value || '/logo.png')
+const isDefaultLogo = computed(() => brandLogoSrc.value === '/logo.png')
 const homePath = computed(() => (authStore.isAdmin ? '/admin/dashboard' : '/dashboard'))
 </script>
 
@@ -75,14 +64,8 @@ const homePath = computed(() => (authStore.isAdmin ? '/admin/dashboard' : '/dash
   position: relative;
 }
 
-.app-brand-logo-image-luoxue {
-  transform: scale(1.13);
+.app-brand-logo-image-default {
+  transform: scale(1.1);
   transform-origin: center;
-}
-
-:global(html.dark .app-brand-logo-image-luoxue) {
-  filter:
-    drop-shadow(0 0 0.75px rgb(255 255 255 / 0.95))
-    drop-shadow(0 0 5px rgb(var(--luoxue-blue-rgb) / 0.22));
 }
 </style>

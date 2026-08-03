@@ -245,6 +245,8 @@ export interface PublicSettings {
   available_channels_enabled: boolean
   /** Public, anonymous model catalog. Optional for older injected __APP_CONFIG__ snapshots. */
   public_model_catalog_enabled?: boolean
+  /** Curated, anonymous Codex Skill marketplace. Opt-in and fail-closed. */
+  skill_marketplace_enabled?: boolean
   service_quota_enabled: boolean
   affiliate_enabled: boolean
   allow_user_view_error_requests?: boolean

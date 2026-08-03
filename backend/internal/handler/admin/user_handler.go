@@ -455,7 +455,9 @@ func (h *UserHandler) GetUserUsage(c *gin.Context) {
 	response.Success(c, stats)
 }
 
-// GetBalanceHistory handles getting user's balance/concurrency change history
+// GetBalanceHistory handles getting user's balance/concurrency change history.
+// The default view only includes balance/concurrency history; current subscriptions
+// are served by GET /api/v1/admin/users/:id/subscriptions.
 // GET /api/v1/admin/users/:id/balance-history
 // Query params:
 //   - type: filter by record type (balance, affiliate_balance, admin_balance, concurrency, admin_concurrency, subscription)

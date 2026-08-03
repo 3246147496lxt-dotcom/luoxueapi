@@ -1,8 +1,9 @@
 /**
- * Shell-level destinations shared by the sidebar and the account surface.
+ * Shell-level destinations shared by workspace navigation, support controls,
+ * and the account surface.
  *
  * Keep route ownership here: consumers should select specs by audience and
- * placement instead of repeating account paths or feature fallback rules.
+ * placement instead of repeating destination paths or feature fallback rules.
  */
 import type { PersonalSettingsSection } from './personalSettingsRoute'
 
@@ -27,21 +28,19 @@ export const ACCOUNT_DESTINATION_PATH_SET: ReadonlySet<AccountDestinationPath> =
 )
 
 export type ShellAudience = 'user' | 'admin'
-export type ShellDestinationPlacement = 'account' | 'support' | 'navigation'
+export type ShellDestinationPlacement = 'account' | 'workspace' | 'support'
 export type ShellSimpleVisibility = 'visible' | 'hidden'
 export type ShellSimpleAccess = 'allowed' | 'blocked'
 export type ShellCapabilityState = 'enabled' | 'disabled' | 'unknown'
 export type ShellUnknownCapabilityPolicy = 'allow' | 'deny'
 export type ShellCapabilityKey = 'payment' | 'public-model-catalog'
 export type ShellConfiguredHrefSource = 'contact' | 'documentation'
-export type ShellSupportDestinationId = 'home' | 'models' | 'contact'
-export type ShellNavigationDestinationId = 'documentation'
+export type ShellSupportDestinationId = 'models' | 'contact' | 'documentation'
 export type ShellSettingsDestinationId = 'settings'
 export type ShellDestinationId =
   | AccountDestinationId
   | ShellSettingsDestinationId
   | ShellSupportDestinationId
-  | ShellNavigationDestinationId
 
 export interface ShellSimpleModePolicy {
   readonly visibility: ShellSimpleVisibility
@@ -120,7 +119,7 @@ export const ACCOUNT_DESTINATION_DEFINITIONS = [
   {
     id: 'subscriptions',
     labelKey: 'nav.mySubscriptions',
-    placement: 'account',
+    placement: 'workspace',
     target: {
       kind: 'route',
       path: ACCOUNT_DESTINATION_PATHS.subscriptions,
@@ -133,7 +132,7 @@ export const ACCOUNT_DESTINATION_DEFINITIONS = [
   {
     id: 'quotaViewer',
     labelKey: 'quotaViewerLanding.meta.title',
-    placement: 'account',
+    placement: 'workspace',
     target: {
       kind: 'route',
       path: ACCOUNT_DESTINATION_PATHS.quotaViewer,
@@ -143,7 +142,7 @@ export const ACCOUNT_DESTINATION_DEFINITIONS = [
   {
     id: 'wallet',
     labelKey: 'nav.buySubscription',
-    placement: 'account',
+    placement: 'workspace',
     target: {
       kind: 'route',
       path: ACCOUNT_DESTINATION_PATHS.wallet,
@@ -163,7 +162,7 @@ export const ACCOUNT_DESTINATION_DEFINITIONS = [
   {
     id: 'orders',
     labelKey: 'nav.myOrders',
-    placement: 'account',
+    placement: 'workspace',
     target: {
       kind: 'route',
       path: ACCOUNT_DESTINATION_PATHS.orders,
@@ -191,12 +190,12 @@ export const ACCOUNT_DESTINATION_DEFINITIONS = [
 
 export const SUPPORT_DESTINATION_DEFINITIONS = [
   {
-    id: 'home',
-    labelKey: 'nav.home',
+    id: 'documentation',
+    labelKey: 'nav.docsTutorial',
     placement: 'support',
     target: {
-      kind: 'href',
-      href: '/home',
+      kind: 'configured-href',
+      source: 'documentation',
     },
     simpleMode: VISIBLE_IN_SIMPLE_MODE,
   },
@@ -226,24 +225,10 @@ export const SUPPORT_DESTINATION_DEFINITIONS = [
   },
 ] as const satisfies readonly ShellDestinationDefinition[]
 
-export const NAVIGATION_DESTINATION_DEFINITIONS = [
-  {
-    id: 'documentation',
-    labelKey: 'nav.docsTutorial',
-    placement: 'navigation',
-    target: {
-      kind: 'configured-href',
-      source: 'documentation',
-    },
-    simpleMode: VISIBLE_IN_SIMPLE_MODE,
-  },
-] as const satisfies readonly ShellDestinationDefinition[]
-
 export const SHELL_DESTINATION_DEFINITIONS: readonly ShellDestinationDefinition[] =
   Object.freeze([
     ...ACCOUNT_DESTINATION_DEFINITIONS,
     ...SUPPORT_DESTINATION_DEFINITIONS,
-    ...NAVIGATION_DESTINATION_DEFINITIONS,
   ])
 
 function createShellDestinationSpecs(

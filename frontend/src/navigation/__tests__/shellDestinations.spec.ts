@@ -51,22 +51,24 @@ describe('shellDestinations', () => {
 
     expect(REGULAR_ACCOUNT_DESTINATION_SPECS.map(({ id }) => id)).toEqual([
       'pricing',
-      'subscriptions',
-      'quotaViewer',
-      'wallet',
       'settings',
-      'orders',
       'profile',
     ])
     expect(ADMIN_ACCOUNT_DESTINATION_SPECS.map(({ id }) => id)).toEqual([
       'pricing',
-      'subscriptions',
-      'quotaViewer',
-      'wallet',
       'settings',
-      'orders',
       'profile',
     ])
+    expect(
+      REGULAR_SHELL_DESTINATION_SPECS
+        .filter(({ placement }) => placement === 'workspace')
+        .map(({ id }) => id),
+    ).toEqual(['subscriptions', 'quotaViewer', 'wallet', 'orders'])
+    expect(
+      ADMIN_SHELL_DESTINATION_SPECS
+        .filter(({ placement }) => placement === 'workspace')
+        .map(({ id }) => id),
+    ).toEqual(['subscriptions', 'quotaViewer', 'wallet', 'orders'])
     expect(getShellDestinationSpecs('user')).toBe(REGULAR_SHELL_DESTINATION_SPECS)
     expect(getAccountDestinationSpecs('admin')).toBe(ADMIN_ACCOUNT_DESTINATION_SPECS)
   })
@@ -153,21 +155,21 @@ describe('shellDestinations', () => {
         context,
         'account',
       ).map(({ id }) => id),
-    ).toEqual(['quotaViewer', 'wallet', 'settings', 'profile'])
+    ).toEqual(['settings', 'profile'])
+    expect(
+      selectVisibleShellDestinations(
+        REGULAR_SHELL_DESTINATION_SPECS,
+        context,
+        'workspace',
+      ).map(({ id }) => id),
+    ).toEqual(['quotaViewer', 'wallet'])
     expect(
       selectVisibleShellDestinations(
         REGULAR_SHELL_DESTINATION_SPECS,
         context,
         'support',
       ).map(({ id }) => id),
-    ).toEqual(['home', 'models', 'contact'])
-    expect(
-      selectVisibleShellDestinations(
-        REGULAR_SHELL_DESTINATION_SPECS,
-        context,
-        'navigation',
-      ).map(({ id }) => id),
-    ).toEqual(['documentation'])
+    ).toEqual(['documentation', 'models', 'contact'])
 
     const adminProfile = findSpec(ADMIN_SHELL_DESTINATION_SPECS, 'profile')
     expect(isShellDestinationVisible(adminProfile, context)).toBe(false)

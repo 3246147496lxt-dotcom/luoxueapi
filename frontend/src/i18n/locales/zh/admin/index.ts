@@ -8,6 +8,7 @@ import audit from './audit'
 import modelCatalog from './modelCatalog'
 import documentation from './documentation'
 import desktopDiagnostics from './desktopDiagnostics'
+import skills from './skills'
 
 export default {
   ...overview,
@@ -20,4 +21,5 @@ export default {
   ...modelCatalog,
   ...documentation,
   ...desktopDiagnostics,
+  ...skills,
 }

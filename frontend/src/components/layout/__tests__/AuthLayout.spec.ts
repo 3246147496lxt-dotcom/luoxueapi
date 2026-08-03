@@ -112,7 +112,7 @@ describe('AuthLayout', () => {
     expect(wrapper.get('[data-testid="auth-content"]').text()).toBe('登录')
     expect(wrapper.get('[data-testid="auth-footer"]').text()).toBe('注册')
     expect(wrapper.get('.auth-brand-mark img').attributes('src')).toBe(
-      '/brand/luoxue-snowpuff-extracted.svg'
+      '/logo.png'
     )
     expect(wrapper.get('.auth-brand-name').text()).toBe('落雪API')
     expect(wrapper.get('.auth-brand-api').text()).toBe('API')
@@ -122,7 +122,7 @@ describe('AuthLayout', () => {
     expect(testState.appStore.fetchPublicSettings).toHaveBeenCalledOnce()
   })
 
-  it('prefers an administrator-configured site logo over the default snowpuff mark', () => {
+  it('prefers an administrator-configured site logo over the canonical default', () => {
     testState.appStore.siteLogo = '/brand/custom-site-logo.svg'
 
     const wrapper = mountLayout()

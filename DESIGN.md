@@ -30,7 +30,7 @@ colors:
 - 运行时色彩、字体、圆角与阴影以 `frontend/src/styles/luoxue-clay-tokens.css` 为唯一权威。
 - 按钮、输入框、选择器、卡片、表格、分页与状态组件统一由 `frontend/src/styles/luoxue-clay-components.css` 应用语义 Token。
 - 旧公共 `/home` 仍是整体视觉基准；已完成且最终视觉审阅为 `PASS / ship` 的公开 `/quota-viewer` 是 Snow Clay 的新视觉基准之一。登录、注册、管理端和用户端只是同一语言在不同信息密度下的应用。
-- `PublicSiteLayout` 与 `AuthLayout` 默认进入 Snow Clay；`AppLayout` 默认提供 Snow Clay 画布和全高侧栏。桌面端不设置全局顶栏，页面语境由内容区的语义 `h1` 承担，账户、钱包、订阅、偏好与帮助统一收进左下角账户菜单；移动端仅保留用于打开导航的极简栏。`home-clay` 只负责管理端高密度内容适配，不能用于给用户页批量套管理端规则。
+- `PublicSiteLayout` 与 `AuthLayout` 默认进入 Snow Clay；`AppLayout` 默认提供 Snow Clay 画布和全高侧栏。桌面端不设置全局顶栏，页面语境由内容区的语义 `h1` 承担。钱包、订阅、订单和额度工具等任务入口进入对应工作区主导航，公告与帮助资源进入可滚动侧栏的“支持”分组；左下角只保留账户摘要、始终指向套餐页的升级入口，以及承载个人资料、个人偏好、使用引导和退出登录的账户菜单。管理员的管理后台与个人工作台分离，并提供清晰切换；两者继续使用同一 Snow Clay 视觉体系。移动端仅保留用于打开导航的极简栏。`home-clay` 只负责管理端高密度内容适配，不能用于给用户页批量套管理端规则。
 
 ## 公开 `/quota-viewer` 可复用边界
 

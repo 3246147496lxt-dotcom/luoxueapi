@@ -3,6 +3,7 @@ import type {
   LocationQuery,
   LocationQueryValue,
   RouteLocationRaw,
+  RouteMeta,
   Router,
 } from 'vue-router'
 
@@ -32,6 +33,7 @@ export interface PersonalSettingsRouteLocation {
   readonly path: string
   readonly query: LocationQuery
   readonly hash: string
+  readonly meta?: RouteMeta
 }
 
 export interface PersonalSettingsRouteState {
@@ -69,6 +71,12 @@ const MAX_LIVE_HISTORY_CHAINS = 16
 const SECTION_SET: ReadonlySet<string> = new Set(PERSONAL_SETTINGS_SECTIONS)
 const DETAIL_SET: ReadonlySet<string> = new Set(PERSONAL_SETTINGS_DETAILS)
 const HOST_PATH_SET: ReadonlySet<string> = new Set(['/dashboard', '/admin/dashboard'])
+const RESTRICTED_HOST_PATH_SET: ReadonlySet<string> = new Set([
+  '/purchase',
+  '/pricing',
+  '/subscriptions',
+  '/orders',
+])
 
 const DETAIL_SECTION: Readonly<Record<PersonalSettingsDetail, PersonalSettingsSection>> = {
   profile: 'account',
@@ -157,6 +165,25 @@ export function isPersonalSettingsHostPath(
   return HOST_PATH_SET.has(path)
 }
 
+/**
+ * Personal settings may stay on authenticated AppLayout pages, but never
+ * overlay payment and transaction surfaces. The two dashboard paths remain
+ * unconditional hosts for legacy redirects and safe fallbacks.
+ */
+export function isPersonalSettingsHostRoute(
+  route: Pick<PersonalSettingsRouteLocation, 'path' | 'meta'>,
+): boolean {
+  if (isPersonalSettingsHostPath(route.path)) return true
+  if (
+    RESTRICTED_HOST_PATH_SET.has(route.path)
+    || route.path.startsWith('/payment/')
+    || route.meta?.requiresPayment === true
+  ) {
+    return false
+  }
+  return route.meta?.requiresAuth === true
+}
+
 export function getPersonalSettingsHostPath(
   audience: PersonalSettingsAudience,
 ): PersonalSettingsHostPath {
@@ -180,7 +207,8 @@ export function parsePersonalSettingsRoute(
   const sectionValue = scalarQueryValue(query[SECTION_QUERY_KEY])
   const hasValidSection = isPersonalSettingsSection(sectionValue)
   const section = hasValidSection ? sectionValue : DEFAULT_SECTION
-  const isOpen = isPersonalSettingsHostPath(route.path) && hasValidSection
+  const isHostRoute = isPersonalSettingsHostRoute(route)
+  const isOpen = isHostRoute && hasValidSection
 
   const detailValue = scalarQueryValue(query[DETAIL_QUERY_KEY])
   const hasValidDetail = isPersonalSettingsDetail(detailValue)
@@ -190,7 +218,7 @@ export function parsePersonalSettingsRoute(
   const needsCanonicalization = (
     (hasSectionQuery || hasDetailQuery)
     && (
-      !isPersonalSettingsHostPath(route.path)
+      !isHostRoute
       || !hasValidSection
       || (hasDetailQuery && !hasValidDetail)
     )
@@ -354,7 +382,7 @@ export function resolvePersonalSettingsCanonicalization(
 
   if (!state.needsCanonicalization) return null
 
-  const keepSection = isPersonalSettingsHostPath(route.path)
+  const keepSection = isPersonalSettingsHostRoute(route)
     && isPersonalSettingsSection(
       scalarQueryValue((route.query ?? {})[SECTION_QUERY_KEY]),
     )
@@ -392,7 +420,9 @@ export function openPersonalSettings(
   return router.push(
     createRouteTarget(
       route,
-      getPersonalSettingsHostPath(audience),
+      isPersonalSettingsHostRoute(route)
+        ? route.path
+        : getPersonalSettingsHostPath(audience),
       createSettingsQuery(route, section),
       historyOwnerState(chain ? createHistoryOwner(chain, 0) : null),
     ),
@@ -404,7 +434,7 @@ export function replacePersonalSettingsSection(
   route: PersonalSettingsRouteLocation,
   section: PersonalSettingsSection,
 ) {
-  if (!isPersonalSettingsHostPath(route.path)) {
+  if (!isPersonalSettingsHostRoute(route)) {
     return canonicalizePersonalSettingsRoute(router, route)
   }
   const owner = readLiveHistoryOwner()
@@ -423,7 +453,7 @@ export function replacePersonalSettingsDetail(
   route: PersonalSettingsRouteLocation,
   detail: PersonalSettingsDetail,
 ) {
-  if (!isPersonalSettingsHostPath(route.path)) {
+  if (!isPersonalSettingsHostRoute(route)) {
     return canonicalizePersonalSettingsRoute(router, route)
   }
   const section = getPersonalSettingsDetailSection(detail)

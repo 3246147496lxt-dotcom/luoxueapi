@@ -17,12 +17,29 @@ vi.mock('vue-router', () => ({
 vi.mock('vue-i18n', async () => {
   const actual = await vi.importActual<typeof import('vue-i18n')>('vue-i18n')
   const messages: Record<string, string> = {
-    'nav.personalTools': '个人工具',
+    'nav.adminWorkspace': '管理后台',
+    'nav.personalWorkspace': '我的工作台',
+    'nav.switchToAdminWorkspace': '切换到管理后台',
+    'nav.switchToPersonalWorkspace': '切换到我的工作台',
     'nav.adminSections.overview': '概览',
     'nav.adminSections.business': '用户与资源',
     'nav.adminSections.operations': '计费与运营',
     'nav.adminSections.system': '系统与审计',
+    'nav.userSections.work': '工作台',
+    'nav.userSections.usageTools': '使用与工具',
+    'nav.userSections.billing': '账户与费用',
     'nav.adminUsage': '全站用量',
+    'nav.announcementManagement': '公告管理',
+    'nav.systemSettings': '系统设置',
+    'nav.support': '支持',
+    'nav.home': '首页',
+    'nav.modelCatalog': '模型广场',
+    'nav.contactUs': '联系我们',
+    'nav.docsTutorial': '文档教程',
+    'nav.rechargeAndRedeem': '充值/兑换',
+    'announcements.title': '公告',
+    'nav.helpAndResources': '帮助与资源',
+    'quotaViewerLanding.meta.title': '桌面额度查看器',
   }
   return {
     ...actual,
@@ -95,6 +112,15 @@ function mountSidebar(role: User['role'] = 'admin'): VueWrapper {
         SidebarAccountDock: {
           template: '<div data-testid="sidebar-account-dock-stub" />',
         },
+        AnnouncementBell: {
+          props: ['variant'],
+          template: `
+            <button type="button" :data-variant="variant">
+              <span>公告</span>
+              <span>2</span>
+            </button>
+          `,
+        },
         VersionBadge: true,
       },
     },
@@ -107,6 +133,7 @@ function enableAllAdminNavigation(): void {
 
   appStore.cachedPublicSettings = {
     affiliate_enabled: true,
+    available_channels_enabled: true,
     channel_monitor_enabled: true,
     payment_enabled: true,
     risk_control_enabled: true,
@@ -217,6 +244,52 @@ describe('AppSidebar grouped admin navigation', () => {
     expect(brand.classes()).not.toContain('app-brand--collapsed')
   })
 
+  it('switches administrators between route-driven admin and personal workspaces', async () => {
+    const adminWrapper = mountSidebar('admin')
+    const adminOption = adminWrapper.get('[data-testid="sidebar-workspace-admin-option"]')
+    const personalOption = adminWrapper.get('[data-testid="sidebar-workspace-personal-option"]')
+
+    expect(adminOption.attributes('aria-pressed')).toBe('true')
+    expect(personalOption.attributes('aria-pressed')).toBe('false')
+    expect(adminWrapper.find('[data-testid="sidebar-admin-overview-section"]').exists()).toBe(true)
+    expect(adminWrapper.find('[data-testid="sidebar-user-work-section"]').exists()).toBe(false)
+
+    await personalOption.trigger('click')
+    expect(routerPush).toHaveBeenCalledWith('/dashboard')
+
+    adminWrapper.unmount()
+    routerPush.mockReset()
+    routeState.path = '/dashboard'
+
+    const personalWrapper = mountSidebar('admin')
+    expect(
+      personalWrapper.get('[data-testid="sidebar-workspace-admin-option"]').attributes('aria-pressed'),
+    ).toBe('false')
+    expect(
+      personalWrapper.get('[data-testid="sidebar-workspace-personal-option"]').attributes('aria-pressed'),
+    ).toBe('true')
+    expect(personalWrapper.find('[data-testid="sidebar-admin-overview-section"]').exists()).toBe(false)
+    expect(personalWrapper.find('[data-testid="sidebar-user-work-section"]').exists()).toBe(true)
+
+    await personalWrapper.get('[data-testid="sidebar-workspace-admin-option"]').trigger('click')
+    expect(routerPush).toHaveBeenCalledWith('/admin/dashboard')
+  })
+
+  it('keeps the workspace switch keyboard-accessible in the collapsed rail', async () => {
+    const appStore = useAppStore()
+    appStore.setSidebarCollapsed(true)
+    const wrapper = mountSidebar('admin')
+    const compactSwitch = wrapper.get('[data-testid="sidebar-workspace-compact-switch"]')
+
+    expect(compactSwitch.element.tagName).toBe('BUTTON')
+    expect(compactSwitch.attributes('type')).toBe('button')
+    expect(compactSwitch.attributes('aria-label')).toBe('切换到我的工作台')
+    expect(wrapper.find('[data-testid="sidebar-workspace-admin-option"]').exists()).toBe(false)
+
+    await compactSwitch.trigger('click')
+    expect(routerPush).toHaveBeenCalledWith('/dashboard')
+  })
+
   it('groups the complete admin navigation by task while retaining the production rail', async () => {
     enableAllAdminNavigation()
     const wrapper = mountSidebar('admin')
@@ -252,11 +325,10 @@ describe('AppSidebar grouped admin navigation', () => {
 
     expect(sections[0].findAll('a[href]').map(link => link.attributes('href'))).toEqual([
       '/admin/dashboard',
-      '/chat',
       '/admin/ops',
       '/admin/usage',
     ])
-    expect(wrapper.findAll('a[href="/chat"]')).toHaveLength(1)
+    expect(wrapper.findAll('a[href="/chat"]')).toHaveLength(0)
     expect(sections[0].text()).toContain('全站用量')
     expect(sections[1].findAll('a[href]').map(link => link.attributes('href'))).toEqual([
       '/admin/users',
@@ -266,6 +338,7 @@ describe('AppSidebar grouped admin navigation', () => {
       '/admin/channels/pricing',
       '/admin/channels/monitor',
       '/admin/model-catalog',
+      '/admin/skills',
     ])
     expect(sections[2].findAll('a[href]').map(link => link.attributes('href'))).toEqual([
       '/admin/subscriptions',
@@ -286,6 +359,69 @@ describe('AppSidebar grouped admin navigation', () => {
       '/admin/documentation',
       '/admin/settings',
     ])
+  })
+
+  it('opens overview and the active admin section while keeping other sections collapsible', async () => {
+    routeState.path = '/admin/users'
+    const wrapper = mountSidebar('admin')
+    const overviewToggle = wrapper.get(
+      '[data-testid="sidebar-admin-overview-section"] .sidebar-section-toggle',
+    )
+    const businessToggle = wrapper.get(
+      '[data-testid="sidebar-admin-business-section"] .sidebar-section-toggle',
+    )
+    const operationsToggle = wrapper.get(
+      '[data-testid="sidebar-admin-operations-section"] .sidebar-section-toggle',
+    )
+
+    expect(overviewToggle.attributes('aria-expanded')).toBe('true')
+    expect(businessToggle.attributes('aria-expanded')).toBe('true')
+    expect(businessToggle.attributes('aria-disabled')).toBe('true')
+    expect(operationsToggle.attributes('aria-expanded')).toBe('false')
+    expect(wrapper.get('[data-testid="sidebar-section-panel-operations"]').attributes('style')).toContain(
+      'display: none',
+    )
+
+    await businessToggle.trigger('click')
+    expect(businessToggle.attributes('aria-expanded')).toBe('true')
+
+    await operationsToggle.trigger('click')
+    expect(operationsToggle.attributes('aria-expanded')).toBe('true')
+    expect(localStorage.getItem('app-sidebar-admin-expanded-sections')).toBe(
+      JSON.stringify(['overview', 'operations']),
+    )
+  })
+
+  it('restores manually expanded admin sections from local storage', () => {
+    localStorage.setItem(
+      'app-sidebar-admin-expanded-sections',
+      JSON.stringify(['overview', 'system']),
+    )
+    const wrapper = mountSidebar('admin')
+
+    expect(
+      wrapper
+        .get('[data-testid="sidebar-admin-system-section"] .sidebar-section-toggle')
+        .attributes('aria-expanded'),
+    ).toBe('true')
+    expect(
+      wrapper.get('[data-testid="sidebar-section-panel-system"]').attributes('style'),
+    ).toBeUndefined()
+  })
+
+  it('keeps every admin section reachable when the global rail is collapsed', () => {
+    localStorage.setItem('app-sidebar-admin-expanded-sections', JSON.stringify([]))
+    const appStore = useAppStore()
+    appStore.setSidebarCollapsed(true)
+    const wrapper = mountSidebar('admin')
+
+    expect(wrapper.find('.sidebar-section-toggle').exists()).toBe(false)
+    expect(wrapper.get('a[href="/admin/users"]').classes()).toContain('sidebar-link-collapsed')
+    for (const id of ['overview', 'business', 'operations', 'system']) {
+      expect(
+        wrapper.get(`[data-testid="sidebar-section-panel-${id}"]`).attributes('style'),
+      ).toBeUndefined()
+    }
   })
 
   it('keeps custom admin pages in the system group before the final settings destination', () => {
@@ -347,13 +483,7 @@ describe('AppSidebar grouped admin navigation', () => {
       'sidebar-admin-system-section',
     ])
     expect(sections.every(section => section.findAll('.sidebar-link').length > 0)).toBe(true)
-    expect(
-      wrapper
-        .get('[data-testid="sidebar-admin-overview-section"]')
-        .find('a[href="/chat"]')
-        .exists(),
-    ).toBe(true)
-    expect(wrapper.findAll('a[href="/chat"]')).toHaveLength(1)
+    expect(wrapper.findAll('a[href="/chat"]')).toHaveLength(0)
     expect(wrapper.get('[data-testid="sidebar-docs-tutorial"]').attributes('href')).toBe('/docs/')
     expect(wrapper.find('a[href="/admin/users"]').exists()).toBe(false)
     expect(wrapper.find('[data-testid="sidebar-admin-business-section"] a[href="/keys"]').exists()).toBe(true)
@@ -373,6 +503,8 @@ describe('AppSidebar grouped admin navigation', () => {
       system: '系统与审计',
     })
     expect(zhCommon.nav.adminUsage).toBe('全站用量')
+    expect(zhCommon.nav.support).toBe('支持')
+    expect(zhCommon.nav.rechargeAndRedeem).toBe('充值/兑换')
     expect(enCommon.nav.adminSections).toEqual({
       overview: 'Overview',
       business: 'Users & Resources',
@@ -380,6 +512,8 @@ describe('AppSidebar grouped admin navigation', () => {
       system: 'System & Audit',
     })
     expect(enCommon.nav.adminUsage).toBe('Platform Usage')
+    expect(enCommon.nav.support).toBe('Support')
+    expect(enCommon.nav.rechargeAndRedeem).toBe('Top Up / Redeem')
     expect(enCommon.nav.docsTutorial).toBe('Documentation Guide')
     expect(enCommon.nav.documentationManagement).toBe('Documentation Management')
   })
@@ -427,6 +561,17 @@ describe('AppSidebar grouped admin navigation', () => {
     expect(appStore.mobileOpen).toBe(false)
   })
 
+  it('keeps the mobile drawer available behind the announcement modal', async () => {
+    const appStore = useAppStore()
+    appStore.setMobileOpen(true)
+    const wrapper = mountSidebar('user')
+
+    await wrapper.get('[data-testid="sidebar-announcements"]').trigger('click')
+    await nextTick()
+
+    expect(appStore.mobileOpen).toBe(true)
+  })
+
   it('keeps real nested admin groups accessible', () => {
     routeState.path = '/admin/orders/plans'
     const adminSettingsStore = useAdminSettingsStore()
@@ -465,11 +610,13 @@ describe('AppSidebar grouped admin navigation', () => {
     expect(wrapper.find('a[href="/admin/announcements"]').exists()).toBe(true)
   })
 
-  it('uses the personal-tools heading and the supplied notification glyph', () => {
+  it('uses scope-specific admin labels and the supplied notification glyph', () => {
     const wrapper = mountSidebar()
     const announcementPath = wrapper.get('a[href="/admin/announcements"] svg path')
 
-    expect(wrapper.text()).toContain('个人工具')
+    expect(wrapper.get('a[href="/admin/announcements"]').text()).toContain('公告管理')
+    expect(wrapper.get('a[href="/admin/settings"]').text()).toContain('系统设置')
+    expect(wrapper.text()).not.toContain('个人工具')
     expect(announcementPath.attributes('d')).toContain('M512 235.52')
     expect(announcementPath.attributes('fill')).toBe('currentColor')
   })
@@ -481,7 +628,7 @@ describe('AppSidebar grouped admin navigation', () => {
     expect(wrapper.find('a[href="/admin/dashboard"]').exists()).toBe(false)
   })
 
-  it('keeps account destinations out of regular-user navigation in simple mode', () => {
+  it('keeps only simple-mode account actions in the regular-user rail', () => {
     useAuthStore()
     const rawAuthState = toRaw(pinia.state.value.auth) as unknown as {
       runMode: Ref<'standard' | 'simple'>
@@ -492,44 +639,136 @@ describe('AppSidebar grouped admin navigation', () => {
 
     expect(wrapper.find('a[href="/chat"]').exists()).toBe(true)
     expect(wrapper.get('[data-testid="sidebar-docs-tutorial"]').attributes('href')).toBe('/docs/')
-    expect(wrapper.find('a[href="/purchase"]').exists()).toBe(false)
+    expect(wrapper.find('a[href="/quota-viewer"]').exists()).toBe(true)
+    expect(wrapper.find('a[href="/purchase"]').exists()).toBe(true)
     expect(wrapper.find('a[href="/subscriptions"]').exists()).toBe(false)
     expect(wrapper.find('a[href="/orders"]').exists()).toBe(false)
     expect(wrapper.find('a[href="/profile"]').exists()).toBe(false)
+    expect(wrapper.find('a[href="/models.html"]').exists()).toBe(false)
   })
 
-  it('keeps regular-user account links out of the scrolling rail', () => {
+  it('groups regular-user work, tools, and billing destinations in the scrolling rail', () => {
     const wrapper = mountSidebar('user')
-    const mainSection = wrapper.get('[data-testid="sidebar-user-main-section"]')
+    const workSection = wrapper.get('[data-testid="sidebar-user-work-section"]')
+    const usageToolsSection = wrapper.get('[data-testid="sidebar-user-usageTools-section"]')
+    const billingSection = wrapper.get('[data-testid="sidebar-user-billing-section"]')
 
-    expect(mainSection.findAll('a').map((link) => link.attributes('href'))).toEqual([
+    expect(workSection.attributes('aria-label')).toBe('工作台')
+    expect(workSection.findAll('a').map((link) => link.attributes('href'))).toEqual([
       '/dashboard',
       '/chat',
       '/keys',
+    ])
+    expect(usageToolsSection.attributes('aria-label')).toBe('使用与工具')
+    expect(usageToolsSection.findAll('a').map((link) => link.attributes('href'))).toEqual([
       '/usage',
       '/monitor',
+      '/quota-viewer',
     ])
-    expect(wrapper.find('[data-testid="sidebar-user-personal-section"]').exists()).toBe(false)
-    for (const path of ['/subscriptions', '/purchase', '/orders', '/profile']) {
-      expect(wrapper.find(`nav a[href="${path}"]`).exists()).toBe(false)
-    }
+    const quotaViewerLink = usageToolsSection.get('a[href="/quota-viewer"]')
+    const quotaViewerJumpIcon = quotaViewerLink.get(
+      '[data-testid="sidebar-nav-trailing-icon"]',
+    )
+    expect(quotaViewerJumpIcon.attributes('aria-hidden')).toBe('true')
+    expect(quotaViewerJumpIcon.get('path').attributes('d')).toContain('M9 6.65')
+    expect(quotaViewerLink.attributes('target')).toBeUndefined()
+    expect(quotaViewerLink.attributes('rel')).toBeUndefined()
+    expect(quotaViewerLink.findAll('[data-testid="sidebar-nav-trailing-icon"]')).toHaveLength(1)
+    expect(billingSection.attributes('aria-label')).toBe('账户与费用')
+    expect(billingSection.findAll('a').map((link) => link.attributes('href'))).toEqual([
+      '/purchase',
+      '/subscriptions',
+      '/orders',
+    ])
+    expect(billingSection.get('a[href="/purchase"]').text()).toContain('充值/兑换')
+    expect(wrapper.find('nav a[href="/profile"]').exists()).toBe(false)
     expect(wrapper.find('[data-testid="sidebar-account-dock-stub"]').exists()).toBe(true)
   })
 
   it.each<User['role']>(['admin', 'user'])(
-    'moves the configured documentation tutorial into the scrolling %s navigation',
+    'shows support destinations directly in the scrolling %s navigation',
     (role) => {
       const wrapper = mountSidebar(role)
       const navigation = wrapper.get('nav.sidebar-nav')
+      const supportSection = navigation.get('[data-testid="sidebar-support-section"]')
       const docsLink = navigation.get('[data-testid="sidebar-docs-tutorial"]')
+      const contactLink = navigation.get('[data-testid="sidebar-contact-us"]')
 
-      expect(docsLink.text()).toContain('nav.docsTutorial')
+      expect(supportSection.get('[data-testid="sidebar-announcements"]').text()).toContain('公告')
+      expect(supportSection.get('[data-testid="sidebar-announcements"]').attributes('data-variant'))
+        .toBe('row')
+      expect(docsLink.text()).toContain('文档教程')
       expect(docsLink.attributes('href')).toBe('/docs/')
       expect(docsLink.attributes('target')).toBe('_blank')
       expect(docsLink.attributes('rel')).toBe('noopener noreferrer')
+      expect(contactLink.text()).toContain('联系我们')
+      expect(contactLink.attributes('target')).toBe('_blank')
+      expect(contactLink.attributes('rel')).toBe('noopener noreferrer')
+      for (const link of [docsLink, contactLink]) {
+        const jumpIcon = link.get('[data-testid="sidebar-nav-trailing-icon"]')
+        expect(jumpIcon.classes()).toContain('sidebar-nav-trailing-icon')
+        expect(jumpIcon.attributes('aria-hidden')).toBe('true')
+        expect(jumpIcon.get('path').attributes('d')).toContain('M9 6.65')
+      }
+      expect(supportSection.find('[data-testid="sidebar-help-resources"]').exists()).toBe(false)
+      expect(supportSection.find('a[href="/home"]').exists()).toBe(false)
       expect(wrapper.findAll('[data-testid="sidebar-docs-tutorial"]')).toHaveLength(1)
+      expect(wrapper.get('[data-testid="sidebar-account-dock-stub"]').element.contains(
+        supportSection.element,
+      )).toBe(false)
     },
   )
+
+  it('shows configured support resources as flat first-level links', () => {
+    const appStore = useAppStore()
+    appStore.cachedPublicSettings = {
+      public_model_catalog_enabled: true,
+      contact_info: '/support',
+      doc_url: '/docs/',
+    } as PublicSettings
+
+    const wrapper = mountSidebar('user')
+    const supportSection = wrapper.get('[data-testid="sidebar-support-section"]')
+
+    expect(supportSection.findAll('.sidebar-support-link').map((link) => (
+      link.attributes('href')
+    ))).toEqual([
+      '/docs/',
+      '/models.html',
+      '/support',
+    ])
+    expect(supportSection.findAll('.sidebar-support-link').every((link) => (
+      link.attributes('target') === '_blank'
+      && link.attributes('rel') === 'noopener noreferrer'
+    ))).toBe(true)
+  })
+
+  it('keeps each support destination directly reachable in the collapsed rail', () => {
+    const appStore = useAppStore()
+    appStore.setSidebarCollapsed(true)
+    const wrapper = mountSidebar('user')
+    const docsLink = wrapper.get('[data-testid="sidebar-docs-tutorial"]')
+    const contactLink = wrapper.get('[data-testid="sidebar-contact-us"]')
+
+    expect(appStore.sidebarCollapsed).toBe(true)
+    expect(docsLink.classes()).toContain('sidebar-link-collapsed')
+    expect(contactLink.classes()).toContain('sidebar-link-collapsed')
+    expect(docsLink.attributes('title')).toBe('文档教程')
+    expect(contactLink.attributes('title')).toBe('联系我们')
+    expect(docsLink.find('[data-testid="sidebar-nav-trailing-icon"]').exists()).toBe(false)
+    expect(contactLink.find('[data-testid="sidebar-nav-trailing-icon"]').exists()).toBe(false)
+  })
+
+  it('keeps only the primary quota-viewer glyph in the collapsed rail', () => {
+    const appStore = useAppStore()
+    appStore.setSidebarCollapsed(true)
+    const wrapper = mountSidebar('user')
+    const quotaViewerLink = wrapper.get('a[href="/quota-viewer"]')
+
+    expect(quotaViewerLink.classes()).toContain('sidebar-link-collapsed')
+    expect(quotaViewerLink.find('[data-testid="sidebar-nav-trailing-icon"]').exists()).toBe(false)
+    expect(quotaViewerLink.find('.sidebar-nav-icon').exists()).toBe(true)
+  })
 
   it('keeps the documentation tutorial in navigation when backend mode hides user routes', () => {
     const appStore = useAppStore()
@@ -540,11 +779,12 @@ describe('AppSidebar grouped admin navigation', () => {
 
     const wrapper = mountSidebar('user')
 
-    expect(wrapper.find('[data-testid="sidebar-user-main-section"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="sidebar-user-work-section"]').exists()).toBe(false)
     expect(wrapper.get('[data-testid="sidebar-docs-tutorial"]').attributes('href')).toBe('/docs/')
+    expect(wrapper.find('a[href="/models.html"]').exists()).toBe(false)
   })
 
-  it('keeps custom user links after the main section', () => {
+  it('keeps custom user links after the three task sections', () => {
     const appStore = useAppStore()
     appStore.cachedPublicSettings = {
       custom_menu_items: [
@@ -562,7 +802,9 @@ describe('AppSidebar grouped admin navigation', () => {
     const sections = wrapper.get('nav.sidebar-nav').findAll('[data-testid^="sidebar-user-"]')
 
     expect(sections.map((section) => section.attributes('data-testid'))).toEqual([
-      'sidebar-user-main-section',
+      'sidebar-user-work-section',
+      'sidebar-user-usageTools-section',
+      'sidebar-user-billing-section',
       'sidebar-user-custom-section',
     ])
     expect(wrapper.get('[data-testid="sidebar-user-custom-section"] a').attributes('href')).toBe(

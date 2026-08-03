@@ -6,7 +6,10 @@ import { describe, expect, it } from 'vitest'
 
 const dir = dirname(fileURLToPath(import.meta.url))
 const appSidebarSource = readFileSync(resolve(dir, '../AppSidebar.vue'), 'utf8')
-const accountDockSource = readFileSync(resolve(dir, '../SidebarAccountDock.vue'), 'utf8')
+const shellDestinationsSource = readFileSync(
+  resolve(dir, '../../../navigation/shellDestinations.ts'),
+  'utf8',
+)
 const publicSiteLayoutSource = readFileSync(resolve(dir, '../../public/PublicSiteLayout.vue'), 'utf8')
 const homeViewSource = readFileSync(resolve(dir, '../../../views/HomeView.vue'), 'utf8')
 const keyUsageViewSource = readFileSync(resolve(dir, '../../../views/KeyUsageView.vue'), 'utf8')
@@ -17,15 +20,15 @@ describe('doc_url sanitization', () => {
       "import { resolveDocumentationUrl } from '@/utils/documentationUrl'",
     )
     expect(appSidebarSource).toContain('appStore.cachedPublicSettings?.doc_url || appStore.docUrl')
-    expect(appSidebarSource).toContain('href: documentationUrl.value')
+    expect(appSidebarSource).toContain('? documentationUrl.value')
+    expect(appSidebarSource).toContain('const href = resolveSupportHref(spec)')
   })
 
-  it('SidebarAccountDock uses the shared environment-aware documentation URL resolver', () => {
-    expect(accountDockSource).toContain(
-      "import { resolveDocumentationUrl } from '@/utils/documentationUrl'",
-    )
-    expect(accountDockSource).toContain('appStore.cachedPublicSettings?.doc_url || appStore.docUrl')
-    expect(accountDockSource).not.toContain('https://luoxueapi.cc/tutorial-docs/')
+  it('declares documentation as a configured support destination', () => {
+    expect(shellDestinationsSource).toContain("id: 'documentation'")
+    expect(shellDestinationsSource).toContain("kind: 'configured-href'")
+    expect(shellDestinationsSource).toContain("source: 'documentation'")
+    expect(shellDestinationsSource).not.toContain('https://luoxueapi.cc/tutorial-docs/')
   })
 
   it('HomeView imports sanitizeUrl', () => {

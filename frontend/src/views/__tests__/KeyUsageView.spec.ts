@@ -196,7 +196,7 @@ describe('KeyUsageView daily detail', () => {
     vi.unstubAllGlobals()
   })
 
-  it('uses the snowpuff mark when no site logo is configured', () => {
+  it('uses the canonical logo when no site logo is configured', () => {
     const wrapper = mount(KeyUsageView, {
       global: {
         stubs: {
@@ -208,7 +208,7 @@ describe('KeyUsageView daily detail', () => {
     })
 
     expect(wrapper.get('header nav a img[alt="Logo"]').attributes('src')).toBe(
-      '/brand/luoxue-snowpuff-extracted.svg'
+      '/logo.png'
     )
 
     wrapper.unmount()

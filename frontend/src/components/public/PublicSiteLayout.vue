@@ -5,6 +5,7 @@
       'public-site-page--dark': isDark,
       'public-site-page--home': page === 'home',
       'public-site-page--models': page === 'models',
+      'public-site-page--skills': page === 'skills',
       'public-site-page--quota-viewer': page === 'quota-viewer'
     }"
   >
@@ -48,6 +49,13 @@
             :aria-current="page === 'models' ? 'page' : undefined"
           >
             {{ t('modelCatalog.navLabel') }}
+          </router-link>
+          <router-link
+            v-if="skillMarketEntryVisible"
+            to="/skills"
+            :aria-current="page === 'skills' ? 'page' : undefined"
+          >
+            {{ t('skills.navLabel') }}
           </router-link>
           <a v-if="tutorialUrl" :href="tutorialUrl">{{ t('home.nav.tutorial') }}</a>
         </div>
@@ -112,6 +120,14 @@
             >
               {{ t('modelCatalog.navLabel') }}
             </router-link>
+            <router-link
+              v-if="skillMarketEntryVisible"
+              to="/skills"
+              :aria-current="page === 'skills' ? 'page' : undefined"
+              @click="closeMobileMenu()"
+            >
+              {{ t('skills.navLabel') }}
+            </router-link>
             <a v-if="tutorialUrl" :href="tutorialUrl" @click="closeMobileMenu()">
               {{ t('home.nav.tutorial') }}
             </a>
@@ -144,6 +160,9 @@
           <router-link v-if="catalogEntryVisible" to="/models.html">
             {{ t('modelCatalog.navLabel') }}
           </router-link>
+          <router-link v-if="skillMarketEntryVisible" to="/skills">
+            {{ t('skills.navLabel') }}
+          </router-link>
           <a v-if="tutorialUrl" :href="tutorialUrl">{{ t('home.footer.tutorial') }}</a>
           <a
             v-if="docUrl"
@@ -169,7 +188,7 @@ import { resolveDocumentationUrl, resolveTutorialUrl } from '@/utils/documentati
 import { sanitizeUrl } from '@/utils/url'
 
 const props = withDefaults(defineProps<{
-  page?: 'home' | 'models' | 'quota-viewer'
+  page?: 'home' | 'models' | 'skills' | 'quota-viewer'
   showModelCatalog?: boolean
 }>(), {
   page: 'home',
@@ -188,7 +207,7 @@ const siteLogo = computed(() => sanitizeUrl(
   { allowRelative: true, allowDataUrl: true }
 ))
 const displayLogo = computed(() => (
-  siteLogo.value || '/brand/luoxue-snowpuff-extracted.svg'
+  siteLogo.value || '/logo.png'
 ))
 const configuredDocUrl = computed(() => sanitizeUrl(
   appStore.cachedPublicSettings?.doc_url || appStore.docUrl || '',
@@ -205,6 +224,10 @@ const catalogEntryVisible = computed(() => (
     || props.showModelCatalog
     || appStore.cachedPublicSettings?.public_model_catalog_enabled === true
   )
+))
+const skillMarketEntryVisible = computed(() => (
+  !appStore.backendModeEnabled
+  && appStore.cachedPublicSettings?.skill_marketplace_enabled === true
 ))
 
 const navItems = [

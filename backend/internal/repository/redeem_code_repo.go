@@ -357,14 +357,21 @@ func (r *redeemCodeRepository) ListByUser(ctx context.Context, userID int64, lim
 	return redeemCodeEntitiesToService(codes), nil
 }
 
-// ListByUserPaginated returns paginated balance/concurrency history for a user.
-// Supports optional type filter (e.g. "balance", "admin_balance", "concurrency", "admin_concurrency", "subscription").
+// ListByUserPaginated returns paginated redeem-code history for a user.
+// An empty codeType only returns balance/concurrency history. Subscription
+// redemption records and invitation codes belong to other views.
 func (r *redeemCodeRepository) ListByUserPaginated(ctx context.Context, userID int64, params pagination.PaginationParams, codeType string) ([]service.RedeemCode, *pagination.PaginationResult, error) {
 	q := r.client.RedeemCode.Query().
 		Where(redeemcode.UsedByEQ(userID))
 
-	// Optional type filter
-	if codeType != "" {
+	if codeType == "" {
+		q = q.Where(redeemcode.TypeIn(
+			service.RedeemTypeBalance,
+			service.RedeemTypeConcurrency,
+			service.AdjustmentTypeAdminBalance,
+			service.AdjustmentTypeAdminConcurrency,
+		))
+	} else {
 		q = q.Where(redeemcode.TypeEQ(codeType))
 	}
 

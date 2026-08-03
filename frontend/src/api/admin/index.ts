@@ -38,6 +38,7 @@ import modelCatalogAPI from './modelCatalog'
 import documentationAPI from './documentation'
 import chatHistoryAPI from './chatHistory'
 import desktopDiagnosticsAPI from './desktopDiagnostics'
+import skillsAPI from './skills'
 
 /**
  * Unified admin API object for convenient access
@@ -77,7 +78,8 @@ export const adminAPI = {
   modelCatalog: modelCatalogAPI,
   documentation: documentationAPI,
   chatHistory: chatHistoryAPI,
-  desktopDiagnostics: desktopDiagnosticsAPI
+  desktopDiagnostics: desktopDiagnosticsAPI,
+  skills: skillsAPI
 }
 
 export {
@@ -115,7 +117,8 @@ export {
   modelCatalogAPI,
   documentationAPI,
   chatHistoryAPI,
-  desktopDiagnosticsAPI
+  desktopDiagnosticsAPI,
+  skillsAPI
 }
 
 export default adminAPI
@@ -172,3 +175,17 @@ export type {
   DesktopDiagnosticMetadata,
   DesktopDiagnosticUpload,
 } from './desktopDiagnostics'
+export type {
+  AdminSkill,
+  AdminSkillVersion,
+  CreateSkillRequest,
+  SkillListParams,
+  SkillListResponse,
+  SkillMarketplaceConfig,
+  SkillStatus,
+  SkillValidationIssue,
+  SkillValidationReport,
+  SkillVersionStatus,
+  UpdateSkillRequest,
+  UploadSkillVersionRequest,
+} from './skills'

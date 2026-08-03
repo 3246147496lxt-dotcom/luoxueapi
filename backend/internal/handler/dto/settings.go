@@ -368,6 +368,7 @@ type PublicSettings struct {
 
 	AvailableChannelsEnabled  bool `json:"available_channels_enabled"`
 	PublicModelCatalogEnabled bool `json:"public_model_catalog_enabled"`
+	SkillMarketplaceEnabled   bool `json:"skill_marketplace_enabled"`
 
 	AffiliateEnabled bool `json:"affiliate_enabled"`
 

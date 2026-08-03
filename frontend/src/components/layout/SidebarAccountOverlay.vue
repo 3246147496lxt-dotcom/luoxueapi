@@ -43,6 +43,7 @@
               </h2>
               <p class="account-panel__identity-meta">
                 <span class="account-panel__balance-line">
+                  <span>{{ t('accountDock.balanceShort') }}</span>
                   <CreditAmount
                     :value="summary.formattedAvailableBalance"
                     icon-size="xs"
@@ -75,110 +76,46 @@
             </button>
           </header>
 
-          <nav class="account-panel__section" :aria-label="t('accountDock.accountActions')">
-            <RouterLink
-              v-if="purchaseLink"
-              :to="purchaseLink.to"
-              class="account-panel__row"
-              @click="emit('close', false)"
-            >
-              <Icon name="wallet" size="sm" aria-hidden="true" />
-              <span class="min-w-0 flex-1 truncate">{{ t('accountDock.recharge') }}</span>
-              <Icon name="chevronRight" size="xs" aria-hidden="true" />
-            </RouterLink>
-
-            <RouterLink
-              v-if="subscriptionLink"
-              :to="subscriptionLink.to"
-              class="account-panel__row"
-              data-testid="account-subscriptions-link"
-              @click="emit('close', false)"
-            >
-              <Icon :name="subscriptionLink.icon" size="sm" aria-hidden="true" />
-              <span class="min-w-0 flex-1 truncate">{{ subscriptionLink.label }}</span>
-              <Icon name="chevronRight" size="xs" aria-hidden="true" />
-            </RouterLink>
-
-            <RouterLink
-              v-if="quotaViewerLink"
-              :to="quotaViewerLink.to"
-              class="account-panel__row"
-              data-testid="account-quota-viewer-link"
-              @click="emit('close', false)"
-            >
-              <Icon :name="quotaViewerLink.icon" size="sm" aria-hidden="true" />
-              <span class="min-w-0 flex-1 truncate">{{ quotaViewerLink.label }}</span>
-              <Icon name="chevronRight" size="xs" aria-hidden="true" />
-            </RouterLink>
-
+          <nav class="account-panel__section" :aria-label="t('accountDock.personalActions')">
             <button
               type="button"
-              data-testid="account-open-settings"
+              data-testid="account-open-profile"
               class="account-panel__row w-full"
-              @click="emit('open-settings')"
+              @click="emit('open-settings', 'account')"
             >
-              <Icon name="cog" size="sm" aria-hidden="true" />
-              <span class="min-w-0 flex-1 truncate text-left">{{ t('accountDock.settings') }}</span>
+              <Icon name="user" size="sm" aria-hidden="true" />
+              <span class="min-w-0 flex-1 truncate text-left">
+                {{ t('accountDock.personalProfile') }}
+              </span>
               <Icon name="chevronRight" size="xs" aria-hidden="true" />
             </button>
-          </nav>
-
-          <div class="account-panel__section">
-            <AnnouncementBell variant="row" />
 
             <button
               type="button"
-              data-testid="account-resources-toggle"
+              data-testid="account-open-preferences"
               class="account-panel__row w-full"
-              :aria-expanded="resourcesOpen"
-              aria-controls="account-resource-links"
-              @click="resourcesOpen = !resourcesOpen"
+              @click="emit('open-settings', 'general')"
+            >
+              <Icon name="slidersHorizontal" size="sm" aria-hidden="true" />
+              <span class="min-w-0 flex-1 truncate text-left">
+                {{ t('accountDock.personalPreferences') }}
+              </span>
+              <Icon name="chevronRight" size="xs" aria-hidden="true" />
+            </button>
+
+            <button
+              v-if="showOnboarding"
+              type="button"
+              data-testid="account-admin-guide"
+              class="account-panel__row w-full"
+              @click="emit('replay')"
             >
               <Icon name="questionCircle" size="sm" aria-hidden="true" />
               <span class="min-w-0 flex-1 truncate text-left">
-                {{ t('accountDock.helpAndResources') }}
+                {{ t('accountDock.adminGuide') }}
               </span>
-              <Icon
-                name="chevronRight"
-                size="xs"
-                class="account-panel__disclosure-icon"
-                :class="{ 'is-open': resourcesOpen }"
-                aria-hidden="true"
-              />
             </button>
-
-            <div
-              v-show="resourcesOpen"
-              id="account-resource-links"
-              class="account-panel__nested"
-            >
-              <a
-                v-for="link in resourceLinks"
-                :key="link.id"
-                :href="link.href"
-                class="account-panel__row account-panel__row--nested"
-                target="_blank"
-                rel="noopener noreferrer"
-                @click="emit('close', false)"
-              >
-                <Icon :name="link.icon" size="sm" aria-hidden="true" />
-                <span class="min-w-0 flex-1 truncate">{{ link.label }}</span>
-                <Icon name="externalLink" size="xs" aria-hidden="true" />
-              </a>
-
-              <button
-                v-if="showOnboarding"
-                type="button"
-                class="account-panel__row account-panel__row--nested w-full"
-                @click="emit('replay')"
-              >
-                <Icon name="questionCircle" size="sm" aria-hidden="true" />
-                <span class="min-w-0 flex-1 truncate text-left">
-                  {{ t('accountDock.adminGuide') }}
-                </span>
-              </button>
-            </div>
-          </div>
+          </nav>
 
           <div class="account-panel__section account-panel__section--danger">
             <button
@@ -208,23 +145,15 @@ import {
   registerModalLayer,
   unregisterModalLayer,
 } from '@/utils/modalStack'
-import AnnouncementBell from '@/components/common/AnnouncementBell.vue'
 import CreditAmount from '@/components/common/CreditAmount.vue'
 import Icon from '@/components/icons/Icon.vue'
-import type {
-  AccountPanelLink,
-  AccountPanelSummary,
-  AccountResourceLink,
-} from './accountPanelTypes'
+import type { PersonalSettingsSection } from '@/navigation/personalSettingsRoute'
+import type { AccountPanelSummary } from './accountPanelTypes'
 
 const props = defineProps<{
   open: boolean
   anchorElement: HTMLElement | null
   summary: AccountPanelSummary
-  purchaseLink: AccountPanelLink | null
-  subscriptionLink: AccountPanelLink | null
-  quotaViewerLink?: AccountPanelLink | null
-  resourceLinks: AccountResourceLink[]
   showOnboarding: boolean
 }>()
 
@@ -232,12 +161,11 @@ const emit = defineEmits<{
   close: [restoreFocus: boolean]
   logout: []
   replay: []
-  'open-settings': []
+  'open-settings': [section: PersonalSettingsSection]
 }>()
 
 const { t } = useI18n()
 const panelRef = ref<HTMLElement | null>(null)
-const resourcesOpen = ref(false)
 const anchorRef = toRef(props, 'anchorElement')
 const openRef = toRef(props, 'open')
 const { desktopStyle, updatePosition } = useAnchoredOverlay(openRef, anchorRef, panelRef)
@@ -357,8 +285,6 @@ watch(
       registerModalLayer(modalLayerToken)
       lockMobileBackground()
       void focusPanel()
-    } else {
-      resourcesOpen.value = false
     }
   },
   { immediate: true },
@@ -544,33 +470,6 @@ onBeforeUnmount(() => {
   outline-offset: 1px;
 }
 
-.account-panel__section :deep(.announcement-bell-row) {
-  min-height: 36px !important;
-  padding-right: 8px !important;
-  padding-left: 8px !important;
-  border-radius: 10px !important;
-  color: rgb(51 65 85);
-  font-weight: 400;
-}
-
-.account-panel__nested {
-  padding: 2px 0 2px 12px;
-}
-
-.account-panel__row--nested {
-  min-height: 36px;
-  color: rgb(71 85 105);
-  font-size: 0.8125rem;
-}
-
-.account-panel__disclosure-icon {
-  transition: transform 160ms ease;
-}
-
-.account-panel__disclosure-icon.is-open {
-  transform: rotate(90deg);
-}
-
 .account-panel__section--danger {
   margin-top: 4px;
 }
@@ -607,10 +506,6 @@ onBeforeUnmount(() => {
 }
 
 :global(html.dark .account-panel__row) {
-  color: rgb(226 232 240);
-}
-
-:global(html.dark .account-panel__section .announcement-bell-row) {
   color: rgb(226 232 240);
 }
 
@@ -665,18 +560,10 @@ onBeforeUnmount(() => {
     font-size: 0.8125rem;
   }
 
-  .account-panel__row,
-  .account-panel__row--nested {
+  .account-panel__row {
     min-height: 44px;
     padding: 8px 11px;
     border-radius: 12px;
-  }
-
-  .account-panel__section :deep(.announcement-bell-row) {
-    min-height: 44px !important;
-    padding-right: 12px !important;
-    padding-left: 12px !important;
-    border-radius: 12px !important;
   }
 
   .account-panel-enter-from,

@@ -88,7 +88,7 @@ describe('AppSidebar navigation shell', () => {
       /\.sidebar-header :deep\(\.app-brand-logo-image\)\s*\{[^}]*width: 1\.25rem;[^}]*height: 1\.25rem;/,
     )
     expect(componentSource).toMatch(
-      /\.sidebar-header :deep\(\.app-brand-logo-image-luoxue\)\s*\{[^}]*transform: scale\(1\.6\);/,
+      /\.sidebar-header :deep\(\.app-brand-logo-image-default\)\s*\{[^}]*transform: scale\(1\.4\);/,
     )
   })
 
@@ -146,6 +146,14 @@ describe('AppSidebar navigation shell', () => {
     expect(componentSource).toContain("window.matchMedia('(max-width: 1023px)')")
   })
 
+  it('keeps every mobile sidebar link at least 44px tall', () => {
+    const mobileRules = componentSource.slice(componentSource.indexOf('@media (max-width: 1023px)'))
+
+    expect(mobileRules).toMatch(
+      /\.sidebar-link,[\s\S]*?min-height: 2\.75rem;/,
+    )
+  })
+
   it('keeps the mobile overlay and configurable glass fallback above it', () => {
     expect(componentSource).toContain(
       'class="fixed inset-0 z-30 border-0 bg-gray-950/5 p-0 backdrop-blur-[1px] lg:hidden dark:bg-black/20"',
@@ -184,15 +192,34 @@ describe('AppSidebar navigation shell', () => {
     expect(componentSource).toContain('flex: 1 1 auto;')
     expect(componentSource).toContain('justify-content: space-between;')
   })
+
+  it('uses a logical trailing edge and RTL mirror for destination jump cues', () => {
+    expect(componentSource).toContain("trailingIcon: 'destinationArrowUpRight'")
+    expect(componentSource).toContain('data-testid="sidebar-nav-trailing-icon"')
+    expect(componentSource).not.toContain('name="externalLink"')
+    expect(componentSource).not.toContain('sidebar-support-external')
+    expect(componentSource).toContain('margin-inline-start: auto;')
+    expect(componentSource).toContain(":global([dir='rtl']) .sidebar-nav-trailing-icon")
+    expect(componentSource).toContain('transform: scaleX(-1);')
+  })
 })
 
 describe('AppSidebar utility actions', () => {
-  it('delegates account and utility actions to the account dock', () => {
+  it('keeps support actions in scrolling navigation and account actions in the dock', () => {
+    const navStart = componentSource.indexOf('<nav')
     const navEnd = componentSource.indexOf('</nav>')
+    const support = componentSource.indexOf('data-testid="sidebar-support-section"')
     const dock = componentSource.indexOf('<SidebarAccountDock />')
 
+    expect(support).toBeGreaterThan(navStart)
+    expect(support).toBeLessThan(navEnd)
     expect(navEnd).toBeGreaterThan(-1)
     expect(dock).toBeGreaterThan(navEnd)
+    expect(componentSource).toContain('data-testid="sidebar-announcements"')
+    expect(componentSource).toContain("'sidebar-docs-tutorial'")
+    expect(componentSource).toContain("'sidebar-contact-us'")
+    expect(componentSource).not.toContain('data-testid="sidebar-help-resources"')
+    expect(componentSource).toContain('sidebarSupportLinks')
     expect(componentSource).toContain("import SidebarAccountDock from './SidebarAccountDock.vue'")
     expect(componentSource).not.toContain('toggleTheme')
     expect(componentSource).not.toContain("t('nav.lightMode')")
@@ -201,15 +228,14 @@ describe('AppSidebar utility actions', () => {
 })
 
 describe('AppSidebar account destination ownership', () => {
-  it('filters account destinations out of the scrolling navigation', () => {
+  it('surfaces task-oriented account destinations in the personal workspace', () => {
     expect(componentSource).toContain('ACCOUNT_DESTINATION_PATHS')
-    expect(componentSource).toContain('isAccountDestinationPath')
-    expect(componentSource).toContain(
-      "(item) => !isAccountDestinationPath(item.path) && !item.path.startsWith('/custom/')",
-    )
-    expect(componentSource).toContain(
-      "(item) => item.path !== '/chat' && !isAccountDestinationPath(item.path)",
-    )
+    expect(componentSource).toContain('ACCOUNT_DESTINATION_PATHS.quotaViewer')
+    expect(componentSource).toContain('ACCOUNT_DESTINATION_PATHS.subscriptions')
+    expect(componentSource).toContain('ACCOUNT_DESTINATION_PATHS.wallet')
+    expect(componentSource).toContain('ACCOUNT_DESTINATION_PATHS.orders')
+    expect(componentSource).toContain('USER_BILLING_PATHS')
+    expect(componentSource).toContain("item.path !== ACCOUNT_DESTINATION_PATHS.profile")
     expect(componentSource).not.toContain('data-testid="sidebar-destination-links"')
   })
 })

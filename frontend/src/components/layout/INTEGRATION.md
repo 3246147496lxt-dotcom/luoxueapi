@@ -79,11 +79,12 @@ Avoid fixed shell-height constants in pages.
 Main navigation is rendered by `AppSidebar.vue`. Keep route labels localized and
 preserve role, capability, simple-mode, and feature-flag visibility checks.
 
-Account, support, and standalone navigation destinations are declared in
+Account and support destinations are declared in
 `frontend/src/navigation/shellDestinations.ts`. Use that registry when adding or
 removing links for subscriptions, wallet, orders, profile, home, model catalog,
 contact, or documentation so the sidebar and account panel share one visibility
-policy.
+policy. Announcements and help resources belong to the scrolling sidebar's
+`Support` group, not the account overlay.
 
 On mobile, the menu button in `AppMobileHeader` controls
 `useAppStore().mobileOpen`. Selecting a sidebar route closes the drawer.
@@ -93,12 +94,14 @@ On mobile, the menu button in `AppMobileHeader` controls
 `SidebarAccountDock` is mounted at the bottom of `AppSidebar`. Do not add a second
 user dropdown or page-level account launcher.
 
-`SidebarAccountOverlay` presents account summary and actions:
+`SidebarAccountDock` keeps the account summary and capability-gated Upgrade action
+visible at the bottom of the rail. `SidebarAccountOverlay` presents personal
+account actions:
 
 - desktop: an anchored dialog beside the dock;
 - mobile: a modal bottom sheet with safe-area padding;
-- both: route-aware dismissal, outside-click and Escape handling, theme and locale
-  controls, announcements, support, onboarding replay, and logout.
+- both: route-aware dismissal, outside-click and Escape handling, personal profile
+  and preferences, theme and locale controls, onboarding replay, and logout.
 
 When changing account actions, keep destination selection in
 `shellDestinations.ts`, display data in `useAccountSummary`, and the view behavior in

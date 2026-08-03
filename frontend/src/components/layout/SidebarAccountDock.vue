@@ -14,8 +14,8 @@
         ref="triggerRef"
         type="button"
         class="sidebar-account-trigger"
-        :title="sidebarCollapsed ? summary.displayName.value : undefined"
-        :aria-label="`${t('accountDock.open')} · ${summary.displayName.value}`"
+        :title="sidebarCollapsed ? triggerAriaLabel : undefined"
+        :aria-label="triggerAriaLabel"
         aria-haspopup="dialog"
         aria-controls="sidebar-account-panel"
         :aria-expanded="panelOpen"
@@ -28,11 +28,6 @@
             :alt="summary.displayName.value"
           >
           <span v-else>{{ summary.initials.value }}</span>
-          <span
-            v-if="summary.unreadAnnouncementCount.value > 0"
-            class="sidebar-account-trigger__badge"
-            :aria-label="t('announcements.unread')"
-          ></span>
         </span>
 
         <span
@@ -41,6 +36,9 @@
         >
           <span class="sidebar-account-trigger__name">{{ summary.displayName.value }}</span>
           <span class="sidebar-account-trigger__meta">
+            <span class="sidebar-account-trigger__balance-label">
+              {{ t('accountDock.balanceShort') }}
+            </span>
             <CreditAmount
               :value="formatCredit(summary.availableBalance.value)"
               icon-size="xs"
@@ -53,13 +51,13 @@
       </button>
 
       <RouterLink
-        v-if="upgradeLink && !sidebarCollapsed"
+        v-if="pricingTarget && !sidebarCollapsed"
         data-testid="account-upgrade-link"
-        class="sidebar-account-upgrade"
-        :to="upgradeLink.to"
-        @click="handleUpgradeClick"
+        class="sidebar-account-cta"
+        :to="pricingTarget.path"
+        @click="handleCtaClick"
       >
-        {{ upgradeLink.label }}
+        {{ t('accountDock.upgrade') }}
       </RouterLink>
     </div>
 
@@ -67,10 +65,6 @@
       :open="panelOpen"
       :anchor-element="dockRowRef"
       :summary="panelSummary"
-      :purchase-link="purchaseLink"
-      :subscription-link="subscriptionLink"
-      :quota-viewer-link="quotaViewerLink"
-      :resource-links="resourceLinks"
       :show-onboarding="showOnboarding"
       @close="closePanel"
       @logout="handleLogout"
@@ -95,16 +89,10 @@ import {
 import { useAppStore } from '@/stores/app'
 import { useAuthStore } from '@/stores/auth'
 import { useOnboardingStore } from '@/stores/onboarding'
-import { resolveDocumentationUrl } from '@/utils/documentationUrl'
-import { sanitizeUrl } from '@/utils/url'
 import CreditAmount from '@/components/common/CreditAmount.vue'
 import SidebarAccountOverlay from './SidebarAccountOverlay.vue'
-import type {
-  AccountPanelIcon,
-  AccountPanelLink,
-  AccountPanelSummary,
-  AccountResourceLink,
-} from './accountPanelTypes'
+import type { PersonalSettingsSection } from '@/navigation/personalSettingsRoute'
+import type { AccountPanelSummary } from './accountPanelTypes'
 
 const { t } = useI18n()
 const route = useRoute()
@@ -119,16 +107,11 @@ const dockRowRef = ref<HTMLElement | null>(null)
 const triggerRef = ref<HTMLButtonElement | null>(null)
 const sidebarCollapsed = computed(() => appStore.sidebarCollapsed)
 const audience = computed(() => summary.isAdmin.value ? 'admin' as const : 'user' as const)
-const documentationUrl = computed(() => resolveDocumentationUrl(
-  appStore.cachedPublicSettings?.doc_url || appStore.docUrl,
+const settingsAudience = computed(() => (
+  summary.isAdmin.value && route.path.startsWith('/admin')
+    ? 'admin' as const
+    : 'user' as const
 ))
-const contactUrl = computed(() => {
-  const configuredUrl = sanitizeUrl(
-    appStore.cachedPublicSettings?.contact_info || appStore.contactInfo,
-    { allowRelative: true },
-  )
-  return configuredUrl || `${documentationUrl.value.replace(/#.*$/, '')}#recharge`
-})
 const showOnboarding = computed(
   () => !summary.isSimpleMode.value && summary.isAdmin.value,
 )
@@ -148,120 +131,17 @@ const destinationContext = computed(() => ({
   },
 }))
 
-const iconByDestination: Record<string, AccountPanelIcon> = {
-  home: 'destinationHome',
-  models: 'destinationModels',
-  contact: 'destinationContact',
-}
-
-const purchaseLink = computed<AccountPanelLink | null>(() => {
-  const walletSpec = selectVisibleShellDestinations(
+function findVisibleRouteDestination(id: ShellDestinationSpec['id']) {
+  const spec = selectVisibleShellDestinations(
     getShellDestinationSpecs(audience.value),
     destinationContext.value,
-    'account',
-  )
-    .find((spec) => spec.id === 'wallet' && spec.target.kind === 'route')
-
-  if (!walletSpec || walletSpec.target.kind !== 'route') return null
-
-  return {
-    id: walletSpec.id,
-    label: t('accountDock.recharge'),
-    to: walletSpec.target.path,
-    icon: 'wallet',
-  }
-})
-
-const subscriptionLink = computed<AccountPanelLink | null>(() => {
-  const subscriptionSpec = selectVisibleShellDestinations(
-    getShellDestinationSpecs(audience.value),
-    destinationContext.value,
-    'account',
-  )
-    .find((spec) => spec.id === 'subscriptions' && spec.target.kind === 'route')
-
-  if (!subscriptionSpec || subscriptionSpec.target.kind !== 'route') return null
-
-  return {
-    id: subscriptionSpec.id,
-    label: t(subscriptionSpec.labelKey),
-    to: subscriptionSpec.target.path,
-    icon: 'creditCard',
-  }
-})
-
-const quotaViewerLink = computed<AccountPanelLink | null>(() => {
-  const quotaViewerSpec = selectVisibleShellDestinations(
-    getShellDestinationSpecs(audience.value),
-    destinationContext.value,
-    'account',
-  ).find((spec) => spec.id === 'quotaViewer' && spec.target.kind === 'route')
-
-  if (!quotaViewerSpec || quotaViewerSpec.target.kind !== 'route') return null
-
-  return {
-    id: quotaViewerSpec.id,
-    label: t(quotaViewerSpec.labelKey),
-    to: quotaViewerSpec.target.path,
-    icon: 'download',
-  }
-})
-
-const upgradeLink = computed(() => {
-  const pricingSpec = selectVisibleShellDestinations(
-    getShellDestinationSpecs(audience.value),
-    destinationContext.value,
-    'account',
-  )
-    .find((spec) => spec.id === 'pricing' && spec.target.kind === 'route')
-
-  if (!pricingSpec || pricingSpec.target.kind !== 'route') return null
-
-  return {
-    label: t('accountDock.upgrade'),
-    to: pricingSpec.target.path,
-  }
-})
-
-const settingsTarget = computed(() => {
-  const settingsSpec = selectVisibleShellDestinations(
-    getShellDestinationSpecs(audience.value),
-    destinationContext.value,
-    'account',
-  ).find((spec) => (
-    spec.id === 'settings'
-    && spec.target.kind === 'settings-section'
+  ).find((destination) => (
+    destination.id === id
+    && destination.target.kind === 'route'
   ))
 
-  return settingsSpec?.target.kind === 'settings-section'
-    ? settingsSpec.target
-    : null
-})
-
-function resolveResourceHref(spec: ShellDestinationSpec) {
-  if (spec.target.kind === 'href') return spec.target.href
-  if (spec.target.kind === 'configured-href') {
-    return spec.target.source === 'documentation'
-      ? documentationUrl.value
-      : contactUrl.value
-  }
-  if (spec.target.kind === 'route') return spec.target.path
-  return '#'
+  return spec?.target.kind === 'route' ? spec.target : null
 }
-
-const resourceLinks = computed<AccountResourceLink[]>(() => (
-  selectVisibleShellDestinations(
-    getShellDestinationSpecs(audience.value),
-    destinationContext.value,
-    'support',
-  )
-    .map((spec) => ({
-      id: spec.id,
-      label: t(spec.labelKey),
-      href: resolveResourceHref(spec),
-      icon: iconByDestination[spec.id] ?? 'destinationDocument',
-    }))
-))
 
 function formatCredit(value: number) {
   return Number.isFinite(value) ? value.toFixed(2) : '0.00'
@@ -280,6 +160,17 @@ const subscriptionStatusText = computed(() => {
   }
   return t('accountDock.payAsYouGo')
 })
+
+const triggerAriaLabel = computed(() => [
+  t('accountDock.open'),
+  summary.displayName.value,
+  t('accountDock.summary', {
+    balance: formatCredit(summary.availableBalance.value),
+    subscription: subscriptionStatusText.value,
+  }),
+].join(' · '))
+
+const pricingTarget = computed(() => findVisibleRouteDestination('pricing'))
 
 const panelSummary = computed<AccountPanelSummary>(() => ({
   displayName: summary.displayName.value,
@@ -339,22 +230,21 @@ function handleReplay() {
   onboardingStore.replay()
 }
 
-function handleUpgradeClick() {
+function handleCtaClick() {
   closePanel(false)
   if (isMobileViewport()) {
     appStore.setMobileOpen(false)
   }
 }
 
-async function handleOpenSettings() {
-  if (!settingsTarget.value) return
+async function handleOpenSettings(section: PersonalSettingsSection) {
   closePanel(false)
   await nextTick()
   await openPersonalSettings(
     router,
     route,
-    audience.value,
-    settingsTarget.value.section,
+    settingsAudience.value,
+    section,
   )
 }
 
@@ -410,7 +300,7 @@ watch(sidebarCollapsed, () => closePanel(false))
 }
 
 .sidebar-account-trigger:focus-visible,
-.sidebar-account-upgrade:focus-visible {
+.sidebar-account-cta:focus-visible {
   outline: 2px solid var(--app-shell-sidebar-focus, rgb(0 132 255 / 0.5));
   outline-offset: -2px;
 }
@@ -436,17 +326,6 @@ watch(sidebarCollapsed, () => closePanel(false))
   overflow: hidden;
   border-radius: inherit;
   object-fit: cover;
-}
-
-.sidebar-account-trigger__badge {
-  position: absolute;
-  right: -2px;
-  top: -2px;
-  width: 9px;
-  height: 9px;
-  border: 2px solid var(--app-shell-sidebar-bg, #fff);
-  border-radius: 999px;
-  background: rgb(239 68 68);
 }
 
 .sidebar-account-trigger__copy {
@@ -481,7 +360,7 @@ watch(sidebarCollapsed, () => closePanel(false))
   line-height: 1rem;
 }
 
-.sidebar-account-upgrade {
+.sidebar-account-cta {
   display: inline-flex;
   min-width: 0;
   min-height: 32px;
@@ -503,7 +382,7 @@ watch(sidebarCollapsed, () => closePanel(false))
     background-color 150ms ease;
 }
 
-.sidebar-account-upgrade:hover {
+.sidebar-account-cta:hover {
   border-color: rgb(15 23 42 / 0.24);
   background: #fff;
 }
@@ -545,20 +424,20 @@ watch(sidebarCollapsed, () => closePanel(false))
   color: rgb(148 163 184);
 }
 
-:global(html.dark .sidebar-account-upgrade) {
+:global(html.dark .sidebar-account-cta) {
   border-color: rgb(255 255 255 / 0.16);
   color: rgb(248 250 252);
   background: rgb(255 255 255 / 0.08);
 }
 
-:global(html.dark .sidebar-account-upgrade:hover) {
+:global(html.dark .sidebar-account-cta:hover) {
   border-color: rgb(255 255 255 / 0.28);
   background: rgb(255 255 255 / 0.12);
 }
 
 @media (prefers-reduced-motion: reduce) {
   .sidebar-account-row,
-  .sidebar-account-upgrade {
+  .sidebar-account-cta {
     transition-duration: 0.01ms;
   }
 }

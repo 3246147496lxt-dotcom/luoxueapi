@@ -469,6 +469,8 @@ const (
 
 	// SettingKeyBackendModeEnabled Backend 模式：禁用用户注册和自助服务，仅管理员可登录
 	SettingKeyBackendModeEnabled = "backend_mode_enabled"
+	// SettingKeySkillMarketplaceEnabled Skill 市场公开访问开关（默认 false，仅显式 true 开启）。
+	SettingKeySkillMarketplaceEnabled = "skill_marketplace_enabled"
 
 	// Gateway Forwarding Behavior
 	// SettingKeyEnableFingerprintUnification 是否统一 OAuth 账号的 X-Stainless-* 指纹头（默认 true）

@@ -5,6 +5,7 @@ import {
   closePersonalSettings,
   getPersonalSettingsDetailSection,
   getPersonalSettingsHostPath,
+  isPersonalSettingsHostRoute,
   openPersonalSettings,
   parsePersonalSettingsRoute,
   replacePersonalSettingsDetail,
@@ -18,8 +19,9 @@ function createRoute(
   query: LocationQuery = {},
   path = '/dashboard',
   hash = '#usage',
+  meta: PersonalSettingsRouteLocation['meta'] = { requiresAuth: true },
 ): PersonalSettingsRouteLocation {
-  return { path, query, hash }
+  return { path, query, hash, meta }
 }
 
 function createRouter() {
@@ -69,8 +71,8 @@ afterEach(() => {
 })
 
 describe('personalSettingsRoute', () => {
-  it('opens only on the two controlled dashboard hosts', () => {
-    for (const path of ['/dashboard', '/admin/dashboard']) {
+  it('opens on authenticated workspace hosts without covering transaction routes', () => {
+    for (const path of ['/dashboard', '/admin/dashboard', '/monitor', '/admin/users']) {
       expect(parsePersonalSettingsRoute(createRoute({
         account_settings: 'general',
       }, path))).toMatchObject({
@@ -90,7 +92,7 @@ describe('personalSettingsRoute', () => {
       '/payment/stripe',
       '/payment/airwallex',
       '/payment/stripe-popup',
-      '/keys',
+      '/pricing',
     ]) {
       expect(parsePersonalSettingsRoute(createRoute({
         account_settings: 'general',
@@ -99,6 +101,18 @@ describe('personalSettingsRoute', () => {
         needsCanonicalization: true,
       })
     }
+
+    expect(parsePersonalSettingsRoute(createRoute(
+      { account_settings: 'general' },
+      '/home',
+      '',
+      { requiresAuth: false },
+    ))).toMatchObject({
+      isOpen: false,
+      needsCanonicalization: true,
+    })
+    expect(isPersonalSettingsHostRoute(createRoute({}, '/monitor'))).toBe(true)
+    expect(isPersonalSettingsHostRoute(createRoute({}, '/purchase'))).toBe(false)
   })
 
   it('normalizes invalid, repeated, and mismatched query values', () => {
@@ -190,7 +204,7 @@ describe('personalSettingsRoute', () => {
     expect(router.replace).not.toHaveBeenCalled()
   })
 
-  it('pushes menu opens to the role dashboard and preserves unrelated query and hash', async () => {
+  it('falls back to the role dashboard from restricted transaction surfaces', async () => {
     const router = createRouter()
     const sourceRoute = createRoute({
       order_id: 'order-1',
@@ -226,12 +240,34 @@ describe('personalSettingsRoute', () => {
     expect(getPersonalSettingsHostPath('admin')).toBe('/admin/dashboard')
   })
 
+  it.each([
+    { path: '/monitor', audience: 'admin' as const },
+    { path: '/admin/users', audience: 'admin' as const },
+    { path: '/keys', audience: 'user' as const },
+  ])('opens settings over the current $path workspace', async ({ path, audience }) => {
+    const router = createRouter()
+    const sourceRoute = createRoute({ filter: 'active' }, path, '#context')
+    window.history.replaceState({ position: 9 }, '')
+
+    await openPersonalSettings(router, sourceRoute, audience, 'general')
+
+    expect(router.push).toHaveBeenCalledOnce()
+    expect(getFirstNavigationTarget(vi.mocked(router.push))).toMatchObject({
+      path,
+      query: {
+        filter: 'active',
+        account_settings: 'general',
+      },
+      hash: '#context',
+    })
+  })
+
   it('replaces depth-zero sections, pushes the first detail, and replaces detail-to-detail', async () => {
     const router = createRouter()
     window.history.replaceState({ position: 11 }, '')
     await openPersonalSettings(
       router,
-      createRoute({ filter: 'active' }),
+      createRoute({ filter: 'active' }, '/monitor'),
       'user',
       'account',
     )
@@ -242,11 +278,11 @@ describe('personalSettingsRoute', () => {
     const accountRoute = createRoute({
       filter: 'active',
       account_settings: 'account',
-    })
+    }, '/monitor')
 
     await replacePersonalSettingsSection(router, accountRoute, 'security')
     expect(router.replace).toHaveBeenCalledWith({
-      path: '/dashboard',
+      path: '/monitor',
       query: {
         filter: 'active',
         account_settings: 'security',
@@ -262,7 +298,7 @@ describe('personalSettingsRoute', () => {
     expect(router.push).toHaveBeenCalledOnce()
     const depthOneTarget = getFirstNavigationTarget(vi.mocked(router.push))
     expect(depthOneTarget).toMatchObject({
-      path: '/dashboard',
+      path: '/monitor',
       query: {
         filter: 'active',
         account_settings: 'account',
@@ -283,11 +319,11 @@ describe('personalSettingsRoute', () => {
         filter: 'active',
         account_settings: 'account',
         account_settings_detail: 'profile',
-      }),
+      }, '/monitor'),
       'connections',
     )
     expect(router.replace).toHaveBeenLastCalledWith({
-      path: '/dashboard',
+      path: '/monitor',
       query: {
         filter: 'active',
         account_settings: 'account',
@@ -394,7 +430,7 @@ describe('personalSettingsRoute', () => {
       account_settings: 'account',
       account_settings_detail: 'connections',
       oauth: 'complete',
-    })
+    }, '/monitor')
 
     window.history.replaceState({
       __sub2api_personal_settings_owner: 'stale-token-from-before-refresh',
@@ -403,7 +439,7 @@ describe('personalSettingsRoute', () => {
 
     expect(router.back).not.toHaveBeenCalled()
     expect(router.replace).toHaveBeenCalledWith({
-      path: '/dashboard',
+      path: '/monitor',
       query: {
         oauth: 'complete',
       },

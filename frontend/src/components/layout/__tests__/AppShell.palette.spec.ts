@@ -83,8 +83,10 @@ describe('authenticated mixed application shell palette', () => {
     expect(accountDockSource).toContain(':global(html.dark .sidebar-account-row)')
   })
 
-  it('keeps the Luoxue mark readable in the dark sidebar', () => {
-    expect(brandSource).toContain(':global(html.dark .app-brand-logo-image-luoxue)')
-    expect(brandSource).not.toContain(':global(html.dark) .app-brand-logo-image-luoxue')
+  it('scales the canonical default logo without retaining legacy brand styles', () => {
+    expect(brandSource).toMatch(
+      /\.app-brand-logo-image-default\s*\{[^}]*transform: scale\(1\.1\);/,
+    )
+    expect(brandSource).not.toContain('app-brand-logo-image-luoxue')
   })
 })

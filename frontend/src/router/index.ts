@@ -65,6 +65,30 @@ const routes: RouteRecordRaw[] = [
     }
   },
   {
+    path: '/skills',
+    name: 'SkillMarket',
+    component: () => import('@/views/public/SkillMarketplaceView.vue'),
+    meta: {
+      requiresAuth: false,
+      requiresSkillMarketplace: true,
+      title: 'Skill Market',
+      titleKey: 'skills.meta.title',
+      descriptionKey: 'skills.meta.description'
+    }
+  },
+  {
+    path: '/skills/:slug',
+    name: 'SkillDetail',
+    component: () => import('@/views/public/SkillDetailView.vue'),
+    meta: {
+      requiresAuth: false,
+      requiresSkillMarketplace: true,
+      title: 'Skill Detail',
+      titleKey: 'skills.meta.title',
+      descriptionKey: 'skills.meta.description'
+    }
+  },
+  {
     path: '/quota-viewer',
     name: 'QuotaViewerLanding',
     component: () => import('@/views/public/QuotaViewerLandingView.vue'),
@@ -703,6 +727,42 @@ const routes: RouteRecordRaw[] = [
     }
   },
   {
+    path: '/admin/skills',
+    name: 'AdminSkills',
+    component: () => import('@/views/admin/SkillsView.vue'),
+    meta: {
+      requiresAuth: true,
+      requiresAdmin: true,
+      title: 'Skill Market',
+      titleKey: 'admin.skills.title',
+      descriptionKey: 'admin.skills.description'
+    }
+  },
+  {
+    path: '/admin/skills/new',
+    name: 'AdminSkillCreate',
+    component: () => import('@/views/admin/SkillEditorView.vue'),
+    meta: {
+      requiresAuth: true,
+      requiresAdmin: true,
+      title: 'Create Skill',
+      titleKey: 'admin.skills.editor.createTitle',
+      descriptionKey: 'admin.skills.editor.createDescription'
+    }
+  },
+  {
+    path: '/admin/skills/:id/edit',
+    name: 'AdminSkillEdit',
+    component: () => import('@/views/admin/SkillEditorView.vue'),
+    meta: {
+      requiresAuth: true,
+      requiresAdmin: true,
+      title: 'Edit Skill',
+      titleKey: 'admin.skills.editor.editTitle',
+      descriptionKey: 'admin.skills.editor.editDescription'
+    }
+  },
+  {
     path: '/admin/documentation',
     name: 'AdminDocumentation',
     component: () => import('@/views/admin/DocumentationView.vue'),
@@ -1055,6 +1115,23 @@ router.beforeEach(async (to, _from, next) => {
       }
       if (
         appStore.cachedPublicSettings?.public_model_catalog_enabled !== true
+        || appStore.backendModeEnabled
+      ) {
+        next('/home')
+        return
+      }
+    }
+
+    if (to.meta.requiresSkillMarketplace) {
+      if (!appStore.publicSettingsLoaded) {
+        try {
+          await appStore.fetchPublicSettings()
+        } catch (error) {
+          console.warn('Failed to load Skill marketplace setting', error)
+        }
+      }
+      if (
+        appStore.cachedPublicSettings?.skill_marketplace_enabled !== true
         || appStore.backendModeEnabled
       ) {
         next('/home')

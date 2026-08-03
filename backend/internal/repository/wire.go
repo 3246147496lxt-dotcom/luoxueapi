@@ -111,6 +111,7 @@ var ProviderSet = wire.NewSet(
 	NewTLSFingerprintProfileRepository,
 	NewChannelRepository,
 	NewModelCatalogRepository,
+	NewSkillMarketRepository,
 	NewDocumentationRepository,
 	NewChannelMonitorRepository,
 	NewChannelMonitorRequestTemplateRepository,
