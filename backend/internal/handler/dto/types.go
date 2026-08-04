@@ -281,6 +281,7 @@ type Account struct {
 	ParentPlanType              string `json:"parent_plan_type,omitempty"`
 	ParentPrivacyMode           string `json:"parent_privacy_mode,omitempty"`
 	ParentSubscriptionExpiresAt string `json:"parent_subscription_expires_at,omitempty"`
+	ParentSubscriptionWillRenew *bool  `json:"parent_subscription_will_renew,omitempty"`
 	ParentChatGPTAccountID      string `json:"parent_chatgpt_account_id,omitempty"`
 
 	Proxy         *Proxy         `json:"proxy,omitempty"`

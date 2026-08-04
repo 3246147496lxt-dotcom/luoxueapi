@@ -299,7 +299,7 @@ describe('admin AccountsView — 影子行 parent_* OR 兜底展示', () => {
     // 1. 紧凑身份单元格不重复展示 email，详情由 Inspector 承载
     expect(wrapper.text()).not.toContain('parent@example.com')
 
-    // 2. PlatformTypeBadge 仍通过 parent_* 字段兜底
+    // 2. 独立平台/类型列仍通过 parent_* 字段兜底
     const badge = wrapper.findComponent(PlatformTypeBadge)
     expect(badge.exists()).toBe(true)
     expect(badge.props('planType')).toBe('plus')
@@ -373,7 +373,6 @@ describe('admin AccountsView — 影子行 parent_* OR 兜底展示', () => {
     await flushPromises()
 
     const badges = wrapper.findAllComponents(PlatformTypeBadge)
-      .filter((badge) => badge.props('compact') === true)
     expect(badges.map((badge) => badge.props('planType'))).toEqual([
       'SuperGrok',
       'SuperGrok Heavy',

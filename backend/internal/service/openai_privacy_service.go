@@ -207,13 +207,24 @@ func fetchChatGPTAccountInfo(ctx context.Context, clientFactory PrivacyClientFac
 	return info
 }
 
-// fetchChatGPTSubscriptionExpiresAt reads the lightweight subscription endpoint used by
-// ChatGPT/Codex clients. Some Plus accounts no longer expose entitlement.expires_at in
-// accounts/check, but this endpoint still returns active_until.
-func fetchChatGPTSubscriptionExpiresAt(ctx context.Context, clientFactory PrivacyClientFactory, accessToken, proxyURL, accountID string) string {
+// OpenAISubscriptionInfo is the sanitized subscription-cycle metadata exposed to
+// admin quota views. active_until is a cycle boundary: will_renew determines
+// whether the UI should call it a renewal date or an expiry date.
+type OpenAISubscriptionInfo struct {
+	PlanType    string `json:"plan_type,omitempty"`
+	ActiveUntil string `json:"active_until,omitempty"`
+	WillRenew   *bool  `json:"will_renew,omitempty"`
+	CheckedAt   string `json:"checked_at,omitempty"`
+	Source      string `json:"source,omitempty"`
+}
+
+// fetchChatGPTSubscriptionInfo reads the lightweight subscription endpoint used by
+// ChatGPT/Codex clients. A non-nil empty result means the upstream request succeeded
+// but the account has no active subscription; nil means the lookup itself failed.
+func fetchChatGPTSubscriptionInfo(ctx context.Context, clientFactory PrivacyClientFactory, accessToken, proxyURL, accountID string) *OpenAISubscriptionInfo {
 	accountID = strings.TrimSpace(accountID)
 	if accessToken == "" || accountID == "" || clientFactory == nil {
-		return ""
+		return nil
 	}
 
 	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
@@ -222,13 +233,13 @@ func fetchChatGPTSubscriptionExpiresAt(ctx context.Context, clientFactory Privac
 	client, err := clientFactory(proxyURL)
 	if err != nil {
 		slog.Debug("chatgpt_subscription_client_error", "error", err.Error())
-		return ""
+		return nil
 	}
 
 	var result struct {
 		PlanType    string `json:"plan_type"`
 		ActiveUntil string `json:"active_until"`
-		WillRenew   bool   `json:"will_renew"`
+		WillRenew   *bool  `json:"will_renew"`
 		ID          string `json:"id"`
 	}
 	resp, err := client.R().
@@ -242,25 +253,39 @@ func fetchChatGPTSubscriptionExpiresAt(ctx context.Context, clientFactory Privac
 		Get(chatGPTSubscriptionsURL)
 	if err != nil {
 		slog.Debug("chatgpt_subscription_request_error", "error", err.Error())
-		return ""
+		return nil
 	}
 	if !resp.IsSuccessState() {
 		slog.Debug("chatgpt_subscription_failed", "status", resp.StatusCode, "body", truncate(resp.String(), 200))
-		return ""
+		return nil
 	}
 
 	activeUntil := strings.TrimSpace(result.ActiveUntil)
 	if activeUntil == "" {
 		slog.Debug("chatgpt_subscription_no_active_until", "plan_type", result.PlanType, "has_subscription_id", strings.TrimSpace(result.ID) != "", "will_renew", result.WillRenew)
-		return ""
-	}
-	if _, err := time.Parse(time.RFC3339, activeUntil); err != nil {
+	} else if _, err := time.Parse(time.RFC3339, activeUntil); err != nil {
 		slog.Debug("chatgpt_subscription_bad_active_until", "active_until", activeUntil, "error", err.Error())
-		return ""
+		return nil
 	}
 
 	slog.Info("chatgpt_subscription_success", "plan_type", result.PlanType, "subscription_expires_at", activeUntil, "account_id", accountID)
-	return activeUntil
+	return &OpenAISubscriptionInfo{
+		PlanType:    strings.TrimSpace(result.PlanType),
+		ActiveUntil: activeUntil,
+		WillRenew:   result.WillRenew,
+		CheckedAt:   time.Now().UTC().Format(time.RFC3339),
+		Source:      "live",
+	}
+}
+
+// fetchChatGPTSubscriptionExpiresAt keeps the existing OAuth enrichment contract.
+// The richer quota path uses fetchChatGPTSubscriptionInfo directly.
+func fetchChatGPTSubscriptionExpiresAt(ctx context.Context, clientFactory PrivacyClientFactory, accessToken, proxyURL, accountID string) string {
+	info := fetchChatGPTSubscriptionInfo(ctx, clientFactory, accessToken, proxyURL, accountID)
+	if info == nil {
+		return ""
+	}
+	return info.ActiveUntil
 }
 
 // fillAccountInfo 从单个 account 对象中提取 plan_type 和 subscription_expires_at

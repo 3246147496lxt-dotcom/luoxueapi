@@ -65,7 +65,7 @@
         >
           <span :style="{ width: overviewProgressWidth(row.utilization) }" />
         </div>
-        <p v-if="row.showReset && overviewResetText(row)">
+        <p v-if="overviewResetText(row)">
           {{ overviewResetText(row) }}
         </p>
       </article>
@@ -74,6 +74,19 @@
     <p v-else class="account-usage-overview__empty">
       {{ t('admin.accounts.workbench.quotaUnavailable') }}
     </p>
+
+    <div
+      v-if="overviewSubscription"
+      class="account-usage-overview__subscription"
+      :data-state="overviewSubscription.state"
+      data-testid="account-usage-overview-subscription"
+    >
+      <span>{{ overviewSubscription.label }}</span>
+      <div>
+        <strong>{{ overviewSubscription.value }}</strong>
+        <small>{{ overviewSubscription.detail }}</small>
+      </div>
+    </div>
   </div>
 
   <div ref="rootRef" v-else-if="showUsageWindows">
@@ -705,7 +718,12 @@ import {
 } from '@/composables/useAccountUsageHealth'
 import { buildOpenAIUsageRefreshKey } from '@/utils/accountUsageRefresh'
 import CreditAmount from '@/components/common/CreditAmount.vue'
-import { formatCompactNumber, formatRelativeTime } from '@/utils/format'
+import {
+  formatCompactNumber,
+  formatCountdown,
+  formatDateTime,
+  formatRelativeTime
+} from '@/utils/format'
 import UsageProgressBar from './UsageProgressBar.vue'
 import AccountQuotaInfo from './AccountQuotaInfo.vue'
 import OpenAIQuotaResetCell from './OpenAIQuotaResetCell.vue'
@@ -1652,13 +1670,12 @@ interface OverviewUsageRow {
   resetsAt: string | null
   level: UsageLevel
   tone: OverviewTone
-  showReset: boolean
 }
 
 const overviewNow = ref(Date.now())
 
 const overviewUsageRows = computed((): OverviewUsageRow[] => {
-  const rows: Omit<OverviewUsageRow, 'level' | 'tone' | 'showReset'>[] = []
+  const rows: Omit<OverviewUsageRow, 'level' | 'tone'>[] = []
   const addRow = (
     key: string,
     label: string,
@@ -1778,8 +1795,7 @@ const overviewUsageRows = computed((): OverviewUsageRow[] => {
   return rows.slice(0, 2).map((row, index) => ({
     ...row,
     level: usageLevel(row.utilization),
-    tone: index === 0 ? 'primary' : 'secondary',
-    showReset: index === 0 && Boolean(row.resetsAt)
+    tone: index === 0 ? 'primary' : 'secondary'
   }))
 })
 
@@ -1799,21 +1815,130 @@ const overviewResetText = (row: OverviewUsageRow) => {
   const resetAt = new Date(row.resetsAt).getTime()
   if (!Number.isFinite(resetAt)) return ''
 
-  const remainingSeconds = Math.floor((resetAt - overviewNow.value) / 1000)
-  if (remainingSeconds <= 0) {
-    return row.utilization > 0
-      ? t('admin.accounts.workbench.quotaResetPending')
-      : t('admin.accounts.workbench.quotaResetNow')
+  const date = formatDateTime(row.resetsAt, {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false
+  })
+  if (!date) return ''
+  if (resetAt <= overviewNow.value) {
+    return t('admin.accounts.workbench.quotaResetPendingAt', { date })
   }
 
-  const hours = Math.floor(remainingSeconds / 3600)
-  const minutes = Math.floor((remainingSeconds % 3600) / 60)
-  const seconds = remainingSeconds % 60
-  const time = [hours, minutes, seconds]
-    .map(value => String(value).padStart(2, '0'))
-    .join(':')
-  return t('admin.accounts.workbench.quotaResetCountdown', { time })
+  // Reference the shared clock so the localized countdown is recomputed while
+  // the inspector remains open. Absolute time remains the source of precision.
+  void overviewNow.value
+  const time = formatCountdown(row.resetsAt)
+  return time
+    ? t('admin.accounts.workbench.quotaResetsAt', { date, time })
+    : t('admin.accounts.workbench.quotaResetPendingAt', { date })
 }
+
+type OverviewSubscriptionState = 'active' | 'ending' | 'stale' | 'unknown'
+
+interface OverviewSubscriptionRow {
+  label: string
+  value: string
+  detail: string
+  state: OverviewSubscriptionState
+}
+
+const overviewSubscription = computed((): OverviewSubscriptionRow | null => {
+  if (props.account.platform !== 'openai' || props.account.type !== 'oauth') return null
+
+  const subscription = usageInfo.value?.openai_subscription
+  const hasLiveResult = subscription?.source === 'live'
+  const credentials = props.account.credentials as Record<string, unknown> | undefined
+  const planType = [subscription?.plan_type, credentials?.plan_type, props.account.parent_plan_type]
+    .find((value): value is string => typeof value === 'string' && value.trim().length > 0)
+  const normalizedPlan = planType?.trim().toLowerCase() || ''
+  const isWorkspace = normalizedPlan.includes('business')
+    || normalizedPlan.includes('team')
+    || normalizedPlan.includes('enterprise')
+  const label = isWorkspace
+    ? t('admin.accounts.workbench.workspaceEntitlement')
+    : t('admin.accounts.workbench.membershipCycle')
+  const cachedActiveUntil = typeof credentials?.subscription_expires_at === 'string'
+    ? credentials.subscription_expires_at.trim()
+    : ''
+  const parentActiveUntil = props.account.parent_subscription_expires_at?.trim() || ''
+  const activeUntil = hasLiveResult
+    ? subscription?.active_until?.trim() || ''
+    : subscription?.active_until?.trim() || cachedActiveUntil || parentActiveUntil
+  if (!activeUntil) {
+    return {
+      label,
+      value: t('admin.accounts.workbench.membershipUnavailable'),
+      detail: hasLiveResult
+        ? t('admin.accounts.workbench.membershipNotReturned')
+        : t('admin.accounts.workbench.membershipQueryHint'),
+      state: 'unknown'
+    }
+  }
+
+  const timestamp = new Date(activeUntil).getTime()
+  if (!Number.isFinite(timestamp)) {
+    return {
+      label,
+      value: t('admin.accounts.workbench.membershipUnavailable'),
+      detail: t('admin.accounts.workbench.membershipQueryHint'),
+      state: 'unknown'
+    }
+  }
+  const date = formatDateTime(activeUntil, {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false
+  })
+  if (!date) return null
+
+  const cachedWillRenew = typeof credentials?.subscription_will_renew === 'boolean'
+    ? credentials.subscription_will_renew
+    : props.account.parent_subscription_will_renew
+  const willRenew = hasLiveResult
+    ? subscription?.will_renew
+    : typeof subscription?.will_renew === 'boolean'
+      ? subscription.will_renew
+      : cachedWillRenew
+  const expired = timestamp <= overviewNow.value
+
+  if (expired && willRenew !== false) {
+    return {
+      label,
+      value: t('admin.accounts.workbench.membershipRefreshNeeded'),
+      detail: t('admin.accounts.workbench.membershipLastRecordedUntil', { date }),
+      state: 'stale'
+    }
+  }
+
+  const value = isWorkspace
+    ? t('admin.accounts.workbench.workspaceEntitlementUntil', { date })
+    : willRenew === false
+      ? expired
+        ? t('admin.accounts.workbench.membershipExpiredAt', { date })
+        : t('admin.accounts.workbench.membershipExpiresAt', { date })
+      : t('admin.accounts.workbench.membershipCurrentPeriodUntil', { date })
+  const detail = isWorkspace
+    ? t('admin.accounts.workbench.workspaceEntitlementHint')
+    : willRenew === true
+      ? t('admin.accounts.workbench.membershipAutoRenewOn')
+      : willRenew === false
+        ? t('admin.accounts.workbench.membershipAutoRenewOff')
+        : t('admin.accounts.workbench.membershipRenewUnknown')
+
+  return {
+    label,
+    value,
+    detail,
+    state: willRenew === false ? 'ending' : 'active'
+  }
+})
 
 // ===== Key account today stats formatters =====
 
@@ -1841,7 +1966,7 @@ onMounted(() => {
   if (props.displayMode === 'overview') {
     overviewClock = setInterval(() => {
       overviewNow.value = Date.now()
-    }, 1000)
+    }, 30_000)
   }
 
   if (typeof window !== 'undefined') {

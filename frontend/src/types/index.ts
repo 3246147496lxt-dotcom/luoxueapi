@@ -1035,6 +1035,7 @@ export interface Account {
   parent_plan_type?: string
   parent_privacy_mode?: string
   parent_subscription_expires_at?: string
+  parent_subscription_will_renew?: boolean
   parent_chatgpt_account_id?: string
 }
 
@@ -1114,6 +1115,13 @@ export interface AccountUsageInfo {
   seven_day: UsageProgress | null
   seven_day_sonnet: UsageProgress | null
   seven_day_fable?: UsageProgress | null
+  openai_subscription?: {
+    plan_type?: string
+    active_until?: string
+    will_renew?: boolean
+    checked_at?: string
+    source?: 'live' | 'cached'
+  } | null
   gemini_shared_daily?: UsageProgress | null
   gemini_pro_daily?: UsageProgress | null
   gemini_flash_daily?: UsageProgress | null

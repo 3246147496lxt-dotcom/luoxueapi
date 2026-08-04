@@ -15,6 +15,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strconv"
 	"strings"
 	"time"
@@ -623,6 +624,65 @@ func (r *accountRepository) UpdateCredentials(ctx context.Context, id int64, cre
 	return nil
 }
 
+// UpdateOpenAISubscriptionCredentialsIfUnchanged stores best-effort ChatGPT
+// subscription metadata only while the complete credential document still
+// matches the one used for the upstream request. This prevents a slow response
+// from an old authorization from overwriting a concurrently re-authorized
+// account.
+func (r *accountRepository) UpdateOpenAISubscriptionCredentialsIfUnchanged(
+	ctx context.Context,
+	id int64,
+	expectedCredentials map[string]any,
+	credentials map[string]any,
+) (bool, error) {
+	if r == nil || r.sql == nil {
+		return false, errors.New("account repository SQL executor is not configured")
+	}
+	expectedJSON, err := json.Marshal(normalizeJSONMap(expectedCredentials))
+	if err != nil {
+		return false, err
+	}
+	credentialsJSON, err := json.Marshal(normalizeJSONMap(credentials))
+	if err != nil {
+		return false, err
+	}
+
+	exec := sqlExecutorFromContext(ctx, r.sql)
+	result, err := exec.ExecContext(ctx, `
+		WITH updated AS (
+			UPDATE accounts AS a
+			SET credentials = $1::jsonb,
+				updated_at = NOW()
+			WHERE a.id = $2
+				AND a.deleted_at IS NULL
+				AND a.platform = $3
+				AND a.type = $4
+				AND a.credentials = $5::jsonb
+			RETURNING a.id
+		)
+		INSERT INTO scheduler_outbox (event_type, account_id, group_id, payload)
+		SELECT $6, updated.id, NULL, NULL FROM updated
+	`,
+		string(credentialsJSON),
+		id,
+		service.PlatformOpenAI,
+		service.AccountTypeOAuth,
+		string(expectedJSON),
+		service.SchedulerOutboxEventAccountChanged,
+	)
+	if err != nil {
+		return false, err
+	}
+	rowsAffected, err := result.RowsAffected()
+	if err != nil || rowsAffected == 0 {
+		return false, err
+	}
+	if rawStatementCommittedHere(ctx, exec) {
+		r.syncSchedulerAccountSnapshotDetached(ctx, id)
+	}
+	return true, nil
+}
+
 func (r *accountRepository) Delete(ctx context.Context, id int64) error {
 	baseCtx := ctx
 	var groupIDs []int64
@@ -901,6 +961,9 @@ func (r *accountRepository) ListOpsAccountsForStats(ctx context.Context, platfor
 func accountListOrder(params pagination.PaginationParams) []func(*entsql.Selector) {
 	sortBy := strings.ToLower(strings.TrimSpace(params.SortBy))
 	sortOrder := params.NormalizedSortOrder(pagination.SortOrderAsc)
+	if sortBy == "effective_status" {
+		return accountEffectiveStatusOrder(sortOrder)
+	}
 
 	field := dbaccount.FieldName
 	defaultOrder := true
@@ -940,6 +1003,220 @@ func accountListOrder(params pagination.PaginationParams) []func(*entsql.Selecto
 		return []func(*entsql.Selector){dbent.Asc(dbaccount.FieldName), dbent.Asc(dbaccount.FieldID)}
 	}
 	return []func(*entsql.Selector){dbent.Asc(field), dbent.Asc(dbaccount.FieldID)}
+}
+
+// accountEffectiveStatusOrder sorts by the status an administrator can act on,
+// rather than the persisted accounts.status value alone. Runtime restrictions
+// such as quota exhaustion keep the physical status "active", so ordering the
+// column directly cannot separate healthy and restricted accounts.
+//
+// Keep this expression in SQL: pagination is applied before accounts are
+// hydrated, and sorting a single hydrated page would produce incorrect order
+// across page boundaries.
+func accountEffectiveStatusOrder(sortOrder string) []func(*entsql.Selector) {
+	return []func(*entsql.Selector){func(s *entsql.Selector) {
+		rank := accountEffectiveStatusRankExpr(s)
+		if sortOrder == pagination.SortOrderDesc {
+			s.OrderExpr(entsql.Expr(rank + " DESC"))
+			s.OrderBy(entsql.Desc(s.C(dbaccount.FieldName)))
+			s.OrderBy(entsql.Desc(s.C(dbaccount.FieldID)))
+			return
+		}
+
+		s.OrderExpr(entsql.Expr(rank + " ASC"))
+		s.OrderBy(entsql.Asc(s.C(dbaccount.FieldName)))
+		s.OrderBy(entsql.Asc(s.C(dbaccount.FieldID)))
+	}}
+}
+
+// accountEffectiveStatusRankExpr returns a stable business-status rank. Lower
+// ranks are healthier, so ASC puts active/schedulable accounts first. The CASE
+// order mirrors the compact frontend status precedence for persisted signals:
+// error > quota > overload > rate limit > temporary pause > manual pause > active.
+func accountEffectiveStatusRankExpr(s *entsql.Selector) string {
+	status := s.C(dbaccount.FieldStatus)
+	errorMessage := s.C(dbaccount.FieldErrorMessage)
+	platform := s.C(dbaccount.FieldPlatform)
+	accountType := s.C(dbaccount.FieldType)
+	extra := s.C(dbaccount.FieldExtra)
+	schedulable := s.C(dbaccount.FieldSchedulable)
+	overloadUntil := s.C(dbaccount.FieldOverloadUntil)
+	rateLimitResetAt := s.C(dbaccount.FieldRateLimitResetAt)
+	tempUnschedulableUntil := s.C(dbaccount.FieldTempUnschedulableUntil)
+	expiresAt := s.C(dbaccount.FieldExpiresAt)
+	autoPauseOnExpired := s.C(dbaccount.FieldAutoPauseOnExpired)
+
+	openAIQuotaExhausted := fmt.Sprintf(
+		`(%s = 'openai' AND (%s OR %s))`,
+		platform,
+		codexWindowExhaustedExpr(extra, s.C(dbaccount.FieldUpdatedAt), "5h"),
+		codexWindowExhaustedExpr(extra, s.C(dbaccount.FieldUpdatedAt), "7d"),
+	)
+	knownQuotaExhausted := fmt.Sprintf(
+		`(%s IN ('apikey', 'bedrock') AND %s)`,
+		accountType,
+		knownAccountQuotaExceededOrderExpr(extra),
+	)
+	quotaExhausted := fmt.Sprintf(`(%s OR %s)`, openAIQuotaExhausted, knownQuotaExhausted)
+
+	return fmt.Sprintf(`(CASE
+		WHEN %s = 'error' OR NULLIF(BTRIM(COALESCE(%s, '')), '') IS NOT NULL THEN 7
+		WHEN %s = 'active' AND %s THEN 1
+		WHEN %s = 'active' AND %s IS NOT NULL AND %s > CURRENT_TIMESTAMP THEN 2
+		WHEN %s = 'active' AND %s IS NOT NULL AND %s > CURRENT_TIMESTAMP THEN 3
+		WHEN %s = 'active' AND %s IS NOT NULL AND %s > CURRENT_TIMESTAMP THEN 4
+		WHEN %s = 'active' AND (
+			%s = FALSE OR (%s = TRUE AND %s IS NOT NULL AND %s <= CURRENT_TIMESTAMP)
+		) THEN 5
+		WHEN %s = 'active' THEN 0
+		ELSE 6
+	END)`,
+		status, errorMessage,
+		status, quotaExhausted,
+		status, overloadUntil, overloadUntil,
+		status, rateLimitResetAt, rateLimitResetAt,
+		status, tempUnschedulableUntil, tempUnschedulableUntil,
+		status, schedulable, autoPauseOnExpired, expiresAt, expiresAt,
+		status,
+	)
+}
+
+// PostgreSQL does not have a portable TRY_CAST on the supported versions. Keep
+// every JSON number conversion behind a CASE type guard so malformed/string
+// values cannot abort the whole account-list query.
+func jsonNumberAtLeastExpr(extra, key string, minimum int) string {
+	return fmt.Sprintf(`(CASE
+		WHEN jsonb_typeof(%[1]s->'%[2]s') = 'number'
+		THEN (%[1]s->>'%[2]s')::numeric >= %[3]d
+		ELSE FALSE
+	END)`, extra, key, minimum)
+}
+
+func jsonPositiveNumberExpr(extra, key string) string {
+	return fmt.Sprintf(`(CASE
+		WHEN jsonb_typeof(%[1]s->'%[2]s') = 'number'
+		THEN (%[1]s->>'%[2]s')::numeric > 0
+		ELSE FALSE
+	END)`, extra, key)
+}
+
+func jsonNumberAtLeastJSONNumberExpr(extra, usedKey, limitKey string) string {
+	return fmt.Sprintf(`(CASE
+		WHEN jsonb_typeof(%[1]s->'%[2]s') = 'number'
+			AND jsonb_typeof(%[1]s->'%[3]s') = 'number'
+		THEN (%[1]s->>'%[2]s')::numeric >= (%[1]s->>'%[3]s')::numeric
+		ELSE FALSE
+	END)`, extra, usedKey, limitKey)
+}
+
+func knownAccountQuotaExceededOrderExpr(extra string) string {
+	dailyExpired := quotaPeriodExpiredOrderExpr(extra, "daily", "24 hours")
+	weeklyExpired := quotaPeriodExpiredOrderExpr(extra, "weekly", "168 hours")
+	totalExceeded := fmt.Sprintf(
+		`(%s AND %s)`,
+		jsonPositiveNumberExpr(extra, "quota_limit"),
+		jsonNumberAtLeastJSONNumberExpr(extra, "quota_used", "quota_limit"),
+	)
+	dailyExceeded := fmt.Sprintf(
+		`(%s AND %s AND NOT %s)`,
+		jsonPositiveNumberExpr(extra, "quota_daily_limit"),
+		jsonNumberAtLeastJSONNumberExpr(extra, "quota_daily_used", "quota_daily_limit"),
+		dailyExpired,
+	)
+	weeklyExceeded := fmt.Sprintf(
+		`(%s AND %s AND NOT %s)`,
+		jsonPositiveNumberExpr(extra, "quota_weekly_limit"),
+		jsonNumberAtLeastJSONNumberExpr(extra, "quota_weekly_used", "quota_weekly_limit"),
+		weeklyExpired,
+	)
+	return fmt.Sprintf(`(%s OR %s OR %s)`, totalExceeded, dailyExceeded, weeklyExceeded)
+}
+
+const accountEffectiveStatusRFC3339Pattern = `^[0-9]{4}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])T([01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9]([.][0-9]+)?([zZ]|[+-]((0[0-9]|1[0-3]):[0-5][0-9]|14:00))$`
+
+func jsonRFC3339StringExpr(extra, key string) string {
+	// The shape regex protects the numeric substring casts. The nested year/day
+	// checks reject values such as year zero or February 31 before PostgreSQL is
+	// ever asked to cast the full value to timestamptz.
+	return fmt.Sprintf(`(CASE
+		WHEN jsonb_typeof(%[1]s->'%[2]s') = 'string'
+			AND (%[1]s->>'%[2]s') ~ '%[3]s'
+		THEN CASE
+			WHEN SUBSTRING(%[1]s->>'%[2]s' FROM 1 FOR 4)::integer >= 1
+			THEN SUBSTRING(%[1]s->>'%[2]s' FROM 9 FOR 2)::integer <= EXTRACT(DAY FROM (
+				make_date(
+					SUBSTRING(%[1]s->>'%[2]s' FROM 1 FOR 4)::integer,
+					SUBSTRING(%[1]s->>'%[2]s' FROM 6 FOR 2)::integer,
+					1
+				) + INTERVAL '1 month' - INTERVAL '1 day'
+			))::integer
+			ELSE FALSE
+		END
+		ELSE FALSE
+	END)`,
+		extra,
+		key,
+		accountEffectiveStatusRFC3339Pattern,
+	)
+}
+
+func jsonRFC3339TimestampOrNullExpr(extra, key string) string {
+	return fmt.Sprintf(`(CASE
+		WHEN %s THEN (%s->>'%s')::timestamptz
+		ELSE NULL
+	END)`, jsonRFC3339StringExpr(extra, key), extra, key)
+}
+
+// quotaPeriodExpiredOrderExpr is the malformed-data-safe counterpart of the
+// mutation-path dailyExpiredExpr/weeklyExpiredExpr constants. Account extra can
+// contain legacy or imported strings, so status sorting must not cast an
+// unvalidated timestamp and fail the whole account-list query. Missing or
+// invalid period timestamps degrade to the epoch, matching the service layer's
+// zero-time behavior: the old period is considered expired, not exhausted.
+func quotaPeriodExpiredOrderExpr(extra, period, rollingInterval string) string {
+	resetModeKey := "quota_" + period + "_reset_mode"
+	resetAtKey := "quota_" + period + "_reset_at"
+	startKey := "quota_" + period + "_start"
+	resetAt := jsonRFC3339TimestampOrNullExpr(extra, resetAtKey)
+	start := jsonRFC3339TimestampOrNullExpr(extra, startKey)
+
+	return fmt.Sprintf(`(CASE
+		WHEN COALESCE(%[1]s->>'%[2]s', 'rolling') = 'fixed'
+		THEN CURRENT_TIMESTAMP >= COALESCE(%[3]s, '1970-01-01'::timestamptz)
+		ELSE COALESCE(%[4]s, '1970-01-01'::timestamptz)
+			+ INTERVAL '%[5]s' <= CURRENT_TIMESTAMP
+	END)`, extra, resetModeKey, resetAt, start, rollingInterval)
+}
+
+// codexWindowExhaustedExpr mirrors the persisted portion of the frontend quota
+// resolver. An explicit reset_at wins. Otherwise reset_after_seconds is based
+// on codex_usage_updated_at (or the account update time). Missing reset data is
+// intentionally treated as still exhausted; a known past reset is not.
+func codexWindowExhaustedExpr(extra, accountUpdatedAt, window string) string {
+	usedPercentKey := "codex_" + window + "_used_percent"
+	resetAtKey := "codex_" + window + "_reset_at"
+	resetAfterKey := "codex_" + window + "_reset_after_seconds"
+	validResetAt := jsonRFC3339StringExpr(extra, resetAtKey)
+	validUsageUpdatedAt := jsonRFC3339StringExpr(extra, "codex_usage_updated_at")
+
+	baseTime := fmt.Sprintf(`(CASE
+		WHEN %[2]s THEN (%[1]s->>'codex_usage_updated_at')::timestamptz
+		ELSE %[3]s
+	END)`, extra, validUsageUpdatedAt, accountUpdatedAt)
+
+	resetStillActive := fmt.Sprintf(`(CASE
+		WHEN %[1]s THEN (%[2]s->>'%[3]s')::timestamptz > CURRENT_TIMESTAMP
+		WHEN jsonb_typeof(%[2]s->'%[4]s') = 'number'
+			AND (%[2]s->>'%[4]s')::numeric > 0
+		THEN %[5]s + ((%[2]s->>'%[4]s')::double precision * INTERVAL '1 second') > CURRENT_TIMESTAMP
+		ELSE TRUE
+	END)`, validResetAt, extra, resetAtKey, resetAfterKey, baseTime)
+
+	return fmt.Sprintf(
+		`(%s AND %s)`,
+		jsonNumberAtLeastExpr(extra, usedPercentKey, 100),
+		resetStillActive,
+	)
 }
 
 func (r *accountRepository) ListByGroup(ctx context.Context, groupID int64) ([]service.Account, error) {
@@ -2329,7 +2606,9 @@ func (r *accountRepository) UpdateExtra(ctx context.Context, id int64, updates m
 		return nil
 	}
 
-	// 使用 JSONB 合并操作实现原子更新，避免读-改-写的并发丢失更新问题
+	// 使用 JSONB 合并操作实现原子更新，避免读-改-写的并发丢失更新问题。
+	// 顶层 nil 是 tombstone：只删除本次 payload 中显式置空的键，不会
+	// 递归剥离其它已存在的 JSON null。这让权威快照可以原子清掉已退役字段。
 	payload, err := json.Marshal(updates)
 	if err != nil {
 		return err
@@ -2338,7 +2617,11 @@ func (r *accountRepository) UpdateExtra(ctx context.Context, id int64, updates m
 	clearProbeSnapshot := upstreamBillingProbeExplicitlyDisabled(updates) || upstreamBillingProbeSnapshotClearRequested(updates)
 	durableSchedulerChange := shouldEnqueueSchedulerOutboxForExtraUpdates(updates) || clearProbeSnapshot
 	baseCtx := ctx
-	extraExpression := "COALESCE(extra, '{}'::jsonb) || $1::jsonb"
+	extraExpression := `(COALESCE(extra, '{}'::jsonb) || $1::jsonb) - ARRAY(
+		SELECT entry.key
+		FROM jsonb_each($1::jsonb) AS entry(key, value)
+		WHERE entry.value = 'null'::jsonb
+	)`
 	if clearProbeSnapshot {
 		extraExpression = "(" + extraExpression + ") - 'upstream_billing_probe'"
 	}

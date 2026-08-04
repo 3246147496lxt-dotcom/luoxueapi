@@ -318,6 +318,45 @@ describe('admin AccountsView workbench', () => {
     document.body.replaceChildren()
   })
 
+  it('keeps the identity cell to the account name only', async () => {
+    listAccounts.mockResolvedValue(
+      responseFor(makeAccount('name-only-account', '2026-07-01T00:00:00Z'))
+    )
+
+    const wrapper = mountView()
+    await flushPromises()
+
+    const identity = wrapper.get('.account-identity-cell')
+    expect(identity.text()).toBe('name-only-account')
+    expect(identity.find('.account-identity-cell__meta').exists()).toBe(false)
+    expect(identity.text()).not.toContain('ID:')
+    expect(identity.text()).not.toContain('OpenAI')
+    expect(identity.text()).not.toContain('OAuth')
+  })
+
+  it('maps the visible status sort to server-side effective status ordering', async () => {
+    listAccounts.mockResolvedValue(
+      responseFor(makeAccount('sortable-account', '2026-07-01T00:00:00Z'))
+    )
+
+    const wrapper = mountView()
+    await flushPromises()
+    listAccounts.mockClear()
+
+    wrapper.getComponent(DataTableStub).vm.$emit('sort', 'status', 'desc')
+    await flushPromises()
+
+    expect(listAccounts).toHaveBeenCalledWith(
+      1,
+      20,
+      expect.objectContaining({
+        sort_by: 'effective_status',
+        sort_order: 'desc'
+      }),
+      expect.anything()
+    )
+  })
+
   it('auto-selects the first wide-screen row and keeps selection by ID after refresh', async () => {
     listAccounts
       .mockResolvedValueOnce(responseFor(

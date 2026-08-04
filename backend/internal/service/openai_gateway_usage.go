@@ -777,13 +777,75 @@ func codexResetAtRFC3339(base time.Time, resetAfterSeconds *int) *string {
 	return &resetAt
 }
 
+func newNormalizedCodexWindowExtraUpdates() map[string]any {
+	return map[string]any{
+		"codex_5h_used_percent":        nil,
+		"codex_5h_reset_after_seconds": nil,
+		"codex_5h_window_minutes":      nil,
+		"codex_5h_reset_at":            nil,
+		"codex_7d_used_percent":        nil,
+		"codex_7d_reset_after_seconds": nil,
+		"codex_7d_window_minutes":      nil,
+		"codex_7d_reset_at":            nil,
+	}
+}
+
+func normalizedCodexLimitsHaveData(limits *NormalizedCodexLimits) bool {
+	return limits != nil && (limits.Used5hPercent != nil ||
+		limits.Reset5hSeconds != nil ||
+		limits.Window5hMinutes != nil ||
+		limits.Used7dPercent != nil ||
+		limits.Reset7dSeconds != nil ||
+		limits.Window7dMinutes != nil)
+}
+
+func applyNormalizedCodexWindowExtraUpdates(updates map[string]any, limits *NormalizedCodexLimits, baseTime time.Time) {
+	if updates == nil || limits == nil {
+		return
+	}
+	if limits.Used5hPercent != nil {
+		updates["codex_5h_used_percent"] = *limits.Used5hPercent
+	}
+	if limits.Reset5hSeconds != nil {
+		updates["codex_5h_reset_after_seconds"] = *limits.Reset5hSeconds
+	}
+	if limits.Window5hMinutes != nil {
+		updates["codex_5h_window_minutes"] = *limits.Window5hMinutes
+	}
+	if limits.Used7dPercent != nil {
+		updates["codex_7d_used_percent"] = *limits.Used7dPercent
+	}
+	if limits.Reset7dSeconds != nil {
+		updates["codex_7d_reset_after_seconds"] = *limits.Reset7dSeconds
+	}
+	if limits.Window7dMinutes != nil {
+		updates["codex_7d_window_minutes"] = *limits.Window7dMinutes
+	}
+	if reset5hAt := codexResetAtRFC3339(baseTime, limits.Reset5hSeconds); reset5hAt != nil {
+		updates["codex_5h_reset_at"] = *reset5hAt
+	}
+	if reset7dAt := codexResetAtRFC3339(baseTime, limits.Reset7dSeconds); reset7dAt != nil {
+		updates["codex_7d_reset_at"] = *reset7dAt
+	}
+}
+
 func buildCodexUsageExtraUpdates(snapshot *OpenAICodexUsageSnapshot, fallbackNow time.Time) map[string]any {
 	if snapshot == nil {
 		return nil
 	}
 
 	baseTime := codexSnapshotBaseTime(snapshot, fallbackNow)
-	updates := make(map[string]any)
+	updates := newNormalizedCodexWindowExtraUpdates()
+	// A fresh upstream snapshot is authoritative for both slots. Keep explicit
+	// tombstones for absent raw fields so a retired secondary/5h window cannot
+	// survive a JSONB merge and be mistaken for current data.
+	updates["codex_primary_used_percent"] = nil
+	updates["codex_primary_reset_after_seconds"] = nil
+	updates["codex_primary_window_minutes"] = nil
+	updates["codex_secondary_used_percent"] = nil
+	updates["codex_secondary_reset_after_seconds"] = nil
+	updates["codex_secondary_window_minutes"] = nil
+	updates["codex_primary_over_secondary_percent"] = nil
 
 	// 保存原始 primary/secondary 字段，便于排查问题
 	if snapshot.PrimaryUsedPercent != nil {
@@ -809,33 +871,9 @@ func buildCodexUsageExtraUpdates(snapshot *OpenAICodexUsageSnapshot, fallbackNow
 	}
 	updates["codex_usage_updated_at"] = baseTime.Format(time.RFC3339)
 
-	// 归一化到 5h/7d 规范字段
-	if normalized := snapshot.Normalize(); normalized != nil {
-		if normalized.Used5hPercent != nil {
-			updates["codex_5h_used_percent"] = *normalized.Used5hPercent
-		}
-		if normalized.Reset5hSeconds != nil {
-			updates["codex_5h_reset_after_seconds"] = *normalized.Reset5hSeconds
-		}
-		if normalized.Window5hMinutes != nil {
-			updates["codex_5h_window_minutes"] = *normalized.Window5hMinutes
-		}
-		if normalized.Used7dPercent != nil {
-			updates["codex_7d_used_percent"] = *normalized.Used7dPercent
-		}
-		if normalized.Reset7dSeconds != nil {
-			updates["codex_7d_reset_after_seconds"] = *normalized.Reset7dSeconds
-		}
-		if normalized.Window7dMinutes != nil {
-			updates["codex_7d_window_minutes"] = *normalized.Window7dMinutes
-		}
-		if reset5hAt := codexResetAtRFC3339(baseTime, normalized.Reset5hSeconds); reset5hAt != nil {
-			updates["codex_5h_reset_at"] = *reset5hAt
-		}
-		if reset7dAt := codexResetAtRFC3339(baseTime, normalized.Reset7dSeconds); reset7dAt != nil {
-			updates["codex_7d_reset_at"] = *reset7dAt
-		}
-	}
+	// 归一化到 5h/7d 规范字段。缺席的窗口保留 tombstone，
+	// 由 repository 原子删除旧键。
+	applyNormalizedCodexWindowExtraUpdates(updates, snapshot.Normalize(), baseTime)
 
 	return updates
 }

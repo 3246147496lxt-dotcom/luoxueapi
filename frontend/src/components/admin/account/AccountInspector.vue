@@ -873,7 +873,6 @@ defineExpose({ focus })
   height: 100%;
   border-radius: inherit;
   background: var(--lx-clay-success-bright);
-  transition: width 220ms ease-out;
 }
 
 .account-inspector__section--quota :deep(.account-usage-overview__row[data-tone='secondary'] .account-usage-overview__track > span) {
@@ -908,6 +907,48 @@ defineExpose({ focus })
   margin: 0;
   color: var(--lx-clay-text-muted);
   font-size: 0.72rem;
+}
+
+.account-inspector__section--quota :deep(.account-usage-overview__subscription) {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: start;
+  gap: 14px;
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px solid var(--lx-clay-border);
+  color: var(--lx-clay-text-muted);
+  font-size: 0.72rem;
+  font-weight: 760;
+  line-height: 1.4;
+}
+
+.account-inspector__section--quota :deep(.account-usage-overview__subscription > div) {
+  min-width: 0;
+  text-align: right;
+}
+
+.account-inspector__section--quota :deep(.account-usage-overview__subscription strong) {
+  display: block;
+  overflow-wrap: anywhere;
+  color: var(--lx-clay-text);
+  font-size: 0.74rem;
+  font-weight: 820;
+  font-variant-numeric: tabular-nums;
+}
+
+.account-inspector__section--quota :deep(.account-usage-overview__subscription small) {
+  display: block;
+  margin-top: 3px;
+  color: var(--lx-clay-text-muted);
+  font-size: 0.67rem;
+  font-weight: 650;
+  line-height: 1.45;
+}
+
+.account-inspector__section--quota :deep(.account-usage-overview__subscription[data-state='ending'] strong),
+.account-inspector__section--quota :deep(.account-usage-overview__subscription[data-state='stale'] strong) {
+  color: var(--lx-clay-warning);
 }
 
 .account-inspector__quota-actions {

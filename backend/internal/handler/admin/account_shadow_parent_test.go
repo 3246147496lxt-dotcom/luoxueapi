@@ -16,6 +16,7 @@ func TestEnrichShadowParentInfo(t *testing.T) {
 			"email":                   "owner@example.com",
 			"plan_type":               "pro",
 			"subscription_expires_at": "2026-12-31T00:00:00Z",
+			"subscription_will_renew": false,
 			"chatgpt_account_id":      "acct_123",
 		},
 		Extra: map[string]any{"privacy_mode": "training_off"},
@@ -33,6 +34,8 @@ func TestEnrichShadowParentInfo(t *testing.T) {
 	require.Equal(t, "pro", items[0].ParentPlanType)
 	require.Equal(t, "training_off", items[0].ParentPrivacyMode)
 	require.Equal(t, "2026-12-31T00:00:00Z", items[0].ParentSubscriptionExpiresAt)
+	require.NotNil(t, items[0].ParentSubscriptionWillRenew)
+	require.False(t, *items[0].ParentSubscriptionWillRenew)
 	require.Equal(t, "acct_123", items[0].ParentChatGPTAccountID)
 
 	require.Empty(t, items[1].ParentEmail, "非影子不回填")

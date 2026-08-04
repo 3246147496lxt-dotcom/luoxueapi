@@ -49,8 +49,12 @@ func TestShouldRefreshOpenAICodexSnapshot(t *testing.T) {
 		t.Fatal("expected complete non-rate-limited usage to skip codex snapshot refresh")
 	}
 
-	if !shouldRefreshOpenAICodexSnapshot(&Account{}, &UsageInfo{FiveHour: nil, SevenDay: &UsageProgress{}}, now) {
-		t.Fatal("expected missing 5h snapshot to require refresh")
+	if shouldRefreshOpenAICodexSnapshot(&Account{}, &UsageInfo{FiveHour: nil, SevenDay: &UsageProgress{}}, now) {
+		t.Fatal("expected an authoritative 7d-only snapshot to skip refresh")
+	}
+
+	if !shouldRefreshOpenAICodexSnapshot(&Account{}, &UsageInfo{}, now) {
+		t.Fatal("expected a snapshot with no canonical windows to require refresh")
 	}
 
 	staleAt := now.Add(-(openAIProbeCacheTTL + time.Minute)).Format(time.RFC3339)
@@ -255,4 +259,54 @@ func TestBuildCodexUsageProgressFromExtra_ZerosExpiredWindow(t *testing.T) {
 			t.Fatalf("expected Utilization=0 for expired 7d window, got %v", progress.Utilization)
 		}
 	})
+}
+
+func TestMergeAndApplyCodexUsage_SevenDayOnlyDoesNotReviveRetiredFiveHour(t *testing.T) {
+	now := time.Date(2026, 8, 4, 12, 0, 0, 0, time.UTC)
+	account := &Account{Extra: map[string]any{
+		"codex_5h_used_percent":        42.0,
+		"codex_5h_reset_after_seconds": 2 * 60 * 60,
+		"codex_5h_window_minutes":      5 * 60,
+		"codex_5h_reset_at":            now.Add(2 * time.Hour).Format(time.RFC3339),
+		"codex_usage_updated_at":       now.Add(-time.Hour).Format(time.RFC3339),
+	}}
+	usage := &UsageInfo{}
+	applyExtraToUsage(usage, account.Extra, now)
+	if usage.FiveHour == nil {
+		t.Fatal("test setup must begin with a stale 5h window")
+	}
+
+	primaryUsed := 38.0
+	primaryReset := 3 * 24 * 60 * 60
+	primaryWindow := 7 * 24 * 60
+	updates := buildCodexUsageExtraUpdates(&OpenAICodexUsageSnapshot{
+		PrimaryUsedPercent:       &primaryUsed,
+		PrimaryResetAfterSeconds: &primaryReset,
+		PrimaryWindowMinutes:     &primaryWindow,
+		UpdatedAt:                now.Format(time.RFC3339),
+	}, now)
+	mergeAccountExtra(account, updates)
+
+	for _, key := range []string{
+		"codex_5h_used_percent",
+		"codex_5h_reset_after_seconds",
+		"codex_5h_window_minutes",
+		"codex_5h_reset_at",
+	} {
+		if _, ok := account.Extra[key]; ok {
+			t.Fatalf("retired 5h key %s survived tombstone merge", key)
+		}
+	}
+
+	applyExtraToUsage(usage, account.Extra, now)
+	if usage.FiveHour != nil {
+		t.Fatalf("retired 5h window was revived: %#v", usage.FiveHour)
+	}
+	if usage.SevenDay == nil || usage.SevenDay.Utilization != primaryUsed {
+		t.Fatalf("expected current 7d window with utilization %v, got %#v", primaryUsed, usage.SevenDay)
+	}
+	wantResetAt := now.Add(time.Duration(primaryReset) * time.Second)
+	if usage.SevenDay.ResetsAt == nil || !usage.SevenDay.ResetsAt.Equal(wantResetAt) {
+		t.Fatalf("7d reset = %v, want %v", usage.SevenDay.ResetsAt, wantResetAt)
+	}
 }

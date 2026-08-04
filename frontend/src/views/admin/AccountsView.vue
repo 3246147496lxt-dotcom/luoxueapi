@@ -346,22 +346,9 @@
           <template #cell-id="{ value }">
             <span class="font-mono text-xs text-gray-500 dark:text-gray-400">#{{ value }}</span>
           </template>
-          <template #cell-name="{ row, value }">
+          <template #cell-name="{ value }">
             <div class="account-identity-cell">
               <span class="account-identity-cell__name">{{ value }}</span>
-              <div class="account-identity-cell__meta">
-                <span class="account-identity-cell__id">ID: {{ row.id }}</span>
-                <span aria-hidden="true" class="account-identity-cell__separator">·</span>
-                <PlatformTypeBadge
-                  :platform="row.platform"
-                  :type="row.type"
-                  :auth-mode="getOpenAIAuthMode(row)"
-                  :plan-type="getAccountPlanType(row)"
-                  :privacy-mode="row.extra?.privacy_mode || row.parent_privacy_mode"
-                  :subscription-expires-at="row.credentials?.subscription_expires_at || row.parent_subscription_expires_at"
-                  compact
-                />
-              </div>
             </div>
           </template>
           <template #cell-notes="{ value }">
@@ -897,6 +884,8 @@ const ACCOUNT_SORTABLE_KEYS = new Set([
   'created_at',
   'expires_at'
 ])
+// The combined status column renders effective health, not the persisted account.status value.
+const accountSortRequestKey = (key: string) => key === 'status' ? 'effective_status' : key
 const loadInitialAccountSortState = (): AccountSortState => {
   const fallback: AccountSortState = { sort_by: 'name', sort_order: 'asc' }
   try {
@@ -1168,7 +1157,7 @@ const {
     group: '',
     search: '',
     include_scheduler_score: shouldIncludeSchedulerScore() ? '1' : '0',
-    sort_by: sortState.sort_by,
+    sort_by: accountSortRequestKey(sortState.sort_by),
     sort_order: sortState.sort_order
   }
 })
@@ -1485,7 +1474,7 @@ const handleSort = (key: string, order: AccountSortOrder) => {
   sortState.sort_by = key
   sortState.sort_order = order
   const requestParams = params as any
-  requestParams.sort_by = key
+  requestParams.sort_by = accountSortRequestKey(key)
   requestParams.sort_order = order
   syncAccountListDerivedParams()
   pagination.page = 1
@@ -2187,7 +2176,7 @@ const buildAccountQueryFilters = () => ({
   group: params.group || '',
   privacy_mode: params.privacy_mode || '',
   search: params.search || '',
-  sort_by: sortState.sort_by,
+  sort_by: accountSortRequestKey(sortState.sort_by),
   sort_order: sortState.sort_order
 })
 const accountMatchesCurrentFilters = (account: Account) => {
@@ -2704,27 +2693,6 @@ onUnmounted(() => {
   line-height: 1.25rem;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.account-identity-cell__meta {
-  display: flex;
-  min-width: 0;
-  align-items: center;
-  gap: 5px;
-  overflow: hidden;
-}
-
-.account-identity-cell__id {
-  flex: none;
-  color: var(--lx-clay-text-muted);
-  font-family: var(--lx-clay-font-mono, ui-monospace, monospace);
-  font-size: 0.6875rem;
-  line-height: 1rem;
-}
-
-.account-identity-cell__separator {
-  color: var(--lx-clay-text-muted);
-  font-size: 0.6875rem;
 }
 
 .account-quota-capacity {
