@@ -481,7 +481,7 @@ async function performPendingAction(): Promise<void> {
     configLoading.value = true
     configError.value = null
     try {
-      const updated = await stepUp.run(() => skillsAPI.updateConfig(action.enabled))
+      const updated = await skillsAPI.updateConfig(action.enabled)
       marketplaceEnabled.value = updated.enabled === true
       try {
         await appStore.fetchPublicSettings(true)
@@ -493,10 +493,9 @@ async function performPendingAction(): Promise<void> {
         ? t('admin.skills.marketplace.enabledSuccess')
         : t('admin.skills.marketplace.disabledSuccess'))
     } catch (error: unknown) {
-      configError.value = isStepUpCancelled(error)
-        ? null
-        : extractApiErrorMessage(error, t('admin.skills.marketplace.updateFailed'))
-      handleSensitiveError(error, t('admin.skills.marketplace.updateFailed'))
+      const message = extractApiErrorMessage(error, t('admin.skills.marketplace.updateFailed'))
+      configError.value = message
+      appStore.showError(message)
     } finally {
       configLoading.value = false
     }

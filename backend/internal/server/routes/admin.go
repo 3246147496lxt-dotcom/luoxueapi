@@ -176,7 +176,7 @@ func registerSkillMarketRoutes(admin *gin.RouterGroup, h *handler.Handlers, step
 	skills := admin.Group("/skills")
 	{
 		skills.GET("/config", h.Admin.SkillMarket.GetConfig)
-		skills.PUT("/config", gin.HandlerFunc(stepUpAuth), h.Admin.SkillMarket.UpdateConfig)
+		skills.PUT("/config", h.Admin.SkillMarket.UpdateConfig)
 		skills.GET("", h.Admin.SkillMarket.List)
 		skills.POST("", h.Admin.SkillMarket.Create)
 		skills.GET("/:id", h.Admin.SkillMarket.Get)

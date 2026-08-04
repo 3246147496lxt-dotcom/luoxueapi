@@ -11,6 +11,9 @@ describe('public Skill API contract', () => {
       slug: 'api-docs',
       display_name: 'API Docs',
       tags: ['docs', null, 'api'],
+      repository_url: 'https://github.com/example/api-docs',
+      repository_name: 'example/api-docs',
+      github_stars: 1240,
       current_version: {
         version: '1.2.0',
         released_at: '2026-08-03T10:00:00Z',
@@ -35,6 +38,11 @@ describe('public Skill API contract', () => {
       { code: 'NETWORK_REFERENCE', message: 'Uses the network', path: 'api-docs/SKILL.md' },
     ])
     expect(skill.tags).toEqual(['docs', 'api'])
+    expect(skill).toMatchObject({
+      source_url: 'https://github.com/example/api-docs',
+      source_repository: 'example/api-docs',
+      repository_stars: 1240,
+    })
   })
 
   it('normalizes string categories for task filters', () => {

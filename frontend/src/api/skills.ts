@@ -51,6 +51,9 @@ export interface PublicSkill {
   published_at: string
   updated_at: string
   versions: PublicSkillVersion[]
+  source_url?: string
+  source_repository?: string
+  repository_stars?: number | null
 }
 
 export interface SkillCategory {
@@ -87,6 +90,10 @@ function stringValue(value: unknown): string {
 
 function numberValue(value: unknown): number {
   return typeof value === 'number' && Number.isFinite(value) ? value : 0
+}
+
+function optionalNumberValue(value: unknown): number | null {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : null
 }
 
 function stringArray(value: unknown): string[] {
@@ -177,6 +184,11 @@ export function normalizePublicSkill(value: unknown): PublicSkill {
     versions: rawVersions
       .map(normalizePublicSkillVersion)
       .filter((version) => Boolean(version.version)),
+    source_url: stringValue(source.source_url) || stringValue(source.repository_url) || undefined,
+    source_repository: stringValue(source.source_repository) || stringValue(source.repository_name) || undefined,
+    repository_stars: optionalNumberValue(
+      source.repository_stars ?? source.github_stars ?? source.source_stars,
+    ),
   }
 }
 

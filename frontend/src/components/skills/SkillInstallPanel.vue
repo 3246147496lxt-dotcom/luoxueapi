@@ -1,118 +1,87 @@
 <template>
-  <aside class="skill-install" :aria-labelledby="`${skill.slug}-install-title`">
-    <div class="skill-install__heading">
-      <span aria-hidden="true"><Icon name="download" size="md" :stroke-width="1.8" /></span>
-      <div>
-        <h2 :id="`${skill.slug}-install-title`">{{ t('skills.install.title') }}</h2>
-        <p>{{ t('skills.install.localOnly') }}</p>
+  <section class="skill-install" :aria-labelledby="`${skill.slug}-install-title`">
+    <header class="skill-install__heading">
+      <h2 :id="`${skill.slug}-install-title`">{{ t('skills.install.title') }}</h2>
+      <div class="skill-install__scope">
+        <span>{{ t('skills.install.scopeLabel') }}</span>
+        <SettingsChoiceMenu
+          class="skill-install__scope-menu"
+          :model-value="scope"
+          :options="scopeOptions"
+          :ariaLabel="t('skills.install.scopeLabel')"
+          @update:model-value="updateScope"
+        />
       </div>
-    </div>
+    </header>
 
-    <ol class="skill-install__steps">
-      <li>
-        <div class="skill-install__step-heading">
-          <span>1</span>
-          <div>
-            <h3>{{ t('skills.install.scopeTitle') }}</h3>
-            <p>{{ t('skills.install.scopeDescription') }}</p>
-          </div>
-        </div>
+    <div class="skill-install__card">
+      <div class="skill-install__modes" role="tablist" :aria-label="t('skills.install.methodLabel')">
+        <button
+          id="skill-install-command-tab"
+          type="button"
+          role="tab"
+          :aria-selected="mode === 'command'"
+          :aria-controls="`${skill.slug}-install-payload`"
+          :class="{ 'is-active': mode === 'command' }"
+          @click="mode = 'command'"
+        >
+          {{ t('skills.install.command') }}
+        </button>
+        <button
+          id="skill-install-codex-tab"
+          type="button"
+          role="tab"
+          :aria-selected="mode === 'codex'"
+          :aria-controls="`${skill.slug}-install-payload`"
+          :class="{ 'is-active': mode === 'codex' }"
+          @click="mode = 'codex'"
+        >
+          {{ t('skills.install.copyForCodex') }}
+        </button>
+      </div>
 
-        <div class="skill-install__scope" role="radiogroup" :aria-label="t('skills.install.scopeTitle')">
-          <button
-            type="button"
-            role="radio"
-            :aria-checked="scope === 'personal'"
-            :class="{ 'is-active': scope === 'personal' }"
-            @click="scope = 'personal'"
-          >
-            <strong>{{ t('skills.install.personal') }}</strong>
-            <span>{{ t('skills.install.personalHint') }}</span>
-          </button>
-          <button
-            type="button"
-            role="radio"
-            :aria-checked="scope === 'project'"
-            :class="{ 'is-active': scope === 'project' }"
-            @click="scope = 'project'"
-          >
-            <strong>{{ t('skills.install.project') }}</strong>
-            <span>{{ t('skills.install.projectHint') }}</span>
-          </button>
-        </div>
-
-        <code class="skill-install__path">{{ installPath }}</code>
-      </li>
-
-      <li>
-        <div class="skill-install__step-heading">
-          <span>2</span>
-          <div>
-            <h3>{{ t('skills.install.actionTitle') }}</h3>
-            <p>{{ t('skills.install.actionDescription') }}</p>
-          </div>
-        </div>
-
-        <a class="skill-install__review-link" href="#skill-risk-title">
-          <Icon name="shield" size="xs" aria-hidden="true" />
-          {{ t('skills.install.reviewFirst') }}
-        </a>
-
+      <div
+        :id="`${skill.slug}-install-payload`"
+        class="skill-install__payload"
+        role="tabpanel"
+        :aria-labelledby="mode === 'command' ? 'skill-install-command-tab' : 'skill-install-codex-tab'"
+      >
+        <code>{{ activeVersion ? activePayload : t('skills.install.versionUnavailable') }}</code>
         <button
           type="button"
-          class="skill-install__primary"
           :disabled="!activeVersion"
-          @click="copyCodexPrompt"
+          :aria-label="t(mode === 'command' ? 'skills.install.copyCommandAria' : 'skills.install.copyPromptAria')"
+          @click="copyActivePayload"
         >
-          <Icon :name="promptCopied ? 'check' : 'copy'" size="sm" aria-hidden="true" />
-          {{ t(promptCopied ? 'skills.install.promptCopied' : 'skills.install.copyForCodex') }}
+          <Icon :name="copiedMode === mode ? 'check' : 'copy'" size="sm" aria-hidden="true" />
         </button>
-        <a
-          v-if="activeVersion"
-          class="skill-install__secondary"
-          :href="downloadURL"
-          :download="`${skill.slug}-${activeVersion}.zip`"
-          @click="markDownloadStarted"
-        >
-          <Icon name="download" size="sm" aria-hidden="true" />
-          {{ t(downloadStarted ? 'skills.install.downloadStarted' : 'skills.install.downloadZip') }}
-        </a>
-        <button v-else type="button" class="skill-install__secondary skill-install__secondary--disabled" disabled>
-          <Icon name="download" size="sm" aria-hidden="true" />
-          {{ t('skills.install.versionUnavailable') }}
-        </button>
-        <p class="skill-install__disclosure">
-          <Icon name="shield" size="sm" aria-hidden="true" />
-          {{ t('skills.install.noAutoRun') }}
-        </p>
-      </li>
+      </div>
 
-      <li>
-        <div class="skill-install__step-heading">
-          <span>3</span>
-          <div>
-            <h3>{{ t('skills.install.verifyTitle') }}</h3>
-            <p>{{ t('skills.install.verifyDescription') }}</p>
-          </div>
-        </div>
-
-        <div class="skill-install__verify">
+      <p class="skill-install__hint">
+        <Icon name="infoCircle" size="xs" aria-hidden="true" />
+        <span v-if="mode === 'command'">
+          {{ t('skills.install.commandHint') }}
           <code>${{ skill.slug }}</code>
-          <span>{{ t('skills.install.verifyOr') }}</span>
+          {{ t('skills.install.verifyOr') }}
           <code>/skills</code>
-        </div>
-        <p class="skill-install__restart">{{ t('skills.install.restartHint') }}</p>
-      </li>
-    </ol>
-  </aside>
+          {{ t('skills.install.verifySuffix') }}
+        </span>
+        <span v-else>{{ t('skills.install.codexHint') }}</span>
+      </p>
+    </div>
+  </section>
 </template>
 
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import Icon from '@/components/icons/Icon.vue'
+import SettingsChoiceMenu from '@/components/settings/SettingsChoiceMenu.vue'
 import { useClipboard } from '@/composables/useClipboard'
 import { getSkillVersionDownloadURL, type PublicSkill } from '@/api/skills'
+
+type InstallMode = 'command' | 'codex'
+type InstallScope = 'global' | 'project'
 
 const props = defineProps<{
   skill: PublicSkill
@@ -122,25 +91,77 @@ const props = defineProps<{
 
 const { t } = useI18n()
 const { copyToClipboard } = useClipboard()
-const scope = ref<'personal' | 'project'>('personal')
-const promptCopied = ref(false)
-const downloadStarted = ref(false)
-let promptTimer: ReturnType<typeof setTimeout> | null = null
-let downloadTimer: ReturnType<typeof setTimeout> | null = null
+const scope = ref<InstallScope>('global')
+const mode = ref<InstallMode>('command')
+const copiedMode = ref<InstallMode | null>(null)
+let copiedTimer: ReturnType<typeof setTimeout> | null = null
 
+const scopeOptions = computed(() => [
+  { value: 'global', label: t('skills.install.globalOption') },
+  { value: 'project', label: t('skills.install.projectOption') },
+])
 const activeVersion = computed(() => props.version || props.skill.current_version?.version || '')
-const installPath = computed(() => scope.value === 'personal'
+const installPath = computed(() => scope.value === 'global'
   ? `$HOME/.agents/skills/${props.skill.slug}`
   : `<repo>/.agents/skills/${props.skill.slug}`)
-const installParent = computed(() => scope.value === 'personal'
+const installParent = computed(() => scope.value === 'global'
   ? '$HOME/.agents/skills'
   : '<repo>/.agents/skills')
 const downloadURL = computed(() => activeVersion.value
   ? getSkillVersionDownloadURL(props.skill.slug, activeVersion.value)
   : '')
 const absoluteDownloadURL = computed(() => {
-  if (typeof window === 'undefined') return downloadURL.value
+  if (!downloadURL.value || typeof window === 'undefined') return downloadURL.value
   return new URL(downloadURL.value, window.location.origin).href
+})
+
+function shellSingleQuote(value: string) {
+  return `'${value.replace(/'/g, `'"'"'`)}'`
+}
+
+const shellInstallRoot = computed(() => scope.value === 'global'
+  ? 'SKILLS_DIR="$HOME/.agents/skills"'
+  : 'REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)" && SKILLS_DIR="$REPO_ROOT/.agents/skills"')
+
+const installCommand = computed(() => {
+  if (!activeVersion.value) return ''
+  const checksum = props.sha256?.trim()
+  const steps = [
+    'set -eu',
+    `SKILL_SLUG=${shellSingleQuote(props.skill.slug)}`,
+    shellInstallRoot.value,
+    'mkdir -p "$SKILLS_DIR"',
+    'TMP_DIR="$(mktemp -d)"',
+    'STAGE_ROOT=""',
+    'TARGET_DIR=""',
+    'BACKUP_DIR=""',
+    'cleanup_install() { status=$?; trap - EXIT HUP INT TERM; if [ -n "$BACKUP_DIR" ] && { [ -e "$BACKUP_DIR" ] || [ -L "$BACKUP_DIR" ]; } && [ -n "$TARGET_DIR" ] && ! { [ -e "$TARGET_DIR" ] || [ -L "$TARGET_DIR" ]; }; then mv "$BACKUP_DIR" "$TARGET_DIR"; fi; rm -rf -- "$TMP_DIR"; if [ -n "$STAGE_ROOT" ]; then rm -rf -- "$STAGE_ROOT"; fi; exit "$status"; }',
+    'trap cleanup_install EXIT',
+    "trap 'exit 130' HUP INT TERM",
+    `curl -fsSL ${shellSingleQuote(absoluteDownloadURL.value)} -o "$TMP_DIR/skill.zip"`,
+  ]
+
+  if (checksum) {
+    steps.push(
+      `EXPECTED_SHA256=${shellSingleQuote(checksum)}`,
+      'if command -v shasum >/dev/null 2>&1; then (cd "$TMP_DIR" && printf \'%s  skill.zip\\n\' "$EXPECTED_SHA256" | shasum -a 256 -c -); elif command -v sha256sum >/dev/null 2>&1; then (cd "$TMP_DIR" && printf \'%s  skill.zip\\n\' "$EXPECTED_SHA256" | sha256sum -c -); else printf \'A SHA-256 utility is required.\\n\' >&2; false; fi',
+    )
+  }
+
+  steps.push(
+    'STAGE_ROOT="$(mktemp -d "$SKILLS_DIR/.${SKILL_SLUG}.install.XXXXXX")"',
+    'TARGET_DIR="$SKILLS_DIR/$SKILL_SLUG"',
+    'BACKUP_DIR="$STAGE_ROOT/.previous"',
+    'unzip -q "$TMP_DIR/skill.zip" -d "$STAGE_ROOT"',
+    'test -f "$STAGE_ROOT/$SKILL_SLUG/SKILL.md"',
+    'if [ -e "$TARGET_DIR" ] || [ -L "$TARGET_DIR" ]; then mv "$TARGET_DIR" "$BACKUP_DIR"; fi',
+    'mv "$STAGE_ROOT/$SKILL_SLUG" "$TARGET_DIR"',
+    'rm -rf -- "$BACKUP_DIR"',
+    'trap - EXIT HUP INT TERM',
+    'rm -rf -- "$TMP_DIR" "$STAGE_ROOT"',
+  )
+
+  return steps.join('; ')
 })
 
 const codexPrompt = computed(() => t('skills.install.codexPrompt', {
@@ -153,299 +174,236 @@ const codexPrompt = computed(() => t('skills.install.codexPrompt', {
   parent: installParent.value,
 }))
 
-async function copyCodexPrompt() {
-  if (!activeVersion.value) return
-  const copied = await copyToClipboard(codexPrompt.value, t('skills.install.copySuccess'))
+const activePayload = computed(() => mode.value === 'command'
+  ? installCommand.value
+  : codexPrompt.value)
+
+function updateScope(value: string) {
+  if (value === 'global' || value === 'project') scope.value = value
+}
+
+async function copyActivePayload() {
+  if (!activeVersion.value || !activePayload.value) return
+  const successMessage = mode.value === 'command'
+    ? t('skills.install.commandCopySuccess')
+    : t('skills.install.copySuccess')
+  const copied = await copyToClipboard(activePayload.value, successMessage)
   if (!copied) return
-  promptCopied.value = true
-  if (promptTimer) clearTimeout(promptTimer)
-  promptTimer = setTimeout(() => {
-    promptCopied.value = false
+  copiedMode.value = mode.value
+  if (copiedTimer) clearTimeout(copiedTimer)
+  copiedTimer = setTimeout(() => {
+    copiedMode.value = null
   }, 2200)
 }
 
-function markDownloadStarted() {
-  downloadStarted.value = true
-  if (downloadTimer) clearTimeout(downloadTimer)
-  downloadTimer = setTimeout(() => {
-    downloadStarted.value = false
-  }, 2600)
-}
-
 onBeforeUnmount(() => {
-  if (promptTimer) clearTimeout(promptTimer)
-  if (downloadTimer) clearTimeout(downloadTimer)
+  if (copiedTimer) clearTimeout(copiedTimer)
 })
 </script>
 
 <style scoped>
 .skill-install {
-  border-radius: 16px;
-  padding: 24px;
-  background: var(--lx-clay-surface-elevated);
-  box-shadow: var(--lx-clay-shadow-overview);
-}
-
-.skill-install__heading,
-.skill-install__step-heading {
-  display: flex;
-  align-items: flex-start;
+  min-width: 0;
 }
 
 .skill-install__heading {
-  gap: 13px;
-}
-
-.skill-install__heading > span {
-  width: 40px;
-  height: 40px;
-  display: inline-flex;
-  flex: 0 0 auto;
+  display: flex;
   align-items: center;
-  justify-content: center;
-  border-radius: 13px;
-  background: var(--lx-clay-accent-soft);
-  color: var(--lx-clay-accent-deep);
+  justify-content: space-between;
+  gap: 24px;
+  margin-bottom: 24px;
 }
 
-.skill-install h2,
-.skill-install h3,
-.skill-install p {
+.skill-install__heading h2 {
   margin: 0;
-}
-
-.skill-install h2,
-.skill-install h3 {
   color: var(--lx-clay-text);
   font-family: var(--lx-clay-font-display);
-  font-weight: 900;
-}
-
-.skill-install h2 {
-  font-size: 20px;
-  line-height: 1.2;
-}
-
-.skill-install__heading p {
-  margin-top: 4px;
-  color: var(--lx-clay-text-muted);
-  font-size: 12px;
-  line-height: 1.5;
-}
-
-.skill-install__steps {
-  display: grid;
-  gap: 0;
-  margin: 24px 0 0;
-  padding: 0;
-  list-style: none;
-}
-
-.skill-install__steps > li {
-  padding: 22px 0;
-  border-top: 1px solid var(--lx-clay-border);
-}
-
-.skill-install__steps > li:last-child {
-  padding-bottom: 0;
-}
-
-.skill-install__step-heading {
-  gap: 11px;
-}
-
-.skill-install__step-heading > span {
-  width: 26px;
-  height: 26px;
-  display: inline-flex;
-  flex: 0 0 auto;
-  align-items: center;
-  justify-content: center;
-  border-radius: 9px;
-  background: var(--lx-clay-accent);
-  color: var(--lx-clay-on-accent);
-  font-size: 12px;
-  font-weight: 900;
-}
-
-.skill-install__step-heading h3 {
-  font-size: 15px;
-}
-
-.skill-install__step-heading p {
-  margin-top: 4px;
-  color: var(--lx-clay-text-muted);
-  font-size: 12px;
-  line-height: 1.55;
+  font-size: clamp(27px, 3vw, 34px);
+  font-weight: 950;
+  letter-spacing: -0.03em;
+  line-height: 1.15;
 }
 
 .skill-install__scope {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 8px;
-  margin-top: 14px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--lx-clay-text-muted);
+  font-size: 12px;
+  font-weight: 720;
 }
 
-.skill-install__scope button {
+.skill-install__scope-menu {
+  width: 194px;
+  flex: 0 0 194px;
+}
+
+.skill-install__scope-menu :deep(.settings-choice-menu__trigger) {
+  width: 100%;
+  max-width: none;
+  height: 42px;
+  justify-content: space-between;
+  border-color: color-mix(in srgb, var(--lx-clay-border) 74%, transparent);
+  border-radius: 12px;
+  padding-inline: 13px 11px;
+  background: var(--lx-clay-recessed);
+  color: var(--lx-clay-text);
+  font-size: 12px;
+  font-weight: 790;
+}
+
+.skill-install__scope-menu :deep(.settings-choice-menu__trigger:hover),
+.skill-install__scope-menu :deep(.settings-choice-menu__trigger--open) {
+  border-color: var(--lx-clay-border-strong);
+  background: var(--lx-clay-surface-soft);
+}
+
+.skill-install__card {
   min-width: 0;
   border: 1px solid transparent;
+  border-radius: 17px;
+  padding: 26px;
+  background: var(--lx-clay-surface-elevated);
+  box-shadow: var(--lx-clay-shadow-form);
+}
+
+.skill-install__modes {
+  width: fit-content;
+  display: inline-grid;
+  grid-template-columns: 1fr 1fr;
   border-radius: 12px;
-  padding: 11px 10px;
+  padding: 4px;
   background: var(--lx-clay-recessed);
+}
+
+.skill-install__modes button {
+  min-height: 42px;
+  border: 0;
+  border-radius: 9px;
+  padding: 0 17px;
+  background: transparent;
   color: var(--lx-clay-text-secondary);
-  text-align: left;
+  font-family: var(--lx-clay-font-ui);
+  font-size: 12px;
+  font-weight: 820;
   cursor: pointer;
 }
 
-.skill-install__scope button.is-active {
-  border-color: var(--lx-clay-accent);
+.skill-install__modes button.is-active {
   background: var(--lx-clay-accent-soft);
   color: var(--lx-clay-accent-deep);
+  box-shadow: 0 1px 2px color-mix(in srgb, var(--lx-clay-accent) 12%, transparent);
 }
 
-.skill-install__scope strong,
-.skill-install__scope span {
-  display: block;
-}
-
-.skill-install__scope strong {
-  font-size: 13px;
-}
-
-.skill-install__scope span {
-  margin-top: 3px;
-  font-size: 11px;
-}
-
-.skill-install__path,
-.skill-install__verify code {
-  font-family: var(--lx-clay-font-mono);
-}
-
-.skill-install__path {
-  display: block;
-  overflow-x: auto;
-  margin-top: 10px;
-  border-radius: 10px;
-  padding: 10px 11px;
+.skill-install__payload {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 40px;
+  align-items: center;
+  gap: 8px;
+  margin-top: 24px;
+  border-radius: 12px;
+  padding: 9px 9px 9px 16px;
   background: var(--lx-clay-code-canvas);
   color: #f8f5fc;
+}
+
+.skill-install__payload > code {
+  min-width: 0;
+  overflow: auto hidden;
+  padding: 7px 0;
+  font-family: var(--lx-clay-font-mono);
   font-size: 11px;
+  line-height: 1.55;
+  scrollbar-width: none;
   white-space: nowrap;
 }
 
-.skill-install__primary,
-.skill-install__secondary {
-  min-height: 46px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-  border-radius: 13px;
-  padding: 0 14px;
-  font-size: 13px;
-  font-weight: 850;
-  text-decoration: none;
+.skill-install__payload > code::-webkit-scrollbar {
+  display: none;
 }
 
-.skill-install__review-link {
-  min-height: 36px;
+.skill-install__payload > button {
+  width: 40px;
+  height: 40px;
   display: inline-flex;
   align-items: center;
-  gap: 7px;
-  margin-top: 14px;
-  color: var(--lx-clay-accent-deep);
-  font-size: 11px;
-  font-weight: 800;
-  text-decoration: none;
-}
-
-.skill-install__review-link:hover {
-  text-decoration: underline;
-  text-underline-offset: 3px;
-}
-
-.skill-install__primary {
-  width: 100%;
-  margin-top: 7px;
+  justify-content: center;
   border: 0;
-  background: linear-gradient(145deg, var(--lx-clay-light-accent), var(--lx-clay-accent-deepest));
-  box-shadow: var(--lx-clay-shadow-primary);
+  border-radius: 9px;
+  background: rgba(255, 255, 255, 0.09);
   color: #fff;
   cursor: pointer;
 }
 
-.skill-install__primary:disabled {
+.skill-install__payload > button:disabled {
   cursor: not-allowed;
-  opacity: 0.52;
+  opacity: 0.45;
 }
 
-.skill-install__secondary {
-  width: 100%;
-  border: 0;
-  margin-top: 9px;
-  background: var(--lx-clay-recessed);
-  color: var(--lx-clay-text);
-  font-family: var(--lx-clay-font-ui);
-  cursor: pointer;
-}
-
-.skill-install__secondary--disabled {
-  cursor: not-allowed;
-  opacity: 0.52;
-}
-
-.skill-install__disclosure {
+.skill-install__hint {
   display: flex;
   align-items: flex-start;
-  gap: 7px;
-  margin-top: 12px !important;
+  gap: 8px;
+  margin: 12px 0 0;
   color: var(--lx-clay-text-muted);
   font-size: 11px;
-  line-height: 1.55;
+  line-height: 1.6;
 }
 
-.skill-install__disclosure svg {
+.skill-install__hint > svg {
   flex: 0 0 auto;
-  margin-top: 1px;
-  color: var(--lx-clay-success-text);
+  margin-top: 2px;
 }
 
-.skill-install__verify {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 7px;
-  margin-top: 14px;
-}
-
-.skill-install__verify code {
-  border-radius: 9px;
-  padding: 7px 9px;
+.skill-install__hint code {
+  border-radius: 6px;
+  padding: 1px 5px;
   background: var(--lx-clay-recessed);
   color: var(--lx-clay-accent-deep);
-  font-size: 12px;
-  font-weight: 800;
+  font-family: var(--lx-clay-font-mono);
+  font-size: 10px;
 }
 
-.skill-install__verify span,
-.skill-install__restart {
-  color: var(--lx-clay-text-muted);
-  font-size: 11px;
+.skill-install button:focus-visible {
+  outline: 2px solid var(--lx-clay-accent);
+  outline-offset: 2px;
 }
 
-.skill-install__restart {
-  margin-top: 10px !important;
-  line-height: 1.55;
-}
-
-@media (max-width: 430px) {
-  .skill-install {
-    padding: 20px;
+@media (max-width: 640px) {
+  .skill-install__heading {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 14px;
   }
 
   .skill-install__scope {
-    grid-template-columns: 1fr;
+    align-items: stretch;
+    flex-direction: column;
+    gap: 7px;
+  }
+
+  .skill-install__scope-menu {
+    width: 100%;
+    flex-basis: auto;
+  }
+
+  .skill-install__card {
+    padding: 24px;
+  }
+
+  .skill-install__modes {
+    width: 100%;
+  }
+
+  .skill-install__modes button {
+    padding-inline: 10px;
+  }
+}
+
+@media (max-width: 390px) {
+  .skill-install__card {
+    padding: 20px;
   }
 }
 </style>

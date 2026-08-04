@@ -13,6 +13,7 @@ const {
   showSuccess,
   showError,
   fetchPublicSettings,
+  stepUpRun,
 } = vi.hoisted(() => ({
   list: vi.fn(),
   getConfig: vi.fn(),
@@ -23,6 +24,7 @@ const {
   showSuccess: vi.fn(),
   showError: vi.fn(),
   fetchPublicSettings: vi.fn(),
+  stepUpRun: vi.fn(),
 }))
 
 vi.mock('@/api/admin/skills', () => ({
@@ -41,7 +43,7 @@ vi.mock('@/composables/useStepUp', () => ({
   useStepUp: () => ({
     visible: ref(false),
     blockedReason: ref(''),
-    run: (action: () => Promise<unknown>) => action(),
+    run: stepUpRun,
     onVerified: vi.fn(),
     onCancel: vi.fn(),
   }),
@@ -190,6 +192,7 @@ function mountView() {
 describe('admin SkillsView', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    stepUpRun.mockImplementation((action: () => Promise<unknown>) => action())
     list.mockResolvedValue({ items: [draft], total: 1, page: 1, page_size: 20 })
     getConfig.mockResolvedValue({ enabled: false })
     updateConfig.mockResolvedValue({ enabled: true })
@@ -222,10 +225,11 @@ describe('admin SkillsView', () => {
     await flushPromises()
 
     expect(publish).toHaveBeenCalledWith(1, 11)
+    expect(stepUpRun).toHaveBeenCalledOnce()
     expect(showSuccess).toHaveBeenCalledWith('admin.skills.publishSuccess')
   })
 
-  it('confirms and step-ups before opening the public marketplace', async () => {
+  it('confirms without step-up before opening the public marketplace', async () => {
     const wrapper = mountView()
     await flushPromises()
 
@@ -235,6 +239,7 @@ describe('admin SkillsView', () => {
     await flushPromises()
 
     expect(updateConfig).toHaveBeenCalledWith(true)
+    expect(stepUpRun).not.toHaveBeenCalled()
     expect(fetchPublicSettings).toHaveBeenCalledWith(true)
     expect(showSuccess).toHaveBeenCalledWith('admin.skills.marketplace.enabledSuccess')
   })
@@ -248,5 +253,6 @@ describe('admin SkillsView', () => {
     await flushPromises()
 
     expect(archive).toHaveBeenCalledWith(1)
+    expect(stepUpRun).toHaveBeenCalledOnce()
   })
 })
