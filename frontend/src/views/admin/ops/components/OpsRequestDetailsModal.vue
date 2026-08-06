@@ -14,6 +14,10 @@ export interface OpsRequestDetailsPreset {
   sort?: OpsRequestDetailsParams['sort']
   min_duration_ms?: number
   max_duration_ms?: number
+  request_id?: string
+  platform?: string
+  start_time?: string
+  end_time?: string
 }
 
 interface Props {
@@ -43,12 +47,27 @@ const pageSize = ref(10)
 const close = () => emit('update:modelValue', false)
 
 const rangeLabel = computed(() => {
+  if (props.preset.start_time && props.preset.end_time) {
+    const start = new Date(props.preset.start_time)
+    const end = new Date(props.preset.end_time)
+    if (Number.isFinite(start.getTime()) && Number.isFinite(end.getTime())) {
+      const minutes = Math.max(1, Math.round((end.getTime() - start.getTime()) / 60_000))
+      if (minutes >= 60) return t('admin.ops.requestDetails.rangeHours', { n: Math.round(minutes / 60) })
+      return t('admin.ops.requestDetails.rangeMinutes', { n: minutes })
+    }
+  }
   const minutes = parseTimeRangeMinutes(props.timeRange)
   if (minutes >= 60) return t('admin.ops.requestDetails.rangeHours', { n: Math.round(minutes / 60) })
   return t('admin.ops.requestDetails.rangeMinutes', { n: minutes })
 })
 
 function buildTimeParams(): Pick<OpsRequestDetailsParams, 'start_time' | 'end_time'> {
+  if (props.preset.start_time && props.preset.end_time) {
+    return {
+      start_time: props.preset.start_time,
+      end_time: props.preset.end_time
+    }
+  }
   const minutes = parseTimeRangeMinutes(props.timeRange)
   const endTime = new Date()
   const startTime = new Date(endTime.getTime() - minutes * 60 * 1000)
@@ -70,12 +89,13 @@ const fetchData = async () => {
       sort: props.preset.sort ?? 'created_at_desc'
     }
 
-    const platform = (props.platform || '').trim()
+    const platform = (props.preset.platform || props.platform || '').trim()
     if (platform) params.platform = platform
     if (typeof props.groupId === 'number' && props.groupId > 0) params.group_id = props.groupId
 
     if (typeof props.preset.min_duration_ms === 'number') params.min_duration_ms = props.preset.min_duration_ms
     if (typeof props.preset.max_duration_ms === 'number') params.max_duration_ms = props.preset.max_duration_ms
+    if (props.preset.request_id?.trim()) params.request_id = props.preset.request_id.trim()
 
     const res = await opsAPI.listRequestDetails(params)
     items.value = res.items || []

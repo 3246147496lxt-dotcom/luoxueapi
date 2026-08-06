@@ -35,6 +35,7 @@ interface Props {
   customEndTime?: string | null
   workspace?: string
   resource?: OpsResourceView
+  compact?: boolean
 }
 
 interface Emits {
@@ -899,12 +900,18 @@ type OperationalStatusTone = 'healthy' | 'warning' | 'critical' | 'idle' | 'load
 
 const operationalStatus = computed<{ tone: OperationalStatusTone; label: string }>(() => {
   if (props.loading) return { tone: 'loading', label: t('admin.ops.loadingText') }
+  if (props.workspace === 'diagnostics') {
+    return { tone: 'idle', label: t('admin.ops.ready') }
+  }
+  if (props.workspace === 'incidents') {
+    return { tone: 'warning', label: t('admin.ops.riskMode') }
+  }
   if (isSystemIdle.value) return { tone: 'idle', label: t('admin.ops.idleStatus') }
   if (diagnosisReport.value.some((item) => item.type === 'critical')) {
-    return { tone: 'critical', label: t('common.critical') }
+    return { tone: 'critical', label: t('admin.ops.riskyStatus') }
   }
   if (diagnosisReport.value.some((item) => item.type === 'warning')) {
-    return { tone: 'warning', label: t('common.warning') }
+    return { tone: 'warning', label: t('admin.ops.riskyStatus') }
   }
   return { tone: 'healthy', label: t('admin.ops.ready') }
 })
@@ -943,13 +950,14 @@ function blurDiagnosisTrigger(event: KeyboardEvent) {
     class="ops-command-center"
     :class="{
       'ops-command-center--fullscreen': props.fullscreen,
-      'ops-command-center--resources': props.workspace === 'resources'
+      'ops-command-center--resources': props.workspace === 'resources',
+      'ops-command-center--compact': props.compact
     }"
     data-testid="ops-dashboard-header"
   >
     <header class="ops-masthead">
       <div class="ops-masthead__identity">
-        <span class="ops-masthead__icon" aria-hidden="true">
+        <span v-if="!props.compact" class="ops-masthead__icon" aria-hidden="true">
           <Icon name="activity" size="lg" :stroke-width="2" />
         </span>
         <div class="ops-masthead__copy">
@@ -960,7 +968,7 @@ function blurDiagnosisTrigger(event: KeyboardEvent) {
               {{ operationalStatus.label }}
             </span>
           </div>
-          <p v-if="!props.fullscreen && props.workspace !== 'resources'">{{ t('admin.ops.description') }}</p>
+          <p v-if="!props.compact && !props.fullscreen && props.workspace !== 'resources'">{{ t('admin.ops.description') }}</p>
           <div
             v-if="!props.fullscreen"
             class="ops-status-line"
@@ -969,15 +977,55 @@ function blurDiagnosisTrigger(event: KeyboardEvent) {
             aria-live="polite"
             aria-atomic="true"
           >
-            <span>{{ t('common.refresh') }}: {{ lastUpdatedLabel }}</span>
+            <span>{{ t('common.refresh') }}: {{ props.compact ? t('common.justNow') : lastUpdatedLabel }}</span>
             <span
-              v-if="props.autoRefreshEnabled && props.autoRefreshCountdown !== undefined"
+              v-if="props.compact || (props.autoRefreshEnabled && props.autoRefreshCountdown !== undefined)"
               class="ops-status-line__countdown"
+              aria-hidden="true"
             >
-              {{ t('admin.ops.autoRefreshRemaining', { seconds: props.autoRefreshCountdown }) }}
+              {{
+                props.compact
+                  ? `${t('admin.ops.autoRefreshLabel')}: ${props.autoRefreshEnabled ? `${props.autoRefreshCountdown ?? 0}s` : t('common.disabled')}`
+                  : t('admin.ops.autoRefreshRemaining', { seconds: props.autoRefreshCountdown })
+              }}
             </span>
           </div>
         </div>
+      </div>
+
+      <div v-if="props.compact && !props.fullscreen" class="ops-masthead__compact-actions">
+        <button
+          type="button"
+          class="ops-command-button ops-command-button--primary"
+          :disabled="loading"
+          :title="t('common.refresh')"
+          :aria-label="t('common.refresh')"
+          @click="handleToolbarRefresh"
+        >
+          <Icon name="refresh" size="sm" :class="{ 'ops-spin': loading }" aria-hidden="true" />
+          <span>{{ t('common.refresh') }}</span>
+        </button>
+
+        <button
+          type="button"
+          class="ops-command-button ops-command-button--settings"
+          :title="t('admin.ops.settings.title')"
+          :aria-label="t('admin.ops.settings.title')"
+          @click="emit('openSettings')"
+        >
+          <Icon name="cog" size="sm" aria-hidden="true" />
+          <span>{{ t('admin.ops.settings.shortTitle') }}</span>
+        </button>
+
+        <button
+          type="button"
+          class="ops-icon-button"
+          :title="t('admin.ops.fullscreen.enter')"
+          :aria-label="t('admin.ops.fullscreen.enter')"
+          @click="emit('enterFullscreen')"
+        >
+          <Icon name="maximize" size="sm" aria-hidden="true" />
+        </button>
       </div>
 
       <button
@@ -994,7 +1042,7 @@ function blurDiagnosisTrigger(event: KeyboardEvent) {
       </button>
     </header>
 
-    <div v-if="!props.fullscreen" class="ops-command-bar" data-testid="ops-command-bar">
+    <div v-if="!props.compact && !props.fullscreen" class="ops-command-bar" data-testid="ops-command-bar">
       <div class="ops-command-bar__label">
         <Icon name="filter" size="sm" aria-hidden="true" />
         <span>{{ t('common.filter') }}</span>
@@ -1082,7 +1130,7 @@ function blurDiagnosisTrigger(event: KeyboardEvent) {
     </div>
 
     <section
-      v-if="overview"
+      v-if="overview && !props.compact"
       class="ops-signal-strip"
       :aria-label="t('admin.ops.overview')"
       data-testid="ops-signal-strip"
@@ -1158,7 +1206,7 @@ function blurDiagnosisTrigger(event: KeyboardEvent) {
     </section>
 
     <button
-      v-if="overview"
+      v-if="overview && !props.compact"
       type="button"
       class="ops-diagnostic-toggle"
       :aria-expanded="showDiagnosticDetails"
@@ -1181,7 +1229,7 @@ function blurDiagnosisTrigger(event: KeyboardEvent) {
     </button>
 
     <div
-      v-show="showDiagnosticDetails"
+      v-if="!props.compact && showDiagnosticDetails"
       id="ops-diagnostic-details"
       class="ops-diagnostic-details"
       data-testid="ops-diagnostic-details"
@@ -1841,6 +1889,61 @@ function blurDiagnosisTrigger(event: KeyboardEvent) {
   min-height: min(calc(100vh - 3rem), 900px);
 }
 
+.ops-command-center--compact {
+  border-width: 0 0 1px;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+.ops-command-center--compact .ops-masthead {
+  min-height: 58px;
+  align-items: center;
+  padding: 7px 20px;
+  border-bottom: 0;
+}
+
+.ops-command-center--compact .ops-masthead__identity {
+  align-items: center;
+  gap: 10px;
+}
+
+.ops-command-center--compact .ops-masthead__icon {
+  width: 34px;
+  height: 34px;
+  border: 0;
+  border-radius: 8px;
+}
+
+.ops-command-center--compact .ops-masthead h1 {
+  font-size: 1rem;
+}
+
+.ops-command-center--compact .ops-status-badge {
+  min-height: 24px;
+  padding: 4px 8px;
+}
+
+.ops-masthead__compact-actions {
+  display: flex;
+  min-width: 0;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 8px;
+}
+
+.ops-command-center--compact .ops-command-button,
+.ops-command-center--compact .ops-icon-button {
+  min-height: 36px;
+}
+
+.ops-command-center--compact .ops-command-button {
+  padding: 7px 12px;
+}
+
+.ops-command-center--compact .ops-icon-button {
+  width: 36px;
+}
+
 .ops-command-center--resources .ops-masthead {
   align-items: center;
   padding: 0.75rem 1rem;
@@ -1993,6 +2096,11 @@ function blurDiagnosisTrigger(event: KeyboardEvent) {
   font-size: 0.6875rem;
   line-height: 1.45;
   overflow-wrap: anywhere;
+}
+
+.ops-command-center--compact .ops-status-line {
+  margin-top: 2px;
+  font-size: 0.625rem;
 }
 
 .ops-status-line__countdown {
@@ -2632,6 +2740,16 @@ function blurDiagnosisTrigger(event: KeyboardEvent) {
     padding: 1rem;
   }
 
+  .ops-command-center--compact .ops-masthead {
+    align-items: flex-start;
+    flex-wrap: wrap;
+    padding: 10px 12px;
+  }
+
+  .ops-masthead__compact-actions {
+    margin-left: auto;
+  }
+
   .ops-command-bar {
     align-items: stretch;
     padding: 0.75rem 1rem;
@@ -2699,6 +2817,25 @@ function blurDiagnosisTrigger(event: KeyboardEvent) {
     align-items: flex-start;
     flex-direction: column;
     gap: 0.125rem;
+  }
+
+  .ops-command-center--compact .ops-status-line {
+    display: none;
+  }
+
+  .ops-command-center--compact .ops-command-button span {
+    display: none;
+  }
+
+  .ops-command-center--compact .ops-command-button {
+    width: 44px;
+    min-height: 44px;
+    padding: 0;
+  }
+
+  .ops-command-center--compact .ops-icon-button {
+    width: 44px;
+    min-height: 44px;
   }
 
   .ops-status-line__countdown {
@@ -2808,6 +2945,149 @@ function blurDiagnosisTrigger(event: KeyboardEvent) {
 @keyframes ops-spin {
   to {
     transform: rotate(360deg);
+  }
+}
+
+/* Superdesign Option B compact operator header. */
+.ops-command-center--compact {
+  height: 56px;
+  min-height: 56px;
+  overflow: visible;
+  border: 0;
+  border-bottom: 1px solid rgba(91, 80, 112, 0.14);
+  border-radius: 0;
+  background: #ffffff;
+  box-shadow: none;
+}
+
+.ops-command-center--compact .ops-masthead {
+  height: 56px;
+  min-height: 56px;
+  padding: 0 24px;
+  border: 0;
+}
+
+.ops-command-center--compact .ops-masthead__identity {
+  min-width: 0;
+  align-items: center;
+  gap: 0;
+}
+
+.ops-command-center--compact .ops-masthead__copy {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 18px;
+}
+
+.ops-command-center--compact .ops-masthead__title-row {
+  flex-wrap: nowrap;
+  gap: 16px;
+}
+
+.ops-command-center--compact .ops-masthead h1 {
+  color: #332f3a;
+  font-family: var(--lx-clay-font-display);
+  font-size: 18px;
+  font-weight: 850;
+  line-height: 24px;
+  letter-spacing: -0.02em;
+}
+
+.ops-command-center--compact .ops-status-badge {
+  min-height: 24px;
+  padding: 4px 10px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.ops-command-center--compact .ops-status-badge i {
+  width: 6px;
+  height: 6px;
+}
+
+.ops-command-center--compact .ops-status-badge--warning,
+.ops-command-center--compact .ops-status-badge--critical {
+  border-color: rgb(180 83 9 / 10%);
+  color: #b45309;
+  background: rgb(245 158 11 / 8%);
+}
+
+.ops-command-center--compact .ops-status-line {
+  flex-wrap: nowrap;
+  gap: 14px;
+  margin: 0;
+  color: #756e80;
+  font-size: 11px;
+  line-height: 16px;
+  white-space: nowrap;
+}
+
+.ops-command-center--compact .ops-status-line__countdown {
+  padding-inline-start: 12px;
+  opacity: 0.62;
+}
+
+.ops-command-center--compact .ops-status-line__countdown::before {
+  display: block;
+  width: 4px;
+  height: 4px;
+  background: currentColor;
+}
+
+.ops-command-center--compact .ops-masthead__compact-actions {
+  gap: 8px;
+}
+
+.ops-command-center--compact .ops-command-button,
+.ops-command-center--compact .ops-icon-button {
+  min-height: 36px;
+  border: 1px solid rgba(91, 80, 112, 0.14);
+  border-radius: 10px;
+  color: #635f69;
+  background: #ffffff;
+  box-shadow: none;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.ops-command-center--compact .ops-command-button {
+  padding: 0 12px;
+}
+
+.ops-command-center--compact .ops-icon-button {
+  width: 36px;
+}
+
+.ops-command-center--compact .ops-command-button:hover:not(:disabled),
+.ops-command-center--compact .ops-icon-button:hover:not(:disabled) {
+  border-color: rgba(91, 80, 112, 0.23);
+  color: #332f3a;
+  background: #f9fafb;
+}
+
+@media (max-width: 760px) {
+  .ops-command-center--compact {
+    height: auto;
+  }
+
+  .ops-command-center--compact .ops-masthead {
+    height: auto;
+    min-height: 56px;
+    flex-wrap: wrap;
+    padding: 10px 16px;
+  }
+
+  .ops-command-center--compact .ops-masthead__copy {
+    flex-wrap: wrap;
+    gap: 4px 12px;
+  }
+
+  .ops-command-center--compact .ops-masthead__compact-actions {
+    width: 100%;
+    justify-content: flex-end;
   }
 }
 </style>

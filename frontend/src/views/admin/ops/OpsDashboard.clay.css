@@ -18,8 +18,9 @@
   container: ops-dashboard / inline-size;
   display: grid;
   min-width: 0;
-  gap: 22px;
-  padding-bottom: 48px;
+  min-height: calc(100dvh - var(--app-shell-top-offset));
+  gap: 0;
+  padding-bottom: 0;
   color: var(--ops-text);
   font-family: var(--lx-clay-font-ui);
 }
@@ -62,19 +63,20 @@ html:not(.dark) body.admin-ops-fullscreen {
 }
 
 .ops-dashboard-body {
-  gap: 26px;
+  gap: 0;
 }
 
 .ops-workspace-nav-host {
   position: sticky;
-  top: calc(var(--app-shell-top-offset) + 8px);
+  top: var(--app-shell-top-offset);
   z-index: 20;
+  width: 100%;
   max-width: 100%;
   align-self: start;
-  justify-self: start;
-  padding: 4px;
-  margin: -4px;
-  border-radius: var(--lx-clay-radius-control);
+  justify-self: stretch;
+  padding: 0 20px;
+  margin: 0;
+  border-radius: 0;
   background: var(--app-shell-canvas, var(--lx-clay-canvas));
 }
 
@@ -83,8 +85,8 @@ html:not(.dark) body.admin-ops-fullscreen {
 }
 
 .ops-workspace-view {
-  gap: 26px;
-  scroll-margin-top: calc(var(--app-shell-top-offset) + 75px);
+  gap: 0;
+  scroll-margin-top: calc(var(--app-shell-top-offset) + 50px);
 }
 
 .ops-dashboard-shell--fullscreen .ops-workspace-view {
@@ -106,6 +108,22 @@ html:not(.dark) body.admin-ops-fullscreen {
   gap: 12px;
 }
 
+.ops-workspace-section--flush {
+  gap: 0;
+}
+
+.ops-evidence-canvas,
+.ops-incident-evidence {
+  display: grid;
+  min-width: 0;
+  gap: 16px;
+}
+
+.ops-section-heading--evidence {
+  align-items: center;
+  padding: 0;
+}
+
 .ops-section-heading {
   display: flex;
   min-width: 0;
@@ -119,7 +137,8 @@ html:not(.dark) body.admin-ops-fullscreen {
   min-width: 0;
 }
 
-.ops-section-heading h2 {
+.ops-section-heading h2,
+.ops-section-heading h3 {
   margin: 0;
   color: var(--ops-text);
   font-family: var(--lx-clay-font-display);
@@ -204,10 +223,10 @@ html:not(.dark) body.admin-ops-fullscreen {
 }
 
 .ops-quality-grid {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: minmax(0, 2fr) minmax(260px, 1fr);
   grid-template-areas:
-    "error error"
-    "switch distribution";
+    "error distribution"
+    "error switch";
 }
 
 .ops-performance-grid {
@@ -241,6 +260,15 @@ html:not(.dark) body.admin-ops-fullscreen {
 .ops-panel--latency,
 .ops-panel--error-distribution {
   min-height: 310px;
+}
+
+.ops-incident-evidence .ops-panel--error-trend {
+  min-height: 430px;
+}
+
+.ops-incident-evidence .ops-panel--switch-rate,
+.ops-incident-evidence .ops-panel--error-distribution {
+  min-height: 207px;
 }
 
 .ops-performance-grid .ops-model-panel {
@@ -292,23 +320,28 @@ html:not(.dark) body.admin-ops-fullscreen {
   outline-offset: 2px;
 }
 
-@container ops-dashboard (min-width: 1080px) {
-  .ops-quality-grid {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-    grid-template-areas:
-      "error error switch"
-      "distribution distribution distribution";
-  }
-}
-
 @container ops-dashboard (max-width: 840px) {
   .ops-live-grid {
     grid-template-columns: minmax(0, 1fr);
   }
 
+  .ops-quality-grid {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas:
+      "error"
+      "distribution"
+      "switch";
+  }
+
   .ops-panel--throughput,
   .ops-panel--concurrency {
     height: 360px;
+  }
+
+  .ops-incident-evidence .ops-panel--error-trend,
+  .ops-incident-evidence .ops-panel--switch-rate,
+  .ops-incident-evidence .ops-panel--error-distribution {
+    min-height: 310px;
   }
 }
 
@@ -318,7 +351,11 @@ html:not(.dark) body.admin-ops-fullscreen {
   }
 
   .ops-dashboard-body {
-    gap: 22px;
+    gap: 0;
+  }
+
+  .ops-workspace-nav-host {
+    padding-inline: 12px;
   }
 
   .ops-section-heading {
@@ -354,5 +391,465 @@ html:not(.dark) body.admin-ops-fullscreen {
     transition-duration: 0.01ms !important;
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
+  }
+}
+
+/* --------------------------------------------------------------------------
+ * Superdesign Option B — Investigative Workbench Fidelity Polish (v3)
+ * Route-scoped so the rest of the product keeps its shared Snow Clay shell.
+ * -------------------------------------------------------------------------- */
+
+body.admin-ops-option-b {
+  --lx-clay-canvas: #ffffff;
+  --lx-clay-surface: #ffffff;
+  --lx-clay-surface-soft: rgb(255 255 255 / 66%);
+  --lx-clay-recessed: #f4f1fa;
+  --lx-clay-recessed-strong: #efebf5;
+  --lx-clay-text: #332f3a;
+  --lx-clay-text-secondary: #635f69;
+  --lx-clay-text-muted: #756e80;
+  --lx-clay-text-subtle: #94a3b8;
+  --lx-clay-border: rgb(91 80 112 / 14%);
+  --lx-clay-border-strong: rgb(91 80 112 / 23%);
+  --lx-clay-accent: #7c3aed;
+  --lx-clay-accent-deep: #5b21b6;
+  --lx-clay-accent-soft: rgb(124 58 237 / 10%);
+  --lx-clay-success: #047857;
+  --lx-clay-success-text: #047857;
+  --lx-clay-success-bright: #10b981;
+  --lx-clay-success-soft: rgb(16 185 129 / 11%);
+  --lx-clay-warning: #b45309;
+  --lx-clay-warning-bright: #f59e0b;
+  --lx-clay-warning-soft: rgb(245 158 11 / 12%);
+  --lx-clay-danger: #c2415b;
+  --lx-clay-danger-soft: rgb(220 76 100 / 11%);
+  --lx-clay-radius-ops: 12px;
+  --lx-clay-radius-control: 10px;
+  --lx-clay-radius-surface: 14px;
+  --lx-clay-shadow-flat: 0 1px 2px rgb(15 23 42 / 4%);
+  margin: 0;
+  overflow: hidden;
+  color: #332f3a;
+  background: #ffffff;
+  font-family: var(--lx-clay-font-ui);
+}
+
+body.admin-ops-option-b #app-sidebar {
+  border-right: 1px solid #e5e7eb !important;
+  background: #fcfcfc !important;
+  box-shadow: none !important;
+  backdrop-filter: none !important;
+}
+
+body.admin-ops-option-b #app-sidebar::before,
+body.admin-ops-option-b #app-sidebar::after {
+  display: none !important;
+}
+
+body.admin-ops-option-b #app-sidebar .sidebar-header {
+  display: none !important;
+}
+
+body.admin-ops-option-b #app-sidebar .sidebar-nav {
+  padding: 12px 8px 8px;
+}
+
+body.admin-ops-option-b #app-sidebar .sidebar-workspace-switch {
+  min-height: 38px;
+  gap: 3px;
+  margin: 0 0 12px;
+  padding: 3px;
+  border-radius: 10px;
+  background: rgb(15 23 42 / 6%);
+}
+
+body.admin-ops-option-b #app-sidebar .sidebar-workspace-option {
+  min-height: 32px;
+  border-radius: 7px;
+  color: #635f69;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+body.admin-ops-option-b #app-sidebar .sidebar-workspace-option-active {
+  color: #332f3a;
+  background: #ffffff;
+  box-shadow: 0 1px 3px rgb(15 23 42 / 12%);
+  font-weight: 700;
+}
+
+body.admin-ops-option-b #app-sidebar .sidebar-section-title {
+  min-height: 28px;
+  padding: 4px 12px;
+  color: #5f6b7a;
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 20px;
+}
+
+body.admin-ops-option-b #app-sidebar [data-testid="sidebar-admin-business-section"] .sidebar-section-title,
+body.admin-ops-option-b #app-sidebar [data-testid="sidebar-admin-operations-section"] .sidebar-section-title,
+body.admin-ops-option-b #app-sidebar [data-testid="sidebar-admin-system-section"] .sidebar-section-title {
+  min-height: 36px;
+  padding-block: 8px;
+}
+
+body.admin-ops-option-b #app-sidebar .sidebar-link,
+body.admin-ops-option-b #app-sidebar .announcement-bell-row {
+  min-height: 40px;
+  gap: 12px;
+  margin-bottom: 0;
+  padding: 8px 12px;
+  border-radius: 10px;
+  color: #332f3a;
+  font-size: 14px;
+  font-weight: 400;
+  line-height: 20px;
+}
+
+body.admin-ops-option-b #app-sidebar .sidebar-link > svg,
+body.admin-ops-option-b #app-sidebar .sidebar-link > .sidebar-svg-icon {
+  color: #635f69;
+}
+
+body.admin-ops-option-b #app-sidebar .sidebar-link-active,
+body.admin-ops-option-b #app-sidebar .sidebar-link-active:hover {
+  color: #332f3a;
+  background: rgb(0 0 0 / 5%);
+}
+
+body.admin-ops-option-b #app-sidebar .sidebar-link-active > svg,
+body.admin-ops-option-b #app-sidebar .sidebar-link-active > .sidebar-svg-icon {
+  color: #332f3a;
+}
+
+body.admin-ops-option-b #app-sidebar .sidebar-support-section {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid rgb(91 80 112 / 10%);
+}
+
+body.admin-ops-option-b #app-sidebar .sidebar-account-dock {
+  padding: 8px;
+  border-top: 1px solid #e5e7eb;
+  background: #fcfcfc;
+}
+
+body.admin-ops-option-b #app-sidebar .sidebar-account-row {
+  min-height: 48px;
+  padding-right: 0;
+  border-radius: 10px;
+}
+
+body.admin-ops-option-b #app-sidebar .sidebar-account-trigger {
+  min-height: 48px;
+  grid-template-columns: 32px minmax(0, 1fr) auto;
+  padding: 6px 8px;
+}
+
+body.admin-ops-option-b #app-sidebar .sidebar-account-trigger__avatar {
+  color: #7c3aed;
+  background: #f1eafe;
+}
+
+body.admin-ops-option-b #app-sidebar .sidebar-account-trigger__name {
+  color: #332f3a;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+body.admin-ops-option-b #app-sidebar .sidebar-account-trigger__meta {
+  color: #756e80;
+  font-size: 11px;
+}
+
+body.admin-ops-option-b #app-sidebar .sidebar-account-cta {
+  display: none;
+}
+
+[data-admin-page-kind="ops"].ops-dashboard-shell {
+  display: flex;
+  width: 100%;
+  height: 100dvh;
+  min-height: 0;
+  flex-direction: column;
+  overflow: hidden;
+  color: #332f3a;
+  background: #ffffff;
+  font-family: var(--lx-clay-font-ui);
+}
+
+.ops-dashboard-shell > .ops-command-center {
+  flex: 0 0 56px;
+}
+
+.ops-dashboard-body {
+  display: flex;
+  min-height: 0;
+  flex: 1 1 auto;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.ops-workspace-nav-host {
+  position: static;
+  z-index: 10;
+  width: 100%;
+  height: 48px;
+  flex: 0 0 48px;
+  padding: 0 24px;
+  border-bottom: 1px solid rgb(91 80 112 / 14%);
+  background: #ffffff;
+}
+
+.ops-workspace-nav-host .ops-workspace-nav {
+  height: 48px;
+  border-bottom: 0;
+}
+
+.ops-workspace-view {
+  display: block;
+  min-height: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+  scroll-margin-top: 0;
+}
+
+.ops-workspace-section,
+.ops-workspace-section--flush,
+.ops-support-stack {
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  gap: 0;
+}
+
+.ops-evidence-canvas {
+  width: 100%;
+  max-width: 72rem;
+  margin: 0 auto;
+  gap: 24px;
+}
+
+.ops-section-heading--evidence {
+  min-height: 52px;
+  align-items: flex-end;
+  padding: 0;
+}
+
+.ops-section-heading h2,
+.ops-section-heading h3 {
+  color: #332f3a;
+  font-family: var(--lx-clay-font-display);
+  font-size: 24px;
+  font-weight: 900;
+  line-height: 32px;
+  letter-spacing: -0.03em;
+}
+
+.ops-section-heading p {
+  margin-top: 4px;
+  color: #635f69;
+  font-size: 14px;
+  line-height: 20px;
+}
+
+.ops-section-signal {
+  min-height: 32px;
+  padding: 0 12px;
+  border: 1px solid rgb(16 185 129 / 18%);
+  border-radius: 999px;
+  color: #047857;
+  background: rgb(16 185 129 / 11%);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.ops-live-grid {
+  display: block;
+}
+
+.ops-performance-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 24px;
+}
+
+.ops-panel--throughput {
+  height: auto;
+  min-height: 0;
+}
+
+.ops-panel--latency,
+.ops-performance-grid .ops-model-panel {
+  height: 302px;
+  min-height: 302px;
+}
+
+.ops-panel > *,
+.ops-model-panel > * {
+  border: 1px solid rgb(91 80 112 / 14%);
+  border-radius: 14px;
+  color: #332f3a;
+  background: #ffffff;
+  box-shadow: 0 1px 2px rgb(15 23 42 / 4%);
+}
+
+.ops-dashboard-shell .ops-chart-panel {
+  padding: 24px;
+}
+
+.ops-dashboard-shell .ops-panel--throughput > .ops-throughput-view {
+  height: auto;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.ops-dashboard-shell .ops-panel--throughput .ops-throughput-view__header {
+  min-height: 52px;
+  margin-bottom: 0;
+}
+
+.ops-dashboard-shell .ops-chart-header {
+  min-height: 36px;
+  margin-bottom: 24px;
+}
+
+.ops-dashboard-shell .ops-chart-icon {
+  width: 36px;
+  height: 36px;
+  border-radius: 8px;
+}
+
+.ops-dashboard-shell .ops-chart-icon svg {
+  width: 20px;
+  height: 20px;
+}
+
+.ops-dashboard-shell .ops-chart-title {
+  color: #332f3a;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.ops-dashboard-shell .ops-chart-help {
+  width: 32px;
+  height: 32px;
+}
+
+.ops-dashboard-shell .ops-chart-action,
+.ops-dashboard-shell .ops-chart-filter {
+  min-height: 32px;
+  padding: 0 12px;
+  border-radius: 8px;
+  color: #635f69;
+  background: #ffffff;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.ops-dashboard-shell .ops-panel--throughput .ops-chart-plot:has(.ops-chart-state) {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.ops-dashboard-shell .ops-chart-action:disabled {
+  cursor: not-allowed;
+  opacity: 1;
+}
+
+.ops-dashboard-shell .ops-panel--throughput .empty-state.ops-chart-empty > div:first-child {
+  width: 60px;
+  height: 60px;
+  margin-bottom: 16px;
+  color: #f3f4f6;
+  background: transparent !important;
+}
+
+.ops-dashboard-shell .ops-panel--throughput .empty-state.ops-chart-empty svg {
+  width: 60px;
+  height: 60px;
+  color: currentColor;
+}
+
+.ops-dashboard-shell .ops-panel--throughput .empty-state.ops-chart-empty .empty-state-title {
+  color: #d1d5db !important;
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 20px;
+}
+
+.ops-dashboard-shell .ops-panel--throughput :is(.ops-chart-action, .ops-chart-filter) {
+  min-height: 30px;
+  padding: 6px 12px;
+  border: 0;
+  color: #6b7280;
+  background: #f9fafb;
+  line-height: 16px;
+}
+
+.ops-dashboard-shell .ops-panel--throughput .ops-chart-action--primary {
+  color: #7c3aed;
+  background: #f5f3ff;
+}
+
+.ops-dashboard-shell .empty-state-description:empty {
+  display: none;
+}
+
+.ops-dashboard-shell .empty-state-title,
+.ops-dashboard-shell .empty-state-description {
+  color: #756e80;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.ops-concurrency-dialog-body {
+  height: min(560px, 68dvh);
+}
+
+.ops-concurrency-dialog-body > * {
+  height: 100%;
+}
+
+@media (max-width: 1180px) {
+  .ops-evidence-canvas {
+    max-width: none;
+  }
+}
+
+@media (max-width: 860px) {
+  body.admin-ops-option-b {
+    overflow: auto;
+  }
+
+  [data-admin-page-kind="ops"].ops-dashboard-shell {
+    height: auto;
+    min-height: 100dvh;
+    overflow: visible;
+  }
+
+  .ops-dashboard-body,
+  .ops-workspace-view,
+  .ops-workspace-section,
+  .ops-support-stack {
+    height: auto;
+    overflow: visible;
+  }
+
+  .ops-performance-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .ops-panel--throughput,
+  .ops-panel--latency,
+  .ops-performance-grid .ops-model-panel {
+    height: auto;
+    min-height: 320px;
   }
 }

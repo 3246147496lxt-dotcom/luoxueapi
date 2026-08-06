@@ -13,6 +13,7 @@ export default {
     edit: 'Edit',
     create: 'Create',
     update: 'Update',
+    apply: 'Apply',
     confirm: 'Confirm',
     reset: 'Reset',
     search: 'Search',

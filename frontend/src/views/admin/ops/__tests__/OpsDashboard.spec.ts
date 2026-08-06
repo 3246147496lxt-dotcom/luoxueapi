@@ -110,8 +110,9 @@ const AppLayoutStub = defineComponent({
   name: 'AppLayout',
   props: {
     variant: { type: String, default: 'default' },
+    contentMode: { type: String, default: 'contained' },
   },
-  template: '<div data-testid="app-layout" :data-variant="variant"><slot /></div>',
+  template: '<div data-testid="app-layout" :data-variant="variant" :data-content-mode="contentMode"><slot /></div>',
 })
 
 const OpsDashboardSkeletonStub = defineComponent({
@@ -132,6 +133,7 @@ const OpsDashboardHeaderStub = defineComponent({
     resource: { type: String, default: '' },
     loading: Boolean,
     fullscreen: Boolean,
+    compact: Boolean,
   },
   emits: [
     'update:timeRange',
@@ -157,6 +159,7 @@ const OpsDashboardHeaderStub = defineComponent({
       :data-has-overview="String(overview != null)"
       :data-loading="String(loading)"
       :data-fullscreen="String(fullscreen)"
+      :data-compact="String(compact)"
     >
       <button data-testid="refresh" type="button" :disabled="loading" @click="$emit('refresh')">refresh</button>
       <button data-testid="platform" type="button" @click="$emit('update:platform', 'openai')">platform</button>
@@ -169,9 +172,24 @@ const OpsDashboardHeaderStub = defineComponent({
 
 const OpsThroughputTrendChartStub = defineComponent({
   name: 'OpsThroughputTrendChart',
+  props: {
+    overview: { type: Object, default: null },
+    points: { type: Array, default: () => [] },
+    loading: Boolean,
+    timeRange: { type: String, default: '' },
+    fullscreen: Boolean,
+  },
   emits: ['selectPlatform', 'selectGroup', 'openDetails'],
   template: `
-    <section data-testid="throughput-trend">
+    <section
+      data-testid="throughput-trend"
+      :data-has-overview="String(overview != null)"
+      :data-average-qps="overview?.qps?.avg ?? ''"
+      :data-point-count="String(points.length)"
+      :data-loading="String(loading)"
+      :data-time-range="timeRange"
+      :data-fullscreen="String(fullscreen)"
+    >
       <button data-testid="select-group" type="button" @click="$emit('selectGroup', 42)">group</button>
       <button data-testid="open-request-details" type="button" @click="$emit('openDetails')">details</button>
     </section>
@@ -181,6 +199,62 @@ const OpsThroughputTrendChartStub = defineComponent({
 const componentStub = (name: string, testId: string) => defineComponent({
   name,
   template: `<section data-testid="${testId}" />`,
+})
+
+const OpsWorkbenchShellStub = defineComponent({
+  name: 'OpsWorkbenchShell',
+  template: '<section data-testid="ops-workbench-shell"><aside><slot name="rail" /></aside><div><slot name="evidence" /></div></section>',
+})
+
+const OpsTrafficInvestigationRailStub = defineComponent({
+  name: 'OpsTrafficInvestigationRail',
+  emits: ['selectSignal'],
+  template: '<button data-testid="traffic-investigation-rail" type="button" @click="$emit(\'selectSignal\', \'throughput\')">rail</button>',
+})
+
+const OpsAlertEventsCardStub = defineComponent({
+  name: 'OpsAlertEventsCard',
+  props: {
+    enabled: { type: Boolean, default: true },
+    platformFilter: { type: String, default: '' },
+    groupIdFilter: { type: Number, default: null },
+  },
+  emits: ['viewRelatedLogs', 'update:platform', 'update:group'],
+  template: `
+    <section data-testid="alert-events" :data-enabled="String(enabled)">
+      <p v-if="!enabled" role="status">admin.ops.workspace.alertsDisabled</p>
+      <button
+        data-testid="alert-view-related-logs"
+        type="button"
+        @click="$emit('viewRelatedLogs', {
+          alertId: 17,
+          firedAt: '2026-07-21T03:00:00.000Z',
+          platform: 'openai',
+          groupId: 42,
+          title: 'Latency alert'
+        })"
+      >logs</button>
+      <slot name="evidence" />
+    </section>
+  `,
+})
+
+const OpsSystemLogTableStub = defineComponent({
+  name: 'OpsSystemLogTable',
+  props: {
+    platformFilter: { type: String, default: '' },
+    refreshToken: { type: Number, default: 0 },
+    investigationPreset: { type: Object, default: null },
+  },
+  template: `
+    <section
+      data-testid="system-log"
+      :data-alert-id="investigationPreset?.alertId ?? ''"
+      :data-platform="investigationPreset?.platform ?? ''"
+      :data-start-time="investigationPreset?.startTime ?? ''"
+      :data-end-time="investigationPreset?.endTime ?? ''"
+    />
+  `,
 })
 
 const OpsErrorDistributionChartStub = defineComponent({
@@ -228,8 +302,10 @@ const globalStubs = {
   OpsErrorDistributionChart: OpsErrorDistributionChartStub,
   OpsErrorTrendChart: OpsErrorTrendChartStub,
   OpsOpenAITokenStatsCard: componentStub('OpsOpenAITokenStatsCard', 'openai-token-stats'),
-  OpsAlertEventsCard: componentStub('OpsAlertEventsCard', 'alert-events'),
-  OpsSystemLogTable: componentStub('OpsSystemLogTable', 'system-log'),
+  OpsAlertEventsCard: OpsAlertEventsCardStub,
+  OpsSystemLogTable: OpsSystemLogTableStub,
+  OpsWorkbenchShell: OpsWorkbenchShellStub,
+  OpsTrafficInvestigationRail: OpsTrafficInvestigationRailStub,
   OpsSettingsDialog: componentStub('OpsSettingsDialog', 'settings-dialog'),
   OpsAlertRulesCard: componentStub('OpsAlertRulesCard', 'alert-rules'),
   OpsErrorDetailsModal: OpsErrorDetailsModalStub,
@@ -247,6 +323,9 @@ const overview = {
   upstream_error_count_excl_429_529: 0,
   upstream_429_count: 0,
   upstream_529_count: 0,
+  token_consumed: 1_200_000,
+  qps: { current: 0.42, peak: 1.84, avg: 0.31 },
+  tps: { current: 19_900, peak: 22_400, avg: 18_200 },
 }
 
 const trend = {
@@ -335,6 +414,7 @@ describe('OpsDashboard integration shell', () => {
     expect(page.exists()).toBe(true)
     expect(page.attributes('aria-busy')).toBe('false')
     expect(wrapper.get('[data-testid="app-layout"]').attributes('data-variant')).toBe('home-clay')
+    expect(wrapper.get('[data-testid="app-layout"]').attributes('data-content-mode')).toBe('workbench')
     expect(wrapper.find('[data-testid="ops-dashboard-loading"]').exists()).toBe(false)
 
     expect(wrapper.get('[data-testid="ops-dashboard-body"]').classes()).toContain('ops-dashboard-body')
@@ -357,8 +437,17 @@ describe('OpsDashboard integration shell', () => {
     expect(wrapper.get('#ops-workspace-tab-traffic').attributes('aria-selected')).toBe('true')
     expect(wrapper.get('[data-testid="ops-workspace-panel-traffic"]').attributes('style')).toBeUndefined()
     expect(wrapper.find('[data-testid="ops-header"]').exists()).toBe(true)
+    expect(wrapper.get('[data-testid="ops-header"]').attributes('data-compact')).toBe('true')
     expect(wrapper.find('[data-testid="concurrency-card"]').exists()).toBe(true)
     expect(wrapper.find('[data-testid="throughput-trend"]').exists()).toBe(true)
+    expect(wrapper.get('[data-testid="throughput-trend"]').attributes()).toMatchObject({
+      'data-has-overview': 'true',
+      'data-average-qps': '0.31',
+      'data-point-count': '0',
+      'data-loading': 'false',
+      'data-time-range': '1h',
+      'data-fullscreen': 'false',
+    })
     expect(wrapper.find('[data-testid="latency-chart"]').exists()).toBe(true)
     expect(wrapper.find('[data-testid="alert-events"]').exists()).toBe(false)
     expect(wrapper.find('[data-testid="system-log"]').exists()).toBe(false)
@@ -517,10 +606,28 @@ describe('OpsDashboard integration shell', () => {
     await flushPromises()
 
     expect(wrapper.get('#ops-workspace-tab-incidents').attributes('aria-selected')).toBe('true')
-    expect(wrapper.find('[data-testid="alert-events"]').exists()).toBe(false)
+    expect(wrapper.get('[data-testid="alert-events"]').attributes('data-enabled')).toBe('false')
     expect(wrapper.get('[data-testid="ops-alerts-section"] [role="status"]').text()).toBe(
       'admin.ops.workspace.alertsDisabled',
     )
+  })
+
+  it('hands an alert to diagnostics as a materialized one-hour log investigation', async () => {
+    mocks.route.query = { section: 'incidents' }
+    const wrapper = mountDashboard()
+    await flushPromises()
+
+    await wrapper.get('[data-testid="alert-view-related-logs"]').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.get('#ops-workspace-tab-diagnostics').attributes('aria-selected')).toBe('true')
+    expect(wrapper.get('[data-testid="system-log"]').attributes()).toMatchObject({
+      'data-alert-id': '17',
+      'data-platform': 'openai',
+      'data-start-time': '2026-07-21T02:30:00.000Z',
+      'data-end-time': '2026-07-21T03:30:00.000Z',
+    })
+    expect(mocks.routerReplace).toHaveBeenLastCalledWith({ query: { section: 'diagnostics' } })
   })
 
   it('shows the dedicated loading skeleton until feature settings resolve', async () => {
@@ -805,6 +912,8 @@ describe('OpsDashboard integration shell', () => {
     expect(statusRule).toContain('min-width: 0')
     expect(statusRule).toContain('flex-wrap: wrap')
     expect(statusRule).toContain('overflow-wrap: anywhere')
+
+    await wrapper.get('[data-testid="ops-diagnostic-toggle"]').trigger('click')
 
     const diagnosis = wrapper.get('#ops-diagnosis-popover')
     expect(diagnosis.attributes('role')).toBe('tooltip')

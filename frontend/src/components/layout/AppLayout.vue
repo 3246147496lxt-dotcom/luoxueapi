@@ -4,9 +4,12 @@
     :class="{
       'app-layout--flat-workspace-shell': isFlatWorkspaceShell,
       'app-layout--admin-shell': isAdminShell,
-      'app-layout--purchase': variant === 'purchase'
+      'app-layout--purchase': variant === 'purchase',
+      'app-layout--workbench-content': contentMode === 'workbench',
+      'app-layout--ops-option-b': isOpsOptionB
     }"
     :data-sidebar-collapsed="sidebarCollapsed"
+    :data-content-mode="contentMode"
   >
     <!-- Mobile navigation context -->
     <AppMobileHeader />
@@ -27,8 +30,14 @@
       ]"
     >
       <!-- Main Content -->
-      <main class="app-main-content px-[13px] pb-[13px] pt-0 sm:px-5 sm:pb-5 md:px-6 md:pb-6 lg:px-8 lg:pb-8">
-        <div class="mx-auto w-full max-w-[1600px]">
+      <main
+        class="app-main-content px-[13px] pb-[13px] pt-0 sm:px-5 sm:pb-5 md:px-6 md:pb-6 lg:px-8 lg:pb-8"
+        :class="{ 'app-main-content--workbench': contentMode === 'workbench' }"
+      >
+        <div
+          class="app-main-inner mx-auto w-full max-w-[1600px]"
+          :class="{ 'app-main-inner--workbench': contentMode === 'workbench' }"
+        >
           <slot />
         </div>
       </main>
@@ -62,11 +71,14 @@ const PersonalSettingsDialog = defineAsyncComponent(
 )
 
 export type AppLayoutVariant = 'default' | 'home-clay' | 'chat' | 'purchase'
+export type AppLayoutContentMode = 'contained' | 'workbench'
 
 const props = withDefaults(defineProps<{
   variant?: AppLayoutVariant
+  contentMode?: AppLayoutContentMode
 }>(), {
-  variant: 'default'
+  variant: 'default',
+  contentMode: 'contained'
 })
 
 const route = useRoute()
@@ -78,6 +90,9 @@ const isAdminShell = computed(
 )
 const isFlatWorkspaceShell = computed(
   () => isAdminShell.value || route.meta.requiresAuth === true
+)
+const isOpsOptionB = computed(
+  () => props.contentMode === 'workbench' && route.path.startsWith('/admin/ops')
 )
 
 const HOME_CLAY_PORTAL_CLASS = 'admin-home-clay-portals'
@@ -230,6 +245,55 @@ defineExpose({ replayTour })
 @media (max-width: 767px) {
   .app-layout--snow-shell .app-main-shell.app-layout--chat .app-main-content {
     padding: 0 5px 5px;
+  }
+}
+
+.app-layout--snow-shell .app-main-content.app-main-content--workbench {
+  min-height: calc(100dvh - var(--app-shell-top-offset));
+  padding: 0;
+}
+
+.app-layout--snow-shell .app-main-inner.app-main-inner--workbench {
+  min-height: inherit;
+  max-width: none;
+}
+
+/* Superdesign Option B: the operator workbench owns the full desktop frame. */
+.app-layout--snow-shell.app-layout--ops-option-b {
+  --app-shell-top-offset: 0px;
+  --app-shell-canvas: #ffffff;
+  min-height: 100dvh;
+  padding-top: 0 !important;
+  background: #ffffff !important;
+}
+
+.app-layout--ops-option-b .app-main-shell,
+.app-layout--ops-option-b .app-main-content,
+.app-layout--ops-option-b .app-main-inner {
+  min-height: 100dvh;
+}
+
+.app-layout--ops-option-b .app-main-shell {
+  background: #ffffff !important;
+}
+
+@media (min-width: 1024px) {
+  .app-layout--ops-option-b .app-main-shell {
+    margin-left: 260px !important;
+  }
+
+  :global(.app-layout--ops-option-b #app-sidebar) {
+    width: 260px !important;
+    border-color: #e5e7eb !important;
+    background: #fcfcfc !important;
+  }
+
+  :global(.app-layout--ops-option-b #app-sidebar .sidebar-header) {
+    display: none !important;
+  }
+
+  :global(.app-layout--ops-option-b #app-sidebar .sidebar-nav) {
+    padding: 12px 8px 8px;
   }
 }
 </style>

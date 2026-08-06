@@ -23,19 +23,24 @@
       >
         <span class="sidebar-account-trigger__avatar">
           <img
-            v-if="summary.avatarUrl.value"
+            v-if="summary.avatarUrl.value && !isOpsOptionB"
             :src="summary.avatarUrl.value"
             :alt="summary.displayName.value"
           >
-          <span v-else>{{ summary.initials.value }}</span>
+          <span v-else>{{ isOpsOptionB ? t('admin.ops.sidebar.avatar') : summary.initials.value }}</span>
         </span>
 
         <span
           class="sidebar-account-trigger__copy"
           :aria-hidden="sidebarCollapsed ? 'true' : undefined"
         >
-          <span class="sidebar-account-trigger__name">{{ summary.displayName.value }}</span>
-          <span class="sidebar-account-trigger__meta">
+          <span class="sidebar-account-trigger__name">
+            {{ isOpsOptionB ? t('admin.ops.sidebar.admin') : summary.displayName.value }}
+          </span>
+          <span v-if="isOpsOptionB" class="sidebar-account-trigger__meta">
+            {{ t('admin.ops.sidebar.balanceSubscription') }}
+          </span>
+          <span v-else class="sidebar-account-trigger__meta">
             <span class="sidebar-account-trigger__balance-label">
               {{ t('accountDock.balanceShort') }}
             </span>
@@ -48,10 +53,18 @@
             <span class="truncate">{{ subscriptionStatusText }}</span>
           </span>
         </span>
+
+        <Icon
+          v-if="isOpsOptionB && !sidebarCollapsed"
+          name="chevronsUpDown"
+          size="sm"
+          class="sidebar-account-trigger__chevrons"
+          aria-hidden="true"
+        />
       </button>
 
       <RouterLink
-        v-if="pricingTarget && !sidebarCollapsed"
+        v-if="pricingTarget && !sidebarCollapsed && !isOpsOptionB"
         data-testid="account-upgrade-link"
         class="sidebar-account-cta"
         :to="pricingTarget.path"
@@ -90,6 +103,7 @@ import { useAppStore } from '@/stores/app'
 import { useAuthStore } from '@/stores/auth'
 import { useOnboardingStore } from '@/stores/onboarding'
 import CreditAmount from '@/components/common/CreditAmount.vue'
+import Icon from '@/components/icons/Icon.vue'
 import SidebarAccountOverlay from './SidebarAccountOverlay.vue'
 import type { PersonalSettingsSection } from '@/navigation/personalSettingsRoute'
 import type { AccountPanelSummary } from './accountPanelTypes'
@@ -106,6 +120,7 @@ const panelOpen = ref(false)
 const dockRowRef = ref<HTMLElement | null>(null)
 const triggerRef = ref<HTMLButtonElement | null>(null)
 const sidebarCollapsed = computed(() => appStore.sidebarCollapsed)
+const isOpsOptionB = computed(() => route.path.startsWith('/admin/ops'))
 const audience = computed(() => summary.isAdmin.value ? 'admin' as const : 'user' as const)
 const settingsAudience = computed(() => (
   summary.isAdmin.value && route.path.startsWith('/admin')
@@ -290,7 +305,7 @@ watch(sidebarCollapsed, () => closePanel(false))
   display: grid;
   min-width: 0;
   min-height: 52px;
-  grid-template-columns: 32px minmax(0, 1fr);
+  grid-template-columns: 32px minmax(0, 1fr) auto;
   align-items: center;
   gap: 10px;
   padding: 6px 4px 6px 8px;
@@ -340,6 +355,11 @@ watch(sidebarCollapsed, () => closePanel(false))
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.sidebar-account-trigger__chevrons {
+  flex: 0 0 auto;
+  color: #5f6b7a;
 }
 
 .sidebar-account-trigger__name {

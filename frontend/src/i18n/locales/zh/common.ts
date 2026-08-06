@@ -13,6 +13,7 @@ export default {
     edit: '编辑',
     create: '创建',
     update: '更新',
+    apply: '应用',
     confirm: '确认',
     reset: '重置',
     search: '搜索',

@@ -43,7 +43,7 @@
         class="sidebar-workspace-switch"
         :class="{ 'sidebar-workspace-switch-collapsed': sidebarCollapsed }"
         role="group"
-        :aria-label="`${t('nav.adminWorkspace')} / ${t('nav.personalWorkspace')}`"
+        :aria-label="`${adminWorkspaceLabel} / ${personalWorkspaceLabel}`"
         data-testid="sidebar-workspace-switch"
       >
         <template v-if="!sidebarCollapsed">
@@ -55,7 +55,7 @@
             data-testid="sidebar-workspace-admin-option"
             @click="switchWorkspace('/admin/dashboard')"
           >
-            {{ t('nav.adminWorkspace') }}
+            {{ adminWorkspaceLabel }}
           </button>
           <button
             type="button"
@@ -65,7 +65,7 @@
             data-testid="sidebar-workspace-personal-option"
             @click="switchWorkspace('/dashboard')"
           >
-            {{ t('nav.personalWorkspace') }}
+            {{ personalWorkspaceLabel }}
           </button>
         </template>
         <button
@@ -439,6 +439,9 @@ interface NavSection {
 }
 
 type SidebarSupportIcon =
+  | 'home'
+  | 'document'
+  | 'destinationHome'
   | 'destinationModels'
   | 'destinationContact'
   | 'destinationDocument'
@@ -478,9 +481,16 @@ const sidebarCollapsed = computed(() => appStore.sidebarCollapsed)
 const mobileOpen = computed(() => appStore.mobileOpen)
 const isAdmin = computed(() => authStore.isAdmin)
 const isAdminWorkspace = computed(() => isAdmin.value && route.path.startsWith('/admin'))
+const isOpsOptionB = computed(() => route.path.startsWith('/admin/ops'))
+const adminWorkspaceLabel = computed(() => (
+  isOpsOptionB.value ? t('admin.ops.sidebar.adminWorkspace') : t('nav.adminWorkspace')
+))
+const personalWorkspaceLabel = computed(() => (
+  isOpsOptionB.value ? t('admin.ops.sidebar.personalWorkspace') : t('nav.personalWorkspace')
+))
 const workspaceSwitchLabel = computed(() => (
   isAdminWorkspace.value
-    ? t('nav.switchToPersonalWorkspace')
+    ? (isOpsOptionB.value ? t('admin.ops.sidebar.switchToPersonalWorkspace') : t('nav.switchToPersonalWorkspace'))
     : t('nav.switchToAdminWorkspace')
 ))
 const documentationUrl = computed(() => resolveDocumentationUrl(
@@ -552,6 +562,14 @@ const ChartIcon = {
         })
       ]
     )
+}
+
+const OpsChartIcon = {
+  render: () => h(Icon, { name: 'chartNoAxesColumn', strokeWidth: 1.7 })
+}
+
+const UsageChartIcon = {
+  render: () => h(Icon, { name: 'lucideBarChartBig', strokeWidth: 1.7 })
 }
 
 const GiftIcon = {
@@ -883,7 +901,7 @@ const sidebarSupportLinks = computed<SidebarSupportLink[]>(() => {
     'support',
   )
 
-  return visibleSpecs.flatMap((spec): SidebarSupportLink[] => {
+  const links = visibleSpecs.flatMap((spec): SidebarSupportLink[] => {
     const href = resolveSupportHref(spec)
     if (!href) return []
 
@@ -894,6 +912,21 @@ const sidebarSupportLinks = computed<SidebarSupportLink[]>(() => {
       icon: supportIconByDestination[spec.id] ?? 'destinationDocument',
     }]
   })
+
+  if (route.path.startsWith('/admin/ops')) {
+    const documentation = links.find((link) => link.id === 'documentation')
+    return [
+      {
+        id: 'home',
+        label: t('admin.ops.sidebar.backHome'),
+        href: '/',
+        icon: 'home',
+      },
+      ...(documentation ? [{ ...documentation, icon: 'document' as const }] : []),
+    ]
+  }
+
+  return links
 })
 
 // Public-settings flags go through the registry in utils/featureFlags.ts,
@@ -1009,15 +1042,16 @@ const customMenuItemsForAdmin = computed(() => {
 
 // Admin navigation items
 const adminNavItems = computed((): NavItem[] => {
+  const isOpsShell = route.path.startsWith('/admin/ops')
   const baseItems: NavItem[] = [
     {
       path: '/admin/dashboard',
-      label: t('nav.adminDashboard'),
-      icon: null,
-      iconSvg: reportDashboardIconSvg,
+      label: isOpsShell ? t('admin.ops.sidebar.dashboard') : t('nav.adminDashboard'),
+      icon: isOpsShell ? DashboardIcon : null,
+      iconSvg: isOpsShell ? undefined : reportDashboardIconSvg,
     },
-    { path: '/admin/ops', label: t('nav.ops'), icon: ChartIcon, featureFlag: flagOpsMonitoring },
-    { path: '/admin/usage', label: t('nav.adminUsage'), icon: ChartIcon },
+    { path: '/admin/ops', label: t('nav.ops'), icon: isOpsShell ? OpsChartIcon : ChartIcon, featureFlag: flagOpsMonitoring },
+    { path: '/admin/usage', label: isOpsShell ? t('admin.ops.sidebar.usage') : t('nav.adminUsage'), icon: isOpsShell ? UsageChartIcon : ChartIcon },
     { path: '/admin/users', label: t('nav.users'), icon: UsersIcon, hideInSimpleMode: true },
     { path: '/admin/groups', label: t('nav.groups'), icon: FolderIcon, hideInSimpleMode: true },
     {
@@ -1234,7 +1268,11 @@ const displayedAdminNavSections = computed((): AdminNavSection[] => {
   }
 
   return ADMIN_NAV_SECTION_CONFIG
-    .map(({ id, labelKey }) => ({ id, label: t(labelKey), items: grouped.get(id) ?? [] }))
+    .map(({ id, labelKey }) => ({
+      id,
+      label: isOpsOptionB.value ? t(`admin.ops.sidebar.sections.${id}`) : t(labelKey),
+      items: grouped.get(id) ?? [],
+    }))
     .filter(section => section.items.length > 0)
 })
 

@@ -106,8 +106,10 @@ function handleKeydown(event: KeyboardEvent, index: number): void {
   max-width: 100%;
   overflow-x: auto;
   overscroll-behavior-inline: contain;
+  border-bottom: 1px solid var(--lx-clay-border);
   color: var(--lx-clay-text);
   font-family: var(--lx-clay-font-ui);
+  scrollbar-width: thin;
   -webkit-overflow-scrolling: touch;
 }
 
@@ -117,47 +119,48 @@ function handleKeydown(event: KeyboardEvent, index: number): void {
   min-width: 100%;
   align-items: center;
   gap: 4px;
-  padding: 3px;
-  border: 1px solid var(--lx-clay-border);
-  border-radius: var(--lx-clay-radius-control);
-  background: var(--lx-clay-recessed);
 }
 
 .ops-workspace-nav__tab {
   min-width: 44px;
-  min-height: 44px;
+  min-height: 48px;
   flex: 0 0 auto;
-  padding: 0 14px;
-  border: 1px solid transparent;
-  border-radius: var(--lx-clay-radius-ops);
+  margin-bottom: -1px;
+  padding: 0 16px;
+  border: 0;
+  border-bottom: 2px solid transparent;
   color: var(--lx-clay-text-secondary);
   background: transparent;
   font: inherit;
-  font-size: 0.8125rem;
-  font-weight: 750;
+  font-size: 12px;
+  font-weight: 700;
   line-height: 1.2;
   white-space: nowrap;
   cursor: pointer;
   transition:
     color 180ms ease-out,
-    background-color 180ms ease-out,
     border-color 180ms ease-out;
 }
 
 .ops-workspace-nav__tab:hover:not(.ops-workspace-nav__tab--active) {
   color: var(--lx-clay-text);
-  background: var(--lx-clay-surface-soft);
+  border-bottom-color: color-mix(in srgb, var(--lx-clay-text-secondary) 34%, transparent);
 }
 
 .ops-workspace-nav__tab--active {
-  border-color: color-mix(in srgb, var(--lx-clay-accent) 18%, transparent);
+  border-bottom-color: var(--lx-clay-accent);
   color: var(--lx-clay-accent);
-  background: var(--lx-clay-surface);
 }
 
 .ops-workspace-nav__tab:focus-visible {
   outline: 3px solid color-mix(in srgb, var(--lx-clay-accent) 34%, transparent);
-  outline-offset: 1px;
+  outline-offset: -3px;
+}
+
+@media (max-width: 640px) {
+  .ops-workspace-nav__tabs {
+    gap: 14px;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
