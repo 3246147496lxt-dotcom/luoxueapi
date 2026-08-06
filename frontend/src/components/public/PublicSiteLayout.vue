@@ -36,13 +36,7 @@
         </a>
 
         <div class="public-site-desktop-nav">
-          <a
-            v-for="item in navItems"
-            :key="item.href"
-            :href="item.href"
-          >
-            {{ t(item.labelKey) }}
-          </a>
+          <a href="/home#steps">{{ t('home.nav.quickStart') }}</a>
           <router-link
             v-if="catalogEntryVisible"
             to="/models.html"
@@ -105,12 +99,10 @@
         <div v-if="mobileMenuOpen" id="public-site-mobile-menu" class="public-site-mobile-panel">
           <div class="public-site-mobile-inner">
             <a
-              v-for="item in navItems"
-              :key="item.href"
-              :href="item.href"
+              href="/home#steps"
               @click="closeMobileMenu()"
             >
-              {{ t(item.labelKey) }}
+              {{ t('home.nav.quickStart') }}
             </a>
             <router-link
               v-if="catalogEntryVisible"
@@ -229,13 +221,6 @@ const skillMarketEntryVisible = computed(() => (
   !appStore.backendModeEnabled
   && appStore.cachedPublicSettings?.skill_marketplace_enabled === true
 ))
-
-const navItems = [
-  { href: '/home#steps', labelKey: 'home.nav.steps' },
-  { href: '/home#capabilities', labelKey: 'home.nav.capabilities' },
-  { href: '/home#providers', labelKey: 'home.nav.providers' },
-  { href: '/home#faq', labelKey: 'home.nav.faq' }
-] as const
 
 const dashboardPath = computed(() => (authStore.isAdmin ? '/admin/dashboard' : '/dashboard'))
 const headerAccountPath = computed(() => (authStore.isAuthenticated ? dashboardPath.value : '/login'))

@@ -14,10 +14,7 @@ export default {
     login: 'Sign in',
     nav: {
       ariaLabel: 'Home navigation',
-      capabilities: 'Capabilities',
-      steps: 'Get started',
-      providers: 'Model status',
-      faq: 'FAQ',
+      quickStart: 'Get started',
       tutorial: 'Tutorial',
       openMenu: 'Open menu',
       closeMenu: 'Close menu'

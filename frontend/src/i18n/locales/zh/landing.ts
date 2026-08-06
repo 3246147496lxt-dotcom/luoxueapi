@@ -14,10 +14,7 @@ export default {
     login: '登录',
     nav: {
       ariaLabel: '首页导航',
-      capabilities: '产品能力',
-      steps: '接入步骤',
-      providers: '模型状态',
-      faq: '常见问题',
+      quickStart: '快速开始',
       tutorial: '使用教程',
       openMenu: '打开菜单',
       closeMenu: '关闭菜单'

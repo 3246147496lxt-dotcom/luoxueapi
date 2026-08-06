@@ -33,10 +33,7 @@ const testState = vi.hoisted(() => ({
 
 const messages: Record<string, string> = {
   'home.nav.ariaLabel': '首页导航',
-  'home.nav.capabilities': '产品能力',
-  'home.nav.steps': '接入步骤',
-  'home.nav.providers': '模型状态',
-  'home.nav.faq': '常见问题',
+  'home.nav.quickStart': '快速开始',
   'home.nav.tutorial': '使用教程',
   'home.nav.openMenu': '打开菜单',
   'home.nav.closeMenu': '关闭菜单',
@@ -192,17 +189,48 @@ describe('PublicSiteLayout', () => {
     expect(customWrapper.find('.public-site-brand-api').exists()).toBe(false)
   })
 
-  it('uses cross-page home anchors and hides the catalog entry while disabled', () => {
+  it('uses one quick-start home anchor and hides the catalog entry while disabled', () => {
     const wrapper = mountLayout()
     const hrefs = wrapper.findAll('.public-site-desktop-nav > a')
       .map((link) => link.attributes('href'))
 
-    expect(hrefs).toContain('/home#capabilities')
     expect(hrefs).toContain('/home#steps')
-    expect(hrefs.slice(0, 2)).toEqual(['/home#steps', '/home#capabilities'])
+    expect(hrefs).not.toContain('/home#capabilities')
+    expect(hrefs).not.toContain('/home#providers')
+    expect(hrefs).not.toContain('/home#faq')
     expect(wrapper.find('[data-to="/models.html"]').exists()).toBe(false)
     expect(wrapper.get('[data-testid="content"]').text()).toBe('Content')
     expect(wrapper.get('.public-site-footer nav').attributes('aria-label')).toBe('页脚导航')
+  })
+
+  it('keeps the four primary destinations consistent across desktop and mobile', async () => {
+    testState.appStore.cachedPublicSettings.public_model_catalog_enabled = true
+    testState.appStore.cachedPublicSettings.skill_marketplace_enabled = true
+    const wrapper = mountLayout()
+
+    const desktopItems = wrapper.findAll('.public-site-desktop-nav > a')
+      .map((link) => ({
+        label: link.text(),
+        target: link.attributes('href') ?? link.attributes('data-to')
+      }))
+    expect(desktopItems).toEqual([
+      { label: '快速开始', target: '/home#steps' },
+      { label: '模型广场', target: '/models.html' },
+      { label: 'Skill 市场', target: '/skills' },
+      {
+        label: '使用教程',
+        target: 'http://127.0.0.1:4179/tutorial-docs/#quick-start'
+      }
+    ])
+
+    await wrapper.get('[data-testid="mobile-menu-toggle"]').trigger('click')
+
+    const mobileItems = wrapper.findAll('.public-site-mobile-inner > a')
+      .map((link) => ({
+        label: link.text(),
+        target: link.attributes('href') ?? link.attributes('data-to')
+      }))
+    expect(mobileItems).toEqual(desktopItems)
   })
 
   it('shows the catalog in desktop, mobile, and footer navigation when enabled', async () => {
