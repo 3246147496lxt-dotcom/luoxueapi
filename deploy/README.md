@@ -18,6 +18,7 @@ This directory contains files for deploying LuoxueAPI on Linux servers and Apple
 |------|-------------|
 | `docker-compose.yml` | Docker Compose configuration (named volumes) |
 | `docker-compose.local.yml` | Docker Compose configuration (local directories, easy migration) |
+| `docker-compose.mihomo.yml` | Optional three-instance Mihomo egress overlay |
 | `docker-deploy.sh` | **One-click Docker deployment script (recommended)** |
 | `apple-container.sh` | Native Apple `container` lifecycle script |
 | `APPLE_CONTAINER.md` | Apple `container` deployment and operations guide |
@@ -28,6 +29,7 @@ This directory contains files for deploying LuoxueAPI on Linux servers and Apple
 | `sub2api.service` | Systemd service unit file |
 | `sub2api-datamanagementd.service` | datamanagementd systemd service unit file |
 | `DATAMANAGEMENTD_CN.md` | datamanagementd 部署与联动说明（中文） |
+| `MIHOMO_MULTI_CONTAINER.md` | Mihomo 多容器出口部署与账号灰度迁移 |
 | `config.example.yaml` | Example configuration file |
 
 ---

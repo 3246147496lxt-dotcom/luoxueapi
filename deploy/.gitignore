@@ -10,6 +10,9 @@ redis_data/
 # Environment configuration (contains sensitive information)
 .env
 
+# Mihomo runtime configs (contain node credentials and proxy authentication)
+mihomo/instances/
+
 # Backup files
 *.backup
 *.bak

@@ -1,0 +1,36 @@
+# Copy this file to mihomo/instances/<a|b|c>/etc/config.yaml.
+# Replace both listener credentials before starting the container.
+# The referenced provider file should contain only this shard's primary node
+# and, optionally, a dedicated backup node in priority order.
+
+log-level: warning
+ipv6: false
+
+proxy-providers:
+  egress:
+    type: file
+    path: /etc/mihomo/providers/egress.yaml
+    health-check:
+      enable: true
+      url: https://www.gstatic.com/generate_204
+      interval: 120
+      timeout: 5000
+      lazy: false
+      expected-status: 204
+
+proxy-groups:
+  - name: AI-EGRESS
+    type: fallback
+    use:
+      - egress
+    empty-fallback: REJECT
+
+listeners:
+  - name: sub2api-http
+    type: http
+    listen: 0.0.0.0
+    port: 7890
+    proxy: AI-EGRESS
+    users:
+      - username: REPLACE_WITH_PROXY_USERNAME
+        password: REPLACE_WITH_PROXY_PASSWORD
