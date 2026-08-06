@@ -6,7 +6,10 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"sync"
+	"time"
 )
+
+const injectedHTMLCacheTTL = time.Minute
 
 // HTMLCache manages the cached index.html with injected settings
 type HTMLCache struct {
@@ -14,17 +17,24 @@ type HTMLCache struct {
 	entries         map[string]CachedHTML
 	baseHTMLHash    string // Hash of the original index.html (immutable after build)
 	settingsVersion uint64 // Incremented when settings change
+	ttl             time.Duration
+	now             func() time.Time
 }
 
 // CachedHTML represents the cache state
 type CachedHTML struct {
-	Content []byte
-	ETag    string
+	Content   []byte
+	ETag      string
+	expiresAt time.Time
 }
 
 // NewHTMLCache creates a new HTML cache instance
 func NewHTMLCache() *HTMLCache {
-	return &HTMLCache{entries: make(map[string]CachedHTML)}
+	return &HTMLCache{
+		entries: make(map[string]CachedHTML),
+		ttl:     injectedHTMLCacheTTL,
+		now:     time.Now,
+	}
 }
 
 // SetBaseHTML initializes the cache with the base HTML template
@@ -58,13 +68,22 @@ func (c *HTMLCache) GetForKey(key string) *CachedHTML {
 	defer c.mu.RUnlock()
 
 	entry, ok := c.entries[key]
-	if !ok {
+	if !ok || (!entry.expiresAt.IsZero() && !c.now().Before(entry.expiresAt)) {
 		return nil
 	}
 	return &CachedHTML{
 		Content: entry.Content,
 		ETag:    entry.ETag,
 	}
+}
+
+// Generation returns the current invalidation generation. Callers that render
+// cache entries asynchronously can use it to avoid committing a snapshot that
+// was read before a concurrent Invalidate call.
+func (c *HTMLCache) Generation() uint64 {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.settingsVersion
 }
 
 // Set updates the cache with new rendered HTML
@@ -76,13 +95,34 @@ func (c *HTMLCache) Set(html []byte, settingsJSON []byte) {
 func (c *HTMLCache) SetForKey(key string, html []byte, settingsJSON []byte) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	c.setForKeyLocked(key, html, settingsJSON)
+}
 
+// SetForKeyIfGeneration stores a rendered document only when no settings
+// invalidation happened after the caller began rendering it.
+func (c *HTMLCache) SetForKeyIfGeneration(
+	key string,
+	html []byte,
+	settingsJSON []byte,
+	expectedGeneration uint64,
+) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.settingsVersion != expectedGeneration {
+		return false
+	}
+	c.setForKeyLocked(key, html, settingsJSON)
+	return true
+}
+
+func (c *HTMLCache) setForKeyLocked(key string, html []byte, settingsJSON []byte) {
 	if c.entries == nil {
 		c.entries = make(map[string]CachedHTML)
 	}
 	c.entries[key] = CachedHTML{
-		Content: html,
-		ETag:    c.generateETagForKey(key, settingsJSON),
+		Content:   html,
+		ETag:      c.generateETagForKey(key, settingsJSON),
+		expiresAt: c.now().Add(c.ttl),
 	}
 }
 

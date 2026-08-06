@@ -9,7 +9,6 @@ import (
 	"net/http"
 	"regexp"
 	"sort"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -94,30 +93,35 @@ type SkillVersion struct {
 }
 
 type Skill struct {
-	ID               int64          `json:"id"`
-	Slug             string         `json:"slug"`
-	DisplayName      string         `json:"display_name"`
-	Summary          string         `json:"summary"`
-	Description      string         `json:"description"`
-	Category         string         `json:"category"`
-	Tags             []string       `json:"tags"`
-	Icon             string         `json:"icon"`
-	ExamplePrompts   []string       `json:"example_prompts"`
-	RiskNotes        string         `json:"risk_notes"`
-	Status           string         `json:"status"`
-	Featured         bool           `json:"featured"`
-	SortOrder        int            `json:"sort_order"`
-	CurrentVersionID *int64         `json:"current_version_id"`
-	CurrentVersion   *SkillVersion  `json:"current_version"`
-	LatestVersion    *SkillVersion  `json:"latest_version"`
-	Versions         []SkillVersion `json:"versions,omitempty"`
-	DownloadCount    int64          `json:"download_count"`
-	PublishedAt      *time.Time     `json:"published_at"`
-	ArchivedAt       *time.Time     `json:"archived_at"`
-	CreatedAt        time.Time      `json:"created_at"`
-	UpdatedAt        time.Time      `json:"updated_at"`
-	CreatedBy        *int64         `json:"-"`
-	UpdatedBy        *int64         `json:"-"`
+	ID                          int64          `json:"id"`
+	Slug                        string         `json:"slug"`
+	DisplayName                 string         `json:"display_name"`
+	Summary                     string         `json:"summary"`
+	Description                 string         `json:"description"`
+	Category                    string         `json:"category"`
+	Tags                        []string       `json:"tags"`
+	Icon                        string         `json:"icon"`
+	ExamplePrompts              []string       `json:"example_prompts"`
+	RiskNotes                   string         `json:"risk_notes"`
+	SourceURL                   string         `json:"source_url"`
+	SourceRepository            string         `json:"source_repository"`
+	RepositoryStars             *int64         `json:"repository_stars"`
+	Status                      string         `json:"status"`
+	Featured                    bool           `json:"featured"`
+	SortOrder                   int            `json:"sort_order"`
+	CurrentVersionID            *int64         `json:"current_version_id"`
+	CurrentVersion              *SkillVersion  `json:"current_version"`
+	LatestVersion               *SkillVersion  `json:"latest_version"`
+	Versions                    []SkillVersion `json:"versions,omitempty"`
+	DownloadCount               int64          `json:"download_count"`
+	PublishedAt                 *time.Time     `json:"published_at"`
+	ArchivedAt                  *time.Time     `json:"archived_at"`
+	CreatedAt                   time.Time      `json:"created_at"`
+	UpdatedAt                   time.Time      `json:"updated_at"`
+	CreatedBy                   *int64         `json:"-"`
+	UpdatedBy                   *int64         `json:"-"`
+	RepositoryStarsFetchedAt    *time.Time     `json:"-"`
+	RepositoryStarsRefreshAfter *time.Time     `json:"-"`
 }
 
 type SkillInput struct {
@@ -130,6 +134,7 @@ type SkillInput struct {
 	Icon           string   `json:"icon"`
 	ExamplePrompts []string `json:"example_prompts"`
 	RiskNotes      string   `json:"risk_notes"`
+	SourceURL      *string  `json:"source_url"`
 	Featured       bool     `json:"featured"`
 	SortOrder      int      `json:"sort_order"`
 }
@@ -178,21 +183,24 @@ type PublicSkillVersionSummary struct {
 }
 
 type PublicSkill struct {
-	Slug           string                     `json:"slug"`
-	DisplayName    string                     `json:"display_name"`
-	Summary        string                     `json:"summary"`
-	Description    string                     `json:"description"`
-	Category       string                     `json:"category"`
-	Tags           []string                   `json:"tags"`
-	Icon           string                     `json:"icon"`
-	ExamplePrompts []string                   `json:"example_prompts"`
-	RiskNotes      string                     `json:"risk_notes"`
-	Featured       bool                       `json:"featured"`
-	CurrentVersion *PublicSkillVersionSummary `json:"current_version"`
-	Versions       []PublicSkillVersion       `json:"versions,omitempty"`
-	DownloadCount  int64                      `json:"download_count"`
-	PublishedAt    *time.Time                 `json:"published_at"`
-	UpdatedAt      time.Time                  `json:"updated_at"`
+	Slug             string                     `json:"slug"`
+	DisplayName      string                     `json:"display_name"`
+	Summary          string                     `json:"summary"`
+	Description      string                     `json:"description"`
+	Category         string                     `json:"category"`
+	Tags             []string                   `json:"tags"`
+	Icon             string                     `json:"icon"`
+	ExamplePrompts   []string                   `json:"example_prompts"`
+	RiskNotes        string                     `json:"risk_notes"`
+	SourceURL        string                     `json:"source_url"`
+	SourceRepository string                     `json:"source_repository"`
+	RepositoryStars  *int64                     `json:"repository_stars"`
+	Featured         bool                       `json:"featured"`
+	CurrentVersion   *PublicSkillVersionSummary `json:"current_version"`
+	Versions         []PublicSkillVersion       `json:"versions,omitempty"`
+	DownloadCount    int64                      `json:"download_count"`
+	PublishedAt      *time.Time                 `json:"published_at"`
+	UpdatedAt        time.Time                  `json:"updated_at"`
 }
 
 type PublicSkillListResult struct {
@@ -213,6 +221,12 @@ type SkillArtifact struct {
 	Data      []byte
 }
 
+type SkillRepositoryStarsTarget struct {
+	ID               int64
+	SourceURL        string
+	SourceRepository string
+}
+
 type SkillMarketRepository interface {
 	Create(ctx context.Context, skill *Skill) error
 	Update(ctx context.Context, skill *Skill, previousSlug string) error
@@ -231,6 +245,9 @@ type SkillMarketRepository interface {
 	Archive(ctx context.Context, skillID int64, actorID *int64) error
 	GetVersionArtifact(ctx context.Context, slug, version string) (*SkillArtifact, error)
 	RecordDownload(ctx context.Context, skillVersionID int64) error
+	ClaimRepositoryStarsRefresh(ctx context.Context, limit int, claimedUntil time.Time) ([]SkillRepositoryStarsTarget, error)
+	CompleteRepositoryStarsRefresh(ctx context.Context, skillID int64, sourceURL string, stars int64, fetchedAt, refreshAfter time.Time) error
+	DeferRepositoryStarsRefresh(ctx context.Context, skillID int64, sourceURL string, refreshAfter time.Time) error
 }
 
 type SkillMarketplaceConfig struct {
@@ -238,15 +255,26 @@ type SkillMarketplaceConfig struct {
 }
 
 type SkillMarketService struct {
-	repo        SkillMarketRepository
-	settingRepo SettingRepository
-	gateMu      sync.Mutex
-	gateEnabled bool
-	gateExpires time.Time
+	repo           SkillMarketRepository
+	settingRepo    SettingRepository
+	settingService *SettingService
+	gateMu         sync.Mutex
+	gateEnabled    bool
+	gateExpires    time.Time
+	stars          skillRepositoryStarsRuntime
 }
 
-func NewSkillMarketService(repo SkillMarketRepository, settingRepo SettingRepository) *SkillMarketService {
-	return &SkillMarketService{repo: repo, settingRepo: settingRepo}
+func NewSkillMarketService(repo SkillMarketRepository, settingService *SettingService) *SkillMarketService {
+	var settingRepo SettingRepository
+	if settingService != nil {
+		settingRepo = settingService.settingRepo
+	}
+	return &SkillMarketService{
+		repo:           repo,
+		settingRepo:    settingRepo,
+		settingService: settingService,
+		stars:          newSkillRepositoryStarsRuntime(),
+	}
 }
 
 func (s *SkillMarketService) GetConfig(ctx context.Context) (*SkillMarketplaceConfig, error) {
@@ -264,15 +292,19 @@ func (s *SkillMarketService) GetConfig(ctx context.Context) (*SkillMarketplaceCo
 }
 
 func (s *SkillMarketService) UpdateConfig(ctx context.Context, enabled bool) (*SkillMarketplaceConfig, error) {
-	if s.settingRepo == nil {
-		return nil, infraerrors.InternalServer("SKILL_CONFIG_UNAVAILABLE", "skill marketplace config storage is unavailable")
-	}
-	if err := s.settingRepo.Set(ctx, SettingKeySkillMarketplaceEnabled, strconv.FormatBool(enabled)); err != nil {
-		return nil, fmt.Errorf("update skill marketplace config: %w", err)
-	}
+	// Expire the hot-path gate before the synchronous settings notification so
+	// requests cannot keep consuming the old five-second snapshot while the
+	// current instance invalidates its derived runtime caches.
 	s.gateMu.Lock()
 	s.gateExpires = time.Time{}
 	s.gateMu.Unlock()
+
+	if s.settingService == nil {
+		return nil, infraerrors.InternalServer("SKILL_CONFIG_UNAVAILABLE", "skill marketplace config storage is unavailable")
+	}
+	if err := s.settingService.UpdateSkillMarketplaceEnabled(ctx, enabled); err != nil {
+		return nil, err
+	}
 	return &SkillMarketplaceConfig{Enabled: enabled}, nil
 }
 
@@ -312,6 +344,14 @@ func normalizeSkillInput(input SkillInput) (SkillInput, error) {
 	input.Category = strings.ToLower(strings.TrimSpace(input.Category))
 	input.Icon = strings.TrimSpace(input.Icon)
 	input.RiskNotes = strings.TrimSpace(input.RiskNotes)
+	if input.SourceURL != nil {
+		sourceURL := strings.TrimSpace(*input.SourceURL)
+		normalizedSourceURL, _, err := normalizeSkillSourceURL(sourceURL)
+		if err != nil {
+			return input, ErrSkillInvalid.WithMetadata(map[string]string{"source_url": "must be a supported github.com repository URL"})
+		}
+		input.SourceURL = &normalizedSourceURL
+	}
 	if !skillSlugPattern.MatchString(input.Slug) || len(input.Slug) > 64 || input.DisplayName == "" ||
 		utf8.RuneCountInString(input.DisplayName) > 120 || utf8.RuneCountInString(input.Summary) > 280 ||
 		utf8.RuneCountInString(input.Description) > 100_000 || utf8.RuneCountInString(input.Category) > 80 ||
@@ -354,10 +394,16 @@ func normalizeSkillStrings(values []string, maxItems, maxRunes int, lower bool) 
 }
 
 func skillFromInput(input SkillInput, actorID *int64) *Skill {
+	sourceURL := ""
+	if input.SourceURL != nil {
+		sourceURL = *input.SourceURL
+	}
+	_, sourceRepository, _ := normalizeSkillSourceURL(sourceURL)
 	return &Skill{
 		Slug: input.Slug, DisplayName: input.DisplayName, Summary: input.Summary,
 		Description: input.Description, Category: input.Category, Tags: input.Tags,
 		Icon: input.Icon, ExamplePrompts: input.ExamplePrompts, RiskNotes: input.RiskNotes,
+		SourceURL: sourceURL, SourceRepository: sourceRepository,
 		Status: SkillStatusDraft, Featured: input.Featured, SortOrder: input.SortOrder,
 		CreatedBy: actorID, UpdatedBy: actorID,
 	}
@@ -368,6 +414,22 @@ func applySkillInput(skill *Skill, input SkillInput, actorID *int64) {
 	skill.Summary, skill.Description, skill.Category = input.Summary, input.Description, input.Category
 	skill.Tags, skill.Icon, skill.ExamplePrompts = input.Tags, input.Icon, input.ExamplePrompts
 	skill.RiskNotes, skill.Featured, skill.SortOrder = input.RiskNotes, input.Featured, input.SortOrder
+	if input.SourceURL != nil {
+		sourceURL := *input.SourceURL
+		_, sourceRepository, _ := normalizeSkillSourceURL(sourceURL)
+		sourceChanged := skill.SourceURL != sourceURL
+		skill.SourceURL, skill.SourceRepository = sourceURL, sourceRepository
+		if sourceChanged {
+			skill.RepositoryStars = nil
+			skill.RepositoryStarsFetchedAt = nil
+			if sourceURL == "" {
+				skill.RepositoryStarsRefreshAfter = nil
+			} else {
+				now := time.Now().UTC()
+				skill.RepositoryStarsRefreshAfter = &now
+			}
+		}
+	}
 	skill.UpdatedBy = actorID
 }
 
@@ -776,7 +838,9 @@ func publicSkillFromModel(skill *Skill, includeVersions bool) PublicSkill {
 		Slug: skill.Slug, DisplayName: skill.DisplayName, Summary: skill.Summary,
 		Description: skill.Description, Category: skill.Category, Tags: skill.Tags,
 		Icon: skill.Icon, ExamplePrompts: skill.ExamplePrompts, RiskNotes: skill.RiskNotes,
-		Featured: skill.Featured, DownloadCount: skill.DownloadCount,
+		SourceURL: skill.SourceURL, SourceRepository: skill.SourceRepository,
+		RepositoryStars: skill.RepositoryStars,
+		Featured:        skill.Featured, DownloadCount: skill.DownloadCount,
 		PublishedAt: skill.PublishedAt, UpdatedAt: skill.UpdatedAt,
 	}
 	if skill.CurrentVersion != nil {
@@ -815,7 +879,7 @@ func pageCount(total int64, pageSize int) int {
 }
 
 func validateSkillPublishable(skill *Skill, version *SkillVersion) error {
-	missing := make([]string, 0, 5)
+	missing := make([]string, 0, 3)
 	if strings.TrimSpace(skill.Summary) == "" {
 		missing = append(missing, "summary")
 	}
@@ -824,12 +888,6 @@ func validateSkillPublishable(skill *Skill, version *SkillVersion) error {
 	}
 	if strings.TrimSpace(skill.Category) == "" {
 		missing = append(missing, "category")
-	}
-	if strings.TrimSpace(skill.RiskNotes) == "" {
-		missing = append(missing, "risk_notes")
-	}
-	if len(skill.ExamplePrompts) == 0 {
-		missing = append(missing, "example_prompts")
 	}
 	if len(missing) > 0 {
 		return ErrSkillInvalid.WithMetadata(map[string]string{"missing_fields": strings.Join(missing, ",")})

@@ -27,3 +27,29 @@ func TestSkillMarketMigrationIsBoundedAndVersioned(t *testing.T) {
 	require.Contains(t, sql, "PREVENT_SKILL_VERSION_DELETE")
 	require.Contains(t, sql, "RELEASED_AT IS NOT NULL AND YANKED_AT IS NULL")
 }
+
+func TestSkillMarketSourceMigrationSimplifiesMetadataAndAddsSnapshot(t *testing.T) {
+	content, err := FS.ReadFile("197_skill_market_simplify_and_source.sql")
+	require.NoError(t, err)
+
+	sql := strings.ToUpper(strings.Join(strings.Fields(string(content)), " "))
+	require.Contains(t, sql, "SOURCE_URL TEXT NOT NULL DEFAULT ''")
+	require.Contains(t, sql, "SOURCE_REPOSITORY VARCHAR(140) NOT NULL DEFAULT ''")
+	require.Contains(t, sql, "REPOSITORY_STARS BIGINT NULL")
+	require.Contains(t, sql, "REPOSITORY_STARS_FETCHED_AT TIMESTAMPTZ NULL")
+	require.Contains(t, sql, "REPOSITORY_STARS_REFRESH_AFTER TIMESTAMPTZ NULL")
+	require.Contains(t, sql, "SET DISPLAY_NAME = 'FRONTEND-DESIGN'")
+	require.Contains(t, sql, "SOURCE_URL = 'HTTPS://GITHUB.COM/ANTHROPICS/SKILLS/TREE/MAIN/SKILLS/FRONTEND-DESIGN'")
+	require.Contains(t, sql, "SOURCE_REPOSITORY = 'ANTHROPICS/SKILLS'")
+	require.Contains(t, sql, "RISK_NOTES = ''")
+
+	constraintAt := strings.LastIndex(sql, "ADD CONSTRAINT SKILLS_PUBLISHED_METADATA_CHECK")
+	require.NotEqual(t, -1, constraintAt)
+	updateAt := strings.Index(sql, "UPDATE SKILLS")
+	require.NotEqual(t, -1, updateAt)
+	require.Less(t, constraintAt, updateAt, "published metadata constraint must be relaxed before curated rows are updated")
+	publishConstraint := sql[constraintAt:updateAt]
+	require.Contains(t, publishConstraint, "BTRIM(SUMMARY) <> ''")
+	require.NotContains(t, publishConstraint, "RISK_NOTES")
+	require.NotContains(t, publishConstraint, "EXAMPLE_PROMPTS")
+}

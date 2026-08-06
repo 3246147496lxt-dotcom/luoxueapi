@@ -37,6 +37,7 @@ func (h *SettingHandler) SetNotificationEmailService(notificationEmailService *s
 // GetPublicSettings 获取公开设置
 // GET /api/v1/settings/public
 func (h *SettingHandler) GetPublicSettings(c *gin.Context) {
+	c.Header("Cache-Control", "no-store")
 	settings, err := h.settingService.GetPublicSettings(c.Request.Context())
 	if err != nil {
 		response.ErrorFrom(c, err)

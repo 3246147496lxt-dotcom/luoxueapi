@@ -229,6 +229,7 @@ func (s *FrontendServer) serveIndexHTML(c *gin.Context) {
 		c.Abort()
 		return
 	}
+	cacheGeneration := s.cache.Generation()
 
 	// Cache miss - fetch settings and render
 	ctx, cancel := context.WithTimeout(c.Request.Context(), 2*time.Second)
@@ -254,13 +255,15 @@ func (s *FrontendServer) serveIndexHTML(c *gin.Context) {
 	}
 
 	rendered := s.injectSettingsForPath(settingsJSON, c.Request.URL.Path)
-	s.cache.SetForKey(cacheKey, rendered, settingsJSON)
+	stored := s.cache.SetForKeyIfGeneration(cacheKey, rendered, settingsJSON, cacheGeneration)
 
 	// Replace nonce placeholder with actual nonce before serving
 	content := replaceNoncePlaceholder(rendered, nonce)
 
-	cached = s.cache.GetForKey(cacheKey)
-	if cached != nil {
+	if stored {
+		cached = s.cache.GetForKey(cacheKey)
+	}
+	if stored && cached != nil {
 		c.Header("ETag", cached.ETag)
 	}
 	c.Header("Cache-Control", "no-cache")

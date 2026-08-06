@@ -109,7 +109,7 @@ func RegisterAdminRoutes(
 		registerModelCatalogRoutes(admin, h)
 
 		// Codex Skill 市场
-		registerSkillMarketRoutes(admin, h, stepUpAuth)
+		registerSkillMarketRoutes(admin, h)
 
 		// 文档教程内容管理
 		registerDocumentationRoutes(admin, h)
@@ -172,7 +172,7 @@ func registerModelCatalogRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 	}
 }
 
-func registerSkillMarketRoutes(admin *gin.RouterGroup, h *handler.Handlers, stepUpAuth middleware.StepUpAuthMiddleware) {
+func registerSkillMarketRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 	skills := admin.Group("/skills")
 	{
 		skills.GET("/config", h.Admin.SkillMarket.GetConfig)
@@ -180,12 +180,12 @@ func registerSkillMarketRoutes(admin *gin.RouterGroup, h *handler.Handlers, step
 		skills.GET("", h.Admin.SkillMarket.List)
 		skills.POST("", h.Admin.SkillMarket.Create)
 		skills.GET("/:id", h.Admin.SkillMarket.Get)
-		skills.PUT("/:id", gin.HandlerFunc(stepUpAuth), h.Admin.SkillMarket.Update)
+		skills.PUT("/:id", h.Admin.SkillMarket.Update)
 		skills.POST("/:id/versions", h.Admin.SkillMarket.UploadVersion)
-		skills.POST("/:id/publish", gin.HandlerFunc(stepUpAuth), h.Admin.SkillMarket.Publish)
-		skills.POST("/:id/versions/:versionId/activate", gin.HandlerFunc(stepUpAuth), h.Admin.SkillMarket.Activate)
-		skills.POST("/:id/versions/:versionId/yank", gin.HandlerFunc(stepUpAuth), h.Admin.SkillMarket.Yank)
-		skills.POST("/:id/archive", gin.HandlerFunc(stepUpAuth), h.Admin.SkillMarket.Archive)
+		skills.POST("/:id/publish", h.Admin.SkillMarket.Publish)
+		skills.POST("/:id/versions/:versionId/activate", h.Admin.SkillMarket.Activate)
+		skills.POST("/:id/versions/:versionId/yank", h.Admin.SkillMarket.Yank)
+		skills.POST("/:id/archive", h.Admin.SkillMarket.Archive)
 	}
 }
 

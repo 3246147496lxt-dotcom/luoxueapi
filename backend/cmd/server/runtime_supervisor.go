@@ -26,6 +26,7 @@ import (
 func buildApplicationSupervisor(
 	pricing *service.PricingService,
 	settingService *service.SettingService,
+	skillMarket *service.SkillMarketService,
 	routerSettingsRuntime *server.RouterSettingsRuntime,
 	opsService *service.OpsService,
 	idempotencyCoordinator *service.IdempotencyCoordinator,
@@ -292,6 +293,11 @@ func buildApplicationSupervisor(
 		applicationVoidLifecycleComponent("payment-order-expiry", paymentOrderExpiry.Start, paymentOrderExpiry.Stop),
 		applicationVoidLifecycleComponent("channel-monitor", channelMonitorRunner.Start, channelMonitorRunner.Stop),
 		applicationVoidLifecycleComponent("upstream-billing-probe", upstreamBillingProbe.Start, upstreamBillingProbe.Stop),
+		lifecycle.ComponentFuncs{
+			ComponentName: "skill-market-github-stars",
+			StartFunc:     skillMarket.Start,
+			StopFunc:      skillMarket.Stop,
+		},
 	)
 }
 

@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/config"
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/stretchr/testify/require"
 )
@@ -114,6 +115,45 @@ func TestValidateSkillArchiveRejectsNameMismatchAndFileLimit(t *testing.T) {
 	requireSkillArchiveCode(t, err, "FILE_SIZE")
 }
 
+func TestSkillArchiveWarningsIgnoreDocumentationURLs(t *testing.T) {
+	for _, name := range []string{
+		"demo-skill/LICENSE",
+		"demo-skill/LICENSE.txt",
+		"demo-skill/NOTICE.md",
+		"demo-skill/README.md",
+		"demo-skill/references/guide.rst",
+	} {
+		t.Run(name, func(t *testing.T) {
+			warnings := skillArchiveWarnings(name, []byte("See https://example.com/reference for details."), 0o644)
+			for _, warning := range warnings {
+				require.NotEqual(t, "NETWORK_REFERENCE", warning.Code)
+			}
+		})
+	}
+}
+
+func TestSkillArchiveWarningsKeepActionableNetworkSignals(t *testing.T) {
+	tests := []struct {
+		name string
+		data string
+		mode os.FileMode
+	}{
+		{name: "demo-skill/scripts/install.sh", data: "curl https://example.com/install.sh", mode: 0o755},
+		{name: "demo-skill/README.md", data: "Run: wget https://example.com/archive", mode: 0o644},
+		{name: "demo-skill/config.yaml", data: "endpoint: https://example.com/api", mode: 0o644},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			warnings := skillArchiveWarnings(tt.name, []byte(tt.data), tt.mode)
+			codes := make([]string, 0, len(warnings))
+			for _, warning := range warnings {
+				codes = append(codes, warning.Code)
+			}
+			require.Contains(t, codes, "NETWORK_REFERENCE")
+		})
+	}
+}
+
 type skillGateSettingRepo struct {
 	mu     sync.Mutex
 	values map[string]string
@@ -185,7 +225,10 @@ func TestSkillMarketplaceGateFailsClosedCachesAndInvalidates(t *testing.T) {
 		SettingKeySkillMarketplaceEnabled: "true",
 		SettingKeyBackendModeEnabled:      "false",
 	}}
-	service := NewSkillMarketService(nil, repo)
+	settings := NewSettingService(repo, &config.Config{})
+	notifications := 0
+	settings.SetOnUpdateCallback(func() { notifications++ })
+	service := NewSkillMarketService(nil, settings)
 
 	var wait sync.WaitGroup
 	results := make(chan bool, 12)
@@ -206,6 +249,7 @@ func TestSkillMarketplaceGateFailsClosedCachesAndInvalidates(t *testing.T) {
 	config, err := service.UpdateConfig(context.Background(), false)
 	require.NoError(t, err)
 	require.False(t, config.Enabled)
+	require.Equal(t, 1, notifications)
 	require.False(t, service.IsPublicEnabled(context.Background()))
 	require.Equal(t, 2, repo.calls)
 

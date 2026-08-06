@@ -11,7 +11,9 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/server/middleware"
 	"github.com/gin-gonic/gin"
@@ -179,6 +181,48 @@ type mockSettingsProvider struct {
 func (m *mockSettingsProvider) GetPublicSettingsForInjection(ctx context.Context) (any, error) {
 	m.called++
 	return m.settings, m.err
+}
+
+type blockingSettingsProvider struct {
+	mu           sync.Mutex
+	first        any
+	current      any
+	calls        int
+	firstStarted chan struct{}
+	releaseFirst chan struct{}
+}
+
+func (p *blockingSettingsProvider) GetPublicSettingsForInjection(ctx context.Context) (any, error) {
+	p.mu.Lock()
+	p.calls++
+	call := p.calls
+	settings := p.current
+	if call == 1 {
+		settings = p.first
+	}
+	p.mu.Unlock()
+
+	if call == 1 {
+		close(p.firstStarted)
+		select {
+		case <-p.releaseFirst:
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
+	return settings, nil
+}
+
+func (p *blockingSettingsProvider) setCurrent(settings any) {
+	p.mu.Lock()
+	p.current = settings
+	p.mu.Unlock()
+}
+
+func (p *blockingSettingsProvider) callCount() int {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.calls
 }
 
 func TestFrontendServer_InjectSettings(t *testing.T) {
@@ -611,6 +655,89 @@ func TestFrontendServer_InvalidateCache(t *testing.T) {
 
 		server.serveIndexHTML(c2)
 		assert.Equal(t, 2, provider.called)
+	})
+
+	t.Run("old_etag_is_replaced_after_invalidation", func(t *testing.T) {
+		provider := &mockSettingsProvider{
+			settings: map[string]bool{"skill_marketplace_enabled": true},
+		}
+		server, err := NewFrontendServer(provider)
+		require.NoError(t, err)
+
+		request := func(etag string) *httptest.ResponseRecorder {
+			w := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(w)
+			c.Request = httptest.NewRequest(http.MethodGet, "/", nil)
+			if etag != "" {
+				c.Request.Header.Set("If-None-Match", etag)
+			}
+			c.Set(middleware.CSPNonceKey, "nonce")
+			server.serveIndexHTML(c)
+			return w
+		}
+
+		first := request("")
+		oldETag := first.Header().Get("ETag")
+		require.NotEmpty(t, oldETag)
+		require.Contains(t, first.Body.String(), `"skill_marketplace_enabled":true`)
+
+		provider.settings = map[string]bool{"skill_marketplace_enabled": false}
+		server.InvalidateCache()
+		refreshed := request(oldETag)
+
+		assert.Equal(t, http.StatusOK, refreshed.Code)
+		assert.NotEqual(t, oldETag, refreshed.Header().Get("ETag"))
+		assert.Contains(t, refreshed.Body.String(), `"skill_marketplace_enabled":false`)
+	})
+
+	t.Run("invalidation_rejects_an_inflight_stale_render", func(t *testing.T) {
+		provider := &blockingSettingsProvider{
+			first:        map[string]bool{"skill_marketplace_enabled": true},
+			current:      map[string]bool{"skill_marketplace_enabled": true},
+			firstStarted: make(chan struct{}),
+			releaseFirst: make(chan struct{}),
+		}
+		server, err := NewFrontendServer(provider)
+		require.NoError(t, err)
+
+		firstDone := make(chan *httptest.ResponseRecorder, 1)
+		go func() {
+			w := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(w)
+			c.Request = httptest.NewRequest(http.MethodGet, "/", nil)
+			c.Set(middleware.CSPNonceKey, "nonce-old")
+			server.serveIndexHTML(c)
+			firstDone <- w
+		}()
+
+		select {
+		case <-provider.firstStarted:
+		case <-time.After(time.Second):
+			t.Fatal("first settings read did not start")
+		}
+		provider.setCurrent(map[string]bool{"skill_marketplace_enabled": false})
+		server.InvalidateCache()
+		close(provider.releaseFirst)
+
+		var first *httptest.ResponseRecorder
+		select {
+		case first = <-firstDone:
+		case <-time.After(time.Second):
+			t.Fatal("first settings read did not finish")
+		}
+		require.Contains(t, first.Body.String(), `"skill_marketplace_enabled":true`)
+		assert.Empty(t, first.Header().Get("ETag"))
+		assert.Nil(t, server.cache.GetForKey(homeHTMLCacheKey))
+
+		second := httptest.NewRecorder()
+		secondContext, _ := gin.CreateTestContext(second)
+		secondContext.Request = httptest.NewRequest(http.MethodGet, "/", nil)
+		secondContext.Set(middleware.CSPNonceKey, "nonce-new")
+		server.serveIndexHTML(secondContext)
+
+		assert.Contains(t, second.Body.String(), `"skill_marketplace_enabled":false`)
+		assert.NotEmpty(t, second.Header().Get("ETag"))
+		assert.Equal(t, 2, provider.callCount())
 	})
 
 	t.Run("handles_nil_server", func(t *testing.T) {
@@ -1121,6 +1248,23 @@ func TestHTMLCache(t *testing.T) {
 		assert.Nil(t, cache.Get())
 	})
 
+	t.Run("invalidate_rejects_write_from_an_older_generation", func(t *testing.T) {
+		cache := NewHTMLCache()
+		cache.SetBaseHTML([]byte("<html></html>"))
+		generation := cache.Generation()
+
+		cache.Invalidate()
+		stored := cache.SetForKeyIfGeneration(
+			homeHTMLCacheKey,
+			[]byte("<html>stale</html>"),
+			[]byte(`{"skill_marketplace_enabled":true}`),
+			generation,
+		)
+
+		assert.False(t, stored)
+		assert.Nil(t, cache.GetForKey(homeHTMLCacheKey))
+	})
+
 	t.Run("etag_changes_with_settings", func(t *testing.T) {
 		cache := NewHTMLCache()
 		cache.SetBaseHTML([]byte("<html></html>"))
@@ -1165,6 +1309,18 @@ func TestHTMLCache(t *testing.T) {
 		assert.Equal(t, []byte("private"), cache.GetForKey(noIndexHTMLCacheKey).Content)
 		assert.NotEqual(t, cache.GetForKey(homeHTMLCacheKey).ETag, cache.GetForKey(modelCatalogHTMLCacheKey).ETag)
 		assert.NotEqual(t, cache.GetForKey(homeHTMLCacheKey).ETag, cache.GetForKey(noIndexHTMLCacheKey).ETag)
+	})
+
+	t.Run("expires_injected_settings_after_bounded_ttl", func(t *testing.T) {
+		cache := NewHTMLCache()
+		cache.SetBaseHTML([]byte("<html></html>"))
+		now := time.Date(2026, time.August, 5, 0, 0, 0, 0, time.UTC)
+		cache.now = func() time.Time { return now }
+		cache.Set([]byte("<html>enabled</html>"), []byte(`{"skill_marketplace_enabled":true}`))
+
+		require.NotNil(t, cache.Get())
+		now = now.Add(injectedHTMLCacheTTL)
+		assert.Nil(t, cache.Get())
 	})
 }
 

@@ -64,6 +64,12 @@ var scriptExtensions = map[string]struct{}{
 	".rb": {}, ".sh": {}, ".ts": {}, ".zsh": {},
 }
 
+var networkCommandPattern = regexp.MustCompile(`(?i)(^|[[:space:];|&])(curl|wget)([[:space:]]|$)`)
+
+var documentationExtensions = map[string]struct{}{
+	".adoc": {}, ".markdown": {}, ".md": {}, ".rst": {}, ".text": {}, ".txt": {},
+}
+
 func ValidateSkillArchive(raw []byte, expectedName string) (*ValidatedSkillArchive, error) {
 	if len(raw) == 0 || int64(len(raw)) > SkillArchiveMaxBytes {
 		return nil, invalidSkillArchive("ARCHIVE_SIZE", "ZIP must be between 1 byte and 5 MiB", "")
@@ -304,8 +310,9 @@ func skillArchiveWarnings(name string, data []byte, mode os.FileMode) []SkillVal
 		warnings = append(warnings, SkillValidationIssue{Code: "EXECUTABLE_CONTENT", Message: "package contains executable or script content; installation never executes it automatically", Path: name})
 	}
 	lower := bytes.ToLower(data)
-	if bytes.Contains(lower, []byte("http://")) || bytes.Contains(lower, []byte("https://")) ||
-		bytes.Contains(lower, []byte("curl ")) || bytes.Contains(lower, []byte("wget ")) {
+	hasRemoteURL := bytes.Contains(lower, []byte("http://")) || bytes.Contains(lower, []byte("https://"))
+	hasNetworkCommand := networkCommandPattern.Match(data)
+	if hasNetworkCommand || (hasRemoteURL && !isSkillArchiveDocumentation(name)) {
 		warnings = append(warnings, SkillValidationIssue{Code: "NETWORK_REFERENCE", Message: "file references network access or remote content", Path: name})
 	}
 	if bytes.Contains(data, []byte("$HOME")) || bytes.Contains(data, []byte("${HOME}")) ||
@@ -314,6 +321,16 @@ func skillArchiveWarnings(name string, data []byte, mode os.FileMode) []SkillVal
 		warnings = append(warnings, SkillValidationIssue{Code: "ENVIRONMENT_ACCESS", Message: "file references environment variables or user-local paths", Path: name})
 	}
 	return warnings
+}
+
+func isSkillArchiveDocumentation(name string) bool {
+	base := strings.ToLower(path.Base(name))
+	trimmedBase := strings.TrimSuffix(base, path.Ext(base))
+	if trimmedBase == "license" || trimmedBase == "licence" || trimmedBase == "notice" {
+		return true
+	}
+	_, found := documentationExtensions[strings.ToLower(path.Ext(base))]
+	return found
 }
 
 func parseSkillManifest(skillMD []byte) (string, string, string, error) {
