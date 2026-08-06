@@ -6,11 +6,10 @@
       @click="toggle"
       :disabled="disabled"
       :aria-expanded="isOpen"
-      :aria-haspopup="true"
+      aria-haspopup="listbox"
       :aria-label="ariaLabelText"
-      :aria-controls="`${instanceId}-listbox`"
+      :aria-controls="isOpen ? listboxId : undefined"
       :aria-invalid="error ? 'true' : undefined"
-      :aria-activedescendant="activeDescendantId"
       :class="[
         'select-trigger',
         isOpen && 'select-trigger-open',
@@ -51,10 +50,8 @@
           ref="dropdownRef"
           class="select-portal select-dropdown-portal"
           :class="[instanceId]"
-          :id="`${instanceId}-listbox`"
           data-ui-portal="select"
           :style="dropdownStyle"
-          role="listbox"
           @click.stop
           @mousedown.stop
           @keydown="onDropdownKeyDown"
@@ -67,13 +64,25 @@
               v-model="searchQuery"
               type="text"
               :placeholder="searchPlaceholderText"
+              :aria-label="searchPlaceholderText"
+              :aria-controls="listboxId"
+              :aria-activedescendant="activeDescendantId"
+              aria-autocomplete="list"
               class="select-search-input"
               @click.stop
             />
           </div>
 
           <!-- Options list -->
-          <div class="select-options" ref="optionsListRef">
+          <div
+            :id="listboxId"
+            ref="optionsListRef"
+            class="select-options"
+            role="listbox"
+            :aria-label="ariaLabelText"
+            :aria-activedescendant="!isSearchable ? activeDescendantId : undefined"
+            :tabindex="!isSearchable ? -1 : undefined"
+          >
             <div
               v-for="(option, index) in filteredOptions"
               :key="`${typeof getOptionValue(option)}:${String(getOptionValue(option) ?? '')}`"
@@ -109,10 +118,11 @@
               </slot>
             </div>
 
-            <!-- Empty state -->
-            <div v-if="filteredOptions.length === 0" class="select-empty">
-              {{ emptyTextDisplay }}
-            </div>
+          </div>
+
+          <!-- Empty state stays outside the listbox so its children remain options only. -->
+          <div v-if="filteredOptions.length === 0" class="select-empty" role="status">
+            {{ emptyTextDisplay }}
           </div>
         </div>
       </Transition>
@@ -129,6 +139,7 @@ const { t } = useI18n()
 
 // Instance ID for unique click-outside detection
 const instanceId = `select-${Math.random().toString(36).substring(2, 9)}`
+const listboxId = `${instanceId}-listbox`
 
 export interface SelectOption {
   value: string | number | boolean | null
@@ -264,7 +275,9 @@ const hasValue = computed(
 )
 
 const activeDescendantId = computed(() =>
-  isOpen.value && focusedIndex.value >= 0
+  isOpen.value &&
+  focusedIndex.value >= 0 &&
+  focusedIndex.value < filteredOptions.value.length
     ? `${instanceId}-option-${focusedIndex.value}`
     : undefined
 )
@@ -363,9 +376,13 @@ watch(isOpen, (open) => {
         : initialIdx
     }
 
-    if (isSearchable.value) {
-      nextTick(() => searchInputRef.value?.focus())
-    }
+    nextTick(() => {
+      if (isSearchable.value) {
+        searchInputRef.value?.focus()
+      } else {
+        optionsListRef.value?.focus()
+      }
+    })
     // Add scroll listener to update position
     window.addEventListener('scroll', updateTriggerRect, { capture: true, passive: true })
     window.addEventListener('resize', calculateDropdownPosition)
@@ -462,6 +479,9 @@ const onDropdownKeyDown = (e: KeyboardEvent) => {
       break
     case 'Tab':
       isOpen.value = false
+      // The dropdown is teleported to <body>; hand focus back synchronously so the
+      // browser continues its native Tab order from the trigger, not the portal.
+      triggerRef.value?.focus({ preventScroll: true })
       break
   }
 }

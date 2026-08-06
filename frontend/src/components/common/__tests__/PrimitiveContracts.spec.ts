@@ -53,7 +53,7 @@ describe('Snow Clay primitive contracts', () => {
     expect(wrapper.get('#announcement-copy-message').text()).toBe('支持多行内容')
   })
 
-  it('exposes localized select labeling and listbox ownership', () => {
+  it('exposes localized select labeling and listbox ownership', async () => {
     const wrapper = mount(Select, {
       props: {
         modelValue: null,
@@ -67,7 +67,60 @@ describe('Snow Clay primitive contracts', () => {
 
     const trigger = wrapper.get('.select-trigger')
     expect(trigger.attributes('aria-label')).toBe('选择平台')
-    expect(trigger.attributes('aria-controls')).toMatch(/^select-.+-listbox$/)
+    expect(trigger.attributes('aria-haspopup')).toBe('listbox')
+    expect(trigger.attributes('aria-expanded')).toBe('false')
+    expect(trigger.attributes('aria-controls')).toBeUndefined()
+    expect(trigger.attributes('aria-activedescendant')).toBeUndefined()
+
+    await trigger.trigger('click')
+    await wrapper.vm.$nextTick()
+
+    const listbox = wrapper.get('[role="listbox"]')
+    expect(trigger.attributes('aria-expanded')).toBe('true')
+    expect(trigger.attributes('aria-controls')).toBe(listbox.attributes('id'))
+    expect(listbox.attributes('aria-label')).toBe('选择平台')
+    expect(listbox.findAll(':scope > [role="option"]')).toHaveLength(1)
+    expect(
+      Array.from(listbox.element.children).every((child) => child.getAttribute('role') === 'option')
+    ).toBe(true)
+  })
+
+  it('keeps a searchable select input named and outside the listbox role', async () => {
+    const wrapper = mount(Select, {
+      props: {
+        modelValue: null,
+        options: [
+          { value: 'gpt', label: 'GPT' },
+          { value: 'gemini', label: 'Gemini' }
+        ],
+        searchable: true,
+        searchPlaceholder: '搜索平台'
+      },
+      attachTo: document.body,
+      global: {
+        stubs: { Teleport: true }
+      }
+    })
+
+    const trigger = wrapper.get('.select-trigger')
+    await trigger.trigger('click')
+    await wrapper.vm.$nextTick()
+
+    const searchInput = wrapper.get('.select-search-input')
+    const listbox = wrapper.get('[role="listbox"]')
+    expect(searchInput.attributes('aria-label')).toBe('搜索平台')
+    expect(searchInput.attributes('aria-controls')).toBe(listbox.attributes('id'))
+    expect(searchInput.attributes('aria-activedescendant')).toMatch(/-option-0$/)
+    expect(trigger.attributes('aria-activedescendant')).toBeUndefined()
+    expect(listbox.element.contains(searchInput.element)).toBe(false)
+    expect(document.activeElement).toBe(searchInput.element)
+
+    await searchInput.setValue('不存在的平台')
+    expect(searchInput.attributes('aria-label')).toBe('搜索平台')
+    expect(searchInput.attributes('aria-activedescendant')).toBeUndefined()
+    expect(wrapper.get('[role="status"]').element.parentElement).toBe(listbox.element.parentElement)
+
+    wrapper.unmount()
   })
 
   it('supports keyboard selection when the select has no search field', async () => {
@@ -80,6 +133,7 @@ describe('Snow Clay primitive contracts', () => {
         ],
         searchable: false
       },
+      attachTo: document.body,
       global: {
         stubs: { Teleport: true }
       }
@@ -89,10 +143,70 @@ describe('Snow Clay primitive contracts', () => {
     await trigger.trigger('keydown', { key: 'ArrowDown' })
     await wrapper.vm.$nextTick()
     expect(trigger.attributes('aria-expanded')).toBe('true')
-    expect(trigger.attributes('aria-activedescendant')).toMatch(/-option-0$/)
+    expect(trigger.attributes('aria-activedescendant')).toBeUndefined()
 
-    await trigger.trigger('keydown', { key: 'Enter' })
+    const listbox = wrapper.get('[role="listbox"]')
+    expect(listbox.attributes('aria-activedescendant')).toMatch(/-option-0$/)
+    expect(listbox.attributes('tabindex')).toBe('-1')
+    expect(document.activeElement).toBe(listbox.element)
+
+    await listbox.trigger('keydown', { key: 'Enter' })
     expect(wrapper.emitted('update:modelValue')).toEqual([['gpt']])
+    expect(trigger.attributes('aria-expanded')).toBe('false')
+    expect(trigger.attributes('aria-controls')).toBeUndefined()
+
+    wrapper.unmount()
+  })
+
+  it.each([
+    ['non-searchable', false],
+    ['searchable', true]
+  ])('restores the trigger as the native Tab-order anchor for a %s select', async (_label, searchable) => {
+    const wrapper = mount(Select, {
+      props: {
+        modelValue: null,
+        options: [
+          { value: 'gpt', label: 'GPT' },
+          { value: 'gemini', label: 'Gemini' }
+        ],
+        searchable
+      },
+      attachTo: document.body
+    })
+
+    const trigger = wrapper.get('.select-trigger')
+
+    for (const shiftKey of [false, true]) {
+      await trigger.trigger('click')
+      await wrapper.vm.$nextTick()
+
+      const listboxId = trigger.attributes('aria-controls')
+      expect(listboxId).toBeTruthy()
+      const listbox = listboxId ? document.getElementById(listboxId) : null
+      const focusTarget = searchable
+        ? listbox?.parentElement?.querySelector<HTMLInputElement>('.select-search-input')
+        : listbox
+
+      expect(focusTarget).not.toBeNull()
+      expect(document.activeElement).toBe(focusTarget)
+
+      const tabEvent = new KeyboardEvent('keydown', {
+        key: 'Tab',
+        shiftKey,
+        bubbles: true,
+        cancelable: true
+      })
+      focusTarget?.dispatchEvent(tabEvent)
+
+      expect(tabEvent.defaultPrevented).toBe(false)
+      expect(document.activeElement).toBe(trigger.element)
+
+      await wrapper.vm.$nextTick()
+      expect(trigger.attributes('aria-expanded')).toBe('false')
+      expect(trigger.attributes('aria-controls')).toBeUndefined()
+    }
+
+    wrapper.unmount()
   })
 
   it('uses semantic toggle classes and blocks disabled changes', async () => {
