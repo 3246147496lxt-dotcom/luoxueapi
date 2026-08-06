@@ -5,7 +5,6 @@ import (
 	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
-	"fmt"
 	"io"
 	"os"
 	"path"
@@ -372,7 +371,7 @@ func buildDeterministicSkillZIP(contents []validatedArchiveContent) ([]byte, err
 	fixedTime := time.Date(1980, time.January, 1, 0, 0, 0, 0, time.UTC)
 	for _, content := range contents {
 		header := &zip.FileHeader{Name: content.name, Method: zip.Deflate}
-		header.SetModTime(fixedTime)
+		header.Modified = fixedTime
 		if content.executable {
 			header.SetMode(0o755)
 		} else {
@@ -401,11 +400,4 @@ func invalidSkillArchive(code, message, filePath string) error {
 		Warnings: []SkillValidationIssue{},
 	}
 	return skillArchiveError(report)
-}
-
-func archiveDebugString(result *ValidatedSkillArchive) string {
-	if result == nil {
-		return "<nil>"
-	}
-	return fmt.Sprintf("%s (%d files, %d bytes)", result.ManifestName, len(result.FileManifest), result.UnpackedSize)
 }

@@ -742,20 +742,6 @@ func (s *SkillMarketService) RecordDownloadBestEffort(ctx context.Context, artif
 	}
 }
 
-func (s *SkillMarketService) hydrateCurrent(ctx context.Context, skill *Skill) error {
-	if skill.CurrentVersionID == nil {
-		skill.CurrentVersion = nil
-		return nil
-	}
-	version, err := s.repo.GetVersionByID(ctx, skill.ID, *skill.CurrentVersionID)
-	if err != nil {
-		return fmt.Errorf("load skill current version: %w", err)
-	}
-	setSkillVersionStatus(version, skill.CurrentVersionID)
-	skill.CurrentVersion = version
-	return nil
-}
-
 func (s *SkillMarketService) hydratePublicCurrent(ctx context.Context, skill *Skill) error {
 	if skill.CurrentVersionID == nil {
 		skill.CurrentVersion = nil
