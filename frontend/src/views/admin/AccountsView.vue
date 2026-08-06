@@ -2884,6 +2884,8 @@ onUnmounted(() => {
 }
 
 .account-workbench__table-surface :deep(.data-table--desktop) {
+  /* Keep the second sticky column aligned with the percentage-based select column. */
+  --select-col-width: 5%;
   min-height: 0;
   flex: 1;
   overflow-x: hidden;
@@ -2965,6 +2967,8 @@ onUnmounted(() => {
 }
 
 .account-workbench__table-surface--expanded :deep(.data-table--desktop) {
+  /* Expanded tables switch the select column to a fixed width. */
+  --select-col-width: 40px;
   overflow-x: auto;
 }
 
@@ -2974,7 +2978,9 @@ onUnmounted(() => {
 }
 
 .account-workbench__table-surface--expanded :deep(.account-table-col--select) {
+  width: 40px;
   min-width: 40px;
+  max-width: 40px;
 }
 
 .account-workbench__table-surface--expanded :deep(.account-table-col--identity),

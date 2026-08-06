@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import { flushPromises, mount } from '@vue/test-utils'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import AccountsView from '../AccountsView.vue'
@@ -6,6 +8,18 @@ import {
   invalidateAccountUsageHealthSnapshot,
   publishAccountUsage
 } from '@/composables/useAccountUsageHealth'
+
+const accountsViewSource = readFileSync(
+  resolve(process.cwd(), 'src/views/admin/AccountsView.vue'),
+  'utf8'
+)
+
+function cssRule(selector: string): string {
+  const selectorStart = accountsViewSource.indexOf(selector)
+  const blockStart = accountsViewSource.indexOf('{', selectorStart)
+  const blockEnd = accountsViewSource.indexOf('}', blockStart)
+  return accountsViewSource.slice(selectorStart, blockEnd + 1)
+}
 
 const {
   listAccounts,
@@ -276,6 +290,28 @@ function setViewport(width: number) {
 }
 
 describe('admin AccountsView workbench', () => {
+  it('keeps the sticky identity offset aligned with the select column width', () => {
+    const compactTableRule = cssRule(
+      '.account-workbench__table-surface :deep(.data-table--desktop)'
+    )
+    const compactSelectRule = cssRule(
+      '.account-workbench__table-surface :deep(.account-table-col--select)'
+    )
+    const expandedTableRule = cssRule(
+      '.account-workbench__table-surface--expanded :deep(.data-table--desktop)'
+    )
+    const expandedSelectRule = cssRule(
+      '.account-workbench__table-surface--expanded :deep(.account-table-col--select)'
+    )
+
+    expect(compactTableRule).toContain('--select-col-width: 5%;')
+    expect(compactSelectRule).toContain('width: 5%;')
+    expect(expandedTableRule).toContain('--select-col-width: 40px;')
+    expect(expandedSelectRule).toContain('width: 40px;')
+    expect(expandedSelectRule).toContain('min-width: 40px;')
+    expect(expandedSelectRule).toContain('max-width: 40px;')
+  })
+
   beforeEach(() => {
     localStorage.clear()
     Object.defineProperty(window, 'innerWidth', {
