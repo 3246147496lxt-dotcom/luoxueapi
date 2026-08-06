@@ -406,6 +406,21 @@ export const useAppStore = defineStore('app', () => {
   }
 
   /**
+   * Refresh public settings after a successful settings mutation.
+   *
+   * A request that started before the mutation may still be in flight. Wait
+   * for it to settle, then always dispatch a new request so callers cannot
+   * mistake the pre-mutation snapshot for the mutation result.
+   */
+  async function refreshPublicSettingsAfterMutation(): Promise<PublicSettings | null> {
+    const requestBeforeMutationRefresh = publicSettingsRequest
+    if (requestBeforeMutationRefresh) {
+      await requestBeforeMutationRefresh
+    }
+    return fetchPublicSettings(true)
+  }
+
+  /**
    * Clear public settings cache
    */
   function clearPublicSettingsCache(): void {
@@ -482,6 +497,7 @@ export const useAppStore = defineStore('app', () => {
 
     // Public settings actions
     fetchPublicSettings,
+    refreshPublicSettingsAfterMutation,
     clearPublicSettingsCache,
     initFromInjectedConfig
   }

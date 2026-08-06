@@ -25,6 +25,7 @@ const appStore = vi.hoisted(() => ({
   cachedPublicSettings: null as null | {
     payment_enabled?: boolean
     risk_control_enabled?: boolean
+    skill_marketplace_enabled?: boolean
     custom_menu_items?: []
   },
   fetchPublicSettings: vi.fn(),
@@ -162,6 +163,62 @@ describe('feature route guard', () => {
     await navigation
     expect(next).toHaveBeenCalledOnce()
     expect(next).toHaveBeenCalledWith()
+  })
+
+  it('always refreshes the Skill marketplace flag before opening a public Skill route', async () => {
+    appStore.publicSettingsLoaded = true
+    appStore.cachedPublicSettings = { skill_marketplace_enabled: true }
+    appStore.fetchPublicSettings.mockImplementation(async () => {
+      const settings = { skill_marketplace_enabled: false }
+      appStore.cachedPublicSettings = settings
+      return settings
+    })
+
+    const { navigation, next } = runGuard(
+      { requiresAuth: false, requiresSkillMarketplace: true },
+      '/skills/frontend-design',
+    )
+    await navigation
+
+    expect(appStore.fetchPublicSettings).toHaveBeenCalledOnce()
+    expect(appStore.fetchPublicSettings).toHaveBeenCalledWith(true)
+    expect(next).toHaveBeenCalledWith('/home')
+  })
+
+  it('opens a public Skill route after the refreshed flag is enabled', async () => {
+    appStore.publicSettingsLoaded = true
+    appStore.cachedPublicSettings = { skill_marketplace_enabled: false }
+    appStore.fetchPublicSettings.mockImplementation(async () => {
+      const settings = { skill_marketplace_enabled: true }
+      appStore.cachedPublicSettings = settings
+      return settings
+    })
+
+    const { navigation, next } = runGuard(
+      { requiresAuth: false, requiresSkillMarketplace: true },
+      '/skills',
+    )
+    await navigation
+
+    expect(appStore.fetchPublicSettings).toHaveBeenCalledOnce()
+    expect(appStore.fetchPublicSettings).toHaveBeenCalledWith(true)
+    expect(next).toHaveBeenCalledOnce()
+    expect(next).toHaveBeenCalledWith()
+  })
+
+  it('fails closed when the Skill marketplace flag cannot be refreshed', async () => {
+    appStore.publicSettingsLoaded = true
+    appStore.cachedPublicSettings = { skill_marketplace_enabled: true }
+    appStore.fetchPublicSettings.mockResolvedValue(null)
+
+    const { navigation, next } = runGuard(
+      { requiresAuth: false, requiresSkillMarketplace: true },
+      '/skills',
+    )
+    await navigation
+
+    expect(next).toHaveBeenCalledOnce()
+    expect(next).toHaveBeenCalledWith('/home')
   })
 
   it('waits for public settings before opening a fresh subscription plan bridge', async () => {

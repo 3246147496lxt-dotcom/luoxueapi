@@ -1123,15 +1123,9 @@ router.beforeEach(async (to, _from, next) => {
     }
 
     if (to.meta.requiresSkillMarketplace) {
-      if (!appStore.publicSettingsLoaded) {
-        try {
-          await appStore.fetchPublicSettings()
-        } catch (error) {
-          console.warn('Failed to load Skill marketplace setting', error)
-        }
-      }
+      const refreshedSettings = await appStore.fetchPublicSettings(true)
       if (
-        appStore.cachedPublicSettings?.skill_marketplace_enabled !== true
+        refreshedSettings?.skill_marketplace_enabled !== true
         || appStore.backendModeEnabled
       ) {
         next('/home')

@@ -11,9 +11,9 @@ describe('public Skill API contract', () => {
       slug: 'api-docs',
       display_name: 'API Docs',
       tags: ['docs', null, 'api'],
-      repository_url: 'https://github.com/example/api-docs',
-      repository_name: 'example/api-docs',
-      github_stars: 1240,
+      source_url: 'https://github.com/example/api-docs',
+      source_repository: 'example/api-docs',
+      repository_stars: 1240,
       current_version: {
         version: '1.2.0',
         released_at: '2026-08-03T10:00:00Z',
@@ -43,6 +43,18 @@ describe('public Skill API contract', () => {
       source_repository: 'example/api-docs',
       repository_stars: 1240,
     })
+  })
+
+  it('keeps zero repository stars and normalizes missing or invalid values to null', () => {
+    expect(normalizePublicSkill({
+      slug: 'zero-stars',
+      repository_stars: 0,
+    }).repository_stars).toBe(0)
+    expect(normalizePublicSkill({ slug: 'missing-stars' }).repository_stars).toBeNull()
+    expect(normalizePublicSkill({
+      slug: 'invalid-stars',
+      repository_stars: -1,
+    }).repository_stars).toBeNull()
   })
 
   it('normalizes string categories for task filters', () => {

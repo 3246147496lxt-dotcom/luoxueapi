@@ -15,24 +15,18 @@
     </header>
 
     <div class="skill-install__card">
-      <div class="skill-install__modes" role="tablist" :aria-label="t('skills.install.methodLabel')">
+      <div class="skill-install__modes" role="group" :aria-label="t('skills.install.methodLabel')">
         <button
-          id="skill-install-command-tab"
           type="button"
-          role="tab"
-          :aria-selected="mode === 'command'"
-          :aria-controls="`${skill.slug}-install-payload`"
+          :aria-pressed="mode === 'command'"
           :class="{ 'is-active': mode === 'command' }"
           @click="mode = 'command'"
         >
           {{ t('skills.install.command') }}
         </button>
         <button
-          id="skill-install-codex-tab"
           type="button"
-          role="tab"
-          :aria-selected="mode === 'codex'"
-          :aria-controls="`${skill.slug}-install-payload`"
+          :aria-pressed="mode === 'codex'"
           :class="{ 'is-active': mode === 'codex' }"
           @click="mode = 'codex'"
         >
@@ -43,8 +37,6 @@
       <div
         :id="`${skill.slug}-install-payload`"
         class="skill-install__payload"
-        role="tabpanel"
-        :aria-labelledby="mode === 'command' ? 'skill-install-command-tab' : 'skill-install-codex-tab'"
       >
         <code>{{ activeVersion ? activePayload : t('skills.install.versionUnavailable') }}</code>
         <button
@@ -167,9 +159,7 @@ const installCommand = computed(() => {
 const codexPrompt = computed(() => t('skills.install.codexPrompt', {
   name: props.skill.display_name,
   slug: props.skill.slug,
-  version: activeVersion.value,
   url: absoluteDownloadURL.value,
-  sha256: props.sha256 || t('skills.install.shaUnavailable'),
   path: installPath.value,
   parent: installParent.value,
 }))
@@ -260,11 +250,11 @@ onBeforeUnmount(() => {
 
 .skill-install__card {
   min-width: 0;
-  border: 1px solid transparent;
-  border-radius: 17px;
+  border: 1px solid color-mix(in srgb, var(--lx-clay-border) 76%, transparent);
+  border-radius: 16px;
   padding: 26px;
   background: var(--lx-clay-surface-elevated);
-  box-shadow: var(--lx-clay-shadow-form);
+  box-shadow: none;
 }
 
 .skill-install__modes {

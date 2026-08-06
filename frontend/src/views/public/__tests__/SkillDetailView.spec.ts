@@ -114,7 +114,7 @@ describe('SkillDetailView', () => {
     clipboardState.copy.mockClear()
   })
 
-  it('shows risk, validation and exact package evidence before installation', async () => {
+  it('keeps the reading flow focused on install, overview, supporting info, and SKILL.md', async () => {
     const wrapper = mountView()
     await flushPromises()
 
@@ -125,7 +125,6 @@ describe('SkillDetailView', () => {
 
     const orderedBlocks = wrapper.find('.skill-detail-layout').element.children
     expect(Array.from(orderedBlocks).map((element) => element.className)).toEqual([
-      'skill-detail-review',
       expect.stringContaining('skill-detail-install'),
       'skill-detail-overview',
       'skill-detail-info',
@@ -133,14 +132,16 @@ describe('SkillDetailView', () => {
     ])
 
     expect(wrapper.get('.skill-detail-overview__card').text()).toContain('这是 Anthropic frontend-design 指引 Skill。')
-    const review = wrapper.get('.skill-detail-review')
-    expect(review.find('#skill-risk-title').exists()).toBe(true)
-    expect(review.text()).toContain('risk-note-copy')
-    expect(review.text()).toContain('risk-warning-copy')
-    expect(review.text()).toContain('LICENSE.txt')
-    expect(review.text()).toContain('v1.0.0')
-    expect(review.text()).toContain('a'.repeat(64))
-    expect(review.text()).toContain('frontend-design/SKILL.md')
+    expect(wrapper.find('.skill-detail-review').exists()).toBe(false)
+    expect(wrapper.find('.skill-detail-closing').exists()).toBe(false)
+    expect(wrapper.find('#skill-risk-title').exists()).toBe(false)
+    expect(wrapper.text()).not.toContain('risk-note-copy')
+    expect(wrapper.text()).not.toContain('risk-warning-copy')
+    expect(wrapper.text()).not.toContain('LICENSE.txt')
+    expect(wrapper.text()).not.toContain('a'.repeat(64))
+    expect(wrapper.text()).not.toContain('frontend-design/SKILL.md')
+    expect(wrapper.get('.skill-install-stub').attributes('data-version')).toBe('1.0.0')
+    expect(wrapper.get('.skill-install-stub').attributes('data-sha')).toBe('a'.repeat(64))
   })
 
   it('shows source metadata only when the API supplies it', async () => {
@@ -157,30 +158,49 @@ describe('SkillDetailView', () => {
     expect(sourceLink.attributes('target')).toBe('_blank')
     expect(sourceLink.attributes('rel')).toContain('noopener')
     expect(sourceLink.text()).toContain('anthropics/skills')
+    expect(sourceLink.text()).toContain('★ 166.1k')
     expect(sourceLink.text()).not.toContain('1 次下载')
     expect(wrapper.findAll('.skill-detail-info')).toHaveLength(1)
   })
 
-  it('switches the reviewed and installable immutable version together', async () => {
+  it('uses the current published version for installation and SKILL.md', async () => {
     const current = version()
     const previous: PublicSkillVersion = {
       ...version(),
       version: '0.9.0',
       sha256: 'c'.repeat(64),
+      skill_md: '# Previous guidance',
       created_at: '2026-07-01T00:00:00Z',
     }
     api.getSkill.mockResolvedValue(skill({
-      current_version: current,
+      current_version: { ...current, skill_md: '' },
       versions: [current, previous],
     }))
     const wrapper = mountView()
     await flushPromises()
 
-    await wrapper.get('.skill-detail-review__heading select').setValue('0.9.0')
+    expect(wrapper.find('select').exists()).toBe(false)
+    expect(wrapper.get('.skill-install-stub').attributes('data-version')).toBe('1.0.0')
+    expect(wrapper.get('.skill-install-stub').attributes('data-sha')).toBe('a'.repeat(64))
+    expect(wrapper.get('.skill-detail-source__body').text()).toContain('# Frontend Design')
+    expect(wrapper.get('.skill-detail-source__body').text()).not.toContain('Previous guidance')
+  })
 
-    expect(wrapper.get('.skill-detail-review__checksum').text()).toContain('c'.repeat(64))
-    expect(wrapper.get('.skill-install-stub').attributes('data-version')).toBe('0.9.0')
-    expect(wrapper.get('.skill-install-stub').attributes('data-sha')).toBe('c'.repeat(64))
+  it.each([
+    { stars: null, visible: false, label: 'null' },
+    { stars: 0, visible: true, label: 'zero' },
+  ])('renders a repository star count correctly when it is $label', async ({ stars, visible }) => {
+    api.getSkill.mockResolvedValue(skill({
+      source_url: 'https://github.com/anthropics/skills/tree/main/skills/frontend-design',
+      source_repository: 'anthropics/skills',
+      repository_stars: stars,
+    }))
+    const wrapper = mountView()
+    await flushPromises()
+
+    const starCount = wrapper.find('.skill-detail-info__source small')
+    expect(starCount.exists()).toBe(visible)
+    if (visible) expect(starCount.text()).toBe('★ 0')
   })
 
   it('copies the complete SKILL.md while keeping the reading view concise', async () => {
@@ -202,5 +222,17 @@ describe('SkillDetailView', () => {
 
     expect(wrapper.find('.skill-detail-info__source').exists()).toBe(false)
     expect(wrapper.get('.skill-detail-info__category').text()).toContain('design-ui')
+  })
+
+  it('does not render a non-GitHub HTTPS URL as GitHub provenance', async () => {
+    api.getSkill.mockResolvedValue(skill({
+      source_url: 'https://example.com/anthropics/skills',
+      source_repository: 'anthropics/skills',
+      repository_stars: 12,
+    }))
+    const wrapper = mountView()
+    await flushPromises()
+
+    expect(wrapper.find('.skill-detail-info__source').exists()).toBe(false)
   })
 })

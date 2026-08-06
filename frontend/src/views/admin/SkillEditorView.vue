@@ -206,6 +206,20 @@
                   :placeholder="t('admin.skills.editor.fields.iconPlaceholder')"
                 />
               </div>
+              <div class="skill-editor-fields__wide">
+                <label for="skill-source-url" class="input-label">
+                  {{ t('admin.skills.editor.fields.sourceUrl') }}
+                </label>
+                <input
+                  id="skill-source-url"
+                  v-model="draft.source_url"
+                  type="url"
+                  class="input"
+                  :disabled="isArchived"
+                  :placeholder="t('admin.skills.editor.fields.sourceUrlPlaceholder')"
+                />
+                <p class="input-hint">{{ t('admin.skills.editor.fields.sourceUrlHint') }}</p>
+              </div>
               <div class="skill-editor-toggle-row skill-editor-fields__wide">
                 <div>
                   <label class="input-label">{{ t('admin.skills.editor.fields.featured') }}</label>
@@ -384,62 +398,6 @@
                 />
                 <p class="input-hint">{{ t('admin.skills.editor.fields.tagsHint') }}</p>
               </div>
-              <div class="skill-editor-examples">
-                <div class="skill-editor-examples__heading">
-                  <label class="input-label">{{ t('admin.skills.editor.fields.examples') }}</label>
-                  <button
-                    type="button"
-                    :disabled="isArchived"
-                    @click="addExample"
-                  >
-                    <Icon name="plus" size="sm" aria-hidden="true" />
-                    {{ t('admin.skills.editor.fields.addExample') }}
-                  </button>
-                </div>
-                <div v-if="draft.example_prompts.length" class="skill-editor-example-list">
-                  <div v-for="(_, index) in draft.example_prompts" :key="index">
-                    <Icon name="chat" size="sm" aria-hidden="true" />
-                    <textarea
-                      v-model="draft.example_prompts[index]"
-                      class="input"
-                      rows="2"
-                      :disabled="isArchived"
-                      :placeholder="t('admin.skills.editor.fields.examplePlaceholder')"
-                    ></textarea>
-                    <button
-                      type="button"
-                      :title="t('admin.skills.editor.fields.removeExample')"
-                      :disabled="isArchived"
-                      @click="removeExample(index)"
-                    >
-                      <Icon name="trash" size="sm" aria-hidden="true" />
-                    </button>
-                  </div>
-                </div>
-                <button
-                  v-else
-                  type="button"
-                  class="skill-editor-add-first-example"
-                  :disabled="isArchived"
-                  @click="addExample"
-                >
-                  <Icon name="plus" size="sm" aria-hidden="true" />
-                  {{ t('admin.skills.editor.fields.addExample') }}
-                </button>
-              </div>
-              <div>
-                <label for="skill-risk-notes" class="input-label">
-                  {{ t('admin.skills.editor.fields.riskNotes') }}
-                </label>
-                <textarea
-                  id="skill-risk-notes"
-                  v-model="draft.risk_notes"
-                  class="input"
-                  rows="4"
-                  :disabled="isArchived"
-                  :placeholder="t('admin.skills.editor.fields.riskNotesPlaceholder')"
-                ></textarea>
-              </div>
             </div>
           </section>
 
@@ -504,7 +462,6 @@
         @cancel="pendingAction = null"
       />
 
-      <TotpStepUpDialog :controller="stepUp" />
     </div>
   </AppLayout>
 </template>
@@ -521,19 +478,12 @@ import skillsAPI, {
   type UploadSkillVersionRequest,
 } from '@/api/admin/skills'
 import { useAppStore } from '@/stores/app'
-import {
-  isStepUpBlocked,
-  isStepUpCancelled,
-  stepUpBlockReason,
-  useStepUp,
-} from '@/composables/useStepUp'
 import { extractApiErrorMessage } from '@/utils/apiError'
 import { formatDateTime } from '@/utils/format'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import AdminPageHeader from '@/components/layout/AdminPageHeader.vue'
 import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
 import Toggle from '@/components/common/Toggle.vue'
-import TotpStepUpDialog from '@/components/auth/TotpStepUpDialog.vue'
 import Icon from '@/components/icons/Icon.vue'
 import SkillPackageUploader from '@/components/admin/skills/SkillPackageUploader.vue'
 import SkillPreviewCard from '@/components/admin/skills/SkillPreviewCard.vue'
@@ -557,7 +507,6 @@ const route = useRoute()
 const router = useRouter()
 const { t } = useI18n()
 const appStore = useAppStore()
-const stepUp = useStepUp()
 
 const routeId = Array.isArray(route.params.id) ? route.params.id[0] : route.params.id
 const parsedId = Number(routeId)
@@ -605,9 +554,9 @@ const isDirty = computed(() => savedSnapshot.value !== JSON.stringify(buildPaylo
 const basicComplete = computed(() => validateForSave(false).length === 0)
 const packageComplete = computed(() => Boolean(selectedVersion.value?.validation_report.valid))
 const contentComplete = computed(() => Boolean(
-  draft.description.trim()
-  && draft.example_prompts.some((prompt) => prompt.trim())
-  && draft.risk_notes.trim(),
+  draft.summary.trim()
+  && draft.description.trim()
+  && draft.category.trim(),
 ))
 
 const editorSections = computed(() => [
@@ -641,7 +590,7 @@ const preflightChecks = computed(() => [
   {
     key: 'metadata',
     label: t('admin.skills.editor.preflight.metadata'),
-    passed: basicComplete.value && Boolean(draft.description.trim()) && !isDirty.value,
+    passed: contentComplete.value,
   },
   {
     key: 'version',
@@ -653,23 +602,15 @@ const preflightChecks = computed(() => [
     label: t('admin.skills.editor.preflight.validation'),
     passed: selectedVersion.value?.validation_report.valid === true,
   },
-  {
-    key: 'examples',
-    label: t('admin.skills.editor.preflight.examples'),
-    passed: draft.example_prompts.some((prompt) => prompt.trim()),
-  },
-  {
-    key: 'risks',
-    label: t('admin.skills.editor.preflight.risks'),
-    passed: Boolean(draft.risk_notes.trim()),
-  },
 ])
 
 const preflightBlockCount = computed(() => preflightChecks.value.filter((check) => !check.passed).length)
 const canPublish = computed(() => Boolean(
   skillId.value
   && skill.value?.status === 'draft'
-  && preflightBlockCount.value === 0,
+  && contentComplete.value
+  && selectedVersion.value?.status !== 'yanked'
+  && selectedVersion.value?.validation_report.valid === true,
 ))
 
 const confirmTitle = computed(() => {
@@ -718,6 +659,7 @@ function emptyDraft(): CreateSkillRequest {
     category: '',
     tags: [],
     icon: '',
+    source_url: '',
     example_prompts: [],
     risk_notes: '',
     featured: false,
@@ -734,8 +676,9 @@ function buildPayload(): CreateSkillRequest {
     category: draft.category.trim(),
     tags: uniqueValues(tagsText.value),
     icon: draft.icon.trim(),
-    example_prompts: draft.example_prompts.map((prompt) => prompt.trim()).filter(Boolean),
-    risk_notes: draft.risk_notes.trim(),
+    source_url: draft.source_url?.trim() || '',
+    example_prompts: [...(draft.example_prompts ?? [])],
+    risk_notes: draft.risk_notes ?? '',
     featured: draft.featured,
     sort_order: Number.isFinite(Number(draft.sort_order)) ? Math.max(0, Number(draft.sort_order)) : 0,
   }
@@ -751,6 +694,7 @@ function applySkill(nextSkill: AdminSkill): void {
     category: nextSkill.category ?? '',
     tags: nextSkill.tags ?? [],
     icon: nextSkill.icon ?? '',
+    source_url: nextSkill.source_url ?? '',
     example_prompts: [...(nextSkill.example_prompts ?? [])],
     risk_notes: nextSkill.risk_notes ?? '',
     featured: Boolean(nextSkill.featured),
@@ -792,7 +736,7 @@ async function saveDraft(showSuccess = true): Promise<AdminSkill | null> {
   try {
     const payload = buildPayload()
     const saved = skillId.value
-      ? await stepUp.run(() => skillsAPI.update(skillId.value!, payload))
+      ? await skillsAPI.update(skillId.value, payload)
       : await skillsAPI.create(payload)
     skillId.value = saved.id
     applySkill(saved)
@@ -812,11 +756,7 @@ async function saveDraft(showSuccess = true): Promise<AdminSkill | null> {
     }
     return saved
   } catch (error: unknown) {
-    if (wasCreate) {
-      appStore.showError(extractApiErrorMessage(error, t('admin.skills.editor.saveFailed')))
-    } else {
-      handleSensitiveError(error, t('admin.skills.editor.saveFailed'))
-    }
+    appStore.showError(extractApiErrorMessage(error, t('admin.skills.editor.saveFailed')))
     return null
   } finally {
     saving.value = false
@@ -834,32 +774,20 @@ function validateForSave(focusAlert: boolean): string[] {
   ) {
     errors.push(t('admin.skills.editor.validation.slugInvalid'))
   }
-  if (!draft.summary.trim()) errors.push(t('admin.skills.editor.validation.summaryRequired'))
-  if (!draft.category.trim()) errors.push(t('admin.skills.editor.validation.categoryRequired'))
-  if (skill.value?.status === 'published') {
-    if (!draft.description.trim()) errors.push(t('admin.skills.editor.validation.descriptionRequired'))
-    if (!draft.example_prompts.some((prompt) => prompt.trim())) {
-      errors.push(t('admin.skills.editor.validation.exampleRequired'))
-    }
-    if (!draft.risk_notes.trim()) errors.push(t('admin.skills.editor.validation.riskNotesRequired'))
-  }
   if (focusAlert) showValidationErrors(errors)
   return errors
 }
 
 function validateForPublish(): string[] {
-  const errors = validateForSave(false)
+  const errors: string[] = []
+  if (!draft.summary.trim()) errors.push(t('admin.skills.editor.validation.summaryRequired'))
   if (!draft.description.trim()) errors.push(t('admin.skills.editor.validation.descriptionRequired'))
-  if (!draft.example_prompts.some((prompt) => prompt.trim())) {
-    errors.push(t('admin.skills.editor.validation.exampleRequired'))
-  }
-  if (!draft.risk_notes.trim()) errors.push(t('admin.skills.editor.validation.riskNotesRequired'))
+  if (!draft.category.trim()) errors.push(t('admin.skills.editor.validation.categoryRequired'))
   if (!selectedVersion.value || selectedVersion.value.status === 'yanked') {
     errors.push(t('admin.skills.editor.validation.versionRequired'))
   } else if (selectedVersion.value.validation_report.valid !== true) {
     errors.push(t('admin.skills.editor.validation.versionInvalid'))
   }
-  if (isDirty.value) errors.push(t('admin.skills.editor.dirtyPublish'))
   showValidationErrors(errors)
   return errors
 }
@@ -900,9 +828,14 @@ async function handleVersionUpload(request: UploadSkillVersionRequest): Promise<
   }
 }
 
-function requestPublish(): void {
+async function requestPublish(): Promise<void> {
   if (validateForPublish().length || !selectedVersion.value) return
-  pendingAction.value = { kind: 'publish', version: selectedVersion.value }
+  const version = selectedVersion.value
+  if (isDirty.value) {
+    const saved = await saveDraft(false)
+    if (!saved) return
+  }
+  pendingAction.value = { kind: 'publish', version }
 }
 
 function requestActivate(version: AdminSkillVersion): void {
@@ -930,14 +863,13 @@ async function performPendingAction(): Promise<void> {
   publishing.value = action.kind === 'publish'
   operating.value = action.kind !== 'publish'
   try {
-    const updated = await stepUp.run(() => {
-      switch (action.kind) {
-        case 'publish': return skillsAPI.publish(id, action.version.id)
-        case 'activate': return skillsAPI.activateVersion(id, action.version.id)
-        case 'yank': return skillsAPI.yankVersion(id, action.version.id)
-        case 'archive': return skillsAPI.archive(id)
-      }
-    })
+    const updated = action.kind === 'publish'
+      ? await skillsAPI.publish(id, action.version.id)
+      : action.kind === 'activate'
+        ? await skillsAPI.activateVersion(id, action.version.id)
+        : action.kind === 'yank'
+          ? await skillsAPI.yankVersion(id, action.version.id)
+          : await skillsAPI.archive(id)
     applySkill(updated)
     const successKey = action.kind === 'publish'
       ? 'admin.skills.publishSuccess'
@@ -956,24 +888,11 @@ async function performPendingAction(): Promise<void> {
         : action.kind === 'yank'
           ? 'admin.skills.editor.versions.yankFailed'
           : 'admin.skills.archiveFailed'
-    handleSensitiveError(error, t(failureKey))
+    appStore.showError(extractApiErrorMessage(error, t(failureKey)))
   } finally {
     publishing.value = false
     operating.value = false
   }
-}
-
-function handleSensitiveError(error: unknown, fallback: string): void {
-  if (isStepUpCancelled(error)) return
-  if (isStepUpBlocked(error)) {
-    appStore.showError(
-      stepUpBlockReason(error) === 'STEP_UP_ADMIN_API_KEY_FORBIDDEN'
-        ? t('stepUp.adminApiKeyForbidden')
-        : t('stepUp.notEnabled'),
-    )
-    return
-  }
-  appStore.showError(extractApiErrorMessage(error, fallback))
 }
 
 function extractRejectedValidationReport(error: unknown): SkillValidationReport | null {
@@ -1013,18 +932,6 @@ function normalizeRejectedValidationReport(
     errors: Array.isArray(report.errors) ? report.errors : [],
     warnings: Array.isArray(report.warnings) ? report.warnings : [],
   }
-}
-
-function addExample(): void {
-  draft.example_prompts.push('')
-  void nextTick(() => {
-    const inputs = document.querySelectorAll<HTMLTextAreaElement>('.skill-editor-example-list textarea')
-    inputs[inputs.length - 1]?.focus()
-  })
-}
-
-function removeExample(index: number): void {
-  draft.example_prompts.splice(index, 1)
 }
 
 function uniqueValues(value: string): string[] {

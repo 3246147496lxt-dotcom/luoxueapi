@@ -56,7 +56,7 @@
               :model-value="marketplaceEnabled"
               :disabled="configLoading"
               :aria-label="t('admin.skills.marketplace.title')"
-              @update:model-value="requestConfigChange"
+              @update:model-value="updateMarketplaceConfig"
             />
           </div>
           <div class="skills-workflow-strip__stages" aria-hidden="true">
@@ -243,12 +243,10 @@
       :title="confirmTitle"
       :message="confirmMessage"
       :confirm-text="confirmButtonText"
-      :danger="pendingAction?.kind === 'archive' || (pendingAction?.kind === 'config' && !pendingAction.enabled)"
+      :danger="pendingAction?.kind === 'archive'"
       @confirm="performPendingAction"
       @cancel="pendingAction = null"
     />
-
-    <TotpStepUpDialog :controller="stepUp" />
   </AppLayout>
 </template>
 
@@ -262,12 +260,6 @@ import skillsAPI, {
   type SkillStatus,
 } from '@/api/admin/skills'
 import { useAppStore } from '@/stores/app'
-import {
-  isStepUpBlocked,
-  isStepUpCancelled,
-  stepUpBlockReason,
-  useStepUp,
-} from '@/composables/useStepUp'
 import { extractApiErrorMessage } from '@/utils/apiError'
 import { formatDateTime } from '@/utils/format'
 import type { Column } from '@/components/common/types'
@@ -280,19 +272,15 @@ import Pagination from '@/components/common/Pagination.vue'
 import Select from '@/components/common/Select.vue'
 import Toggle from '@/components/common/Toggle.vue'
 import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
-import TotpStepUpDialog from '@/components/auth/TotpStepUpDialog.vue'
 import Icon from '@/components/icons/Icon.vue'
 import SkillStatusBadge from '@/components/admin/skills/SkillStatusBadge.vue'
 
 type FeaturedFilter = 'all' | boolean
-type PendingAction =
-  | { kind: 'publish' | 'archive'; skill: AdminSkill }
-  | { kind: 'config'; enabled: boolean }
+type PendingAction = { kind: 'publish' | 'archive'; skill: AdminSkill }
 
 const { t } = useI18n()
 const router = useRouter()
 const appStore = useAppStore()
-const stepUp = useStepUp()
 
 const skills = ref<AdminSkill[]>([])
 const loading = ref(false)
@@ -334,11 +322,6 @@ const featuredOptions = computed(() => [
 
 const confirmTitle = computed(() => {
   const action = pendingAction.value
-  if (action?.kind === 'config') {
-    return action.enabled
-      ? t('admin.skills.marketplace.enableTitle')
-      : t('admin.skills.marketplace.disableTitle')
-  }
   return action?.kind === 'archive'
     ? t('admin.skills.archiveTitle')
     : t('admin.skills.publishTitle')
@@ -347,11 +330,6 @@ const confirmTitle = computed(() => {
 const confirmMessage = computed(() => {
   const action = pendingAction.value
   if (!action) return ''
-  if (action.kind === 'config') {
-    return action.enabled
-      ? t('admin.skills.marketplace.enableConfirm')
-      : t('admin.skills.marketplace.disableConfirm')
-  }
   if (action.kind === 'archive') {
     return t('admin.skills.archiveConfirm', { name: action.skill.display_name })
   }
@@ -363,11 +341,6 @@ const confirmMessage = computed(() => {
 
 const confirmButtonText = computed(() => {
   const action = pendingAction.value
-  if (action?.kind === 'config') {
-    return action.enabled
-      ? t('admin.skills.marketplace.enableAction')
-      : t('admin.skills.marketplace.disableAction')
-  }
   return action?.kind === 'archive' ? t('admin.skills.archive') : t('admin.skills.publish')
 })
 
@@ -447,8 +420,6 @@ function canQuickPublish(skill: AdminSkill): boolean {
     && Boolean(skill.summary.trim())
     && Boolean(skill.description.trim())
     && Boolean(skill.category.trim())
-    && Boolean(skill.risk_notes.trim())
-    && skill.example_prompts.some((prompt) => prompt.trim())
 }
 
 function listVersion(skill: AdminSkill): AdminSkillVersion | null {
@@ -467,60 +438,55 @@ function requestArchive(skill: AdminSkill): void {
   pendingAction.value = { kind: 'archive', skill }
 }
 
-function requestConfigChange(enabled: boolean): void {
-  if (enabled === marketplaceEnabled.value) return
-  pendingAction.value = { kind: 'config', enabled }
+async function updateMarketplaceConfig(enabled: boolean): Promise<void> {
+  if (enabled === marketplaceEnabled.value || configLoading.value) return
+  const previous = marketplaceEnabled.value
+  marketplaceEnabled.value = enabled
+  configLoading.value = true
+  configError.value = null
+  try {
+    const updated = await skillsAPI.updateConfig(enabled)
+    marketplaceEnabled.value = updated.enabled === true
+    try {
+      await appStore.refreshPublicSettingsAfterMutation()
+    } catch {
+      // The config mutation already succeeded. A public-settings refresh is
+      // best-effort and must not turn that success into a false failure.
+    }
+    appStore.showSuccess(updated.enabled
+      ? t('admin.skills.marketplace.enabledSuccess')
+      : t('admin.skills.marketplace.disabledSuccess'))
+  } catch (error: unknown) {
+    marketplaceEnabled.value = previous
+    const message = extractApiErrorMessage(error, t('admin.skills.marketplace.updateFailed'))
+    configError.value = message
+    appStore.showError(message)
+  } finally {
+    configLoading.value = false
+  }
 }
 
 async function performPendingAction(): Promise<void> {
   const action = pendingAction.value
-  if (!action || operatingId.value !== null || configLoading.value) return
+  if (!action || operatingId.value !== null) return
   pendingAction.value = null
-
-  if (action.kind === 'config') {
-    configLoading.value = true
-    configError.value = null
-    try {
-      const updated = await skillsAPI.updateConfig(action.enabled)
-      marketplaceEnabled.value = updated.enabled === true
-      try {
-        await appStore.fetchPublicSettings(true)
-      } catch {
-        // The config mutation already succeeded. A public-settings refresh is
-        // best-effort and must not turn that success into a false failure.
-      }
-      appStore.showSuccess(updated.enabled
-        ? t('admin.skills.marketplace.enabledSuccess')
-        : t('admin.skills.marketplace.disabledSuccess'))
-    } catch (error: unknown) {
-      const message = extractApiErrorMessage(error, t('admin.skills.marketplace.updateFailed'))
-      configError.value = message
-      appStore.showError(message)
-    } finally {
-      configLoading.value = false
-    }
-    return
-  }
 
   operatingId.value = action.skill.id
   try {
     const updated = action.kind === 'archive'
-      ? await stepUp.run(() => skillsAPI.archive(action.skill.id))
-      : await stepUp.run(() => skillsAPI.publish(
-          action.skill.id,
-          listVersion(action.skill)!.id,
-        ))
+      ? await skillsAPI.archive(action.skill.id)
+      : await skillsAPI.publish(action.skill.id, listVersion(action.skill)!.id)
     replaceSkill(updated)
     appStore.showSuccess(action.kind === 'archive'
       ? t('admin.skills.archiveSuccess')
       : t('admin.skills.publishSuccess'))
   } catch (error: unknown) {
-    handleSensitiveError(
+    appStore.showError(extractApiErrorMessage(
       error,
       action.kind === 'archive'
         ? t('admin.skills.archiveFailed')
         : t('admin.skills.publishFailed'),
-    )
+    ))
   } finally {
     operatingId.value = null
   }
@@ -529,19 +495,6 @@ async function performPendingAction(): Promise<void> {
 function replaceSkill(updated: AdminSkill): void {
   const index = skills.value.findIndex((item) => item.id === updated.id)
   if (index >= 0) skills.value.splice(index, 1, updated)
-}
-
-function handleSensitiveError(error: unknown, fallback: string): void {
-  if (isStepUpCancelled(error)) return
-  if (isStepUpBlocked(error)) {
-    appStore.showError(
-      stepUpBlockReason(error) === 'STEP_UP_ADMIN_API_KEY_FORBIDDEN'
-        ? t('stepUp.adminApiKeyForbidden')
-        : t('stepUp.notEnabled'),
-    )
-    return
-  }
-  appStore.showError(extractApiErrorMessage(error, fallback))
 }
 
 function safeIconUrl(value: string): string {

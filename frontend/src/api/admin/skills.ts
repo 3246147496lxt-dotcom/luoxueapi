@@ -3,7 +3,7 @@
  *
  * Skill metadata and immutable package versions have separate lifecycles. A
  * draft can be edited freely, while publish/activate/yank/archive remain
- * explicit server-side operations (and are wrapped by step-up in the views).
+ * explicit server-side operations.
  */
 import { apiClient } from '../client'
 
@@ -56,8 +56,9 @@ export interface AdminSkill {
   category: string
   tags: string[]
   icon: string
-  example_prompts: string[]
-  risk_notes: string
+  source_url?: string
+  example_prompts?: string[]
+  risk_notes?: string
   status: SkillStatus
   featured: boolean
   sort_order: number
@@ -95,8 +96,9 @@ export interface CreateSkillRequest {
   category: string
   tags: string[]
   icon: string
-  example_prompts: string[]
-  risk_notes: string
+  source_url?: string
+  example_prompts?: string[]
+  risk_notes?: string
   featured: boolean
   sort_order: number
 }

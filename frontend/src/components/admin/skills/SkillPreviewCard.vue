@@ -26,28 +26,6 @@
       <span v-for="tag in skill.tags" :key="tag">{{ tag }}</span>
     </div>
 
-    <section class="skill-preview__examples">
-      <h4>{{ t('admin.skills.editor.preview.examples') }}</h4>
-      <ol v-if="skill.example_prompts?.length">
-        <li v-for="prompt in skill.example_prompts" :key="prompt">
-          <Icon name="chat" size="sm" aria-hidden="true" />
-          <span>{{ prompt }}</span>
-        </li>
-      </ol>
-      <p v-else class="skill-preview__placeholder">
-        {{ t('admin.skills.editor.preview.noExamples') }}
-      </p>
-    </section>
-
-    <section class="skill-preview__risk">
-      <h4>
-        <Icon name="shield" size="sm" aria-hidden="true" />
-        {{ t('admin.skills.editor.preview.risks') }}
-      </h4>
-      <p :class="{ 'skill-preview__placeholder': !skill.risk_notes }">
-        {{ skill.risk_notes || t('admin.skills.editor.preview.noRisks') }}
-      </p>
-    </section>
   </article>
 </template>
 
@@ -182,58 +160,6 @@ html.dark .skill-preview__labels span:first-child {
   flex-wrap: wrap;
   gap: 6px;
   margin-top: 14px;
-}
-
-.skill-preview__examples,
-.skill-preview__risk {
-  margin-top: 18px;
-  padding-top: 16px;
-  border-top: 1px solid var(--lx-clay-border);
-}
-
-.skill-preview h4 {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  margin: 0 0 9px;
-  color: var(--lx-clay-text);
-  font-size: 0.75rem;
-  font-weight: 800;
-}
-
-.skill-preview__examples ol {
-  display: grid;
-  gap: 8px;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-.skill-preview__examples li {
-  display: flex;
-  align-items: flex-start;
-  gap: 8px;
-  padding: 9px 10px;
-  border-radius: var(--lx-clay-radius-control);
-  color: var(--lx-clay-text-secondary);
-  background: var(--lx-clay-surface-soft);
-  font-size: 0.75rem;
-  line-height: 1.5;
-}
-
-.skill-preview__examples li :deep(svg) {
-  flex: 0 0 auto;
-  margin-top: 1px;
-  color: var(--lx-clay-accent-deep);
-}
-
-.skill-preview__risk p,
-.skill-preview__examples > p {
-  margin: 0;
-  color: var(--lx-clay-text-secondary);
-  font-size: 0.75rem;
-  line-height: 1.6;
-  white-space: pre-line;
 }
 
 .skill-preview__placeholder {

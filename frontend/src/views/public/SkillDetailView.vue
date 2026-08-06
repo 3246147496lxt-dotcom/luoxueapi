@@ -39,85 +39,11 @@
         </header>
 
         <div class="skill-detail-shell skill-detail-layout">
-          <section class="skill-detail-review" aria-labelledby="skill-risk-title">
-            <div class="skill-detail-review__heading">
-              <div>
-                <h2 id="skill-risk-title">{{ t('skills.detail.riskTitle') }}</h2>
-                <p>{{ t('skills.detail.riskDescription') }}</p>
-              </div>
-              <label v-if="availableVersions.length > 1">
-                <span>{{ t('skills.detail.versionLabel') }}</span>
-                <select v-model="selectedVersionNumber">
-                  <option
-                    v-for="version in availableVersions"
-                    :key="version.version"
-                    :value="version.version"
-                  >
-                    v{{ version.version }}
-                  </option>
-                </select>
-              </label>
-            </div>
-
-            <div class="skill-detail-review__risk" :class="{ 'is-clear': !hasRiskSignals }">
-              <span aria-hidden="true">
-                <Icon :name="hasRiskSignals ? 'exclamationTriangle' : 'shield'" size="md" />
-              </span>
-              <div>
-                <strong>{{ t(hasRiskSignals ? 'skills.detail.riskFound' : 'skills.detail.noExtraRisk') }}</strong>
-                <SafeMarkdown v-if="skill.risk_notes" :content="skill.risk_notes" compact />
-                <ul v-if="selectedWarnings.length">
-                  <li v-for="warning in selectedWarnings" :key="`${warning.code}-${warning.path || ''}`">
-                    <Icon name="exclamationCircle" size="xs" aria-hidden="true" />
-                    <span>
-                      {{ riskWarningLabel(warning.code, warning.message) }}
-                      <code v-if="warning.path">{{ warning.path }}</code>
-                    </span>
-                  </li>
-                </ul>
-                <p v-if="!skill.risk_notes && !selectedWarnings.length">
-                  {{ t('skills.detail.noExtraRiskDescription') }}
-                </p>
-              </div>
-            </div>
-
-            <div v-if="selectedVersion" class="skill-detail-review__package">
-              <dl>
-                <div><dt>{{ t('skills.detail.version') }}</dt><dd>v{{ selectedVersion.version }}</dd></div>
-                <div><dt>{{ t('skills.detail.packageSize') }}</dt><dd>{{ formatBytes(selectedVersion.byte_size) }}</dd></div>
-                <div><dt>{{ t('skills.detail.fileCount') }}</dt><dd>{{ selectedVersion.file_count }}</dd></div>
-                <div><dt>{{ t('skills.detail.versionDownloads') }}</dt><dd>{{ formatNumber(selectedVersion.download_count) }}</dd></div>
-              </dl>
-
-              <div v-if="selectedVersion.sha256" class="skill-detail-review__checksum">
-                <span>SHA-256</span>
-                <code :title="selectedVersion.sha256">{{ selectedVersion.sha256 }}</code>
-              </div>
-
-              <div v-if="selectedVersion.file_manifest.length" class="skill-detail-review__files">
-                <div>
-                  <span>{{ t('skills.detail.fileTree') }}</span>
-                  <small>{{ t('skills.detail.fileTreeCount', { count: selectedVersion.file_manifest.length }) }}</small>
-                </div>
-                <ul>
-                  <li v-for="file in selectedVersion.file_manifest" :key="file.path">
-                    <Icon name="document" size="sm" aria-hidden="true" />
-                    <code :title="file.path">{{ file.path }}</code>
-                    <span>{{ formatBytes(file.byte_size) }}</span>
-                  </li>
-                </ul>
-              </div>
-              <p v-else class="skill-detail-muted">{{ t('skills.detail.noFileManifest') }}</p>
-            </div>
-
-            <p v-else class="skill-detail-muted">{{ t('skills.install.versionUnavailable') }}</p>
-          </section>
-
           <SkillInstallPanel
             class="skill-detail-install"
             :skill="skill"
-            :version="skill.current_version ? selectedVersion?.version : undefined"
-            :sha256="skill.current_version ? selectedVersion?.sha256 : undefined"
+            :version="currentVersion?.version"
+            :sha256="currentVersion?.sha256"
           />
 
           <section class="skill-detail-overview" aria-labelledby="skill-overview-title">
@@ -187,16 +113,6 @@
           </section>
         </div>
 
-        <section class="skill-detail-shell skill-detail-closing" aria-labelledby="skill-closing-title">
-          <div>
-            <h2 id="skill-closing-title">{{ t('skills.detail.closingTitle') }}</h2>
-            <p>{{ t('skills.detail.closingDescription') }}</p>
-          </div>
-          <RouterLink to="/skills">
-            {{ t('skills.detail.exploreMore') }}
-            <Icon name="arrowRight" size="sm" aria-hidden="true" />
-          </RouterLink>
-        </section>
       </template>
     </main>
   </PublicSiteLayout>
@@ -216,7 +132,6 @@ import {
   getPublicSkill,
   getPublicSkillVersions,
   type PublicSkill,
-  type PublicSkillVersion,
 } from '@/api/skills'
 
 interface SkillSourceMeta {
@@ -226,13 +141,12 @@ interface SkillSourceMeta {
 }
 
 const route = useRoute()
-const { t, te } = useI18n()
+const { t } = useI18n()
 const { copyToClipboard } = useClipboard()
 const skill = ref<PublicSkill | null>(null)
 const loading = ref(true)
 const loadError = ref(false)
 const notFound = ref(false)
-const selectedVersionNumber = ref('')
 const markdownCopied = ref(false)
 let controller: AbortController | null = null
 let markdownTimer: ReturnType<typeof setTimeout> | null = null
@@ -242,26 +156,14 @@ const slug = computed(() => {
   return Array.isArray(value) ? value[0] || '' : String(value || '')
 })
 
-const availableVersions = computed<PublicSkillVersion[]>(() => {
-  if (!skill.value) return []
-  const all = [...skill.value.versions]
-  if (
-    skill.value.current_version
-    && !all.some((version) => version.version === skill.value?.current_version?.version)
-  ) {
-    all.unshift(skill.value.current_version)
-  }
-  return all.sort((a, b) => b.created_at.localeCompare(a.created_at))
+const currentVersion = computed(() => {
+  const current = skill.value?.current_version
+  if (!current) return null
+  return skill.value?.versions.find((version) => version.version === current.version) ?? current
 })
 
-const selectedVersion = computed(() => availableVersions.value.find(
-  (version) => version.version === selectedVersionNumber.value,
-) ?? availableVersions.value[0] ?? null)
-
-const rawSkillMarkdown = computed(() => selectedVersion.value?.skill_md.trim() || '')
+const rawSkillMarkdown = computed(() => currentVersion.value?.skill_md.trim() || '')
 const skillMarkdown = computed(() => stripFrontmatter(rawSkillMarkdown.value))
-const selectedWarnings = computed(() => selectedVersion.value?.validation_report.warnings ?? [])
-const hasRiskSignals = computed(() => Boolean(skill.value?.risk_notes || selectedWarnings.value.length))
 const sourceMeta = computed<SkillSourceMeta | null>(() => {
   if (!skill.value) return null
   const url = safeSourceURL(skill.value.source_url || '')
@@ -284,14 +186,6 @@ function formatNumber(value: number) {
     .toLowerCase()
 }
 
-function formatBytes(value: number) {
-  if (!Number.isFinite(value) || value <= 0) return '—'
-  const units = ['B', 'KB', 'MB', 'GB']
-  const index = Math.min(Math.floor(Math.log(value) / Math.log(1024)), units.length - 1)
-  const amount = value / 1024 ** index
-  return `${new Intl.NumberFormat(undefined, { maximumFractionDigits: index === 0 ? 0 : 1 }).format(amount)} ${units[index]}`
-}
-
 function stripFrontmatter(markdown: string) {
   return markdown.replace(/^---\s*\n[\s\S]*?\n---\s*(?:\n|$)/, '').trim()
 }
@@ -299,7 +193,9 @@ function stripFrontmatter(markdown: string) {
 function safeSourceURL(value: string) {
   try {
     const url = new URL(value)
-    return url.protocol === 'https:' ? url.href : ''
+    return url.protocol === 'https:' && url.hostname.toLowerCase() === 'github.com'
+      ? url.href
+      : ''
   } catch {
     return ''
   }
@@ -313,11 +209,6 @@ function repositoryName(value: string) {
   } catch {
     return ''
   }
-}
-
-function riskWarningLabel(code: string, fallback: string) {
-  const key = `skills.detail.validationWarnings.${code}`
-  return te(key) ? t(key) : fallback || code
 }
 
 async function loadSkill() {
@@ -345,9 +236,6 @@ async function loadSkill() {
       }
     }
     skill.value = detail
-    selectedVersionNumber.value = detail.current_version?.version
-      || detail.versions[0]?.version
-      || ''
   } catch (error) {
     if (requestController.signal.aborted) return
     const status = extractErrorStatus(error)

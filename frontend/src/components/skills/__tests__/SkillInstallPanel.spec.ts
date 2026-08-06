@@ -33,8 +33,7 @@ const translations = vi.hoisted<Record<string, string>>(() => ({
   'skills.install.verifyOr': '或',
   'skills.install.verifySuffix': '验证。',
   'skills.install.versionUnavailable': '暂无可下载版本',
-  'skills.install.shaUnavailable': '未提供',
-  'skills.install.codexPrompt': 'Skill={name}; slug={slug}; version={version}; url={url}; sha={sha256}; path={path}; parent={parent}',
+  'skills.install.codexPrompt': 'Skill={name}; slug={slug}; url={url}; path={path}; parent={parent}',
 }))
 
 vi.mock('vue-i18n', async (importOriginal) => {
@@ -122,7 +121,7 @@ describe('SkillInstallPanel', () => {
     const copyButton = wrapper.get('[aria-label="复制安装命令"]')
     const globalCommand = wrapper.get('.skill-install__payload code').text()
 
-    expect(wrapper.get('[role="tab"][aria-selected="true"]').text()).toBe('命令安装')
+    expect(wrapper.get('[aria-pressed="true"]').text()).toBe('命令安装')
     expect(globalCommand).toContain('SKILLS_DIR="$HOME/.agents/skills"')
     expect(globalCommand).toContain('/versions/1.4.0/download')
     expect(globalCommand).toContain('abc123')
@@ -157,14 +156,16 @@ describe('SkillInstallPanel', () => {
 
   it('switches to a Codex instruction and keeps scope-specific paths', async () => {
     const wrapper = mountPanel()
-    await wrapper.findAll('[role="tab"]')[1].trigger('click')
+    await wrapper.findAll('.skill-install__modes button')[1].trigger('click')
 
     expect(wrapper.get('.skill-install__payload code').text()).toContain('path=$HOME/.agents/skills/api-docs')
     await wrapper.get('[aria-label="复制 Codex 安装指令"]').trigger('click')
     expect(clipboardState.copy).toHaveBeenLastCalledWith(
-      expect.stringContaining('version=1.4.0'),
+      expect.not.stringContaining('sha='),
       '安装指令已复制',
     )
+    expect(wrapper.get('.skill-install__payload code').text()).not.toContain('sha=')
+    expect(wrapper.get('.skill-install__payload code').text()).not.toContain('version=')
 
     await selectScope(wrapper, 'project')
     expect(wrapper.get('.skill-install__payload code').text()).toContain('path=<repo>/.agents/skills/api-docs')

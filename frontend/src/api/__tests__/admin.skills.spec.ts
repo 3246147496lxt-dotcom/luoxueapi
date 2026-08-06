@@ -30,8 +30,7 @@ const draft: CreateSkillRequest = {
   category: '文档与数据',
   tags: ['Codex', '文档'],
   icon: '',
-  example_prompts: ['为这个接口生成接入文档'],
-  risk_notes: '只读取当前项目文件。',
+  source_url: 'https://github.com/example/api-doc-writer',
   featured: true,
   sort_order: 10,
 }

@@ -373,6 +373,27 @@ describe('useAppStore', () => {
       expect(getPublicSettings).toHaveBeenCalledTimes(2)
     })
 
+    it('设置变更后的刷新会等待旧请求，并且必定再发起一条新请求', async () => {
+      const staleRequest = createDeferred<PublicSettings>()
+      const stale = createPublicSettings({ skill_marketplace_enabled: false })
+      const updated = createPublicSettings({ skill_marketplace_enabled: true })
+      vi.mocked(getPublicSettings)
+        .mockReturnValueOnce(staleRequest.promise)
+        .mockResolvedValueOnce(updated)
+      const store = useAppStore()
+
+      const requestStartedBeforeMutation = store.fetchPublicSettings(true)
+      const mutationRefresh = store.refreshPublicSettingsAfterMutation()
+
+      expect(getPublicSettings).toHaveBeenCalledTimes(1)
+      staleRequest.resolve(stale)
+
+      await expect(requestStartedBeforeMutation).resolves.toEqual(stale)
+      await expect(mutationRefresh).resolves.toEqual(updated)
+      expect(getPublicSettings).toHaveBeenCalledTimes(2)
+      expect(store.cachedPublicSettings?.skill_marketplace_enabled).toBe(true)
+    })
+
     it('并发请求失败时所有调用得到 null，且不会标记设置已加载', async () => {
       const deferred = createDeferred<PublicSettings>()
       vi.mocked(getPublicSettings).mockReturnValue(deferred.promise)

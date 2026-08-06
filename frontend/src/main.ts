@@ -22,6 +22,11 @@ async function bootstrap() {
   const appStore = useAppStore()
   appStore.initFromInjectedConfig()
 
+  // The injected snapshot prevents first-paint flicker, but it may have been
+  // rendered by another instance before a feature flag changed. Revalidate it
+  // in the background; route guards reuse this in-flight request.
+  const publicSettingsRefresh = appStore.fetchPublicSettings(true)
+
   // Set document title immediately after config is loaded
   if (appStore.siteName && appStore.siteName !== '落雪API') {
     document.title = `${appStore.siteName} - AI API Gateway`
@@ -35,6 +40,8 @@ async function bootstrap() {
   // 等待路由器完成初始导航后再挂载，避免竞态条件导致的空白渲染
   await router.isReady()
   app.mount('#app')
+
+  void publicSettingsRefresh
 }
 
 bootstrap()

@@ -27,4 +27,9 @@ describe('Skill marketplace navigation', () => {
     expect(publicLayoutSource).toContain('skillMarketEntryVisible')
     expect(publicLayoutSource).toContain('skill_marketplace_enabled === true')
   })
+
+  it('revalidates the public flag instead of trusting embedded HTML forever', () => {
+    expect(routerSource).toContain('fetchPublicSettings(true)')
+    expect(routerSource).toContain('refreshedSettings?.skill_marketplace_enabled !== true')
+  })
 })

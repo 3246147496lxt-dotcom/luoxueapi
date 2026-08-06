@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { defineComponent, h, ref } from 'vue'
+import { defineComponent, h } from 'vue'
 import { flushPromises, mount } from '@vue/test-utils'
 import SkillsView from '../SkillsView.vue'
 
@@ -12,8 +12,8 @@ const {
   push,
   showSuccess,
   showError,
-  fetchPublicSettings,
-  stepUpRun,
+  refreshPublicSettingsAfterMutation,
+  useStepUp,
 } = vi.hoisted(() => ({
   list: vi.fn(),
   getConfig: vi.fn(),
@@ -23,8 +23,8 @@ const {
   push: vi.fn(),
   showSuccess: vi.fn(),
   showError: vi.fn(),
-  fetchPublicSettings: vi.fn(),
-  stepUpRun: vi.fn(),
+  refreshPublicSettingsAfterMutation: vi.fn(),
+  useStepUp: vi.fn(),
 }))
 
 vi.mock('@/api/admin/skills', () => ({
@@ -32,7 +32,12 @@ vi.mock('@/api/admin/skills', () => ({
 }))
 
 vi.mock('@/stores/app', () => ({
-  useAppStore: () => ({ showSuccess, showError, fetchPublicSettings }),
+  useAppStore: () => ({
+    showSuccess,
+    showError,
+    refreshPublicSettingsAfterMutation,
+    backendModeEnabled: false,
+  }),
 }))
 
 vi.mock('@/utils/apiError', () => ({
@@ -40,13 +45,7 @@ vi.mock('@/utils/apiError', () => ({
 }))
 
 vi.mock('@/composables/useStepUp', () => ({
-  useStepUp: () => ({
-    visible: ref(false),
-    blockedReason: ref(''),
-    run: stepUpRun,
-    onVerified: vi.fn(),
-    onCancel: vi.fn(),
-  }),
+  useStepUp,
   isStepUpCancelled: () => false,
   isStepUpBlocked: () => false,
   stepUpBlockReason: () => '',
@@ -95,8 +94,8 @@ const draft = {
   category: '文档与数据',
   tags: ['Codex'],
   icon: '',
-  example_prompts: ['生成文档'],
-  risk_notes: '只读取当前项目。',
+  example_prompts: [],
+  risk_notes: '',
   status: 'draft' as const,
   featured: true,
   sort_order: 1,
@@ -158,11 +157,13 @@ const SelectStub = defineComponent({
 })
 
 const ToggleStub = defineComponent({
-  props: { modelValue: Boolean },
+  props: { modelValue: Boolean, disabled: Boolean },
   emits: ['update:modelValue'],
   setup(props, { emit }) {
     return () => h('button', {
       'data-testid': 'market-toggle',
+      'data-value': String(props.modelValue),
+      disabled: props.disabled,
       onClick: () => emit('update:modelValue', !props.modelValue),
     })
   },
@@ -181,7 +182,6 @@ function mountView() {
         Toggle: ToggleStub,
         EmptyState: true,
         Pagination: true,
-        TotpStepUpDialog: true,
         SkillStatusBadge: true,
         Icon: true,
       },
@@ -192,11 +192,10 @@ function mountView() {
 describe('admin SkillsView', () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    stepUpRun.mockImplementation((action: () => Promise<unknown>) => action())
     list.mockResolvedValue({ items: [draft], total: 1, page: 1, page_size: 20 })
     getConfig.mockResolvedValue({ enabled: false })
     updateConfig.mockResolvedValue({ enabled: true })
-    fetchPublicSettings.mockResolvedValue(null)
+    refreshPublicSettingsAfterMutation.mockResolvedValue(null)
     publish.mockResolvedValue({ ...draft, status: 'published' })
     archive.mockResolvedValue({ ...draft, status: 'archived' })
   })
@@ -225,23 +224,36 @@ describe('admin SkillsView', () => {
     await flushPromises()
 
     expect(publish).toHaveBeenCalledWith(1, 11)
-    expect(stepUpRun).toHaveBeenCalledOnce()
+    expect(useStepUp).not.toHaveBeenCalled()
     expect(showSuccess).toHaveBeenCalledWith('admin.skills.publishSuccess')
   })
 
-  it('confirms without step-up before opening the public marketplace', async () => {
+  it('updates the public marketplace directly without a confirmation', async () => {
     const wrapper = mountView()
     await flushPromises()
 
     await wrapper.get('[data-testid="market-toggle"]').trigger('click')
-    expect(updateConfig).not.toHaveBeenCalled()
-    await wrapper.get('.confirm-action').trigger('click')
+    expect(updateConfig).toHaveBeenCalledWith(true)
+    expect(wrapper.find('.confirm-action').exists()).toBe(false)
+    await flushPromises()
+
+    expect(wrapper.get('[data-testid="market-toggle"]').attributes('data-value')).toBe('true')
+    expect(useStepUp).not.toHaveBeenCalled()
+    expect(refreshPublicSettingsAfterMutation).toHaveBeenCalledOnce()
+    expect(showSuccess).toHaveBeenCalledWith('admin.skills.marketplace.enabledSuccess')
+  })
+
+  it('restores the marketplace toggle when the direct update fails', async () => {
+    updateConfig.mockRejectedValueOnce(new Error('network error'))
+    const wrapper = mountView()
+    await flushPromises()
+
+    await wrapper.get('[data-testid="market-toggle"]').trigger('click')
     await flushPromises()
 
     expect(updateConfig).toHaveBeenCalledWith(true)
-    expect(stepUpRun).not.toHaveBeenCalled()
-    expect(fetchPublicSettings).toHaveBeenCalledWith(true)
-    expect(showSuccess).toHaveBeenCalledWith('admin.skills.marketplace.enabledSuccess')
+    expect(wrapper.get('[data-testid="market-toggle"]').attributes('data-value')).toBe('false')
+    expect(showError).toHaveBeenCalledWith('admin.skills.marketplace.updateFailed')
   })
 
   it('archives only after confirmation', async () => {
@@ -253,6 +265,6 @@ describe('admin SkillsView', () => {
     await flushPromises()
 
     expect(archive).toHaveBeenCalledWith(1)
-    expect(stepUpRun).toHaveBeenCalledOnce()
+    expect(useStepUp).not.toHaveBeenCalled()
   })
 })

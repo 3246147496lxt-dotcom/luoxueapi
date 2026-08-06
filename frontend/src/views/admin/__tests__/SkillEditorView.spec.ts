@@ -16,6 +16,7 @@ const {
   replace,
   showSuccess,
   showError,
+  useStepUp,
   routeParams,
 } = vi.hoisted(() => ({
   getById: vi.fn(),
@@ -30,6 +31,7 @@ const {
   replace: vi.fn(),
   showSuccess: vi.fn(),
   showError: vi.fn(),
+  useStepUp: vi.fn(),
   routeParams: { id: '1' as string | undefined },
 }))
 
@@ -55,13 +57,7 @@ vi.mock('@/utils/apiError', () => ({
 }))
 
 vi.mock('@/composables/useStepUp', () => ({
-  useStepUp: () => ({
-    visible: { value: false },
-    blockedReason: { value: '' },
-    run: (action: () => Promise<unknown>) => action(),
-    onVerified: vi.fn(),
-    onCancel: vi.fn(),
-  }),
+  useStepUp,
   isStepUpCancelled: () => false,
   isStepUpBlocked: () => false,
   stepUpBlockReason: () => '',
@@ -112,8 +108,9 @@ const draftSkill = {
   category: '文档与数据',
   tags: ['Codex'],
   icon: '',
-  example_prompts: ['为这个接口生成文档'],
-  risk_notes: '只读取当前项目文件，不访问网络。',
+  source_url: 'https://github.com/example/api-doc-writer',
+  example_prompts: ['保留已有示例'],
+  risk_notes: '保留已有风险说明',
   status: 'draft' as const,
   featured: false,
   sort_order: 1,
@@ -194,7 +191,6 @@ function mountView() {
         SkillValidationReportPanel: ReportStub,
         SkillPreviewCard: true,
         SkillStatusBadge: true,
-        TotpStepUpDialog: true,
         Toggle: true,
         Icon: true,
       },
@@ -225,13 +221,18 @@ describe('admin SkillEditorView', () => {
     await flushPromises()
 
     await wrapper.get('#skill-summary').setValue('生成清晰、可执行的接入文档')
+    await wrapper.get('#skill-source-url').setValue('https://github.com/example/updated-skill')
     await wrapper.get('[data-testid="save-skill-draft"]').trigger('click')
     await flushPromises()
 
     expect(update).toHaveBeenCalledWith(1, expect.objectContaining({
       slug: 'api-doc-writer',
       summary: '生成清晰、可执行的接入文档',
+      source_url: 'https://github.com/example/updated-skill',
+      example_prompts: ['保留已有示例'],
+      risk_notes: '保留已有风险说明',
     }))
+    expect(useStepUp).not.toHaveBeenCalled()
   })
 
   it('publishes a valid immutable version only after confirmation', async () => {
@@ -244,6 +245,7 @@ describe('admin SkillEditorView', () => {
     await flushPromises()
 
     expect(publish).toHaveBeenCalledWith(1, 11)
+    expect(useStepUp).not.toHaveBeenCalled()
   })
 
   it('renders the rejected ZIP validation report from serialized error metadata', async () => {
@@ -282,5 +284,40 @@ describe('admin SkillEditorView', () => {
     await flushPromises()
 
     expect(activateVersion).toHaveBeenCalledWith(1, 12)
+    expect(useStepUp).not.toHaveBeenCalled()
+  })
+
+  it('yanks an inactive version after one ordinary confirmation', async () => {
+    const wrapper = mountView()
+    await flushPromises()
+
+    const yankButton = wrapper.findAll('button').find((button) =>
+      button.text().includes('admin.skills.editor.versions.yank'),
+    )
+    expect(yankButton).toBeTruthy()
+    await yankButton!.trigger('click')
+    expect(yankVersion).not.toHaveBeenCalled()
+    await wrapper.get('.confirm-action').trigger('click')
+    await flushPromises()
+
+    expect(yankVersion).toHaveBeenCalledWith(1, 11)
+    expect(useStepUp).not.toHaveBeenCalled()
+  })
+
+  it('archives after one ordinary confirmation', async () => {
+    const wrapper = mountView()
+    await flushPromises()
+
+    const archiveButton = wrapper.findAll('button').find((button) =>
+      button.text().includes('admin.skills.archive'),
+    )
+    expect(archiveButton).toBeTruthy()
+    await archiveButton!.trigger('click')
+    expect(archive).not.toHaveBeenCalled()
+    await wrapper.get('.confirm-action').trigger('click')
+    await flushPromises()
+
+    expect(archive).toHaveBeenCalledWith(1)
+    expect(useStepUp).not.toHaveBeenCalled()
   })
 })
