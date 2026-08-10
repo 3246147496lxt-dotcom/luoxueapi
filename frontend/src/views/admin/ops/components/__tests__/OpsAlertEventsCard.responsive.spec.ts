@@ -17,7 +17,7 @@ vi.mock('@/api/admin/ops', () => ({
   opsAPI: { getAlertEvent, listAlertEvents },
 }))
 
-vi.mock('@/api', () => ({
+vi.mock('@/api/admin', () => ({
   adminAPI: { groups: { getAll: getGroups } },
 }))
 

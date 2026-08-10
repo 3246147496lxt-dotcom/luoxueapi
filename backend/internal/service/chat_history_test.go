@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -229,6 +230,35 @@ func TestChatHistoryPrepareCompletionCanonicalizesEnvelopeAndHashesIt(t *testing
 	require.Equal(t, "  preserve prompt spacing  ", repo.prepareInput.UserMessage.Content)
 	require.Equal(t, maxChatCompletionContextMessages, repo.prepareInput.ContextMessageLimit)
 	require.Len(t, repo.prepareInput.RequestHash, 64)
+}
+
+func TestChatHistoryPrepareCompletionAllowsAttachmentOnlyAndHashesOnlyOrderedIdentity(t *testing.T) {
+	expires := time.Now().Add(24 * time.Hour)
+	attachmentRepo := &chatAttachmentRepoFake{attachments: map[string]ChatAttachment{
+		"att_12345678": {ID: "att_12345678", Name: "first.png", Kind: ChatAttachmentKindImage, Size: 10, Status: ChatAttachmentStatusReady, ExpiresAt: expires, Digest: strings.Repeat("a", 64)},
+	}}
+	prepare := func(repo *chatHistoryRepositoryStub, attempt, assistant string) string {
+		svc := NewChatHistoryService(repo)
+		svc.attachments = attachmentRepo
+		_, err := svc.PrepareCompletion(context.Background(), 42, attempt, "client-request-12345678", &PrepareChatCompletionInput{
+			ConversationID: "conversation-12345678", Model: "gpt-5.5",
+			UserMessage:        &ChatCompletionHistoryUserMessage{ID: "message-user-12345678", AttachmentIDs: []string{"att_12345678"}},
+			AssistantMessageID: assistant,
+		})
+		require.NoError(t, err)
+		return repo.prepareInput.RequestHash
+	}
+	firstRepo := &chatHistoryRepositoryStub{}
+	firstHash := prepare(firstRepo, "attempt-12345678", "message-assistant-12345678")
+	a := attachmentRepo.attachments["att_12345678"]
+	a.Name = "renamed.png"
+	a.ExpiresAt = expires.Add(time.Hour)
+	attachmentRepo.attachments[a.ID] = a
+	secondRepo := &chatHistoryRepositoryStub{}
+	secondHash := prepare(secondRepo, "attempt-87654321", "message-assistant-12345678")
+	require.Equal(t, firstHash, secondHash)
+	require.Empty(t, firstRepo.prepareInput.UserMessage.Content)
+	require.Len(t, firstRepo.prepareInput.UserMessage.Attachments, 1)
 }
 
 func TestChatHistoryCompletionWritesRequireMonotonicSequence(t *testing.T) {

@@ -1155,6 +1155,64 @@ export async function deleteAdminApiKey(): Promise<{ message: string }> {
   return data;
 }
 
+// ==================== Web Chat Transcription Settings ====================
+
+export interface WebChatTranscriptionModelOption {
+  id: string;
+  available_group_count: number;
+  availability_checked: boolean;
+}
+
+export interface WebChatTranscriptionLimits {
+  max_upload_bytes: number;
+  max_duration_seconds: number;
+  max_concurrent_global: number;
+  max_concurrent_per_user: number;
+  user_requests_per_minute: number;
+  user_daily_audio_seconds: number;
+  request_timeout_seconds: number;
+}
+
+export interface WebChatTranscriptionSettings {
+  enabled: boolean;
+  provider: string;
+  model: string;
+  group_ids: number[];
+  user_daily_audio_seconds: number;
+  daily_audio_seconds_min: number;
+  daily_audio_seconds_max: number;
+  managed: boolean;
+  runtime_ready: boolean;
+  catalog_available: boolean;
+  selected_model_available: boolean;
+  model_options: WebChatTranscriptionModelOption[];
+  limits: WebChatTranscriptionLimits;
+}
+
+export interface UpdateWebChatTranscriptionSettingsRequest {
+  enabled: boolean;
+  model: string;
+  group_ids: number[];
+  user_daily_audio_seconds: number;
+}
+
+export async function getWebChatTranscriptionSettings(): Promise<WebChatTranscriptionSettings> {
+  const { data } = await apiClient.get<WebChatTranscriptionSettings>(
+    "/admin/settings/transcription",
+  );
+  return data;
+}
+
+export async function updateWebChatTranscriptionSettings(
+  settings: UpdateWebChatTranscriptionSettingsRequest,
+): Promise<WebChatTranscriptionSettings> {
+  const { data } = await apiClient.put<WebChatTranscriptionSettings>(
+    "/admin/settings/transcription",
+    settings,
+  );
+  return data;
+}
+
 // ==================== Overload Cooldown Settings ====================
 
 /**
@@ -1429,6 +1487,8 @@ export const settingsAPI = {
   getAdminApiKey,
   regenerateAdminApiKey,
   deleteAdminApiKey,
+  getWebChatTranscriptionSettings,
+  updateWebChatTranscriptionSettings,
   getOverloadCooldownSettings,
   updateOverloadCooldownSettings,
   getRateLimit429CooldownSettings,

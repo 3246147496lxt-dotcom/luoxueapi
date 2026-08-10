@@ -276,6 +276,65 @@ func TestCheckBillingEligibilitySimpleModeRechecksWebChatBalanceOnly(t *testing.
 	})
 }
 
+func TestCheckBillingEligibilitySimpleModeRechecksWebChatSubscription(t *testing.T) {
+	newFixture := func(t *testing.T) (*BillingCacheService, *User, *APIKey, *Group, *UserSubscription, *subscriptionMonthlyCacheStub) {
+		t.Helper()
+		subscription, cacheData, _ := billingCacheMonthlyFixture(t)
+		cache := &subscriptionMonthlyCacheStub{data: cacheData}
+		cfg := &config.Config{RunMode: config.RunModeSimple}
+		svc := NewBillingCacheService(cache, nil, nil, nil, nil, nil, cfg, nil)
+		group := &Group{
+			ID:               subscription.GroupID,
+			Status:           StatusActive,
+			Platform:         PlatformOpenAI,
+			SubscriptionType: SubscriptionTypeSubscription,
+			Hydrated:         true,
+		}
+		user := &User{ID: subscription.UserID, Status: StatusActive, Balance: 0}
+		apiKey := &APIKey{
+			ID:      99,
+			UserID:  user.ID,
+			GroupID: &group.ID,
+			Status:  StatusActive,
+			Purpose: APIKeyPurposeWebChat,
+			User:    user,
+			Group:   group,
+		}
+		return svc, user, apiKey, group, subscription, cache
+	}
+
+	t.Run("valid subscription does not require wallet balance", func(t *testing.T) {
+		svc, user, apiKey, group, subscription, cache := newFixture(t)
+		ctx := context.WithValue(context.Background(), ctxkey.WebChat, true)
+
+		err := svc.CheckBillingEligibility(ctx, user, apiKey, group, subscription, PlatformOpenAI)
+		require.NoError(t, err)
+		require.Equal(t, 1, cache.getCalls)
+	})
+
+	t.Run("missing subscription context fails closed", func(t *testing.T) {
+		svc, user, apiKey, group, _, cache := newFixture(t)
+		ctx := context.WithValue(context.Background(), ctxkey.WebChat, true)
+
+		err := svc.CheckBillingEligibility(ctx, user, apiKey, group, nil, PlatformOpenAI)
+		require.Error(t, err)
+		require.True(t, infraerrors.IsServiceUnavailable(err))
+		require.Zero(t, cache.getCalls)
+	})
+
+	t.Run("exhausted subscription is rejected by final gateway check", func(t *testing.T) {
+		svc, user, apiKey, group, subscription, cache := newFixture(t)
+		weeklyLimit := 1.0
+		group.WeeklyLimitUSD = &weeklyLimit
+		cache.data.WeeklyUsage = weeklyLimit
+		ctx := context.WithValue(context.Background(), ctxkey.WebChat, true)
+
+		err := svc.CheckBillingEligibility(ctx, user, apiKey, group, subscription, PlatformOpenAI)
+		require.ErrorIs(t, err, ErrWeeklyLimitExceeded)
+		require.Equal(t, 1, cache.getCalls)
+	})
+}
+
 func TestPeekWebChatEligibilityBusinessRejectionsCloseCircuitBreaker(t *testing.T) {
 	tests := []struct {
 		name  string

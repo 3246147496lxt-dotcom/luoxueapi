@@ -1,8 +1,13 @@
 <template>
   <div
-    v-if="summary.hasUser.value"
+    v-if="profile"
     class="sidebar-account-dock"
-    :class="{ 'sidebar-account-dock--collapsed': sidebarCollapsed }"
+    :class="{
+      'sidebar-account-dock--collapsed': sidebarCollapsed,
+      'sidebar-account-dock--chat': context === 'chat',
+      'sidebar-account-dock--personal': !isAdminWorkspace,
+      'sidebar-account-dock--work': context === 'work' && !isAdminWorkspace,
+    }"
     data-testid="sidebar-account-dock"
   >
     <div
@@ -23,11 +28,11 @@
       >
         <span class="sidebar-account-trigger__avatar">
           <img
-            v-if="summary.avatarUrl.value && !isOpsOptionB"
-            :src="summary.avatarUrl.value"
-            :alt="summary.displayName.value"
+            v-if="profile.avatarUrl && !isOpsOptionB"
+            :src="profile.avatarUrl"
+            :alt="profile.displayName"
           >
-          <span v-else>{{ isOpsOptionB ? t('admin.ops.sidebar.avatar') : summary.initials.value }}</span>
+          <span v-else>{{ isOpsOptionB ? t('admin.ops.sidebar.avatar') : profile.initials }}</span>
         </span>
 
         <span
@@ -35,36 +40,27 @@
           :aria-hidden="sidebarCollapsed ? 'true' : undefined"
         >
           <span class="sidebar-account-trigger__name">
-            {{ isOpsOptionB ? t('admin.ops.sidebar.admin') : summary.displayName.value }}
+            {{ isOpsOptionB ? t('admin.ops.sidebar.admin') : profile.displayName }}
           </span>
           <span v-if="isOpsOptionB" class="sidebar-account-trigger__meta">
             {{ t('admin.ops.sidebar.balanceSubscription') }}
           </span>
           <span v-else class="sidebar-account-trigger__meta">
-            <span class="sidebar-account-trigger__balance-label">
-              {{ t('accountDock.balanceShort') }}
-            </span>
-            <CreditAmount
-              :value="formatCredit(summary.availableBalance.value)"
-              icon-size="xs"
-              :label="`${t('accountDock.availableBalance')} ${formatCredit(summary.availableBalance.value)}`"
-            />
-            <span aria-hidden="true">·</span>
-            <span class="truncate">{{ subscriptionStatusText }}</span>
+            {{ accountPlanLabel }}
           </span>
         </span>
 
-        <Icon
-          v-if="isOpsOptionB && !sidebarCollapsed"
-          name="chevronsUpDown"
-          size="sm"
+        <span
+          v-if="(isOpsOptionB || !isAdminWorkspace) && !sidebarCollapsed"
           class="sidebar-account-trigger__chevrons"
           aria-hidden="true"
-        />
+        >
+          <Icon name="chevronsUpDown" size="sm" />
+        </span>
       </button>
 
       <RouterLink
-        v-if="pricingTarget && !sidebarCollapsed && !isOpsOptionB"
+        v-if="isAdminWorkspace && pricingTarget && !sidebarCollapsed && !isOpsOptionB"
         data-testid="account-upgrade-link"
         class="sidebar-account-cta"
         :to="pricingTarget.path"
@@ -79,6 +75,11 @@
       :anchor-element="dockRowRef"
       :summary="panelSummary"
       :show-onboarding="showOnboarding"
+      :context="context"
+      :variant="isAdminWorkspace ? 'admin' : 'personal'"
+      :plan-label="accountPlanLabel"
+      :help-href="helpHref"
+      :workspace-target="workspaceTarget"
       @close="closePanel"
       @logout="handleLogout"
       @replay="handleReplay"
@@ -89,10 +90,12 @@
 
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from 'vue'
+import { storeToRefs } from 'pinia'
 import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
-import { useAccountSummary } from '@/composables/useAccountSummary'
+import { useUserMembership } from '@/composables/useUserMembership'
 import { openPersonalSettings } from '@/navigation/personalSettingsRoute'
+import { resolveDocumentationUrl } from '@/utils/documentationUrl'
 import {
   getShellDestinationSpecs,
   selectVisibleShellDestinations,
@@ -102,7 +105,7 @@ import {
 import { useAppStore } from '@/stores/app'
 import { useAuthStore } from '@/stores/auth'
 import { useOnboardingStore } from '@/stores/onboarding'
-import CreditAmount from '@/components/common/CreditAmount.vue'
+import { useUserProfileStore } from '@/stores/userProfile'
 import Icon from '@/components/icons/Icon.vue'
 import SidebarAccountOverlay from './SidebarAccountOverlay.vue'
 import type { PersonalSettingsSection } from '@/navigation/personalSettingsRoute'
@@ -114,26 +117,46 @@ const router = useRouter()
 const appStore = useAppStore()
 const authStore = useAuthStore()
 const onboardingStore = useOnboardingStore()
-const summary = useAccountSummary()
+const userProfileStore = useUserProfileStore()
+const props = withDefaults(defineProps<{
+  context?: 'work' | 'chat'
+  collapsed?: boolean
+}>(), {
+  context: 'work',
+  collapsed: false,
+})
+const context = computed(() => props.context)
+const {
+  profile,
+  subscriptionsLoaded,
+  activeSubscriptionCount,
+  primarySubscription,
+} = storeToRefs(userProfileStore)
+const membership = useUserMembership({
+  subscriptionsLoaded,
+  activeSubscriptionCount,
+  primarySubscription,
+})
 
 const panelOpen = ref(false)
 const dockRowRef = ref<HTMLElement | null>(null)
 const triggerRef = ref<HTMLButtonElement | null>(null)
-const sidebarCollapsed = computed(() => appStore.sidebarCollapsed)
 const isOpsOptionB = computed(() => route.path.startsWith('/admin/ops'))
-const audience = computed(() => summary.isAdmin.value ? 'admin' as const : 'user' as const)
+const isAdminWorkspace = computed(() => (
+  authStore.isAdmin && route.path.startsWith('/admin')
+))
+const sidebarCollapsed = computed(() => props.collapsed)
+const audience = computed(() => (isAdminWorkspace.value ? 'admin' as const : 'user' as const))
 const settingsAudience = computed(() => (
-  summary.isAdmin.value && route.path.startsWith('/admin')
-    ? 'admin' as const
-    : 'user' as const
+  isAdminWorkspace.value ? 'admin' as const : 'user' as const
 ))
 const showOnboarding = computed(
-  () => !summary.isSimpleMode.value && summary.isAdmin.value,
+  () => !authStore.isSimpleMode && isAdminWorkspace.value,
 )
 
 const destinationContext = computed(() => ({
   audience: audience.value,
-  simpleMode: summary.isSimpleMode.value,
+  simpleMode: authStore.isSimpleMode,
   capabilities: {
     payment: toShellCapabilityState(
       appStore.cachedPublicSettings?.payment_enabled,
@@ -162,45 +185,60 @@ function formatCredit(value: number) {
   return Number.isFinite(value) ? value.toFixed(2) : '0.00'
 }
 
-const subscriptionStatusText = computed(() => {
-  if (
-    !summary.subscriptionsLoaded.value
-  ) {
-    return t('accountDock.subscriptionLoading')
-  }
-  if (summary.activeSubscriptionCount.value > 0) {
-    return t('accountDock.activeSubscriptions', {
-      count: summary.activeSubscriptionCount.value,
-    })
-  }
-  return t('accountDock.payAsYouGo')
+const adminSubscriptionStatusText = computed(() => t('accountDock.payAsYouGo'))
+
+const accountPlanLabel = computed(() => (
+  isAdminWorkspace.value
+    ? adminSubscriptionStatusText.value
+    : membership.accountPlanLabel.value
+))
+
+const triggerAriaLabel = computed(() => (
+  isAdminWorkspace.value
+    ? [
+        t('accountDock.open'),
+        profile.value?.displayName ?? '',
+        t('accountDock.summary', {
+          balance: formatCredit(profile.value?.availableBalance ?? 0),
+          subscription: accountPlanLabel.value,
+        }),
+      ].join(' · ')
+    : [
+        t('accountDock.open'),
+        profile.value?.displayName ?? '',
+        accountPlanLabel.value,
+      ].filter(Boolean).join(' · ')
+))
+
+const pricingTarget = computed(() => (
+  props.context === 'chat' ? null : findVisibleRouteDestination('pricing')
+))
+
+const helpHref = computed(() => resolveDocumentationUrl(
+  appStore.cachedPublicSettings?.doc_url || appStore.docUrl,
+))
+
+const workspaceTarget = computed(() => {
+  if (props.context === 'chat' || !authStore.isAdmin) return null
+  return isAdminWorkspace.value
+    ? { href: '/dashboard', label: t('nav.switchToPersonalWorkspace') }
+    : { href: '/admin/dashboard', label: t('nav.switchToAdminWorkspace') }
 })
 
-const triggerAriaLabel = computed(() => [
-  t('accountDock.open'),
-  summary.displayName.value,
-  t('accountDock.summary', {
-    balance: formatCredit(summary.availableBalance.value),
-    subscription: subscriptionStatusText.value,
-  }),
-].join(' · '))
-
-const pricingTarget = computed(() => findVisibleRouteDestination('pricing'))
-
 const panelSummary = computed<AccountPanelSummary>(() => ({
-  displayName: summary.displayName.value,
-  email: summary.email.value,
-  initials: summary.initials.value,
-  avatarUrl: summary.avatarUrl.value,
-  frozenBalance: summary.frozenBalance.value,
-  formattedAvailableBalance: formatCredit(summary.availableBalance.value),
-  formattedFrozenBalance: formatCredit(summary.frozenBalance.value),
-  activeSubscriptionCount: summary.activeSubscriptionCount.value,
-  subscriptionsLoaded: summary.subscriptionsLoaded.value,
+  displayName: profile.value?.displayName ?? '',
+  email: profile.value?.email ?? '',
+  initials: profile.value?.initials ?? '',
+  avatarUrl: profile.value?.avatarUrl ?? '',
+  frozenBalance: profile.value?.frozenBalance ?? 0,
+  formattedAvailableBalance: formatCredit(profile.value?.availableBalance ?? 0),
+  formattedFrozenBalance: formatCredit(profile.value?.frozenBalance ?? 0),
+  activeSubscriptionCount: isAdminWorkspace.value ? 0 : activeSubscriptionCount.value,
+  subscriptionsLoaded: isAdminWorkspace.value ? true : subscriptionsLoaded.value,
 }))
 
 function isMobileViewport() {
-  return typeof window !== 'undefined' && window.matchMedia('(max-width: 1023px)').matches
+  return appStore.workspaceMobileDrawer
 }
 
 function togglePanel() {
@@ -210,13 +248,13 @@ function togglePanel() {
   }
 
   panelOpen.value = true
-  if (isMobileViewport()) {
+  if (isMobileViewport() && isAdminWorkspace.value) {
     appStore.setMobileOpen(false)
   }
 }
 
 function focusReturnTarget() {
-  const target = isMobileViewport()
+  const target = isMobileViewport() && props.context !== 'chat'
     ? document.querySelector<HTMLButtonElement>('[data-testid="mobile-header-menu"]')
     : triggerRef.value
   target?.focus({ preventScroll: true })
@@ -247,8 +285,11 @@ function handleReplay() {
 
 function handleCtaClick() {
   closePanel(false)
-  if (isMobileViewport()) {
+  if (isMobileViewport() || appStore.mobileOpen) {
     appStore.setMobileOpen(false)
+  }
+  if (appStore.workspaceNarrowSidebar) {
+    appStore.setWorkspaceNarrowSidebarOpen(false)
   }
 }
 
@@ -269,6 +310,22 @@ watch(
 )
 
 watch(sidebarCollapsed, () => closePanel(false))
+
+watch(
+  () => appStore.mobileOpen,
+  (mobileOpen) => {
+    if (!mobileOpen && props.context === 'work' && !isAdminWorkspace.value) {
+      closePanel(false)
+    }
+  },
+)
+
+watch(
+  () => appStore.workspaceNarrowSidebarOpen,
+  (open) => {
+    if (!open && appStore.workspaceNarrowSidebar) closePanel(false)
+  },
+)
 </script>
 
 <style scoped>
@@ -277,38 +334,57 @@ watch(sidebarCollapsed, () => closePanel(false))
   z-index: 2;
   width: 100%;
   flex: 0 0 auto;
-  padding: 0 6px calc(6px + env(safe-area-inset-bottom)) 8px;
+  padding:
+    0
+    var(--workspace-space-1-5)
+    calc(var(--workspace-space-1-5) + env(safe-area-inset-bottom))
+    var(--workspace-space-2);
 }
 
 .sidebar-account-row {
   display: grid;
   width: 100%;
-  min-height: 52px;
+  min-height: var(--workspace-sidebar-footer-row-height);
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: stretch;
-  padding-right: 6px;
+  padding-right: var(--workspace-space-1-5);
   overflow: hidden;
-  border-radius: 10px;
-  color: rgb(30 41 59);
+  border-radius: var(--workspace-radius-button);
+  color: var(--workspace-dock-text);
   transition:
+    width var(--workspace-sidebar-transition-duration) var(--workspace-sidebar-transition-easing),
     color 150ms ease,
     background-color 150ms ease;
 }
 
 .sidebar-account-row:hover,
 .sidebar-account-row--open {
-  color: rgb(15 23 42);
-  background: rgb(15 23 42 / 0.055);
+  color: var(--workspace-dock-text-strong);
+  background: var(--workspace-dock-hover);
+}
+
+.sidebar-account-dock--personal .sidebar-account-row,
+.sidebar-account-dock--personal .sidebar-account-row:hover,
+.sidebar-account-dock--personal .sidebar-account-row--open {
+  color: var(--workspace-identity-text);
+}
+
+.sidebar-account-dock--personal .sidebar-account-row {
+  padding-right: 0;
 }
 
 .sidebar-account-trigger {
   display: grid;
   min-width: 0;
-  min-height: 52px;
-  grid-template-columns: 32px minmax(0, 1fr) auto;
+  min-height: var(--workspace-sidebar-footer-row-height);
+  grid-template-columns: var(--workspace-sidebar-touch-target) minmax(0, 1fr) auto;
   align-items: center;
-  gap: 10px;
-  padding: 6px 4px 6px 8px;
+  gap: var(--workspace-space-2-5);
+  padding:
+    var(--workspace-space-1-5)
+    var(--workspace-space-1)
+    var(--workspace-space-1-5)
+    0;
   border-radius: inherit;
   color: inherit;
   text-align: left;
@@ -316,21 +392,32 @@ watch(sidebarCollapsed, () => closePanel(false))
 
 .sidebar-account-trigger:focus-visible,
 .sidebar-account-cta:focus-visible {
-  outline: 2px solid var(--app-shell-sidebar-focus, rgb(0 132 255 / 0.5));
+  outline: 2px solid var(--workspace-dock-focus);
   outline-offset: -2px;
+}
+
+.sidebar-account-dock--personal .sidebar-account-trigger:focus-visible {
+  outline-color: var(--workspace-dock-focus-personal);
+}
+
+.sidebar-account-dock--personal .sidebar-account-trigger {
+  grid-template-columns: 24px minmax(0, 1fr) 36px;
+  gap: var(--workspace-space-2);
+  padding: var(--workspace-space-2);
 }
 
 .sidebar-account-trigger__avatar {
   position: relative;
   display: flex;
-  width: 32px;
-  height: 32px;
+  width: var(--workspace-avatar-size-md);
+  height: var(--workspace-avatar-size-md);
   align-items: center;
   justify-content: center;
+  justify-self: center;
   overflow: visible;
-  border-radius: 999px;
-  color: #1c1f23;
-  background: #fce865;
+  border-radius: var(--workspace-radius-pill);
+  color: var(--workspace-identity-avatar-text);
+  background: var(--workspace-identity-avatar-surface);
   font-size: 0.75rem;
   font-weight: 700;
 }
@@ -343,11 +430,33 @@ watch(sidebarCollapsed, () => closePanel(false))
   object-fit: cover;
 }
 
+.sidebar-account-dock--personal .sidebar-account-trigger__avatar {
+  width: 24px;
+  height: 24px;
+  border-radius: var(--workspace-radius-pill);
+  color: var(--workspace-identity-text);
+  background: var(--workspace-hover);
+  font-size: var(--workspace-type-secondary-size);
+  font-weight: var(--workspace-type-secondary-weight);
+}
+
+:global(html.dark .sidebar-account-dock--personal .sidebar-account-trigger__avatar) {
+  color: var(--workspace-identity-text);
+  background: var(--workspace-surface-subtle);
+  box-shadow: inset 0 0 0 1px var(--workspace-border-strong);
+}
+
 .sidebar-account-trigger__copy {
   display: flex;
   min-width: 0;
+  max-width: 12rem;
   flex-direction: column;
-  gap: 1px;
+  gap: var(--workspace-space-0-25);
+  overflow: hidden;
+  opacity: 1;
+  transition:
+    max-width 0.2s ease,
+    opacity 0.12s ease;
 }
 
 .sidebar-account-trigger__name,
@@ -358,8 +467,17 @@ watch(sidebarCollapsed, () => closePanel(false))
 }
 
 .sidebar-account-trigger__chevrons {
-  flex: 0 0 auto;
-  color: #5f6b7a;
+  display: grid;
+  width: 36px;
+  height: 36px;
+  place-items: center;
+  flex: 0 0 36px;
+  border-radius: var(--workspace-radius-compact);
+  color: var(--workspace-dock-chevron);
+}
+
+.sidebar-account-dock--personal .sidebar-account-trigger__chevrons {
+  color: var(--workspace-identity-text-tertiary);
 }
 
 .sidebar-account-trigger__name {
@@ -373,25 +491,38 @@ watch(sidebarCollapsed, () => closePanel(false))
   display: flex;
   min-width: 0;
   align-items: center;
-  gap: 3px;
-  color: rgb(100 116 139);
+  gap: var(--workspace-space-0-75);
+  color: var(--workspace-dock-text-muted);
   font-size: 0.6875rem;
   font-weight: 400;
   line-height: 1rem;
 }
 
+.sidebar-account-dock--personal .sidebar-account-trigger__name {
+  font-size: 14px;
+  font-weight: 400;
+  line-height: 20px;
+}
+
+.sidebar-account-dock--personal .sidebar-account-trigger__meta {
+  color: var(--workspace-identity-text-tertiary);
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 16px;
+}
+
 .sidebar-account-cta {
   display: inline-flex;
   min-width: 0;
-  min-height: 32px;
+  min-height: var(--workspace-avatar-size-md);
   align-self: center;
   align-items: center;
   justify-content: center;
-  padding: 0 11px;
-  border: 1px solid rgb(15 23 42 / 0.15);
-  border-radius: 999px;
-  color: rgb(15 23 42);
-  background: rgb(255 255 255 / 0.9);
+  padding: 0 var(--workspace-space-2-75);
+  border: 1px solid var(--workspace-dock-cta-border);
+  border-radius: var(--workspace-radius-control-sm);
+  color: var(--workspace-dock-cta-text);
+  background: var(--workspace-dock-cta-surface);
   font-size: 0.8125rem;
   font-weight: 500;
   line-height: 1;
@@ -402,62 +533,45 @@ watch(sidebarCollapsed, () => closePanel(false))
     background-color 150ms ease;
 }
 
-.sidebar-account-cta:hover {
-  border-color: rgb(15 23 42 / 0.24);
-  background: #fff;
+.sidebar-account-dock--personal .sidebar-account-cta {
+  display: none;
 }
 
-.sidebar-account-dock--collapsed {
-  padding-right: 7px;
-  padding-left: 7px;
+.sidebar-account-cta:hover {
+  border-color: var(--workspace-dock-cta-border-hover);
+  background: var(--workspace-dock-cta-surface-hover);
 }
 
 .sidebar-account-dock--collapsed .sidebar-account-row {
-  display: block;
+  width: var(--workspace-sidebar-touch-target);
   padding-right: 0;
 }
 
 .sidebar-account-dock--collapsed .sidebar-account-trigger {
-  width: 100%;
-  min-height: 52px;
-  grid-template-columns: 32px;
-  justify-content: center;
+  width: var(--workspace-sidebar-touch-target);
+  min-height: var(--workspace-sidebar-footer-row-height);
+  grid-template-columns: var(--workspace-sidebar-touch-target) minmax(0, 0) 0;
+  justify-content: start;
+  gap: 0;
+  padding: 0;
+}
+
+.sidebar-account-dock--personal.sidebar-account-dock--collapsed .sidebar-account-trigger {
+  grid-template-columns: var(--workspace-sidebar-touch-target) minmax(0, 0) 0;
   gap: 0;
   padding: 0;
 }
 
 .sidebar-account-dock--collapsed .sidebar-account-trigger__copy {
-  display: none;
-}
-
-:global(html.dark .sidebar-account-row) {
-  color: rgb(226 232 240);
-}
-
-:global(html.dark .sidebar-account-row:hover),
-:global(html.dark .sidebar-account-row--open) {
-  color: #fff;
-  background: rgb(255 255 255 / 0.08);
-}
-
-:global(html.dark .sidebar-account-trigger__meta) {
-  color: rgb(148 163 184);
-}
-
-:global(html.dark .sidebar-account-cta) {
-  border-color: rgb(255 255 255 / 0.16);
-  color: rgb(248 250 252);
-  background: rgb(255 255 255 / 0.08);
-}
-
-:global(html.dark .sidebar-account-cta:hover) {
-  border-color: rgb(255 255 255 / 0.28);
-  background: rgb(255 255 255 / 0.12);
+  max-width: 0;
+  opacity: 0;
+  pointer-events: none;
 }
 
 @media (prefers-reduced-motion: reduce) {
   .sidebar-account-row,
-  .sidebar-account-cta {
+  .sidebar-account-cta,
+  .sidebar-account-trigger__copy {
     transition-duration: 0.01ms;
   }
 }

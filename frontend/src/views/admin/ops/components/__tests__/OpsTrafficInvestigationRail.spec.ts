@@ -9,7 +9,7 @@ const { getGroups } = vi.hoisted(() => ({
   getGroups: vi.fn(),
 }))
 
-vi.mock('@/api', () => ({
+vi.mock('@/api/admin', () => ({
   adminAPI: { groups: { getAll: getGroups } },
 }))
 

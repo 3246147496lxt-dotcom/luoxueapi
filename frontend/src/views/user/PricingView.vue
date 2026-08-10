@@ -262,8 +262,8 @@ onMounted(() => {
 
 .pricing-page__hero h1 {
   color: #171717;
-  font-size: clamp(30px, 3vw, 34px);
-  font-weight: 650;
+  font-size: var(--workspace-type-page-title-size);
+  font-weight: var(--workspace-type-page-title-weight);
   letter-spacing: -0.025em;
   line-height: 1.2;
   text-wrap: balance;
@@ -272,7 +272,8 @@ onMounted(() => {
 .pricing-page__hero > p {
   margin: 12px auto 0;
   color: #666;
-  font-size: 15px;
+  font-size: var(--workspace-type-body-size);
+  font-weight: var(--workspace-type-body-weight);
   line-height: 1.65;
   text-wrap: pretty;
 }
@@ -284,8 +285,8 @@ onMounted(() => {
   margin-top: 20px;
   border-radius: 8px;
   color: #3f3f3f;
-  font-size: 13px;
-  font-weight: 600;
+  font-size: var(--workspace-type-navigation-size);
+  font-weight: var(--workspace-type-navigation-weight);
 }
 
 .pricing-page__manage-link:hover {
@@ -370,15 +371,16 @@ onMounted(() => {
 
 .pricing-page__state h2 {
   margin-top: 18px;
-  font-size: 19px;
-  font-weight: 650;
+  font-size: var(--workspace-type-brand-size);
+  font-weight: var(--workspace-type-brand-weight);
 }
 
 .pricing-page__state p {
   width: min(440px, 100%);
   margin-top: 8px;
   color: #707070;
-  font-size: 14px;
+  font-size: var(--workspace-type-body-size);
+  font-weight: var(--workspace-type-body-weight);
   line-height: 1.6;
 }
 
@@ -393,8 +395,8 @@ onMounted(() => {
   border-radius: 999px;
   color: #fff;
   background: #171717;
-  font-size: 13px;
-  font-weight: 650;
+  font-size: var(--workspace-type-navigation-size);
+  font-weight: var(--workspace-type-navigation-weight);
 }
 
 .pricing-page__filter,
@@ -409,14 +411,15 @@ onMounted(() => {
   border-radius: 12px;
   color: #555;
   background: rgb(255 255 255 / 0.75);
-  font-size: 13px;
+  font-size: var(--workspace-type-secondary-size);
+  font-weight: var(--workspace-type-secondary-weight);
 }
 
 .pricing-page__filter button,
 .pricing-page__warning button {
   flex: none;
   color: #171717;
-  font-weight: 650;
+  font-weight: var(--workspace-type-navigation-weight);
 }
 
 @keyframes pricing-shimmer {
@@ -499,11 +502,11 @@ onMounted(() => {
   }
 
   .pricing-page__hero h1 {
-    font-size: 30px;
+    font-size: var(--workspace-type-page-title-size);
   }
 
   .pricing-page__hero > p {
-    font-size: 14px;
+    font-size: var(--workspace-type-body-size);
   }
 
   .pricing-page__grid {

@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"log/slog"
+	"strings"
 )
 
 // PricingSource 定价来源标识
@@ -52,6 +53,16 @@ func NewModelPricingResolver(channelService *ChannelService, billingService *Bil
 		channelService: channelService,
 		billingService: billingService,
 	}
+}
+
+// SupportsVision is deliberately fail-closed: capability metadata must exist
+// for the exact billing model selected by the Web Chat catalog.
+func (r *ModelPricingResolver) SupportsVision(model string) bool {
+	if r == nil || r.billingService == nil || r.billingService.pricingService == nil {
+		return false
+	}
+	_, pricing := r.billingService.pricingService.GetExactModelPricing(strings.TrimSpace(model))
+	return pricing != nil && pricing.SupportsVision
 }
 
 // PricingInput 定价解析输入

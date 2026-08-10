@@ -949,9 +949,12 @@ import type {
   AccountType,
   CreateAccountRequest,
   OpenAICompactMode,
-  OpenAIResponsesMode,
-  OpenAIEndpointCapability
+  OpenAIResponsesMode
 } from '@/types'
+import {
+  DEFAULT_OPENAI_ENDPOINT_CAPABILITIES,
+  type OpenAIEndpointCapability
+} from '@/components/account/openAIEndpointCapabilities'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
 import PlatformIcon from '@/components/common/PlatformIcon.vue'
@@ -1151,7 +1154,9 @@ const openAILongContextBillingEnabled = ref(false)
 const openAILongContextBillingTouched = ref(false)
 const openAICompactMode = ref<OpenAICompactMode>('auto')
 const openAIResponsesMode = ref<OpenAIResponsesMode>('auto')
-const openAIEndpointCapabilities = ref<OpenAIEndpointCapability[]>(['chat_completions', 'embeddings'])
+const openAIEndpointCapabilities = ref<OpenAIEndpointCapability[]>([
+  ...DEFAULT_OPENAI_ENDPOINT_CAPABILITIES
+])
 const openaiOAuthResponsesWebSocketV2Mode = ref<OpenAIWSMode>(OPENAI_WS_MODE_OFF)
 const openaiAPIKeyResponsesWebSocketV2Mode = ref<OpenAIWSMode>(OPENAI_WS_MODE_OFF)
 const codexCLIOnlyEnabled = ref(false)
@@ -1495,7 +1500,7 @@ watch(
     }
     if (newPlatform !== 'openai') {
       openaiPassthroughEnabled.value = false
-      openAIEndpointCapabilities.value = ['chat_completions', 'embeddings']
+      openAIEndpointCapabilities.value = [...DEFAULT_OPENAI_ENDPOINT_CAPABILITIES]
       openaiOAuthResponsesWebSocketV2Mode.value = OPENAI_WS_MODE_OFF
       openaiAPIKeyResponsesWebSocketV2Mode.value = OPENAI_WS_MODE_OFF
       codexCLIOnlyEnabled.value = false
@@ -1671,7 +1676,7 @@ const resetForm = () => {
   openAILongContextBillingTouched.value = false
   openAICompactMode.value = 'auto'
   openAIResponsesMode.value = 'auto'
-  openAIEndpointCapabilities.value = ['chat_completions', 'embeddings']
+  openAIEndpointCapabilities.value = [...DEFAULT_OPENAI_ENDPOINT_CAPABILITIES]
   openaiOAuthResponsesWebSocketV2Mode.value = OPENAI_WS_MODE_OFF
   openaiAPIKeyResponsesWebSocketV2Mode.value = OPENAI_WS_MODE_OFF
   codexCLIOnlyEnabled.value = false

@@ -70,5 +70,8 @@ declare module 'vue-router' {
      * i18n key for the page description
      */
     descriptionKey?: string
+
+    /** Authenticated personal product mode. Independent from layout density. */
+    shellMode?: 'chat' | 'work'
   }
 }

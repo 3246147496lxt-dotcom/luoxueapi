@@ -79,7 +79,7 @@ describe('useAccountSummary', () => {
     const authStore = useAuthStore()
     const subscriptionStore = useSubscriptionStore()
     const announcementStore = useAnnouncementStore()
-    const summary = useAccountSummary()
+    const summary = useAccountSummary({ subscriptionStore })
 
     authStore.user = makeUser({
       username: '  Riley Quinn  ',
@@ -162,7 +162,7 @@ describe('useAccountSummary', () => {
     const fetchAnnouncements = vi.spyOn(announcementStore, 'fetchAnnouncements')
     const setIntervalSpy = vi.spyOn(globalThis, 'setInterval')
 
-    const summary = useAccountSummary()
+    const summary = useAccountSummary({ subscriptionStore })
 
     expect(summary.displayName.value).toBe('')
     expect(summary.activeSubscriptionCount.value).toBe(0)

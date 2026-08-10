@@ -312,11 +312,25 @@ func GetSubscriptionFromContext(c *gin.Context) (*service.UserSubscription, bool
 // context normally produced by API-key authentication, after JWT chat
 // authorization has resolved an internal web-chat principal.
 func BindChatPrincipalContext(c *gin.Context, apiKey *service.APIKey) bool {
+	return BindChatPrincipalBillingContext(c, apiKey, nil)
+}
+
+// BindChatPrincipalBillingContext binds the trusted Web Chat principal and its
+// selected billing entitlement. Subscription identity is accepted only when it
+// exactly matches the principal's subscription group; wallet principals must
+// never carry subscription context.
+func BindChatPrincipalBillingContext(
+	c *gin.Context,
+	apiKey *service.APIKey,
+	subscription *service.UserSubscription,
+) bool {
 	if c == nil || c.Request == nil || apiKey == nil || apiKey.User == nil || apiKey.Group == nil ||
 		apiKey.Purpose != service.APIKeyPurposeWebChat || !apiKey.IsActive() ||
-		!apiKey.User.IsActive() || !apiKey.User.CanBindGroup(apiKey.Group.ID, apiKey.Group.IsExclusive) ||
+		!apiKey.User.IsActive() ||
+		(!apiKey.Group.IsSubscriptionType() && !apiKey.User.CanBindGroup(apiKey.Group.ID, apiKey.Group.IsExclusive)) ||
 		apiKey.UserID != apiKey.User.ID || apiKey.GroupID == nil || *apiKey.GroupID != apiKey.Group.ID ||
-		!service.IsGroupContextValid(apiKey.Group) {
+		!service.IsGroupContextValid(apiKey.Group) ||
+		!chatPrincipalSubscriptionMatches(apiKey, subscription) {
 		return false
 	}
 	if ingress, _ := c.Request.Context().Value(ctxkey.WebChatIngress).(bool); !ingress {
@@ -332,8 +346,24 @@ func BindChatPrincipalContext(c *gin.Context, apiKey *service.APIKey) bool {
 		Concurrency: apiKey.User.Concurrency,
 	})
 	c.Set(string(ContextKeyUserRole), apiKey.User.Role)
+	if subscription != nil {
+		c.Set(string(ContextKeySubscription), subscription)
+	}
 	setGroupContext(c, apiKey.Group)
 	return true
+}
+
+func chatPrincipalSubscriptionMatches(apiKey *service.APIKey, subscription *service.UserSubscription) bool {
+	if apiKey == nil || apiKey.Group == nil {
+		return false
+	}
+	if !apiKey.Group.IsSubscriptionType() {
+		return subscription == nil
+	}
+	return subscription != nil &&
+		subscription.UserID == apiKey.UserID &&
+		subscription.GroupID == apiKey.Group.ID &&
+		subscription.IsActive()
 }
 
 func setGroupContext(c *gin.Context, group *service.Group) {

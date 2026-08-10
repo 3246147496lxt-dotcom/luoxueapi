@@ -1,4 +1,4 @@
-import axios from 'axios'
+import axios, { type AxiosProgressEvent } from 'axios'
 import {
   authSession,
   isAuthSessionChangedError,
@@ -12,7 +12,9 @@ import type {
   ChatCompletionStreamHandlers,
   ChatCompletionStreamOptions,
   ChatCompletionStreamResult,
+  ChatCapabilities,
   ChatCatalog,
+  ChatAttachment,
   ChatAttempt,
   ChatAttemptStatus,
   ChatConversationPage,
@@ -26,6 +28,8 @@ import type {
   ChatServerMessage,
   ChatSyncChange,
   ChatSyncPage,
+  ChatTranscriptionCapability,
+  ChatTranscriptionResult,
   CreateChatConversationRequest,
   DeleteChatConversationRequest,
   PatchChatConversationRequest,
@@ -141,6 +145,27 @@ export function createChatRequestId(): string {
 
 export function createChatAttemptId(): string {
   return createChatRequestId()
+}
+
+export function createChatIdempotencyKey(): string {
+  try {
+    if (typeof globalThis.crypto?.randomUUID === 'function') {
+      return globalThis.crypto.randomUUID()
+    }
+    if (typeof globalThis.crypto?.getRandomValues === 'function') {
+      const bytes = globalThis.crypto.getRandomValues(new Uint8Array(16))
+      bytes[6] = ((bytes[6] ?? 0) & 0x0f) | 0x40
+      bytes[8] = ((bytes[8] ?? 0) & 0x3f) | 0x80
+      const hex = Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('')
+      return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`
+    }
+  } catch {
+    // The fallback remains a UUID-shaped idempotency token, not a credential.
+  }
+  const seed = `${Date.now().toString(16).padStart(12, '0')}${(++fallbackRequestIdCounter)
+    .toString(16)
+    .padStart(20, '0')}`
+  return `${seed.slice(0, 8)}-${seed.slice(8, 12)}-4${seed.slice(13, 16)}-8${seed.slice(17, 20)}-${seed.slice(20, 32)}`
 }
 
 export function isAbortError(error: unknown): boolean {
@@ -377,7 +402,18 @@ function normalizeChatModel(value: unknown): ChatModel | null {
   const candidate = asRecord(value)
   const id = nonEmptyString(candidate?.id)
   if (!candidate || !id) return null
-  return { ...candidate, id } as unknown as ChatModel
+  const model = { ...candidate, id } as unknown as ChatModel
+  const supportsVision = candidate.supports_vision ?? candidate.supportsVision
+  if (typeof supportsVision === 'boolean') model.supports_vision = supportsVision
+  const supportsReasoningSlider = candidate.supports_reasoning_slider
+    ?? candidate.supportsReasoningSlider
+  delete (model as ChatModel & { supportsReasoningSlider?: unknown }).supportsReasoningSlider
+  if (typeof supportsReasoningSlider === 'boolean') {
+    model.supports_reasoning_slider = supportsReasoningSlider
+  } else {
+    delete model.supports_reasoning_slider
+  }
+  return model
 }
 
 function normalizeRequestError(error: unknown, fallbackMessage: string): ChatAPIError {
@@ -398,19 +434,295 @@ function normalizeRequestError(error: unknown, fallbackMessage: string): ChatAPI
 export async function getChatModels(): Promise<ChatCatalog> {
   try {
     const { data } = await apiClient.get<unknown>('/chat/models')
+    const response = asRecord(data)
     const items = modelList(data)
-    const balance = asRecord(data)?.balance
+    const balance = response?.balance
     if (!items || typeof balance !== 'number' || !Number.isFinite(balance)) {
       throw new ChatAPIError('The chat model list returned an invalid response.', {
         code: 'INVALID_MODELS_RESPONSE',
       })
     }
-    return {
+    const catalog: ChatCatalog = {
       models: items.map(normalizeChatModel).filter((model): model is ChatModel => model !== null),
       balance,
     }
+    const transcription = normalizeTranscriptionCapability(response?.transcription)
+    if (transcription) catalog.transcription = transcription
+    return catalog
   } catch (error) {
     throw normalizeRequestError(error, 'Unable to load the chat model list.')
+  }
+}
+
+export async function getChatCapabilities(signal?: AbortSignal): Promise<ChatCapabilities> {
+  try {
+    const { data } = await apiClient.get<unknown>('/chat/capabilities', { signal })
+    const response = asRecord(data)
+    if (!response) {
+      throw new ChatAPIError('The chat capabilities endpoint returned an invalid response.', {
+        code: 'INVALID_CHAT_CAPABILITIES_RESPONSE',
+      })
+    }
+    const capabilities: ChatCapabilities = {}
+    const transcription = normalizeTranscriptionCapability(response.transcription)
+    if (transcription) capabilities.transcription = transcription
+    return capabilities
+  } catch (error) {
+    if (signal?.aborted || isAbortError(error)) throw error
+    throw normalizeRequestError(error, 'Unable to load chat capabilities.')
+  }
+}
+
+export interface ChatTranscriptionOptions {
+  signal?: AbortSignal
+  timeoutMs?: number
+  idempotencyKey?: string
+}
+
+function normalizePositiveInteger(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value > 0
+    ? value
+    : undefined
+}
+
+function normalizeNonNegativeInteger(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0
+    ? value
+    : undefined
+}
+
+export function normalizeChatAttachment(value: unknown): ChatAttachment | null {
+  const candidate = asRecord(value)
+  if (!candidate) return null
+
+  const id = nonEmptyString(candidate.id)
+  const name = nonEmptyString(candidate.name)
+  const kind = candidate.kind
+  const mimeType = nonEmptyString(candidate.mime_type ?? candidate.mimeType)
+  const size = normalizeNonNegativeInteger(candidate.size)
+  const status = candidate.status
+  const expiresAt = nonEmptyString(candidate.expires_at ?? candidate.expiresAt)
+
+  if (
+    !id
+    || !name
+    || (kind !== 'image' && kind !== 'document')
+    || !mimeType
+    || size === undefined
+    || (status !== 'ready' && status !== 'expired')
+    || !expiresAt
+  ) return null
+
+  const attachment: ChatAttachment = {
+    id,
+    name,
+    kind,
+    mimeType,
+    size,
+    status,
+    expiresAt,
+  }
+  const pageCount = normalizePositiveInteger(candidate.page_count ?? candidate.pageCount)
+  const width = normalizePositiveInteger(candidate.width)
+  const height = normalizePositiveInteger(candidate.height)
+  if (pageCount !== undefined) attachment.pageCount = pageCount
+  if (width !== undefined) attachment.width = width
+  if (height !== undefined) attachment.height = height
+  return attachment
+}
+
+export interface ChatAttachmentUploadOptions {
+  signal?: AbortSignal
+  onProgress?: (progress: number) => void
+}
+
+function attachmentUploadFile(file: File): File {
+  if (file.type.trim()) return file
+  const extension = file.name.split('.').pop()?.toLowerCase() ?? ''
+  const canonicalMimeType: Record<string, string> = {
+    jpg: 'image/jpeg',
+    jpeg: 'image/jpeg',
+    png: 'image/png',
+    webp: 'image/webp',
+    pdf: 'application/pdf',
+    docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  }
+  const mimeType = canonicalMimeType[extension]
+  return mimeType
+    ? new File([file], file.name, { type: mimeType, lastModified: file.lastModified })
+    : file
+}
+
+export async function uploadChatAttachment(
+  file: File,
+  options: ChatAttachmentUploadOptions = {},
+): Promise<ChatAttachment> {
+  throwIfAborted(options.signal)
+  if (!(file instanceof File) || file.size <= 0) {
+    throw new ChatAPIError('A non-empty attachment is required.', {
+      code: 'EMPTY_ATTACHMENT',
+    })
+  }
+
+  const formData = new FormData()
+  formData.append('file', attachmentUploadFile(file), file.name)
+
+  try {
+    const { data } = await apiClient.post<unknown>('/chat/attachments', formData, {
+      signal: options.signal,
+      timeout: 0,
+      headers: { 'Content-Type': undefined },
+      onUploadProgress: (event: AxiosProgressEvent) => {
+        const total = event.total && event.total > 0 ? event.total : file.size
+        const progress = total > 0 ? Math.round((event.loaded / total) * 100) : 0
+        options.onProgress?.(Math.max(0, Math.min(100, progress)))
+      },
+    })
+    throwIfAborted(options.signal)
+    const payload = asRecord(data)?.attachment ?? data
+    const attachment = normalizeChatAttachment(payload)
+    if (!attachment) {
+      throw new ChatAPIError('The attachment upload returned an invalid response.', {
+        code: 'INVALID_ATTACHMENT_RESPONSE',
+      })
+    }
+    return attachment
+  } catch (error) {
+    if (options.signal?.aborted || isAbortError(error)) throw abortError()
+    throw normalizeRequestError(error, 'Unable to upload the attachment.')
+  }
+}
+
+export async function deleteChatAttachment(id: string, signal?: AbortSignal): Promise<void> {
+  const normalizedId = id.trim()
+  if (!normalizedId) {
+    throw new ChatAPIError('An attachment ID is required.', {
+      code: 'ATTACHMENT_ID_REQUIRED',
+    })
+  }
+  throwIfAborted(signal)
+  try {
+    await apiClient.delete(`/chat/attachments/${encodeURIComponent(normalizedId)}`, { signal })
+    throwIfAborted(signal)
+  } catch (error) {
+    if (signal?.aborted || isAbortError(error)) throw abortError()
+    throw normalizeRequestError(error, 'Unable to delete the attachment.')
+  }
+}
+
+export async function getChatAttachmentContent(
+  id: string,
+  signal?: AbortSignal,
+): Promise<Blob> {
+  const normalizedId = id.trim()
+  if (!normalizedId) {
+    throw new ChatAPIError('An attachment ID is required.', {
+      code: 'ATTACHMENT_ID_REQUIRED',
+    })
+  }
+  throwIfAborted(signal)
+  try {
+    const { data } = await apiClient.get<Blob>(
+      `/chat/attachments/${encodeURIComponent(normalizedId)}/content`,
+      { signal, responseType: 'blob' },
+    )
+    throwIfAborted(signal)
+    if (!(data instanceof Blob)) {
+      throw new ChatAPIError('The attachment content response was invalid.', {
+        code: 'INVALID_ATTACHMENT_CONTENT_RESPONSE',
+      })
+    }
+    return data
+  } catch (error) {
+    if (signal?.aborted || isAbortError(error)) throw abortError()
+    throw normalizeRequestError(error, 'Unable to load the attachment.')
+  }
+}
+
+function normalizeTranscriptionCapability(value: unknown): ChatTranscriptionCapability | undefined {
+  const candidate = asRecord(value)
+  if (!candidate || typeof candidate.enabled !== 'boolean') return undefined
+  const capability: ChatTranscriptionCapability = {
+    enabled: candidate.enabled,
+  }
+  const billingMode = nonEmptyString(candidate.billing_mode ?? candidate.billingMode)
+  const maxUploadBytes = normalizePositiveInteger(
+    candidate.max_upload_bytes ?? candidate.maxUploadBytes,
+  )
+  const maxDurationSeconds = normalizePositiveInteger(
+    candidate.max_duration_seconds ?? candidate.maxDurationSeconds,
+  )
+  const rawMimeTypes = candidate.accepted_mime_types ?? candidate.acceptedMimeTypes
+  const acceptedMimeTypes = Array.isArray(rawMimeTypes)
+    ? rawMimeTypes
+        .map((mimeType) => nonEmptyString(mimeType))
+        .filter((mimeType): mimeType is string => mimeType !== null)
+    : []
+  if (billingMode) capability.billing_mode = billingMode
+  if (maxUploadBytes !== undefined) capability.max_upload_bytes = maxUploadBytes
+  if (maxDurationSeconds !== undefined) capability.max_duration_seconds = maxDurationSeconds
+  if (acceptedMimeTypes.length > 0) capability.accepted_mime_types = acceptedMimeTypes
+  return capability
+}
+
+function audioFileExtension(mimeType: string): string {
+  const normalized = mimeType.toLowerCase()
+  if (normalized.includes('mp4') || normalized.includes('m4a')) return 'm4a'
+  if (normalized.includes('ogg')) return 'ogg'
+  return 'webm'
+}
+
+export async function transcribeChatAudio(
+  audio: Blob,
+  options: ChatTranscriptionOptions = {},
+): Promise<ChatTranscriptionResult> {
+  const {
+    signal,
+    // Upload and provider deadlines are enforced by the server and may be
+    // configured above 90 seconds. Axios 0 disables its shorter client timer;
+    // callers can still cancel immediately through AbortSignal.
+    timeoutMs = 0,
+    idempotencyKey = createChatIdempotencyKey(),
+  } = options
+  throwIfAborted(signal)
+
+  if (audio.size <= 0) {
+    throw new ChatAPIError('A non-empty audio recording is required.', {
+      code: 'EMPTY_AUDIO',
+    })
+  }
+
+  const formData = new FormData()
+  const extension = audioFileExtension(audio.type)
+  formData.append('file', audio, `chat-recording.${extension}`)
+
+  try {
+    const { data } = await apiClient.post<unknown>(
+      '/chat/transcriptions',
+      formData,
+      {
+        signal,
+        timeout: timeoutMs,
+        // Clear the instance-wide JSON default before Axios transforms the
+        // body. The browser adapter will then add multipart/form-data with its
+        // generated boundary.
+        headers: {
+          'Content-Type': undefined,
+          'Idempotency-Key': idempotencyKey,
+        },
+      },
+    )
+    throwIfAborted(signal)
+    const text = nonEmptyString(asRecord(data)?.text)
+    if (!text) {
+      throw new ChatAPIError('The transcription response did not include text.', {
+        code: 'INVALID_TRANSCRIPTION_RESPONSE',
+      })
+    }
+    return { text }
+  } catch (error) {
+    if (signal?.aborted || isAbortError(error)) throw abortError()
+    throw normalizeRequestError(error, 'Unable to transcribe the audio recording.')
   }
 }
 
@@ -624,6 +936,12 @@ function normalizeServerMessage(value: unknown): ChatServerMessage | null {
     createdAt,
     status: acceptedStatus,
   }
+  if (Array.isArray(candidate.attachments)) {
+    const attachments = candidate.attachments
+      .map(normalizeChatAttachment)
+      .filter((attachment): attachment is ChatAttachment => attachment !== null)
+    if (attachments.length > 0) message.attachments = attachments
+  }
   if (
     rawStatus === 'streaming'
     || rawStatus === 'processing'
@@ -731,6 +1049,17 @@ function normalizeServerMessage(value: unknown): ChatServerMessage | null {
   return message
 }
 
+function sortServerMessages(messages: ChatServerMessage[]): ChatServerMessage[] {
+  const hasCanonicalPositions = messages.every(({ position }) => position !== undefined)
+  return messages.sort((left, right) => {
+    if (hasCanonicalPositions) {
+      return (left.position ?? 0) - (right.position ?? 0)
+        || left.createdAt - right.createdAt
+    }
+    return left.createdAt - right.createdAt
+  })
+}
+
 function normalizeServerConversation(value: unknown): ChatServerConversation | null {
   const candidate = asRecord(value)
   const id = nonEmptyString(candidate?.id ?? candidate?.conversation_id)
@@ -739,15 +1068,11 @@ function normalizeServerConversation(value: unknown): ChatServerConversation | n
   if (!candidate || !id || !title || !model) return null
 
   const messagesValue = Array.isArray(candidate.messages) ? candidate.messages : []
-  const messages = messagesValue
-    .map(normalizeServerMessage)
-    .filter((message): message is ChatServerMessage => message !== null)
-    .sort((left, right) => {
-      if (left.position !== undefined && right.position !== undefined) {
-        return left.position - right.position
-      }
-      return left.createdAt - right.createdAt || left.id.localeCompare(right.id)
-    })
+  const messages = sortServerMessages(
+    messagesValue
+      .map(normalizeServerMessage)
+      .filter((message): message is ChatServerMessage => message !== null),
+  )
   const revision = optionalNonNegativeInteger(candidate.revision) ?? 0
   const version = optionalNonNegativeInteger(candidate.version) ?? revision
   const createdAt = optionalTimestamp(candidate.created_at ?? candidate.createdAt) ?? Date.now()
@@ -898,9 +1223,11 @@ export async function getChatConversationMessages(
         code: 'INVALID_MESSAGE_LIST_RESPONSE',
       })
     }
-    const items = rawItems
-      .map(normalizeServerMessage)
-      .filter((message): message is ChatServerMessage => message !== null)
+    const items = sortServerMessages(
+      rawItems
+        .map(normalizeServerMessage)
+        .filter((message): message is ChatServerMessage => message !== null),
+    )
     const nextBeforePosition = optionalNonNegativeInteger(
       candidate?.next_before_position ?? candidate?.nextBeforePosition,
     ) ?? null
@@ -1152,6 +1479,9 @@ async function postCompletion(
             user_message: {
               id: request.userMessage.id,
               content: request.userMessage.content,
+              ...(request.userMessage.attachmentIds?.length
+                ? { attachment_ids: request.userMessage.attachmentIds }
+                : {}),
             },
           }
         : {}),
@@ -1244,7 +1574,11 @@ export async function streamChatCompletion(
     })
   }
   const hasUserMessage = Boolean(
-    request.userMessage?.id.trim() && request.userMessage.content.trim(),
+    request.userMessage?.id.trim()
+    && (
+      request.userMessage.content.trim()
+      || request.userMessage.attachmentIds?.some((id) => id.trim())
+    ),
   )
   const hasRetryMessage = Boolean(request.retryOfMessageId?.trim())
   if (hasUserMessage === hasRetryMessage) {
@@ -1328,16 +1662,23 @@ export async function streamChatCompletion(
       }
     }
 
+    // X-Client-Request-ID is present on every response for request tracing,
+    // including validation failures that happen before a chat attempt exists.
+    // Only the dedicated receipt header proves that the server persisted (or
+    // replayed) the attempt and that attachment drafts may be committed.
+    const receiptId = nonEmptyString(response.headers.get('X-Chat-Receipt-ID'))
+    if (receiptId) {
+      handlers.onReceiptId?.(receiptId)
+      handlers.onAccepted?.()
+    }
     if (!response.ok) throw await responseError(response)
-    const receiptId = nonEmptyString(response.headers.get('X-Client-Request-ID'))
-    if (receiptId) handlers.onReceiptId?.(receiptId)
+    if (!receiptId) handlers.onAccepted?.()
     if (!response.body) {
       throw new ChatAPIError('The chat response did not include a stream.', {
         status: response.status,
         code: 'EMPTY_STREAM',
       })
     }
-
     const result = await parseChatCompletionSSE(response.body, handlers, options)
     result.receiptId = receiptId
     if (!result.receivedDone) {

@@ -156,11 +156,11 @@
 
       <div v-if="loading" class="min-h-0 flex-1 overflow-hidden" aria-live="polite" :aria-label="t('common.loading')">
         <div class="hidden h-full grid-cols-[minmax(0,3fr)_minmax(0,2fr)] md:grid">
-          <div class="animate-pulse bg-gray-50 dark:bg-dark-800/60" />
-          <div class="animate-pulse border-l border-gray-100 bg-gray-100/70 dark:border-dark-700 dark:bg-dark-900" />
+          <div class="keys-loading-master animate-pulse" />
+          <div class="keys-loading-detail animate-pulse border-l" />
         </div>
-        <div class="h-full space-y-4 overflow-hidden bg-gray-50 p-4 dark:bg-dark-900 md:hidden">
-          <div v-for="index in 2" :key="index" class="h-[360px] animate-pulse rounded-lg border border-gray-200 bg-white dark:border-dark-700 dark:bg-dark-800" />
+        <div class="keys-loading-mobile h-full space-y-4 overflow-hidden p-4 md:hidden">
+          <div v-for="index in 2" :key="index" class="keys-loading-card h-[360px] animate-pulse rounded-lg border" />
         </div>
       </div>
 
@@ -351,7 +351,7 @@
                 :peak-end="(option as unknown as GroupOption).peakEnd"
                 :peak-rate-multiplier="(option as unknown as GroupOption).peakRateMultiplier"
               />
-              <span v-else class="text-gray-400">{{ t('keys.selectGroup') }}</span>
+              <span v-else class="keys-text-muted">{{ t('keys.selectGroup') }}</span>
             </template>
             <template #option="{ option, selected }">
               <GroupOptionItem
@@ -380,12 +380,12 @@
               @click="formData.use_custom_key = !formData.use_custom_key"
               :class="[
                 'relative inline-flex h-5 w-9 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none',
-                formData.use_custom_key ? 'bg-primary-600' : 'bg-gray-200 dark:bg-dark-600'
+                formData.use_custom_key ? 'bg-primary-600' : 'keys-switch-track'
               ]"
             >
               <span
                 :class="[
-                  'pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out',
+                  'keys-switch-thumb pointer-events-none inline-block h-4 w-4 transform rounded-full shadow ring-0 transition duration-200 ease-in-out',
                   formData.use_custom_key ? 'translate-x-4' : 'translate-x-0'
                 ]"
               />
@@ -422,12 +422,12 @@
               @click="formData.enable_ip_restriction = !formData.enable_ip_restriction"
               :class="[
                 'relative inline-flex h-5 w-9 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none',
-                formData.enable_ip_restriction ? 'bg-primary-600' : 'bg-gray-200 dark:bg-dark-600'
+                formData.enable_ip_restriction ? 'bg-primary-600' : 'keys-switch-track'
               ]"
             >
               <span
                 :class="[
-                  'pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out',
+                  'keys-switch-thumb pointer-events-none inline-block h-4 w-4 transform rounded-full shadow ring-0 transition duration-200 ease-in-out',
                   formData.enable_ip_restriction ? 'translate-x-4' : 'translate-x-0'
                 ]"
               />
@@ -470,12 +470,12 @@
               @click="formData.enable_quota = !formData.enable_quota"
               :class="[
                 'relative inline-flex h-5 w-9 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none',
-                formData.enable_quota ? 'bg-primary-600' : 'bg-gray-200 dark:bg-dark-600'
+                formData.enable_quota ? 'bg-primary-600' : 'keys-switch-track'
               ]"
             >
               <span
                 :class="[
-                  'pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out',
+                  'keys-switch-thumb pointer-events-none inline-block h-4 w-4 transform rounded-full shadow ring-0 transition duration-200 ease-in-out',
                   formData.enable_quota ? 'translate-x-4' : 'translate-x-0'
                 ]"
               />
@@ -503,15 +503,15 @@
             <div v-if="showEditModal && selectedKey && selectedKey.quota > 0">
               <label class="input-label">{{ t('keys.quotaUsed') }}</label>
               <div class="flex items-center gap-2">
-                <div class="flex-1 rounded-lg bg-gray-100 px-3 py-2 dark:bg-dark-700">
+                <div class="keys-form-usage-surface flex-1 rounded-lg px-3 py-2">
                   <CreditAmount
-                    class="font-medium text-gray-900 dark:text-white"
+                    class="keys-text-primary font-medium"
                     :value="selectedKey.quota_used?.toFixed(4) || '0.0000'"
                     icon-size="xs"
                   />
-                  <span class="mx-2 text-gray-400">/</span>
+                  <span class="keys-text-muted mx-2">/</span>
                   <CreditAmount
-                    class="text-gray-500 dark:text-gray-400"
+                    class="keys-text-secondary"
                     :value="selectedKey.quota?.toFixed(2) || '0.00'"
                     icon-size="xs"
                   />
@@ -538,12 +538,12 @@
               @click="formData.enable_rate_limit = !formData.enable_rate_limit"
               :class="[
                 'relative inline-flex h-5 w-9 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none',
-                formData.enable_rate_limit ? 'bg-primary-600' : 'bg-gray-200 dark:bg-dark-600'
+                formData.enable_rate_limit ? 'bg-primary-600' : 'keys-switch-track'
               ]"
             >
               <span
                 :class="[
-                  'pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out',
+                  'keys-switch-thumb pointer-events-none inline-block h-4 w-4 transform rounded-full shadow ring-0 transition duration-200 ease-in-out',
                   formData.enable_rate_limit ? 'translate-x-4' : 'translate-x-0'
                 ]"
               />
@@ -569,7 +569,7 @@
               <!-- Usage info (edit mode only) -->
               <div v-if="showEditModal && selectedKey && selectedKey.rate_limit_5h > 0" class="mt-2">
                 <div class="flex items-center gap-2">
-                  <div class="flex-1 rounded-lg bg-gray-100 px-3 py-2 dark:bg-dark-700 text-sm">
+                  <div class="keys-form-usage-surface flex-1 rounded-lg px-3 py-2 text-sm">
                     <CreditAmount
                       :value="selectedKey.usage_5h?.toFixed(4) || '0.0000'"
                       icon-size="xs"
@@ -577,18 +577,18 @@
                       'font-medium',
                       selectedKey.usage_5h >= selectedKey.rate_limit_5h ? 'text-red-500' :
                       selectedKey.usage_5h >= selectedKey.rate_limit_5h * 0.8 ? 'text-yellow-500' :
-                      'text-gray-900 dark:text-white'
+                      'keys-text-primary'
                     ]"
                     />
-                    <span class="mx-2 text-gray-400">/</span>
+                    <span class="keys-text-muted mx-2">/</span>
                     <CreditAmount
-                      class="text-gray-500 dark:text-gray-400"
+                      class="keys-text-secondary"
                       :value="selectedKey.rate_limit_5h?.toFixed(2) || '0.00'"
                       icon-size="xs"
                     />
                   </div>
                 </div>
-                <div class="mt-1 h-1.5 w-full overflow-hidden rounded-full bg-gray-200 dark:bg-dark-600">
+                <div class="keys-form-progress-track mt-1 h-1.5 w-full overflow-hidden rounded-full">
                   <div
                     :class="[
                       'h-full rounded-full transition-all',
@@ -619,7 +619,7 @@
               <!-- Usage info (edit mode only) -->
               <div v-if="showEditModal && selectedKey && selectedKey.rate_limit_1d > 0" class="mt-2">
                 <div class="flex items-center gap-2">
-                  <div class="flex-1 rounded-lg bg-gray-100 px-3 py-2 dark:bg-dark-700 text-sm">
+                  <div class="keys-form-usage-surface flex-1 rounded-lg px-3 py-2 text-sm">
                     <CreditAmount
                       :value="selectedKey.usage_1d?.toFixed(4) || '0.0000'"
                       icon-size="xs"
@@ -627,18 +627,18 @@
                       'font-medium',
                       selectedKey.usage_1d >= selectedKey.rate_limit_1d ? 'text-red-500' :
                       selectedKey.usage_1d >= selectedKey.rate_limit_1d * 0.8 ? 'text-yellow-500' :
-                      'text-gray-900 dark:text-white'
+                      'keys-text-primary'
                     ]"
                     />
-                    <span class="mx-2 text-gray-400">/</span>
+                    <span class="keys-text-muted mx-2">/</span>
                     <CreditAmount
-                      class="text-gray-500 dark:text-gray-400"
+                      class="keys-text-secondary"
                       :value="selectedKey.rate_limit_1d?.toFixed(2) || '0.00'"
                       icon-size="xs"
                     />
                   </div>
                 </div>
-                <div class="mt-1 h-1.5 w-full overflow-hidden rounded-full bg-gray-200 dark:bg-dark-600">
+                <div class="keys-form-progress-track mt-1 h-1.5 w-full overflow-hidden rounded-full">
                   <div
                     :class="[
                       'h-full rounded-full transition-all',
@@ -669,7 +669,7 @@
               <!-- Usage info (edit mode only) -->
               <div v-if="showEditModal && selectedKey && selectedKey.rate_limit_7d > 0" class="mt-2">
                 <div class="flex items-center gap-2">
-                  <div class="flex-1 rounded-lg bg-gray-100 px-3 py-2 dark:bg-dark-700 text-sm">
+                  <div class="keys-form-usage-surface flex-1 rounded-lg px-3 py-2 text-sm">
                     <CreditAmount
                       :value="selectedKey.usage_7d?.toFixed(4) || '0.0000'"
                       icon-size="xs"
@@ -677,18 +677,18 @@
                       'font-medium',
                       selectedKey.usage_7d >= selectedKey.rate_limit_7d ? 'text-red-500' :
                       selectedKey.usage_7d >= selectedKey.rate_limit_7d * 0.8 ? 'text-yellow-500' :
-                      'text-gray-900 dark:text-white'
+                      'keys-text-primary'
                     ]"
                     />
-                    <span class="mx-2 text-gray-400">/</span>
+                    <span class="keys-text-muted mx-2">/</span>
                     <CreditAmount
-                      class="text-gray-500 dark:text-gray-400"
+                      class="keys-text-secondary"
                       :value="selectedKey.rate_limit_7d?.toFixed(2) || '0.00'"
                       icon-size="xs"
                     />
                   </div>
                 </div>
-                <div class="mt-1 h-1.5 w-full overflow-hidden rounded-full bg-gray-200 dark:bg-dark-600">
+                <div class="keys-form-progress-track mt-1 h-1.5 w-full overflow-hidden rounded-full">
                   <div
                     :class="[
                       'h-full rounded-full transition-all',
@@ -724,12 +724,12 @@
               @click="formData.enable_expiration = !formData.enable_expiration"
               :class="[
                 'relative inline-flex h-5 w-9 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none',
-                formData.enable_expiration ? 'bg-primary-600' : 'bg-gray-200 dark:bg-dark-600'
+                formData.enable_expiration ? 'bg-primary-600' : 'keys-switch-track'
               ]"
             >
               <span
                 :class="[
-                  'pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out',
+                  'keys-switch-thumb pointer-events-none inline-block h-4 w-4 transform rounded-full shadow ring-0 transition duration-200 ease-in-out',
                   formData.enable_expiration ? 'translate-x-4' : 'translate-x-0'
                 ]"
               />
@@ -748,7 +748,7 @@
                   'rounded-lg px-3 py-1.5 text-sm transition-colors',
                   formData.expiration_preset === days
                     ? 'bg-primary-100 text-primary-700 dark:bg-primary-900/30 dark:text-primary-400'
-                    : 'bg-gray-100 text-gray-600 hover:bg-gray-200 dark:bg-dark-700 dark:text-gray-400 dark:hover:bg-dark-600'
+                    : 'keys-neutral-choice'
                 ]"
               >
                 {{ showEditModal ? t('keys.extendDays', { days }) : t('keys.expiresInDays', { days }) }}
@@ -760,7 +760,7 @@
                   'rounded-lg px-3 py-1.5 text-sm transition-colors',
                   formData.expiration_preset === 'custom'
                     ? 'bg-primary-100 text-primary-700 dark:bg-primary-900/30 dark:text-primary-400'
-                    : 'bg-gray-100 text-gray-600 hover:bg-gray-200 dark:bg-dark-700 dark:text-gray-400 dark:hover:bg-dark-600'
+                    : 'keys-neutral-choice'
                 ]"
               >
                 {{ t('keys.customDate') }}
@@ -780,8 +780,8 @@
 
             <!-- Current expiration display (only in edit mode) -->
             <div v-if="showEditModal && selectedKey?.expires_at" class="text-sm">
-              <span class="text-gray-500 dark:text-gray-400">{{ t('keys.currentExpiration') }}: </span>
-              <span class="font-medium text-gray-900 dark:text-white">
+              <span class="keys-text-secondary">{{ t('keys.currentExpiration') }}: </span>
+              <span class="keys-text-primary font-medium">
                 {{ formatDateTime(selectedKey.expires_at) }}
               </span>
             </div>
@@ -886,31 +886,31 @@
       @close="closeCcsClientSelect"
     >
       <div class="space-y-4">
-        <p class="text-sm text-gray-600 dark:text-gray-400">
+        <p class="keys-text-secondary text-sm">
           {{ t('keys.ccsClientSelect.description') }}
 	        </p>
 	        <div class="grid grid-cols-2 gap-3">
 	          <button
 	            @click="handleCcsClientSelect('claude')"
-	            class="flex flex-col items-center gap-2 p-4 rounded-xl border-2 border-gray-200 dark:border-dark-600 hover:border-primary-500 dark:hover:border-primary-500 hover:bg-primary-50 dark:hover:bg-primary-900/20 transition-all"
+	            class="keys-client-option flex flex-col items-center gap-2 rounded-xl border-2 p-4 transition-all hover:border-primary-500 hover:bg-primary-50 dark:hover:border-primary-500 dark:hover:bg-primary-900/20"
 	          >
-	            <Icon name="terminal" size="xl" class="text-gray-600 dark:text-gray-400" />
-	            <span class="font-medium text-gray-900 dark:text-white">{{
+	            <Icon name="terminal" size="xl" class="keys-text-secondary" />
+	            <span class="keys-text-primary font-medium">{{
 	              t('keys.ccsClientSelect.claudeCode')
 	            }}</span>
-	            <span class="text-xs text-gray-500 dark:text-gray-400">{{
+	            <span class="keys-text-secondary text-xs">{{
 	              t('keys.ccsClientSelect.claudeCodeDesc')
 	            }}</span>
 	          </button>
 	          <button
 	            @click="handleCcsClientSelect('gemini')"
-	            class="flex flex-col items-center gap-2 p-4 rounded-xl border-2 border-gray-200 dark:border-dark-600 hover:border-primary-500 dark:hover:border-primary-500 hover:bg-primary-50 dark:hover:bg-primary-900/20 transition-all"
+	            class="keys-client-option flex flex-col items-center gap-2 rounded-xl border-2 p-4 transition-all hover:border-primary-500 hover:bg-primary-50 dark:hover:border-primary-500 dark:hover:bg-primary-900/20"
 	          >
-	            <Icon name="sparkles" size="xl" class="text-gray-600 dark:text-gray-400" />
-	            <span class="font-medium text-gray-900 dark:text-white">{{
+	            <Icon name="sparkles" size="xl" class="keys-text-secondary" />
+	            <span class="keys-text-primary font-medium">{{
 	              t('keys.ccsClientSelect.geminiCli')
 	            }}</span>
-	            <span class="text-xs text-gray-500 dark:text-gray-400">{{
+	            <span class="keys-text-secondary text-xs">{{
 	              t('keys.ccsClientSelect.geminiCliDesc')
 	            }}</span>
 	          </button>
@@ -932,7 +932,7 @@
         ref="dropdownRef"
         role="dialog"
         :aria-label="t('keys.selectGroup')"
-        class="animate-in fade-in slide-in-from-top-2 fixed z-[100000020] w-[min(380px,calc(100vw-2rem))] overflow-hidden rounded-xl bg-white shadow-lg ring-1 ring-black/5 duration-200 dark:bg-dark-800 dark:ring-white/10"
+        class="keys-group-selector animate-in fade-in slide-in-from-top-2 fixed z-[100000020] w-[min(380px,calc(100vw-2rem))] overflow-hidden rounded-xl shadow-lg duration-200"
         style="pointer-events: auto !important;"
         :style="{
           top: dropdownPosition.top !== undefined ? dropdownPosition.top + 'px' : undefined,
@@ -941,15 +941,15 @@
         }"
       >
         <!-- Search box -->
-        <div class="border-b border-gray-100 p-2 dark:border-dark-700">
+        <div class="keys-group-selector-header border-b p-2">
           <div class="relative">
-            <svg class="absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">
+            <svg class="keys-text-muted absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="2">
               <path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
             </svg>
             <input
               v-model="groupSearchQuery"
               type="text"
-              class="w-full rounded-lg border border-gray-200 bg-gray-50 py-1.5 pl-8 pr-3 text-sm text-gray-900 placeholder-gray-400 outline-none focus:border-primary-300 focus:ring-1 focus:ring-primary-300 dark:border-dark-600 dark:bg-dark-700 dark:text-white dark:placeholder-gray-500 dark:focus:border-primary-600 dark:focus:ring-primary-600"
+              class="keys-group-search w-full rounded-lg border py-1.5 pl-8 pr-3 text-sm outline-none focus:border-primary-300 focus:ring-1 focus:ring-primary-300 dark:focus:border-primary-600 dark:focus:ring-primary-600"
               :placeholder="t('keys.searchGroup')"
               :aria-label="t('keys.searchGroup')"
               @click.stop
@@ -967,11 +967,11 @@
             @click="changeSelectedGroup(option.value)"
             :class="[
               'flex w-full items-center justify-between rounded-lg px-3 py-2.5 text-sm transition-colors',
-              'border-b border-gray-100 last:border-0 dark:border-dark-700',
+              'keys-group-option border-b last:border-0',
               selectedKeyForGroup?.group_id === option.value ||
               (!selectedKeyForGroup?.group_id && option.value === null)
-                ? 'bg-primary-50 dark:bg-primary-900/20'
-                : 'hover:bg-gray-100 dark:hover:bg-dark-700'
+                ? 'keys-group-option--selected'
+                : 'keys-group-option--idle'
             ]"
             :title="option.description || undefined"
           >
@@ -993,7 +993,7 @@
             />
           </button>
           <!-- Empty state when search has no results -->
-          <div v-if="filteredGroupOptions.length === 0" class="py-4 text-center text-sm text-gray-400 dark:text-gray-500">
+          <div v-if="filteredGroupOptions.length === 0" class="keys-text-muted py-4 text-center text-sm">
             {{ t('keys.noGroupFound') }}
           </div>
         </div>
@@ -2008,9 +2008,8 @@ onUnmounted(() => {
   min-height: 0;
   flex-direction: column;
   overflow: hidden;
-  color: #332f3a;
-  background: #fff;
-  font-family: "DM Sans", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+  color: var(--workspace-text);
+  background: var(--workspace-canvas);
   font-variant-numeric: tabular-nums;
   letter-spacing: 0;
   -webkit-font-smoothing: antialiased;
@@ -2020,8 +2019,8 @@ onUnmounted(() => {
 .keys-desktop-header,
 .keys-filter-toolbar {
   flex: 0 0 auto;
-  border-bottom: 1px solid #f3f4f6;
-  background: #fff;
+  border-bottom: 1px solid var(--workspace-border);
+  background: var(--workspace-card-surface);
 }
 
 .keys-mobile-header {
@@ -2043,9 +2042,9 @@ onUnmounted(() => {
 .keys-mobile-title {
   gap: 8px;
   min-width: 0;
-  color: #111827;
-  font-size: 16px;
-  font-weight: 900;
+  color: var(--workspace-text);
+  font-size: var(--workspace-type-brand-size);
+  font-weight: var(--workspace-type-brand-weight);
   line-height: 24px;
 }
 
@@ -2073,7 +2072,7 @@ onUnmounted(() => {
 .keys-mobile-refresh {
   width: 40px;
   height: 40px;
-  color: #9ca3af;
+  color: var(--workspace-text-muted);
   border-radius: 12px;
 }
 
@@ -2090,8 +2089,8 @@ onUnmounted(() => {
   color: #fff;
   background: #7c3aed;
   box-shadow: 0 10px 15px -3px rgb(124 58 237 / 0.3), 0 4px 6px -4px rgb(124 58 237 / 0.3);
-  font-size: 12px;
-  font-weight: 900;
+  font-size: var(--workspace-type-navigation-size);
+  font-weight: var(--workspace-type-navigation-weight);
 }
 
 .keys-mobile-create :deep(svg) {
@@ -2135,18 +2134,18 @@ onUnmounted(() => {
 
 .keys-desktop-title-copy h1 {
   margin: 0;
-  color: #030712;
-  font-size: 20px;
-  font-weight: 900;
+  color: var(--workspace-text);
+  font-size: var(--workspace-type-page-title-size);
+  font-weight: var(--workspace-type-page-title-weight);
   line-height: 28px;
 }
 
 .keys-desktop-title-copy p {
   overflow: hidden;
   margin: 0;
-  color: #9ca3af;
-  font-size: 11px;
-  font-weight: 700;
+  color: var(--workspace-text-muted);
+  font-size: var(--workspace-type-secondary-size);
+  font-weight: var(--workspace-type-secondary-weight);
   line-height: 16px;
   letter-spacing: 0;
   text-overflow: ellipsis;
@@ -2163,12 +2162,12 @@ onUnmounted(() => {
   height: 48px;
   flex: 0 0 48px;
   border-radius: 12px;
-  color: #6b7280;
-  background: #f9fafb;
+  color: var(--workspace-text-secondary);
+  background: var(--workspace-surface-subtle);
 }
 
 .keys-desktop-refresh:hover {
-  background: #f3f4f6;
+  background: var(--workspace-hover);
 }
 
 .keys-desktop-create {
@@ -2179,8 +2178,8 @@ onUnmounted(() => {
   color: #fff;
   background: #7c3aed;
   box-shadow: 0 10px 15px -3px rgb(124 58 237 / 0.3), 0 4px 6px -4px rgb(124 58 237 / 0.3);
-  font-size: 14px;
-  font-weight: 700;
+  font-size: var(--workspace-type-navigation-size);
+  font-weight: var(--workspace-type-navigation-weight);
 }
 
 .keys-desktop-create:hover {
@@ -2217,11 +2216,11 @@ onUnmounted(() => {
   min-height: 44px;
   border: 0;
   border-radius: 12px;
-  color: #111827;
-  background: #f9fafb;
+  color: var(--workspace-text);
+  background: var(--workspace-surface-subtle);
   box-shadow: none;
-  font-size: 14px;
-  font-weight: 400;
+  font-size: var(--workspace-type-body-size);
+  font-weight: var(--workspace-type-body-weight);
 }
 
 .key-filter-search :deep(.input) {
@@ -2269,7 +2268,7 @@ onUnmounted(() => {
 .keys-density-button {
   height: 40px;
   border-radius: 8px;
-  font-weight: 900;
+  font-weight: var(--workspace-type-navigation-weight);
 }
 
 .keys-detail-settings-button {
@@ -2277,7 +2276,7 @@ onUnmounted(() => {
   padding: 0 12px;
   color: #6d28d9;
   background: #f5f3ff;
-  font-size: 12px;
+  font-size: var(--workspace-type-navigation-size);
 }
 
 .keys-detail-settings-button :deep(svg) {
@@ -2291,10 +2290,10 @@ onUnmounted(() => {
 
 .keys-density-button {
   padding: 0 12px;
-  border: 1px solid #f3f4f6;
-  color: #9ca3af;
-  background: #f9fafb;
-  font-size: 10px;
+  border: 1px solid var(--workspace-border);
+  color: var(--workspace-text-muted);
+  background: var(--workspace-surface-subtle);
+  font-size: var(--workspace-type-navigation-size);
   letter-spacing: 0;
   text-transform: uppercase;
 }
@@ -2318,10 +2317,10 @@ onUnmounted(() => {
   max-height: 320px;
   overflow-y: auto;
   margin-top: 8px;
-  border: 1px solid #f3f4f6;
+  border: 1px solid var(--workspace-border);
   border-radius: 12px;
   padding: 8px 0;
-  background: #fff;
+  background: var(--workspace-popup-surface);
   box-shadow: 0 20px 25px -5px rgb(0 0 0 / 0.1), 0 8px 10px -6px rgb(0 0 0 / 0.1);
 }
 
@@ -2332,13 +2331,14 @@ onUnmounted(() => {
   align-items: center;
   justify-content: space-between;
   padding: 0 16px;
-  color: #374151;
-  font-size: 14px;
+  color: var(--workspace-text-secondary);
+  font-size: var(--workspace-type-navigation-size);
+  font-weight: var(--workspace-type-navigation-weight);
   text-align: left;
 }
 
 .keys-detail-menu-item:hover {
-  background: #f3f4f6;
+  background: var(--workspace-hover);
 }
 
 .keys-content {
@@ -2346,7 +2346,7 @@ onUnmounted(() => {
   min-height: 0;
   flex: 1 1 0;
   overflow: hidden;
-  background: #fff;
+  background: var(--workspace-canvas);
 }
 
 .keys-master-pane {
@@ -2356,7 +2356,7 @@ onUnmounted(() => {
   flex: 1 1 auto;
   flex-direction: column;
   overflow: hidden;
-  background: #fff;
+  background: var(--workspace-canvas);
 }
 
 .keys-detail-pane {
@@ -2364,16 +2364,16 @@ onUnmounted(() => {
   min-width: 0;
   flex: 0 0 40%;
   overflow: hidden;
-  border-left: 1px solid #f3f4f6;
-  background: #f9f8fd;
+  border-left: 1px solid var(--workspace-border);
+  background: var(--workspace-canvas);
 }
 
 .keys-mobile-list {
   height: 100%;
   overflow-y: auto;
   padding: 16px;
-  background: #f4f1fa;
-  scrollbar-color: rgb(91 80 112 / 0.2) transparent;
+  background: var(--workspace-canvas);
+  scrollbar-color: var(--workspace-border-strong) transparent;
   scrollbar-width: thin;
 }
 
@@ -2383,7 +2383,7 @@ onUnmounted(() => {
 
 .keys-mobile-list::-webkit-scrollbar-thumb {
   border-radius: 10px;
-  background: rgb(91 80 112 / 20%);
+  background: var(--workspace-border-strong);
 }
 
 .keys-mobile-list > * + * {
@@ -2399,9 +2399,9 @@ onUnmounted(() => {
 
 .keys-mobile-pagination p {
   margin: 0;
-  color: #9ca3af;
-  font-size: 10px;
-  font-weight: 900;
+  color: var(--workspace-text-muted);
+  font-size: var(--workspace-type-secondary-size);
+  font-weight: var(--workspace-type-secondary-weight);
   letter-spacing: 0;
   text-transform: uppercase;
 }
@@ -2416,10 +2416,10 @@ onUnmounted(() => {
   width: 40px;
   height: 40px;
   place-items: center;
-  border: 1px solid #f3f4f6;
+  border: 1px solid var(--workspace-border);
   border-radius: 12px;
-  color: #6b7280;
-  background: #fff;
+  color: var(--workspace-text-secondary);
+  background: var(--workspace-card-surface);
 }
 
 .keys-mobile-pagination button:disabled {
@@ -2433,15 +2433,15 @@ onUnmounted(() => {
 
 .keys-desktop-pagination :deep(.pagination) {
   min-height: 73px;
-  border-top: 1px solid #f3f4f6;
+  border-top: 1px solid var(--workspace-border);
   padding: 16px 32px;
-  background: #fff;
+  background: var(--workspace-card-surface);
 }
 
 .keys-desktop-pagination :deep(.pagination-summary) {
-  color: #9ca3af;
-  font-size: 11px;
-  font-weight: 900;
+  color: var(--workspace-text-muted);
+  font-size: var(--workspace-type-secondary-size);
+  font-weight: var(--workspace-type-secondary-weight);
   letter-spacing: 0;
   text-transform: uppercase;
 }
@@ -2460,13 +2460,13 @@ onUnmounted(() => {
   align-items: center;
   justify-content: center;
   margin: 0;
-  border: 1px solid #f3f4f6;
+  border: 1px solid var(--workspace-border);
   border-radius: 12px;
   padding: 0;
-  color: #9ca3af;
-  background: #fff;
-  font-size: 12px;
-  font-weight: 900;
+  color: var(--workspace-text-muted);
+  background: var(--workspace-card-surface);
+  font-size: var(--workspace-type-navigation-size);
+  font-weight: var(--workspace-type-navigation-weight);
 }
 
 .keys-desktop-pagination :deep(.pagination-nav .pagination-button--active) {
@@ -2484,7 +2484,89 @@ onUnmounted(() => {
   justify-content: center;
   overflow-y: auto;
   padding: 24px;
-  background: #f9fafb;
+  background: var(--workspace-canvas);
+}
+
+.keys-loading-master {
+  background: var(--workspace-surface-subtle);
+}
+
+.keys-loading-mobile {
+  background: var(--workspace-canvas);
+}
+
+.keys-loading-detail {
+  border-color: var(--workspace-border);
+  background: var(--workspace-surface-subtle);
+}
+
+.keys-loading-card,
+.keys-client-option {
+  border-color: var(--workspace-border);
+  background: var(--workspace-card-surface);
+}
+
+.keys-switch-track,
+.keys-form-progress-track {
+  background: var(--workspace-border-strong);
+}
+
+.keys-switch-thumb {
+  background: var(--workspace-light-surface);
+}
+
+.keys-form-usage-surface,
+.keys-neutral-choice {
+  background: var(--workspace-surface-subtle);
+}
+
+.keys-neutral-choice {
+  color: var(--workspace-text-secondary);
+}
+
+.keys-neutral-choice:hover {
+  background: var(--workspace-hover);
+}
+
+.keys-text-primary {
+  color: var(--workspace-text);
+}
+
+.keys-text-secondary {
+  color: var(--workspace-text-secondary);
+}
+
+.keys-text-muted {
+  color: var(--workspace-text-muted);
+}
+
+.keys-group-selector {
+  border: 1px solid var(--workspace-border);
+  color: var(--workspace-text);
+  background: var(--workspace-popup-surface);
+}
+
+.keys-group-selector-header,
+.keys-group-option {
+  border-color: var(--workspace-border);
+}
+
+.keys-group-search {
+  border-color: var(--workspace-border);
+  color: var(--workspace-text);
+  background: var(--workspace-surface-subtle);
+}
+
+.keys-group-search::placeholder {
+  color: var(--workspace-text-muted);
+}
+
+.keys-group-option--selected {
+  background: var(--workspace-selected);
+}
+
+.keys-group-option--idle:hover {
+  background: var(--workspace-hover);
 }
 
 :global(.app-layout--snow-shell:has(.keys-workspace)) {
@@ -2494,7 +2576,7 @@ onUnmounted(() => {
 :global(.app-layout--snow-shell:has(.keys-workspace) .app-main-shell.app-layout--chat) {
   position: relative;
   z-index: 0;
-  background: #fff !important;
+  background: var(--workspace-canvas) !important;
   box-shadow: 0 25px 50px -12px rgb(0 0 0 / 0.25);
 }
 
@@ -2512,24 +2594,24 @@ onUnmounted(() => {
 :global(.dark) .keys-filter-toolbar,
 :global(.dark) .keys-content,
 :global(.dark) .keys-master-pane {
-  color: #f8f5fc;
-  background: #17131f;
+  color: var(--workspace-text);
+  background: var(--workspace-canvas);
 }
 
 :global(.dark .app-layout--snow-shell:has(.keys-workspace) .app-main-shell.app-layout--chat) {
-  background: #17131f !important;
+  background: var(--workspace-canvas) !important;
 }
 
 :global(.dark) .keys-mobile-header,
 :global(.dark) .keys-desktop-header,
 :global(.dark) .keys-filter-toolbar,
 :global(.dark) .keys-detail-pane {
-  border-color: rgb(255 255 255 / 0.1);
+  border-color: var(--workspace-border);
 }
 
 :global(.dark) .keys-mobile-title,
 :global(.dark) .keys-desktop-title-copy h1 {
-  color: #fff;
+  color: var(--workspace-text);
 }
 
 :global(.dark) .keys-desktop-title-icon {
@@ -2541,15 +2623,15 @@ onUnmounted(() => {
 :global(.dark) .keys-filter-toolbar,
 :global(.dark) .keys-mobile-header,
 :global(.dark) .keys-desktop-header {
-  background: #251e2f;
+  background: var(--workspace-card-surface);
 }
 
 :global(.dark) .key-filter-search :deep(.input),
 :global(.dark) .key-secondary-filter :deep(.select-trigger),
 :global(.dark) .keys-density-button {
-  border-color: rgb(255 255 255 / 0.05);
-  color: #f8f5fc;
-  background: rgb(255 255 255 / 0.05);
+  border-color: var(--workspace-border);
+  color: var(--workspace-text);
+  background: var(--workspace-surface-subtle);
 }
 
 :global(.dark) .keys-detail-settings-button {
@@ -2558,33 +2640,33 @@ onUnmounted(() => {
 }
 
 :global(.dark) .keys-detail-menu {
-  border-color: rgb(255 255 255 / 0.1);
-  background: #251e2f;
+  border-color: var(--workspace-border);
+  background: var(--workspace-popup-surface);
 }
 
 :global(.dark) .keys-detail-menu-item {
-  color: #d1d5db;
+  color: var(--workspace-text-secondary);
 }
 
 :global(.dark) .keys-detail-menu-item:hover {
-  background: rgb(255 255 255 / 0.06);
+  background: var(--workspace-hover);
 }
 
 :global(.dark) .keys-detail-pane {
-  background: rgb(0 0 0 / 0.2);
+  background: var(--workspace-canvas);
 }
 
 :global(.dark) .keys-mobile-list,
 :global(.dark) .keys-empty-state {
-  background: #17131f;
+  background: var(--workspace-canvas);
 }
 
 :global(.dark) .keys-mobile-pagination button,
 :global(.dark) .keys-desktop-pagination :deep(.pagination),
 :global(.dark) .keys-desktop-pagination :deep(.pagination-nav .pagination-button) {
-  border-color: rgb(255 255 255 / 0.1);
-  color: #c5bccf;
-  background: #251e2f;
+  border-color: var(--workspace-border);
+  color: var(--workspace-text-secondary);
+  background: var(--workspace-card-surface);
 }
 
 @media (min-width: 768px) {
@@ -2624,14 +2706,14 @@ onUnmounted(() => {
 
   .key-filter-search :deep(.input),
   .key-secondary-filter :deep(.select-trigger) {
-    border: 1px solid #f3f4f6;
+    border: 1px solid var(--workspace-border);
   }
 
   .key-secondary-filter :deep(.select-trigger) {
     gap: 8px;
     padding-right: 12px;
     padding-left: 12px;
-    background: #fff;
+    background: var(--workspace-card-surface);
   }
 
   .key-secondary-filter :deep(.select-icon) {
@@ -2658,14 +2740,14 @@ onUnmounted(() => {
     width: 44px;
     height: 44px;
     padding: 0;
-    border: 1px solid #f3f4f6;
+    border: 1px solid var(--workspace-border);
     border-radius: 12px;
-    color: #6b7280;
-    background: #fff;
+    color: var(--workspace-text-secondary);
+    background: var(--workspace-card-surface);
   }
 
   .keys-detail-settings-button:hover {
-    background: #f9fafb;
+    background: var(--workspace-hover);
   }
 
   .keys-detail-settings-button span,
@@ -2684,19 +2766,9 @@ onUnmounted(() => {
 
   :global(.dark) .key-secondary-filter :deep(.select-trigger),
   :global(.dark) .keys-detail-settings-button {
-    border-color: rgb(255 255 255 / 0.1);
-    color: #c5bccf;
-    background: #120f18;
-  }
-}
-
-@media (min-width: 1024px) {
-  :global(.app-layout--snow-shell:has(.keys-workspace)[data-sidebar-collapsed='false'] #app-sidebar) {
-    width: 208px !important;
-  }
-
-  :global(.app-layout--snow-shell:has(.keys-workspace)[data-sidebar-collapsed='false'] .app-main-shell) {
-    margin-left: 208px !important;
+    border-color: var(--workspace-border);
+    color: var(--workspace-text-secondary);
+    background: var(--workspace-surface-subtle);
   }
 }
 

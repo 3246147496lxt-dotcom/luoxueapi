@@ -4,7 +4,8 @@ import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 
 const directory = dirname(fileURLToPath(import.meta.url))
-const routerSource = readFileSync(resolve(directory, '../index.ts'), 'utf8')
+const routeSource = readFileSync(resolve(directory, '../routes/public.ts'), 'utf8')
+const guardSource = readFileSync(resolve(directory, '../guards.ts'), 'utf8')
 const sidebarSource = readFileSync(resolve(directory, '../../components/layout/AppSidebar.vue'), 'utf8')
 const publicLayoutSource = readFileSync(
   resolve(directory, '../../components/public/PublicSiteLayout.vue'),
@@ -13,12 +14,12 @@ const publicLayoutSource = readFileSync(
 
 describe('Skill marketplace navigation', () => {
   it('registers opt-in public catalog and detail routes', () => {
-    expect(routerSource).toContain("path: '/skills'")
-    expect(routerSource).toContain("name: 'SkillMarket'")
-    expect(routerSource).toContain("component: () => import('@/views/public/SkillMarketplaceView.vue')")
-    expect(routerSource).toContain("path: '/skills/:slug'")
-    expect(routerSource.match(/requiresSkillMarketplace: true/g)).toHaveLength(2)
-    expect(routerSource).not.toContain("'/legal', '/skills'")
+    expect(routeSource).toContain("path: '/skills'")
+    expect(routeSource).toContain("name: 'SkillMarket'")
+    expect(routeSource).toContain("component: () => import('@/views/public/SkillMarketplaceView.vue')")
+    expect(routeSource).toContain("path: '/skills/:slug'")
+    expect(routeSource.match(/requiresSkillMarketplace: true/g)).toHaveLength(2)
+    expect(guardSource).not.toContain("'/legal', '/skills'")
   })
 
   it('keeps public and admin entries behind their intended boundaries', () => {
@@ -29,7 +30,7 @@ describe('Skill marketplace navigation', () => {
   })
 
   it('revalidates the public flag instead of trusting embedded HTML forever', () => {
-    expect(routerSource).toContain('fetchPublicSettings(true)')
-    expect(routerSource).toContain('refreshedSettings?.skill_marketplace_enabled !== true')
+    expect(guardSource).toContain('fetchPublicSettings(true)')
+    expect(guardSource).toContain('refreshedSettings?.skill_marketplace_enabled !== true')
   })
 })

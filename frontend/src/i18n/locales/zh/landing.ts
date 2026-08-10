@@ -149,6 +149,8 @@ export default {
     navLabel: '模型广场',
     title: '模型广场',
     description: '无需登录即可查看已上架模型的模型 ID、能力范围和公开标准价格。',
+    workspaceTitle: '模型中心',
+    workspaceDescription: '查看当前可用模型的模型 ID、能力范围与公开标准价格。',
     publicPriceNote: '这里展示所有注册用户可使用的公开标准价，价格单位为雪花额度；不包含专属分组、订阅优惠或用户个性倍率。最终费用以实际调用记录为准。',
     modelCount: '{count} 个模型',
     pricingUpdatedAt: '价格更新于 {time}',

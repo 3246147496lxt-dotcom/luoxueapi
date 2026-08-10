@@ -30,6 +30,8 @@ const testState = vi.hoisted(() => ({
 const messages: Record<string, string> = {
   'modelCatalog.title': '模型广场',
   'modelCatalog.description': '公开查看模型',
+  'modelCatalog.workspaceTitle': '模型中心',
+  'modelCatalog.workspaceDescription': '查看当前可用模型',
   'modelCatalog.publicPriceNote': '公开标准价格说明',
   'modelCatalog.modelCount': '{count} 个模型',
   'modelCatalog.pricingUpdatedAt': '价格更新于 {time}',
@@ -143,7 +145,12 @@ vi.mock('@/composables/useClipboard', () => ({
 }))
 
 const PublicLayoutStub = defineComponent({
-  template: '<div class="model-catalog-page"><slot /></div>'
+  props: ['page'],
+  template: '<div data-testid="public-site-layout" :data-page="page"><slot /></div>'
+})
+
+const AppLayoutStub = defineComponent({
+  template: '<div data-testid="app-layout"><slot /></div>'
 })
 
 function model(overrides: Partial<PublicModelCatalogItem> = {}): PublicModelCatalogItem {
@@ -197,18 +204,23 @@ function catalogResponse(items: PublicModelCatalogItem[]): PublicModelCatalogRes
   }
 }
 
-async function mountCatalog(initialPath = '/models.html') {
+async function mountCatalog(initialPath = '/models.html', props: { embedded?: boolean } = {}) {
   const router = createRouter({
     history: createMemoryHistory(),
-    routes: [{ path: '/models.html', component: ModelCatalogView }]
+    routes: [
+      { path: '/models.html', component: ModelCatalogView },
+      { path: '/models', component: ModelCatalogView }
+    ]
   })
   await router.push(initialPath)
   await router.isReady()
   const wrapper = mount(ModelCatalogView, {
+    props,
     global: {
       plugins: [router],
       stubs: {
         PublicSiteLayout: PublicLayoutStub,
+        AppLayout: AppLayoutStub,
         ModelIcon: true,
         Icon: true,
         RouterLink: true
@@ -230,6 +242,24 @@ beforeEach(() => {
 })
 
 describe('ModelCatalogView', () => {
+  it('uses the public shell by default and the Work shell for its embedded variant', async () => {
+    testState.getCatalog.mockResolvedValue(catalogResponse([]))
+
+    const publicCatalog = await mountCatalog()
+    expect(publicCatalog.wrapper.get('[data-testid="public-site-layout"]').attributes('data-page')).toBe('models')
+    expect(publicCatalog.wrapper.find('[data-testid="app-layout"]').exists()).toBe(false)
+    publicCatalog.wrapper.unmount()
+
+    const workCatalog = await mountCatalog('/models', { embedded: true })
+    const workLayout = workCatalog.wrapper.get('[data-testid="app-layout"]')
+    expect(workCatalog.wrapper.find('[data-testid="public-site-layout"]').exists()).toBe(false)
+    expect(workLayout.classes()).toContain('model-catalog-page--embedded')
+    expect(workLayout.get('#catalog-title').text()).toBe('模型中心')
+    expect(workLayout.text()).toContain('查看当前可用模型')
+    expect(workLayout.text()).not.toContain('公开查看模型')
+    expect(document.head.querySelector('link[rel="canonical"]')).toBeNull()
+  })
+
   it('renders effective public prices as Snow credits and preserves a real zero price', async () => {
     testState.getCatalog.mockResolvedValue(catalogResponse([
       model(),

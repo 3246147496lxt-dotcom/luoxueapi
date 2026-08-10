@@ -29,6 +29,12 @@ const AUTH_SESSION_KEY_PROPERTIES = new Map([
 
 type BoundaryViolation = 'session-storage' | 'pinia-token'
 
+// Every storage expression understood by the detector originates from one of
+// these browser globals, and every auth-store expression originates from
+// useAuthStore. Keep this prefilter broader than the protected key/property
+// markers so concatenated forms such as 'auth_' + 'token' remain detectable.
+const BOUNDARY_SOURCE_MARKER = /\b(?:globalThis|window|localStorage|sessionStorage|useAuthStore)\b/
+
 function productionSourceFiles(directory: string): string[] {
   return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
     const path = join(directory, entry.name)
@@ -156,11 +162,14 @@ function isProtectedStorageKey(
 }
 
 function boundaryViolations(path: string, source: string): Set<BoundaryViolation> {
+  const script = scriptSource(path, source)
+  if (!BOUNDARY_SOURCE_MARKER.test(script)) return new Set()
+
   const parsed = ts.createSourceFile(
     path,
-    scriptSource(path, source),
+    script,
     ts.ScriptTarget.Latest,
-    true,
+    false,
     ts.ScriptKind.TS,
   )
   const violations = new Set<BoundaryViolation>()
@@ -363,20 +372,26 @@ function boundaryViolations(path: string, source: string): Set<BoundaryViolation
   return violations
 }
 
+const productionBoundaryResults = productionSourceFiles(SOURCE_ROOT).map((path) => ({
+  path,
+  relativePath: relative(SOURCE_ROOT, path),
+  violations: boundaryViolations(path, readFileSync(path, 'utf8')),
+}))
+
 describe('auth session source boundary', () => {
   it('keeps browser session storage keys behind authSession', () => {
-    const violations = productionSourceFiles(SOURCE_ROOT)
-      .filter((path) => path !== AUTH_SESSION_SOURCE)
-      .filter((path) => boundaryViolations(path, readFileSync(path, 'utf8')).has('session-storage'))
-      .map((path) => relative(SOURCE_ROOT, path))
+    const violations = productionBoundaryResults
+      .filter(({ path }) => path !== AUTH_SESSION_SOURCE)
+      .filter(({ violations }) => violations.has('session-storage'))
+      .map(({ relativePath }) => relativePath)
 
     expect(violations).toEqual([])
   })
 
   it('does not expose the Pinia token projection to production consumers', () => {
-    const violations = productionSourceFiles(SOURCE_ROOT)
-      .filter((path) => boundaryViolations(path, readFileSync(path, 'utf8')).has('pinia-token'))
-      .map((path) => relative(SOURCE_ROOT, path))
+    const violations = productionBoundaryResults
+      .filter(({ violations }) => violations.has('pinia-token'))
+      .map(({ relativePath }) => relativePath)
 
     expect(violations).toEqual([])
   })
@@ -403,6 +418,11 @@ describe('auth session source boundary', () => {
       'session-storage',
     ],
     [
+      'concatenated storage, method and protected key names',
+      "const root = globalThis; const storage = root['local' + 'Storage']; const read = storage['get' + 'Item']; read('auth_' + 'token')",
+      'session-storage',
+    ],
+    [
       'aliased auth store property',
       'const first = useAuthStore(); const alias = first; void alias[\'token\']',
       'pinia-token',
@@ -425,6 +445,11 @@ describe('auth session source boundary', () => {
     [
       'auth store state token through aliases',
       "const store = useAuthStore(); const { $state: state } = store; const alias = state; void alias['token']",
+      'pinia-token',
+    ],
+    [
+      'concatenated auth store token property',
+      "const store = useAuthStore(); const property = 'to' + 'ken'; void store[property]",
       'pinia-token',
     ],
   ] as const)('detects %s', (_label, source, expected) => {

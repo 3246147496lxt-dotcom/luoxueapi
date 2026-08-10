@@ -1,7 +1,6 @@
 import type {
   AccountPlatform,
   OpenAICompactMode,
-  OpenAIEndpointCapability,
   OpenAIResponsesMode,
 } from '@/types'
 import {
@@ -13,6 +12,11 @@ import type {
   BedrockAuthMode,
   CreateAccountCategory,
 } from './formDraft'
+import {
+  normalizeOpenAIEndpointCapabilities,
+  serializeOpenAIEndpointCapabilities,
+  type OpenAIEndpointCapability,
+} from '../openAIEndpointCapabilities'
 
 export const DEFAULT_POOL_MODE_RETRY_COUNT = 3
 export const MAX_POOL_MODE_RETRY_COUNT = 10
@@ -197,17 +201,6 @@ export function buildVertexServiceAccountCredentials(input: {
   }
 }
 
-export function normalizeOpenAIEndpointCapabilities(
-  values: OpenAIEndpointCapability[],
-): OpenAIEndpointCapability[] {
-  const allowed: OpenAIEndpointCapability[] = [
-    'chat_completions',
-    'embeddings',
-  ]
-  const selected = allowed.filter((value) => values.includes(value))
-  return selected.length > 0 ? selected : allowed
-}
-
 export interface APIKeyCredentialInput extends PoolModeInput {
   platform: AccountPlatform
   baseUrl: string
@@ -233,11 +226,11 @@ export function buildAPIKeyCredentials(
   }
   if (input.modelMapping) credentials.model_mapping = input.modelMapping
   if (input.platform === 'openai') {
-    const capabilities = normalizeOpenAIEndpointCapabilities(
-      input.openAIEndpointCapabilities || [],
+    const capabilities = serializeOpenAIEndpointCapabilities(
+      normalizeOpenAIEndpointCapabilities(input.openAIEndpointCapabilities || []),
     )
-    if (capabilities.length !== 2) {
-      credentials.openai_capabilities = capabilities
+    if (!capabilities.omit) {
+      credentials.openai_capabilities = capabilities.values
     }
     if (input.compactModelMapping) {
       credentials.compact_model_mapping = input.compactModelMapping

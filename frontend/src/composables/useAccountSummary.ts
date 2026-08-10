@@ -4,6 +4,13 @@ import { useAuthStore } from '@/stores/auth'
 import { useSubscriptionStore } from '@/stores/subscriptions'
 import type { UserSubscription } from '@/types'
 
+type SubscriptionStore = ReturnType<typeof useSubscriptionStore>
+
+export interface AccountSummaryOptions {
+  includeSubscriptions?: boolean
+  subscriptionStore?: SubscriptionStore
+}
+
 export interface AccountSubscriptionSummary {
   readonly id: number
   readonly name: string | null
@@ -46,13 +53,16 @@ function selectPrimarySubscription(
 /**
  * Passive, read-only account data for shell UI.
  *
- * Global app orchestration owns fetching and polling. This composable only
+ * Global app orchestration owns synchronization. This composable only
  * derives immutable primitives/snapshots from the three existing stores.
  */
-export function useAccountSummary() {
+export function useAccountSummary(options: AccountSummaryOptions = {}) {
   const authStore = useAuthStore()
-  const subscriptionStore = useSubscriptionStore()
   const announcementStore = useAnnouncementStore()
+  const includeSubscriptions = options.includeSubscriptions ?? true
+  const subscriptionStore = includeSubscriptions
+    ? (options.subscriptionStore ?? useSubscriptionStore())
+    : null
 
   const hasUser = computed(() => authStore.user !== null)
   const userId = computed(() => authStore.user?.id ?? null)
@@ -81,16 +91,22 @@ export function useAccountSummary() {
   const hasFrozenBalance = computed(() => frozenBalance.value > 0)
 
   const activeSubscriptionCount = computed(
-    () => subscriptionStore.activeSubscriptions.length,
+    () => subscriptionStore?.activeSubscriptions.length ?? 0,
   )
   const hasActiveSubscriptions = computed(
-    () => subscriptionStore.hasActiveSubscriptions,
+    () => subscriptionStore?.hasActiveSubscriptions ?? false,
   )
-  const subscriptionsLoading = computed(() => subscriptionStore.loading)
-  const subscriptionsLoaded = computed(() => subscriptionStore.loaded)
+  const subscriptionsLoading = computed(
+    () => subscriptionStore?.loading ?? false,
+  )
+  const subscriptionsLoaded = computed(
+    () => includeSubscriptions
+      ? (subscriptionStore?.loaded ?? false)
+      : true,
+  )
   const primarySubscription = computed<Readonly<AccountSubscriptionSummary> | null>(() => {
     const subscription = selectPrimarySubscription(
-      subscriptionStore.activeSubscriptions,
+      subscriptionStore?.activeSubscriptions ?? [],
     )
     if (!subscription) return null
 

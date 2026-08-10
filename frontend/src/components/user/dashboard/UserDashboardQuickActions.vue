@@ -1,140 +1,227 @@
 <template>
-  <section aria-labelledby="dashboard-quick-actions-title">
-    <div class="flex items-end justify-between gap-4">
-      <h2
-        id="dashboard-quick-actions-title"
-        class="text-base font-semibold tracking-tight text-gray-950 dark:text-white"
-      >
-        {{ t('dashboard.quickActions') }}
-      </h2>
-    </div>
+  <section class="dashboard-panel" :aria-label="t('dashboard.workspace.quickActions')">
+    <header class="dashboard-panel-header">
+      <div>
+        <h2>{{ t('dashboard.workspace.quickActions') }}</h2>
+        <p>{{ t('dashboard.workspace.quickActionsDescription') }}</p>
+      </div>
+    </header>
 
-    <div class="mt-4 grid grid-cols-1 gap-3 md:grid-cols-3 md:gap-4">
-      <button
-        type="button"
-        class="group flex min-h-[184px] w-full flex-col rounded-[24px] border border-gray-200/80 bg-white p-5 text-left shadow-card transition-colors duration-200 hover:border-primary-200 hover:bg-primary-50/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500/40 focus-visible:ring-offset-2 dark:border-dark-700 dark:bg-dark-800 dark:hover:border-primary-800 dark:hover:bg-primary-950/20"
-        @click="router.push('/keys')"
+    <nav class="dashboard-action-list" :aria-label="t('dashboard.workspace.quickActions')">
+      <RouterLink
+        v-for="action in actions"
+        :key="action.to"
+        :to="action.to"
+        class="dashboard-action"
       >
-        <div class="flex items-start justify-between gap-4">
-          <div
-            class="flex h-11 w-11 items-center justify-center rounded-2xl bg-primary-50 text-primary-700 dark:bg-primary-950/70 dark:text-primary-300"
-          >
-            <Icon name="key" size="lg" />
-          </div>
-          <Icon
-            name="chevronRight"
-            size="md"
-            class="text-gray-300 transition-colors group-hover:text-primary-600 dark:text-dark-500 dark:group-hover:text-primary-300"
-          />
-        </div>
-        <p class="mt-6 min-h-10 text-sm leading-5 text-gray-500 dark:text-dark-400">
-          {{ t('dashboard.generateNewKey') }}
-        </p>
-        <div class="mt-auto flex items-center gap-2 border-t border-gray-100 pt-4 dark:border-dark-700">
-          <span class="h-2 w-2 rounded-full bg-primary-600 dark:bg-primary-400"></span>
-          <span class="text-sm font-semibold text-gray-950 dark:text-white">
-            {{ t('dashboard.createApiKey') }}
-          </span>
-        </div>
-      </button>
-
-      <button
-        type="button"
-        class="group flex min-h-[184px] w-full flex-col rounded-[24px] border border-[#dcebe4] bg-[#eef8f3] p-5 text-left transition-colors duration-200 hover:border-primary-300 hover:bg-[#e7f5ef] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500/40 focus-visible:ring-offset-2 dark:border-primary-950 dark:bg-primary-950/30 dark:hover:border-primary-800 dark:hover:bg-primary-950/50"
-        @click="router.push('/usage')"
-      >
-        <div class="flex items-start justify-between gap-4">
-          <div
-            class="flex h-11 w-11 items-center justify-center rounded-2xl bg-white text-primary-700 shadow-sm dark:bg-dark-800 dark:text-primary-300"
-          >
-            <Icon name="chart" size="lg" />
-          </div>
-          <Icon
-            name="chevronRight"
-            size="md"
-            class="text-primary-300 transition-colors group-hover:text-primary-700 dark:text-primary-800 dark:group-hover:text-primary-300"
-          />
-        </div>
-        <p class="mt-6 min-h-10 text-sm leading-5 text-gray-600 dark:text-dark-300">
-          {{ t('dashboard.checkDetailedLogs') }}
-        </p>
-        <div class="mt-auto flex items-center gap-2 border-t border-primary-100 pt-4 dark:border-primary-900/60">
-          <span class="h-2 w-2 rounded-full bg-emerald-500 dark:bg-emerald-400"></span>
-          <span class="text-sm font-semibold text-gray-950 dark:text-white">
-            {{ t('dashboard.viewUsage') }}
-          </span>
-        </div>
-      </button>
-
-      <button
-        type="button"
-        class="group flex min-h-[184px] w-full flex-col rounded-[24px] border border-[#eee2ad] bg-[#fff8d8] p-5 text-left transition-colors duration-200 hover:border-amber-300 hover:bg-[#fff4c5] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-500/40 focus-visible:ring-offset-2 dark:border-[#4d4424] dark:bg-[#302c1d] dark:hover:border-amber-800 dark:hover:bg-[#38321f]"
-        @click="router.push({ path: '/purchase', hash: '#redeem' })"
-      >
-        <div class="flex items-start justify-between gap-4">
-          <div
-            class="flex h-11 w-11 items-center justify-center rounded-2xl bg-white text-amber-700 shadow-sm dark:bg-[#3a3420] dark:text-amber-300"
-          >
-            <Icon name="gift" size="lg" />
-          </div>
-          <Icon
-            name="chevronRight"
-            size="md"
-            class="text-amber-300 transition-colors group-hover:text-amber-700 dark:text-amber-800 dark:group-hover:text-amber-300"
-          />
-        </div>
-        <p class="mt-6 min-h-10 text-sm leading-5 text-[#75631d] dark:text-amber-100/70">
-          {{ t('dashboard.addBalanceWithCode') }}
-        </p>
-        <div class="mt-auto flex items-center gap-2 border-t border-amber-200/80 pt-4 dark:border-amber-900/50">
-          <span class="h-2 w-2 rounded-full bg-amber-500 dark:bg-amber-400"></span>
-          <span class="text-sm font-semibold text-gray-950 dark:text-white">
-            {{ t('dashboard.redeemCode') }}
-          </span>
-        </div>
-      </button>
-    </div>
-
-    <button
-      v-if="canUseBatchImage"
-      type="button"
-      class="group mt-3 flex w-full items-center gap-3 rounded-[20px] border border-primary-100 bg-primary-50/70 px-4 py-3 text-left transition-colors duration-200 hover:border-primary-200 hover:bg-primary-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500/40 focus-visible:ring-offset-2 dark:border-primary-900/60 dark:bg-primary-950/30 dark:hover:border-primary-800 dark:hover:bg-primary-950/50"
-      @click="router.push('/batch-image')"
-    >
-      <span
-        class="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-xl bg-white text-primary-700 shadow-sm dark:bg-dark-800 dark:text-primary-300"
-      >
-        <Icon name="sparkles" size="md" />
-      </span>
-      <span class="min-w-0 flex-1">
-        <span class="block text-sm font-semibold text-gray-950 dark:text-white">
-          {{ t('dashboard.batchImageAgent') }}
+        <span class="dashboard-action__icon" aria-hidden="true">
+          <Icon :name="action.icon" size="sm" :stroke-width="1.7" />
         </span>
-        <span class="block truncate text-xs text-gray-500 dark:text-dark-400">
-          {{ t('dashboard.batchImageAgentDesc') }}
+        <span class="dashboard-action__copy">
+          <strong>{{ t(action.labelKey) }}</strong>
+          <span>{{ t(action.descriptionKey) }}</span>
         </span>
-      </span>
-      <span class="h-2 w-2 rounded-full bg-primary-500"></span>
-      <Icon
-        name="chevronRight"
-        size="sm"
-        class="text-primary-400 transition-colors group-hover:text-primary-700 dark:group-hover:text-primary-300"
-      />
-    </button>
+        <Icon name="chevronRight" size="xs" class="dashboard-action__arrow" aria-hidden="true" />
+      </RouterLink>
+    </nav>
   </section>
 </template>
 
 <script setup lang="ts">
-import { onMounted } from 'vue'
-import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import Icon from '@/components/icons/Icon.vue'
-import { useBatchImageAccess } from '@/composables/useBatchImageAccess'
-const router = useRouter()
-const { t } = useI18n()
-const { canUseBatchImage, refreshBatchImageAccess } = useBatchImageAccess()
 
-onMounted(() => {
-  void refreshBatchImageAccess()
-})
+const { t } = useI18n()
+
+const actions = [
+  {
+    to: '/chat',
+    icon: 'chat' as const,
+    labelKey: 'dashboard.workspace.actions.newChat',
+    descriptionKey: 'dashboard.workspace.actions.newChatDescription',
+  },
+  {
+    to: '/purchase',
+    icon: 'wallet' as const,
+    labelKey: 'dashboard.workspace.actions.balance',
+    descriptionKey: 'dashboard.workspace.actions.balanceDescription',
+  },
+  {
+    to: '/keys',
+    icon: 'key' as const,
+    labelKey: 'dashboard.workspace.actions.apiKeys',
+    descriptionKey: 'dashboard.workspace.actions.apiKeysDescription',
+  },
+  {
+    to: '/usage',
+    icon: 'chart' as const,
+    labelKey: 'dashboard.workspace.actions.usage',
+    descriptionKey: 'dashboard.workspace.actions.usageDescription',
+  },
+]
 </script>
+
+<style scoped>
+.dashboard-panel {
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid var(--workspace-border);
+  border-radius: var(--workspace-radius-work-card);
+  background: var(--workspace-card-surface);
+  box-shadow: var(--workspace-work-shadow-card);
+}
+
+.dashboard-panel-header {
+  display: flex;
+  min-height: 78px;
+  align-items: center;
+  padding: var(--workspace-space-4-5) var(--workspace-space-5);
+  border-bottom: 1px solid var(--workspace-border);
+}
+
+.dashboard-panel-header h2 {
+  color: var(--workspace-work-text);
+  font-size: var(--workspace-type-navigation-size);
+  font-weight: var(--workspace-type-navigation-weight);
+  line-height: 1.35rem;
+}
+
+.dashboard-panel-header p {
+  margin-top: 3px;
+  color: var(--workspace-work-text-muted);
+  font-size: var(--workspace-type-secondary-size);
+  font-weight: var(--workspace-type-secondary-weight);
+  line-height: 1rem;
+}
+
+.dashboard-action-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 4px;
+  padding: 8px;
+}
+
+.dashboard-action {
+  display: grid;
+  min-width: 0;
+  min-height: 72px;
+  grid-template-columns: 34px minmax(0, 1fr) 16px;
+  align-items: center;
+  gap: 11px;
+  padding: 12px;
+  border-radius: var(--workspace-radius-button);
+  border: 1px solid transparent;
+  color: var(--workspace-work-text-secondary);
+  transition: color 140ms ease, background-color 140ms ease, border-color 140ms ease;
+}
+
+.dashboard-action:first-child {
+  border-color: var(--workspace-work-accent-border);
+  background: color-mix(in srgb, var(--workspace-work-accent-soft) 58%, transparent);
+}
+
+.dashboard-action:hover {
+  border-color: var(--workspace-work-accent-border);
+  color: var(--workspace-work-accent-hover);
+  background: var(--workspace-work-accent-soft);
+}
+
+.dashboard-action:focus-visible {
+  outline: 2px solid var(--workspace-work-accent);
+  outline-offset: 2px;
+}
+
+.dashboard-action__icon {
+  display: inline-flex;
+  width: 34px;
+  height: 34px;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--workspace-radius-button);
+  color: var(--workspace-work-accent);
+  background: var(--workspace-work-accent-soft);
+}
+
+.dashboard-action:nth-child(even) .dashboard-action__icon {
+  color: var(--workspace-work-info);
+  background: var(--workspace-work-info-soft);
+}
+
+.dashboard-action__copy {
+  min-width: 0;
+}
+
+.dashboard-action__copy strong,
+.dashboard-action__copy span {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dashboard-action__copy strong {
+  color: inherit;
+  font-size: var(--workspace-type-navigation-size);
+  font-weight: var(--workspace-type-navigation-weight);
+  line-height: 1.15rem;
+}
+
+.dashboard-action__copy span {
+  margin-top: 3px;
+  color: var(--workspace-work-text-muted);
+  font-size: var(--workspace-type-secondary-size);
+  font-weight: var(--workspace-type-secondary-weight);
+  line-height: 1rem;
+}
+
+.dashboard-action__arrow {
+  color: var(--workspace-border-strong);
+  transition: color 140ms ease, transform 140ms ease;
+}
+
+.dashboard-action:hover .dashboard-action__arrow {
+  color: var(--workspace-work-accent);
+  transform: translateX(2px);
+}
+
+@media (max-width: 479px) {
+  .dashboard-action-list {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .dashboard-panel-header {
+    padding: 16px 18px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dashboard-action,
+  .dashboard-action__arrow {
+    transition-duration: 0.01ms;
+  }
+}
+
+:global(html.dark) .dashboard-panel {
+  border-color: var(--workspace-border);
+  background: var(--workspace-card-surface);
+  box-shadow: none;
+}
+
+:global(html.dark) .dashboard-panel-header {
+  border-color: var(--workspace-border);
+}
+
+:global(html.dark) .dashboard-panel-header h2,
+:global(html.dark) .dashboard-action {
+  color: var(--workspace-dark-text);
+}
+
+:global(html.dark) .dashboard-panel-header p,
+:global(html.dark) .dashboard-action__copy span {
+  color: var(--workspace-dark-text-muted);
+}
+
+:global(html.dark) .dashboard-action:hover {
+  background: var(--workspace-surface-subtle);
+}
+</style>

@@ -194,9 +194,9 @@ import {
   ref,
   watch,
 } from 'vue'
+import { storeToRefs } from 'pinia'
 import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
-import { useAccountSummary } from '@/composables/useAccountSummary'
 import Icon from '@/components/icons/Icon.vue'
 import type { AccountPanelSummary } from '@/components/layout/accountPanelTypes'
 import {
@@ -210,6 +210,7 @@ import {
 } from '@/navigation/personalSettingsRoute'
 import { useAppStore } from '@/stores/app'
 import { useAuthStore } from '@/stores/auth'
+import { useUserProfileStore } from '@/stores/userProfile'
 import { acquireBodyScrollLock, releaseBodyScrollLock } from '@/utils/bodyScrollLock'
 import {
   focusFirstVisibleTarget,
@@ -243,7 +244,12 @@ const router = useRouter()
 const { t } = useI18n()
 const appStore = useAppStore()
 const authStore = useAuthStore()
-const summary = useAccountSummary()
+const userProfileStore = useUserProfileStore()
+const {
+  profile,
+  activeSubscriptionCount,
+  subscriptionsLoaded,
+} = storeToRefs(userProfileStore)
 const dialogRef = ref<HTMLElement | null>(null)
 const visitedSections = ref<ReadonlySet<PersonalSettingsSection>>(new Set())
 const accountLoading = ref(false)
@@ -251,7 +257,6 @@ const accountError = ref(false)
 const publicSettingsLoading = ref(false)
 const publicSettingsError = ref(false)
 
-let accountRefreshAttempted = false
 let publicSettingsAttempted = false
 let previousFocus: HTMLElement | null = null
 let inertHost: HTMLElement | null = null
@@ -313,15 +318,15 @@ function formatCredit(value: number) {
 }
 
 const billingSummary = computed<AccountPanelSummary>(() => ({
-  displayName: summary.displayName.value,
-  email: summary.email.value,
-  initials: summary.initials.value,
-  avatarUrl: summary.avatarUrl.value,
-  frozenBalance: summary.frozenBalance.value,
-  formattedAvailableBalance: formatCredit(summary.availableBalance.value),
-  formattedFrozenBalance: formatCredit(summary.frozenBalance.value),
-  activeSubscriptionCount: summary.activeSubscriptionCount.value,
-  subscriptionsLoaded: summary.subscriptionsLoaded.value,
+  displayName: profile.value?.displayName ?? '',
+  email: profile.value?.email ?? '',
+  initials: profile.value?.initials ?? '',
+  avatarUrl: profile.value?.avatarUrl ?? '',
+  frozenBalance: profile.value?.frozenBalance ?? 0,
+  formattedAvailableBalance: formatCredit(profile.value?.availableBalance ?? 0),
+  formattedFrozenBalance: formatCredit(profile.value?.frozenBalance ?? 0),
+  activeSubscriptionCount: activeSubscriptionCount.value,
+  subscriptionsLoaded: subscriptionsLoaded.value,
 }))
 
 const detailTitleKeys: Partial<Record<PersonalSettingsDetail, string>> = {
@@ -348,13 +353,12 @@ function markVisited(target: PersonalSettingsSection) {
   visitedSections.value = new Set([...visitedSections.value, target])
 }
 
-async function refreshAccountData(force = false) {
-  if (accountRefreshAttempted && !force) return
-  accountRefreshAttempted = true
+async function refreshAccountData() {
+  if (accountLoading.value) return
   accountLoading.value = true
   accountError.value = false
   try {
-    await authStore.refreshUser()
+    await userProfileStore.refreshProfile()
   } catch {
     accountError.value = true
   } finally {
@@ -384,7 +388,6 @@ async function ensurePublicSettings(force = false) {
 
 function ensureSectionData(target: PersonalSettingsSection) {
   if (target === 'account') {
-    void refreshAccountData()
     void ensurePublicSettings()
     return
   }
@@ -394,7 +397,7 @@ function ensureSectionData(target: PersonalSettingsSection) {
 }
 
 function retryAccountData() {
-  void refreshAccountData(true)
+  void refreshAccountData()
   void ensurePublicSettings(true)
 }
 
@@ -590,7 +593,6 @@ watch(
       if (wasOpen) {
         deactivateModal()
         visitedSections.value = new Set()
-        accountRefreshAttempted = false
         publicSettingsAttempted = false
         accountError.value = false
         publicSettingsError.value = false

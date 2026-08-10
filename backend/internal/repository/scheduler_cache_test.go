@@ -20,6 +20,30 @@ func TestFilterSchedulerCredentialsKeepsSubscriptionPlanType(t *testing.T) {
 	require.NotContains(t, filtered, "refresh_token")
 }
 
+func TestSchedulerMetadataAccountKeepsOpenAIAudioCapabilityWithoutOAuthTokens(t *testing.T) {
+	account := service.Account{
+		ID:       3,
+		Platform: service.PlatformOpenAI,
+		Type:     service.AccountTypeAPIKey,
+		Credentials: map[string]any{
+			"openai_capabilities": []string{"chat_completions", "audio_transcriptions"},
+			"access_token":        "secret-access-token",
+			"refresh_token":       "secret-refresh-token",
+		},
+	}
+
+	_, metadataPayload, err := marshalSchedulerCacheAccount(account)
+	require.NoError(t, err)
+	require.NotContains(t, string(metadataPayload), "secret-access-token")
+	require.NotContains(t, string(metadataPayload), "secret-refresh-token")
+
+	metadata, err := decodeCachedAccount(metadataPayload)
+	require.NoError(t, err)
+	require.True(t, metadata.SupportsOpenAIEndpointCapability(service.OpenAIEndpointCapabilityAudioTranscriptions))
+	require.NotContains(t, metadata.Credentials, "access_token")
+	require.NotContains(t, metadata.Credentials, "refresh_token")
+}
+
 func TestSchedulerMetadataAccountKeepsOpenAISubscriptionIdentity(t *testing.T) {
 	account := service.Account{
 		ID:       24,

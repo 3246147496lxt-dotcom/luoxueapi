@@ -307,16 +307,16 @@ onMounted(async () => {
 
 .quota-viewer-auth-details dt {
   color: var(--lx-clay-text-secondary);
-  font-size: 13px;
-  font-weight: 600;
+  font-size: var(--workspace-type-secondary-size);
+  font-weight: var(--workspace-type-secondary-weight);
 }
 
 .quota-viewer-auth-details dd {
   min-width: 0;
   overflow-wrap: anywhere;
   color: var(--lx-clay-text);
-  font-size: 14px;
-  font-weight: 700;
+  font-size: var(--workspace-type-body-size);
+  font-weight: var(--workspace-type-body-weight);
   text-align: right;
 }
 
@@ -329,14 +329,15 @@ onMounted(async () => {
   border-radius: 16px;
   background: rgb(236 253 245);
   color: rgb(4 120 87);
-  font-size: 13px;
+  font-size: var(--workspace-type-body-size);
+  font-weight: var(--workspace-type-body-weight);
   line-height: 1.6;
 }
 
 .quota-viewer-inline-link {
   margin-left: 4px;
   color: currentColor;
-  font-weight: 800;
+  font-weight: var(--workspace-type-navigation-weight);
   text-decoration: underline;
   text-underline-offset: 3px;
 }

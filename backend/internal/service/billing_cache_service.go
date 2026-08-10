@@ -936,6 +936,29 @@ func (s *BillingCacheService) PeekWebChatEligibility(ctx context.Context, userID
 	return balance, nil
 }
 
+// PeekWebChatSubscriptionEligibility performs the read-only subscription
+// preflight used while Web Chat selects a billing source. It deliberately
+// excludes API-key rate limits and RPM accounting; the gateway still performs
+// the authoritative, side-effecting admission check immediately before
+// scheduling the upstream request.
+func (s *BillingCacheService) PeekWebChatSubscriptionEligibility(
+	ctx context.Context,
+	userID int64,
+	group *Group,
+	subscription *UserSubscription,
+) error {
+	if s == nil || s.cfg == nil || userID <= 0 || group == nil || subscription == nil {
+		return ErrBillingServiceUnavailable
+	}
+	if !group.IsSubscriptionType() || subscription.UserID != userID || subscription.GroupID != group.ID {
+		return ErrSubscriptionInvalid
+	}
+	if s.circuitBreaker != nil && !s.circuitBreaker.Allow() {
+		return ErrBillingServiceUnavailable
+	}
+	return s.checkSubscriptionEligibility(ctx, userID, group, subscription)
+}
+
 func (s *BillingCacheService) peekUserPlatformQuotaEligibilityStrict(ctx context.Context, userID int64, platform string) error {
 	if strings.TrimSpace(platform) == "" {
 		return nil
@@ -1013,12 +1036,24 @@ func evaluateUserPlatformQuotaEntry(entry *UserPlatformQuotaCacheEntry, now time
 // platform 为请求的目标平台（如 "anthropic"），传空串 "" 时跳过 user × platform quota 检查。
 func (s *BillingCacheService) CheckBillingEligibility(ctx context.Context, user *User, apiKey *APIKey, group *Group, subscription *UserSubscription, platform string) error {
 	// 简易模式保留标准 API 跳过计费检查的既有语义。站内 Web Chat
-	// 仍需在进入调度前做第二次权威正余额复检，但不检查 reserve 或平台额度。
+	// 仍需在进入调度前按已选计费来源做第二次权威复检。
 	if s.cfg.RunMode == config.RunModeSimple {
 		webChat, _ := ctx.Value(ctxkey.WebChat).(bool)
 		if webChat {
 			if user == nil || user.ID <= 0 {
 				return ErrBillingServiceUnavailable
+			}
+			if group != nil && group.IsSubscriptionType() {
+				if apiKey == nil {
+					return ErrBillingServiceUnavailable
+				}
+				if _, err := resolveUsageSubscriptionBilling(apiKey, subscription); err != nil {
+					return ErrBillingServiceUnavailable.WithCause(err)
+				}
+				return s.PeekWebChatSubscriptionEligibility(ctx, user.ID, group, subscription)
+			}
+			if subscription != nil {
+				return ErrBillingServiceUnavailable.WithCause(errors.New("subscription billing context does not match wallet group"))
 			}
 			_, err := s.PeekWebChatEligibility(ctx, user.ID, platform)
 			return err

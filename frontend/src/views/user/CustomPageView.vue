@@ -136,12 +136,11 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, ref, shallowRef, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores'
 import { useAuthStore } from '@/stores/auth'
-import { useAdminSettingsStore } from '@/stores/adminSettings'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import Icon from '@/components/icons/Icon.vue'
 import { buildApiUrl } from '@/api/client'
@@ -155,6 +154,7 @@ import {
 } from '@/utils/embedded-url'
 import { marked } from 'marked'
 import DOMPurify from 'dompurify'
+import type { CustomMenuItem } from '@/types'
 
 interface TocItem {
   id: string
@@ -166,7 +166,7 @@ const { t, locale } = useI18n()
 const route = useRoute()
 const appStore = useAppStore()
 const authStore = useAuthStore()
-const adminSettingsStore = useAdminSettingsStore()
+const adminCustomMenuItems = shallowRef<CustomMenuItem[]>([])
 
 const loading = ref(false)
 const pageTheme = ref<'light' | 'dark'>(detectTheme())
@@ -190,10 +190,18 @@ const menuItem = computed(() => {
   const found = publicItems.find((item) => item.id === id) ?? null
   if (found) return found
   if (authStore.isAdmin) {
-    return adminSettingsStore.customMenuItems.find((item) => item.id === id) ?? null
+    return adminCustomMenuItems.value.find((item) => item.id === id) ?? null
   }
   return null
 })
+
+async function loadAdminCustomMenuItems() {
+  if (!authStore.isAdmin) return
+  const { useAdminSettingsStore } = await import('@/stores/adminSettings')
+  const adminSettingsStore = useAdminSettingsStore()
+  await adminSettingsStore.fetch()
+  adminCustomMenuItems.value = [...adminSettingsStore.customMenuItems]
+}
 
 const pageTitle = computed(() => menuItem.value?.label || t('customPage.title'))
 
@@ -468,6 +476,12 @@ watch(
 onMounted(async () => {
   pageTheme.value = detectTheme()
 
+  try {
+    await loadAdminCustomMenuItems()
+  } catch (error) {
+    console.warn('Failed to load admin custom menu items', error)
+  }
+
   if (typeof document !== 'undefined') {
     themeObserver = new MutationObserver(() => {
       pageTheme.value = detectTheme()
@@ -616,7 +630,8 @@ onUnmounted(() => {
   top: 8px;
   right: 8px;
   padding: 4px 10px;
-  font-size: 12px;
+  font-size: var(--workspace-type-secondary-size);
+  font-weight: var(--workspace-type-secondary-weight);
   border-radius: 4px;
   background: rgba(255, 255, 255, 0.15);
   color: #e2e8f0;

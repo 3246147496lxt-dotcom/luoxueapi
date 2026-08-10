@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/config"
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/stretchr/testify/require"
 )
@@ -70,14 +72,44 @@ func (s *chatTestCatalog) ResolveUserGroupRateMultiplier(context.Context, int64,
 }
 
 type chatTestScheduler struct {
-	schedulable bool
-	err         error
-	calls       int
+	schedulable          bool
+	err                  error
+	calls                int
+	transcriptionByGroup map[int64]bool
+	transcriptionCalls   []int64
+}
+
+func (s *chatTestScheduler) HasSchedulableTranscriptionAccount(_ context.Context, groupID int64, _ string) (bool, error) {
+	s.transcriptionCalls = append(s.transcriptionCalls, groupID)
+	return s.transcriptionByGroup[groupID], s.err
 }
 
 func (s *chatTestScheduler) HasSchedulableChatCompletionsAccount(context.Context, int64, string) (bool, error) {
 	s.calls++
 	return s.schedulable, s.err
+}
+
+type chatCapabilitiesSchedulerStub struct {
+	config             config.TranscriptionConfig
+	configErr          error
+	configCalls        int
+	chatScheduleCalls  int
+	audioScheduleCalls int
+}
+
+func (s *chatCapabilitiesSchedulerStub) EffectiveTranscriptionConfig(context.Context) (config.TranscriptionConfig, error) {
+	s.configCalls++
+	return s.config, s.configErr
+}
+
+func (s *chatCapabilitiesSchedulerStub) HasSchedulableChatCompletionsAccount(context.Context, int64, string) (bool, error) {
+	s.chatScheduleCalls++
+	return false, nil
+}
+
+func (s *chatCapabilitiesSchedulerStub) HasSchedulableTranscriptionAccount(context.Context, int64, string) (bool, error) {
+	s.audioScheduleCalls++
+	return false, nil
 }
 
 type chatTestPricing struct{}
@@ -98,10 +130,12 @@ func (chatTestPricing) GetIntervalPricing(resolved *ResolvedPricing, _ int) *Mod
 }
 
 type chatTestBilling struct {
-	balance  float64
-	err      error
-	calls    int
-	platform string
+	balance           float64
+	err               error
+	calls             int
+	platform          string
+	subscriptionErr   error
+	subscriptionCalls int
 }
 
 func (s *chatTestBilling) PeekWebChatEligibility(_ context.Context, _ int64, platform string) (float64, error) {
@@ -110,14 +144,65 @@ func (s *chatTestBilling) PeekWebChatEligibility(_ context.Context, _ int64, pla
 	return s.balance, s.err
 }
 
+func (s *chatTestBilling) PeekWebChatSubscriptionEligibility(
+	_ context.Context,
+	_ int64,
+	_ *Group,
+	_ *UserSubscription,
+) error {
+	s.subscriptionCalls++
+	return s.subscriptionErr
+}
+
+type chatTestSubscriptions struct {
+	sub              *UserSubscription
+	getErr           error
+	validateErr      error
+	needsMaintenance bool
+	maintenanceErr   error
+	getCalls         int
+	validateCalls    int
+	maintenanceCalls int
+}
+
+func (s *chatTestSubscriptions) GetActiveSubscription(context.Context, int64, int64) (*UserSubscription, error) {
+	s.getCalls++
+	return s.sub, s.getErr
+}
+
+func (s *chatTestSubscriptions) ValidateAndCheckLimits(*UserSubscription, *Group) (bool, error) {
+	s.validateCalls++
+	needsMaintenance := s.needsMaintenance
+	s.needsMaintenance = false
+	return needsMaintenance, s.validateErr
+}
+
+func (s *chatTestSubscriptions) EnsureWindowMaintenance(context.Context, *UserSubscription) (*UserSubscription, error) {
+	s.maintenanceCalls++
+	return s.sub, s.maintenanceErr
+}
+
 type chatTestPrincipalProvider struct {
 	principal *APIKey
 	err       error
 	calls     int
+	groupIDs  []int64
+	subIDs    []int64
 }
 
-func (s *chatTestPrincipalProvider) Resolve(context.Context, int64, *Group) (*APIKey, error) {
+func (s *chatTestPrincipalProvider) Resolve(
+	_ context.Context,
+	_ int64,
+	group *Group,
+	subscription *UserSubscription,
+) (*APIKey, error) {
 	s.calls++
+	if group != nil {
+		s.groupIDs = append(s.groupIDs, group.ID)
+	}
+	if subscription != nil {
+		s.subIDs = append(s.subIDs, subscription.ID)
+	}
 	return s.principal, s.err
 }
 
@@ -141,19 +226,145 @@ func newChatServiceBehaviorTest() (*ChatService, *chatTestGroupAccess, *chatTest
 		scheduler:  scheduler,
 		pricing:    chatTestPricing{},
 		billing:    billing,
+		subs:       &chatTestSubscriptions{},
 		principals: principals,
 	}
 	return svc, groups, catalog, scheduler, billing, principals
 }
 
+func configureChatSubscriptionAndWalletGroups(groups *chatTestGroupAccess) {
+	groups.groups = []Group{
+		{
+			ID:               10,
+			Name:             "Wallet",
+			Platform:         PlatformOpenAI,
+			Status:           StatusActive,
+			SubscriptionType: SubscriptionTypeStandard,
+			RateMultiplier:   1,
+		},
+		{
+			ID:               20,
+			Name:             "Pro",
+			Platform:         PlatformOpenAI,
+			Status:           StatusActive,
+			SubscriptionType: SubscriptionTypeSubscription,
+			RateMultiplier:   1,
+		},
+	}
+}
+
+func activeChatTestSubscription() *UserSubscription {
+	now := time.Now()
+	return &UserSubscription{
+		ID:        700,
+		UserID:    7,
+		GroupID:   20,
+		Status:    SubscriptionStatusActive,
+		StartsAt:  now.Add(-time.Hour),
+		ExpiresAt: now.Add(time.Hour),
+	}
+}
+
+func TestChatServiceCapabilitiesDoesNotRunUserOrRuntimeAdmission(t *testing.T) {
+	svc, groups, catalog, _, billing, principals := newChatServiceBehaviorTest()
+	users, ok := svc.users.(*chatTestUserReader)
+	require.True(t, ok)
+	scheduler := &chatCapabilitiesSchedulerStub{
+		config: config.TranscriptionConfig{
+			Enabled:            true,
+			MaxUploadBytes:     8 << 20,
+			MaxDurationSeconds: 90,
+			AcceptedMIMETypes:  []string{"audio/webm", "audio/mp4"},
+			GroupIDs:           []int64{10, 20},
+			Model:              "gpt-4o-mini-transcribe",
+		},
+	}
+	svc.scheduler = scheduler
+
+	result, err := svc.Capabilities(context.Background())
+
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.True(t, result.Transcription.Enabled)
+	require.Equal(t, int64(8<<20), result.Transcription.MaxUploadBytes)
+	require.Equal(t, 90, result.Transcription.MaxDurationSeconds)
+	require.Equal(t, []string{"audio/webm", "audio/mp4"}, result.Transcription.AcceptedMIMETypes)
+	require.Equal(t, 1, scheduler.configCalls)
+	require.Zero(t, scheduler.chatScheduleCalls)
+	require.Zero(t, scheduler.audioScheduleCalls)
+	require.Zero(t, users.calls)
+	require.Zero(t, groups.calls)
+	require.Zero(t, catalog.availableCalls)
+	require.Zero(t, catalog.mappingCalls)
+	require.Zero(t, catalog.restrictionCalls)
+	require.Zero(t, billing.calls)
+	require.Zero(t, principals.calls)
+}
+
+func TestChatServiceCapabilitiesFailsClosedWhenProductConfigIsUnavailable(t *testing.T) {
+	svc, groups, catalog, _, billing, principals := newChatServiceBehaviorTest()
+	users, ok := svc.users.(*chatTestUserReader)
+	require.True(t, ok)
+	svc.transcribe = config.TranscriptionConfig{
+		Enabled:            true,
+		MaxUploadBytes:     4 << 20,
+		MaxDurationSeconds: 60,
+		AcceptedMIMETypes:  []string{"audio/webm"},
+	}
+	scheduler := &chatCapabilitiesSchedulerStub{configErr: errors.New("settings unavailable")}
+	svc.scheduler = scheduler
+
+	result, err := svc.Capabilities(context.Background())
+
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.False(t, result.Transcription.Enabled)
+	require.Equal(t, int64(4<<20), result.Transcription.MaxUploadBytes)
+	require.Equal(t, 60, result.Transcription.MaxDurationSeconds)
+	require.Equal(t, []string{"audio/webm"}, result.Transcription.AcceptedMIMETypes)
+	require.Equal(t, 1, scheduler.configCalls)
+	require.Zero(t, scheduler.chatScheduleCalls)
+	require.Zero(t, scheduler.audioScheduleCalls)
+	require.Zero(t, users.calls)
+	require.Zero(t, groups.calls)
+	require.Zero(t, catalog.availableCalls)
+	require.Zero(t, billing.calls)
+	require.Zero(t, principals.calls)
+}
+
+func TestChatServiceResolveTranscriptionPrincipalUsesWhitelistIntersectionOrder(t *testing.T) {
+	svc, groups, _, scheduler, billing, principals := newChatServiceBehaviorTest()
+	groups.groups = []Group{
+		{ID: 10, Platform: PlatformOpenAI, Status: StatusActive, SubscriptionType: SubscriptionTypeStandard},
+		{ID: 30, Platform: PlatformOpenAI, Status: StatusActive, SubscriptionType: SubscriptionTypeStandard},
+		{ID: 40, Platform: PlatformOpenAI, Status: StatusActive, SubscriptionType: SubscriptionTypeSubscription},
+	}
+	svc.transcribe = config.TranscriptionConfig{
+		Enabled:  true,
+		Model:    "gpt-4o-mini-transcribe",
+		GroupIDs: []int64{99, 10, 40, 30},
+	}
+	scheduler.transcriptionByGroup = map[int64]bool{10: false, 30: true, 40: true}
+	selectedGroupID := int64(30)
+	principals.principal = &APIKey{ID: 99, UserID: 7, GroupID: &selectedGroupID}
+
+	principal, err := svc.ResolveTranscriptionPrincipal(context.Background(), 7)
+	require.NoError(t, err)
+	require.Equal(t, int64(99), principal.ID)
+	require.Equal(t, []int64{10, 30}, scheduler.transcriptionCalls)
+	require.Equal(t, []int64{30}, principals.groupIDs)
+	require.Equal(t, 1, billing.calls)
+}
+
 func TestChatServiceListModelsUsesBillingBalanceWithoutCreatingPrincipal(t *testing.T) {
-	svc, _, _, _, billing, principals := newChatServiceBehaviorTest()
+	svc, _, catalog, _, billing, principals := newChatServiceBehaviorTest()
+	catalog.models = []string{"gpt-5.5"}
 
 	result, err := svc.ListModels(context.Background(), 7)
 	require.NoError(t, err)
 	require.Equal(t, 12.5, result.Balance)
 	require.Len(t, result.Models, 1)
-	require.Equal(t, "gpt-5.4", result.Models[0].ID)
+	require.Equal(t, "gpt-5.5", result.Models[0].ID)
 	require.False(t, result.Models[0].Recommended)
 	require.Equal(t, PlatformOpenAI, billing.platform)
 	require.Equal(t, 1, billing.calls)
@@ -176,8 +387,8 @@ func TestChatServiceBillingPreflightRejectsGETAndPOSTBeforePrincipalCreation(t *
 			require.ErrorIs(t, err, ErrChatInsufficientBalance)
 			require.True(t, infraerrors.IsForbidden(err))
 			require.Equal(t, 1, billing.calls)
-			require.Zero(t, groups.calls)
-			require.Zero(t, catalog.availableCalls)
+			require.Equal(t, 1, groups.calls)
+			require.Equal(t, 1, catalog.availableCalls)
 			require.Zero(t, principals.calls)
 		})
 	}
@@ -191,10 +402,124 @@ func TestChatServiceBillingDependencyFailureReturns503(t *testing.T) {
 	require.Error(t, err)
 	require.True(t, infraerrors.IsServiceUnavailable(err))
 	require.Equal(t, "BILLING_SERVICE_ERROR", infraerrors.Reason(err))
-	require.Zero(t, groups.calls)
-	require.Zero(t, catalog.availableCalls)
-	require.Zero(t, scheduler.calls)
+	require.Equal(t, 1, groups.calls)
+	require.Equal(t, 1, catalog.availableCalls)
+	require.Equal(t, 1, scheduler.calls)
 	require.Zero(t, principals.calls)
+}
+
+func TestChatServiceCompletionEntitlementPrefersSubscription(t *testing.T) {
+	svc, groups, _, _, billing, principals := newChatServiceBehaviorTest()
+	configureChatSubscriptionAndWalletGroups(groups)
+	subscriptions := svc.subs.(*chatTestSubscriptions)
+	subscriptions.sub = activeChatTestSubscription()
+
+	principal, err := svc.ResolvePrincipal(context.Background(), 7, "gpt-5.4")
+	require.NoError(t, err)
+	require.NotNil(t, principal)
+	require.Same(t, principals.principal, principal.APIKey)
+	require.Same(t, subscriptions.sub, principal.Subscription)
+	require.Equal(t, []int64{20}, principals.groupIDs)
+	require.Equal(t, []int64{700}, principals.subIDs)
+	require.Equal(t, 1, billing.subscriptionCalls)
+}
+
+func TestChatServiceCompletionEntitlementAllowsSubscriptionWhenWalletUnavailable(t *testing.T) {
+	for _, walletErr := range []error{
+		ErrInsufficientBalance,
+		errors.New("wallet cache and database unavailable"),
+	} {
+		t.Run(walletErr.Error(), func(t *testing.T) {
+			svc, groups, _, _, billing, principals := newChatServiceBehaviorTest()
+			configureChatSubscriptionAndWalletGroups(groups)
+			subscriptions := svc.subs.(*chatTestSubscriptions)
+			subscriptions.sub = activeChatTestSubscription()
+			billing.err = walletErr
+
+			principal, err := svc.ResolvePrincipal(context.Background(), 7, "gpt-5.4")
+			require.NoError(t, err)
+			require.NotNil(t, principal)
+			require.Same(t, subscriptions.sub, principal.Subscription)
+			require.Equal(t, []int64{20}, principals.groupIDs)
+			require.Equal(t, 1, billing.subscriptionCalls)
+		})
+	}
+}
+
+func TestChatServiceCompletionEntitlementFallsBackToWalletAfterSubscriptionExhaustion(t *testing.T) {
+	svc, groups, _, _, billing, principals := newChatServiceBehaviorTest()
+	configureChatSubscriptionAndWalletGroups(groups)
+	subscriptions := svc.subs.(*chatTestSubscriptions)
+	subscriptions.sub = activeChatTestSubscription()
+	subscriptions.validateErr = ErrWeeklyLimitExceeded
+
+	principal, err := svc.ResolvePrincipal(context.Background(), 7, "gpt-5.4")
+	require.NoError(t, err)
+	require.NotNil(t, principal)
+	require.Nil(t, principal.Subscription)
+	require.Equal(t, []int64{10}, principals.groupIDs)
+	require.Empty(t, principals.subIDs)
+	require.Zero(t, billing.subscriptionCalls)
+}
+
+func TestChatServiceCompletionEntitlementReportsInsufficientOnlyWhenEverySourceIsExhausted(t *testing.T) {
+	svc, groups, _, _, billing, principals := newChatServiceBehaviorTest()
+	configureChatSubscriptionAndWalletGroups(groups)
+	subscriptions := svc.subs.(*chatTestSubscriptions)
+	subscriptions.sub = activeChatTestSubscription()
+	subscriptions.validateErr = ErrMonthlyLimitExceeded
+	billing.err = ErrInsufficientBalance
+
+	_, err := svc.ResolvePrincipal(context.Background(), 7, "gpt-5.4")
+	require.ErrorIs(t, err, ErrChatInsufficientBalance)
+	require.True(t, infraerrors.IsForbidden(err))
+	require.Zero(t, principals.calls)
+}
+
+func TestChatServiceCompletionEntitlementDoesNotMaskDependencyFailureAsInsufficient(t *testing.T) {
+	t.Run("subscription dependency failure blocks wallet fallback", func(t *testing.T) {
+		svc, groups, _, _, _, principals := newChatServiceBehaviorTest()
+		configureChatSubscriptionAndWalletGroups(groups)
+		subscriptions := svc.subs.(*chatTestSubscriptions)
+		subscriptions.getErr = errors.New("subscription database unavailable")
+
+		_, err := svc.ResolvePrincipal(context.Background(), 7, "gpt-5.4")
+		require.Error(t, err)
+		require.True(t, infraerrors.IsServiceUnavailable(err))
+		require.Equal(t, "BILLING_SERVICE_ERROR", infraerrors.Reason(err))
+		require.NotErrorIs(t, err, ErrChatInsufficientBalance)
+		require.Zero(t, principals.calls)
+	})
+
+	t.Run("wallet dependency failure wins when subscription is exhausted", func(t *testing.T) {
+		svc, groups, _, _, billing, principals := newChatServiceBehaviorTest()
+		configureChatSubscriptionAndWalletGroups(groups)
+		subscriptions := svc.subs.(*chatTestSubscriptions)
+		subscriptions.sub = activeChatTestSubscription()
+		subscriptions.validateErr = ErrWeeklyLimitExceeded
+		billing.err = errors.New("wallet database unavailable")
+
+		_, err := svc.ResolvePrincipal(context.Background(), 7, "gpt-5.4")
+		require.Error(t, err)
+		require.True(t, infraerrors.IsServiceUnavailable(err))
+		require.Equal(t, "BILLING_SERVICE_ERROR", infraerrors.Reason(err))
+		require.NotErrorIs(t, err, ErrChatInsufficientBalance)
+		require.Zero(t, principals.calls)
+	})
+}
+
+func TestChatServiceCompletionEntitlementMaintainsSubscriptionWindowsBeforeAdmission(t *testing.T) {
+	svc, groups, _, _, _, _ := newChatServiceBehaviorTest()
+	configureChatSubscriptionAndWalletGroups(groups)
+	subscriptions := svc.subs.(*chatTestSubscriptions)
+	subscriptions.sub = activeChatTestSubscription()
+	subscriptions.needsMaintenance = true
+
+	principal, err := svc.ResolvePrincipal(context.Background(), 7, "gpt-5.4")
+	require.NoError(t, err)
+	require.Same(t, subscriptions.sub, principal.Subscription)
+	require.Equal(t, 2, subscriptions.validateCalls)
+	require.Equal(t, 1, subscriptions.maintenanceCalls)
 }
 
 func TestChatServiceUserDependencyFailureReturnsCatalog503WithoutSideEffects(t *testing.T) {
@@ -434,29 +759,252 @@ func TestRetiredGPT52FamilyBoundary(t *testing.T) {
 	}
 }
 
-func TestChatServiceRecommendsGPT55WhenAvailable(t *testing.T) {
+func TestChatServiceRecommendsExactGPT56SolWhenAvailable(t *testing.T) {
 	svc, _, catalog, _, _, _ := newChatServiceBehaviorTest()
 	catalog.models = []string{"gpt-5.6-sol", "gpt-5.4", "gpt-5.5"}
 
 	result, err := svc.ListModels(context.Background(), 7)
 	require.NoError(t, err)
-	require.Len(t, result.Models, 3)
-	require.Equal(t, "gpt-5.5", result.Models[0].ID)
+	require.Len(t, result.Models, 2)
+	require.Equal(t, "gpt-5.6-sol", result.Models[0].ID)
 	require.True(t, result.Models[0].Recommended)
 	require.False(t, result.Models[1].Recommended)
-	require.False(t, result.Models[2].Recommended)
 }
 
-func TestChatServiceDoesNotRecommendAnotherModelWhenGPT55IsUnavailable(t *testing.T) {
+func TestChatServiceDoesNotRecommendFallbackWhenExactGPT56SolIsUnavailable(t *testing.T) {
 	svc, _, catalog, _, _, _ := newChatServiceBehaviorTest()
-	catalog.models = []string{"gpt-5.6-sol", "gpt-5.4"}
+	catalog.models = []string{"gpt-5.6", "gpt-5.5", "gpt-5.4"}
 
 	result, err := svc.ListModels(context.Background(), 7)
 	require.NoError(t, err)
-	require.Len(t, result.Models, 2)
+	require.Len(t, result.Models, 1)
 	for _, model := range result.Models {
 		require.False(t, model.Recommended)
 	}
+}
+
+func TestChatServiceCatalogHidesProductExcludedModelsWithoutRevokingAuthorization(t *testing.T) {
+	svc, _, catalog, _, _, principals := newChatServiceBehaviorTest()
+	catalog.models = []string{
+		"gpt-5.6",
+		"gpt-5.6-sol",
+		"gpt-5.5",
+		"gpt-5.6-luna",
+		"gpt-5.6-terra",
+		"gpt-5.3-codex-spark",
+		"gpt-5.4",
+		"gpt-5.4-mini",
+		"gpt-5.4-2026-03-05",
+		"gpt-5.40",
+		"gpt-5.4x",
+	}
+
+	result, err := svc.ListModels(context.Background(), 7)
+	require.NoError(t, err)
+	modelIDs := make([]string, 0, len(result.Models))
+	for _, model := range result.Models {
+		modelIDs = append(modelIDs, model.ID)
+	}
+	require.NotContains(t, modelIDs, "gpt-5.6")
+	require.NotContains(t, modelIDs, "gpt-5.3-codex-spark")
+	require.NotContains(t, modelIDs, "gpt-5.4")
+	require.NotContains(t, modelIDs, "gpt-5.4-mini")
+	require.NotContains(t, modelIDs, "gpt-5.4-2026-03-05")
+	require.Contains(t, modelIDs, "gpt-5.6-sol")
+	require.Contains(t, modelIDs, "gpt-5.5")
+	require.Contains(t, modelIDs, "gpt-5.6-luna")
+	require.Contains(t, modelIDs, "gpt-5.6-terra")
+	require.Contains(t, modelIDs, "gpt-5.40", "numeric lookalikes must not be treated as GPT-5.4")
+	require.Contains(t, modelIDs, "gpt-5.4x", "alphabetic lookalikes must not be treated as GPT-5.4")
+
+	for _, model := range result.Models {
+		require.Equal(t, model.ID == "gpt-5.6-sol", model.Recommended, model.ID)
+	}
+
+	for _, historicalModel := range []string{
+		"gpt-5.6",
+		"gpt-5.3-codex-spark",
+		"gpt-5.4",
+		"gpt-5.4-mini",
+		"gpt-5.4-2026-03-05",
+	} {
+		principal, resolveErr := svc.ResolvePrincipal(context.Background(), 7, historicalModel)
+		require.NoError(t, resolveErr)
+		require.NotNil(t, principal)
+	}
+	require.Equal(t, 5, principals.calls)
+}
+
+func TestHiddenWebChatCatalogModelIDNormalizesGPT54FamilyWithBoundary(t *testing.T) {
+	for _, model := range []string{
+		"GPT-5.4",
+		"openai/GPT-5.4-Mini",
+		"gpt5.4mini",
+		"gpt-5.4:preview",
+		"gpt-5.4_2026-03-05",
+	} {
+		require.True(t, isHiddenWebChatCatalogModelID(model), model)
+	}
+	for _, model := range []string{
+		"gpt-5.40",
+		"gpt-5.4x",
+		"gpt-5.41-mini",
+		"gpt-15.4",
+		"gpt-5.5",
+		"gpt-5.6-luna",
+	} {
+		require.False(t, isHiddenWebChatCatalogModelID(model), model)
+	}
+}
+
+func TestChatServiceReasoningSliderIsAvailableForEveryCatalogModel(t *testing.T) {
+	for _, tt := range []struct {
+		name      string
+		requested string
+		mapping   ChannelMappingResult
+	}{
+		{
+			name:      "exact Sol",
+			requested: "gpt-5.6-sol",
+		},
+		{
+			name:      "bare GPT-5.6 normalizes to Sol",
+			requested: "gpt-5.6",
+		},
+		{
+			name:      "channel alias maps to Sol",
+			requested: "gpt-safe-alias",
+			mapping: ChannelMappingResult{
+				MappedModel:        "openai/gpt-5.6-sol",
+				Mapped:             true,
+				BillingModelSource: BillingModelSourceChannelMapped,
+			},
+		},
+		{
+			name:      "non-Sol model",
+			requested: "gpt-5.5",
+		},
+		{
+			name:      "upstream mapping cannot prove Sol",
+			requested: "gpt-safe-alias",
+			mapping: ChannelMappingResult{
+				MappedModel:        "gpt-5.6-sol",
+				Mapped:             true,
+				BillingModelSource: BillingModelSourceUpstream,
+			},
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			svc, _, catalog, _, _, _ := newChatServiceBehaviorTest()
+			catalog.models = []string{tt.requested}
+			catalog.mapping = tt.mapping
+
+			_, _, choices, err := svc.authorizedModelChoices(context.Background(), 7)
+			require.NoError(t, err)
+			require.Len(t, choices, 1)
+			require.True(t, choices[0].model.SupportsReasoningSlider)
+		})
+	}
+}
+
+func TestChatServiceReasoningEffortDefaultsToLowAndPreservesSupportedLevels(t *testing.T) {
+	for _, effort := range []string{"", "low", "medium", "high", "xhigh"} {
+		t.Run("effort="+effort, func(t *testing.T) {
+			svc, _, catalog, _, _, _ := newChatServiceBehaviorTest()
+			catalog.models = []string{"gpt-5.6-sol"}
+
+			got, err := svc.NormalizeReasoningEffort(context.Background(), 7, "gpt-5.6-sol", effort)
+			require.NoError(t, err)
+			if effort == "" {
+				require.Equal(t, "low", got)
+			} else {
+				require.Equal(t, effort, got)
+			}
+		})
+	}
+}
+
+func TestChatServiceReasoningEffortRejectsMaxForEffectiveGPT56Sol(t *testing.T) {
+	for _, tt := range []struct {
+		name      string
+		requested string
+		effective string
+		mapped    bool
+	}{
+		{name: "exact Sol", requested: "gpt-5.6-sol"},
+		{name: "bare GPT-5.6 alias", requested: "gpt-5.6"},
+		{name: "channel alias mapped to Sol", requested: "gpt-safe-alias", effective: "openai/gpt-5.6-sol", mapped: true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			svc, _, catalog, _, _, _ := newChatServiceBehaviorTest()
+			catalog.models = []string{tt.requested}
+			if tt.effective != "" {
+				catalog.mapping = ChannelMappingResult{
+					MappedModel:        tt.effective,
+					Mapped:             tt.mapped,
+					BillingModelSource: BillingModelSourceChannelMapped,
+				}
+			}
+
+			got, err := svc.NormalizeReasoningEffort(context.Background(), 7, tt.requested, "max")
+			require.Empty(t, got)
+			require.ErrorIs(t, err, ErrChatReasoningNotAllowed)
+			require.True(t, infraerrors.IsBadRequest(err))
+			require.Equal(t, "CHAT_REASONING_EFFORT_NOT_AVAILABLE", infraerrors.Reason(err))
+		})
+	}
+}
+
+func TestChatServiceReasoningEffortKeepsMaxForNonSolModel(t *testing.T) {
+	svc, _, catalog, _, _, _ := newChatServiceBehaviorTest()
+	catalog.models = []string{"gpt-5.5"}
+
+	got, err := svc.NormalizeReasoningEffort(context.Background(), 7, "gpt-5.5", "max")
+	require.NoError(t, err)
+	require.Equal(t, "max", got)
+}
+
+func TestChatServiceReasoningEffortRejectsMaxWhenUpstreamMappingCannotProveNonSol(t *testing.T) {
+	svc, _, catalog, _, _, _ := newChatServiceBehaviorTest()
+	catalog.models = []string{"gpt-5.5"}
+	catalog.mapping = ChannelMappingResult{
+		MappedModel:        "gpt-5.5",
+		BillingModelSource: BillingModelSourceUpstream,
+	}
+
+	got, err := svc.NormalizeReasoningEffort(context.Background(), 7, "gpt-5.5", "max")
+	require.Empty(t, got)
+	require.ErrorIs(t, err, ErrChatReasoningNotAllowed)
+	require.Equal(t, "CHAT_REASONING_EFFORT_NOT_AVAILABLE", infraerrors.Reason(err))
+}
+
+func TestChatServiceReasoningEffortPreservesNonMaxLevelsForUpstreamMapping(t *testing.T) {
+	for _, effort := range []string{"low", "medium", "high", "xhigh"} {
+		t.Run(effort, func(t *testing.T) {
+			svc, _, catalog, _, _, _ := newChatServiceBehaviorTest()
+			catalog.models = []string{"gpt-5.5"}
+			catalog.mapping = ChannelMappingResult{
+				MappedModel:        "gpt-5.5",
+				BillingModelSource: BillingModelSourceUpstream,
+			}
+
+			got, err := svc.NormalizeReasoningEffort(context.Background(), 7, "gpt-5.5", effort)
+			require.NoError(t, err)
+			require.Equal(t, effort, got)
+		})
+	}
+}
+
+func TestChatServiceReasoningEffortMappingFailureFailsClosed(t *testing.T) {
+	svc, _, catalog, _, _, _ := newChatServiceBehaviorTest()
+	catalog.models = []string{"gpt-safe-alias"}
+	catalog.mappingErr = errors.New("channel cache unavailable")
+
+	got, err := svc.NormalizeReasoningEffort(context.Background(), 7, "gpt-safe-alias", "max")
+	require.Empty(t, got)
+	require.Error(t, err)
+	require.True(t, infraerrors.IsServiceUnavailable(err))
+	require.Equal(t, "CHAT_CATALOG_UNAVAILABLE", infraerrors.Reason(err))
 }
 
 func TestChatServiceRejectsAliasMappedByChannelToRetiredGPT52(t *testing.T) {
@@ -526,11 +1074,12 @@ func TestChatServiceModelCandidatesRespectDefaultAndCustomCatalogs(t *testing.T)
 		for _, model := range result.Models {
 			modelIDs = append(modelIDs, model.ID)
 		}
-		require.Contains(t, modelIDs, "gpt-5.4")
+		require.Contains(t, modelIDs, "gpt-5.6-sol")
+		require.NotContains(t, modelIDs, "gpt-5.4")
 		require.NotContains(t, modelIDs, "gpt-image-1")
 		for _, model := range result.Models {
-			if model.ID == "gpt-5.4" {
-				require.Equal(t, "GPT-5.4", model.DisplayName)
+			if model.ID == "gpt-5.6-sol" {
+				require.Equal(t, "GPT-5.6 Sol", model.DisplayName)
 			}
 		}
 	})

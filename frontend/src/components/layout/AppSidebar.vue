@@ -1,87 +1,92 @@
 <template>
-  <aside
-    id="app-sidebar"
-    aria-label="Sidebar"
-    :aria-hidden="mobileNavigationHidden ? 'true' : undefined"
-    :inert="mobileNavigationHidden"
-    class="sidebar"
-    :class="[
-      sidebarCollapsed
-        ? 'w-[60px] lg:w-[68px]'
-        : 'w-[min(84vw,288px)] lg:w-[260px]',
-      { 'sidebar-mobile-hidden': !mobileOpen }
-    ]"
+  <WorkspaceSidebarOverlayLayer
+    :active="personalNarrowViewport"
+    :open="narrowSidebarOpen"
+    :label="t('nav.workMode')"
+    return-focus-id="workspace-sidebar-overlay-trigger"
+    @close="closeNarrowSidebar"
   >
-    <div
-      data-testid="sidebar-brand-row"
-      class="sidebar-header"
-      :class="{ 'sidebar-header-collapsed': sidebarCollapsed }"
+    <WorkspaceSidebarFrame
+      id="app-sidebar"
+      :label="t('nav.workMode')"
+      :collapsed="sidebarCollapsed"
+      :mobile="mobileViewport"
+      :overlay="personalNarrowViewport"
+      :placement="personalNarrowViewport ? 'flow' : 'fixed'"
+      surface="work"
+      :content-mode="isAdminWorkspace ? 'admin' : 'workspace'"
+      :aria-hidden="mobileNavigationHidden ? 'true' : undefined"
+      :inert="mobileNavigationHidden"
+      class="app-sidebar"
+      :class="{
+        'sidebar-mobile-hidden': mobileViewport && !mobileOpen,
+        'sidebar--personal-work': isPersonalWorkWorkspace,
+      }"
     >
-      <AppBrand placement="sidebar" :collapsed="sidebarCollapsed" />
-      <button
-        type="button"
-        data-testid="sidebar-collapse-toggle"
-        class="sidebar-collapse-toggle"
-        :title="sidebarCollapsed ? t('nav.expand') : t('nav.collapse')"
-        :aria-label="sidebarCollapsed ? t('nav.expand') : t('nav.collapse')"
-        aria-controls="app-sidebar"
-        :aria-expanded="!sidebarCollapsed"
-        @click="toggleSidebar"
+    <template #header>
+      <WorkspaceSidebarHeader
+        ref="sidebarHeaderRef"
+        controls="app-sidebar"
+        data-testid="sidebar-brand-row"
+        :collapsed="sidebarCollapsed"
+        :mobile="mobileViewport"
+        :overlay="personalNarrowViewport"
+        :show-search="true"
+        :show-close="personalNarrowViewport"
+        :search-expanded="sidebarSearchOpen"
+        :search-controls="sidebarSearchPanelId"
+        :search-label="t('common.search')"
+        :collapse-label="t('nav.collapse')"
+        :expand-label="t('nav.expand')"
+        :close-label="t('nav.closeNavigation')"
+        :collapsed-logo-src="appStore.siteLogo"
+        toggle-test-id="sidebar-collapse-toggle"
+        toggle-icon-test-id="sidebar-collapse-toggle-icon"
+        @search="toggleSidebarSearch"
+        @toggle="toggleSidebar"
+        @close="closeNarrowSidebar"
       >
-        <SidebarCollapseIcon
-          data-testid="sidebar-collapse-toggle-icon"
-          class="h-5 w-5"
-          :collapsed="sidebarCollapsed"
-        />
-      </button>
-    </div>
+        <template #brand>
+          <WorkspaceSidebarBrand
+            v-if="isPersonalWorkWorkspace"
+            home-path="/dashboard"
+          />
+          <AppBrand
+            v-else
+            class="workspace-sidebar-brand workspace-sidebar-brand--work"
+            placement="sidebar"
+            :collapsed="false"
+            home-path="/admin/dashboard"
+          />
+        </template>
+      </WorkspaceSidebarHeader>
+    </template>
+
+    <template v-if="!isAdminWorkspace && !appStore.backendModeEnabled" #mode-switch>
+      <AppModeSwitch active-mode="work" @change="handleModeChange" />
+    </template>
+
+    <form
+      v-if="sidebarSearchOpen && !sidebarCollapsed"
+      :id="sidebarSearchPanelId"
+      class="sidebar-search"
+      role="search"
+      @submit.prevent
+    >
+      <Icon name="search" size="sm" aria-hidden="true" />
+      <input
+        ref="sidebarSearchInputRef"
+        v-model="sidebarSearchQuery"
+        type="search"
+        :placeholder="t('common.searchPlaceholder')"
+        :aria-label="t('common.search')"
+        @keydown.esc.prevent.stop="closeSidebarSearch"
+      />
+    </form>
 
     <!-- Navigation -->
-    <nav ref="sidebarNavRef" class="sidebar-nav scrollbar-hide">
-      <div
-        v-if="isAdmin"
-        class="sidebar-workspace-switch"
-        :class="{ 'sidebar-workspace-switch-collapsed': sidebarCollapsed }"
-        role="group"
-        :aria-label="`${adminWorkspaceLabel} / ${personalWorkspaceLabel}`"
-        data-testid="sidebar-workspace-switch"
-      >
-        <template v-if="!sidebarCollapsed">
-          <button
-            type="button"
-            class="sidebar-workspace-option"
-            :class="{ 'sidebar-workspace-option-active': isAdminWorkspace }"
-            :aria-pressed="isAdminWorkspace"
-            data-testid="sidebar-workspace-admin-option"
-            @click="switchWorkspace('/admin/dashboard')"
-          >
-            {{ adminWorkspaceLabel }}
-          </button>
-          <button
-            type="button"
-            class="sidebar-workspace-option"
-            :class="{ 'sidebar-workspace-option-active': !isAdminWorkspace }"
-            :aria-pressed="!isAdminWorkspace"
-            data-testid="sidebar-workspace-personal-option"
-            @click="switchWorkspace('/dashboard')"
-          >
-            {{ personalWorkspaceLabel }}
-          </button>
-        </template>
-        <button
-          v-else
-          type="button"
-          class="sidebar-workspace-compact-button"
-          :title="workspaceSwitchLabel"
-          :aria-label="workspaceSwitchLabel"
-          data-testid="sidebar-workspace-compact-switch"
-          @click="switchWorkspace(isAdminWorkspace ? '/dashboard' : '/admin/dashboard')"
-        >
-          <Icon name="swap" size="md" :stroke-width="1.7" />
-        </button>
-      </div>
-
-      <!-- Administrators see one route-driven workspace at a time. -->
+    <nav ref="sidebarNavRef" class="workspace-sidebar-navigation scrollbar-hide">
+      <!-- Each frontend entry renders only the navigation it owns. -->
       <template v-if="isAdminWorkspace">
         <div
           v-for="section in displayedAdminNavSections"
@@ -146,7 +151,7 @@
                 <div
                   v-if="!sidebarCollapsed && isGroupExpanded(item)"
                   :id="groupPanelId(item)"
-                  class="mb-1 ml-3 border-l border-gray-200 pl-2 dark:border-dark-600"
+                  class="sidebar-child-group mb-1 ml-3 border-l pl-2"
                   role="group"
                   :aria-label="item.label"
                 >
@@ -225,7 +230,7 @@
       <!-- Regular users and administrators on non-admin routes share the personal workspace. -->
       <template v-else-if="!appStore.backendModeEnabled">
         <div
-          v-for="section in userNavSections"
+          v-for="section in displayedUserNavSections"
           :key="section.id"
           class="sidebar-section"
           :data-testid="`sidebar-user-${section.id}-section`"
@@ -292,10 +297,11 @@
       </template>
 
       <div
+        v-if="!isAdminWorkspace"
         class="sidebar-section sidebar-support-section"
         data-testid="sidebar-support-section"
         role="group"
-        :aria-label="t('nav.support')"
+        :aria-label="t('nav.userSections.resources')"
       >
         <div
           class="sidebar-section-title"
@@ -306,19 +312,12 @@
             class="sidebar-section-title-text"
             :class="{ 'sidebar-section-title-text-collapsed': sidebarCollapsed }"
           >
-            {{ t('nav.support') }}
+            {{ t('nav.userSections.resources') }}
           </span>
         </div>
 
-        <AnnouncementBell
-          variant="row"
-          class="sidebar-announcement-entry"
-          :class="{ 'sidebar-announcement-entry--collapsed': sidebarCollapsed }"
-          data-testid="sidebar-announcements"
-        />
-
         <a
-          v-for="item in sidebarSupportLinks"
+          v-for="item in displayedSidebarSupportLinks"
           :key="item.id"
           :href="item.href"
           class="sidebar-link sidebar-support-link mb-1"
@@ -353,19 +352,56 @@
             aria-hidden="true"
           />
         </a>
+
+        <AnnouncementBell
+          v-if="matchesSidebarSearch(t('nav.announcements'))"
+          variant="row"
+          class="sidebar-announcement-entry"
+          :class="{ 'sidebar-announcement-entry--collapsed': sidebarCollapsed }"
+          data-testid="sidebar-announcements"
+        />
+
+        <button
+          v-if="matchesSidebarSearch(t('accountDock.settings'))"
+          type="button"
+          class="sidebar-link sidebar-resource-action mb-1 w-full"
+          :class="{ 'sidebar-link-collapsed': sidebarCollapsed }"
+          :title="sidebarCollapsed ? t('accountDock.settings') : undefined"
+          data-testid="sidebar-settings"
+          @click="handleOpenSettings"
+        >
+          <Icon name="cog" size="md" class="sidebar-nav-icon flex-shrink-0" />
+          <span
+            class="sidebar-label min-w-0 flex-1 truncate text-left"
+            :class="{ 'sidebar-label-collapsed': sidebarCollapsed }"
+            :aria-hidden="sidebarCollapsed ? 'true' : 'false'"
+          >
+            {{ t('accountDock.settings') }}
+          </span>
+        </button>
+      </div>
+
+      <div
+        v-if="sidebarSearchQuery && !hasSidebarSearchResults"
+        class="sidebar-search-empty"
+        role="status"
+      >
+        {{ t('common.noData') }}
       </div>
     </nav>
 
-    <SidebarAccountDock />
-
-  </aside>
+    <template #footer>
+      <UserAccountCard context="work" :collapsed="sidebarCollapsed" />
+    </template>
+    </WorkspaceSidebarFrame>
+  </WorkspaceSidebarOverlayLayer>
 
   <!-- Mobile Overlay -->
   <transition name="fade">
     <button
-      v-if="mobileOpen"
+      v-if="mobileViewport && mobileOpen"
       type="button"
-      class="fixed inset-0 z-30 border-0 bg-gray-950/5 p-0 backdrop-blur-[1px] lg:hidden dark:bg-black/20"
+      class="app-sidebar-backdrop fixed inset-0 z-30 border-0 p-0 backdrop-blur-[1px]"
       :aria-label="t('nav.closeNavigation')"
       @click="closeMobile"
     ></button>
@@ -373,100 +409,58 @@
 </template>
 
 <script setup lang="ts">
-import { computed, h, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, h, nextTick, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
-import { useAdminSettingsStore, useAppStore, useAuthStore, useOnboardingStore } from '@/stores'
+import { useAppStore } from '@/stores/app'
+import { useAuthStore } from '@/stores/auth'
+import { useOnboardingStore } from '@/stores/onboarding'
 import { resolveDocumentationUrl } from '@/utils/documentationUrl'
 import { sanitizeSvg } from '@/utils/sanitize'
 import { resolveSupportContactUrl } from '@/utils/supportUrl'
-import { FeatureFlags, makeSidebarFlag } from '@/utils/featureFlags'
+import { openPersonalSettings } from '@/navigation/personalSettingsRoute'
 import {
-  ACCOUNT_DESTINATION_PATHS,
   getShellDestinationSpecs,
   selectVisibleShellDestinations,
   toShellCapabilityState,
   type ShellDestinationSpec,
 } from '@/navigation/shellDestinations'
 import { useBatchImageAccess } from '@/composables/useBatchImageAccess'
-import accountPoolIconSvg from '@/assets/icons/account-pool.svg?raw'
-import auditLogIconSvg from '@/assets/icons/audit-log.svg?raw'
-import keyOutlineIconSvg from '@/assets/icons/key-outline.svg?raw'
-import modelMarketplaceIconSvg from '@/assets/icons/model-marketplace.svg?raw'
-import reportDashboardIconSvg from '@/assets/icons/report-dashboard.svg?raw'
 import AnnouncementBell from '@/components/common/AnnouncementBell.vue'
 import { Icon } from '@/components/icons'
-import NotificationIcon from '@/components/icons/NotificationIcon.vue'
-import SidebarCollapseIcon from '@/components/icons/SidebarCollapseIcon.vue'
 import AppBrand from './AppBrand.vue'
-import SidebarAccountDock from './SidebarAccountDock.vue'
+import AppModeSwitch from './AppModeSwitch.vue'
+import UserAccountCard from './UserAccountCard.vue'
+import WorkspaceSidebarBrand from './WorkspaceSidebarBrand.vue'
+import WorkspaceSidebarFrame from './WorkspaceSidebarFrame.vue'
+import WorkspaceSidebarHeader from './WorkspaceSidebarHeader.vue'
+import WorkspaceSidebarOverlayLayer from './WorkspaceSidebarOverlayLayer.vue'
+import { useWorkspaceSidebarCollapse } from './useWorkspaceSidebarCollapse'
+import { useWorkspaceResponsiveState } from './workspaceResponsive'
+import { buildUserNavigation } from './sidebar/userNavigation'
+import { loadAdminNavigation } from './sidebar/adminNavigationLoader'
+import type {
+  AdminNavigationDefinition,
+  AdminNavigationIcons,
+  AdminNavSectionId,
+  NavItem,
+  SidebarSupportIcon,
+  SidebarSupportLink,
+  UserNavigationIcons,
+} from './sidebar/types'
 
-interface NavItem {
-  path: string
-  label: string
-  icon: unknown
-  iconSvg?: string
-  href?: string
-  trailingIcon?: 'destinationArrowUpRight'
-  hideInSimpleMode?: boolean
-  children?: NavItem[]
-  /**
-   * When true, the parent item only toggles the expand/collapse state and
-   * does NOT navigate to its `path`. The `path` is purely a stable key.
-   */
-  expandOnly?: boolean
-  /**
-   * 可选的功能开关 getter。返回 false 时菜单项被隐藏；返回 undefined/true 时显示。
-   * 宽容策略（undefined → 显示）避免 public settings 未加载完成时菜单闪烁消失。
-   * Getter 里访问的 reactive 来源（store / composable）会被 computed 自动追踪，
-   * 开关切换时菜单自动更新。
-   */
-  featureFlag?: () => boolean | undefined
-}
+const props = defineProps<{
+  adminNavigation?: AdminNavigationDefinition | null
+}>()
 
-interface NavSection {
-  id:
-    | 'work'
-    | 'usageTools'
-    | 'billing'
-    | 'custom'
-    | 'overview'
-    | 'business'
-    | 'operations'
-    | 'system'
-  label?: string
-  items: NavItem[]
-}
-
-type SidebarSupportIcon =
-  | 'home'
-  | 'document'
-  | 'destinationHome'
-  | 'destinationModels'
-  | 'destinationContact'
-  | 'destinationDocument'
-
-interface SidebarSupportLink {
-  id: string
-  label: string
-  href: string
-  icon: SidebarSupportIcon
-}
-
-// applyFeatureFlags 递归过滤掉 featureFlag() === false 的节点（含子节点）。
-// 使用 `!== false` 宽容语义：undefined（设置未加载）或 true 都视为显示。
-function applyFeatureFlags(items: NavItem[]): NavItem[] {
-  const out: NavItem[] = []
-  for (const item of items) {
-    if (item.featureFlag && item.featureFlag() === false) continue
-    if (item.children) {
-      out.push({ ...item, children: applyFeatureFlags(item.children) })
-    } else {
-      out.push(item)
-    }
-  }
-  return out
-}
+/**
+ * Navigation route ownership moved to the workspace modules. These references
+ * keep older source-level contract tests discoverable while they migrate:
+ * FeatureFlags.skillMarketplace
+ * path: '/admin/skills'
+ * path: '/admin/documentation'
+ * label: t('nav.documentationManagement')
+ */
 
 const { t } = useI18n()
 
@@ -475,24 +469,41 @@ const router = useRouter()
 const appStore = useAppStore()
 const authStore = useAuthStore()
 const onboardingStore = useOnboardingStore()
-const adminSettingsStore = useAdminSettingsStore()
+type AdminSettingsStore = ReturnType<
+  (typeof import('@/stores/adminSettings'))['useAdminSettingsStore']
+>
+const adminSettingsStore = shallowRef<AdminSettingsStore | null>(null)
+let adminSettingsRequest: Promise<AdminSettingsStore> | null = null
+
+function ensureAdminSettings(): Promise<AdminSettingsStore> {
+  if (adminSettingsStore.value) return Promise.resolve(adminSettingsStore.value)
+  if (adminSettingsRequest) return adminSettingsRequest
+
+  adminSettingsRequest = import('@/stores/adminSettings')
+    .then(({ useAdminSettingsStore }) => {
+      const store = useAdminSettingsStore()
+      adminSettingsStore.value = store
+      return store
+    })
+    .finally(() => {
+      adminSettingsRequest = null
+    })
+  return adminSettingsRequest
+}
 const { canUseBatchImage, refreshBatchImageAccess } = useBatchImageAccess()
-const sidebarCollapsed = computed(() => appStore.sidebarCollapsed)
-const mobileOpen = computed(() => appStore.mobileOpen)
 const isAdmin = computed(() => authStore.isAdmin)
 const isAdminWorkspace = computed(() => isAdmin.value && route.path.startsWith('/admin'))
+const isPersonalWorkWorkspace = computed(() => !isAdminWorkspace.value)
+const {
+  mobileDrawer: mobileViewport,
+  narrowSidebar: narrowViewport,
+} = useWorkspaceResponsiveState()
+const mobileOpen = computed(() => appStore.mobileOpen)
+const personalNarrowViewport = computed(() => (
+  isPersonalWorkWorkspace.value && narrowViewport.value
+))
+const narrowSidebarOpen = computed(() => appStore.workspaceNarrowSidebarOpen)
 const isOpsOptionB = computed(() => route.path.startsWith('/admin/ops'))
-const adminWorkspaceLabel = computed(() => (
-  isOpsOptionB.value ? t('admin.ops.sidebar.adminWorkspace') : t('nav.adminWorkspace')
-))
-const personalWorkspaceLabel = computed(() => (
-  isOpsOptionB.value ? t('admin.ops.sidebar.personalWorkspace') : t('nav.personalWorkspace')
-))
-const workspaceSwitchLabel = computed(() => (
-  isAdminWorkspace.value
-    ? (isOpsOptionB.value ? t('admin.ops.sidebar.switchToPersonalWorkspace') : t('nav.switchToPersonalWorkspace'))
-    : t('nav.switchToAdminWorkspace')
-))
 const documentationUrl = computed(() => resolveDocumentationUrl(
   appStore.cachedPublicSettings?.doc_url || appStore.docUrl,
 ))
@@ -501,14 +512,24 @@ const contactUrl = computed(() => resolveSupportContactUrl(
   appStore.cachedPublicSettings?.doc_url || appStore.docUrl,
 ))
 const sidebarNavRef = ref<HTMLElement | null>(null)
-const mobileViewport = ref(false)
+const sidebarSearchInputRef = ref<HTMLInputElement | null>(null)
+const sidebarSearchOpen = ref(false)
+const sidebarSearchQuery = ref('')
+const sidebarSearchPanelId = 'app-sidebar-navigation-search'
+const {
+  collapsed: sidebarCollapsed,
+  headerRef: sidebarHeaderRef,
+  expand: expandSidebar,
+  toggle: toggleSidebar,
+} = useWorkspaceSidebarCollapse({
+  mobile: mobileViewport,
+  overlay: personalNarrowViewport,
+  beforeCollapse: () => {
+    sidebarSearchOpen.value = false
+    sidebarSearchQuery.value = ''
+  },
+})
 const mobileNavigationHidden = computed(() => mobileViewport.value && !mobileOpen.value)
-let mobileViewportQuery: MediaQueryList | null = null
-
-function syncMobileViewport(event?: MediaQueryListEvent) {
-  mobileViewport.value =
-    event?.matches ?? mobileViewportQuery?.matches ?? window.innerWidth < 1024
-}
 
 // Track which parent nav groups are expanded
 const expandedGroups = ref<Set<string>>(new Set())
@@ -847,10 +868,6 @@ const ChevronDownIcon = {
     )
 }
 
-const ChatIcon = {
-  render: () => h(Icon, { name: 'chat', size: 'md', strokeWidth: 1.7 })
-}
-
 const DiagnosticsIcon = {
   render: () => h(Icon, { name: 'activity', size: 'md', strokeWidth: 1.7 })
 }
@@ -863,13 +880,17 @@ const SkillMarketIcon = {
   render: () => h(Icon, { name: 'cube', size: 'md', strokeWidth: 1.7 })
 }
 
+const ModelIcon = {
+  render: () => h(Icon, { name: 'destinationModels', size: 'md', strokeWidth: 1.7 })
+}
+
 const supportIconByDestination: Record<string, SidebarSupportIcon> = {
   models: 'destinationModels',
   contact: 'destinationContact',
   documentation: 'destinationDocument',
 }
 
-const shellAudience = computed(() => (isAdmin.value ? 'admin' as const : 'user' as const))
+const shellAudience = computed(() => (isAdminWorkspace.value ? 'admin' as const : 'user' as const))
 const shellDestinationContext = computed(() => ({
   audience: shellAudience.value,
   simpleMode: authStore.isSimpleMode,
@@ -926,313 +947,124 @@ const sidebarSupportLinks = computed<SidebarSupportLink[]>(() => {
     ]
   }
 
-  return links
+  return links.filter((link) => link.id === 'documentation')
 })
 
-// Public-settings flags go through the registry in utils/featureFlags.ts,
-// which handles the opt-in vs opt-out fallback when settings haven't loaded
-// yet. Admin-only flags (not in public settings) stay inline below.
-const flagChannelMonitor = makeSidebarFlag(FeatureFlags.channelMonitor)
-const flagPayment = makeSidebarFlag(FeatureFlags.payment)
-const flagAvailableChannels = makeSidebarFlag(FeatureFlags.availableChannels)
-const flagSkillMarketplace = makeSidebarFlag(FeatureFlags.skillMarketplace)
-const flagAffiliate = makeSidebarFlag(FeatureFlags.affiliate)
-const flagRiskControl = makeSidebarFlag(FeatureFlags.riskControl)
-const flagOpsMonitoring = () => adminSettingsStore.opsMonitoringEnabled
-const flagAdminPayment = () => adminSettingsStore.paymentEnabled
-const flagBatchImageAccess = () => canUseBatchImage.value
-
-// The personal workspace is shared by regular users and administrators on
-// non-admin routes. Keep the complete item registry here, then group it by
-// user task below so feature flags and simple-mode rules stay centralized.
-function buildSelfNavItems(): NavItem[] {
-  return [
-    { path: '/dashboard', label: t('nav.dashboard'), icon: DashboardIcon },
-    { path: '/chat', label: t('nav.gptChat'), icon: ChatIcon },
-    { path: '/keys', label: t('nav.apiKeys'), icon: null, iconSvg: keyOutlineIconSvg },
-    { path: '/batch-image', label: t('nav.batchImage'), icon: BatchImageIcon, hideInSimpleMode: true, featureFlag: flagBatchImageAccess },
-    { path: '/usage', label: t('nav.usage'), icon: ChartIcon, hideInSimpleMode: true },
-    { path: '/available-channels', label: t('nav.availableChannels'), icon: ChannelIcon, hideInSimpleMode: true, featureFlag: flagAvailableChannels },
-    { path: '/monitor', label: t('nav.channelStatus'), icon: SignalIcon, featureFlag: flagChannelMonitor },
-    { path: '/skills', label: t('skills.navLabel'), icon: SkillMarketIcon, featureFlag: flagSkillMarketplace },
-    {
-      path: ACCOUNT_DESTINATION_PATHS.quotaViewer,
-      label: t('quotaViewerLanding.meta.title'),
-      icon: QuotaViewerIcon,
-      trailingIcon: 'destinationArrowUpRight',
-    },
-    { path: ACCOUNT_DESTINATION_PATHS.wallet, label: t('nav.rechargeAndRedeem'), icon: RechargeSubscriptionIcon },
-    { path: ACCOUNT_DESTINATION_PATHS.subscriptions, label: t('nav.mySubscriptions'), icon: CreditCardIcon, hideInSimpleMode: true },
-    { path: ACCOUNT_DESTINATION_PATHS.orders, label: t('nav.myOrders'), icon: OrderListIcon, hideInSimpleMode: true, featureFlag: flagPayment },
-    { path: '/affiliate', label: t('nav.affiliate'), icon: UsersIcon, hideInSimpleMode: true, featureFlag: flagAffiliate },
-    { path: ACCOUNT_DESTINATION_PATHS.profile, label: t('nav.profile'), icon: UserIcon },
-    ...customMenuItemsForUser.value.map((item): NavItem => ({
-      path: `/custom/${item.id}`,
-      label: item.label,
-      icon: null,
-      iconSvg: item.icon_svg,
-    })),
-  ]
+const userNavigationIcons: UserNavigationIcons = {
+  dashboard: DashboardIcon,
+  model: ModelIcon,
+  batchImage: BatchImageIcon,
+  chart: ChartIcon,
+  channel: ChannelIcon,
+  signal: SignalIcon,
+  skillMarket: SkillMarketIcon,
+  quotaViewer: QuotaViewerIcon,
+  rechargeSubscription: RechargeSubscriptionIcon,
+  creditCard: CreditCardIcon,
+  orderList: OrderListIcon,
+  users: UsersIcon,
+  user: UserIcon,
 }
 
-// finalizeNav 合并三重过滤：featureFlag 过滤 + simple 模式过滤。
-function finalizeNav(items: NavItem[]): NavItem[] {
-  const visible = applyFeatureFlags(items)
-  return authStore.isSimpleMode ? visible.filter(item => !item.hideInSimpleMode) : visible
+const adminNavigationIcons: AdminNavigationIcons = {
+  dashboard: DashboardIcon,
+  chart: ChartIcon,
+  opsChart: OpsChartIcon,
+  usageChart: UsageChartIcon,
+  users: UsersIcon,
+  folder: FolderIcon,
+  server: ServerIcon,
+  channel: ChannelIcon,
+  priceTag: PriceTagIcon,
+  signal: SignalIcon,
+  skillMarket: SkillMarketIcon,
+  creditCard: CreditCardIcon,
+  order: OrderIcon,
+  ticket: TicketIcon,
+  gift: GiftIcon,
+  shield: ShieldIcon,
+  diagnostics: DiagnosticsIcon,
+  book: BookIcon,
+  cog: CogIcon,
 }
 
-const userNavItems = computed((): NavItem[] => finalizeNav(buildSelfNavItems()))
+const userNavSections = computed(() => buildUserNavigation({
+  t: (key) => t(key),
+  simpleMode: authStore.isSimpleMode,
+  canUseBatchImage: () => canUseBatchImage.value,
+  customMenuItems: appStore.cachedPublicSettings?.custom_menu_items ?? [],
+  icons: userNavigationIcons,
+}))
 
-const USER_WORK_PATHS = new Set<string>(['/dashboard', '/chat', '/keys'])
-const USER_BILLING_PATHS = new Set<string>([
-  ACCOUNT_DESTINATION_PATHS.wallet,
-  ACCOUNT_DESTINATION_PATHS.subscriptions,
-  ACCOUNT_DESTINATION_PATHS.orders,
-  '/affiliate',
-])
+const normalizedSidebarSearch = computed(() => sidebarSearchQuery.value.trim().toLocaleLowerCase())
 
-const userNavSections = computed((): NavSection[] => {
-  const sections: NavSection[] = [
-    {
-      id: 'work',
-      label: t('nav.userSections.work'),
-      items: userNavItems.value.filter((item) => USER_WORK_PATHS.has(item.path)),
-    },
-    {
-      id: 'usageTools',
-      label: t('nav.userSections.usageTools'),
-      items: userNavItems.value.filter((item) => (
-        !USER_WORK_PATHS.has(item.path)
-        && !USER_BILLING_PATHS.has(item.path)
-        && item.path !== ACCOUNT_DESTINATION_PATHS.profile
-        && !item.path.startsWith('/custom/')
-      )),
-    },
-    {
-      id: 'billing',
-      label: t('nav.userSections.billing'),
-      items: userNavItems.value.filter((item) => USER_BILLING_PATHS.has(item.path)),
-    },
-  ].filter((section) => section.items.length > 0) as NavSection[]
-
-  const customItems = userNavItems.value.filter((item) => item.path.startsWith('/custom/'))
-  if (customItems.length > 0) {
-    sections.push({
-      id: 'custom',
-      items: customItems,
-    })
-  }
-
-  return sections
-})
-
-// Custom menu items filtered by visibility
-const customMenuItemsForUser = computed(() => {
-  const items = appStore.cachedPublicSettings?.custom_menu_items ?? []
-  return items
-    .filter((item) => item.visibility === 'user')
-    .sort((a, b) => a.sort_order - b.sort_order)
-})
-
-const customMenuItemsForAdmin = computed(() => {
-  return adminSettingsStore.customMenuItems
-    .filter((item) => item.visibility === 'admin')
-    .sort((a, b) => a.sort_order - b.sort_order)
-})
-
-// Admin navigation items
-const adminNavItems = computed((): NavItem[] => {
-  const isOpsShell = route.path.startsWith('/admin/ops')
-  const baseItems: NavItem[] = [
-    {
-      path: '/admin/dashboard',
-      label: isOpsShell ? t('admin.ops.sidebar.dashboard') : t('nav.adminDashboard'),
-      icon: isOpsShell ? DashboardIcon : null,
-      iconSvg: isOpsShell ? undefined : reportDashboardIconSvg,
-    },
-    { path: '/admin/ops', label: t('nav.ops'), icon: isOpsShell ? OpsChartIcon : ChartIcon, featureFlag: flagOpsMonitoring },
-    { path: '/admin/usage', label: isOpsShell ? t('admin.ops.sidebar.usage') : t('nav.adminUsage'), icon: isOpsShell ? UsageChartIcon : ChartIcon },
-    { path: '/admin/users', label: t('nav.users'), icon: UsersIcon, hideInSimpleMode: true },
-    { path: '/admin/groups', label: t('nav.groups'), icon: FolderIcon, hideInSimpleMode: true },
-    {
-      path: '/admin/accounts',
-      label: t('nav.accounts'),
-      icon: null,
-      iconSvg: accountPoolIconSvg,
-    },
-    { path: '/admin/proxies', label: t('nav.proxies'), icon: ServerIcon },
-    {
-      path: '/admin/channels',
-      label: t('nav.channelManagement'),
-      icon: ChannelIcon,
-      hideInSimpleMode: true,
-      expandOnly: true,
-      children: [
-        { path: '/admin/channels/pricing', label: t('nav.channelPricing'), icon: PriceTagIcon },
-        { path: '/admin/channels/monitor', label: t('nav.channelMonitor'), icon: SignalIcon, featureFlag: flagChannelMonitor },
-      ],
-    },
-    {
-      path: '/admin/model-catalog',
-      label: t('nav.modelCatalog'),
-      icon: null,
-      iconSvg: modelMarketplaceIconSvg,
-      hideInSimpleMode: true,
-    },
-    { path: '/admin/skills', label: t('admin.skills.title'), icon: SkillMarketIcon, hideInSimpleMode: true },
-    { path: '/admin/subscriptions', label: t('nav.subscriptions'), icon: CreditCardIcon, hideInSimpleMode: true },
-    {
-      path: '/admin/orders',
-      label: t('nav.orderManagement'),
-      icon: OrderIcon,
-      hideInSimpleMode: true,
-      expandOnly: true,
-      featureFlag: flagAdminPayment,
-      children: [
-        { path: '/admin/orders/dashboard', label: t('nav.paymentDashboard'), icon: ChartIcon },
-        { path: '/admin/orders', label: t('nav.orderManagement'), icon: OrderIcon },
-        { path: '/admin/orders/plans', label: t('nav.paymentPlans'), icon: CreditCardIcon },
-      ],
-    },
-    { path: '/admin/redeem', label: t('nav.redeemCodes'), icon: TicketIcon, hideInSimpleMode: true },
-    { path: '/admin/promo-codes', label: t('nav.promoCodes'), icon: GiftIcon, hideInSimpleMode: true },
-    {
-      path: '/admin/affiliates',
-      label: t('nav.affiliateManagement'),
-      icon: UsersIcon,
-      hideInSimpleMode: true,
-      expandOnly: true,
-      featureFlag: flagAffiliate,
-      children: [
-        { path: '/admin/affiliates/invites', label: t('nav.affiliateInviteRecords'), icon: UsersIcon },
-        { path: '/admin/affiliates/rebates', label: t('nav.affiliateRebateRecords'), icon: OrderIcon },
-        { path: '/admin/affiliates/transfers', label: t('nav.affiliateTransferRecords'), icon: CreditCardIcon },
-      ],
-    },
-    { path: '/admin/announcements', label: t('nav.announcementManagement'), icon: NotificationIcon },
-    { path: '/admin/risk-control', label: t('nav.riskControl'), icon: ShieldIcon, hideInSimpleMode: true, featureFlag: flagRiskControl },
-    {
-      path: '/admin/audit-logs',
-      label: t('nav.auditLogs'),
-      icon: null,
-      iconSvg: auditLogIconSvg,
-      hideInSimpleMode: true,
-    },
-    {
-      path: '/admin/desktop-diagnostics',
-      label: t('nav.desktopDiagnostics'),
-      icon: DiagnosticsIcon,
-      hideInSimpleMode: true,
-    },
-    { path: '/admin/documentation', label: t('nav.documentationManagement'), icon: BookIcon, hideInSimpleMode: true },
-  ]
-
-  const visible = applyFeatureFlags(baseItems)
-
-  // 简单模式下，在系统设置前插入 API密钥
-  if (authStore.isSimpleMode) {
-    const filtered = visible.filter(item => !item.hideInSimpleMode)
-    filtered.push({ path: '/keys', label: t('nav.apiKeys'), icon: null, iconSvg: keyOutlineIconSvg })
-    for (const cm of customMenuItemsForAdmin.value) {
-      filtered.push({ path: `/custom/${cm.id}`, label: cm.label, icon: null, iconSvg: cm.icon_svg })
-    }
-    filtered.push({ path: '/admin/settings', label: t('nav.systemSettings'), icon: CogIcon })
-    return filtered
-  }
-
-  for (const cm of customMenuItemsForAdmin.value) {
-    visible.push({ path: `/custom/${cm.id}`, label: cm.label, icon: null, iconSvg: cm.icon_svg })
-  }
-  visible.push({ path: '/admin/settings', label: t('nav.systemSettings'), icon: CogIcon })
-  return visible
-})
-
-type AdminNavSectionId = 'overview' | 'business' | 'operations' | 'system'
-
-interface AdminNavSection extends Omit<NavSection, 'id'> {
-  id: AdminNavSectionId
+function matchesSidebarSearch(label: string): boolean {
+  const query = normalizedSidebarSearch.value
+  return !query || label.toLocaleLowerCase().includes(query)
 }
 
-const ADMIN_NAV_SECTION_STORAGE_KEY = 'app-sidebar-admin-expanded-sections'
+function filterSidebarItems(items: NavItem[]): NavItem[] {
+  if (!normalizedSidebarSearch.value) return items
 
-const ADMIN_NAV_SECTION_BY_PATH: Record<string, AdminNavSectionId> = {
-  '/admin/dashboard': 'overview',
-  '/admin/ops': 'overview',
-  '/admin/usage': 'overview',
-  '/admin/users': 'business',
-  '/admin/groups': 'business',
-  '/admin/accounts': 'business',
-  '/admin/proxies': 'business',
-  '/admin/channels': 'business',
-  '/admin/model-catalog': 'business',
-  '/admin/skills': 'business',
-  '/keys': 'business',
-  '/admin/subscriptions': 'operations',
-  '/admin/orders': 'operations',
-  '/admin/redeem': 'operations',
-  '/admin/promo-codes': 'operations',
-  '/admin/affiliates': 'operations',
-  '/admin/announcements': 'operations',
-  '/admin/risk-control': 'system',
-  '/admin/audit-logs': 'system',
-  '/admin/desktop-diagnostics': 'system',
-  '/admin/documentation': 'system',
-  '/admin/settings': 'system',
+  return items.flatMap((item) => {
+    if (matchesSidebarSearch(item.label)) return [item]
+
+    const children = item.children ? filterSidebarItems(item.children) : []
+    return children.length ? [{ ...item, children }] : []
+  })
 }
 
-const ADMIN_NAV_SECTION_CONFIG: Array<{ id: AdminNavSectionId; labelKey: string }> = [
-  { id: 'overview', labelKey: 'nav.adminSections.overview' },
-  { id: 'business', labelKey: 'nav.adminSections.business' },
-  { id: 'operations', labelKey: 'nav.adminSections.operations' },
-  { id: 'system', labelKey: 'nav.adminSections.system' },
-]
+const displayedUserNavSections = computed(() => {
+  if (!normalizedSidebarSearch.value) return userNavSections.value
 
-const ADMIN_NAV_SECTION_IDS = new Set<AdminNavSectionId>(
-  ADMIN_NAV_SECTION_CONFIG.map(({ id }) => id),
+  return userNavSections.value.flatMap((section) => {
+    if (section.label && matchesSidebarSearch(section.label)) return [section]
+    const items = filterSidebarItems(section.items)
+    return items.length ? [{ ...section, items }] : []
+  })
+})
+
+const displayedSidebarSupportLinks = computed(() => (
+  sidebarSupportLinks.value.filter((item) => matchesSidebarSearch(item.label))
+))
+
+const adminNavigationDefinition = shallowRef<AdminNavigationDefinition | null>(null)
+const expandedAdminSections = ref<Set<AdminNavSectionId>>(new Set())
+
+function activateAdminNavigation(definition: AdminNavigationDefinition | null | undefined): void {
+  if (!definition || adminNavigationDefinition.value === definition) return
+  adminNavigationDefinition.value = definition
+  expandedAdminSections.value = definition.loadExpandedSections()
+}
+
+watch(
+  () => props.adminNavigation,
+  (definition) => activateAdminNavigation(definition),
+  { immediate: true, flush: 'sync' },
 )
 
-function loadExpandedAdminSections(): Set<AdminNavSectionId> {
-  if (typeof window === 'undefined') return new Set(['overview'])
-
-  try {
-    const raw = window.localStorage.getItem(ADMIN_NAV_SECTION_STORAGE_KEY)
-    if (raw === null) return new Set(['overview'])
-
-    const stored = JSON.parse(raw)
-    if (!Array.isArray(stored)) return new Set(['overview'])
-
-    return new Set(
-      stored.filter((id): id is AdminNavSectionId => (
-        typeof id === 'string' && ADMIN_NAV_SECTION_IDS.has(id as AdminNavSectionId)
-      )),
-    )
-  } catch {
-    return new Set(['overview'])
-  }
+async function ensureAdminNavigationDefinition(): Promise<AdminNavigationDefinition> {
+  if (adminNavigationDefinition.value) return adminNavigationDefinition.value
+  const definition = await loadAdminNavigation()
+  activateAdminNavigation(definition)
+  return definition
 }
 
-const expandedAdminSections = ref<Set<AdminNavSectionId>>(loadExpandedAdminSections())
+const adminNavItems = computed((): NavItem[] => (
+  adminNavigationDefinition.value?.buildItems({
+    t: (key) => t(key),
+    simpleMode: authStore.isSimpleMode,
+    isOpsShell: isOpsOptionB.value,
+    opsMonitoringEnabled: () => adminSettingsStore.value?.opsMonitoringEnabled,
+    adminPaymentEnabled: () => adminSettingsStore.value?.paymentEnabled,
+    customMenuItems: adminSettingsStore.value?.customMenuItems ?? [],
+    icons: adminNavigationIcons,
+  }) ?? []
+))
 
-const activeAdminSectionId = computed<AdminNavSectionId | null>(() => {
-  const matchingPath = Object.keys(ADMIN_NAV_SECTION_BY_PATH)
-    .sort((a, b) => b.length - a.length)
-    .find((path) => route.path === path || route.path.startsWith(`${path}/`))
-
-  return matchingPath ? ADMIN_NAV_SECTION_BY_PATH[matchingPath] : null
-})
-
-function persistExpandedAdminSections() {
-  if (typeof window === 'undefined') return
-
-  try {
-    const orderedIds = ADMIN_NAV_SECTION_CONFIG
-      .map(({ id }) => id)
-      .filter((id) => expandedAdminSections.value.has(id))
-    window.localStorage.setItem(ADMIN_NAV_SECTION_STORAGE_KEY, JSON.stringify(orderedIds))
-  } catch {
-    // Navigation remains usable when storage is unavailable.
-  }
-}
+const activeAdminSectionId = computed<AdminNavSectionId | null>(() => (
+  adminNavigationDefinition.value?.activeSectionId(route.path) ?? null
+))
 
 function isAdminSectionExpanded(sectionId: AdminNavSectionId): boolean {
   return activeAdminSectionId.value === sectionId || expandedAdminSections.value.has(sectionId)
@@ -1248,47 +1080,73 @@ function toggleAdminSection(sectionId: AdminNavSectionId) {
     next.add(sectionId)
   }
   expandedAdminSections.value = next
-  persistExpandedAdminSections()
+  adminNavigationDefinition.value?.persistExpandedSections(next)
 }
 
 function adminSectionPanelId(sectionId: AdminNavSectionId): string {
-  return `sidebar-admin-${sectionId}-items`
+  return adminNavigationDefinition.value?.sectionPanelId(sectionId)
+    ?? `sidebar-admin-${sectionId}-items`
 }
 
-const displayedAdminNavSections = computed((): AdminNavSection[] => {
-  const grouped = new Map<AdminNavSectionId, NavItem[]>(
-    ADMIN_NAV_SECTION_CONFIG.map(({ id }) => [id, []]),
-  )
+const adminNavSections = computed(() => (
+  adminNavigationDefinition.value?.buildSections(
+    adminNavItems.value,
+    (key) => t(key),
+    isOpsOptionB.value,
+  ) ?? []
+))
 
-  for (const item of adminNavItems.value) {
-    const sectionId = item.path.startsWith('/custom/')
-      ? 'system'
-      : (ADMIN_NAV_SECTION_BY_PATH[item.path] ?? 'system')
-    grouped.get(sectionId)?.push(item)
-  }
+const displayedAdminNavSections = computed(() => {
+  if (!normalizedSidebarSearch.value) return adminNavSections.value
 
-  return ADMIN_NAV_SECTION_CONFIG
-    .map(({ id, labelKey }) => ({
-      id,
-      label: isOpsOptionB.value ? t(`admin.ops.sidebar.sections.${id}`) : t(labelKey),
-      items: grouped.get(id) ?? [],
-    }))
-    .filter(section => section.items.length > 0)
+  return adminNavSections.value.flatMap((section) => {
+    if (section.label && matchesSidebarSearch(section.label)) return [section]
+    const items = filterSidebarItems(section.items)
+    return items.length ? [{ ...section, items }] : []
+  })
 })
 
-function switchWorkspace(path: '/admin/dashboard' | '/dashboard') {
-  if (route.path !== path) {
-    void router.push(path)
-  }
-  handleMenuItemClick(path)
-}
+const hasSidebarSearchResults = computed(() => {
+  if (!normalizedSidebarSearch.value) return true
+  if (isAdminWorkspace.value) return displayedAdminNavSections.value.length > 0
+
+  return displayedUserNavSections.value.length > 0
+    || displayedSidebarSupportLinks.value.length > 0
+    || matchesSidebarSearch(t('nav.announcements'))
+    || matchesSidebarSearch(t('accountDock.settings'))
+})
 
 function closeMobile() {
   appStore.setMobileOpen(false)
 }
 
-function toggleSidebar() {
-  appStore.toggleSidebar()
+function closeNarrowSidebar() {
+  appStore.setWorkspaceNarrowSidebarOpen(false)
+}
+
+async function toggleSidebarSearch() {
+  if (sidebarSearchOpen.value) {
+    await closeSidebarSearch()
+    return
+  }
+
+  sidebarSearchOpen.value = true
+  await nextTick()
+  sidebarSearchInputRef.value?.focus()
+}
+
+async function closeSidebarSearch() {
+  sidebarSearchQuery.value = ''
+  sidebarSearchOpen.value = false
+  await nextTick()
+  sidebarHeaderRef.value?.focusSearch()
+}
+
+async function handleModeChange(mode: 'chat' | 'work') {
+  if (mode !== 'chat') return
+  if (mobileViewport.value) closeMobile()
+  if (personalNarrowViewport.value) closeNarrowSidebar()
+  await router.push('/chat')
 }
 
 function handleMenuItemClick(itemPath: string) {
@@ -1296,6 +1154,9 @@ function handleMenuItemClick(itemPath: string) {
     setTimeout(() => {
       appStore.setMobileOpen(false)
     }, 150)
+  }
+  if (personalNarrowViewport.value && narrowSidebarOpen.value) {
+    appStore.setWorkspaceNarrowSidebarOpen(false)
   }
 
   // Map paths to tour selectors
@@ -1309,6 +1170,11 @@ function handleMenuItemClick(itemPath: string) {
   if (selector && onboardingStore.isCurrentStep(selector)) {
     onboardingStore.nextStep(500)
   }
+}
+
+async function handleOpenSettings() {
+  await openPersonalSettings(router, route, 'user', 'general')
+  handleMenuItemClick('settings')
 }
 
 function isActive(path: string): boolean {
@@ -1353,7 +1219,7 @@ function toggleGroup(item: NavItem) {
  */
 function handleGroupClick(item: NavItem) {
   if (sidebarCollapsed.value) {
-    appStore.setSidebarCollapsed(false)
+    expandSidebar()
     expandedGroups.value.add(item.path)
     return
   }
@@ -1372,27 +1238,21 @@ function handleGroupClick(item: NavItem) {
 
 // Fetch admin settings (for feature-gated nav items like Ops).
 watch(
-  isAdmin,
-  (v) => {
-    if (v) {
-      adminSettingsStore.fetch()
+  isAdminWorkspace,
+  (active) => {
+    if (active) {
+      void ensureAdminNavigationDefinition()
+      void ensureAdminSettings().then((store) => store.fetch())
     }
   },
-  { immediate: true }
+  { immediate: true },
 )
 
 onMounted(() => {
-  if (typeof window.matchMedia === 'function') {
-    mobileViewportQuery = window.matchMedia('(max-width: 1023px)')
-    syncMobileViewport()
-    mobileViewportQuery.addEventListener?.('change', syncMobileViewport)
-  } else {
-    syncMobileViewport()
-  }
-
   void refreshBatchImageAccess()
-  if (isAdmin.value) {
-    adminSettingsStore.fetch()
+  if (isAdminWorkspace.value) {
+    void ensureAdminNavigationDefinition()
+    void ensureAdminSettings().then((store) => store.fetch())
   }
   // Restore sidebar scroll position after route change re-mounts the component
   if (appStore.sidebarScrollTop > 0 && sidebarNavRef.value) {
@@ -1405,7 +1265,6 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
-  mobileViewportQuery?.removeEventListener?.('change', syncMobileViewport)
   if (sidebarNavRef.value) {
     appStore.sidebarScrollTop = sidebarNavRef.value.scrollTop
   }
@@ -1413,195 +1272,136 @@ onBeforeUnmount(() => {
 </script>
 
 <style scoped>
-.sidebar {
-  @apply border-gray-100 bg-white;
+.app-sidebar {
   isolation: isolate;
   overflow: hidden;
-  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
-  border-color: var(
-    --app-shell-sidebar-border,
-    rgb(255 255 255 / 0.65) rgb(255 255 255 / 0.36) rgb(255 255 255 / 0.36)
-  );
-  background: var(
-    --app-shell-sidebar-bg,
-    linear-gradient(rgb(248 251 255 / 0.32), rgb(235 242 252 / 0.1))
-  ) !important;
-  box-shadow: var(
-    --app-shell-sidebar-shadow,
-    inset 0 1px 0 rgb(255 255 255 / 0.65),
-    inset 0 -1px 0 rgb(15 23 42 / 0.04),
-    0 1px 2px rgb(15 23 42 / 0.04),
-    0 6px 16px -4px rgb(15 23 42 / 0.08),
-    0 18px 40px -12px rgb(15 23 42 / 0.18)
-  );
+  border-color: var(--app-shell-sidebar-border, var(--workspace-border));
+  background: var(--app-shell-sidebar-bg, var(--workspace-sidebar-surface)) !important;
+  box-shadow: var(--app-shell-sidebar-shadow, var(--workspace-shadow-surface));
   backdrop-filter: var(--app-shell-sidebar-backdrop, saturate(1.7) blur(36px));
   -webkit-backdrop-filter: var(--app-shell-sidebar-backdrop, saturate(1.7) blur(36px));
-  transition-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
 }
 
-.sidebar::before,
-.sidebar::after {
+.app-sidebar::before,
+.app-sidebar::after {
   content: '';
   position: absolute;
   pointer-events: none;
 }
 
-.sidebar::before {
+.app-sidebar::before {
   inset: 0;
   z-index: -1;
-  background: var(
-    --app-shell-sidebar-decoration,
-    radial-gradient(80% 50% at 50% 0%, rgb(96 165 250 / 0.1) 0%, transparent 70%),
-    radial-gradient(80% 50% at 50% 100%, rgb(167 139 250 / 0.1) 0%, transparent 70%)
-  );
+  background: var(--app-shell-sidebar-decoration, none);
 }
 
-.sidebar::after {
+.app-sidebar::after {
   top: 0;
   right: 12%;
   left: 12%;
   height: 1px;
-  background: var(
-    --app-shell-sidebar-highlight,
-    linear-gradient(to right, transparent, rgb(255 255 255 / 0.85), transparent)
-  );
+  background: var(--app-shell-sidebar-highlight, var(--workspace-divider));
 }
 
-:global(.dark .sidebar) {
-  border-color: rgb(255 255 255 / 0.08) rgb(255 255 255 / 0.06) rgb(255 255 255 / 0.06);
-  background: rgb(11 15 26) !important;
-  box-shadow:
-    inset 0 1px 0 rgb(255 255 255 / 0.04),
-    0 1px 2px rgb(0 0 0 / 0.4),
-    0 8px 24px -8px rgb(0 0 0 / 0.5);
-  backdrop-filter: none;
-  -webkit-backdrop-filter: none;
+:global(.dark .app-sidebar) {
+  border-color: var(--app-shell-sidebar-border, var(--workspace-border));
+  background: var(--app-shell-sidebar-bg, var(--workspace-sidebar-surface)) !important;
+  box-shadow: var(--app-shell-sidebar-shadow, var(--workspace-shadow-surface));
+  backdrop-filter: var(--app-shell-sidebar-backdrop, none);
+  -webkit-backdrop-filter: var(--app-shell-sidebar-backdrop, none);
 }
 
-:global(.dark .sidebar::after) {
-  background: linear-gradient(to right, transparent, rgb(255 255 255 / 0.85), transparent);
+:global(.dark .app-sidebar::after) {
+  background: var(--app-shell-sidebar-highlight, var(--workspace-divider));
 }
 
-.sidebar-nav {
+.app-sidebar-backdrop {
+  display: none;
+  background: var(--workspace-overlay-backdrop);
+}
+
+.workspace-sidebar-navigation {
   position: relative;
   z-index: 1;
   min-height: 0;
-  @apply px-2 py-3;
+  flex: 1 1 auto;
+  overflow-y: auto;
+  padding: 0;
 }
 
-.sidebar-workspace-switch {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 0.1875rem;
-  margin: 0 0.25rem 0.75rem;
-  padding: 0.1875rem;
-  border-radius: 0.625rem;
-  background: rgb(15 23 42 / 0.06);
-}
-
-.sidebar-workspace-option,
-.sidebar-workspace-compact-button {
+.sidebar-search {
   display: flex;
-  min-width: 0;
-  min-height: 2rem;
+  min-height: 40px;
+  flex: 0 0 auto;
   align-items: center;
-  justify-content: center;
-  border-radius: 0.4375rem;
-  color: rgb(71 85 105);
-  font-size: 0.75rem;
-  font-weight: 500;
-  line-height: 1rem;
+  gap: var(--workspace-space-2);
+  margin: 0 var(--workspace-space-1) var(--workspace-space-2);
+  border: 1px solid var(--workspace-border);
+  border-radius: var(--workspace-radius-input);
+  padding: 0 var(--workspace-space-2-5);
+  color: var(--workspace-text-muted);
+  background: var(--workspace-surface);
 }
 
-.sidebar-workspace-option:hover,
-.sidebar-workspace-compact-button:hover {
-  color: var(--app-shell-sidebar-hover-color, rgb(0 132 255));
-  background: var(--app-shell-sidebar-hover-bg, rgb(0 132 255 / 0.08));
+.sidebar-search:focus-within {
+  border-color: var(--workspace-border-strong);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--workspace-text) 6%, transparent);
 }
 
-.sidebar-workspace-option:focus-visible,
-.sidebar-workspace-compact-button:focus-visible,
+.sidebar-search input {
+  min-width: 0;
+  flex: 1;
+  border: 0;
+  padding: 0;
+  color: var(--workspace-text);
+  background: transparent;
+  font: inherit;
+  font-size: 13px;
+  outline: none;
+}
+
+.sidebar-search-empty {
+  padding: var(--workspace-space-4) var(--workspace-space-3);
+  color: var(--workspace-text-muted);
+  font-size: 13px;
+  text-align: center;
+}
+
+.sidebar-resource-action {
+  display: flex;
+  align-items: center;
+  text-align: left;
+}
+
+.sidebar-child-group {
+  border-color: var(--workspace-border);
+}
+
 .sidebar-section-toggle:focus-visible {
-  outline: 2px solid var(--app-shell-sidebar-focus, rgb(0 132 255 / 0.5));
+  outline: 2px solid var(--app-shell-sidebar-focus, var(--lx-clay-accent));
   outline-offset: 2px;
 }
 
-.sidebar-workspace-option-active,
-.sidebar-workspace-option-active:hover {
-  color: var(--app-shell-sidebar-active-color, rgb(13 13 13));
-  background: rgb(255 255 255 / 0.92);
-  box-shadow: 0 1px 3px rgb(15 23 42 / 0.12);
-}
-
-.sidebar-workspace-switch-collapsed {
-  display: block;
-  margin-right: 0;
-  margin-left: 0;
-  padding: 0;
-  background: transparent;
-}
-
-.sidebar-workspace-compact-button {
-  width: 100%;
-  min-height: 2.75rem;
-  color: rgb(28 31 35 / 0.68);
-}
-
-:global(.dark .sidebar-workspace-switch) {
-  background: rgb(255 255 255 / 0.08);
-}
-
-:global(.dark .sidebar-workspace-option),
-:global(.dark .sidebar-workspace-compact-button) {
-  color: rgb(235 235 235 / 0.72);
-}
-
-:global(.dark .sidebar-workspace-option-active),
-:global(.dark .sidebar-workspace-option-active:hover) {
-  color: rgb(245 245 245);
-  background: rgb(255 255 255 / 0.12);
-  box-shadow: 0 1px 3px rgb(0 0 0 / 0.32);
-}
-
-.sidebar-header {
-  display: none;
-}
-
-.sidebar-collapse-toggle {
-  position: relative;
-  display: flex;
+.workspace-sidebar-brand--work {
   width: 2.25rem;
+  max-width: 2.25rem;
   height: 2.25rem;
   flex: 0 0 2.25rem;
-  align-items: center;
-  justify-content: center;
-  border-radius: 0.5rem;
-  color: rgb(143 143 143);
-  cursor: w-resize;
-  transition: none;
+  border-radius: var(--workspace-radius-compact);
 }
 
-.sidebar-collapse-toggle::after {
-  content: '';
-  position: absolute;
-  inset: -0.375rem;
+.workspace-sidebar-brand--work :deep(.app-brand-logo-frame) {
+  width: 2.25rem;
+  height: 2.25rem;
 }
 
-.sidebar-collapse-toggle:hover {
-  background: rgb(0 0 0 / 0.07);
+.workspace-sidebar-brand--work :deep(.app-brand-logo-image) {
+  width: 1.25rem;
+  height: 1.25rem;
 }
 
-.sidebar-collapse-toggle:focus-visible {
-  outline: 2px solid var(--app-shell-sidebar-focus, rgb(0 132 255 / 0.5));
-  outline-offset: 2px;
-}
-
-:global(.dark .sidebar-collapse-toggle) {
-  color: rgb(209 213 219);
-}
-
-:global(.dark .sidebar-collapse-toggle:hover) {
-  background: rgb(255 255 255 / 0.08);
+.workspace-sidebar-brand--work :deep(.app-brand-logo-image-default) {
+  transform: scale(1.4);
 }
 
 .sidebar-section {
@@ -1617,22 +1417,34 @@ onBeforeUnmount(() => {
 }
 
 .sidebar-announcement-entry :deep(.announcement-bell-row) {
+  width: 100%;
   min-height: 2.25rem;
   justify-content: flex-start;
   gap: 0.625rem;
   padding: 0.25rem 0.75rem;
   border-radius: 0.625rem;
-  color: rgb(28 31 35);
+  color: var(--workspace-text);
   font-size: 0.875rem;
   font-weight: 400;
   line-height: 1.5rem;
+  transition:
+    width var(--workspace-sidebar-transition-duration) var(--workspace-sidebar-transition-easing),
+    color 0.2s ease,
+    background-color 0.2s ease,
+    box-shadow 0.2s ease;
 }
 
 .sidebar-announcement-entry :deep(.announcement-bell-row > span:first-of-type) {
+  max-width: 12rem;
   margin-left: 0;
+  overflow: hidden;
+  opacity: 1;
   font-size: inherit;
   font-weight: inherit;
   line-height: inherit;
+  transition:
+    max-width 0.2s ease,
+    opacity 0.12s ease;
 }
 
 .sidebar-announcement-entry :deep(.announcement-bell-row > span:last-of-type:not(:first-of-type)) {
@@ -1640,26 +1452,30 @@ onBeforeUnmount(() => {
 }
 
 .sidebar-announcement-entry :deep(.announcement-bell-row:hover) {
-  color: var(--app-shell-sidebar-hover-color, rgb(0 132 255));
-  background: var(--app-shell-sidebar-hover-bg, rgb(0 132 255 / 0.08));
-  box-shadow: var(--app-shell-sidebar-hover-shadow, 0 2px 8px rgb(0 132 255 / 0.045));
+  color: var(--app-shell-sidebar-hover-color, var(--workspace-text));
+  background: var(--app-shell-sidebar-hover-bg, var(--workspace-hover));
+  box-shadow: var(--app-shell-sidebar-hover-shadow, none);
 }
 
 .sidebar-announcement-entry :deep(.announcement-bell-row:focus-visible) {
-  outline: 2px solid var(--app-shell-sidebar-focus, rgb(0 132 255 / 0.5));
+  outline: 2px solid var(--app-shell-sidebar-focus, var(--lx-clay-accent));
   outline-offset: 2px;
 }
 
 .sidebar-announcement-entry--collapsed :deep(.announcement-bell-row) {
+  width: var(--workspace-sidebar-touch-target);
   min-height: 2.75rem;
-  justify-content: center;
+  justify-content: flex-start;
   gap: 0;
   padding-right: 0;
-  padding-left: 0;
+  padding-left: var(--workspace-space-3);
 }
 
 .sidebar-announcement-entry--collapsed :deep(.announcement-bell-row > span:first-of-type) {
-  display: none;
+  max-width: 0;
+  flex: 0 0 0;
+  opacity: 0;
+  pointer-events: none;
 }
 
 .sidebar-announcement-entry--collapsed :deep(.announcement-bell-row > span:last-of-type:not(:first-of-type)) {
@@ -1682,16 +1498,17 @@ onBeforeUnmount(() => {
 }
 
 :global(.dark .sidebar-announcement-entry .announcement-bell-row) {
-  color: rgb(235 235 235 / 0.82);
+  color: var(--workspace-text);
 }
 
 :global(.dark .sidebar-announcement-entry .announcement-bell-row:hover) {
-  color: rgb(71 160 255);
-  background: rgb(71 160 255 / 0.12);
+  color: var(--app-shell-sidebar-hover-color, var(--workspace-text));
+  background: var(--app-shell-sidebar-hover-bg, var(--workspace-hover));
 }
 
 .sidebar-link {
   position: relative;
+  width: 100%;
   min-height: 2.25rem;
   gap: 0.625rem;
   padding-top: 0.25rem;
@@ -1699,40 +1516,42 @@ onBeforeUnmount(() => {
   padding-bottom: 0.25rem;
   padding-left: 0.75rem;
   border-radius: 0.625rem;
-  color: rgb(28 31 35);
+  color: var(--workspace-text);
   font-size: 0.875rem;
   font-weight: 400;
   line-height: 1.5rem;
-  transition-property: color, background-color, box-shadow;
-  transition-duration: 0.2s;
-  transition-timing-function: ease;
+  transition:
+    width var(--workspace-sidebar-transition-duration) var(--workspace-sidebar-transition-easing),
+    color 0.2s ease,
+    background-color 0.2s ease,
+    box-shadow 0.2s ease;
 }
 
 .sidebar-link > :deep(svg),
 .sidebar-link > .sidebar-svg-icon {
-  color: rgb(28 31 35 / 0.62);
+  color: var(--workspace-text-secondary);
   transition: color 0.2s ease;
 }
 
 .sidebar-link:hover {
-  color: var(--app-shell-sidebar-hover-color, rgb(0 132 255));
-  background: var(--app-shell-sidebar-hover-bg, rgb(0 132 255 / 0.08));
-  box-shadow: var(--app-shell-sidebar-hover-shadow, 0 2px 8px rgb(0 132 255 / 0.045));
+  color: var(--app-shell-sidebar-hover-color, var(--workspace-text));
+  background: var(--app-shell-sidebar-hover-bg, var(--workspace-hover));
+  box-shadow: var(--app-shell-sidebar-hover-shadow, none);
 }
 
 .sidebar-link:hover > :deep(svg),
 .sidebar-link:hover > .sidebar-svg-icon {
-  color: var(--app-shell-sidebar-hover-color, rgb(0 132 255));
+  color: var(--app-shell-sidebar-hover-color, var(--workspace-text));
 }
 
 .sidebar-link:focus-visible {
-  outline: 2px solid var(--app-shell-sidebar-focus, rgb(0 132 255 / 0.5));
+  outline: 2px solid var(--app-shell-sidebar-focus, var(--lx-clay-accent));
   outline-offset: 2px;
 }
 
 .sidebar-link-active {
-  color: var(--app-shell-sidebar-active-color, rgb(13 13 13));
-  background: var(--app-shell-sidebar-active-bg, rgb(0 0 0 / 0.05));
+  color: var(--app-shell-sidebar-active-color, var(--workspace-text));
+  background: var(--app-shell-sidebar-active-bg, var(--workspace-selected));
   box-shadow: none;
 }
 
@@ -1745,43 +1564,72 @@ onBeforeUnmount(() => {
   width: 2px;
   height: 1rem;
   border-radius: 2px;
-  background: rgb(0 132 255);
+  background: var(--app-shell-sidebar-active-marker-color, var(--workspace-text-muted));
   transform: translateY(-50%);
 }
 
 .sidebar-link-active > :deep(svg),
 .sidebar-link-active > .sidebar-svg-icon {
-  color: var(--app-shell-sidebar-active-icon, rgb(13 13 13));
+  color: var(--app-shell-sidebar-active-icon, var(--workspace-text));
 }
 
 .sidebar-link-active:hover {
-  color: var(--app-shell-sidebar-active-color, rgb(13 13 13));
-  background: var(--app-shell-sidebar-active-bg, rgb(0 0 0 / 0.05));
+  color: var(--app-shell-sidebar-active-color, var(--workspace-text));
+  background: var(--app-shell-sidebar-active-bg, var(--workspace-selected));
+}
+
+:global(html:not(.dark) .sidebar--personal-work .sidebar-section + .sidebar-section) {
+  margin-top: 0.25rem;
+}
+
+.sidebar--personal-work .sidebar-link-active {
+  font-size: var(--workspace-type-navigation-size);
+  font-weight: var(--workspace-type-navigation-weight);
+}
+
+.sidebar--personal-work .sidebar-link,
+.sidebar--personal-work .sidebar-announcement-entry :deep(.announcement-bell-row) {
+  font-size: var(--workspace-type-navigation-size);
+  font-weight: var(--workspace-type-navigation-weight);
+}
+
+.sidebar--personal-work .sidebar-search input {
+  font-size: var(--workspace-type-body-size);
+  font-weight: var(--workspace-type-body-weight);
+}
+
+.sidebar--personal-work .sidebar-search-empty,
+.sidebar--personal-work .sidebar-section-title,
+.sidebar--personal-work .sidebar-announcement-entry--collapsed
+  :deep(.announcement-bell-row > span:last-of-type:not(:first-of-type)) {
+  font-size: var(--workspace-type-secondary-size);
+  font-weight: var(--workspace-type-secondary-weight);
 }
 
 :global(.dark .sidebar-link) {
-  color: rgb(235 235 235 / 0.82);
+  color: var(--workspace-text);
 }
 
 :global(.dark .sidebar-link > svg),
 :global(.dark .sidebar-link > .sidebar-svg-icon) {
-  color: rgb(235 235 235 / 0.62);
+  color: var(--workspace-text-secondary);
 }
 
 :global(.dark .sidebar-link:hover) {
-  color: rgb(71 160 255);
-  background: rgb(71 160 255 / 0.12);
+  color: var(--app-shell-sidebar-hover-color, var(--workspace-text));
+  background: var(--app-shell-sidebar-hover-bg, var(--workspace-hover));
+  box-shadow: var(--app-shell-sidebar-hover-shadow, none);
 }
 
 :global(.dark .sidebar-link-active),
 :global(.dark .sidebar-link-active:hover) {
-  color: var(--app-shell-sidebar-active-color, rgb(245 245 245));
-  background: var(--app-shell-sidebar-active-bg, rgb(255 255 255 / 0.1));
+  color: var(--app-shell-sidebar-active-color, var(--workspace-text));
+  background: var(--app-shell-sidebar-active-bg, var(--workspace-selected));
 }
 
 :global(.dark .sidebar-link-active > svg),
 :global(.dark .sidebar-link-active > .sidebar-svg-icon) {
-  color: var(--app-shell-sidebar-active-icon, rgb(245 245 245));
+  color: var(--app-shell-sidebar-active-icon, var(--workspace-text));
 }
 
 :global(.dark .sidebar-link-active::before) {
@@ -1789,10 +1637,11 @@ onBeforeUnmount(() => {
 }
 
 .sidebar-link-collapsed {
+  width: var(--workspace-sidebar-touch-target);
   min-height: 2.75rem;
-  justify-content: center;
+  justify-content: flex-start;
   gap: 0;
-  padding-left: 0;
+  padding-left: var(--workspace-space-3);
   padding-right: 0;
 }
 
@@ -1803,7 +1652,7 @@ onBeforeUnmount(() => {
   min-height: 1.5625rem;
   margin: 0;
   padding: 0.1875rem 1rem 0.25rem;
-  color: var(--app-shell-sidebar-section-color, rgb(100 116 139));
+  color: var(--app-shell-sidebar-section-color, var(--workspace-text-muted));
   font-size: 0.75rem;
   font-weight: 400;
   line-height: 1.125rem;
@@ -1822,7 +1671,7 @@ onBeforeUnmount(() => {
 }
 
 .sidebar-section-toggle:hover {
-  color: rgb(51 65 85);
+  color: var(--workspace-text-secondary);
 }
 
 .sidebar-section-toggle[aria-disabled='true'] {
@@ -1834,11 +1683,11 @@ onBeforeUnmount(() => {
 }
 
 :global(.dark .sidebar-section-toggle:hover) {
-  color: rgb(209 213 219);
+  color: var(--workspace-text-secondary);
 }
 
 :global(.dark .sidebar-section-title) {
-  color: rgb(156 163 175);
+  color: var(--workspace-text-muted);
 }
 
 .sidebar-section-title-text {
@@ -1870,8 +1719,7 @@ onBeforeUnmount(() => {
   white-space: nowrap;
   transition:
     max-width 0.2s ease,
-    opacity 0.12s ease,
-    transform 0.12s ease;
+    opacity 0.12s ease;
   max-width: 12rem;
 }
 
@@ -1886,7 +1734,6 @@ onBeforeUnmount(() => {
 .sidebar-label-collapsed {
   max-width: 0;
   opacity: 0;
-  transform: translateX(-4px);
   pointer-events: none;
 }
 
@@ -1907,7 +1754,7 @@ onBeforeUnmount(() => {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .sidebar,
+  .app-sidebar,
   .sidebar-label,
   .sidebar-section-title-text,
   .sidebar-section-chevron,
@@ -1917,78 +1764,11 @@ onBeforeUnmount(() => {
   }
 }
 
-@media (min-width: 1024px) {
-  .sidebar {
-    top: 0;
-    right: auto;
-    bottom: 0;
-    left: 0;
-    height: auto;
+@media (min-width: 768px) {
+  .app-sidebar {
     border-width: 0 1px 0 0;
     border-radius: 0;
     box-shadow: none;
-  }
-
-  .sidebar-header {
-    display: flex;
-    height: 3.25rem;
-    min-width: 0;
-    flex: 0 0 3.25rem;
-    align-items: center;
-    gap: 0;
-    padding: 0.5rem;
-    border-bottom-width: 0;
-  }
-
-  .sidebar-header :deep(.app-brand) {
-    width: 2.25rem;
-    height: 2.25rem;
-    flex: 0 0 2.25rem;
-    border-radius: 0.5rem;
-  }
-
-  .sidebar-header :deep(.app-brand-logo-frame) {
-    width: 2.25rem;
-    height: 2.25rem;
-  }
-
-  .sidebar-header :deep(.app-brand-logo-image) {
-    width: 1.25rem;
-    height: 1.25rem;
-  }
-
-  .sidebar-header :deep(.app-brand-logo-image-default) {
-    /* The canonical PNG has transparent padding; keep its visible mark near 20px. */
-    transform: scale(1.4);
-  }
-
-  .sidebar-header .sidebar-collapse-toggle {
-    margin-left: auto;
-  }
-
-  .sidebar-header-collapsed {
-    gap: 0;
-    padding-right: 0;
-    padding-left: 0;
-  }
-
-  .sidebar-header-collapsed .sidebar-collapse-toggle {
-    width: 1.75rem;
-    height: 1.75rem;
-    flex-basis: 1.75rem;
-    cursor: e-resize;
-  }
-
-  .sidebar-header-collapsed .sidebar-collapse-toggle::after {
-    inset: -0.5rem;
-  }
-
-  :global([dir='rtl']) .sidebar-collapse-toggle {
-    cursor: e-resize;
-  }
-
-  :global([dir='rtl']) .sidebar-header-collapsed .sidebar-collapse-toggle {
-    cursor: w-resize;
   }
 
   .sidebar-mobile-hidden {
@@ -1996,23 +1776,20 @@ onBeforeUnmount(() => {
   }
 }
 
-@media (max-width: 1023px) {
-  .sidebar {
-    top: var(--app-shell-top-offset);
-    bottom: 0;
-    left: 0;
-    height: auto;
+@media (max-width: 767px) and (hover: none) and (pointer: coarse) {
+  .app-sidebar-backdrop {
+    display: block;
+  }
+
+  .app-sidebar {
     border-width: 0 1px 0 0;
     border-radius: 0;
-    background: var(
-      --app-shell-sidebar-bg,
-      linear-gradient(rgb(248 251 255 / 0.32), rgb(235 242 252 / 0.1))
-    ) !important;
+    background: var(--app-shell-sidebar-bg, var(--workspace-sidebar-surface)) !important;
     box-shadow: none;
   }
 
-  :global(.dark .sidebar) {
-    background: rgb(11 15 26) !important;
+  :global(.dark .app-sidebar) {
+    background: var(--app-shell-sidebar-bg, var(--workspace-sidebar-surface)) !important;
   }
 
   .sidebar-mobile-hidden {
@@ -2021,8 +1798,6 @@ onBeforeUnmount(() => {
 
   .sidebar-link,
   .sidebar-announcement-entry :deep(.announcement-bell-row),
-  .sidebar-workspace-option,
-  .sidebar-workspace-compact-button,
   .sidebar-section-toggle {
     min-height: 2.75rem;
   }

@@ -95,6 +95,8 @@ var ProviderSet = wire.NewSet(
 	NewBillingReceiptRepository,
 	NewChatAttemptRepository,
 	NewChatHistoryRepository,
+	NewChatAttachmentRepository,
+	NewChatAttachmentBlobStore,
 	NewAdminChatHistoryRepository,
 	NewBatchImageRepository,
 	NewIdempotencyRepository,

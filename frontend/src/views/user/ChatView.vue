@@ -1,9 +1,12 @@
 <template>
-  <AppLayout variant="chat">
+  <AppLayout variant="chat" shell-mode="chat">
     <h1 class="sr-only">{{ t('chat.title') }}</h1>
+    <ChatFileDropOverlay :active="pageFileDragActive" />
 
     <div class="chat-workspace">
       <ChatHistoryPanel
+        v-show="!narrowSidebar"
+        shell
         class="chat-workspace__history chat-workspace__history--desktop"
         :conversations="historyConversations"
         :active-id="chatStore.activeConversationId"
@@ -23,7 +26,7 @@
 
       <Transition name="chat-drawer">
         <div
-          v-if="historyModalActive"
+          v-if="historyOpen && mobileHistoryLayout"
           ref="historyDrawerRef"
           class="chat-workspace__drawer"
           role="dialog"
@@ -40,6 +43,7 @@
             @click="closeHistory()"
           ></button>
           <ChatHistoryPanel
+            shell
             mobile
             :conversations="historyConversations"
             :active-id="chatStore.activeConversationId"
@@ -60,57 +64,55 @@
         </div>
       </Transition>
 
+      <WorkspaceSidebarOverlayLayer
+        v-if="narrowSidebar"
+        active
+        :open="narrowSidebarOpen"
+        :label="t('chat.history.title')"
+        return-focus-id="workspace-sidebar-overlay-trigger"
+        @close="closeHistory()"
+      >
+        <ChatHistoryPanel
+          shell
+          overlay
+          sidebar-id="workspace-chat-sidebar-overlay"
+          :conversations="historyConversations"
+          :active-id="chatStore.activeConversationId"
+          :search-query="historySearchQuery"
+          :searching="chatStore.searchingHistory"
+          :has-more="chatStore.conversationsHaveMore"
+          :loading-more="chatStore.loadingConversationPage"
+          @new="startNewConversation"
+          @close="closeHistory"
+          @select="selectConversation"
+          @rename="chatStore.renameConversation"
+          @delete="confirmDelete"
+          @clear="confirmClear"
+          @update:search-query="updateHistorySearch"
+          @search="runHistorySearch"
+          @load-more="chatStore.loadConversationPage()"
+        />
+      </WorkspaceSidebarOverlayLayer>
+
       <section
         ref="chatMainRef"
         class="chat-workspace__main"
+        :class="{ 'chat-workspace__main--new-chat': isNewConversationHome }"
         :aria-label="t('chat.title')"
         :aria-hidden="historyModalActive ? 'true' : undefined"
         :inert="historyModalActive ? true : undefined"
         tabindex="-1"
       >
-        <header class="chat-toolbar">
-          <div class="chat-toolbar__primary">
-            <button
-              ref="historyTriggerRef"
-              type="button"
-              class="chat-toolbar__history-button"
-              :aria-label="t('chat.history.title')"
-              :title="t('chat.history.title')"
-              @click="openHistory"
-            >
-              <Icon name="menu" size="sm" />
-            </button>
-
-            <div class="chat-toolbar__session" :title="activeTitle">
-              <Icon name="chatBubble" size="xs" />
-              <span>{{ activeTitle }}</span>
-            </div>
-          </div>
-
-          <router-link
-            class="chat-toolbar__balance"
-            to="/purchase"
-            :aria-label="`${t('chat.balance.available')} ${formattedBalance} ${t('dashboard.creditUnit')}`"
+        <div class="chat-mobile-actions">
+          <button
+            ref="historyTriggerRef"
+            type="button"
+            class="chat-mobile-actions__history-button"
+            :aria-label="t('chat.history.title')"
+            :title="t('chat.history.title')"
+            @click="openHistory"
           >
-            <Icon name="wallet" size="sm" />
-            <span>
-              <small>{{ t('chat.balance.available') }}</small>
-              <strong>
-                <CreditAmount :value="formattedBalance" icon-size="xs" />
-              </strong>
-            </span>
-          </router-link>
-        </header>
-
-        <div v-if="modelsError" class="chat-catalog-error" role="alert">
-          <Icon name="exclamationTriangle" size="md" />
-          <div>
-            <strong>{{ t('chat.models.loadFailed') }}</strong>
-            <span>{{ modelsError }}</span>
-          </div>
-          <button type="button" class="btn btn-secondary" @click="loadCatalog()">
-            <Icon name="refresh" size="sm" />
-            {{ t('chat.actions.retry') }}
+            <Icon name="menu" size="sm" />
           </button>
         </div>
 
@@ -162,6 +164,11 @@
 
         <p class="sr-only" aria-live="polite">{{ streamAnnouncement }}</p>
 
+        <div
+          class="chat-conversation-flow"
+          :class="{ 'chat-conversation-flow--new-chat': isNewConversationHome }"
+          data-test="chat-conversation-flow"
+        >
         <div class="chat-messages-region">
           <div
             ref="messageScrollerRef"
@@ -173,24 +180,22 @@
             @touchend.passive="handleMessageTouchEnd"
             @touchcancel.passive="handleMessageTouchEnd"
           >
-            <div v-if="!activeConversation || activeConversation.messages.length === 0" class="chat-empty-state">
-              <div class="chat-empty-state__icon"><Icon name="sparkles" size="xl" :stroke-width="1.7" /></div>
-              <h2>{{ t('chat.empty.title') }}</h2>
-              <p>{{ t('chat.empty.description') }}</p>
+            <div v-if="isNewConversationHome" class="chat-empty-state" data-test="chat-new-chat-hero">
+              <h2>{{ newChatGreeting }}</h2>
             </div>
 
             <div v-else class="chat-messages__inner">
               <button
-                v-if="activeConversation.messagesHasMore"
+                v-if="activeConversation?.messagesHasMore"
                 type="button"
                 class="chat-messages__load-older"
-                :disabled="chatStore.loadingConversationMessages.has(activeConversation.id)"
-                @click="chatStore.loadOlderConversationMessages(activeConversation.id)"
+                :disabled="chatStore.loadingConversationMessages.has(activeConversation?.id ?? '')"
+                @click="activeConversation && chatStore.loadOlderConversationMessages(activeConversation.id)"
               >
                 {{ t('chat.history.loadOlderMessages') }}
               </button>
               <ChatMessageItem
-                v-for="(message, index) in activeConversation.messages"
+                v-for="(message, index) in activeConversation?.messages ?? []"
                 :key="message.id"
                 :message="message"
                 :retryable="canRetryMessage(message, index)"
@@ -220,20 +225,58 @@
             v-model="composerDraft"
             :streaming="chatStore.isStreaming"
             :disabled="!chatReady || !selectedModelAvailable"
-            :insufficient-balance="insufficientBalance"
+            :submission-busy="voiceBusy || attachmentBusy"
+            :has-attachments="attachmentDrafts.length > 0"
+            :attachments-valid="attachmentValid"
             @send="sendMessage"
             @stop="stopStreaming"
           >
-            <template #controls>
+            <template #attachments>
+              <ChatAttachmentPreviewList
+                :items="attachmentDrafts"
+                :supports-vision="selectedModelSupportsVision"
+                @cancel="attachmentPickerRef?.cancel($event)"
+                @retry="attachmentPickerRef?.retry($event)"
+                @remove="attachmentPickerRef?.remove($event)"
+              />
+            </template>
+            <template #leading>
+              <ChatAttachmentPicker
+                ref="attachmentPickerRef"
+                :disabled="attachmentInputDisabled"
+                :supports-vision="selectedModelSupportsVision"
+                @change="attachmentDrafts = $event"
+                @busy-change="attachmentBusy = $event"
+                @valid-change="attachmentValid = $event"
+              />
+            </template>
+            <template #trailing>
               <ChatModelSettings
                 v-model="selectedModel"
                 v-model:reasoning-effort="selectedReasoningEffort"
                 :model-options="modelOptions"
-                :loading="modelsLoading"
-                :disabled="modelsLoading || chatStore.isStreaming || modelOptions.length === 0"
+                :disabled="chatStore.isStreaming || voiceBusy"
+              />
+              <ChatVoiceInput
+                v-if="transcriptionEnabled"
+                :key="voiceCapabilityKey"
+                :context-key="voiceContextKey"
+                :disabled="!chatReady || !selectedModelAvailable || chatStore.isStreaming"
+                :max-duration-ms="voiceMaxDurationMs"
+                :max-bytes="voiceMaxBytes"
+                :accepted-mime-types="voiceAcceptedMimeTypes"
+                @busy-change="voiceBusy = $event"
+                @transcribed="insertVoiceTranscription"
+              />
+            </template>
+            <template #empty-action>
+              <ChatVoiceModeButton
+                :available="false"
+                :disabled="!chatReady || !selectedModelAvailable"
               />
             </template>
           </ChatComposer>
+        </div>
         </div>
       </section>
     </div>
@@ -242,18 +285,52 @@
       :show="confirmation !== null"
       :title="confirmation?.kind === 'clear' ? t('chat.confirm.clearTitle') : t('chat.confirm.deleteTitle')"
       width="narrow"
+      :variant="confirmation?.kind === 'delete' ? 'workspace-confirm' : 'default'"
+      :show-close-button="confirmation?.kind !== 'delete'"
+      :description-id="confirmation?.kind === 'delete' ? 'chat-delete-confirm-description' : undefined"
       @close="confirmation = null"
     >
-      <p class="text-sm leading-6 text-gray-600 dark:text-dark-300">
-        {{ confirmation?.kind === 'clear' ? t('chat.confirm.clearDescription') : t('chat.confirm.deleteDescription') }}
+      <div
+        v-if="confirmation?.kind === 'delete'"
+        id="chat-delete-confirm-description"
+        class="chat-delete-confirm__copy"
+      >
+        <p class="chat-delete-confirm__message">
+          <span>{{ t('chat.confirm.deleteDescriptionPrefix') }}</span><strong
+            :aria-label="confirmation.title"
+            :title="confirmation.title"
+          >{{ confirmation.displayTitle }}</strong><span>{{ t('chat.confirm.deleteDescriptionSuffix') }}</span>
+        </p>
+        <p class="chat-delete-confirm__memory"><span>{{ t('chat.confirm.memoryPrefix') }}</span><span class="chat-delete-confirm__settings-word">{{ t('chat.confirm.memorySettings') }}</span><span>{{ t('chat.confirm.memorySuffix') }}</span></p>
+      </div>
+      <p v-else class="text-sm leading-6 text-gray-600 dark:text-dark-300">
+        {{ t('chat.confirm.clearDescription') }}
       </p>
       <template #footer>
-        <button type="button" class="btn btn-secondary" @click="confirmation = null">
-          {{ t('common.cancel') }}
-        </button>
-        <button type="button" class="btn btn-danger" @click="applyConfirmation">
-          {{ t('common.delete') }}
-        </button>
+        <template v-if="confirmation?.kind === 'delete'">
+          <button
+            type="button"
+            class="chat-delete-confirm__button chat-delete-confirm__button--cancel"
+            @click="confirmation = null"
+          >
+            {{ t('common.cancel') }}
+          </button>
+          <button
+            type="button"
+            class="chat-delete-confirm__button chat-delete-confirm__button--danger"
+            @click="applyConfirmation"
+          >
+            {{ t('common.delete') }}
+          </button>
+        </template>
+        <template v-else>
+          <button type="button" class="btn btn-secondary" @click="confirmation = null">
+            {{ t('common.cancel') }}
+          </button>
+          <button type="button" class="btn btn-danger" @click="applyConfirmation">
+            {{ t('common.delete') }}
+          </button>
+        </template>
       </template>
     </BaseDialog>
 
@@ -285,24 +362,42 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import AppLayout from '@/components/layout/AppLayout.vue'
+import WorkspaceSidebarOverlayLayer from '@/components/layout/WorkspaceSidebarOverlayLayer.vue'
+import { useWorkspaceResponsiveState } from '@/components/layout/workspaceResponsive'
 import BaseDialog from '@/components/common/BaseDialog.vue'
-import CreditAmount from '@/components/common/CreditAmount.vue'
 import Icon from '@/components/icons/Icon.vue'
 import ChatComposer from '@/components/chat/ChatComposer.vue'
+import ChatAttachmentPicker from '@/components/chat/ChatAttachmentPicker.vue'
+import ChatAttachmentPreviewList from '@/components/chat/ChatAttachmentPreviewList.vue'
+import ChatFileDropOverlay from '@/components/chat/ChatFileDropOverlay.vue'
+import type { ChatAttachmentDraft } from '@/components/chat/chatAttachmentUi'
 import ChatHistoryPanel from '@/components/chat/ChatHistoryPanel.vue'
 import ChatMessageItem from '@/components/chat/ChatMessageItem.vue'
+import ChatVoiceInput from '@/components/chat/ChatVoiceInput.vue'
+import ChatVoiceModeButton from '@/components/chat/ChatVoiceModeButton.vue'
+import {
+  CHAT_AUDIO_MAX_BYTES,
+  CHAT_AUDIO_MAX_DURATION_MS,
+} from '@/composables/useAudioRecorder'
 import ChatModelSettings, {
   type ChatModelSettingsOption,
 } from '@/components/chat/ChatModelSettings.vue'
 import {
   ChatAPIError,
   createChatAttemptId,
-  getChatModels,
+  getChatCapabilities,
   isAbortError,
   pollChatReceipt,
   streamChatCompletion,
 } from '@/api/chat'
+import { pickChatGreeting } from '@/features/chat/chatGreetings'
+import { toChatConversationTitlePreview } from '@/features/chat/conversationTitle'
+import {
+  CHAT_PRODUCT_MODELS,
+  DEFAULT_CHAT_PRODUCT_MODEL_ID,
+} from '@/features/chat/chatProductModels'
 import { useAuthStore } from '@/stores/auth'
+import { useAppStore } from '@/stores/app'
 import { useChatStore, type ChatMessagePatch } from '@/stores/chat'
 import type {
   ChatCompletionRequest,
@@ -310,36 +405,78 @@ import type {
   ChatModel,
   ChatReasoningEffort,
   ChatReceipt,
+  ChatTranscriptionCapability,
 } from '@/types/chat'
 
 type Confirmation =
-  | { kind: 'delete'; conversationId: string }
+  | { kind: 'delete'; conversationId: string; title: string; displayTitle: string }
   | { kind: 'clear' }
 
 const SCROLL_FOLLOW_RESUME_DISTANCE = 8
+const DEFAULT_REASONING_EFFORT: ChatReasoningEffort = 'low'
+const NEW_CHAT_QUERY_KEY = 'conversation'
+const NEW_CHAT_QUERY_VALUE = 'new'
 
 const { t } = useI18n()
+const appStore = useAppStore()
 const authStore = useAuthStore()
 const chatStore = useChatStore()
 
-const models = ref<ChatModel[]>([])
-const modelsLoading = ref(true)
-const modelsError = ref('')
-const defaultModel = ref('')
-const catalogBalance = ref<number | null>(null)
-const catalogBalanceAuthStateVersion = ref(-1)
-const authBalanceStateVersion = ref(0)
-const balanceRejected = ref(false)
+function hasNewChatRouteIntent(): boolean {
+  if (typeof window === 'undefined') return false
+  try {
+    return new URL(window.location.href).searchParams.get(NEW_CHAT_QUERY_KEY)
+      === NEW_CHAT_QUERY_VALUE
+  } catch {
+    return false
+  }
+}
+
+function setNewChatRouteIntent(enabled: boolean): void {
+  if (typeof window === 'undefined') return
+  try {
+    const url = new URL(window.location.href)
+    if (enabled) {
+      url.searchParams.set(NEW_CHAT_QUERY_KEY, NEW_CHAT_QUERY_VALUE)
+    } else if (url.searchParams.get(NEW_CHAT_QUERY_KEY) === NEW_CHAT_QUERY_VALUE) {
+      url.searchParams.delete(NEW_CHAT_QUERY_KEY)
+    } else {
+      return
+    }
+    window.history.replaceState(
+      window.history.state,
+      '',
+      `${url.pathname}${url.search}${url.hash}`,
+    )
+  } catch {
+    // IndexedDB remains the fallback when the current environment cannot replace the URL.
+  }
+}
+
+const models: readonly ChatModel[] = CHAT_PRODUCT_MODELS
+const transcriptionCapability = ref<ChatTranscriptionCapability | null>(null)
+const defaultModel = ref(DEFAULT_CHAT_PRODUCT_MODEL_ID)
 const persistenceRetrying = ref(false)
 const composerDraft = ref('')
-const selectedReasoningEffort = ref<ChatReasoningEffort>('')
+const newChatGreeting = ref(pickChatGreeting())
+const voiceBusy = ref(false)
+const attachmentDrafts = ref<ChatAttachmentDraft[]>([])
+const attachmentBusy = ref(false)
+const attachmentValid = ref(true)
+const pageFileDragActive = ref(false)
+const selectedReasoningEffort = ref<ChatReasoningEffort>(DEFAULT_REASONING_EFFORT)
 const historySearchQuery = ref('')
 const legacyImportPromptVisible = ref(true)
 const historyOpen = ref(false)
-const mobileHistoryLayout = ref(true)
+const {
+  mobileDrawer: mobileHistoryLayout,
+  narrowSidebar,
+} = useWorkspaceResponsiveState()
+const narrowSidebarOpen = computed(() => appStore.workspaceNarrowSidebarOpen)
 const confirmation = ref<Confirmation | null>(null)
 const messageScrollerRef = ref<HTMLElement | null>(null)
 const composerRef = ref<InstanceType<typeof ChatComposer> | null>(null)
+const attachmentPickerRef = ref<InstanceType<typeof ChatAttachmentPicker> | null>(null)
 const historyDrawerRef = ref<HTMLElement | null>(null)
 const historyTriggerRef = ref<HTMLButtonElement | null>(null)
 const chatMainRef = ref<HTMLElement | null>(null)
@@ -349,12 +486,12 @@ let scrollFrame = 0
 let historySearchTimer: ReturnType<typeof setTimeout> | null = null
 let lastMessageScrollTop = 0
 let lastMessageTouchY: number | null = null
-let catalogRequestVersion = 0
-let receiptBalanceVersion = 0
 let observedAuthUserId: string | undefined
 let viewDisposed = false
-let historyMediaQuery: MediaQueryList | null = null
+let attachmentContextChangeOwnedBySend = false
+let pageFileDragDepth = 0
 let messageResizeObserver: ResizeObserver | null = null
+let capabilitiesController: AbortController | null = null
 const receiptPolls = new Map<string, {
   receiptId: string
   controller: AbortController
@@ -367,8 +504,30 @@ const historyConversations = computed(() => (
     ? chatStore.searchResults
     : chatStore.conversations
 ))
-const activeTitle = computed(() => activeConversation.value?.title || t('chat.history.newConversation'))
-const historyModalActive = computed(() => historyOpen.value && mobileHistoryLayout.value)
+const transcriptionEnabled = computed(() => transcriptionCapability.value?.enabled === true)
+const voiceContextKey = computed(() => (
+  `${currentAuthUserId()}:${chatStore.activeConversationId ?? 'new'}`
+))
+const voiceMaxDurationMs = computed(() => Math.min(
+  CHAT_AUDIO_MAX_DURATION_MS,
+  (transcriptionCapability.value?.max_duration_seconds ?? 60) * 1_000,
+))
+const voiceMaxBytes = computed(() => Math.min(
+  CHAT_AUDIO_MAX_BYTES,
+  transcriptionCapability.value?.max_upload_bytes ?? CHAT_AUDIO_MAX_BYTES,
+))
+const voiceAcceptedMimeTypes = computed(() => (
+  transcriptionCapability.value?.accepted_mime_types ?? []
+))
+const voiceCapabilityKey = computed(() => [
+  voiceMaxDurationMs.value,
+  voiceMaxBytes.value,
+  ...voiceAcceptedMimeTypes.value,
+].join(':'))
+const historyModalActive = computed(() => (
+  (historyOpen.value && mobileHistoryLayout.value)
+  || (narrowSidebar.value && narrowSidebarOpen.value)
+))
 const chatReady = computed(() => {
   const authenticatedUserId = authStore.user?.id
   return authenticatedUserId !== null
@@ -379,17 +538,7 @@ const chatReady = computed(() => {
 const streamAnnouncement = computed(() => (
   chatStore.isStreaming ? t('chat.message.generating') : ''
 ))
-const currentBalance = computed(() => {
-  const accountBalance = normalizedBalance(authStore.user?.balance)
-  return catalogBalance.value !== null
-    && catalogBalanceAuthStateVersion.value === authBalanceStateVersion.value
-    ? catalogBalance.value
-    : accountBalance
-})
-const formattedBalance = computed(() => currentBalance.value.toFixed(2))
-const insufficientBalance = computed(() => currentBalance.value <= 0 || balanceRejected.value)
-
-const modelOptions = computed<ChatModelSettingsOption[]>(() => models.value.map((model) => {
+const modelOptions = computed<ChatModelSettingsOption[]>(() => models.map((model) => {
   const label = model.display_name?.trim() || model.id
   const description = model.description?.trim() || ''
   return {
@@ -397,17 +546,16 @@ const modelOptions = computed<ChatModelSettingsOption[]>(() => models.value.map(
     label,
     description: description === label || description === model.id ? '' : description,
     recommended: model.recommended === true,
+    supportsReasoningSlider: true,
   }
 }))
-const availableModelIds = computed(() => new Set(models.value.map((model) => model.id)))
-const preferredModel = computed(() => (
-  models.value.find((model) => model.recommended)?.id || models.value[0]?.id || ''
-))
+const availableModelIds = new Set(models.map((model) => model.id))
+const preferredModel = DEFAULT_CHAT_PRODUCT_MODEL_ID
 
 const selectedModel = computed<string>({
   get: () => activeConversation.value?.model || defaultModel.value,
   set: (value) => {
-    if (!value || !availableModelIds.value.has(value)) return
+    if (!value || !availableModelIds.has(value)) return
     defaultModel.value = value
     if (activeConversation.value) {
       chatStore.setConversationModel(activeConversation.value.id, value)
@@ -415,17 +563,32 @@ const selectedModel = computed<string>({
   },
 })
 const selectedModelAvailable = computed(() => (
-  !modelsLoading.value
-  && !modelsError.value
-  && !!selectedModel.value
-  && availableModelIds.value.has(selectedModel.value)
+  selectedModel.value.trim().length > 0
+))
+const selectedModelSupportsVision = computed(() => (
+  models.find((model) => model.id === selectedModel.value)?.supports_vision === true
+))
+const attachmentInputDisabled = computed(() => (
+  !chatReady.value
+  || !selectedModelAvailable.value
+  || chatStore.isStreaming
+))
+const attachmentDropEnabled = computed(() => (
+  !attachmentInputDisabled.value
+  && !historyModalActive.value
+  && confirmation.value === null
+  && !(legacyImportPromptVisible.value && chatStore.legacyImportRequired)
 ))
 
+const isNewConversationHome = computed(() => {
+  const conversation = activeConversation.value
+  if (!conversation) return true
+  return conversation.messages.length === 0 && (conversation.messageCount ?? 0) === 0
+})
 const emptyComposerReady = computed(() => (
   chatReady.value
   && selectedModelAvailable.value
-  && !insufficientBalance.value
-  && (!activeConversation.value || activeConversation.value.messages.length === 0)
+  && isNewConversationHome.value
 ))
 const showScrollToLatest = computed(() => (
   !shouldFollowStream.value
@@ -434,27 +597,23 @@ const showScrollToLatest = computed(() => (
 ))
 
 watch(
-  [() => authStore.user, () => authStore.user?.balance],
-  () => {
-    authBalanceStateVersion.value += 1
-  },
-  { flush: 'sync' },
-)
-
-watch(
   () => authStore.user?.id,
   (userId) => {
     const normalizedUserId = normalizeUserId(userId)
     abortReceiptPolls()
     if (observedAuthUserId !== undefined && observedAuthUserId !== normalizedUserId) {
+      void discardPendingAttachments()
       composerDraft.value = ''
-      selectedReasoningEffort.value = ''
+      selectedReasoningEffort.value = DEFAULT_REASONING_EFFORT
       historySearchQuery.value = ''
     }
     observedAuthUserId = normalizedUserId
     legacyImportPromptVisible.value = true
-    resetCatalogState(userId)
+    resetChatProductState()
     const hydration = chatStore.hydrate(userId)
+    if (normalizedUserId && hasNewChatRouteIntent()) {
+      chatStore.selectConversation(null)
+    }
     void Promise.resolve(hydration).then(() => {
       if (
         !viewDisposed
@@ -465,7 +624,6 @@ watch(
         void initializeServerHistory(normalizedUserId)
       }
     })
-    if (userId !== null && userId !== undefined) void loadCatalog()
   },
   { immediate: true, flush: 'sync' },
 )
@@ -475,7 +633,6 @@ watch(
     chatReady,
     () => chatStore.activeConversationId,
     () => activeConversation.value?.model,
-    () => models.value,
   ],
   () => reconcileSelectedModel(),
   { flush: 'sync' },
@@ -483,28 +640,47 @@ watch(
 
 watch(emptyComposerReady, (ready) => {
   if (ready) void focusComposer()
-})
+}, { immediate: true })
+
+watch(attachmentDropEnabled, (enabled) => {
+  if (!enabled) resetPageFileDrag()
+}, { flush: 'sync' })
 
 watch(
   () => activeConversation.value?.messages.map((message) => `${message.id}:${message.content.length}:${message.status}`).join('|'),
   () => scheduleScrollToBottom(),
 )
 
+watch(() => chatStore.activeConversationId, (conversationId) => {
+  if (conversationId !== null) setNewChatRouteIntent(false)
+}, { flush: 'sync' })
+
 watch(() => chatStore.activeConversationId, () => {
-  if (historyOpen.value) void closeHistory()
+  if (attachmentContextChangeOwnedBySend) {
+    attachmentContextChangeOwnedBySend = false
+  } else {
+    void discardPendingAttachments()
+  }
+  if (historyModalActive.value) void closeHistory()
   shouldFollowStream.value = true
   isAwayFromLatest.value = false
   lastMessageScrollTop = 0
   scheduleScrollToBottom()
 })
 
-function onHistoryBreakpointChange(event: MediaQueryListEvent) {
-  mobileHistoryLayout.value = event.matches
-  if (!event.matches && historyOpen.value) void closeHistory(chatMainRef.value)
-}
+watch(mobileHistoryLayout, (mobile) => {
+  if (!mobile && historyOpen.value) void closeHistory(chatMainRef.value)
+})
 
 onMounted(() => {
+  void loadChatCapabilities()
   window.addEventListener('online', syncServerHistory)
+  window.addEventListener('dragenter', onPageFileDragEnter, true)
+  window.addEventListener('dragover', onPageFileDragOver, true)
+  window.addEventListener('dragleave', onPageFileDragLeave, true)
+  window.addEventListener('drop', onPageFileDrop, true)
+  window.addEventListener('dragend', resetPageFileDrag, true)
+  window.addEventListener('blur', resetPageFileDrag)
   if (typeof ResizeObserver === 'function' && messageScrollerRef.value) {
     messageResizeObserver = new ResizeObserver(() => {
       const scroller = messageScrollerRef.value
@@ -516,65 +692,43 @@ onMounted(() => {
     })
     messageResizeObserver.observe(messageScrollerRef.value)
   }
-  if (typeof window.matchMedia === 'function') {
-    historyMediaQuery = window.matchMedia('(max-width: 1023px)')
-    mobileHistoryLayout.value = historyMediaQuery.matches
-    historyMediaQuery.addEventListener('change', onHistoryBreakpointChange)
-  }
 })
 
 onBeforeUnmount(() => {
   viewDisposed = true
+  capabilitiesController?.abort()
+  capabilitiesController = null
+  void discardPendingAttachments()
   cancelPendingMessageScroll()
   abortReceiptPolls()
   if (historySearchTimer !== null) clearTimeout(historySearchTimer)
   window.removeEventListener('online', syncServerHistory)
+  window.removeEventListener('dragenter', onPageFileDragEnter, true)
+  window.removeEventListener('dragover', onPageFileDragOver, true)
+  window.removeEventListener('dragleave', onPageFileDragLeave, true)
+  window.removeEventListener('drop', onPageFileDrop, true)
+  window.removeEventListener('dragend', resetPageFileDrag, true)
+  window.removeEventListener('blur', resetPageFileDrag)
+  resetPageFileDrag()
   messageResizeObserver?.disconnect()
-  historyMediaQuery?.removeEventListener('change', onHistoryBreakpointChange)
   if (chatStore.isStreaming) chatStore.stopStreaming()
 })
 
-async function loadCatalog(silent = false) {
-  const requestedUserId = currentAuthUserId()
-  if (!requestedUserId) {
-    modelsLoading.value = false
-    return
-  }
-  const requestVersion = ++catalogRequestVersion
-  const requestedAuthStateVersion = authBalanceStateVersion.value
-  const requestedReceiptBalanceVersion = receiptBalanceVersion
-  if (!silent) {
-    modelsLoading.value = true
-    modelsError.value = ''
-  }
-
+async function loadChatCapabilities() {
+  capabilitiesController?.abort()
+  const controller = new AbortController()
+  capabilitiesController = controller
   try {
-    const catalog = await getChatModels()
-    if (!isCurrentCatalogRequest(requestVersion, requestedUserId)) return
-    models.value = catalog.models
-    if (requestedReceiptBalanceVersion === receiptBalanceVersion) {
-      catalogBalance.value = catalog.balance
-      catalogBalanceAuthStateVersion.value = requestedAuthStateVersion
+    const capabilities = await getChatCapabilities(controller.signal)
+    if (!viewDisposed && capabilitiesController === controller) {
+      transcriptionCapability.value = capabilities.transcription ?? null
     }
-    balanceRejected.value = false
-
-    if (models.value.length === 0) {
-      defaultModel.value = ''
-      modelsError.value = t('chat.errors.noModelsAvailable')
-      return
-    }
-    modelsError.value = ''
-    reconcileSelectedModel()
   } catch (error) {
-    if (!isCurrentCatalogRequest(requestVersion, requestedUserId)) return
-    if (error instanceof ChatAPIError && String(error.code || '') === 'INSUFFICIENT_BALANCE') {
-      balanceRejected.value = true
+    if (!isAbortError(error) && !viewDisposed && capabilitiesController === controller) {
+      transcriptionCapability.value = null
     }
-    if (!silent) modelsError.value = localizedError(error, 'models')
   } finally {
-    if (!silent && isCurrentCatalogRequest(requestVersion, requestedUserId)) {
-      modelsLoading.value = false
-    }
+    if (capabilitiesController === controller) capabilitiesController = null
   }
 }
 
@@ -586,49 +740,82 @@ function normalizeUserId(id: string | number | null | undefined) {
   return id === null || id === undefined ? '' : String(id)
 }
 
-function normalizedBalance(balance: unknown) {
-  const candidate = Number(balance ?? 0)
-  return Number.isFinite(candidate) ? candidate : 0
-}
-
-function isCurrentCatalogRequest(version: number, userId: string) {
-  return version === catalogRequestVersion && userId === currentAuthUserId()
-}
-
-function resetCatalogState(userId: string | number | null | undefined) {
-  catalogRequestVersion += 1
-  receiptBalanceVersion += 1
-  models.value = []
-  modelsError.value = ''
-  defaultModel.value = ''
-  catalogBalance.value = null
-  catalogBalanceAuthStateVersion.value = -1
-  balanceRejected.value = false
-  modelsLoading.value = userId !== null && userId !== undefined
+function resetChatProductState() {
+  defaultModel.value = DEFAULT_CHAT_PRODUCT_MODEL_ID
 }
 
 function reconcileSelectedModel() {
-  const preferred = preferredModel.value
-  if (!preferred) {
-    defaultModel.value = ''
-    return
-  }
-
-  if (!availableModelIds.value.has(defaultModel.value)) defaultModel.value = preferred
-
-  const conversation = activeConversation.value
-  if (
-    chatReady.value
-    && conversation
-    && !availableModelIds.value.has(conversation.model)
-  ) {
-    chatStore.setConversationModel(conversation.id, preferred)
-  }
+  if (!availableModelIds.has(defaultModel.value)) defaultModel.value = preferredModel
 }
 
 async function focusComposer() {
   await nextTick()
   composerRef.value?.focus()
+}
+
+function insertVoiceTranscription(text: string, acknowledge?: (inserted: boolean) => void) {
+  const inserted = composerRef.value?.insertText?.(text) === true
+  acknowledge?.(inserted)
+}
+
+function isPageFileDrag(event: DragEvent): boolean {
+  const transfer = event.dataTransfer
+  if (!transfer) return false
+  return Array.from(transfer.types ?? []).includes('Files') || transfer.files.length > 0
+}
+
+function setPageFileDropEffect(event: DragEvent): void {
+  if (!event.dataTransfer) return
+  event.dataTransfer.dropEffect = attachmentDropEnabled.value ? 'copy' : 'none'
+}
+
+function resetPageFileDrag(): void {
+  pageFileDragDepth = 0
+  pageFileDragActive.value = false
+}
+
+function onPageFileDragEnter(event: DragEvent): void {
+  if (!isPageFileDrag(event)) return
+  event.preventDefault()
+  setPageFileDropEffect(event)
+  if (!attachmentDropEnabled.value) return
+  pageFileDragDepth += 1
+  pageFileDragActive.value = true
+}
+
+function onPageFileDragOver(event: DragEvent): void {
+  if (!isPageFileDrag(event)) return
+  event.preventDefault()
+  setPageFileDropEffect(event)
+}
+
+function onPageFileDragLeave(event: DragEvent): void {
+  if (!pageFileDragActive.value) return
+  const leftViewport = event.relatedTarget === null
+    && (event.target === document.body || event.target === document.documentElement)
+  if (leftViewport) {
+    resetPageFileDrag()
+    return
+  }
+  pageFileDragDepth = Math.max(0, pageFileDragDepth - 1)
+  if (pageFileDragDepth === 0) pageFileDragActive.value = false
+}
+
+function onPageFileDrop(event: DragEvent): void {
+  if (!isPageFileDrag(event)) return
+  event.preventDefault()
+  const files = Array.from(event.dataTransfer?.files ?? [])
+  const accepted = attachmentDropEnabled.value
+  resetPageFileDrag()
+  if (accepted && files.length > 0) attachmentPickerRef.value?.addFiles(files)
+}
+
+async function discardPendingAttachments(): Promise<void> {
+  const picker = attachmentPickerRef.value
+  attachmentDrafts.value = []
+  attachmentBusy.value = false
+  attachmentValid.value = true
+  if (picker) await picker.discardAll()
 }
 
 async function retryPersistence() {
@@ -732,13 +919,13 @@ async function recoverInterruptedAttempts(expectedUserId: string) {
 
 function startNewConversation() {
   if (chatStore.isStreaming) stopStreaming()
-  if (activeConversation.value && availableModelIds.value.has(activeConversation.value.model)) {
-    defaultModel.value = activeConversation.value.model
-  }
+  newChatGreeting.value = pickChatGreeting(newChatGreeting.value)
+  defaultModel.value = preferredModel
+  setNewChatRouteIntent(true)
   chatStore.selectConversation(null)
   reconcileSelectedModel()
   composerDraft.value = ''
-  if (historyOpen.value) void closeHistory()
+  if (historyModalActive.value) void closeHistory()
   void focusComposer()
 }
 
@@ -749,7 +936,7 @@ function selectConversation(id: string) {
   if (!chatStore.selectConversation(id)) return
   void chatStore.loadConversationDetail(id)
   reconcileSelectedModel()
-  if (historyOpen.value) void closeHistory()
+  if (historyModalActive.value) void closeHistory()
 }
 
 async function openHistory() {
@@ -757,16 +944,19 @@ async function openHistory() {
   historyOpen.value = true
   await nextTick()
   const firstControl = historyDrawerRef.value?.querySelector<HTMLElement>(
-    'button:not([disabled]):not([tabindex="-1"]), input:not([disabled]), [tabindex]:not([tabindex="-1"])',
+    'a[href]:not([tabindex="-1"]), button:not([disabled]):not([tabindex="-1"]), input:not([disabled]), [tabindex]:not([tabindex="-1"])',
   )
   ;(firstControl ?? historyDrawerRef.value)?.focus()
 }
 
 async function closeHistory(focusTarget: HTMLElement | null = historyTriggerRef.value) {
-  if (!historyOpen.value) return
-  historyOpen.value = false
+  const mobileWasOpen = historyOpen.value
+  const narrowWasOpen = narrowSidebarOpen.value
+  if (!mobileWasOpen && !narrowWasOpen) return
+  if (mobileWasOpen) historyOpen.value = false
+  if (narrowWasOpen) appStore.setWorkspaceNarrowSidebarOpen(false)
   await nextTick()
-  focusTarget?.focus()
+  if (mobileWasOpen) focusTarget?.focus()
 }
 
 function onHistoryDrawerKeydown(event: KeyboardEvent) {
@@ -778,7 +968,7 @@ function onHistoryDrawerKeydown(event: KeyboardEvent) {
   if (event.key !== 'Tab') return
 
   const controls = Array.from(historyDrawerRef.value?.querySelectorAll<HTMLElement>(
-    'button:not([disabled]):not([tabindex="-1"]), input:not([disabled]), [tabindex]:not([tabindex="-1"])',
+    'a[href]:not([tabindex="-1"]), button:not([disabled]):not([tabindex="-1"]), input:not([disabled]), [tabindex]:not([tabindex="-1"])',
   ) ?? []).filter((element) => element.getClientRects().length > 0)
   if (controls.length === 0) {
     event.preventDefault()
@@ -797,8 +987,17 @@ function onHistoryDrawerKeydown(event: KeyboardEvent) {
   }
 }
 
-function confirmDelete(id: string) {
-  confirmation.value = { kind: 'delete', conversationId: id }
+async function confirmDelete(id: string) {
+  const conversation = historyConversations.value.find((item) => item.id === id)
+    ?? chatStore.conversations.find((item) => item.id === id)
+  const title = conversation?.title.trim() || t('chat.actions.newChat')
+  if (historyModalActive.value) await closeHistory()
+  confirmation.value = {
+    kind: 'delete',
+    conversationId: id,
+    title,
+    displayTitle: toChatConversationTitlePreview(title),
+  }
 }
 
 function confirmClear() {
@@ -818,29 +1017,57 @@ function buildTitle(content: string) {
   return normalized.length > 42 ? `${normalized.slice(0, 42)}...` : normalized
 }
 
-async function sendMessage(content: string) {
-  if (!chatReady.value || !selectedModelAvailable.value || chatStore.isStreaming || insufficientBalance.value) return
+async function sendMessage(
+  content: string,
+  acknowledge?: (accepted: boolean) => void,
+) {
+  const attachments = attachmentPickerRef.value?.getReadyAttachments() ?? []
+  if (
+    !chatReady.value
+    || !selectedModelAvailable.value
+    || chatStore.isStreaming
+    || voiceBusy.value
+    || attachmentBusy.value
+    || !attachmentValid.value
+    || (attachmentDrafts.value.length > 0 && attachments.length !== attachmentDrafts.value.length)
+    || (!content.trim() && attachments.length === 0)
+  ) {
+    acknowledge?.(false)
+    return
+  }
   const requestModel = selectedModel.value
+  const titleSource = content.trim() || attachments[0]?.name || t('chat.history.newConversation')
 
   let conversation = activeConversation.value
   if (!conversation) {
-    conversation = chatStore.createConversation(requestModel, buildTitle(content))
+    attachmentContextChangeOwnedBySend = true
+    conversation = chatStore.createConversation(requestModel, buildTitle(titleSource))
   }
-  if (!conversation) return
+  if (!conversation) {
+    attachmentContextChangeOwnedBySend = false
+    acknowledge?.(false)
+    return
+  }
 
   if (conversation.messages.length === 0) {
-    chatStore.renameConversation(conversation.id, buildTitle(content))
+    chatStore.renameConversation(conversation.id, buildTitle(titleSource))
   }
   chatStore.setConversationModel(conversation.id, requestModel)
-  if (!await chatStore.prepareConversationForCompletion(conversation.id)) return
+  if (!await chatStore.prepareConversationForCompletion(conversation.id)) {
+    acknowledge?.(false)
+    return
+  }
   const expectedHeadMessageId = conversation.headMessageId
     ?? conversation.messages[conversation.messages.length - 1]?.id
     ?? null
   const userMessage = chatStore.addMessage(
     conversation.id,
-    { role: 'user', content, status: 'complete' },
+    { role: 'user', content, attachments, status: 'complete' },
   )
-  if (!userMessage) return
+  if (!userMessage) {
+    acknowledge?.(false)
+    return
+  }
   const attemptId = createChatAttemptId()
   const assistant = chatStore.addMessage(conversation.id, {
     role: 'assistant',
@@ -849,21 +1076,40 @@ async function sendMessage(content: string) {
     attemptId,
     requestedModel: requestModel,
   })
-  if (!assistant) return
+  if (!assistant) {
+    chatStore.removeMessages(conversation.id, [userMessage.id])
+    acknowledge?.(false)
+    return
+  }
 
-  await runStream({
+  if (attachments.length === 0) acknowledge?.(true)
+
+  const streamResult = await runStream({
     conversationId: conversation.id,
     model: requestModel,
-    ...(selectedReasoningEffort.value
-      ? { reasoningEffort: selectedReasoningEffort.value }
-      : {}),
+    reasoningEffort: selectedReasoningEffort.value,
     expectedHeadMessageId,
     userMessage: {
       id: userMessage.id,
       content: userMessage.content,
+      ...(attachments.length > 0
+        ? { attachmentIds: attachments.map(({ id }) => id) }
+        : {}),
     },
     assistantMessageId: assistant.id,
-  }, attemptId)
+  }, attemptId, attachments.length > 0
+    ? () => {
+        attachmentPickerRef.value?.commitAll()
+        acknowledge?.(true)
+      }
+    : undefined)
+
+  if (attachments.length > 0 && !streamResult.accepted) {
+    if (!streamResult.keepMessages) {
+      chatStore.removeMessages(conversation.id, [userMessage.id, assistant.id])
+    }
+    acknowledge?.(false)
+  }
 }
 
 function canRetryMessage(message: ChatMessage, index: number) {
@@ -872,12 +1118,11 @@ function canRetryMessage(message: ChatMessage, index: number) {
     && index === (activeConversation.value?.messages.length ?? 0) - 1
     && !chatStore.isStreaming
     && selectedModelAvailable.value
-    && !insufficientBalance.value
 }
 
 async function retryMessage(messageId: string) {
   const conversation = activeConversation.value
-  if (!conversation || !selectedModelAvailable.value || chatStore.isStreaming || insufficientBalance.value) return
+  if (!conversation || !selectedModelAvailable.value || chatStore.isStreaming) return
   const requestModel = selectedModel.value
   const index = conversation.messages.findIndex((message) => message.id === messageId)
   if (index < 0) return
@@ -902,9 +1147,7 @@ async function retryMessage(messageId: string) {
   await runStream({
     conversationId: conversation.id,
     model: requestModel,
-    ...(selectedReasoningEffort.value
-      ? { reasoningEffort: selectedReasoningEffort.value }
-      : {}),
+    reasoningEffort: selectedReasoningEffort.value,
     expectedHeadMessageId,
     assistantMessageId: replacement.id,
     retryOfMessageId: messageId,
@@ -914,12 +1157,16 @@ async function retryMessage(messageId: string) {
 async function runStream(
   request: ChatCompletionRequest,
   attemptId: string,
-) {
+  onAccepted?: () => void,
+): Promise<{ accepted: boolean; keepMessages: boolean }> {
   const conversationId = request.conversationId
   const assistantMessageId = request.assistantMessageId
   const streamUserId = currentAuthUserId()
   const controller = new AbortController()
-  if (!chatStore.startStreaming(conversationId, assistantMessageId, controller)) return
+  if (!chatStore.startStreaming(conversationId, assistantMessageId, controller)) {
+    return { accepted: false, keepMessages: false }
+  }
+  let accepted = false
   shouldFollowStream.value = true
   scheduleScrollToBottom()
 
@@ -927,6 +1174,10 @@ async function runStream(
     const result = await streamChatCompletion(
       request,
       {
+        onAccepted: () => {
+          accepted = true
+          onAccepted?.()
+        },
         onReceiptId: (receiptId) => {
           recordPendingReceipt(conversationId, assistantMessageId, receiptId)
         },
@@ -948,6 +1199,10 @@ async function runStream(
   } catch (error) {
     const duplicateReceiptId = submittedAttemptReceiptId(error)
     if (duplicateReceiptId) {
+      if (!accepted) {
+        accepted = true
+        onAccepted?.()
+      }
       recordPendingReceipt(conversationId, assistantMessageId, duplicateReceiptId)
     }
     if (isAbortError(error)) {
@@ -962,14 +1217,13 @@ async function runStream(
           streamUserId,
         )
       }
-      return
+      return { accepted, keepMessages: accepted }
     }
     const code = error instanceof ChatAPIError && typeof error.code === 'string' ? error.code : undefined
-    if (code === 'INSUFFICIENT_BALANCE') balanceRejected.value = true
     chatStore.failStreaming(
       conversationId,
       assistantMessageId,
-      localizedError(error, 'completion'),
+      localizedCompletionError(error),
       code,
     )
     const receiptId = duplicateReceiptId
@@ -984,11 +1238,8 @@ async function runStream(
         streamUserId,
       )
     }
-  } finally {
-    if (!viewDisposed && streamUserId && streamUserId === currentAuthUserId()) {
-      void refreshAccountState(streamUserId)
-    }
   }
+  return { accepted, keepMessages: true }
 }
 
 async function recoverStreamAttempt(
@@ -1026,27 +1277,21 @@ function stopStreaming() {
   }
 }
 
-async function refreshAccountState(expectedUserId = currentAuthUserId()) {
-  if (!expectedUserId || expectedUserId !== currentAuthUserId()) return
-  const catalogRefresh = loadCatalog(true)
-  const userRefresh = authStore.refreshUser()
-  await Promise.allSettled([
-    catalogRefresh,
-    userRefresh,
-  ])
-}
-
-function localizedError(error: unknown, source: 'models' | 'completion') {
+function localizedCompletionError(error: unknown) {
   const code = error instanceof ChatAPIError ? String(error.code || '') : ''
   if (code === 'INSUFFICIENT_BALANCE') return t('chat.errors.insufficientBalance')
   if (code === 'CHAT_ATTEMPT_ALREADY_SUBMITTED') {
     return t('chat.errors.attemptAlreadySubmitted')
   }
-  if (code === 'CHAT_MODEL_NOT_AVAILABLE' || code === 'MODEL_NOT_AVAILABLE' || code === 'MODEL_NOT_FOUND') {
+  if (
+    code === 'CHAT_CATALOG_UNAVAILABLE'
+    || code === 'CHAT_MODEL_NOT_AVAILABLE'
+    || code === 'MODEL_NOT_AVAILABLE'
+    || code === 'MODEL_NOT_FOUND'
+  ) {
     return t('chat.errors.modelUnavailable')
   }
   if (error instanceof ChatAPIError && error.status === 503) return t('chat.errors.serviceUnavailable')
-  if (source === 'models') return t('chat.errors.modelsUnavailable')
   return error instanceof Error && error.message ? error.message : t('chat.errors.requestFailed')
 }
 
@@ -1123,12 +1368,6 @@ function applyChatReceipt(
     return
   }
   chatStore.updateMessage(conversationId, messageId, receiptMessagePatch(receipt))
-  if (receipt.balanceAfter !== undefined) {
-    receiptBalanceVersion += 1
-    catalogBalance.value = receipt.balanceAfter
-    catalogBalanceAuthStateVersion.value = authBalanceStateVersion.value
-    if (receipt.balanceAfter > 0) balanceRejected.value = false
-  }
 }
 
 function receiptPollKey(conversationId: string, messageId: string): string {
@@ -1304,11 +1543,11 @@ function scheduleScrollToBottom() {
   height: 100%;
   min-height: 0;
   overflow: hidden;
-  border: 1px solid var(--lx-clay-border);
-  border-radius: 8px;
+  border: 0;
+  border-radius: 0;
   color: var(--lx-clay-text);
-  background: var(--lx-clay-surface);
-  box-shadow: var(--lx-clay-shadow-form);
+  background: var(--workspace-canvas);
+  box-shadow: none;
 }
 
 .chat-workspace__main {
@@ -1317,89 +1556,25 @@ function scheduleScrollToBottom() {
   min-height: 0;
   flex: 1;
   flex-direction: column;
-  background: color-mix(in srgb, var(--lx-clay-canvas) 64%, var(--lx-clay-surface));
+  background: var(--workspace-canvas);
 }
 
-.chat-toolbar {
-  display: flex;
-  height: 64px;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  flex: 0 0 auto;
-  border-bottom: 1px solid var(--lx-clay-border);
-  padding: 0 24px;
-  background: var(--lx-clay-surface-soft);
-  backdrop-filter: blur(10px);
-}
-
-.chat-toolbar__primary {
-  display: flex;
-  min-width: 0;
-  flex: 1;
-  align-items: center;
-  gap: 10px;
-}
-
-.chat-toolbar__history-button {
+.chat-mobile-actions {
   display: none;
+  align-items: center;
+  flex: 0 0 auto;
+}
+
+.chat-mobile-actions__history-button {
+  display: grid;
   place-items: center;
-  width: 38px;
-  height: 38px;
-  flex: 0 0 38px;
-  border: 1px solid var(--lx-clay-border);
+  width: 44px;
+  height: 44px;
+  flex: 0 0 44px;
+  border: 1px solid var(--workspace-border);
   border-radius: 8px;
   color: var(--lx-clay-text-secondary);
   background: var(--lx-clay-surface);
-}
-
-.chat-toolbar__session {
-  display: flex;
-  min-width: 0;
-  max-width: 360px;
-  align-items: center;
-  gap: 7px;
-  color: var(--lx-clay-text-muted);
-  font-size: 12px;
-  font-weight: 650;
-}
-
-.chat-toolbar__session > span {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.chat-toolbar__balance {
-  display: flex;
-  min-width: 112px;
-  min-height: 40px;
-  align-items: center;
-  gap: 8px;
-  border: 1px solid var(--lx-clay-border);
-  border-radius: 8px;
-  padding: 5px 10px;
-  color: var(--lx-clay-accent);
-  background: var(--lx-clay-surface);
-  text-decoration: none;
-}
-
-.chat-toolbar__balance > span {
-  display: flex;
-  min-width: 0;
-  align-items: baseline;
-  gap: 5px;
-}
-
-.chat-toolbar__balance small {
-  color: var(--lx-clay-text-muted);
-  font-size: 10px;
-}
-
-.chat-toolbar__balance strong {
-  color: var(--lx-clay-text);
-  font-size: 12px;
-  font-variant-numeric: tabular-nums;
 }
 
 .chat-catalog-error {
@@ -1419,10 +1594,14 @@ function scheduleScrollToBottom() {
   min-width: 0;
   flex: 1;
   flex-direction: column;
-  font-size: 12px;
+  font-size: var(--workspace-type-secondary-size);
+  font-weight: var(--workspace-type-secondary-weight);
 }
 
-.chat-catalog-error strong { font-size: 13px; }
+.chat-catalog-error strong {
+  font-size: var(--workspace-type-navigation-size);
+  font-weight: var(--workspace-type-navigation-weight);
+}
 .chat-catalog-error .btn { flex: 0 0 auto; }
 
 .chat-persistence-warning {
@@ -1442,11 +1621,30 @@ function scheduleScrollToBottom() {
   min-width: 0;
   flex: 1;
   flex-direction: column;
-  font-size: 12px;
+  font-size: var(--workspace-type-secondary-size);
+  font-weight: var(--workspace-type-secondary-weight);
 }
 
-.chat-persistence-warning strong { font-size: 13px; }
+.chat-persistence-warning strong {
+  font-size: var(--workspace-type-navigation-size);
+  font-weight: var(--workspace-type-navigation-weight);
+}
 .chat-persistence-warning .btn { flex: 0 0 auto; }
+
+.chat-conversation-flow {
+  display: flex;
+  min-width: 0;
+  min-height: 0;
+  flex: 1;
+  flex-direction: column;
+}
+
+.chat-conversation-flow--new-chat {
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  animation: chat-new-chat-enter 400ms cubic-bezier(0, 0, 0.2, 1) both;
+}
 
 .chat-messages-region {
   position: relative;
@@ -1460,27 +1658,31 @@ function scheduleScrollToBottom() {
   min-height: 0;
   flex: 1;
   overflow-y: auto;
-  padding: 32px 24px 10px;
+  padding: 52px 24px 10px;
   overscroll-behavior: contain;
 }
 
 .chat-messages__inner {
   display: flex;
   flex-direction: column;
-  gap: 18px;
+  gap: 28px;
   padding-bottom: 16px;
 }
 
 .chat-messages__load-older {
   align-self: center;
   min-height: 36px;
-  border: 0;
+  border: 1px solid var(--workspace-border);
   border-radius: 8px;
   padding: 0 14px;
-  color: var(--lx-clay-accent);
-  background: var(--lx-clay-accent-soft);
-  font-size: 12px;
-  font-weight: 700;
+  color: var(--workspace-text-secondary);
+  background: var(--workspace-surface);
+  font-size: var(--workspace-type-navigation-size);
+  font-weight: var(--workspace-type-navigation-weight);
+}
+
+.chat-messages__load-older:hover:not(:disabled) {
+  background: var(--workspace-surface-subtle);
 }
 
 .chat-messages__load-older:disabled {
@@ -1497,11 +1699,11 @@ function scheduleScrollToBottom() {
   width: 40px;
   height: 40px;
   place-items: center;
-  border: 1px solid var(--lx-clay-border-strong);
+  border: 1px solid var(--workspace-border);
   border-radius: 50%;
-  color: var(--lx-clay-accent-deep);
-  background: var(--lx-clay-surface-elevated);
-  box-shadow: var(--lx-clay-shadow-surface);
+  color: var(--workspace-text-secondary);
+  background: var(--workspace-surface);
+  box-shadow: 0 4px 14px rgb(17 24 39 / 0.08);
   transform: translateX(-50%);
   transition:
     border-color 160ms ease,
@@ -1512,9 +1714,9 @@ function scheduleScrollToBottom() {
 }
 
 .chat-scroll-to-latest:hover {
-  border-color: color-mix(in srgb, var(--lx-clay-accent) 34%, var(--lx-clay-border));
-  color: var(--lx-clay-accent);
-  background: var(--lx-clay-accent-soft);
+  border-color: var(--workspace-border-strong);
+  color: var(--workspace-text);
+  background: var(--workspace-surface-subtle);
 }
 
 .chat-scroll-control-enter-from,
@@ -1540,33 +1742,17 @@ function scheduleScrollToBottom() {
   text-align: center;
 }
 
-.chat-empty-state__icon {
-  display: grid;
-  place-items: center;
-  width: 80px;
-  height: 80px;
-  border: 1px solid color-mix(in srgb, var(--lx-clay-accent) 18%, transparent);
-  border-radius: 8px;
-  color: var(--lx-clay-accent);
-  background: var(--lx-clay-accent-soft);
-  box-shadow: var(--lx-clay-shadow-form);
-}
-
 .chat-empty-state h2 {
-  margin: 24px 0 0;
-  color: var(--lx-clay-text);
-  font-family: var(--lx-clay-font-display);
+  display: inline-flex;
+  min-height: 42px;
+  align-items: baseline;
+  margin: 0;
+  color: var(--workspace-text);
   font-size: 24px;
-  font-weight: 900;
-  line-height: 1.25;
-}
-
-.chat-empty-state p {
-  max-width: 480px;
-  margin: 10px 0 0;
-  color: var(--lx-clay-text-secondary);
-  font-size: 14px;
-  line-height: 1.7;
+  font-weight: 400;
+  letter-spacing: normal;
+  line-height: 28px;
+  text-wrap: balance;
 }
 
 .chat-composer-region {
@@ -1575,8 +1761,112 @@ function scheduleScrollToBottom() {
   background: transparent;
 }
 
+.chat-conversation-flow--new-chat .chat-messages-region {
+  min-height: 232px;
+  flex: 0 0 max(232px, 42svh);
+}
+
+.chat-conversation-flow--new-chat .chat-messages {
+  overflow: visible;
+  padding: 0;
+}
+
+.chat-conversation-flow--new-chat .chat-empty-state {
+  min-height: 100%;
+  justify-content: flex-end;
+  padding: 24px 20px 22px;
+}
+
+.chat-conversation-flow--new-chat .chat-composer-region {
+  padding: 0 24px 48px;
+}
+
+@keyframes chat-new-chat-enter {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
 .chat-workspace__drawer {
   display: none;
+}
+
+.chat-delete-confirm__message,
+.chat-delete-confirm__memory {
+  margin: 0;
+}
+
+.chat-delete-confirm__message {
+  color: var(--workspace-confirm-text);
+  font-size: 16px;
+  font-weight: var(--workspace-type-body-weight);
+  line-height: 24px;
+}
+
+.chat-delete-confirm__message strong {
+  font-weight: 700;
+}
+
+.chat-delete-confirm__memory {
+  margin-top: var(--workspace-space-2);
+  color: var(--workspace-confirm-text-secondary);
+  font-size: var(--workspace-type-body-size);
+  font-weight: var(--workspace-type-body-weight);
+  line-height: 20px;
+}
+
+.chat-delete-confirm__settings-word {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.chat-delete-confirm__button {
+  display: inline-flex;
+  height: 36px;
+  align-items: center;
+  justify-content: center;
+  appearance: none;
+  padding: 0 var(--workspace-space-3);
+  border: 1px solid transparent;
+  border-radius: var(--workspace-radius-pill);
+  font: inherit;
+  font-size: var(--workspace-type-navigation-size);
+  font-weight: var(--workspace-type-navigation-weight);
+  line-height: 20px;
+  cursor: pointer;
+  transition: none;
+}
+
+.chat-delete-confirm__button--cancel {
+  border-color: var(--workspace-confirm-cancel-border);
+  color: var(--workspace-confirm-text);
+  background: var(--workspace-confirm-surface);
+}
+
+.chat-delete-confirm__button--danger {
+  color: var(--lx-clay-on-accent);
+  background: var(--workspace-confirm-danger);
+}
+
+.chat-delete-confirm__button:focus-visible {
+  outline: 1.5px solid var(--workspace-confirm-text);
+  outline-offset: 2.5px;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .chat-delete-confirm__button--cancel:hover {
+    background: var(--workspace-confirm-cancel-hover);
+  }
+
+  .chat-delete-confirm__button--danger:hover {
+    background: var(--workspace-confirm-danger-hover);
+  }
 }
 
 .chat-workspace :deep(button:focus-visible),
@@ -1585,18 +1875,23 @@ function scheduleScrollToBottom() {
   outline-offset: 2px;
 }
 
-@media (max-width: 1023px) {
+@media (max-width: 767px) and (hover: none) and (pointer: coarse) {
   .chat-workspace__history--desktop { display: none; }
-  .chat-toolbar__history-button {
-    display: grid;
-    width: 44px;
-    height: 44px;
-    flex-basis: 44px;
+
+  .chat-mobile-actions {
+    display: flex;
+    height: 56px;
+    padding: 0 10px;
+  }
+
+  .chat-conversation-flow--new-chat .chat-messages-region {
+    min-height: 176px;
+    flex-basis: max(176px, calc(42svh - 56px));
   }
 
   .chat-workspace__drawer {
     position: fixed;
-    inset: var(--app-shell-top-offset) 0 0;
+    inset: 0;
     z-index: 45;
     display: flex;
   }
@@ -1605,37 +1900,43 @@ function scheduleScrollToBottom() {
     position: absolute;
     inset: 0;
     border: 0;
-    background: rgba(23, 19, 31, 0.34);
+    background: rgb(15 23 42 / 0.36);
     backdrop-filter: blur(2px);
   }
 
   .chat-workspace__drawer :deep(.chat-history) {
     position: relative;
     z-index: 1;
-    box-shadow: 18px 0 40px rgba(23, 19, 31, 0.18);
+    box-shadow: 18px 0 40px rgb(15 23 42 / 0.18);
   }
 }
 
 @media (max-width: 700px) {
-  .chat-toolbar {
-    height: 64px;
-    gap: 8px;
-    padding: 0 10px;
+  .chat-messages {
+    padding: 24px 8px 6px;
   }
 
-  .chat-toolbar__primary { gap: 8px; }
-  .chat-toolbar__session { display: none; }
-  .chat-toolbar__balance { min-width: 88px; padding-inline: 9px; }
-  .chat-toolbar__balance small { display: none; }
-
-  .chat-messages {
-    padding: 14px 8px 6px;
+  .chat-messages__inner {
+    gap: 24px;
   }
 
   .chat-scroll-to-latest { bottom: 8px; }
 
   .chat-composer-region {
-    padding: 8px 8px max(7px, env(safe-area-inset-bottom));
+    padding: 8px 16px max(7px, env(safe-area-inset-bottom));
+  }
+
+  .chat-conversation-flow--new-chat .chat-messages-region {
+    min-height: 148px;
+    flex-basis: max(148px, calc(42svh - 56px));
+  }
+
+  .chat-conversation-flow--new-chat .chat-empty-state {
+    padding: 20px 16px 22px;
+  }
+
+  .chat-conversation-flow--new-chat .chat-composer-region {
+    padding: 0 16px max(24px, env(safe-area-inset-bottom));
   }
 
   .chat-catalog-error {
@@ -1664,6 +1965,10 @@ function scheduleScrollToBottom() {
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .chat-conversation-flow--new-chat {
+    animation: none;
+  }
+
   .chat-drawer-enter-active,
   .chat-drawer-leave-active,
   .chat-scroll-control-enter-active,

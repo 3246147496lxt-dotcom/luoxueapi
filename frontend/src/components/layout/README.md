@@ -65,6 +65,31 @@ The sidebar owns authenticated navigation on desktop and mobile:
 
 `AppLayout` mounts the sidebar automatically.
 
+### Workspace Sidebar state contract
+
+`useAppStore().sidebarCollapsed` is the only requested desktop collapse state for
+both Chat and Work. Sidebar hosts must consume it through
+`useWorkspaceSidebarCollapse()`, which returns the mobile-aware rendered state and
+the shared toggle, expand, focus-handoff behavior.
+
+```text
+appStore.sidebarCollapsed
+        ↓
+useWorkspaceSidebarCollapse({ enabled, mobile })
+        ↓
+Frame / Header / Brand control / ModeSwitch visibility / Navigation / UserAccountCard
+        ↓
+SidebarAccountDock (collapsed prop only)
+```
+
+Mobile drawer visibility (`mobileOpen`) is orthogonal to desktop collapse state.
+Opening a mobile drawer must not clear the desktop preference; mobile hosts render
+expanded and restore the stored collapsed state when returning to desktop.
+
+Do not add a component-local `collapsed` ref, read the Store again inside a Sidebar
+child, or infer Account Dock state from route or role. Children are controlled by
+the single rendered state supplied by their host.
+
 ### `AppMobileHeader.vue`
 
 The compact header is rendered only below the desktop breakpoint. It contains:

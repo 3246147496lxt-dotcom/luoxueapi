@@ -10,6 +10,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/Wei-Shaw/sub2api/internal/config"
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 )
 
@@ -85,23 +86,24 @@ type ChatHistoryConversation struct {
 }
 
 type ChatHistoryMessage struct {
-	ID                    string     `json:"id"`
-	Position              int64      `json:"position"`
-	Role                  string     `json:"role"`
-	Content               string     `json:"content"`
-	Status                string     `json:"status"`
-	RequestedModel        string     `json:"requested_model,omitempty"`
-	FinishReason          *string    `json:"finish_reason,omitempty"`
-	ErrorCode             *string    `json:"error_code,omitempty"`
-	ErrorMessage          *string    `json:"error_message,omitempty"`
-	AttemptID             *string    `json:"attempt_id,omitempty"`
-	ReceiptID             *string    `json:"receipt_id,omitempty"`
-	ExcludedFromContext   bool       `json:"excluded_from_context,omitempty"`
-	SupersededByMessageID *string    `json:"superseded_by_message_id,omitempty"`
-	CheckpointSeq         int64      `json:"checkpoint_seq,omitempty"`
-	CreatedAt             time.Time  `json:"created_at"`
-	UpdatedAt             time.Time  `json:"updated_at"`
-	TerminalAt            *time.Time `json:"terminal_at,omitempty"`
+	ID                    string           `json:"id"`
+	Position              int64            `json:"position"`
+	Role                  string           `json:"role"`
+	Content               string           `json:"content"`
+	Status                string           `json:"status"`
+	RequestedModel        string           `json:"requested_model,omitempty"`
+	FinishReason          *string          `json:"finish_reason,omitempty"`
+	ErrorCode             *string          `json:"error_code,omitempty"`
+	ErrorMessage          *string          `json:"error_message,omitempty"`
+	AttemptID             *string          `json:"attempt_id,omitempty"`
+	ReceiptID             *string          `json:"receipt_id,omitempty"`
+	ExcludedFromContext   bool             `json:"excluded_from_context,omitempty"`
+	SupersededByMessageID *string          `json:"superseded_by_message_id,omitempty"`
+	CheckpointSeq         int64            `json:"checkpoint_seq,omitempty"`
+	CreatedAt             time.Time        `json:"created_at"`
+	UpdatedAt             time.Time        `json:"updated_at"`
+	TerminalAt            *time.Time       `json:"terminal_at,omitempty"`
+	Attachments           []ChatAttachment `json:"attachments,omitempty"`
 }
 
 type ChatHistoryImportedMessage struct {
@@ -170,8 +172,10 @@ type ChatHistoryAttempt struct {
 }
 
 type ChatCompletionHistoryUserMessage struct {
-	ID      string
-	Content string
+	ID            string
+	Content       string
+	AttachmentIDs []string
+	Attachments   []ChatAttachment
 }
 
 type PrepareChatCompletionInput struct {
@@ -189,8 +193,9 @@ type PrepareChatCompletionInput struct {
 }
 
 type ChatCompletionContextMessage struct {
-	Role    string
-	Content string
+	Role        string
+	Content     string
+	Attachments []ChatAttachment
 }
 
 type PreparedChatCompletion struct {
@@ -237,11 +242,22 @@ type ChatHistoryRepository interface {
 }
 
 type ChatHistoryService struct {
-	repo ChatHistoryRepository
+	repo             ChatHistoryRepository
+	attachments      ChatAttachmentRepository
+	attachmentConfig config.ChatAttachmentConfig
 }
 
 func NewChatHistoryService(repo ChatHistoryRepository) *ChatHistoryService {
 	return &ChatHistoryService{repo: repo}
+}
+
+func ProvideChatHistoryService(repo ChatHistoryRepository, attachments ChatAttachmentRepository, cfg *config.Config) *ChatHistoryService {
+	service := NewChatHistoryService(repo)
+	service.attachments = attachments
+	if cfg != nil {
+		service.attachmentConfig = cfg.ChatAttachments
+	}
+	return service
 }
 
 func (s *ChatHistoryService) CreateConversation(
@@ -453,32 +469,73 @@ func (s *ChatHistoryService) PrepareCompletion(
 	if hasUserMessage {
 		message := *normalized.UserMessage
 		message.ID = strings.TrimSpace(message.ID)
+		message.AttachmentIDs = append([]string(nil), message.AttachmentIDs...)
 		if !validChatHistoryPublicID(message.ID) ||
-			strings.TrimSpace(message.Content) == "" ||
+			(strings.TrimSpace(message.Content) == "" && len(message.AttachmentIDs) == 0) ||
 			len(message.Content) > maxChatCompletionContentBytes {
 			return nil, ErrChatHistoryInvalid
+		}
+		if len(message.AttachmentIDs) > 0 {
+			if s.attachments == nil {
+				return nil, ErrChatAttachmentUnavailable
+			}
+			for i := range message.AttachmentIDs {
+				message.AttachmentIDs[i] = strings.TrimSpace(message.AttachmentIDs[i])
+				if !validChatHistoryPublicID(message.AttachmentIDs[i]) {
+					return nil, ErrChatAttachmentInvalid
+				}
+			}
+			attachments, resolveErr := s.attachments.ResolveForCompletion(ctx, userID, message.AttachmentIDs)
+			if resolveErr != nil {
+				return nil, resolveErr
+			}
+			if validateErr := ValidateAttachmentSelection(attachments, s.attachmentConfig); validateErr != nil {
+				return nil, validateErr
+			}
+			message.Attachments = attachments
 		}
 		normalized.UserMessage = &message
 	} else if !validChatHistoryPublicID(normalized.RetryOfMessageID) {
 		return nil, ErrChatHistoryInvalid
 	}
 
+	type hashAttachment struct {
+		ID     string `json:"id"`
+		Digest string `json:"digest"`
+	}
+	type hashUserMessage struct {
+		ID      string `json:"id"`
+		Content string `json:"content"`
+	}
+	var hashAttachments []hashAttachment
+	var hashUser *hashUserMessage
+	if normalized.UserMessage != nil {
+		hashUser = &hashUserMessage{ID: normalized.UserMessage.ID, Content: normalized.UserMessage.Content}
+		for i := range normalized.UserMessage.Attachments {
+			hashAttachments = append(hashAttachments, hashAttachment{
+				ID:     normalized.UserMessage.Attachments[i].ID,
+				Digest: normalized.UserMessage.Attachments[i].Digest,
+			})
+		}
+	}
 	hashPayload := struct {
-		ConversationID        string                            `json:"conversation_id"`
-		Model                 string                            `json:"model"`
-		ReasoningEffort       string                            `json:"reasoning_effort,omitempty"`
-		ExpectedHeadMessageID *string                           `json:"expected_head_message_id"`
-		UserMessage           *ChatCompletionHistoryUserMessage `json:"user_message,omitempty"`
-		RetryOfMessageID      string                            `json:"retry_of_message_id,omitempty"`
-		AssistantMessageID    string                            `json:"assistant_message_id"`
+		ConversationID        string           `json:"conversation_id"`
+		Model                 string           `json:"model"`
+		ReasoningEffort       string           `json:"reasoning_effort,omitempty"`
+		ExpectedHeadMessageID *string          `json:"expected_head_message_id"`
+		UserMessage           *hashUserMessage `json:"user_message,omitempty"`
+		RetryOfMessageID      string           `json:"retry_of_message_id,omitempty"`
+		AssistantMessageID    string           `json:"assistant_message_id"`
+		Attachments           []hashAttachment `json:"attachments,omitempty"`
 	}{
 		ConversationID:        normalized.ConversationID,
 		Model:                 normalized.Model,
 		ReasoningEffort:       normalized.ReasoningEffort,
 		ExpectedHeadMessageID: normalized.ExpectedHeadMessageID,
-		UserMessage:           normalized.UserMessage,
+		UserMessage:           hashUser,
 		RetryOfMessageID:      normalized.RetryOfMessageID,
 		AssistantMessageID:    normalized.AssistantMessageID,
+		Attachments:           hashAttachments,
 	}
 	payload, err := json.Marshal(hashPayload)
 	if err != nil {

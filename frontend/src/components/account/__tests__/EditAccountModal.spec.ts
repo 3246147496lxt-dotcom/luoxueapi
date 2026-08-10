@@ -647,6 +647,80 @@ describe('EditAccountModal', () => {
     ])
   })
 
+  it('round-trips the OpenAI audio transcriptions capability', async () => {
+    const account = buildAccount()
+    account.credentials.openai_capabilities = [
+      'chat_completions',
+      'embeddings',
+      'audio_transcriptions'
+    ]
+    updateAccountMock.mockReset()
+    checkMixedChannelRiskMock.mockReset()
+    checkMixedChannelRiskMock.mockResolvedValue({ has_risk: false })
+    updateAccountMock.mockResolvedValue(account)
+
+    const wrapper = mountModal(account)
+    const audioTranscriptions = wrapper.get<HTMLInputElement>(
+      '[data-testid="openai-endpoint-capability-audio_transcriptions"]'
+    )
+    expect(audioTranscriptions.element.checked).toBe(true)
+
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+
+    expect(updateAccountMock).toHaveBeenCalledTimes(1)
+    expect(updateAccountMock.mock.calls[0]?.[1]?.credentials?.openai_capabilities).toEqual([
+      'chat_completions',
+      'embeddings',
+      'audio_transcriptions'
+    ])
+  })
+
+  it('preserves unknown OpenAI endpoint capabilities while editing known ones', async () => {
+    const account = buildAccount()
+    account.credentials.openai_capabilities = [
+      'chat_completions',
+      'audio_transcriptions',
+      'future_audio_mode'
+    ]
+    updateAccountMock.mockReset()
+    checkMixedChannelRiskMock.mockReset()
+    checkMixedChannelRiskMock.mockResolvedValue({ has_risk: false })
+    updateAccountMock.mockResolvedValue(account)
+
+    const wrapper = mountModal(account)
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+
+    expect(updateAccountMock).toHaveBeenCalledTimes(1)
+    expect(updateAccountMock.mock.calls[0]?.[1]?.credentials?.openai_capabilities).toEqual([
+      'chat_completions',
+      'audio_transcriptions',
+      'future_audio_mode'
+    ])
+  })
+
+  it('does not silently enable legacy capabilities when only an unknown capability exists', async () => {
+    const account = buildAccount()
+    account.credentials.openai_capabilities = ['future_audio_mode']
+    updateAccountMock.mockReset()
+    checkMixedChannelRiskMock.mockReset()
+    checkMixedChannelRiskMock.mockResolvedValue({ has_risk: false })
+    updateAccountMock.mockResolvedValue(account)
+
+    const wrapper = mountModal(account)
+    expect(wrapper.get<HTMLInputElement>(
+      '[data-testid="openai-endpoint-capability-chat_completions"]'
+    ).element.checked).toBe(false)
+    expect(wrapper.get<HTMLInputElement>(
+      '[data-testid="openai-endpoint-capability-embeddings"]'
+    ).element.checked).toBe(false)
+
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+
+    expect(updateAccountMock.mock.calls[0]?.[1]?.credentials?.openai_capabilities).toEqual([
+      'future_audio_mode'
+    ])
+  })
+
 	it('submits OpenAI quota auto-pause thresholds in extra', async () => {
 	  const account = buildAccount()
 	  account.extra = {

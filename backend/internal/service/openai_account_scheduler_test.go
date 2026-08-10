@@ -599,6 +599,59 @@ func TestOpenAIGatewayService_SelectAccountWithScheduler_DefaultDisabled_Embeddi
 	require.Equal(t, openAIAccountScheduleLayerLoadBalance, decision.Layer)
 }
 
+func TestOpenAIGatewayService_SelectAccountWithScheduler_TranscriptionRequiresExplicitAPIKeyCapability(t *testing.T) {
+	resetOpenAIAdvancedSchedulerSettingCacheForTest()
+	ctx := context.Background()
+	groupID := int64(10111)
+	legacyAPIKey := Account{
+		ID: 36101, Platform: PlatformOpenAI, Type: AccountTypeAPIKey,
+		Status: StatusActive, Schedulable: true, Concurrency: 1, Priority: 10,
+	}
+	oauthWithClaim := Account{
+		ID: 36102, Platform: PlatformOpenAI, Type: AccountTypeOAuth,
+		Status: StatusActive, Schedulable: true, Concurrency: 1, Priority: 20,
+		Credentials: map[string]any{"openai_capabilities": []any{"audio_transcriptions"}},
+	}
+	explicitAPIKey := Account{
+		ID: 36103, Platform: PlatformOpenAI, Type: AccountTypeAPIKey,
+		Status: StatusActive, Schedulable: true, Concurrency: 1, Priority: 0,
+		Credentials: map[string]any{"openai_capabilities": []any{"audio_transcriptions"}},
+	}
+	newService := func(accounts []Account) *OpenAIGatewayService {
+		cfg := &config.Config{}
+		cfg.Gateway.Scheduling.LoadBatchEnabled = false
+		return &OpenAIGatewayService{
+			accountRepo:        schedulerTestOpenAIAccountRepo{accounts: accounts},
+			cache:              &schedulerTestGatewayCache{},
+			cfg:                cfg,
+			concurrencyService: NewConcurrencyService(schedulerTestConcurrencyCache{}),
+		}
+	}
+
+	svc := newService([]Account{legacyAPIKey, oauthWithClaim, explicitAPIKey})
+	selection, _, err := svc.SelectAccountWithSchedulerForCapability(
+		ctx, &groupID, "", "", "gpt-4o-mini-transcribe", nil,
+		OpenAIUpstreamTransportHTTPSSE, OpenAIEndpointCapabilityAudioTranscriptions,
+		false, false, false,
+	)
+	require.NoError(t, err)
+	require.NotNil(t, selection)
+	require.NotNil(t, selection.Account)
+	require.Equal(t, explicitAPIKey.ID, selection.Account.ID)
+	if selection.ReleaseFunc != nil {
+		selection.ReleaseFunc()
+	}
+
+	svc = newService([]Account{legacyAPIKey, oauthWithClaim})
+	selection, _, err = svc.SelectAccountWithSchedulerForCapability(
+		ctx, &groupID, "", "", "gpt-4o-mini-transcribe", nil,
+		OpenAIUpstreamTransportHTTPSSE, OpenAIEndpointCapabilityAudioTranscriptions,
+		false, false, false,
+	)
+	require.Error(t, err)
+	require.Nil(t, selection)
+}
+
 // 生图意图的 /v1/responses 请求要求 OpenAIEndpointCapabilityResponses：探测确认
 // 不支持 Responses API 的 APIKey 账号必须被排除，避免 forward 阶段降级为无法生图
 // 的 Chat Completions 直转（#4417）。

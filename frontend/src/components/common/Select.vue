@@ -58,7 +58,7 @@
         >
           <!-- Search input -->
           <div v-if="isSearchable" class="select-search">
-            <Icon name="search" size="sm" class="text-gray-400" />
+            <Icon name="search" size="sm" class="text-[var(--lx-clay-text-muted)]" />
             <input
               ref="searchInputRef"
               v-model="searchQuery"
@@ -105,9 +105,9 @@
                   v-if="option._creatable"
                   name="search"
                   size="sm"
-                  class="flex-shrink-0 text-gray-400"
+                  class="flex-shrink-0 text-[var(--lx-clay-text-muted)]"
                 />
-                <span class="select-option-label" :class="option._creatable && 'italic text-gray-500 dark:text-dark-300'">{{ getOptionLabel(option) }}</span>
+                <span class="select-option-label" :class="option._creatable && 'italic text-[var(--lx-clay-text-secondary)]'">{{ getOptionLabel(option) }}</span>
                 <Icon
                   v-if="isSelected(option)"
                   name="check"
@@ -527,17 +527,22 @@ onUnmounted(() => {
 .select-trigger {
   @apply flex w-full items-center justify-between gap-2;
   @apply rounded-xl px-4 py-2.5 text-sm;
-  @apply bg-white dark:bg-dark-800;
-  @apply border border-gray-200 dark:border-dark-600;
-  @apply text-gray-900 dark:text-gray-100;
+  @apply border;
   @apply transition-all duration-200;
-  @apply focus:border-primary-500 focus:outline-none focus:ring-2 focus:ring-primary-500/30;
-  @apply hover:border-gray-300 dark:hover:border-dark-500;
+  @apply focus:outline-none;
   @apply cursor-pointer;
+  border-color: var(--lx-clay-border);
+  color: var(--lx-clay-text);
+  background: var(--lx-clay-surface-soft);
+}
+
+.select-trigger:hover {
+  border-color: var(--lx-clay-border-strong);
 }
 
 .select-trigger-open {
-  @apply border-primary-500 ring-2 ring-primary-500/30;
+  border-color: var(--lx-clay-accent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--lx-clay-accent) 30%, transparent);
 }
 
 .select-trigger-error {
@@ -545,7 +550,8 @@ onUnmounted(() => {
 }
 
 .select-trigger-disabled {
-  @apply cursor-not-allowed bg-gray-100 opacity-60 dark:bg-dark-900;
+  @apply cursor-not-allowed opacity-60;
+  background: var(--lx-clay-recessed);
 }
 
 .select-value {
@@ -553,37 +559,48 @@ onUnmounted(() => {
 }
 
 .select-icon {
-  @apply flex-shrink-0 text-gray-400 dark:text-dark-400;
+  @apply flex-shrink-0;
+  color: var(--lx-clay-text-muted);
 }
 
 .select-clear {
   @apply flex flex-shrink-0 cursor-pointer items-center justify-center;
-  @apply rounded text-gray-400 transition-colors;
-  @apply hover:text-gray-600 dark:hover:text-gray-200;
+  @apply rounded transition-colors;
+  color: var(--lx-clay-text-muted);
+}
+
+.select-clear:hover {
+  color: var(--lx-clay-text);
 }
 </style>
 
 <style>
 .select-dropdown-portal {
   @apply w-max min-w-[200px];
-  @apply bg-white dark:bg-dark-800;
   @apply rounded-xl;
-  @apply border border-gray-200 dark:border-dark-700;
+  @apply border;
   @apply shadow-lg shadow-black/10 dark:shadow-black/30;
   @apply overflow-hidden;
+  border-color: var(--lx-clay-border);
+  color: var(--lx-clay-text);
+  background: var(--lx-clay-surface-elevated);
   pointer-events: auto !important;
 }
 
 .select-dropdown-portal .select-search {
   @apply flex items-center gap-2 px-3 py-2;
-  @apply border-b border-gray-100 dark:border-dark-700;
+  @apply border-b;
+  border-color: var(--lx-clay-border);
 }
 
 .select-dropdown-portal .select-search-input {
   @apply flex-1 bg-transparent text-sm;
-  @apply text-gray-900 dark:text-gray-100;
-  @apply placeholder:text-gray-400 dark:placeholder:text-dark-400;
   @apply focus:outline-none;
+  color: var(--lx-clay-text);
+}
+
+.select-dropdown-portal .select-search-input::placeholder {
+  color: var(--lx-clay-placeholder);
 }
 
 .select-dropdown-portal .select-options {
@@ -593,19 +610,20 @@ onUnmounted(() => {
 .select-dropdown-portal .select-option {
   @apply flex items-center justify-between gap-2;
   @apply px-4 py-2.5 text-sm;
-  @apply text-gray-700 dark:text-gray-300;
   @apply cursor-pointer transition-colors duration-150;
-  @apply hover:bg-gray-50 dark:hover:bg-dark-700;
+  color: var(--lx-clay-text-secondary);
   pointer-events: auto !important;
 }
 
-.select-dropdown-portal .select-option-selected {
-  @apply bg-primary-50 dark:bg-primary-900/20;
-  @apply text-primary-700 dark:text-primary-300;
+.select-dropdown-portal .select-option:hover,
+.select-dropdown-portal .select-option-focused {
+  color: var(--lx-clay-text);
+  background: var(--lx-clay-hover);
 }
 
-.select-dropdown-portal .select-option-focused {
-  @apply bg-gray-100 dark:bg-dark-700;
+.select-dropdown-portal .select-option-selected {
+  color: var(--lx-clay-text);
+  background: var(--lx-clay-selected);
 }
 
 .select-dropdown-portal .select-option-disabled {
@@ -614,13 +632,13 @@ onUnmounted(() => {
 
 .select-dropdown-portal .select-option-group {
   @apply cursor-default select-none;
-  @apply bg-gray-50 dark:bg-dark-900;
   @apply text-[11px] font-bold uppercase tracking-wider;
-  @apply text-gray-500 dark:text-gray-400;
+  color: var(--lx-clay-text-secondary);
+  background: var(--lx-clay-surface-subtle);
 }
 
 .select-dropdown-portal .select-option-group:hover {
-  @apply bg-gray-50 dark:bg-dark-900;
+  background: var(--lx-clay-surface-subtle);
 }
 
 .select-dropdown-portal .select-option-label {
@@ -629,7 +647,7 @@ onUnmounted(() => {
 
 .select-dropdown-portal .select-empty {
   @apply px-4 py-8 text-center text-sm;
-  @apply text-gray-500 dark:text-dark-400;
+  color: var(--lx-clay-text-secondary);
 }
 
 .select-dropdown-enter-active,

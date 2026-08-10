@@ -60,6 +60,7 @@ func buildApplicationSupervisor(
 	idempotencyCleanup *service.IdempotencyCleanupService,
 	desktopCleanup *service.DesktopCleanupService,
 	chatAttemptRecovery *service.ChatAttemptService,
+	chatAttachmentCleanup *service.ChatAttachmentService,
 	dashboardAggregation *service.DashboardAggregationService,
 	usageCleanup *service.UsageCleanupService,
 	opsMetricsCollector *service.OpsMetricsCollector,
@@ -262,6 +263,7 @@ func buildApplicationSupervisor(
 			StartFunc:     chatAttemptRecovery.StartRecovery,
 			StopFunc:      chatAttemptRecovery.StopRecovery,
 		},
+		applicationVoidLifecycleComponent("chat-attachment-cleanup", chatAttachmentCleanup.Start, chatAttachmentCleanup.Stop),
 		lifecycle.ComponentFuncs{
 			ComponentName: "dashboard-aggregation",
 			StartFunc: func(context.Context) error {

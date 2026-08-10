@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
@@ -259,6 +260,11 @@ func (h *ChatHandler) DeleteConversation(c *gin.Context) {
 	); err != nil {
 		response.ErrorFrom(c, err)
 		return
+	}
+	if h.attachments != nil {
+		if err := h.attachments.CleanupConversation(c.Request.Context(), userID, c.Param("conversation_id")); err != nil {
+			slog.Warn("chat attachment conversation cleanup deferred to janitor", "user_id", userID, "conversation_id", c.Param("conversation_id"), "error", err)
+		}
 	}
 	response.Success(c, gin.H{"deleted": true})
 }

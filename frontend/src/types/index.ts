@@ -1193,7 +1193,10 @@ export interface CodexUsageSnapshot {
 
 export type OpenAICompactMode = 'auto' | 'force_on' | 'force_off'
 export type OpenAIResponsesMode = 'auto' | 'force_responses' | 'force_chat_completions'
-export type OpenAIEndpointCapability = 'chat_completions' | 'embeddings'
+export type OpenAIEndpointCapability =
+  | 'chat_completions'
+  | 'embeddings'
+  | 'audio_transcriptions'
 
 export interface OpenAICompactState {
   openai_compact_mode?: OpenAICompactMode
@@ -1713,6 +1716,8 @@ export interface GroupStat {
 export interface UserBreakdownItem {
   user_id: number
   email: string
+  /** Present on current servers; optional keeps rolling upgrades compatible with older responses. */
+  username?: string
   requests: number
   input_tokens: number
   output_tokens: number

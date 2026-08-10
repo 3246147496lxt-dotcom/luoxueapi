@@ -17,6 +17,7 @@ import { chatHistoryPersistence } from '@/features/chat/persistence'
 import type { ChatHistoryMutation } from '@/features/chat/persistence'
 import type {
   ChatAttempt,
+  ChatAttachment,
   ChatConversation,
   ChatHistoryOutboxMutation,
   ChatHistorySyncStatus,
@@ -30,7 +31,7 @@ import type {
 
 export const MAX_CHAT_CONVERSATIONS = 50
 
-const STORAGE_VERSION = 2
+const STORAGE_VERSION = 4
 const DEFAULT_CONVERSATION_TITLE = '新对话'
 const STREAM_PERSIST_THROTTLE_MS = 300
 const MAX_FUTURE_TIMESTAMP_SKEW_MS = 5 * 60 * 1000
@@ -44,6 +45,7 @@ interface PersistedChatState {
   clearRevision: number
   deletedConversationIds: string[]
   activeConversationId: string | null
+  activeConversationSelectionResolved: boolean
   conversations: ChatConversation[]
   serverVersion: number
   outbox: ChatHistoryOutboxMutation[]
@@ -84,6 +86,7 @@ export interface CreateChatMessage {
   receiptCreatedAt?: string
   excludedFromContext?: boolean
   supersededByMessageId?: string
+  attachments?: ChatAttachment[]
 }
 
 export type ChatMessagePatch = Partial<
@@ -200,6 +203,52 @@ function isChatReceiptStatus(value: unknown): value is ChatReceiptStatus {
     || value === 'failed'
 }
 
+function sanitizeAttachment(value: unknown): ChatAttachment | null {
+  if (!isRecord(value)) return null
+  const id = typeof value.id === 'string' ? value.id.trim() : ''
+  const name = typeof value.name === 'string' ? value.name.trim() : ''
+  const mimeType = typeof value.mimeType === 'string' ? value.mimeType.trim() : ''
+  const expiresAt = typeof value.expiresAt === 'string' ? value.expiresAt.trim() : ''
+  if (
+    !id
+    || !name
+    || !mimeType
+    || !expiresAt
+    || (value.kind !== 'image' && value.kind !== 'document')
+    || (value.status !== 'ready' && value.status !== 'expired')
+    || !isNonNegativeInteger(value.size)
+  ) return null
+
+  const attachment: ChatAttachment = {
+    id,
+    name,
+    kind: value.kind,
+    mimeType,
+    size: value.size,
+    status: value.status,
+    expiresAt,
+  }
+  if (isNonNegativeInteger(value.pageCount) && value.pageCount > 0) {
+    attachment.pageCount = value.pageCount
+  }
+  if (isNonNegativeInteger(value.width) && value.width > 0) attachment.width = value.width
+  if (isNonNegativeInteger(value.height) && value.height > 0) attachment.height = value.height
+  return attachment
+}
+
+function sanitizedAttachments(value: unknown): ChatAttachment[] {
+  if (!Array.isArray(value)) return []
+  const ids = new Set<string>()
+  return value.reduce<ChatAttachment[]>((result, candidate) => {
+    const attachment = sanitizeAttachment(candidate)
+    if (attachment && !ids.has(attachment.id)) {
+      ids.add(attachment.id)
+      result.push(attachment)
+    }
+    return result
+  }, [])
+}
+
 function copyAssistantMetadata(
   target: ChatMessage,
   source: Record<string, unknown>,
@@ -310,6 +359,8 @@ function sanitizeMessage(value: unknown): ChatMessage | null {
   if (typeof value.errorCode === 'string') message.errorCode = value.errorCode
   if (typeof value.errorMessage === 'string') message.errorMessage = value.errorMessage
   copyAssistantMetadata(message, value)
+  const attachments = sanitizedAttachments(value.attachments)
+  if (attachments.length > 0) message.attachments = attachments
 
   return message
 }
@@ -379,6 +430,8 @@ function createPersistedMessage(message: ChatMessage): ChatMessage {
   if (message.errorCode !== undefined) persisted.errorCode = message.errorCode
   if (message.errorMessage !== undefined) persisted.errorMessage = message.errorMessage
   copyAssistantMetadata(persisted, message as unknown as Record<string, unknown>)
+  const attachments = sanitizedAttachments(message.attachments)
+  if (attachments.length > 0) persisted.attachments = attachments
   return persisted
 }
 
@@ -473,6 +526,10 @@ export const useChatStore = defineStore('chat', () => {
   let syncPromise: Promise<void> | null = null
   let syncController: AbortController | null = null
   let clearRevision = 0
+  let activeConversationSelectionResolved = false
+  let activeConversationSelectionRevision = 0
+  let pendingInitialConversationSelection = false
+  let pendingServerSelectionReplacementId: string | null = null
   let deletedConversationIds = new Set<string>()
   let pendingPersistConversationIds = new Set<string>()
   type PersistenceOperation = () => Promise<void>
@@ -542,6 +599,10 @@ export const useChatStore = defineStore('chat', () => {
     searchingHistory.value = false
     loadingConversationMessages.value = new Set<string>()
     clearRevision = 0
+    activeConversationSelectionResolved = false
+    activeConversationSelectionRevision = 0
+    pendingInitialConversationSelection = false
+    pendingServerSelectionReplacementId = null
     deletedConversationIds = new Set<string>()
     pendingPersistConversationIds = new Set<string>()
   }
@@ -613,6 +674,7 @@ export const useChatStore = defineStore('chat', () => {
       clearRevision,
       deletedConversationIds: [...deletedConversationIds],
       activeConversationId: activeConversationId.value,
+      activeConversationSelectionResolved,
       conversations: conversations.value.map(createPersistedConversation),
       serverVersion: serverVersion.value,
       outbox: outbox.value.map((mutation) => ({ ...mutation })),
@@ -684,7 +746,12 @@ export const useChatStore = defineStore('chat', () => {
     try {
       if (
         !isRecord(parsed)
-        || (parsed.version !== 1 && parsed.version !== STORAGE_VERSION)
+        || (
+          parsed.version !== 1
+          && parsed.version !== 2
+          && parsed.version !== 3
+          && parsed.version !== STORAGE_VERSION
+        )
         || !Array.isArray(parsed.conversations)
       ) {
         throw new Error('Invalid chat storage payload')
@@ -724,6 +791,16 @@ export const useChatStore = defineStore('chat', () => {
       const requestedActiveId = typeof parsed.activeConversationId === 'string'
         ? parsed.activeConversationId
         : null
+      const hasExplicitEmptySelection = Object.prototype.hasOwnProperty.call(
+        parsed,
+        'activeConversationId',
+      ) && parsed.activeConversationId === null
+      const restoredSelectionResolved =
+        typeof parsed.activeConversationSelectionResolved === 'boolean'
+          ? parsed.activeConversationSelectionResolved
+          : requestedActiveId !== null
+            || hasExplicitEmptySelection
+            || restoredClearRevision > 0
       const outboxIds = new Set<string>()
       const restoredOutbox = (
         Array.isArray(parsed.outbox) ? parsed.outbox : []
@@ -753,9 +830,14 @@ export const useChatStore = defineStore('chat', () => {
         version: STORAGE_VERSION,
         clearRevision: restoredClearRevision,
         deletedConversationIds: [...restoredDeletedIds],
-        activeConversationId: restored.some(({ id }) => id === requestedActiveId)
-          ? requestedActiveId
-          : (restored[0]?.id ?? null),
+        activeConversationId: !restoredSelectionResolved
+          ? null
+          : parsed.activeConversationId === null
+            ? null
+            : restored.some(({ id }) => id === requestedActiveId)
+              ? requestedActiveId
+              : (restored[0]?.id ?? null),
+        activeConversationSelectionResolved: restoredSelectionResolved,
         conversations: restored,
         serverVersion: isNonNegativeInteger(parsed.serverVersion) ? parsed.serverVersion : 0,
         outbox: restoredOutbox,
@@ -785,6 +867,7 @@ export const useChatStore = defineStore('chat', () => {
     persistenceAvailable.value = true
     userId.value = normalizedUserId
     hydrating.value = true
+    const selectionRevision = activeConversationSelectionRevision
 
     hydrationPromise = (async () => {
       try {
@@ -793,7 +876,10 @@ export const useChatStore = defineStore('chat', () => {
         if (version !== hydrationVersion || userId.value !== normalizedUserId || !persisted) return
 
         conversations.value = persisted.conversations
-        activeConversationId.value = persisted.activeConversationId
+        if (selectionRevision === activeConversationSelectionRevision) {
+          activeConversationId.value = persisted.activeConversationId
+          activeConversationSelectionResolved = persisted.activeConversationSelectionResolved
+        }
         clearRevision = persisted.clearRevision
         deletedConversationIds = new Set(persisted.deletedConversationIds)
         serverVersion.value = persisted.serverVersion
@@ -984,6 +1070,8 @@ export const useChatStore = defineStore('chat', () => {
 
     conversations.value.unshift(conversation)
     activeConversationId.value = conversation.id
+    activeConversationSelectionResolved = true
+    activeConversationSelectionRevision += 1
     const createMutationId = queueConversationCreate(conversation)
 
     if (conversations.value.length > MAX_CHAT_CONVERSATIONS) {
@@ -1004,12 +1092,16 @@ export const useChatStore = defineStore('chat', () => {
   function selectConversation(conversationId: string | null): boolean {
     if (conversationId === null) {
       activeConversationId.value = null
+      activeConversationSelectionResolved = true
+      activeConversationSelectionRevision += 1
       persist({ activeConversationChanged: true })
       return true
     }
     if (!findConversation(conversationId)) return false
 
     activeConversationId.value = conversationId
+    activeConversationSelectionResolved = true
+    activeConversationSelectionRevision += 1
     persist({ activeConversationChanged: true })
     return true
   }
@@ -1036,16 +1128,22 @@ export const useChatStore = defineStore('chat', () => {
     if (streamingConversationId.value === conversationId) clearStreamingRuntime(true)
     const mutationId = queueConversationDelete(conversations.value[index]!)
     conversations.value.splice(index, 1)
+    searchResults.value = searchResults.value.filter(
+      (conversation) => conversation.id !== conversationId,
+    )
     deletedConversationIds.add(conversationId)
     legacyConversationIds.value = legacyConversationIds.value.filter((id) => id !== conversationId)
-    if (activeConversationId.value === conversationId) {
+    const activeConversationChanged = activeConversationId.value === conversationId
+    if (activeConversationChanged) {
       activeConversationId.value = conversations.value[index]?.id
         ?? conversations.value[index - 1]?.id
         ?? null
+      activeConversationSelectionResolved = true
+      activeConversationSelectionRevision += 1
     }
     persist({
       deletedConversationIds: [conversationId],
-      activeConversationChanged: true,
+      activeConversationChanged,
       ...(mutationId ? { enqueueOutboxMutationIds: [mutationId] } : {}),
       syncStateChanged: true,
     })
@@ -1060,6 +1158,8 @@ export const useChatStore = defineStore('chat', () => {
     clearStreamingRuntime(true)
     conversations.value = []
     activeConversationId.value = null
+    activeConversationSelectionResolved = true
+    activeConversationSelectionRevision += 1
     streamError.value = null
     clearRevision = Math.max(epochNow(), clearRevision + TIMESTAMP_INCREMENT_MS)
     deletedConversationIds = new Set<string>()
@@ -1114,11 +1214,22 @@ export const useChatStore = defineStore('chat', () => {
     if (!conversation || (input.role !== 'user' && input.role !== 'assistant')) return null
     if (typeof input.content !== 'string') return null
 
+    const highestKnownPosition = conversation.messages.reduce(
+      (highest, { position }) => Math.max(highest, position ?? 0),
+      0,
+    )
+    const nextPosition = Math.max(
+      conversation.messageCount ?? 0,
+      conversation.messages.length,
+      highestKnownPosition,
+    ) + 1
+
     const message: ChatMessage = {
       id: input.id?.trim() || createId('message'),
       role: input.role,
       content: input.content,
       createdAt: isFiniteTimestamp(input.createdAt) ? input.createdAt : Date.now(),
+      position: nextPosition,
       status: input.status ?? 'complete',
     }
     if (conversation.messages.some(({ id }) => id === message.id)) return null
@@ -1126,6 +1237,8 @@ export const useChatStore = defineStore('chat', () => {
     if (input.errorCode !== undefined) message.errorCode = input.errorCode
     if (input.errorMessage !== undefined) message.errorMessage = input.errorMessage
     copyAssistantMetadata(message, input as unknown as Record<string, unknown>)
+    const attachments = sanitizedAttachments(input.attachments)
+    if (attachments.length > 0) message.attachments = attachments
 
     conversation.messages.push(message)
     moveConversationToFront(conversation)
@@ -1158,6 +1271,26 @@ export const useChatStore = defineStore('chat', () => {
     if (typeof patch.errorMessage === 'string') message.errorMessage = patch.errorMessage
     copyAssistantMetadata(message, patch as unknown as Record<string, unknown>)
 
+    moveConversationToFront(conversation)
+    persist({ upsertConversationIds: [conversationId] })
+    return true
+  }
+
+  function removeMessages(conversationId: string, messageIds: string[]): boolean {
+    const conversation = findConversation(conversationId)
+    const ids = new Set(messageIds.map((id) => id.trim()).filter(Boolean))
+    if (!conversation || ids.size === 0) return false
+
+    const nextMessages = conversation.messages.filter((message) => !ids.has(message.id))
+    if (nextMessages.length === conversation.messages.length) return false
+    if (
+      streamingConversationId.value === conversationId
+      && streamingMessageId.value
+      && ids.has(streamingMessageId.value)
+    ) {
+      clearStreamingRuntime(true)
+    }
+    conversation.messages = nextMessages
     moveConversationToFront(conversation)
     persist({ upsertConversationIds: [conversationId] })
     return true
@@ -1298,13 +1431,26 @@ export const useChatStore = defineStore('chat', () => {
     return chatErrorStatus(error) === 404
   }
 
-  function compareMessages(left: ChatMessage, right: ChatMessage): number {
-    if (left.position !== undefined && right.position !== undefined) {
-      return left.position - right.position
-    }
-    if (left.position !== undefined) return -1
-    if (right.position !== undefined) return 1
-    return left.createdAt - right.createdAt || left.id.localeCompare(right.id)
+  function sortMessages(messages: ChatMessage[]): ChatMessage[] {
+    const hasCanonicalPositions = messages.every(({ position }) => position !== undefined)
+    return messages.sort((left, right) => {
+      if (hasCanonicalPositions) {
+        return (left.position ?? 0) - (right.position ?? 0)
+          || left.createdAt - right.createdAt
+      }
+      // Legacy and in-flight records can temporarily lack a server position.
+      // Keep equal timestamps stable instead of letting random UUIDs reorder a turn.
+      return left.createdAt - right.createdAt
+    })
+  }
+
+  function conversationNeedsCanonicalMessages(conversation: ChatConversation): boolean {
+    if (conversation.messages.some(({ position }) => position === undefined)) return true
+    if ((conversation.messageCount ?? 0) > 0 && conversation.messages.length === 0) return true
+    return Boolean(
+      conversation.headMessageId
+      && !conversation.messages.some(({ id }) => id === conversation.headMessageId),
+    )
   }
 
   function mergeServerMessage(
@@ -1350,7 +1496,7 @@ export const useChatStore = defineStore('chat', () => {
         mergeServerMessage(messagesById.get(message.id), message, incoming.id),
       )
     }
-    const messages = [...messagesById.values()].sort(compareMessages)
+    const messages = sortMessages([...messagesById.values()])
     const remoteWinsMetadata = !existing
       || incoming.revision >= (existing.serverRevision ?? 0)
     const conversation: ChatConversation = existing ?? {
@@ -1387,8 +1533,15 @@ export const useChatStore = defineStore('chat', () => {
     conversations.value.sort((left, right) => (
       compareConversationsByRecency(left, right, Date.now())
     ))
-    if (!activeConversationId.value) activeConversationId.value = conversation.id
     return conversation.id
+  }
+
+  function resolveInitialConversationSelection(): void {
+    if (activeConversationSelectionResolved || conversations.value.length === 0) return
+    activeConversationId.value = conversations.value[0]!.id
+    activeConversationSelectionResolved = true
+    activeConversationSelectionRevision += 1
+    pendingInitialConversationSelection = true
   }
 
   function acknowledgeOutbox(ids: Iterable<string>): string[] {
@@ -1408,9 +1561,14 @@ export const useChatStore = defineStore('chat', () => {
       if (streamingConversationId.value === conversationId) clearStreamingRuntime(true)
       conversations.value.splice(index, 1)
       if (activeConversationId.value === conversationId) {
+        if (pendingServerSelectionReplacementId === null) {
+          pendingServerSelectionReplacementId = conversationId
+        }
         activeConversationId.value = conversations.value[index]?.id
           ?? conversations.value[index - 1]?.id
           ?? null
+        activeConversationSelectionResolved = true
+        activeConversationSelectionRevision += 1
       }
     }
     deletedConversationIds.add(conversationId)
@@ -1427,13 +1585,27 @@ export const useChatStore = defineStore('chat', () => {
     deletedIds: string[] = [],
     acknowledgedMutationIds: string[] = [],
   ): void {
+    const createdConversations = upsertConversationIds.flatMap((id) => {
+      const conversation = findConversation(id)
+      return conversation
+        ? [{ id, operationAt: conversation.createdAt }]
+        : []
+    })
+    const initializeActiveConversation = pendingInitialConversationSelection
+    const replaceActiveConversationIfId = pendingServerSelectionReplacementId
+    pendingInitialConversationSelection = false
+    pendingServerSelectionReplacementId = null
     persist({
       ...(upsertConversationIds.length > 0 ? { upsertConversationIds } : {}),
+      ...(createdConversations.length > 0 ? { createdConversations } : {}),
       ...(deletedIds.length > 0 ? { deletedConversationIds: deletedIds } : {}),
       ...(acknowledgedMutationIds.length > 0
         ? { acknowledgedOutboxMutationIds: acknowledgedMutationIds }
         : {}),
-      activeConversationChanged: deletedIds.length > 0,
+      ...(initializeActiveConversation ? { initializeActiveConversation: true } : {}),
+      ...(replaceActiveConversationIfId
+        ? { replaceActiveConversationIfId }
+        : {}),
       syncStateChanged: true,
     })
   }
@@ -1467,6 +1639,7 @@ export const useChatStore = defineStore('chat', () => {
       pageCount += 1
     } while (cursor && pageCount < 100)
 
+    resolveInitialConversationSelection()
     persistServerMerge([...upserted], [...deleted], [...acknowledged])
   }
 
@@ -1655,20 +1828,31 @@ export const useChatStore = defineStore('chat', () => {
 
   async function loadConversationPage(reset = false): Promise<void> {
     if (!userId.value || loadingConversationPage.value || !browserIsOnline()) return
+    const context = capturePersistenceContext()
+    let conversationToHydrate: string | null = null
     loadingConversationPage.value = true
     try {
       const page = await listChatConversations({
         cursor: reset ? null : conversationCursor.value,
         limit: MAX_CHAT_CONVERSATIONS,
       })
+      if (!isCurrentPersistenceContext(context)) return
       serverHistoryAvailable.value = true
       const upserted = page.items
         .map(applyServerConversation)
         .filter((id): id is string => Boolean(id))
       conversationCursor.value = page.nextCursor
       conversationsHaveMore.value = page.hasMore
+      if (reset) resolveInitialConversationSelection()
       persistServerMerge(upserted)
+      const active = reset && activeConversationId.value
+        ? findConversation(activeConversationId.value)
+        : undefined
+      if (active && conversationNeedsCanonicalMessages(active)) {
+        conversationToHydrate = active.id
+      }
     } catch (error) {
+      if (!isCurrentPersistenceContext(context)) return
       if (isHistoryUnavailableError(error)) {
         serverHistoryAvailable.value = false
         syncStatus.value = 'unavailable'
@@ -1676,7 +1860,10 @@ export const useChatStore = defineStore('chat', () => {
         syncError.value = error instanceof Error ? error.message : 'Unable to load conversations.'
       }
     } finally {
-      loadingConversationPage.value = false
+      if (isCurrentPersistenceContext(context)) loadingConversationPage.value = false
+    }
+    if (conversationToHydrate && isCurrentPersistenceContext(context)) {
+      await loadConversationDetail(conversationToHydrate)
     }
   }
 
@@ -1728,12 +1915,19 @@ export const useChatStore = defineStore('chat', () => {
 
   async function loadConversationDetail(conversationId: string): Promise<boolean> {
     if (!browserIsOnline() || serverHistoryAvailable.value === false) return false
+    const context = capturePersistenceContext()
     try {
       const remote = await getChatConversation(conversationId)
+      if (!isCurrentPersistenceContext(context)) return false
       const id = applyServerConversation(remote)
       if (id) persistServerMerge([id])
+      const conversation = id ? findConversation(id) : undefined
+      if (id && conversation && conversationNeedsCanonicalMessages(conversation)) {
+        await loadConversationMessagesPage(id, null)
+      }
       return Boolean(id)
     } catch (error) {
+      if (!isCurrentPersistenceContext(context)) return false
       if (isNotFoundError(error) && serverHistoryAvailable.value === true) {
         const deletion = applyServerDeletion(conversationId)
         persistServerMerge(
@@ -1746,10 +1940,14 @@ export const useChatStore = defineStore('chat', () => {
     }
   }
 
-  async function loadOlderConversationMessages(conversationId: string): Promise<boolean> {
-    const conversation = findConversation(conversationId)
+  async function loadConversationMessagesPage(
+    conversationId: string,
+    beforePosition: number | null,
+  ): Promise<boolean> {
+    const context = capturePersistenceContext()
+    const existingConversation = findConversation(conversationId)
     if (
-      !conversation
+      !existingConversation
       || !browserIsOnline()
       || loadingConversationMessages.value.has(conversationId)
     ) {
@@ -1760,9 +1958,12 @@ export const useChatStore = defineStore('chat', () => {
     loadingConversationMessages.value = loading
     try {
       const page = await getChatConversationMessages(conversationId, {
-        beforePosition: conversation.messagesBeforePosition ?? null,
+        beforePosition,
         limit: 100,
       })
+      if (!isCurrentPersistenceContext(context)) return false
+      const conversation = findConversation(conversationId)
+      if (!conversation) return false
       const messagesById = new Map(
         conversation.messages.map((message) => [message.id, message]),
       )
@@ -1772,18 +1973,30 @@ export const useChatStore = defineStore('chat', () => {
           mergeServerMessage(messagesById.get(message.id), message, conversationId),
         )
       }
-      conversation.messages = [...messagesById.values()].sort(compareMessages)
+      conversation.messages = sortMessages([...messagesById.values()])
       conversation.messagesBeforePosition = page.nextBeforePosition
       conversation.messagesHasMore = page.hasMore
+      serverHistoryAvailable.value = true
       persist({ upsertConversationIds: [conversationId], syncStateChanged: true })
       return true
     } catch {
       return false
     } finally {
-      const nextLoading = new Set(loadingConversationMessages.value)
-      nextLoading.delete(conversationId)
-      loadingConversationMessages.value = nextLoading
+      if (isCurrentPersistenceContext(context)) {
+        const nextLoading = new Set(loadingConversationMessages.value)
+        nextLoading.delete(conversationId)
+        loadingConversationMessages.value = nextLoading
+      }
     }
+  }
+
+  async function loadOlderConversationMessages(conversationId: string): Promise<boolean> {
+    const conversation = findConversation(conversationId)
+    if (!conversation) return false
+    return loadConversationMessagesPage(
+      conversationId,
+      conversation.messagesBeforePosition ?? null,
+    )
   }
 
   async function recoverAttempt(
@@ -1823,7 +2036,7 @@ export const useChatStore = defineStore('chat', () => {
         }
         if (index >= 0) conversation.messages[index] = merged
         else conversation.messages.push(merged)
-        conversation.messages.sort(compareMessages)
+        sortMessages(conversation.messages)
         persist({ upsertConversationIds: [conversationId], syncStateChanged: true })
       } else if (attempt.receiptId) {
         updateMessage(conversationId, messageId, {
@@ -1874,6 +2087,7 @@ export const useChatStore = defineStore('chat', () => {
     setConversationModel,
     addMessage,
     updateMessage,
+    removeMessages,
     startStreaming,
     appendStreamingContent,
     finishStreaming,

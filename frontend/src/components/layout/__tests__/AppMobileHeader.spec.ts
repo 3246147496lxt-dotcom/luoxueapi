@@ -61,18 +61,26 @@ describe('AppMobileHeader', () => {
     const { wrapper } = mountHeader()
     const header = wrapper.get('[data-testid="app-mobile-header"]')
 
-    expect(header.classes()).toEqual(expect.arrayContaining(['app-mobile-header', 'lg:hidden']))
+    expect(header.classes()).toEqual(['app-mobile-header'])
     expect(wrapper.get('[data-testid="mobile-brand"]').attributes()).toMatchObject({
       'data-placement': 'header',
       'data-collapsed': 'false',
     })
     expect(wrapper.get('[data-testid="mobile-header-page-title"]').text()).toBe('Dashboard')
     expect(componentSource).toContain('height: var(--app-shell-top-offset);')
+    expect(componentSource).toMatch(
+      /\.app-mobile-header\s*\{[^}]*display: none;/s,
+    )
+    expect(componentSource).toMatch(
+      /@media \(max-width: 767px\) and \(hover: none\) and \(pointer: coarse\)[\s\S]*?\.app-mobile-header\s*\{[^}]*display: block;/,
+    )
+    expect(componentSource).toContain('font-size: var(--workspace-type-navigation-size);')
+    expect(componentSource).toContain('font-weight: var(--workspace-type-navigation-weight);')
     expect(componentSource).not.toContain('81px')
     expect(componentSource).not.toContain('5.0625rem')
   })
 
-  it('opens the sidebar expanded and keeps aria state synchronized', async () => {
+  it('opens the mobile drawer without clearing the desktop collapse request', async () => {
     const { wrapper, appStore } = mountHeader()
     const menu = wrapper.get('[data-testid="mobile-header-menu"]')
 
@@ -84,14 +92,15 @@ describe('AppMobileHeader', () => {
     await menu.trigger('click')
 
     expect(appStore.mobileOpen).toBe(true)
-    expect(appStore.sidebarCollapsed).toBe(false)
+    expect(appStore.sidebarCollapsed).toBe(true)
     expect(menu.attributes('aria-expanded')).toBe('true')
     expect(menu.attributes('aria-label')).toBe('nav.closeNavigation')
 
     await menu.trigger('click')
 
     expect(appStore.mobileOpen).toBe(false)
-    expect(appStore.sidebarCollapsed).toBe(false)
+    expect(appStore.sidebarCollapsed).toBe(true)
     expect(menu.attributes('aria-expanded')).toBe('false')
+    expect(componentSource).not.toContain('setSidebarCollapsed')
   })
 })

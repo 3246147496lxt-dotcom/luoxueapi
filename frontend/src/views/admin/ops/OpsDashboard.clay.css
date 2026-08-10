@@ -454,30 +454,6 @@ body.admin-ops-option-b #app-sidebar .sidebar-nav {
   padding: 12px 8px 8px;
 }
 
-body.admin-ops-option-b #app-sidebar .sidebar-workspace-switch {
-  min-height: 38px;
-  gap: 3px;
-  margin: 0 0 12px;
-  padding: 3px;
-  border-radius: 10px;
-  background: rgb(15 23 42 / 6%);
-}
-
-body.admin-ops-option-b #app-sidebar .sidebar-workspace-option {
-  min-height: 32px;
-  border-radius: 7px;
-  color: #635f69;
-  font-size: 12px;
-  font-weight: 500;
-}
-
-body.admin-ops-option-b #app-sidebar .sidebar-workspace-option-active {
-  color: #332f3a;
-  background: #ffffff;
-  box-shadow: 0 1px 3px rgb(15 23 42 / 12%);
-  font-weight: 700;
-}
-
 body.admin-ops-option-b #app-sidebar .sidebar-section-title {
   min-height: 28px;
   padding: 4px 12px;

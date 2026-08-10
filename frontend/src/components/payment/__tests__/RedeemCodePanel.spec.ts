@@ -4,8 +4,8 @@ import RedeemCodePanel from '../RedeemCodePanel.vue'
 
 const redeem = vi.hoisted(() => vi.fn())
 const getHistory = vi.hoisted(() => vi.fn())
-const refreshUser = vi.hoisted(() => vi.fn())
-const fetchActiveSubscriptions = vi.hoisted(() => vi.fn())
+const syncAfterUpgrade = vi.hoisted(() => vi.fn())
+const refreshProfile = vi.hoisted(() => vi.fn())
 const showSuccess = vi.hoisted(() => vi.fn())
 const showError = vi.hoisted(() => vi.fn())
 const showWarning = vi.hoisted(() => vi.fn())
@@ -22,7 +22,7 @@ vi.mock('vue-i18n', async () => {
 })
 
 vi.mock('@/stores/auth', () => ({
-  useAuthStore: () => ({ user, refreshUser }),
+  useAuthStore: () => ({ user }),
 }))
 
 vi.mock('@/stores/app', () => ({
@@ -35,8 +35,8 @@ vi.mock('@/stores/app', () => ({
   }),
 }))
 
-vi.mock('@/stores/subscriptions', () => ({
-  useSubscriptionStore: () => ({ fetchActiveSubscriptions }),
+vi.mock('@/stores/userProfile', () => ({
+  useUserProfileStore: () => ({ refreshProfile, syncAfterUpgrade }),
 }))
 
 vi.mock('@/api/redeem', () => ({
@@ -62,10 +62,10 @@ describe('RedeemCodePanel', () => {
     user.concurrency = 2
     redeem.mockReset()
     getHistory.mockReset().mockResolvedValue([])
-    refreshUser.mockReset().mockImplementation(async () => {
+    refreshProfile.mockReset().mockImplementation(async () => {
       user.balance = 15
     })
-    fetchActiveSubscriptions.mockReset().mockResolvedValue(undefined)
+    syncAfterUpgrade.mockReset().mockResolvedValue(undefined)
     showSuccess.mockReset()
     showError.mockReset()
     showWarning.mockReset()
@@ -118,7 +118,7 @@ describe('RedeemCodePanel', () => {
     await flushPromises()
 
     expect(redeem).toHaveBeenCalledWith('EMBEDDED-001')
-    expect(refreshUser).toHaveBeenCalledTimes(1)
+    expect(refreshProfile).toHaveBeenCalledTimes(1)
     expect(getHistory).not.toHaveBeenCalled()
     expect(wrapper.get('[role="status"]').classes()).toContain('redeem-panel__feedback--success')
     expect(wrapper.emitted('redeemed')).toHaveLength(1)
@@ -134,7 +134,7 @@ describe('RedeemCodePanel', () => {
     await flushPromises()
 
     expect(redeem).toHaveBeenCalledWith('CODE-001')
-    expect(refreshUser).toHaveBeenCalledTimes(1)
+    expect(refreshProfile).toHaveBeenCalledTimes(1)
     expect(wrapper.get('[role="status"]').text()).toContain('redeem.balanceAddedAmount')
     expect(wrapper.get('[role="status"]').text()).toContain('redeem.currentBalance')
     expect(wrapper.get('[role="status"]').findAll('[data-testid="credit-amount"]')).toHaveLength(2)
@@ -157,13 +157,13 @@ describe('RedeemCodePanel', () => {
     await wrapper.get('form').trigger('submit')
     await flushPromises()
 
-    expect(fetchActiveSubscriptions).toHaveBeenCalledWith(true)
+    expect(syncAfterUpgrade).toHaveBeenCalledTimes(1)
     expect(wrapper.get('[role="status"]').text()).toContain('redeem.subscriptionRedeemSummary')
   })
 
   it('keeps a successful redemption when refreshing the account fails', async () => {
     redeem.mockResolvedValue(redeemResult())
-    refreshUser.mockRejectedValue(new Error('temporary refresh failure'))
+    refreshProfile.mockRejectedValue(new Error('temporary refresh failure'))
     const wrapper = mount(RedeemCodePanel)
     await flushPromises()
 

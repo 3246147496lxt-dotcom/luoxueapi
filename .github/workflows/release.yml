@@ -291,6 +291,7 @@ jobs:
           set -Eeuo pipefail
           go version | grep -q 'go1.26.5'
           test -f internal/web/dist/index.html
+          test -f internal/web/dist/admin/index.html
           test -f internal/web/dist/tutorial-docs/index.html
           test -s resources/model-pricing/model_prices_and_context_window.json
           go test -tags=embed ./internal/web

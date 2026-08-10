@@ -26,12 +26,17 @@ func NewChatPrincipalResolver(repo ChatPrincipalRepository, cfg *config.Config) 
 	return &ChatPrincipalResolver{repo: repo, cfg: cfg}
 }
 
-func (r *ChatPrincipalResolver) Resolve(ctx context.Context, userID int64, group *Group) (*APIKey, error) {
+func (r *ChatPrincipalResolver) Resolve(
+	ctx context.Context,
+	userID int64,
+	group *Group,
+	subscription *UserSubscription,
+) (*APIKey, error) {
 	if r == nil || r.repo == nil {
 		return nil, fmt.Errorf("chat principal repository is unavailable")
 	}
 	if userID <= 0 || group == nil || group.ID <= 0 || !group.IsActive() ||
-		group.Platform != PlatformOpenAI || group.IsSubscriptionType() {
+		group.Platform != PlatformOpenAI || !chatSubscriptionMatchesGroup(subscription, userID, group) {
 		return nil, fmt.Errorf("invalid web chat principal scope")
 	}
 
@@ -42,7 +47,7 @@ func (r *ChatPrincipalResolver) Resolve(ctx context.Context, userID int64, group
 		}
 		principal, err := r.repo.GetOrCreateWebChatPrincipal(ctx, userID, group.ID, key)
 		if err == nil {
-			if err := validateResolvedChatPrincipal(principal, userID, group.ID); err != nil {
+			if err := validateResolvedChatPrincipal(principal, userID, group.ID, subscription); err != nil {
 				return nil, err
 			}
 			return principal, nil
@@ -66,16 +71,35 @@ func (r *ChatPrincipalResolver) generateKey() (string, error) {
 	return prefix + hex.EncodeToString(random), nil
 }
 
-func validateResolvedChatPrincipal(principal *APIKey, userID, groupID int64) error {
+func validateResolvedChatPrincipal(
+	principal *APIKey,
+	userID, groupID int64,
+	subscription *UserSubscription,
+) error {
 	if principal == nil || principal.ID <= 0 || principal.UserID != userID ||
 		principal.GroupID == nil || *principal.GroupID != groupID ||
 		principal.Purpose != APIKeyPurposeWebChat || !principal.IsActive() ||
 		principal.User == nil || principal.User.ID != userID ||
 		principal.Group == nil || principal.Group.ID != groupID ||
-		!principal.User.IsActive() || !principal.User.CanBindGroup(principal.Group.ID, principal.Group.IsExclusive) ||
+		!principal.User.IsActive() ||
+		(!principal.Group.IsSubscriptionType() && !principal.User.CanBindGroup(principal.Group.ID, principal.Group.IsExclusive)) ||
 		!IsGroupContextValid(principal.Group) || !principal.Group.IsActive() ||
-		principal.Group.Platform != PlatformOpenAI || principal.Group.IsSubscriptionType() {
+		principal.Group.Platform != PlatformOpenAI ||
+		!chatSubscriptionMatchesGroup(subscription, userID, principal.Group) {
 		return fmt.Errorf("resolved web chat principal is incomplete")
 	}
 	return nil
+}
+
+func chatSubscriptionMatchesGroup(subscription *UserSubscription, userID int64, group *Group) bool {
+	if group == nil {
+		return false
+	}
+	if !group.IsSubscriptionType() {
+		return subscription == nil
+	}
+	return subscription != nil &&
+		subscription.UserID == userID &&
+		subscription.GroupID == group.ID &&
+		subscription.IsActive()
 }

@@ -57,6 +57,12 @@
         <GatewaySettingsPanel :active="activeTab === 'gateway'" />
 
 
+        <TranscriptionSettingsPanel
+          :active="activeTab === 'transcription'"
+          @dirty-change="transcriptionSettingsDirty = $event"
+        />
+
+
         <UsersSettingsPanel :active="activeTab === 'users'" />
 
 
@@ -73,7 +79,13 @@
 
         <!-- Sticky save bar -->
         <div
-          v-show="activeTab !== 'backup' || isSettingsDirty || saveFailed"
+          v-show="
+            activeTab !== 'transcription' &&
+            (activeTab !== 'backup' ||
+              isSettingsDirty ||
+              saveFailed ||
+              transcriptionSettingsDirty)
+          "
           class="settings-save-bar"
           :data-state="settingsSaveState"
           aria-live="polite"
@@ -98,12 +110,21 @@
           >
             {{ localText("重新加载", "Reload") }}
           </button>
-          <button
-            v-else
-            type="submit"
-            :disabled="saving || (!isSettingsDirty && !saveFailed)"
-            class="btn btn-primary shrink-0"
-          >
+          <template v-else>
+            <button
+              v-if="transcriptionSettingsDirty"
+              type="button"
+              class="btn btn-secondary shrink-0"
+              @click="selectSettingsTab('transcription')"
+            >
+              {{ localText("返回语音识别", "Return to Voice Input") }}
+            </button>
+            <button
+              v-if="!transcriptionSettingsDirty || isSettingsDirty || saveFailed"
+              type="submit"
+              :disabled="saving || (!isSettingsDirty && !saveFailed)"
+              class="btn btn-primary shrink-0"
+            >
             <svg
               v-if="saving"
               class="h-4 w-4 animate-spin"
@@ -131,7 +152,8 @@
                   ? localText("重试保存", "Retry save")
                   : t("admin.settings.saveSettings")
             }}
-          </button>
+            </button>
+          </template>
         </div>
       </form>
 
@@ -184,7 +206,7 @@ import {
 } from "vue";
 import { matchedRouteKey, onBeforeRouteLeave } from "vue-router";
 import { useI18n } from "vue-i18n";
-import { adminAPI } from "@/api";
+import { adminAPI } from "@/api/admin";
 import {
   appendAuthSourceDefaultsToUpdateRequest,
   buildAuthSourceDefaultsState,
@@ -223,6 +245,7 @@ import FeaturesSettingsPanel from "@/views/admin/settings/FeaturesSettingsPanel.
 import SecuritySettingsPanel from "@/views/admin/settings/SecuritySettingsPanel.vue";
 import UsersSettingsPanel from "@/views/admin/settings/UsersSettingsPanel.vue";
 import GatewaySettingsPanel from "@/views/admin/settings/GatewaySettingsPanel.vue";
+import TranscriptionSettingsPanel from "@/views/admin/settings/TranscriptionSettingsPanel.vue";
 import PaymentSettingsPanel from "@/views/admin/settings/PaymentSettingsPanel.vue";
 import EmailSettingsPanel from "@/views/admin/settings/EmailSettingsPanel.vue";
 import BackupSettingsPanel from "@/views/admin/settings/BackupSettingsPanel.vue";
@@ -285,6 +308,7 @@ type SettingsTab =
   | "security"
   | "users"
   | "gateway"
+  | "transcription"
   | "payment"
   | "email"
   | "backup";
@@ -296,6 +320,7 @@ const settingsTabs = [
   { key: "security" as SettingsTab, icon: "shield" as const },
   { key: "users" as SettingsTab, icon: "user" as const },
   { key: "gateway" as SettingsTab, icon: "server" as const },
+  { key: "transcription" as SettingsTab, icon: "microphone" as const },
   { key: "payment" as SettingsTab, icon: "creditCard" as const },
   { key: "email" as SettingsTab, icon: "mail" as const },
   { key: "backup" as SettingsTab, icon: "database" as const },
@@ -1554,6 +1579,7 @@ const codexFingerprintRows = ref<FingerprintSignalRow[]>([]);
 type SettingsSaveState =
   | "saved"
   | "dirty"
+  | "transcription-dirty"
   | "saving"
   | "error"
   | "load-error";
@@ -1598,12 +1624,14 @@ const isSettingsDirty = computed(
     savedSettingsFingerprint.value !== null &&
     settingsFingerprint.value !== savedSettingsFingerprint.value,
 );
+const transcriptionSettingsDirty = ref(false);
 
 const settingsSaveState = computed<SettingsSaveState>(() => {
   if (loadFailed.value) return "load-error";
   if (saving.value) return "saving";
   if (saveFailed.value) return "error";
   if (isSettingsDirty.value) return "dirty";
+  if (transcriptionSettingsDirty.value) return "transcription-dirty";
   return "saved";
 });
 
@@ -1641,6 +1669,17 @@ const settingsSaveStatus = computed(() => {
           "These changes take effect only after you save.",
         ),
       };
+    case "transcription-dirty":
+      return {
+        title: localText(
+          "语音识别有未保存的更改",
+          "Voice input has unsaved changes",
+        ),
+        detail: localText(
+          "返回语音识别标签保存后才会生效。",
+          "Return to the Voice Input tab to save these changes.",
+        ),
+      };
     default:
       return {
         title: localText("已保存", "Saved"),
@@ -1653,7 +1692,9 @@ const settingsSaveStatus = computed(() => {
 });
 
 const shouldWarnUnsavedSettings = computed(
-  () => !loading.value && !loadFailed.value && isSettingsDirty.value,
+  () =>
+    transcriptionSettingsDirty.value ||
+    (!loading.value && !loadFailed.value && isSettingsDirty.value),
 );
 
 function markSettingsBaseline(): void {
@@ -3997,20 +4038,6 @@ provide(settingsPanelBindingsKey, () => settingsPanelBindings);
   @apply relative isolate flex h-10 min-w-[6.75rem] shrink-0 items-center justify-center gap-1.5 whitespace-nowrap rounded-xl border border-transparent px-3 text-sm font-medium text-gray-600 outline-none transition-colors duration-200 ease-out dark:text-gray-300;
 }
 
-@media (min-width: 768px) {
-  .settings-tabs {
-    @apply min-w-full;
-  }
-
-  .settings-tab {
-    @apply min-w-0 flex-1 basis-0 overflow-hidden px-2 text-[13px];
-  }
-
-  .settings-tab-icon {
-    @apply h-6 w-6;
-  }
-}
-
 .settings-tab::before {
   @apply absolute inset-0 -z-10 rounded-xl opacity-0 transition-opacity duration-200;
   content: "";
@@ -4088,6 +4115,7 @@ provide(settingsPanelBindingsKey, () => settingsPanelBindings);
 }
 
 .settings-save-bar[data-state="dirty"] .settings-save-status-dot,
+.settings-save-bar[data-state="transcription-dirty"] .settings-save-status-dot,
 .settings-save-bar[data-state="saving"] .settings-save-status-dot {
   background: var(--admin-clay-violet);
   color: var(--admin-clay-violet);

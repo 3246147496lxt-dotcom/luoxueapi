@@ -11,7 +11,7 @@
               <Icon name="creditCard" size="lg" />
             </span>
             <div class="min-w-0">
-              <h1 class="purchase-workbench__title text-2xl font-black text-gray-950 dark:text-white">
+              <h1 class="purchase-workbench__title text-gray-950 dark:text-white">
                 {{ t('payment.checkoutTitle') }}
               </h1>
               <p class="text-sm font-medium text-gray-500 dark:text-gray-400">
@@ -212,7 +212,7 @@
                             <dt class="purchase-summary-total text-sm font-bold">
                               {{ t('payment.actualPay') }}
                             </dt>
-                            <dd class="purchase-summary-total min-w-0 break-all text-right text-2xl font-black leading-none tabular-nums">
+                            <dd class="purchase-summary-total min-w-0 break-all text-right leading-none tabular-nums">
                               {{ formatSelectedPaymentAmount(totalAmount) }}
                             </dd>
                           </div>
@@ -368,7 +368,7 @@
                             <dt class="purchase-summary-total text-sm font-semibold">
                               {{ t('payment.actualPay') }}
                             </dt>
-                            <dd class="purchase-summary-total min-w-0 break-all text-right text-2xl font-extrabold leading-none tabular-nums">
+                            <dd class="purchase-summary-total min-w-0 break-all text-right leading-none tabular-nums">
                               {{ formatSelectedPaymentAmount(subTotalAmount) }}
                             </dd>
                           </div>
@@ -511,7 +511,7 @@ import { useI18n } from 'vue-i18n'
 import { RouterLink, useRoute, useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import { usePaymentStore } from '@/stores/payment'
-import { useSubscriptionStore } from '@/stores/subscriptions'
+import { useUserProfileStore } from '@/stores/userProfile'
 import { useAppStore } from '@/stores'
 import { usageAPI } from '@/api/usage'
 import { extractApiErrorMessage, extractI18nErrorMessage } from '@/utils/apiError'
@@ -555,7 +555,7 @@ const route = useRoute()
 const router = useRouter()
 const authStore = useAuthStore()
 const paymentStore = usePaymentStore()
-const subscriptionStore = useSubscriptionStore()
+const userProfileStore = useUserProfileStore()
 const appStore = useAppStore()
 
 const user = computed(() => authStore.user)
@@ -722,20 +722,22 @@ function buildWechatOAuthAuthorizeUrl(
 }
 
 function onPaymentDone() {
-  const wasSubscription = paymentState.value.orderType === 'subscription'
   resetPayment()
   selectedPlan.value = null
-  if (wasSubscription) {
-    subscriptionStore.fetchActiveSubscriptions(true).catch(() => {})
-  }
   syncSubscriptionCheckoutFromRoute()
 }
 
-function onPaymentSuccess() {
+async function onPaymentSuccess() {
   removeRecoverySnapshot()
-  authStore.refreshUser()
-  if (paymentState.value.orderType === 'subscription') {
-    subscriptionStore.fetchActiveSubscriptions(true).catch(() => {})
+
+  try {
+    if (paymentState.value.orderType === 'subscription') {
+      await userProfileStore.syncAfterUpgrade()
+    } else {
+      await userProfileStore.refreshProfile()
+    }
+  } catch (error) {
+    console.error('Failed to sync user profile after payment:', error)
   }
 }
 
@@ -1467,7 +1469,8 @@ watch(
 }
 
 .purchase-workbench__title {
-  font-family: var(--lx-clay-font-display);
+  font-size: var(--workspace-type-page-title-size);
+  font-weight: var(--workspace-type-page-title-weight);
   letter-spacing: 0;
 }
 
@@ -1508,6 +1511,11 @@ watch(
   color: #6d28d9;
 }
 
+dd.purchase-summary-total {
+  font-size: var(--workspace-type-numeric-size);
+  font-weight: var(--workspace-type-numeric-weight);
+}
+
 .purchase-workbench__summary {
   border-top: 1px solid rgb(243 244 246 / 60%);
   background: rgb(249 250 251 / 50%);
@@ -1517,7 +1525,7 @@ watch(
   color: white;
   background: linear-gradient(145deg, #8b5cf6, #5b21b6);
   border-radius: 14px;
-  font-weight: 750;
+  font-weight: var(--workspace-type-navigation-weight);
   box-shadow: 0 10px 20px rgb(91 33 182 / 22%);
   transition:
     filter 150ms ease,

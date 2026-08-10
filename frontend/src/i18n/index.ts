@@ -1,5 +1,6 @@
 import { readonly, ref } from 'vue'
 import { createI18n } from 'vue-i18n'
+import type { Router } from 'vue-router'
 import {
   DEFAULT_LOCALE,
   LOCALE_STORAGE_KEY,
@@ -23,10 +24,17 @@ export {
 } from './preference'
 
 type LocaleMessages = Record<string, any>
+export type I18nSurface = 'user' | 'admin'
 
-const localeLoaders: Record<LocaleCode, () => Promise<{ default: LocaleMessages }>> = {
-  en: () => import('./locales/en'),
-  zh: () => import('./locales/zh')
+const localeLoaders: Record<I18nSurface, Record<LocaleCode, () => Promise<{ default: LocaleMessages }>>> = {
+  user: {
+    en: () => import('./locales/en/portal'),
+    zh: () => import('./locales/zh/portal'),
+  },
+  admin: {
+    en: () => import('./locales/en'),
+    zh: () => import('./locales/zh'),
+  },
 }
 
 const preferenceState = ref<LocalePreference>(readLocalePreference())
@@ -41,21 +49,24 @@ export const i18n = createI18n({
   warnHtmlMessage: false
 })
 
-const loadedLocales = new Set<LocaleCode>()
+const loadedLocales = new Set<string>()
 let localeApplySequence = 0
 let preferenceSyncInstalled = false
+let activeSurface: I18nSurface = 'user'
+let activeRouter: Router | null = null
 
 export const localePreference = readonly(preferenceState)
 
 export async function loadLocaleMessages(locale: LocaleCode): Promise<void> {
-  if (loadedLocales.has(locale)) {
+  const loadKey = `${activeSurface}:${locale}`
+  if (loadedLocales.has(loadKey)) {
     return
   }
 
-  const loader = localeLoaders[locale]
+  const loader = localeLoaders[activeSurface][locale]
   const module = await loader()
   i18n.global.setLocaleMessage(locale, module.default)
-  loadedLocales.add(locale)
+  loadedLocales.add(loadKey)
 }
 
 async function applyLocale(locale: LocaleCode, updateTitle: boolean): Promise<void> {
@@ -72,18 +83,15 @@ async function applyLocale(locale: LocaleCode, updateTitle: boolean): Promise<vo
 
   // 同步更新浏览器页签标题，使其跟随语言切换
   const { resolveRouteDocumentTitle } = await import('@/router/title')
-  const { default: router } = await import('@/router')
   const { useAppStore } = await import('@/stores/app')
-  const { useAuthStore } = await import('@/stores/auth')
-  const { useAdminSettingsStore } = await import('@/stores/adminSettings')
+  const router = activeRouter ?? (await import('@/router')).default
   const route = router.currentRoute.value
   const appStore = useAppStore()
-  const authStore = useAuthStore()
-  const adminSettingsStore = useAdminSettingsStore()
-  const customMenuItems = [
-    ...(appStore.cachedPublicSettings?.custom_menu_items ?? []),
-    ...(authStore.isAdmin ? adminSettingsStore.customMenuItems : []),
-  ]
+  const customMenuItems = [...(appStore.cachedPublicSettings?.custom_menu_items ?? [])]
+  if (activeSurface === 'admin') {
+    const { useAdminSettingsStore } = await import('@/stores/adminSettings')
+    customMenuItems.push(...useAdminSettingsStore().customMenuItems)
+  }
   document.title = resolveRouteDocumentTitle(route, appStore.siteName, customMenuItems)
 }
 
@@ -115,7 +123,12 @@ export function stopLocalePreferenceSync() {
   window.removeEventListener('storage', handleLocaleStorage)
 }
 
-export async function initI18n(): Promise<void> {
+export async function initI18n(options?: {
+  surface?: I18nSurface
+  router?: Router
+}): Promise<void> {
+  activeSurface = options?.surface ?? 'user'
+  activeRouter = options?.router ?? null
   preferenceState.value = readLocalePreference()
   await applyLocale(resolveLocalePreference(preferenceState.value), false)
   installLocalePreferenceSync()

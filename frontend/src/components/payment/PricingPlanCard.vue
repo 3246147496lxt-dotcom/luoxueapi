@@ -208,8 +208,8 @@ const planFacts = computed(() => {
 
 .pricing-plan-card h2 {
   overflow-wrap: anywhere;
-  font-size: 24px;
-  font-weight: 650;
+  font-size: var(--workspace-type-brand-size);
+  font-weight: var(--workspace-type-brand-weight);
   letter-spacing: -0.025em;
   line-height: 1.2;
 }
@@ -220,15 +220,16 @@ const planFacts = computed(() => {
   border-radius: 999px;
   color: #17633a;
   background: #e8f7ee;
-  font-size: 11px;
-  font-weight: 650;
+  font-size: var(--workspace-type-secondary-size);
+  font-weight: var(--workspace-type-secondary-weight);
 }
 
 .pricing-plan-card__description {
   min-height: 48px;
   margin-top: 15px;
   color: #666;
-  font-size: 14px;
+  font-size: var(--workspace-type-body-size);
+  font-weight: var(--workspace-type-body-weight);
   line-height: 1.65;
 }
 
@@ -241,15 +242,16 @@ const planFacts = computed(() => {
 }
 
 .pricing-plan-card__price span {
-  font-size: 34px;
-  font-weight: 650;
+  font-size: var(--workspace-type-numeric-size);
+  font-weight: var(--workspace-type-numeric-weight);
   letter-spacing: -0.04em;
   line-height: 1;
 }
 
 .pricing-plan-card__price small {
   color: #737373;
-  font-size: 13px;
+  font-size: var(--workspace-type-secondary-size);
+  font-weight: var(--workspace-type-secondary-weight);
 }
 
 .pricing-plan-card__action {
@@ -259,8 +261,8 @@ const planFacts = computed(() => {
   border-radius: 999px;
   color: #fff;
   background: var(--lx-clay-accent-deep);
-  font-size: 14px;
-  font-weight: 650;
+  font-size: var(--workspace-type-navigation-size);
+  font-weight: var(--workspace-type-navigation-weight);
   transition:
     background-color 150ms ease,
     transform 150ms ease;
@@ -287,8 +289,8 @@ const planFacts = computed(() => {
 
 .pricing-plan-card__includes {
   margin-bottom: 14px;
-  font-size: 13px;
-  font-weight: 650;
+  font-size: var(--workspace-type-navigation-size);
+  font-weight: var(--workspace-type-navigation-weight);
 }
 
 .pricing-plan-card__facts {
@@ -302,7 +304,8 @@ const planFacts = computed(() => {
   align-items: start;
   gap: 10px;
   color: #444;
-  font-size: 13px;
+  font-size: var(--workspace-type-body-size);
+  font-weight: var(--workspace-type-body-weight);
   line-height: 1.5;
 }
 

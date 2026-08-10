@@ -88,3 +88,33 @@ func TestOpsCaptureWriter_CompactKeepaliveRestoresOriginalWriter(t *testing.T) {
 	require.Equal(t, http.StatusOK, outerStatus)
 	require.Equal(t, http.StatusOK, recorder.Code)
 }
+
+type readDeadlineRecorder struct {
+	*httptest.ResponseRecorder
+	deadline time.Time
+}
+
+func (w *readDeadlineRecorder) SetReadDeadline(deadline time.Time) error {
+	w.deadline = deadline
+	return nil
+}
+
+func TestOpsCaptureWriter_UnwrapsResponseControllerCapabilities(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	router.Use(OpsErrorLoggerMiddleware(nil))
+	wantDeadline := time.Now().Add(time.Minute).Round(0)
+	var deadlineErr error
+	router.POST("/deadline", func(c *gin.Context) {
+		deadlineErr = http.NewResponseController(c.Writer).SetReadDeadline(wantDeadline)
+		c.Status(http.StatusNoContent)
+	})
+
+	recorder := &readDeadlineRecorder{ResponseRecorder: httptest.NewRecorder()}
+	request := httptest.NewRequest(http.MethodPost, "/deadline", nil)
+	router.ServeHTTP(recorder, request)
+
+	require.NoError(t, deadlineErr)
+	require.Equal(t, wantDeadline, recorder.deadline)
+	require.Equal(t, http.StatusNoContent, recorder.Code)
+}

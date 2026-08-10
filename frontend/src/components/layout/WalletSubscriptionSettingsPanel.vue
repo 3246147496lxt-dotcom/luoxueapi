@@ -456,8 +456,8 @@ onBeforeUnmount(() => {
 
 .wallet-settings__section-title {
   color: rgb(51 65 85);
-  font-size: 0.75rem;
-  font-weight: 680;
+  font-size: var(--workspace-type-secondary-size);
+  font-weight: var(--workspace-type-secondary-weight);
   line-height: 1.25rem;
 }
 
@@ -465,8 +465,8 @@ onBeforeUnmount(() => {
 .wallet-settings__row-link {
   border-radius: 6px;
   color: rgb(79 70 229);
-  font-size: 0.75rem;
-  font-weight: 620;
+  font-size: var(--workspace-type-navigation-size);
+  font-weight: var(--workspace-type-navigation-weight);
   text-decoration: none;
 }
 
@@ -488,13 +488,14 @@ onBeforeUnmount(() => {
 
 .wallet-settings__balance-row dt {
   color: rgb(71 85 105);
-  font-size: 0.8125rem;
+  font-size: var(--workspace-type-body-size);
+  font-weight: var(--workspace-type-body-weight);
 }
 
 .wallet-settings__balance-row dd {
   color: rgb(15 23 42);
-  font-size: 0.9375rem;
-  font-weight: 680;
+  font-size: var(--workspace-type-navigation-size);
+  font-weight: var(--workspace-type-navigation-weight);
 }
 
 .wallet-settings__balance-row--frozen dt,
@@ -515,8 +516,8 @@ onBeforeUnmount(() => {
   gap: 9px;
   border-radius: 9px;
   color: rgb(51 65 85);
-  font-size: 0.8125rem;
-  font-weight: 560;
+  font-size: var(--workspace-type-navigation-size);
+  font-weight: var(--workspace-type-navigation-weight);
   text-decoration: none;
   transition:
     color 150ms ease,
@@ -534,7 +535,8 @@ onBeforeUnmount(() => {
   border-radius: 8px;
   color: rgb(120 53 15);
   background: rgb(255 247 237);
-  font-size: 0.75rem;
+  font-size: var(--workspace-type-secondary-size);
+  font-weight: var(--workspace-type-secondary-weight);
   line-height: 1.45;
 }
 
@@ -566,8 +568,8 @@ onBeforeUnmount(() => {
 .wallet-settings__row-title {
   overflow: hidden;
   color: rgb(30 41 59);
-  font-size: 0.8125rem;
-  font-weight: 620;
+  font-size: var(--workspace-type-navigation-size);
+  font-weight: var(--workspace-type-navigation-weight);
   line-height: 1.2rem;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -577,7 +579,8 @@ onBeforeUnmount(() => {
   overflow: hidden;
   margin-top: 1px;
   color: rgb(71 85 105);
-  font-size: 0.6875rem;
+  font-size: var(--workspace-type-secondary-size);
+  font-weight: var(--workspace-type-secondary-weight);
   line-height: 1rem;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -591,8 +594,8 @@ onBeforeUnmount(() => {
   margin-left: 3px;
   color: rgb(100 116 139);
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  font-size: 0.6875rem;
-  font-weight: 500;
+  font-size: var(--workspace-type-secondary-size);
+  font-weight: var(--workspace-type-secondary-weight);
 }
 
 .wallet-settings__order-value {
@@ -602,8 +605,8 @@ onBeforeUnmount(() => {
   align-items: flex-end;
   gap: 3px;
   color: rgb(15 23 42);
-  font-size: 0.75rem;
-  font-weight: 650;
+  font-size: var(--workspace-type-secondary-size);
+  font-weight: var(--workspace-type-secondary-weight);
 }
 
 .wallet-settings__loading {
@@ -642,7 +645,8 @@ onBeforeUnmount(() => {
   margin-top: 5px;
   padding: 12px 0 2px;
   color: rgb(71 85 105);
-  font-size: 0.75rem;
+  font-size: var(--workspace-type-secondary-size);
+  font-weight: var(--workspace-type-secondary-weight);
   line-height: 1.45;
 }
 
@@ -665,8 +669,8 @@ onBeforeUnmount(() => {
   border-radius: 8px;
   color: rgb(185 28 28);
   background: rgb(254 226 226 / 0.72);
-  font-size: 0.75rem;
-  font-weight: 650;
+  font-size: var(--workspace-type-navigation-size);
+  font-weight: var(--workspace-type-navigation-weight);
 }
 
 .wallet-settings__empty--orders {
@@ -677,7 +681,7 @@ onBeforeUnmount(() => {
 
 .wallet-settings__empty--orders p:first-child {
   color: rgb(51 65 85);
-  font-weight: 620;
+  font-weight: var(--workspace-type-navigation-weight);
 }
 
 .wallet-settings__empty--orders p:last-child {

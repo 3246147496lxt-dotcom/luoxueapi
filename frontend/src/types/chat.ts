@@ -2,6 +2,23 @@ export type ChatMessageRole = 'user' | 'assistant'
 
 export type ChatMessageStatus = 'complete' | 'streaming' | 'stopped' | 'error'
 
+export type ChatAttachmentKind = 'image' | 'document'
+
+export type ChatAttachmentStatus = 'ready' | 'expired'
+
+export interface ChatAttachment {
+  id: string
+  name: string
+  kind: ChatAttachmentKind
+  mimeType: string
+  size: number
+  status: ChatAttachmentStatus
+  expiresAt: string
+  pageCount?: number
+  width?: number
+  height?: number
+}
+
 export type ChatReceiptStatus =
   | 'pending'
   | 'charged'
@@ -57,6 +74,7 @@ export interface ChatMessage {
   receiptCreatedAt?: string
   excludedFromContext?: boolean
   supersededByMessageId?: string
+  attachments?: ChatAttachment[]
 }
 
 export interface ChatConversation {
@@ -93,15 +111,34 @@ export interface ChatModel {
   input_price?: number | null
   output_price?: number | null
   pricing?: ChatModelPricing
+  supports_vision?: boolean
+  supports_reasoning_slider?: boolean
 }
 
 export interface ChatCatalog {
   models: ChatModel[]
   balance: number
+  transcription?: ChatTranscriptionCapability
+}
+
+export interface ChatCapabilities {
+  transcription?: ChatTranscriptionCapability
+}
+
+export interface ChatTranscriptionCapability {
+  enabled: boolean
+  billing_mode?: string
+  max_upload_bytes?: number
+  max_duration_seconds?: number
+  accepted_mime_types?: string[]
+}
+
+export interface ChatTranscriptionResult {
+  text: string
 }
 
 export type ChatCompletionMessageRole = 'system' | 'developer' | ChatMessageRole
-export type ChatReasoningEffort = '' | 'low' | 'medium' | 'high' | 'xhigh'
+export type ChatReasoningEffort = 'low' | 'medium' | 'high' | 'xhigh'
 
 export interface ChatCompletionMessage {
   role: ChatCompletionMessageRole
@@ -111,12 +148,13 @@ export interface ChatCompletionMessage {
 export interface ChatCompletionUserMessage {
   id: string
   content: string
+  attachmentIds?: string[]
 }
 
 interface ChatCompletionHistoryRequestBase {
   conversationId: string
   model: string
-  reasoningEffort?: Exclude<ChatReasoningEffort, ''>
+  reasoningEffort?: ChatReasoningEffort
   expectedHeadMessageId: string | null
   assistantMessageId: string
 }
@@ -170,6 +208,7 @@ export interface ChatCompletionStreamResult {
 }
 
 export interface ChatCompletionStreamHandlers {
+  onAccepted?: () => void
   onChunk?: (chunk: ChatCompletionChunk) => void
   onContent?: (content: string, chunk: ChatCompletionChunk) => void
   onReasoningContent?: (content: string, chunk: ChatCompletionChunk) => void

@@ -1,5 +1,6 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
+import { defineComponent, h } from 'vue'
 
 import UsageFilters from '../UsageFilters.vue'
 
@@ -28,6 +29,9 @@ const messages: Record<string, string> = {
   'admin.usage.billingModeToken': 'Token',
   'admin.usage.billingModePerRequest': 'Per Request',
   'admin.usage.billingModeImage': 'Image',
+  'admin.ops.errorLog.type': 'Error phase',
+  'usage.errors.category': 'Error category',
+  'admin.ops.errorLog.status': 'Status',
   'admin.usage.group': 'Group',
   'admin.usage.allGroups': 'All Groups',
   'common.refresh': 'Refresh',
@@ -98,6 +102,123 @@ function mountFilters(filters = defaultFilters()) {
     },
   })
 }
+
+describe('UsageFilters — layout variants', () => {
+  it('keeps toolbar as the default and removes card framing in rail mode', async () => {
+    const wrapper = mountFilters()
+
+    expect(wrapper.classes()).toContain('usage-filters--toolbar')
+    expect(wrapper.classes()).toContain('usage-filters--card')
+    expect(wrapper.classes()).toContain('card')
+
+    await wrapper.setProps({ layout: 'rail' })
+
+    expect(wrapper.classes()).toContain('usage-filters--rail')
+    expect(wrapper.classes()).not.toContain('usage-filters--toolbar')
+    expect(wrapper.classes()).not.toContain('usage-filters--card')
+    expect(wrapper.classes()).not.toContain('card')
+  })
+
+  it('keeps search input ids unique and labels scoped to each instance', () => {
+    const firstFilters = defaultFilters()
+    const secondFilters = defaultFilters()
+    const Host = defineComponent({
+      setup() {
+        return () => h('div', [
+          h(UsageFilters, {
+            modelValue: firstFilters,
+            exporting: false,
+            startDate: '2026-05-01',
+            endDate: '2026-05-28',
+            showActions: false,
+          }),
+          h(UsageFilters, {
+            modelValue: secondFilters,
+            exporting: false,
+            startDate: '2026-05-01',
+            endDate: '2026-05-28',
+            showActions: false,
+          }),
+        ])
+      },
+    })
+    const wrapper = mount(Host, {
+      global: {
+        stubs: {
+          Select: true,
+          Teleport: true,
+        },
+      },
+    })
+    const instances = wrapper.findAllComponents(UsageFilters)
+    const allInputIds: string[] = []
+
+    expect(instances).toHaveLength(2)
+    instances.forEach((instance) => {
+      const dropdowns = instance.findAll('.usage-filter-dropdown')
+      expect(dropdowns).toHaveLength(3)
+
+      dropdowns.forEach((dropdown) => {
+        const label = dropdown.get('label').element as HTMLLabelElement
+        const input = dropdown.get('input').element as HTMLInputElement
+        const instanceElement = instance.element as HTMLElement
+        const target = Array.from(instanceElement.querySelectorAll<HTMLInputElement>('input'))
+          .find((candidate) => candidate.id === label.htmlFor)
+
+        expect(input.id).not.toBe('')
+        expect(label.htmlFor).toBe(input.id)
+        expect(target).toBe(input)
+        allInputIds.push(input.id)
+      })
+    })
+
+    expect(allInputIds).toHaveLength(6)
+    expect(new Set(allInputIds).size).toBe(allInputIds.length)
+  })
+
+  it('gives every custom select a field-level accessible name', () => {
+    const SelectAriaStub = defineComponent({
+      props: {
+        ariaLabel: String,
+      },
+      setup(props) {
+        return () => h('button', {
+          class: 'select-aria-stub',
+          'aria-label': props.ariaLabel,
+        })
+      },
+    })
+    const expectedUsageLabels = ['Model', 'Type', 'Billing Type', 'Billing Mode', 'Group']
+    const expectedErrorLabels = ['Model', 'Error phase', 'Error category', 'Status', 'Group']
+
+    const usage = mount(UsageFilters, {
+      props: {
+        modelValue: defaultFilters(),
+        exporting: false,
+        startDate: '2026-05-01',
+        endDate: '2026-05-28',
+        showActions: false,
+      },
+      global: { stubs: { Select: SelectAriaStub, Teleport: true } },
+    })
+    const errors = mount(UsageFilters, {
+      props: {
+        modelValue: defaultFilters(),
+        exporting: false,
+        startDate: '2026-05-01',
+        endDate: '2026-05-28',
+        showActions: false,
+        mode: 'errors',
+      },
+      global: { stubs: { Select: SelectAriaStub, Teleport: true } },
+    })
+
+    expect(usage.findAll('.select-aria-stub').map((select) => select.attributes('aria-label')))
+      .toEqual(expectedUsageLabels)
+    expect(errors.findAll('.select-aria-stub').map((select) => select.attributes('aria-label')))
+      .toEqual(expectedErrorLabels)
+  })
+})
 
 describe('UsageFilters — user search dropdown', () => {
   beforeEach(() => {

@@ -73,6 +73,30 @@ describe('OpsErrorLogTable user/api-key/account columns', () => {
     expect(wrapper.text()).toContain('old-key')
     expect(wrapper.text()).toContain('admin.ops.errorLog.keyDeletedBadge')
   })
+
+  it('puts event evidence before identity context and keeps the API classification visible', () => {
+    const wrapper = mountTable({
+      phase: 'upstream',
+      error_owner: 'provider',
+      severity: 'P1',
+      status_code: 529,
+      request_id: 'req-visible-529',
+      message: 'provider returned an overloaded response',
+    })
+
+    const headers = wrapper.findAll('th').map((header) => header.text())
+    expect(headers.slice(0, 5)).toEqual([
+      'admin.ops.errorLog.timeId',
+      'admin.ops.errorLog.status',
+      'admin.ops.errorLog.phase',
+      'usage.errors.category',
+      'admin.ops.errorLog.message',
+    ])
+    expect(wrapper.text()).toContain('admin.ops.errorLog.typeUpstream')
+    expect(wrapper.text()).toContain('usage.errors.categories.upstream')
+    expect(wrapper.text()).toContain('P1')
+    expect(wrapper.text()).toContain('req-visible-529')
+  })
 })
 
 // 防回归:组件用 admin.ops.errorLog.* 命名空间。若 i18n 键写错命名空间(如误放到
@@ -84,10 +108,12 @@ describe('OpsErrorLogTable user/api-key/account columns', () => {
 describe('OpsErrorLogTable i18n keys exist in the errorLog namespace', () => {
   const locales: Record<string, any> = { zh: zhLocale, en: enLocale }
   for (const [name, msgs] of Object.entries(locales)) {
-    it(`has apiKey & keyDeletedBadge for ${name}`, () => {
+    it(`has error audit labels for ${name}`, () => {
       const errorLog = msgs?.admin?.ops?.errorLog
       expect(errorLog?.apiKey).toBeTruthy()
       expect(errorLog?.keyDeletedBadge).toBeTruthy()
+      expect(errorLog?.priority).toBeTruthy()
+      expect(errorLog?.readOnly).toBeTruthy()
     })
   }
 })

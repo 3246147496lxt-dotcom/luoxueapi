@@ -90,6 +90,7 @@ describe('ProfileView', () => {
 
     await flushPromises()
 
+    expect(refreshUserMock).not.toHaveBeenCalled()
     expect(wrapper.findAll('.stat-card')).toHaveLength(0)
     expect(wrapper.find('[data-testid="profile-shell"]').exists()).toBe(true)
     expect(wrapper.get('[data-testid="profile-shell"]').html()).toContain('profile-info-card')

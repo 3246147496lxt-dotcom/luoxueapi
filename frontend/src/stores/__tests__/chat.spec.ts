@@ -203,6 +203,61 @@ describe('useChatStore', () => {
     expect(JSON.stringify(persistedState('202'))).toContain(second.id)
   })
 
+  it('从 v2 历史恢复附件元数据，并以 v4 schema 持久化', async () => {
+    const conversation = {
+      id: 'attachment-conversation',
+      userId: 'attachment-user',
+      title: 'Attachment history',
+      model: 'gpt-5',
+      messages: [{
+        id: 'attachment-message',
+        role: 'user',
+        content: '',
+        createdAt: 1,
+        status: 'complete',
+        attachments: [{
+          id: 'attachment-1',
+          name: 'brief.pdf',
+          kind: 'document',
+          mimeType: 'application/pdf',
+          size: 2048,
+          status: 'ready',
+          expiresAt: '2099-01-01T00:00:00Z',
+          pageCount: 3,
+          ignoredObjectUrl: 'blob:must-not-persist',
+        }],
+      }],
+      createdAt: 1,
+      updatedAt: 2,
+    }
+    persistedBuckets.set(
+      'attachment-user',
+      persistedChatState('attachment-user', conversation),
+    )
+
+    const store = useChatStore()
+    await store.hydrate('attachment-user')
+    expect(store.conversations[0]?.messages[0]?.attachments).toEqual([{
+      id: 'attachment-1',
+      name: 'brief.pdf',
+      kind: 'document',
+      mimeType: 'application/pdf',
+      size: 2048,
+      status: 'ready',
+      expiresAt: '2099-01-01T00:00:00Z',
+      pageCount: 3,
+    }])
+
+    store.addMessage('attachment-conversation', { role: 'assistant', content: 'Done' })
+    await store.flushPersistence()
+    const persisted = persistedState('attachment-user')
+    expect(persisted.version).toBe(4)
+    expect(persisted.conversations[0]?.messages[0]?.attachments).toEqual(
+      store.conversations[0]?.messages[0]?.attachments,
+    )
+    expect(JSON.stringify(persisted)).not.toContain('blob:must-not-persist')
+  })
+
   it('两个标签页并发新建会话时都能持久化', async () => {
     setActivePinia(createPinia())
     const tabA = useChatStore()
@@ -255,6 +310,137 @@ describe('useChatStore', () => {
     expect(persistedBuckets.has('user-a')).toBe(true)
     expect(persistedState('user-a').conversations).toEqual([])
     expect(persistenceMocks.remove).not.toHaveBeenCalled()
+  })
+
+  it('从搜索结果删除会话后同步移除结果行', async () => {
+    const store = useChatStore()
+    await store.hydrate('search-delete-user')
+    const conversation = store.createConversation('gpt-5', '待删除的搜索结果')!
+    chatApiMocks.searchChatConversations.mockResolvedValueOnce({
+      items: [serverConversation(conversation.id, {
+        title: conversation.title,
+        model: conversation.model,
+      })],
+      nextCursor: null,
+      hasMore: false,
+    })
+
+    await store.searchHistory('待删除')
+    expect(store.searchResults.map(({ id }) => id)).toEqual([conversation.id])
+
+    expect(store.deleteConversation(conversation.id)).toBe(true)
+    expect(store.searchResults).toEqual([])
+  })
+
+  it('点击新聊天后刷新及服务端历史合并仍保持新聊天', async () => {
+    const firstStore = useChatStore()
+    await firstStore.hydrate('new-chat-refresh-user')
+    const first = firstStore.createConversation('gpt-5', '第一段对话')!
+    const second = firstStore.createConversation('gpt-5', '第二段对话')!
+    await firstStore.flushPersistence()
+
+    expect(firstStore.selectConversation(null)).toBe(true)
+    await firstStore.flushPersistence()
+    expect(persistedState('new-chat-refresh-user')).toMatchObject({
+      activeConversationId: null,
+      activeConversationSelectionResolved: true,
+    })
+
+    chatApiMocks.listChatConversations.mockResolvedValueOnce({
+      items: [
+        serverConversation(second.id, { title: second.title, updatedAt: 20 }),
+        serverConversation(first.id, { title: first.title, updatedAt: 10 }),
+      ],
+      nextCursor: null,
+      hasMore: false,
+    })
+
+    setActivePinia(createPinia())
+    const restoredStore = useChatStore()
+    await restoredStore.hydrate('new-chat-refresh-user')
+    expect(restoredStore.conversations).toHaveLength(2)
+    expect(restoredStore.activeConversationId).toBeNull()
+    expect(restoredStore.activeConversation).toBeNull()
+
+    await restoredStore.syncHistory()
+    await restoredStore.loadConversationPage(true)
+    expect(restoredStore.activeConversationId).toBeNull()
+    expect(restoredStore.activeConversation).toBeNull()
+  })
+
+  it('首次服务端同步完成排序后才选择最新会话', async () => {
+    chatApiMocks.getChatSync
+      .mockResolvedValueOnce({
+        changes: [
+          {
+            type: 'upsert',
+            version: 1,
+            conversationId: 'older-conversation',
+            conversation: serverConversation('older-conversation', { updatedAt: 10 }),
+          },
+          {
+            type: 'upsert',
+            version: 2,
+            conversationId: 'newer-conversation',
+            conversation: serverConversation('newer-conversation', { updatedAt: 20 }),
+          },
+        ],
+        latestVersion: 2,
+        nextCursor: null,
+        hasMore: false,
+      })
+      .mockResolvedValueOnce({
+        changes: [],
+        latestVersion: 2,
+        nextCursor: null,
+        hasMore: false,
+      })
+
+    const store = useChatStore()
+    await store.hydrate('initial-server-selection')
+    await store.syncHistory()
+    await store.flushPersistence()
+
+    expect(store.conversations.map(({ id }) => id)).toEqual([
+      'newer-conversation',
+      'older-conversation',
+    ])
+    expect(store.activeConversationId).toBe('newer-conversation')
+    expect(persistedState('initial-server-selection').activeConversationId)
+      .toBe('newer-conversation')
+  })
+
+  it('同账号 hydration 期间点击新聊天不会被迟到的旧选择覆盖', async () => {
+    const oldConversation = {
+      id: 'old-active-conversation',
+      userId: 'hydration-selection-race',
+      title: '旧会话',
+      model: 'gpt-5',
+      messages: [],
+      createdAt: 10,
+      updatedAt: 20,
+    }
+    const delayedLoad = createDeferred<unknown | null>()
+    persistedBuckets.set(
+      'hydration-selection-race',
+      persistedChatState('hydration-selection-race', oldConversation),
+    )
+    persistenceMocks.load.mockReturnValueOnce(delayedLoad.promise)
+
+    const store = useChatStore()
+    const hydration = store.hydrate('hydration-selection-race')
+    await vi.waitFor(() => expect(persistenceMocks.load).toHaveBeenCalled())
+    expect(store.selectConversation(null)).toBe(true)
+    delayedLoad.resolve(persistedChatState('hydration-selection-race', oldConversation))
+    await hydration
+    await store.flushPersistence()
+
+    expect(store.conversations.map(({ id }) => id)).toEqual(['old-active-conversation'])
+    expect(store.activeConversationId).toBeNull()
+    expect(persistedState('hydration-selection-race')).toMatchObject({
+      activeConversationId: null,
+      activeConversationSelectionResolved: true,
+    })
   })
 
   it('瞬时写入失败后按原顺序重放删除和清空意图', async () => {
@@ -729,7 +915,7 @@ describe('useChatStore', () => {
     expect(store.outbox).toEqual([])
     expect(chatApiMocks.createChatConversation).not.toHaveBeenCalled()
     expect(persistedState('legacy-user')).toMatchObject({
-      version: 2,
+      version: 4,
       legacyImportDecision: 'pending',
       legacyConversationIds: ['legacy-conversation'],
       outbox: [],
@@ -818,6 +1004,124 @@ describe('useChatStore', () => {
     expect(chatApiMocks.createChatConversation).not.toHaveBeenCalled()
   })
 
+  it('同一毫秒创建的一轮消息仍保持 user 在 assistant 前', async () => {
+    const store = useChatStore()
+    await store.hydrate('ordered-local-user')
+    const conversation = store.createConversation('gpt-5', '顺序测试')!
+
+    const user = store.addMessage(conversation.id, {
+      id: 'user-z',
+      role: 'user',
+      content: '你好',
+      createdAt: 10,
+    })
+    const assistant = store.addMessage(conversation.id, {
+      id: 'assistant-a',
+      role: 'assistant',
+      content: '你好！',
+      createdAt: 10,
+    })
+
+    expect([user?.position, assistant?.position]).toEqual([1, 2])
+    expect(conversation.messages.map(({ id }) => id)).toEqual(['user-z', 'assistant-a'])
+  })
+
+  it('首次加载服务端摘要时补拉消息，并把新历史持久化到本地', async () => {
+    const remote = serverConversation('remote-history', {
+      title: '你好',
+      headMessageId: 'assistant-2',
+      messageCount: 2,
+      createdAt: 10,
+      updatedAt: 11,
+    })
+    chatApiMocks.listChatConversations.mockResolvedValueOnce({
+      items: [remote],
+      nextCursor: null,
+      hasMore: false,
+    })
+    chatApiMocks.getChatConversation.mockResolvedValueOnce(remote)
+    chatApiMocks.getChatConversationMessages.mockResolvedValueOnce({
+      items: [
+        {
+          id: 'assistant-2',
+          role: 'assistant',
+          content: '有什么可以帮你的吗？',
+          createdAt: 20,
+          position: 2,
+          status: 'complete',
+        },
+        {
+          id: 'user-1',
+          role: 'user',
+          content: '你好',
+          createdAt: 20,
+          position: 1,
+          status: 'complete',
+        },
+      ],
+      nextBeforePosition: null,
+      hasMore: false,
+    })
+
+    const store = useChatStore()
+    await store.hydrate('remote-history-user')
+    await store.loadConversationPage(true)
+    await store.flushPersistence()
+
+    expect(chatApiMocks.getChatConversationMessages).toHaveBeenCalledWith(
+      'remote-history',
+      { beforePosition: null, limit: 100 },
+    )
+    expect(store.activeConversation?.messages.map(({ id }) => id)).toEqual([
+      'user-1',
+      'assistant-2',
+    ])
+
+    setActivePinia(createPinia())
+    const restoredStore = useChatStore()
+    await restoredStore.hydrate('remote-history-user')
+    expect(restoredStore.activeConversation?.messages.map(({ id }) => id)).toEqual([
+      'user-1',
+      'assistant-2',
+    ])
+  })
+
+  it('忽略账号切换前迟到的历史列表响应', async () => {
+    const stalePage = createDeferred<{
+      items: ChatServerConversation[]
+      nextCursor: string | null
+      hasMore: boolean
+    }>()
+    chatApiMocks.listChatConversations
+      .mockReturnValueOnce(stalePage.promise)
+      .mockResolvedValueOnce({
+        items: [serverConversation('current-conversation', { title: '当前账号' })],
+        nextCursor: null,
+        hasMore: false,
+      })
+
+    const store = useChatStore()
+    await store.hydrate('stale-account')
+    const staleLoad = store.loadConversationPage(true)
+    await vi.waitFor(() => {
+      expect(chatApiMocks.listChatConversations).toHaveBeenCalledTimes(1)
+    })
+
+    await store.hydrate('current-account')
+    await store.loadConversationPage(true)
+    stalePage.resolve({
+      items: [serverConversation('stale-conversation', { title: '旧账号' })],
+      nextCursor: 'stale-cursor',
+      hasMore: true,
+    })
+    await staleLoad
+
+    expect(store.userId).toBe('current-account')
+    expect(store.conversations.map(({ id }) => id)).toEqual(['current-conversation'])
+    expect(store.conversationsHaveMore).toBe(false)
+    expect(store.loadingConversationPage).toBe(false)
+  })
+
   it('PATCH 遇到 409 时拉取最新 revision 后只重放一次', async () => {
     const conversation = {
       id: 'conflict-conversation',
@@ -875,6 +1179,77 @@ describe('useChatStore', () => {
       title: '本地标题',
       serverRevision: 3,
     })
+  })
+
+  it('元数据同步不会按随机消息 ID 反排同毫秒的一轮对话', async () => {
+    const conversation = {
+      id: 'stable-order-conversation',
+      userId: 'stable-order-user',
+      title: '稳定顺序',
+      model: 'gpt-5',
+      messages: [
+        {
+          id: 'user-z',
+          role: 'user',
+          content: '你好',
+          createdAt: 20,
+          status: 'complete',
+        },
+        {
+          id: 'assistant-a',
+          role: 'assistant',
+          content: '你好！',
+          createdAt: 20,
+          status: 'complete',
+        },
+      ],
+      headMessageId: 'assistant-a',
+      messageCount: 2,
+      createdAt: 10,
+      updatedAt: 20,
+      serverRevision: 1,
+      serverVersion: 1,
+    }
+    persistedBuckets.set(
+      'stable-order-user',
+      persistedChatState('stable-order-user', conversation, { serverVersion: 1 }),
+    )
+    chatApiMocks.getChatSync
+      .mockResolvedValueOnce({
+        changes: [{
+          type: 'upsert',
+          version: 2,
+          conversationId: 'stable-order-conversation',
+          conversation: serverConversation('stable-order-conversation', {
+            title: '稳定顺序',
+            revision: 2,
+            version: 2,
+            headMessageId: 'assistant-a',
+            messageCount: 2,
+            messages: [],
+            createdAt: 10,
+            updatedAt: 20,
+          }),
+        }],
+        latestVersion: 2,
+        nextCursor: null,
+        hasMore: false,
+      })
+      .mockResolvedValueOnce({
+        changes: [],
+        latestVersion: 2,
+        nextCursor: null,
+        hasMore: false,
+      })
+
+    const store = useChatStore()
+    await store.hydrate('stable-order-user')
+    await store.syncHistory()
+
+    expect(store.activeConversation?.messages.map(({ id }) => id)).toEqual([
+      'user-z',
+      'assistant-a',
+    ])
   })
 
   it('同步消息按 ID 合并，不丢失本机并发加入的消息', async () => {
@@ -956,9 +1331,11 @@ describe('useChatStore', () => {
     await store.syncHistory()
 
     expect(store.conversations[0].messages).toHaveLength(3)
-    expect(store.conversations[0].messages.map(({ id }) => id)).toEqual(
-      expect.arrayContaining(['shared-message', 'local-message', 'remote-message']),
-    )
+    expect(store.conversations[0].messages.map(({ id }) => id)).toEqual([
+      'shared-message',
+      'local-message',
+      'remote-message',
+    ])
     expect(store.conversations[0].messages.find(({ id }) => id === 'shared-message')?.content)
       .toBe('服务端新内容')
   })
@@ -1014,6 +1391,229 @@ describe('useChatStore', () => {
 
     expect(store.conversations).toEqual([])
     expect(store.serverVersion).toBe(3)
+  })
+
+  it('详情消息页会修复已持久化的反序历史', async () => {
+    const conversation = {
+      id: 'reversed-conversation',
+      userId: 'reversed-user',
+      title: '反序历史',
+      model: 'gpt-5',
+      messages: [
+        {
+          id: 'assistant-2',
+          role: 'assistant',
+          content: '回答',
+          createdAt: 20,
+          status: 'complete',
+        },
+        {
+          id: 'user-1',
+          role: 'user',
+          content: '你好',
+          createdAt: 20,
+          status: 'complete',
+        },
+      ],
+      headMessageId: 'assistant-2',
+      messageCount: 2,
+      createdAt: 10,
+      updatedAt: 20,
+      serverRevision: 1,
+      serverVersion: 1,
+    }
+    persistedBuckets.set(
+      'reversed-user',
+      persistedChatState('reversed-user', conversation),
+    )
+    const remote = serverConversation('reversed-conversation', {
+      title: '反序历史',
+      headMessageId: 'assistant-2',
+      messageCount: 2,
+      createdAt: 10,
+      updatedAt: 20,
+    })
+    chatApiMocks.getChatConversation.mockResolvedValueOnce(remote)
+    chatApiMocks.getChatConversationMessages.mockResolvedValueOnce({
+      items: [
+        {
+          id: 'assistant-2',
+          role: 'assistant',
+          content: '回答',
+          createdAt: 20,
+          position: 2,
+          status: 'complete',
+        },
+        {
+          id: 'user-1',
+          role: 'user',
+          content: '你好',
+          createdAt: 20,
+          position: 1,
+          status: 'complete',
+        },
+      ],
+      nextBeforePosition: null,
+      hasMore: false,
+    })
+
+    const store = useChatStore()
+    await store.hydrate('reversed-user')
+    await store.loadConversationDetail('reversed-conversation')
+
+    expect(store.activeConversation?.messages.map(({ id }) => id)).toEqual([
+      'user-1',
+      'assistant-2',
+    ])
+    expect(store.activeConversation).toMatchObject({
+      messagesBeforePosition: null,
+      messagesHasMore: false,
+    })
+  })
+
+  it('加载更早消息时按 position 升序合并、去重并推进游标', async () => {
+    const conversation = {
+      id: 'paged-conversation',
+      userId: 'paged-user',
+      title: '分页历史',
+      model: 'gpt-5',
+      messages: [
+        {
+          id: 'user-3',
+          role: 'user',
+          content: '第三条',
+          createdAt: 30,
+          position: 3,
+          status: 'complete',
+        },
+        {
+          id: 'assistant-4',
+          role: 'assistant',
+          content: '第四条',
+          createdAt: 40,
+          position: 4,
+          status: 'complete',
+        },
+      ],
+      headMessageId: 'assistant-4',
+      messageCount: 4,
+      messagesBeforePosition: 3,
+      messagesHasMore: true,
+      createdAt: 10,
+      updatedAt: 40,
+      serverRevision: 1,
+      serverVersion: 1,
+    }
+    persistedBuckets.set('paged-user', persistedChatState('paged-user', conversation))
+    chatApiMocks.getChatConversationMessages.mockResolvedValueOnce({
+      items: [
+        {
+          id: 'user-3',
+          role: 'user',
+          content: '第三条（服务端）',
+          createdAt: 30,
+          position: 3,
+          status: 'complete',
+        },
+        {
+          id: 'assistant-2',
+          role: 'assistant',
+          content: '第二条',
+          createdAt: 20,
+          position: 2,
+          status: 'complete',
+        },
+        {
+          id: 'user-1',
+          role: 'user',
+          content: '第一条',
+          createdAt: 10,
+          position: 1,
+          status: 'complete',
+        },
+      ],
+      nextBeforePosition: null,
+      hasMore: false,
+    })
+
+    const store = useChatStore()
+    await store.hydrate('paged-user')
+    await store.loadOlderConversationMessages('paged-conversation')
+
+    expect(chatApiMocks.getChatConversationMessages).toHaveBeenCalledWith(
+      'paged-conversation',
+      { beforePosition: 3, limit: 100 },
+    )
+    expect(store.activeConversation?.messages.map(({ id }) => id)).toEqual([
+      'user-1',
+      'assistant-2',
+      'user-3',
+      'assistant-4',
+    ])
+    expect(store.activeConversation?.messages.find(({ id }) => id === 'user-3')?.content)
+      .toBe('第三条（服务端）')
+    expect(store.activeConversation).toMatchObject({
+      messagesBeforePosition: null,
+      messagesHasMore: false,
+    })
+  })
+
+  it('attempt 只给 assistant 补 position 时仍保留同轮 user 在前', async () => {
+    const conversation = {
+      id: 'mixed-position-conversation',
+      userId: 'mixed-position-user',
+      title: '混合位置',
+      model: 'gpt-5',
+      messages: [
+        {
+          id: 'user-z',
+          role: 'user',
+          content: '你好',
+          createdAt: 20,
+          status: 'complete',
+        },
+        {
+          id: 'assistant-a',
+          role: 'assistant',
+          content: '旧回答',
+          createdAt: 20,
+          status: 'stopped',
+          attemptId: 'attempt-mixed',
+        },
+      ],
+      createdAt: 10,
+      updatedAt: 20,
+      serverRevision: 1,
+      serverVersion: 1,
+    }
+    persistedBuckets.set(
+      'mixed-position-user',
+      persistedChatState('mixed-position-user', conversation),
+    )
+    chatApiMocks.getChatAttempt.mockResolvedValueOnce({
+      attemptId: 'attempt-mixed',
+      conversationId: 'mixed-position-conversation',
+      assistantMessageId: 'assistant-a',
+      status: 'processing',
+      assistantMessage: {
+        id: 'assistant-a',
+        role: 'assistant',
+        content: '服务端回答',
+        createdAt: 20,
+        position: 2,
+        status: 'stopped',
+        attemptId: 'attempt-mixed',
+      },
+    })
+
+    const store = useChatStore()
+    await store.hydrate('mixed-position-user')
+    await store.recoverAttempt('mixed-position-conversation', 'assistant-a')
+
+    expect(store.activeConversation?.messages.map(({ id }) => id)).toEqual([
+      'user-z',
+      'assistant-a',
+    ])
   })
 
   it('恢复 processing attempt 的 partial 内容时保持 stopped，且不创建新请求', async () => {

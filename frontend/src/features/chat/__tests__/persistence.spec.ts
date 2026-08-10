@@ -6,6 +6,7 @@ interface MergedState {
   clearRevision: number
   deletedConversationIds: string[]
   activeConversationId: string | null
+  activeConversationSelectionResolved: boolean
   conversations: Array<Record<string, unknown>>
   serverVersion: number
   outbox: Array<Record<string, unknown>>
@@ -29,11 +30,14 @@ function state(
   conversations: Array<Record<string, unknown>>,
   options: { clearRevision?: number; deletedConversationIds?: string[]; activeId?: string | null } = {},
 ): Record<string, unknown> {
+  const activeConversationId = Object.prototype.hasOwnProperty.call(options, 'activeId')
+    ? (options.activeId ?? null)
+    : (String(conversations[0]?.id ?? '') || null)
   return {
     version: 1,
     clearRevision: options.clearRevision ?? 0,
     deletedConversationIds: options.deletedConversationIds ?? [],
-    activeConversationId: options.activeId ?? (String(conversations[0]?.id ?? '') || null),
+    activeConversationId,
     conversations,
   }
 }
@@ -46,13 +50,20 @@ function version2State(
     outbox?: Array<Record<string, unknown>>
     legacyImportDecision?: 'pending' | 'accepted' | 'declined' | null
     legacyConversationIds?: string[]
+    activeConversationSelectionResolved?: boolean
   } = {},
 ): Record<string, unknown> {
+  const activeConversationId = Object.prototype.hasOwnProperty.call(options, 'activeId')
+    ? (options.activeId ?? null)
+    : (String(conversations[0]?.id ?? '') || null)
   return {
     version: 2,
     clearRevision: 0,
     deletedConversationIds: [],
-    activeConversationId: options.activeId ?? (String(conversations[0]?.id ?? '') || null),
+    activeConversationId,
+    ...(options.activeConversationSelectionResolved !== undefined
+      ? { activeConversationSelectionResolved: options.activeConversationSelectionResolved }
+      : {}),
     conversations,
     serverVersion: options.serverVersion ?? 0,
     outbox: options.outbox ?? [],
@@ -66,6 +77,102 @@ function mergedState(value: unknown): MergedState {
 }
 
 describe('mergeChatHistoryStates', () => {
+  it('preserves an explicit new-chat selection across background history writes', () => {
+    const existing = conversation('existing', 10)
+    const removed = conversation('removed', 5)
+    let stored = mergeChatHistoryStates(
+      null,
+      version2State([existing, removed], {
+        activeId: null,
+      }),
+      'user-1',
+      {
+        upsertConversationIds: ['existing', 'removed'],
+        createdConversations: [
+          { id: 'existing', operationAt: 10 },
+          { id: 'removed', operationAt: 5 },
+        ],
+        activeConversationChanged: true,
+      },
+    )
+
+    stored = mergeChatHistoryStates(
+      stored,
+      version2State([conversation('existing', 20), removed], { activeId: 'existing' }),
+      'user-1',
+      { upsertConversationIds: ['existing'] },
+    )
+
+    stored = mergeChatHistoryStates(
+      stored,
+      version2State([conversation('existing', 20)], { activeId: 'existing' }),
+      'user-1',
+      { deletedConversationIds: ['removed'] },
+    )
+
+    stored = mergeChatHistoryStates(
+      stored,
+      version2State([conversation('existing', 20)], { activeId: 'existing' }),
+      'user-1',
+      { initializeActiveConversation: true },
+    )
+
+    stored = mergeChatHistoryStates(
+      stored,
+      version2State([conversation('existing', 20)], { activeId: 'existing' }),
+      'user-1',
+      { replaceActiveConversationIfId: 'removed' },
+    )
+
+    expect(mergedState(stored)).toMatchObject({
+      activeConversationId: null,
+      activeConversationSelectionResolved: true,
+    })
+  })
+
+  it('initializes a server-derived selection only while the stored selection is unresolved', () => {
+    const existing = conversation('existing', 10)
+    const unresolved = version2State([existing], {
+      activeId: null,
+      activeConversationSelectionResolved: false,
+    })
+    const selected = version2State([existing], {
+      activeId: 'existing',
+      activeConversationSelectionResolved: true,
+    })
+
+    const merged = mergedState(mergeChatHistoryStates(
+      unresolved,
+      selected,
+      'user-1',
+      { initializeActiveConversation: true },
+    ))
+
+    expect(merged).toMatchObject({
+      activeConversationId: 'existing',
+      activeConversationSelectionResolved: true,
+    })
+  })
+
+  it('replaces a server-deleted active conversation only when the stored ID still matches', () => {
+    const removed = conversation('removed', 20)
+    const kept = conversation('kept', 10)
+    const merged = mergedState(mergeChatHistoryStates(
+      version2State([removed, kept], { activeId: 'removed' }),
+      version2State([kept], { activeId: 'kept' }),
+      'user-1',
+      {
+        deletedConversationIds: ['removed'],
+        replaceActiveConversationIfId: 'removed',
+      },
+    ))
+
+    expect(merged).toMatchObject({
+      activeConversationId: 'kept',
+      activeConversationSelectionResolved: true,
+    })
+  })
+
   it('preserves conversations created concurrently in different tabs', () => {
     const tabA = conversation('tab-a', 10)
     const tabB = conversation('tab-b', 20)

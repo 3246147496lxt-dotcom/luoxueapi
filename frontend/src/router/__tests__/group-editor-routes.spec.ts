@@ -39,7 +39,7 @@ vi.mock('@/composables/useRoutePrefetch', () => ({
 
 describe('group editor routes', () => {
   it('registers admin-only create and edit workspaces', async () => {
-    const { default: router } = await import('@/router')
+    const { default: router } = await import('@/router/admin')
     const createRoute = router.getRoutes().find(record => record.name === 'AdminGroupCreate')
     const editRoute = router.getRoutes().find(record => record.name === 'AdminGroupEdit')
 
@@ -50,7 +50,7 @@ describe('group editor routes', () => {
   })
 
   it('resolves numeric edit IDs without shadowing the create route', async () => {
-    const { default: router } = await import('@/router')
+    const { default: router } = await import('@/router/admin')
 
     expect(router.resolve('/admin/groups/new').name).toBe('AdminGroupCreate')
     expect(router.resolve('/admin/groups/42/edit').name).toBe('AdminGroupEdit')

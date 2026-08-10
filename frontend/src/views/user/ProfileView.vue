@@ -84,10 +84,6 @@ const oidcOAuthEnabled = ref(false)
 const oidcOAuthProviderName = ref('OIDC')
 
 onMounted(async () => {
-  const profileRefresh = authStore.refreshUser().catch((error) => {
-    console.error('Failed to refresh profile:', error)
-  })
-
   const settingsLoad = appStore.fetchPublicSettings()
     .then((settings) => {
       if (!settings) {
@@ -112,6 +108,6 @@ onMounted(async () => {
       console.error('Failed to load settings:', error)
     })
 
-  await Promise.all([profileRefresh, settingsLoad])
+  await settingsLoad
 })
 </script>

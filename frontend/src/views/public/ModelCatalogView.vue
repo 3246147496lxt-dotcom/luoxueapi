@@ -1,16 +1,25 @@
 <template>
-  <PublicSiteLayout class="model-catalog-page" page="models">
+  <component
+    :is="layoutComponent"
+    v-bind="layoutBindings"
+    class="model-catalog-page"
+    :class="{ 'model-catalog-page--embedded': props.embedded }"
+  >
     <main id="top" class="catalog-main">
       <section class="catalog-hero" aria-labelledby="catalog-title">
         <div class="catalog-shell catalog-hero-inner">
           <div class="catalog-heading">
             <div class="catalog-title-line">
-              <h1 id="catalog-title">{{ t('modelCatalog.title') }}</h1>
+              <h1 id="catalog-title">
+                {{ t(props.embedded ? 'modelCatalog.workspaceTitle' : 'modelCatalog.title') }}
+              </h1>
               <span v-if="!loading && !errorState" class="catalog-count-badge">
                 {{ t('modelCatalog.modelCount', { count: items.length }) }}
               </span>
             </div>
-            <p>{{ t('modelCatalog.description') }}</p>
+            <p>
+              {{ t(props.embedded ? 'modelCatalog.workspaceDescription' : 'modelCatalog.description') }}
+            </p>
           </div>
           <div class="catalog-price-note">
             <Icon name="infoCircle" size="sm" aria-hidden="true" />
@@ -312,13 +321,14 @@
         </div>
       </div>
     </dialog>
-  </PublicSiteLayout>
+  </component>
 </template>
 
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
+import AppLayout from '@/components/layout/AppLayout.vue'
 import PublicSiteLayout from '@/components/public/PublicSiteLayout.vue'
 import CatalogPriceAmount from '@/components/common/CatalogPriceAmount.vue'
 import ModelIcon from '@/components/common/ModelIcon.vue'
@@ -337,6 +347,19 @@ import { resolveTutorialUrl } from '@/utils/documentationUrl'
 import { sanitizeUrl } from '@/utils/url'
 
 type ErrorState = 'unavailable' | 'error' | null
+
+const props = withDefaults(defineProps<{
+  embedded?: boolean
+}>(), {
+  embedded: false
+})
+
+const layoutComponent = computed(() => (
+  props.embedded ? AppLayout : PublicSiteLayout
+))
+const layoutBindings = computed(() => (
+  props.embedded ? {} : { page: 'models' as const }
+))
 
 const { t, te, locale } = useI18n()
 const route = useRoute()
@@ -751,11 +774,11 @@ function restoreDocumentMeta() {
 }
 
 watch([locale, siteName], () => {
-  if (managedHead.size) updateDocumentMeta()
+  if (!props.embedded && managedHead.size) updateDocumentMeta()
 })
 
 onMounted(() => {
-  updateDocumentMeta()
+  if (!props.embedded) updateDocumentMeta()
   void loadCatalog()
 })
 
@@ -1674,6 +1697,94 @@ onBeforeUnmount(() => {
     justify-items: start;
     text-align: left;
   }
+}
+
+.model-catalog-page--embedded {
+  --page: var(--lx-clay-canvas, #f8fafc);
+  --surface: var(--lx-clay-surface, #ffffff);
+  --surface-soft: var(--lx-clay-surface-subtle, #f3f4f6);
+  --surface-accent: var(--lx-clay-accent-soft, #f3e8ff);
+  --ink: var(--lx-clay-text, #111827);
+  --copy: var(--lx-clay-text-secondary, #374151);
+  --muted: var(--lx-clay-text-muted, #6b7280);
+  --border: var(--lx-clay-border, #e5e7eb);
+  --accent: var(--lx-clay-accent, #7c3aed);
+  --accent-strong: var(--lx-clay-accent-deep, #6d28d9);
+  --accent-ink: var(--lx-clay-accent-deep, #6d28d9);
+  min-height: 0;
+}
+
+.model-catalog-page--embedded .catalog-main {
+  min-height: 0;
+}
+
+.model-catalog-page--embedded .catalog-shell {
+  width: 100%;
+  max-width: 1200px;
+}
+
+.model-catalog-page--embedded .catalog-hero {
+  padding-block: 4px 24px;
+}
+
+.model-catalog-page--embedded .catalog-hero-inner {
+  justify-items: start;
+  text-align: left;
+}
+
+.model-catalog-page--embedded .catalog-heading {
+  max-width: 820px;
+}
+
+.model-catalog-page--embedded .catalog-title-line {
+  align-items: flex-start;
+  justify-content: flex-start;
+  gap: 10px;
+}
+
+.model-catalog-page--embedded .catalog-title-line h1 {
+  font-size: clamp(1.75rem, 3vw, 2.25rem);
+  letter-spacing: -0.03em;
+  line-height: 1.2;
+}
+
+.model-catalog-page--embedded .catalog-heading > p {
+  margin: 8px 0 0;
+  font-size: 14px;
+  line-height: 1.65;
+}
+
+.model-catalog-page--embedded .catalog-price-note {
+  max-width: 820px;
+  margin-top: 16px;
+  border-radius: var(--workspace-radius-input);
+}
+
+.model-catalog-page--embedded .catalog-browser {
+  padding-block: 24px;
+}
+
+.model-catalog-page--embedded .catalog-search-wrap {
+  max-width: 680px;
+  margin-inline: 0;
+}
+
+.model-catalog-page--embedded .catalog-search-wrap input {
+  border-radius: var(--workspace-radius-input);
+}
+
+.model-catalog-page--embedded .catalog-results {
+  padding-block: 8px 48px;
+}
+
+.model-catalog-page--embedded .catalog-card,
+.model-catalog-page--embedded .catalog-cta {
+  border-radius: var(--workspace-radius-card);
+}
+
+.model-catalog-page--embedded .catalog-cta {
+  margin-bottom: 0;
+  padding: 24px;
 }
 
 @media (prefers-reduced-motion: reduce) {

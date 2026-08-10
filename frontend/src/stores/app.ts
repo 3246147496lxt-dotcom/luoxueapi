@@ -7,17 +7,16 @@ import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import type { Toast, ToastType, PublicSettings } from '@/types'
 import { i18n } from '@/i18n'
-import {
-  checkUpdates as checkUpdatesAPI,
-  type VersionInfo,
-  type ReleaseInfo
-} from '@/api/admin/system'
+import type { VersionInfo, ReleaseInfo } from '@/api/admin/system'
 import { getPublicSettings as fetchPublicSettingsAPI } from '@/api/auth'
 
 export const useAppStore = defineStore('app', () => {
   // ==================== State ====================
 
   const sidebarCollapsed = ref<boolean>(false)
+  const workspaceNarrowSidebar = ref<boolean>(false)
+  const workspaceNarrowSidebarOpen = ref<boolean>(false)
+  const workspaceMobileDrawer = ref<boolean>(false)
   const mobileOpen = ref<boolean>(false)
   const sidebarScrollTop = ref<number>(0)
   const loading = ref<boolean>(false)
@@ -69,6 +68,24 @@ export const useAppStore = defineStore('app', () => {
    */
   function setSidebarCollapsed(collapsed: boolean): void {
     sidebarCollapsed.value = collapsed
+  }
+
+  /**
+   * Record the narrow pointer-driven overlay range without changing the
+   * user's docked desktop collapse preference.
+   */
+  function setWorkspaceNarrowSidebar(narrow: boolean): void {
+    workspaceNarrowSidebar.value = narrow
+    if (!narrow) workspaceNarrowSidebarOpen.value = false
+  }
+
+  function setWorkspaceNarrowSidebarOpen(open: boolean): void {
+    workspaceNarrowSidebarOpen.value = open && workspaceNarrowSidebar.value
+  }
+
+  function setWorkspaceMobileDrawer(mobile: boolean): void {
+    workspaceMobileDrawer.value = mobile
+    if (mobile) workspaceNarrowSidebarOpen.value = false
   }
 
   /**
@@ -229,6 +246,9 @@ export const useAppStore = defineStore('app', () => {
    */
   function reset(): void {
     sidebarCollapsed.value = false
+    workspaceNarrowSidebar.value = false
+    workspaceNarrowSidebarOpen.value = false
+    workspaceMobileDrawer.value = false
     loading.value = false
     loadingCount.value = 0
     toasts.value = []
@@ -260,6 +280,7 @@ export const useAppStore = defineStore('app', () => {
 
     versionLoading.value = true
     try {
+      const { checkUpdates: checkUpdatesAPI } = await import('@/api/admin/system')
       const data = await checkUpdatesAPI(force)
       currentVersion.value = data.current_version
       latestVersion.value = data.latest_version
@@ -446,6 +467,9 @@ export const useAppStore = defineStore('app', () => {
   return {
     // State
     sidebarCollapsed,
+    workspaceNarrowSidebar,
+    workspaceNarrowSidebarOpen,
+    workspaceMobileDrawer,
     mobileOpen,
     sidebarScrollTop,
     loading,
@@ -477,6 +501,9 @@ export const useAppStore = defineStore('app', () => {
     // Actions
     toggleSidebar,
     setSidebarCollapsed,
+    setWorkspaceNarrowSidebar,
+    setWorkspaceNarrowSidebarOpen,
+    setWorkspaceMobileDrawer,
     toggleMobileSidebar,
     setMobileOpen,
     setLoading,

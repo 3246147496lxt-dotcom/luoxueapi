@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 
 const directory = dirname(fileURLToPath(import.meta.url))
-const routerSource = readFileSync(resolve(directory, '../index.ts'), 'utf8')
+const routerSource = readFileSync(resolve(directory, '../routes/admin.ts'), 'utf8')
 
 describe('admin dashboard home-style preview route', () => {
   it('keeps the visual experiment local and leaves the real admin route in place', () => {

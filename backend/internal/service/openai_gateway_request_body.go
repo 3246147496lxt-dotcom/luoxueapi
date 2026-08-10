@@ -1063,8 +1063,12 @@ func openAIRequestBodyMayContainImageInput(body []byte) bool {
 		return false
 	}
 	input := gjson.GetBytes(body, "input")
-	messages := gjson.GetBytes(body, "messages.#-1")
+	messages := gjson.GetBytes(body, "messages")
 	return openAIJSONValueMayContainImageInput(input) || openAIJSONValueMayContainImageInput(messages)
+}
+
+func OpenAIRequestBodyHasImageInput(body []byte) bool {
+	return openAIRequestBodyMayContainImageInput(body)
 }
 
 func openAIJSONValueMayContainImageInput(value gjson.Result) bool {

@@ -1,267 +1,318 @@
 <template>
   <section
-    class="dashboard-metric-grid grid grid-cols-2 gap-3 sm:gap-4 md:grid-cols-2"
-    :class="isSimple ? 'xl:grid-cols-3' : 'xl:grid-cols-4'"
+    class="dashboard-metric-grid"
     data-testid="dashboard-metric-grid"
     :aria-label="t('dashboard.accountMetrics')"
   >
-    <article v-if="!isSimple" class="dashboard-panel dashboard-summary-card min-h-[205px] overflow-hidden">
-      <DashboardCardHeader icon="wallet" :title="t('dashboard.accountData')" />
-      <div class="dashboard-summary-content space-y-4 px-5 py-5">
-        <DashboardMetricRow
-          icon="arrowLeftRight"
-          tone="blue"
-          :label="t('dashboard.currentBalance')"
-          :value="formatBalance(balance)"
-          credit
-        />
-        <DashboardMetricRow
-          icon="chartNoAxesColumn"
-          tone="violet"
-          :label="t('dashboard.lifetimeSpend')"
-          :value="formatCost(stats.total_actual_cost)"
-          credit
+    <article class="dashboard-metric-card dashboard-metric-card--balance">
+      <div class="dashboard-metric-card__header">
+        <span>{{ t('dashboard.workspace.balance') }}</span>
+        <span class="dashboard-metric-card__icon-well" aria-hidden="true">
+          <Icon name="wallet" size="sm" :stroke-width="1.7" />
+        </span>
+      </div>
+      <div class="dashboard-metric-card__value dashboard-metric-card__value--credit">
+        <CreditAmount
+          :value="formatCredit(balance)"
+          icon-size="md"
+          :label="`${t('dashboard.workspace.balance')} ${formatCredit(balance)}`"
         />
       </div>
+      <p class="dashboard-metric-card__hint">{{ t('dashboard.workspace.balanceHint') }}</p>
+      <RouterLink to="/purchase" class="dashboard-metric-card__link">
+        {{ t('dashboard.workspace.manageBalance') }}
+        <Icon name="arrowRight" size="xs" aria-hidden="true" />
+      </RouterLink>
     </article>
 
-    <article class="dashboard-panel dashboard-summary-card min-h-[205px] overflow-hidden">
-      <DashboardCardHeader icon="activity" :title="t('dashboard.usageStatistics')" />
-      <div class="dashboard-summary-content space-y-4 px-5 py-5">
-        <DashboardMetricRow
-          icon="send"
-          tone="emerald"
-          :label="t('dashboard.lifetimeRequests')"
-          :value="formatNumber(stats.total_requests)"
-        />
-        <DashboardMetricRow
-          icon="activity"
-          tone="sky"
-          :label="t('dashboard.rangeRequests')"
-          :value="formatNumber(rangeMetrics.requests)"
-          :sparkline-values="sparklineSeries.requests"
-          sparkline-color="#0b8bed"
+    <article class="dashboard-metric-card dashboard-metric-card--usage">
+      <div class="dashboard-metric-card__header">
+        <span>{{ t('dashboard.workspace.todayUsage') }}</span>
+        <span class="dashboard-metric-card__icon-well" aria-hidden="true">
+          <Icon name="activity" size="sm" :stroke-width="1.7" />
+        </span>
+      </div>
+      <div class="dashboard-metric-card__value dashboard-metric-card__value--credit">
+        <CreditAmount
+          :value="formatCredit(stats.today_actual_cost)"
+          icon-size="md"
+          :label="`${t('dashboard.workspace.todayUsage')} ${formatCredit(stats.today_actual_cost)}`"
         />
       </div>
+      <p class="dashboard-metric-card__hint">
+        {{ t('dashboard.workspace.todayRequestsHint', { count: formatNumber(stats.today_requests) }) }}
+      </p>
+      <RouterLink to="/usage" class="dashboard-metric-card__link">
+        {{ t('dashboard.workspace.viewUsage') }}
+        <Icon name="arrowRight" size="xs" aria-hidden="true" />
+      </RouterLink>
     </article>
 
-    <article class="dashboard-panel dashboard-summary-card min-h-[205px] overflow-hidden">
-      <DashboardCardHeader icon="zap" :title="t('dashboard.resourceUsage')" />
-      <div class="dashboard-summary-content space-y-4 px-5 py-5">
-        <DashboardMetricRow
-          icon="coins"
-          tone="amber"
-          :label="t('dashboard.rangeSpend')"
-          :value="formatCost(rangeMetrics.actualCost)"
-          :sparkline-values="sparklineSeries.actualCost"
-          sparkline-color="#f59e0b"
-          credit
-        />
-        <DashboardMetricRow
-          icon="type"
-          tone="rose"
-          :label="t('dashboard.rangeTokens')"
-          :value="formatTokens(rangeMetrics.tokens)"
-          :sparkline-values="sparklineSeries.tokens"
-          sparkline-color="#ec4899"
-        />
+    <article class="dashboard-metric-card dashboard-metric-card--tokens">
+      <div class="dashboard-metric-card__header">
+        <span>{{ t('dashboard.workspace.tokenConsumption') }}</span>
+        <span class="dashboard-metric-card__icon-well" aria-hidden="true">
+          <Icon name="type" size="sm" :stroke-width="1.7" />
+        </span>
       </div>
+      <strong class="dashboard-metric-card__value">
+        {{ formatNumber(stats.today_tokens) }}
+      </strong>
+      <p class="dashboard-metric-card__hint">
+        {{ t('dashboard.workspace.tokenBreakdownHint', {
+          input: formatNumber(stats.today_input_tokens),
+          output: formatNumber(stats.today_output_tokens),
+        }) }}
+      </p>
+      <RouterLink to="/usage" class="dashboard-metric-card__link">
+        {{ t('dashboard.workspace.viewUsage') }}
+        <Icon name="arrowRight" size="xs" aria-hidden="true" />
+      </RouterLink>
     </article>
 
-    <article class="dashboard-panel dashboard-summary-card min-h-[205px] overflow-hidden">
-      <DashboardCardHeader icon="gauge" :title="t('dashboard.performance')" />
-      <div class="dashboard-summary-content space-y-4 px-5 py-5">
-        <DashboardMetricRow
-          icon="timer"
-          tone="indigo"
-          :label="t('dashboard.averageRpm')"
-          :value="formatRate(rangeMetrics.averageRpm)"
-          :sparkline-values="sparklineSeries.requests"
-          sparkline-color="#6366f1"
-        />
-        <DashboardMetricRow
-          icon="send"
-          tone="orange"
-          :label="t('dashboard.averageTpm')"
-          :value="formatRate(rangeMetrics.averageTpm)"
-          :sparkline-values="sparklineSeries.tokens"
-          sparkline-color="#f97316"
-        />
+    <article class="dashboard-metric-card dashboard-metric-card--plan">
+      <div class="dashboard-metric-card__header">
+        <span>{{ t('dashboard.workspace.currentPlan') }}</span>
+        <span class="dashboard-metric-card__icon-well" aria-hidden="true">
+          <Icon name="creditCard" size="sm" :stroke-width="1.7" />
+        </span>
       </div>
+      <div v-if="planLoading && !subscriptionsLoaded" class="dashboard-plan-loading" aria-live="polite">
+        <span class="skeleton h-8 w-36" />
+        <span class="sr-only">{{ t('dashboard.workspace.planLoading') }}</span>
+      </div>
+      <strong v-else class="dashboard-metric-card__value dashboard-metric-card__value--plan">
+        <span class="dashboard-plan-dot" aria-hidden="true" />
+        <span class="truncate" :title="planName">{{ planName }}</span>
+      </strong>
+      <p class="dashboard-metric-card__hint">
+        {{ planExpiresAt
+          ? t('dashboard.workspace.planExpires', { date: formatPlanDate(planExpiresAt) })
+          : hasActiveSubscription
+            ? t('dashboard.workspace.planNoExpiry')
+            : t('dashboard.workspace.planFlexible') }}
+      </p>
+      <RouterLink to="/subscriptions" class="dashboard-metric-card__link">
+        {{ t('dashboard.workspace.managePlan') }}
+        <Icon name="arrowRight" size="xs" aria-hidden="true" />
+      </RouterLink>
     </article>
   </section>
 </template>
 
 <script setup lang="ts">
-import { computed, defineComponent, h, type PropType } from 'vue'
 import { useI18n } from 'vue-i18n'
-import Icon from '@/components/icons/Icon.vue'
 import CreditAmount from '@/components/common/CreditAmount.vue'
-import DashboardSparkline from '@/components/user/dashboard/DashboardSparkline.vue'
+import Icon from '@/components/icons/Icon.vue'
 import type { UserDashboardStats as UserStatsType } from '@/api/usage'
-import type { TrendDataPoint } from '@/types'
-import type { DashboardRangeMetrics } from '@/utils/dashboardMetrics'
-import { buildDashboardSparklineSeries } from '@/utils/dashboardMetrics'
-import {
-  formatCostFixed as formatCost,
-  formatNumberLocaleString as formatNumber,
-  formatTokensK as formatTokens,
-} from '@/utils/format'
 
-const props = defineProps<{
+defineProps<{
   stats: UserStatsType
   balance: number
-  isSimple: boolean
-  rangeMetrics: DashboardRangeMetrics
-  trend: TrendDataPoint[]
-  startDate: string
-  endDate: string
-  granularity: 'day' | 'hour'
+  planName: string
+  planExpiresAt: string | null
+  planLoading: boolean
+  subscriptionsLoaded: boolean
+  hasActiveSubscription: boolean
 }>()
 
-const { t } = useI18n()
-const sparklineSeries = computed(() => buildDashboardSparklineSeries(
-  props.trend,
-  props.startDate,
-  props.endDate,
-  props.granularity,
-))
+const { t, locale } = useI18n()
 
-type DashboardIconName =
-  | 'wallet'
-  | 'activity'
-  | 'zap'
-  | 'gauge'
-  | 'arrowLeftRight'
-  | 'chartNoAxesColumn'
-  | 'send'
-  | 'coins'
-  | 'type'
-  | 'timer'
-
-const toneClasses = {
-  blue: 'bg-blue-50 text-blue-500 dark:bg-blue-950/40 dark:text-blue-300',
-  violet: 'bg-violet-50 text-violet-500 dark:bg-violet-950/40 dark:text-violet-300',
-  emerald: 'bg-emerald-50 text-emerald-500 dark:bg-emerald-950/40 dark:text-emerald-300',
-  sky: 'bg-sky-50 text-sky-500 dark:bg-sky-950/40 dark:text-sky-300',
-  amber: 'bg-amber-50 text-amber-500 dark:bg-amber-950/40 dark:text-amber-300',
-  rose: 'bg-pink-50 text-pink-500 dark:bg-pink-950/40 dark:text-pink-300',
-  indigo: 'bg-indigo-50 text-indigo-500 dark:bg-indigo-950/40 dark:text-indigo-300',
-  orange: 'bg-orange-50 text-orange-500 dark:bg-orange-950/40 dark:text-orange-300',
-} as const
-
-const DashboardCardHeader = defineComponent({
-  name: 'DashboardCardHeader',
-  props: {
-    icon: { type: String as PropType<DashboardIconName>, required: true },
-    title: { type: String, required: true },
-  },
-  setup(props) {
-    return () => h('div', {
-      class: 'dashboard-summary-card-header flex h-[61px] items-center gap-2 border-b border-gray-100 px-5 text-sm font-medium text-gray-800 dark:border-dark-700 dark:text-gray-100',
-    }, [
-      h(Icon, { name: props.icon, size: 'sm', strokeWidth: 2 }),
-      h('span', props.title),
-    ])
-  },
-})
-
-const DashboardMetricRow = defineComponent({
-  name: 'DashboardMetricRow',
-  props: {
-    icon: { type: String as PropType<DashboardIconName>, required: true },
-    tone: { type: String as PropType<keyof typeof toneClasses>, required: true },
-    label: { type: String, required: true },
-    value: { type: String, required: true },
-    credit: { type: Boolean, default: false },
-    sparklineValues: { type: Array as PropType<number[]>, default: () => [] },
-    sparklineColor: { type: String, default: '' },
-  },
-  setup(props) {
-    return () => h('div', { class: 'dashboard-metric-row flex min-w-0 items-center' }, [
-      h('span', {
-        class: `dashboard-metric-row-icon mr-3 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${toneClasses[props.tone]}`,
-      }, [h(Icon, { name: props.icon, size: 'sm', strokeWidth: 2 })]),
-      h('span', { class: 'dashboard-metric-row-copy min-w-0 flex-1' }, [
-        h('span', { class: 'block text-xs leading-4 text-gray-500 dark:text-dark-400' }, props.label),
-        h('strong', {
-          class: 'dashboard-metric-row-value mt-0.5 block truncate text-lg font-semibold leading-6 text-gray-800 dark:text-gray-100',
-          title: props.value,
-        }, props.credit
-          ? [h(CreditAmount, {
-              value: props.value,
-              iconSize: 'md',
-              label: `${props.label} ${props.value}`,
-            })]
-          : props.value),
-      ]),
-      props.sparklineColor
-        ? h(DashboardSparkline, {
-            class: 'ml-3',
-            values: props.sparklineValues,
-            color: props.sparklineColor,
-          })
-        : null,
-    ])
-  },
-})
-
-function formatRate(value: number): string {
-  if (!Number.isFinite(value)) return '0.000'
-  if (value >= 1000) return formatTokens(value)
-  return value.toFixed(3)
+function finiteNumber(value: number | null | undefined): number {
+  return Number.isFinite(value) ? Number(value) : 0
 }
 
-function formatBalance(value: number): string {
-  if (!Number.isFinite(value)) return '0.00'
-  return new Intl.NumberFormat('en-US', {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  }).format(value)
+function formatCredit(value: number | null | undefined): string {
+  return finiteNumber(value).toFixed(2)
+}
+
+function formatNumber(value: number | null | undefined): string {
+  return new Intl.NumberFormat(locale.value.startsWith('zh') ? 'zh-CN' : 'en-US')
+    .format(finiteNumber(value))
+}
+
+function formatPlanDate(value: string): string {
+  const date = new Date(value)
+  if (!Number.isFinite(date.getTime())) return value
+  return new Intl.DateTimeFormat(locale.value.startsWith('zh') ? 'zh-CN' : 'en-US', {
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+  }).format(date)
 }
 </script>
 
 <style scoped>
-.dashboard-panel {
-  border: 1px solid var(--lx-clay-border);
-  border-radius: var(--lx-clay-radius-surface);
-  background: var(--lx-clay-surface);
-  box-shadow: var(--lx-clay-shadow-form);
+.dashboard-metric-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--workspace-space-4);
+}
+
+.dashboard-metric-card {
+  min-width: 0;
+  padding: var(--workspace-space-5);
+  border: 1px solid var(--workspace-border);
+  border-radius: var(--workspace-radius-work-card);
+  background: var(--workspace-card-surface);
+  box-shadow: var(--workspace-work-shadow-card);
+}
+
+.dashboard-metric-card__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  color: var(--workspace-work-text-muted);
+  font-size: var(--workspace-type-secondary-size);
+  font-weight: var(--workspace-type-secondary-weight);
+  line-height: 1.25rem;
+}
+
+.dashboard-metric-card__icon-well {
+  display: inline-flex;
+  width: 34px;
+  height: 34px;
+  flex: 0 0 34px;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--workspace-radius-button);
+  color: var(--workspace-work-accent);
+  background: var(--workspace-work-accent-soft);
+}
+
+.dashboard-metric-card--tokens .dashboard-metric-card__icon-well {
+  color: var(--workspace-work-info);
+  background: var(--workspace-work-info-soft);
+}
+
+.dashboard-metric-card--plan .dashboard-metric-card__icon-well {
+  color: var(--workspace-work-text-secondary);
+  background: var(--workspace-surface-subtle);
+}
+
+.dashboard-metric-card__value {
+  display: flex;
+  min-height: 2.25rem;
+  align-items: center;
+  margin-top: 18px;
+  color: var(--workspace-work-text);
+  font-size: var(--workspace-type-numeric-size);
+  font-weight: var(--workspace-type-numeric-weight);
+  line-height: 2.25rem;
+  letter-spacing: -0.025em;
+  font-variant-numeric: tabular-nums;
+}
+
+.dashboard-metric-card--balance .dashboard-metric-card__value {
+  color: var(--workspace-work-accent-deep);
+}
+
+.dashboard-metric-card--balance .dashboard-metric-card__value--credit :deep([data-testid="snowflake-credit-icon"]) {
+  opacity: 1;
+}
+
+.dashboard-metric-card__value--plan {
+  gap: 9px;
+}
+
+.dashboard-plan-dot {
+  width: 7px;
+  height: 7px;
+  flex: 0 0 7px;
+  border-radius: 999px;
+  background: var(--workspace-work-success);
+}
+
+.dashboard-plan-loading {
+  display: flex;
+  min-height: 2.25rem;
+  align-items: center;
+  margin-top: 18px;
+}
+
+.dashboard-metric-card__hint {
+  min-height: 2.5rem;
+  margin-top: 8px;
+  color: var(--workspace-work-text-muted);
+  font-size: var(--workspace-type-secondary-size);
+  font-weight: var(--workspace-type-secondary-weight);
+  line-height: 1.25rem;
+}
+
+.dashboard-metric-card__link {
+  display: inline-flex;
+  min-height: 32px;
+  align-items: center;
+  gap: 5px;
+  margin-top: 12px;
+  border-radius: var(--workspace-radius-compact);
+  color: var(--workspace-work-text-secondary);
+  font-size: var(--workspace-type-navigation-size);
+  font-weight: var(--workspace-type-navigation-weight);
+  transition: color 140ms ease, background-color 140ms ease;
+}
+
+.dashboard-metric-card__link:hover {
+  color: var(--workspace-work-accent-hover);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+.dashboard-metric-card__link:focus-visible {
+  outline: 2px solid var(--workspace-work-accent);
+  outline-offset: 3px;
+}
+
+@media (max-width: 1279px) {
+  .dashboard-metric-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 
 @media (max-width: 639px) {
-  .dashboard-summary-card-header {
-    gap: 0.375rem;
-    padding-right: 0.75rem;
-    padding-left: 0.75rem;
+  .dashboard-metric-grid {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 12px;
   }
 
-  .dashboard-summary-content {
-    padding: 0.875rem 0.75rem;
+  .dashboard-metric-card {
+    padding: 17px 18px;
   }
 
-  .dashboard-metric-row-icon {
-    width: 1.75rem;
-    height: 1.75rem;
-    margin-right: 0.5rem;
+  .dashboard-metric-card__value {
+    margin-top: 12px;
   }
 
-  .dashboard-metric-row-value {
-    font-size: 1rem;
-    line-height: 1.375rem;
+  .dashboard-metric-card__hint {
+    min-height: auto;
   }
 
-  .dashboard-metric-row :deep(.dashboard-sparkline) {
-    width: 2.375rem;
-    height: 1.75rem;
-    margin-left: 0.25rem;
-    flex-basis: 2.375rem;
+  .dashboard-metric-card__link {
+    min-height: 44px;
   }
 }
 
-@media (max-width: 359px) {
-  .dashboard-metric-grid {
-    grid-template-columns: minmax(0, 1fr);
-  }
+:global(html.dark) .dashboard-metric-card {
+  border-color: var(--workspace-border);
+  background: var(--workspace-card-surface);
+  box-shadow: none;
+}
+
+:global(html.dark) .dashboard-metric-card__header,
+:global(html.dark) .dashboard-metric-card__hint {
+  color: var(--workspace-dark-text-muted);
+}
+
+:global(html.dark) .dashboard-metric-card__value {
+  color: var(--workspace-dark-text);
+}
+
+:global(html.dark) .dashboard-metric-card__link {
+  color: var(--workspace-dark-text-secondary);
+}
+
+:global(html.dark) .dashboard-metric-card__link:hover {
+  color: var(--workspace-light-surface);
 }
 </style>

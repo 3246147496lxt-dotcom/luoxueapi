@@ -16,6 +16,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/pkg/ctxkey"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/ip"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/transcriptiontemp"
 	middleware2 "github.com/Wei-Shaw/sub2api/internal/server/middleware"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 
@@ -37,6 +38,7 @@ type OpenAIGatewayHandler struct {
 	opsService               *service.OpsService
 	concurrencyHelper        *ConcurrencyHelper
 	imageLimiter             *imageConcurrencyLimiter
+	transcriptionRuntime     *transcriptionRuntime
 	maxAccountSwitches       int
 	cfg                      *config.Config
 }
@@ -166,10 +168,23 @@ func NewOpenAIGatewayHandler(
 	opsService *service.OpsService,
 	cfg *config.Config,
 ) *OpenAIGatewayHandler {
+	if err := transcriptiontemp.StartMaintenance(); err != nil {
+		// The maintenance loop and request-time Create calls retry after an
+		// operator repairs the workspace; keep the warning free of audio names.
+		logger.L().Warn("transcription.temp_workspace_unavailable", zap.Error(err))
+	}
 	pingInterval := time.Duration(0)
 	maxAccountSwitches := 3
+	var transcriptionRuntime *transcriptionRuntime
 	if cfg != nil {
 		pingInterval = time.Duration(cfg.Concurrency.PingInterval) * time.Second
+		// The operator-managed enabled/model/group fields live in the settings
+		// table and may change without a restart. Build the deployment-bounded
+		// runtime whenever this run mode can support transcription; the dynamic
+		// switch is enforced per request.
+		if cfg.RunMode != config.RunModeSimple {
+			transcriptionRuntime = newTranscriptionRuntime(cfg.Transcription)
+		}
 		if cfg.Gateway.MaxAccountSwitches > 0 {
 			maxAccountSwitches = cfg.Gateway.MaxAccountSwitches
 		}
@@ -184,6 +199,7 @@ func NewOpenAIGatewayHandler(
 		opsService:               opsService,
 		concurrencyHelper:        NewConcurrencyHelper(concurrencyService, SSEPingFormatComment, pingInterval),
 		imageLimiter:             &imageConcurrencyLimiter{},
+		transcriptionRuntime:     transcriptionRuntime,
 		maxAccountSwitches:       maxAccountSwitches,
 		cfg:                      cfg,
 	}

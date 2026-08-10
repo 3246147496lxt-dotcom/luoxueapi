@@ -5,6 +5,7 @@ package web
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"io/fs"
 	"net/http"
 	"net/http/httptest"
@@ -24,6 +25,8 @@ import (
 func init() {
 	gin.SetMode(gin.TestMode)
 }
+
+const adminEntryMarker = `<meta name="app-entry" content="admin" />`
 
 func TestInjectSiteTitle(t *testing.T) {
 	t.Run("replaces_title_with_site_name", func(t *testing.T) {
@@ -279,6 +282,21 @@ func TestFrontendServer_InjectSettings(t *testing.T) {
 		assert.Contains(t, string(result), `window.__APP_CONFIG__={"nested":{"array":[1,2,3]},"special":"<>&"};`)
 	})
 
+	t.Run("selects_the_admin_html_entry_for_admin_routes", func(t *testing.T) {
+		provider := &mockSettingsProvider{settings: map[string]string{"site_name": "落雪API"}}
+		server, err := NewFrontendServer(provider)
+		require.NoError(t, err)
+
+		adminResult := server.injectSettingsForPath([]byte(`{"site_name":"落雪API"}`), "/admin/dashboard")
+		userResult := server.injectSettingsForPath([]byte(`{"site_name":"落雪API"}`), "/dashboard")
+
+		assert.Contains(t, string(adminResult), adminEntryMarker)
+		assert.Contains(t, string(adminResult), `window.__APP_CONFIG__={"site_name":"落雪API"};`)
+		assert.Contains(t, string(adminResult), `<meta name="robots" content="noindex, nofollow" />`)
+		assert.Equal(t, 1, strings.Count(string(adminResult), `name="robots"`))
+		assert.NotContains(t, string(userResult), adminEntryMarker)
+	})
+
 	t.Run("injects_route_specific_model_catalog_metadata", func(t *testing.T) {
 		provider := &mockSettingsProvider{settings: map[string]any{
 			"site_name":                    "落雪API",
@@ -419,6 +437,27 @@ func TestHTMLRouteCacheKey(t *testing.T) {
 	}
 }
 
+func TestFrontendIndexFilePath(t *testing.T) {
+	tests := []struct {
+		requestPath string
+		want        string
+	}{
+		{requestPath: "/", want: userFrontendIndexFilePath},
+		{requestPath: "/dashboard", want: userFrontendIndexFilePath},
+		{requestPath: "/administrator", want: userFrontendIndexFilePath},
+		{requestPath: "/admin", want: adminFrontendIndexFilePath},
+		{requestPath: "/admin/", want: adminFrontendIndexFilePath},
+		{requestPath: "/admin/dashboard", want: adminFrontendIndexFilePath},
+		{requestPath: "/admin/index.html", want: adminFrontendIndexFilePath},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.requestPath, func(t *testing.T) {
+			assert.Equal(t, tt.want, frontendIndexFilePath(tt.requestPath))
+		})
+	}
+}
+
 func TestApplyRouteIndexingHeaders(t *testing.T) {
 	indexable := make(http.Header)
 	applyRouteIndexingHeaders(indexable, homeHTMLCacheKey)
@@ -427,6 +466,34 @@ func TestApplyRouteIndexingHeaders(t *testing.T) {
 	private := make(http.Header)
 	applyRouteIndexingHeaders(private, noIndexHTMLCacheKey)
 	assert.Equal(t, "noindex, nofollow", private.Get("X-Robots-Tag"))
+}
+
+func TestInjectNoIndexMetadata(t *testing.T) {
+	t.Run("adds_noindex_when_missing", func(t *testing.T) {
+		html := []byte(`<html><head><title>Private</title></head><body></body></html>`)
+
+		result := injectNoIndexMetadata(html)
+
+		assert.Contains(t, string(result), `<meta name="robots" content="noindex, nofollow" />`)
+	})
+
+	t.Run("keeps_an_existing_noindex_meta_without_duplication", func(t *testing.T) {
+		html := []byte(`<html><head><META content='nofollow, noindex' NAME='robots'></head><body></body></html>`)
+
+		result := injectNoIndexMetadata(html)
+
+		assert.Equal(t, html, result)
+		assert.Len(t, metaTagPattern.FindAll(result, -1), 1)
+	})
+
+	t.Run("does_not_treat_an_indexable_robots_meta_as_noindex", func(t *testing.T) {
+		html := []byte(`<html><head><meta name="robots" content="index, follow" /></head><body></body></html>`)
+
+		result := injectNoIndexMetadata(html)
+
+		assert.Contains(t, string(result), `<meta name="robots" content="noindex, nofollow" />`)
+		assert.Len(t, metaTagPattern.FindAll(result, -1), 2)
+	})
 }
 
 func TestFrontendServer_ServeIndexHTML(t *testing.T) {
@@ -510,7 +577,7 @@ func TestFrontendServer_ServeIndexHTML(t *testing.T) {
 		assert.True(t, strings.HasSuffix(etag, `"`))
 	})
 
-	t.Run("returns_304_for_matching_etag", func(t *testing.T) {
+	t.Run("returns_fresh_nonce_body_for_matching_etag", func(t *testing.T) {
 		provider := &mockSettingsProvider{
 			settings: map[string]string{"test": "value"},
 		}
@@ -518,10 +585,12 @@ func TestFrontendServer_ServeIndexHTML(t *testing.T) {
 		server, err := NewFrontendServer(provider)
 		require.NoError(t, err)
 
-		// Use a real router for proper 304 handling
+		// Model SecurityHeaders issuing a fresh nonce for every response.
+		nonceSequence := 0
 		router := gin.New()
 		router.Use(func(c *gin.Context) {
-			c.Set(middleware.CSPNonceKey, "test-nonce")
+			nonceSequence++
+			c.Set(middleware.CSPNonceKey, fmt.Sprintf("test-nonce-%d", nonceSequence))
 			c.Next()
 		})
 		router.Use(server.Middleware())
@@ -539,8 +608,11 @@ func TestFrontendServer_ServeIndexHTML(t *testing.T) {
 		req2.Header.Set("If-None-Match", etag)
 		router.ServeHTTP(w2, req2)
 
-		assert.Equal(t, http.StatusNotModified, w2.Code)
-		assert.Empty(t, w2.Body.String())
+		assert.Equal(t, http.StatusOK, w2.Code)
+		assert.Equal(t, etag, w2.Header().Get("ETag"))
+		assert.Equal(t, "no-cache", w2.Header().Get("Cache-Control"))
+		assert.Contains(t, w2.Body.String(), `nonce="test-nonce-2"`)
+		assert.NotContains(t, w2.Body.String(), `nonce="test-nonce-1"`)
 	})
 
 	t.Run("sets_cache_control_header", func(t *testing.T) {
@@ -620,6 +692,32 @@ func TestFrontendServer_ServeIndexHTML(t *testing.T) {
 		assert.Empty(t, quotaViewer.Header().Get("X-Robots-Tag"))
 		assert.Contains(t, homeAgain.Body.String(), `<link rel="canonical" href="https://luoxueapi.cc/home" />`)
 		assert.Equal(t, 4, provider.called)
+	})
+
+	t.Run("isolates_user_and_admin_entry_caches", func(t *testing.T) {
+		provider := &mockSettingsProvider{settings: map[string]string{"site_name": "落雪API"}}
+		server, err := NewFrontendServer(provider)
+		require.NoError(t, err)
+
+		request := func(path, nonce string) *httptest.ResponseRecorder {
+			w := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(w)
+			c.Request = httptest.NewRequest(http.MethodGet, path, nil)
+			c.Set(middleware.CSPNonceKey, nonce)
+			server.serveIndexHTML(c)
+			return w
+		}
+
+		user := request("/dashboard", "user-nonce")
+		admin := request("/admin/dashboard", "admin-nonce")
+		adminAgain := request("/admin/users", "admin-second-nonce")
+
+		assert.NotContains(t, user.Body.String(), adminEntryMarker)
+		assert.Contains(t, admin.Body.String(), adminEntryMarker)
+		assert.Contains(t, admin.Body.String(), `nonce="admin-nonce"`)
+		assert.Contains(t, adminAgain.Body.String(), `nonce="admin-second-nonce"`)
+		assert.NotEqual(t, user.Header().Get("ETag"), admin.Header().Get("ETag"))
+		assert.Equal(t, 2, provider.called)
 	})
 }
 
@@ -754,6 +852,19 @@ func TestFrontendServer_InvalidateCache(t *testing.T) {
 		assert.NotPanics(t, func() {
 			server.InvalidateCache()
 		})
+	})
+
+	t.Run("invalidates_user_and_admin_caches", func(t *testing.T) {
+		provider := &mockSettingsProvider{settings: map[string]string{"test": "value"}}
+		server, err := NewFrontendServer(provider)
+		require.NoError(t, err)
+
+		server.cache.SetForKey(noIndexHTMLCacheKey, []byte("user"), []byte(`{}`))
+		server.adminCache.SetForKey(noIndexHTMLCacheKey, []byte("admin"), []byte(`{}`))
+		server.InvalidateCache()
+
+		assert.Nil(t, server.cache.GetForKey(noIndexHTMLCacheKey))
+		assert.Nil(t, server.adminCache.GetForKey(noIndexHTMLCacheKey))
 	})
 }
 
@@ -916,6 +1027,44 @@ func TestFrontendServer_Middleware(t *testing.T) {
 				assert.Contains(t, w.Header().Get("Content-Type"), "text/html")
 			})
 		}
+	})
+
+	t.Run("serves_admin_entry_for_admin_roots_and_deep_links", func(t *testing.T) {
+		provider := &mockSettingsProvider{settings: map[string]string{"site_name": "落雪API"}}
+		server, err := NewFrontendServer(provider)
+		require.NoError(t, err)
+
+		router := gin.New()
+		router.Use(func(c *gin.Context) {
+			c.Set(middleware.CSPNonceKey, "admin-route-nonce")
+			c.Next()
+		})
+		router.Use(server.Middleware())
+
+		for _, requestPath := range []string{
+			"/admin",
+			"/admin/",
+			"/admin/index.html",
+			"/admin/dashboard",
+			"/admin/users/123/chat-history",
+		} {
+			t.Run(requestPath, func(t *testing.T) {
+				w := httptest.NewRecorder()
+				req := httptest.NewRequest(http.MethodGet, requestPath, nil)
+				router.ServeHTTP(w, req)
+
+				assert.Equal(t, http.StatusOK, w.Code)
+				assert.Contains(t, w.Header().Get("Content-Type"), "text/html")
+				assert.Equal(t, "no-cache", w.Header().Get("Cache-Control"))
+				assert.Equal(t, "noindex, nofollow", w.Header().Get("X-Robots-Tag"))
+				assert.Contains(t, w.Body.String(), adminEntryMarker)
+				assert.Contains(t, w.Body.String(), `nonce="admin-route-nonce"`)
+			})
+		}
+
+		userWriter := httptest.NewRecorder()
+		router.ServeHTTP(userWriter, httptest.NewRequest(http.MethodGet, "/dashboard", nil))
+		assert.NotContains(t, userWriter.Body.String(), adminEntryMarker)
 	})
 
 	t.Run("serves_documentation_site_and_its_deep_links", func(t *testing.T) {
@@ -1083,7 +1232,9 @@ func TestNewFrontendServer(t *testing.T) {
 		assert.NotNil(t, server.distFS)
 		assert.NotNil(t, server.fileServer)
 		assert.NotNil(t, server.baseHTML)
+		assert.NotNil(t, server.adminBaseHTML)
 		assert.NotNil(t, server.cache)
+		assert.NotNil(t, server.adminCache)
 		assert.Equal(t, provider, server.settings)
 	})
 
@@ -1097,6 +1248,8 @@ func TestNewFrontendServer(t *testing.T) {
 
 		assert.NotEmpty(t, server.baseHTML)
 		assert.Contains(t, string(server.baseHTML), "<!doctype html>")
+		assert.NotEmpty(t, server.adminBaseHTML)
+		assert.Contains(t, string(server.adminBaseHTML), adminEntryMarker)
 	})
 }
 
@@ -1154,6 +1307,30 @@ func TestServeEmbeddedFrontend(t *testing.T) {
 
 				assert.Equal(t, http.StatusOK, w.Code)
 				assert.Contains(t, w.Header().Get("Content-Type"), "text/html")
+			})
+		}
+	})
+
+	t.Run("serves_admin_index_for_admin_roots_and_deep_links", func(t *testing.T) {
+		middleware := ServeEmbeddedFrontend()
+		router := gin.New()
+		router.Use(middleware)
+
+		for _, requestPath := range []string{
+			"/admin",
+			"/admin/",
+			"/admin/index.html",
+			"/admin/dashboard",
+			"/admin/users/123/chat-history",
+		} {
+			t.Run(requestPath, func(t *testing.T) {
+				w := httptest.NewRecorder()
+				req := httptest.NewRequest(http.MethodGet, requestPath, nil)
+				router.ServeHTTP(w, req)
+
+				assert.Equal(t, http.StatusOK, w.Code)
+				assert.Contains(t, w.Header().Get("Content-Type"), "text/html")
+				assert.Contains(t, w.Body.String(), adminEntryMarker)
 			})
 		}
 	})

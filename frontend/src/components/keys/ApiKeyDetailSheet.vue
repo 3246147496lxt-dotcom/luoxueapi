@@ -219,7 +219,7 @@ onBeforeUnmount(() => {
   display: flex;
   align-items: flex-end;
   justify-content: center;
-  background: rgb(0 0 0 / 0.7);
+  background: var(--workspace-overlay-backdrop);
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
 }
@@ -234,8 +234,8 @@ onBeforeUnmount(() => {
   border: 0;
   border-radius: 32px 32px 0 0;
   outline: none;
-  color: #332f3a;
-  background: #f4f1fa;
+  color: var(--workspace-text);
+  background: var(--workspace-canvas);
   box-shadow: 0 25px 50px -12px rgb(0 0 0 / 0.25);
   font-family: "DM Sans", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
 }
@@ -254,9 +254,9 @@ onBeforeUnmount(() => {
   align-items: center;
   justify-content: space-between;
   gap: 1.5rem;
-  border-bottom: 1px solid rgb(243 244 246);
+  border-bottom: 1px solid var(--workspace-border);
   border-radius: 32px 32px 0 0;
-  background: #fff;
+  background: var(--workspace-popup-surface);
   padding: 1.5rem;
   box-shadow: 0 1px 2px 0 rgb(0 0 0 / 0.05);
 }
@@ -289,7 +289,7 @@ onBeforeUnmount(() => {
 
 .api-key-detail-sheet__subtitle {
   margin: 0.125rem 0 0;
-  color: #9ca3af;
+  color: var(--workspace-text-muted);
   font-size: 0.625rem;
   font-weight: 900;
   line-height: 0.875rem;
@@ -304,12 +304,12 @@ onBeforeUnmount(() => {
   flex: 0 0 3rem;
   align-items: center;
   justify-content: center;
-  color: #9ca3af;
+  color: var(--workspace-text-muted);
   transition: color 150ms ease, transform 150ms ease;
 }
 
 .api-key-detail-sheet__close:hover {
-  color: var(--lx-clay-text);
+  color: var(--workspace-text);
 }
 
 .api-key-detail-sheet__close:active {
@@ -334,8 +334,8 @@ onBeforeUnmount(() => {
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 0.75rem;
   flex: 0 0 auto;
-  border-top: 1px solid rgb(243 244 246);
-  background: #fff;
+  border-top: 1px solid var(--workspace-border);
+  background: var(--workspace-popup-surface);
   padding: 1.5rem;
   padding-bottom: max(2rem, calc(1.5rem + env(safe-area-inset-bottom)));
 }
@@ -361,14 +361,14 @@ onBeforeUnmount(() => {
 }
 
 :global(.dark) .api-key-detail-sheet {
-  color: #f8f5fc;
-  background: #17131f;
+  color: var(--workspace-text);
+  background: var(--workspace-canvas);
 }
 
 :global(.dark) .api-key-detail-sheet__header,
 :global(.dark) .api-key-detail-sheet__content :deep(.api-key-inspector__footer) {
-  border-color: rgb(255 255 255 / 0.1);
-  background: #251e2f;
+  border-color: var(--workspace-border);
+  background: var(--workspace-popup-surface);
 }
 
 :global(.dark) .api-key-detail-sheet__info-icon {

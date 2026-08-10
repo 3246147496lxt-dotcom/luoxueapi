@@ -1,5 +1,10 @@
 <template>
-  <div :class="flat ? '' : 'card overflow-hidden'">
+  <div
+    :class="[
+      flat ? '' : 'card overflow-hidden',
+      { 'usage-table--audit': auditLayout }
+    ]"
+  >
     <div
       v-if="showIpGeoToolbar"
       class="flex items-center justify-end gap-2 border-b border-gray-200 px-4 py-2 dark:border-dark-700"
@@ -27,20 +32,64 @@
         @sort="(key, order) => $emit('sort', key, order)"
       >
         <template #cell-user="{ row }">
-          <div class="text-sm">
+          <div
+            v-if="auditLayout"
+            class="usage-audit-subject"
+            data-testid="audit-subject"
+            :title="getAuditUserTitle(row)"
+          >
+            <div class="usage-audit-subject__heading">
+              <button
+                v-if="row.user?.email || getUserDisplayName(row)"
+                type="button"
+                class="usage-audit-subject__primary"
+                data-testid="audit-subject-primary"
+                :title="t('admin.usage.clickToViewBalance')"
+                @click="$emit('userClick', row.user_id, row.user?.email)"
+              >
+                {{ getUserDisplayName(row) || row.user?.email }}
+              </button>
+              <span v-else class="usage-audit-subject__fallback">#{{ row.user_id }}</span>
+              <span
+                v-if="row.user?.deleted_at"
+                class="usage-audit-subject__deactivated"
+                data-testid="audit-subject-deactivated"
+              >
+                {{ t('admin.usage.workspace.table.deactivated') }}
+              </span>
+            </div>
+            <div class="usage-audit-subject__meta" data-testid="audit-subject-meta">
+              <template v-if="getUserDisplayName(row) && row.user?.email">
+                <span>{{ row.user.email }}</span>
+                <span aria-hidden="true"> · </span>
+              </template>
+              <span>#{{ row.user_id }}</span>
+            </div>
+          </div>
+          <div v-else class="min-w-[180px] text-sm">
             <button
-              v-if="row.user?.email"
-              class="font-medium text-primary-600 underline decoration-dashed underline-offset-2 transition-colors hover:text-primary-700 dark:text-primary-400 dark:hover:text-primary-300"
+              v-if="row.user?.email || getUserDisplayName(row)"
+              class="block max-w-[240px] text-left text-primary-700 transition-colors hover:text-primary-800 dark:text-primary-300 dark:hover:text-primary-200"
               @click="$emit('userClick', row.user_id, row.user?.email)"
               :title="t('admin.usage.clickToViewBalance')"
             >
-              {{ row.user.email }}
+              <span class="block truncate font-semibold">
+                {{ getUserDisplayName(row) || row.user?.email }}
+              </span>
+              <span
+                v-if="getUserDisplayName(row) && row.user?.email"
+                class="mt-0.5 block truncate text-xs font-normal text-gray-500 dark:text-gray-400"
+              >
+                {{ row.user.email }}
+              </span>
             </button>
-            <span v-else class="font-medium text-gray-900 dark:text-white">-</span>
-            <span v-if="row.user?.deleted_at" class="ml-1 inline-flex items-center rounded px-1 py-px text-[10px] font-medium leading-tight bg-rose-100 text-rose-600 ring-1 ring-inset ring-rose-200 dark:bg-rose-500/20 dark:text-rose-400 dark:ring-rose-500/30">
-              {{ t('admin.usage.userDeletedBadge') }}
-            </span>
-            <span class="ml-1 text-gray-500 dark:text-gray-400">#{{ row.user_id }}</span>
+            <span v-else class="font-medium text-gray-900 dark:text-white">#{{ row.user_id }}</span>
+            <div v-if="row.user" class="mt-1 flex flex-wrap items-center gap-1.5 text-xs text-gray-500 dark:text-gray-400">
+              <span>#{{ row.user_id }}</span>
+              <span v-if="row.user.deleted_at" class="inline-flex items-center rounded px-1.5 py-px text-[10px] font-semibold leading-tight bg-rose-100 text-rose-700 ring-1 ring-inset ring-rose-200 dark:bg-rose-500/20 dark:text-rose-300 dark:ring-rose-500/30">
+                {{ t('admin.usage.userDeletedBadge') }}
+              </span>
+            </div>
           </div>
         </template>
 
@@ -69,11 +118,23 @@
         </template>
 
         <template #cell-account="{ row }">
-          <span class="text-sm text-gray-900 dark:text-white">{{ row.account?.name || '-' }}</span>
+          <span
+            v-if="auditLayout"
+            class="usage-audit-account"
+            data-testid="audit-account"
+            :title="row.account?.name || undefined"
+          >{{ row.account?.name || '-' }}</span>
+          <span v-else class="text-sm text-gray-900 dark:text-white">{{ row.account?.name || '-' }}</span>
         </template>
 
         <template #cell-model="{ row }">
-          <div v-if="row.model_mapping_chain && row.model_mapping_chain.includes('→')" class="space-y-0.5 text-xs">
+          <div v-if="auditLayout" class="usage-audit-model" data-testid="audit-model">
+            <span class="usage-audit-model__requested">{{ getRequestedModel(row) }}</span>
+            <span v-if="getAuditMappedModel(row)" class="usage-audit-model__mapped">
+              <span aria-hidden="true">↳ </span>{{ getAuditMappedModel(row) }}
+            </span>
+          </div>
+          <div v-else-if="row.model_mapping_chain && row.model_mapping_chain.includes('→')" class="space-y-0.5 text-xs">
             <div v-for="(step, i) in row.model_mapping_chain.split('→')" :key="i"
                  class="break-all"
                  :class="i === 0 ? 'font-medium text-gray-900 dark:text-white' : 'text-gray-500 dark:text-gray-400'"
@@ -134,8 +195,18 @@
         </template>
 
         <template #cell-tokens="{ row }">
+          <div v-if="auditLayout" class="usage-audit-tokens" data-testid="audit-tokens">
+            <div class="usage-audit-tokens__line usage-audit-tokens__line--input">
+              <span>{{ row.input_tokens?.toLocaleString() || 0 }}</span>
+              <span class="usage-audit-tokens__label">{{ t('admin.usage.workspace.table.input') }}</span>
+            </div>
+            <div class="usage-audit-tokens__line usage-audit-tokens__line--output">
+              <span>{{ row.output_tokens?.toLocaleString() || 0 }}</span>
+              <span class="usage-audit-tokens__label">{{ t('admin.usage.workspace.table.output') }}</span>
+            </div>
+          </div>
           <!-- 图片生成请求（仅按次计费时显示图片格式） -->
-          <div v-if="isImageUsage(row)" class="flex items-center gap-1.5">
+          <div v-else-if="isImageUsage(row)" class="flex items-center gap-1.5">
             <svg class="h-4 w-4 text-indigo-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
             </svg>
@@ -194,7 +265,21 @@
         </template>
 
         <template #cell-cost="{ row }">
-          <div class="text-sm">
+          <div v-if="auditLayout" class="usage-audit-cost" data-testid="audit-cost">
+            <div class="usage-audit-cost__charged">
+              <CreditAmount
+                v-if="creditMode"
+                :value="getChargedAmount(row).toFixed(6)"
+                icon-size="xs"
+                :label="`${t('usage.chargedAmount')} ${getChargedAmount(row).toFixed(6)}`"
+              />
+              <span v-else>${{ getChargedAmount(row).toFixed(6) }}</span>
+            </div>
+            <div class="usage-audit-cost__base" data-testid="audit-cost-base">
+              {{ t('admin.usage.workspace.table.cost') }}: ${{ getGrossCost(row).toFixed(4) }}
+            </div>
+          </div>
+          <div v-else class="text-sm">
             <div class="flex items-center gap-1.5">
               <CreditAmount
                 v-if="creditMode"
@@ -228,7 +313,17 @@
 
         <!-- 合并首字/总耗时的健康度列：左侧色条上端随首字档、下端随总耗时档，中段(40%-60%)短渐变过渡，便于纵向扫视整体健康状况 -->
         <template #cell-latency="{ row }">
-          <div class="flex items-stretch gap-2">
+          <div v-if="auditLayout" class="usage-audit-latency" data-testid="audit-latency">
+            <span
+              class="usage-audit-latency__badge"
+              :class="getAuditLatencyBadgeClass(row.first_token_ms)"
+              data-testid="audit-latency-badge"
+            >{{ formatDuration(row.first_token_ms) }}</span>
+            <span class="usage-audit-latency__total">
+              {{ t('admin.usage.workspace.table.total') }}: {{ formatDuration(row.duration_ms) }}
+            </span>
+          </div>
+          <div v-else class="flex items-stretch gap-2">
             <span
               class="w-1 shrink-0 rounded-full"
               :class="row.first_token_ms != null
@@ -246,8 +341,15 @@
           </div>
         </template>
 
-        <template #cell-created_at="{ value }">
-          <span class="text-sm text-gray-600 dark:text-gray-400">{{ formatDateTime(value) }}</span>
+        <template #cell-created_at="{ value, row }">
+          <div v-if="auditLayout" class="usage-audit-time" data-testid="audit-time">
+            <span class="usage-audit-time__date">{{ formatAuditDateTime(value) }}</span>
+            <code
+              class="usage-audit-time__request"
+              :title="row.request_id || undefined"
+            >{{ row.request_id || '-' }}</code>
+          </div>
+          <span v-else class="text-sm text-gray-600 dark:text-gray-400">{{ formatDateTime(value) }}</span>
         </template>
 
         <template #cell-user_agent="{ row }">
@@ -256,7 +358,14 @@
         </template>
 
         <template #cell-ip_address="{ row }">
-          <div v-if="row.ip_address">
+          <div v-if="auditLayout && row.ip_address" class="usage-audit-ip" data-testid="audit-ip">
+            <span class="usage-audit-ip__address">{{ row.ip_address }}</span>
+            <div class="usage-audit-ip__geo">
+              <IpGeoCell :ip="row.ip_address" />
+            </div>
+          </div>
+          <span v-else-if="auditLayout" class="usage-audit-ip__empty">-</span>
+          <div v-else-if="row.ip_address">
             <span class="text-sm font-mono text-gray-600 dark:text-gray-400">{{ row.ip_address }}</span>
             <IpGeoCell :ip="row.ip_address" />
           </div>
@@ -549,11 +658,19 @@ import EmptyState from '@/components/common/EmptyState.vue'
 import IpGeoCell from '@/components/common/IpGeoCell.vue'
 import Icon from '@/components/icons/Icon.vue'
 import { fetchBatch, getEntry } from '@/utils/ipGeoLookup'
-import type { AdminUsageLog } from '@/types'
+import type { UsageLog, UsageLogAccountSummary } from '@/types'
 import type { Column } from '@/components/common/types'
 
+interface UsageTableRow extends UsageLog {
+  upstream_model?: string | null
+  model_mapping_chain?: string | null
+  account_rate_multiplier?: number | null
+  account_stats_cost?: number | null
+  account?: UsageLogAccountSummary
+}
+
 interface Props {
-  data: AdminUsageLog[]
+  data: UsageTableRow[]
   loading?: boolean
   columns: Column[]
   serverSideSort?: boolean
@@ -562,6 +679,8 @@ interface Props {
   showAccountBilling?: boolean
   showUpstreamEndpoint?: boolean
   creditMode?: boolean
+  /** Superdesign 用量审计台账的紧凑八列复合单元格 */
+  auditLayout?: boolean
   /** 嵌入统一卡片内使用：去掉自身卡片外观 */
   flat?: boolean
 }
@@ -574,6 +693,7 @@ const props = withDefaults(defineProps<Props>(), {
   showAccountBilling: true,
   showUpstreamEndpoint: true,
   creditMode: false,
+  auditLayout: false,
   flat: false
 })
 const emit = defineEmits<{
@@ -586,6 +706,18 @@ const showAccountBilling = props.showAccountBilling
 const showUpstreamEndpoint = props.showUpstreamEndpoint
 const creditMode = props.creditMode
 const ipGeoBatchLoading = ref(false)
+
+const getUserDisplayName = (row: UsageTableRow): string => {
+  const username = row.user?.username?.trim() || ''
+  const email = row.user?.email?.trim() || ''
+  return username && username.toLocaleLowerCase() !== email.toLocaleLowerCase() ? username : ''
+}
+
+const getAuditUserTitle = (row: UsageTableRow): string => {
+  const displayName = getUserDisplayName(row)
+  const email = row.user?.email?.trim() || ''
+  return [displayName, email, `#${row.user_id}`].filter(Boolean).join(' · ')
+}
 
 const showIpGeoToolbar = computed(() => props.columns.some((col) => col.key === 'ip_address'))
 
@@ -614,14 +746,14 @@ const handleBatchFetchIpGeo = async () => {
 // Tooltip state - cost
 const tooltipVisible = ref(false)
 const tooltipPosition = ref({ x: 0, y: 0 })
-const tooltipData = ref<AdminUsageLog | null>(null)
+const tooltipData = ref<UsageTableRow | null>(null)
 
 // Tooltip state - token
 const tokenTooltipVisible = ref(false)
 const tokenTooltipPosition = ref({ x: 0, y: 0 })
-const tokenTooltipData = ref<AdminUsageLog | null>(null)
+const tokenTooltipData = ref<UsageTableRow | null>(null)
 
-const getRequestTypeLabel = (row: AdminUsageLog): string => {
+const getRequestTypeLabel = (row: UsageTableRow): string => {
   const requestType = resolveUsageRequestType(row)
   if (requestType === 'cyber') return t('usage.cyber')
   if (requestType === 'ws_v2') return t('usage.ws')
@@ -630,7 +762,7 @@ const getRequestTypeLabel = (row: AdminUsageLog): string => {
   return t('usage.unknown')
 }
 
-const getRequestTypeBadgeClass = (row: AdminUsageLog): string => {
+const getRequestTypeBadgeClass = (row: UsageTableRow): string => {
   const requestType = resolveUsageRequestType(row)
   if (requestType === 'cyber') return 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200'
   if (requestType === 'ws_v2') return 'bg-violet-100 text-violet-800 dark:bg-violet-900 dark:text-violet-200'
@@ -639,18 +771,32 @@ const getRequestTypeBadgeClass = (row: AdminUsageLog): string => {
   return 'bg-amber-100 text-amber-800 dark:bg-amber-900 dark:text-amber-200'
 }
 
-const getRequestedModel = (row: AdminUsageLog): string =>
+const getRequestedModel = (row: UsageTableRow): string =>
   row.model || '-'
 
-const getActualModel = (row: AdminUsageLog): string =>
+const getActualModel = (row: UsageTableRow): string =>
   row.upstream_model?.trim() || row.model || '-'
 
-const getChargedAmount = (row: AdminUsageLog | null | undefined): number => {
+const getAuditMappedModel = (row: UsageTableRow): string => {
+  const requested = getRequestedModel(row)
+  const mappingSteps = row.model_mapping_chain
+    ?.split('→')
+    .map((step) => step.trim())
+    .filter(Boolean)
+
+  const mapped = mappingSteps && mappingSteps.length > 1
+    ? mappingSteps[mappingSteps.length - 1]
+    : getActualModel(row)
+
+  return mapped && mapped !== requested ? mapped : ''
+}
+
+const getChargedAmount = (row: UsageTableRow | null | undefined): number => {
   const value = row?.actual_cost ?? 0
   return Number.isFinite(value) ? value : 0
 }
 
-const getGrossCost = (row: AdminUsageLog | null | undefined): number => {
+const getGrossCost = (row: UsageTableRow | null | undefined): number => {
   const value = row?.total_cost ?? getChargedAmount(row)
   return Number.isFinite(value) ? value : 0
 }
@@ -682,8 +828,16 @@ const formatDuration = (ms: number | null | undefined): string => {
   return `${Math.floor(totalSec / 3600)}h ${Math.floor((totalSec % 3600) / 60)}m`
 }
 
+const formatAuditDateTime = (value: string | Date | null | undefined): string =>
+  formatDateTime(value, undefined, 'sv-SE')
+
+const getAuditLatencyBadgeClass = (ms: number | null | undefined): string => {
+  if (ms == null) return 'usage-audit-latency__badge--muted'
+  return `usage-audit-latency__badge--${firstTokenSeverity(ms)}`
+}
+
 // Cost tooltip functions
-const showTooltip = (event: MouseEvent, row: AdminUsageLog) => {
+const showTooltip = (event: MouseEvent, row: UsageTableRow) => {
   const target = event.currentTarget as HTMLElement
   const rect = target.getBoundingClientRect()
   tooltipData.value = row
@@ -698,7 +852,7 @@ const hideTooltip = () => {
 }
 
 // Token tooltip functions
-const showTokenTooltip = (event: MouseEvent, row: AdminUsageLog) => {
+const showTokenTooltip = (event: MouseEvent, row: UsageTableRow) => {
   const target = event.currentTarget as HTMLElement
   const rect = target.getBoundingClientRect()
   tokenTooltipData.value = row
@@ -712,3 +866,292 @@ const hideTokenTooltip = () => {
   tokenTooltipData.value = null
 }
 </script>
+
+<style scoped>
+.usage-table--audit {
+  color: var(--lx-clay-text, #332f3a);
+}
+
+.usage-audit-subject {
+  min-width: 220px;
+  max-width: 240px;
+  overflow: hidden;
+}
+
+.usage-audit-subject__heading {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 6px;
+}
+
+.usage-audit-subject__primary,
+.usage-audit-subject__fallback {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--lx-clay-accent, #7c3aed);
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 20px;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.usage-audit-subject__primary {
+  display: block;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  transition: color 150ms ease;
+}
+
+.usage-audit-subject__primary:hover {
+  color: #6d28d9;
+}
+
+.usage-audit-subject__deactivated {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  padding: 1px 4px;
+  border-radius: 3px;
+  background: #ffe4e6;
+  box-shadow: inset 0 0 0 1px #fecdd3;
+  color: #e11d48;
+  font-size: 10px;
+  font-weight: 500;
+  line-height: 12px;
+}
+
+.usage-audit-subject__meta {
+  overflow: hidden;
+  margin-top: 1px;
+  color: #9ca3af;
+  font-size: 10px;
+  font-weight: 400;
+  line-height: 14px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.usage-audit-model {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+}
+
+.usage-audit-model__requested {
+  overflow-wrap: anywhere;
+  color: var(--lx-clay-text, #332f3a);
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 16px;
+}
+
+.usage-audit-model__mapped {
+  overflow-wrap: anywhere;
+  color: #9ca3af;
+  font-size: 10px;
+  font-weight: 400;
+  line-height: 14px;
+}
+
+.usage-audit-tokens,
+.usage-audit-cost,
+.usage-audit-latency {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+}
+
+.usage-audit-tokens__line {
+  display: flex;
+  align-items: baseline;
+  justify-content: flex-end;
+  gap: 4px;
+  color: var(--lx-clay-text, #332f3a);
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 18px;
+  white-space: nowrap;
+}
+
+.usage-audit-tokens__line--output {
+  color: #8b5cf6;
+}
+
+.usage-audit-tokens__label {
+  color: #9ca3af;
+  font-size: 10px;
+  font-weight: 400;
+  line-height: 14px;
+}
+
+.usage-audit-cost__charged {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px;
+  color: #059669;
+  font-size: 13px;
+  font-weight: 900;
+  line-height: 18px;
+  white-space: nowrap;
+}
+
+.usage-audit-cost__base {
+  margin-top: 1px;
+  color: #fb923c;
+  font-size: 10px;
+  font-weight: 400;
+  line-height: 14px;
+  white-space: nowrap;
+}
+
+.usage-audit-latency__badge {
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 14px;
+  white-space: nowrap;
+}
+
+.usage-audit-latency__badge--good {
+  background: #d1fae5;
+  color: #047857;
+}
+
+.usage-audit-latency__badge--warn {
+  background: #fef3c7;
+  color: #b45309;
+}
+
+.usage-audit-latency__badge--slow {
+  background: #ffedd5;
+  color: #c2410c;
+}
+
+.usage-audit-latency__badge--critical {
+  background: #fee2e2;
+  color: #b91c1c;
+}
+
+.usage-audit-latency__badge--muted {
+  background: #f3f4f6;
+  color: #9ca3af;
+}
+
+.usage-audit-latency__total {
+  margin-top: 4px;
+  color: #9ca3af;
+  font-size: 10px;
+  font-weight: 400;
+  line-height: 14px;
+  white-space: nowrap;
+}
+
+.usage-audit-account {
+  display: block;
+  max-width: 120px;
+  overflow: hidden;
+  color: #4b5563;
+  font-size: 13px;
+  font-weight: 400;
+  line-height: 18px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.usage-audit-time {
+  display: flex;
+  min-width: 140px;
+  flex-direction: column;
+}
+
+.usage-audit-time__date {
+  color: #6b7280;
+  font-size: 11px;
+  font-weight: 400;
+  line-height: 16px;
+  white-space: nowrap;
+}
+
+.usage-audit-time__request {
+  display: block;
+  max-width: 160px;
+  overflow: hidden;
+  color: #9ca3af;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 9px;
+  font-weight: 400;
+  line-height: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.usage-audit-ip {
+  min-width: 120px;
+  color: var(--lx-clay-text, #332f3a);
+  font-size: 11px;
+  font-weight: 400;
+  line-height: 16px;
+}
+
+.usage-audit-ip__address {
+  white-space: nowrap;
+}
+
+.usage-audit-ip__geo {
+  color: #9ca3af;
+}
+
+.usage-audit-ip__geo :deep(div) {
+  margin-top: 1px;
+  color: #9ca3af;
+  font-size: 11px;
+  line-height: 14px;
+}
+
+.usage-audit-ip__geo :deep(button) {
+  color: #9ca3af;
+  font-size: 11px;
+  text-decoration-color: transparent;
+}
+
+.usage-audit-ip__empty {
+  color: #9ca3af;
+  font-size: 11px;
+}
+
+.dark .usage-audit-subject__primary,
+.dark .usage-audit-subject__fallback {
+  color: #a78bfa;
+}
+
+.dark .usage-audit-subject__primary:hover {
+  color: #c4b5fd;
+}
+
+.dark .usage-audit-subject__deactivated {
+  background: rgb(244 63 94 / 20%);
+  box-shadow: inset 0 0 0 1px rgb(244 63 94 / 30%);
+  color: #fda4af;
+}
+
+.dark .usage-audit-model__requested,
+.dark .usage-audit-tokens__line--input,
+.dark .usage-audit-ip {
+  color: var(--lx-clay-text, #f8f5fc);
+}
+
+.dark .usage-audit-tokens__line--output {
+  color: #a78bfa;
+}
+
+.dark .usage-audit-account,
+.dark .usage-audit-time__date {
+  color: #c5bccf;
+}
+</style>

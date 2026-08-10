@@ -228,8 +228,8 @@ const usageFor = (key: ApiKey) => {
   height: 100%;
   max-width: 100%;
   overflow: auto;
-  background: #fff;
-  scrollbar-color: rgb(91 80 112 / 20%) transparent;
+  background: var(--workspace-card-surface);
+  scrollbar-color: var(--workspace-border-strong) transparent;
   scrollbar-width: thin;
 }
 
@@ -240,13 +240,13 @@ const usageFor = (key: ApiKey) => {
 
 .key-workspace-list::-webkit-scrollbar-thumb {
   border-radius: 10px;
-  background: rgb(91 80 112 / 20%);
+  background: var(--workspace-border-strong);
 }
 
 .workspace-table {
   width: 100%;
   border-collapse: collapse;
-  color: #332f3a;
+  color: var(--workspace-text);
   text-align: left;
   font-variant-numeric: tabular-nums;
 }
@@ -261,8 +261,8 @@ const usageFor = (key: ApiKey) => {
   position: sticky;
   top: 0;
   z-index: 10;
-  border-bottom: 1px solid #f3f4f6;
-  background: rgb(255 255 255 / 95%);
+  border-bottom: 1px solid var(--workspace-border);
+  background: color-mix(in srgb, var(--workspace-card-surface) 95%, transparent);
   backdrop-filter: blur(4px);
   -webkit-backdrop-filter: blur(4px);
 }
@@ -270,7 +270,7 @@ const usageFor = (key: ApiKey) => {
 .workspace-table th {
   height: 3.5rem;
   padding: 1.25rem 1rem;
-  color: #9ca3af;
+  color: var(--workspace-text-muted);
   font-size: 0.625rem;
   font-weight: 900;
   letter-spacing: 0;
@@ -290,21 +290,21 @@ const usageFor = (key: ApiKey) => {
 
 .workspace-row {
   height: 5.75rem;
-  background: #fff;
+  background: var(--workspace-card-surface);
   transition: background-color 300ms cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .workspace-table tbody tr + tr {
-  border-top: 1px solid #f9fafb;
+  border-top: 1px solid var(--workspace-border);
 }
 
 .workspace-row:hover {
-  background: rgb(249 250 251 / 50%);
+  background: var(--workspace-hover);
 }
 
 .workspace-row--selected,
 .workspace-row--selected:hover {
-  background: rgb(124 58 237 / 5%);
+  background: var(--workspace-selected);
 }
 
 .workspace-row:focus-visible {
@@ -323,7 +323,7 @@ const usageFor = (key: ApiKey) => {
 }
 
 .workspace-row--selected > .workspace-status-cell {
-  box-shadow: inset 4px 0 0 #7c3aed;
+  box-shadow: inset 4px 0 0 var(--workspace-border-strong);
 }
 
 .workspace-usage-cell {
@@ -359,7 +359,7 @@ const usageFor = (key: ApiKey) => {
   width: 2.5rem;
   height: 1.375rem;
   border-radius: 9999px;
-  background: #e5e7eb;
+  background: var(--workspace-border-strong);
   transition: background-color 200ms ease;
 }
 
@@ -374,7 +374,7 @@ const usageFor = (key: ApiKey) => {
   width: 1.125rem;
   height: 1.125rem;
   border-radius: 9999px;
-  background: #fff;
+  background: var(--workspace-light-surface);
   box-shadow: 0 1px 2px 0 rgb(0 0 0 / 5%);
   transition: transform 200ms ease;
 }
@@ -398,14 +398,14 @@ const usageFor = (key: ApiKey) => {
 }
 
 .workspace-key-name {
-  color: #111827;
+  color: var(--workspace-text);
   font-size: 0.875rem;
   font-weight: 700;
   line-height: 1.25rem;
 }
 
 .workspace-key-token {
-  color: #9ca3af;
+  color: var(--workspace-text-muted);
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   font-size: 0.6875rem;
   letter-spacing: 0;
@@ -490,9 +490,9 @@ const usageFor = (key: ApiKey) => {
 }
 
 .workspace-group-button--unassigned {
-  border: 1px solid #e5e7eb;
-  color: #4b5563;
-  background: #f3f4f6;
+  border: 1px solid var(--workspace-border);
+  color: var(--workspace-text-secondary);
+  background: var(--workspace-surface-subtle);
   font-weight: 700;
 }
 
@@ -528,7 +528,7 @@ const usageFor = (key: ApiKey) => {
   align-items: center;
   gap: 0.125rem;
   overflow: hidden;
-  color: #9ca3af;
+  color: var(--workspace-text-muted);
   white-space: nowrap;
 }
 
@@ -536,7 +536,7 @@ const usageFor = (key: ApiKey) => {
   height: 0.375rem;
   overflow: hidden;
   border-radius: 9999px;
-  background: #f3f4f6;
+  background: var(--workspace-surface-subtle);
 }
 
 .workspace-quota-meter {
@@ -547,14 +547,14 @@ const usageFor = (key: ApiKey) => {
 }
 
 .workspace-quota-unlimited {
-  color: #9ca3af;
+  color: var(--workspace-text-muted);
   font-size: 0.75rem;
   font-weight: 700;
 }
 
 .workspace-usage-today {
   justify-content: flex-end;
-  color: #111827;
+  color: var(--workspace-text);
   font-size: 0.875rem;
   font-weight: 900;
   line-height: 1.25rem;
@@ -566,7 +566,7 @@ const usageFor = (key: ApiKey) => {
   justify-content: flex-end;
   gap: 0.25rem;
   margin-top: 0.125rem;
-  color: #9ca3af;
+  color: var(--workspace-text-muted);
   font-size: 0.625rem;
   font-weight: 700;
   letter-spacing: 0;
@@ -575,7 +575,7 @@ const usageFor = (key: ApiKey) => {
 }
 
 .workspace-usage-empty {
-  color: #9ca3af;
+  color: var(--workspace-text-muted);
   font-size: 0.875rem;
   font-weight: 700;
 }
@@ -591,42 +591,42 @@ const usageFor = (key: ApiKey) => {
 
 :global(.dark) .key-workspace-list,
 :global(.dark) .workspace-row {
-  background: #17131f;
+  background: var(--workspace-card-surface);
 }
 
 :global(.dark) .workspace-table {
-  color: #f8f5fc;
+  color: var(--workspace-text);
 }
 
 :global(.dark) .workspace-table thead {
-  border-bottom-color: rgb(255 255 255 / 10%);
-  background: rgb(37 30 47 / 95%);
+  border-bottom-color: var(--workspace-border);
+  background: color-mix(in srgb, var(--workspace-card-surface) 95%, transparent);
 }
 
 :global(.dark) .workspace-table th {
-  color: #6b7280;
+  color: var(--workspace-text-muted);
 }
 
 :global(.dark) .workspace-table tbody tr + tr {
-  border-top-color: rgb(255 255 255 / 5%);
+  border-top-color: var(--workspace-border);
 }
 
 :global(.dark) .workspace-row:hover {
-  background: rgb(255 255 255 / 3%);
+  background: var(--workspace-hover);
 }
 
 :global(.dark) .workspace-row--selected,
 :global(.dark) .workspace-row--selected:hover {
-  background: rgb(124 58 237 / 9%);
+  background: var(--workspace-selected);
 }
 
 :global(.dark) .workspace-key-name,
 :global(.dark) .workspace-usage-today {
-  color: #fff;
+  color: var(--workspace-text);
 }
 
 :global(.dark) .workspace-status-track {
-  background: rgb(255 255 255 / 10%);
+  background: var(--workspace-border-strong);
 }
 
 :global(.dark) .workspace-status-track--active {
@@ -634,7 +634,7 @@ const usageFor = (key: ApiKey) => {
 }
 
 :global(.dark) .workspace-quota-progress {
-  background: rgb(255 255 255 / 5%);
+  background: var(--workspace-surface-subtle);
 }
 
 :global(.dark) .workspace-group-button--assigned {

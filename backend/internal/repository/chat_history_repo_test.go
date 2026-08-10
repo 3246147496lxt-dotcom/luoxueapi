@@ -38,6 +38,7 @@ func TestChatHistoryListMessagesReturnsAscendingPageAndBeforeCursor(t *testing.T
 		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(conversationID))
 
 	columns := []string{
+		"internal_id",
 		"public_id",
 		"position",
 		"role",
@@ -60,9 +61,15 @@ func TestChatHistoryListMessagesReturnsAscendingPageAndBeforeCursor(t *testing.T
 	mock.ExpectQuery(regexp.QuoteMeta("FROM chat_messages m")).
 		WithArgs(userID, conversationID, 3).
 		WillReturnRows(sqlmock.NewRows(columns).
-			AddRow("message-00000005", 5, "assistant", "five", "completed", "gpt-5.5", nil, nil, nil, false, nil, 4, nil, nil, now, now, now).
-			AddRow("message-00000004", 4, "user", "four", "completed", "", nil, nil, nil, false, nil, 0, nil, nil, now, now, now).
-			AddRow("message-00000003", 3, "assistant", "three", "completed", "gpt-5.5", nil, nil, nil, false, nil, 2, nil, nil, now, now, now))
+			AddRow(int64(105), "message-00000005", 5, "assistant", "five", "completed", "gpt-5.5", nil, nil, nil, false, nil, 4, nil, nil, now, now, now).
+			AddRow(int64(104), "message-00000004", 4, "user", "four", "completed", "", nil, nil, nil, false, nil, 0, nil, nil, now, now, now).
+			AddRow(int64(103), "message-00000003", 3, "assistant", "three", "completed", "gpt-5.5", nil, nil, nil, false, nil, 2, nil, nil, now, now, now))
+	mock.ExpectQuery(regexp.QuoteMeta("FROM chat_message_attachments ma")).
+		WithArgs(sqlmock.AnyArg()).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"message_id", "public_id", "original_name", "kind", "mime_type", "byte_size", "stored_size", "status", "expires_at",
+			"page_count", "width", "height", "storage_key", "sha256", "extracted_text",
+		}))
 
 	repo := NewChatHistoryRepository(db)
 	page, err := repo.ListMessages(
@@ -104,6 +111,9 @@ func TestChatHistoryDeleteRemovesOnlyContentAndWritesTombstone(t *testing.T) {
 	mock.ExpectQuery(regexp.QuoteMeta("UPDATE chat_history_sync_states")).
 		WithArgs(userID).
 		WillReturnRows(sqlmock.NewRows([]string{"version"}).AddRow(5))
+	mock.ExpectExec(regexp.QuoteMeta("UPDATE chat_attachments")).
+		WithArgs(userID, conversationID, sqlmock.AnyArg()).
+		WillReturnResult(sqlmock.NewResult(0, 0))
 	mock.ExpectExec(regexp.QuoteMeta("DELETE FROM chat_messages")).
 		WithArgs(userID, conversationID).
 		WillReturnResult(sqlmock.NewResult(0, 2))

@@ -222,8 +222,7 @@ const skillMarketEntryVisible = computed(() => (
   && appStore.cachedPublicSettings?.skill_marketplace_enabled === true
 ))
 
-const dashboardPath = computed(() => (authStore.isAdmin ? '/admin/dashboard' : '/dashboard'))
-const headerAccountPath = computed(() => (authStore.isAuthenticated ? dashboardPath.value : '/login'))
+const headerAccountPath = computed(() => (authStore.isAuthenticated ? '/dashboard' : '/login'))
 const headerAccountLabel = computed(() => (
   authStore.isAuthenticated ? t('home.dashboard') : t('home.login')
 ))

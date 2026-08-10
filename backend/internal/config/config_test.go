@@ -138,6 +138,104 @@ func TestLoadDefaultOpenAIFirstOutputTimeoutsDisabled(t *testing.T) {
 	require.Zero(t, cfg.Gateway.OpenAIHighEffortFirstOutputTimeoutSeconds)
 }
 
+func TestLoadTranscriptionDefaults(t *testing.T) {
+	resetViperWithJWTSecret(t)
+	cfg, err := Load()
+	require.NoError(t, err)
+	require.False(t, cfg.Transcription.Enabled)
+	require.Equal(t, "openai_compatible", cfg.Transcription.Provider)
+	require.Equal(t, "gpt-4o-mini-transcribe", cfg.Transcription.Model)
+	require.Empty(t, cfg.Transcription.GroupIDs)
+	require.EqualValues(t, 10*1024*1024, cfg.Transcription.MaxUploadBytes)
+	require.Equal(t, 30, cfg.Transcription.UploadTimeoutSeconds)
+	require.Equal(t, 120, cfg.Transcription.MaxDurationSeconds)
+	require.Equal(t, 45, cfg.Transcription.RequestTimeoutSeconds)
+	require.Equal(t, 600, cfg.Transcription.IdempotencyTTLSeconds)
+	require.EqualValues(t, 11*1024*1024, cfg.Transcription.RequestBodyLimit())
+}
+
+func TestLoadChatAttachmentDefaults(t *testing.T) {
+	resetViperWithJWTSecret(t)
+	cfg, err := Load()
+	require.NoError(t, err)
+	require.Equal(t, "./data/chat-attachments", cfg.ChatAttachments.StorageDir)
+	require.Equal(t, 30, cfg.ChatAttachments.RetentionDays)
+	require.Equal(t, 4, cfg.ChatAttachments.MaxPerTurn)
+	require.EqualValues(t, 20*1024*1024, cfg.ChatAttachments.MaxTurnBytes)
+	require.EqualValues(t, 10*1024*1024, cfg.ChatAttachments.MaxImageBytes)
+	require.EqualValues(t, 20*1024*1024, cfg.ChatAttachments.MaxDocumentBytes)
+	require.Equal(t, 4, cfg.ChatAttachments.ContextMaxImages)
+	require.EqualValues(t, 256*1024, cfg.ChatAttachments.ContextDocumentTextBytes)
+	require.Equal(t, 10, cfg.ChatAttachments.UploadsPerMinute)
+	require.EqualValues(t, 100*1024*1024, cfg.ChatAttachments.DailyUploadBytes)
+	require.Equal(t, 4, cfg.ChatAttachments.MaxConcurrentGlobal)
+	require.Equal(t, 2, cfg.ChatAttachments.MaxConcurrentPerUser)
+	require.EqualValues(t, 21*1024*1024, cfg.ChatAttachments.RequestBodyLimit())
+}
+
+func TestValidateEnabledTranscriptionRequiresExplicitGroupsAndProbe(t *testing.T) {
+	resetViperWithJWTSecret(t)
+	cfg, err := Load()
+	require.NoError(t, err)
+	cfg.Transcription.Enabled = true
+	cfg.Transcription.FFprobePath = os.Args[0]
+
+	err = cfg.Validate()
+	require.ErrorContains(t, err, "transcription.group_ids")
+
+	cfg.Transcription.GroupIDs = []int64{7, 9}
+	require.NoError(t, cfg.Validate())
+
+	cfg.Transcription.IdempotencyTTLSeconds = 139
+	err = cfg.Validate()
+	require.ErrorContains(t, err, "transcription.idempotency_ttl_seconds")
+	cfg.Transcription.IdempotencyTTLSeconds = 600
+
+	cfg.Transcription.GroupIDs = []int64{7, 7}
+	err = cfg.Validate()
+	require.ErrorContains(t, err, "duplicate ID 7")
+}
+
+func TestValidateEnabledTranscriptionRejectsSimpleMode(t *testing.T) {
+	resetViperWithJWTSecret(t)
+	cfg, err := Load()
+	require.NoError(t, err)
+	cfg.RunMode = RunModeSimple
+	cfg.Transcription.Enabled = true
+	cfg.Transcription.GroupIDs = []int64{7}
+	cfg.Transcription.FFprobePath = os.Args[0]
+
+	err = cfg.Validate()
+	require.ErrorContains(t, err, "run_mode=simple")
+}
+
+func TestValidateEnabledTranscriptionRequiresEffectiveIngressBodyCapacity(t *testing.T) {
+	buildEnabled := func(t *testing.T) *Config {
+		t.Helper()
+		resetViperWithJWTSecret(t)
+		cfg, err := Load()
+		require.NoError(t, err)
+		cfg.Transcription.Enabled = true
+		cfg.Transcription.GroupIDs = []int64{7}
+		cfg.Transcription.FFprobePath = os.Args[0]
+		return cfg
+	}
+
+	t.Run("chat gateway cap", func(t *testing.T) {
+		cfg := buildEnabled(t)
+		cfg.Gateway.MaxBodySize = cfg.Transcription.RequestBodyLimit() - 1
+		err := cfg.Validate()
+		require.ErrorContains(t, err, "gateway.max_body_size")
+	})
+
+	t.Run("global server cap", func(t *testing.T) {
+		cfg := buildEnabled(t)
+		cfg.Server.MaxRequestBodySize = cfg.Transcription.RequestBodyLimit() - 1
+		err := cfg.Validate()
+		require.ErrorContains(t, err, "server.max_request_body_size")
+	})
+}
+
 func TestLoadOpenAIFirstOutputTimeoutsFromEnv(t *testing.T) {
 	resetViperWithJWTSecret(t)
 	t.Setenv("GATEWAY_OPENAI_FIRST_OUTPUT_TIMEOUT_SECONDS", "90")

@@ -37,8 +37,5 @@ export {
   type SkillFileManifestEntry,
 } from './skills'
 
-// Admin APIs
-export { adminAPI } from './admin'
-
 // Default export
 export { default } from './client'

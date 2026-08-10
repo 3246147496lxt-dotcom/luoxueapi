@@ -1,183 +1,367 @@
 <template>
-  <AppLayout variant="home-clay">
-    <div class="space-y-6" data-admin-page-kind="overview">
-      <AdminPageHeader
-        :title="t('admin.usage.title')"
-        :description="t('admin.usage.description')"
-      />
-      <UsageStatsCards :stats="usageStats" credit-mode />
-      <!-- Charts Section -->
-      <div class="space-y-4">
-        <div class="card p-4">
-          <div class="flex flex-wrap items-center gap-4">
-            <div class="flex items-center gap-2">
-              <span class="text-sm font-medium text-gray-700 dark:text-gray-300">{{ t('admin.dashboard.timeRange') }}:</span>
-              <DateRangePicker
-                v-model:start-date="startDate"
-                v-model:end-date="endDate"
-                @change="onDateRangeChange"
-              />
-            </div>
-            <div class="ml-auto flex items-center gap-2">
-              <span class="text-sm font-medium text-gray-700 dark:text-gray-300">{{ t('admin.dashboard.granularity') }}:</span>
-              <div class="w-28">
+  <AppLayout variant="home-clay" content-mode="workbench">
+    <div
+      class="usage-workbench"
+      data-admin-page-kind="ops"
+      data-testid="usage-workbench"
+    >
+      <header class="usage-workbench__header">
+        <AdminPageHeader
+          class="usage-workbench__page-header"
+          :title="t('admin.usage.title')"
+          :description="t('admin.usage.description')"
+        >
+          <template #secondary-actions>
+            <button
+              type="button"
+              class="usage-workbench__header-button usage-workbench__header-button--secondary"
+              :disabled="loading"
+              @click="refreshData"
+            >
+              <Icon name="refresh" size="sm" aria-hidden="true" />
+              <span>{{ t('common.refresh') }}</span>
+            </button>
+          </template>
+          <template v-if="activeTab === 'usage'" #primary-actions>
+            <button
+              type="button"
+              class="usage-workbench__header-button usage-workbench__header-button--primary"
+              :disabled="exporting"
+              @click="exportToExcel"
+            >
+              <Icon name="download" size="sm" aria-hidden="true" />
+              <span>{{ t('usage.exportExcel') }}</span>
+            </button>
+          </template>
+        </AdminPageHeader>
+
+        <UsageStatsCards v-if="activeTab === 'usage'" :stats="usageStats" credit-mode />
+      </header>
+
+      <div class="usage-workbench__body">
+        <aside
+          class="usage-workbench__filter-rail"
+          data-testid="usage-filter-rail"
+          :aria-label="t('admin.usage.workspace.filtersLabel')"
+        >
+          <div class="usage-workbench__filter-scroll">
+            <section class="usage-workbench__filter-section">
+              <h2 class="usage-workbench__filter-heading">
+                {{ t('admin.usage.workspace.periodTitle') }}
+              </h2>
+              <div class="usage-workbench__scope-field">
+                <span class="usage-workbench__scope-label">
+                  {{ t('admin.dashboard.timeRange') }}
+                </span>
+                <DateRangePicker
+                  v-model:start-date="startDate"
+                  v-model:end-date="endDate"
+                  @change="onDateRangeChange"
+                />
+              </div>
+              <div v-if="activeTab === 'usage'" class="usage-workbench__scope-field">
+                <span class="usage-workbench__scope-label">
+                  {{ t('admin.dashboard.granularity') }}
+                </span>
                 <Select v-model="granularity" :options="granularityOptions" @change="loadChartData" />
               </div>
-            </div>
-          </div>
-        </div>
-        <div class="grid grid-cols-1 gap-6 lg:grid-cols-2">
-          <ModelDistributionChart
-            variant="home-clay"
-            v-model:source="modelDistributionSource"
-            v-model:metric="modelDistributionMetric"
-            :model-stats="requestedModelStats"
-            :upstream-model-stats="upstreamModelStats"
-            :mapping-model-stats="mappingModelStats"
-            :loading="modelStatsLoading"
-            :show-source-toggle="true"
-            :show-metric-toggle="true"
-            credit-mode
-            :start-date="startDate"
-            :end-date="endDate"
-            :filters="breakdownFilters"
-          />
-          <GroupDistributionChart
-            v-model:metric="groupDistributionMetric"
-            :group-stats="groupStats"
-            :loading="chartsLoading"
-            :show-metric-toggle="true"
-            credit-mode
-            :start-date="startDate"
-            :end-date="endDate"
-            :filters="breakdownFilters"
-          />
-        </div>
-        <div class="grid grid-cols-1 gap-6 lg:grid-cols-2">
-          <EndpointDistributionChart
-            v-model:source="endpointDistributionSource"
-            v-model:metric="endpointDistributionMetric"
-            :endpoint-stats="inboundEndpointStats"
-            :upstream-endpoint-stats="upstreamEndpointStats"
-            :endpoint-path-stats="endpointPathStats"
-            :loading="endpointStatsLoading"
-            :show-source-toggle="true"
-            :show-metric-toggle="true"
-            credit-mode
-            :title="t('usage.endpointDistribution')"
-            :start-date="startDate"
-            :end-date="endDate"
-            :filters="breakdownFilters"
-          />
-          <TokenUsageTrend variant="home-clay" :trend-data="trendData" :loading="chartsLoading" credit-mode />
-        </div>
-      </div>
-      <!-- 明细区：tab 栏 + 筛选 + 内容收进同一张卡片，消除割裂感 -->
-      <div class="card">
-        <div class="flex flex-wrap items-center border-b border-gray-200 px-2 dark:border-dark-700 sm:px-4">
-          <button
-            v-for="tab in detailTabs"
-            :key="tab.key"
-            type="button"
-            data-testid="usage-detail-tab"
-            class="-mb-px inline-flex items-center gap-1.5 border-b-2 px-3 py-3 text-sm font-medium transition-colors sm:px-4"
-            :class="activeTab === tab.key
-              ? 'border-primary-500 text-primary-600 dark:text-primary-400'
-              : 'border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700 dark:text-gray-400 dark:hover:border-dark-500 dark:hover:text-gray-200'"
-            @click="switchTab(tab.key)"
-          >
-            <Icon :name="tab.icon" size="sm" />
-            {{ tab.label }}
-          </button>
-        </div>
+            </section>
 
-        <UsageFilters v-if="activeTab !== 'billing'" v-model="filters" ref="usageFiltersRef" flat :mode="usageFilterMode" class="border-b border-gray-100 dark:border-dark-700/50" :start-date="startDate" :end-date="endDate" :exporting="exporting" :model-options="modelNameOptions" @change="applyFilters" @refresh="refreshData" @reset="resetFilters" @cleanup="openCleanupDialog" @export="exportToExcel">
-          <template #after-reset>
-            <div v-if="activeTab !== 'ranking'" class="relative" ref="columnDropdownRef">
-              <button
-                @click="showColumnDropdown = !showColumnDropdown"
-                class="btn btn-secondary px-2 md:px-3"
-                :title="t('admin.users.columnSettings')"
-              >
-                <svg class="h-4 w-4 md:mr-1.5" fill="none" stroke="currentColor" viewBox="0 0 24 24" stroke-width="1.5">
-                  <path stroke-linecap="round" stroke-linejoin="round" d="M9 4.5v15m6-15v15m-10.875 0h15.75c.621 0 1.125-.504 1.125-1.125V5.625c0-.621-.504-1.125-1.125-1.125H4.125C3.504 4.5 3 5.004 3 5.625v12.75c0 .621.504 1.125 1.125 1.125z" />
-                </svg>
-                <span class="hidden md:inline">{{ t('admin.users.columnSettings') }}</span>
+            <section v-if="activeTab !== 'billing'" class="usage-workbench__filter-section">
+              <h2 class="usage-workbench__filter-heading">
+                {{ t('admin.usage.workspace.auditObjectsTitle') }}
+              </h2>
+              <UsageFilters
+                v-model="filters"
+                ref="usageFiltersRef"
+                flat
+                layout="rail"
+                :show-actions="false"
+                :mode="usageFilterMode"
+                :start-date="startDate"
+                :end-date="endDate"
+                :exporting="exporting"
+                :model-options="modelNameOptions"
+                @change="applyFilters"
+                @refresh="refreshData"
+                @reset="resetFilters"
+                @cleanup="openCleanupDialog"
+                @export="exportToExcel"
+              />
+            </section>
+
+            <section class="usage-workbench__filter-section">
+              <h2 class="usage-workbench__filter-heading">
+                {{ t('admin.usage.workspace.conditionsTitle') }}
+              </h2>
+              <p class="usage-workbench__filter-status">
+                {{ activeFilterCount > 0
+                  ? t('admin.usage.workspace.activeFilters', { count: activeFilterCount })
+                  : t('admin.usage.workspace.noActiveFilters') }}
+              </p>
+            </section>
+          </div>
+
+          <footer class="usage-workbench__filter-actions">
+            <button type="button" class="btn btn-primary w-full" @click="applyFilters">
+              {{ t('admin.usage.workspace.applyFilters') }}
+            </button>
+            <button type="button" class="btn btn-secondary w-full" @click="resetFilters">
+              {{ t('admin.usage.workspace.resetLedger') }}
+            </button>
+            <div v-if="activeTab === 'usage'" class="usage-workbench__danger-zone">
+              <span class="usage-workbench__danger-label">
+                {{ t('admin.usage.workspace.dangerTitle') }}
+              </span>
+              <button type="button" class="btn btn-danger w-full" @click="openCleanupDialog">
+                {{ t('admin.usage.cleanup.button') }}
               </button>
-              <div
-                v-if="showColumnDropdown"
-                class="absolute right-0 top-full z-50 mt-1 max-h-80 w-48 overflow-y-auto rounded-lg border border-gray-200 bg-white py-1 shadow-lg dark:border-dark-600 dark:bg-dark-800"
+            </div>
+          </footer>
+        </aside>
+
+        <section
+          class="usage-workbench__evidence"
+          data-testid="usage-evidence-area"
+          :aria-label="t('admin.usage.workspace.evidenceLabel')"
+        >
+          <section class="usage-workbench__surface" :aria-label="activeTabMeta.label">
+            <header
+              class="usage-workbench__toolbar"
+              data-testid="usage-tab-toolbar"
+            >
+              <nav
+                class="usage-workbench__tabs"
+                role="tablist"
+                :aria-label="t('admin.usage.workspace.tabsLabel')"
               >
                 <button
-                  v-for="col in currentToggleableColumns"
-                  :key="col.key"
-                  @click="toggleCurrentColumn(col.key)"
-                  class="flex w-full items-center justify-between px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-dark-700"
+                  v-for="tab in detailTabs"
+                  :key="tab.key"
+                  :id="'usage-tab-' + tab.key"
+                  type="button"
+                  role="tab"
+                  data-testid="usage-detail-tab"
+                  class="usage-workbench__tab"
+                  :class="{ 'usage-workbench__tab--active': activeTab === tab.key }"
+                  :aria-current="activeTab === tab.key ? 'page' : undefined"
+                  :aria-selected="activeTab === tab.key"
+                  :aria-controls="'usage-panel-' + tab.key"
+                  @click="switchTab(tab.key)"
                 >
-                  <span>{{ col.label }}</span>
-                  <Icon
-                    v-if="isCurrentColumnVisible(col.key)"
-                    name="check"
-                    size="sm"
-                    class="text-primary-500"
-                    :stroke-width="2"
-                  />
+                  {{ tab.label }}
                 </button>
-              </div>
-            </div>
-          </template>
-        </UsageFilters>
+              </nav>
 
-        <div v-show="activeTab === 'usage'" class="overflow-hidden rounded-b-2xl">
-          <UsageTable
-            flat
-            :data="usageLogs"
-            :loading="loading"
-            :columns="visibleColumns"
-            :server-side-sort="true"
-            :default-sort-key="'created_at'"
-            :default-sort-order="'desc'"
-            credit-mode
-            @sort="handleSort"
-            @userClick="handleUserClick"
-            @ipGeoBatchFailed="handleIpGeoBatchFailed"
-          />
-          <Pagination v-if="pagination.total > 0" :page="pagination.page" :total="pagination.total" :page-size="pagination.page_size" @update:page="handlePageChange" @update:pageSize="handlePageSizeChange" />
-        </div>
-        <div v-show="activeTab === 'errors'" class="overflow-hidden rounded-b-2xl">
-          <OpsErrorLogTable
-            flat
-            :rows="errRows" :total="errTotal" :loading="errLoading"
-            :page="errPage" :page-size="errPageSize"
-            :visible-column-keys="errVisibleColumnKeys"
-            user-clickable
-            @userClick="handleUserClick"
-            @openErrorDetail="openError"
-            @sort="onErrSort"
-            @update:page="onErrPage"
-            @update:pageSize="onErrPageSize"
-            @ipGeoBatchFailed="handleIpGeoBatchFailed" />
-        </div>
-        <!-- 懒挂载：首次切到该 tab 才请求排行数据，之后随筛选自动刷新 -->
-        <div v-if="rankingMounted" v-show="activeTab === 'ranking'" class="overflow-hidden rounded-b-2xl">
-          <UserTokenRanking
-            ref="rankingRef"
-            :start-date="startDate"
-            :end-date="endDate"
-            :filters="breakdownFilters"
-            :model="filters.model"
-            :initial-sort-by="rankingInitialSortBy"
-            @select-user="handleRankingSelectUser"
-          />
-        </div>
-        <div v-if="billingMounted" v-show="activeTab === 'billing'" class="overflow-hidden rounded-b-2xl">
-          <AdminBillingReceiptsPanel
-            ref="billingReceiptsRef"
-            :start-date="startDate"
-            :end-date="endDate"
-          />
-        </div>
+              <div class="usage-workbench__toolbar-actions">
+                <span v-if="activeTab === 'usage' && pagination.total > 0" class="usage-workbench__result-count">
+                  {{ t('admin.usage.workspace.resultCount', { count: pagination.total.toLocaleString() }) }}
+                </span>
+                <span v-else-if="activeTab === 'errors' && errTotal > 0" class="usage-workbench__result-count usage-workbench__result-count--danger">
+                  {{ t('admin.usage.workspace.resultCount', { count: errTotal.toLocaleString() }) }}
+                </span>
+
+                <div
+                  v-if="activeTab !== 'ranking' && activeTab !== 'billing'"
+                  ref="columnDropdownRef"
+                  class="usage-workbench__column-control"
+                >
+                  <button
+                    type="button"
+                    class="usage-workbench__tool-button"
+                    :title="t('admin.users.columnSettings')"
+                    :aria-expanded="showColumnDropdown"
+                    @click="showColumnDropdown = !showColumnDropdown"
+                  >
+                    <Icon name="slidersHorizontal" size="sm" aria-hidden="true" />
+                    <span>{{ t('admin.users.columnSettings') }}</span>
+                  </button>
+                  <div v-if="showColumnDropdown" class="usage-workbench__column-menu">
+                    <button
+                      v-for="col in currentToggleableColumns"
+                      :key="col.key"
+                      type="button"
+                      class="usage-workbench__column-option"
+                      @click="toggleCurrentColumn(col.key)"
+                    >
+                      <span>{{ col.label }}</span>
+                      <Icon
+                        v-if="isCurrentColumnVisible(col.key)"
+                        name="check"
+                        size="sm"
+                        class="text-primary-500"
+                        :stroke-width="2"
+                      />
+                    </button>
+                  </div>
+                </div>
+
+                <div v-if="activeTab === 'usage'" class="usage-workbench__density" role="group" :aria-label="t('admin.usage.workspace.densityLabel')">
+                  <button
+                    type="button"
+                    class="usage-workbench__density-button"
+                    :class="{ 'usage-workbench__density-button--active': tableDensity === 'compact' }"
+                    :aria-pressed="tableDensity === 'compact'"
+                    :title="t('admin.usage.workspace.compactView')"
+                    @click="tableDensity = 'compact'"
+                  >
+                    <Icon name="grid" size="sm" aria-hidden="true" />
+                  </button>
+                  <button
+                    type="button"
+                    class="usage-workbench__density-button"
+                    :class="{ 'usage-workbench__density-button--active': tableDensity === 'comfortable' }"
+                    :aria-pressed="tableDensity === 'comfortable'"
+                    :title="t('admin.usage.workspace.comfortableView')"
+                    @click="tableDensity = 'comfortable'"
+                  >
+                    <Icon name="menu" size="sm" aria-hidden="true" />
+                  </button>
+                </div>
+              </div>
+            </header>
+
+            <div
+              v-if="activeTab === 'usage'"
+              :id="'usage-panel-' + activeTab"
+              class="usage-workbench__panel usage-workbench__panel--usage"
+              role="tabpanel"
+              :aria-labelledby="'usage-tab-' + activeTab"
+              :class="{ 'usage-workbench__panel--comfortable': tableDensity === 'comfortable' }"
+            >
+              <UsageTable
+                flat
+                audit-layout
+                :data="usageLogs"
+                :loading="loading"
+                :columns="visibleColumns"
+                :server-side-sort="true"
+                :default-sort-key="'created_at'"
+                :default-sort-order="'desc'"
+                credit-mode
+                @sort="handleSort"
+                @userClick="handleUserClick"
+                @ipGeoBatchFailed="handleIpGeoBatchFailed"
+              />
+              <Pagination
+                v-if="pagination.total > 0"
+                :page="pagination.page"
+                :total="pagination.total"
+                :page-size="pagination.page_size"
+                @update:page="handlePageChange"
+                @update:pageSize="handlePageSizeChange"
+              />
+            </div>
+            <div v-else-if="activeTab === 'errors'" :id="'usage-panel-' + activeTab" class="usage-workbench__panel" role="tabpanel" :aria-labelledby="'usage-tab-' + activeTab">
+              <OpsErrorLogTable
+                flat
+                :rows="errRows"
+                :total="errTotal"
+                :loading="errLoading"
+                :page="errPage"
+                :page-size="errPageSize"
+                :visible-column-keys="errVisibleColumnKeys"
+                user-clickable
+                @userClick="handleUserClick"
+                @openErrorDetail="openError"
+                @sort="onErrSort"
+                @update:page="onErrPage"
+                @update:pageSize="onErrPageSize"
+                @ipGeoBatchFailed="handleIpGeoBatchFailed"
+              />
+            </div>
+            <!-- 懒挂载：首次切到该 tab 才请求排行数据，之后随筛选自动刷新 -->
+            <div v-else-if="activeTab === 'ranking' && rankingMounted" :id="'usage-panel-' + activeTab" class="usage-workbench__panel" role="tabpanel" :aria-labelledby="'usage-tab-' + activeTab">
+              <UserTokenRanking
+                ref="rankingRef"
+                :start-date="startDate"
+                :end-date="endDate"
+                :filters="breakdownFilters"
+                :model="filters.model"
+                :initial-sort-by="rankingInitialSortBy"
+                @select-user="handleRankingSelectUser"
+              />
+            </div>
+            <div v-else-if="activeTab === 'billing' && billingMounted" :id="'usage-panel-' + activeTab" class="usage-workbench__panel" role="tabpanel" :aria-labelledby="'usage-tab-' + activeTab">
+              <AdminBillingReceiptsPanel
+                ref="billingReceiptsRef"
+                :start-date="startDate"
+                :end-date="endDate"
+              />
+            </div>
+          </section>
+
+          <details
+            v-if="activeTab === 'usage'"
+            class="usage-workbench__analytics"
+            data-testid="usage-analytics"
+            open
+          >
+            <summary class="usage-workbench__analytics-summary">
+              <span class="usage-workbench__analytics-heading-wrap">
+                <Icon name="chart" size="sm" aria-hidden="true" />
+                <span id="usage-analytics-heading" class="usage-workbench__analytics-title">
+                  {{ t('admin.usage.workspace.analyticsTitle') }}
+                </span>
+              </span>
+              <Icon name="chevronDown" size="sm" class="usage-workbench__analytics-chevron" aria-hidden="true" />
+            </summary>
+            <p class="usage-workbench__analytics-description">
+              {{ t('admin.usage.workspace.analyticsDescription') }}
+            </p>
+            <div class="usage-workbench__chart-grid" aria-labelledby="usage-analytics-heading">
+              <TokenUsageTrend
+                class="usage-workbench__chart-wide"
+                variant="home-clay"
+                :trend-data="trendData"
+                :loading="chartsLoading"
+                credit-mode
+              />
+              <ModelDistributionChart
+                variant="home-clay"
+                v-model:source="modelDistributionSource"
+                v-model:metric="modelDistributionMetric"
+                :model-stats="requestedModelStats"
+                :upstream-model-stats="upstreamModelStats"
+                :mapping-model-stats="mappingModelStats"
+                :loading="modelStatsLoading"
+                :show-source-toggle="true"
+                :show-metric-toggle="true"
+                credit-mode
+                :start-date="startDate"
+                :end-date="endDate"
+                :filters="breakdownFilters"
+              />
+              <GroupDistributionChart
+                v-model:metric="groupDistributionMetric"
+                :group-stats="groupStats"
+                :loading="chartsLoading"
+                :show-metric-toggle="true"
+                credit-mode
+                :start-date="startDate"
+                :end-date="endDate"
+                :filters="breakdownFilters"
+              />
+              <EndpointDistributionChart
+                v-model:source="endpointDistributionSource"
+                v-model:metric="endpointDistributionMetric"
+                :endpoint-stats="inboundEndpointStats"
+                :upstream-endpoint-stats="upstreamEndpointStats"
+                :endpoint-path-stats="endpointPathStats"
+                :loading="endpointStatsLoading"
+                :show-source-toggle="true"
+                :show-metric-toggle="true"
+                credit-mode
+                :title="t('usage.endpointDistribution')"
+                :start-date="startDate"
+                :end-date="endDate"
+                :filters="breakdownFilters"
+              />
+            </div>
+          </details>
+        </section>
       </div>
+
       <OpsErrorDetailModal v-model:show="showErrorModal" :error-id="selectedErrorId" :error-type="'request'" />
     </div>
   </AppLayout>
@@ -209,8 +393,8 @@ import { formatReasoningEffort } from '@/utils/format'
 import { resolveUsageRequestType, requestTypeToLegacyStream } from '@/utils/usageRequestType'
 import AppLayout from '@/components/layout/AppLayout.vue'; import Pagination from '@/components/common/Pagination.vue'; import Select from '@/components/common/Select.vue'; import DateRangePicker from '@/components/common/DateRangePicker.vue'
 import AdminPageHeader from '@/components/layout/AdminPageHeader.vue'
-import UsageStatsCards from '@/components/admin/usage/UsageStatsCards.vue'; import UsageFilters from '@/components/admin/usage/UsageFilters.vue'
-import UsageTable from '@/components/admin/usage/UsageTable.vue'; import UsageExportProgress from '@/components/admin/usage/UsageExportProgress.vue'
+import UsageStatsCards from '@/components/shared-domain/usage/UsageStatsCards.vue'; import UsageFilters from '@/components/admin/usage/UsageFilters.vue'
+import UsageTable from '@/components/shared-domain/usage/UsageTable.vue'; import UsageExportProgress from '@/components/admin/usage/UsageExportProgress.vue'
 import UserTokenRanking from '@/components/admin/usage/UserTokenRanking.vue'
 import AdminBillingReceiptsPanel from '@/components/admin/usage/AdminBillingReceiptsPanel.vue'
 import UsageCleanupDialog from '@/components/admin/usage/UsageCleanupDialog.vue'
@@ -252,6 +436,7 @@ let abortController: AbortController | null = null; let exportAbortController: A
 let chartReqSeq = 0
 let statsReqSeq = 0
 let modelStatsReqSeq = 0
+let errorReqSeq = 0
 const exportProgress = reactive({ show: false, progress: 0, current: 0, total: 0, estimatedTime: '' })
 const cleanupDialogVisible = ref(false)
 // Balance history modal state
@@ -317,6 +502,15 @@ const getGranularityForRange = (start: string, end: string): 'day' | 'hour' => {
 const defaultRange = getLast24HoursRangeDates()
 const startDate = ref(defaultRange.start); const endDate = ref(defaultRange.end)
 const filters = ref<AdminUsageQueryParams>({ user_id: undefined, model: undefined, group_id: undefined, request_type: undefined, billing_type: null, start_date: startDate.value, end_date: endDate.value })
+const activeFilterCount = computed(() =>
+  Object.entries(filters.value).filter(([key, value]) =>
+    key !== 'start_date'
+    && key !== 'end_date'
+    && value !== undefined
+    && value !== null
+    && value !== ''
+  ).length
+)
 const pagination = reactive({ page: 1, page_size: getPersistedPageSize(), total: 0 })
 const sortState = reactive({
   sort_by: 'created_at',
@@ -366,7 +560,9 @@ const applyRouteQueryFilters = () => {
   granularity.value = getGranularityForRange(startDate.value, endDate.value)
   rankingInitialSortBy.value = queryRankingSort ?? 'total_tokens'
 
-  if (queryTab === 'ranking') {
+  if (queryTab === 'errors') {
+    activeTab.value = 'errors'
+  } else if (queryTab === 'ranking') {
     activeTab.value = 'ranking'
     rankingMounted.value = true
   } else if (queryTab === 'billing') {
@@ -643,25 +839,73 @@ const exportToExcel = async () => {
 
 // Column visibility
 const ALWAYS_VISIBLE = ['user', 'created_at']
-const DEFAULT_HIDDEN_COLUMNS = ['reasoning_effort', 'user_agent']
-const HIDDEN_COLUMNS_KEY = 'usage-hidden-columns'
+const DEFAULT_HIDDEN_COLUMNS = [
+  'api_key',
+  'reasoning_effort',
+  'endpoint',
+  'group',
+  'stream',
+  'billing_mode',
+  'user_agent',
+]
+const HIDDEN_COLUMNS_KEY = 'usage-hidden-columns-v2'
 
 const allColumns = computed(() => [
-  { key: 'user', label: t('admin.usage.user'), sortable: false },
+  {
+    key: 'user',
+    label: t('admin.usage.workspace.columns.auditSubject'),
+    sortable: false,
+    class: 'usage-audit-col--subject min-w-[220px] max-w-[240px]',
+  },
+  {
+    key: 'model',
+    label: t('admin.usage.workspace.columns.modelMapping'),
+    sortable: true,
+    class: 'usage-audit-col--model min-w-[150px]',
+  },
+  {
+    key: 'tokens',
+    label: t('admin.usage.workspace.columns.tokenPayload'),
+    sortable: false,
+    class: 'usage-audit-col--tokens text-right',
+  },
+  {
+    key: 'cost',
+    label: t('admin.usage.workspace.columns.actualCharge'),
+    sortable: false,
+    class: 'usage-audit-col--cost text-right',
+  },
+  {
+    key: 'latency',
+    label: t('admin.usage.workspace.columns.latencyResponse'),
+    sortable: false,
+    class: 'usage-audit-col--latency text-right',
+  },
+  {
+    key: 'account',
+    label: t('admin.usage.workspace.columns.channelAccount'),
+    sortable: false,
+    class: 'usage-audit-col--account max-w-[120px] text-right',
+  },
+  {
+    key: 'created_at',
+    label: t('admin.usage.workspace.columns.timeSerial'),
+    sortable: true,
+    class: 'usage-audit-col--time min-w-[140px]',
+  },
+  {
+    key: 'ip_address',
+    label: t('admin.usage.workspace.columns.ipGeo'),
+    sortable: false,
+    class: 'usage-audit-col--ip min-w-[120px]',
+  },
   { key: 'api_key', label: t('usage.apiKeyFilter'), sortable: false },
-  { key: 'account', label: t('admin.usage.account'), sortable: false },
-  { key: 'model', label: t('usage.model'), sortable: true },
   { key: 'reasoning_effort', label: t('usage.reasoningEffort'), sortable: false },
   { key: 'endpoint', label: t('usage.endpoint'), sortable: false },
   { key: 'group', label: t('admin.usage.group'), sortable: false },
   { key: 'stream', label: t('usage.type'), sortable: false },
   { key: 'billing_mode', label: t('admin.usage.billingMode'), sortable: false },
-  { key: 'tokens', label: t('usage.tokens'), sortable: false },
-  { key: 'cost', label: t('usage.cost'), sortable: false },
-  { key: 'latency', label: t('usage.latency'), sortable: false },
-  { key: 'created_at', label: t('usage.time'), sortable: true },
   { key: 'user_agent', label: t('usage.userAgent'), sortable: false },
-  { key: 'ip_address', label: t('admin.usage.ipAddress'), sortable: false }
 ])
 
 const hiddenColumns = reactive<Set<string>>(new Set())
@@ -781,12 +1025,40 @@ const loadSavedColumns = () => {
 // Detail tabs
 type DetailTab = 'usage' | 'errors' | 'ranking' | 'billing'
 const activeTab = ref<DetailTab>('usage')
+const tableDensity = ref<'compact' | 'comfortable'>('compact')
 const detailTabs = computed(() => [
-  { key: 'usage' as const, label: t('usage.tabs.usage'), icon: 'document' as const },
-  { key: 'errors' as const, label: t('usage.tabs.errors'), icon: 'exclamationTriangle' as const },
-  { key: 'ranking' as const, label: t('usage.tabs.ranking'), icon: 'chart' as const },
-  { key: 'billing' as const, label: t('usage.tabs.billing'), icon: 'coins' as const },
+  {
+    key: 'usage' as const,
+    label: t('usage.tabs.usage'),
+    icon: 'document' as const,
+    description: t('admin.usage.workspace.tabs.usageDescription'),
+    detail: t('admin.usage.workspace.tabs.usageDetail'),
+  },
+  {
+    key: 'errors' as const,
+    label: t('usage.tabs.errors'),
+    icon: 'exclamationTriangle' as const,
+    description: t('admin.usage.workspace.tabs.errorsDescription'),
+    detail: t('admin.usage.workspace.tabs.errorsDetail'),
+  },
+  {
+    key: 'ranking' as const,
+    label: t('usage.tabs.ranking'),
+    icon: 'chart' as const,
+    description: t('admin.usage.workspace.tabs.rankingDescription'),
+    detail: t('admin.usage.workspace.tabs.rankingDetail'),
+  },
+  {
+    key: 'billing' as const,
+    label: t('usage.tabs.billing'),
+    icon: 'coins' as const,
+    description: t('admin.usage.workspace.tabs.billingDescription'),
+    detail: t('admin.usage.workspace.tabs.billingDetail'),
+  },
 ])
+const activeTabMeta = computed(() =>
+  detailTabs.value.find((tab) => tab.key === activeTab.value) ?? detailTabs.value[0]!
+)
 const usageFilterMode = computed(() =>
   activeTab.value === 'billing' ? 'usage' : activeTab.value
 )
@@ -819,6 +1091,7 @@ const toRFC3339 = (d: string | undefined, endOfDay = false): string | undefined 
   d ? new Date(d + (endOfDay ? 'T23:59:59.999' : 'T00:00:00')).toISOString() : undefined
 
 const loadAdminErrors = async () => {
+  const seq = ++errorReqSeq
   errLoading.value = true
   try {
     const resp = await listErrorLogs({
@@ -838,13 +1111,15 @@ const loadAdminErrors = async () => {
       sort_by: errSortBy.value,
       sort_order: errSortOrder.value,
     })
+    if (seq !== errorReqSeq) return
     errRows.value = resp.items
     errTotal.value = resp.total
   } catch (error) {
+    if (seq !== errorReqSeq) return
     console.error('Failed to load admin errors:', error)
     appStore.showError(t('usage.errors.failedToLoad'))
   } finally {
-    errLoading.value = false
+    if (seq === errorReqSeq) errLoading.value = false
   }
 }
 
@@ -875,11 +1150,19 @@ onMounted(() => {
   window.setTimeout(() => {
     void loadChartData()
   }, 120)
+  if (activeTab.value === 'errors') {
+    void loadAdminErrors()
+  }
   loadSavedColumns()
   loadSavedErrColumns()
   document.addEventListener('click', handleColumnClickOutside)
 })
-onUnmounted(() => { abortController?.abort(); exportAbortController?.abort(); document.removeEventListener('click', handleColumnClickOutside) })
+onUnmounted(() => {
+  abortController?.abort()
+  exportAbortController?.abort()
+  errorReqSeq += 1
+  document.removeEventListener('click', handleColumnClickOutside)
+})
 
 watch(modelDistributionSource, (source) => {
   void loadModelStats(source)
@@ -887,3 +1170,665 @@ watch(modelDistributionSource, (source) => {
 
 defineExpose({ requestedModelStats, refreshData })
 </script>
+
+<style scoped>
+.usage-workbench {
+  display: flex;
+  height: calc(100dvh - var(--app-shell-top-offset, 0px));
+  min-height: 640px;
+  min-width: 0;
+  overflow: hidden;
+  flex-direction: column;
+  color: var(--lx-clay-text);
+  background: var(--lx-clay-canvas);
+  font-family: var(--lx-clay-font-ui);
+}
+
+.usage-workbench__header {
+  position: relative;
+  z-index: 30;
+  flex: 0 0 auto;
+  padding: 12px 32px;
+  border-bottom: 1px solid var(--lx-clay-border);
+  background: var(--lx-clay-surface);
+}
+
+.usage-workbench__page-header {
+  gap: 20px;
+}
+
+.usage-workbench__page-header :deep(.admin-page-header__title) {
+  color: var(--lx-clay-text);
+  font-family: var(--lx-clay-font-display);
+  font-size: 20px;
+  font-weight: 900;
+  line-height: 1.2;
+  letter-spacing: -0.02em;
+}
+
+.usage-workbench__page-header :deep(.admin-page-header__description) {
+  margin-top: 4px;
+  color: var(--lx-clay-text-secondary);
+  font-size: 14px;
+  line-height: 1.35;
+}
+
+.usage-workbench__page-header :deep(.admin-page-header__actions) {
+  align-self: center;
+}
+
+.usage-workbench__header > :deep(.usage-stat-rail) {
+  margin-top: 10px;
+}
+
+.usage-workbench__header-button {
+  display: inline-flex;
+  min-height: 38px;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border: 1px solid var(--lx-clay-border);
+  border-radius: 12px;
+  padding: 0 15px;
+  font-size: 14px;
+  font-weight: 700;
+  transition:
+    border-color 150ms ease,
+    background-color 150ms ease,
+    color 150ms ease,
+    transform 150ms ease;
+}
+
+.usage-workbench__header-button--secondary {
+  color: var(--lx-clay-text-secondary);
+  background: var(--lx-clay-surface);
+  box-shadow: var(--lx-clay-shadow-flat);
+}
+
+.usage-workbench__header-button--secondary:hover:not(:disabled) {
+  border-color: var(--lx-clay-border-strong);
+  color: var(--lx-clay-text);
+  background: var(--lx-clay-recessed);
+}
+
+.usage-workbench__header-button--primary {
+  border-color: var(--lx-clay-accent);
+  color: var(--lx-clay-on-accent);
+  background: var(--lx-clay-accent);
+  box-shadow: var(--lx-clay-shadow-primary);
+}
+
+.usage-workbench__header-button--primary:hover:not(:disabled) {
+  background: var(--lx-clay-accent-deep);
+}
+
+.usage-workbench__header-button:active:not(:disabled) {
+  transform: scale(0.97);
+}
+
+.usage-workbench__header-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.58;
+}
+
+.usage-workbench__body {
+  display: grid;
+  min-height: 0;
+  min-width: 0;
+  flex: 1 1 auto;
+  grid-template-columns: 300px minmax(0, 1fr);
+}
+
+.usage-workbench__filter-rail {
+  display: flex;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+  flex-direction: column;
+  border-right: 1px solid var(--lx-clay-border);
+  background: var(--lx-clay-surface);
+}
+
+.usage-workbench__filter-scroll {
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 20px;
+  scrollbar-color: var(--lx-clay-border) transparent;
+  scrollbar-width: thin;
+}
+
+.usage-workbench__filter-section + .usage-workbench__filter-section {
+  margin-top: 20px;
+  padding-top: 20px;
+  border-top: 1px solid var(--lx-clay-border);
+}
+
+.usage-workbench__filter-heading,
+.usage-workbench__danger-label {
+  display: block;
+  margin: 0 0 10px;
+  color: var(--lx-clay-text-muted);
+  font-family: var(--lx-clay-font-ui);
+  font-size: 11px;
+  font-weight: 900;
+  line-height: 1.25;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.usage-workbench__scope-field + .usage-workbench__scope-field {
+  margin-top: 10px;
+}
+
+.usage-workbench__scope-label {
+  display: block;
+  margin-bottom: 6px;
+  color: var(--lx-clay-text-secondary);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.3;
+}
+
+.usage-workbench__scope-field :deep(.date-picker-trigger),
+.usage-workbench__scope-field :deep(.select-control) {
+  width: 100%;
+  min-height: 38px;
+  border-radius: 12px;
+}
+
+.usage-workbench__scope-field :deep(.date-picker-dropdown) {
+  width: 100%;
+  min-width: 0;
+}
+
+.usage-workbench__scope-field :deep(.date-picker-custom) {
+  align-items: stretch;
+  flex-direction: column;
+}
+
+.usage-workbench__scope-field :deep(.date-picker-separator) {
+  display: none;
+}
+
+.usage-workbench__filter-status {
+  margin: 0;
+  color: var(--lx-clay-text-muted);
+  font-size: 11px;
+  font-style: italic;
+  line-height: 1.5;
+}
+
+.usage-workbench__filter-actions {
+  flex: 0 0 auto;
+  padding: 16px 20px 20px;
+  border-top: 1px solid var(--lx-clay-border);
+  background: var(--lx-clay-surface);
+}
+
+.usage-workbench__filter-actions > .btn + .btn {
+  margin-top: 9px;
+}
+
+.usage-workbench__danger-zone {
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid var(--lx-clay-border);
+}
+
+.usage-workbench__danger-label {
+  color: var(--lx-clay-danger);
+}
+
+.usage-workbench__evidence {
+  min-height: 0;
+  min-width: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 24px;
+  background: var(--lx-clay-canvas);
+  scrollbar-color: var(--lx-clay-border) transparent;
+  scrollbar-width: thin;
+}
+
+.usage-workbench__surface {
+  min-width: 0;
+  overflow: clip;
+  border: 1px solid var(--lx-clay-border);
+  border-radius: var(--lx-clay-radius-ops);
+  background: var(--lx-clay-surface);
+}
+
+.usage-workbench__toolbar {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 4px 24px;
+  border-bottom: 1px solid var(--lx-clay-border);
+  background: color-mix(in srgb, var(--lx-clay-surface) 96%, transparent);
+  backdrop-filter: blur(10px);
+}
+
+.usage-workbench__tabs {
+  display: flex;
+  min-width: 0;
+  gap: 24px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.usage-workbench__tabs::-webkit-scrollbar {
+  display: none;
+}
+
+.usage-workbench__tab {
+  position: relative;
+  display: inline-flex;
+  min-width: max-content;
+  flex: 0 0 auto;
+  align-items: center;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+  padding: 16px 0;
+  color: var(--lx-clay-text-muted) !important;
+  background: transparent;
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 20px;
+  transition:
+    border-color 150ms ease,
+    color 150ms ease;
+}
+
+.usage-workbench__tab:not(.usage-workbench__tab--active):hover {
+  color: var(--lx-clay-text) !important;
+}
+
+.usage-workbench__tab--active,
+.usage-workbench__tab--active:hover {
+  border-bottom-color: var(--lx-clay-accent);
+  color: var(--lx-clay-accent) !important;
+}
+
+.usage-workbench__toolbar-actions {
+  display: flex;
+  min-width: max-content;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 10px;
+}
+
+.usage-workbench__result-count {
+  display: inline-flex;
+  min-height: 24px;
+  align-items: center;
+  border: 1px solid var(--lx-clay-border);
+  border-radius: 999px;
+  padding: 2px 9px;
+  color: var(--lx-clay-text-secondary);
+  background: var(--lx-clay-recessed);
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
+.usage-workbench__result-count--danger {
+  border-color: color-mix(in srgb, var(--lx-clay-danger) 28%, transparent);
+  color: var(--lx-clay-danger);
+  background: var(--lx-clay-danger-soft);
+}
+
+.usage-workbench__column-control {
+  position: relative;
+}
+
+.usage-workbench__tool-button {
+  display: inline-flex;
+  min-height: 32px;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid var(--lx-clay-border);
+  border-radius: 8px;
+  padding: 0 10px;
+  color: var(--lx-clay-text-secondary);
+  background: var(--lx-clay-surface);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.usage-workbench__tool-button:hover {
+  border-color: var(--lx-clay-border-strong);
+  color: var(--lx-clay-text);
+  background: var(--lx-clay-recessed);
+}
+
+.usage-workbench__density {
+  display: inline-flex;
+  gap: 2px;
+  padding-left: 10px;
+  border-left: 1px solid var(--lx-clay-border);
+}
+
+.usage-workbench__density-button {
+  display: inline-flex;
+  width: 32px;
+  height: 32px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  color: var(--lx-clay-text-subtle);
+  background: transparent;
+}
+
+.usage-workbench__density-button:hover,
+.usage-workbench__density-button--active {
+  color: var(--lx-clay-text);
+  background: var(--lx-clay-recessed);
+}
+
+.usage-workbench__column-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 50;
+  width: 208px;
+  max-height: 320px;
+  overflow-y: auto;
+  padding: 5px;
+  border: 1px solid var(--lx-clay-border);
+  border-radius: var(--lx-clay-radius-table);
+  color: var(--lx-clay-text);
+  background: var(--lx-clay-surface);
+  box-shadow: var(--lx-clay-shadow-overlay);
+}
+
+.usage-workbench__column-option {
+  display: flex;
+  width: 100%;
+  min-height: 40px;
+  align-items: center;
+  justify-content: space-between;
+  border-radius: 9px;
+  padding: 8px 10px;
+  color: var(--lx-clay-text-secondary);
+  text-align: left;
+}
+
+.usage-workbench__column-option:hover {
+  color: var(--lx-clay-accent-deep);
+  background: var(--lx-clay-accent-soft);
+}
+
+.usage-workbench__panel {
+  min-width: 0;
+  overflow: hidden;
+}
+
+.usage-workbench__panel :deep(.data-table-header) {
+  background: color-mix(in srgb, var(--lx-clay-recessed) 62%, var(--lx-clay-surface));
+}
+
+.usage-workbench__panel :deep(.data-table-header-cell) {
+  padding: 10px 16px !important;
+  color: var(--lx-clay-text-secondary) !important;
+  font-size: 11px !important;
+  font-weight: 700 !important;
+  letter-spacing: 0 !important;
+  text-transform: none !important;
+}
+
+.usage-workbench__panel--usage :deep(.data-table-table) {
+  border-collapse: separate;
+  border-spacing: 0;
+  font-family: var(--lx-clay-font-ui);
+  font-size: 13px;
+}
+
+.usage-workbench__panel--usage :deep(.data-table-header),
+.usage-workbench__panel--usage :deep(.data-table-header-cell) {
+  background: #f9fafb !important;
+}
+
+.usage-workbench__panel--usage :deep(.data-table-header-cell) {
+  color: #635f69 !important;
+  font-size: 13px !important;
+  font-weight: 700 !important;
+}
+
+.usage-workbench__panel--usage :deep(.usage-audit-col--account.data-table-cell) {
+  text-align: left !important;
+}
+
+.dark .usage-workbench__panel--usage :deep(.data-table-header),
+.dark .usage-workbench__panel--usage :deep(.data-table-header-cell) {
+  color: var(--lx-clay-text-secondary) !important;
+  background: var(--lx-clay-recessed) !important;
+}
+
+.usage-workbench__panel :deep(.data-table-cell) {
+  padding: 10px 16px !important;
+  color: var(--lx-clay-text);
+  font-size: 13px !important;
+}
+
+.usage-workbench__panel--comfortable :deep(.data-table-cell) {
+  padding-top: 14px !important;
+  padding-bottom: 14px !important;
+}
+
+.usage-workbench__panel :deep(.pagination) {
+  border-top: 1px solid var(--lx-clay-border);
+  border-right: 0;
+  border-bottom: 0;
+  border-left: 0;
+  border-radius: 0;
+}
+
+.usage-workbench__analytics {
+  min-width: 0;
+  margin-top: 24px;
+  overflow: hidden;
+  border: 1px dashed var(--lx-clay-border-strong);
+  border-radius: var(--lx-clay-radius-ops);
+  background: color-mix(in srgb, var(--lx-clay-surface) 72%, transparent);
+}
+
+.usage-workbench__analytics-summary {
+  display: flex;
+  min-height: 54px;
+  cursor: pointer;
+  list-style: none;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 0 20px;
+  user-select: none;
+}
+
+.usage-workbench__analytics-summary::-webkit-details-marker {
+  display: none;
+}
+
+.usage-workbench__analytics-heading-wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--lx-clay-accent);
+}
+
+.usage-workbench__analytics-title {
+  color: var(--lx-clay-text-secondary);
+  font-size: 13px;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.usage-workbench__analytics-description {
+  margin: -4px 20px 16px;
+  color: var(--lx-clay-text-muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.usage-workbench__analytics-chevron {
+  color: var(--lx-clay-text-muted);
+  transition: transform 150ms ease;
+}
+
+.usage-workbench__analytics[open] .usage-workbench__analytics-chevron {
+  transform: rotate(180deg);
+}
+
+.usage-workbench__chart-grid {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+  padding: 0 20px 20px;
+}
+
+.usage-workbench__chart-wide {
+  grid-column: 1 / -1;
+}
+
+@media (max-width: 1439px) {
+  .usage-workbench__chart-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 1199px) {
+  .usage-workbench__header {
+    padding-right: 24px;
+    padding-left: 24px;
+  }
+
+  .usage-workbench__body {
+    grid-template-columns: 280px minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 1023px) {
+  .usage-workbench__body {
+    grid-template-columns: 260px minmax(0, 1fr);
+  }
+
+  .usage-workbench__evidence {
+    padding: 18px;
+  }
+
+  .usage-workbench__toolbar {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 0;
+    padding: 0 16px 10px;
+  }
+
+  .usage-workbench__tabs {
+    min-height: 50px;
+  }
+
+  .usage-workbench__toolbar-actions {
+    justify-content: flex-end;
+  }
+
+  .usage-workbench__chart-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 767px) {
+  .usage-workbench {
+    height: auto;
+    min-height: calc(100dvh - var(--app-shell-top-offset, 0px));
+    overflow: visible;
+  }
+
+  .usage-workbench__header {
+    padding: 16px;
+  }
+
+  .usage-workbench__page-header :deep(.admin-page-header__actions) {
+    align-self: stretch;
+  }
+
+  .usage-workbench__header-button {
+    flex: 1 1 auto;
+  }
+
+  .usage-workbench__body {
+    display: flex;
+    min-height: 0;
+    flex-direction: column;
+  }
+
+  .usage-workbench__filter-rail {
+    width: 100%;
+    max-height: none;
+    overflow: visible;
+    border-right: 0;
+    border-bottom: 1px solid var(--lx-clay-border);
+  }
+
+  .usage-workbench__filter-scroll {
+    overflow: visible;
+    padding: 18px 16px;
+  }
+
+  .usage-workbench__filter-actions {
+    padding: 16px;
+  }
+
+  .usage-workbench__evidence {
+    overflow: visible;
+    padding: 16px;
+  }
+
+  .usage-workbench__toolbar-actions {
+    min-width: 0;
+    flex-wrap: wrap;
+  }
+
+  .usage-workbench__result-count {
+    display: none;
+  }
+
+  .usage-workbench__tool-button span {
+    display: none;
+  }
+
+  .usage-workbench__analytics {
+    margin-top: 16px;
+  }
+
+  .usage-workbench__analytics-summary {
+    padding: 0 16px;
+  }
+
+  .usage-workbench__analytics-description {
+    margin-right: 16px;
+    margin-left: 16px;
+  }
+
+  .usage-workbench__chart-grid {
+    padding: 0 16px 16px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .usage-workbench__header-button,
+  .usage-workbench__tab,
+  .usage-workbench__analytics-chevron {
+    transition: none;
+  }
+}
+
+</style>

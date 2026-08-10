@@ -436,6 +436,18 @@ type OpenAIGatewayService struct {
 	openaiCompatAnthropicDigestSessions sync.Map
 }
 
+// AccountSupportsVision evaluates the final model after channel and account
+// mapping. Unknown capability metadata is rejected rather than inherited from
+// a model family fallback.
+func (s *OpenAIGatewayService) AccountSupportsVision(account *Account, selectedModel string) bool {
+	if s == nil || s.resolver == nil || account == nil {
+		return false
+	}
+	forwarded := resolveOpenAIForwardModel(account, strings.TrimSpace(selectedModel), "")
+	forwarded = normalizeOpenAIModelForUpstream(account, forwarded)
+	return s.resolver.SupportsVision(forwarded)
+}
+
 // NewOpenAIGatewayService creates a new OpenAIGatewayService
 func NewOpenAIGatewayService(
 	accountRepo AccountRepository,

@@ -1,606 +1,49 @@
 <template>
-  <AppLayout variant="home-clay">
-    <TablePageLayout v-if="editorMode === 'list'">
-      <template #header>
-        <AdminPageHeader
-          :title="t('admin.groups.title')"
-          :description="t('admin.groups.description')"
-        />
-      </template>
-
-      <template #filters>
-        <div
-          class="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-3 lg:flex lg:flex-wrap"
-        >
-          <!-- Search stays visible at every viewport width. -->
-          <div class="relative min-w-0 lg:w-64 lg:flex-none">
-            <Icon
-              name="search"
-              size="md"
-              class="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 dark:text-gray-500"
-            />
-            <input
-              v-model="searchQuery"
-              type="text"
-              :placeholder="t('admin.groups.searchGroups')"
-              class="input min-h-11 pl-10 lg:min-h-[42px]"
-              data-test="groups-search"
-              @input="handleSearch"
-            />
-          </div>
-
-          <button
-            type="button"
-            class="btn btn-secondary min-h-11 min-w-11 px-3 lg:hidden"
-            data-test="groups-mobile-filter-toggle"
-            :aria-expanded="mobileFiltersExpanded"
-            aria-controls="groups-mobile-secondary-filters"
-            @click="toggleMobileFilters"
-          >
-            <Icon name="filter" size="sm" class="mr-1.5" />
-            <span>{{ t("common.filter") }}</span>
-            <Icon
-              name="chevronDown"
-              size="xs"
-              class="ml-1 transition-transform motion-reduce:transition-none"
-              :class="{ 'rotate-180': mobileFiltersExpanded }"
-            />
-          </button>
-
-          <!-- Platform, status, and exclusivity are progressively disclosed below desktop. -->
-          <div
-            id="groups-mobile-secondary-filters"
-            data-test="groups-mobile-secondary-filters"
-            :class="
-              mobileFiltersExpanded
-                ? 'col-span-2 grid grid-cols-1 gap-3 sm:grid-cols-3 lg:flex lg:min-w-0 lg:flex-1'
-                : 'hidden lg:flex lg:min-w-0 lg:flex-1 lg:items-center lg:gap-3'
-            "
-          >
-            <Select
-              v-model="filters.platform"
-              :options="platformFilterOptions"
-              :placeholder="t('admin.groups.allPlatforms')"
-              class="w-full lg:w-44"
-              @change="loadGroups"
-            />
-            <Select
-              v-model="filters.status"
-              :options="statusOptions"
-              :placeholder="t('admin.groups.allStatus')"
-              class="w-full lg:w-40"
-              @change="loadGroups"
-            />
-            <Select
-              v-model="filters.is_exclusive"
-              :options="exclusiveOptions"
-              :placeholder="t('admin.groups.allGroups')"
-              class="w-full lg:w-44"
-              @change="loadGroups"
-            />
-          </div>
-
-          <!-- Refresh and the single primary action remain visible at every breakpoint. -->
-          <div
-            class="col-span-2 flex w-full flex-shrink-0 items-center justify-end gap-2 lg:ml-auto lg:w-auto lg:gap-3"
-          >
-            <button
-              type="button"
-              @click="loadGroups"
-              :disabled="loading"
-              class="btn btn-secondary min-h-11 min-w-11 justify-center px-3 lg:min-h-10"
-              data-test="groups-refresh"
-              :title="t('common.refresh')"
-              :aria-label="t('common.refresh')"
-            >
-              <Icon
-                name="refresh"
-                size="md"
-                :class="loading ? 'animate-spin' : ''"
-              />
-            </button>
-
-            <!-- Tablet/mobile secondary tools. -->
-            <div ref="mobileToolsRef" class="relative lg:hidden">
-              <button
-                type="button"
-                class="btn btn-secondary min-h-11 min-w-11 justify-center px-3"
-                data-test="groups-mobile-more-toggle"
-                :title="t('common.more')"
-                :aria-label="t('common.more')"
-                :aria-expanded="showMobileTools"
-                aria-controls="groups-mobile-tools-menu"
-                @click="toggleMobileTools"
-              >
-                <Icon name="more" size="md" />
-              </button>
-              <div
-                v-if="showMobileTools"
-                id="groups-mobile-tools-menu"
-                data-test="groups-mobile-tools-menu"
-                class="absolute right-0 top-full z-50 mt-1 max-h-80 w-64 overflow-y-auto rounded-xl border border-gray-200 bg-white py-1 shadow-lg dark:border-dark-600 dark:bg-dark-800"
-              >
-                <button
-                  type="button"
-                  class="flex min-h-11 w-full items-center justify-between gap-3 px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-dark-700"
-                  :aria-expanded="mobileColumnSettingsExpanded"
-                  @click="mobileColumnSettingsExpanded = !mobileColumnSettingsExpanded"
-                >
-                  <span class="flex items-center gap-2">
-                    <Icon name="grid" size="sm" />
-                    {{ t("admin.groups.columnSettings") }}
-                  </span>
-                  <Icon
-                    name="chevronDown"
-                    size="xs"
-                    class="transition-transform motion-reduce:transition-none"
-                    :class="{ 'rotate-180': mobileColumnSettingsExpanded }"
-                  />
-                </button>
-                <div
-                  v-if="mobileColumnSettingsExpanded"
-                  class="border-y border-gray-100 bg-gray-50/80 py-1 dark:border-dark-700 dark:bg-dark-900/50"
-                >
-                  <button
-                    v-for="col in toggleableColumns"
-                    :key="col.key"
-                    type="button"
-                    @click="toggleColumn(col.key)"
-                    class="flex min-h-11 w-full items-center justify-between px-5 py-2 text-left text-sm text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-dark-700"
-                  >
-                    <span>{{ col.label }}</span>
-                    <Icon
-                      v-if="isColumnVisible(col.key)"
-                      name="check"
-                      size="sm"
-                      class="text-primary-500"
-                      :stroke-width="2"
-                    />
-                  </button>
-                </div>
-                <button
-                  type="button"
-                  class="flex min-h-11 w-full items-center gap-2 px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-dark-700"
-                  @click="openSortFromMobile"
-                >
-                  <Icon name="arrowsUpDown" size="sm" />
-                  {{ t("admin.groups.sortOrder") }}
-                </button>
-              </div>
-            </div>
-
-            <!-- Desktop secondary tools retain their existing behavior. -->
-            <div class="relative hidden lg:block" ref="columnDropdownRef">
-              <button
-                type="button"
-                @click="showColumnDropdown = !showColumnDropdown"
-                class="btn btn-secondary"
-                :title="t('admin.groups.columnSettings')"
-              >
-                <Icon name="grid" size="md" class="mr-2" />
-                <span class="hidden md:inline">{{
-                  t("admin.groups.columnSettings")
-                }}</span>
-              </button>
-              <div
-                v-if="showColumnDropdown"
-                class="absolute right-0 top-full z-50 mt-1 max-h-80 w-48 overflow-y-auto rounded-lg border border-gray-200 bg-white py-1 shadow-lg dark:border-dark-600 dark:bg-dark-800"
-              >
-                <button
-                  v-for="col in toggleableColumns"
-                  :key="col.key"
-                  @click="toggleColumn(col.key)"
-                  class="flex w-full items-center justify-between px-4 py-2 text-left text-sm text-gray-700 hover:bg-gray-100 dark:text-gray-300 dark:hover:bg-dark-700"
-                >
-                  <span>{{ col.label }}</span>
-                  <Icon
-                    v-if="isColumnVisible(col.key)"
-                    name="check"
-                    size="sm"
-                    class="text-primary-500"
-                    :stroke-width="2"
-                  />
-                </button>
-              </div>
-            </div>
-            <button
-              type="button"
-              @click="openSortModal"
-              class="btn btn-secondary hidden lg:inline-flex"
-              :title="t('admin.groups.sortOrder')"
-            >
-              <Icon name="arrowsUpDown" size="md" class="mr-2" />
-              {{ t("admin.groups.sortOrder") }}
-            </button>
-            <button
-              type="button"
-              @click="openCreateModal"
-              class="btn btn-primary min-h-11 flex-1 justify-center lg:min-h-10 lg:flex-none"
-              data-test="groups-create"
-              data-tour="groups-create-btn"
-            >
-              <Icon name="plus" size="md" class="mr-2" />
-              {{ t("admin.groups.createGroup") }}
-            </button>
-          </div>
-        </div>
-      </template>
-
-      <template #table>
-        <DataTable
-          :columns="columns"
-          :data="groups"
-          :loading="loading"
-          mobile-primary-key="name"
-          :mobile-visible-keys="[
-            'platform',
-            'billing_type',
-            'account_count',
-            'capacity',
-            'status',
-          ]"
-          :server-side-sort="true"
-          default-sort-key="sort_order"
-          default-sort-order="asc"
-          @sort="handleSort"
-        >
-          <template #cell-name="{ value }">
-            <span class="font-medium text-gray-900 dark:text-white">{{
-              value
-            }}</span>
-          </template>
-
-          <template #cell-id="{ value }">
-            <span class="font-mono text-xs text-gray-500 dark:text-gray-400"
-              >#{{ value }}</span
-            >
-          </template>
-
-          <template #cell-platform="{ value }">
-            <span
-              :class="[
-                'inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-medium',
-                value === 'anthropic'
-                  ? 'bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400'
-                  : value === 'openai'
-                    ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400'
-                    : value === 'antigravity'
-                      ? 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400'
-                      : value === 'grok'
-                        ? 'bg-zinc-200 text-zinc-800 dark:bg-zinc-700 dark:text-zinc-100'
-                        : 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400',
-              ]"
-            >
-              <PlatformIcon :platform="value" size="xs" />
-              {{ t("admin.groups.platforms." + value) }}
-            </span>
-          </template>
-
-          <template #cell-billing_type="{ row }">
-            <div class="space-y-1">
-              <!-- Type Badge -->
-              <span
-                :class="[
-                  'inline-block rounded-full px-2 py-0.5 text-xs font-medium',
-                  row.subscription_type === 'subscription'
-                    ? 'bg-violet-100 text-violet-700 dark:bg-violet-900/30 dark:text-violet-400'
-                    : 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300',
-                ]"
-              >
-                {{
-                  row.subscription_type === "subscription"
-                    ? t("admin.groups.subscription.subscription")
-                    : t("admin.groups.subscription.standard")
-                }}
-              </span>
-              <!-- Subscription Limits - compact single line -->
-              <div
-                v-if="row.subscription_type === 'subscription'"
-                class="space-y-0.5 text-xs text-gray-500 dark:text-gray-400"
-              >
-                <div
-                  v-if="
-                    row.daily_limit_usd ||
-                    row.weekly_limit_usd ||
-                    row.monthly_limit_usd
-                  "
-                  class="flex flex-wrap items-center gap-x-1 gap-y-0.5"
-                >
-                  <span v-if="row.daily_limit_usd" class="whitespace-nowrap">
-                    <span
-                      v-if="usageLoading"
-                      class="font-medium text-gray-400 dark:text-gray-500"
-                      >—</span
-                    >
-                    <span
-                      v-else
-                      :class="
-                        getQuotaUsageClass(
-                          usageMap.get(row.id)?.today_cost ?? 0,
-                          row.daily_limit_usd
-                        )
-                      "
-                    >
-                      <CreditAmount
-                        :value="formatCost(usageMap.get(row.id)?.today_cost ?? 0)"
-                        icon-size="xs"
-                      />
-                    </span>
-                    <span class="text-gray-400 dark:text-gray-500">
-                      /
-                      <CreditAmount
-                        :value="formatCost(row.daily_limit_usd)"
-                        icon-size="xs"
-                      />/{{ t("admin.groups.limitDay") }}</span
-                    >
-                  </span>
-                  <span
-                    v-if="
-                      row.daily_limit_usd &&
-                      (row.weekly_limit_usd || row.monthly_limit_usd)
-                    "
-                    class="mx-1 text-gray-300 dark:text-gray-600"
-                    >·</span
-                  >
-                  <span v-if="row.weekly_limit_usd" class="inline-flex items-center whitespace-nowrap">
-                    <CreditAmount
-                      :value="formatCost(row.weekly_limit_usd)"
-                      icon-size="xs"
-                    />/{{ t("admin.groups.limitWeek") }}
-                  </span>
-                  <span
-                    v-if="row.weekly_limit_usd && row.monthly_limit_usd"
-                    class="mx-1 text-gray-300 dark:text-gray-600"
-                    >·</span
-                  >
-                  <span v-if="row.monthly_limit_usd" class="inline-flex items-center whitespace-nowrap">
-                    <CreditAmount
-                      :value="formatCost(row.monthly_limit_usd)"
-                      icon-size="xs"
-                    />/{{ t("admin.groups.limitMonth") }}
-                  </span>
-                </div>
-                <span v-else class="text-gray-400 dark:text-gray-500">{{
-                  t("admin.groups.subscription.noLimit")
-                }}</span>
-                <div class="text-gray-400 dark:text-gray-500">
-                  {{ t("admin.groups.usageTotal") }}
-                  <span v-if="usageLoading" class="ml-1 font-medium text-gray-600 dark:text-gray-300">—</span>
-                  <CreditAmount
-                    v-else
-                    class="ml-1 font-medium text-gray-600 dark:text-gray-300"
-                    :value="formatCost(usageMap.get(row.id)?.total_cost ?? 0)"
-                    icon-size="xs"
-                  />
-                </div>
-              </div>
-            </div>
-          </template>
-
-          <template #cell-rate_multiplier="{ value }">
-            <span class="text-sm text-gray-700 dark:text-gray-300"
-              >{{ value }}x</span
-            >
-          </template>
-
-          <template #cell-is_exclusive="{ value }">
-            <span :class="['badge', value ? 'badge-primary' : 'badge-gray']">
-              {{
-                value ? t("admin.groups.exclusive") : t("admin.groups.public")
-              }}
-            </span>
-          </template>
-
-          <template #cell-account_count="{ row }">
-            <div class="space-y-0.5 text-xs">
-              <div>
-                <span class="text-gray-500 dark:text-gray-400">{{
-                  t("admin.groups.accountsAvailable")
-                }}</span>
-                <span
-                  class="ml-1 font-medium text-emerald-600 dark:text-emerald-400"
-                  >{{ row.active_account_count || 0 }}</span
-                >
-                <span
-                  class="ml-1 inline-flex items-center rounded bg-gray-100 px-1.5 py-0.5 font-medium text-gray-800 dark:bg-dark-600 dark:text-gray-300"
-                  >{{ t("admin.groups.accountsUnit") }}</span
-                >
-              </div>
-              <div v-if="row.rate_limited_account_count">
-                <span class="text-gray-500 dark:text-gray-400">{{
-                  t("admin.groups.accountsRateLimited")
-                }}</span>
-                <span
-                  class="ml-1 font-medium text-amber-600 dark:text-amber-400"
-                  >{{ row.rate_limited_account_count }}</span
-                >
-                <span
-                  class="ml-1 inline-flex items-center rounded bg-gray-100 px-1.5 py-0.5 font-medium text-gray-800 dark:bg-dark-600 dark:text-gray-300"
-                  >{{ t("admin.groups.accountsUnit") }}</span
-                >
-              </div>
-              <div>
-                <span class="text-gray-500 dark:text-gray-400">{{
-                  t("admin.groups.accountsTotal")
-                }}</span>
-                <span
-                  class="ml-1 font-medium text-gray-700 dark:text-gray-300"
-                  >{{ row.account_count || 0 }}</span
-                >
-                <span
-                  class="ml-1 inline-flex items-center rounded bg-gray-100 px-1.5 py-0.5 font-medium text-gray-800 dark:bg-dark-600 dark:text-gray-300"
-                  >{{ t("admin.groups.accountsUnit") }}</span
-                >
-              </div>
-            </div>
-          </template>
-
-          <template #cell-capacity="{ row }">
-            <GroupCapacityBadge
-              v-if="capacityMap.get(row.id)"
-              :concurrency-used="capacityMap.get(row.id)!.concurrencyUsed"
-              :concurrency-max="capacityMap.get(row.id)!.concurrencyMax"
-              :sessions-used="capacityMap.get(row.id)!.sessionsUsed"
-              :sessions-max="capacityMap.get(row.id)!.sessionsMax"
-              :rpm-used="capacityMap.get(row.id)!.rpmUsed"
-              :rpm-max="capacityMap.get(row.id)!.rpmMax"
-            />
-            <span v-else class="text-xs text-gray-400">—</span>
-          </template>
-
-          <template #cell-usage="{ row }">
-            <div v-if="usageLoading" class="text-xs text-gray-400">—</div>
-            <div v-else class="space-y-0.5 text-xs">
-              <div class="text-gray-500 dark:text-gray-400">
-                <span class="text-gray-400 dark:text-gray-500">{{
-                  t("admin.groups.usageToday")
-                }}</span>
-                <CreditAmount
-                  class="ml-1 font-medium text-gray-700 dark:text-gray-300"
-                  :value="formatCost(usageMap.get(row.id)?.today_cost ?? 0)"
-                  icon-size="xs"
-                />
-              </div>
-              <div class="text-gray-500 dark:text-gray-400">
-                <span class="text-gray-400 dark:text-gray-500">{{
-                  t("admin.groups.usageTotal")
-                }}</span>
-                <CreditAmount
-                  class="ml-1 font-medium text-gray-700 dark:text-gray-300"
-                  :value="formatCost(usageMap.get(row.id)?.total_cost ?? 0)"
-                  icon-size="xs"
-                />
-              </div>
-            </div>
-          </template>
-
-          <template #cell-status="{ value }">
-            <span
-              :class="[
-                'badge',
-                value === 'active' ? 'badge-success' : 'badge-danger',
-              ]"
-            >
-              {{ t("admin.accounts.status." + value) }}
-            </span>
-          </template>
-
-          <template #cell-actions="{ row }">
-            <div class="flex flex-wrap items-center gap-1">
-              <button
-                type="button"
-                @click="handleEdit(row)"
-                class="flex min-h-11 min-w-11 flex-1 flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-gray-100 hover:text-primary-600 lg:min-h-0 lg:min-w-0 lg:flex-none dark:hover:bg-dark-700 dark:hover:text-primary-400"
-                data-test="groups-row-edit"
-              >
-                <Icon name="edit" size="sm" />
-                <span class="text-xs">{{ t("common.edit") }}</span>
-              </button>
-
-              <button
-                type="button"
-                class="flex min-h-11 min-w-11 flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-gray-100 hover:text-gray-900 lg:hidden dark:hover:bg-dark-700 dark:hover:text-white"
-                data-test="groups-row-more"
-                :title="t('common.more')"
-                :aria-label="t('common.more')"
-                :aria-expanded="expandedGroupActionId === row.id"
-                :aria-controls="`groups-row-secondary-actions-${row.id}`"
-                @click="toggleGroupRowActions(row.id)"
-              >
-                <Icon name="more" size="sm" />
-                <span class="text-xs">{{ t("common.more") }}</span>
-              </button>
-
-              <button
-                type="button"
-                @click="handleRateMultipliers(row)"
-                class="hidden flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-gray-100 hover:text-purple-600 lg:flex dark:hover:bg-dark-700 dark:hover:text-purple-400"
-                data-test="groups-row-rate-desktop"
-              >
-                <Icon name="dollar" size="sm" />
-                <span class="text-xs">{{
-                  t("admin.groups.rateMultipliers")
-                }}</span>
-              </button>
-              <button
-                type="button"
-                @click="handleRPMOverrides(row)"
-                class="hidden flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-gray-100 hover:text-orange-600 lg:flex dark:hover:bg-dark-700 dark:hover:text-orange-400"
-                data-test="groups-row-rpm-desktop"
-              >
-                <Icon name="bolt" size="sm" />
-                <span class="text-xs">{{
-                  t("admin.groups.rpmOverrides")
-                }}</span>
-              </button>
-              <button
-                type="button"
-                @click="handleDelete(row)"
-                class="hidden flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-red-50 hover:text-red-600 lg:flex dark:hover:bg-red-900/20 dark:hover:text-red-400"
-                data-test="groups-row-delete-desktop"
-              >
-                <Icon name="trash" size="sm" />
-                <span class="text-xs">{{ t("common.delete") }}</span>
-              </button>
-
-              <div
-                v-if="expandedGroupActionId === row.id"
-                :id="`groups-row-secondary-actions-${row.id}`"
-                class="grid w-full grid-cols-3 gap-1 border-t border-gray-200 pt-2 lg:hidden dark:border-dark-700"
-                data-test="groups-row-secondary-actions"
-              >
-                <button
-                  type="button"
-                  class="flex min-h-11 flex-col items-center justify-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-gray-100 hover:text-purple-600 dark:hover:bg-dark-700 dark:hover:text-purple-400"
-                  @click="closeGroupRowActions(); handleRateMultipliers(row)"
-                >
-                  <Icon name="dollar" size="sm" />
-                  <span class="text-xs">{{ t("admin.groups.rateMultipliers") }}</span>
-                </button>
-                <button
-                  type="button"
-                  class="flex min-h-11 flex-col items-center justify-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-gray-100 hover:text-orange-600 dark:hover:bg-dark-700 dark:hover:text-orange-400"
-                  @click="closeGroupRowActions(); handleRPMOverrides(row)"
-                >
-                  <Icon name="bolt" size="sm" />
-                  <span class="text-xs">{{ t("admin.groups.rpmOverrides") }}</span>
-                </button>
-                <button
-                  type="button"
-                  class="flex min-h-11 flex-col items-center justify-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-900/20 dark:hover:text-red-400"
-                  @click="closeGroupRowActions(); handleDelete(row)"
-                >
-                  <Icon name="trash" size="sm" />
-                  <span class="text-xs">{{ t("common.delete") }}</span>
-                </button>
-              </div>
-            </div>
-          </template>
-
-          <template #empty>
-            <EmptyState
-              :title="t('admin.groups.noGroupsYet')"
-              :description="t('admin.groups.createFirstGroup')"
-            />
-          </template>
-        </DataTable>
-      </template>
-
-      <template #pagination>
-        <Pagination
-          v-if="pagination.total > 0"
-          :page="pagination.page"
-          :total="pagination.total"
-          :page-size="pagination.page_size"
-          @update:page="handlePageChange"
-          @update:pageSize="handlePageSizeChange"
-        />
-      </template>
-    </TablePageLayout>
+  <AppLayout
+    variant="home-clay"
+    :content-mode="editorMode === 'list' ? 'workbench' : 'contained'"
+  >
+    <GroupOperationsCockpit
+      v-if="editorMode === 'list'"
+      data-admin-page-kind="ops"
+      :groups="groups"
+      :overview-groups="overviewGroups"
+      :loading="loading"
+      :overview-loading="overviewLoading"
+      :overview-error="overviewError"
+      :usage-map="usageMap"
+      :usage-loading="usageLoading"
+      :usage-error="usageError"
+      :capacity-map="capacityMap"
+      :capacity-loading="capacityLoading"
+      :capacity-error="capacityError"
+      :refreshing="dashboardRefreshing"
+      :search-query="searchQuery"
+      :filters="filters"
+      :platform-options="platformFilterOptions"
+      :status-options="statusOptions"
+      :exclusive-options="exclusiveOptions"
+      :column-preferences="columnPreferences"
+      :pagination="pagination"
+      :last-updated-at="lastUpdatedAt"
+      @refresh="refreshGroupsDashboard"
+      @create="openCreateModal"
+      @search="handleCockpitSearch"
+      @filter="handleCockpitFilter"
+      @toggle-column="toggleColumn"
+      @sort-order="openSortModal"
+      @edit="handleEdit"
+      @rate-multipliers="handleRateMultipliers"
+      @rpm-overrides="handleRPMOverrides"
+      @delete="handleDelete"
+      @page-change="handlePageChange"
+      @page-size-change="handlePageSizeChange"
+    />
 
     <!-- Create Group Workspace -->
     <GroupEditorShell
       v-else-if="editorMode === 'create'"
+      data-admin-page-kind="form"
       :title="t('admin.groups.createGroup')"
       :description="t('admin.groups.editor.createDescription')"
       :context-label="t('admin.groups.platforms.' + createForm.platform)"
@@ -687,6 +130,7 @@
     <!-- Edit Group Workspace -->
     <GroupEditorShell
       v-else
+      data-admin-page-kind="form"
       :title="t('admin.groups.editGroup')"
       :description="t('admin.groups.editor.editDescription')"
       :context-label="editorContextLabel"
@@ -903,7 +347,7 @@
       :show="showRateMultipliersModal"
       :group="rateMultipliersGroup"
       @close="showRateMultipliersModal = false"
-      @success="loadGroups"
+      @success="refreshGroupsDashboard"
     />
 
     <!-- Group RPM Overrides Modal -->
@@ -911,7 +355,7 @@
       :show="showRPMOverridesModal"
       :group="rpmOverridesGroup"
       @close="showRPMOverridesModal = false"
-      @success="loadGroups"
+      @success="refreshGroupsDashboard"
     />
   </AppLayout>
 </template>
@@ -939,22 +383,14 @@ import { adminAPI } from "@/api/admin";
 import type { AdminGroup, GroupPlatform } from "@/types";
 import type { Column } from "@/components/common/types";
 import AppLayout from "@/components/layout/AppLayout.vue";
-import AdminPageHeader from "@/components/layout/AdminPageHeader.vue";
-import TablePageLayout from "@/components/layout/TablePageLayout.vue";
-import DataTable from "@/components/common/DataTable.vue";
-import CreditAmount from "@/components/common/CreditAmount.vue";
-import Pagination from "@/components/common/Pagination.vue";
 import BaseDialog from "@/components/common/BaseDialog.vue";
 import ConfirmDialog from "@/components/common/ConfirmDialog.vue";
-import EmptyState from "@/components/common/EmptyState.vue";
-import Select from "@/components/common/Select.vue";
-import PlatformIcon from "@/components/common/PlatformIcon.vue";
 import Icon from "@/components/icons/Icon.vue";
 import GroupRateMultipliersModal from "@/components/admin/group/GroupRateMultipliersModal.vue";
 import GroupRPMOverridesModal from "@/components/admin/group/GroupRPMOverridesModal.vue";
 import GroupEditorShell from "@/components/admin/group/GroupEditorShell.vue";
+import GroupOperationsCockpit from "@/components/admin/group/GroupOperationsCockpit.vue";
 import GroupForm from "./groups/GroupForm.vue";
-import GroupCapacityBadge from "@/components/common/GroupCapacityBadge.vue";
 import { VueDraggable } from "vue-draggable-plus";
 import { createStableObjectKeyResolver } from "@/utils/stableObjectKey";
 import {
@@ -1092,23 +528,6 @@ const toggleableColumns = computed(() =>
   allColumns.value.filter((col) => !ALWAYS_VISIBLE_COLUMNS.has(col.key)),
 );
 const hiddenColumns = reactive<Set<string>>(new Set());
-const showColumnDropdown = ref(false);
-const columnDropdownRef = ref<HTMLElement | null>(null);
-const showMobileTools = ref(false);
-const mobileColumnSettingsExpanded = ref(false);
-const mobileToolsRef = ref<HTMLElement | null>(null);
-
-const toggleMobileTools = () => {
-  showMobileTools.value = !showMobileTools.value;
-  if (!showMobileTools.value) {
-    mobileColumnSettingsExpanded.value = false;
-  }
-};
-
-const closeMobileTools = () => {
-  showMobileTools.value = false;
-  mobileColumnSettingsExpanded.value = false;
-};
 
 const getValidHiddenColumnKeys = () =>
   new Set(toggleableColumns.value.map((col) => col.key));
@@ -1180,36 +599,25 @@ const saveColumnsToStorage = () => {
 };
 
 const isColumnVisible = (key: string) => !hiddenColumns.has(key);
-const hasVisibleUsageSummaryConsumer = computed(
-  () => isColumnVisible("usage") || isColumnVisible("billing_type"),
+const columnPreferences = computed(() =>
+  toggleableColumns.value.map((column) => ({
+    key: column.key,
+    label: column.label,
+    visible: isColumnVisible(column.key),
+  })),
 );
-const hasVisibleCapacityColumn = computed(() => isColumnVisible("capacity"));
 
 const toggleColumn = (key: string) => {
   const validKeys = getValidHiddenColumnKeys();
   if (!validKeys.has(key)) return;
 
-  const wasHidden = hiddenColumns.has(key);
-  if (wasHidden) {
+  if (hiddenColumns.has(key)) {
     hiddenColumns.delete(key);
   } else {
     hiddenColumns.add(key);
   }
   saveColumnsToStorage();
-
-  if (wasHidden && (key === "usage" || key === "billing_type")) {
-    loadUsageSummary();
-  }
-  if (wasHidden && key === "capacity") {
-    loadCapacitySummary();
-  }
 };
-
-const columns = computed<Column[]>(() =>
-  allColumns.value.filter(
-    (col) => ALWAYS_VISIBLE_COLUMNS.has(col.key) || !hiddenColumns.has(col.key),
-  ),
-);
 
 if (typeof window !== "undefined") {
   loadSavedColumns();
@@ -1217,13 +625,13 @@ if (typeof window !== "undefined") {
 
 // Filter options
 const statusOptions = computed(() => [
-  { value: "", label: t("admin.groups.allStatus") },
+  { value: "", label: t("admin.groups.cockpit.activeStatus") },
   { value: "active", label: t("admin.accounts.status.active") },
   { value: "inactive", label: t("admin.accounts.status.inactive") },
 ]);
 
 const exclusiveOptions = computed(() => [
-  { value: "", label: t("admin.groups.allGroups") },
+  { value: "", label: t("admin.groups.cockpit.accessType") },
   { value: "true", label: t("admin.groups.exclusive") },
   { value: "false", label: t("admin.groups.nonExclusive") },
 ]);
@@ -1237,7 +645,7 @@ const platformOptions = computed(() => [
 ]);
 
 const platformFilterOptions = computed(() => [
-  { value: "", label: t("admin.groups.allPlatforms") },
+  { value: "", label: t("admin.groups.cockpit.allPlatforms") },
   { value: "anthropic", label: "Anthropic" },
   { value: "openai", label: "OpenAI" },
   { value: "gemini", label: "Gemini" },
@@ -1356,7 +764,10 @@ const copyAccountsGroupOptionsForEdit = computed(() => {
 });
 
 const groups = ref<AdminGroup[]>([]);
+const overviewGroups = ref<AdminGroup[]>([]);
 const loading = ref(false);
+const overviewLoading = ref(false);
+const overviewError = ref(false);
 type GroupUsageSummary = {
   today_cost: number;
   total_cost: number;
@@ -1364,6 +775,7 @@ type GroupUsageSummary = {
 
 const usageMap = ref<Map<number, GroupUsageSummary>>(new Map());
 const usageLoading = ref(false);
+const usageError = ref(false);
 const capacityMap = ref<
   Map<
     number,
@@ -1377,17 +789,22 @@ const capacityMap = ref<
     }
   >
 >(new Map());
+const capacityLoading = ref(false);
+const capacityError = ref(false);
+const lastUpdatedAt = ref<Date | null>(null);
+const dashboardRefreshing = computed(
+  () =>
+    loading.value ||
+    overviewLoading.value ||
+    usageLoading.value ||
+    capacityLoading.value,
+);
 const searchQuery = ref("");
 const filters = reactive({
   platform: "",
   status: "",
   is_exclusive: "",
 });
-const mobileFiltersExpanded = ref(false);
-
-const toggleMobileFilters = () => {
-  mobileFiltersExpanded.value = !mobileFiltersExpanded.value;
-};
 
 const pagination = reactive({
   page: 1,
@@ -1412,7 +829,6 @@ const showRateMultipliersModal = ref(false);
 const rateMultipliersGroup = ref<AdminGroup | null>(null);
 const showRPMOverridesModal = ref(false);
 const rpmOverridesGroup = ref<AdminGroup | null>(null);
-const expandedGroupActionId = ref<number | null>(null);
 const sortableGroups = ref<AdminGroup[]>([]);
 const createModelsListState = reactive(createInitialModelsListState());
 const editModelsListState = reactive(createInitialModelsListState());
@@ -1976,14 +1392,6 @@ const loadGroups = async () => {
     groups.value = response.items;
     pagination.total = response.total;
     pagination.pages = response.pages;
-    if (hasVisibleUsageSummaryConsumer.value) {
-      loadUsageSummary();
-    } else {
-      usageLoading.value = false;
-    }
-    if (hasVisibleCapacityColumn.value) {
-      loadCapacitySummary();
-    }
   } catch (error: any) {
     if (
       signal.aborted ||
@@ -1998,6 +1406,20 @@ const loadGroups = async () => {
     if (abortController === currentController && !signal.aborted) {
       loading.value = false;
     }
+  }
+};
+
+const loadOverviewGroups = async () => {
+  overviewLoading.value = true;
+  overviewError.value = false;
+  try {
+    overviewGroups.value = await adminAPI.groups.getAllIncludingInactive();
+  } catch (error) {
+    overviewGroups.value = [];
+    overviewError.value = true;
+    console.error("Error loading group overview:", error);
+  } finally {
+    overviewLoading.value = false;
   }
 };
 
@@ -2018,36 +1440,9 @@ const loadEditorReferenceGroups = async () => {
   }
 };
 
-const formatCost = (cost: number | null | undefined): string => {
-  const value = cost ?? 0;
-  if (value >= 1000) return value.toFixed(0);
-  if (value >= 100) return value.toFixed(1);
-  return value.toFixed(2);
-};
-
-const getQuotaUsageClass = (
-  used: number,
-  limit: number | null | undefined,
-): string => {
-  if (!limit || limit <= 0) {
-    return "font-medium text-gray-700 dark:text-gray-300";
-  }
-  const ratio = used / limit;
-  if (ratio >= 1) {
-    return "font-semibold text-red-600 dark:text-red-400";
-  }
-  if (ratio >= 0.8) {
-    return "font-semibold text-amber-600 dark:text-amber-400";
-  }
-  return "font-medium text-gray-700 dark:text-gray-300";
-};
-
 const loadUsageSummary = async () => {
-  if (!hasVisibleUsageSummaryConsumer.value) {
-    usageLoading.value = false;
-    return;
-  }
   usageLoading.value = true;
+  usageError.value = false;
   try {
     const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
     const data = await adminAPI.groups.getUsageSummary(tz);
@@ -2060,6 +1455,8 @@ const loadUsageSummary = async () => {
     }
     usageMap.value = map;
   } catch (error) {
+    usageMap.value = new Map();
+    usageError.value = true;
     console.error("Error loading group usage summary:", error);
   } finally {
     usageLoading.value = false;
@@ -2067,9 +1464,8 @@ const loadUsageSummary = async () => {
 };
 
 const loadCapacitySummary = async () => {
-  if (!hasVisibleCapacityColumn.value) {
-    return;
-  }
+  capacityLoading.value = true;
+  capacityError.value = false;
   try {
     const data = await adminAPI.groups.getCapacitySummary();
     const map = new Map<
@@ -2095,8 +1491,22 @@ const loadCapacitySummary = async () => {
     }
     capacityMap.value = map;
   } catch (error) {
+    capacityMap.value = new Map();
+    capacityError.value = true;
     console.error("Error loading group capacity summary:", error);
+  } finally {
+    capacityLoading.value = false;
   }
+};
+
+const refreshGroupsDashboard = async () => {
+  await Promise.allSettled([
+    loadGroups(),
+    loadOverviewGroups(),
+    loadUsageSummary(),
+    loadCapacitySummary(),
+  ]);
+  lastUpdatedAt.value = new Date();
 };
 
 let searchTimeout: ReturnType<typeof setTimeout>;
@@ -2108,6 +1518,20 @@ const handleSearch = () => {
   }, 300);
 };
 
+const handleCockpitSearch = (value: string) => {
+  searchQuery.value = value;
+  handleSearch();
+};
+
+const handleCockpitFilter = (
+  key: "platform" | "status" | "is_exclusive",
+  value: string,
+) => {
+  filters[key] = value;
+  pagination.page = 1;
+  void loadGroups();
+};
+
 const handlePageChange = (page: number) => {
   pagination.page = page;
   loadGroups();
@@ -2115,13 +1539,6 @@ const handlePageChange = (page: number) => {
 
 const handlePageSizeChange = (pageSize: number) => {
   pagination.page_size = pageSize;
-  pagination.page = 1;
-  loadGroups();
-};
-
-const handleSort = (key: string, order: 'asc' | 'desc') => {
-  sortState.sort_by = key;
-  sortState.sort_order = order;
   pagination.page = 1;
   loadGroups();
 };
@@ -2437,7 +1854,7 @@ watch(
     clearEditorValidationError();
     resetCreateForm();
     resetEditForm();
-    void loadGroups();
+    void refreshGroupsDashboard();
   },
   { immediate: true },
 );
@@ -2507,15 +1924,6 @@ const handleRPMOverrides = (group: AdminGroup) => {
   showRPMOverridesModal.value = true;
 };
 
-const toggleGroupRowActions = (groupId: number) => {
-  expandedGroupActionId.value =
-    expandedGroupActionId.value === groupId ? null : groupId;
-};
-
-const closeGroupRowActions = () => {
-  expandedGroupActionId.value = null;
-};
-
 const handleDelete = (group: AdminGroup) => {
   deletingGroup.value = group;
   showDeleteDialog.value = true;
@@ -2529,7 +1937,7 @@ const confirmDelete = async () => {
     appStore.showSuccess(t("admin.groups.groupDeleted"));
     showDeleteDialog.value = false;
     deletingGroup.value = null;
-    loadGroups();
+    void refreshGroupsDashboard();
   } catch (error: any) {
     appStore.showError(
       error.response?.data?.detail || t("admin.groups.failedToDelete"),
@@ -2646,12 +2054,6 @@ const handleClickOutside = (event: MouseEvent) => {
       showAccountDropdown.value[key] = false;
     });
   }
-  if (columnDropdownRef.value && !columnDropdownRef.value.contains(target)) {
-    showColumnDropdown.value = false;
-  }
-  if (mobileToolsRef.value && !mobileToolsRef.value.contains(target)) {
-    closeMobileTools();
-  }
 };
 
 // 打开排序弹窗
@@ -2668,11 +2070,6 @@ const openSortModal = async () => {
     appStore.showError(t("admin.groups.failedToLoad"));
     console.error("Error loading groups for sorting:", error);
   }
-};
-
-const openSortFromMobile = async () => {
-  closeMobileTools();
-  await openSortModal();
 };
 
 // 关闭排序弹窗
@@ -2692,7 +2089,7 @@ const saveSortOrder = async () => {
     await adminAPI.groups.updateSortOrder(updates);
     appStore.showSuccess(t("admin.groups.sortOrderUpdated"));
     closeSortModal();
-    loadGroups();
+    void refreshGroupsDashboard();
   } catch (error: any) {
     appStore.showError(
       error.response?.data?.detail || t("admin.groups.failedToUpdateSortOrder"),

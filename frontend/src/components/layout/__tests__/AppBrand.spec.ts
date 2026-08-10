@@ -1,6 +1,6 @@
 import { mount, type VueWrapper } from '@vue/test-utils'
 import { createPinia, setActivePinia, type Pinia } from 'pinia'
-import { beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { User } from '@/types'
 
 import AppBrand from '../AppBrand.vue'
@@ -27,12 +27,19 @@ function createUser(role: User['role']): User {
 }
 
 function mountBrand(
-  props: { placement?: 'header' | 'sidebar', collapsed?: boolean } = {},
+  props: {
+    placement?: 'header' | 'sidebar'
+    collapsed?: boolean
+    wordmark?: boolean
+    wordmarkOnly?: boolean
+  } = {},
 ): VueWrapper {
   return mount(AppBrand, {
     props: {
       placement: props.placement ?? 'sidebar',
       collapsed: props.collapsed ?? false,
+      wordmark: props.wordmark ?? false,
+      wordmarkOnly: props.wordmarkOnly ?? false,
     },
     global: {
       plugins: [pinia],
@@ -51,6 +58,10 @@ describe('AppBrand', () => {
     pinia = createPinia()
     setActivePinia(pinia)
     useAuthStore().user = createUser('user')
+  })
+
+  afterEach(() => {
+    document.querySelector('meta[name="app-entry"]')?.remove()
   })
 
   it('renders the canonical default logo as a logo-only link', () => {
@@ -81,6 +92,41 @@ describe('AppBrand', () => {
     expect(brand.text()).toBe('')
   })
 
+  it('renders the configured site name as an opt-in wordmark', async () => {
+    const appStore = useAppStore()
+    appStore.siteName = 'Luoxue AI Workspace'
+    const wrapper = mountBrand({ wordmark: true })
+
+    expect(wrapper.get('[data-testid="sidebar-brand-wordmark"]').text())
+      .toBe('Luoxue AI Workspace')
+    expect(wrapper.get('[data-testid="sidebar-brand"]').classes())
+      .toContain('app-brand--wordmark')
+    expect(wrapper.find('[data-testid="sidebar-brand-logo"]').exists()).toBe(true)
+
+    await wrapper.setProps({ collapsed: true })
+
+    expect(wrapper.find('[data-testid="sidebar-brand-wordmark"]').exists()).toBe(false)
+  })
+
+  it('renders a pure text Work wordmark while preserving a collapsed fallback logo', async () => {
+    const appStore = useAppStore()
+    appStore.siteName = '落雪 AI Workspace'
+    const wrapper = mountBrand({ wordmark: true, wordmarkOnly: true })
+
+    expect(wrapper.get('[data-testid="sidebar-brand-wordmark"]').text())
+      .toBe('落雪 AI Workspace')
+    expect(wrapper.get('[data-testid="sidebar-brand"]').classes())
+      .toContain('app-brand--wordmark-only')
+    expect(wrapper.find('[data-testid="sidebar-brand-logo"]').exists()).toBe(false)
+    expect(wrapper.find('img').exists()).toBe(false)
+
+    await wrapper.setProps({ collapsed: true })
+
+    expect(wrapper.find('[data-testid="sidebar-brand-wordmark"]').exists()).toBe(false)
+    expect(wrapper.get('[data-testid="sidebar-brand-logo"] img').attributes('src'))
+      .toBe('/logo.png')
+  })
+
   it('does not replace an uploaded data-image logo with the canonical default', async () => {
     const appStore = useAppStore()
     appStore.siteName = '落雪API'
@@ -98,7 +144,7 @@ describe('AppBrand', () => {
     expect(image.classes()).not.toContain('app-brand-logo-image-default')
   })
 
-  it('links users and administrators to their respective dashboards', async () => {
+  it('keeps the logo inside the active frontend entry regardless of role', async () => {
     const authStore = useAuthStore()
     const wrapper = mountBrand()
 
@@ -108,6 +154,15 @@ describe('AppBrand', () => {
     await wrapper.vm.$nextTick()
 
     expect(wrapper.get('[data-testid="sidebar-brand"]').attributes('href'))
+      .toBe('/dashboard')
+
+    wrapper.unmount()
+    const entryMeta = document.createElement('meta')
+    entryMeta.name = 'app-entry'
+    entryMeta.content = 'admin'
+    document.head.append(entryMeta)
+
+    expect(mountBrand().get('[data-testid="sidebar-brand"]').attributes('href'))
       .toBe('/admin/dashboard')
   })
 

@@ -52,7 +52,7 @@ const {
 
 const localeRef = vi.hoisted(() => ({ value: "zh-CN" }));
 
-vi.mock("@/api", () => ({
+vi.mock("@/api/admin", () => ({
   adminAPI: {
     settings: {
       getSettings,
@@ -208,6 +208,28 @@ vi.mock("vue-i18n", async () => {
 });
 
 const AppLayoutStub = { template: "<div><slot /></div>" };
+const TranscriptionSettingsPanelStub = defineComponent({
+  props: {
+    active: {
+      type: Boolean,
+      default: false,
+    },
+  },
+  emits: ["dirty-change"],
+  setup(props, { emit }) {
+    return () =>
+      h(
+        "button",
+        {
+          type: "button",
+          class: "transcription-settings-dirty-stub",
+          "data-active": String(props.active),
+          onClick: () => emit("dirty-change", true),
+        },
+        "mark transcription dirty",
+      );
+  },
+});
 const ToggleStub = defineComponent({
   props: {
     modelValue: {
@@ -492,6 +514,7 @@ function mountView() {
         ProxySelector: true,
         ImageUpload: ImageUploadStub,
         BackupSettings: true,
+        TranscriptionSettingsPanel: TranscriptionSettingsPanelStub,
       },
     },
   });
@@ -643,6 +666,30 @@ describe("admin SettingsView payment visible method controls", () => {
       "saved",
     );
     expect(wrapper.get(".settings-save-status-title").text()).toBe("已保存");
+    wrapper.unmount();
+  });
+
+  it("shows an unsaved voice-input state after the child panel becomes dirty", async () => {
+    const wrapper = mountView();
+    await flushPromises();
+
+    expect(wrapper.get(".settings-save-bar").attributes("data-state")).toBe(
+      "saved",
+    );
+
+    await wrapper.get(".transcription-settings-dirty-stub").trigger("click");
+
+    const saveBar = wrapper.get(".settings-save-bar");
+    expect(saveBar.attributes("data-state")).toBe("transcription-dirty");
+    expect(saveBar.get(".settings-save-status-title").text()).toBe(
+      "语音识别有未保存的更改",
+    );
+    expect(saveBar.get(".settings-save-status-detail").text()).toBe(
+      "返回语音识别标签保存后才会生效。",
+    );
+    expect(saveBar.get(".settings-save-status-dot").attributes("aria-hidden")).toBe(
+      "true",
+    );
     wrapper.unmount();
   });
 

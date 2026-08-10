@@ -58,8 +58,11 @@ vi.mock('@vueuse/core', () => ({
   }),
 }))
 
-vi.mock('@/stores', () => ({
+vi.mock('@/stores/adminSettings', () => ({
   useAdminSettingsStore: () => mocks.adminSettingsStore,
+}))
+
+vi.mock('@/stores/app', () => ({
   useAppStore: () => ({ showError: mocks.showError }),
 }))
 
@@ -88,7 +91,7 @@ vi.mock('@/api/admin/ops', () => ({
   },
 }))
 
-vi.mock('@/api', () => ({
+vi.mock('@/api/admin', () => ({
   adminAPI: {
     groups: {
       getAll: mocks.getGroups,

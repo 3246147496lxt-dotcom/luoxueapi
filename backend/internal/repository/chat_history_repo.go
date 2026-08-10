@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/service"
+	"github.com/lib/pq"
 )
 
 type chatHistoryRepository struct {
@@ -365,6 +366,7 @@ func (r *chatHistoryRepository) ListMessages(
 	args = append(args, limit+1)
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT
+			m.id,
 			m.public_id,
 			m.position,
 			m.role,
@@ -398,12 +400,17 @@ func (r *chatHistoryRepository) ListMessages(
 	defer func() { _ = rows.Close() }()
 
 	descending := make([]*service.ChatHistoryMessage, 0, limit+1)
+	messageInternalIDs := make([]int64, 0, limit+1)
 	for rows.Next() {
-		message, scanErr := scanChatHistoryMessage(rows.Scan)
+		var internalID int64
+		message, scanErr := scanChatHistoryMessage(func(dest ...any) error {
+			return rows.Scan(append([]any{&internalID}, dest...)...)
+		})
 		if scanErr != nil {
 			return nil, scanErr
 		}
 		descending = append(descending, message)
+		messageInternalIDs = append(messageInternalIDs, internalID)
 	}
 	if err = rows.Err(); err != nil {
 		return nil, err
@@ -412,6 +419,14 @@ func (r *chatHistoryRepository) ListMessages(
 	hasMore := len(descending) > limit
 	if hasMore {
 		descending = descending[:limit]
+		messageInternalIDs = messageInternalIDs[:limit]
+	}
+	attachmentsByMessage, err := loadChatAttachmentsForMessages(ctx, r.db, messageInternalIDs)
+	if err != nil {
+		return nil, err
+	}
+	for i := range descending {
+		descending[i].Attachments = attachmentsByMessage[messageInternalIDs[i]]
 	}
 	items := make([]*service.ChatHistoryMessage, len(descending))
 	for i := range descending {
@@ -577,6 +592,16 @@ func (r *chatHistoryRepository) DeleteConversation(
 		return err
 	}
 	now := time.Now().UTC()
+	// Mark first, then delete message associations. Blob deletion happens after
+	// commit; retaining storage_key makes a failed immediate cleanup recoverable
+	// by the attachment janitor.
+	if _, err = tx.ExecContext(ctx, `
+		UPDATE chat_attachments
+		SET status='deleted', extracted_text=NULL, updated_at=$3
+		WHERE user_id=$1 AND conversation_id=$2
+	`, userID, conversationID, now); err != nil {
+		return err
+	}
 	if _, err = tx.ExecContext(ctx, `
 		DELETE FROM chat_messages
 		WHERE user_id = $1 AND conversation_id = $2
@@ -874,9 +899,10 @@ func (r *chatHistoryRepository) PrepareCompletion(
 
 	now := time.Now().UTC()
 	appendCount := 1
+	var userMessageInternalID int64
 	if input.UserMessage != nil {
 		appendCount = 2
-		if _, err = tx.ExecContext(ctx, `
+		if err = tx.QueryRowContext(ctx, `
 			INSERT INTO chat_messages (
 				public_id,
 				user_id,
@@ -890,6 +916,7 @@ func (r *chatHistoryRepository) PrepareCompletion(
 				terminal_at
 			)
 			VALUES ($1, $2, $3, $4, 'user', $5, $6, $7, $7, $7)
+			RETURNING id
 		`,
 			input.UserMessage.ID,
 			userID,
@@ -898,8 +925,32 @@ func (r *chatHistoryRepository) PrepareCompletion(
 			input.UserMessage.Content,
 			service.ChatMessageDeliveryCompleted,
 			now,
-		); err != nil {
+		).Scan(&userMessageInternalID); err != nil {
 			return nil, err
+		}
+		for position := range input.UserMessage.Attachments {
+			attachment := input.UserMessage.Attachments[position]
+			var attachmentInternalID int64
+			if err = tx.QueryRowContext(ctx, `
+				UPDATE chat_attachments
+				SET conversation_id=$3, updated_at=$4
+				WHERE user_id=$1 AND public_id=$2
+				  AND status='ready' AND expires_at > $4
+				  AND (conversation_id IS NULL OR conversation_id=$3)
+				  AND sha256=$5
+				RETURNING id
+			`, userID, attachment.ID, conversationID, now, attachment.Digest).Scan(&attachmentInternalID); err != nil {
+				if errors.Is(err, sql.ErrNoRows) {
+					return nil, service.ErrChatAttachmentNotFound
+				}
+				return nil, err
+			}
+			if _, err = tx.ExecContext(ctx, `
+				INSERT INTO chat_message_attachments (message_id, attachment_id, position)
+				VALUES ($1,$2,$3)
+			`, userMessageInternalID, attachmentInternalID, position+1); err != nil {
+				return nil, err
+			}
 		}
 	} else {
 		if !headMessageID.Valid ||
@@ -1043,9 +1094,9 @@ func (r *chatHistoryRepository) PrepareCompletion(
 	}
 
 	rows, err := tx.QueryContext(ctx, `
-		SELECT context_message.role, context_message.content
+		SELECT context_message.id, context_message.role, context_message.content
 		FROM (
-			SELECT m.position, m.role, m.content
+			SELECT m.id, m.position, m.role, m.content
 			FROM chat_messages m
 			WHERE m.user_id = $1
 			  AND m.conversation_id = $2
@@ -1068,13 +1119,16 @@ func (r *chatHistoryRepository) PrepareCompletion(
 		return nil, err
 	}
 	messages := make([]service.ChatCompletionContextMessage, 0, input.ContextMessageLimit)
+	contextMessageIDs := make([]int64, 0, input.ContextMessageLimit)
 	for rows.Next() {
 		var message service.ChatCompletionContextMessage
-		if err = rows.Scan(&message.Role, &message.Content); err != nil {
+		var messageID int64
+		if err = rows.Scan(&messageID, &message.Role, &message.Content); err != nil {
 			_ = rows.Close()
 			return nil, err
 		}
 		messages = append(messages, message)
+		contextMessageIDs = append(contextMessageIDs, messageID)
 	}
 	if err = rows.Err(); err != nil {
 		_ = rows.Close()
@@ -1082,6 +1136,13 @@ func (r *chatHistoryRepository) PrepareCompletion(
 	}
 	if err = rows.Close(); err != nil {
 		return nil, err
+	}
+	attachmentsByMessage, err := loadChatAttachmentsForMessages(ctx, tx, contextMessageIDs)
+	if err != nil {
+		return nil, err
+	}
+	for i := range messages {
+		messages[i].Attachments = attachmentsByMessage[contextMessageIDs[i]]
 	}
 	if err = tx.Commit(); err != nil {
 		return nil, err
@@ -1711,6 +1772,39 @@ func scanChatHistoryMessage(scan chatHistoryScanner) (*service.ChatHistoryMessag
 		message.TerminalAt = &value
 	}
 	return &message, nil
+}
+
+func loadChatAttachmentsForMessages(
+	ctx context.Context,
+	queryer sqlQueryer,
+	messageIDs []int64,
+) (map[int64][]service.ChatAttachment, error) {
+	result := make(map[int64][]service.ChatAttachment)
+	if len(messageIDs) == 0 {
+		return result, nil
+	}
+	rows, err := queryer.QueryContext(ctx, `
+		SELECT ma.message_id, `+chatAttachmentColumns+`
+		FROM chat_message_attachments ma
+		JOIN chat_attachments a ON a.id=ma.attachment_id
+		WHERE ma.message_id = ANY($1)
+		ORDER BY ma.message_id, ma.position
+	`, pq.Array(messageIDs))
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	for rows.Next() {
+		var messageID int64
+		attachment, scanErr := scanChatAttachment(func(dest ...any) error {
+			return rows.Scan(append([]any{&messageID}, dest...)...)
+		})
+		if scanErr != nil {
+			return nil, scanErr
+		}
+		result[messageID] = append(result[messageID], *attachment)
+	}
+	return result, rows.Err()
 }
 
 func lockChatHistorySyncState(ctx context.Context, tx *sql.Tx, userID int64) (int64, error) {

@@ -205,6 +205,39 @@ describe('useAppStore', () => {
       expect(store.sidebarCollapsed).toBe(false)
     })
 
+    it('窄桌面 overlay 状态不会改写桌面手动折叠偏好', () => {
+      const store = useAppStore()
+
+      store.setSidebarCollapsed(true)
+      store.setWorkspaceNarrowSidebar(true)
+      store.setWorkspaceNarrowSidebarOpen(true)
+
+      expect(store.sidebarCollapsed).toBe(true)
+      expect(store.workspaceNarrowSidebar).toBe(true)
+      expect(store.workspaceNarrowSidebarOpen).toBe(true)
+
+      store.setWorkspaceNarrowSidebar(false)
+
+      expect(store.sidebarCollapsed).toBe(true)
+      expect(store.workspaceNarrowSidebar).toBe(false)
+      expect(store.workspaceNarrowSidebarOpen).toBe(false)
+    })
+
+    it('只允许在窄桌面状态打开 overlay，并在移动 drawer 接管时关闭', () => {
+      const store = useAppStore()
+
+      store.setWorkspaceNarrowSidebarOpen(true)
+      expect(store.workspaceNarrowSidebarOpen).toBe(false)
+
+      store.setWorkspaceNarrowSidebar(true)
+      store.setWorkspaceNarrowSidebarOpen(true)
+      expect(store.workspaceNarrowSidebarOpen).toBe(true)
+
+      store.setWorkspaceMobileDrawer(true)
+      expect(store.workspaceNarrowSidebarOpen).toBe(false)
+      expect(store.workspaceMobileDrawer).toBe(true)
+    })
+
     it('sidebarScrollTop 默认为 0 且可读写', () => {
       const store = useAppStore()
       expect(store.sidebarScrollTop).toBe(0)
@@ -307,12 +340,18 @@ describe('useAppStore', () => {
       const store = useAppStore()
 
       store.setSidebarCollapsed(true)
+      store.setWorkspaceNarrowSidebar(true)
+      store.setWorkspaceNarrowSidebarOpen(true)
+      store.setWorkspaceMobileDrawer(true)
       store.setLoading(true)
       store.showSuccess('消息')
 
       store.reset()
 
       expect(store.sidebarCollapsed).toBe(false)
+      expect(store.workspaceNarrowSidebar).toBe(false)
+      expect(store.workspaceNarrowSidebarOpen).toBe(false)
+      expect(store.workspaceMobileDrawer).toBe(false)
       expect(store.loading).toBe(false)
       expect(store.toasts).toHaveLength(0)
     })

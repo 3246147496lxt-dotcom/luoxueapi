@@ -38,17 +38,24 @@ vi.mock('@/api/client', () => ({
 import {
   ChatAPIError,
   createChatConversation,
+  deleteChatAttachment,
   deleteChatConversation,
   getChatAttempt,
+  getChatConversationMessages,
+  getChatCapabilities,
   getChatSync,
   getChatReceipt,
   getChatModels,
+  getChatAttachmentContent,
   listChatConversations,
   parseChatCompletionSSE,
+  normalizeChatAttachment,
   patchChatConversation,
   pollChatReceipt,
   searchChatConversations,
   streamChatCompletion,
+  transcribeChatAudio,
+  uploadChatAttachment,
 } from '@/api/chat'
 
 const encoder = new TextEncoder()
@@ -334,6 +341,158 @@ describe('chatAPI', () => {
     expect(mocks.apiGet).toHaveBeenCalledWith('/chat/models')
   })
 
+  it('loads non-blocking Chat capabilities from the endpoint that does not return models', async () => {
+    mocks.apiGet.mockResolvedValue({
+      data: {
+        transcription: {
+          enabled: true,
+          billing_mode: 'included',
+          max_upload_bytes: 8_388_608,
+          max_duration_seconds: 120,
+          accepted_mime_types: ['audio/webm;codecs=opus', ' ', 'audio/mp4'],
+        },
+      },
+    })
+
+    await expect(getChatCapabilities()).resolves.toEqual({
+      transcription: {
+        enabled: true,
+        billing_mode: 'included',
+        max_upload_bytes: 8_388_608,
+        max_duration_seconds: 120,
+        accepted_mime_types: ['audio/webm;codecs=opus', 'audio/mp4'],
+      },
+    })
+    expect(mocks.apiGet).toHaveBeenCalledWith('/chat/capabilities', { signal: undefined })
+  })
+
+  it('normalizes the Sol reasoning slider capability and fails closed for invalid values', async () => {
+    mocks.apiGet.mockResolvedValue({
+      data: {
+        models: [
+          { id: 'sol', supports_reasoning_slider: true },
+          { id: 'legacy', supportsReasoningSlider: false },
+          { id: 'spoofed', supports_reasoning_slider: 'true' },
+        ],
+        balance: 2,
+      },
+    })
+
+    await expect(getChatModels()).resolves.toEqual({
+      models: [
+        { id: 'sol', supports_reasoning_slider: true },
+        { id: 'legacy', supports_reasoning_slider: false },
+        { id: 'spoofed' },
+      ],
+      balance: 2,
+    })
+  })
+
+  it('normalizes the optional transcription capability without breaking legacy catalogs', async () => {
+    mocks.apiGet.mockResolvedValue({
+      data: {
+        models: [{ id: 'gpt-5' }],
+        balance: 3,
+        transcription: {
+          enabled: true,
+          billing_mode: 'included',
+          max_upload_bytes: 8_388_608,
+          max_duration_seconds: 120,
+          accepted_mime_types: ['audio/webm;codecs=opus', ' ', 'audio/mp4'],
+        },
+      },
+    })
+
+    await expect(getChatModels()).resolves.toMatchObject({
+      transcription: {
+        enabled: true,
+        billing_mode: 'included',
+        max_upload_bytes: 8_388_608,
+        max_duration_seconds: 120,
+        accepted_mime_types: ['audio/webm;codecs=opus', 'audio/mp4'],
+      },
+    })
+  })
+
+  it('uploads recorded audio as FormData without overriding the multipart boundary', async () => {
+    const controller = new AbortController()
+    const audio = new Blob(['recorded voice'], { type: 'audio/webm;codecs=opus' })
+    const idempotencyKey = '11111111-2222-4333-8444-555555555555'
+    mocks.apiPost.mockResolvedValue({ data: { text: '  你好世界  ' } })
+
+    await expect(transcribeChatAudio(audio, {
+      signal: controller.signal,
+      idempotencyKey,
+    })).resolves.toEqual({ text: '你好世界' })
+
+    const [url, formData, config] = mocks.apiPost.mock.calls[0]
+    expect(url).toBe('/chat/transcriptions')
+    expect(formData).toBeInstanceOf(FormData)
+    expect((formData as FormData).has('duration_ms')).toBe(false)
+    const uploadedFile = (formData as FormData).get('file')
+    expect(uploadedFile).toBeInstanceOf(File)
+    expect((uploadedFile as File).name).toBe('chat-recording.webm')
+    expect((uploadedFile as File).type).toBe('audio/webm;codecs=opus')
+    expect(config).toEqual({
+      signal: controller.signal,
+      timeout: 0,
+      headers: {
+        'Content-Type': undefined,
+        'Idempotency-Key': idempotencyKey,
+      },
+    })
+  })
+
+  it('rejects empty audio and invalid transcription payloads', async () => {
+    await expect(transcribeChatAudio(new Blob([]))).rejects.toMatchObject({
+      name: 'ChatAPIError',
+      code: 'EMPTY_AUDIO',
+    })
+    expect(mocks.apiPost).not.toHaveBeenCalled()
+
+    mocks.apiPost.mockResolvedValue({ data: { text: '   ' } })
+    await expect(transcribeChatAudio(new Blob(['voice']))).rejects.toMatchObject({
+      name: 'ChatAPIError',
+      code: 'INVALID_TRANSCRIPTION_RESPONSE',
+    })
+  })
+
+  it('honors an already-aborted transcription signal before uploading', async () => {
+    const controller = new AbortController()
+    controller.abort()
+
+    await expect(transcribeChatAudio(new Blob(['voice']), {
+      signal: controller.signal,
+    })).rejects.toMatchObject({ name: 'AbortError' })
+    expect(mocks.apiPost).not.toHaveBeenCalled()
+  })
+
+  it('preserves the dedicated daily transcription quota reason and reset metadata', async () => {
+    mocks.apiPost.mockRejectedValue({
+      status: 429,
+      code: 429,
+      reason: 'TRANSCRIPTION_DAILY_QUOTA_EXCEEDED',
+      message: 'Daily voice transcription limit reached',
+      metadata: {
+        limit_seconds: '1200',
+        reset_in_seconds: '3600',
+        reset_at: '2026-08-08T00:00:00Z',
+      },
+    })
+
+    await expect(transcribeChatAudio(new Blob(['voice']))).rejects.toMatchObject({
+      name: 'ChatAPIError',
+      status: 429,
+      code: 'TRANSCRIPTION_DAILY_QUOTA_EXCEEDED',
+      reason: 'TRANSCRIPTION_DAILY_QUOTA_EXCEEDED',
+      metadata: {
+        limit_seconds: '1200',
+        reset_in_seconds: '3600',
+        reset_at: '2026-08-08T00:00:00Z',
+      },
+    })
+  })
+
   it('normalizes model-list business reasons into ChatAPIError codes', async () => {
     mocks.apiGet.mockRejectedValue({
       status: 403,
@@ -543,6 +702,51 @@ describe('chatAPI', () => {
     )
   })
 
+  it('normalizes history message pages into canonical position order', async () => {
+    mocks.apiGet.mockResolvedValueOnce({
+      data: {
+        items: [
+          {
+            id: 'assistant-2',
+            role: 'assistant',
+            content: '回答',
+            status: 'completed',
+            position: 2,
+            created_at: '2026-08-09T08:00:00Z',
+          },
+          {
+            id: 'user-1',
+            role: 'user',
+            content: '你好',
+            status: 'completed',
+            position: 1,
+            created_at: '2026-08-09T08:00:00Z',
+          },
+        ],
+        next_before_position: 1,
+        has_more: true,
+      },
+    })
+
+    const page = await getChatConversationMessages('conversation-1', {
+      beforePosition: 3,
+      limit: 100,
+    })
+
+    expect(page.items.map(({ id, position }) => ({ id, position }))).toEqual([
+      { id: 'user-1', position: 1 },
+      { id: 'assistant-2', position: 2 },
+    ])
+    expect(page).toMatchObject({ nextBeforePosition: 1, hasMore: true })
+    expect(mocks.apiGet).toHaveBeenCalledWith(
+      '/chat/conversations/conversation-1/messages',
+      {
+        params: { before_position: 3, limit: 100 },
+        signal: undefined,
+      },
+    )
+  })
+
   it('sends optimistic revisions for patch and delete', async () => {
     mocks.apiPatch.mockResolvedValue({
       data: {
@@ -626,7 +830,7 @@ describe('chatAPI', () => {
         'data: {"choices":[{"index":0,"delta":{"content":"hello"},"finish_reason":null}]}\n\n',
         'data: [DONE]\n\n',
       ].join(''),
-      { 'X-Client-Request-ID': 'receipt-stream' },
+      { 'X-Chat-Receipt-ID': 'receipt-stream' },
     ))
     vi.stubGlobal('fetch', fetchMock)
     const content: string[] = []
@@ -700,11 +904,11 @@ describe('chatAPI', () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(unauthorizedResponse(
         cancel,
-        { 'X-Client-Request-ID': 'receipt-from-401' },
+        { 'X-Chat-Receipt-ID': 'receipt-from-401' },
       ))
       .mockResolvedValueOnce(successfulStreamResponse(
         'data: [DONE]\n\n',
-        { 'X-Client-Request-ID': 'receipt-after-refresh' },
+        { 'X-Chat-Receipt-ID': 'receipt-after-refresh' },
       ))
     vi.stubGlobal('fetch', fetchMock)
     mocks.refreshAuthSession.mockImplementation(async () => {
@@ -1029,5 +1233,207 @@ describe('chatAPI', () => {
       message: '请先充值',
       requestId: 'request-1',
     })
+  })
+
+  it('uploads one multipart attachment and normalizes server metadata', async () => {
+    const progress = vi.fn()
+    mocks.apiPost.mockImplementation(async (
+      path: string,
+      body: FormData,
+      config: { onUploadProgress?: (event: { loaded: number; total: number }) => void },
+    ) => {
+      expect(path).toBe('/chat/attachments')
+      expect(body).toBeInstanceOf(FormData)
+      expect(body.get('file')).toBeInstanceOf(File)
+      config.onUploadProgress?.({ loaded: 3, total: 3 })
+      return {
+        data: {
+          id: 'attachment-1',
+          name: 'snow.png',
+          kind: 'image',
+          mime_type: 'image/png',
+          size: 3,
+          status: 'ready',
+          expires_at: '2099-01-01T00:00:00Z',
+          width: 32,
+          height: 24,
+        },
+      }
+    })
+
+    await expect(uploadChatAttachment(
+      new File(['png'], 'snow.png', { type: 'image/png' }),
+      { onProgress: progress },
+    )).resolves.toEqual({
+      id: 'attachment-1',
+      name: 'snow.png',
+      kind: 'image',
+      mimeType: 'image/png',
+      size: 3,
+      status: 'ready',
+      expiresAt: '2099-01-01T00:00:00Z',
+      width: 32,
+      height: 24,
+    })
+    expect(progress).toHaveBeenCalledWith(100)
+  })
+
+  it.each([
+    ['empty-type.pdf', 'application/pdf'],
+    [
+      'empty-type.docx',
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    ],
+    ['empty-type.png', 'image/png'],
+  ])('supplies the canonical MIME for %s when the browser omits File.type', async (
+    name,
+    expectedMimeType,
+  ) => {
+    mocks.apiPost.mockImplementation(async (_path: string, body: FormData) => {
+      const uploaded = body.get('file')
+      expect(uploaded).toBeInstanceOf(File)
+      expect((uploaded as File).type).toBe(expectedMimeType)
+      return {
+        data: {
+          id: `attachment-${name}`,
+          name,
+          kind: name.endsWith('.png') ? 'image' : 'document',
+          mime_type: expectedMimeType,
+          size: 4,
+          status: 'ready',
+          expires_at: '2099-01-01T00:00:00Z',
+        },
+      }
+    })
+
+    await uploadChatAttachment(new File(['file'], name, { type: '' }))
+    expect(mocks.apiPost).toHaveBeenCalledTimes(1)
+  })
+
+  it('deletes unbound attachments and loads image bytes through the authenticated client', async () => {
+    const blob = new Blob(['image'], { type: 'image/png' })
+    mocks.apiDelete.mockResolvedValue({ data: null })
+    mocks.apiGet.mockResolvedValue({ data: blob })
+
+    await deleteChatAttachment('attachment/with space')
+    await expect(getChatAttachmentContent('attachment/with space')).resolves.toBe(blob)
+
+    expect(mocks.apiDelete).toHaveBeenCalledWith(
+      '/chat/attachments/attachment%2Fwith%20space',
+      { signal: undefined },
+    )
+    expect(mocks.apiGet).toHaveBeenCalledWith(
+      '/chat/attachments/attachment%2Fwith%20space/content',
+      { signal: undefined, responseType: 'blob' },
+    )
+  })
+
+  it('normalizes attachment metadata and accepts an attachment-only completion envelope', async () => {
+    expect(normalizeChatAttachment({
+      id: 'document-1',
+      name: 'brief.pdf',
+      kind: 'document',
+      mime_type: 'application/pdf',
+      size: 2048,
+      status: 'ready',
+      expires_at: '2099-01-01T00:00:00Z',
+      page_count: 3,
+    })).toMatchObject({
+      id: 'document-1',
+      mimeType: 'application/pdf',
+      pageCount: 3,
+    })
+
+    const fetchMock = vi.fn().mockResolvedValue(successfulStreamResponse('data: [DONE]\n\n'))
+    vi.stubGlobal('fetch', fetchMock)
+    const onAccepted = vi.fn()
+    await streamChatCompletion({
+      conversationId: 'conversation-attachment',
+      model: 'gpt-5',
+      expectedHeadMessageId: null,
+      userMessage: {
+        id: 'user-attachment',
+        content: '',
+        attachmentIds: ['document-1'],
+      },
+      assistantMessageId: 'assistant-attachment',
+    }, { onAccepted })
+
+    const request = fetchMock.mock.calls[0]?.[1] as RequestInit
+    expect(JSON.parse(String(request.body))).toMatchObject({
+      user_message: {
+        id: 'user-attachment',
+        content: '',
+        attachment_ids: ['document-1'],
+      },
+    })
+    expect(onAccepted).toHaveBeenCalledTimes(1)
+  })
+
+  it('treats a non-2xx completion with an explicit chat receipt as accepted before surfacing the error', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: false,
+      status: 422,
+      statusText: 'Unprocessable Entity',
+      headers: new Headers({ 'X-Chat-Receipt-ID': 'receipt-bound' }),
+      text: vi.fn().mockResolvedValue(JSON.stringify({
+        code: 'CHAT_PROVIDER_FAILED',
+        message: 'Provider failed after prepare',
+      })),
+    }))
+    const onAccepted = vi.fn()
+    const onReceiptId = vi.fn()
+
+    await expect(streamChatCompletion(
+      historyCompletionRequest(),
+      { onAccepted, onReceiptId },
+    )).rejects.toMatchObject({ code: 'CHAT_PROVIDER_FAILED' })
+
+    expect(onReceiptId).toHaveBeenCalledWith('receipt-bound')
+    expect(onAccepted).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not treat the universal request correlation header as chat acceptance', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: false,
+      status: 503,
+      statusText: 'Service Unavailable',
+      headers: new Headers({ 'X-Client-Request-ID': 'correlation-only' }),
+      text: vi.fn().mockResolvedValue(JSON.stringify({
+        code: 'CHAT_CATALOG_UNAVAILABLE',
+        message: 'Catalog unavailable before prepare',
+      })),
+    }))
+    const onAccepted = vi.fn()
+    const onReceiptId = vi.fn()
+
+    await expect(streamChatCompletion(
+      historyCompletionRequest(),
+      { onAccepted, onReceiptId },
+    )).rejects.toMatchObject({ code: 'CHAT_CATALOG_UNAVAILABLE' })
+
+    expect(onReceiptId).not.toHaveBeenCalled()
+    expect(onAccepted).not.toHaveBeenCalled()
+  })
+
+  it('keeps a non-2xx completion without a receipt header in pre-accept state', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: false,
+      status: 409,
+      statusText: 'Conflict',
+      headers: new Headers(),
+      text: vi.fn().mockResolvedValue(JSON.stringify({
+        code: 'CHAT_HISTORY_CONFLICT',
+        message: 'Not prepared',
+      })),
+    }))
+    const onAccepted = vi.fn()
+
+    await expect(streamChatCompletion(
+      historyCompletionRequest(),
+      { onAccepted },
+    )).rejects.toMatchObject({ code: 'CHAT_HISTORY_CONFLICT' })
+
+    expect(onAccepted).not.toHaveBeenCalled()
   })
 })

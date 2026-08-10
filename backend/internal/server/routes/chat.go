@@ -32,6 +32,10 @@ func RegisterChatRoutes(
 	chat.Use(gin.HandlerFunc(jwtAuth))
 	chat.Use(middleware.BackendModeUserGuard(settingService))
 	chat.GET("/models", h.Chat.Models)
+	chat.GET("/capabilities", h.Chat.Capabilities)
+	chat.POST("/attachments", middleware.RequestBodyLimit(cfg.ChatAttachments.RequestBodyLimit()), h.Chat.UploadAttachment)
+	chat.DELETE("/attachments/:id", h.Chat.DeleteAttachment)
+	chat.GET("/attachments/:id/content", h.Chat.AttachmentContent)
 	chat.GET("/receipts/:receipt_id", h.Chat.Receipt)
 	chat.GET("/attempts/:attempt_id", h.Chat.Attempt)
 	chat.GET("/sync", h.Chat.SyncConversations)
@@ -42,5 +46,6 @@ func RegisterChatRoutes(
 	chat.GET("/conversations/:conversation_id/messages", h.Chat.ListConversationMessages)
 	chat.PATCH("/conversations/:conversation_id", h.Chat.UpdateConversation)
 	chat.DELETE("/conversations/:conversation_id", h.Chat.DeleteConversation)
+	chat.POST("/transcriptions", middleware.RequestBodyLimit(cfg.Transcription.RequestBodyLimit()), h.Chat.Transcriptions)
 	chat.POST("/completions", h.Chat.Completions)
 }

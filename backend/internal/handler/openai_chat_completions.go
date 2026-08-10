@@ -100,6 +100,11 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 
 	// 解析渠道级模型映射
 	channelMapping, _ := h.gatewayService.ResolveChannelMappingAndRestrict(c.Request.Context(), apiKey.GroupID, reqModel)
+	requiresVision := service.OpenAIRequestBodyHasImageInput(body)
+	selectedModel := reqModel
+	if channelMapping.Mapped {
+		selectedModel = channelMapping.MappedModel
+	}
 
 	if h.errorPassthroughService != nil {
 		service.BindErrorPassthroughService(c, h.errorPassthroughService)
@@ -138,6 +143,7 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 	sameAccountRetryCount := make(map[int64]int)
 	var lastFailoverErr *service.UpstreamFailoverError
 	var oauth429FailoverState service.OpenAIOAuth429FailoverState
+	visionRejectedAccounts := 0
 
 	for {
 		if failoverClientGone(c) {
@@ -175,6 +181,10 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 				h.handleStreamingAwareError(c, cls.Status, cls.ErrType, cls.Message, streamStarted)
 				return
 			} else {
+				if requiresVision && visionRejectedAccounts > 0 && lastFailoverErr == nil {
+					h.handleStreamingAwareError(c, http.StatusBadRequest, "model_vision_unsupported", "No available account supports image input for the selected model", streamStarted)
+					return
+				}
 				if lastFailoverErr != nil {
 					h.handleFailoverExhausted(c, lastFailoverErr, streamStarted)
 				} else {
@@ -192,6 +202,12 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 			return
 		}
 		account := selection.Account
+		if requiresVision && !h.gatewayService.AccountSupportsVision(account, selectedModel) {
+			failedAccountIDs[account.ID] = struct{}{}
+			visionRejectedAccounts++
+			reqLog.Info("openai_chat_completions.account_rejected_no_vision", zap.Int64("account_id", account.ID), zap.String("selected_model", selectedModel))
+			continue
+		}
 		sessionHash = ensureOpenAIPoolModeSessionHash(sessionHash, account)
 		reqLog.Debug("openai_chat_completions.account_selected", zap.Int64("account_id", account.ID), zap.String("account_name", account.Name))
 		_ = scheduleDecision

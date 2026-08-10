@@ -160,7 +160,7 @@ function handleMethodKeydown(event: KeyboardEvent) {
 
 <style scoped>
 .payment-method-label {
-  color: #111827;
+  color: var(--lx-clay-text);
 }
 
 .payment-method-option {
@@ -175,8 +175,8 @@ function handleMethodKeydown(event: KeyboardEvent) {
 }
 
 .payment-method-option:hover:not(:disabled) {
-  background: color-mix(in srgb, var(--lx-clay-accent) 5%, var(--lx-clay-surface));
-  border-color: var(--lx-clay-accent);
+  background: var(--lx-clay-hover);
+  border-color: var(--lx-clay-border-strong);
 }
 
 .payment-method-option.is-selected {
@@ -200,11 +200,11 @@ function handleMethodKeydown(event: KeyboardEvent) {
 }
 
 .payment-method-meta {
-  color: #9ca3af;
+  color: var(--lx-clay-text-muted);
 }
 
 .payment-method-name {
-  color: #111827;
+  color: var(--lx-clay-text);
 }
 
 .payment-method-check {

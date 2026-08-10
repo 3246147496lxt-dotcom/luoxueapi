@@ -217,7 +217,7 @@ import { computed, nextTick, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAuthStore } from '@/stores/auth'
 import { useAppStore } from '@/stores/app'
-import { useSubscriptionStore } from '@/stores/subscriptions'
+import { useUserProfileStore } from '@/stores/userProfile'
 import { redeemAPI, type RedeemHistoryItem, type RedeemResult } from '@/api/redeem'
 import { extractI18nErrorMessage } from '@/utils/apiError'
 import { formatDateTime } from '@/utils/format'
@@ -237,7 +237,7 @@ const emit = defineEmits<{
 const { t } = useI18n()
 const authStore = useAuthStore()
 const appStore = useAppStore()
-const subscriptionStore = useSubscriptionStore()
+const userProfileStore = useUserProfileStore()
 
 const redeemCode = ref('')
 const submitting = ref(false)
@@ -332,18 +332,14 @@ async function handleRedeem() {
     redeemResult.value = result
     redeemCode.value = ''
     try {
-      await authStore.refreshUser()
+      if (result.type === 'subscription') {
+        await userProfileStore.syncAfterUpgrade()
+      } else {
+        await userProfileStore.refreshProfile()
+      }
     } catch (error) {
       console.error('Failed to refresh account after redeem:', error)
       appStore.showWarning(t('redeem.accountRefreshFailed'))
-    }
-    if (result.type === 'subscription') {
-      try {
-        await subscriptionStore.fetchActiveSubscriptions(true)
-      } catch (error) {
-        console.error('Failed to refresh subscriptions after redeem:', error)
-        appStore.showWarning(t('redeem.subscriptionRefreshFailed'))
-      }
     }
     if (!props.embedded) await fetchHistory()
     emit('redeemed', result)
@@ -367,7 +363,6 @@ onMounted(() => {
 .redeem-panel--embedded {
   color: var(--lx-clay-text);
   background: transparent;
-  font-family: var(--lx-clay-font-ui);
 }
 
 .redeem-panel__embedded-icon {
@@ -376,7 +371,6 @@ onMounted(() => {
 
 .redeem-panel__embedded-title {
   color: var(--lx-clay-text);
-  font-family: var(--lx-clay-font-display);
   font-weight: 700;
   letter-spacing: 0;
 }

@@ -7,8 +7,10 @@ import (
 	"fmt"
 	"log/slog"
 	"math"
+	"mime"
 	"net/url"
 	"os"
+	"os/exec"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -97,6 +99,79 @@ type Config struct {
 	BatchImage              BatchImageConfig              `mapstructure:"batch_image"`
 	ImageStorage            ImageStorageConfig            `mapstructure:"image_storage"`
 	Desktop                 DesktopConfig                 `mapstructure:"desktop"`
+	Transcription           TranscriptionConfig           `mapstructure:"transcription"`
+	ChatAttachments         ChatAttachmentConfig          `mapstructure:"chat_attachments"`
+}
+
+// ChatAttachmentConfig controls Web Chat's private attachment store and the
+// independent limits applied before attachment data reaches model context.
+type ChatAttachmentConfig struct {
+	StorageDir               string `mapstructure:"storage_dir"`
+	RetentionDays            int    `mapstructure:"retention_days"`
+	MaxPerTurn               int    `mapstructure:"max_per_turn"`
+	MaxTurnBytes             int64  `mapstructure:"max_turn_bytes"`
+	MaxImageBytes            int64  `mapstructure:"max_image_bytes"`
+	MaxDocumentBytes         int64  `mapstructure:"max_document_bytes"`
+	ContextImageBytes        int64  `mapstructure:"context_image_bytes"`
+	ContextMaxImages         int    `mapstructure:"context_max_images"`
+	ContextDocumentTextBytes int64  `mapstructure:"context_document_text_bytes"`
+	JanitorIntervalMinutes   int    `mapstructure:"janitor_interval_minutes"`
+	CleanupBatchSize         int    `mapstructure:"cleanup_batch_size"`
+	UploadsPerMinute         int    `mapstructure:"uploads_per_minute"`
+	DailyUploadBytes         int64  `mapstructure:"daily_upload_bytes"`
+	MaxConcurrentGlobal      int    `mapstructure:"max_concurrent_global"`
+	MaxConcurrentPerUser     int    `mapstructure:"max_concurrent_per_user"`
+}
+
+func (c ChatAttachmentConfig) RequestBodyLimit() int64 {
+	const multipartOverhead = int64(1 << 20)
+	limit := c.MaxDocumentBytes
+	if c.MaxImageBytes > limit {
+		limit = c.MaxImageBytes
+	}
+	if limit <= 0 {
+		limit = 20 << 20
+	}
+	if limit > math.MaxInt64-multipartOverhead {
+		return math.MaxInt64
+	}
+	return limit + multipartOverhead
+}
+
+// TranscriptionConfig controls the authenticated Web Chat speech-to-text
+// endpoint. The feature is disabled by default and can only use groups listed
+// explicitly in GroupIDs.
+type TranscriptionConfig struct {
+	Enabled                  bool     `mapstructure:"enabled"`
+	Provider                 string   `mapstructure:"provider"`
+	Model                    string   `mapstructure:"model"`
+	GroupIDs                 []int64  `mapstructure:"group_ids"`
+	MaxUploadBytes           int64    `mapstructure:"max_upload_bytes"`
+	UploadTimeoutSeconds     int      `mapstructure:"upload_timeout_seconds"`
+	MaxDurationSeconds       int      `mapstructure:"max_duration_seconds"`
+	RequestTimeoutSeconds    int      `mapstructure:"request_timeout_seconds"`
+	QueueTimeoutMS           int      `mapstructure:"queue_timeout_ms"`
+	IdempotencyTTLSeconds    int      `mapstructure:"idempotency_ttl_seconds"`
+	MaxConcurrentGlobal      int      `mapstructure:"max_concurrent_global"`
+	MaxConcurrentPerUser     int      `mapstructure:"max_concurrent_per_user"`
+	UserRequestsPerMinute    int      `mapstructure:"user_requests_per_minute"`
+	IPRequestsPerMinute      int      `mapstructure:"ip_requests_per_minute"`
+	UserDailyAudioSeconds    int      `mapstructure:"user_daily_audio_seconds"`
+	AcceptedMIMETypes        []string `mapstructure:"accepted_mime_types"`
+	UpstreamResponseMaxBytes int64    `mapstructure:"upstream_response_max_bytes"`
+	ProbeTimeoutSeconds      int      `mapstructure:"probe_timeout_seconds"`
+	FFprobePath              string   `mapstructure:"ffprobe_path"`
+}
+
+func (c TranscriptionConfig) RequestBodyLimit() int64 {
+	const multipartOverhead = int64(1 << 20)
+	if c.MaxUploadBytes <= 0 {
+		return multipartOverhead
+	}
+	if c.MaxUploadBytes > math.MaxInt64-multipartOverhead {
+		return math.MaxInt64
+	}
+	return c.MaxUploadBytes + multipartOverhead
 }
 
 type LogConfig struct {
@@ -1650,6 +1725,11 @@ func load(allowMissingJWTSecret bool) (*Config, error) {
 	cfg.Security.ResponseHeaders.AdditionalAllowed = normalizeStringSlice(cfg.Security.ResponseHeaders.AdditionalAllowed)
 	cfg.Security.ResponseHeaders.ForceRemove = normalizeStringSlice(cfg.Security.ResponseHeaders.ForceRemove)
 	cfg.Security.CSP.Policy = strings.TrimSpace(cfg.Security.CSP.Policy)
+	cfg.Transcription.Provider = strings.ToLower(strings.TrimSpace(cfg.Transcription.Provider))
+	cfg.Transcription.Model = strings.TrimSpace(cfg.Transcription.Model)
+	cfg.Transcription.FFprobePath = strings.TrimSpace(cfg.Transcription.FFprobePath)
+	cfg.Transcription.AcceptedMIMETypes = normalizeStringSlice(cfg.Transcription.AcceptedMIMETypes)
+	cfg.ChatAttachments.StorageDir = strings.TrimSpace(cfg.ChatAttachments.StorageDir)
 	cfg.SetTrustForwardedIPForAPIKeyACL(cfg.Security.TrustForwardedIPForAPIKeyACL)
 	cfg.Log.Level = strings.ToLower(strings.TrimSpace(cfg.Log.Level))
 	cfg.Log.Format = strings.ToLower(strings.TrimSpace(cfg.Log.Format))
@@ -1730,6 +1810,49 @@ func load(allowMissingJWTSecret bool) (*Config, error) {
 
 func setDefaults() {
 	viper.SetDefault("run_mode", RunModeStandard)
+
+	// Authenticated Web Chat speech-to-text. The feature remains unavailable
+	// until an operator explicitly enables it and whitelists one or more groups.
+	viper.SetDefault("transcription.enabled", false)
+	viper.SetDefault("transcription.provider", "openai_compatible")
+	viper.SetDefault("transcription.model", "gpt-4o-mini-transcribe")
+	viper.SetDefault("transcription.group_ids", []int64{})
+	viper.SetDefault("transcription.max_upload_bytes", int64(10*1024*1024))
+	viper.SetDefault("transcription.upload_timeout_seconds", 30)
+	viper.SetDefault("transcription.max_duration_seconds", 120)
+	viper.SetDefault("transcription.request_timeout_seconds", 45)
+	viper.SetDefault("transcription.queue_timeout_ms", 2000)
+	viper.SetDefault("transcription.idempotency_ttl_seconds", 600)
+	viper.SetDefault("transcription.max_concurrent_global", 16)
+	viper.SetDefault("transcription.max_concurrent_per_user", 1)
+	viper.SetDefault("transcription.user_requests_per_minute", 6)
+	viper.SetDefault("transcription.ip_requests_per_minute", 20)
+	viper.SetDefault("transcription.user_daily_audio_seconds", 1200)
+	viper.SetDefault("transcription.accepted_mime_types", []string{
+		"audio/webm", "video/webm", "audio/wav", "audio/x-wav", "audio/mpeg",
+		"audio/mp4", "video/mp4", "audio/ogg", "application/ogg", "audio/flac",
+	})
+	viper.SetDefault("transcription.upstream_response_max_bytes", int64(1024*1024))
+	viper.SetDefault("transcription.probe_timeout_seconds", 3)
+	viper.SetDefault("transcription.ffprobe_path", "ffprobe")
+
+	// Web Chat attachments are private local files by default. The database
+	// stores only metadata and extracted text.
+	viper.SetDefault("chat_attachments.storage_dir", "./data/chat-attachments")
+	viper.SetDefault("chat_attachments.retention_days", 30)
+	viper.SetDefault("chat_attachments.max_per_turn", 4)
+	viper.SetDefault("chat_attachments.max_turn_bytes", int64(20*1024*1024))
+	viper.SetDefault("chat_attachments.max_image_bytes", int64(10*1024*1024))
+	viper.SetDefault("chat_attachments.max_document_bytes", int64(20*1024*1024))
+	viper.SetDefault("chat_attachments.context_image_bytes", int64(20*1024*1024))
+	viper.SetDefault("chat_attachments.context_max_images", 4)
+	viper.SetDefault("chat_attachments.context_document_text_bytes", int64(256*1024))
+	viper.SetDefault("chat_attachments.janitor_interval_minutes", 60)
+	viper.SetDefault("chat_attachments.cleanup_batch_size", 100)
+	viper.SetDefault("chat_attachments.uploads_per_minute", 10)
+	viper.SetDefault("chat_attachments.daily_upload_bytes", int64(100*1024*1024))
+	viper.SetDefault("chat_attachments.max_concurrent_global", 4)
+	viper.SetDefault("chat_attachments.max_concurrent_per_user", 2)
 
 	// Server
 	viper.SetDefault("server.host", "0.0.0.0")
@@ -3199,8 +3322,154 @@ func (c *Config) Validate() error {
 	if c.Concurrency.PingInterval < 5 || c.Concurrency.PingInterval > 30 {
 		return fmt.Errorf("concurrency.ping_interval must be between 5-30 seconds")
 	}
+	if c.RunMode == RunModeSimple && c.Transcription.Enabled {
+		return fmt.Errorf("transcription.enabled is not supported when run_mode=simple")
+	}
+	if err := validateTranscriptionConfig(c.Transcription); err != nil {
+		return err
+	}
+	if c.Transcription.Enabled {
+		transcriptionBodyLimit := c.Transcription.RequestBodyLimit()
+		if c.Gateway.MaxBodySize < transcriptionBodyLimit {
+			return fmt.Errorf("gateway.max_body_size must be at least transcription request body limit (%d bytes)", transcriptionBodyLimit)
+		}
+		globalBodyLimit := c.Server.MaxRequestBodySize
+		if globalBodyLimit <= 0 {
+			globalBodyLimit = c.Gateway.MaxBodySize
+		}
+		if globalBodyLimit < transcriptionBodyLimit {
+			return fmt.Errorf("server.max_request_body_size must be at least transcription request body limit (%d bytes)", transcriptionBodyLimit)
+		}
+	}
+	if err := validateChatAttachmentConfig(c.ChatAttachments); err != nil {
+		return err
+	}
+	attachmentBodyLimit := c.ChatAttachments.RequestBodyLimit()
+	if c.Gateway.MaxBodySize < attachmentBodyLimit {
+		return fmt.Errorf("gateway.max_body_size must be at least chat attachment request body limit (%d bytes)", attachmentBodyLimit)
+	}
+	globalBodyLimit := c.Server.MaxRequestBodySize
+	if globalBodyLimit <= 0 {
+		globalBodyLimit = c.Gateway.MaxBodySize
+	}
+	if globalBodyLimit < attachmentBodyLimit {
+		return fmt.Errorf("server.max_request_body_size must be at least chat attachment request body limit (%d bytes)", attachmentBodyLimit)
+	}
 	if err := ValidateDingTalkConfig(c.DingTalk); err != nil {
 		return fmt.Errorf("dingtalk_connect: %w", err)
+	}
+	return nil
+}
+
+func validateChatAttachmentConfig(c ChatAttachmentConfig) error {
+	if strings.TrimSpace(c.StorageDir) == "" {
+		return fmt.Errorf("chat_attachments.storage_dir must not be empty")
+	}
+	if c.RetentionDays != 30 {
+		return fmt.Errorf("chat_attachments.retention_days must be 30")
+	}
+	if c.MaxPerTurn != 4 {
+		return fmt.Errorf("chat_attachments.max_per_turn must be 4")
+	}
+	if c.MaxTurnBytes != 20*1024*1024 {
+		return fmt.Errorf("chat_attachments.max_turn_bytes must be 20MB")
+	}
+	if c.MaxImageBytes != 10*1024*1024 || c.MaxDocumentBytes != 20*1024*1024 {
+		return fmt.Errorf("chat_attachments image/document limits must be 10MB/20MB")
+	}
+	if c.ContextImageBytes <= 0 || c.ContextImageBytes > 40*1024*1024 || c.ContextMaxImages != 4 ||
+		c.ContextDocumentTextBytes <= 0 || c.ContextDocumentTextBytes > 4*1024*1024 {
+		return fmt.Errorf("chat_attachments context budgets are invalid")
+	}
+	if c.JanitorIntervalMinutes <= 0 || c.JanitorIntervalMinutes > 1440 ||
+		c.CleanupBatchSize <= 0 || c.CleanupBatchSize > 1000 {
+		return fmt.Errorf("chat_attachments janitor settings are invalid")
+	}
+	if c.UploadsPerMinute != 10 || c.DailyUploadBytes != 100*1024*1024 {
+		return fmt.Errorf("chat_attachments upload quotas must be 10/minute and 100MB/day")
+	}
+	if c.MaxConcurrentGlobal != 4 ||
+		c.MaxConcurrentPerUser != 2 || c.MaxConcurrentPerUser > c.MaxConcurrentGlobal {
+		return fmt.Errorf("chat_attachments concurrency limits are invalid")
+	}
+	return nil
+}
+
+func validateTranscriptionConfig(c TranscriptionConfig) error {
+	if strings.ToLower(strings.TrimSpace(c.Provider)) != "openai_compatible" {
+		return fmt.Errorf("transcription.provider must be openai_compatible")
+	}
+	if strings.TrimSpace(c.Model) == "" {
+		return fmt.Errorf("transcription.model must not be empty")
+	}
+	if c.MaxUploadBytes <= 0 || c.MaxUploadBytes > 100*1024*1024 {
+		return fmt.Errorf("transcription.max_upload_bytes must be between 1 byte and 100MB")
+	}
+	if c.UploadTimeoutSeconds <= 0 || c.UploadTimeoutSeconds > 120 {
+		return fmt.Errorf("transcription.upload_timeout_seconds must be between 1 and 120")
+	}
+	if c.MaxDurationSeconds <= 0 || c.MaxDurationSeconds > 3600 {
+		return fmt.Errorf("transcription.max_duration_seconds must be between 1 and 3600")
+	}
+	if c.RequestTimeoutSeconds <= 0 || c.RequestTimeoutSeconds > 300 {
+		return fmt.Errorf("transcription.request_timeout_seconds must be between 1 and 300")
+	}
+	if c.QueueTimeoutMS <= 0 || c.QueueTimeoutMS > 30000 {
+		return fmt.Errorf("transcription.queue_timeout_ms must be between 1 and 30000")
+	}
+	minimumIdempotencyTTLSeconds := c.UploadTimeoutSeconds + c.ProbeTimeoutSeconds + c.RequestTimeoutSeconds + int(math.Ceil(float64(c.QueueTimeoutMS)/1000)) + 60
+	if c.IdempotencyTTLSeconds < minimumIdempotencyTTLSeconds || c.IdempotencyTTLSeconds > 86400 {
+		return fmt.Errorf("transcription.idempotency_ttl_seconds must be between %d and 86400", minimumIdempotencyTTLSeconds)
+	}
+	if c.MaxConcurrentGlobal <= 0 || c.MaxConcurrentGlobal > 1024 {
+		return fmt.Errorf("transcription.max_concurrent_global must be between 1 and 1024")
+	}
+	if c.MaxConcurrentPerUser <= 0 || c.MaxConcurrentPerUser > c.MaxConcurrentGlobal {
+		return fmt.Errorf("transcription.max_concurrent_per_user must be between 1 and max_concurrent_global")
+	}
+	if c.UserRequestsPerMinute <= 0 || c.IPRequestsPerMinute <= 0 {
+		return fmt.Errorf("transcription request-per-minute limits must be positive")
+	}
+	if c.UserDailyAudioSeconds <= 0 {
+		return fmt.Errorf("transcription.user_daily_audio_seconds must be positive")
+	}
+	if c.UpstreamResponseMaxBytes <= 0 || c.UpstreamResponseMaxBytes > 16*1024*1024 {
+		return fmt.Errorf("transcription.upstream_response_max_bytes must be between 1 byte and 16MB")
+	}
+	if c.ProbeTimeoutSeconds <= 0 || c.ProbeTimeoutSeconds > 30 {
+		return fmt.Errorf("transcription.probe_timeout_seconds must be between 1 and 30")
+	}
+	if len(c.AcceptedMIMETypes) == 0 {
+		return fmt.Errorf("transcription.accepted_mime_types must not be empty")
+	}
+	for _, value := range c.AcceptedMIMETypes {
+		mediaType, _, err := mime.ParseMediaType(value)
+		if err != nil || !strings.Contains(mediaType, "/") {
+			return fmt.Errorf("transcription.accepted_mime_types contains invalid media type %q", value)
+		}
+	}
+	seenGroups := make(map[int64]struct{}, len(c.GroupIDs))
+	for _, groupID := range c.GroupIDs {
+		if groupID <= 0 {
+			return fmt.Errorf("transcription.group_ids must contain only positive IDs")
+		}
+		if _, exists := seenGroups[groupID]; exists {
+			return fmt.Errorf("transcription.group_ids must not contain duplicate ID %d", groupID)
+		}
+		seenGroups[groupID] = struct{}{}
+	}
+	if !c.Enabled {
+		return nil
+	}
+	if len(c.GroupIDs) == 0 {
+		return fmt.Errorf("transcription.group_ids must not be empty when transcription.enabled=true")
+	}
+	ffprobePath := strings.TrimSpace(c.FFprobePath)
+	if ffprobePath == "" {
+		return fmt.Errorf("transcription.ffprobe_path must not be empty when transcription.enabled=true")
+	}
+	if _, err := exec.LookPath(ffprobePath); err != nil {
+		return fmt.Errorf("transcription.ffprobe_path is unavailable: %w", err)
 	}
 	return nil
 }

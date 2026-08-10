@@ -9,7 +9,7 @@ const { mockGetGroups, mockGetRealtimeTrafficSummary, mockSetRealtimeEnabled } =
   mockSetRealtimeEnabled: vi.fn()
 }))
 
-vi.mock('@/api', () => ({
+vi.mock('@/api/admin', () => ({
   adminAPI: {
     groups: {
       getAll: (...args: unknown[]) => mockGetGroups(...args)
@@ -23,7 +23,7 @@ vi.mock('@/api/admin/ops', () => ({
   }
 }))
 
-vi.mock('@/stores', () => ({
+vi.mock('@/stores/adminSettings', () => ({
   useAdminSettingsStore: () => ({
     opsRealtimeMonitoringEnabled: true,
     setOpsRealtimeMonitoringEnabledLocal: mockSetRealtimeEnabled

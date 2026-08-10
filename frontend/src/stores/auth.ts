@@ -7,7 +7,7 @@
 
 import { defineStore } from 'pinia'
 import { computed, onScopeDispose, readonly, ref } from 'vue'
-import { authAPI, isTotp2FARequired, type LoginResponse } from '@/api'
+import { authAPI, isTotp2FARequired, type LoginResponse } from '@/api/auth'
 import {
   authSession,
   isAuthSessionChangedError,
@@ -16,7 +16,6 @@ import {
 import type { User, LoginRequest, RegisterRequest, AuthResponse } from '@/types'
 
 const PENDING_AUTH_SESSION_KEY = 'pending_auth_session'
-const AUTO_REFRESH_INTERVAL = 60 * 1000
 const TOKEN_REFRESH_BUFFER = 120 * 1000
 const MAX_TIMEOUT_DELAY = 2_147_483_647
 
@@ -84,31 +83,14 @@ export const useAuthStore = defineStore('auth', () => {
   const runMode = ref<'standard' | 'simple'>('standard')
   const pendingAuthSession = ref<PendingAuthSessionSummary | null>(null)
 
-  let refreshIntervalId: ReturnType<typeof setInterval> | null = null
   let tokenRefreshTimeoutId: ReturnType<typeof setTimeout> | null = null
   let scheduledTokenExpiry: number | null = null
+  let activeUserRefresh: { token: string; promise: Promise<User> } | null = null
 
   const isAuthenticated = computed(() => !!token.value && !!user.value)
   const isAdmin = computed(() => user.value?.role === 'admin')
   const isSimpleMode = computed(() => runMode.value === 'simple')
   const hasPendingAuthSession = computed(() => pendingAuthSession.value !== null)
-
-  function stopAutoRefresh(): void {
-    if (refreshIntervalId !== null) {
-      clearInterval(refreshIntervalId)
-      refreshIntervalId = null
-    }
-  }
-
-  function startAutoRefresh(): void {
-    if (refreshIntervalId !== null) return
-    refreshIntervalId = setInterval(() => {
-      if (!token.value) return
-      refreshUser().catch((error) => {
-        console.error('Auto-refresh user failed:', error)
-      })
-    }, AUTO_REFRESH_INTERVAL)
-  }
 
   function stopTokenRefresh(): void {
     if (tokenRefreshTimeoutId !== null) {
@@ -148,9 +130,6 @@ export const useAuthStore = defineStore('auth', () => {
       user.value = null
       if (!session.accessToken) runMode.value = 'standard'
     }
-
-    if (session.accessToken && session.user) startAutoRefresh()
-    else stopAutoRefresh()
 
     if (session.refreshToken && session.expiresAt !== null) {
       scheduleTokenRefreshAt(session.expiresAt)
@@ -259,7 +238,6 @@ export const useAuthStore = defineStore('auth', () => {
 
   /** Set an OAuth/SSO access token while preserving its freshly stored refresh context. */
   async function setToken(newToken: string): Promise<User> {
-    stopAutoRefresh()
     stopTokenRefresh()
     const oauthContext = authSession.getSnapshot()
     if (authSession.getGeneration() && oauthContext.accessToken === newToken) {
@@ -314,29 +292,39 @@ export const useAuthStore = defineStore('auth', () => {
     }
   }
 
-  async function refreshUser(): Promise<User> {
-    if (!token.value) throw new Error('Not authenticated')
+  function refreshUser(): Promise<User> {
+    const requestToken = token.value
+    if (!requestToken) return Promise.reject(new Error('Not authenticated'))
+    if (activeUserRefresh?.token === requestToken) return activeUserRefresh.promise
 
-    try {
-      const response = await authAPI.getCurrentUser()
-      const responseUser = response.data as User & { run_mode?: 'standard' | 'simple' }
-      const { run_mode: _runMode, ...userData } = responseUser
-      authSession.patch({ user: userData })
-      if (responseUser.run_mode) runMode.value = responseUser.run_mode
-      return userData
-    } catch (error) {
-      if (
-        !isAuthSessionChangedError(error)
-        && (error as { status?: number }).status === 401
-      ) {
-        clearAuth({ preservePendingAuthSession: pendingAuthSession.value !== null })
-      }
-      throw error
-    }
+    const operation = authAPI.getCurrentUser()
+      .then((response) => {
+        const responseUser = response.data as User & { run_mode?: 'standard' | 'simple' }
+        const { run_mode: _runMode, ...userData } = responseUser
+        authSession.patch({ user: userData })
+        if (responseUser.run_mode) runMode.value = responseUser.run_mode
+        return userData
+      })
+      .catch((error) => {
+        if (
+          !isAuthSessionChangedError(error)
+          && (error as { status?: number }).status === 401
+        ) {
+          clearAuth({ preservePendingAuthSession: pendingAuthSession.value !== null })
+        }
+        throw error
+      })
+
+    const record = { token: requestToken, promise: operation }
+    record.promise = operation.finally(() => {
+      if (activeUserRefresh === record) activeUserRefresh = null
+    })
+    activeUserRefresh = record
+    return record.promise
   }
 
   function clearAuth(options?: { preservePendingAuthSession?: boolean }): void {
-    stopAutoRefresh()
+    activeUserRefresh = null
     stopTokenRefresh()
     authSession.clear()
     syncFromSession(authSession.getSnapshot())

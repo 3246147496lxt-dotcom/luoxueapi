@@ -7,7 +7,10 @@ type NavigationGuard = (
 ) => Promise<void>
 
 const routerHarness = vi.hoisted(() => ({
-  guard: null as NavigationGuard | null,
+  guards: {
+    user: null as NavigationGuard | null,
+    admin: null as NavigationGuard | null,
+  },
 }))
 
 const authStore = vi.hoisted(() => ({
@@ -40,13 +43,18 @@ const adminComplianceStore = vi.hoisted(() => ({
 
 vi.mock('vue-router', () => ({
   createWebHistory: vi.fn(() => ({})),
-  createRouter: vi.fn(() => ({
-    beforeEach: vi.fn((guard: NavigationGuard) => {
-      routerHarness.guard = guard
-    }),
-    afterEach: vi.fn(),
-    onError: vi.fn(),
-  })),
+  createRouter: vi.fn((options: { routes: Array<{ name?: string }> }) => {
+    const entry = options.routes.some((route) => route.name === 'AdminDashboard')
+      ? 'admin'
+      : 'user'
+    return {
+      beforeEach: vi.fn((guard: NavigationGuard) => {
+        routerHarness.guards[entry] = guard
+      }),
+      afterEach: vi.fn(),
+      onError: vi.fn(),
+    }
+  }),
 }))
 
 vi.mock('@/stores/auth', () => ({
@@ -95,7 +103,9 @@ function runGuard(
   query: Record<string, string | string[]> = {},
   hash = '',
 ) {
-  if (!routerHarness.guard) {
+  const entry = path === '/admin' || path.startsWith('/admin/') ? 'admin' : 'user'
+  const guard = routerHarness.guards[entry]
+  if (!guard) {
     throw new Error('router guard was not registered')
   }
 
@@ -107,7 +117,7 @@ function runGuard(
   })
   const search = searchParams.toString()
   const fullPath = `${path}${search ? `?${search}` : ''}${hash}`
-  const navigation = routerHarness.guard(
+  const navigation = guard(
     {
       path,
       fullPath,
@@ -126,6 +136,7 @@ function runGuard(
 describe('feature route guard', () => {
   beforeAll(async () => {
     await import('@/router')
+    await import('@/router/admin')
   })
 
   beforeEach(() => {

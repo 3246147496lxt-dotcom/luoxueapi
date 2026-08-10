@@ -19,15 +19,19 @@ vi.mock('vue-i18n', async () => {
   }
 })
 
-const item = (id: number, tokens: number) => ({
+const item = (id: number, tokens: number, overrides: Record<string, unknown> = {}) => ({
   user_id: id,
   email: `u${id}@test.com`,
+  username: '',
   requests: 1,
   input_tokens: tokens,
   output_tokens: 0,
   cache_tokens: 0,
   total_tokens: tokens,
+  cost: 0.6,
   actual_cost: 0.5,
+  account_cost: 0.4,
+  ...overrides,
 })
 
 const mountRanking = (props: Record<string, unknown> = {}) =>
@@ -92,6 +96,30 @@ describe('UserTokenRanking', () => {
     }))
   })
 
+  it('uses semantic buttons for sorting and user drill-down with aria-sort state', async () => {
+    const wrapper = mountRanking()
+    await flushPromises()
+
+    const sortableHeaders = wrapper.findAll('thead th[aria-sort]')
+    expect(sortableHeaders).toHaveLength(6)
+    expect(sortableHeaders[4].attributes('aria-sort')).toBe('descending')
+    expect(sortableHeaders[0].get('button').attributes('type')).toBe('button')
+
+    await sortableHeaders[0].get('button').trigger('click')
+    await flushPromises()
+
+    expect(getUserBreakdown).toHaveBeenLastCalledWith(expect.objectContaining({
+      sort_by: 'requests',
+    }))
+    expect(wrapper.findAll('thead th[aria-sort]')[0].attributes('aria-sort')).toBe('descending')
+
+    const userButton = wrapper.get('tbody tr td:nth-child(2) button')
+    expect(userButton.attributes('type')).toBe('button')
+    expect(userButton.attributes('aria-label')).toContain('u1@test.com')
+    await userButton.trigger('click')
+    expect(wrapper.emitted('select-user')?.at(-1)).toEqual([1, 'u1@test.com'])
+  })
+
   it('shows a distinct error state and retries without presenting the failure as empty data', async () => {
     getUserBreakdown.mockRejectedValueOnce(new Error('network unavailable'))
     const wrapper = mountRanking()
@@ -118,5 +146,29 @@ describe('UserTokenRanking', () => {
 
     expect(wrapper.find('[role="alert"]').exists()).toBe(false)
     expect(wrapper.text()).toContain('admin.dashboard.noDataAvailable')
+  })
+
+  it('uses username as the primary identity and naturally falls back to email then user ID', async () => {
+    getUserBreakdown.mockResolvedValueOnce({
+      users: [
+        item(1, 100, { username: 'Alice', email: 'alice@example.com' }),
+        item(2, 50, { email: 'bob@example.com' }),
+        item(3, 25, { username: '   ', email: '' }),
+      ],
+    })
+    const wrapper = mountRanking()
+    await flushPromises()
+
+    const identityCells = wrapper.findAll('tbody tr td:nth-child(2)')
+    expect(identityCells[0].get('button').findAll('span').map((node) => node.text())).toEqual([
+      'Alice',
+      'alice@example.com',
+    ])
+    expect(identityCells[1].get('button').findAll('span').map((node) => node.text())).toEqual([
+      'bob@example.com',
+    ])
+    expect(identityCells[2].get('button').findAll('span').map((node) => node.text())).toEqual([
+      'User #3',
+    ])
   })
 })

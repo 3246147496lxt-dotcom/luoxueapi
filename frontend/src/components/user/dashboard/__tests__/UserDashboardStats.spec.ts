@@ -2,7 +2,6 @@ import { describe, expect, it } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { createI18n } from 'vue-i18n'
 import CreditAmount from '@/components/common/CreditAmount.vue'
-import DashboardSparkline from '../DashboardSparkline.vue'
 import UserDashboardStats from '../UserDashboardStats.vue'
 
 const i18n = createI18n({
@@ -12,148 +11,89 @@ const i18n = createI18n({
     zh: {
       dashboard: {
         accountMetrics: '账户指标',
-        accountData: '账户数据',
-        currentBalance: '当前余额',
-        lifetimeSpend: '历史消耗',
-        usageStatistics: '使用统计',
-        lifetimeRequests: '历史请求',
-        rangeRequests: '区间请求',
-        resourceUsage: '资源使用',
-        rangeSpend: '区间消耗',
-        rangeTokens: '区间 Token',
-        performance: '性能',
-        averageRpm: '平均 RPM',
-        averageTpm: '平均 TPM',
+        workspace: {
+          balance: '可用余额',
+          balanceHint: '余额说明',
+          manageBalance: '管理余额',
+          todayUsage: '今日使用',
+          todayRequestsHint: '今日共 {count} 次请求',
+          viewUsage: '查看使用记录',
+          tokenConsumption: 'Token 消耗',
+          tokenBreakdownHint: '输入 {input} · 输出 {output}',
+          currentPlan: '当前套餐',
+          planLoading: '正在读取套餐信息',
+          planExpires: '有效期至 {date}',
+          planNoExpiry: '当前套餐长期有效',
+          planFlexible: '按需使用，随时管理',
+          managePlan: '管理套餐',
+        },
       },
     },
   },
 })
 
-describe('UserDashboardStats', () => {
-  it('uses a two-column compact grid while retaining the four-column desktop layout', () => {
-    const wrapper = mount(UserDashboardStats, {
-      props: {
-        stats: {
-          total_actual_cost: 25.34,
-          total_requests: 4,
-        } as never,
-        balance: 0.66,
-        isSimple: false,
-        rangeMetrics: {
-          requests: 3,
-          actualCost: 1.25,
-          tokens: 162,
-          minutes: 60,
-          averageRpm: 0.5,
-          averageTpm: 20,
-        },
-        trend: [],
-        startDate: '2026-07-10',
-        endDate: '2026-07-12',
-        granularity: 'day',
-      },
-      global: {
-        plugins: [i18n],
-        stubs: { Icon: true, DashboardSparkline: true },
-      },
-    })
+const stats = {
+  today_actual_cost: 1.25,
+  today_requests: 3,
+  today_tokens: 162,
+  today_input_tokens: 100,
+  today_output_tokens: 62,
+} as never
 
-    const grid = wrapper.get('[data-testid="dashboard-metric-grid"]')
-    expect(grid.classes()).toEqual(expect.arrayContaining([
-      'grid-cols-2',
-      'md:grid-cols-2',
-      'xl:grid-cols-4',
-    ]))
-    expect(grid.classes()).not.toContain('grid-cols-1')
-    expect(grid.findAll('.dashboard-summary-card')).toHaveLength(4)
+function mountStats(overrides: Record<string, unknown> = {}) {
+  return mount(UserDashboardStats, {
+    props: {
+      stats,
+      balance: 0.66,
+      planName: 'Pro',
+      planExpiresAt: '2026-08-31T00:00:00Z',
+      planLoading: false,
+      subscriptionsLoaded: true,
+      hasActiveSubscription: true,
+      ...overrides,
+    },
+    global: {
+      plugins: [i18n],
+      stubs: {
+        Icon: true,
+        RouterLink: { props: ['to'], template: '<a :href="to"><slot /></a>' },
+      },
+    },
+  })
+}
+
+describe('UserDashboardStats', () => {
+  it('renders the four end-user overview cards requested by the workspace IA', () => {
+    const wrapper = mountStats()
+
+    expect(wrapper.get('[data-testid="dashboard-metric-grid"]').findAll('.dashboard-metric-card')).toHaveLength(4)
+    expect(wrapper.text()).toContain('dashboard.workspace.balance')
+    expect(wrapper.text()).toContain('dashboard.workspace.todayUsage')
+    expect(wrapper.text()).toContain('dashboard.workspace.tokenConsumption')
+    expect(wrapper.text()).toContain('dashboard.workspace.currentPlan')
+    expect(wrapper.text()).toContain('Pro')
+    expect(wrapper.text()).toContain('dashboard.workspace.todayRequestsHint')
+    expect(wrapper.text()).toContain('dashboard.workspace.tokenBreakdownHint')
   })
 
-  it('uses snowflake credits for balance and consumption metrics', () => {
-    const wrapper = mount(UserDashboardStats, {
-      props: {
-        stats: {
-          total_actual_cost: 25.34,
-          total_requests: 4,
-        } as never,
-        balance: 0.66,
-        isSimple: false,
-        rangeMetrics: {
-          requests: 3,
-          actualCost: 1.25,
-          tokens: 162,
-          minutes: 60,
-          averageRpm: 0.5,
-          averageTpm: 20,
-        },
-        trend: [
-          {
-            date: '2026-07-10',
-            requests: 1,
-            input_tokens: 0,
-            output_tokens: 0,
-            cache_creation_tokens: 0,
-            cache_read_tokens: 0,
-            total_tokens: 10,
-            cost: 0.1,
-            actual_cost: 0.1,
-          },
-          {
-            date: '2026-07-12',
-            requests: 3,
-            input_tokens: 0,
-            output_tokens: 0,
-            cache_creation_tokens: 0,
-            cache_read_tokens: 0,
-            total_tokens: 30,
-            cost: 0.3,
-            actual_cost: 0.3,
-          },
-        ],
-        startDate: '2026-07-10',
-        endDate: '2026-07-12',
-        granularity: 'day',
-      },
-      global: {
-        plugins: [i18n],
-        stubs: { Icon: true, DashboardSparkline: true },
-      },
+  it('uses the current balance and today actual cost without surfacing lifetime admin-like metrics', () => {
+    const wrapper = mountStats()
+    const credits = wrapper.findAllComponents(CreditAmount)
+
+    expect(credits.map(component => component.props('value'))).toEqual(['0.66', '1.25'])
+    expect(wrapper.text()).not.toContain('历史消耗')
+    expect(wrapper.text()).not.toContain('RPM')
+    expect(wrapper.text()).not.toContain('TPM')
+  })
+
+  it('uses Free as the membership label when there is no active subscription', () => {
+    const wrapper = mountStats({
+      planName: 'Free',
+      planExpiresAt: null,
+      hasActiveSubscription: false,
     })
 
-    const credits = wrapper.findAllComponents(CreditAmount)
-    expect(credits.map(component => component.props('value'))).toEqual(['0.66', '25.3400', '1.2500'])
-    expect(wrapper.text()).not.toContain('$')
-
-    const iconNames = wrapper.findAll('icon-stub').map(icon => icon.attributes('name'))
-    expect(iconNames).toEqual([
-      'wallet',
-      'arrowLeftRight',
-      'chartNoAxesColumn',
-      'activity',
-      'send',
-      'activity',
-      'zap',
-      'coins',
-      'type',
-      'gauge',
-      'timer',
-      'send',
-    ])
-
-    const sparklines = wrapper.findAllComponents(DashboardSparkline)
-    expect(sparklines).toHaveLength(5)
-    expect(sparklines.map(component => component.props('color'))).toEqual([
-      '#0b8bed',
-      '#f59e0b',
-      '#ec4899',
-      '#6366f1',
-      '#f97316',
-    ])
-    expect(sparklines.map(component => component.props('values'))).toEqual([
-      [1, 0, 3],
-      [0.1, 0, 0.3],
-      [10, 0, 30],
-      [1, 0, 3],
-      [10, 0, 30],
-    ])
+    expect(wrapper.text()).toContain('Free')
+    expect(wrapper.text()).toContain('dashboard.workspace.planFlexible')
   })
 })

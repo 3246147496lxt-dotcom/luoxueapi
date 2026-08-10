@@ -155,6 +155,8 @@ export default {
     navLabel: 'Models',
     title: 'Model Catalog',
     description: 'Browse published model IDs, capabilities, and public standard pricing without signing in.',
+    workspaceTitle: 'Model Center',
+    workspaceDescription: 'Review available model IDs, capabilities, and public standard pricing.',
     publicPriceNote: 'Prices shown here are public standard rates in Snow credits. Exclusive groups, subscription discounts, and user-specific multipliers are not included. Actual usage records are authoritative.',
     modelCount: '{count} models',
     pricingUpdatedAt: 'Pricing updated {time}',

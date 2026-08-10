@@ -16,7 +16,7 @@ import { describe, expect, it, vi, beforeEach } from 'vitest'
 import { mount } from '@vue/test-utils'
 import { nextTick } from 'vue'
 
-import UsageTable from '../UsageTable.vue'
+import UsageTable from '@/components/shared-domain/usage/UsageTable.vue'
 import type { AdminUsageLog } from '@/types'
 
 const messages: Record<string, string> = {
@@ -61,6 +61,11 @@ const messages: Record<string, string> = {
   'admin.usage.billingModeToken': 'Token',
   'admin.usage.billingModePerRequest': 'Per request',
   'admin.usage.billingModeImage': 'Image',
+  'admin.usage.workspace.table.deactivated': 'Deactivated',
+  'admin.usage.workspace.table.input': 'In',
+  'admin.usage.workspace.table.output': 'Out',
+  'admin.usage.workspace.table.total': 'Total',
+  'admin.usage.workspace.table.cost': 'Cost',
 }
 
 vi.mock('vue-i18n', async () => {
@@ -572,7 +577,139 @@ const DataTableStubWithUser = {
   `,
 }
 
+const DataTableStubWithAuditCells = {
+  props: ['data'],
+  template: `
+    <div>
+      <div v-for="row in data" :key="row.request_id">
+        <slot name="cell-user" :row="row" />
+        <slot name="cell-model" :row="row" />
+        <slot name="cell-tokens" :row="row" />
+        <slot name="cell-cost" :row="row" />
+        <slot name="cell-latency" :row="row" />
+        <slot name="cell-account" :row="row" />
+        <slot name="cell-created_at" :row="row" :value="row.created_at" />
+        <slot name="cell-ip_address" :row="row" />
+      </div>
+    </div>
+  `,
+}
+
+describe('admin UsageTable Superdesign audit cells', () => {
+  it('renders the eight-column composite hierarchy and keeps the username purple', () => {
+    ipGeoMocks.getEntry.mockReturnValue({
+      status: 'success',
+      label: 'CN · Shanghai',
+      detail: {},
+    })
+
+    const row = makeUsageRow({
+      request_id: 'req-audit-2408',
+      user_id: 42,
+      user: {
+        id: 42,
+        username: 'VioletOps',
+        email: 'violet@example.com',
+        deleted_at: null,
+      } as AdminUsageLog['user'],
+      model: 'claude-3-7-sonnet',
+      upstream_model: 'claude-sonnet-4',
+      model_mapping_chain: 'claude-3-7-sonnet → claude-sonnet-4',
+      input_tokens: 12_345,
+      output_tokens: 678,
+      actual_cost: 0.012345,
+      total_cost: 0.015,
+      long_context_billing_applied: true,
+      first_token_ms: 420,
+      duration_ms: 3_200,
+      account: { id: 9, name: 'Anthropic · Pool A' },
+      created_at: '2026-08-07T01:02:03Z',
+      ip_address: '203.0.113.8',
+    })
+
+    const wrapper = mount(UsageTable, {
+      props: {
+        data: [row],
+        loading: false,
+        auditLayout: true,
+        columns: [
+          { key: 'user', label: 'Audit Subject' },
+          { key: 'model', label: 'Model Mapping' },
+          { key: 'tokens', label: 'Token Payload' },
+          { key: 'cost', label: 'Actual Charge' },
+          { key: 'latency', label: 'Latency' },
+          { key: 'account', label: 'Channel Account' },
+          { key: 'created_at', label: 'Time / Request ID' },
+          { key: 'ip_address', label: 'IP Location' },
+        ],
+      },
+      global: {
+        stubs: {
+          DataTable: DataTableStubWithAuditCells,
+          EmptyState: true,
+          Teleport: true,
+        },
+      },
+    })
+
+    const subject = wrapper.get('[data-testid="audit-subject"]')
+    expect(subject.get('[data-testid="audit-subject-primary"]').text()).toBe('VioletOps')
+    expect(subject.get('[data-testid="audit-subject-primary"]').classes()).toContain('usage-audit-subject__primary')
+    expect(subject.get('[data-testid="audit-subject-meta"]').text()).toBe('violet@example.com · #42')
+
+    expect(wrapper.get('[data-testid="audit-model"]').text()).toContain('claude-3-7-sonnet')
+    expect(wrapper.get('[data-testid="audit-model"]').text()).toContain('↳ claude-sonnet-4')
+    expect(wrapper.get('.usage-audit-tokens__line--input').text()).toBe('12,345In')
+    expect(wrapper.get('.usage-audit-tokens__line--output').text()).toBe('678Out')
+    expect(wrapper.get('[data-testid="audit-cost"]').text()).toContain('$0.012345')
+    expect(wrapper.get('[data-testid="audit-cost-base"]').text()).toBe('Cost: $0.0150')
+    expect(wrapper.find('[data-testid="long-context-billing-marker"]').exists()).toBe(false)
+    expect(wrapper.get('[data-testid="audit-latency-badge"]').text()).toBe('420ms')
+    expect(wrapper.get('[data-testid="audit-latency-badge"]').classes()).toContain('usage-audit-latency__badge--good')
+    expect(wrapper.get('[data-testid="audit-latency"]').text()).toContain('Total: 3.20s')
+    expect(wrapper.get('[data-testid="audit-account"]').text()).toBe('Anthropic · Pool A')
+    expect(wrapper.get('[data-testid="audit-time"]').text()).toContain('req-audit-2408')
+    expect(wrapper.get('[data-testid="audit-time"]').text()).toMatch(/2026-08-07 \d{2}:\d{2}:\d{2}/)
+    expect(wrapper.get('[data-testid="audit-ip"]').text()).toContain('203.0.113.8')
+  })
+})
+
 describe('admin UsageTable deleted-user badge', () => {
+  it('shows an existing username before the email while retaining the user id', () => {
+    const row = makeUsageRow({
+      request_id: 'req-named-user-1',
+      user_id: 7,
+      user: {
+        id: 7,
+        username: 'SnowOperator',
+        email: 'operator@test.com',
+        deleted_at: null,
+      } as AdminUsageLog['user'],
+    })
+
+    const wrapper = mount(UsageTable, {
+      props: {
+        data: [row],
+        loading: false,
+        columns: [{ key: 'user', label: 'User' }],
+      },
+      global: {
+        stubs: {
+          DataTable: DataTableStubWithUser,
+          EmptyState: true,
+          Icon: true,
+          Teleport: true,
+        },
+      },
+    })
+
+    const content = wrapper.text()
+    expect(content).toContain('SnowOperator')
+    expect(content).toContain('operator@test.com')
+    expect(content).toContain('#7')
+    expect(content.indexOf('SnowOperator')).toBeLessThan(content.indexOf('operator@test.com'))
+  })
+
   it('renders deleted badge for a soft-deleted user row', () => {
     const row = makeUsageRow({
       request_id: 'req-deleted-user-1',
