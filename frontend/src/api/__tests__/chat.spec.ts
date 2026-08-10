@@ -1279,7 +1279,6 @@ describe('chatAPI', () => {
   })
 
   it.each([
-    ['empty-type.pdf', 'application/pdf'],
     [
       'empty-type.docx',
       'application/vnd.openxmlformats-officedocument.wordprocessingml.document',

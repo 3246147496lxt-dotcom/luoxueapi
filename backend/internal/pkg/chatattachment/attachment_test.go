@@ -31,6 +31,7 @@ func TestProcessRejectsEmptyAndUnsupportedAttachments(t *testing.T) {
 		{"vector.svg", "image/svg+xml", []byte("<svg/>")},
 		{"animated.gif", "image/gif", []byte("GIF89a")},
 		{"macro.docm", "application/vnd.ms-word.document.macroEnabled.12", []byte("PK\x03\x04")},
+		{"report.pdf", "application/pdf", []byte("%PDF-1.7\n")},
 	} {
 		testCase := testCase
 		t.Run(testCase.filename, func(t *testing.T) {
@@ -224,90 +225,6 @@ func TestProcessRejectsTruncatedImage(t *testing.T) {
 	}, CodeInvalidImage)
 }
 
-func TestProcessPDFExtractsText(t *testing.T) {
-	t.Parallel()
-
-	result, err := Process(Input{
-		Filename:     "report.pdf",
-		DeclaredMIME: "application/pdf",
-		Data:         buildTestPDF(t, []string{"First page", "Second page"}, false),
-	})
-	if err != nil {
-		t.Fatalf("Process() error = %v", err)
-	}
-	if result.Kind != KindPDF || result.PageCount != 2 || result.SanitizedData != nil {
-		t.Fatalf("unexpected PDF result: %+v", result)
-	}
-	if !strings.Contains(result.Text, "First page") || !strings.Contains(result.Text, "Second page") {
-		t.Fatalf("extracted PDF text = %q", result.Text)
-	}
-}
-
-func TestProcessPDFRejectsPageLimit(t *testing.T) {
-	t.Parallel()
-	pages := make([]string, MaxPDFPages+1)
-	for index := range pages {
-		pages[index] = fmt.Sprintf("Page %d", index+1)
-	}
-	assertProcessError(t, Input{
-		Filename:     "long.pdf",
-		DeclaredMIME: "application/pdf",
-		Data:         buildTestPDF(t, pages, false),
-	}, CodePDFPageLimitExceeded)
-}
-
-func TestProcessPDFAcceptsFiftyPageBoundary(t *testing.T) {
-	t.Parallel()
-	pages := make([]string, MaxPDFPages)
-	for index := range pages {
-		pages[index] = fmt.Sprintf("Page %d", index+1)
-	}
-	result, err := Process(Input{
-		Filename:     "fifty.pdf",
-		DeclaredMIME: "application/pdf",
-		Data:         buildTestPDF(t, pages, false),
-	})
-	if err != nil {
-		t.Fatalf("Process() error = %v", err)
-	}
-	if result.PageCount != MaxPDFPages {
-		t.Fatalf("PageCount = %d, want %d", result.PageCount, MaxPDFPages)
-	}
-}
-
-func TestProcessPDFRejectsMissingTextLayer(t *testing.T) {
-	t.Parallel()
-	assertProcessError(t, Input{
-		Filename:     "scan.pdf",
-		DeclaredMIME: "application/pdf",
-		Data:         buildTestPDF(t, []string{""}, false),
-	}, CodePDFNoText)
-}
-
-func TestProcessPDFRejectsTextLimit(t *testing.T) {
-	t.Parallel()
-	assertProcessError(t, Input{
-		Filename:     "huge-text.pdf",
-		DeclaredMIME: "application/pdf",
-		Data:         buildTestPDF(t, []string{strings.Repeat("A", MaxExtractedTextCharacters+1)}, false),
-	}, CodeTextLimitExceeded)
-}
-
-func TestProcessRejectsEncryptedAndMalformedPDF(t *testing.T) {
-	t.Parallel()
-
-	assertProcessError(t, Input{
-		Filename:     "secret.pdf",
-		DeclaredMIME: "application/pdf",
-		Data:         buildTestPDF(t, []string{"Secret"}, true),
-	}, CodePDFEncrypted)
-	assertProcessError(t, Input{
-		Filename:     "broken.pdf",
-		DeclaredMIME: "application/pdf",
-		Data:         append([]byte("%PDF-1.7\n"), make([]byte, 128)...),
-	}, CodeInvalidPDF)
-}
-
 func TestProcessDOCXExtractsText(t *testing.T) {
 	t.Parallel()
 	files := baseDOCXFiles(`<w:p><w:r><w:t>Hello</w:t><w:tab/><w:t>World</w:t></w:r></w:p><w:p><w:r><w:t>Second line</w:t></w:r></w:p>`)
@@ -432,9 +349,9 @@ func TestProcessDOCXRejectsTextLimit(t *testing.T) {
 
 func TestCodeOfFindsWrappedAttachmentError(t *testing.T) {
 	t.Parallel()
-	err := fmt.Errorf("outer: %w", attachmentError(CodeInvalidPDF, "bad PDF", nil))
-	if got := CodeOf(err); got != CodeInvalidPDF {
-		t.Fatalf("CodeOf() = %q, want %q", got, CodeInvalidPDF)
+	err := fmt.Errorf("outer: %w", attachmentError(CodeInvalidDOCX, "bad DOCX", nil))
+	if got := CodeOf(err); got != CodeInvalidDOCX {
+		t.Fatalf("CodeOf() = %q, want %q", got, CodeInvalidDOCX)
 	}
 	if got := CodeOf(fmt.Errorf("ordinary")); got != "" {
 		t.Fatalf("CodeOf(ordinary) = %q, want empty", got)
@@ -447,7 +364,6 @@ func TestProcessMalformedInputsDoNotPanicConcurrently(t *testing.T) {
 		{Filename: "bad.jpg", DeclaredMIME: "image/jpeg", Data: []byte("\xff\xd8\xff")},
 		{Filename: "bad.png", DeclaredMIME: "image/png", Data: []byte("\x89PNG\r\n\x1a\n")},
 		{Filename: "bad.webp", DeclaredMIME: "image/webp", Data: []byte("RIFF\x01\x00\x00\x00WEBP")},
-		{Filename: "bad.pdf", DeclaredMIME: "application/pdf", Data: append([]byte("%PDF-1.7\n"), make([]byte, 128)...)},
 		{Filename: "bad.docx", DeclaredMIME: docxMIME, Data: []byte("PK\x03\x04broken")},
 	}
 
@@ -629,72 +545,6 @@ func appendPNGChunk(output []byte, chunkType string, data []byte) []byte {
 	checksum := make([]byte, 4)
 	binary.BigEndian.PutUint32(checksum, crc32.ChecksumIEEE(output[chunkStart:]))
 	return append(output, checksum...)
-}
-
-func buildTestPDF(t *testing.T, pageTexts []string, encrypted bool) []byte {
-	t.Helper()
-	if len(pageTexts) == 0 {
-		t.Fatal("PDF fixture needs at least one page")
-	}
-
-	fontObject := 3 + len(pageTexts)*2
-	encryptionObject := 0
-	objectCount := fontObject
-	if encrypted {
-		encryptionObject = fontObject + 1
-		objectCount++
-	}
-	objects := make([]string, objectCount+1)
-	objects[1] = "<< /Type /Catalog /Pages 2 0 R >>"
-
-	kids := make([]string, 0, len(pageTexts))
-	for index, text := range pageTexts {
-		pageObject := 3 + index*2
-		contentObject := pageObject + 1
-		kids = append(kids, fmt.Sprintf("%d 0 R", pageObject))
-		objects[pageObject] = fmt.Sprintf(
-			"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 %d 0 R >> >> /Contents %d 0 R >>",
-			fontObject, contentObject,
-		)
-		content := "q Q"
-		if text != "" {
-			content = fmt.Sprintf("BT /F1 12 Tf 72 720 Td (%s) Tj ET", escapePDFString(text))
-		}
-		objects[contentObject] = fmt.Sprintf("<< /Length %d >>\nstream\n%s\nendstream", len(content), content)
-	}
-	objects[2] = fmt.Sprintf("<< /Type /Pages /Count %d /Kids [%s] >>", len(pageTexts), strings.Join(kids, " "))
-	widths := strings.TrimSpace(strings.Repeat("600 ", 256))
-	objects[fontObject] = fmt.Sprintf("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding /FirstChar 0 /LastChar 255 /Widths [%s] >>", widths)
-	if encrypted {
-		owner := strings.Repeat("O", 32)
-		user := strings.Repeat("U", 32)
-		objects[encryptionObject] = fmt.Sprintf("<< /Filter /Standard /V 1 /R 2 /O (%s) /U (%s) /P -4 >>", owner, user)
-	}
-
-	var output bytes.Buffer
-	output.WriteString("%PDF-1.4\n%\xe2\xe3\xcf\xd3\n")
-	offsets := make([]int, objectCount+1)
-	for objectNumber := 1; objectNumber <= objectCount; objectNumber++ {
-		offsets[objectNumber] = output.Len()
-		fmt.Fprintf(&output, "%d 0 obj\n%s\nendobj\n", objectNumber, objects[objectNumber])
-	}
-	xrefOffset := output.Len()
-	fmt.Fprintf(&output, "xref\n0 %d\n0000000000 65535 f \n", objectCount+1)
-	for objectNumber := 1; objectNumber <= objectCount; objectNumber++ {
-		fmt.Fprintf(&output, "%010d 00000 n \n", offsets[objectNumber])
-	}
-	fmt.Fprintf(&output, "trailer\n<< /Size %d /Root 1 0 R", objectCount+1)
-	if encrypted {
-		fmt.Fprintf(&output, " /Encrypt %d 0 R", encryptionObject)
-	}
-	fmt.Fprintf(&output, " >>\nstartxref\n%d\n%%%%EOF\n", xrefOffset)
-	return output.Bytes()
-}
-
-func escapePDFString(value string) string {
-	value = strings.ReplaceAll(value, "\\", "\\\\")
-	value = strings.ReplaceAll(value, "(", "\\(")
-	return strings.ReplaceAll(value, ")", "\\)")
 }
 
 func baseDOCXFiles(body string) map[string][]byte {

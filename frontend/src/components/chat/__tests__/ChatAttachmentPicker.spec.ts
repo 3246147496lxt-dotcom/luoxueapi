@@ -49,7 +49,6 @@ vi.mock('vue-i18n', async () => {
   }
 })
 
-import { ChatAPIError } from '@/api/chat'
 import ChatAttachmentPicker from '../ChatAttachmentPicker.vue'
 
 const attachment: ChatAttachment = {
@@ -441,14 +440,15 @@ describe('ChatAttachmentPicker', () => {
     apiMocks.upload.mockResolvedValue({
       ...attachment,
       id: 'document-1',
-      name: 'brief.pdf',
+      name: 'brief.docx',
       kind: 'document',
-      mimeType: 'application/pdf',
-      pageCount: 2,
+      mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
     })
     const wrapper = mountPicker()
     pickerApi(wrapper).addFiles([
-      new File(['pdf'], 'brief.pdf', { type: '' }),
+      new File(['docx'], 'brief.docx', {
+        type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+      }),
       new File(['docx'], 'appendix.docx', {
         type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
       }),
@@ -460,31 +460,18 @@ describe('ChatAttachmentPicker', () => {
     expect(wrapper.text()).toContain('chat.attachments.errors.oneDocument')
   })
 
-  it('keeps typed PDF failures actionable and allows retry', async () => {
-    apiMocks.upload.mockRejectedValueOnce(new ChatAPIError('No text layer', {
-      code: 'CHAT_ATTACHMENT_INVALID',
-      metadata: { attachment_error: 'PDF_NO_TEXT' },
-    })).mockResolvedValueOnce({
-      ...attachment,
-      id: 'pdf-ready',
-      name: 'locked.pdf',
-      kind: 'document',
-      mimeType: 'application/pdf',
-    })
+  it('rejects PDF files before upload while PDF parsing is security-disabled', async () => {
     const wrapper = mountPicker()
     pickerApi(wrapper).addFiles([
-      new File(['pdf'], 'locked.pdf', { type: 'application/pdf' }),
+      new File(['pdf'], 'brief.pdf', { type: 'application/pdf' }),
     ])
     await flushPromises()
 
     expect(lastDrafts(wrapper)[0]).toMatchObject({
       state: 'error',
-      errorKey: 'chat.attachments.errors.pdfNoText',
+      errorKey: 'chat.attachments.errors.type',
     })
-
-    pickerApi(wrapper).retry(lastDrafts(wrapper)[0]!.key)
-    await flushPromises()
-    expect(lastDrafts(wrapper)[0]).toMatchObject({ state: 'ready' })
+    expect(apiMocks.upload).not.toHaveBeenCalled()
   })
 
   it('ignores stale progress and deletes a stale upload that resolves after cancel and retry', async () => {

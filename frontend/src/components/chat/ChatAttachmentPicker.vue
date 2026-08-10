@@ -403,20 +403,6 @@ function uploadErrorKey(error: unknown): string {
     .map((value) => String(value ?? ''))
     .join(' ')
     .toLowerCase()
-  if (signature.includes('encrypt') || signature.includes('password')) {
-    return 'chat.attachments.errors.pdfEncrypted'
-  }
-  if (
-    signature.includes('no_text')
-    || signature.includes('text_layer')
-    || signature.includes('ocr_required')
-    || signature.includes('scanned_pdf')
-  ) return 'chat.attachments.errors.pdfNoText'
-  if (
-    signature.includes('page_limit')
-    || signature.includes('too_many_pages')
-    || signature.includes('pages_exceeded')
-  ) return 'chat.attachments.errors.pdfTooManyPages'
   if (
     signature.includes('unsafe')
     || signature.includes('malware')
@@ -426,7 +412,6 @@ function uploadErrorKey(error: unknown): string {
   ) return 'chat.attachments.errors.unsafeDocument'
   if (
     signature.includes('invalid_document')
-    || signature.includes('invalid_pdf')
     || signature.includes('invalid_docx')
     || signature.includes('parse')
     || signature.includes('corrupt')

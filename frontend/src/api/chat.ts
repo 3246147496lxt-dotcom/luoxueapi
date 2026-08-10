@@ -544,7 +544,6 @@ function attachmentUploadFile(file: File): File {
     jpeg: 'image/jpeg',
     png: 'image/png',
     webp: 'image/webp',
-    pdf: 'application/pdf',
     docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
   }
   const mimeType = canonicalMimeType[extension]

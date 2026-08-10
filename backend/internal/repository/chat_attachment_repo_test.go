@@ -16,7 +16,10 @@ import (
 func TestChatAttachmentQuotaPreflightReturns429BeforeParsing(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	require.NoError(t, err)
-	defer db.Close()
+	defer func() {
+		mock.ExpectClose()
+		require.NoError(t, db.Close())
+	}()
 	repo := NewChatAttachmentRepository(db, &config.Config{ChatAttachments: config.ChatAttachmentConfig{UploadsPerMinute: 10, DailyUploadBytes: 100 << 20}})
 	mock.ExpectQuery("SELECT\\s+COUNT\\(\\*\\) FILTER").WithArgs(int64(7)).
 		WillReturnRows(sqlmock.NewRows([]string{"count", "bytes"}).AddRow(10, 1))
@@ -28,7 +31,10 @@ func TestChatAttachmentQuotaPreflightReturns429BeforeParsing(t *testing.T) {
 func TestChatAttachmentCreateUsesNamespacedLockAndAtomicQuota(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	require.NoError(t, err)
-	defer db.Close()
+	defer func() {
+		mock.ExpectClose()
+		require.NoError(t, db.Close())
+	}()
 	repo := NewChatAttachmentRepository(db, &config.Config{ChatAttachments: config.ChatAttachmentConfig{UploadsPerMinute: 10, DailyUploadBytes: 100 << 20}})
 	mock.ExpectBegin()
 	mock.ExpectQuery(regexp.QuoteMeta("SELECT pg_advisory_xact_lock(hashtext('chat_attachments'), hashint8($1::bigint))")).
@@ -44,7 +50,10 @@ func TestChatAttachmentCreateUsesNamespacedLockAndAtomicQuota(t *testing.T) {
 func TestChatAttachmentCreateAliasesInsertForReturningColumns(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	require.NoError(t, err)
-	defer db.Close()
+	defer func() {
+		mock.ExpectClose()
+		require.NoError(t, db.Close())
+	}()
 	repo := NewChatAttachmentRepository(db, &config.Config{ChatAttachments: config.ChatAttachmentConfig{UploadsPerMinute: 10, DailyUploadBytes: 100 << 20}})
 	expiresAt := time.Now().UTC().Add(30 * 24 * time.Hour)
 
@@ -80,7 +89,10 @@ func TestChatAttachmentCreateAliasesInsertForReturningColumns(t *testing.T) {
 func TestChatAttachmentCleanupNeverClaimsFreshPendingRows(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	require.NoError(t, err)
-	defer db.Close()
+	defer func() {
+		mock.ExpectClose()
+		require.NoError(t, db.Close())
+	}()
 	repo := NewChatAttachmentRepository(db, nil)
 	mock.ExpectBegin()
 	mock.ExpectExec("UPDATE chat_attachments\\s+SET status='expired'").WillReturnResult(sqlmock.NewResult(0, 0))

@@ -11,7 +11,6 @@ import (
 const (
 	MaxImageDimension                = 8192
 	MaxImagePixels             int64 = 25_000_000
-	MaxPDFPages                      = 50
 	MaxExtractedTextCharacters       = 50_000
 	MaxDOCXEntries                   = 2048
 	MaxDOCXUncompressedBytes         = 50 << 20
@@ -21,7 +20,6 @@ type Kind string
 
 const (
 	KindImage Kind = "image"
-	KindPDF   Kind = "pdf"
 	KindDOCX  Kind = "docx"
 )
 
@@ -33,10 +31,6 @@ const (
 	CodeTypeMismatch             ErrorCode = "TYPE_MISMATCH"
 	CodeInvalidImage             ErrorCode = "INVALID_IMAGE"
 	CodeImageDimensionsExceeded  ErrorCode = "IMAGE_DIMENSIONS_EXCEEDED"
-	CodeInvalidPDF               ErrorCode = "INVALID_PDF"
-	CodePDFEncrypted             ErrorCode = "PDF_ENCRYPTED"
-	CodePDFPageLimitExceeded     ErrorCode = "PDF_PAGE_LIMIT_EXCEEDED"
-	CodePDFNoText                ErrorCode = "PDF_NO_TEXT"
 	CodeTextLimitExceeded        ErrorCode = "TEXT_LIMIT_EXCEEDED"
 	CodeInvalidDOCX              ErrorCode = "INVALID_DOCX"
 	CodeDOCXMacroForbidden       ErrorCode = "DOCX_MACRO_FORBIDDEN"
@@ -109,8 +103,6 @@ func Process(input Input) (*Result, error) {
 	switch fileType.kind {
 	case KindImage:
 		return processImage(input.Data, fileType)
-	case KindPDF:
-		return processPDF(input.Data)
 	case KindDOCX:
 		return processDOCX(input.Data)
 	default:
@@ -128,8 +120,6 @@ func classifyInput(filename, declaredMIME string, data []byte) (supportedType, e
 		fileType = supportedType{KindImage, "image/png", ".png", hasPNGSignature}
 	case ".webp":
 		fileType = supportedType{KindImage, "image/webp", ".webp", hasWebPSignature}
-	case ".pdf":
-		fileType = supportedType{KindPDF, "application/pdf", ".pdf", hasPDFSignature}
 	case ".docx":
 		fileType = supportedType{
 			KindDOCX,
@@ -165,10 +155,6 @@ func hasPNGSignature(data []byte) bool {
 
 func hasWebPSignature(data []byte) bool {
 	return len(data) >= 12 && string(data[:4]) == "RIFF" && string(data[8:12]) == "WEBP"
-}
-
-func hasPDFSignature(data []byte) bool {
-	return len(data) >= 5 && bytes.Equal(data[:5], []byte("%PDF-"))
 }
 
 func hasZIPSignature(data []byte) bool {

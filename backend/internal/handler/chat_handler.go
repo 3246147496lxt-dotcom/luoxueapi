@@ -459,7 +459,6 @@ func (h *ChatHandler) Completions(c *gin.Context) {
 			h.finalizeChatCompletion(subject.UserID, attemptID, req.AssistantMessageID, c.Writer.Status(), deliveredChatStreamSnapshot{})
 			return
 		}
-		visionChecked = true
 	}
 	if requiresVision && !visionSupported {
 		response.ErrorFrom(c, service.ErrChatAttachmentVisionUnsupported)

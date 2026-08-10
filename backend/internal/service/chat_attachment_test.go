@@ -219,6 +219,21 @@ func TestUploadDocumentDoesNotPersistOriginalBlob(t *testing.T) {
 	require.NotEmpty(t, repo.created.Attachment.ExtractedText)
 }
 
+func TestUploadRejectsPDFWithoutPersisting(t *testing.T) {
+	repo := &chatAttachmentRepoFake{}
+	store := &chatAttachmentStoreFake{}
+	svc := NewChatAttachmentService(repo, store, nil)
+
+	attachment, err := svc.Upload(context.Background(), 7, ChatAttachmentUpload{
+		Filename: "report.pdf", DeclaredMIME: "application/pdf", Data: []byte("%PDF-1.7\n"),
+	})
+
+	require.Nil(t, attachment)
+	require.ErrorIs(t, err, ErrChatAttachmentInvalid)
+	require.Nil(t, repo.created)
+	require.Zero(t, store.putCalls)
+}
+
 func TestUploadAdmissionIsBoundedPerUser(t *testing.T) {
 	svc := NewChatAttachmentService(&chatAttachmentRepoFake{}, &chatAttachmentStoreFake{}, nil)
 	releaseOne, err := svc.AdmitUpload(9)

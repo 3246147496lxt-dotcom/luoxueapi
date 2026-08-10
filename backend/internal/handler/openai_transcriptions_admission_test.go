@@ -148,7 +148,7 @@ func TestChatTranscriptionRejectedAdmissionClosesSlowHTTP1BodyWithoutDrain(t *te
 
 	connection, err := net.Dial("tcp", server.Listener.Addr().String())
 	require.NoError(t, err)
-	defer connection.Close()
+	defer func() { require.NoError(t, connection.Close()) }()
 	require.NoError(t, connection.SetDeadline(time.Now().Add(2*time.Second)))
 	_, err = io.WriteString(connection,
 		"POST /api/v1/chat/transcriptions HTTP/1.1\r\n"+
@@ -160,7 +160,7 @@ func TestChatTranscriptionRejectedAdmissionClosesSlowHTTP1BodyWithoutDrain(t *te
 
 	responseMessage, err := http.ReadResponse(bufio.NewReader(connection), &http.Request{Method: http.MethodPost})
 	require.NoError(t, err)
-	defer responseMessage.Body.Close()
+	defer func() { require.NoError(t, responseMessage.Body.Close()) }()
 	_, err = io.Copy(io.Discard, responseMessage.Body)
 	require.NoError(t, err)
 	require.Equal(t, http.StatusTooManyRequests, responseMessage.StatusCode)

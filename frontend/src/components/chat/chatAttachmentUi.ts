@@ -5,7 +5,6 @@ export const CHAT_ATTACHMENT_ACCEPT = [
   '.jpeg',
   '.png',
   '.webp',
-  '.pdf',
   '.docx',
 ].join(',')
 
@@ -34,10 +33,9 @@ export interface ChatAttachmentValidationError {
 }
 
 const IMAGE_EXTENSIONS = new Set(['jpg', 'jpeg', 'png', 'webp'])
-const DOCUMENT_EXTENSIONS = new Set(['pdf', 'docx'])
+const DOCUMENT_EXTENSIONS = new Set(['docx'])
 const IMAGE_MIME_TYPES = new Set(['image/jpeg', 'image/png', 'image/webp'])
 const DOCUMENT_MIME_TYPES = new Set([
-  'application/pdf',
   'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
 ])
 

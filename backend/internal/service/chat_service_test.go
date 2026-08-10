@@ -411,7 +411,8 @@ func TestChatServiceBillingDependencyFailureReturns503(t *testing.T) {
 func TestChatServiceCompletionEntitlementPrefersSubscription(t *testing.T) {
 	svc, groups, _, _, billing, principals := newChatServiceBehaviorTest()
 	configureChatSubscriptionAndWalletGroups(groups)
-	subscriptions := svc.subs.(*chatTestSubscriptions)
+	subscriptions, ok := svc.subs.(*chatTestSubscriptions)
+	require.True(t, ok)
 	subscriptions.sub = activeChatTestSubscription()
 
 	principal, err := svc.ResolvePrincipal(context.Background(), 7, "gpt-5.4")
@@ -432,7 +433,8 @@ func TestChatServiceCompletionEntitlementAllowsSubscriptionWhenWalletUnavailable
 		t.Run(walletErr.Error(), func(t *testing.T) {
 			svc, groups, _, _, billing, principals := newChatServiceBehaviorTest()
 			configureChatSubscriptionAndWalletGroups(groups)
-			subscriptions := svc.subs.(*chatTestSubscriptions)
+			subscriptions, ok := svc.subs.(*chatTestSubscriptions)
+			require.True(t, ok)
 			subscriptions.sub = activeChatTestSubscription()
 			billing.err = walletErr
 
@@ -449,7 +451,8 @@ func TestChatServiceCompletionEntitlementAllowsSubscriptionWhenWalletUnavailable
 func TestChatServiceCompletionEntitlementFallsBackToWalletAfterSubscriptionExhaustion(t *testing.T) {
 	svc, groups, _, _, billing, principals := newChatServiceBehaviorTest()
 	configureChatSubscriptionAndWalletGroups(groups)
-	subscriptions := svc.subs.(*chatTestSubscriptions)
+	subscriptions, ok := svc.subs.(*chatTestSubscriptions)
+	require.True(t, ok)
 	subscriptions.sub = activeChatTestSubscription()
 	subscriptions.validateErr = ErrWeeklyLimitExceeded
 
@@ -465,7 +468,8 @@ func TestChatServiceCompletionEntitlementFallsBackToWalletAfterSubscriptionExhau
 func TestChatServiceCompletionEntitlementReportsInsufficientOnlyWhenEverySourceIsExhausted(t *testing.T) {
 	svc, groups, _, _, billing, principals := newChatServiceBehaviorTest()
 	configureChatSubscriptionAndWalletGroups(groups)
-	subscriptions := svc.subs.(*chatTestSubscriptions)
+	subscriptions, ok := svc.subs.(*chatTestSubscriptions)
+	require.True(t, ok)
 	subscriptions.sub = activeChatTestSubscription()
 	subscriptions.validateErr = ErrMonthlyLimitExceeded
 	billing.err = ErrInsufficientBalance
@@ -480,7 +484,8 @@ func TestChatServiceCompletionEntitlementDoesNotMaskDependencyFailureAsInsuffici
 	t.Run("subscription dependency failure blocks wallet fallback", func(t *testing.T) {
 		svc, groups, _, _, _, principals := newChatServiceBehaviorTest()
 		configureChatSubscriptionAndWalletGroups(groups)
-		subscriptions := svc.subs.(*chatTestSubscriptions)
+		subscriptions, ok := svc.subs.(*chatTestSubscriptions)
+		require.True(t, ok)
 		subscriptions.getErr = errors.New("subscription database unavailable")
 
 		_, err := svc.ResolvePrincipal(context.Background(), 7, "gpt-5.4")
@@ -494,7 +499,8 @@ func TestChatServiceCompletionEntitlementDoesNotMaskDependencyFailureAsInsuffici
 	t.Run("wallet dependency failure wins when subscription is exhausted", func(t *testing.T) {
 		svc, groups, _, _, billing, principals := newChatServiceBehaviorTest()
 		configureChatSubscriptionAndWalletGroups(groups)
-		subscriptions := svc.subs.(*chatTestSubscriptions)
+		subscriptions, ok := svc.subs.(*chatTestSubscriptions)
+		require.True(t, ok)
 		subscriptions.sub = activeChatTestSubscription()
 		subscriptions.validateErr = ErrWeeklyLimitExceeded
 		billing.err = errors.New("wallet database unavailable")
@@ -511,7 +517,8 @@ func TestChatServiceCompletionEntitlementDoesNotMaskDependencyFailureAsInsuffici
 func TestChatServiceCompletionEntitlementMaintainsSubscriptionWindowsBeforeAdmission(t *testing.T) {
 	svc, groups, _, _, _, _ := newChatServiceBehaviorTest()
 	configureChatSubscriptionAndWalletGroups(groups)
-	subscriptions := svc.subs.(*chatTestSubscriptions)
+	subscriptions, ok := svc.subs.(*chatTestSubscriptions)
+	require.True(t, ok)
 	subscriptions.sub = activeChatTestSubscription()
 	subscriptions.needsMaintenance = true
 
