@@ -1,6 +1,6 @@
 <template>
   <main
-    class="pricing-page font-workspace"
+    class="pricing-page font-[family-name:var(--lx-clay-font-ui)]"
     :class="activeDefinition.themeClass"
     :data-tier="activeTier"
     data-testid="pricing-page"
@@ -298,7 +298,6 @@ onMounted(() => {
 
 <style scoped>
 .pricing-page {
-  --workspace-font-ui: var(--lx-clay-font-ui);
   --pricing-hero-background: radial-gradient(circle at 72% 35%, #7c3aed 0%, #eaf5ff 45%, #fff 100%);
   --pricing-featured-background: #f5f3ff;
   --pricing-featured-border: rgb(124 58 237 / 0.28);
