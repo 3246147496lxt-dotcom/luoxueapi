@@ -83,6 +83,22 @@ export default {
     retry: 'Try again',
     emptyTitle: 'No plans are available yet',
     emptyDescription: 'No subscription plan has been published. You can keep using pay-as-you-go balance billing.',
+    tierSelectorLabel: 'Plan tier selection',
+    tiers: {
+      low: {
+        name: 'Lightweight',
+        description: 'For trying AI, learning, and light everyday tasks'
+      },
+      mid: {
+        name: 'Medium',
+        description: 'For frequent office work, content creation, and professional individual use'
+      },
+      high: {
+        name: 'High volume',
+        description: 'For intensive AI workflows, professional creators, and teams'
+      }
+    },
+    recommended: 'Recommended',
     renewalOption: 'Renewal option',
     choosePlan: 'Choose this plan',
     renewPlan: 'Choose renewal',
@@ -92,6 +108,8 @@ export default {
     groupFilter: 'Showing available plans for the selected group',
     viewAllPlans: 'View all plans',
     includes: 'Includes',
+    viewQuotaDetails: 'View quota details',
+    viewQuotaDetailsAccessible: 'View quota details for the {plan} plan',
     validityDays: '{days} days',
     metricLabels: {
       rate: 'Billing rate',

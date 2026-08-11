@@ -1,62 +1,61 @@
 <template>
   <article
     class="pricing-plan-card"
-    :class="{
-      'pricing-plan-card--renewal': renewal,
-      'pricing-plan-card--focused': focused,
-    }"
+    :class="{ 'pricing-plan-card--featured': featured }"
     :data-plan-id="String(plan.id)"
     :data-plan-group="String(plan.group_id)"
+    :data-featured="featured ? 'true' : 'false'"
   >
-    <div class="pricing-plan-card__heading">
-      <div class="min-w-0">
-        <h2>{{ plan.name }}</h2>
+    <div v-if="featured" class="pricing-plan-card__aura" aria-hidden="true"></div>
+
+    <div class="pricing-plan-card__inner">
+      <div class="pricing-plan-card__heading">
+        <h3>{{ plan.name }}</h3>
+        <span v-if="featured" class="pricing-plan-card__badge">
+          {{ t('pricing.recommended') }}
+        </span>
       </div>
-      <span v-if="renewal" class="pricing-plan-card__status">
-        {{ t('pricing.renewalOption') }}
-      </span>
-    </div>
 
-    <p v-if="plan.description" class="pricing-plan-card__description">
-      {{ plan.description }}
-    </p>
+      <p class="pricing-plan-card__description">
+        {{ plan.description }}
+      </p>
 
-    <div class="pricing-plan-card__price">
-      <span>{{ formattedPrice }}</span>
-      <small>/ {{ validityLabel }}</small>
-    </div>
+      <div class="pricing-plan-card__price">
+        <span>{{ formattedPrice }}</span>
+        <small>/ {{ validityLabel }}</small>
+      </div>
 
-    <button
-      type="button"
-      class="pricing-plan-card__action"
-      :aria-label="t(
-        renewal ? 'pricing.renewPlanAccessible' : 'pricing.choosePlanAccessible',
-        { plan: plan.name },
-      )"
-      @click="emit('select', plan)"
-    >
-      {{ renewal ? t('pricing.renewPlan') : t('pricing.choosePlan') }}
-    </button>
-
-    <div class="pricing-plan-card__divider" aria-hidden="true"></div>
-
-    <p class="pricing-plan-card__includes">
-      {{ t('pricing.includes') }}
-    </p>
-    <ul class="pricing-plan-card__facts">
-      <li v-for="item in planFacts" :key="`fact-${item}`">
-        <Icon name="check" size="sm" aria-hidden="true" />
-        <span>{{ item }}</span>
-      </li>
-      <li
-        v-for="term in planTerms"
-        :key="`term-${term.key}`"
-        :data-metric="term.key"
+      <button
+        type="button"
+        class="pricing-plan-card__action"
+        :aria-label="t('pricing.choosePlanAccessible', { plan: plan.name })"
+        @click="emit('select', plan)"
       >
-        <Icon name="check" size="sm" aria-hidden="true" />
-        <span>{{ term.text }}</span>
-      </li>
-    </ul>
+        {{ t('pricing.choosePlan') }}
+      </button>
+
+      <div class="pricing-plan-card__divider" aria-hidden="true"></div>
+
+      <p class="pricing-plan-card__includes">
+        {{ t('pricing.includes') }}
+      </p>
+      <ul class="pricing-plan-card__facts">
+        <li v-for="item in planFacts" :key="item">
+          <Icon name="check" size="sm" aria-hidden="true" />
+          <span>{{ item }}</span>
+        </li>
+      </ul>
+
+      <button
+        type="button"
+        class="pricing-plan-card__details"
+        :aria-label="t('pricing.viewQuotaDetailsAccessible', { plan: plan.name })"
+        @click="emit('details', plan)"
+      >
+        {{ t('pricing.viewQuotaDetails') }}
+        <Icon name="arrowRight" size="xs" aria-hidden="true" />
+      </button>
+    </div>
   </article>
 </template>
 
@@ -64,22 +63,21 @@
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import Icon from '@/components/icons/Icon.vue'
-import { useAppStore } from '@/stores/app'
 import type { SubscriptionPlan } from '@/types/payment'
-import { formatPeakRateWindow, hasPeakRate, serverTimezoneLabel } from '@/utils/peak-rate'
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   plan: SubscriptionPlan
-  renewal: boolean
-  focused?: boolean
-}>()
+  featured?: boolean
+}>(), {
+  featured: false,
+})
 
 const emit = defineEmits<{
   select: [plan: SubscriptionPlan]
+  details: [plan: SubscriptionPlan]
 }>()
 
 const { locale, t } = useI18n()
-const appStore = useAppStore()
 
 const formattedPrice = computed(() => {
   const currency = props.plan.currency?.trim().toUpperCase() || 'USD'
@@ -87,6 +85,8 @@ const formattedPrice = computed(() => {
     return new Intl.NumberFormat(locale.value, {
       style: 'currency',
       currency,
+      currencyDisplay: 'narrowSymbol',
+      minimumFractionDigits: 2,
       maximumFractionDigits: 2,
     }).format(props.plan.price)
   } catch {
@@ -101,184 +101,165 @@ const validityLabel = computed(() => {
   return t('pricing.validityDays', { days: props.plan.validity_days })
 })
 
-const MODEL_SCOPE_LABELS: Record<string, string> = {
-  claude: 'Claude',
-  gemini_text: 'Gemini',
-  gemini_image: 'Imagen',
-}
-
-const peakRateFact = computed(() => {
-  if (!hasPeakRate(props.plan)) return null
-  return t('pricing.peakRateWindow', {
-    window: formatPeakRateWindow(
-      props.plan,
-      serverTimezoneLabel(appStore.cachedPublicSettings?.server_utc_offset),
-    ),
-  })
-})
-
-const modelScopesFact = computed(() => {
-  const scopes = [...new Set(
-    (props.plan.supported_model_scopes ?? [])
-      .map((scope) => scope.trim())
-      .filter(Boolean),
-  )]
-  if (scopes.length === 0) return null
-  return t('pricing.modelScopes', {
-    models: scopes.map((scope) => MODEL_SCOPE_LABELS[scope] || scope).join(', '),
-  })
-})
-
-interface PlanTerm {
-  key: 'rate' | 'daily' | 'weekly' | 'monthly'
-  text: string
-}
-
-const quotaTerm = (
-  key: PlanTerm['key'],
-  translationKey: 'pricing.dailyQuota' | 'pricing.weeklyQuota' | 'pricing.monthlyQuota',
-  value: number | null | undefined,
-): PlanTerm => ({
-  key,
-  text: t(translationKey, {
-    amount: value == null ? t('payment.planCard.unlimited') : value.toFixed(2),
-  }),
-})
-
-const planTerms = computed<PlanTerm[]>(() => [
-  {
-    key: 'rate',
-    text: t('pricing.rateMultiplier', {
-      rate: Number((props.plan.rate_multiplier ?? 1).toPrecision(10)),
-    }),
-  },
-  quotaTerm('daily', 'pricing.dailyQuota', props.plan.daily_limit_usd),
-  quotaTerm('weekly', 'pricing.weeklyQuota', props.plan.weekly_limit_usd),
-  quotaTerm('monthly', 'pricing.monthlyQuota', props.plan.monthly_limit_usd),
-])
-
-const planFacts = computed(() => {
-  const facts = [
-    ...(Array.isArray(props.plan.features) ? props.plan.features : []),
-    peakRateFact.value,
-    modelScopesFact.value,
-  ].filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
-
-  return [...new Set(facts)]
-})
+const planFacts = computed(() => [...new Set(
+  (Array.isArray(props.plan.features) ? props.plan.features : [])
+    .map((item) => item.trim())
+    .filter(Boolean),
+)].slice(0, 4))
 </script>
 
 <style scoped>
 .pricing-plan-card {
+  position: relative;
   display: flex;
-  width: 100%;
   min-width: 0;
-  min-height: 540px;
+  min-height: 520px;
+  overflow: hidden;
   flex-direction: column;
-  padding: 30px;
-  border: 1px solid #d9d9d9;
+  padding: 24px 28px 28px;
+  border: 1px solid #e5e5e5;
   border-radius: 16px;
-  color: #171717;
+  color: #0d0d0d;
   background: #fff;
-  box-shadow: 0 1px 2px rgb(0 0 0 / 0.025);
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.03);
+  text-align: left;
+}
+
+.pricing-plan-card--featured {
+  border-color: var(--pricing-featured-border);
+  background-color: var(--pricing-featured-background);
+  box-shadow: var(--pricing-featured-shadow);
   transition:
-    border-color 160ms ease,
-    box-shadow 160ms ease,
-    transform 160ms ease;
+    background-color 520ms,
+    border-color 520ms,
+    box-shadow 520ms;
 }
 
-.pricing-plan-card:hover {
-  border-color: #b7b7b7;
-  box-shadow: 0 10px 28px rgb(0 0 0 / 0.07);
-  transform: translateY(-2px);
+.pricing-plan-card__aura {
+  position: absolute;
+  z-index: 0;
+  inset: -15%;
+  background: var(--pricing-featured-aura);
+  opacity: 0.6;
+  pointer-events: none;
+  transition: opacity 520ms;
 }
 
-.pricing-plan-card--renewal,
-.pricing-plan-card--focused {
-  border-color: color-mix(in srgb, var(--lx-clay-accent) 68%, #a3a3a3);
-  box-shadow: 0 0 0 1px color-mix(in srgb, var(--lx-clay-accent) 22%, transparent);
+.pricing-plan-card__inner {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  height: 100%;
+  flex: 1;
+  flex-direction: column;
 }
 
 .pricing-plan-card__heading {
   display: flex;
+  min-width: 0;
   align-items: flex-start;
   justify-content: space-between;
-  gap: 16px;
+  gap: 12px;
+  margin-bottom: 8px;
 }
 
-.pricing-plan-card h2 {
+.pricing-plan-card__heading h3 {
+  min-width: 0;
   overflow-wrap: anywhere;
-  font-size: var(--workspace-type-brand-size);
-  font-weight: var(--workspace-type-brand-weight);
+  font-size: 18px;
+  font-weight: 700;
   letter-spacing: -0.025em;
-  line-height: 1.2;
+  line-height: 1.5;
 }
 
-.pricing-plan-card__status {
+.pricing-plan-card__badge {
   flex: none;
-  padding: 5px 9px;
-  border-radius: 999px;
-  color: #17633a;
-  background: #e8f7ee;
-  font-size: var(--workspace-type-secondary-size);
-  font-weight: var(--workspace-type-secondary-weight);
+  padding: 4px 10px;
+  border-radius: 99px;
+  color: var(--pricing-badge-color);
+  background: var(--pricing-badge-background);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  line-height: 1.5;
 }
 
 .pricing-plan-card__description {
-  min-height: 48px;
-  margin-top: 15px;
-  color: #666;
-  font-size: var(--workspace-type-body-size);
-  font-weight: var(--workspace-type-body-weight);
-  line-height: 1.65;
+  min-height: 24px;
+  margin-bottom: 14px;
+  color: #5d5d5d;
+  font-size: 14px;
+  font-weight: 400;
+  line-height: 1.5;
 }
 
 .pricing-plan-card__price {
   display: flex;
-  min-height: 52px;
   align-items: baseline;
-  gap: 8px;
-  margin-top: 24px;
+  gap: 6px;
+  margin-bottom: 24px;
+  white-space: nowrap;
 }
 
 .pricing-plan-card__price span {
-  font-size: var(--workspace-type-numeric-size);
-  font-weight: var(--workspace-type-numeric-weight);
+  font-size: 32px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
   letter-spacing: -0.04em;
-  line-height: 1;
+  line-height: 1.5;
 }
 
 .pricing-plan-card__price small {
-  color: #737373;
-  font-size: var(--workspace-type-secondary-size);
-  font-weight: var(--workspace-type-secondary-weight);
+  flex-shrink: 0;
+  color: #8e8e8e;
+  font-size: 12px;
+  font-weight: 400;
 }
 
 .pricing-plan-card__action {
+  display: flex;
   width: 100%;
-  min-height: 46px;
-  margin-top: 24px;
+  height: 46px;
+  flex: none;
+  align-items: center;
+  justify-content: center;
   border-radius: 999px;
   color: #fff;
-  background: var(--lx-clay-accent-deep);
-  font-size: var(--workspace-type-navigation-size);
-  font-weight: var(--workspace-type-navigation-weight);
+  background: #171717;
+  font-size: 14px;
+  font-weight: 500;
   transition:
-    background-color 150ms ease,
-    transform 150ms ease;
+    transform 150ms ease,
+    opacity 150ms ease,
+    box-shadow 150ms ease;
 }
 
-.pricing-plan-card__action:hover {
-  background: var(--lx-clay-accent);
+.pricing-plan-card--featured .pricing-plan-card__action {
+  background: var(--pricing-featured-button);
+  transition:
+    background-color 150ms ease,
+    transform 150ms ease,
+    opacity 150ms ease,
+    box-shadow 150ms ease;
+}
+
+.pricing-plan-card--featured .pricing-plan-card__action:hover {
+  background: var(--pricing-featured-button-hover);
 }
 
 .pricing-plan-card__action:active {
-  transform: scale(0.99);
+  transform: scale(0.98);
 }
 
 .pricing-plan-card__action:focus-visible {
-  outline: 3px solid color-mix(in srgb, var(--lx-clay-accent) 38%, transparent);
+  outline: 2px solid #171717;
   outline-offset: 2px;
+  box-shadow: 0 0 0 4px rgb(23 23 23 / 0.14);
+}
+
+.pricing-plan-card--featured .pricing-plan-card__action:focus-visible {
+  outline-color: var(--pricing-featured-button);
+  box-shadow: var(--pricing-featured-focus-ring);
 }
 
 .pricing-plan-card__divider {
@@ -289,95 +270,63 @@ const planFacts = computed(() => {
 
 .pricing-plan-card__includes {
   margin-bottom: 14px;
-  font-size: var(--workspace-type-navigation-size);
-  font-weight: var(--workspace-type-navigation-weight);
-}
-
-.pricing-plan-card__facts {
-  display: grid;
-  gap: 12px;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.5;
 }
 
 .pricing-plan-card__facts li {
   display: grid;
   grid-template-columns: 18px minmax(0, 1fr);
-  align-items: start;
   gap: 10px;
+  margin-bottom: 12px;
   color: #444;
-  font-size: var(--workspace-type-body-size);
-  font-weight: var(--workspace-type-body-weight);
+  font-size: 14px;
+  font-weight: 400;
   line-height: 1.5;
 }
 
-.pricing-plan-card__facts li svg {
-  margin-top: 1px;
+.pricing-plan-card__facts li :deep(svg) {
+  margin-top: 2px;
   color: #171717;
   stroke-width: 2.1;
 }
 
-:global(html.dark) .pricing-plan-card {
-  border-color: #393939;
-  color: #f4f4f4;
-  background: #242424;
-  box-shadow: none;
+.pricing-plan-card__details {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: auto;
+  border-radius: 2px;
+  color: #525252;
+  background: transparent;
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 1.5;
+  transition: color 200ms;
 }
 
-:global(html.dark) .pricing-plan-card:hover {
-  border-color: #555;
-  box-shadow: 0 12px 30px rgb(0 0 0 / 0.22);
+.pricing-plan-card__details:hover {
+  color: #111;
 }
 
-:global(html.dark) .pricing-plan-card__description,
-:global(html.dark) .pricing-plan-card__price small {
-  color: #a3a3a3;
+.pricing-plan-card__details:focus-visible {
+  outline: 2px solid #7c3aed;
+  outline-offset: 4px;
 }
 
-:global(html.dark) .pricing-plan-card__status {
-  color: #91e6b5;
-  background: #173a28;
-}
-
-:global(html.dark) .pricing-plan-card__action {
-  color: var(--lx-clay-on-accent);
-  background: var(--lx-clay-accent-deep);
-}
-
-:global(html.dark) .pricing-plan-card__action:hover {
-  background: var(--lx-clay-accent);
-}
-
-:global(html.dark) .pricing-plan-card__divider {
-  background: #3d3d3d;
-}
-
-:global(html.dark) .pricing-plan-card__facts li {
-  color: #d0d0d0;
-}
-
-:global(html.dark) .pricing-plan-card__facts li svg {
-  color: #f4f4f4;
+@media (max-width: 640px) {
+  .pricing-plan-card {
+    padding-right: 18px;
+    padding-left: 18px;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .pricing-plan-card,
-  .pricing-plan-card__action {
-    transition: none;
-  }
-
-  .pricing-plan-card:hover {
-    transform: none;
-  }
-}
-
-@media (max-width: 639px) {
-  .pricing-plan-card {
-    min-height: auto;
-    padding: 22px;
-    border-radius: 16px;
-  }
-
-  .pricing-plan-card__description {
-    min-height: 0;
+  .pricing-plan-card--featured,
+  .pricing-plan-card__aura,
+  .pricing-plan-card--featured .pricing-plan-card__action {
+    transition-duration: 100ms !important;
   }
 }
 </style>

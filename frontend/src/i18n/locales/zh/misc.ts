@@ -81,6 +81,22 @@ export default {
     retry: '重新加载',
     emptyTitle: '暂时没有可购买的套餐',
     emptyDescription: '管理员尚未发布订阅套餐，你仍然可以继续使用余额按量计费。',
+    tierSelectorLabel: '方案等级选择',
+    tiers: {
+      low: {
+        name: '轻量级',
+        description: '适合体验 AI、学习和日常轻任务'
+      },
+      mid: {
+        name: '中量级',
+        description: '适合高频办公、内容创作和专业个人用户'
+      },
+      high: {
+        name: '高量级',
+        description: '适合重度 AI 工作流、专业创作者和团队用户'
+      }
+    },
+    recommended: '推荐选择',
     renewalOption: '续费可选',
     choosePlan: '选择此套餐',
     renewPlan: '选择续费方案',
@@ -90,6 +106,8 @@ export default {
     groupFilter: '正在查看所选分组的可用套餐',
     viewAllPlans: '查看全部套餐',
     includes: '套餐包含',
+    viewQuotaDetails: '查看额度详情',
+    viewQuotaDetailsAccessible: '查看 {plan} 套餐额度详情',
     validityDays: '{days} 天',
     metricLabels: {
       rate: '计费倍率',
