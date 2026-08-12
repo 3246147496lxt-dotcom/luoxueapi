@@ -9,11 +9,17 @@
     </div>
 
     <form
+      ref="composerRef"
       class="chat-composer"
       :class="{
         'chat-composer--expanded': composerExpanded,
+        'chat-composer--maximized': composerMaximized,
+        'chat-composer--overflowing': inputOverflowing,
+        'chat-composer--has-expand-toggle': showExpandToggle,
         'chat-composer--has-attachments': hasAttachments,
       }"
+      :data-expanded="composerExpanded ? '' : undefined"
+      :data-expanded-composer="composerMaximized ? '' : undefined"
       :aria-busy="submissionBusy || submitting ? 'true' : undefined"
       @submit.prevent="submit"
     >
@@ -25,17 +31,39 @@
         <slot name="leading"></slot>
       </div>
 
-      <textarea
-        ref="textareaRef"
-        v-model="draft"
-        rows="1"
-        :maxlength="maxLength"
-        :placeholder="placeholder"
-        :disabled="disabled || insufficientBalance"
-        :aria-label="t('chat.composer.label')"
-        @input="resize"
-        @keydown="onKeydown"
-      ></textarea>
+      <div class="chat-composer__input-shell">
+        <textarea
+          :id="composerInputId"
+          ref="textareaRef"
+          v-model="draft"
+          class="chat-composer__input"
+          rows="1"
+          :maxlength="maxLength"
+          :placeholder="placeholder"
+          :disabled="disabled || insufficientBalance"
+          :aria-label="t('chat.composer.label')"
+          @input="resize"
+          @keydown="onKeydown"
+        ></textarea>
+
+        <button
+          v-if="showExpandToggle"
+          type="button"
+          class="chat-composer__expand-toggle"
+          :aria-label="composerMaximized ? t('chat.composer.collapse') : t('chat.composer.expand')"
+          :title="composerMaximized ? t('chat.composer.collapse') : t('chat.composer.expand')"
+          :aria-controls="composerInputId"
+          :aria-expanded="composerMaximized"
+          data-test="chat-composer-expand"
+          @click="toggleComposerMaximized"
+        >
+          <Icon
+            :name="composerMaximized ? 'chatComposerCollapse' : 'chatComposerExpand'"
+            size="md"
+            aria-hidden="true"
+          />
+        </button>
+      </div>
 
       <div v-if="$slots.trailing || $slots.controls" class="chat-composer__trailing">
         <slot name="trailing">
@@ -69,12 +97,21 @@
       >
         <Icon name="chatSend" size="md" aria-hidden="true" />
       </button>
+
+      <textarea
+        ref="measureRef"
+        class="chat-composer__measure"
+        :value="draft"
+        aria-hidden="true"
+        tabindex="-1"
+        readonly
+      ></textarea>
     </form>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, useId, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import Icon from '@/components/icons/Icon.vue'
 
@@ -105,13 +142,27 @@ const emit = defineEmits<{
 }>()
 
 const { t } = useI18n()
+const composerInputId = useId()
+const composerRef = ref<HTMLFormElement | null>(null)
 const textareaRef = ref<HTMLTextAreaElement | null>(null)
+const measureRef = ref<HTMLTextAreaElement | null>(null)
 const draft = ref(props.modelValue)
 const multiline = ref(props.modelValue.includes('\n'))
+const composerMaximized = ref(false)
+const inputOverflowing = ref(false)
+const showExpandToggle = ref(false)
 const submitting = ref(false)
-const COMPOSER_RESIZE_DURATION_MS = 180
-let resizeFrame: number | null = null
-let collapseTimer: ReturnType<typeof setTimeout> | null = null
+const COMPOSER_COMPACT_INPUT_HEIGHT = 36
+const COMPOSER_STACKED_INPUT_HEIGHT = 48
+const COMPOSER_SINGLE_LINE_THRESHOLD = 54
+const COMPOSER_EXPAND_TOGGLE_THRESHOLD = 140
+const COMPOSER_COLLAPSED_VIEWPORT_RATIO = 0.3
+const COMPOSER_MAXIMIZED_VIEWPORT_RATIO = 0.75
+const COMPOSER_STACKED_CHROME_HEIGHT = 54
+let queuedResizeFrame: number | null = null
+let composerResizeObserver: ResizeObserver | null = null
+let ensureSelectionVisibleAfterResize = false
+const observedWidths = new WeakMap<Element, number>()
 
 const hasContent = computed(() => draft.value.trim().length > 0 || props.hasAttachments)
 
@@ -132,66 +183,232 @@ const placeholder = computed(() => (
 ))
 
 const composerExpanded = computed(() => (
-  props.hasAttachments
-  || multiline.value
+  multiline.value
   || draft.value.includes('\n')
+  || composerMaximized.value
 ))
+
+watch(composerExpanded, () => {
+  void nextTick(resize)
+})
 
 watch(() => props.modelValue, (value) => {
   if (value === draft.value) return
   draft.value = value
+  if (!value) composerMaximized.value = false
   void nextTick(resize)
 })
 
-watch(draft, (value) => emit('update:modelValue', value))
+watch(() => props.hasAttachments, () => {
+  void nextTick(resize)
+})
+
+watch(draft, (value) => {
+  emit('update:modelValue', value)
+  if (!value) composerMaximized.value = false
+})
+
+function viewportHeight(): number {
+  if (typeof window === 'undefined') return 800
+  return window.visualViewport?.height || window.innerHeight || 800
+}
+
+function collapsedInputMaxHeight(): number {
+  return Math.max(80, Math.round(viewportHeight() * COMPOSER_COLLAPSED_VIEWPORT_RATIO))
+}
+
+function maximizedInputHeight(): number {
+  return Math.max(
+    collapsedInputMaxHeight(),
+    Math.round(viewportHeight() * COMPOSER_MAXIMIZED_VIEWPORT_RATIO)
+      - COMPOSER_STACKED_CHROME_HEIGHT,
+  )
+}
+
+function narrowComposerLayout(): boolean {
+  return typeof window !== 'undefined'
+    && window.matchMedia?.('(max-width: 720px)').matches
+}
+
+function outerWidth(element: Element | null): number {
+  if (!(element instanceof HTMLElement)) return 0
+  const style = window.getComputedStyle(element)
+  return element.getBoundingClientRect().width
+    + (Number.parseFloat(style.marginInlineStart) || 0)
+    + (Number.parseFloat(style.marginInlineEnd) || 0)
+}
+
+function compactContentHeight(fallbackHeight: number): number {
+  const form = composerRef.value
+  const mirror = measureRef.value
+  if (!form || !mirror || typeof window === 'undefined') return fallbackHeight
+
+  const formStyle = window.getComputedStyle(form)
+  const formWidth = form.getBoundingClientRect().width || form.clientWidth
+  if (formWidth <= 0) return fallbackHeight
+
+  const innerWidth = formWidth
+    - (Number.parseFloat(formStyle.paddingInlineStart) || 0)
+    - (Number.parseFloat(formStyle.paddingInlineEnd) || 0)
+  const reservedWidth = outerWidth(form.querySelector('.chat-composer__leading'))
+    + outerWidth(form.querySelector('.chat-composer__trailing'))
+    + outerWidth(
+      form.querySelector('.chat-composer__action, .chat-composer__empty-action'),
+    )
+  const compactWidth = Math.max(150, Math.floor(innerWidth - reservedWidth))
+
+  mirror.value = draft.value
+  mirror.style.width = `${compactWidth}px`
+  mirror.style.paddingInlineStart = '7px'
+  mirror.style.paddingInlineEnd = '6px'
+  return mirror.scrollHeight || fallbackHeight
+}
+
+function restoreScrollPosition(
+  textarea: HTMLTextAreaElement,
+  previousScrollTop: number,
+  overflowing: boolean,
+  ensureSelectionVisible = false,
+) {
+  if (!overflowing) {
+    textarea.scrollTop = 0
+    return
+  }
+
+  const maxScrollTop = Math.max(0, textarea.scrollHeight - textarea.clientHeight)
+  const collapsedCaretAtEnd = document.activeElement === textarea
+    && textarea.selectionStart === textarea.selectionEnd
+    && textarea.selectionEnd === textarea.value.length
+
+  if (collapsedCaretAtEnd) {
+    textarea.scrollTop = maxScrollTop
+    return
+  }
+
+  textarea.scrollTop = Math.min(previousScrollTop, maxScrollTop)
+  if (ensureSelectionVisible) ensureActiveSelectionVisible(textarea)
+}
+
+function ensureActiveSelectionVisible(textarea: HTMLTextAreaElement) {
+  const mirror = measureRef.value
+  if (!mirror || typeof window === 'undefined') return
+
+  const style = window.getComputedStyle(textarea)
+  const activeSelectionEdge = textarea.selectionDirection === 'backward'
+    ? textarea.selectionStart
+    : textarea.selectionEnd
+  const lineHeight = Number.parseFloat(style.lineHeight) || 26
+  const paddingBlockEnd = Number.parseFloat(style.paddingBlockEnd) || 0
+
+  mirror.style.width = `${textarea.clientWidth}px`
+  mirror.style.paddingInlineStart = style.paddingInlineStart
+  mirror.style.paddingInlineEnd = style.paddingInlineEnd
+  mirror.value = `${textarea.value.slice(0, activeSelectionEdge)}\u200b`
+
+  const activeEdgeBottom = Math.max(lineHeight, mirror.scrollHeight - paddingBlockEnd)
+  const activeEdgeTop = Math.max(0, activeEdgeBottom - lineHeight)
+  const visibleTop = textarea.scrollTop
+  const visibleBottom = visibleTop + textarea.clientHeight
+
+  if (activeEdgeBottom > visibleBottom) {
+    textarea.scrollTop = activeEdgeBottom - textarea.clientHeight
+  } else if (activeEdgeTop < visibleTop) {
+    textarea.scrollTop = activeEdgeTop
+  }
+}
 
 function resize() {
   const textarea = textareaRef.value
   if (!textarea) return
 
-  if (collapseTimer !== null) {
-    clearTimeout(collapseTimer)
-    collapseTimer = null
-  }
-
   const previousHeight = textarea.getBoundingClientRect().height
+  const previousScrollTop = textarea.scrollTop
   textarea.style.height = 'auto'
   const contentHeight = textarea.scrollHeight
-  const nextHeight = Math.min(Math.max(contentHeight, 36), 180)
-  const shouldExpand = contentHeight > 54
-  const collapseAfterResize = multiline.value && !shouldExpand
+  const shouldUseStackedLayout = draft.value.includes('\n')
+    || (
+      narrowComposerLayout()
+        ? contentHeight > COMPOSER_SINGLE_LINE_THRESHOLD
+        : compactContentHeight(contentHeight) > COMPOSER_SINGLE_LINE_THRESHOLD
+    )
 
-  if (resizeFrame !== null) {
-    cancelAnimationFrame(resizeFrame)
-    resizeFrame = null
-  }
-
-  const reduceMotion = typeof window !== 'undefined'
-    && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches
-  const canAnimate = !reduceMotion
-    && previousHeight > 0
-    && Math.abs(previousHeight - nextHeight) >= 0.5
-    && typeof requestAnimationFrame === 'function'
-
-  if (shouldExpand) multiline.value = true
-  else if (!canAnimate) multiline.value = false
-
-  if (!canAnimate) {
-    textarea.style.height = `${nextHeight}px`
+  if (multiline.value !== shouldUseStackedLayout) {
+    multiline.value = shouldUseStackedLayout
+    textarea.style.height = previousHeight > 0
+      ? `${previousHeight}px`
+      : `${COMPOSER_COMPACT_INPUT_HEIGHT}px`
+    textarea.style.overflowY = 'hidden'
     return
   }
 
-  textarea.style.height = `${previousHeight}px`
-  void textarea.offsetHeight
-  resizeFrame = requestAnimationFrame(() => {
-    textarea.style.height = `${nextHeight}px`
-    resizeFrame = null
-    if (collapseAfterResize) {
-      collapseTimer = setTimeout(() => {
-        multiline.value = false
-        collapseTimer = null
-      }, COMPOSER_RESIZE_DURATION_MS)
-    }
+  const shouldShowExpandToggle = Boolean(draft.value)
+    && (
+      composerMaximized.value
+      || contentHeight >= Math.min(
+        COMPOSER_EXPAND_TOGGLE_THRESHOLD,
+        collapsedInputMaxHeight(),
+      )
+    )
+
+  if (showExpandToggle.value !== shouldShowExpandToggle) {
+    showExpandToggle.value = shouldShowExpandToggle
+    textarea.style.height = previousHeight > 0
+      ? `${previousHeight}px`
+      : `${COMPOSER_COMPACT_INPUT_HEIGHT}px`
+    void nextTick(resize)
+    return
+  }
+
+  const minimumHeight = composerExpanded.value
+    ? COMPOSER_STACKED_INPUT_HEIGHT
+    : COMPOSER_COMPACT_INPUT_HEIGHT
+  const maximumHeight = composerMaximized.value
+    ? maximizedInputHeight()
+    : collapsedInputMaxHeight()
+  const nextHeight = composerMaximized.value
+    ? maximumHeight
+    : Math.min(Math.max(contentHeight, minimumHeight), maximumHeight)
+  const overflowing = contentHeight > nextHeight + 0.5
+  inputOverflowing.value = overflowing
+  textarea.style.overflowY = overflowing ? 'auto' : 'hidden'
+  textarea.style.height = `${nextHeight}px`
+  restoreScrollPosition(
+    textarea,
+    previousScrollTop,
+    overflowing,
+    ensureSelectionVisibleAfterResize,
+  )
+  ensureSelectionVisibleAfterResize = false
+}
+
+function queueResize() {
+  if (queuedResizeFrame !== null) cancelAnimationFrame(queuedResizeFrame)
+  if (typeof requestAnimationFrame !== 'function') {
+    void nextTick(resize)
+    return
+  }
+  queuedResizeFrame = requestAnimationFrame(() => {
+    queuedResizeFrame = null
+    resize()
+  })
+}
+
+function toggleComposerMaximized() {
+  const textarea = textareaRef.value
+  if (!textarea) return
+
+  const selectionStart = textarea.selectionStart
+  const selectionEnd = textarea.selectionEnd
+  const selectionDirection = textarea.selectionDirection
+  const previousScrollTop = textarea.scrollTop
+  ensureSelectionVisibleAfterResize = composerMaximized.value
+  composerMaximized.value = !composerMaximized.value
+
+  void nextTick(() => {
+    textarea.focus({ preventScroll: true })
+    textarea.setSelectionRange(selectionStart, selectionEnd, selectionDirection)
+    textarea.scrollTop = previousScrollTop
+    resize()
   })
 }
 
@@ -250,11 +467,39 @@ function insertText(value: string): boolean {
   return true
 }
 
-onMounted(resize)
+onMounted(() => {
+  resize()
+
+  if (typeof ResizeObserver !== 'undefined' && composerRef.value) {
+    composerResizeObserver = new ResizeObserver((entries) => {
+      const widthChanged = entries.some((entry) => {
+        const previousWidth = observedWidths.get(entry.target)
+        observedWidths.set(entry.target, entry.contentRect.width)
+        return previousWidth !== undefined
+          && Math.abs(previousWidth - entry.contentRect.width) >= 0.5
+      })
+      if (widthChanged) queueResize()
+    })
+
+    const responsiveElements = [
+      composerRef.value.parentElement,
+      composerRef.value,
+      composerRef.value.querySelector('.chat-composer__leading'),
+      composerRef.value.querySelector('.chat-composer__trailing'),
+    ].filter((element): element is Element => element instanceof Element)
+
+    responsiveElements.forEach((element) => composerResizeObserver?.observe(element))
+  }
+
+  window.addEventListener('resize', queueResize)
+  window.visualViewport?.addEventListener('resize', queueResize)
+})
 
 onBeforeUnmount(() => {
-  if (resizeFrame !== null) cancelAnimationFrame(resizeFrame)
-  if (collapseTimer !== null) clearTimeout(collapseTimer)
+  if (queuedResizeFrame !== null) cancelAnimationFrame(queuedResizeFrame)
+  composerResizeObserver?.disconnect()
+  window.removeEventListener('resize', queueResize)
+  window.visualViewport?.removeEventListener('resize', queueResize)
 })
 
 defineExpose({ focus, insertText })
@@ -311,6 +556,7 @@ defineExpose({ focus, insertText })
   --chat-composer-secondary-fg: #0d0d0d;
   --chat-composer-secondary-hover: rgb(0 0 0 / 5%);
 
+  position: relative;
   display: grid;
   grid-template-columns: auto minmax(150px, 1fr) auto auto;
   grid-template-areas: "composer-leading composer-input composer-trailing composer-action";
@@ -345,15 +591,28 @@ defineExpose({ focus, insertText })
 .chat-composer--has-attachments {
   grid-template-areas:
     "composer-attachments composer-attachments composer-attachments composer-attachments"
+    "composer-leading composer-input composer-trailing composer-action";
+  grid-template-rows: auto 36px;
+  row-gap: 18px;
+}
+
+.chat-composer--expanded.chat-composer--has-attachments {
+  grid-template-areas:
+    "composer-attachments composer-attachments composer-attachments composer-attachments"
     "composer-input composer-input composer-input composer-input"
     "composer-leading . composer-trailing composer-action";
   grid-template-rows: auto minmax(36px, auto) 36px;
+  row-gap: 2px;
 }
 
 .chat-composer__attachments {
   grid-area: composer-attachments;
   min-width: 0;
-  padding: 0 4px 4px;
+  padding: 0;
+}
+
+.chat-composer--expanded.chat-composer--has-attachments .chat-composer__attachments {
+  padding-block-end: 16px;
 }
 
 .chat-composer__leading {
@@ -363,17 +622,24 @@ defineExpose({ focus, insertText })
   align-items: center;
 }
 
-.chat-composer textarea {
+.chat-composer__input-shell {
   grid-area: composer-input;
+  position: relative;
+  min-width: 0;
+}
+
+.chat-composer__input {
+  display: block;
+  box-sizing: border-box;
   width: 100%;
   min-width: 0;
   min-height: 36px;
-  max-height: 180px;
+  max-height: none;
   resize: none;
   border: 0;
   padding-block: 5px;
   padding-inline: 7px 6px;
-  overflow-y: auto;
+  overflow-y: hidden;
   color: var(--chat-composer-primary-fg);
   background: transparent;
   font-size: 16px;
@@ -382,14 +648,31 @@ defineExpose({ focus, insertText })
   letter-spacing: normal;
   outline: none;
   scrollbar-width: thin;
-  transition: height 180ms cubic-bezier(0.22, 1, 0.36, 1);
+  scrollbar-color: #e5e5e5 transparent;
 }
 
-.chat-composer--expanded textarea {
+.chat-composer--expanded .chat-composer__input {
   padding: 5px 10px;
 }
 
-.chat-composer textarea::placeholder {
+.chat-composer--has-expand-toggle .chat-composer__input {
+  padding-inline-end: 46px;
+}
+
+.chat-composer__input::-webkit-scrollbar {
+  width: 6px;
+}
+
+.chat-composer__input::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.chat-composer__input::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: #e5e5e5;
+}
+
+.chat-composer__input::placeholder {
   color: var(--chat-composer-placeholder-fg);
   font-size: inherit;
   font-weight: inherit;
@@ -398,8 +681,64 @@ defineExpose({ focus, insertText })
   opacity: 1;
 }
 
-.chat-composer textarea:disabled {
+.chat-composer__input:disabled {
   cursor: not-allowed;
+}
+
+.chat-composer__expand-toggle {
+  position: absolute;
+  inset-block-start: 2px;
+  inset-inline-end: 12px;
+  z-index: 2;
+  display: grid;
+  width: 36px;
+  height: 36px;
+  place-items: center;
+  border: 0;
+  border-radius: 50%;
+  padding: 0;
+  color: var(--chat-composer-muted-fg);
+  background: transparent;
+  cursor: pointer;
+  transition:
+    color 150ms ease,
+    background-color 150ms ease;
+}
+
+.chat-composer__expand-toggle:hover {
+  color: var(--chat-composer-primary-fg);
+  background: var(--chat-composer-secondary-hover);
+}
+
+.chat-composer__expand-toggle:focus-visible {
+  outline: 2px solid var(--lx-clay-accent);
+  outline-offset: 1px;
+}
+
+.chat-composer__measure {
+  position: absolute;
+  inset: 0 auto auto 0;
+  z-index: -1;
+  box-sizing: border-box;
+  max-width: 100%;
+  height: 0;
+  min-height: 0;
+  resize: none;
+  border: 0;
+  padding-block: 5px;
+  padding-inline: 7px 6px;
+  overflow: hidden;
+  visibility: hidden;
+  pointer-events: none;
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+  color: transparent;
+  background: transparent;
+  font: inherit;
+  font-size: 16px;
+  font-weight: 400;
+  line-height: 26px;
+  letter-spacing: normal;
 }
 
 .chat-composer__trailing {
@@ -501,11 +840,21 @@ defineExpose({ focus, insertText })
       "composer-input composer-input composer-input composer-input"
       "composer-leading . composer-trailing composer-action";
     grid-template-rows: auto minmax(36px, auto) 36px;
+    row-gap: 0;
   }
 
-  .chat-composer textarea {
+  .chat-composer--has-attachments .chat-composer__attachments,
+  .chat-composer--expanded.chat-composer--has-attachments .chat-composer__attachments {
+    padding-block-end: 12px;
+  }
+
+  .chat-composer__input {
     padding: 5px 10px;
     font-size: 16px;
+  }
+
+  .chat-composer--has-expand-toggle .chat-composer__input {
+    padding-inline-end: 46px;
   }
 
   .chat-composer--expanded {
@@ -527,6 +876,14 @@ defineExpose({ focus, insertText })
   --chat-composer-secondary-hover: rgb(255 255 255 / 10%);
 }
 
+:global(html.dark .chat-composer__input) {
+  scrollbar-color: #4d4d4d transparent;
+}
+
+:global(html.dark .chat-composer__input::-webkit-scrollbar-thumb) {
+  background: #4d4d4d;
+}
+
 @media (forced-colors: active) {
   .chat-composer {
     border: 1px solid CanvasText;
@@ -535,7 +892,7 @@ defineExpose({ focus, insertText })
 
 @media (prefers-reduced-motion: reduce) {
   .chat-composer,
-  .chat-composer textarea,
+  .chat-composer__expand-toggle,
   .chat-composer__action {
     transition: none;
   }

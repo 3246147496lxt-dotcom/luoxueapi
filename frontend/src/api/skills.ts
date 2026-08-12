@@ -51,9 +51,12 @@ export interface PublicSkill {
   published_at: string
   updated_at: string
   versions: PublicSkillVersion[]
+  origin_url?: string
   source_url?: string
   source_repository?: string
   repository_stars?: number | null
+  catalog_source_priority?: number
+  catalog_source_rank?: number | null
 }
 
 export interface SkillCategory {
@@ -184,11 +187,14 @@ export function normalizePublicSkill(value: unknown): PublicSkill {
     versions: rawVersions
       .map(normalizePublicSkillVersion)
       .filter((version) => Boolean(version.version)),
+    origin_url: stringValue(source.origin_url) || undefined,
     source_url: stringValue(source.source_url) || stringValue(source.repository_url) || undefined,
     source_repository: stringValue(source.source_repository) || stringValue(source.repository_name) || undefined,
     repository_stars: optionalNumberValue(
       source.repository_stars ?? source.github_stars ?? source.source_stars,
     ),
+    catalog_source_priority: optionalNumberValue(source.catalog_source_priority) ?? undefined,
+    catalog_source_rank: optionalNumberValue(source.catalog_source_rank),
   }
 }
 

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"regexp"
 	"sort"
 	"strings"
@@ -103,12 +104,15 @@ type Skill struct {
 	Icon                        string         `json:"icon"`
 	ExamplePrompts              []string       `json:"example_prompts"`
 	RiskNotes                   string         `json:"risk_notes"`
+	OriginURL                   string         `json:"origin_url"`
 	SourceURL                   string         `json:"source_url"`
 	SourceRepository            string         `json:"source_repository"`
 	RepositoryStars             *int64         `json:"repository_stars"`
 	Status                      string         `json:"status"`
 	Featured                    bool           `json:"featured"`
 	SortOrder                   int            `json:"sort_order"`
+	CatalogSourcePriority       int            `json:"catalog_source_priority"`
+	CatalogSourceRank           *int           `json:"catalog_source_rank,omitempty"`
 	CurrentVersionID            *int64         `json:"current_version_id"`
 	CurrentVersion              *SkillVersion  `json:"current_version"`
 	LatestVersion               *SkillVersion  `json:"latest_version"`
@@ -125,18 +129,21 @@ type Skill struct {
 }
 
 type SkillInput struct {
-	Slug           string   `json:"slug"`
-	DisplayName    string   `json:"display_name"`
-	Summary        string   `json:"summary"`
-	Description    string   `json:"description"`
-	Category       string   `json:"category"`
-	Tags           []string `json:"tags"`
-	Icon           string   `json:"icon"`
-	ExamplePrompts []string `json:"example_prompts"`
-	RiskNotes      string   `json:"risk_notes"`
-	SourceURL      *string  `json:"source_url"`
-	Featured       bool     `json:"featured"`
-	SortOrder      int      `json:"sort_order"`
+	Slug                  string   `json:"slug"`
+	DisplayName           string   `json:"display_name"`
+	Summary               string   `json:"summary"`
+	Description           string   `json:"description"`
+	Category              string   `json:"category"`
+	Tags                  []string `json:"tags"`
+	Icon                  string   `json:"icon"`
+	ExamplePrompts        []string `json:"example_prompts"`
+	RiskNotes             string   `json:"risk_notes"`
+	OriginURL             *string  `json:"origin_url"`
+	SourceURL             *string  `json:"source_url"`
+	Featured              bool     `json:"featured"`
+	SortOrder             int      `json:"sort_order"`
+	CatalogSourcePriority *int     `json:"catalog_source_priority"`
+	CatalogSourceRank     *int     `json:"catalog_source_rank"`
 }
 
 type SkillListFilter struct {
@@ -183,24 +190,27 @@ type PublicSkillVersionSummary struct {
 }
 
 type PublicSkill struct {
-	Slug             string                     `json:"slug"`
-	DisplayName      string                     `json:"display_name"`
-	Summary          string                     `json:"summary"`
-	Description      string                     `json:"description"`
-	Category         string                     `json:"category"`
-	Tags             []string                   `json:"tags"`
-	Icon             string                     `json:"icon"`
-	ExamplePrompts   []string                   `json:"example_prompts"`
-	RiskNotes        string                     `json:"risk_notes"`
-	SourceURL        string                     `json:"source_url"`
-	SourceRepository string                     `json:"source_repository"`
-	RepositoryStars  *int64                     `json:"repository_stars"`
-	Featured         bool                       `json:"featured"`
-	CurrentVersion   *PublicSkillVersionSummary `json:"current_version"`
-	Versions         []PublicSkillVersion       `json:"versions,omitempty"`
-	DownloadCount    int64                      `json:"download_count"`
-	PublishedAt      *time.Time                 `json:"published_at"`
-	UpdatedAt        time.Time                  `json:"updated_at"`
+	Slug                  string                     `json:"slug"`
+	DisplayName           string                     `json:"display_name"`
+	Summary               string                     `json:"summary"`
+	Description           string                     `json:"description"`
+	Category              string                     `json:"category"`
+	Tags                  []string                   `json:"tags"`
+	Icon                  string                     `json:"icon"`
+	ExamplePrompts        []string                   `json:"example_prompts"`
+	RiskNotes             string                     `json:"risk_notes"`
+	OriginURL             string                     `json:"origin_url"`
+	SourceURL             string                     `json:"source_url"`
+	SourceRepository      string                     `json:"source_repository"`
+	RepositoryStars       *int64                     `json:"repository_stars"`
+	Featured              bool                       `json:"featured"`
+	CatalogSourcePriority int                        `json:"catalog_source_priority"`
+	CatalogSourceRank     *int                       `json:"catalog_source_rank,omitempty"`
+	CurrentVersion        *PublicSkillVersionSummary `json:"current_version"`
+	Versions              []PublicSkillVersion       `json:"versions,omitempty"`
+	DownloadCount         int64                      `json:"download_count"`
+	PublishedAt           *time.Time                 `json:"published_at"`
+	UpdatedAt             time.Time                  `json:"updated_at"`
 }
 
 type PublicSkillListResult struct {
@@ -344,6 +354,13 @@ func normalizeSkillInput(input SkillInput) (SkillInput, error) {
 	input.Category = strings.ToLower(strings.TrimSpace(input.Category))
 	input.Icon = strings.TrimSpace(input.Icon)
 	input.RiskNotes = strings.TrimSpace(input.RiskNotes)
+	if input.OriginURL != nil {
+		originURL, err := normalizeSkillOriginURL(*input.OriginURL)
+		if err != nil {
+			return input, ErrSkillInvalid.WithMetadata(map[string]string{"origin_url": "must be a public HTTPS URL without credentials or fragments"})
+		}
+		input.OriginURL = &originURL
+	}
 	if input.SourceURL != nil {
 		sourceURL := strings.TrimSpace(*input.SourceURL)
 		normalizedSourceURL, _, err := normalizeSkillSourceURL(sourceURL)
@@ -358,12 +375,32 @@ func normalizeSkillInput(input SkillInput) (SkillInput, error) {
 		utf8.RuneCountInString(input.Icon) > 160 || utf8.RuneCountInString(input.RiskNotes) > 10_000 {
 		return input, ErrSkillInvalid
 	}
+	if input.CatalogSourcePriority != nil && (*input.CatalogSourcePriority < 0 || *input.CatalogSourcePriority > 1000000) {
+		return input, ErrSkillInvalid.WithMetadata(map[string]string{"catalog_source_priority": "must be between 0 and 1000000"})
+	}
+	if input.CatalogSourceRank != nil && *input.CatalogSourceRank <= 0 {
+		return input, ErrSkillInvalid.WithMetadata(map[string]string{"catalog_source_rank": "must be positive"})
+	}
 	input.Tags = normalizeSkillStrings(input.Tags, 20, 40, true)
 	input.ExamplePrompts = normalizeSkillStrings(input.ExamplePrompts, 10, 500, false)
 	if input.Tags == nil || input.ExamplePrompts == nil {
 		return input, ErrSkillInvalid
 	}
 	return input, nil
+}
+
+func normalizeSkillOriginURL(raw string) (string, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return "", nil
+	}
+	parsed, err := url.Parse(raw)
+	if err != nil || parsed.Scheme != "https" || parsed.Hostname() == "" || parsed.User != nil || parsed.Fragment != "" || len(raw) > 2048 {
+		return "", ErrSkillInvalid
+	}
+	parsed.Scheme = "https"
+	parsed.Host = strings.ToLower(parsed.Host)
+	return parsed.String(), nil
 }
 
 func normalizeSkillStrings(values []string, maxItems, maxRunes int, lower bool) []string {
@@ -399,12 +436,21 @@ func skillFromInput(input SkillInput, actorID *int64) *Skill {
 		sourceURL = *input.SourceURL
 	}
 	_, sourceRepository, _ := normalizeSkillSourceURL(sourceURL)
+	originURL := ""
+	if input.OriginURL != nil {
+		originURL = *input.OriginURL
+	}
+	catalogPriority := 0
+	if input.CatalogSourcePriority != nil {
+		catalogPriority = *input.CatalogSourcePriority
+	}
 	return &Skill{
 		Slug: input.Slug, DisplayName: input.DisplayName, Summary: input.Summary,
 		Description: input.Description, Category: input.Category, Tags: input.Tags,
 		Icon: input.Icon, ExamplePrompts: input.ExamplePrompts, RiskNotes: input.RiskNotes,
-		SourceURL: sourceURL, SourceRepository: sourceRepository,
+		OriginURL: originURL, SourceURL: sourceURL, SourceRepository: sourceRepository,
 		Status: SkillStatusDraft, Featured: input.Featured, SortOrder: input.SortOrder,
+		CatalogSourcePriority: catalogPriority, CatalogSourceRank: input.CatalogSourceRank,
 		CreatedBy: actorID, UpdatedBy: actorID,
 	}
 }
@@ -414,6 +460,16 @@ func applySkillInput(skill *Skill, input SkillInput, actorID *int64) {
 	skill.Summary, skill.Description, skill.Category = input.Summary, input.Description, input.Category
 	skill.Tags, skill.Icon, skill.ExamplePrompts = input.Tags, input.Icon, input.ExamplePrompts
 	skill.RiskNotes, skill.Featured, skill.SortOrder = input.RiskNotes, input.Featured, input.SortOrder
+	if input.OriginURL != nil {
+		skill.OriginURL = *input.OriginURL
+	}
+	if input.CatalogSourcePriority != nil {
+		skill.CatalogSourcePriority = *input.CatalogSourcePriority
+	}
+	if input.CatalogSourceRank != nil {
+		rank := *input.CatalogSourceRank
+		skill.CatalogSourceRank = &rank
+	}
 	if input.SourceURL != nil {
 		sourceURL := *input.SourceURL
 		_, sourceRepository, _ := normalizeSkillSourceURL(sourceURL)
@@ -824,9 +880,10 @@ func publicSkillFromModel(skill *Skill, includeVersions bool) PublicSkill {
 		Slug: skill.Slug, DisplayName: skill.DisplayName, Summary: skill.Summary,
 		Description: skill.Description, Category: skill.Category, Tags: skill.Tags,
 		Icon: skill.Icon, ExamplePrompts: skill.ExamplePrompts, RiskNotes: skill.RiskNotes,
-		SourceURL: skill.SourceURL, SourceRepository: skill.SourceRepository,
+		OriginURL: skill.OriginURL, SourceURL: skill.SourceURL, SourceRepository: skill.SourceRepository,
 		RepositoryStars: skill.RepositoryStars,
-		Featured:        skill.Featured, DownloadCount: skill.DownloadCount,
+		Featured:        skill.Featured, CatalogSourcePriority: skill.CatalogSourcePriority,
+		CatalogSourceRank: skill.CatalogSourceRank, DownloadCount: skill.DownloadCount,
 		PublishedAt: skill.PublishedAt, UpdatedAt: skill.UpdatedAt,
 	}
 	if skill.CurrentVersion != nil {

@@ -40,6 +40,9 @@ func TestBindChatPrincipalContextMarksWebChatRequest(t *testing.T) {
 	webChat, ok := c.Request.Context().Value(ctxkey.WebChat).(bool)
 	require.True(t, ok)
 	require.True(t, webChat)
+	preference, ok := c.Request.Context().Value(ctxkey.OpenAIServiceTierPreference).(string)
+	require.True(t, ok)
+	require.Equal(t, service.ServiceTierPreferenceStandard, preference)
 }
 
 func TestBindChatPrincipalContextRejectsPrincipalOutsideWebChatIngress(t *testing.T) {

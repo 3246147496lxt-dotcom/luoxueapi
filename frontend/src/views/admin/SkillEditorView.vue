@@ -207,6 +207,20 @@
                 />
               </div>
               <div class="skill-editor-fields__wide">
+                <label for="skill-origin-url" class="input-label">
+                  {{ t('admin.skills.editor.fields.originUrl') }}
+                </label>
+                <input
+                  id="skill-origin-url"
+                  v-model="draft.origin_url"
+                  type="url"
+                  class="input"
+                  :disabled="isArchived"
+                  :placeholder="t('admin.skills.editor.fields.originUrlPlaceholder')"
+                />
+                <p class="input-hint">{{ t('admin.skills.editor.fields.originUrlHint') }}</p>
+              </div>
+              <div class="skill-editor-fields__wide">
                 <label for="skill-source-url" class="input-label">
                   {{ t('admin.skills.editor.fields.sourceUrl') }}
                 </label>
@@ -659,6 +673,7 @@ function emptyDraft(): CreateSkillRequest {
     category: '',
     tags: [],
     icon: '',
+    origin_url: '',
     source_url: '',
     example_prompts: [],
     risk_notes: '',
@@ -676,6 +691,7 @@ function buildPayload(): CreateSkillRequest {
     category: draft.category.trim(),
     tags: uniqueValues(tagsText.value),
     icon: draft.icon.trim(),
+    origin_url: draft.origin_url?.trim() || '',
     source_url: draft.source_url?.trim() || '',
     example_prompts: [...(draft.example_prompts ?? [])],
     risk_notes: draft.risk_notes ?? '',
@@ -694,6 +710,7 @@ function applySkill(nextSkill: AdminSkill): void {
     category: nextSkill.category ?? '',
     tags: nextSkill.tags ?? [],
     icon: nextSkill.icon ?? '',
+    origin_url: nextSkill.origin_url ?? '',
     source_url: nextSkill.source_url ?? '',
     example_prompts: [...(nextSkill.example_prompts ?? [])],
     risk_notes: nextSkill.risk_notes ?? '',

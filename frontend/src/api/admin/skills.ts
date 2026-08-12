@@ -56,12 +56,15 @@ export interface AdminSkill {
   category: string
   tags: string[]
   icon: string
+  origin_url?: string
   source_url?: string
   example_prompts?: string[]
   risk_notes?: string
   status: SkillStatus
   featured: boolean
   sort_order: number
+  catalog_source_priority: number
+  catalog_source_rank?: number | null
   current_version_id: number | null
   current_version: AdminSkillVersion | null
   latest_version?: AdminSkillVersion | null
@@ -96,11 +99,14 @@ export interface CreateSkillRequest {
   category: string
   tags: string[]
   icon: string
+  origin_url?: string
   source_url?: string
   example_prompts?: string[]
   risk_notes?: string
   featured: boolean
   sort_order: number
+  catalog_source_priority?: number
+  catalog_source_rank?: number | null
 }
 
 export type UpdateSkillRequest = CreateSkillRequest

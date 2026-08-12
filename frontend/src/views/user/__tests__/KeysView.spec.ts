@@ -8,6 +8,7 @@ import KeysView from '../KeysView.vue'
 const {
   listKeys,
   toggleStatus,
+  updateKey,
   getPublicSettings,
   getDashboardApiKeysUsage,
   getAvailableGroups,
@@ -20,6 +21,7 @@ const {
 } = vi.hoisted(() => ({
   listKeys: vi.fn(),
   toggleStatus: vi.fn(),
+  updateKey: vi.fn(),
   getPublicSettings: vi.fn(),
   getDashboardApiKeysUsage: vi.fn(),
   getAvailableGroups: vi.fn(),
@@ -104,13 +106,19 @@ const messages: Record<string, string> = {
   'keys.workspaceKeyInfo': 'Key Information',
   'keys.workspacePageOf': 'Page {page} of {total}',
   'keys.workspaceQuotaProgress': 'Quota Usage Progress',
+  'keys.serviceTierEnableTitle': 'Enable Fast mode?',
+  'keys.serviceTierEnableConfirmMessage': 'Priority costs more',
+  'keys.serviceTierEnableConfirm': 'Enable Fast mode',
+  'keys.serviceTierEnabledSuccess': 'Fast mode enabled',
+  'keys.serviceTierDisabledSuccess': 'Fast mode disabled',
+  'keys.serviceTierUpdateFailed': 'Fast mode update failed',
 }
 
 vi.mock('@/api', () => ({
   keysAPI: {
     list: listKeys,
     create: vi.fn(),
-    update: vi.fn(),
+    update: updateKey,
     delete: vi.fn(),
     toggleStatus,
   },
@@ -243,6 +251,7 @@ const ApiKeyInspectorStub = {
     'publicSettings',
     'copied',
     'statusUpdating',
+    'serviceTierUpdating',
     'now',
     'showCcsImport',
     'mode',
@@ -251,6 +260,7 @@ const ApiKeyInspectorStub = {
   emits: [
     'copy-key',
     'toggle-status',
+    'toggle-service-tier',
     'change-group',
     'reset-quota',
     'reset-rate-limit',
@@ -265,7 +275,14 @@ const ApiKeyInspectorStub = {
       :data-key-id="apiKey.id"
       :data-key-name="apiKey.name"
       :data-mode="mode"
-    />
+      :data-service-tier="apiKey.service_tier_preference || 'standard'"
+    >
+      <button
+        type="button"
+        data-test="inspector-service-tier-toggle"
+        @click="$emit('toggle-service-tier', apiKey)"
+      />
+    </div>
   `,
 }
 
@@ -277,6 +294,20 @@ const ApiKeyDetailSheetStub = {
     <div v-if="show" data-test="detail-sheet-stub">
       <button data-test="detail-sheet-close" @click="$emit('close')">close</button>
       <slot />
+    </div>
+  `,
+}
+
+const ConfirmDialogStub = {
+  name: 'ConfirmDialog',
+  props: ['show', 'title', 'message', 'confirmText', 'cancelText'],
+  emits: ['confirm', 'cancel'],
+  template: `
+    <div v-if="show" data-test="confirm-dialog-stub">
+      <span data-test="confirm-dialog-title">{{ title }}</span>
+      <span data-test="confirm-dialog-message">{{ message }}</span>
+      <button data-test="confirm-dialog-confirm" @click="$emit('confirm')">{{ confirmText }}</button>
+      <button data-test="confirm-dialog-cancel" @click="$emit('cancel')">{{ cancelText }}</button>
     </div>
   `,
 }
@@ -308,7 +339,7 @@ const mountView = async ({ inlineInspector = true } = {}): Promise<VueWrapper> =
         AppLayout: { name: 'AppLayout', props: ['variant'], template: '<div><slot /></div>' },
         Pagination: PaginationStub,
         BaseDialog: true,
-        ConfirmDialog: true,
+        ConfirmDialog: ConfirmDialogStub,
         EmptyState: EmptyStateStub,
         Select: SelectStub,
         SearchInput: SearchInputStub,
@@ -338,6 +369,7 @@ describe('user KeysView workspace integration', () => {
     for (const mock of [
       listKeys,
       toggleStatus,
+      updateKey,
       getPublicSettings,
       getDashboardApiKeysUsage,
       getAvailableGroups,
@@ -351,6 +383,7 @@ describe('user KeysView workspace integration', () => {
 
     listKeys.mockResolvedValue(keyResponse(createKeySet()))
     toggleStatus.mockResolvedValue(undefined)
+    updateKey.mockResolvedValue(undefined)
     getPublicSettings.mockResolvedValue({})
     getDashboardApiKeysUsage.mockImplementation(async (keyIds: number[]) => ({
       stats: Object.fromEntries(keyIds.map((id) => [String(id), {
@@ -465,6 +498,109 @@ describe('user KeysView workspace integration', () => {
 
     expect(wrapper.find('[data-test="detail-sheet-stub"]').exists()).toBe(false)
     expect(wrapper.get('[data-test="api-key-workspace-row-2"]').attributes('aria-selected')).toBe('true')
+  })
+
+  it('confirms enabling Fast mode before updating an OpenAI key preference', async () => {
+    const openAiKey = createApiKey({
+      group_id: 42,
+      group: {
+        id: 42,
+        name: 'OpenAI',
+        platform: 'openai',
+        subscription_type: 'standard',
+        rate_multiplier: 1,
+      } as ApiKey['group'],
+    })
+    listKeys.mockResolvedValue(keyResponse([openAiKey]))
+    const wrapper = await mountView()
+
+    await inlineInspector(wrapper).get('[data-test="inspector-service-tier-toggle"]').trigger('click')
+    expect(updateKey).not.toHaveBeenCalled()
+
+    const dialog = wrapper.get('[data-test="confirm-dialog-stub"]')
+    expect(dialog.get('[data-test="confirm-dialog-message"]').text()).toContain('Priority costs more')
+    await dialog.get('[data-test="confirm-dialog-confirm"]').trigger('click')
+    await flushPromises()
+
+    expect(updateKey).toHaveBeenCalledWith(1, {
+      service_tier_preference: 'priority',
+    })
+    expect(showSuccess).toHaveBeenCalledWith('Fast mode enabled')
+  })
+
+  it('leaves Fast mode unchanged when the enable confirmation is cancelled', async () => {
+    const openAiKey = createApiKey({
+      group_id: 42,
+      group: {
+        id: 42,
+        name: 'OpenAI',
+        platform: 'openai',
+        subscription_type: 'standard',
+        rate_multiplier: 1,
+      } as ApiKey['group'],
+    })
+    listKeys.mockResolvedValue(keyResponse([openAiKey]))
+    const wrapper = await mountView()
+
+    await inlineInspector(wrapper).get('[data-test="inspector-service-tier-toggle"]').trigger('click')
+    const dialog = wrapper.get('[data-test="confirm-dialog-stub"]')
+    await dialog.get('[data-test="confirm-dialog-cancel"]').trigger('click')
+    await flushPromises()
+
+    expect(updateKey).not.toHaveBeenCalled()
+    expect(wrapper.find('[data-test="confirm-dialog-stub"]').exists()).toBe(false)
+    expect(inlineInspector(wrapper).attributes('data-service-tier')).toBe('standard')
+  })
+
+  it('disables Fast mode directly without a confirmation dialog', async () => {
+    const openAiKey = createApiKey({
+      service_tier_preference: 'priority',
+      group_id: 42,
+      group: {
+        id: 42,
+        name: 'OpenAI',
+        platform: 'openai',
+        subscription_type: 'standard',
+        rate_multiplier: 1,
+      } as ApiKey['group'],
+    })
+    listKeys.mockResolvedValue(keyResponse([openAiKey]))
+    const wrapper = await mountView()
+
+    await inlineInspector(wrapper).get('[data-test="inspector-service-tier-toggle"]').trigger('click')
+    await flushPromises()
+
+    expect(updateKey).toHaveBeenCalledWith(1, {
+      service_tier_preference: 'standard',
+    })
+    expect(wrapper.find('[data-test="confirm-dialog-stub"]').exists()).toBe(false)
+  })
+
+  it('keeps the previous Fast mode value and reports an update failure', async () => {
+    const openAiKey = createApiKey({
+      group_id: 42,
+      group: {
+        id: 42,
+        name: 'OpenAI',
+        platform: 'openai',
+        subscription_type: 'standard',
+        rate_multiplier: 1,
+      } as ApiKey['group'],
+    })
+    listKeys.mockResolvedValue(keyResponse([openAiKey]))
+    updateKey.mockRejectedValueOnce(new Error('network unavailable'))
+    const wrapper = await mountView()
+
+    await inlineInspector(wrapper).get('[data-test="inspector-service-tier-toggle"]').trigger('click')
+    await wrapper.get('[data-test="confirm-dialog-confirm"]').trigger('click')
+    await flushPromises()
+
+    expect(updateKey).toHaveBeenCalledWith(1, {
+      service_tier_preference: 'priority',
+    })
+    expect(showError).toHaveBeenCalledWith('Fast mode update failed')
+    expect(showSuccess).not.toHaveBeenCalledWith('Fast mode enabled')
+    expect(inlineInspector(wrapper).attributes('data-service-tier')).toBe('standard')
   })
 
   it('forwards page, page size, filters, and explicit sort to list requests', async () => {

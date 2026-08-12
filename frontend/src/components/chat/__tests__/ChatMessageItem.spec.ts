@@ -36,9 +36,15 @@ function assistantMessage(overrides: Partial<ChatMessage> = {}): ChatMessage {
   }
 }
 
-function mountMessage(message: ChatMessage) {
+interface MessageStateProps {
+  retryable?: boolean
+  retrying?: boolean
+  announceFailure?: boolean
+}
+
+function mountMessage(message: ChatMessage, state: MessageStateProps = {}) {
   return mount(ChatMessageItem, {
-    props: { message },
+    props: { message, ...state },
     global: {
       stubs: {
         Icon: IconStub,
@@ -236,10 +242,98 @@ describe('ChatMessageItem safe Markdown rendering', () => {
       expect(wrapper.find('.chat-message__plain').exists()).toBe(false)
       expect(wrapper.find('.chat-message__markdown').exists()).toBe(false)
       expect(wrapper.find('.chat-message__actions').exists()).toBe(false)
-      if (status === 'error') expect(wrapper.find('[role="alert"]').exists()).toBe(true)
+      if (status === 'error') {
+        expect(wrapper.get('.chat-message__failure').attributes('role')).toBe('group')
+        expect(wrapper.find('[role="alert"]').exists()).toBe(false)
+      }
       if (status === 'stopped') expect(wrapper.get('.chat-message__status').text()).toBe('chat.message.stopped')
     },
   )
+
+  it.each([
+    ['Unauthorized', 'chat.errors.sessionExpired'],
+    ['Forbidden', 'chat.errors.permissionDenied'],
+    ['Bad Gateway', 'chat.errors.serviceUnavailable'],
+  ] as const)('不会展示历史消息中的原始 HTTP 错误 %s', (raw, expectedKey) => {
+    const wrapper = mountMessage(assistantMessage({
+      status: 'error',
+      errorMessage: raw,
+    }), { retryable: true })
+
+    expect(wrapper.get('.chat-message__error').text()).toContain(expectedKey)
+    expect(wrapper.find('[role="alert"]').exists()).toBe(false)
+    expect(wrapper.text()).not.toContain(raw)
+  })
+
+  it('只有本次实时失败才通过 alert 公告，历史失败保持安静', () => {
+    const message = assistantMessage({
+      status: 'error',
+      errorCode: 'HTTP_502',
+      errorMessage: 'Bad Gateway',
+    })
+    const historical = mountMessage(message, { retryable: true })
+    const live = mountMessage(message, { retryable: true, announceFailure: true })
+
+    expect(historical.find('[role="alert"]').exists()).toBe(false)
+    expect(live.get('.chat-message__error').attributes('role')).toBe('alert')
+    expect(live.get('[role="alert"]').text()).toContain('chat.errors.serviceUnavailable')
+  })
+
+  it('可恢复失败在消息内显示文字重试按钮并触发 retry', async () => {
+    const wrapper = mountMessage(assistantMessage({
+      content: '已经生成的部分内容',
+      status: 'error',
+      errorCode: 'HTTP_502',
+      errorMessage: 'Bad Gateway',
+    }), { retryable: true })
+
+    expect(wrapper.get('.chat-message__markdown').text()).toBe('已经生成的部分内容')
+    expect(wrapper.get('.chat-message__failure').element.closest('article')).toBe(
+      wrapper.get('article').element,
+    )
+    expect(wrapper.get('.chat-message__retry-button').text()).toBe('chat.actions.retryFailed')
+    expect(wrapper.findAll('.chat-message__icon-button')).toHaveLength(1)
+
+    await wrapper.get('.chat-message__retry-button').trigger('click')
+    expect(wrapper.emitted('retry')).toHaveLength(1)
+  })
+
+  it('重试中保留失败按钮并呈现不可重复提交的忙碌状态', async () => {
+    const wrapper = mountMessage(assistantMessage({
+      status: 'error',
+      errorCode: 'NETWORK_ERROR',
+      errorMessage: 'Failed to fetch',
+    }), { retrying: true })
+
+    const button = wrapper.get<HTMLButtonElement>('.chat-message__retry-button')
+    expect(button.attributes('disabled')).toBeDefined()
+    expect(button.attributes('aria-busy')).toBe('true')
+    expect(button.text()).toBe('chat.actions.retrying')
+
+    await button.trigger('click')
+    expect(wrapper.emitted('retry')).toBeUndefined()
+  })
+
+  it('不可恢复和已被替代的失败不显示重试或旧错误', () => {
+    const forbidden = mountMessage(assistantMessage({
+      status: 'error',
+      errorCode: 'HTTP_403',
+      errorMessage: 'Forbidden',
+    }), { retryable: true })
+    expect(forbidden.find('.chat-message__retry-button').exists()).toBe(false)
+    expect(forbidden.find('.chat-message__actions').exists()).toBe(false)
+
+    const superseded = mountMessage(assistantMessage({
+      status: 'error',
+      errorCode: 'HTTP_502',
+      errorMessage: 'Bad Gateway',
+      excludedFromContext: true,
+      supersededByMessageId: 'assistant-2',
+    }), { retryable: true })
+    expect(superseded.find('[role="alert"]').exists()).toBe(false)
+    expect(superseded.find('.chat-message__retry-button').exists()).toBe(false)
+    expect(superseded.text()).not.toContain('Bad Gateway')
+  })
 
   it('不会为 user streaming 状态渲染 assistant 呼吸圆点', () => {
     const wrapper = mountMessage({

@@ -25,6 +25,9 @@
       </template>
 
       <template #actions>
+        <div class="skills-local-navigation">
+          <SkillMarketNav active="catalog" />
+        </div>
         <section class="skills-workflow-strip" aria-labelledby="skills-workflow-title">
           <div class="skills-workflow-strip__icon" aria-hidden="true">
             <Icon name="cube" size="md" />
@@ -274,6 +277,7 @@ import Toggle from '@/components/common/Toggle.vue'
 import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
 import Icon from '@/components/icons/Icon.vue'
 import SkillStatusBadge from '@/components/admin/skills/SkillStatusBadge.vue'
+import SkillMarketNav from '@/components/admin/skills/SkillMarketNav.vue'
 
 type FeaturedFilter = 'all' | boolean
 type PendingAction = { kind: 'publish' | 'archive'; skill: AdminSkill }

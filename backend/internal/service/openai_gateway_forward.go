@@ -443,6 +443,44 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		}
 	}
 
+	// Materialize every model/body transform before deciding whether the
+	// API-key Fast default applies. This keeps the gate tied to the final
+	// upstream model and lets us exclude image-generation requests explicitly.
+	if bodyModified {
+		if requestView.HasPatches() {
+			patchedBody, patchErr := requestView.ApplyPatches()
+			if patchErr != nil {
+				return nil, fmt.Errorf("apply request normalization before service tier: %w", patchErr)
+			}
+			body = patchedBody
+			requestView = newOpenAIRequestView(body)
+			reqBody = nil
+			bodyModified = false
+		}
+		if bodyModified {
+			decoded, decodeErr := ensureReqBody()
+			if decodeErr != nil {
+				return nil, decodeErr
+			}
+			body, err = marshalOpenAIUpstreamJSON(decoded)
+			if err != nil {
+				return nil, fmt.Errorf("serialize request body before service tier: %w", err)
+			}
+			requestView = newOpenAIRequestView(body)
+			reqBody = nil
+			bodyModified = false
+		}
+	}
+	if !imageIntent {
+		if updated, injected, injectErr := s.injectDefaultOpenAIServiceTier(ctx, c, account, upstreamModel, body); injectErr != nil {
+			return nil, fmt.Errorf("inject default service tier: %w", injectErr)
+		} else if injected {
+			body = updated
+			requestView = newOpenAIRequestView(body)
+			logger.LegacyPrintf("service.openai_gateway", "[OpenAI] Injected default service_tier=priority account=%d model=%s", account.ID, upstreamModel)
+		}
+	}
+
 	if rawTier := requestView.ServiceTier; rawTier != "" {
 		if normTier := normalizedOpenAIServiceTierValue(rawTier); normTier != "" {
 			action, errMsg := s.evaluateOpenAIFastPolicy(ctx, account, upstreamModel, normTier)

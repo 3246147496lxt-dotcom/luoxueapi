@@ -486,6 +486,32 @@ func TestLoadDefaultBatchImageQueueDisabled(t *testing.T) {
 	require.False(t, cfg.BatchImage.QueueEnabled)
 }
 
+func TestLoadDefaultSkillImportConfig(t *testing.T) {
+	resetViperWithJWTSecret(t)
+
+	cfg, err := Load()
+	require.NoError(t, err)
+	require.True(t, cfg.SkillImport.Enabled)
+	require.True(t, cfg.SkillImport.WorkerEnabled)
+	require.Equal(t, 2, cfg.SkillImport.WorkerConcurrency)
+	require.Equal(t, 1, cfg.SkillImport.PerHostConcurrency)
+	require.Equal(t, 5, cfg.SkillImport.MaxAttempts)
+	require.Equal(t, 24, cfg.SkillImport.MaxRunDurationHours)
+}
+
+func TestLoadSkillImportConfigFromEnv(t *testing.T) {
+	resetViperWithJWTSecret(t)
+	t.Setenv("SKILL_IMPORT_WORKER_CONCURRENCY", "4")
+	t.Setenv("SKILL_IMPORT_PER_HOST_CONCURRENCY", "2")
+	t.Setenv("SKILL_IMPORT_GITHUB_TOKEN", "  token-value  ")
+
+	cfg, err := Load()
+	require.NoError(t, err)
+	require.Equal(t, 4, cfg.SkillImport.WorkerConcurrency)
+	require.Equal(t, 2, cfg.SkillImport.PerHostConcurrency)
+	require.Equal(t, "token-value", cfg.SkillImport.GitHubToken)
+}
+
 func TestLoadIdempotencyConfigFromEnv(t *testing.T) {
 	resetViperWithJWTSecret(t)
 	t.Setenv("IDEMPOTENCY_OBSERVE_ONLY", "false")

@@ -39,6 +39,20 @@
         <path d="M9 16V6.414L5.707 9.707a1 1 0 1 1-1.414-1.414l5-5 .076-.069a1 1 0 0 1 1.338.069l5 5 .068.076a1 1 0 0 1-1.406 1.406l-.076-.068L11 6.414V16a1 1 0 1 1-2 0" />
       </g>
     </template>
+    <template v-else-if="props.name === 'chatComposerExpand'">
+      <path
+        fill="currentColor"
+        stroke="none"
+        d="M4.335 11a.665.665 0 0 1 1.33 0v3.335H9l.134.014a.665.665 0 0 1 0 1.302L9 15.665H5A.665.665 0 0 1 4.335 15zm10-2V5.665H11a.665.665 0 0 1 0-1.33h4l.134.014c.303.062.531.33.531.651v4a.665.665 0 1 1-1.33 0"
+      />
+    </template>
+    <template v-else-if="props.name === 'chatComposerCollapse'">
+      <path
+        fill="currentColor"
+        stroke="none"
+        d="M7.335 16v-3.335H4a.665.665 0 1 1 0-1.33h4c.367 0 .665.298.665.665v4a.665.665 0 0 1-1.33 0m4-12a.665.665 0 1 1 1.33 0v3.335H16l.134.014a.665.665 0 0 1 0 1.302L16 8.665h-4A.665.665 0 0 1 11.335 8z"
+      />
+    </template>
     <template v-else-if="props.name === 'chatPlus'">
       <g fill="currentColor" stroke="none">
         <path d="M10 2.533a.8.8 0 0 1 .8.8V9.2h5.866a.8.8 0 1 1 0 1.6H10.8v5.866a.8.8 0 1 1-1.6 0V10.8H3.333a.8.8 0 0 1 0-1.6H9.2V3.333a.8.8 0 0 1 .8-.8" />
@@ -137,6 +151,8 @@ const icons = {
   chatMicrophone: '',
   chatVoiceMode: '',
   chatSend: '',
+  chatComposerExpand: '',
+  chatComposerCollapse: '',
   chatPlus: '',
   chatCheck: '',
   chatSidebarCompose: '',
@@ -295,6 +311,7 @@ const chatIconViewBox = computed(() => {
   if (props.name === 'chatHistoryPinSmall') return '0 0 16 16'
   if (
     props.name === 'chatSend'
+    || props.name.startsWith('chatComposer')
     || props.name === 'chatPlus'
     || props.name.startsWith('chatSidebar')
     || props.name.startsWith('chatHistory')

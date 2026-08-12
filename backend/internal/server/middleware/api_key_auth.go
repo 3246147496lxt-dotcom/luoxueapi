@@ -129,7 +129,21 @@ func apiKeyAuthWithSubscription(apiKeyService *service.APIKeyService, subscripti
 		if abortIfAPIKeyGroupNotAllowed(c, apiKey) {
 			return
 		}
+		// Only user-managed keys may opt into the server-side OpenAI default.
+		// Desktop and other internal purposes remain Standard even if a stale
+		// or manually edited database value says otherwise.
+		serviceTierPreference := service.ServiceTierPreferenceStandard
+		if apiKey.Purpose == service.APIKeyPurposeUser {
+			var ok bool
+			serviceTierPreference, ok = service.NormalizeServiceTierPreference(apiKey.ServiceTierPreference)
+			if !ok {
+				// Older/partially migrated records are fail-safe: Standard is the
+				// only value that may reach the gateway as a server default.
+				serviceTierPreference = service.ServiceTierPreferenceStandard
+			}
+		}
 		ctx := context.WithValue(c.Request.Context(), ctxkey.UserID, apiKey.User.ID)
+		ctx = context.WithValue(ctx, ctxkey.OpenAIServiceTierPreference, serviceTierPreference)
 		c.Request = c.Request.WithContext(ctx)
 		billingInfoRequest := c.Request.URL.Path == "/v1/sub2api/billing"
 		// Async image task polling only reads data that already belongs to the
@@ -338,6 +352,9 @@ func BindChatPrincipalBillingContext(
 	}
 
 	ctx := context.WithValue(c.Request.Context(), ctxkey.UserID, apiKey.User.ID)
+	// Internal web-chat principals never participate in the API-key Fast
+	// preference, even if a stale value was attached by an outer middleware.
+	ctx = context.WithValue(ctx, ctxkey.OpenAIServiceTierPreference, service.ServiceTierPreferenceStandard)
 	ctx = context.WithValue(ctx, ctxkey.WebChat, true)
 	c.Request = c.Request.WithContext(ctx)
 	c.Set(string(ContextKeyAPIKey), apiKey)

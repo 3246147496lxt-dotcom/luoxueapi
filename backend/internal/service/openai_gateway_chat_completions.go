@@ -242,6 +242,27 @@ func (s *OpenAIGatewayService) ForwardAsChatCompletions(
 			}
 		}
 	}
+	// The conversion DTO uses omitempty and cannot represent an explicit
+	// null/empty/unknown service_tier. Restore the raw member before applying
+	// the server default so client intent always wins.
+	responsesBody, err = preserveOpenAIServiceTierMember(body, responsesBody)
+	if err != nil {
+		return nil, fmt.Errorf("preserve service_tier across conversion: %w", err)
+	}
+
+	// Apply the API-key default only after all model/body normalization and
+	// before the administrator fast policy. Explicit client service_tier values
+	// remain untouched by the shared helper. Image-generation requests are
+	// excluded even when an account mapping resolves their model to GPT-5.6 Sol.
+	imageIntent := IsImageGenerationIntentForPlatform(openAIResponsesEndpoint, originalModel, body, account.Platform) ||
+		IsImageGenerationIntentForPlatform(openAIResponsesEndpoint, upstreamModel, responsesBody, account.Platform)
+	if !imageIntent {
+		if updatedBody, injected, injectErr := s.injectDefaultOpenAIServiceTier(ctx, c, account, upstreamModel, responsesBody); injectErr != nil {
+			return nil, fmt.Errorf("inject default service tier: %w", injectErr)
+		} else if injected {
+			responsesBody = updatedBody
+		}
+	}
 
 	// 4b. Apply OpenAI fast policy (may filter service_tier or block the request).
 	updatedBody, policyErr := s.applyOpenAIFastPolicyToBody(ctx, account, upstreamModel, responsesBody)
@@ -354,10 +375,9 @@ func (s *OpenAIGatewayService) ForwardAsChatCompletions(
 
 	// Propagate ServiceTier and ReasoningEffort to result for billing
 	if handleErr == nil && result != nil {
-		if responsesReq.ServiceTier != "" {
-			st := responsesReq.ServiceTier
-			result.ServiceTier = &st
-		}
+		// Billing must observe the body after API-key default injection and the
+		// administrator policy, not the pre-policy conversion DTO.
+		result.ServiceTier = extractOpenAIServiceTierFromBody(responsesBody)
 		if responsesReq.Reasoning != nil && responsesReq.Reasoning.Effort != "" {
 			re := responsesReq.Reasoning.Effort
 			result.ReasoningEffort = &re
@@ -386,14 +406,19 @@ func normalizeResponsesBodyServiceTier(body []byte) ([]byte, string, error) {
 	if len(body) == 0 {
 		return body, "", nil
 	}
-	rawServiceTier := gjson.GetBytes(body, "service_tier").String()
+	raw := gjson.GetBytes(body, "service_tier")
+	if !raw.Exists() || raw.Type != gjson.String {
+		return body, "", nil
+	}
+	rawServiceTier := strings.TrimSpace(raw.String())
 	if rawServiceTier == "" {
 		return body, "", nil
 	}
 	normalizedServiceTier := normalizedOpenAIServiceTierValue(rawServiceTier)
 	if normalizedServiceTier == "" {
-		trimmed, err := sjson.DeleteBytes(body, "service_tier")
-		return trimmed, "", err
+		// Unknown values are explicit client input. Keep them untouched; the
+		// upstream remains responsible for reporting whether they are valid.
+		return body, "", nil
 	}
 	if normalizedServiceTier == rawServiceTier {
 		return body, normalizedServiceTier, nil

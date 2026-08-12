@@ -39,13 +39,34 @@
         <span class="chat-message__streaming-dot"></span>
       </div>
 
-      <div v-if="message.status === 'error'" class="chat-message__error" role="alert">
-        <Icon name="exclamationCircle" size="sm" />
-        <span>{{ message.errorMessage || t('chat.errors.requestFailed') }}</span>
+      <div
+        v-if="message.status === 'error' && !message.excludedFromContext"
+        class="chat-message__failure"
+        role="group"
+        :aria-label="t('chat.message.failed')"
+      >
+        <div
+          class="chat-message__error"
+          :role="announceFailure ? 'alert' : undefined"
+        >
+          <Icon name="exclamationCircle" size="sm" aria-hidden="true" />
+          <span>{{ t(errorPresentation.messageKey) }}</span>
+        </div>
+        <button
+          v-if="(retryable || retrying) && errorPresentation.retryable"
+          type="button"
+          class="chat-message__retry-button"
+          :disabled="retrying"
+          :aria-busy="retrying ? 'true' : undefined"
+          @click="$emit('retry')"
+        >
+          <Icon name="refresh" size="sm" aria-hidden="true" />
+          <span>{{ t(retrying ? 'chat.actions.retrying' : 'chat.actions.retryFailed') }}</span>
+        </button>
       </div>
 
       <div
-        v-if="message.role === 'assistant' && message.status !== 'streaming' && (hasRenderableContent || retryable)"
+        v-if="message.role === 'assistant' && message.status !== 'streaming' && (hasRenderableContent || ((retryable || retrying) && message.status !== 'error'))"
         class="chat-message__actions"
       >
         <button
@@ -59,11 +80,13 @@
           <Icon :name="copied ? 'check' : 'copy'" size="sm" />
         </button>
         <button
-          v-if="retryable"
+          v-if="(retryable || retrying) && message.status !== 'error'"
           type="button"
           class="chat-message__icon-button"
-          :title="t('chat.actions.retry')"
-          :aria-label="t('chat.actions.retry')"
+          :title="t(retrying ? 'chat.actions.retrying' : 'chat.actions.retry')"
+          :aria-label="t(retrying ? 'chat.actions.retrying' : 'chat.actions.retry')"
+          :disabled="retrying"
+          :aria-busy="retrying ? 'true' : undefined"
           @click="$emit('retry')"
         >
           <Icon name="refresh" size="sm" />
@@ -80,13 +103,18 @@ import DOMPurify from 'dompurify'
 import { marked, Renderer } from 'marked'
 import ChatMessageAttachments from '@/components/chat/ChatMessageAttachments.vue'
 import Icon from '@/components/icons/Icon.vue'
+import { describeChatMessageError } from '@/features/chat/chatErrorHandler'
 import type { ChatMessage } from '@/types/chat'
 
 const props = withDefaults(defineProps<{
   message: ChatMessage
   retryable?: boolean
+  retrying?: boolean
+  announceFailure?: boolean
 }>(), {
   retryable: false,
+  retrying: false,
+  announceFailure: false,
 })
 
 defineEmits<{
@@ -97,6 +125,7 @@ const { t } = useI18n()
 const copied = ref(false)
 let copiedTimer: ReturnType<typeof setTimeout> | undefined
 const hasRenderableContent = computed(() => props.message.content.trim().length > 0)
+const errorPresentation = computed(() => describeChatMessageError(props.message))
 const showStreamingIndicator = computed(() => (
   props.message.role === 'assistant'
   && props.message.status === 'streaming'
@@ -545,15 +574,61 @@ onBeforeUnmount(() => {
   animation: chat-streaming-breathe 1.2s ease-in-out infinite;
 }
 
+.chat-message__failure {
+  display: flex;
+  align-items: flex-start;
+  flex-wrap: wrap;
+  gap: 10px 14px;
+  margin-top: 8px;
+}
+
 .chat-message__error {
   display: flex;
   align-items: flex-start;
   gap: 7px;
-  margin-top: 8px;
+  min-width: 0;
   color: var(--lx-clay-danger, #b91c1c);
   font-size: var(--workspace-type-body-size);
   font-weight: var(--workspace-type-body-weight);
   line-height: 1.5;
+}
+
+.chat-message__error span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.chat-message__retry-button {
+  display: inline-flex;
+  min-height: 36px;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  border: 1px solid var(--workspace-border);
+  border-radius: 10px;
+  padding: 6px 12px;
+  color: var(--workspace-text);
+  background: transparent;
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 20px;
+  transition: color 150ms ease, background-color 150ms ease, border-color 150ms ease;
+}
+
+.chat-message__retry-button:hover {
+  border-color: var(--workspace-text-secondary);
+  background: var(--chat-message-action-hover);
+}
+
+.chat-message__retry-button:disabled,
+.chat-message__icon-button:disabled {
+  cursor: wait;
+  opacity: 0.6;
+}
+
+.chat-message__retry-button:focus-visible {
+  outline: 2px solid var(--lx-clay-accent);
+  outline-offset: 2px;
 }
 
 .chat-message__actions {
@@ -622,6 +697,12 @@ onBeforeUnmount(() => {
     height: 44px;
   }
 
+}
+
+@media (hover: none) and (pointer: coarse) {
+  .chat-message__retry-button {
+    min-height: 44px;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {

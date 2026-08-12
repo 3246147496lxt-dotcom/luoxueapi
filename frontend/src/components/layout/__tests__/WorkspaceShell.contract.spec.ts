@@ -102,6 +102,13 @@ describe('shared Workspace shell contract', () => {
     }
   })
 
+  it('fills the full Chat shell instead of inheriting the generic 1600px page cap', () => {
+    expect(appLayoutSource).toMatch(
+      /\.app-layout--chat-shell \.app-main-inner\s*\{[^}]*max-width:\s*none;[^}]*margin-right:\s*0 !important;/,
+    )
+    expect(appLayoutSource).toContain('class="app-main-inner mx-auto w-full max-w-[1600px]"')
+  })
+
   it('copies the 768px boundary into distinct narrow-overlay and mobile-drawer classifiers', () => {
     expect(responsiveSource).toContain(
       "'(max-width: 767px) and (hover: none) and (pointer: coarse)'",

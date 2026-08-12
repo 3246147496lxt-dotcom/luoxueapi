@@ -675,6 +675,24 @@ func extractOpenAIServiceTierFromBody(body []byte) *string {
 	return normalizeOpenAIServiceTier(gjson.GetBytes(body, "service_tier").String())
 }
 
+// preserveOpenAIServiceTierMember carries the client's raw service_tier JSON
+// member across protocol conversions.  The compatibility DTOs intentionally
+// use an omitempty string field, so an explicit null/empty value (and unknown
+// values that should be left to the upstream) would otherwise disappear.  A
+// missing member means the server is still allowed to apply the API-key
+// default; any present member remains authoritative, even when a conversion
+// layer synthesized a value from a protocol-specific header.
+func preserveOpenAIServiceTierMember(originalBody, convertedBody []byte) ([]byte, error) {
+	if len(originalBody) == 0 || len(convertedBody) == 0 {
+		return convertedBody, nil
+	}
+	raw := gjson.GetBytes(originalBody, "service_tier")
+	if !raw.Exists() || strings.TrimSpace(raw.Raw) == "" {
+		return convertedBody, nil
+	}
+	return sjson.SetRawBytes(convertedBody, "service_tier", []byte(raw.Raw))
+}
+
 func normalizeOpenAIServiceTier(raw string) *string {
 	value := strings.ToLower(strings.TrimSpace(raw))
 	if value == "" {
@@ -686,7 +704,8 @@ func normalizeOpenAIServiceTier(raw string) *string {
 	// 放过 OpenAI 官方文档定义的所有合法 tier 值：priority/flex/auto/default/scale。
 	// 对 Codex 客户端零影响（Codex 只发 priority 或 flex，见 codex-rs/core/src/client.rs），
 	// 但能让直连 OpenAI SDK 的用户透传 auto/default/scale 以便抓包/调试。
-	// 真未知值仍返回 nil，由 normalizeResponsesBodyServiceTier 从 body 中删除。
+	// 真未知值仍返回 nil；请求体转换层会保留原始 JSON member，避免把
+	// 客户端显式控制误判为“缺失”后再注入默认档位。
 	switch value {
 	case "priority", "flex", "auto", "default", "scale":
 		return &value

@@ -525,6 +525,7 @@ export const useChatStore = defineStore('chat', () => {
   let hydrationPromise: Promise<void> | null = null
   let syncPromise: Promise<void> | null = null
   let syncController: AbortController | null = null
+  let completionPreparationController: AbortController | null = null
   let clearRevision = 0
   let activeConversationSelectionResolved = false
   let activeConversationSelectionRevision = 0
@@ -579,6 +580,8 @@ export const useChatStore = defineStore('chat', () => {
     syncController?.abort()
     syncController = null
     syncPromise = null
+    completionPreparationController?.abort()
+    completionPreparationController = null
     userId.value = null
     conversations.value = []
     activeConversationId.value = null
@@ -1431,6 +1434,17 @@ export const useChatStore = defineStore('chat', () => {
     return chatErrorStatus(error) === 404
   }
 
+  function recordHistorySyncFailure(error: unknown, fallbackMessage: string): void {
+    if (isHistoryUnavailableError(error)) {
+      serverHistoryAvailable.value = false
+      syncStatus.value = 'unavailable'
+      syncError.value = null
+      return
+    }
+    syncStatus.value = browserIsOnline() ? 'error' : 'offline'
+    syncError.value = error instanceof Error ? error.message : fallbackMessage
+  }
+
   function sortMessages(messages: ChatMessage[]): ChatMessage[] {
     const hasCanonicalPositions = messages.every(({ position }) => position !== undefined)
     return messages.sort((left, right) => {
@@ -1646,13 +1660,16 @@ export const useChatStore = defineStore('chat', () => {
   async function fetchConflictConversation(
     conversationId: string,
     signal?: AbortSignal,
+    context?: PersistenceContext,
   ): Promise<ChatServerConversation | null> {
     try {
       const remote = await getChatConversation(conversationId, signal)
+      if (signal?.aborted || (context && !isCurrentPersistenceContext(context))) return null
       const id = applyServerConversation(remote)
       if (id) persistServerMerge([id])
       return remote
     } catch (error) {
+      if (signal?.aborted || (context && !isCurrentPersistenceContext(context))) return null
       if (isNotFoundError(error) && serverHistoryAvailable.value === true) {
         const deletion = applyServerDeletion(conversationId)
         persistServerMerge(
@@ -1670,6 +1687,7 @@ export const useChatStore = defineStore('chat', () => {
     mutation: ChatHistoryOutboxMutation,
     signal?: AbortSignal,
     retryAfterConflict = true,
+    context?: PersistenceContext,
   ): Promise<void> {
     let remote: ChatServerConversation | null = null
     try {
@@ -1701,22 +1719,24 @@ export const useChatStore = defineStore('chat', () => {
           revision: mutation.revision ?? 0,
         }, signal)
       }
+      if (signal?.aborted || (context && !isCurrentPersistenceContext(context))) return
     } catch (error) {
       if (mutation.type === 'create' && isConflictError(error)) {
         remote = await getChatConversation(mutation.conversationId, signal)
+        if (signal?.aborted || (context && !isCurrentPersistenceContext(context))) return
       } else if (
         retryAfterConflict
         && isConflictError(error)
         && mutation.type !== 'create'
       ) {
-        const canonical = await fetchConflictConversation(mutation.conversationId, signal)
+        const canonical = await fetchConflictConversation(mutation.conversationId, signal, context)
         if (!canonical) return
         mutation.revision = canonical.revision
         persist({
           enqueueOutboxMutationIds: [mutation.mutationId],
           syncStateChanged: true,
         })
-        await replayOutboxMutation(mutation, signal, false)
+        await replayOutboxMutation(mutation, signal, false, context)
         return
       } else if (
         mutation.type === 'delete'
@@ -1729,6 +1749,7 @@ export const useChatStore = defineStore('chat', () => {
       }
     }
 
+    if (signal?.aborted || (context && !isCurrentPersistenceContext(context))) return
     const acknowledged = acknowledgeOutbox([mutation.mutationId])
     const upserted: string[] = []
     if (remote) {
@@ -1741,15 +1762,17 @@ export const useChatStore = defineStore('chat', () => {
   async function replayOutbox(
     signal?: AbortSignal,
     conversationId?: string,
+    context?: PersistenceContext,
   ): Promise<void> {
     const snapshot = outbox.value
       .filter((mutation) => !conversationId || mutation.conversationId === conversationId)
       .sort((left, right) => left.createdAt - right.createdAt)
     for (const candidate of snapshot) {
+      if (signal?.aborted || (context && !isCurrentPersistenceContext(context))) return
       const current = outbox.value.find(({ mutationId }) => (
         mutationId === candidate.mutationId
       ))
-      if (current) await replayOutboxMutation(current, signal)
+      if (current) await replayOutboxMutation(current, signal, true, context)
     }
   }
 
@@ -1780,14 +1803,7 @@ export const useChatStore = defineStore('chat', () => {
         serverHistoryAvailable.value = true
       } catch (error) {
         if (controller.signal.aborted || isAbortError(error)) return
-        if (isHistoryUnavailableError(error)) {
-          syncStatus.value = 'unavailable'
-          serverHistoryAvailable.value = false
-          syncError.value = null
-          return
-        }
-        syncStatus.value = browserIsOnline() ? 'error' : 'offline'
-        syncError.value = error instanceof Error ? error.message : 'Unable to synchronize history.'
+        recordHistorySyncFailure(error, 'Unable to synchronize history.')
       } finally {
         if (syncController === controller) syncController = null
         syncPromise = null
@@ -1801,29 +1817,55 @@ export const useChatStore = defineStore('chat', () => {
       syncStatus.value = 'offline'
       return false
     }
-    await syncHistory()
-    if (
-      serverHistoryAvailable.value !== true
-      || syncStatus.value === 'error'
-      || syncStatus.value === 'offline'
-    ) {
-      return false
-    }
-
+    const context = capturePersistenceContext()
+    if (!isCurrentPersistenceContext(context) || !findConversation(conversationId)) return false
+    completionPreparationController?.abort()
     const controller = new AbortController()
+    completionPreparationController = controller
     try {
-      await replayOutbox(controller.signal, conversationId)
+      await replayOutbox(controller.signal, conversationId, context)
+      if (!isCurrentPersistenceContext(context) || !findConversation(conversationId)) return false
       const remote = await getChatConversation(conversationId, controller.signal)
+      if (!isCurrentPersistenceContext(context) || !findConversation(conversationId)) return false
       const id = applyServerConversation(remote)
       if (id) persistServerMerge([id])
       return Boolean(id)
     } catch (error) {
-      if (!isAbortError(error)) {
-        syncStatus.value = browserIsOnline() ? 'error' : 'offline'
-        syncError.value = error instanceof Error ? error.message : 'Unable to prepare conversation.'
+      if (
+        !controller.signal.aborted
+        && !isAbortError(error)
+        && isCurrentPersistenceContext(context)
+      ) {
+        recordHistorySyncFailure(error, 'Unable to prepare conversation.')
       }
-      return false
+      // Cloud history is best-effort. As long as this is still the same local
+      // conversation and the browser is online, let /chat/completions make the
+      // independent decision instead of treating sync failure as a hard gate.
+      return !controller.signal.aborted
+        && browserIsOnline()
+        && isCurrentPersistenceContext(context)
+        && Boolean(findConversation(conversationId))
+    } finally {
+      if (completionPreparationController === controller) {
+        completionPreparationController = null
+      }
     }
+  }
+
+  function markCompletionAccepted(
+    conversationId: string,
+    assistantMessageId: string,
+  ): boolean {
+    const conversation = findConversation(conversationId)
+    const assistant = findMessage(conversationId, assistantMessageId)
+    if (!conversation || !assistant || assistant.role !== 'assistant') return false
+    conversation.headMessageId = assistantMessageId
+    conversation.messageCount = Math.max(
+      conversation.messageCount ?? 0,
+      assistant.position ?? conversation.messages.length,
+    )
+    persist({ upsertConversationIds: [conversationId] })
+    return true
   }
 
   async function loadConversationPage(reset = false): Promise<void> {
@@ -1853,12 +1895,7 @@ export const useChatStore = defineStore('chat', () => {
       }
     } catch (error) {
       if (!isCurrentPersistenceContext(context)) return
-      if (isHistoryUnavailableError(error)) {
-        serverHistoryAvailable.value = false
-        syncStatus.value = 'unavailable'
-      } else if (!isAbortError(error)) {
-        syncError.value = error instanceof Error ? error.message : 'Unable to load conversations.'
-      }
+      if (!isAbortError(error)) recordHistorySyncFailure(error, 'Unable to load conversations.')
     } finally {
       if (isCurrentPersistenceContext(context)) loadingConversationPage.value = false
     }
@@ -2098,6 +2135,7 @@ export const useChatStore = defineStore('chat', () => {
     declineLegacyImport,
     syncHistory,
     prepareConversationForCompletion,
+    markCompletionAccepted,
     loadConversationPage,
     searchHistory,
     loadConversationDetail,

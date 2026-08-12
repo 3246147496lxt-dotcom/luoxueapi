@@ -38,7 +38,6 @@ func (s *OpenAIGatewayService) forwardResponsesViaRawChatCompletions(
 	}
 
 	clientStream := responsesReq.Stream
-	serviceTier := extractOpenAIServiceTierFromBody(body)
 	// custom 工具（如 codex 的 exec）降级为 function 工具转发，回程需按名字还原为
 	// custom_tool_call 项，先记下名字集合；tool_search 工具同理，回程还原为
 	// tool_search_call 项；namespace 子工具（如 MCP 工具）摊平转发，回程按映射还原
@@ -72,6 +71,23 @@ func (s *OpenAIGatewayService) forwardResponsesViaRawChatCompletions(
 	if err != nil {
 		return nil, fmt.Errorf("marshal chat completions fallback request: %w", err)
 	}
+	chatBody, err = preserveOpenAIServiceTierMember(body, chatBody)
+	if err != nil {
+		return nil, fmt.Errorf("preserve service_tier across conversion: %w", err)
+	}
+	// Image-generation requests are billed through the image path and do not
+	// carry OpenAI Priority semantics. Re-check both pre- and post-mapping
+	// representations because this fallback is selected before normal routing
+	// knows whether an alias resolves to an image model.
+	imageIntent := IsImageGenerationIntentForPlatform(openAIResponsesEndpoint, originalModel, body, account.Platform) ||
+		IsImageGenerationIntentForPlatform(openAIResponsesEndpoint, upstreamModel, chatBody, account.Platform)
+	if !imageIntent {
+		if updatedBody, injected, injectErr := s.injectDefaultOpenAIServiceTier(ctx, c, account, upstreamModel, chatBody); injectErr != nil {
+			return nil, fmt.Errorf("inject default service tier: %w", injectErr)
+		} else if injected {
+			chatBody = updatedBody
+		}
+	}
 	chatBody, err = s.applyOpenAIFastPolicyToBody(ctx, account, upstreamModel, chatBody)
 	if err != nil {
 		var blocked *OpenAIFastBlockedError
@@ -80,9 +96,9 @@ func (s *OpenAIGatewayService) forwardResponsesViaRawChatCompletions(
 		}
 		return nil, err
 	}
-	if serviceTier == nil {
-		serviceTier = extractOpenAIServiceTierFromBody(chatBody)
-	}
+	// Billing reflects the final body after both the API-key default and admin
+	// policy have run (including any filtering/blocking rewrite).
+	serviceTier := extractOpenAIServiceTierFromBody(chatBody)
 
 	logger.L().Debug("openai responses: forwarding via raw chat completions",
 		zap.Int64("account_id", account.ID),

@@ -13,6 +13,10 @@
   font-family: var(--lx-clay-font-ui);
 }
 
+.skills-local-navigation {
+  margin-bottom: 12px;
+}
+
 .skills-workflow-strip {
   display: grid;
   min-width: 0;

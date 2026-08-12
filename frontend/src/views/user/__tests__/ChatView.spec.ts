@@ -8,7 +8,7 @@ import {
   WORKSPACE_MOBILE_DRAWER_MEDIA_QUERY,
   WORKSPACE_NARROW_SIDEBAR_MEDIA_QUERY,
 } from '@/components/layout/workspaceResponsive'
-import type { ChatAttachment, ChatConversation, ChatMessage } from '@/types/chat'
+import type { ChatAttachment, ChatAttempt, ChatConversation, ChatMessage } from '@/types/chat'
 
 const apiMocks = vi.hoisted(() => ({
   createChatAttemptId: vi.fn(),
@@ -25,21 +25,27 @@ vi.mock('@/api/chat', () => {
   class MockChatAPIError extends Error {
     status: number
     code: string | number | null
+    reason: unknown
     metadata: unknown
+    requestId: string
 
     constructor(
       message: string,
       options: {
         status?: number
         code?: string | number | null
+        reason?: unknown
         metadata?: unknown
+        requestId?: string
       } = {},
     ) {
       super(message)
       this.name = 'ChatAPIError'
       this.status = options.status ?? 0
       this.code = options.code ?? null
+      this.reason = options.reason
       this.metadata = options.metadata
+      this.requestId = options.requestId ?? ''
     }
   }
 
@@ -76,6 +82,7 @@ vi.mock('@/stores/chat', async () => {
     hydrating: false,
     persistenceAvailable: true,
     syncStatus: 'idle' as const,
+    syncError: null as string | null,
     serverHistoryAvailable: true as boolean | null,
     legacyImportRequired: false,
     legacyConversationIds: [] as string[],
@@ -96,6 +103,7 @@ vi.mock('@/stores/chat', async () => {
     loadOlderConversationMessages: vi.fn(),
     recoverAttempt: vi.fn(),
     prepareConversationForCompletion: vi.fn(),
+    markCompletionAccepted: vi.fn(),
     acceptLegacyImport: vi.fn(),
     declineLegacyImport: vi.fn(),
     createConversation: vi.fn(),
@@ -118,10 +126,16 @@ vi.mock('@/stores/chat', async () => {
 
 vi.mock('vue-i18n', async () => {
   const actual = await vi.importActual<typeof import('vue-i18n')>('vue-i18n')
+  const syncMessages: Record<string, string> = {
+    'chat.sync.errorDescription': '云端历史记录同步失败，当前聊天仍可正常使用',
+    'chat.sync.retry': '重新同步',
+    'chat.sync.syncing': '正在同步…',
+    'chat.sync.success': '云端历史记录已同步',
+  }
   return {
     ...actual,
     useI18n: () => ({
-      t: (key: string) => key,
+      t: (key: string) => syncMessages[key] ?? key,
     }),
   }
 })
@@ -327,14 +341,19 @@ const ChatHistoryPanelStub = {
 }
 
 const ChatMessageItemStub = {
-  props: ['message', 'retryable'],
+  props: ['message', 'retryable', 'retrying', 'announceFailure'],
   emits: ['retry'],
   template: `
-    <article :data-message-id="message.id">
+    <article
+      :data-message-id="message.id"
+      :data-announce-failure="String(!!announceFailure)"
+    >
       <button
-        v-if="retryable"
+        v-if="retryable || retrying"
         type="button"
         data-test="retry-message"
+        :disabled="retrying"
+        :aria-busy="retrying ? 'true' : undefined"
         @click="$emit('retry')"
       >
         Retry
@@ -385,6 +404,7 @@ interface ChatStoreHarness {
   hydrating: boolean
   persistenceAvailable: boolean
   syncStatus: 'idle' | 'syncing' | 'offline' | 'error' | 'unavailable'
+  syncError: string | null
   serverHistoryAvailable: boolean | null
   legacyImportRequired: boolean
   legacyConversationIds: string[]
@@ -405,6 +425,7 @@ interface ChatStoreHarness {
   loadOlderConversationMessages: ReturnType<typeof vi.fn>
   recoverAttempt: ReturnType<typeof vi.fn>
   prepareConversationForCompletion: ReturnType<typeof vi.fn>
+  markCompletionAccepted: ReturnType<typeof vi.fn>
   acceptLegacyImport: ReturnType<typeof vi.fn>
   declineLegacyImport: ReturnType<typeof vi.fn>
   createConversation: ReturnType<typeof vi.fn>
@@ -628,6 +649,7 @@ describe('ChatView catalog and hydration gates', () => {
     chatStore.hydrating = false
     chatStore.persistenceAvailable = true
     chatStore.syncStatus = 'idle'
+    chatStore.syncError = null
     chatStore.serverHistoryAvailable = true
     chatStore.legacyImportRequired = false
     chatStore.legacyConversationIds = []
@@ -648,6 +670,15 @@ describe('ChatView catalog and hydration gates', () => {
     chatStore.loadOlderConversationMessages.mockResolvedValue(true)
     chatStore.recoverAttempt.mockResolvedValue(null)
     chatStore.prepareConversationForCompletion.mockResolvedValue(true)
+    chatStore.markCompletionAccepted.mockImplementation((
+      conversationId: string,
+      assistantMessageId: string,
+    ) => {
+      const conversation = chatStore.conversations.find(({ id }) => id === conversationId)
+      if (!conversation) return false
+      conversation.headMessageId = assistantMessageId
+      return true
+    })
     chatStore.acceptLegacyImport.mockReturnValue(0)
     chatStore.declineLegacyImport.mockReturnValue(undefined)
     chatStore.selectConversation.mockImplementation((id: string | null) => {
@@ -1175,6 +1206,191 @@ describe('ChatView catalog and hydration gates', () => {
     const view = await mountView()
 
     expect(view.find('[data-test="chat-persistence-warning"]').exists()).toBe(false)
+  })
+
+  it.each(['error', 'unavailable'] as const)(
+    '云端历史状态为 %s 时显示轻量提示与重新同步，且不泄露原始同步错误',
+    async (syncStatus) => {
+      const rawSyncError = 'Bad Gateway: upstream history database unavailable'
+      chatStore.userId = '7'
+      chatStore.hydrated = true
+      chatStore.persistenceAvailable = true
+      chatStore.syncStatus = syncStatus
+      chatStore.syncError = rawSyncError
+      chatStore.serverHistoryAvailable = syncStatus === 'unavailable' ? false : true
+
+      const view = await mountView()
+      const notice = view.get('[data-test="chat-sync-warning"]')
+      const status = notice.get('[role="status"]')
+      const retry = notice.get('[data-test="chat-sync-retry"]')
+
+      expect(notice.classes()).toContain('chat-sync-notice')
+      expect(notice.classes()).not.toContain('chat-persistence-warning')
+      expect(notice.attributes('role')).toBeUndefined()
+      expect(status.attributes('aria-live')).toBe('polite')
+      expect(status.attributes('aria-atomic')).toBe('true')
+      expect(status.text()).toBe('云端历史记录同步失败，当前聊天仍可正常使用')
+      expect(retry.text()).toContain('重新同步')
+      expect(retry.attributes('aria-label')).toBe('重新同步')
+      expect(notice.text()).not.toContain(rawSyncError)
+    },
+  )
+
+  it('本地持久化不可用时优先显示保存告警并抑制云端同步提示', async () => {
+    chatStore.userId = '7'
+    chatStore.hydrated = true
+    chatStore.persistenceAvailable = false
+    chatStore.syncStatus = 'error'
+    chatStore.syncError = 'Forbidden'
+
+    const view = await mountView()
+
+    expect(view.get('[data-test="chat-persistence-warning"]').attributes('role')).toBe('alert')
+    expect(view.find('[data-test="chat-sync-warning"]').exists()).toBe(false)
+  })
+
+  it('重新同步期间锁定按钮并防止重复触发，失败后继续保留轻量提示', async () => {
+    chatStore.userId = '7'
+    chatStore.hydrated = true
+    chatStore.persistenceAvailable = true
+    chatStore.syncStatus = 'error'
+    chatStore.syncError = 'Initial cloud history failure'
+
+    const view = await mountView()
+    chatStore.syncHistory.mockClear()
+    chatStore.loadConversationPage.mockClear()
+
+    let resolveRetry: (() => void) | undefined
+    chatStore.syncHistory.mockImplementationOnce(() => new Promise<void>((resolve) => {
+      resolveRetry = () => {
+        chatStore.syncStatus = 'error'
+        chatStore.syncError = 'Cloud history still unavailable'
+        resolve()
+      }
+    }))
+
+    const retry = view.get('[data-test="chat-sync-retry"]')
+    const firstClick = retry.trigger('click')
+    const secondClick = retry.trigger('click')
+    await Promise.all([firstClick, secondClick])
+    await nextTick()
+
+    const pendingRetry = view.get('[data-test="chat-sync-retry"]')
+    expect(chatStore.syncHistory).toHaveBeenCalledTimes(1)
+    expect(pendingRetry.attributes('disabled')).toBeDefined()
+    expect(pendingRetry.attributes('aria-busy')).toBe('true')
+    expect(pendingRetry.attributes('aria-label')).toBe('正在同步…')
+    expect(view.get('[data-test="chat-sync-warning"]').text()).toContain('正在同步…')
+
+    resolveRetry?.()
+    await flushPromises()
+    await nextTick()
+
+    const retainedNotice = view.get('[data-test="chat-sync-warning"]')
+    const enabledRetry = retainedNotice.get('[data-test="chat-sync-retry"]')
+    expect(chatStore.loadConversationPage).not.toHaveBeenCalled()
+    expect(retainedNotice.text()).toContain('云端历史记录同步失败，当前聊天仍可正常使用')
+    expect(retainedNotice.text()).not.toContain('Cloud history still unavailable')
+    expect(enabledRetry.attributes('disabled')).toBeUndefined()
+    expect(enabledRetry.attributes('aria-busy')).toBeUndefined()
+  })
+
+  it('云端历史同步失败时仍发送 completion 并完成回答，且保持原同步状态', async () => {
+    const conversation: ChatConversation = {
+      id: 'sync-error-chat-success',
+      userId: '7',
+      title: 'Cloud sync failure does not block chat',
+      model: 'gpt-5',
+      messages: [],
+      createdAt: 1,
+      updatedAt: 1,
+    }
+    const rawSyncError = 'History service returned Bad Gateway'
+    chatStore.userId = '7'
+    chatStore.hydrated = true
+    chatStore.persistenceAvailable = true
+    chatStore.syncStatus = 'error'
+    chatStore.syncError = rawSyncError
+    chatStore.conversations = [conversation]
+    chatStore.activeConversationId = conversation.id
+    chatStore.activeConversation = conversation
+    apiMocks.streamChatCompletion.mockImplementationOnce(async (
+      _request: unknown,
+      handlers: { onAccepted?: () => void; onContent?: (content: string) => void },
+    ) => {
+      handlers.onAccepted?.()
+      handlers.onContent?.('聊天回答仍然成功')
+      return { receivedDone: true, finishReason: 'stop', usage: null, receiptId: null }
+    })
+
+    const view = await mountView()
+    view.findComponent(ChatComposerStub).vm.$emit('send', '同步失败时还能聊天吗？')
+    await flushPromises()
+    await nextTick()
+
+    expect(chatStore.prepareConversationForCompletion).toHaveBeenCalledWith(conversation.id)
+    expect(apiMocks.streamChatCompletion).toHaveBeenCalledTimes(1)
+    expect(chatStore.markCompletionAccepted).toHaveBeenCalledWith(
+      conversation.id,
+      'generated-message-2',
+    )
+    expect(chatStore.appendStreamingContent).toHaveBeenCalledWith(
+      conversation.id,
+      'generated-message-2',
+      '聊天回答仍然成功',
+    )
+    expect(chatStore.finishStreaming).toHaveBeenCalledWith(
+      conversation.id,
+      'generated-message-2',
+      'stop',
+    )
+    expect(chatStore.syncStatus).toBe('error')
+    expect(chatStore.syncError).toBe(rawSyncError)
+    expect(view.find('[data-test="chat-sync-warning"]').exists()).toBe(true)
+  })
+
+  it('completion 请求失败只更新消息失败状态，不覆盖云端历史同步错误', async () => {
+    const conversation: ChatConversation = {
+      id: 'sync-error-chat-error',
+      userId: '7',
+      title: 'Independent error channels',
+      model: 'gpt-5',
+      messages: [],
+      createdAt: 1,
+      updatedAt: 1,
+    }
+    const rawSyncError = 'History sync request was forbidden'
+    chatStore.userId = '7'
+    chatStore.hydrated = true
+    chatStore.persistenceAvailable = true
+    chatStore.syncStatus = 'error'
+    chatStore.syncError = rawSyncError
+    chatStore.conversations = [conversation]
+    chatStore.activeConversationId = conversation.id
+    chatStore.activeConversation = conversation
+    vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    apiMocks.streamChatCompletion.mockRejectedValueOnce(new ChatAPIError('Bad Gateway', {
+      status: 502,
+      code: 502,
+    }))
+
+    const view = await mountView()
+    view.findComponent(ChatComposerStub).vm.$emit('send', '触发独立的 completion 错误')
+    await flushPromises()
+    await nextTick()
+
+    expect(apiMocks.streamChatCompletion).toHaveBeenCalledTimes(1)
+    expect(chatStore.failStreaming).toHaveBeenCalledWith(
+      conversation.id,
+      'generated-message-2',
+      'chat.errors.serviceUnavailable',
+      'HTTP_502',
+    )
+    expect(chatStore.syncStatus).toBe('error')
+    expect(chatStore.syncError).toBe(rawSyncError)
+    expect(view.get('[data-test="chat-sync-warning"]').text())
+      .toContain('云端历史记录同步失败，当前聊天仍可正常使用')
+    expect(view.get('[data-test="chat-sync-warning"]').text()).not.toContain('Bad Gateway')
   })
 
   it('history hydration 恢复目录外模型时不在前端改写，交由发送接口最终校验', async () => {
@@ -1858,6 +2074,7 @@ describe('ChatView catalog and hydration gates', () => {
           content: 'Failed answer',
           createdAt: 2,
           status: 'error',
+          errorCode: 'NETWORK_ERROR',
           errorMessage: 'Request failed',
         },
       ],
@@ -1871,8 +2088,9 @@ describe('ChatView catalog and hydration gates', () => {
     chatStore.activeConversation = conversation
     apiMocks.streamChatCompletion.mockImplementationOnce(async (
       _request: unknown,
-      handlers: { onContent?: (content: string) => void },
+      handlers: { onAccepted?: () => void; onContent?: (content: string) => void },
     ) => {
+      handlers.onAccepted?.()
       handlers.onContent?.('Replacement answer')
       return { receivedDone: true, finishReason: 'stop', usage: null, receiptId: null }
     })
@@ -1929,6 +2147,211 @@ describe('ChatView catalog and hydration gates', () => {
       attemptId: 'attempt-generated',
       signal: expect.any(AbortSignal),
     })
+  })
+
+  it('慢 prepare 期间锁定当前重试，连续触发只创建一个 attempt', async () => {
+    const conversation: ChatConversation = {
+      id: 'slow-retry-conversation',
+      userId: '7',
+      title: 'Slow retry',
+      model: 'gpt-5',
+      messages: [
+        {
+          id: 'user-1',
+          role: 'user',
+          content: 'Original question',
+          createdAt: 1,
+          status: 'complete',
+        },
+        {
+          id: 'assistant-1',
+          role: 'assistant',
+          content: '',
+          createdAt: 2,
+          status: 'error',
+          errorCode: 'NETWORK_ERROR',
+        },
+      ],
+      createdAt: 1,
+      updatedAt: 2,
+    }
+    chatStore.userId = '7'
+    chatStore.hydrated = true
+    chatStore.conversations = [conversation]
+    chatStore.activeConversationId = conversation.id
+    chatStore.activeConversation = conversation
+    let resolvePrepare: ((ready: boolean) => void) | undefined
+    chatStore.prepareConversationForCompletion.mockImplementationOnce(() => (
+      new Promise<boolean>((resolve) => {
+        resolvePrepare = resolve
+      })
+    ))
+
+    const view = await mountView()
+    const failedMessage = view.findAllComponents(ChatMessageItemStub).at(-1)!
+    failedMessage.vm.$emit('retry')
+    failedMessage.vm.$emit('retry')
+    await nextTick()
+
+    const pendingMessage = view.findAllComponents(ChatMessageItemStub).at(-1)!
+    expect(chatStore.prepareConversationForCompletion).toHaveBeenCalledTimes(1)
+    expect(pendingMessage.props('retrying')).toBe(true)
+    expect(pendingMessage.get('[data-test="retry-message"]').attributes('disabled')).toBeDefined()
+    expect(pendingMessage.get('[data-test="retry-message"]').attributes('aria-busy')).toBe('true')
+    expect(chatStore.addMessage).not.toHaveBeenCalled()
+    expect(apiMocks.streamChatCompletion).not.toHaveBeenCalled()
+
+    resolvePrepare?.(true)
+    await flushPromises()
+    await nextTick()
+
+    expect(chatStore.prepareConversationForCompletion).toHaveBeenCalledTimes(1)
+    expect(apiMocks.createChatAttemptId).toHaveBeenCalledTimes(1)
+    expect(chatStore.addMessage).toHaveBeenCalledTimes(1)
+    expect(apiMocks.streamChatCompletion).toHaveBeenCalledTimes(1)
+  })
+
+  it('重试在服务端接纳前失败且无法恢复时回滚 replacement，不替代旧消息', async () => {
+    const conversation: ChatConversation = {
+      id: 'retry-pre-accept-rollback',
+      userId: '7',
+      title: 'Retry rollback',
+      model: 'gpt-5',
+      messages: [
+        {
+          id: 'user-1',
+          role: 'user',
+          content: 'Original question',
+          createdAt: 1,
+          status: 'complete',
+        },
+        {
+          id: 'assistant-1',
+          role: 'assistant',
+          content: '',
+          createdAt: 2,
+          status: 'error',
+          errorCode: 'NETWORK_ERROR',
+        },
+      ],
+      createdAt: 1,
+      updatedAt: 2,
+    }
+    chatStore.userId = '7'
+    chatStore.hydrated = true
+    chatStore.conversations = [conversation]
+    chatStore.activeConversationId = conversation.id
+    chatStore.activeConversation = conversation
+    chatStore.recoverAttempt.mockResolvedValueOnce(null)
+    vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    apiMocks.streamChatCompletion.mockRejectedValueOnce(new ChatAPIError(
+      'Connection lost before acceptance',
+      { code: 'NETWORK_ERROR' },
+    ))
+
+    const view = await mountView()
+    await view.get('[data-test="retry-message"]').trigger('click')
+    await flushPromises()
+    await nextTick()
+
+    expect(chatStore.recoverAttempt).toHaveBeenCalledWith(
+      conversation.id,
+      'generated-message-1',
+    )
+    expect(chatStore.removeMessages).toHaveBeenCalledWith(
+      conversation.id,
+      ['generated-message-1'],
+    )
+    expect(chatStore.updateMessage).not.toHaveBeenCalledWith(
+      conversation.id,
+      'assistant-1',
+      expect.objectContaining({ excludedFromContext: true }),
+    )
+    expect(conversation.messages.map(({ id }) => id)).toEqual(['user-1', 'assistant-1'])
+    expect(conversation.messages[1]).not.toHaveProperty('excludedFromContext')
+    const restoredFailure = view.findAllComponents(ChatMessageItemStub).at(-1)!
+    expect(restoredFailure.props('retryable')).toBe(true)
+    expect(restoredFailure.props('retrying')).toBe(false)
+    expect(restoredFailure.props('announceFailure')).toBe(false)
+  })
+
+  it('重试在服务端接纳前失败但恢复到 attempt 时保留 replacement，并仅此时替代旧消息', async () => {
+    const conversation: ChatConversation = {
+      id: 'retry-pre-accept-recovered',
+      userId: '7',
+      title: 'Recovered retry',
+      model: 'gpt-5',
+      messages: [
+        {
+          id: 'user-1',
+          role: 'user',
+          content: 'Original question',
+          createdAt: 1,
+          status: 'complete',
+        },
+        {
+          id: 'assistant-1',
+          role: 'assistant',
+          content: '',
+          createdAt: 2,
+          status: 'error',
+          errorCode: 'NETWORK_ERROR',
+        },
+      ],
+      createdAt: 1,
+      updatedAt: 2,
+    }
+    const recoveredAttempt: ChatAttempt = {
+      attemptId: 'attempt-generated',
+      conversationId: conversation.id,
+      assistantMessageId: 'generated-message-1',
+      status: 'failed',
+    }
+    chatStore.userId = '7'
+    chatStore.hydrated = true
+    chatStore.conversations = [conversation]
+    chatStore.activeConversationId = conversation.id
+    chatStore.activeConversation = conversation
+    chatStore.recoverAttempt.mockResolvedValueOnce(recoveredAttempt)
+    vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    apiMocks.streamChatCompletion.mockRejectedValueOnce(new ChatAPIError(
+      'Connection lost before acceptance',
+      { code: 'NETWORK_ERROR' },
+    ))
+
+    const view = await mountView()
+    await view.get('[data-test="retry-message"]').trigger('click')
+    await flushPromises()
+    await nextTick()
+
+    expect(chatStore.recoverAttempt).toHaveBeenCalledWith(
+      conversation.id,
+      'generated-message-1',
+    )
+    expect(chatStore.removeMessages).not.toHaveBeenCalledWith(
+      conversation.id,
+      ['generated-message-1'],
+    )
+    expect(chatStore.updateMessage).toHaveBeenCalledWith(
+      conversation.id,
+      'assistant-1',
+      {
+        excludedFromContext: true,
+        supersededByMessageId: 'generated-message-1',
+      },
+    )
+    expect(conversation.messages.map(({ id }) => id)).toEqual([
+      'user-1',
+      'assistant-1',
+      'generated-message-1',
+    ])
+    expect(conversation.messages[1]).toMatchObject({
+      excludedFromContext: true,
+      supersededByMessageId: 'generated-message-1',
+    })
+    const replacement = view.findAllComponents(ChatMessageItemStub).at(-1)!
+    expect(replacement.props('retrying')).toBe(false)
+    expect(replacement.props('announceFailure')).toBe(true)
   })
 
   it('成功流在响应头到达时持久化 receipt，并用最终服务端回执更新消息与余额', async () => {
@@ -2043,6 +2466,7 @@ describe('ChatView catalog and hydration gates', () => {
           content: '',
           createdAt: 2,
           status: 'error',
+          errorCode: 'NETWORK_ERROR',
         },
       ],
       createdAt: 1,
@@ -2053,11 +2477,13 @@ describe('ChatView catalog and hydration gates', () => {
     chatStore.conversations = [conversation]
     chatStore.activeConversationId = conversation.id
     chatStore.activeConversation = conversation
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined)
     apiMocks.streamChatCompletion.mockImplementationOnce(async (
       _request: unknown,
-      handlers: { onReceiptId?: (receiptId: string) => void },
+      handlers: { onAccepted?: () => void; onReceiptId?: (receiptId: string) => void },
     ) => {
       handlers.onReceiptId?.('receipt-disconnect')
+      handlers.onAccepted?.()
       throw new ChatAPIError('Connection lost', { code: 'NETWORK_ERROR' })
     })
     apiMocks.pollChatReceipt.mockResolvedValueOnce({
@@ -2075,8 +2501,19 @@ describe('ChatView catalog and hydration gates', () => {
     expect(chatStore.failStreaming).toHaveBeenCalledWith(
       conversation.id,
       'generated-message-1',
-      'Connection lost',
+      'chat.errors.network',
       'NETWORK_ERROR',
+    )
+    expect(consoleError).toHaveBeenCalledWith(
+      '[Chat] 回答生成失败',
+      expect.objectContaining({
+        conversationId: conversation.id,
+        messageId: 'generated-message-1',
+        code: 'NETWORK_ERROR',
+        rawMessage: 'Connection lost',
+        messageKey: 'chat.errors.network',
+        retryable: true,
+      }),
     )
     expect(apiMocks.pollChatReceipt).toHaveBeenCalledWith(
       'receipt-disconnect',
@@ -2090,6 +2527,72 @@ describe('ChatView catalog and hydration gates', () => {
       balanceAfter: 1.999,
     })
   })
+
+  it.each([
+    [401, 'Unauthorized', 'chat.errors.sessionExpired', 'HTTP_401', false],
+    [403, 'Forbidden', 'chat.errors.permissionDenied', 'HTTP_403', false],
+    [502, 'Bad Gateway', 'chat.errors.serviceUnavailable', 'HTTP_502', true],
+  ] as const)(
+    'HTTP %s 使用安全消息级文案并按类型控制重试',
+    async (status, rawMessage, messageKey, normalizedCode, retryable) => {
+      const conversation: ChatConversation = {
+        id: `http-error-${status}`,
+        userId: '7',
+        title: `HTTP ${status}`,
+        model: 'gpt-5',
+        messages: [{
+          id: 'user-before-error',
+          role: 'user',
+          content: 'Question',
+          createdAt: 1,
+          status: 'complete',
+        }],
+        createdAt: 1,
+        updatedAt: 1,
+      }
+      chatStore.userId = '7'
+      chatStore.hydrated = true
+      chatStore.conversations = [conversation]
+      chatStore.activeConversationId = conversation.id
+      chatStore.activeConversation = conversation
+      const error = new ChatAPIError(rawMessage, {
+        status,
+        code: status,
+        requestId: `request-${status}`,
+      })
+      const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+      apiMocks.streamChatCompletion.mockRejectedValueOnce(error)
+
+      const view = await mountView()
+      view.findComponent(ChatComposerStub).vm.$emit('send', `Trigger ${status}`)
+      await flushPromises()
+
+      expect(chatStore.failStreaming).toHaveBeenCalledWith(
+        conversation.id,
+        'generated-message-2',
+        messageKey,
+        normalizedCode,
+      )
+      expect(conversation.messages.at(-1)?.errorMessage).not.toBe(rawMessage)
+      const assistant = conversation.messages.at(-1)!
+      expect(view.findAllComponents(ChatMessageItemStub).at(-1)?.props('retryable')).toBe(retryable)
+      expect(assistant).toMatchObject({
+        status: 'error',
+        errorCode: normalizedCode,
+        errorMessage: messageKey,
+      })
+      expect(consoleError).toHaveBeenCalledWith(
+        '[Chat] 回答生成失败',
+        expect.objectContaining({
+          status,
+          code: normalizedCode,
+          requestId: `request-${status}`,
+          rawMessage,
+        }),
+      )
+      expect(view.find('.chat-catalog-error').exists()).toBe(false)
+    },
+  )
 
   it('恢复历史时自动补查持久化的 pending receipt', async () => {
     const conversation: ChatConversation = {
@@ -2158,6 +2661,7 @@ describe('ChatView catalog and hydration gates', () => {
           content: '',
           createdAt: 2,
           status: 'error',
+          errorCode: 'NETWORK_ERROR',
         },
       ],
       createdAt: 1,

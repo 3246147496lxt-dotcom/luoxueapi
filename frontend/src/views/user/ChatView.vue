@@ -142,25 +142,41 @@
         </div>
 
         <div
-          v-if="chatStore.syncStatus === 'offline' || chatStore.syncStatus === 'error'"
-          class="chat-persistence-warning"
-          role="status"
+          v-if="chatStore.persistenceAvailable && chatStore.syncStatus === 'offline'"
+          class="chat-sync-notice"
+          data-test="chat-sync-offline"
+        >
+          <Icon name="cloud" size="sm" aria-hidden="true" />
+          <p role="status" aria-live="polite" aria-atomic="true">
+            {{ t('chat.sync.offlineDescription') }}
+          </p>
+        </div>
+
+        <div
+          v-if="chatStore.persistenceAvailable && (historySyncRetrying || chatStore.syncStatus === 'error' || chatStore.syncStatus === 'unavailable')"
+          class="chat-sync-notice"
           data-test="chat-sync-warning"
         >
-          <Icon name="cloud" size="md" />
-          <div>
-            <strong>{{ t(`chat.sync.${chatStore.syncStatus}Title`) }}</strong>
-            <span>{{ t(`chat.sync.${chatStore.syncStatus}Description`) }}</span>
-          </div>
+          <Icon name="cloud" size="sm" aria-hidden="true" />
+          <p role="status" aria-live="polite" aria-atomic="true">
+            {{ t(historySyncRetrying ? 'chat.sync.syncing' : 'chat.sync.errorDescription') }}
+          </p>
           <button
             type="button"
             class="btn btn-secondary"
-            @click="syncServerHistory"
+            :disabled="historySyncRetrying"
+            :aria-busy="historySyncRetrying ? 'true' : undefined"
+            :aria-label="t(historySyncRetrying ? 'chat.sync.syncing' : 'chat.sync.retry')"
+            :title="t(historySyncRetrying ? 'chat.sync.syncing' : 'chat.sync.retry')"
+            data-test="chat-sync-retry"
+            @click="retryServerHistory"
           >
-            <Icon name="refresh" size="sm" />
-            <span>{{ t('chat.sync.retry') }}</span>
+            <Icon name="refresh" size="sm" aria-hidden="true" />
+            <span>{{ t(historySyncRetrying ? 'chat.sync.syncing' : 'chat.sync.retry') }}</span>
           </button>
         </div>
+
+        <p class="sr-only" aria-live="polite">{{ historySyncAnnouncement }}</p>
 
         <p class="sr-only" aria-live="polite">{{ streamAnnouncement }}</p>
 
@@ -199,6 +215,8 @@
                 :key="message.id"
                 :message="message"
                 :retryable="canRetryMessage(message, index)"
+                :retrying="retryPendingMessageId === message.id"
+                :announce-failure="liveFailureMessageId === message.id"
                 @retry="retryMessage(message.id)"
               />
             </div>
@@ -391,6 +409,11 @@ import {
   streamChatCompletion,
 } from '@/api/chat'
 import { pickChatGreeting } from '@/features/chat/chatGreetings'
+import {
+  describeChatError,
+  describeChatMessageError,
+  logChatCompletionError,
+} from '@/features/chat/chatErrorHandler'
 import { toChatConversationTitlePreview } from '@/features/chat/conversationTitle'
 import {
   CHAT_PRODUCT_MODELS,
@@ -401,6 +424,7 @@ import { useAppStore } from '@/stores/app'
 import { useChatStore, type ChatMessagePatch } from '@/stores/chat'
 import type {
   ChatCompletionRequest,
+  ChatAttempt,
   ChatMessage,
   ChatModel,
   ChatReasoningEffort,
@@ -457,6 +481,8 @@ const models: readonly ChatModel[] = CHAT_PRODUCT_MODELS
 const transcriptionCapability = ref<ChatTranscriptionCapability | null>(null)
 const defaultModel = ref(DEFAULT_CHAT_PRODUCT_MODEL_ID)
 const persistenceRetrying = ref(false)
+const historySyncRetrying = ref(false)
+const historySyncAnnouncement = ref('')
 const composerDraft = ref('')
 const newChatGreeting = ref(pickChatGreeting())
 const voiceBusy = ref(false)
@@ -482,6 +508,8 @@ const historyTriggerRef = ref<HTMLButtonElement | null>(null)
 const chatMainRef = ref<HTMLElement | null>(null)
 const shouldFollowStream = ref(true)
 const isAwayFromLatest = ref(false)
+const retryPendingMessageId = ref<string | null>(null)
+const liveFailureMessageId = ref<string | null>(null)
 let scrollFrame = 0
 let historySearchTimer: ReturnType<typeof setTimeout> | null = null
 let lastMessageScrollTop = 0
@@ -608,6 +636,7 @@ watch(
       historySearchQuery.value = ''
     }
     observedAuthUserId = normalizedUserId
+    historySyncAnnouncement.value = ''
     legacyImportPromptVisible.value = true
     resetChatProductState()
     const hydration = chatStore.hydrate(userId)
@@ -656,6 +685,7 @@ watch(() => chatStore.activeConversationId, (conversationId) => {
 }, { flush: 'sync' })
 
 watch(() => chatStore.activeConversationId, () => {
+  liveFailureMessageId.value = null
   if (attachmentContextChangeOwnedBySend) {
     attachmentContextChangeOwnedBySend = false
   } else {
@@ -830,19 +860,36 @@ async function retryPersistence() {
   }
 }
 
-async function initializeServerHistory(expectedUserId: string) {
+async function initializeServerHistory(expectedUserId: string): Promise<boolean> {
   await chatStore.syncHistory()
-  if (viewDisposed || expectedUserId !== currentAuthUserId()) return
+  if (viewDisposed || expectedUserId !== currentAuthUserId()) return false
+  if (chatStore.syncStatus !== 'idle' || chatStore.serverHistoryAvailable !== true) return false
   await chatStore.loadConversationPage(true)
-  if (viewDisposed || expectedUserId !== currentAuthUserId()) return
+  if (viewDisposed || expectedUserId !== currentAuthUserId()) return false
+  if (chatStore.syncStatus !== 'idle' || chatStore.serverHistoryAvailable !== true) return false
   await recoverInterruptedAttempts(expectedUserId)
   resumePendingReceipts(expectedUserId)
+  return true
 }
 
-async function syncServerHistory() {
+async function syncServerHistory(): Promise<boolean> {
   const expectedUserId = currentAuthUserId()
-  if (!expectedUserId) return
-  await initializeServerHistory(expectedUserId)
+  if (!expectedUserId) return false
+  return initializeServerHistory(expectedUserId)
+}
+
+async function retryServerHistory() {
+  if (historySyncRetrying.value) return
+  historySyncRetrying.value = true
+  historySyncAnnouncement.value = ''
+  try {
+    if (await syncServerHistory()) {
+      historySyncAnnouncement.value = t('chat.sync.success')
+      await focusComposer()
+    }
+  } finally {
+    historySyncRetrying.value = false
+  }
 }
 
 function updateHistorySearch(value: string) {
@@ -1037,6 +1084,7 @@ async function sendMessage(
   }
   const requestModel = selectedModel.value
   const titleSource = content.trim() || attachments[0]?.name || t('chat.history.newConversation')
+  liveFailureMessageId.value = null
 
   let conversation = activeConversation.value
   if (!conversation) {
@@ -1053,7 +1101,14 @@ async function sendMessage(
     chatStore.renameConversation(conversation.id, buildTitle(titleSource))
   }
   chatStore.setConversationModel(conversation.id, requestModel)
-  if (!await chatStore.prepareConversationForCompletion(conversation.id)) {
+  const expectedUserId = currentAuthUserId()
+  const completionReady = await chatStore.prepareConversationForCompletion(conversation.id)
+  if (
+    !completionReady
+    || viewDisposed
+    || expectedUserId !== currentAuthUserId()
+    || activeConversation.value?.id !== conversation.id
+  ) {
     acknowledge?.(false)
     return
   }
@@ -1113,45 +1168,77 @@ async function sendMessage(
 }
 
 function canRetryMessage(message: ChatMessage, index: number) {
+  const retryableState = message.status === 'error'
+    ? describeChatMessageError(message).retryable
+    : message.status === 'complete' || message.status === 'stopped'
   return message.role === 'assistant'
-    && message.status !== 'streaming'
+    && retryableState
+    && !message.excludedFromContext
     && index === (activeConversation.value?.messages.length ?? 0) - 1
     && !chatStore.isStreaming
+    && retryPendingMessageId.value === null
     && selectedModelAvailable.value
 }
 
 async function retryMessage(messageId: string) {
   const conversation = activeConversation.value
-  if (!conversation || !selectedModelAvailable.value || chatStore.isStreaming) return
+  if (
+    !conversation
+    || !selectedModelAvailable.value
+    || chatStore.isStreaming
+    || retryPendingMessageId.value !== null
+  ) return
   const requestModel = selectedModel.value
   const index = conversation.messages.findIndex((message) => message.id === messageId)
   if (index < 0) return
 
-  if (!await chatStore.prepareConversationForCompletion(conversation.id)) return
-  const expectedHeadMessageId = conversation.headMessageId
-    ?? conversation.messages[conversation.messages.length - 1]?.id
-    ?? null
-  const attemptId = createChatAttemptId()
-  const replacement = chatStore.addMessage(conversation.id, {
-    role: 'assistant',
-    content: '',
-    status: 'streaming',
-    attemptId,
-    requestedModel: requestModel,
-  })
-  if (!replacement) return
-  chatStore.updateMessage(conversation.id, messageId, {
-    excludedFromContext: true,
-    supersededByMessageId: replacement.id,
-  })
-  await runStream({
-    conversationId: conversation.id,
-    model: requestModel,
-    reasoningEffort: selectedReasoningEffort.value,
-    expectedHeadMessageId,
-    assistantMessageId: replacement.id,
-    retryOfMessageId: messageId,
-  }, attemptId)
+  retryPendingMessageId.value = messageId
+  liveFailureMessageId.value = null
+  try {
+    const expectedUserId = currentAuthUserId()
+    if (!await chatStore.prepareConversationForCompletion(conversation.id)) return
+    if (
+      viewDisposed
+      || expectedUserId !== currentAuthUserId()
+      || activeConversation.value?.id !== conversation.id
+    ) return
+    const expectedHeadMessageId = conversation.headMessageId
+      ?? conversation.messages[conversation.messages.length - 1]?.id
+      ?? null
+    const attemptId = createChatAttemptId()
+    const replacement = chatStore.addMessage(conversation.id, {
+      role: 'assistant',
+      content: '',
+      status: 'streaming',
+      attemptId,
+      requestedModel: requestModel,
+    })
+    if (!replacement) return
+    let replacementAccepted = false
+    await runStream({
+      conversationId: conversation.id,
+      model: requestModel,
+      reasoningEffort: selectedReasoningEffort.value,
+      expectedHeadMessageId,
+      assistantMessageId: replacement.id,
+      retryOfMessageId: messageId,
+    }, attemptId, () => {
+      if (replacementAccepted) return
+      replacementAccepted = true
+      chatStore.updateMessage(conversation.id, messageId, {
+        excludedFromContext: true,
+        supersededByMessageId: replacement.id,
+      })
+    })
+
+    if (!replacementAccepted) {
+      chatStore.removeMessages(conversation.id, [replacement.id])
+    }
+  } finally {
+    if (retryPendingMessageId.value === messageId) {
+      retryPendingMessageId.value = null
+    }
+  }
 }
 
 async function runStream(
@@ -1167,6 +1254,12 @@ async function runStream(
     return { accepted: false, keepMessages: false }
   }
   let accepted = false
+  const acceptStream = () => {
+    if (accepted) return
+    accepted = true
+    chatStore.markCompletionAccepted(conversationId, assistantMessageId)
+    onAccepted?.()
+  }
   shouldFollowStream.value = true
   scheduleScrollToBottom()
 
@@ -1175,8 +1268,7 @@ async function runStream(
       request,
       {
         onAccepted: () => {
-          accepted = true
-          onAccepted?.()
+          acceptStream()
         },
         onReceiptId: (receiptId) => {
           recordPendingReceipt(conversationId, assistantMessageId, receiptId)
@@ -1187,6 +1279,7 @@ async function runStream(
       },
       { signal: controller.signal, attemptId },
     )
+    acceptStream()
     if (result.receiptId) {
       recordPendingReceipt(conversationId, assistantMessageId, result.receiptId)
     }
@@ -1199,10 +1292,7 @@ async function runStream(
   } catch (error) {
     const duplicateReceiptId = submittedAttemptReceiptId(error)
     if (duplicateReceiptId) {
-      if (!accepted) {
-        accepted = true
-        onAccepted?.()
-      }
+      acceptStream()
       recordPendingReceipt(conversationId, assistantMessageId, duplicateReceiptId)
     }
     if (isAbortError(error)) {
@@ -1211,32 +1301,46 @@ async function runStream(
         void syncChatReceipt(conversationId, assistantMessageId, receiptId, streamUserId)
       }
       if (streamUserId) {
-        void recoverStreamAttempt(
+        const recoveredAttempt = await recoverStreamAttempt(
           conversationId,
           assistantMessageId,
           streamUserId,
         )
+        if (recoveredAttempt && !accepted) {
+          acceptStream()
+        }
       }
       return { accepted, keepMessages: accepted }
     }
-    const code = error instanceof ChatAPIError && typeof error.code === 'string' ? error.code : undefined
+    const presentation = describeChatError(error)
+    if (!duplicateReceiptId) {
+      logChatCompletionError(error, {
+        conversationId,
+        messageId: assistantMessageId,
+        attemptId,
+      }, presentation)
+    }
     chatStore.failStreaming(
       conversationId,
       assistantMessageId,
-      localizedCompletionError(error),
-      code,
+      t(presentation.messageKey),
+      presentation.code,
     )
+    liveFailureMessageId.value = assistantMessageId
     const receiptId = duplicateReceiptId
       || findMessage(conversationId, assistantMessageId)?.receiptId
     if (receiptId && streamUserId) {
       void syncChatReceipt(conversationId, assistantMessageId, receiptId, streamUserId)
     }
     if (streamUserId) {
-      void recoverStreamAttempt(
+      const recoveredAttempt = await recoverStreamAttempt(
         conversationId,
         assistantMessageId,
         streamUserId,
       )
+      if (recoveredAttempt && !accepted) {
+        acceptStream()
+      }
     }
   }
   return { accepted, keepMessages: true }
@@ -1246,14 +1350,17 @@ async function recoverStreamAttempt(
   conversationId: string,
   assistantMessageId: string,
   expectedUserId: string,
-) {
+): Promise<ChatAttempt | null> {
   const attempt = await chatStore.recoverAttempt(conversationId, assistantMessageId)
   if (
-    !attempt?.receiptId
+    !attempt
     || viewDisposed
     || expectedUserId !== currentAuthUserId()
   ) {
-    return
+    return null
+  }
+  if (!attempt.receiptId) {
+    return attempt
   }
   recordPendingReceipt(conversationId, assistantMessageId, attempt.receiptId)
   void syncChatReceipt(
@@ -1262,6 +1369,7 @@ async function recoverStreamAttempt(
     attempt.receiptId,
     expectedUserId,
   )
+  return attempt
 }
 
 function stopStreaming() {
@@ -1275,24 +1383,6 @@ function stopStreaming() {
   if (stopped && conversationId && messageId && receiptId && streamUserId) {
     void syncChatReceipt(conversationId, messageId, receiptId, streamUserId)
   }
-}
-
-function localizedCompletionError(error: unknown) {
-  const code = error instanceof ChatAPIError ? String(error.code || '') : ''
-  if (code === 'INSUFFICIENT_BALANCE') return t('chat.errors.insufficientBalance')
-  if (code === 'CHAT_ATTEMPT_ALREADY_SUBMITTED') {
-    return t('chat.errors.attemptAlreadySubmitted')
-  }
-  if (
-    code === 'CHAT_CATALOG_UNAVAILABLE'
-    || code === 'CHAT_MODEL_NOT_AVAILABLE'
-    || code === 'MODEL_NOT_AVAILABLE'
-    || code === 'MODEL_NOT_FOUND'
-  ) {
-    return t('chat.errors.modelUnavailable')
-  }
-  if (error instanceof ChatAPIError && error.status === 503) return t('chat.errors.serviceUnavailable')
-  return error instanceof Error && error.message ? error.message : t('chat.errors.requestFailed')
 }
 
 function findMessage(conversationId: string, messageId: string): ChatMessage | undefined {
@@ -1631,6 +1721,30 @@ function scheduleScrollToBottom() {
 }
 .chat-persistence-warning .btn { flex: 0 0 auto; }
 
+.chat-sync-notice {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 8px 16px 0;
+  border: 1px solid var(--workspace-divider);
+  border-radius: 8px;
+  padding: 7px 10px;
+  color: var(--workspace-text-secondary);
+  background: color-mix(in srgb, var(--workspace-surface) 94%, var(--lx-clay-accent));
+}
+
+.chat-sync-notice p {
+  min-width: 0;
+  flex: 1;
+  margin: 0;
+  overflow-wrap: anywhere;
+  font-size: var(--workspace-type-secondary-size);
+  font-weight: var(--workspace-type-secondary-weight);
+  line-height: 1.5;
+}
+
+.chat-sync-notice .btn { flex: 0 0 auto; }
+
 .chat-conversation-flow {
   display: flex;
   min-width: 0;
@@ -1952,6 +2066,13 @@ function scheduleScrollToBottom() {
   }
 
   .chat-persistence-warning .btn span { display: none; }
+
+  .chat-sync-notice {
+    align-items: flex-start;
+    margin: 8px 8px 0;
+  }
+
+  .chat-sync-notice .btn span { display: none; }
 }
 
 .chat-drawer-enter-active,

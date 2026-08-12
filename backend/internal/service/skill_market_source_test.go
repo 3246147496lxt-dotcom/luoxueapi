@@ -47,13 +47,19 @@ func TestNormalizeSkillSourceURL(t *testing.T) {
 
 func TestNormalizeSkillInputDerivesSourceAndAllowsEmptyRiskAndExamples(t *testing.T) {
 	sourceURL := "https://github.com/Example/Repo/tree/main/skill"
+	originURL := "https://skills.example.test/catalog/demo-skill"
+	priority := 20
+	rank := 7
 	input, err := normalizeSkillInput(SkillInput{
-		Slug:        "demo-skill",
-		DisplayName: "Demo",
-		Summary:     "Summary",
-		Description: "Description",
-		Category:    "Developer Tools",
-		SourceURL:   &sourceURL,
+		Slug:                  "demo-skill",
+		DisplayName:           "Demo",
+		Summary:               "Summary",
+		Description:           "Description",
+		Category:              "Developer Tools",
+		SourceURL:             &sourceURL,
+		OriginURL:             &originURL,
+		CatalogSourcePriority: &priority,
+		CatalogSourceRank:     &rank,
 	})
 	require.NoError(t, err)
 	require.NotNil(t, input.SourceURL)
@@ -63,7 +69,19 @@ func TestNormalizeSkillInputDerivesSourceAndAllowsEmptyRiskAndExamples(t *testin
 
 	skill := skillFromInput(input, nil)
 	require.Equal(t, "Example/Repo", skill.SourceRepository)
+	require.Equal(t, originURL, skill.OriginURL)
+	require.Equal(t, priority, skill.CatalogSourcePriority)
+	require.Equal(t, rank, *skill.CatalogSourceRank)
 	require.Nil(t, skill.RepositoryStars)
+}
+
+func TestNormalizeSkillInputRejectsUnsafePublicOriginURL(t *testing.T) {
+	unsafe := "https://user:secret@example.test/skill#fragment"
+	_, err := normalizeSkillInput(SkillInput{
+		Slug: "demo-skill", DisplayName: "Demo", Summary: "Summary",
+		Description: "Description", Category: "developer-tools", OriginURL: &unsafe,
+	})
+	require.ErrorIs(t, err, ErrSkillInvalid)
 }
 
 func TestApplySkillInputPreservesOmittedSourceAndClearsExplicitEmptySource(t *testing.T) {

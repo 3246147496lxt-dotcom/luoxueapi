@@ -109,6 +109,10 @@ const messages: Record<string, string> = {
   'keys.workspaceCreatedSheet': 'Creation time',
   'keys.workspaceLastUsedSheet': 'Previous use',
   'keys.workspaceLastIpSheet': 'Last IP',
+  'keys.serviceTierPreferenceLabel': 'Fast mode (Priority)',
+  'keys.serviceTierPriority': 'Priority',
+  'keys.serviceTierStandard': 'Standard',
+  'keys.serviceTierPreferenceHint': 'Verified upstreams only',
 }
 
 vi.mock('vue-i18n', async () => {
@@ -272,7 +276,9 @@ describe('ApiKeyInspector', () => {
     expect(wrapper.text()).toContain('KEY ID: #7')
     expect(wrapper.text()).toContain('Enabled')
     expect(wrapper.find('[data-test="group-badge"]').exists()).toBe(false)
-    expect(wrapper.find('[role="switch"]').exists()).toBe(false)
+    const serviceTierSwitch = wrapper.get('[data-test="key-inspector-service-tier-switch-7"]')
+    expect(serviceTierSwitch.attributes('aria-checked')).toBe('false')
+    expect(wrapper.get('[data-test="api-key-inspector-service-tier"]').text()).toContain('Standard')
 
     const quota = wrapper.get('[data-test="api-key-inspector-quota"]')
     expect(creditValues(quota)).toEqual(['75.00', '100.00', '1.25', '12.75'])
@@ -423,6 +429,7 @@ describe('ApiKeyInspector', () => {
     expect(rateItems[2].find('.api-key-inspector__reset-time').exists()).toBe(false)
 
     await wrapper.get('[data-test="key-inspector-status-switch-7"]').trigger('click')
+    await wrapper.get('[data-test="key-inspector-service-tier-switch-7"]').trigger('click')
     await wrapper.get('[data-test="key-inspector-reset-quota-7"]').trigger('click')
     await wrapper.get('[data-test="key-inspector-reset-rate-limit-7"]').trigger('click')
 
@@ -441,6 +448,7 @@ describe('ApiKeyInspector', () => {
     }
 
     expect(wrapper.emitted('toggle-status')?.[0]?.[0]).toMatchObject({ id: 7 })
+    expect(wrapper.emitted('toggle-service-tier')?.[0]?.[0]).toMatchObject({ id: 7 })
     expect(wrapper.emitted('change-group')).toBeUndefined()
     expect(wrapper.emitted('reset-quota')?.[0]?.[0]).toMatchObject({ id: 7 })
     expect(wrapper.emitted('reset-rate-limit')?.[0]?.[0]).toMatchObject({ id: 7 })
@@ -510,6 +518,19 @@ describe('ApiKeyInspector', () => {
     expect(audit.text()).not.toContain('Created on')
     expect(audit.text()).not.toContain('Last used')
     expect(audit.text()).not.toContain('Recent IP')
+  })
+
+  it('hides Fast mode for non-OpenAI groups and reflects a priority preference', () => {
+    const nonOpenAi = makeKey({
+      group: { ...makeKey().group!, platform: 'anthropic' },
+    })
+    const hiddenWrapper = mountInspector(nonOpenAi)
+    expect(hiddenWrapper.find('[data-test="api-key-inspector-service-tier"]').exists()).toBe(false)
+
+    const priorityWrapper = mountInspector(makeKey({ service_tier_preference: 'priority' }))
+    const prioritySwitch = priorityWrapper.get('[data-test="key-inspector-service-tier-switch-7"]')
+    expect(prioritySwitch.attributes('aria-checked')).toBe('true')
+    expect(priorityWrapper.get('[data-test="api-key-inspector-service-tier"]').text()).toContain('Priority')
   })
 
   it('uses a non-dialog sheet region without duplicate header controls', async () => {

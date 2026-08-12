@@ -229,6 +229,26 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 			}
 		}
 	}
+	// Preserve any raw client service_tier member (including null/empty) that
+	// Anthropic's compatibility DTO does not model.
+	responsesBody, err = preserveOpenAIServiceTierMember(body, responsesBody)
+	if err != nil {
+		return nil, fmt.Errorf("preserve service_tier across conversion: %w", err)
+	}
+
+	// API-key defaults are applied after the Messages→Responses conversion and
+	// all compatibility transforms, but before the administrator fast policy.
+	// This keeps explicit Anthropic/OpenAI service-tier controls authoritative.
+	// Image-generation requests remain outside OpenAI Priority semantics.
+	imageIntent := IsImageGenerationIntentForPlatform(openAIResponsesEndpoint, originalModel, body, account.Platform) ||
+		IsImageGenerationIntentForPlatform(openAIResponsesEndpoint, upstreamModel, responsesBody, account.Platform)
+	if !imageIntent {
+		if updatedBody, injected, injectErr := s.injectDefaultOpenAIServiceTier(ctx, c, account, upstreamModel, responsesBody); injectErr != nil {
+			return nil, fmt.Errorf("inject default service tier: %w", injectErr)
+		} else if injected {
+			responsesBody = updatedBody
+		}
+	}
 
 	// 4c. Apply OpenAI fast policy (may filter service_tier or block the request).
 	// Mirrors the Claude anthropic-beta "fast-mode-2026-02-01" filter, but keyed
@@ -396,10 +416,9 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 		if promptCacheKey != "" && anthropicDigestChain != "" {
 			s.bindOpenAICompatAnthropicDigestPromptCacheKey(account, apiKeyID, anthropicDigestChain, promptCacheKey, anthropicMatchedDigestChain)
 		}
-		if responsesReq.ServiceTier != "" {
-			st := responsesReq.ServiceTier
-			result.ServiceTier = &st
-		}
+		// Read billing metadata from the final policy-processed body so filtered
+		// or rewritten tiers are charged according to what was sent upstream.
+		result.ServiceTier = extractOpenAIServiceTierFromBody(responsesBody)
 		if responsesReq.Reasoning != nil && responsesReq.Reasoning.Effort != "" {
 			re := responsesReq.Reasoning.Effort
 			result.ReasoningEffort = &re

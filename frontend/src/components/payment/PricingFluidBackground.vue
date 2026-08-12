@@ -37,17 +37,17 @@ const transitioning = ref(false)
 
 const FLUID_CONFIGS: Record<PricingTier, FluidConfig> = {
   low: {
-    speed: 0.58,
-    intensity: 1.28,
-    fluidScale: 1.32,
+    speed: 0.6,
+    intensity: 1.15,
+    fluidScale: 1.4,
     colors: [
       [255, 255, 255],
-      [243, 249, 255],
-      [205, 232, 255],
-      [125, 196, 255],
-      [96, 165, 250],
-      [219, 238, 255],
-      [191, 219, 254],
+      [234, 245, 255],
+      [141, 204, 255],
+      [11, 139, 237],
+      [229, 231, 235],
+      [243, 244, 246],
+      [249, 250, 251],
       [255, 255, 255],
     ],
   },
@@ -176,9 +176,9 @@ const FRAGMENT_SHADER = `
     ) * 2.0 - 1.0;
     warpedP += flowC * (0.085 * surgeStr) * scale * rightAct;
 
-    vec2 vA = vec2((0.74 - 0.5) * aspect, 0.22);
-    vec2 vB = vec2((0.86 - 0.5) * aspect, -0.02);
-    vec2 vC = vec2((0.7 - 0.5) * aspect, -0.24);
+    vec2 vA = vec2((0.53 - 0.5) * aspect, 0.22);
+    vec2 vB = vec2((0.65 - 0.5) * aspect, -0.02);
+    vec2 vC = vec2((0.49 - 0.5) * aspect, -0.24);
     float vBoost = mix(0.8, 1.25, surge);
     vec2 vW = applyVortex(
       warpedP,
@@ -204,7 +204,7 @@ const FRAGMENT_SHADER = `
     warpedP = mix(warpedP, vW, rightAct);
 
     vec2 cPink = vec2(
-      (0.8 + sin(t * 1.05) * 0.14 - 0.5) * aspect,
+      (0.55 + sin(t * 1.05) * 0.14 - 0.5) * aspect,
       0.1 + cos(t * 0.84) * 0.18
     );
     vec2 qPink = (warpedP - cPink) / scale;
@@ -217,7 +217,7 @@ const FRAGMENT_SHADER = `
     );
 
     vec2 cOrng = vec2(
-      (0.73 + cos(t * 0.92 + 1.4) * 0.16 - 0.5) * aspect,
+      (0.51 + cos(t * 0.92 + 1.4) * 0.16 - 0.5) * aspect,
       -0.2 + sin(t * 1.16 + 0.8) * 0.17
     );
     vec2 qOrng = (warpedP - cOrng) / scale;
@@ -230,7 +230,7 @@ const FRAGMENT_SHADER = `
     );
 
     vec2 cCoral = vec2(
-      (0.68 + sin(t * 0.77 + 2.2) * 0.12 - 0.5) * aspect,
+      (0.47 + sin(t * 0.77 + 2.2) * 0.12 - 0.5) * aspect,
       0.02 + cos(t * 1.02) * 0.15
     );
     vec2 qCoral = (warpedP - cCoral) / scale;
@@ -242,7 +242,7 @@ const FRAGMENT_SHADER = `
       1.0
     );
 
-    float fluidMask = smoothstep(0.2, 0.55, uv.x);
+    float fluidMask = smoothstep(-0.03, 0.50, uv.x);
     vec3 color = uColors[0];
     color = mix(color, uColors[1], organicField(warpedP / scale, 2.15) * 0.58);
     color = mix(color, uColors[2], smoothstep(0.08, 0.7, coralField) * 0.72);
@@ -250,7 +250,7 @@ const FRAGMENT_SHADER = `
     color = mix(color, uColors[4], smoothstep(0.08, 0.78, pinkField) * 0.88);
 
     color = mix(uColors[0], color, fluidMask);
-    color = mix(color, uColors[0], 1.0 - smoothstep(0.1, 0.45, uv.x));
+    color = mix(color, uColors[0], 0.22 * smoothstep(0.58, 1.0, uv.x));
     gl_FragColor = vec4(clamp(color, 0.0, 1.0), 1.0);
   }
 `
@@ -439,8 +439,17 @@ onMounted(() => {
       }
       transitioning.value = true
     }
-    if (motionQuery.matches || !running) drawFrame(now)
-    startLoop()
+    if (motionQuery.matches) {
+      drawFrame(now)
+    } else {
+      startLoop()
+      if (!running) {
+        currentConfig = cloneConfig(nextConfig)
+        transition = null
+        transitioning.value = false
+        drawFrame(now, currentConfig)
+      }
+    }
   }
 
   const handleVisibilityChange = () => {

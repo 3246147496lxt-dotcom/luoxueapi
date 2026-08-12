@@ -250,11 +250,13 @@
             :public-settings="publicSettings"
             :copied="copiedKeyId === inspectedKey.id"
             :status-updating="statusUpdatingKeyIds.has(inspectedKey.id)"
+            :service-tier-updating="serviceTierUpdatingKeyIds.has(inspectedKey.id)"
             :now="now"
             :show-ccs-import="!publicSettings?.hide_ccs_import_button"
             :visible-columns="visibleColumnKeys"
             @copy-key="copyKey"
             @toggle-status="toggleKeyStatus"
+            @toggle-service-tier="toggleServiceTierPreference"
             @change-group="openGroupSelector"
             @reset-quota="confirmResetQuotaFromInspector"
             @reset-rate-limit="confirmResetRateLimitFromTable"
@@ -293,11 +295,13 @@
         :public-settings="publicSettings"
         :copied="copiedKeyId === inspectedKey.id"
         :status-updating="statusUpdatingKeyIds.has(inspectedKey.id)"
+        :service-tier-updating="serviceTierUpdatingKeyIds.has(inspectedKey.id)"
         :now="now"
         :show-ccs-import="!publicSettings?.hide_ccs_import_button"
         :visible-columns="visibleColumnKeys"
         @copy-key="copyKey"
         @toggle-status="toggleKeyStatus"
+        @toggle-service-tier="toggleServiceTierPreference"
         @change-group="openGroupSelector"
         @reset-quota="confirmResetQuotaFromInspector"
         @reset-rate-limit="confirmResetRateLimitFromTable"
@@ -868,6 +872,17 @@
       @cancel="showResetRateLimitDialog = false"
     />
 
+    <!-- Fast mode cost confirmation -->
+    <ConfirmDialog
+      :show="showServiceTierConfirmDialog"
+      :title="t('keys.serviceTierEnableTitle')"
+      :message="t('keys.serviceTierEnableConfirmMessage')"
+      :confirm-text="t('keys.serviceTierEnableConfirm')"
+      :cancel-text="t('common.cancel')"
+      @confirm="confirmServiceTierEnable"
+      @cancel="cancelServiceTierEnable"
+    />
+
     <!-- Use Key Modal -->
     <UseKeyModal
       :show="showUseKeyModal"
@@ -1226,6 +1241,9 @@ const showColumnDropdown = ref(false)
 const compactTable = ref(false)
 const statusUpdatingKeyIds = reactive(new Set<number>())
 const statusUpdatingIds = computed(() => Array.from(statusUpdatingKeyIds))
+const serviceTierUpdatingKeyIds = reactive(new Set<number>())
+const showServiceTierConfirmDialog = ref(false)
+const pendingServiceTierKey = ref<ApiKey | null>(null)
 const pendingCcsRow = ref<ApiKey | null>(null)
 const selectedKey = ref<ApiKey | null>(null)
 const inspectedKeyId = ref<number | null>(null)
@@ -1603,6 +1621,56 @@ const toggleKeyStatus = async (key: ApiKey) => {
     appStore.showError(t('keys.failedToUpdateStatus'))
   } finally {
     statusUpdatingKeyIds.delete(key.id)
+  }
+}
+
+const updateServiceTierPreference = async (key: ApiKey, preference: 'standard' | 'priority') => {
+  if (serviceTierUpdatingKeyIds.has(key.id)) return
+  serviceTierUpdatingKeyIds.add(key.id)
+  try {
+    const updatedKey = await keysAPI.update(key.id, {
+      service_tier_preference: preference
+    })
+    const localIndex = apiKeys.value.findIndex((item) => item.id === key.id)
+    if (localIndex >= 0 && updatedKey) {
+      // Keep list-only relations/usage fields if the update response is compact.
+      apiKeys.value[localIndex] = { ...apiKeys.value[localIndex], ...updatedKey }
+    }
+    appStore.showSuccess(
+      preference === 'priority'
+        ? t('keys.serviceTierEnabledSuccess')
+        : t('keys.serviceTierDisabledSuccess')
+    )
+    await loadApiKeys()
+  } catch (error) {
+    // Keep the previous value in place so a failed request naturally rolls back.
+    appStore.showError(t('keys.serviceTierUpdateFailed'))
+  } finally {
+    serviceTierUpdatingKeyIds.delete(key.id)
+  }
+}
+
+const toggleServiceTierPreference = (key: ApiKey) => {
+  if (key.group?.platform !== 'openai' || serviceTierUpdatingKeyIds.has(key.id)) return
+  const isPriority = key.service_tier_preference === 'priority'
+  if (isPriority) {
+    void updateServiceTierPreference(key, 'standard')
+    return
+  }
+  pendingServiceTierKey.value = key
+  showServiceTierConfirmDialog.value = true
+}
+
+const cancelServiceTierEnable = () => {
+  showServiceTierConfirmDialog.value = false
+  pendingServiceTierKey.value = null
+}
+
+const confirmServiceTierEnable = () => {
+  const key = pendingServiceTierKey.value
+  cancelServiceTierEnable()
+  if (key) {
+    void updateServiceTierPreference(key, 'priority')
   }
 }
 

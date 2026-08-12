@@ -74,14 +74,16 @@ function checkoutInfoFixture(plans: SubscriptionPlan[] = []): CheckoutInfoRespon
   }
 }
 
-async function mountPricing(path = '/pricing') {
+async function mountPricing(path = '/pricing', previousPath?: string) {
   const router = createRouter({
     history: createMemoryHistory(),
     routes: [
+      { path: '/dashboard', component: { template: '<div />' } },
       { path: '/pricing', component: { template: '<div />' } },
       { path: '/purchase', component: { template: '<div />' } },
     ],
   })
+  if (previousPath) await router.push(previousPath)
   await router.push(path)
   await router.isReady()
 
@@ -131,12 +133,17 @@ describe('PricingView', () => {
     const mid = wrapper.get('[data-testid="pricing-tier-panel-mid"]')
     const high = wrapper.get('[data-testid="pricing-tier-panel-high"]')
 
-    expect(wrapper.get('[data-testid="pricing-page"]').classes()).toContain('pricing-theme-medium')
-    expect(wrapper.get('[data-testid="pricing-page"]').attributes('data-tier')).toBe('mid')
+    expect(wrapper.get('[data-testid="pricing-page"]').classes()).toContain('pricing-theme-light')
+    expect(wrapper.get('[data-testid="pricing-page"]').attributes('data-tier')).toBe('low')
     expect(low.findAll('.plan-stub').map((card) => card.text())).toEqual([
       'Tryselectdetails',
-      'Standardselectdetails',
       'Basicselectdetails',
+      'Standardselectdetails',
+    ])
+    expect(low.findAll('.plan-stub').map((card) => card.attributes('data-plan-id'))).toEqual([
+      '1',
+      '3',
+      '2',
     ])
     expect(mid.findAll('.plan-stub').map((card) => card.text())).toEqual([
       'Plusselectdetails',
@@ -148,8 +155,8 @@ describe('PricingView', () => {
     ])
     expect(low.findAll('.plan-stub').map((card) => card.attributes('data-featured'))).toEqual([
       'false',
-      'true',
       'false',
+      'true',
     ])
     expect(mid.findAll('.plan-stub').map((card) => card.attributes('data-featured'))).toEqual([
       'false',
@@ -157,9 +164,41 @@ describe('PricingView', () => {
       'false',
     ])
     expect(high.get('.plan-stub').attributes('data-featured')).toBe('true')
-    expect(mid.attributes('aria-hidden')).toBe('false')
-    expect(low.attributes('aria-hidden')).toBe('true')
+    expect(mid.attributes('aria-hidden')).toBe('true')
+    expect(low.attributes('aria-hidden')).toBe('false')
     expect(high.attributes('aria-hidden')).toBe('true')
+  })
+
+  it('keeps the tier heading hidden and exposes the lightweight back entry', async () => {
+    vi.mocked(paymentAPI.getCheckoutInfo).mockResolvedValue({
+      data: checkoutInfoFixture(approvedPlans()),
+    } as never)
+
+    const { router, wrapper } = await mountPricing()
+    expect(wrapper.get('#pricing-tier-summary h2').attributes()).toHaveProperty('hidden')
+    expect(wrapper.get('[data-testid="pricing-back"]').text()).toBe('common.back')
+
+    await wrapper.get('[data-testid="pricing-back"]').trigger('click')
+    await flushPromises()
+    expect(router.currentRoute.value.fullPath).toBe('/dashboard')
+  })
+
+  it('returns to an existing same-origin route instead of using the dashboard fallback', async () => {
+    vi.mocked(paymentAPI.getCheckoutInfo).mockResolvedValue({
+      data: checkoutInfoFixture(approvedPlans()),
+    } as never)
+
+    const { router, wrapper } = await mountPricing(
+      '/pricing',
+      '/purchase?tab=subscription&plan=1',
+    )
+    vi.spyOn(router.options.history, 'state', 'get').mockReturnValue({
+      back: '/purchase?tab=subscription&plan=1',
+    } as never)
+    await wrapper.get('[data-testid="pricing-back"]').trigger('click')
+    await flushPromises()
+
+    expect(router.currentRoute.value.fullPath).toBe('/purchase?tab=subscription&plan=1')
   })
 
   it('switches the tier, background state, featured theme, and panels without navigation', async () => {

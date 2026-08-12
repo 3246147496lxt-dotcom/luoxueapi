@@ -5,6 +5,17 @@
     :data-tier="activeTier"
     data-testid="pricing-page"
   >
+    <a
+      class="pricing-page__back"
+      href="/dashboard"
+      :aria-label="t('common.back')"
+      data-testid="pricing-back"
+      @click="handleBack"
+    >
+      <Icon name="arrowLeft" size="sm" aria-hidden="true" />
+      <span>{{ t('common.back') }}</span>
+    </a>
+
     <div class="pricing-page__module">
       <section class="pricing-page__hero" :data-tier="activeTier">
         <div class="pricing-page__atmosphere">
@@ -44,7 +55,7 @@
               role="tabpanel"
               :aria-labelledby="activeTabId"
             >
-              <h2>{{ t(activeDefinition.nameKey) }}</h2>
+              <h2 hidden>{{ t(activeDefinition.nameKey) }}</h2>
               <p>{{ t(activeDefinition.descriptionKey) }}</p>
             </div>
           </div>
@@ -123,6 +134,7 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
+import Icon from '@/components/icons/Icon.vue'
 import PricingFluidBackground from '@/components/payment/PricingFluidBackground.vue'
 import PricingPlanCard from '@/components/payment/PricingPlanCard.vue'
 import { usePaymentStore } from '@/stores/payment'
@@ -134,7 +146,7 @@ const TIER_DEFINITIONS = [
     nameKey: 'pricing.tiers.low.name',
     descriptionKey: 'pricing.tiers.low.description',
     themeClass: 'pricing-theme-light',
-    planNames: ['Try', 'Standard', 'Basic'],
+    planNames: ['Try', 'Basic', 'Standard'],
     featuredPlan: 'Standard',
   },
   {
@@ -163,7 +175,7 @@ const router = useRouter()
 const paymentStore = usePaymentStore()
 
 const tabListRef = ref<HTMLElement | null>(null)
-const activeTier = ref<PricingTier>('mid')
+const activeTier = ref<PricingTier>('low')
 const loading = ref(paymentStore.checkoutInfo === null)
 const loadError = ref(false)
 const appliedPreferredGroupId = ref<number | null>(null)
@@ -222,6 +234,31 @@ function isFeaturedPlan(tier: PricingTier, plan: SubscriptionPlan) {
 
 function selectTier(tier: PricingTier) {
   activeTier.value = tier
+}
+
+function handleBack(event: MouseEvent) {
+  if (
+    event.defaultPrevented
+    || event.button !== 0
+    || event.metaKey
+    || event.ctrlKey
+    || event.shiftKey
+    || event.altKey
+  ) return
+
+  const historyBack = router.options.history.state.back
+  let hasSafeBackTarget = false
+  if (typeof historyBack === 'string') {
+    try {
+      hasSafeBackTarget = new URL(historyBack, window.location.origin).origin === window.location.origin
+    } catch {
+      hasSafeBackTarget = false
+    }
+  }
+
+  event.preventDefault()
+  if (hasSafeBackTarget) router.back()
+  else void router.push('/dashboard')
 }
 
 function handleTabKeydown(event: KeyboardEvent) {
@@ -310,7 +347,7 @@ onMounted(() => {
   --pricing-badge-color: #6d28d9;
 
   min-height: 100dvh;
-  padding: 48px 0;
+  position: relative;
   color: #0d0d0d;
   background: #f4f1fa;
 }
@@ -355,37 +392,35 @@ onMounted(() => {
 }
 
 .pricing-page__module {
+  position: relative;
+  z-index: 10;
   display: flex;
-  width: min(960px, calc(100% - 32px));
+  width: 100%;
   margin: 0 auto;
   flex-direction: column;
-  gap: 16px;
+  gap: 80px;
+  padding: 120px 0 200px;
 }
 
 .pricing-page__hero {
-  position: relative;
   width: 100%;
-  min-height: 460px;
-  overflow: hidden;
-  border: 1px solid #e5e5e5;
-  border-radius: 24px;
-  background: #fff;
-  box-shadow: 0 4px 20px rgb(0 0 0 / 0.03);
+  display: contents;
 }
 
 .pricing-page__atmosphere {
-  position: absolute;
+  position: fixed;
   z-index: 0;
   overflow: hidden;
-  inset: -8%;
+  inset: -5%;
   background: var(--pricing-hero-background);
+  pointer-events: none;
 }
 
 .pricing-page__scrim {
-  position: absolute;
+  position: fixed;
   z-index: 1;
   inset: 0;
-  background: radial-gradient(circle at 50% 50%, rgb(255 255 255 / 0.88) 0%, rgb(255 255 255 / 0.6) 100%);
+  background: radial-gradient(circle at 50% 25%, rgb(244 241 250 / 0.5) 0%, rgb(244 241 250 / 0.9) 100%);
   pointer-events: none;
 }
 
@@ -393,17 +428,16 @@ onMounted(() => {
   position: relative;
   z-index: 10;
   display: flex;
-  min-height: 460px;
+  width: 100%;
   align-items: center;
-  justify-content: flex-start;
   flex-direction: column;
-  padding: 68px 24px 40px;
+  padding: 0 24px;
   text-align: center;
 }
 
 .pricing-page__tier-info {
-  max-width: 660px;
-  margin-bottom: 40px;
+  max-width: 800px;
+  margin-bottom: 56px;
 }
 
 .pricing-page__tabs {
@@ -464,6 +498,8 @@ onMounted(() => {
   z-index: 20;
   display: grid;
   width: 100%;
+  max-width: 932px;
+  margin: 0 auto;
   grid-template-columns: 1fr;
   text-align: left;
 }
@@ -473,7 +509,7 @@ onMounted(() => {
   display: grid;
   width: 100%;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 16px;
+  gap: 26px;
   transition:
     opacity 520ms cubic-bezier(0.22, 1, 0.36, 1),
     visibility 520ms;
@@ -552,6 +588,7 @@ onMounted(() => {
 @media (max-width: 900px) {
   .pricing-page__tier-panel {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 16px;
   }
 
   .pricing-page__tier-panel > article:nth-child(3) {
@@ -573,9 +610,71 @@ onMounted(() => {
   }
 }
 
+.pricing-page__back {
+  position: absolute;
+  z-index: 30;
+  top: calc(env(safe-area-inset-top, 0px) + 32px);
+  left: calc(env(safe-area-inset-left, 0px) + clamp(24px, 2.35vw, 48px));
+  display: inline-flex;
+  min-width: 72px;
+  height: 36px;
+  align-items: center;
+  gap: 6px;
+  padding: 0 11px;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  color: rgb(13 13 13 / 0.62);
+  background: transparent;
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 20px;
+  text-decoration: none;
+  cursor: pointer;
+  transition:
+    color 155ms ease,
+    background-color 155ms ease,
+    border-color 155ms ease;
+}
+
+.pricing-page__back :deep(svg) {
+  width: 16px;
+  height: 16px;
+  transition: transform 155ms ease;
+}
+
+.pricing-page__back:hover {
+  border-color: rgb(13 13 13 / 0.08);
+  color: #171717;
+  background: rgb(255 255 255 / 0.55);
+}
+
+.pricing-page__back:hover :deep(svg) {
+  transform: translateX(-1px);
+}
+
+.pricing-page__back:active {
+  background: rgb(255 255 255 / 0.7);
+}
+
+.pricing-page__back:focus-visible {
+  outline: 2px solid #7c3aed;
+  outline-offset: 2px;
+  color: #171717;
+  background: rgb(255 255 255 / 0.72);
+  box-shadow: 0 0 0 4px #fff;
+}
+
 @media (max-width: 640px) {
-  .pricing-page__hero {
-    min-height: 320px;
+  .pricing-page__back {
+    top: calc(env(safe-area-inset-top, 0px) + 12px);
+    left: calc(env(safe-area-inset-left, 0px) + 12px);
+    height: 44px;
+    padding: 0 10px;
+  }
+
+  .pricing-page__back :deep(svg) {
+    width: 18px;
+    height: 18px;
   }
 
   .pricing-page__content {
@@ -598,6 +697,12 @@ onMounted(() => {
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .pricing-page__back,
+  .pricing-page__back :deep(svg) {
+    transition: none !important;
+    transform: none !important;
+  }
+
   .pricing-page__tier-panel {
     transition-duration: 100ms !important;
   }

@@ -23,9 +23,9 @@ type skillMarketScanner interface{ Scan(...any) error }
 
 const skillMarketSelectColumns = `
 s.id, s.slug, s.display_name, s.summary, s.description, s.category, s.tags,
-s.icon, s.example_prompts, s.risk_notes, s.source_url, s.source_repository,
+s.icon, s.example_prompts, s.risk_notes, s.origin_url, s.source_url, s.source_repository,
 s.repository_stars, s.repository_stars_fetched_at, s.repository_stars_refresh_after,
-s.status, s.featured, s.sort_order,
+s.status, s.featured, s.sort_order, s.catalog_source_priority, s.catalog_source_rank,
 s.current_version_id, s.published_at, s.archived_at, s.created_by, s.updated_by,
 s.created_at, s.updated_at,
 COALESCE((SELECT SUM(v.download_count) FROM skill_versions v WHERE v.skill_id = s.id), 0)`
@@ -35,6 +35,7 @@ func scanSkillMarket(scanner skillMarketScanner) (*service.Skill, error) {
 		skill                   service.Skill
 		tagsJSON, promptsJSON   []byte
 		repositoryStars         sql.NullInt64
+		catalogSourceRank       sql.NullInt64
 		starsFetchedAt          sql.NullTime
 		starsRefreshAfter       sql.NullTime
 		currentVersionID        sql.NullInt64
@@ -44,9 +45,10 @@ func scanSkillMarket(scanner skillMarketScanner) (*service.Skill, error) {
 	if err := scanner.Scan(
 		&skill.ID, &skill.Slug, &skill.DisplayName, &skill.Summary, &skill.Description,
 		&skill.Category, &tagsJSON, &skill.Icon, &promptsJSON, &skill.RiskNotes,
-		&skill.SourceURL, &skill.SourceRepository, &repositoryStars, &starsFetchedAt,
+		&skill.OriginURL, &skill.SourceURL, &skill.SourceRepository, &repositoryStars, &starsFetchedAt,
 		&starsRefreshAfter,
-		&skill.Status, &skill.Featured, &skill.SortOrder, &currentVersionID,
+		&skill.Status, &skill.Featured, &skill.SortOrder, &skill.CatalogSourcePriority,
+		&catalogSourceRank, &currentVersionID,
 		&publishedAt, &archivedAt, &createdBy, &updatedBy, &skill.CreatedAt,
 		&skill.UpdatedAt, &skill.DownloadCount,
 	); err != nil {
@@ -67,6 +69,10 @@ func scanSkillMarket(scanner skillMarketScanner) (*service.Skill, error) {
 	if repositoryStars.Valid {
 		value := repositoryStars.Int64
 		skill.RepositoryStars = &value
+	}
+	if catalogSourceRank.Valid {
+		value := int(catalogSourceRank.Int64)
+		skill.CatalogSourceRank = &value
 	}
 	if starsFetchedAt.Valid {
 		value := starsFetchedAt.Time
@@ -119,14 +125,15 @@ func (r *skillMarketRepository) Create(ctx context.Context, skill *service.Skill
 	err = r.db.QueryRowContext(ctx, `
 INSERT INTO skills (
   slug, display_name, summary, description, category, tags, icon,
-  example_prompts, risk_notes, source_url, source_repository, repository_stars_refresh_after,
-  status, featured, sort_order, created_by, updated_by
-) VALUES ($1,$2,$3,$4,$5,$6::jsonb,$7,$8::jsonb,$9,$10,$11,
-  CASE WHEN $10='' THEN NULL ELSE NOW() END,'draft',$12,$13,$14,$14)
+  example_prompts, risk_notes, origin_url, source_url, source_repository, repository_stars_refresh_after,
+  status, featured, sort_order, catalog_source_priority, catalog_source_rank, created_by, updated_by
+) VALUES ($1,$2,$3,$4,$5,$6::jsonb,$7,$8::jsonb,$9,$10,$11,$12,
+  CASE WHEN $11='' THEN NULL ELSE NOW() END,'draft',$13,$14,$15,$16,$17,$17)
 RETURNING id`,
 		skill.Slug, skill.DisplayName, skill.Summary, skill.Description, skill.Category,
 		tagsJSON, skill.Icon, promptsJSON, skill.RiskNotes,
-		skill.SourceURL, skill.SourceRepository, skill.Featured, skill.SortOrder, skill.CreatedBy,
+		skill.OriginURL, skill.SourceURL, skill.SourceRepository, skill.Featured, skill.SortOrder,
+		skill.CatalogSourcePriority, skill.CatalogSourceRank, skill.CreatedBy,
 	).Scan(&skill.ID)
 	if err != nil {
 		if isUniqueViolation(err) {
@@ -158,16 +165,17 @@ func (r *skillMarketRepository) Update(ctx context.Context, skill *service.Skill
 UPDATE skills SET
   slug=$2, display_name=$3, summary=$4, description=$5, category=$6,
   tags=$7::jsonb, icon=$8, example_prompts=$9::jsonb, risk_notes=$10,
-  source_url=$11, source_repository=$12,
-  repository_stars=CASE WHEN skills.source_url=$11 THEN repository_stars ELSE NULL END,
-  repository_stars_fetched_at=CASE WHEN skills.source_url=$11 THEN repository_stars_fetched_at ELSE NULL END,
+  origin_url=$11, source_url=$12, source_repository=$13,
+  repository_stars=CASE WHEN skills.source_url=$12 THEN repository_stars ELSE NULL END,
+  repository_stars_fetched_at=CASE WHEN skills.source_url=$12 THEN repository_stars_fetched_at ELSE NULL END,
   repository_stars_refresh_after=CASE
-    WHEN skills.source_url=$11 THEN repository_stars_refresh_after
-    WHEN $11='' THEN NULL
+    WHEN skills.source_url=$12 THEN repository_stars_refresh_after
+    WHEN $12='' THEN NULL
     ELSE NOW()
   END,
-  featured=$13, sort_order=$14, updated_by=$15, updated_at=NOW()
-WHERE id=$1 AND slug=$16
+  featured=$14, sort_order=$15, catalog_source_priority=$16,
+  catalog_source_rank=$17, updated_by=$18, updated_at=NOW()
+WHERE id=$1 AND slug=$19
   AND ($2=slug OR NOT EXISTS (SELECT 1 FROM skill_versions WHERE skill_id=skills.id))
   AND (
     status <> 'published'
@@ -177,8 +185,9 @@ WHERE id=$1 AND slug=$16
   )`,
 		skill.ID, skill.Slug, skill.DisplayName, skill.Summary, skill.Description,
 		skill.Category, tagsJSON, skill.Icon, promptsJSON, skill.RiskNotes,
-		skill.SourceURL, skill.SourceRepository,
-		skill.Featured, skill.SortOrder, skill.UpdatedBy, previousSlug,
+		skill.OriginURL, skill.SourceURL, skill.SourceRepository,
+		skill.Featured, skill.SortOrder, skill.CatalogSourcePriority,
+		skill.CatalogSourceRank, skill.UpdatedBy, previousSlug,
 	)
 	if err != nil {
 		if isUniqueViolation(err) {
@@ -293,7 +302,7 @@ func (r *skillMarketRepository) list(ctx context.Context, filter service.SkillLi
 	}
 	args = append(args, filter.PageSize, (filter.Page-1)*filter.PageSize)
 	query := `SELECT ` + skillMarketSelectColumns + ` FROM skills s` + where +
-		fmt.Sprintf(" ORDER BY s.featured DESC, s.sort_order ASC, s.id ASC LIMIT $%d OFFSET $%d", len(args)-1, len(args))
+		fmt.Sprintf(" ORDER BY s.featured DESC, s.catalog_source_priority ASC, s.catalog_source_rank ASC NULLS LAST, s.sort_order ASC, s.id ASC LIMIT $%d OFFSET $%d", len(args)-1, len(args))
 	rows, err := r.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, 0, fmt.Errorf("list skills: %w", err)

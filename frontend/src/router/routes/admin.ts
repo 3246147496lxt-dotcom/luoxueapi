@@ -167,6 +167,18 @@ export const adminRoutes: RouteRecordRaw[] = [
     }
   },
   {
+    path: '/admin/skills/imports',
+    name: 'AdminSkillImports',
+    component: () => import('@/views/admin/SkillImportsView.vue'),
+    meta: {
+      requiresAuth: true,
+      requiresAdmin: true,
+      title: 'Skill Imports',
+      titleKey: 'admin.skills.imports.title',
+      descriptionKey: 'admin.skills.imports.description'
+    }
+  },
+  {
     path: '/admin/skills/new',
     name: 'AdminSkillCreate',
     component: () => import('@/views/admin/SkillEditorView.vue'),

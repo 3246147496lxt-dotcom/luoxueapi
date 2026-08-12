@@ -42,6 +42,7 @@ type AdminHandlers struct {
 	AuditLog               *admin.AuditLogHandler
 	ModelCatalog           *admin.ModelCatalogHandler
 	SkillMarket            *admin.SkillMarketHandler
+	SkillImport            *admin.SkillImportHandler
 	Documentation          *admin.DocumentationHandler
 	DesktopDiagnostic      *admin.DesktopDiagnosticHandler
 }

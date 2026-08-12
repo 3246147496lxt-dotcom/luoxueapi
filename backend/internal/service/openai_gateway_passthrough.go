@@ -92,6 +92,25 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 	if policyModel == "" {
 		policyModel = reqModel
 	}
+	// A model may support text Priority while the same Responses request is
+	// actually invoking image generation. Image requests have no OpenAI
+	// Priority semantics, so they must never receive the API-key default.
+	prePolicyImageIntent := resolveOpenAIPassthroughImageIntent(
+		c,
+		reqModel,
+		canonicalImageIntentBody,
+		policyModel,
+		body,
+		attemptImageIntentInvalidated,
+		IsImageGenerationIntent,
+	)
+	if !prePolicyImageIntent {
+		if updatedBody, injected, injectErr := s.injectDefaultOpenAIServiceTier(ctx, c, account, policyModel, body); injectErr != nil {
+			return nil, fmt.Errorf("inject default service tier: %w", injectErr)
+		} else if injected {
+			body = updatedBody
+		}
+	}
 	updatedBody, policyErr := s.applyOpenAIFastPolicyToBody(ctx, account, policyModel, body)
 	if policyErr != nil {
 		var blocked *OpenAIFastBlockedError
@@ -104,15 +123,7 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 
 	apiKey := getAPIKeyFromContext(c)
 	// 同一 attempt 的最终 model/body 只判定一次，权限检查与后续图片状态设置共用该结果。
-	imageIntent := resolveOpenAIPassthroughImageIntent(
-		c,
-		reqModel,
-		canonicalImageIntentBody,
-		policyModel,
-		body,
-		attemptImageIntentInvalidated,
-		IsImageGenerationIntent,
-	)
+	imageIntent := prePolicyImageIntent
 	if imageIntent && !GroupAllowsImageGeneration(apiKeyGroup(apiKey)) {
 		MarkOpsClientBusinessLimited(c, OpsClientBusinessLimitedReasonLocalFeatureGate)
 		c.JSON(http.StatusForbidden, gin.H{

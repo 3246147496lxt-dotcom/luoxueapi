@@ -128,6 +128,20 @@ func (_c *APIKeyCreate) SetNillablePurpose(v *string) *APIKeyCreate {
 	return _c
 }
 
+// SetServiceTierPreference sets the "service_tier_preference" field.
+func (_c *APIKeyCreate) SetServiceTierPreference(v string) *APIKeyCreate {
+	_c.mutation.SetServiceTierPreference(v)
+	return _c
+}
+
+// SetNillableServiceTierPreference sets the "service_tier_preference" field if the given value is not nil.
+func (_c *APIKeyCreate) SetNillableServiceTierPreference(v *string) *APIKeyCreate {
+	if v != nil {
+		_c.SetServiceTierPreference(*v)
+	}
+	return _c
+}
+
 // SetManagedDeviceID sets the "managed_device_id" field.
 func (_c *APIKeyCreate) SetManagedDeviceID(v int64) *APIKeyCreate {
 	_c.mutation.SetManagedDeviceID(v)
@@ -425,6 +439,10 @@ func (_c *APIKeyCreate) defaults() error {
 		v := apikey.DefaultPurpose
 		_c.mutation.SetPurpose(v)
 	}
+	if _, ok := _c.mutation.ServiceTierPreference(); !ok {
+		v := apikey.DefaultServiceTierPreference
+		_c.mutation.SetServiceTierPreference(v)
+	}
 	if _, ok := _c.mutation.Quota(); !ok {
 		v := apikey.DefaultQuota
 		_c.mutation.SetQuota(v)
@@ -501,6 +519,14 @@ func (_c *APIKeyCreate) check() error {
 	if v, ok := _c.mutation.Purpose(); ok {
 		if err := apikey.PurposeValidator(v); err != nil {
 			return &ValidationError{Name: "purpose", err: fmt.Errorf(`ent: validator failed for field "APIKey.purpose": %w`, err)}
+		}
+	}
+	if _, ok := _c.mutation.ServiceTierPreference(); !ok {
+		return &ValidationError{Name: "service_tier_preference", err: errors.New(`ent: missing required field "APIKey.service_tier_preference"`)}
+	}
+	if v, ok := _c.mutation.ServiceTierPreference(); ok {
+		if err := apikey.ServiceTierPreferenceValidator(v); err != nil {
+			return &ValidationError{Name: "service_tier_preference", err: fmt.Errorf(`ent: validator failed for field "APIKey.service_tier_preference": %w`, err)}
 		}
 	}
 	if _, ok := _c.mutation.Quota(); !ok {
@@ -584,6 +610,10 @@ func (_c *APIKeyCreate) createSpec() (*APIKey, *sqlgraph.CreateSpec) {
 	if value, ok := _c.mutation.Purpose(); ok {
 		_spec.SetField(apikey.FieldPurpose, field.TypeString, value)
 		_node.Purpose = value
+	}
+	if value, ok := _c.mutation.ServiceTierPreference(); ok {
+		_spec.SetField(apikey.FieldServiceTierPreference, field.TypeString, value)
+		_node.ServiceTierPreference = value
 	}
 	if value, ok := _c.mutation.LastUsedAt(); ok {
 		_spec.SetField(apikey.FieldLastUsedAt, field.TypeTime, value)
@@ -869,6 +899,18 @@ func (u *APIKeyUpsert) SetPurpose(v string) *APIKeyUpsert {
 // UpdatePurpose sets the "purpose" field to the value that was provided on create.
 func (u *APIKeyUpsert) UpdatePurpose() *APIKeyUpsert {
 	u.SetExcluded(apikey.FieldPurpose)
+	return u
+}
+
+// SetServiceTierPreference sets the "service_tier_preference" field.
+func (u *APIKeyUpsert) SetServiceTierPreference(v string) *APIKeyUpsert {
+	u.Set(apikey.FieldServiceTierPreference, v)
+	return u
+}
+
+// UpdateServiceTierPreference sets the "service_tier_preference" field to the value that was provided on create.
+func (u *APIKeyUpsert) UpdateServiceTierPreference() *APIKeyUpsert {
+	u.SetExcluded(apikey.FieldServiceTierPreference)
 	return u
 }
 
@@ -1328,6 +1370,20 @@ func (u *APIKeyUpsertOne) SetPurpose(v string) *APIKeyUpsertOne {
 func (u *APIKeyUpsertOne) UpdatePurpose() *APIKeyUpsertOne {
 	return u.Update(func(s *APIKeyUpsert) {
 		s.UpdatePurpose()
+	})
+}
+
+// SetServiceTierPreference sets the "service_tier_preference" field.
+func (u *APIKeyUpsertOne) SetServiceTierPreference(v string) *APIKeyUpsertOne {
+	return u.Update(func(s *APIKeyUpsert) {
+		s.SetServiceTierPreference(v)
+	})
+}
+
+// UpdateServiceTierPreference sets the "service_tier_preference" field to the value that was provided on create.
+func (u *APIKeyUpsertOne) UpdateServiceTierPreference() *APIKeyUpsertOne {
+	return u.Update(func(s *APIKeyUpsert) {
+		s.UpdateServiceTierPreference()
 	})
 }
 
@@ -2001,6 +2057,20 @@ func (u *APIKeyUpsertBulk) SetPurpose(v string) *APIKeyUpsertBulk {
 func (u *APIKeyUpsertBulk) UpdatePurpose() *APIKeyUpsertBulk {
 	return u.Update(func(s *APIKeyUpsert) {
 		s.UpdatePurpose()
+	})
+}
+
+// SetServiceTierPreference sets the "service_tier_preference" field.
+func (u *APIKeyUpsertBulk) SetServiceTierPreference(v string) *APIKeyUpsertBulk {
+	return u.Update(func(s *APIKeyUpsert) {
+		s.SetServiceTierPreference(v)
+	})
+}
+
+// UpdateServiceTierPreference sets the "service_tier_preference" field to the value that was provided on create.
+func (u *APIKeyUpsertBulk) UpdateServiceTierPreference() *APIKeyUpsertBulk {
+	return u.Update(func(s *APIKeyUpsert) {
+		s.UpdateServiceTierPreference()
 	})
 }
 

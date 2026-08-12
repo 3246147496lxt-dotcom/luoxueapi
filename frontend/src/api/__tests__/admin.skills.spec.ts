@@ -30,6 +30,7 @@ const draft: CreateSkillRequest = {
   category: '文档与数据',
   tags: ['Codex', '文档'],
   icon: '',
+  origin_url: 'https://skills.example.com/api-doc-writer',
   source_url: 'https://github.com/example/api-doc-writer',
   featured: true,
   sort_order: 10,

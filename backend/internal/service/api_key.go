@@ -1,6 +1,7 @@
 package service
 
 import (
+	"strings"
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/ip"
@@ -20,6 +21,28 @@ const (
 	APIKeyPurposeDesktop = "desktop"
 )
 
+// API key-level default OpenAI service tier preferences. The preference is
+// applied only by the gateway when the request does not explicitly provide a
+// service_tier and the selected upstream has verified Priority support.
+const (
+	ServiceTierPreferenceStandard = "standard"
+	ServiceTierPreferencePriority = "priority"
+)
+
+// NormalizeServiceTierPreference canonicalizes the persisted/API value. An
+// omitted value is the safe Standard default; callers should reject values
+// for which ok is false instead of silently changing them.
+func NormalizeServiceTierPreference(value string) (normalized string, ok bool) {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "", ServiceTierPreferenceStandard:
+		return ServiceTierPreferenceStandard, true
+	case ServiceTierPreferencePriority:
+		return ServiceTierPreferencePriority, true
+	default:
+		return "", false
+	}
+}
+
 // Rate limit window durations
 const (
 	RateLimitWindow5h = 5 * time.Hour
@@ -34,16 +57,17 @@ func IsWindowExpired(windowStart *time.Time, duration time.Duration) bool {
 }
 
 type APIKey struct {
-	ID              int64
-	UserID          int64
-	Key             string
-	Name            string
-	GroupID         *int64
-	Status          string
-	Purpose         string
-	ManagedDeviceID *int64
-	IPWhitelist     []string
-	IPBlacklist     []string
+	ID                    int64
+	UserID                int64
+	Key                   string
+	Name                  string
+	GroupID               *int64
+	Status                string
+	Purpose               string
+	ServiceTierPreference string
+	ManagedDeviceID       *int64
+	IPWhitelist           []string
+	IPBlacklist           []string
 	// 预编译的 IP 规则，用于认证热路径避免重复 ParseIP/ParseCIDR。
 	CompiledIPWhitelist *ip.CompiledIPRules `json:"-"`
 	CompiledIPBlacklist *ip.CompiledIPRules `json:"-"`

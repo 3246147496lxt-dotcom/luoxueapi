@@ -110,6 +110,7 @@ func RegisterAdminRoutes(
 
 		// Codex Skill 市场
 		registerSkillMarketRoutes(admin, h)
+		registerSkillImportRoutes(admin, h)
 
 		// 文档教程内容管理
 		registerDocumentationRoutes(admin, h)
@@ -186,6 +187,31 @@ func registerSkillMarketRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 		skills.POST("/:id/versions/:versionId/activate", h.Admin.SkillMarket.Activate)
 		skills.POST("/:id/versions/:versionId/yank", h.Admin.SkillMarket.Yank)
 		skills.POST("/:id/archive", h.Admin.SkillMarket.Archive)
+	}
+}
+
+func registerSkillImportRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
+	imports := admin.Group("/skill-import")
+	{
+		imports.GET("/adapters", h.Admin.SkillImport.Adapters)
+		imports.GET("/sources", h.Admin.SkillImport.ListSources)
+		imports.POST("/sources", h.Admin.SkillImport.CreateSource)
+		imports.GET("/sources/:id", h.Admin.SkillImport.GetSource)
+		imports.PUT("/sources/:id", h.Admin.SkillImport.UpdateSource)
+		imports.GET("/schedules", h.Admin.SkillImport.ListSchedules)
+		imports.POST("/schedules", h.Admin.SkillImport.CreateSchedule)
+		imports.GET("/schedules/:id", h.Admin.SkillImport.GetSchedule)
+		imports.PUT("/schedules/:id", h.Admin.SkillImport.UpdateSchedule)
+		imports.POST("/schedules/:id/run", h.Admin.SkillImport.RunSchedule)
+		imports.GET("/runs", h.Admin.SkillImport.ListRuns)
+		imports.POST("/runs", h.Admin.SkillImport.CreateRun)
+		imports.POST("/runs/upload", h.Admin.SkillImport.UploadRun)
+		imports.GET("/runs/:id", h.Admin.SkillImport.GetRun)
+		imports.GET("/runs/:id/items", h.Admin.SkillImport.ListRunItems)
+		imports.GET("/runs/:id/events", h.Admin.SkillImport.ListRunEvents)
+		imports.POST("/runs/:id/cancel", h.Admin.SkillImport.CancelRun)
+		imports.POST("/runs/:id/retry-failed", h.Admin.SkillImport.RetryFailed)
+		imports.POST("/runs/:id/publish", h.Admin.SkillImport.PublishRun)
 	}
 }
 

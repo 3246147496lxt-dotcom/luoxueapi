@@ -52,6 +52,12 @@ vi.mock('@/composables/useStepUp', () => ({
 }))
 
 vi.mock('vue-router', () => ({
+  RouterLink: defineComponent({
+    props: { to: { type: [String, Object], required: true } },
+    setup(_props, { slots }) {
+      return () => h('a', slots.default?.())
+    },
+  }),
   useRouter: () => ({ push }),
 }))
 

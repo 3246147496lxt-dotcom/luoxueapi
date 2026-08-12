@@ -607,6 +607,8 @@ export interface ApiKey {
   expires_at: string | null // Expiration time (null = never expires)
   created_at: string
   updated_at: string
+  /** Server-side default service tier for OpenAI GPT-5.6 Sol requests. */
+  service_tier_preference?: 'standard' | 'priority'
   current_concurrency: number
   group?: Group
   rate_limit_5h: number
@@ -634,6 +636,7 @@ export interface CreateApiKeyRequest {
   rate_limit_5h?: number
   rate_limit_1d?: number
   rate_limit_7d?: number
+  service_tier_preference?: 'standard' | 'priority'
 }
 
 export interface UpdateApiKeyRequest {
@@ -649,6 +652,7 @@ export interface UpdateApiKeyRequest {
   rate_limit_1d?: number
   rate_limit_7d?: number
   reset_rate_limit_usage?: boolean
+  service_tier_preference?: 'standard' | 'priority'
 }
 
 export interface CreateGroupRequest {

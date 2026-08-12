@@ -118,54 +118,55 @@ const (
 // APIKeyMutation represents an operation that mutates the APIKey nodes in the graph.
 type APIKeyMutation struct {
 	config
-	op                    Op
-	typ                   string
-	id                    *int64
-	created_at            *time.Time
-	updated_at            *time.Time
-	deleted_at            *time.Time
-	key                   *string
-	name                  *string
-	status                *string
-	purpose               *string
-	last_used_at          *time.Time
-	ip_whitelist          *[]string
-	appendip_whitelist    []string
-	ip_blacklist          *[]string
-	appendip_blacklist    []string
-	quota                 *float64
-	addquota              *float64
-	quota_used            *float64
-	addquota_used         *float64
-	expires_at            *time.Time
-	rate_limit_5h         *float64
-	addrate_limit_5h      *float64
-	rate_limit_1d         *float64
-	addrate_limit_1d      *float64
-	rate_limit_7d         *float64
-	addrate_limit_7d      *float64
-	usage_5h              *float64
-	addusage_5h           *float64
-	usage_1d              *float64
-	addusage_1d           *float64
-	usage_7d              *float64
-	addusage_7d           *float64
-	window_5h_start       *time.Time
-	window_1d_start       *time.Time
-	window_7d_start       *time.Time
-	clearedFields         map[string]struct{}
-	user                  *int64
-	cleareduser           bool
-	group                 *int64
-	clearedgroup          bool
-	managed_device        *int64
-	clearedmanaged_device bool
-	usage_logs            map[int64]struct{}
-	removedusage_logs     map[int64]struct{}
-	clearedusage_logs     bool
-	done                  bool
-	oldValue              func(context.Context) (*APIKey, error)
-	predicates            []predicate.APIKey
+	op                      Op
+	typ                     string
+	id                      *int64
+	created_at              *time.Time
+	updated_at              *time.Time
+	deleted_at              *time.Time
+	key                     *string
+	name                    *string
+	status                  *string
+	purpose                 *string
+	service_tier_preference *string
+	last_used_at            *time.Time
+	ip_whitelist            *[]string
+	appendip_whitelist      []string
+	ip_blacklist            *[]string
+	appendip_blacklist      []string
+	quota                   *float64
+	addquota                *float64
+	quota_used              *float64
+	addquota_used           *float64
+	expires_at              *time.Time
+	rate_limit_5h           *float64
+	addrate_limit_5h        *float64
+	rate_limit_1d           *float64
+	addrate_limit_1d        *float64
+	rate_limit_7d           *float64
+	addrate_limit_7d        *float64
+	usage_5h                *float64
+	addusage_5h             *float64
+	usage_1d                *float64
+	addusage_1d             *float64
+	usage_7d                *float64
+	addusage_7d             *float64
+	window_5h_start         *time.Time
+	window_1d_start         *time.Time
+	window_7d_start         *time.Time
+	clearedFields           map[string]struct{}
+	user                    *int64
+	cleareduser             bool
+	group                   *int64
+	clearedgroup            bool
+	managed_device          *int64
+	clearedmanaged_device   bool
+	usage_logs              map[int64]struct{}
+	removedusage_logs       map[int64]struct{}
+	clearedusage_logs       bool
+	done                    bool
+	oldValue                func(context.Context) (*APIKey, error)
+	predicates              []predicate.APIKey
 }
 
 var _ ent.Mutation = (*APIKeyMutation)(nil)
@@ -614,6 +615,42 @@ func (m *APIKeyMutation) OldPurpose(ctx context.Context) (v string, err error) {
 // ResetPurpose resets all changes to the "purpose" field.
 func (m *APIKeyMutation) ResetPurpose() {
 	m.purpose = nil
+}
+
+// SetServiceTierPreference sets the "service_tier_preference" field.
+func (m *APIKeyMutation) SetServiceTierPreference(s string) {
+	m.service_tier_preference = &s
+}
+
+// ServiceTierPreference returns the value of the "service_tier_preference" field in the mutation.
+func (m *APIKeyMutation) ServiceTierPreference() (r string, exists bool) {
+	v := m.service_tier_preference
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldServiceTierPreference returns the old "service_tier_preference" field's value of the APIKey entity.
+// If the APIKey object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *APIKeyMutation) OldServiceTierPreference(ctx context.Context) (v string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldServiceTierPreference is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldServiceTierPreference requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldServiceTierPreference: %w", err)
+	}
+	return oldValue.ServiceTierPreference, nil
+}
+
+// ResetServiceTierPreference resets all changes to the "service_tier_preference" field.
+func (m *APIKeyMutation) ResetServiceTierPreference() {
+	m.service_tier_preference = nil
 }
 
 // SetManagedDeviceID sets the "managed_device_id" field.
@@ -1657,7 +1694,7 @@ func (m *APIKeyMutation) Type() string {
 // order to get all numeric fields that were incremented/decremented, call
 // AddedFields().
 func (m *APIKeyMutation) Fields() []string {
-	fields := make([]string, 0, 25)
+	fields := make([]string, 0, 26)
 	if m.created_at != nil {
 		fields = append(fields, apikey.FieldCreatedAt)
 	}
@@ -1684,6 +1721,9 @@ func (m *APIKeyMutation) Fields() []string {
 	}
 	if m.purpose != nil {
 		fields = append(fields, apikey.FieldPurpose)
+	}
+	if m.service_tier_preference != nil {
+		fields = append(fields, apikey.FieldServiceTierPreference)
 	}
 	if m.managed_device != nil {
 		fields = append(fields, apikey.FieldManagedDeviceID)
@@ -1759,6 +1799,8 @@ func (m *APIKeyMutation) Field(name string) (ent.Value, bool) {
 		return m.Status()
 	case apikey.FieldPurpose:
 		return m.Purpose()
+	case apikey.FieldServiceTierPreference:
+		return m.ServiceTierPreference()
 	case apikey.FieldManagedDeviceID:
 		return m.ManagedDeviceID()
 	case apikey.FieldLastUsedAt:
@@ -1818,6 +1860,8 @@ func (m *APIKeyMutation) OldField(ctx context.Context, name string) (ent.Value, 
 		return m.OldStatus(ctx)
 	case apikey.FieldPurpose:
 		return m.OldPurpose(ctx)
+	case apikey.FieldServiceTierPreference:
+		return m.OldServiceTierPreference(ctx)
 	case apikey.FieldManagedDeviceID:
 		return m.OldManagedDeviceID(ctx)
 	case apikey.FieldLastUsedAt:
@@ -1921,6 +1965,13 @@ func (m *APIKeyMutation) SetField(name string, value ent.Value) error {
 			return fmt.Errorf("unexpected type %T for field %s", value, name)
 		}
 		m.SetPurpose(v)
+		return nil
+	case apikey.FieldServiceTierPreference:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetServiceTierPreference(v)
 		return nil
 	case apikey.FieldManagedDeviceID:
 		v, ok := value.(int64)
@@ -2271,6 +2322,9 @@ func (m *APIKeyMutation) ResetField(name string) error {
 		return nil
 	case apikey.FieldPurpose:
 		m.ResetPurpose()
+		return nil
+	case apikey.FieldServiceTierPreference:
+		m.ResetServiceTierPreference()
 		return nil
 	case apikey.FieldManagedDeviceID:
 		m.ResetManagedDeviceID()

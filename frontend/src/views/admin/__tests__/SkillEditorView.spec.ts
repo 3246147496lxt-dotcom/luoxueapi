@@ -108,6 +108,7 @@ const draftSkill = {
   category: '文档与数据',
   tags: ['Codex'],
   icon: '',
+  origin_url: 'https://skills.example.com/api-doc-writer',
   source_url: 'https://github.com/example/api-doc-writer',
   example_prompts: ['保留已有示例'],
   risk_notes: '保留已有风险说明',
@@ -221,6 +222,7 @@ describe('admin SkillEditorView', () => {
     await flushPromises()
 
     await wrapper.get('#skill-summary').setValue('生成清晰、可执行的接入文档')
+    await wrapper.get('#skill-origin-url').setValue('https://skills.example.com/updated-skill')
     await wrapper.get('#skill-source-url').setValue('https://github.com/example/updated-skill')
     await wrapper.get('[data-testid="save-skill-draft"]').trigger('click')
     await flushPromises()
@@ -228,6 +230,7 @@ describe('admin SkillEditorView', () => {
     expect(update).toHaveBeenCalledWith(1, expect.objectContaining({
       slug: 'api-doc-writer',
       summary: '生成清晰、可执行的接入文档',
+      origin_url: 'https://skills.example.com/updated-skill',
       source_url: 'https://github.com/example/updated-skill',
       example_prompts: ['保留已有示例'],
       risk_notes: '保留已有风险说明',

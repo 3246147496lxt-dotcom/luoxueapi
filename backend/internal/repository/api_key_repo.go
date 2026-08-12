@@ -62,6 +62,7 @@ func (r *apiKeyRepository) Create(ctx context.Context, key *service.APIKey) erro
 		SetName(key.Name).
 		SetStatus(key.Status).
 		SetPurpose(service.APIKeyPurposeUser).
+		SetServiceTierPreference(service.ServiceTierPreferenceStandard).
 		SetNillableGroupID(key.GroupID).
 		SetNillableLastUsedAt(key.LastUsedAt).
 		SetQuota(key.Quota).
@@ -77,11 +78,17 @@ func (r *apiKeyRepository) Create(ctx context.Context, key *service.APIKey) erro
 	if len(key.IPBlacklist) > 0 {
 		builder.SetIPBlacklist(key.IPBlacklist)
 	}
+	preference, ok := service.NormalizeServiceTierPreference(key.ServiceTierPreference)
+	if !ok {
+		return service.ErrInvalidServiceTierPreference
+	}
+	builder.SetServiceTierPreference(preference)
 
 	created, err := builder.Save(ctx)
 	if err == nil {
 		key.ID = created.ID
 		key.Purpose = service.APIKeyPurposeUser
+		key.ServiceTierPreference = created.ServiceTierPreference
 		key.LastUsedAt = created.LastUsedAt
 		key.CreatedAt = created.CreatedAt
 		key.UpdatedAt = created.UpdatedAt
@@ -265,6 +272,7 @@ func (r *apiKeyRepository) GetByKeyForAuth(ctx context.Context, key string) (*se
 			apikey.FieldName,
 			apikey.FieldStatus,
 			apikey.FieldPurpose,
+			apikey.FieldServiceTierPreference,
 			apikey.FieldManagedDeviceID,
 			apikey.FieldIPWhitelist,
 			apikey.FieldIPBlacklist,
@@ -367,6 +375,7 @@ func (r *apiKeyRepository) Update(ctx context.Context, key *service.APIKey) erro
 		).
 		SetName(key.Name).
 		SetStatus(key.Status).
+		SetServiceTierPreference(service.ServiceTierPreferenceStandard).
 		SetQuota(key.Quota).
 		SetQuotaUsed(key.QuotaUsed).
 		SetRateLimit5h(key.RateLimit5h).
@@ -381,6 +390,11 @@ func (r *apiKeyRepository) Update(ctx context.Context, key *service.APIKey) erro
 	} else {
 		builder.ClearGroupID()
 	}
+	preference, ok := service.NormalizeServiceTierPreference(key.ServiceTierPreference)
+	if !ok {
+		return service.ErrInvalidServiceTierPreference
+	}
+	builder.SetServiceTierPreference(preference)
 
 	// Expiration time
 	if key.ExpiresAt != nil {
@@ -990,32 +1004,37 @@ func apiKeyEntityToService(m *dbent.APIKey) *service.APIKey {
 	if m == nil {
 		return nil
 	}
+	serviceTierPreference, ok := service.NormalizeServiceTierPreference(m.ServiceTierPreference)
+	if !ok {
+		serviceTierPreference = service.ServiceTierPreferenceStandard
+	}
 	out := &service.APIKey{
-		ID:              m.ID,
-		UserID:          m.UserID,
-		Key:             m.Key,
-		Name:            m.Name,
-		Status:          m.Status,
-		Purpose:         m.Purpose,
-		ManagedDeviceID: m.ManagedDeviceID,
-		IPWhitelist:     m.IPWhitelist,
-		IPBlacklist:     m.IPBlacklist,
-		LastUsedAt:      m.LastUsedAt,
-		CreatedAt:       m.CreatedAt,
-		UpdatedAt:       m.UpdatedAt,
-		GroupID:         m.GroupID,
-		Quota:           m.Quota,
-		QuotaUsed:       m.QuotaUsed,
-		ExpiresAt:       m.ExpiresAt,
-		RateLimit5h:     m.RateLimit5h,
-		RateLimit1d:     m.RateLimit1d,
-		RateLimit7d:     m.RateLimit7d,
-		Usage5h:         m.Usage5h,
-		Usage1d:         m.Usage1d,
-		Usage7d:         m.Usage7d,
-		Window5hStart:   m.Window5hStart,
-		Window1dStart:   m.Window1dStart,
-		Window7dStart:   m.Window7dStart,
+		ID:                    m.ID,
+		UserID:                m.UserID,
+		Key:                   m.Key,
+		Name:                  m.Name,
+		Status:                m.Status,
+		Purpose:               m.Purpose,
+		ServiceTierPreference: serviceTierPreference,
+		ManagedDeviceID:       m.ManagedDeviceID,
+		IPWhitelist:           m.IPWhitelist,
+		IPBlacklist:           m.IPBlacklist,
+		LastUsedAt:            m.LastUsedAt,
+		CreatedAt:             m.CreatedAt,
+		UpdatedAt:             m.UpdatedAt,
+		GroupID:               m.GroupID,
+		Quota:                 m.Quota,
+		QuotaUsed:             m.QuotaUsed,
+		ExpiresAt:             m.ExpiresAt,
+		RateLimit5h:           m.RateLimit5h,
+		RateLimit1d:           m.RateLimit1d,
+		RateLimit7d:           m.RateLimit7d,
+		Usage5h:               m.Usage5h,
+		Usage1d:               m.Usage1d,
+		Usage7d:               m.Usage7d,
+		Window5hStart:         m.Window5hStart,
+		Window1dStart:         m.Window1dStart,
+		Window7dStart:         m.Window7dStart,
 	}
 	if m.Edges.User != nil {
 		out.User = userEntityToService(m.Edges.User)

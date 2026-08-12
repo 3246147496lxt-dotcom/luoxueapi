@@ -1,11 +1,13 @@
 package middleware
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"strings"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/ctxkey"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/googleapi"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/ip"
 	"github.com/Wei-Shaw/sub2api/internal/service"
@@ -93,6 +95,18 @@ func APIKeyAuthWithSubscriptionGoogle(apiKeyService *service.APIKeyService, subs
 			abortWithGoogleError(c, 403, "API Key 所属专属分组不再允许当前用户使用")
 			return
 		}
+
+		// Keep the trusted preference context consistent across API-key auth
+		// middleware. Gemini routes cannot consume OpenAI Priority, and
+		// non-user/internal keys are always fail-safe Standard.
+		serviceTierPreference := service.ServiceTierPreferenceStandard
+		if apiKey.Purpose == service.APIKeyPurposeUser {
+			if normalized, ok := service.NormalizeServiceTierPreference(apiKey.ServiceTierPreference); ok {
+				serviceTierPreference = normalized
+			}
+		}
+		ctx := context.WithValue(c.Request.Context(), ctxkey.OpenAIServiceTierPreference, serviceTierPreference)
+		c.Request = c.Request.WithContext(ctx)
 
 		// 简易模式：跳过余额和订阅检查
 		if cfg.RunMode == config.RunModeSimple {

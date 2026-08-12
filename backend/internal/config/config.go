@@ -97,6 +97,7 @@ type Config struct {
 	Update                  UpdateConfig                  `mapstructure:"update"`
 	Idempotency             IdempotencyConfig             `mapstructure:"idempotency"`
 	BatchImage              BatchImageConfig              `mapstructure:"batch_image"`
+	SkillImport             SkillImportConfig             `mapstructure:"skill_import"`
 	ImageStorage            ImageStorageConfig            `mapstructure:"image_storage"`
 	Desktop                 DesktopConfig                 `mapstructure:"desktop"`
 	Transcription           TranscriptionConfig           `mapstructure:"transcription"`
@@ -322,6 +323,24 @@ type BatchImageConfig struct {
 	VertexOutputRetentionHours   int    `mapstructure:"vertex_output_retention_hours"`
 	VertexBatchPredictionBaseURL string `mapstructure:"vertex_batch_prediction_base_url"`
 	VertexGCSBaseURL             string `mapstructure:"vertex_gcs_base_url"`
+}
+
+// SkillImportConfig controls the durable Skill marketplace ingestion worker.
+// Sources and schedules remain database-backed; these values only define
+// process-level safety and resource limits shared by every import plan.
+type SkillImportConfig struct {
+	Enabled              bool   `mapstructure:"enabled"`
+	WorkerEnabled        bool   `mapstructure:"worker_enabled"`
+	WorkerConcurrency    int    `mapstructure:"worker_concurrency"`
+	PerHostConcurrency   int    `mapstructure:"per_host_concurrency"`
+	PollIntervalSeconds  int    `mapstructure:"poll_interval_seconds"`
+	LeaseTTLSeconds      int    `mapstructure:"lease_ttl_seconds"`
+	MaxAttempts          int    `mapstructure:"max_attempts"`
+	MaxRunDurationHours  int    `mapstructure:"max_run_duration_hours"`
+	EventsRetentionDays  int    `mapstructure:"events_retention_days"`
+	MaxHTTPResponseBytes int64  `mapstructure:"max_http_response_bytes"`
+	HTTPTimeoutSeconds   int    `mapstructure:"http_timeout_seconds"`
+	GitHubToken          string `mapstructure:"github_token"`
 }
 
 // ImageStorageConfig 配置异步图片任务结果上传的 S3 兼容对象存储。
@@ -1681,6 +1700,7 @@ func load(allowMissingJWTSecret bool) (*Config, error) {
 	}
 
 	cfg.RunMode = NormalizeRunMode(cfg.RunMode)
+	cfg.SkillImport.GitHubToken = strings.TrimSpace(cfg.SkillImport.GitHubToken)
 	cfg.Server.Mode = strings.ToLower(strings.TrimSpace(cfg.Server.Mode))
 	if cfg.Server.Mode == "" {
 		cfg.Server.Mode = "debug"
@@ -2082,6 +2102,21 @@ func setDefaults() {
 	viper.SetDefault("batch_image.vertex_output_retention_hours", 72)
 	viper.SetDefault("batch_image.vertex_batch_prediction_base_url", "")
 	viper.SetDefault("batch_image.vertex_gcs_base_url", "")
+
+	// Skill marketplace importer. Plans are disabled when created, so keeping
+	// the idle worker available by default does not start outbound collection.
+	viper.SetDefault("skill_import.enabled", true)
+	viper.SetDefault("skill_import.worker_enabled", true)
+	viper.SetDefault("skill_import.worker_concurrency", 2)
+	viper.SetDefault("skill_import.per_host_concurrency", 1)
+	viper.SetDefault("skill_import.poll_interval_seconds", 2)
+	viper.SetDefault("skill_import.lease_ttl_seconds", 300)
+	viper.SetDefault("skill_import.max_attempts", 5)
+	viper.SetDefault("skill_import.max_run_duration_hours", 24)
+	viper.SetDefault("skill_import.events_retention_days", 180)
+	viper.SetDefault("skill_import.max_http_response_bytes", 10485760)
+	viper.SetDefault("skill_import.http_timeout_seconds", 30)
+	viper.SetDefault("skill_import.github_token", "")
 
 	// Image storage (async image task result offload to S3-compatible object storage)
 	viper.SetDefault("image_storage.enabled", false)
@@ -2717,6 +2752,35 @@ func (c *Config) Validate() error {
 	}
 	if c.Redis.MinIdleConns > c.Redis.PoolSize {
 		return fmt.Errorf("redis.min_idle_conns cannot exceed redis.pool_size")
+	}
+	if c.SkillImport.Enabled {
+		if c.SkillImport.WorkerConcurrency <= 0 || c.SkillImport.WorkerConcurrency > 16 {
+			return fmt.Errorf("skill_import.worker_concurrency must be between 1 and 16")
+		}
+		if c.SkillImport.PerHostConcurrency <= 0 || c.SkillImport.PerHostConcurrency > c.SkillImport.WorkerConcurrency {
+			return fmt.Errorf("skill_import.per_host_concurrency must be between 1 and worker_concurrency")
+		}
+		if c.SkillImport.PollIntervalSeconds <= 0 {
+			return fmt.Errorf("skill_import.poll_interval_seconds must be positive")
+		}
+		if c.SkillImport.LeaseTTLSeconds < 30 {
+			return fmt.Errorf("skill_import.lease_ttl_seconds must be at least 30")
+		}
+		if c.SkillImport.MaxAttempts <= 0 || c.SkillImport.MaxAttempts > 20 {
+			return fmt.Errorf("skill_import.max_attempts must be between 1 and 20")
+		}
+		if c.SkillImport.MaxRunDurationHours <= 0 {
+			return fmt.Errorf("skill_import.max_run_duration_hours must be positive")
+		}
+		if c.SkillImport.EventsRetentionDays <= 0 {
+			return fmt.Errorf("skill_import.events_retention_days must be positive")
+		}
+		if c.SkillImport.MaxHTTPResponseBytes <= 0 {
+			return fmt.Errorf("skill_import.max_http_response_bytes must be positive")
+		}
+		if c.SkillImport.HTTPTimeoutSeconds <= 0 {
+			return fmt.Errorf("skill_import.http_timeout_seconds must be positive")
+		}
 	}
 	if c.BatchImage.QueueEnabled {
 		if strings.TrimSpace(c.BatchImage.QueueReadyKey) == "" {

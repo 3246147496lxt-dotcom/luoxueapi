@@ -2,6 +2,10 @@
   <section
     v-if="items.length"
     class="chat-attachment-preview"
+    :class="{
+      'chat-attachment-preview--single-image': isSingleImage,
+      'chat-attachment-preview--multiple': items.length > 1,
+    }"
     :aria-label="t('chat.attachments.selected')"
   >
     <ul class="chat-attachment-preview__list" role="list">
@@ -9,10 +13,16 @@
         v-for="item in items"
         :key="item.key"
         class="chat-attachment-preview__item"
-        :class="{
-          'chat-attachment-preview__item--error': item.state === 'error'
-            || (item.kind === 'image' && !supportsVision),
-        }"
+        :class="[
+          `chat-attachment-preview__item--${item.kind}`,
+          `chat-attachment-preview__item--${item.state}`,
+          {
+            'chat-attachment-preview__item--error': itemIsInvalid(item),
+          },
+        ]"
+        :data-kind="item.kind"
+        :data-state="item.state"
+        data-test="chat-attachment-item"
       >
         <div class="chat-attachment-preview__visual" aria-hidden="true">
           <img
@@ -20,76 +30,87 @@
             :src="item.previewUrl"
             alt=""
           />
-          <Icon v-else :name="item.kind === 'image' ? 'photo' : 'document'" size="md" />
-        </div>
+          <Icon v-else :name="item.kind === 'image' ? 'photo' : 'document'" size="lg" />
 
-        <div class="chat-attachment-preview__content">
-          <strong :title="item.file.name">{{ item.file.name }}</strong>
-          <span class="chat-attachment-preview__meta">
-            {{ formatAttachmentBytes(item.file.size) }}
-          </span>
           <span
-            class="chat-attachment-preview__status"
-            :class="{
-              'chat-attachment-preview__status--error': item.state === 'error'
-                || (item.kind === 'image' && !supportsVision),
-            }"
-            aria-live="polite"
-          >
-            {{ statusText(item) }}
-          </span>
-          <span
-            v-if="isDocx(item) && item.state === 'ready'"
-            class="chat-attachment-preview__hint"
-          >
-            {{ t('chat.attachments.docxTextOnly') }}
-          </span>
-          <progress
-            v-if="item.state === 'uploading'"
-            class="chat-attachment-preview__progress"
-            max="100"
-            :value="item.progress"
-            :aria-label="t('chat.attachments.uploadProgress', { progress: item.progress })"
-          ></progress>
-        </div>
-
-        <div class="chat-attachment-preview__actions">
-          <button
             v-if="item.state === 'uploading' || item.state === 'processing'"
-            type="button"
-            :aria-label="t('chat.attachments.cancel', { name: item.file.name })"
-            :title="t('chat.attachments.cancel', { name: item.file.name })"
-            @click="$emit('cancel', item.key)"
+            class="chat-attachment-preview__scrim"
           >
-            <Icon name="x" size="xs" />
-          </button>
-          <button
-            v-if="item.state === 'error'"
-            type="button"
-            :aria-label="t('chat.attachments.retry', { name: item.file.name })"
-            :title="t('chat.attachments.retry', { name: item.file.name })"
-            @click="$emit('retry', item.key)"
+            <span class="chat-attachment-preview__state-icon">
+              <Icon name="refresh" size="sm" />
+            </span>
+            <span v-if="item.state === 'uploading'" class="chat-attachment-preview__progress-copy">
+              {{ item.progress }}%
+            </span>
+          </span>
+          <span
+            v-else-if="itemIsInvalid(item)"
+            class="chat-attachment-preview__scrim chat-attachment-preview__scrim--error"
           >
-            <Icon name="refresh" size="xs" />
-          </button>
+            <span class="chat-attachment-preview__state-icon">
+              <Icon name="exclamationCircle" size="sm" />
+            </span>
+          </span>
+        </div>
+
+        <div v-if="item.kind === 'document'" class="chat-attachment-preview__document-copy">
+          <strong :title="item.file.name">{{ item.file.name }}</strong>
+          <span>{{ documentMeta(item) }}</span>
+        </div>
+
+        <span class="sr-only" aria-live="polite">
+          {{ item.file.name }}: {{ statusText(item) }}
+        </span>
+
+        <progress
+          v-if="item.state === 'uploading'"
+          class="sr-only"
+          max="100"
+          :value="item.progress"
+          :aria-label="t('chat.attachments.uploadProgress', { progress: item.progress })"
+        ></progress>
+
+        <button
+          v-if="item.state === 'error'"
+          type="button"
+          class="chat-attachment-preview__retry"
+          :aria-label="t('chat.attachments.retry', { name: item.file.name })"
+          :title="t('chat.attachments.retry', { name: item.file.name })"
+          data-test="chat-attachment-retry"
+          @click="$emit('retry', item.key)"
+        >
+          <span class="chat-attachment-preview__action-icon">
+            <Icon name="refresh" size="xs" aria-hidden="true" />
+          </span>
+        </button>
+
+        <ChatControlTooltip
+          :label="t('chat.attachments.removeFile')"
+          :accessible="false"
+          contents
+        >
           <button
-            v-if="item.state === 'ready' || item.state === 'error'"
             type="button"
+            class="chat-attachment-preview__remove"
             :aria-label="t('chat.attachments.remove', { name: item.file.name })"
-            :title="t('chat.attachments.remove', { name: item.file.name })"
+            data-test="chat-attachment-remove"
             @click="$emit('remove', item.key)"
           >
-            <Icon name="x" size="xs" />
+            <span class="chat-attachment-preview__action-icon">
+              <Icon name="x" size="xs" aria-hidden="true" />
+            </span>
           </button>
-        </div>
+        </ChatControlTooltip>
       </li>
     </ul>
   </section>
 </template>
 
 <script setup lang="ts">
+import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import Icon from '@/components/icons/Icon.vue'
+import ChatControlTooltip from './ChatControlTooltip.vue'
 import {
   formatAttachmentBytes,
   type ChatAttachmentDraft,
@@ -110,6 +131,14 @@ defineEmits<{
 
 const { t } = useI18n()
 
+const isSingleImage = computed(() => (
+  props.items.length === 1 && props.items[0]?.kind === 'image'
+))
+
+function itemIsInvalid(item: ChatAttachmentDraft): boolean {
+  return item.state === 'error' || (item.kind === 'image' && !props.supportsVision)
+}
+
 function statusText(item: ChatAttachmentDraft): string {
   if (item.kind === 'image' && !props.supportsVision) {
     return t('chat.attachments.errors.visionUnsupported')
@@ -122,6 +151,13 @@ function statusText(item: ChatAttachmentDraft): string {
   return t(item.errorKey ?? 'chat.attachments.errors.uploadFailed', item.errorArgs ?? {})
 }
 
+function documentMeta(item: ChatAttachmentDraft): string {
+  const status = item.state === 'ready' ? formatAttachmentBytes(item.file.size) : statusText(item)
+  return isDocx(item) && item.state === 'ready'
+    ? `${status} · ${t('chat.attachments.docxTextOnly')}`
+    : status
+}
+
 function isDocx(item: ChatAttachmentDraft): boolean {
   return item.file.name.toLowerCase().endsWith('.docx')
 }
@@ -130,132 +166,279 @@ function isDocx(item: ChatAttachmentDraft): boolean {
 <style scoped>
 .chat-attachment-preview {
   width: 100%;
+  min-width: 0;
   margin: 0;
 }
 
 .chat-attachment-preview__list {
   display: flex;
+  align-items: flex-start;
   gap: 8px;
   margin: 0;
-  padding: 0 1px 4px;
+  padding: 0 6px 0 0;
   overflow-x: auto;
+  overflow-y: hidden;
   list-style: none;
-  scrollbar-width: thin;
+  scrollbar-width: none;
+  overscroll-behavior-inline: contain;
+}
+
+.chat-attachment-preview__list::-webkit-scrollbar {
+  display: none;
 }
 
 .chat-attachment-preview__item {
-  display: grid;
-  grid-template-columns: 48px minmax(0, 1fr) auto;
-  gap: 9px;
-  align-items: center;
-  width: min(280px, 78vw);
-  min-width: 230px;
-  border: 1px solid var(--lx-clay-border);
-  border-radius: var(--lx-clay-radius-control);
-  padding: 7px;
-  color: var(--lx-clay-text);
-  background: var(--lx-clay-recessed);
-  box-shadow: none;
+  position: relative;
+  flex: 0 0 auto;
+  min-width: 0;
+  color: var(--chat-composer-primary-fg, var(--lx-clay-text));
 }
 
-.chat-attachment-preview__item--error {
-  border-color: color-mix(in srgb, var(--lx-clay-danger) 42%, var(--lx-clay-border));
+.chat-attachment-preview__item--image {
+  width: 56px;
+  height: 56px;
+}
+
+.chat-attachment-preview--single-image .chat-attachment-preview__item--image {
+  width: 144px;
+  height: 144px;
+}
+
+.chat-attachment-preview__item--document {
+  display: grid;
+  grid-template-columns: 48px minmax(0, 1fr);
+  gap: 10px;
+  align-items: center;
+  width: min(240px, calc(100vw - 72px));
+  height: 72px;
+  border: 1px solid var(--workspace-border);
+  border-radius: 14px;
+  padding: 11px 36px 11px 11px;
+  background: var(--workspace-surface-subtle);
 }
 
 .chat-attachment-preview__visual {
+  position: relative;
   display: grid;
+  width: 100%;
+  height: 100%;
   place-items: center;
+  overflow: hidden;
+  border: 1px solid var(--workspace-border);
+  border-radius: 14px;
+  color: var(--chat-composer-muted-fg, var(--lx-clay-text-muted));
+  background: var(--workspace-surface-subtle);
+}
+
+.chat-attachment-preview__item--document .chat-attachment-preview__visual {
   width: 48px;
   height: 48px;
-  overflow: hidden;
-  border-radius: 7px;
+  border: 0;
+  border-radius: 10px;
   color: var(--lx-clay-accent-deep);
   background: var(--lx-clay-accent-soft);
 }
 
 .chat-attachment-preview__visual img {
+  display: block;
   width: 100%;
   height: 100%;
   object-fit: cover;
 }
 
-.chat-attachment-preview__content {
+.chat-attachment-preview__scrim {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: 3px;
+  color: #fff;
+  background: rgb(13 13 13 / 48%);
+}
+
+.chat-attachment-preview__scrim--error {
+  background: rgb(127 29 29 / 50%);
+}
+
+.chat-attachment-preview__state-icon {
+  display: grid;
+  width: 28px;
+  height: 28px;
+  place-items: center;
+  border-radius: 50%;
+  background: rgb(0 0 0 / 58%);
+}
+
+.chat-attachment-preview__item--uploading .chat-attachment-preview__state-icon,
+.chat-attachment-preview__item--processing .chat-attachment-preview__state-icon {
+  animation: chat-attachment-spin 900ms linear infinite;
+}
+
+.chat-attachment-preview__progress-copy {
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 14px;
+}
+
+.chat-attachment-preview__document-copy {
   display: flex;
   min-width: 0;
   flex-direction: column;
-  gap: 2px;
+  gap: 3px;
 }
 
-.chat-attachment-preview__content strong {
+.chat-attachment-preview__document-copy strong,
+.chat-attachment-preview__document-copy span {
   overflow: hidden;
-  font-size: var(--workspace-type-navigation-size);
-  font-weight: var(--workspace-type-navigation-weight);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.chat-attachment-preview__meta,
-.chat-attachment-preview__status,
-.chat-attachment-preview__hint {
-  color: var(--lx-clay-text-muted);
-  font-size: var(--workspace-type-secondary-size);
-  font-weight: var(--workspace-type-secondary-weight);
-  line-height: 1.3;
+.chat-attachment-preview__document-copy strong {
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 18px;
 }
 
-.chat-attachment-preview__hint {
-  white-space: normal;
+.chat-attachment-preview__document-copy span {
+  color: var(--chat-composer-muted-fg, var(--lx-clay-text-muted));
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 16px;
 }
 
-.chat-attachment-preview__status--error {
-  color: var(--lx-clay-danger);
-}
-
-.chat-attachment-preview__progress {
-  width: 100%;
-  height: 3px;
-  overflow: hidden;
-  border: 0;
-  border-radius: 999px;
-  accent-color: var(--lx-clay-accent);
-}
-
-.chat-attachment-preview__actions {
-  display: flex;
-  align-self: start;
-  gap: 2px;
-}
-
-.chat-attachment-preview__actions button {
+.chat-attachment-preview__remove,
+.chat-attachment-preview__retry {
+  position: absolute;
+  z-index: 2;
   display: grid;
-  place-items: center;
-  width: 28px;
-  height: 28px;
   border: 0;
-  border-radius: 50%;
-  color: var(--lx-clay-text-muted);
+  padding: 0;
+  place-items: center;
+  color: #fff;
   background: transparent;
   cursor: pointer;
+  opacity: 0;
+  transition: opacity 120ms ease;
 }
 
-.chat-attachment-preview__actions button:hover {
-  color: var(--lx-clay-accent-deep);
-  background: var(--lx-clay-accent-soft);
+.chat-attachment-preview__remove {
+  inset-block-start: 0;
+  inset-inline-end: 0;
+  width: 44px;
+  height: 44px;
 }
 
-.chat-attachment-preview__actions button:focus-visible {
-  outline: 3px solid var(--lx-clay-accent-soft);
+.chat-attachment-preview__retry {
+  inset-block-end: 2px;
+  inset-inline-start: 2px;
+  width: 34px;
+  height: 34px;
 }
 
-@media (max-width: 640px) {
+.chat-attachment-preview__remove::before,
+.chat-attachment-preview__retry::before {
+  position: absolute;
+  border: 2px solid var(--chat-composer-surface, #fff);
+  border-radius: 50%;
+  background: #212121;
+  box-shadow: 0 2px 8px rgb(0 0 0 / 16%);
+  content: '';
+  transition: background-color 120ms ease, transform 120ms ease;
+}
+
+.chat-attachment-preview__remove::before {
+  inset-block-start: 5px;
+  inset-inline-end: 5px;
+  width: 22px;
+  height: 22px;
+}
+
+.chat-attachment-preview__retry::before {
+  inset-block-end: 3px;
+  inset-inline-start: 3px;
+  width: 24px;
+  height: 24px;
+}
+
+.chat-attachment-preview__action-icon {
+  position: absolute;
+  z-index: 1;
+  display: grid;
+  place-items: center;
+}
+
+.chat-attachment-preview__remove .chat-attachment-preview__action-icon {
+  inset-block-start: 10px;
+  inset-inline-end: 10px;
+  width: 12px;
+  height: 12px;
+}
+
+.chat-attachment-preview__retry .chat-attachment-preview__action-icon {
+  inset-block-end: 9px;
+  inset-inline-start: 9px;
+  width: 12px;
+  height: 12px;
+}
+
+.chat-attachment-preview__item:hover .chat-attachment-preview__remove,
+.chat-attachment-preview__item:hover .chat-attachment-preview__retry,
+.chat-attachment-preview__item:focus-within .chat-attachment-preview__remove,
+.chat-attachment-preview__item:focus-within .chat-attachment-preview__retry {
+  opacity: 1;
+}
+
+.chat-attachment-preview__remove:hover::before,
+.chat-attachment-preview__retry:hover::before {
+  background: #0d0d0d;
+  transform: scale(1.04);
+}
+
+.chat-attachment-preview__remove:focus-visible,
+.chat-attachment-preview__retry:focus-visible {
+  outline: 2px solid var(--lx-clay-accent);
+  outline-offset: -5px;
+}
+
+.chat-attachment-preview__item--error .chat-attachment-preview__visual,
+.chat-attachment-preview__item--error.chat-attachment-preview__item--document {
+  border-color: color-mix(in srgb, var(--lx-clay-danger) 52%, var(--lx-clay-border));
+}
+
+@media (hover: none), (pointer: coarse) {
   .chat-attachment-preview__list {
-    padding-inline: 1px;
     scroll-snap-type: x proximity;
   }
 
   .chat-attachment-preview__item {
-    min-width: min(255px, 82vw);
     scroll-snap-align: start;
+  }
+
+  .chat-attachment-preview__remove,
+  .chat-attachment-preview__retry {
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chat-attachment-preview__item--uploading .chat-attachment-preview__state-icon,
+  .chat-attachment-preview__item--processing .chat-attachment-preview__state-icon {
+    animation: none;
+  }
+
+  .chat-attachment-preview__remove,
+  .chat-attachment-preview__retry,
+  .chat-attachment-preview__remove::before,
+  .chat-attachment-preview__retry::before {
+    transition: none;
+  }
+}
+
+@keyframes chat-attachment-spin {
+  to {
+    transform: rotate(1turn);
   }
 }
 </style>

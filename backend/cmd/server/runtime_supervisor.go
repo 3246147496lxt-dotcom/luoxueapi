@@ -12,6 +12,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/handler"
 	"github.com/Wei-Shaw/sub2api/internal/lifecycle"
 	schedulerapp "github.com/Wei-Shaw/sub2api/internal/modules/scheduler/application"
+	skillimportapp "github.com/Wei-Shaw/sub2api/internal/modules/skillimport/application"
 	applogger "github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/websearch"
 	"github.com/Wei-Shaw/sub2api/internal/repository"
@@ -27,6 +28,7 @@ func buildApplicationSupervisor(
 	pricing *service.PricingService,
 	settingService *service.SettingService,
 	skillMarket *service.SkillMarketService,
+	skillImportWorker *skillimportapp.WorkerRuntime,
 	routerSettingsRuntime *server.RouterSettingsRuntime,
 	opsService *service.OpsService,
 	idempotencyCoordinator *service.IdempotencyCoordinator,
@@ -299,6 +301,11 @@ func buildApplicationSupervisor(
 			ComponentName: "skill-market-github-stars",
 			StartFunc:     skillMarket.Start,
 			StopFunc:      skillMarket.Stop,
+		},
+		lifecycle.ComponentFuncs{
+			ComponentName: "skill-import-worker",
+			StartFunc:     skillImportWorker.Start,
+			StopFunc:      skillImportWorker.Stop,
 		},
 	)
 }

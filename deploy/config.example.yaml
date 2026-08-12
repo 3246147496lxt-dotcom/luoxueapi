@@ -844,6 +844,25 @@ usage_cleanup:
   task_timeout_seconds: 1800
 
 # =============================================================================
+# Skill Marketplace Importer
+# Skill 市场长期收录器（来源和计划在管理后台配置）
+# =============================================================================
+skill_import:
+  enabled: true
+  worker_enabled: true
+  worker_concurrency: 2
+  per_host_concurrency: 1
+  poll_interval_seconds: 2
+  lease_ttl_seconds: 300
+  max_attempts: 5
+  max_run_duration_hours: 24
+  events_retention_days: 180
+  max_http_response_bytes: 10485760
+  http_timeout_seconds: 30
+  # Prefer the SKILL_IMPORT_GITHUB_TOKEN environment variable for this secret.
+  github_token: ""
+
+# =============================================================================
 # HTTP 写接口幂等配置
 # Idempotency Configuration
 # =============================================================================

@@ -39,6 +39,7 @@ import documentationAPI from './documentation'
 import chatHistoryAPI from './chatHistory'
 import desktopDiagnosticsAPI from './desktopDiagnostics'
 import skillsAPI from './skills'
+import skillImportAPI from './skillImport'
 
 /**
  * Unified admin API object for convenient access
@@ -79,7 +80,8 @@ export const adminAPI = {
   documentation: documentationAPI,
   chatHistory: chatHistoryAPI,
   desktopDiagnostics: desktopDiagnosticsAPI,
-  skills: skillsAPI
+  skills: skillsAPI,
+  skillImport: skillImportAPI
 }
 
 export {
@@ -118,7 +120,8 @@ export {
   documentationAPI,
   chatHistoryAPI,
   desktopDiagnosticsAPI,
-  skillsAPI
+  skillsAPI,
+  skillImportAPI
 }
 
 export default adminAPI

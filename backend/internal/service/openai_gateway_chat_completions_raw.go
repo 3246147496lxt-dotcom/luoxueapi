@@ -80,9 +80,6 @@ func (s *OpenAIGatewayService) forwardAsRawChatCompletions(
 		return clientDisconnectResult(), ctx.Err()
 	}
 
-	// 1b. Extract service tier from the raw body before any transformation.
-	serviceTier := extractOpenAIServiceTierFromBody(body)
-
 	// 2. Resolve model mapping (same as ForwardAsChatCompletions)
 	billingModel := resolveOpenAIForwardModel(account, originalModel, defaultMappedModel)
 	upstreamModel := normalizeOpenAIModelForUpstream(account, billingModel)
@@ -104,8 +101,23 @@ func (s *OpenAIGatewayService) forwardAsRawChatCompletions(
 	if normalizedBody, normalized := NormalizeGLMOpenAIReasoningEffort(upstreamBody, upstreamModel); normalized {
 		upstreamBody = normalizedBody
 	}
+	// Image-generation requests do not have OpenAI Priority semantics. Check
+	// both the client model/body and the final mapped model/body so aliases that
+	// resolve to an image model cannot receive the API-key default either.
+	imageIntent := IsImageGenerationIntentForPlatform(openAIResponsesEndpoint, originalModel, body, account.Platform) ||
+		IsImageGenerationIntentForPlatform(openAIResponsesEndpoint, upstreamModel, upstreamBody, account.Platform)
 
-	// 4. Apply OpenAI fast policy on the CC body
+	// 4. Apply the API-key default before the administrator fast policy. The
+	// helper is a no-op for Grok and for any explicit service_tier member.
+	if !imageIntent {
+		if updatedBody, injected, injectErr := s.injectDefaultOpenAIServiceTier(ctx, c, account, upstreamModel, upstreamBody); injectErr != nil {
+			return nil, fmt.Errorf("inject default service tier: %w", injectErr)
+		} else if injected {
+			upstreamBody = updatedBody
+		}
+	}
+
+	// Apply OpenAI fast policy on the CC body
 	updatedBody, policyErr := s.applyOpenAIFastPolicyToBody(ctx, account, upstreamModel, upstreamBody)
 	if policyErr != nil {
 		var blocked *OpenAIFastBlockedError
@@ -116,6 +128,7 @@ func (s *OpenAIGatewayService) forwardAsRawChatCompletions(
 		return nil, policyErr
 	}
 	upstreamBody = updatedBody
+	serviceTier := extractOpenAIServiceTierFromBody(upstreamBody)
 
 	// Grok Composer does not accept image_url parts directly, but Grok Build
 	// can describe the images first. Bridge only this exact failure mode.

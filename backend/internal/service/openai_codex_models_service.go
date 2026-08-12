@@ -1,8 +1,10 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -132,10 +134,14 @@ func isRetryableCodexModelsManifestTransportError(err error) bool {
 }
 
 type codexModelsManifestRequest struct {
-	url                 string
-	headers             http.Header
-	proxyURL            string
-	accountID           int64
+	url       string
+	headers   http.Header
+	proxyURL  string
+	accountID int64
+	// account is the selected routing account. It may be a shadow account,
+	// while credentialAccount points at its parent; capability observation uses
+	// both identities to keep the hot-path lookup in sync with manifest fetches.
+	account             *Account
 	credentialAccountID int64
 	credentialAccount   *Account
 	accountConcurrency  int
@@ -219,10 +225,10 @@ func (c *codexModelsManifestCache) set(key string, manifest *CodexModelsManifest
 // FetchCodexModelsManifest fetches the live Codex models manifest from either
 // the ChatGPT backend for OAuth accounts or a custom upstream for API key accounts.
 //
-// The response body is passed through verbatim: the manifest schema evolves
-// with Codex client releases, and interpreting it here would force the gateway
-// to chase upstream changes. Passing it through keeps the gateway
-// schema-agnostic and always reflects the account's real entitlements.
+// After validating the stable top-level envelope, the response body is passed
+// through verbatim. Model entries evolve with Codex client releases, so the
+// gateway deliberately avoids interpreting their fields and reflects the
+// account's real entitlements without chasing upstream schema changes.
 func (s *OpenAIGatewayService) FetchCodexModelsManifest(ctx context.Context, account *Account, clientVersion, ifNoneMatch string) (*CodexModelsManifest, error) {
 	if account == nil {
 		return nil, infraerrors.New(http.StatusInternalServerError, "OPENAI_CODEX_MODELS_ACCOUNT_REQUIRED", "account is required")
@@ -310,6 +316,7 @@ func (s *OpenAIGatewayService) FetchCodexModelsManifest(ctx context.Context, acc
 		headers:             headers,
 		proxyURL:            proxyURL,
 		accountID:           account.ID,
+		account:             account,
 		credentialAccountID: credAccount.ID,
 		credentialAccount:   credAccount,
 		accountConcurrency:  account.Concurrency,
@@ -354,10 +361,19 @@ func (s *OpenAIGatewayService) fetchCachedAPIKeyCodexModelsManifest(ctx context.
 	cacheKey := buildCodexModelsManifestCacheKey(request)
 	manifest, state := s.codexModelsManifestCache.get(cacheKey, time.Now())
 	if state == codexModelsManifestCacheFresh {
+		// Re-observe cached bodies so capability TTLs can be refreshed even when
+		// the manifest itself remains fresh (for example after a process-local
+		// capability cache expiry).
+		if manifest != nil {
+			s.observeCodexModelsManifest(request, manifest.Body)
+		}
 		return codexModelsManifestForClient(manifest, ifNoneMatch), nil
 	}
 	resultCh := s.refreshCachedAPIKeyCodexModelsManifest(cacheKey, request)
 	if state == codexModelsManifestCacheStale {
+		if manifest != nil {
+			s.observeCodexModelsManifest(request, manifest.Body)
+		}
 		return codexModelsManifestForClient(manifest, ifNoneMatch), nil
 	}
 	select {
@@ -387,6 +403,7 @@ func (s *OpenAIGatewayService) refreshCachedAPIKeyCodexModelsManifest(cacheKey s
 			return nil, err
 		}
 		if manifest.NotModified && cached != nil {
+			s.observeCodexModelsManifest(request, cached.Body)
 			s.codexModelsManifestCache.set(cacheKey, cached, time.Now())
 			return cached, nil
 		}
@@ -461,7 +478,52 @@ func (s *OpenAIGatewayService) fetchCodexModelsManifestUpstream(ctx context.Cont
 			retryable: isRetryableCodexModelsManifestTransportError(err),
 		}
 	}
-	return &CodexModelsManifest{Body: body, ETag: resp.Header.Get("ETag")}, nil
+	if err := validateCodexModelsManifestEnvelope(body); err != nil {
+		return nil, &codexModelsManifestUpstreamError{
+			err: infraerrors.Newf(
+				http.StatusBadGateway,
+				"OPENAI_CODEX_MODELS_UPSTREAM_INVALID_MANIFEST",
+				"codex models manifest upstream returned an invalid envelope: %v",
+				err,
+			),
+			retryable: true,
+		}
+	}
+	manifest := &CodexModelsManifest{Body: body, ETag: resp.Header.Get("ETag")}
+	// Capability metadata is derived from the same successful manifest, while
+	// the exact upstream body remains untouched for the Codex client.
+	s.observeCodexModelsManifest(request, body)
+	return manifest, nil
+}
+
+// validateCodexModelsManifestEnvelope checks only the stable part of the
+// Codex manifest contract. The upstream evolves the shape of individual model
+// entries, so validating those fields here would make the gateway reject valid
+// future manifests. A regular OpenAI /v1/models response has a top-level
+// `data` array instead of `models` and must not be accepted as a Codex
+// manifest: accepting it would both poison the cache and hide a bad account
+// behind a successful 2xx response.
+func validateCodexModelsManifestEnvelope(body []byte) error {
+	var envelope map[string]json.RawMessage
+	if err := json.Unmarshal(body, &envelope); err != nil {
+		return fmt.Errorf("decode JSON object: %w", err)
+	}
+	if envelope == nil {
+		return errors.New("expected a JSON object")
+	}
+	models, ok := envelope["models"]
+	if !ok {
+		return errors.New("missing top-level models array")
+	}
+	models = bytes.TrimSpace(models)
+	if len(models) == 0 || models[0] != '[' {
+		return errors.New("top-level models field is not an array")
+	}
+	var entries []json.RawMessage
+	if err := json.Unmarshal(models, &entries); err != nil {
+		return fmt.Errorf("decode top-level models array: %w", err)
+	}
+	return nil
 }
 
 func buildCodexModelsManifestCacheKey(request codexModelsManifestRequest) string {

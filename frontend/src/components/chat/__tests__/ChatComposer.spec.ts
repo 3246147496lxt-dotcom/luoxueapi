@@ -52,15 +52,69 @@ function mountComposer(
   return wrapper
 }
 
+function installDesktopComposerGeometry(
+  wrapper: VueWrapper,
+  initial: { compactHeight: number, expandedHeight: number, viewportHeight?: number },
+) {
+  const form = wrapper.get('form').element as HTMLFormElement
+  const input = wrapper.get('.chat-composer__input').element as HTMLTextAreaElement
+  const measure = wrapper.get('.chat-composer__measure').element as HTMLTextAreaElement
+  const geometry = {
+    compactHeight: initial.compactHeight,
+    expandedHeight: initial.expandedHeight,
+  }
+
+  vi.spyOn(window, 'matchMedia').mockImplementation((query: string) => ({
+    matches: query === '(prefers-reduced-motion: reduce)',
+    media: query,
+    onchange: null,
+    addListener: vi.fn(),
+    removeListener: vi.fn(),
+    addEventListener: vi.fn(),
+    removeEventListener: vi.fn(),
+    dispatchEvent: vi.fn(),
+  }))
+  vi.spyOn(window, 'innerHeight', 'get').mockReturnValue(initial.viewportHeight ?? 900)
+  vi.spyOn(form, 'getBoundingClientRect').mockReturnValue({
+    x: 0,
+    y: 0,
+    top: 0,
+    right: 768,
+    bottom: 52,
+    left: 0,
+    width: 768,
+    height: 52,
+    toJSON: () => ({}),
+  })
+
+  Object.defineProperty(input, 'scrollHeight', {
+    configurable: true,
+    get: () => form.classList.contains('chat-composer--expanded')
+      ? geometry.expandedHeight
+      : geometry.compactHeight,
+  })
+  Object.defineProperty(input, 'clientHeight', {
+    configurable: true,
+    get: () => Number.parseFloat(input.style.height) || 36,
+  })
+  Object.defineProperty(measure, 'scrollHeight', {
+    configurable: true,
+    get: () => geometry.compactHeight,
+  })
+
+  return { form, input, geometry }
+}
+
 afterEach(() => {
   mountedWrappers.splice(0).forEach((wrapper) => wrapper.unmount())
   document.body.innerHTML = ''
+  vi.restoreAllMocks()
 })
 
 describe('ChatComposer voice transcription integration', () => {
-  it('keeps attachment previews inside the unified composer and expands for rich drafts', async () => {
+  it('keeps an attachment-only draft in the compact two-row composer', async () => {
     const wrapper = mountComposer({
-      modelValue: '第一行\n第二行',
+      modelValue: '',
       hasAttachments: true,
     }, {
       attachments: '<div data-test="attachment-preview">附件</div>',
@@ -70,23 +124,60 @@ describe('ChatComposer voice transcription integration', () => {
     const form = wrapper.get('form')
     const attachment = form.get('[data-test="attachment-preview"]')
     const leading = form.get('.chat-composer__leading')
-    const textarea = form.get('textarea')
+    const inputShell = form.get('.chat-composer__input-shell')
     const trailing = form.get('.chat-composer__trailing')
     const action = form.get('.chat-composer__action')
     const children = Array.from(form.element.children)
 
-    expect(form.classes()).toContain('chat-composer--expanded')
+    expect(form.classes()).not.toContain('chat-composer--expanded')
     expect(form.classes()).toContain('chat-composer--has-attachments')
     expect(children.indexOf(attachment.element.closest('.chat-composer__attachments')!))
       .toBeLessThan(children.indexOf(leading.element))
-    expect(children.indexOf(leading.element)).toBeLessThan(children.indexOf(textarea.element))
-    expect(children.indexOf(textarea.element)).toBeLessThan(children.indexOf(trailing.element))
+    expect(children.indexOf(leading.element)).toBeLessThan(children.indexOf(inputShell.element))
+    expect(children.indexOf(inputShell.element)).toBeLessThan(children.indexOf(trailing.element))
     expect(children.indexOf(trailing.element)).toBeLessThan(children.indexOf(action.element))
 
-    await wrapper.setProps({ modelValue: '单行', hasAttachments: false })
+    const attachmentOnlyStyle = SCOPED_STYLE.match(
+      /\.chat-composer--has-attachments\s*\{([\s\S]*?)\}/,
+    )?.[1] ?? ''
+    expect(attachmentOnlyStyle).toContain(
+      '"composer-attachments composer-attachments composer-attachments composer-attachments"',
+    )
+    expect(attachmentOnlyStyle).toContain(
+      '"composer-leading composer-input composer-trailing composer-action"',
+    )
+    expect(attachmentOnlyStyle).toContain('grid-template-rows: auto 36px;')
+    expect(attachmentOnlyStyle).toContain('row-gap: 18px;')
+
+    await wrapper.setProps({ hasAttachments: false })
+    await nextTick()
     await nextTick()
     expect(form.classes()).not.toContain('chat-composer--expanded')
     expect(form.find('.chat-composer__attachments').exists()).toBe(false)
+  })
+
+  it('still expands when an attachment draft contains genuinely multiline text', async () => {
+    const wrapper = mountComposer({
+      modelValue: '第一行\n第二行',
+      hasAttachments: true,
+    }, {
+      attachments: '<div data-test="attachment-preview">附件</div>',
+    })
+    const form = wrapper.get('form')
+
+    expect(form.classes()).toEqual(expect.arrayContaining([
+      'chat-composer--expanded',
+      'chat-composer--has-attachments',
+    ]))
+    expect(wrapper.get('.chat-composer__input').element)
+      .toHaveProperty('value', '第一行\n第二行')
+
+    await wrapper.setProps({ modelValue: '单行' })
+    await nextTick()
+    await nextTick()
+
+    expect(form.classes()).not.toContain('chat-composer--expanded')
+    expect(form.classes()).toContain('chat-composer--has-attachments')
   })
 
   it('submits an attachment-only message and blocks invalid attachment drafts', async () => {
@@ -138,6 +229,110 @@ describe('ChatComposer voice transcription integration', () => {
     expect(SCOPED_STYLE).toContain('height: 36px;')
   })
 
+  it('keeps the reference Chinese sentence fully visible above a stable bottom toolbar', async () => {
+    const wrapper = mountComposer({ modelValue: '' }, {
+      leading: '<button type="button">附件</button>',
+      trailing: '<button type="button">Pro</button><button type="button">语音</button>',
+    })
+    const { form, input } = installDesktopComposerGeometry(wrapper, {
+      compactHeight: 62,
+      expandedHeight: 36,
+    })
+    const referenceSentence = '你觉得充值、订阅套餐、兑换码、我的订阅这些东西应该放在一个功能板块里进行展示吗？站在用户'
+
+    await wrapper.get('.chat-composer__input').setValue(referenceSentence)
+    await vi.waitFor(() => {
+      expect(form.classList.contains('chat-composer--expanded')).toBe(true)
+      expect(input.style.height).toBe('48px')
+    })
+
+    expect(input.value).toBe(referenceSentence)
+    expect(input.style.overflowY).toBe('hidden')
+    expect(form.getAttribute('data-expanded')).toBe('')
+    expect(wrapper.find('[data-test="chat-composer-expand"]').exists()).toBe(false)
+  })
+
+  it('matches the viewport-based scroll cap and preserves editing state when expanded', async () => {
+    const wrapper = mountComposer({ modelValue: '' })
+    const { form, input, geometry } = installDesktopComposerGeometry(wrapper, {
+      compactHeight: 166,
+      expandedHeight: 140,
+      viewportHeight: 900,
+    })
+    const inputWrapper = wrapper.get('.chat-composer__input')
+    const longDraft = '测'.repeat(155)
+
+    await inputWrapper.setValue(longDraft)
+    await vi.waitFor(() => {
+      expect(wrapper.get('[data-test="chat-composer-expand"]').attributes('aria-label'))
+        .toBe('chat.composer.expand')
+      expect(input.style.height).toBe('140px')
+    })
+
+    input.focus()
+    input.setSelectionRange(12, 37, 'backward')
+    await wrapper.get('[data-test="chat-composer-expand"]').trigger('click')
+    await vi.waitFor(() => {
+      expect(form.classList.contains('chat-composer--maximized')).toBe(true)
+      expect(input.style.height).toBe('621px')
+    })
+
+    const collapseButton = wrapper.get('[data-test="chat-composer-expand"]')
+    expect(collapseButton.attributes('aria-label')).toBe('chat.composer.collapse')
+    expect(collapseButton.attributes('aria-controls')).toBe(input.id)
+    expect(collapseButton.attributes('aria-expanded')).toBe('true')
+    expect(collapseButton.get('[data-icon="chatComposerCollapse"]').attributes('data-icon'))
+      .toBe('chatComposerCollapse')
+    expect(document.activeElement).toBe(input)
+    expect([input.selectionStart, input.selectionEnd]).toEqual([12, 37])
+    expect(input.selectionDirection).toBe('backward')
+
+    await collapseButton.trigger('click')
+    await vi.waitFor(() => {
+      expect(form.classList.contains('chat-composer--maximized')).toBe(false)
+      expect(input.style.height).toBe('140px')
+    })
+
+    geometry.compactHeight = 322
+    geometry.expandedHeight = 296
+    input.setSelectionRange(input.value.length, input.value.length)
+    await inputWrapper.trigger('input')
+    await vi.waitFor(() => expect(input.style.height).toBe('270px'))
+    expect(input.style.overflowY).toBe('auto')
+    expect(form.classList.contains('chat-composer--overflowing')).toBe(true)
+
+    geometry.compactHeight = 36
+    geometry.expandedHeight = 36
+    await inputWrapper.setValue('短文本')
+    await vi.waitFor(() => {
+      expect(form.classList.contains('chat-composer--expanded')).toBe(false)
+      expect(input.style.height).toBe('36px')
+      expect(wrapper.find('[data-test="chat-composer-expand"]').exists()).toBe(false)
+    })
+    expect(input.style.overflowY).toBe('hidden')
+  })
+
+  it('offers expansion as soon as a keyboard-shortened viewport reaches its scroll cap', async () => {
+    const wrapper = mountComposer({ modelValue: '' })
+    const { form, input } = installDesktopComposerGeometry(wrapper, {
+      compactHeight: 110,
+      expandedHeight: 100,
+      viewportHeight: 300,
+    })
+
+    await wrapper.get('.chat-composer__input').setValue('测'.repeat(90))
+    await vi.waitFor(() => {
+      expect(form.classList.contains('chat-composer--expanded')).toBe(true)
+      expect(input.style.height).toBe('90px')
+      expect(input.style.overflowY).toBe('auto')
+      expect(wrapper.get('[data-test="chat-composer-expand"]').attributes('aria-expanded'))
+        .toBe('false')
+    })
+
+    expect(wrapper.get('[data-test="chat-composer-expand"]').element.parentElement)
+      .toBe(wrapper.get('.chat-composer__input-shell').element)
+  })
+
   it('uses the target copy and typography without conflating placeholder and label', async () => {
     const wrapper = mountComposer({ modelValue: '' })
     const textarea = wrapper.get('textarea')
@@ -147,10 +342,14 @@ describe('ChatComposer voice transcription integration', () => {
     expect(zhChat.chat.composer).toMatchObject({
       label: '与 ChatGPT 聊天',
       placeholder: '问问 ChatGPT',
+      expand: '展开输入框',
+      collapse: '收起输入框',
     })
     expect(enChat.chat.composer).toMatchObject({
       label: 'Chat with ChatGPT',
       placeholder: 'Ask ChatGPT',
+      expand: 'Expand composer',
+      collapse: 'Collapse composer',
     })
 
     await wrapper.setProps({ insufficientBalance: true })
@@ -160,16 +359,16 @@ describe('ChatComposer voice transcription integration', () => {
     expect(SCOPED_STYLE).not.toContain('--chat-composer-font')
     expect(SCOPED_STYLE).not.toContain('font-family:')
     expect(SCOPED_STYLE).toMatch(
-      /\.chat-composer textarea\s*\{[^}]*font-size: 16px;[^}]*font-weight: 400;/,
+      /\.chat-composer__input\s*\{[^}]*font-size: 16px;[^}]*font-weight: 400;/,
     )
     expect(SCOPED_STYLE).toMatch(
-      /@media \(max-width: 720px\)[\s\S]*?\.chat-composer textarea\s*\{[^}]*font-size: 16px;/,
+      /@media \(max-width: 720px\)[\s\S]*?\.chat-composer__input\s*\{[^}]*font-size: 16px;/,
     )
     expect(SCOPED_STYLE).toContain('line-height: 26px;')
     expect(SCOPED_STYLE).toContain('--chat-composer-placeholder-fg: #8f8f8f;')
     expect(SCOPED_STYLE).toContain('color: var(--chat-composer-placeholder-fg);')
     expect(SCOPED_STYLE).toMatch(
-      /textarea::placeholder\s*\{[^}]*font-size: inherit;[^}]*font-weight: inherit;[^}]*line-height: inherit;[^}]*letter-spacing: inherit;/,
+      /\.chat-composer__input::placeholder\s*\{[^}]*font-size: inherit;[^}]*font-weight: inherit;[^}]*line-height: inherit;[^}]*letter-spacing: inherit;/,
     )
   })
 
@@ -191,15 +390,9 @@ describe('ChatComposer voice transcription integration', () => {
     )
   })
 
-  it('animates textarea growth without bypassing reduced-motion preferences', () => {
-    expect(COMPONENT_SOURCE).toContain("window.matchMedia?.('(prefers-reduced-motion: reduce)')")
-    expect(COMPONENT_SOURCE).toContain('requestAnimationFrame(() => {')
-    expect(SCOPED_STYLE).toContain(
-      'transition: height 180ms cubic-bezier(0.22, 1, 0.36, 1);',
-    )
-    expect(SCOPED_STYLE).toMatch(
-      /@media \(prefers-reduced-motion: reduce\) \{[\s\S]*?\.chat-composer textarea,[\s\S]*?transition: none;/,
-    )
+  it('avoids layout-height transitions while keeping resize work frame-batched', () => {
+    expect(COMPONENT_SOURCE).toContain('queuedResizeFrame = requestAnimationFrame(() => {')
+    expect(SCOPED_STYLE).not.toContain('transition: height')
   })
 
   it('blocks submission while transcription is busy without disabling text editing', async () => {

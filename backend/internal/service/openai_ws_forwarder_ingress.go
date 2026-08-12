@@ -379,6 +379,17 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClientSession(
 			imageInputSize = imageCfg.InputSize
 		}
 
+		// Apply the API-key default before OpenAI Fast Policy on the response.create
+		// frame. Follow-up frames pass through this same closure, preserving the
+		// explicit-field precedence and capability gate without network I/O.
+		if !imageIntent {
+			if updatedPayload, injected, injectErr := s.injectDefaultOpenAIServiceTier(ctx, c, account, upstreamModel, normalized); injectErr != nil {
+				return openAIWSClientPayload{}, NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "invalid websocket request payload", injectErr)
+			} else if injected {
+				normalized = updatedPayload
+			}
+		}
+
 		// Apply OpenAI Fast Policy on the response.create frame using the same
 		// evaluator/normalize/scope rules as the HTTP entrypoints. This is the
 		// single integration point for all WS ingress turns (first + follow-up

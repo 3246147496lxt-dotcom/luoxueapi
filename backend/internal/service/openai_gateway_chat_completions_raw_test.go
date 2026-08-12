@@ -143,6 +143,37 @@ func TestForwardAsRawChatCompletions_ForcesStreamUsageUpstreamAndPassesUsageDown
 	require.Contains(t, rec.Body.String(), "data: [DONE]")
 }
 
+func TestForwardAsRawChatCompletionsImageModelSkipsPriorityDefault(t *testing.T) {
+	setGinTestMode()
+
+	body := []byte(`{"model":"gpt-image-2","messages":[{"role":"user","content":"draw a cat"}],"stream":false}`)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader(body))
+	c.Request.Header.Set("Content-Type", "application/json")
+
+	upstream := &httpUpstreamRecorder{resp: &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"application/json"}},
+		Body: io.NopCloser(strings.NewReader(
+			`{"id":"chatcmpl_image","object":"chat.completion","model":"gpt-image-2","choices":[{"index":0,"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}`,
+		)),
+	}}
+	account := rawChatCompletionsTestAccount()
+	account.Credentials["model_mapping"] = map[string]any{"gpt-image-2": openAIServiceTierModel}
+	svc := newPriorityInjectionTestService()
+	svc.cfg = rawChatCompletionsTestConfig()
+	svc.httpUpstream = upstream
+	markPriorityCapability(svc, account, OpenAIServiceTierSupportSupported)
+	ctx := context.WithValue(context.Background(), ctxkey.OpenAIServiceTierPreference, ServiceTierPreferencePriority)
+
+	result, err := svc.forwardAsRawChatCompletions(ctx, c, account, body, "")
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.Equal(t, openAIServiceTierModel, gjson.GetBytes(upstream.lastBody, "model").String())
+	require.False(t, gjson.GetBytes(upstream.lastBody, "service_tier").Exists())
+}
+
 func TestForwardAsRawChatCompletions_PreservesMappedGPT56MaxEffort(t *testing.T) {
 	setGinTestMode()
 

@@ -410,6 +410,205 @@ describe('useChatStore', () => {
       .toBe('newer-conversation')
   })
 
+  it('全量同步 502 后仍针对当前会话重放并准备 completion', async () => {
+    chatApiMocks.getChatSync.mockRejectedValue(
+      new ChatAPIError('Bad Gateway', { status: 502 }),
+    )
+
+    const store = useChatStore()
+    await store.hydrate('sync-failed-targeted-success')
+    const conversation = store.createConversation('gpt-5', '保持聊天可用')!
+
+    await store.syncHistory()
+
+    expect(store.syncStatus).toBe('error')
+    expect(store.streamError).toBeNull()
+
+    const remote = serverConversation(conversation.id, {
+      title: conversation.title,
+      model: conversation.model,
+      revision: 2,
+      version: 2,
+      updatedAt: conversation.updatedAt,
+    })
+    chatApiMocks.getChatConversation.mockResolvedValueOnce(remote)
+
+    await expect(store.prepareConversationForCompletion(conversation.id))
+      .resolves.toBe(true)
+
+    expect(chatApiMocks.getChatSync).toHaveBeenCalledTimes(1)
+    expect(chatApiMocks.createChatConversation).toHaveBeenCalledWith(
+      {
+        id: conversation.id,
+        title: conversation.title,
+        model: conversation.model,
+      },
+      expect.any(AbortSignal),
+    )
+    expect(chatApiMocks.getChatConversation).toHaveBeenCalledWith(
+      conversation.id,
+      expect.any(AbortSignal),
+    )
+    expect(store.outbox).toEqual([])
+    expect(store.syncStatus).toBe('error')
+    expect(store.streamError).toBeNull()
+  })
+
+  it('针对当前会话的云端准备也 502 时使用本地会话继续并持久化', async () => {
+    const store = useChatStore()
+    await store.hydrate('targeted-history-fallback')
+    const conversation = store.createConversation('gpt-5', '本地降级会话')!
+    store.addMessage(conversation.id, {
+      id: 'local-user-message',
+      role: 'user',
+      content: '即使云端同步失败也要保留',
+      status: 'complete',
+    })
+    store.addMessage(conversation.id, {
+      id: 'local-assistant-message',
+      role: 'assistant',
+      content: '已保留在本地。',
+      status: 'complete',
+    })
+    chatApiMocks.createChatConversation.mockRejectedValueOnce(
+      new ChatAPIError('Bad Gateway', { status: 502 }),
+    )
+
+    await expect(store.prepareConversationForCompletion(conversation.id))
+      .resolves.toBe(true)
+
+    expect(store.syncStatus).toBe('error')
+    expect(store.outbox).toEqual([
+      expect.objectContaining({
+        mutationId: `create:${conversation.id}`,
+        conversationId: conversation.id,
+        type: 'create',
+      }),
+    ])
+    expect(chatApiMocks.getChatConversation).not.toHaveBeenCalled()
+
+    await store.flushPersistence()
+
+    setActivePinia(createPinia())
+    const restoredStore = useChatStore()
+    await restoredStore.hydrate('targeted-history-fallback')
+
+    expect(restoredStore.activeConversation).toMatchObject({
+      id: conversation.id,
+      title: '本地降级会话',
+    })
+    expect(restoredStore.activeConversation?.messages).toEqual([
+      expect.objectContaining({
+        id: 'local-user-message',
+        role: 'user',
+        content: '即使云端同步失败也要保留',
+      }),
+      expect.objectContaining({
+        id: 'local-assistant-message',
+        role: 'assistant',
+        content: '已保留在本地。',
+      }),
+    ])
+    expect(restoredStore.outbox).toEqual([
+      expect.objectContaining({
+        mutationId: `create:${conversation.id}`,
+        conversationId: conversation.id,
+        type: 'create',
+      }),
+    ])
+  })
+
+  it('云端历史接口 501 时标记 unavailable 但仍允许 completion', async () => {
+    const store = useChatStore()
+    await store.hydrate('history-unavailable-fallback')
+    const conversation = store.createConversation('gpt-5', '云端历史不可用')!
+    chatApiMocks.createChatConversation.mockRejectedValueOnce(
+      new ChatAPIError('Not Implemented', { status: 501 }),
+    )
+
+    await expect(store.prepareConversationForCompletion(conversation.id))
+      .resolves.toBe(true)
+
+    expect(store.syncStatus).toBe('unavailable')
+    expect(store.serverHistoryAvailable).toBe(false)
+    expect(store.syncError).toBeNull()
+    expect(store.streamError).toBeNull()
+  })
+
+  it('completion 被接纳后持久化最新 head，且不会改写同步错误状态', async () => {
+    chatApiMocks.getChatSync.mockRejectedValue(
+      new ChatAPIError('Bad Gateway', { status: 502 }),
+    )
+
+    const store = useChatStore()
+    await store.hydrate('accepted-head-persistence')
+    const conversation = store.createConversation('gpt-5', '回答接纳状态')!
+    store.addMessage(conversation.id, {
+      id: 'accepted-user-message',
+      role: 'user',
+      content: '请继续',
+      status: 'complete',
+    })
+    store.addMessage(conversation.id, {
+      id: 'accepted-assistant-message',
+      role: 'assistant',
+      content: '',
+      status: 'streaming',
+    })
+    await store.syncHistory()
+
+    expect(store.syncStatus).toBe('error')
+    expect(store.markCompletionAccepted(
+      conversation.id,
+      'accepted-assistant-message',
+    )).toBe(true)
+    expect(store.syncStatus).toBe('error')
+    expect(store.activeConversation).toMatchObject({
+      headMessageId: 'accepted-assistant-message',
+      messageCount: 2,
+    })
+
+    await store.flushPersistence()
+
+    setActivePinia(createPinia())
+    const restoredStore = useChatStore()
+    await restoredStore.hydrate('accepted-head-persistence')
+
+    expect(restoredStore.activeConversation).toMatchObject({
+      id: conversation.id,
+      headMessageId: 'accepted-assistant-message',
+      messageCount: 2,
+    })
+    expect(restoredStore.activeConversation?.messages.map(({ id }) => id)).toEqual([
+      'accepted-user-message',
+      'accepted-assistant-message',
+    ])
+  })
+
+  it('账号切换会中止旧会话的 completion 准备，且不污染新账号', async () => {
+    const staleCreate = createDeferred<ChatServerConversation>()
+    chatApiMocks.createChatConversation.mockReturnValueOnce(staleCreate.promise)
+
+    const store = useChatStore()
+    await store.hydrate('completion-account-a')
+    const staleConversation = store.createConversation('gpt-5', '账号 A 会话')!
+    const stalePreparation = store.prepareConversationForCompletion(staleConversation.id)
+    await vi.waitFor(() => {
+      expect(chatApiMocks.createChatConversation).toHaveBeenCalledTimes(1)
+    })
+
+    await store.hydrate('completion-account-b')
+    const currentConversation = store.createConversation('gpt-5', '账号 B 会话')!
+    staleCreate.resolve(serverConversation(staleConversation.id, {
+      title: '迟到的账号 A 会话',
+    }))
+
+    await expect(stalePreparation).resolves.toBe(false)
+    expect(store.userId).toBe('completion-account-b')
+    expect(store.conversations.map(({ id }) => id)).toEqual([currentConversation.id])
+    expect(store.conversations.some(({ id }) => id === staleConversation.id)).toBe(false)
+  })
+
   it('同账号 hydration 期间点击新聊天不会被迟到的旧选择覆盖', async () => {
     const oldConversation = {
       id: 'old-active-conversation',

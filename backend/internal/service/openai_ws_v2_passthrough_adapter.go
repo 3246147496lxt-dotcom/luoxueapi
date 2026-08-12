@@ -238,6 +238,13 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 	}
 	lockedPolicyModel := openAIWSPassthroughPolicyModelForFrame(account, firstClientMessage)
 	usageMeta := newOpenAIWSPassthroughUsageMeta(lockedOriginalModel, firstClientMessage)
+	if !IsImageGenerationIntentForPlatform(openAIResponsesEndpoint, lockedOriginalModel, firstClientMessage, account.Platform) {
+		if updatedFirst, injected, injectErr := s.injectDefaultOpenAIServiceTier(ctx, c, account, lockedPolicyModel, firstClientMessage); injectErr != nil {
+			return NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "invalid websocket request payload", injectErr)
+		} else if injected {
+			firstClientMessage = updatedFirst
+		}
+	}
 	updatedFirst, blocked, policyErr := s.applyOpenAIFastPolicyToWSResponseCreate(ctx, account, lockedPolicyModel, firstClientMessage)
 	if policyErr != nil {
 		return NewOpenAIWSClientCloseError(
@@ -508,6 +515,13 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 			}
 			requestModelForThisFrame := usageMeta.requestModelForFrame(payload)
 			model := lockedPolicyModel
+			if !IsImageGenerationIntentForPlatform(openAIResponsesEndpoint, requestModelForThisFrame, payload, account.Platform) {
+				if updatedPayload, injected, injectErr := s.injectDefaultOpenAIServiceTier(ctx, c, account, model, payload); injectErr != nil {
+					return payload, nil, NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "invalid websocket request payload", injectErr)
+				} else if injected {
+					payload = updatedPayload
+				}
+			}
 			out, blocked, policyErr := s.applyOpenAIFastPolicyToWSResponseCreate(ctx, account, model, payload)
 			// 多轮 passthrough usage：仅在成功（non-block / non-err）
 			// 的 response.create 帧上更新 usageMeta，使用

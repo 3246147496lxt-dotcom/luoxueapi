@@ -15,6 +15,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/lifecycle"
 	"github.com/Wei-Shaw/sub2api/internal/modules/desktop"
 	"github.com/Wei-Shaw/sub2api/internal/modules/quotaauth"
+	"github.com/Wei-Shaw/sub2api/internal/modules/skillimport/application"
 	"github.com/Wei-Shaw/sub2api/internal/payment"
 	"github.com/Wei-Shaw/sub2api/internal/repository"
 	"github.com/Wei-Shaw/sub2api/internal/server"
@@ -260,6 +261,14 @@ func initializeApplication(buildInfo handler.BuildInfo, cfg *config.Config, entC
 	skillMarketRepository := repository.NewSkillMarketRepository(db)
 	skillMarketService := service.NewSkillMarketService(skillMarketRepository, settingService)
 	skillMarketHandler := admin.NewSkillMarketHandler(skillMarketService)
+	skillImportRepository := repository.NewSkillImportRepository(db)
+	httpFetcher, err := application.ProvideHTTPFetcher(cfg)
+	if err != nil {
+		return nil, err
+	}
+	adapterRegistry := application.ProvideAdapterRegistry(httpFetcher, cfg)
+	applicationService := application.NewService(skillImportRepository, adapterRegistry, cfg)
+	skillImportHandler := admin.NewSkillImportHandler(applicationService)
 	documentationRepository := repository.NewDocumentationRepository(db)
 	documentationService := service.NewDocumentationService(documentationRepository)
 	documentationHandler := admin.NewDocumentationHandler(documentationService)
@@ -271,7 +280,7 @@ func initializeApplication(buildInfo handler.BuildInfo, cfg *config.Config, entC
 	desktopDiagnosticHandler := admin.NewDesktopDiagnosticHandler(desktopService)
 	upstreamBillingProbeService := service.ProvideUpstreamBillingProbeService(accountRepository, accountTestService, settingService, leaderLockCache, db)
 	proxyHealthService := service.ProvideProxyHealthService(adminService, proxyRepository, proxyLatencyCache, opsService, leaderLockCache, db, cfg)
-	adminHandlers := handler.ProvideAdminHandlers(dashboardHandler, adminUserHandler, groupHandler, accountHandler, adminAnnouncementHandler, dataManagementHandler, backupHandler, oAuthHandler, openAIOAuthHandler, geminiOAuthHandler, antigravityOAuthHandler, grokOAuthHandler, proxyHandler, adminRedeemHandler, promoHandler, settingHandler, opsHandler, systemHandler, adminSubscriptionHandler, adminUsageHandler, adminChatHistoryHandler, userAttributeHandler, errorPassthroughHandler, tlsFingerprintProfileHandler, adminAPIKeyHandler, scheduledTestHandler, channelHandler, channelMonitorHandler, channelMonitorRequestTemplateHandler, contentModerationHandler, paymentHandler, affiliateHandler, complianceHandler, auditLogHandler, modelCatalogHandler, skillMarketHandler, documentationHandler, desktopDiagnosticHandler, upstreamBillingProbeService, proxyHealthService)
+	adminHandlers := handler.ProvideAdminHandlers(dashboardHandler, adminUserHandler, groupHandler, accountHandler, adminAnnouncementHandler, dataManagementHandler, backupHandler, oAuthHandler, openAIOAuthHandler, geminiOAuthHandler, antigravityOAuthHandler, grokOAuthHandler, proxyHandler, adminRedeemHandler, promoHandler, settingHandler, opsHandler, systemHandler, adminSubscriptionHandler, adminUsageHandler, adminChatHistoryHandler, userAttributeHandler, errorPassthroughHandler, tlsFingerprintProfileHandler, adminAPIKeyHandler, scheduledTestHandler, channelHandler, channelMonitorHandler, channelMonitorRequestTemplateHandler, contentModerationHandler, paymentHandler, affiliateHandler, complianceHandler, auditLogHandler, modelCatalogHandler, skillMarketHandler, skillImportHandler, documentationHandler, desktopDiagnosticHandler, upstreamBillingProbeService, proxyHealthService)
 	usageRecordWorkerPool := service.ProvideUsageRecordWorkerPool(cfg)
 	userMsgQueueCache := repository.NewUserMsgQueueCache(redisClient)
 	userMessageQueueService := service.ProvideUserMessageQueueService(userMsgQueueCache, rpmCache, cfg)
@@ -333,6 +342,8 @@ func initializeApplication(buildInfo handler.BuildInfo, cfg *config.Config, entC
 	quotaAuthMiddleware := middleware.NewQuotaAuthMiddleware(quotaauthService)
 	auditLogMiddleware := middleware.NewAuditLogMiddleware(auditLogService)
 	stepUpAuthMiddleware := middleware.NewStepUpAuthMiddleware(totpService, userService)
+	normalizer := application.ProvideNormalizer()
+	workerRuntime := application.NewWorkerRuntime(applicationService, normalizer, cfg)
 	routerSettingsRuntime := server.ProvideRouterSettingsRuntime(settingService)
 	userPlatformQuotaUsageFlusher := service.ProvideUserPlatformQuotaUsageFlusher(cfg, billingCache, serviceUserPlatformQuotaRepository, timingWheelService)
 	usageLogBatchRuntime, err := repository.ProvideUsageLogBatchRuntime(usageLogRepository)
@@ -353,19 +364,19 @@ func initializeApplication(buildInfo handler.BuildInfo, cfg *config.Config, entC
 	scheduledTestRunnerService := service.ProvideScheduledTestRunnerService(scheduledTestPlanRepository, scheduledTestService, accountTestService, rateLimitService, cfg)
 	paymentOrderExpiryService := service.ProvidePaymentOrderExpiryService(paymentService, leaderLockCache, db)
 	channelMonitorRunner := service.ProvideChannelMonitorRunner(channelMonitorService, settingService)
-	supervisor := buildApplicationSupervisor(pricingService, settingService, skillMarketService, routerSettingsRuntime, opsService, idempotencyCoordinator, subscriptionService, oAuthService, openAIOAuthService, geminiOAuthService, antigravityOAuthService, grokOAuthService, openAIGatewayService, digestSessionStore, tlsFingerprintProfileService, errorPassthroughService, timingWheelService, deferredService, userPlatformQuotaUsageFlusher, billingCacheService, auditLogService, opsSystemLogSink, emailQueueService, usageLogBatchRuntime, usageRecordWorkerPool, batchImageWorkerRuntime, schedulerSnapshotService, applicationFacade, apiKeyService, concurrencyService, userMessageQueueService, contentModerationService, batchImageCleanupService, idempotencyCleanupService, desktopCleanupService, chatAttemptService, chatAttachmentService, dashboardAggregationService, usageCleanupService, opsMetricsCollector, opsAggregationService, opsAlertEvaluatorService, opsCleanupService, opsScheduledReportService, tokenRefreshService, accountExpiryService, proxyExpiryService, subscriptionExpiryService, proxyHealthService, scheduledTestRunnerService, backupService, paymentOrderExpiryService, channelMonitorRunner, upstreamBillingProbeService, redisClient, cfg)
+	supervisor := buildApplicationSupervisor(pricingService, settingService, skillMarketService, workerRuntime, routerSettingsRuntime, opsService, idempotencyCoordinator, subscriptionService, oAuthService, openAIOAuthService, geminiOAuthService, antigravityOAuthService, grokOAuthService, openAIGatewayService, digestSessionStore, tlsFingerprintProfileService, errorPassthroughService, timingWheelService, deferredService, userPlatformQuotaUsageFlusher, billingCacheService, auditLogService, opsSystemLogSink, emailQueueService, usageLogBatchRuntime, usageRecordWorkerPool, batchImageWorkerRuntime, schedulerSnapshotService, applicationFacade, apiKeyService, concurrencyService, userMessageQueueService, contentModerationService, batchImageCleanupService, idempotencyCleanupService, desktopCleanupService, chatAttemptService, chatAttachmentService, dashboardAggregationService, usageCleanupService, opsMetricsCollector, opsAggregationService, opsAlertEvaluatorService, opsCleanupService, opsScheduledReportService, tokenRefreshService, accountExpiryService, proxyExpiryService, subscriptionExpiryService, proxyHealthService, scheduledTestRunnerService, backupService, paymentOrderExpiryService, channelMonitorRunner, upstreamBillingProbeService, redisClient, cfg)
 	readinessProbe := server.ProvideReadinessProbe(db, redisClient, schedulerSnapshotService, cfg, supervisor)
 	engine := server.ProvideRouter(cfg, handlers, jwtAuthMiddleware, adminAuthMiddleware, apiKeyAuthMiddleware, desktopAuthMiddleware, quotaAuthMiddleware, auditLogMiddleware, stepUpAuthMiddleware, apiKeyService, subscriptionService, opsService, settingService, redisClient, readinessProbe, routerSettingsRuntime)
 	requestDrainer := server.NewRequestDrainer()
 	httpServer := server.ProvideHTTPServer(cfg, engine, requestDrainer)
 	v := provideCleanup(entClient, redisClient)
-	application := &Application{
+	mainApplication := &Application{
 		Server:         httpServer,
 		RequestDrainer: requestDrainer,
 		Supervisor:     supervisor,
 		Cleanup:        v,
 	}
-	return application, nil
+	return mainApplication, nil
 }
 
 // wire.go:

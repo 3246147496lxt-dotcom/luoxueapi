@@ -45,6 +45,7 @@ func ProvideAdminHandlers(
 	auditLogHandler *admin.AuditLogHandler,
 	modelCatalogHandler *admin.ModelCatalogHandler,
 	skillMarketHandler *admin.SkillMarketHandler,
+	skillImportHandler *admin.SkillImportHandler,
 	documentationHandler *admin.DocumentationHandler,
 	desktopDiagnosticHandler *admin.DesktopDiagnosticHandler,
 	upstreamBillingProbe *service.UpstreamBillingProbeService,
@@ -90,6 +91,7 @@ func ProvideAdminHandlers(
 		AuditLog:               auditLogHandler,
 		ModelCatalog:           modelCatalogHandler,
 		SkillMarket:            skillMarketHandler,
+		SkillImport:            skillImportHandler,
 		Documentation:          documentationHandler,
 		DesktopDiagnostic:      desktopDiagnosticHandler,
 	}
@@ -262,6 +264,7 @@ var ProviderSet = wire.NewSet(
 	admin.NewAuditLogHandler,
 	admin.NewModelCatalogHandler,
 	admin.NewSkillMarketHandler,
+	admin.NewSkillImportHandler,
 	admin.NewDocumentationHandler,
 	admin.NewDesktopDiagnosticHandler,
 

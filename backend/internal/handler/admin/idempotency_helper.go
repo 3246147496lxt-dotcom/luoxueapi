@@ -3,6 +3,7 @@ package admin
 import (
 	"context"
 	"strconv"
+	"strings"
 	"time"
 
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
@@ -28,6 +29,13 @@ func executeAdminIdempotent(
 	ttl time.Duration,
 	execute func(context.Context) (any, error),
 ) (*service.IdempotencyExecuteResult, error) {
+	idempotencyKey := strings.TrimSpace(c.GetHeader("Idempotency-Key"))
+	if idempotencyKey == "" {
+		// X-Idempotency-Key is already used by the data-management job API and
+		// remains useful for browser clients whose infrastructure reserves the
+		// unprefixed header. Both spellings share the same coordinator scope.
+		idempotencyKey = strings.TrimSpace(c.GetHeader("X-Idempotency-Key"))
+	}
 	coordinator := service.DefaultIdempotencyCoordinator()
 	if coordinator == nil {
 		data, err := execute(c.Request.Context())
@@ -42,7 +50,7 @@ func executeAdminIdempotent(
 		ActorScope:     adminActorScope(c),
 		Method:         c.Request.Method,
 		Route:          c.FullPath(),
-		IdempotencyKey: c.GetHeader("Idempotency-Key"),
+		IdempotencyKey: idempotencyKey,
 		Payload:        payload,
 		RequireKey:     true,
 		TTL:            ttl,

@@ -444,6 +444,11 @@ defineExpose({ replayTour })
   margin-left: 0 !important;
 }
 
+.app-layout--chat-shell .app-main-inner {
+  max-width: none;
+  margin-right: 0 !important;
+}
+
 .app-layout--snow-shell.app-layout--chat-shell .app-main-shell.app-layout--chat .app-main-content {
   padding: 0;
 }

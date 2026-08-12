@@ -95,10 +95,46 @@ func TestNormalizeResponsesBodyServiceTier(t *testing.T) {
 	require.Equal(t, "scale", tier)
 	require.Equal(t, "scale", gjson.GetBytes(body, "service_tier").String())
 
-	// 真未知值才会被删除。
+	// 真未知值仍属于客户端显式输入，不能因为转换而丢失，否则 API-key
+	// 默认档位会把它误判为缺失并注入 priority。
 	body, tier, err = normalizeResponsesBodyServiceTier([]byte(`{"model":"gpt-5.1","service_tier":"turbo"}`))
 	require.NoError(t, err)
 	require.Empty(t, tier)
+	require.Equal(t, "turbo", gjson.GetBytes(body, "service_tier").String())
+
+	for _, raw := range []string{`null`, `""`} {
+		body, tier, err = normalizeResponsesBodyServiceTier([]byte(`{"model":"gpt-5.1","service_tier":` + raw + `}`))
+		require.NoError(t, err)
+		require.Empty(t, tier)
+		require.True(t, gjson.GetBytes(body, "service_tier").Exists())
+	}
+}
+
+func TestPreserveOpenAIServiceTierMemberAcrossConversion(t *testing.T) {
+	t.Parallel()
+
+	converted := []byte(`{"model":"gpt-5.6-sol"}`)
+	for _, tc := range []struct {
+		name string
+		raw  string
+	}{
+		{name: "null", raw: `null`},
+		{name: "empty", raw: `""`},
+		{name: "unknown", raw: `"turbo"`},
+		{name: "fast alias", raw: `"fast"`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			body, err := preserveOpenAIServiceTierMember(
+				[]byte(`{"service_tier":`+tc.raw+`}`),
+				converted,
+			)
+			require.NoError(t, err)
+			require.Equal(t, tc.raw, gjson.GetBytes(body, "service_tier").Raw)
+		})
+	}
+
+	body, err := preserveOpenAIServiceTierMember([]byte(`{"model":"gpt-5.6-sol"}`), converted)
+	require.NoError(t, err)
 	require.False(t, gjson.GetBytes(body, "service_tier").Exists())
 }
 
@@ -183,6 +219,45 @@ func TestForwardAsChatCompletions_APIKeyPropagatesPromptCacheKeyInResponsesBody(
 	require.Equal(t, "https://api.openai.com/v1/responses", upstream.lastReq.URL.String())
 	require.Equal(t, "Bearer sk-compatible", upstream.lastReq.Header.Get("Authorization"))
 	require.Equal(t, generateSessionUUID(isolateOpenAISessionID(99, "cache-key-123")), upstream.lastReq.Header.Get("session_id"))
+}
+
+func TestForwardAsChatCompletionsImageIntentSkipsPriorityDefaultAfterModelMapping(t *testing.T) {
+	setGinTestMode()
+
+	body := []byte(`{"model":"gpt-image-2","messages":[{"role":"user","content":"draw a cat"}],"stream":false}`)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader(body))
+	c.Request.Header.Set("Content-Type", "application/json")
+
+	upstream := &httpUpstreamRecorder{resp: &http.Response{
+		StatusCode: http.StatusBadRequest,
+		Header:     http.Header{"Content-Type": []string{"application/json"}},
+		Body:       io.NopCloser(strings.NewReader(`{"error":{"type":"invalid_request_error","message":"stop after capture"}}`)),
+	}}
+	account := &Account{
+		ID:          101,
+		Name:        "responses-openai-apikey",
+		Platform:    PlatformOpenAI,
+		Type:        AccountTypeAPIKey,
+		Concurrency: 1,
+		Credentials: map[string]any{
+			"api_key":  "sk-test",
+			"base_url": "https://upstream.example",
+		},
+	}
+	account.Extra = map[string]any{"openai_responses_supported": true}
+	account.Credentials["model_mapping"] = map[string]any{"gpt-image-2": openAIServiceTierModel}
+	svc := newPriorityInjectionTestService()
+	svc.cfg = &config.Config{}
+	svc.httpUpstream = upstream
+	markPriorityCapability(svc, account, OpenAIServiceTierSupportSupported)
+
+	result, err := svc.ForwardAsChatCompletions(prioritySchedulingContext(), c, account, body, "", "")
+	require.Error(t, err)
+	require.Nil(t, result)
+	require.Equal(t, openAIServiceTierModel, gjson.GetBytes(upstream.lastBody, "model").String())
+	require.False(t, gjson.GetBytes(upstream.lastBody, "service_tier").Exists())
 }
 
 func TestForwardAsChatCompletions_OAuthDoesNotInjectDefaultInstructions(t *testing.T) {

@@ -182,6 +182,35 @@
             <h3>{{ t('keys.workspaceSecurityHeading') }}</h3>
           </div>
           <dl class="api-key-inspector__security-card">
+            <div
+              v-if="isOpenAiUserKey"
+              class="api-key-inspector__service-tier-row"
+              data-test="api-key-inspector-service-tier"
+            >
+              <div class="api-key-inspector__service-tier-copy">
+                <span class="api-key-inspector__service-tier-label">{{ t('keys.serviceTierPreferenceLabel') }}</span>
+                <span class="api-key-inspector__service-tier-value">
+                  {{ isPriorityEnabled ? t('keys.serviceTierPriority') : t('keys.serviceTierStandard') }}
+                </span>
+                <span :id="serviceTierDescriptionId" class="api-key-inspector__service-tier-hint">
+                  {{ t('keys.serviceTierPreferenceHint') }}
+                </span>
+              </div>
+              <button
+                type="button"
+                role="switch"
+                class="api-key-inspector__switch"
+                :aria-checked="isPriorityEnabled"
+                :aria-busy="serviceTierUpdating"
+                :aria-label="`${apiKey.name} · ${t('keys.serviceTierPreferenceLabel')}`"
+                :aria-describedby="serviceTierDescriptionId"
+                :disabled="serviceTierUpdating"
+                :data-test="`key-inspector-service-tier-switch-${apiKey.id}`"
+                @click="emit('toggle-service-tier', apiKey)"
+              >
+                <span :class="{ 'is-active': isPriorityEnabled }"><span /></span>
+              </button>
+            </div>
             <div v-if="isVisible('expires_at')">
               <dt>{{ t('keys.expiresAt') }}</dt>
               <dd :class="{ 'is-danger': isExpired }">
@@ -256,6 +285,36 @@
                   <span :class="{ 'is-active': isActive }"><span /></span>
                 </button>
               </div>
+            </div>
+
+            <div
+              v-if="isOpenAiUserKey"
+              class="api-key-inspector__service-tier-row"
+              data-test="api-key-inspector-service-tier"
+            >
+              <div class="api-key-inspector__service-tier-copy">
+                <span class="api-key-inspector__service-tier-label">{{ t('keys.serviceTierPreferenceLabel') }}</span>
+                <span class="api-key-inspector__service-tier-value">
+                  {{ isPriorityEnabled ? t('keys.serviceTierPriority') : t('keys.serviceTierStandard') }}
+                </span>
+                <span :id="serviceTierDescriptionId" class="api-key-inspector__service-tier-hint">
+                  {{ t('keys.serviceTierPreferenceHint') }}
+                </span>
+              </div>
+              <button
+                type="button"
+                role="switch"
+                class="api-key-inspector__switch"
+                :aria-checked="isPriorityEnabled"
+                :aria-busy="serviceTierUpdating"
+                :aria-label="`${apiKey.name} · ${t('keys.serviceTierPreferenceLabel')}`"
+                :aria-describedby="serviceTierDescriptionId"
+                :disabled="serviceTierUpdating"
+                :data-test="`key-inspector-service-tier-switch-${apiKey.id}`"
+                @click="emit('toggle-service-tier', apiKey)"
+              >
+                <span :class="{ 'is-active': isPriorityEnabled }"><span /></span>
+              </button>
             </div>
 
             <div class="api-key-inspector__sheet-field" data-test="api-key-inspector-key">
@@ -526,6 +585,7 @@ interface Props {
   publicSettings?: PublicSettings | null
   copied?: boolean
   statusUpdating?: boolean
+  serviceTierUpdating?: boolean
   now?: Date
   showCcsImport?: boolean
   mode?: 'inline' | 'sheet'
@@ -538,6 +598,7 @@ const props = withDefaults(defineProps<Props>(), {
   publicSettings: null,
   copied: false,
   statusUpdating: false,
+  serviceTierUpdating: false,
   now: () => new Date(),
   showCcsImport: true,
   mode: 'inline',
@@ -547,6 +608,7 @@ const props = withDefaults(defineProps<Props>(), {
 const emit = defineEmits<{
   (event: 'copy-key', key: ApiKey): void
   (event: 'toggle-status', key: ApiKey): void
+  (event: 'toggle-service-tier', key: ApiKey): void
   (event: 'change-group', key: ApiKey, mouseEvent: MouseEvent): void
   (event: 'reset-quota', key: ApiKey): void
   (event: 'reset-rate-limit', key: ApiKey): void
@@ -570,6 +632,11 @@ const hasVisibleAuditFields = computed(() =>
 )
 const maskedKey = computed(() => maskApiKey(props.apiKey.key))
 const isActive = computed(() => props.apiKey.status === 'active')
+const isOpenAiUserKey = computed(() => props.apiKey.group?.platform === 'openai')
+const isPriorityEnabled = computed(() => props.apiKey.service_tier_preference === 'priority')
+const serviceTierDescriptionId = computed(() =>
+  `api-key-inspector-service-tier-description-${props.mode}-${props.apiKey.id}`
+)
 const isExpired = computed(() => Boolean(
   props.apiKey.expires_at && new Date(props.apiKey.expires_at).getTime() < props.now.getTime()
 ))
@@ -1879,6 +1946,42 @@ defineExpose({ focus })
   gap: 16px;
 }
 
+.api-key-inspector__service-tier-row {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.api-key-inspector__service-tier-copy {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.api-key-inspector__service-tier-label {
+  color: var(--workspace-text-secondary);
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 16px;
+}
+
+.api-key-inspector__service-tier-value {
+  color: var(--workspace-text);
+  font-size: 12px;
+  font-weight: 900;
+  line-height: 16px;
+}
+
+.api-key-inspector__service-tier-hint {
+  max-width: 52ch;
+  color: var(--workspace-text-muted);
+  font-size: 10px;
+  font-weight: 500;
+  line-height: 14px;
+}
+
 .api-key-inspector__security-card dt {
   flex: 0 0 auto;
   color: var(--workspace-text-secondary);
@@ -1964,6 +2067,10 @@ defineExpose({ focus })
   display: grid;
   gap: 20px;
   padding: 20px;
+}
+
+.api-key-inspector--sheet .api-key-inspector__service-tier-row {
+  align-items: center;
 }
 
 .api-key-inspector__sheet-status-row,
