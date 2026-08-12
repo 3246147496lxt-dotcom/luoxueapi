@@ -1,6 +1,9 @@
 package service
 
-import "testing"
+import (
+	"context"
+	"testing"
+)
 
 func TestAPIKeyService_RejectsV10AuthSnapshotWithoutModelsListConfig(t *testing.T) {
 	groupID := int64(9)
@@ -58,7 +61,7 @@ func TestAPIKeyService_AuthSnapshotV16CarriesServiceTierPreference(t *testing.T)
 		Group:                 &Group{ID: groupID, Platform: PlatformOpenAI, Status: StatusActive, SubscriptionType: SubscriptionTypeStandard},
 	}
 
-	snapshot := svc.snapshotFromAPIKey(nil, apiKey)
+	snapshot := svc.snapshotFromAPIKey(context.Background(), apiKey)
 	if snapshot == nil {
 		t.Fatal("expected auth snapshot")
 	}
@@ -109,7 +112,7 @@ func TestAPIKeyService_AuthSnapshotForWebChatForcesStandardPreference(t *testing
 		ServiceTierPreference: ServiceTierPreferencePriority,
 		User:                  &User{ID: 3, Status: StatusActive, Role: RoleUser},
 	}
-	snapshot := svc.snapshotFromAPIKey(nil, apiKey)
+	snapshot := svc.snapshotFromAPIKey(context.Background(), apiKey)
 	if snapshot == nil {
 		t.Fatal("expected auth snapshot")
 	}

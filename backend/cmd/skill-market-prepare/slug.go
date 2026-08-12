@@ -20,13 +20,13 @@ func slugify(input string) string {
 	for _, r := range decomposed {
 		switch {
 		case r >= 'a' && r <= 'z', r >= '0' && r <= '9':
-			output.WriteRune(r)
+			_, _ = output.WriteRune(r)
 			lastDash = false
 		case unicode.Is(unicode.Mn, r):
 			continue
 		default:
 			if output.Len() > 0 && !lastDash {
-				output.WriteByte('-')
+				_ = output.WriteByte('-')
 				lastDash = true
 			}
 		}

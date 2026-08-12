@@ -1077,7 +1077,7 @@ WHERE run_id=$1 AND id=ANY($2) AND (
 	// A failed parent can be the only persisted evidence of a transient final
 	// refresh/publication error: every item may already be ready/unchanged. In
 	// that case an unfiltered retry intentionally requeues only the parent.
-	if affected == 0 && !(len(itemIDs) == 0 && status == service.SkillImportRunStatusFailed) {
+	if affected == 0 && (len(itemIDs) != 0 || status != service.SkillImportRunStatusFailed) {
 		return 0, service.ErrSkillImportInvalidState
 	}
 	if len(itemIDs) > 0 && affected != int64(len(uniqueImportIDs(itemIDs))) {

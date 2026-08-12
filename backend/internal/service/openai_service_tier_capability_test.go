@@ -43,7 +43,7 @@ func TestObserveCodexModelsManifestShadowSelectedAlias(t *testing.T) {
 		accountID:           shadow.ID,
 	}
 	s.observeCodexModelsManifest(request, []byte(`{"models":[{"slug":"gpt-5.6-sol","service_tiers":[{"id":"priority"}]}]}`))
-	require.Equal(t, OpenAIServiceTierSupportSupported, s.serviceTierSupport(nil, shadow, openAIServiceTierModel))
+	require.Equal(t, OpenAIServiceTierSupportSupported, s.serviceTierSupport(context.Background(), shadow, openAIServiceTierModel))
 }
 
 func newCapabilityManifestTestService() *OpenAIGatewayService {

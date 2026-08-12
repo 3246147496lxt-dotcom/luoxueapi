@@ -968,10 +968,10 @@ func suggestedMarketSlug(skill core.DiscoveredSkill) string {
 	dash := false
 	for _, current := range raw {
 		if current >= 'a' && current <= 'z' || current >= '0' && current <= '9' {
-			output.WriteRune(current)
+			_, _ = output.WriteRune(current)
 			dash = false
 		} else if output.Len() > 0 && !dash {
-			output.WriteByte('-')
+			_ = output.WriteByte('-')
 			dash = true
 		}
 	}
@@ -1085,7 +1085,7 @@ func deterministicSkillClassification(skill core.DiscoveredSkill, description, a
 	tagSet := map[string]struct{}{strings.ReplaceAll(adapterType, "_", "-"): {}}
 	for _, source := range []string{strings.Split(skill.Namespace, "/")[0], skill.ExternalID} {
 		for _, token := range strings.FieldsFunc(strings.ToLower(source), func(r rune) bool {
-			return !(unicode.IsLetter(r) || unicode.IsDigit(r))
+			return !unicode.IsLetter(r) && !unicode.IsDigit(r)
 		}) {
 			if count := utf8.RuneCountInString(token); count >= 2 && count <= 40 {
 				tagSet[token] = struct{}{}

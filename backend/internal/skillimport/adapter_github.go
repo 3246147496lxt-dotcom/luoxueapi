@@ -217,7 +217,7 @@ func (a *GitHubAdapter) Acquire(ctx context.Context, request AcquireRequest) (So
 		}
 		inside := strings.HasPrefix(entry.Path, prefix)
 		if inside && (entry.Type == "commit" || entry.Mode == "120000") {
-			return SourceBundle{}, NewAdapterError(GitHubAdapterType, "read tree", ErrorUnsafe, fmt.Errorf("Skill path contains a link or submodule at %q", entry.Path))
+			return SourceBundle{}, NewAdapterError(GitHubAdapterType, "read tree", ErrorUnsafe, fmt.Errorf("skill path contains a link or submodule at %q", entry.Path))
 		}
 		if inside && entry.Type != "blob" {
 			continue
@@ -243,7 +243,7 @@ func (a *GitHubAdapter) Acquire(ctx context.Context, request AcquireRequest) (So
 		selected = append(selected, rootLicenses[0])
 	}
 	if len(selected) > MaxSourceArchiveEntries {
-		return SourceBundle{}, NewAdapterError(GitHubAdapterType, "read tree", ErrorBlocked, fmt.Errorf("Skill path has more than %d files", MaxSourceArchiveEntries))
+		return SourceBundle{}, NewAdapterError(GitHubAdapterType, "read tree", ErrorBlocked, fmt.Errorf("skill path has more than %d files", MaxSourceArchiveEntries))
 	}
 	sort.Slice(selected, func(i, j int) bool { return selected[i].relative < selected[j].relative })
 	files := make([]SourceFile, 0, len(selected))
@@ -255,7 +255,7 @@ func (a *GitHubAdapter) Acquire(ctx context.Context, request AcquireRequest) (So
 		}
 		total += entry.size
 		if total > MaxSourceUnpackedBytes {
-			return SourceBundle{}, NewAdapterError(GitHubAdapterType, "read tree", ErrorBlocked, errors.New("Skill path exceeds the unpacked source limit"))
+			return SourceBundle{}, NewAdapterError(GitHubAdapterType, "read tree", ErrorBlocked, errors.New("skill path exceeds the unpacked source limit"))
 		}
 		rawURL := fmt.Sprintf("https://raw.githubusercontent.com/%s/%s/%s/%s", url.PathEscape(owner), url.PathEscape(repository), snapshot.commit, escapeURLPath(entry.fullPath))
 		result, fetchErr := a.fetcher.Get(ctx, rawURL, FetchOptions{
@@ -269,12 +269,12 @@ func (a *GitHubAdapter) Acquire(ctx context.Context, request AcquireRequest) (So
 			return SourceBundle{}, NewAdapterError(GitHubAdapterType, "verify blob", ErrorIntegrity, fmt.Errorf("GitHub size mismatch for %q", entry.fullPath))
 		}
 		if !strings.EqualFold(gitBlobObjectID(result.Body), entry.sha) {
-			return SourceBundle{}, NewAdapterError(GitHubAdapterType, "verify blob", ErrorIntegrity, fmt.Errorf("Git object ID mismatch for %q", entry.fullPath))
+			return SourceBundle{}, NewAdapterError(GitHubAdapterType, "verify blob", ErrorIntegrity, fmt.Errorf("git object ID mismatch for %q", entry.fullPath))
 		}
 		// Enforce the aggregate limit against bytes actually received as well as
 		// tree metadata, so a malformed provider response cannot amplify memory.
 		if total-int64(entry.size)+int64(len(result.Body)) > MaxSourceUnpackedBytes {
-			return SourceBundle{}, NewAdapterError(GitHubAdapterType, "read tree", ErrorBlocked, errors.New("Skill path exceeds the unpacked source limit"))
+			return SourceBundle{}, NewAdapterError(GitHubAdapterType, "read tree", ErrorBlocked, errors.New("skill path exceeds the unpacked source limit"))
 		}
 		files = append(files, SourceFile{Path: entry.relative, Data: result.Body, Executable: entry.mode == "100755"})
 		evidence = append(evidence, result.Evidence)
@@ -383,7 +383,11 @@ func (a *GitHubAdapter) repositorySnapshot(ctx context.Context, owner, repositor
 	if err != nil {
 		return gitHubSnapshot{}, err
 	}
-	return value.(gitHubSnapshot), nil
+	snapshot, ok := value.(gitHubSnapshot)
+	if !ok {
+		return gitHubSnapshot{}, fmt.Errorf("resolve GitHub repository snapshot: unexpected result type %T", value)
+	}
+	return snapshot, nil
 }
 
 func locateGitHubSkillPath(tree gitHubTreeResponse, skillID string) (string, error) {

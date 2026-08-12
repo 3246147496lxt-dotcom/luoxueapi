@@ -311,8 +311,8 @@ func validationRecoveryFile(err error, slug string, files []packageFile) (int, s
 			}
 		}
 	}
-	for index := len(files) - 1; index >= 1; index-- {
-		return index, reason
+	if len(files) > 1 {
+		return len(files) - 1, reason
 	}
 	return -1, reason
 }

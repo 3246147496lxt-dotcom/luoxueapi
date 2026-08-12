@@ -26,8 +26,8 @@ func parseSkillsHTML(raw []byte, minimum int) ([]rankingRecord, error) {
 		}
 		var chunk string
 		if err := json.Unmarshal(flight[1], &chunk); err == nil {
-			payload.WriteString(chunk)
-			payload.WriteByte('\n')
+			_, _ = payload.WriteString(chunk)
+			_ = payload.WriteByte('\n')
 		}
 	}
 

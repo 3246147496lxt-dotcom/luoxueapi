@@ -43,7 +43,7 @@ func classifySkill(entry snapshotEntry, description string) (string, []string) {
 	owner := strings.Split(entry.Source, "/")[0]
 	for _, value := range []string{owner, entry.OriginalSlug} {
 		for _, token := range strings.FieldsFunc(strings.ToLower(value), func(r rune) bool {
-			return !(unicode.IsLetter(r) || unicode.IsDigit(r))
+			return !unicode.IsLetter(r) && !unicode.IsDigit(r)
 		}) {
 			if utf8.RuneCountInString(token) >= 2 && utf8.RuneCountInString(token) <= 24 {
 				tagSet[token] = struct{}{}

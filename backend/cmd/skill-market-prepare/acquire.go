@@ -292,7 +292,7 @@ func runSkillsCLI(ctx context.Context, npxPath, directory string, args []string)
 	if err != nil {
 		return err
 	}
-	defer logFile.Close()
+	defer func() { _ = logFile.Close() }()
 	command := exec.CommandContext(ctx, npxPath, args...)
 	command.Dir = directory
 	command.Env = append(os.Environ(), "DISABLE_TELEMETRY=1", "NO_COLOR=1")
