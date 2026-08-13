@@ -32,6 +32,9 @@ func TestSkillImportRepositoryPersistsRunAndReclaimsExpiredLease(t *testing.T) {
 	require.NoError(t, repo.CreateRun(ctx, run, ""))
 
 	now := time.Now().UTC()
+	_, err := integrationDB.ExecContext(ctx, `
+UPDATE skill_import_runs SET next_attempt_at=$2 WHERE id=$1`, run.ID, now.Add(-time.Hour))
+	require.NoError(t, err)
 	claimed, err := repo.ClaimNextRun(ctx, "integration-worker", now, now.Add(time.Minute))
 	require.NoError(t, err)
 	require.NotNil(t, claimed)
@@ -39,7 +42,8 @@ func TestSkillImportRepositoryPersistsRunAndReclaimsExpiredLease(t *testing.T) {
 	require.Equal(t, service.SkillImportRunStatusDiscovering, claimed.Status)
 
 	_, err = integrationDB.ExecContext(ctx, `
-UPDATE skill_import_runs SET lease_expires_at=$2 WHERE id=$1`, run.ID, now.Add(-time.Minute))
+UPDATE skill_import_runs SET lease_expires_at=$2, next_attempt_at=$3 WHERE id=$1`,
+		run.ID, now.Add(-time.Minute), now.Add(-time.Hour))
 	require.NoError(t, err)
 	reclaimed, err := repo.ClaimNextRun(ctx, "integration-worker-2", now, now.Add(time.Minute))
 	require.NoError(t, err)
@@ -176,15 +180,15 @@ INSERT INTO skill_import_run_items (
   stage_action, origin_url, package_sha256, staged_artifact,
   staged_package_data, desired_skill, validation_report
 ) VALUES (
-  $1,$2,$3,'cancel-demo',$4,'ready','create','',$5,
+  $1,$2,$3,'cancel-demo',$4::text,'ready','create','',$5::text,
   jsonb_build_object(
-    'manifest_name',$4,'manifest_description','Cancellation test',
-    'skill_md','# Cancellation test','package_sha256',$5,
+    'manifest_name',$4::text,'manifest_description','Cancellation test',
+    'skill_md','# Cancellation test','package_sha256',$5::text,
     'byte_size',3,'unpacked_size',20,'file_count',1,
     'file_manifest',jsonb_build_array(jsonb_build_object('path','SKILL.md')),
     'validation_report',jsonb_build_object('valid',TRUE,'errors',jsonb_build_array(),'warnings',jsonb_build_array())
   ),
-  $6,jsonb_build_object('slug',$4),
+  $6,jsonb_build_object('slug',$4::text),
   jsonb_build_object('valid',TRUE,'errors',jsonb_build_array(),'warnings',jsonb_build_array())
 )
 RETURNING id`, run.ID, source.ID, source.Namespace, marketSlug,
@@ -235,6 +239,9 @@ func TestSkillImportRepositoryCompletesItemWithFencedRunAndItemLeases(t *testing
 	}
 	require.NoError(t, repo.CreateRun(ctx, run, ""))
 	now := time.Now().UTC()
+	_, err := integrationDB.ExecContext(ctx, `
+UPDATE skill_import_runs SET next_attempt_at=$2 WHERE id=$1`, run.ID, now.Add(-time.Hour))
+	require.NoError(t, err)
 	claimedRun, err := repo.ClaimNextRun(ctx, "fenced-run-worker", now, now.Add(time.Minute))
 	require.NoError(t, err)
 	require.Equal(t, run.ID, claimedRun.ID)
