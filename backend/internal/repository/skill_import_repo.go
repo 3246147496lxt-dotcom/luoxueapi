@@ -998,7 +998,9 @@ UPDATE skill_import_run_items i SET status=$3::text, market_slug=$4,
   desired_skill=$8::jsonb, validation_report=$9::jsonb,
   provenance=$10::jsonb, license_unverified=$11, excluded_files=$12::jsonb,
   warnings=$13::jsonb, skill_id=$14, version_id=$15, error_code=$16,
-  error_message=$17, next_attempt_at=CASE WHEN $3::text='queued' THEN $18 ELSE NULL END,
+  error_message=$17, next_attempt_at=CASE
+    WHEN $3::text='queued' THEN $18::timestamptz ELSE NULL::timestamptz
+  END,
   lease_owner=NULL, lease_expires_at=NULL,
 	  completed_at=CASE WHEN $19 THEN NOW() ELSE NULL END, updated_at=NOW()
 FROM skill_import_runs r

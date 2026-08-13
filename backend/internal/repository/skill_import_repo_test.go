@@ -79,7 +79,7 @@ func TestSkillImportRepositoryItemMutationsRequireCurrentParentLease(t *testing.
 		db, mock, err := sqlmock.New()
 		require.NoError(t, err)
 		t.Cleanup(func() { _ = db.Close() })
-		mock.ExpectExec(`(?s)UPDATE skill_import_run_items i SET status=\$3::text.*CASE WHEN \$3::text='queued'.*FROM skill_import_runs r.*r.lease_owner=\$20.*r.lease_expires_at > NOW\(\)`).
+		mock.ExpectExec(`(?s)UPDATE skill_import_run_items i SET status=\$3::text.*CASE.*WHEN \$3::text='queued' THEN \$18::timestamptz ELSE NULL::timestamptz.*FROM skill_import_runs r.*r.lease_owner=\$20.*r.lease_expires_at > NOW\(\)`).
 			WillReturnResult(sqlmock.NewResult(0, 0))
 
 		repo := &skillImportRepository{db: db}
