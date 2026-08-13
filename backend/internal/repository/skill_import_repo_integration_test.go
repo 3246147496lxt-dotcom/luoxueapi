@@ -173,6 +173,10 @@ func TestSkillImportRepositoryCancellationScrubsStagedAndInlineBytes(t *testing.
 		Snapshot:      json.RawMessage(`{}`),
 	}
 	require.NoError(t, repo.CreateRun(ctx, run, ""))
+	actor := mustCreateUser(t, testEntClient(t), &service.User{
+		Email: "skill-import-cancel-" + stamp + "@example.com",
+		Role:  service.RoleAdmin,
+	})
 	var itemID int64
 	err := integrationDB.QueryRowContext(ctx, `
 INSERT INTO skill_import_run_items (
@@ -195,7 +199,7 @@ RETURNING id`, run.ID, source.ID, source.Namespace, marketSlug,
 		strings.Repeat("d", 64), []byte("zip")).Scan(&itemID)
 	require.NoError(t, err)
 
-	changed, err := repo.RequestRunCancellation(ctx, run.ID, 1)
+	changed, err := repo.RequestRunCancellation(ctx, run.ID, actor.ID)
 	require.NoError(t, err)
 	require.True(t, changed)
 	var runStatus, itemStatus, persistedInline string

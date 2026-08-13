@@ -993,12 +993,12 @@ func (r *skillImportRepository) CompleteRunItem(ctx context.Context, itemID int6
 	}
 	terminal := patch.Status != service.SkillImportItemStatusQueued && patch.Status != service.SkillImportItemStatusProcessing
 	result, err := r.db.ExecContext(ctx, `
-UPDATE skill_import_run_items i SET status=$3, market_slug=$4,
+UPDATE skill_import_run_items i SET status=$3::text, market_slug=$4,
   source_revision=$5, source_content_sha256=$6, package_sha256=$7,
   desired_skill=$8::jsonb, validation_report=$9::jsonb,
   provenance=$10::jsonb, license_unverified=$11, excluded_files=$12::jsonb,
   warnings=$13::jsonb, skill_id=$14, version_id=$15, error_code=$16,
-  error_message=$17, next_attempt_at=CASE WHEN $3='queued' THEN $18 ELSE NULL END,
+  error_message=$17, next_attempt_at=CASE WHEN $3::text='queued' THEN $18 ELSE NULL END,
   lease_owner=NULL, lease_expires_at=NULL,
 	  completed_at=CASE WHEN $19 THEN NOW() ELSE NULL END, updated_at=NOW()
 FROM skill_import_runs r
