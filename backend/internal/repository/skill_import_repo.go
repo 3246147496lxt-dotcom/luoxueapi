@@ -2074,11 +2074,11 @@ INSERT INTO skill_import_run_items (
 SELECT $1,$2,$3,$4,$12,$5,'unchanged','unchanged',$5,$6,$7,$8,v.sha256,
   jsonb_build_object(
     'bootstrap',TRUE,
-    'manifest_name',$5,
+    'manifest_name',$5::text,
     'package_sha256',v.sha256,
     'validation_report',v.validation_report
   ),
-  jsonb_build_object('slug',$5,'origin_url',$6),
+  jsonb_build_object('slug',$5::text,'origin_url',$6::text),
   '{"bootstrap":true}'::jsonb,v.validation_report,$9::jsonb,FALSE,
   '[]'::jsonb,'[]'::jsonb,$10,$11,NOW()
 FROM skill_versions v WHERE v.id=$11 AND v.skill_id=$10

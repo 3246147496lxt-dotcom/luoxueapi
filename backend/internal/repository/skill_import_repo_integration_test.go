@@ -3,12 +3,16 @@
 package repository
 
 import (
+	"archive/zip"
+	"bytes"
 	"context"
 	"encoding/json"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/config"
+	importapp "github.com/Wei-Shaw/sub2api/internal/modules/skillimport/application"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/stretchr/testify/require"
 )
@@ -278,6 +282,182 @@ UPDATE skill_import_runs SET next_attempt_at=$2 WHERE id=$1`, run.ID, now.Add(-t
 	require.NoError(t, err)
 	require.Equal(t, service.SkillImportItemStatusSkipped, completed.Status)
 	require.Nil(t, completed.LeaseOwner)
+}
+
+func TestSkillImportRepositoryMigrationBootstrapSucceedsOnPostgreSQL18(t *testing.T) {
+	ctx := context.Background()
+	db := openIsolatedMigrationIntegrationDB(t, "sub2api_skill_import_bootstrap")
+	require.NoError(t, ApplyMigrations(ctx, db))
+	repo := NewSkillImportRepository(db)
+
+	stamp := formatImportTestStamp(time.Now().UTC().UnixNano())
+	slug := "bootstrap-" + stamp
+	externalID := "existing-" + stamp
+	packageData := skillImportBootstrapPackage(t, slug, `---
+name: `+slug+`
+description: PostgreSQL 18 bootstrap integration fixture.
+metadata:
+  original_source: integration/skills
+  skills_sh_id: `+externalID+`
+  snapshot_hash: `+strings.Repeat("a", 64)+`
+---
+Use this fixture to verify durable bootstrap provenance.
+`)
+	validated, err := service.ValidateSkillArchive(packageData, slug)
+	require.NoError(t, err)
+	fileManifest, err := json.Marshal(validated.FileManifest)
+	require.NoError(t, err)
+	validationReport, err := json.Marshal(validated.ValidationReport)
+	require.NoError(t, err)
+
+	var skillID int64
+	err = db.QueryRowContext(ctx, `
+INSERT INTO skills (
+  slug, display_name, summary, description, category, tags,
+  example_prompts, risk_notes, status, sort_order
+) VALUES (
+  $1,$1,'Bootstrap fixture','Bootstrap fixture','integration','[]'::jsonb,
+  '[]'::jsonb,'','draft',7
+)
+RETURNING id`, slug).Scan(&skillID)
+	require.NoError(t, err)
+	var versionID int64
+	err = db.QueryRowContext(ctx, `
+INSERT INTO skill_versions (
+  skill_id, version, changelog, manifest_name, manifest_description, skill_md,
+  package_data, sha256, byte_size, unpacked_size, file_count, file_manifest,
+  validation_report, released_at
+) VALUES (
+  $1,'1.0.0','',$2,$3,$4,$5,$6,$7,$8,$9,$10::jsonb,$11::jsonb,NOW()
+)
+RETURNING id`, skillID, validated.ManifestName, validated.ManifestDescription,
+		validated.SkillMD, validated.PackageData, validated.SHA256, len(validated.PackageData),
+		validated.UnpackedSize, len(validated.FileManifest), fileManifest, validationReport,
+	).Scan(&versionID)
+	require.NoError(t, err)
+	_, err = db.ExecContext(ctx, `
+UPDATE skills SET status='published', current_version_id=$2, published_at=NOW()
+WHERE id=$1`, skillID, versionID)
+	require.NoError(t, err)
+
+	var sourceID, seededRunID int64
+	var seededTrigger, seededMode, seededStatus, seededIdempotencyHash string
+	var seededRequestConfig []byte
+	err = db.QueryRowContext(ctx, `
+SELECT source.id, run.id, run.trigger_type, run.mode, run.status,
+  run.request_config, run.idempotency_key_hash
+FROM skill_import_sources source
+JOIN skill_import_runs run ON run.source_id=source.id
+WHERE source.adapter='skills_sh' AND source.namespace='skills.sh'
+  AND run.trigger_type='bootstrap'`).Scan(
+		&sourceID, &seededRunID, &seededTrigger, &seededMode, &seededStatus,
+		&seededRequestConfig, &seededIdempotencyHash,
+	)
+	require.NoError(t, err)
+	require.Equal(t, service.SkillImportTriggerBootstrap, seededTrigger)
+	require.Equal(t, service.SkillImportModeDryRun, seededMode)
+	require.Equal(t, service.SkillImportRunStatusQueued, seededStatus)
+	require.JSONEq(t, `{"bootstrap_existing":true}`, string(seededRequestConfig))
+	require.Equal(t, "b00757a9e5d127fe24a83c84f5a48a663f18895d28b42b10cf0b769891c5f241", seededIdempotencyHash)
+
+	cfg := &config.Config{SkillImport: config.SkillImportConfig{
+		Enabled: true, WorkerEnabled: true, PollIntervalSeconds: 1,
+		LeaseTTLSeconds: 30, MaxAttempts: 1, MaxRunDurationHours: 1,
+	}}
+	worker := importapp.NewWorkerRuntime(
+		importapp.NewService(repo, importapp.NewAdapterRegistry(), cfg), nil, cfg,
+	)
+	require.NoError(t, worker.Start(ctx))
+	workerStopped := false
+	t.Cleanup(func() {
+		if workerStopped {
+			return
+		}
+		stopCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = worker.Stop(stopCtx)
+	})
+
+	assertBootstrapSucceeded := func(runID int64) {
+		t.Helper()
+		var run *service.SkillImportRun
+		require.Eventually(t, func() bool {
+			current, getErr := repo.GetRun(ctx, runID)
+			if getErr != nil {
+				return false
+			}
+			run = current
+			return current.Status == service.SkillImportRunStatusSucceeded ||
+				current.Status == service.SkillImportRunStatusFailed ||
+				current.Status == service.SkillImportRunStatusPartialSucceeded
+		}, 20*time.Second, 100*time.Millisecond)
+		require.Equal(t, service.SkillImportRunStatusSucceeded, run.Status,
+			"bootstrap error: %s", run.LastErrorMessage)
+		var failedItems, failedEvents int
+		require.NoError(t, db.QueryRowContext(ctx, `
+SELECT COUNT(*) FROM skill_import_run_items
+WHERE run_id=$1 AND status='failed'`, runID).Scan(&failedItems))
+		require.NoError(t, db.QueryRowContext(ctx, `
+SELECT COUNT(*) FROM skill_import_events
+WHERE run_id=$1 AND level='error'`, runID).Scan(&failedEvents))
+		require.Zero(t, failedItems)
+		require.Zero(t, failedEvents)
+	}
+
+	assertBootstrapSucceeded(seededRunID)
+	var stagedName, desiredSlug, desiredOrigin string
+	require.NoError(t, db.QueryRowContext(ctx, `
+SELECT staged_artifact->>'manifest_name', desired_skill->>'slug',
+  desired_skill->>'origin_url'
+FROM skill_import_run_items WHERE run_id=$1 AND skill_id=$2`, seededRunID, skillID).Scan(
+		&stagedName, &desiredSlug, &desiredOrigin,
+	))
+	require.Equal(t, slug, stagedName)
+	require.Equal(t, slug, desiredSlug)
+	require.Equal(t, "https://skills.sh/integration/skills/"+externalID, desiredOrigin)
+
+	secondRun := &service.SkillImportRun{
+		SourceID: sourceID, TriggerType: service.SkillImportTriggerBootstrap,
+		Mode: service.SkillImportModeDryRun, Status: service.SkillImportRunStatusQueued,
+		RequestConfig: json.RawMessage(`{"bootstrap_existing":true}`),
+		Snapshot:      json.RawMessage(`{}`),
+	}
+	require.NoError(t, repo.CreateRun(ctx, secondRun, ""))
+	assertBootstrapSucceeded(secondRun.ID)
+
+	var origins, versionOrigins, secondItems int
+	require.NoError(t, db.QueryRowContext(ctx, `
+SELECT COUNT(*) FROM skill_origins
+WHERE source_id=$1 AND namespace='integration/skills' AND external_id=$2`,
+		sourceID, externalID).Scan(&origins))
+	require.NoError(t, db.QueryRowContext(ctx, `
+SELECT COUNT(*) FROM skill_version_origins version_origin
+JOIN skill_origins origin ON origin.id=version_origin.origin_id
+WHERE origin.source_id=$1 AND origin.namespace='integration/skills'
+  AND origin.external_id=$2`, sourceID, externalID).Scan(&versionOrigins))
+	require.NoError(t, db.QueryRowContext(ctx, `
+SELECT COUNT(*) FROM skill_import_run_items
+WHERE run_id=$1 AND status='unchanged'`, secondRun.ID).Scan(&secondItems))
+	require.Equal(t, 1, origins, "a repeated bootstrap must reuse the durable origin")
+	require.Equal(t, 2, versionOrigins, "each bootstrap run keeps its own provenance evidence")
+	require.Equal(t, 1, secondItems)
+
+	stopCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	require.NoError(t, worker.Stop(stopCtx))
+	workerStopped = true
+}
+
+func skillImportBootstrapPackage(t *testing.T, slug, skillMD string) []byte {
+	t.Helper()
+	var buffer bytes.Buffer
+	writer := zip.NewWriter(&buffer)
+	entry, err := writer.Create(slug + "/SKILL.md")
+	require.NoError(t, err)
+	_, err = entry.Write([]byte(skillMD))
+	require.NoError(t, err)
+	require.NoError(t, writer.Close())
+	return buffer.Bytes()
 }
 
 func formatImportTestStamp(value int64) string {
