@@ -2071,7 +2071,7 @@ INSERT INTO skill_import_run_items (
   provenance, license_unverified, excluded_files, warnings, skill_id,
   version_id, completed_at
 )
-SELECT $1,$2,$3,$4,$12,$5,'unchanged','unchanged',$5,$6,$7,$8,v.sha256,
+SELECT $1,$2,$3,$4,$12,$5::text,'unchanged','unchanged',$5::text,$6::text,$7,$8,v.sha256,
   jsonb_build_object(
     'bootstrap',TRUE,
     'manifest_name',$5::text,
