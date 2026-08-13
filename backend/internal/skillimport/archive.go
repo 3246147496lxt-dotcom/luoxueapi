@@ -25,7 +25,8 @@ const (
 
 // ReadZIPArtifact parses an upstream ZIP without writing it to disk. It never
 // follows links or executes entries. Unsafe structure blocks the whole source;
-// the normalizer may later make explicit, reviewable market-limit exclusions.
+// the normalizer may later omit only inert metadata and blocks any truncation
+// that could remove functional source content.
 func ReadZIPArtifact(raw []byte) ([]SourceFile, error) {
 	if len(raw) == 0 || int64(len(raw)) > MaxSourceArchiveBytes {
 		return nil, NewAdapterError("", "read zip", ErrorBlocked, fmt.Errorf("source ZIP must be between 1 byte and %d bytes", MaxSourceArchiveBytes))
@@ -107,6 +108,9 @@ func safeArchivePath(raw string) (string, bool, error) {
 	name := strings.TrimSuffix(raw, "/")
 	if name == "" || strings.HasPrefix(name, "/") || path.IsAbs(name) || path.Clean(name) != name || norm.NFC.String(name) != name {
 		return "", false, fmt.Errorf("unsafe ZIP path %q", raw)
+	}
+	if len(name) > service.SkillArchiveMaxPathBytes {
+		return "", false, fmt.Errorf("ZIP path %q exceeds %d bytes", raw, service.SkillArchiveMaxPathBytes)
 	}
 	parts := strings.Split(name, "/")
 	if len(parts) > service.SkillArchiveMaxDepth {

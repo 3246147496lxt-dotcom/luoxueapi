@@ -429,13 +429,10 @@ func (s *Service) PublishRun(ctx context.Context, runID int64, itemIDs []int64, 
 	if err := s.requireEnabled(); err != nil {
 		return nil, err
 	}
-	if len(itemIDs) == 0 {
-		var err error
-		itemIDs, err = s.repo.ListEligibleItemIDs(ctx, runID)
-		if err != nil {
-			return nil, err
-		}
-	} else {
+	if runID <= 0 {
+		return nil, ErrInvalidInput.WithMetadata(map[string]string{"run_id": "must be positive"})
+	}
+	if len(itemIDs) > 0 {
 		seen := make(map[int64]struct{}, len(itemIDs))
 		for _, id := range itemIDs {
 			if id <= 0 {
@@ -447,10 +444,43 @@ func (s *Service) PublishRun(ctx context.Context, runID int64, itemIDs []int64, 
 			seen[id] = struct{}{}
 		}
 	}
+	run, err := s.repo.GetRun(ctx, runID)
+	if err != nil {
+		return nil, err
+	}
+	if err := s.requireCurrentPublishRules(run); err != nil {
+		return nil, err
+	}
+	if len(itemIDs) == 0 {
+		itemIDs, err = s.repo.ListEligibleItemIDs(ctx, runID)
+		if err != nil {
+			return nil, err
+		}
+	}
 	if len(itemIDs) == 0 {
 		return nil, domain.ErrSkillImportPublishInvalid.WithMetadata(map[string]string{"items": "no eligible prepared items"})
 	}
 	return s.repo.PublishEligibleItems(ctx, runID, itemIDs, "", actorID)
+}
+
+func (s *Service) requireCurrentPublishRules(run *domain.SkillImportRun) error {
+	if run == nil {
+		return domain.ErrSkillImportRunNotFound
+	}
+	var frozen FrozenRunConfig
+	if err := json.Unmarshal(run.RequestConfig, &frozen); err != nil {
+		return domain.ErrSkillImportPublishInvalid.WithMetadata(map[string]string{
+			"rules": "frozen importer rules cannot be decoded; prepare the run again",
+		})
+	}
+	adapter, adapterAvailable := s.registry.Get(frozen.AdapterType)
+	if !adapterAvailable || adapter.Version() != frozen.AdapterVersion ||
+		frozen.NormalizerVersion != core.CoreVersion || frozen.ValidatorVersion != validatorRulesetVersion {
+		return domain.ErrSkillImportPublishInvalid.WithMetadata(map[string]string{
+			"rules": "frozen importer rules are unavailable in this release; prepare the run again",
+		})
+	}
+	return nil
 }
 
 func requestedCount(selection json.RawMessage) int {

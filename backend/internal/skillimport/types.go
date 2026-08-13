@@ -12,7 +12,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/service"
 )
 
-const CoreVersion = "1.0.0"
+const CoreVersion = "1.0.1"
 
 // SourceAdapter discovers stable upstream identities and acquires their raw
 // files. An adapter must never execute upstream code or write to the market.

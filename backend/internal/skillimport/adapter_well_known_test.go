@@ -77,6 +77,80 @@ func TestWellKnownAdapterPrefersAgentSkillsPathAndReusesItForFiles(t *testing.T)
 	}
 }
 
+func TestWellKnownAdapterFallsBackFromVolcesSoftNotFoundEnvelope(t *testing.T) {
+	// skills.volces.com has returned this JSON error envelope with HTTP 200 for
+	// an unsupported well-known candidate. It is not an empty skill catalog.
+	softNotFound := `{"ResponseMetadata":{"Action":"","Service":"skillhub","RequestId":"fixture","Error":{"Code":"NotFound","Message":"The requested API is not found."}},"Result":null}`
+	legacyIndex := `{"skills":[{"name":"demo","description":"Legacy catalog entry","files":["SKILL.md"]}]}`
+	fetcher := &scriptedFetcher{handler: func(target string, _ FetchOptions) (FetchResult, error) {
+		switch {
+		case strings.HasSuffix(target, "/.well-known/agent-skills/index.json"):
+			return fetchResult(target, "application/json", []byte(softNotFound)), nil
+		case strings.HasSuffix(target, "/.well-known/skills/index.json"):
+			return fetchResult(target, "application/json", []byte(legacyIndex)), nil
+		default:
+			return FetchResult{}, fmt.Errorf("unexpected URL %s", target)
+		}
+	}}
+
+	page, err := NewWellKnownAdapter(fetcher).Discover(context.Background(), DiscoverRequest{
+		BaseURL: "https://skills.volces.com",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(page.Items) != 1 || page.Items[0].ExternalID != "demo" || !strings.Contains(page.Items[0].CanonicalURL, "/.well-known/skills/demo") {
+		t.Fatalf("fallback discovery = %#v", page)
+	}
+	if fetcher.callCount("/.well-known/agent-skills/index.json") != 1 || fetcher.callCount("/.well-known/skills/index.json") != 1 {
+		t.Fatalf("fallback calls = %#v", fetcher.calls)
+	}
+}
+
+func TestWellKnownAdapterTreatsExplicitEmptySkillsAsValidCatalog(t *testing.T) {
+	fetcher := &scriptedFetcher{handler: func(target string, _ FetchOptions) (FetchResult, error) {
+		if strings.HasSuffix(target, "/.well-known/agent-skills/index.json") {
+			return fetchResult(target, "application/json", []byte(`{"skills":[]}`)), nil
+		}
+		return FetchResult{}, fmt.Errorf("legacy fallback must not be requested: %s", target)
+	}}
+
+	page, err := NewWellKnownAdapter(fetcher).Discover(context.Background(), DiscoverRequest{
+		BaseURL: "https://skills.example.test",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(page.Items) != 0 || fetcher.callCount("/.well-known/skills/index.json") != 0 {
+		t.Fatalf("empty catalog result=%#v calls=%#v", page, fetcher.calls)
+	}
+}
+
+func TestWellKnownAdapterDoesNotMaskMalformedOrSchemaInvalidJSON(t *testing.T) {
+	tests := map[string]string{
+		"malformed":      `{"skills":[`,
+		"missing skills": `{"message":"Not Found"}`,
+		"null skills":    `{"skills":null}`,
+		"object skills":  `{"skills":{}}`,
+	}
+	for name, body := range tests {
+		t.Run(name, func(t *testing.T) {
+			fetcher := &scriptedFetcher{handler: func(target string, _ FetchOptions) (FetchResult, error) {
+				return fetchResult(target, "application/json", []byte(body)), nil
+			}}
+			_, err := NewWellKnownAdapter(fetcher).Discover(context.Background(), DiscoverRequest{
+				BaseURL: "https://skills.example.test",
+			})
+			if ErrorKindOf(err) != ErrorInvalidSource {
+				t.Fatalf("error = %v, want invalid_source", err)
+			}
+			if fetcher.callCount("/.well-known/skills/index.json") != 0 {
+				t.Fatalf("invalid candidate was silently hidden by fallback: calls=%#v", fetcher.calls)
+			}
+		})
+	}
+}
+
 func TestWellKnownAdapterRejectsSkillNamePathTraversal(t *testing.T) {
 	index := `{"skills":[{"name":"../outside","files":["SKILL.md"]}]}`
 	fetcher := &scriptedFetcher{handler: func(target string, _ FetchOptions) (FetchResult, error) {

@@ -1,6 +1,7 @@
 package skillimport
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -44,12 +45,14 @@ type wellKnownCursor struct {
 	Offset int `json:"offset"`
 }
 
+var errWellKnownSoftNotFound = errors.New("well-known endpoint returned a not-found envelope")
+
 func NewWellKnownAdapter(fetcher HTTPFetcher) *WellKnownAdapter {
 	return &WellKnownAdapter{fetcher: fetcher}
 }
 
 func (a *WellKnownAdapter) Type() string    { return WellKnownAdapterType }
-func (a *WellKnownAdapter) Version() string { return "1.0.0" }
+func (a *WellKnownAdapter) Version() string { return "1.0.1" }
 
 func (a *WellKnownAdapter) ValidateConfig(raw json.RawMessage) error {
 	_, err := parseWellKnownConfig(raw, "")
@@ -218,8 +221,14 @@ func (a *WellKnownAdapter) fetchIndex(ctx context.Context, config wellKnownConfi
 			}
 			return wellKnownIndex{}, "", Evidence{}, fetchErr
 		}
-		var index wellKnownIndex
-		if decodeErr := json.Unmarshal(result.Body, &index); decodeErr != nil {
+		index, decodeErr := decodeWellKnownIndex(result.Body)
+		if errors.Is(decodeErr, errWellKnownSoftNotFound) {
+			if pathIndex == 0 {
+				continue
+			}
+			return wellKnownIndex{}, "", Evidence{}, NewAdapterError(WellKnownAdapterType, "read index", ErrorNotFound, decodeErr)
+		}
+		if decodeErr != nil {
 			return wellKnownIndex{}, "", Evidence{}, NewAdapterError(WellKnownAdapterType, "decode index", ErrorInvalidSource, decodeErr)
 		}
 		if len(index.Skills) > maxDiscoveryLimit {
@@ -228,6 +237,56 @@ func (a *WellKnownAdapter) fetchIndex(ctx context.Context, config wellKnownConfi
 		return index, indexPath, result.Evidence, nil
 	}
 	return wellKnownIndex{}, "", Evidence{}, NewAdapterError(WellKnownAdapterType, "read index", ErrorNotFound, errors.New("neither agent-skills nor skills well-known index exists"))
+}
+
+// decodeWellKnownIndex distinguishes an explicit empty catalog from a JSON
+// error envelope served with HTTP 200. Only the narrow, observed NotFound
+// shape is eligible for path fallback; malformed or schema-invalid JSON must
+// remain visible to operators instead of being silently masked by legacy data.
+func decodeWellKnownIndex(body []byte) (wellKnownIndex, error) {
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(body, &fields); err != nil {
+		return wellKnownIndex{}, err
+	}
+	if fields == nil {
+		return wellKnownIndex{}, errors.New("well-known index must be a JSON object")
+	}
+	if rawSkills, exists := fields["skills"]; exists {
+		if bytes.Equal(bytes.TrimSpace(rawSkills), []byte("null")) {
+			return wellKnownIndex{}, errors.New("well-known index skills must be an array")
+		}
+		var skills []wellKnownSkill
+		if err := json.Unmarshal(rawSkills, &skills); err != nil {
+			return wellKnownIndex{}, fmt.Errorf("well-known index skills must be an array: %w", err)
+		}
+		if skills == nil {
+			return wellKnownIndex{}, errors.New("well-known index skills must be an array")
+		}
+		return wellKnownIndex{Skills: skills}, nil
+	}
+	if isWellKnownNotFoundEnvelope(fields) {
+		return wellKnownIndex{}, errWellKnownSoftNotFound
+	}
+	return wellKnownIndex{}, errors.New("well-known index is missing the skills array")
+}
+
+func isWellKnownNotFoundEnvelope(fields map[string]json.RawMessage) bool {
+	rawMetadata, exists := fields["ResponseMetadata"]
+	if !exists {
+		return false
+	}
+	var metadata struct {
+		Error *struct {
+			Code    string `json:"Code"`
+			Message string `json:"Message"`
+		} `json:"Error"`
+	}
+	if err := json.Unmarshal(rawMetadata, &metadata); err != nil || metadata.Error == nil {
+		return false
+	}
+	code := strings.ToLower(strings.TrimSpace(metadata.Error.Code))
+	message := strings.ToLower(strings.TrimSpace(metadata.Error.Message))
+	return (code == "notfound" || code == "not_found" || code == "404") && strings.Contains(message, "not found")
 }
 
 func validWellKnownPath(value string) bool {
