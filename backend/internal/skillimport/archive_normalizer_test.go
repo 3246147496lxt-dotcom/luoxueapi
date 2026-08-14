@@ -2,6 +2,7 @@ package skillimport
 
 import (
 	"bytes"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -40,6 +41,17 @@ func TestReadZIPArtifactStripsSingleWrapperDeterministically(t *testing.T) {
 	}
 }
 
+func TestSafeArchivePathEnforcesExistingPathByteLimit(t *testing.T) {
+	withinLimit := strings.Repeat("a", service.SkillArchiveMaxPathBytes)
+	if name, directory, err := safeArchivePath(withinLimit); err != nil || directory || name != withinLimit {
+		t.Fatalf("path at limit: name=%q directory=%v err=%v", name, directory, err)
+	}
+	overLimit := withinLimit + "b"
+	if _, _, err := safeArchivePath(overLimit); err == nil || !strings.Contains(err.Error(), "exceeds 512 bytes") {
+		t.Fatalf("path over limit error = %v", err)
+	}
+}
+
 func TestNormalizerIsDeterministicAndKeepsSeparateHashes(t *testing.T) {
 	skill := SourceFile{Path: "SKILL.md", Data: []byte("---\nname: upstream-name\ndescription: Original upstream description\n---\n\n# Instructions\n\nDo the work.\n")}
 	license := SourceFile{Path: "LICENSE", Data: []byte("Permission granted.\n")}
@@ -75,7 +87,7 @@ func TestNormalizerIsDeterministicAndKeepsSeparateHashes(t *testing.T) {
 	}
 }
 
-func TestNormalizerMarksExclusionsNeedsReviewInsteadOfSilentRemoval(t *testing.T) {
+func TestNormalizerBlocksFunctionalFilesInsteadOfPublishingTruncatedPackage(t *testing.T) {
 	files := []SourceFile{
 		{Path: "SKILL.md", Data: []byte("---\nname: demo\ndescription: Demo skill\n---\n\n# Demo\n")},
 		{Path: ".env", Data: []byte("SECRET=value\n")},
@@ -88,24 +100,141 @@ func TestNormalizerMarksExclusionsNeedsReviewInsteadOfSilentRemoval(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.Blocked || !result.NeedsReview || len(result.ExcludedFiles) != 2 || len(result.PackageData) == 0 {
+	if !result.Blocked || len(result.ExcludedFiles) != 2 || len(result.PackageData) != 0 {
 		t.Fatalf("unexpected exclusion result: %#v", result)
 	}
-	joined := strings.Join(result.ReviewReasons, " ")
-	if !strings.Contains(joined, "excluded") {
-		t.Fatalf("review reasons = %q, want explicit exclusion reason", joined)
-	}
-	reviewWarnings := 0
-	for _, warning := range result.Warnings {
-		if warning.Code == "REVIEW_REQUIRED" {
-			reviewWarnings++
-			if warning.Message == "" {
-				t.Fatal("REVIEW_REQUIRED warning must expose the review reason")
-			}
+	joined := strings.Join(result.BlockedReasons, " ")
+	for _, wanted := range []string{".env", "image.png", "cannot be safely omitted"} {
+		if !strings.Contains(joined, wanted) {
+			t.Fatalf("blocked reasons = %q, want %q", joined, wanted)
 		}
 	}
-	if reviewWarnings != len(result.ReviewReasons) {
-		t.Fatalf("review warnings = %d, reasons = %d", reviewWarnings, len(result.ReviewReasons))
+	for _, warning := range result.Warnings {
+		if warning.Code == "FILES_EXCLUDED" || warning.Code == "METADATA_EXCLUDED" {
+			t.Fatalf("blocked functional exclusions must not be represented as publishable warnings: %#v", result.Warnings)
+		}
+	}
+}
+
+func TestNormalizerSafelyIgnoresUnreferencedInertMetadata(t *testing.T) {
+	files := []SourceFile{
+		{Path: "SKILL.md", Data: []byte("---\nname: demo\ndescription: Demo skill\n---\n\n# Demo\n")},
+		{Path: ".DS_Store", Data: []byte{0, 1, 2, 3}},
+		{Path: ".coverage", Data: []byte("metadata mentions .DS_Store but excluded metadata is never scanned\n")},
+		{Path: ".git/config", Data: []byte("[core]\nrepositoryformatversion = 0\n")},
+	}
+	bundle := SourceBundle{Files: files, UpstreamContentHash: canonicalFilesHash(files), IntegrityVerified: true}
+	result, err := NormalizeSkill(NormalizeInput{
+		Skill: DiscoveredSkill{AdapterType: "fixture", SuggestedName: "Demo"}, Bundle: bundle, MarketSlug: "demo",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Blocked || result.NeedsReview || len(result.ExcludedFiles) != 3 || len(result.PackageData) == 0 || !result.Transformed {
+		t.Fatalf("unexpected metadata exclusion result: %#v", result)
+	}
+	foundMetadataWarning := false
+	for _, warning := range result.Warnings {
+		if warning.Code == "METADATA_EXCLUDED" {
+			foundMetadataWarning = true
+		}
+	}
+	if !foundMetadataWarning {
+		t.Fatalf("warnings = %#v, want METADATA_EXCLUDED", result.Warnings)
+	}
+}
+
+func TestNormalizerSafelyIgnoresReferencedInertMetadata(t *testing.T) {
+	files := []SourceFile{
+		{Path: "SKILL.md", Data: []byte("---\nname: demo\ndescription: Demo skill\n---\n\nDelete .DS_Store and .git/config if present.\n")},
+		{Path: ".DS_Store", Data: []byte{0, 1, 2, 3}},
+		{Path: ".git/config", Data: []byte("[core]\nrepositoryformatversion = 0\n")},
+	}
+	result, err := NormalizeSkill(NormalizeInput{
+		Skill:      DiscoveredSkill{AdapterType: "fixture", SuggestedName: "Demo"},
+		Bundle:     SourceBundle{Files: files, UpstreamContentHash: canonicalFilesHash(files), IntegrityVerified: true},
+		MarketSlug: "demo",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Blocked || result.NeedsReview || len(result.ExcludedFiles) != 2 || len(result.PackageData) == 0 {
+		t.Fatalf("referenced metadata exclusion result: %#v", result)
+	}
+}
+
+func TestNormalizerBlocksMarketplaceFileCountTruncation(t *testing.T) {
+	files := []SourceFile{{Path: "SKILL.md", Data: []byte("---\nname: demo\ndescription: Demo skill\n---\n\n# Demo\n")}}
+	for index := 0; index < service.SkillArchiveMaxFiles; index++ {
+		files = append(files, SourceFile{Path: fmt.Sprintf("references/%03d.md", index), Data: []byte("reference\n")})
+	}
+	result, err := NormalizeSkill(NormalizeInput{
+		Skill:      DiscoveredSkill{AdapterType: "fixture", SuggestedName: "Demo"},
+		Bundle:     SourceBundle{Files: files, UpstreamContentHash: canonicalFilesHash(files), IntegrityVerified: true},
+		MarketSlug: "demo",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.Blocked || len(result.PackageData) != 0 || !strings.Contains(strings.Join(result.BlockedReasons, "\n"), "file count limit") {
+		t.Fatalf("file-count result = %#v", result)
+	}
+}
+
+func TestNormalizerBlocksMarketplaceUnpackedSizeTruncation(t *testing.T) {
+	files := []SourceFile{{Path: "SKILL.md", Data: []byte("---\nname: demo\ndescription: Demo skill\n---\n\n# Demo\n")}}
+	for index := 0; index < 6; index++ {
+		files = append(files, SourceFile{Path: fmt.Sprintf("references/%d.txt", index), Data: bytes.Repeat([]byte("x"), 900*1024)})
+	}
+	result, err := NormalizeSkill(NormalizeInput{
+		Skill:      DiscoveredSkill{AdapterType: "fixture", SuggestedName: "Demo"},
+		Bundle:     SourceBundle{Files: files, UpstreamContentHash: canonicalFilesHash(files), IntegrityVerified: true},
+		MarketSlug: "demo",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !result.Blocked || len(result.PackageData) != 0 || !strings.Contains(strings.Join(result.BlockedReasons, "\n"), "unpacked size limit") {
+		t.Fatalf("unpacked-size result = %#v", result)
+	}
+}
+
+func TestNormalizerBlocksHallmarkStyleReferencedExcludedReference(t *testing.T) {
+	files := []SourceFile{
+		{Path: "SKILL.md", Data: []byte("---\nname: hallmark\ndescription: Hallmark fixture\n---\n\nRead [the checklist](references/checklist.md) before continuing.\n")},
+		{Path: "references/checklist.md", Data: bytes.Repeat([]byte("x"), int(service.SkillArchiveMaxFileBytes)+1)},
+	}
+	result, err := NormalizeSkill(NormalizeInput{
+		Skill:      DiscoveredSkill{AdapterType: "fixture", SuggestedName: "Hallmark"},
+		Bundle:     SourceBundle{Files: files, UpstreamContentHash: canonicalFilesHash(files), IntegrityVerified: true},
+		MarketSlug: "hallmark",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	joined := strings.Join(result.BlockedReasons, "\n")
+	if !result.Blocked || len(result.PackageData) != 0 || !strings.Contains(joined, `functional source file "references/checklist.md" cannot be safely omitted`) {
+		t.Fatalf("referenced-reference result = %#v", result)
+	}
+}
+
+func TestNormalizerBlocksHyperframesStyleFontReferencedFromText(t *testing.T) {
+	files := []SourceFile{
+		{Path: "SKILL.md", Data: []byte("---\nname: hyperframes\ndescription: Hyperframes fixture\n---\n\n# Hyperframes\n")},
+		{Path: "assets/styles/site.css", Data: []byte("@font-face { src: url('../fonts/Inter.woff2'); }\n")},
+		{Path: "assets/fonts/Inter.woff2", Data: []byte{0, 1, 2, 3}},
+	}
+	result, err := NormalizeSkill(NormalizeInput{
+		Skill:      DiscoveredSkill{AdapterType: "fixture", SuggestedName: "Hyperframes"},
+		Bundle:     SourceBundle{Files: files, UpstreamContentHash: canonicalFilesHash(files), IntegrityVerified: true},
+		MarketSlug: "hyperframes",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	joined := strings.Join(result.BlockedReasons, "\n")
+	if !result.Blocked || len(result.PackageData) != 0 || !strings.Contains(joined, `functional source file "assets/fonts/Inter.woff2" cannot be safely omitted`) {
+		t.Fatalf("referenced-font result = %#v", result)
 	}
 }
 

@@ -149,6 +149,63 @@ WHERE i.id=$1`, claimed.ID).Scan(&persistedOrigin, &stagedBytes, &persistedInlin
 	require.Empty(t, stagedBytes, "successful publication clears retry ZIP bytes")
 	require.Empty(t, persistedInline, "successful publication clears inline upload bytes")
 
+	unchangedRun := &service.SkillImportRun{
+		SourceID: source.ID, TriggerType: service.SkillImportTriggerManual,
+		Mode: service.SkillImportModeReview, Status: service.SkillImportRunStatusQueued,
+		RequestConfig: json.RawMessage(`{}`), Snapshot: json.RawMessage(`{}`),
+	}
+	require.NoError(t, repo.CreateRun(ctx, unchangedRun, ""))
+	_, err = integrationDB.ExecContext(ctx, `
+UPDATE skill_import_runs SET status='discovering', lease_owner='unchanged-worker',
+  lease_expires_at=NOW()+INTERVAL '5 minutes'
+WHERE id=$1`, unchangedRun.ID)
+	require.NoError(t, err)
+	unchangedItems := []service.SkillImportRunItem{{
+		StableKey: service.SkillImportStableKey{
+			Namespace: source.Namespace, ExternalID: "inline-demo",
+		},
+		MarketSlug: marketSlug, UpstreamName: "Inline Demo", OriginURL: "",
+	}}
+	require.NoError(t, repo.CompleteDiscovery(
+		ctx, unchangedRun.ID, "unchanged-worker", json.RawMessage(`{"count":1}`),
+		strings.Repeat("d", 64), unchangedItems,
+	))
+	unchangedItem, err := repo.ClaimNextRunItem(
+		ctx, unchangedRun.ID, "unchanged-worker", "unchanged-item-claim",
+		time.Now().UTC(), time.Now().UTC().Add(time.Minute),
+	)
+	require.NoError(t, err)
+	require.NotNil(t, unchangedItem)
+	unchangedStage, err := repo.StagePreparedItem(ctx, service.SkillImportStagePreparedInput{
+		RunID: unchangedRun.ID, RunItemID: unchangedItem.ID,
+		RunWorkerID: "unchanged-worker", ItemLeaseOwner: "unchanged-item-claim",
+		StableKey: unchangedItem.StableKey,
+		DesiredSkill: service.SkillImportDesiredSkill{
+			Slug: marketSlug, DisplayName: "Inline Demo", Summary: "Inline summary",
+			Description: "Inline description", Category: "tools", Tags: []string{},
+			ExamplePrompts: []string{}, OriginURL: "", SortOrder: 1,
+		},
+		Artifact: service.SkillImportPreparedArtifact{
+			ManifestName: marketSlug, ManifestDescription: "Inline description",
+			SkillMD: "# Inline Demo", PackageData: []byte("zip"),
+			PackageSHA256: strings.Repeat("b", 64), ByteSize: 3,
+			UnpackedSize: 13, FileCount: 1,
+			FileManifest: []service.SkillArchiveFile{{
+				Path: marketSlug + "/SKILL.md", ByteSize: 13, SHA256: strings.Repeat("c", 64),
+			}},
+			ValidationReport: service.SkillValidationReport{
+				Valid: true, Errors: []service.SkillValidationIssue{}, Warnings: []service.SkillValidationIssue{},
+			},
+		},
+	})
+	require.NoError(t, err)
+	require.Equal(t, service.SkillImportStageActionUnchanged, unchangedStage.Action)
+	require.Equal(t, published.Items[0].SkillID, unchangedStage.SkillID)
+	require.Equal(t, published.Items[0].VersionID, unchangedStage.VersionID)
+	require.NoError(t, integrationDB.QueryRowContext(ctx, `
+SELECT staged_package_data FROM skill_import_run_items WHERE id=$1`, unchangedItem.ID).Scan(&stagedBytes))
+	require.Nil(t, stagedBytes, "unchanged staging must persist SQL NULL, not an empty bytea")
+
 	_, err = integrationDB.ExecContext(ctx, `
 UPDATE skill_import_run_items SET origin_url='http://insecure.example/skill'
 WHERE id=$1`, claimed.ID)
