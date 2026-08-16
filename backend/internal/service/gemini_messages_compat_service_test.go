@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/apicompat"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/tlsfingerprint"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
@@ -529,6 +530,109 @@ func TestConvertClaudeMessagesToGeminiGenerateContent_AddsThoughtSignatureForToo
 	}
 	if !strings.Contains(s, "\"thoughtSignature\":\""+geminiDummyThoughtSignature+"\"") {
 		t.Fatalf("expected injected thoughtSignature %q, got: %s", geminiDummyThoughtSignature, s)
+	}
+}
+
+func TestConvertClaudeMessagesToGeminiGenerateContent_PreservesPDFAndTextDocuments(t *testing.T) {
+	body := []byte(`{
+		"model":"gemini-test",
+		"messages":[{"role":"user","content":[
+			{"type":"document","title":"report.pdf","source":{"type":"base64","media_type":"application/pdf","data":"JVBERi0="}},
+			{"type":"document","title":"notes.md","source":{"type":"text","media_type":"text/plain","data":"# heading"}}
+		]}]
+	}`)
+
+	out, err := convertClaudeMessagesToGeminiGenerateContent(body)
+	require.NoError(t, err)
+
+	var request struct {
+		Contents []struct {
+			Parts []map[string]any `json:"parts"`
+		} `json:"contents"`
+	}
+	require.NoError(t, json.Unmarshal(out, &request))
+	require.Len(t, request.Contents, 1)
+	require.Len(t, request.Contents[0].Parts, 2)
+
+	inlineData, ok := request.Contents[0].Parts[0]["inlineData"].(map[string]any)
+	require.True(t, ok)
+	require.Equal(t, "application/pdf", inlineData["mimeType"])
+	require.Equal(t, "JVBERi0=", inlineData["data"])
+	require.Equal(t, "[Document: notes.md]\n# heading", request.Contents[0].Parts[1]["text"])
+}
+
+func TestGeminiChatCompletionsDocumentProductionConversionChain(t *testing.T) {
+	var chatReq apicompat.ChatCompletionsRequest
+	require.NoError(t, json.Unmarshal([]byte(`{
+		"model":"gemini-test",
+		"messages":[{"role":"user","content":[
+			{"type":"text","text":"summarize"},
+			{"type":"file","file":{"filename":"report.pdf","file_data":"data:application/pdf;base64,JVBERi0="}},
+			{"type":"file","file":{"filename":"notes.txt","file_data":"data:text/plain;base64,dHh0"}},
+			{"type":"file","file":{"filename":"notes.md","file_data":"data:text/markdown;base64,bWFya2Rvd24="}},
+			{"type":"file","file":{"filename":"data.csv","file_data":"data:text/csv;base64,YSxi"}},
+			{"type":"file","file":{"filename":"data.json","file_data":"data:application/json;base64,e30="}}
+		]}]
+	}`), &chatReq))
+
+	responsesReq, err := apicompat.ChatCompletionsToResponses(&chatReq)
+	require.NoError(t, err)
+	claudeReq, err := apicompat.ResponsesToAnthropicRequest(responsesReq)
+	require.NoError(t, err)
+	claudeBody, err := json.Marshal(claudeReq)
+	require.NoError(t, err)
+	geminiBody, err := convertClaudeMessagesToGeminiGenerateContent(claudeBody)
+	require.NoError(t, err)
+
+	var request struct {
+		Contents []struct {
+			Parts []map[string]any `json:"parts"`
+		} `json:"contents"`
+	}
+	require.NoError(t, json.Unmarshal(geminiBody, &request))
+	require.Len(t, request.Contents, 1)
+	require.Len(t, request.Contents[0].Parts, 6)
+	require.Equal(t, "summarize", request.Contents[0].Parts[0]["text"])
+	require.Contains(t, request.Contents[0].Parts[1], "inlineData")
+	require.Equal(t, "[Document: notes.txt]\ntxt", request.Contents[0].Parts[2]["text"])
+	require.Equal(t, "[Document: notes.md]\nmarkdown", request.Contents[0].Parts[3]["text"])
+	require.Equal(t, "[Document: data.csv]\na,b", request.Contents[0].Parts[4]["text"])
+	require.Equal(t, "[Document: data.json]\n{}", request.Contents[0].Parts[5]["text"])
+}
+
+func TestConvertClaudeMessagesToGeminiGenerateContent_RejectsOfficeDocument(t *testing.T) {
+	tests := []struct {
+		filename  string
+		mediaType string
+	}{
+		{filename: "report.docx", mediaType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document"},
+		{filename: "report.xlsx", mediaType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"},
+		{filename: "report.pptx", mediaType: "application/vnd.openxmlformats-officedocument.presentationml.presentation"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.filename, func(t *testing.T) {
+			body, err := json.Marshal(map[string]any{
+				"model": "gemini-test",
+				"messages": []any{map[string]any{
+					"role": "user",
+					"content": []any{map[string]any{
+						"type": "document", "title": tt.filename,
+						"source": map[string]any{
+							"type": "base64", "media_type": tt.mediaType, "data": "UEs=",
+						},
+					}},
+				}},
+			})
+			require.NoError(t, err)
+
+			out, err := convertClaudeMessagesToGeminiGenerateContent(body)
+			require.Nil(t, out)
+			require.Error(t, err)
+			require.True(t, apicompat.IsProviderFileCompatibilityError(err))
+			require.Contains(t, err.Error(), apicompat.ProviderFileUnsupportedCode)
+			require.Contains(t, err.Error(), tt.filename)
+		})
 	}
 }
 

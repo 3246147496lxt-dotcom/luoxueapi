@@ -338,6 +338,13 @@ func TestSkillImportRepositoryStagePersistsCreateWithoutMarketplaceRows(t *testi
 	// Any INSERT into skills, versions, origins, or version_origins here would
 	// be an unexpected sqlmock call and fail this test.
 	mock.ExpectExec(`(?s)UPDATE skill_import_run_items SET.*stage_action=\$16.*staged_artifact=\$17::jsonb.*staged_package_data=\$18`).
+		WithArgs(
+			int64(33), "item-claim-a", service.SkillImportItemStatusReady, sqlmock.AnyArg(),
+			sqlmock.AnyArg(), "https://skills.sh/demo", "", "", sha64("2"),
+			sqlmock.AnyArg(), sqlmock.AnyArg(), false, sqlmock.AnyArg(), sqlmock.AnyArg(),
+			"demo", service.SkillImportStageActionCreate, sqlmock.AnyArg(), []byte("zip"),
+			nil, nil,
+		).
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectQuery(`(?s)WITH item_counts AS.*i.stage_action='create'.*i.stage_action='new_version'.*UPDATE skill_import_runs`).
 		WithArgs(int64(9)).
@@ -365,6 +372,125 @@ func TestSkillImportRepositoryStagePersistsCreateWithoutMarketplaceRows(t *testi
 	require.Equal(t, "demo", result.MarketSlug)
 	require.Zero(t, result.SkillID)
 	require.Zero(t, result.VersionID)
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestSkillImportRepositoryStagePersistsUnchangedWithNullPackageData(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = db.Close() })
+
+	mock.ExpectBegin()
+	mock.ExpectQuery(`(?s)SELECT r.source_id, r.status, r.cancel_requested_at, src.catalog_priority.*FOR UPDATE OF r`).
+		WithArgs(int64(9)).WillReturnRows(sqlmock.NewRows([]string{
+		"source_id", "status", "cancel_requested_at", "catalog_priority", "lease_owner", "lease_expires_at",
+	}).AddRow(int64(2), service.SkillImportRunStatusPreparing, nil, 100, "worker-a", time.Now().UTC().Add(time.Hour)))
+	mock.ExpectQuery(`(?s)SELECT i.source_id, i.namespace, i.external_id, i.status.*FOR UPDATE OF i`).
+		WithArgs(int64(33), int64(9)).WillReturnRows(sqlmock.NewRows([]string{
+		"source_id", "namespace", "external_id", "status", "lease_owner",
+	}).AddRow(int64(2), "skills.sh", "owner/repo/demo", service.SkillImportItemStatusProcessing, "item-claim-a"))
+	mock.ExpectExec(`SELECT pg_advisory_xact_lock`).WithArgs("demo").
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectQuery(`(?s)SELECT o.skill_id, o.market_slug, s.slug, s.status.*FOR UPDATE OF o, s`).
+		WithArgs(int64(2), "skills.sh", "owner/repo/demo").
+		WillReturnRows(sqlmock.NewRows([]string{"skill_id", "market_slug", "slug", "status"}).
+			AddRow(int64(101), "demo", "demo", service.SkillStatusPublished))
+	mock.ExpectQuery(`(?s)SELECT id, version, yanked_at FROM skill_versions.*sha256=\$2`).
+		WithArgs(int64(101), sha64("2")).
+		WillReturnRows(sqlmock.NewRows([]string{"id", "version", "yanked_at"}).
+			AddRow(int64(201), "1.0.0", nil))
+	mock.ExpectExec(`(?s)UPDATE skill_import_run_items SET.*stage_action=\$16.*staged_artifact=\$17::jsonb.*staged_package_data=\$18`).
+		WithArgs(
+			int64(33), "item-claim-a", service.SkillImportItemStatusUnchanged, sqlmock.AnyArg(),
+			sqlmock.AnyArg(), "https://skills.sh/demo", "", "", sha64("2"),
+			sqlmock.AnyArg(), sqlmock.AnyArg(), false, sqlmock.AnyArg(), sqlmock.AnyArg(),
+			"demo", service.SkillImportStageActionUnchanged, sqlmock.AnyArg(), nil,
+			int64(101), int64(201),
+		).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectQuery(`(?s)WITH item_counts AS.*i.stage_action='create'.*i.stage_action='new_version'.*UPDATE skill_import_runs`).
+		WithArgs(int64(9)).WillReturnRows(importCountRows().AddRow(1, 1, 1, 0, 0, 1, 0, 0, 0, 0))
+	mock.ExpectCommit()
+
+	repo := &skillImportRepository{db: db}
+	result, err := repo.StagePreparedItem(context.Background(), service.SkillImportStagePreparedInput{
+		RunID: 9, RunItemID: 33, RunWorkerID: "worker-a", ItemLeaseOwner: "item-claim-a",
+		StableKey: service.SkillImportStableKey{SourceID: 2, Namespace: "skills.sh", ExternalID: "owner/repo/demo"},
+		DesiredSkill: service.SkillImportDesiredSkill{
+			Slug: "demo", DisplayName: "Demo", OriginURL: "https://skills.sh/demo",
+		},
+		OriginURL: "https://skills.sh/demo",
+		Artifact: service.SkillImportPreparedArtifact{
+			ManifestName: "demo", ManifestDescription: "Demo", SkillMD: "# Demo",
+			PackageData: []byte("zip"), PackageSHA256: sha64("2"), ByteSize: 3,
+			UnpackedSize: 6, FileCount: 1,
+			FileManifest:     []service.SkillArchiveFile{{Path: "SKILL.md", ByteSize: 6, SHA256: sha64("3")}},
+			ValidationReport: service.SkillValidationReport{Valid: true},
+		},
+	})
+	require.NoError(t, err)
+	require.Equal(t, service.SkillImportStageActionUnchanged, result.Action)
+	require.EqualValues(t, 101, result.SkillID)
+	require.EqualValues(t, 201, result.VersionID)
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestSkillImportRepositoryStagePersistsNewVersionWithPackageData(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = db.Close() })
+
+	mock.ExpectBegin()
+	mock.ExpectQuery(`(?s)SELECT r.source_id, r.status, r.cancel_requested_at, src.catalog_priority.*FOR UPDATE OF r`).
+		WithArgs(int64(9)).WillReturnRows(sqlmock.NewRows([]string{
+		"source_id", "status", "cancel_requested_at", "catalog_priority", "lease_owner", "lease_expires_at",
+	}).AddRow(int64(2), service.SkillImportRunStatusPreparing, nil, 100, "worker-a", time.Now().UTC().Add(time.Hour)))
+	mock.ExpectQuery(`(?s)SELECT i.source_id, i.namespace, i.external_id, i.status.*FOR UPDATE OF i`).
+		WithArgs(int64(33), int64(9)).WillReturnRows(sqlmock.NewRows([]string{
+		"source_id", "namespace", "external_id", "status", "lease_owner",
+	}).AddRow(int64(2), "skills.sh", "owner/repo/demo", service.SkillImportItemStatusProcessing, "item-claim-a"))
+	mock.ExpectExec(`SELECT pg_advisory_xact_lock`).WithArgs("demo").
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectQuery(`(?s)SELECT o.skill_id, o.market_slug, s.slug, s.status.*FOR UPDATE OF o, s`).
+		WithArgs(int64(2), "skills.sh", "owner/repo/demo").
+		WillReturnRows(sqlmock.NewRows([]string{"skill_id", "market_slug", "slug", "status"}).
+			AddRow(int64(101), "demo", "demo", service.SkillStatusPublished))
+	mock.ExpectQuery(`(?s)SELECT id, version, yanked_at FROM skill_versions.*sha256=\$2`).
+		WithArgs(int64(101), sha64("2")).WillReturnError(sql.ErrNoRows)
+	mock.ExpectQuery(`SELECT version FROM skill_versions WHERE skill_id=\$1 ORDER BY id`).
+		WithArgs(int64(101)).WillReturnRows(sqlmock.NewRows([]string{"version"}).AddRow("1.0.0"))
+	mock.ExpectExec(`(?s)UPDATE skill_import_run_items SET.*stage_action=\$16.*staged_artifact=\$17::jsonb.*staged_package_data=\$18`).
+		WithArgs(
+			int64(33), "item-claim-a", service.SkillImportItemStatusReady, sqlmock.AnyArg(),
+			sqlmock.AnyArg(), "https://skills.sh/demo", "", "", sha64("2"),
+			sqlmock.AnyArg(), sqlmock.AnyArg(), false, sqlmock.AnyArg(), sqlmock.AnyArg(),
+			"demo", service.SkillImportStageActionNewVersion, sqlmock.AnyArg(), []byte("zip"),
+			nil, nil,
+		).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectQuery(`(?s)WITH item_counts AS.*i.stage_action='create'.*i.stage_action='new_version'.*UPDATE skill_import_runs`).
+		WithArgs(int64(9)).WillReturnRows(importCountRows().AddRow(1, 1, 1, 0, 1, 0, 0, 0, 0, 0))
+	mock.ExpectCommit()
+
+	repo := &skillImportRepository{db: db}
+	result, err := repo.StagePreparedItem(context.Background(), service.SkillImportStagePreparedInput{
+		RunID: 9, RunItemID: 33, RunWorkerID: "worker-a", ItemLeaseOwner: "item-claim-a",
+		StableKey: service.SkillImportStableKey{SourceID: 2, Namespace: "skills.sh", ExternalID: "owner/repo/demo"},
+		DesiredSkill: service.SkillImportDesiredSkill{
+			Slug: "demo", DisplayName: "Demo", OriginURL: "https://skills.sh/demo",
+		},
+		OriginURL: "https://skills.sh/demo",
+		Artifact: service.SkillImportPreparedArtifact{
+			ManifestName: "demo", ManifestDescription: "Demo", SkillMD: "# Demo",
+			PackageData: []byte("zip"), PackageSHA256: sha64("2"), ByteSize: 3,
+			UnpackedSize: 6, FileCount: 1,
+			FileManifest:     []service.SkillArchiveFile{{Path: "SKILL.md", ByteSize: 6, SHA256: sha64("3")}},
+			ValidationReport: service.SkillValidationReport{Valid: true},
+		},
+	})
+	require.NoError(t, err)
+	require.Equal(t, service.SkillImportStageActionNewVersion, result.Action)
+	require.Equal(t, "1.0.1", result.Version)
 	require.NoError(t, mock.ExpectationsWereMet())
 }
 

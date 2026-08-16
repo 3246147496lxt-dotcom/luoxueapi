@@ -20,22 +20,30 @@ type Kind string
 
 const (
 	KindImage Kind = "image"
+	KindFile  Kind = "file"
 	KindDOCX  Kind = "docx"
 )
 
 type ErrorCode string
 
 const (
-	CodeEmptyFile                ErrorCode = "EMPTY_FILE"
-	CodeUnsupportedType          ErrorCode = "UNSUPPORTED_TYPE"
-	CodeTypeMismatch             ErrorCode = "TYPE_MISMATCH"
-	CodeInvalidImage             ErrorCode = "INVALID_IMAGE"
-	CodeImageDimensionsExceeded  ErrorCode = "IMAGE_DIMENSIONS_EXCEEDED"
-	CodeTextLimitExceeded        ErrorCode = "TEXT_LIMIT_EXCEEDED"
-	CodeInvalidDOCX              ErrorCode = "INVALID_DOCX"
-	CodeDOCXMacroForbidden       ErrorCode = "DOCX_MACRO_FORBIDDEN"
-	CodeDOCXExternalRelationship ErrorCode = "DOCX_EXTERNAL_RELATIONSHIP"
-	CodeDOCXArchiveLimitExceeded ErrorCode = "DOCX_ARCHIVE_LIMIT_EXCEEDED"
+	CodeEmptyFile                 ErrorCode = "EMPTY_FILE"
+	CodeUnsupportedType           ErrorCode = "UNSUPPORTED_TYPE"
+	CodeTypeMismatch              ErrorCode = "TYPE_MISMATCH"
+	CodeInvalidImage              ErrorCode = "INVALID_IMAGE"
+	CodeImageDimensionsExceeded   ErrorCode = "IMAGE_DIMENSIONS_EXCEEDED"
+	CodeTextLimitExceeded         ErrorCode = "TEXT_LIMIT_EXCEEDED"
+	CodeInvalidDOCX               ErrorCode = "INVALID_DOCX"
+	CodeDOCXMacroForbidden        ErrorCode = "DOCX_MACRO_FORBIDDEN"
+	CodeDOCXExternalRelationship  ErrorCode = "DOCX_EXTERNAL_RELATIONSHIP"
+	CodeDOCXArchiveLimitExceeded  ErrorCode = "DOCX_ARCHIVE_LIMIT_EXCEEDED"
+	CodeInvalidPDF                ErrorCode = "INVALID_PDF"
+	CodeInvalidText               ErrorCode = "INVALID_TEXT"
+	CodeInvalidJSON               ErrorCode = "INVALID_JSON"
+	CodeInvalidOOXML              ErrorCode = "INVALID_OOXML"
+	CodeOOXMLMacroForbidden       ErrorCode = "OOXML_MACRO_FORBIDDEN"
+	CodeOOXMLExternalRelationship ErrorCode = "OOXML_EXTERNAL_RELATIONSHIP"
+	CodeOOXMLArchiveLimitExceeded ErrorCode = "OOXML_ARCHIVE_LIMIT_EXCEEDED"
 )
 
 type Error struct {

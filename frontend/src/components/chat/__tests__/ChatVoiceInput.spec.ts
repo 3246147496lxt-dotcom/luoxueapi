@@ -34,6 +34,9 @@ vi.mock('vue-i18n', async () => {
   const actual = await vi.importActual<typeof import('vue-i18n')>('vue-i18n')
   const messages: Record<string, string> = {
     'chat.voice.errors.dailyQuotaExceeded': '今日语音额度已用完，将在下一个北京时间 08:00 重置；文字聊天仍可继续使用。',
+    'chat.voice.errors.permissionDenied': '无法使用麦克风，请在浏览器设置中允许麦克风权限。',
+    'chat.voice.errors.unsupported': '当前浏览器暂不支持语音输入。',
+    'chat.voice.errors.unavailable': '语音转写服务暂时不可用，请稍后重试。',
   }
   return {
     ...actual,
@@ -122,6 +125,8 @@ describe('ChatVoiceInput', () => {
     })
     FakeMediaRecorder.instances = []
     vi.stubGlobal('MediaRecorder', FakeMediaRecorder)
+    vi.stubGlobal('requestAnimationFrame', vi.fn(() => 1))
+    vi.stubGlobal('cancelAnimationFrame', vi.fn())
     apiMocks.createChatIdempotencyKey.mockReturnValue('11111111-2222-4333-8444-555555555555')
     apiMocks.isAbortError.mockImplementation((error: unknown) => (
       !!error && typeof error === 'object' && (error as { name?: unknown }).name === 'AbortError'
@@ -143,6 +148,7 @@ describe('ChatVoiceInput', () => {
 
   it('uses the dictation tooltip and supports its advertised keyboard shortcut', async () => {
     const view = mountVoiceInput()
+    const focusSpy = vi.spyOn(HTMLElement.prototype, 'focus')
     const trigger = view.get('[data-test="chat-voice-trigger"]')
     const tooltip = document.body.querySelector<HTMLElement>(
       '[data-ui-portal="chat-control-tooltip"][role="tooltip"]',
@@ -179,6 +185,23 @@ describe('ChatVoiceInput', () => {
 
     expect(shortcut.defaultPrevented).toBe(true)
     expect(view.attributes('data-state')).toBe('recording')
+    expect(view.find('[data-test="chat-voice-recording-shell"]').exists()).toBe(true)
+    expect(focusSpy).toHaveBeenCalledWith({ preventScroll: true })
+
+    const confirmShortcut = new KeyboardEvent('keydown', {
+      code: 'KeyD',
+      ctrlKey: true,
+      shiftKey: true,
+      bubbles: true,
+      cancelable: true,
+    })
+    window.dispatchEvent(confirmShortcut)
+    await flushPromises()
+
+    expect(confirmShortcut.defaultPrevented).toBe(true)
+    expect(apiMocks.transcribeChatAudio).toHaveBeenCalledOnce()
+    expect(view.attributes('data-state')).toBe('idle')
+    focusSpy.mockRestore()
   })
 
   it('can start the same truthful transcription flow from the voice action', async () => {
@@ -191,6 +214,147 @@ describe('ChatVoiceInput', () => {
     expect(view.attributes('data-state')).toBe('recording')
   })
 
+  it('shows the blank recording shell while voice resources are initializing', async () => {
+    let resolveCapability: ((state: 'ready') => void) | undefined
+    const initializeCapability = vi.fn(() => new Promise<'ready'>((resolve) => {
+      resolveCapability = resolve
+    }))
+    const view = mountVoiceInput({
+      capabilityState: 'initializing',
+      initializeCapability,
+    })
+
+    await view.get('[data-test="chat-voice-trigger"]').trigger('click')
+    await nextTick()
+
+    expect(view.attributes('data-state')).toBe('initializing')
+    expect(view.find('[data-test="chat-voice-trigger"]').exists()).toBe(false)
+    expect(view.find('[data-icon="chatMicrophone"]').exists()).toBe(false)
+    expect(view.find('.chat-voice-input__spinner').exists()).toBe(false)
+    expect(view.find('[data-test="chat-voice-recording-shell"]').exists()).toBe(true)
+    expect(view.find('[data-test="chat-voice-cancel"] [data-icon="x"]').exists()).toBe(true)
+    expect(view.find('[data-test="chat-voice-confirm"] [data-icon="check"]').exists()).toBe(true)
+    expect(view.get('[data-test="chat-voice-cancel"]').attributes('aria-label'))
+      .toBe('chat.voice.cancelRequest')
+    const confirm = view.get('[data-test="chat-voice-confirm"]')
+    expect((confirm.element as HTMLButtonElement).disabled).toBe(true)
+    expect(confirm.attributes('aria-label')).toBe('chat.voice.preparing')
+    const canvas = view.get('[data-test="chat-voice-waveform"]')
+    expect(canvas.classes()).toContain('chat-voice-input__waveform--hidden')
+    expect((canvas.element as HTMLCanvasElement).style.display).toBe('')
+    expect(initializeCapability).toHaveBeenCalledOnce()
+    expect(getUserMedia).not.toHaveBeenCalled()
+    expect(requestAnimationFrame).not.toHaveBeenCalled()
+    expect(view.emitted('busy-change')?.at(-1)).toEqual([true])
+
+    resolveCapability?.('ready')
+    await flushPromises()
+
+    expect(view.attributes('data-state')).toBe('recording')
+    expect(view.get('[data-test="chat-voice-waveform"]').classes())
+      .not.toContain('chat-voice-input__waveform--hidden')
+    expect((view.get('[data-test="chat-voice-confirm"]')
+      .element as HTMLButtonElement).disabled).toBe(false)
+    expect(getUserMedia).toHaveBeenCalledOnce()
+  })
+
+  it('cancels capability initialization from the X before microphone capture starts', async () => {
+    let resolveCapability: ((state: 'ready') => void) | undefined
+    const initializeCapability = vi.fn(() => new Promise<'ready'>((resolve) => {
+      resolveCapability = resolve
+    }))
+    const view = mountVoiceInput({
+      capabilityState: 'initializing',
+      initializeCapability,
+    })
+
+    await view.get('[data-test="chat-voice-trigger"]').trigger('click')
+    await nextTick()
+    await view.get('[data-test="chat-voice-cancel"]').trigger('click')
+    await flushPromises()
+
+    expect(view.attributes('data-state')).toBe('idle')
+    expect(view.find('[data-test="chat-voice-recording-shell"]').exists()).toBe(false)
+    expect(view.find('[data-test="chat-voice-trigger"]').exists()).toBe(true)
+
+    resolveCapability?.('ready')
+    await flushPromises()
+
+    expect(getUserMedia).not.toHaveBeenCalled()
+    expect(FakeMediaRecorder.instances).toHaveLength(0)
+    expect(requestAnimationFrame).not.toHaveBeenCalled()
+  })
+
+  it('uses capability limits that arrive after the component is already mounted', async () => {
+    let resolveCapability: ((state: 'ready') => void) | undefined
+    const initializeCapability = vi.fn(() => new Promise<'ready'>((resolve) => {
+      resolveCapability = resolve
+    }))
+    const view = mountVoiceInput({
+      capabilityState: 'initializing',
+      initializeCapability,
+    })
+
+    await view.get('[data-test="chat-voice-trigger"]').trigger('click')
+    await view.setProps({
+      capabilityState: 'ready',
+      acceptedMimeTypes: ['audio/mp4'],
+    })
+    resolveCapability?.('ready')
+    await flushPromises()
+
+    expect(view.attributes('data-state')).toBe('unsupported')
+    expect(getUserMedia).not.toHaveBeenCalled()
+  })
+
+  it('keeps the microphone visible and shows a specific unavailable message', async () => {
+    const initializeCapability = vi.fn().mockResolvedValue('unavailable')
+    const view = mountVoiceInput({
+      capabilityState: 'unavailable',
+      initializeCapability,
+    })
+
+    await view.get('[data-test="chat-voice-trigger"]').trigger('click')
+    await flushPromises()
+
+    expect(view.attributes('data-state')).toBe('unavailable')
+    expect(view.get('[data-test="chat-voice-error"]').text())
+      .toContain('语音转写服务暂时不可用，请稍后重试。')
+    expect(view.find('[data-test="chat-voice-trigger"]').exists()).toBe(true)
+    expect(getUserMedia).not.toHaveBeenCalled()
+  })
+
+  it('shows the same specific message when the transcription backend returns 503', async () => {
+    apiMocks.transcribeChatAudio.mockRejectedValueOnce(new ChatAPIError(
+      'Transcription unavailable',
+      { status: 503, code: 'TRANSCRIPTION_UNAVAILABLE' },
+    ))
+    const view = mountVoiceInput()
+
+    await view.get('[data-test="chat-voice-trigger"]').trigger('click')
+    await flushPromises()
+    await view.get('[data-test="chat-voice-confirm"]').trigger('click')
+    await flushPromises()
+
+    expect(view.attributes('data-state')).toBe('unavailable')
+    expect(view.get('[data-test="chat-voice-error"]').text())
+      .toContain('语音转写服务暂时不可用，请稍后重试。')
+    expect(view.find('[data-test="chat-voice-trigger"]').exists()).toBe(true)
+  })
+
+  it('keeps the microphone visible and explains unsupported browsers', async () => {
+    vi.unstubAllGlobals()
+    const view = mountVoiceInput()
+
+    await view.get('[data-test="chat-voice-trigger"]').trigger('click')
+    await flushPromises()
+
+    expect(view.attributes('data-state')).toBe('unsupported')
+    expect(view.get('[data-test="chat-voice-error"]').text())
+      .toContain('当前浏览器暂不支持语音输入。')
+    expect(view.find('[data-test="chat-voice-trigger"]').exists()).toBe(true)
+  })
+
   it('records with the preferred Opus format, uploads once, and emits text without sending', async () => {
     const view = mountVoiceInput()
     const trigger = view.get('[data-test="chat-voice-trigger"]')
@@ -198,13 +362,17 @@ describe('ChatVoiceInput', () => {
     await trigger.trigger('click')
     await flushPromises()
     expect(view.attributes('data-state')).toBe('recording')
-    expect(trigger.attributes('aria-pressed')).toBe('true')
+    expect(view.find('[data-test="chat-voice-trigger"]').exists()).toBe(false)
+    expect(view.get('[data-test="chat-voice-cancel"]').attributes('aria-label'))
+      .toBe('chat.voice.cancelRecording')
+    expect(view.get('[data-test="chat-voice-confirm"]').attributes('aria-label'))
+      .toBe('chat.voice.stop')
+    expect(view.find('[data-test="chat-voice-cancel"] [data-icon="x"]').exists()).toBe(true)
+    expect(view.find('[data-test="chat-voice-confirm"] [data-icon="check"]').exists()).toBe(true)
+    expect(view.find('[data-test="chat-voice-waveform"]').exists()).toBe(true)
     expect(FakeMediaRecorder.instances[0]?.mimeType).toBe('audio/webm;codecs=opus')
 
-    await vi.advanceTimersByTimeAsync(1_250)
-    expect(trigger.text()).toContain('00:01')
-
-    await trigger.trigger('click')
+    await view.get('[data-test="chat-voice-confirm"]').trigger('click')
     await flushPromises()
 
     expect(trackStop).toHaveBeenCalledOnce()
@@ -221,6 +389,159 @@ describe('ChatVoiceInput', () => {
     expect(view.attributes('data-state')).toBe('idle')
   })
 
+  it('keeps the final moving waveform visible while cloud transcription is pending', async () => {
+    let resolveTranscription: ((value: { text: string }) => void) | undefined
+    apiMocks.transcribeChatAudio.mockReturnValueOnce(new Promise((resolve) => {
+      resolveTranscription = resolve
+    }))
+    const view = mountVoiceInput()
+
+    await view.get('[data-test="chat-voice-trigger"]').trigger('click')
+    await flushPromises()
+    await view.get('[data-test="chat-voice-confirm"]').trigger('click')
+    await flushPromises()
+
+    expect(view.attributes('data-state')).toBe('transcribing')
+    expect(view.find('[data-test="chat-voice-recording-shell"]').exists()).toBe(true)
+    expect(view.find('[data-test="chat-voice-waveform"]').exists()).toBe(true)
+    expect(view.find('[data-test="chat-voice-confirm"]').exists()).toBe(false)
+    expect(view.find('[data-test="chat-voice-transcribing-spinner"]').exists()).toBe(true)
+    expect(view.get('[data-test="chat-voice-cancel"]').attributes('aria-label'))
+      .toBe('chat.voice.cancelTranscription')
+
+    resolveTranscription?.({ text: '转写文字' })
+    await flushPromises()
+    expect(view.attributes('data-state')).toBe('idle')
+  })
+
+  it('cancels cloud transcription with Escape while the frozen waveform is visible', async () => {
+    let uploadSignal: AbortSignal | undefined
+    apiMocks.transcribeChatAudio.mockImplementationOnce((_blob, options) => {
+      uploadSignal = options.signal
+      return new Promise((_resolve, reject) => {
+        options.signal.addEventListener('abort', () => {
+          reject(new DOMException('Aborted', 'AbortError'))
+        }, { once: true })
+      })
+    })
+    const view = mountVoiceInput()
+
+    await view.get('[data-test="chat-voice-trigger"]').trigger('click')
+    await flushPromises()
+    await view.get('[data-test="chat-voice-confirm"]').trigger('click')
+    await flushPromises()
+    const escape = new KeyboardEvent('keydown', {
+      key: 'Escape',
+      bubbles: true,
+      cancelable: true,
+    })
+    window.dispatchEvent(escape)
+    await flushPromises()
+
+    expect(escape.defaultPrevented).toBe(true)
+    expect(uploadSignal?.aborted).toBe(true)
+    expect(view.attributes('data-state')).toBe('idle')
+  })
+
+  it('cancels the active recording from the X without uploading audio', async () => {
+    const view = mountVoiceInput()
+    const focusSpy = vi.spyOn(HTMLElement.prototype, 'focus')
+
+    await view.get('[data-test="chat-voice-trigger"]').trigger('click')
+    await flushPromises()
+    focusSpy.mockClear()
+    await view.get('[data-test="chat-voice-cancel"]').trigger('click')
+    await flushPromises()
+
+    expect(trackStop).toHaveBeenCalledOnce()
+    expect(apiMocks.transcribeChatAudio).not.toHaveBeenCalled()
+    expect(view.attributes('data-state')).toBe('idle')
+    expect(view.find('[data-test="chat-voice-trigger"]').exists()).toBe(true)
+    expect(view.find('[data-test="chat-voice-recording-shell"]').exists()).toBe(false)
+    expect(focusSpy).toHaveBeenCalledWith({ preventScroll: true })
+    focusSpy.mockRestore()
+  })
+
+  it('makes covered composer controls inert as soon as the voice shell starts preparing', async () => {
+    let resolveCapability: ((state: 'ready') => void) | undefined
+    const initializeCapability = vi.fn(() => new Promise<'ready'>((resolve) => {
+      resolveCapability = resolve
+    }))
+    const composer = document.createElement('form')
+    composer.className = 'chat-composer'
+    const coveredButton = document.createElement('button')
+    coveredButton.setAttribute('aria-label', 'covered control')
+    composer.appendChild(coveredButton)
+    document.body.appendChild(composer)
+    wrapper = mount(ChatVoiceInput, {
+      attachTo: composer,
+      props: {
+        contextKey: 'user-7:new',
+        capabilityState: 'initializing',
+        initializeCapability,
+        onTranscribed: (_text: string, acknowledge: (inserted: boolean) => void) => acknowledge(true),
+      },
+      global: { stubs: { Icon: IconStub } },
+    })
+
+    await wrapper.get('[data-test="chat-voice-trigger"]').trigger('click')
+    await nextTick()
+
+    expect(coveredButton.hasAttribute('inert')).toBe(true)
+    expect(coveredButton.getAttribute('aria-hidden')).toBe('true')
+
+    await wrapper.get('[data-test="chat-voice-cancel"]').trigger('click')
+    await flushPromises()
+
+    expect(coveredButton.hasAttribute('inert')).toBe(false)
+    expect(coveredButton.hasAttribute('aria-hidden')).toBe(false)
+
+    resolveCapability?.('ready')
+    await flushPromises()
+    expect(getUserMedia).not.toHaveBeenCalled()
+  })
+
+  it('cancels the active recording with Escape after the original trigger is replaced', async () => {
+    const view = mountVoiceInput()
+
+    await view.get('[data-test="chat-voice-trigger"]').trigger('click')
+    await flushPromises()
+    const escape = new KeyboardEvent('keydown', {
+      key: 'Escape',
+      bubbles: true,
+      cancelable: true,
+    })
+    window.dispatchEvent(escape)
+    await flushPromises()
+
+    expect(escape.defaultPrevented).toBe(true)
+    expect(trackStop).toHaveBeenCalledOnce()
+    expect(apiMocks.transcribeChatAudio).not.toHaveBeenCalled()
+    expect(view.attributes('data-state')).toBe('idle')
+  })
+
+  it('does not consume Escape while an active modal owns the keyboard', async () => {
+    const view = mountVoiceInput()
+
+    await view.get('[data-test="chat-voice-trigger"]').trigger('click')
+    await flushPromises()
+    const modal = document.createElement('div')
+    modal.setAttribute('role', 'dialog')
+    modal.setAttribute('aria-modal', 'true')
+    document.body.appendChild(modal)
+    const escape = new KeyboardEvent('keydown', {
+      key: 'Escape',
+      bubbles: true,
+      cancelable: true,
+    })
+    window.dispatchEvent(escape)
+    await flushPromises()
+
+    expect(escape.defaultPrevented).toBe(false)
+    expect(view.attributes('data-state')).toBe('recording')
+    expect(trackStop).not.toHaveBeenCalled()
+  })
+
   it('explains daily voice quota exhaustion without implying text chat is blocked', async () => {
     apiMocks.transcribeChatAudio.mockRejectedValueOnce(new ChatAPIError(
       'Daily voice transcription limit reached',
@@ -230,7 +551,7 @@ describe('ChatVoiceInput', () => {
 
     await view.get('[data-test="chat-voice-trigger"]').trigger('click')
     await flushPromises()
-    await view.get('[data-test="chat-voice-trigger"]').trigger('click')
+    await view.get('[data-test="chat-voice-confirm"]').trigger('click')
     await flushPromises()
 
     expect(view.attributes('data-state')).toBe('error')
@@ -248,7 +569,7 @@ describe('ChatVoiceInput', () => {
 
     await view.get('[data-test="chat-voice-trigger"]').trigger('click')
     await flushPromises()
-    await view.get('[data-test="chat-voice-trigger"]').trigger('click')
+    await view.get('[data-test="chat-voice-confirm"]').trigger('click')
     await flushPromises()
 
     const message = view.get('[data-test="chat-voice-error"]').text()
@@ -263,11 +584,11 @@ describe('ChatVoiceInput', () => {
     await view.get('[data-test="chat-voice-trigger"]').trigger('click')
     await flushPromises()
 
-    expect(view.attributes('data-state')).toBe('error')
+    expect(view.attributes('data-state')).toBe('denied')
     expect(view.get('[data-test="chat-voice-error"]').text())
-      .toContain('chat.voice.errors.permissionDenied')
+      .toContain('无法使用麦克风，请在浏览器设置中允许麦克风权限。')
     expect(view.get('[data-test="chat-voice-trigger"]').attributes('aria-label'))
-      .toBe('chat.voice.retry')
+      .toBe('无法使用麦克风，请在浏览器设置中允许麦克风权限。')
 
     await view.setProps({ contextKey: 'user-7:conversation-2' })
 
@@ -288,6 +609,13 @@ describe('ChatVoiceInput', () => {
     await view.get('[data-test="chat-voice-trigger"]').trigger('click')
     await nextTick()
     expect(view.attributes('data-state')).toBe('requesting')
+    expect(view.find('[data-test="chat-voice-recording-shell"]').exists()).toBe(true)
+    expect(view.get('[data-test="chat-voice-waveform"]').classes())
+      .toContain('chat-voice-input__waveform--hidden')
+    expect((view.get('[data-test="chat-voice-confirm"]')
+      .element as HTMLButtonElement).disabled).toBe(true)
+    expect(view.find('.chat-voice-input__spinner').exists()).toBe(false)
+    expect(requestAnimationFrame).not.toHaveBeenCalled()
 
     await view.setProps({ contextKey: 'user-7:conversation-2' })
     resolveCapture?.(capturedStream)
@@ -297,6 +625,72 @@ describe('ChatVoiceInput', () => {
     expect(FakeMediaRecorder.instances).toHaveLength(0)
     expect(apiMocks.transcribeChatAudio).not.toHaveBeenCalled()
     expect(view.attributes('data-state')).toBe('idle')
+  })
+
+  it('keeps permission loading blank, then starts the waveform only after capture resolves', async () => {
+    let resolveCapture: ((stream: MediaStream) => void) | undefined
+    const capturedStream = {
+      getTracks: () => [{ stop: trackStop }],
+    } as unknown as MediaStream
+    getUserMedia.mockReturnValue(new Promise<MediaStream>((resolve) => {
+      resolveCapture = resolve
+    }))
+    vi.stubGlobal('matchMedia', vi.fn(() => ({
+      matches: false,
+      media: '(prefers-reduced-motion: reduce)',
+      onchange: null,
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      dispatchEvent: vi.fn(() => true),
+    })))
+    const view = mountVoiceInput()
+
+    await view.get('[data-test="chat-voice-trigger"]').trigger('click')
+    await nextTick()
+
+    expect(view.attributes('data-state')).toBe('requesting')
+    expect(view.get('[data-test="chat-voice-waveform"]').classes())
+      .toContain('chat-voice-input__waveform--hidden')
+    expect(requestAnimationFrame).not.toHaveBeenCalled()
+
+    resolveCapture?.(capturedStream)
+    await flushPromises()
+
+    expect(view.attributes('data-state')).toBe('recording')
+    expect(view.get('[data-test="chat-voice-waveform"]').classes())
+      .not.toContain('chat-voice-input__waveform--hidden')
+    expect((view.get('[data-test="chat-voice-confirm"]')
+      .element as HTMLButtonElement).disabled).toBe(false)
+    expect(requestAnimationFrame).toHaveBeenCalled()
+  })
+
+  it('cancels a pending microphone request from the X and stops a late stream', async () => {
+    let resolveCapture: ((stream: MediaStream) => void) | undefined
+    const capturedStream = {
+      getTracks: () => [{ stop: trackStop }],
+    } as unknown as MediaStream
+    getUserMedia.mockReturnValue(new Promise<MediaStream>((resolve) => {
+      resolveCapture = resolve
+    }))
+    const view = mountVoiceInput()
+
+    await view.get('[data-test="chat-voice-trigger"]').trigger('click')
+    await nextTick()
+    await view.get('[data-test="chat-voice-cancel"]').trigger('click')
+    await flushPromises()
+
+    expect(view.attributes('data-state')).toBe('idle')
+    expect(view.find('[data-test="chat-voice-recording-shell"]').exists()).toBe(false)
+
+    resolveCapture?.(capturedStream)
+    await flushPromises()
+
+    expect(trackStop).toHaveBeenCalledOnce()
+    expect(FakeMediaRecorder.instances).toHaveLength(0)
+    expect(apiMocks.transcribeChatAudio).not.toHaveBeenCalled()
+    expect(requestAnimationFrame).not.toHaveBeenCalled()
   })
 
   it('automatically stops at 60 seconds and begins transcription', async () => {
@@ -322,7 +716,7 @@ describe('ChatVoiceInput', () => {
 
     await view.get('[data-test="chat-voice-trigger"]').trigger('click')
     await flushPromises()
-    await view.get('[data-test="chat-voice-trigger"]').trigger('click')
+    await view.get('[data-test="chat-voice-confirm"]').trigger('click')
     await flushPromises()
 
     expect(view.attributes('data-state')).toBe('error')
@@ -344,6 +738,41 @@ describe('ChatVoiceInput', () => {
 
   it('keeps the preserved transcript inside the viewport-clamped error card', () => {
     expect(COMPONENT_STYLE).toMatch(
+      /\.chat-voice-input\s*\{[\s\S]*?width: 36px;[\s\S]*?height: 36px;[\s\S]*?flex: 0 0 36px;/,
+    )
+    expect(COMPONENT_STYLE).not.toContain('chat-voice-input__trigger--wide')
+    expect(COMPONENT_STYLE).toMatch(
+      /\.chat-voice-input__recording-shell\s*\{[\s\S]*?grid-template-rows: 36px;[\s\S]*?height: 52px;[\s\S]*?border-radius: 28px;[\s\S]*?color: var\(--chat-composer-primary-fg, #0d0d0d\);[\s\S]*?background: transparent;[\s\S]*?box-shadow: none;/,
+    )
+    expect(COMPONENT_STYLE).not.toContain('background: #212121;')
+    expect(COMPONENT_STYLE).not.toContain('box-shadow: inset 0 0 0 1px #292929;')
+    expect(COMPONENT_STYLE).toMatch(
+      /\.chat-voice-input__waveform\s*\{[\s\S]*?width: 100%;[\s\S]*?height: 44px;/,
+    )
+    expect(COMPONENT_STYLE).toMatch(
+      /\.chat-voice-input__waveform--hidden\s*\{[\s\S]*?visibility: hidden;/,
+    )
+    expect(COMPONENT_SOURCE).not.toContain('v-show="waveformVisible"')
+    expect(COMPONENT_SOURCE).not.toContain('chat-voice-input__spinner')
+    expect(COMPONENT_STYLE).toMatch(
+      /\.chat-composer:has\(\.chat-voice-input--initializing\)[\s\S]*?height: 52px;/,
+    )
+    expect(COMPONENT_STYLE).toMatch(
+      /\.chat-composer:has\(\.chat-voice-input--requesting\)[\s\S]*?height: 52px;/,
+    )
+    expect(COMPONENT_STYLE).toMatch(
+      /\.chat-composer:has\(\.chat-voice-input--initializing\) > \.chat-composer__input-shell[\s\S]*?visibility: hidden;/,
+    )
+    expect(COMPONENT_STYLE).toMatch(
+      /\.chat-composer:has\(\.chat-voice-input--requesting\) > \.chat-composer__trailing > :not\(\.chat-voice-input\)[\s\S]*?visibility: hidden;/,
+    )
+    expect(COMPONENT_STYLE).toMatch(
+      /\.chat-composer:has\(\.chat-voice-input--recording\) > \.chat-composer__input-shell[\s\S]*?visibility: hidden;/,
+    )
+    expect(COMPONENT_STYLE).toMatch(
+      /\.chat-composer:has\(\.chat-voice-input--transcribing\) > \.chat-composer__trailing > :not\(\.chat-voice-input\)[\s\S]*?visibility: hidden;/,
+    )
+    expect(COMPONENT_STYLE).toMatch(
       /\.chat-voice-input__error\s*\{[\s\S]*?z-index: 70;/,
     )
     expect(COMPONENT_STYLE).toMatch(
@@ -351,6 +780,18 @@ describe('ChatVoiceInput', () => {
     )
     expect(COMPONENT_STYLE).toMatch(
       /\.chat-voice-input__pending-transcript\s*\{[\s\S]*?width: 100%;[\s\S]*?max-width: 100%;/,
+    )
+  })
+
+  it('keeps pending waveform samples in the raw audio-level domain', () => {
+    expect(COMPONENT_SOURCE).toContain(
+      'waveformPendingLevel = recorder.audioLevel.value',
+    )
+    expect(COMPONENT_SOURCE).not.toContain(
+      'waveformPendingLevel = chatVoiceWaveformHeight(recorder.audioLevel.value)',
+    )
+    expect(COMPONENT_SOURCE).toMatch(
+      /appendChatVoiceWaveformSample\([\s\S]*?waveformPendingLevel,[\s\S]*?capacity,/,
     )
   })
 
@@ -382,7 +823,7 @@ describe('ChatVoiceInput', () => {
     const view = mountVoiceInput()
     await view.get('[data-test="chat-voice-trigger"]').trigger('click')
     await flushPromises()
-    await view.get('[data-test="chat-voice-trigger"]').trigger('click')
+    await view.get('[data-test="chat-voice-confirm"]').trigger('click')
     await flushPromises()
     expect(view.attributes('data-state')).toBe('transcribing')
 

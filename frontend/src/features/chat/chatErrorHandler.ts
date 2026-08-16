@@ -5,6 +5,7 @@ export type ChatErrorMessageKey =
   | 'chat.errors.insufficientBalance'
   | 'chat.errors.modelUnavailable'
   | 'chat.errors.reasoningUnavailable'
+  | 'chat.errors.proReasoningUnavailable'
   | 'chat.errors.serviceUnavailable'
   | 'chat.errors.network'
   | 'chat.errors.timeout'
@@ -150,6 +151,9 @@ function presentationFor(code: string, status: number): ChatErrorPresentation {
   }
   if (code === 'CHAT_REASONING_EFFORT_NOT_AVAILABLE') {
     return { code, messageKey: 'chat.errors.reasoningUnavailable', retryable: false }
+  }
+  if (code === 'PRO_REASONING_UNAVAILABLE') {
+    return { code, messageKey: 'chat.errors.proReasoningUnavailable', retryable: false }
   }
   if (code === 'CHAT_MODEL_VISION_UNAVAILABLE') {
     return { code, messageKey: 'chat.errors.modelUnavailable', retryable: false }

@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
 import { nextTick } from 'vue'
+import { routerKey } from 'vue-router'
 import { toChatConversationTitlePreview } from '@/features/chat/conversationTitle'
 import type { ChatConversation } from '@/types/chat'
 import { useAppStore } from '@/stores/app'
@@ -185,9 +186,15 @@ describe('ChatHistoryPanel focus management', () => {
 
   it('按官方顺序呈现五项一级导航，并让未接入入口只显示提示而不伪造路由', async () => {
     const appStore = useAppStore()
+    const push = vi.fn().mockResolvedValue(undefined)
     wrapper = mount(ChatHistoryPanel, {
       props: { conversations: [], shell: true },
-      global: { stubs: shellStubs },
+      global: {
+        stubs: shellStubs,
+        provide: {
+          [routerKey as symbol]: { push },
+        },
+      },
     })
 
     const fixedNewChat = wrapper.get('.chat-history__header .chat-history__new')
@@ -210,17 +217,25 @@ describe('ChatHistoryPanel focus management', () => {
     ])
     expect(scrollingNav.findAll('a')).toHaveLength(0)
     expect(wrapper.find('.chat-history__list .chat-history__new').exists()).toBe(false)
-    expect(actions.slice(1).every((action) => action.attributes('aria-disabled') === 'true'))
+    expect(actions[1]!.attributes('aria-disabled')).toBeUndefined()
+    expect(actions.slice(2).every((action) => action.attributes('aria-disabled') === 'true'))
       .toBe(true)
 
     await actions[0]!.trigger('click')
     expect(wrapper.emitted('new')).toEqual([[]])
 
     await actions[1]!.trigger('click')
+    await flushPromises()
+    expect(push).toHaveBeenCalledOnce()
+    expect(push).toHaveBeenCalledWith('/library')
+    expect(appStore.toasts).toHaveLength(0)
+
+    await actions[2]!.trigger('click')
     expect(appStore.toasts.at(-1)).toMatchObject({
       type: 'info',
       message: 'chat.navigation.unavailable',
     })
+    expect(push).toHaveBeenCalledOnce()
     expect(wrapper.emitted('new')).toEqual([[]])
   })
 
@@ -323,7 +338,12 @@ describe('ChatHistoryPanel focus management', () => {
     const collapsedActions = wrapper.get('[data-testid="chat-sidebar-collapsed-nav"]')
       .findAll('button, a')
     expect(collapsedActions.map((action) => action.attributes('aria-label')))
-      .toEqual(['chat.history.searchLabel', 'nav.chatMode'])
+      .toEqual([
+        'chat.history.searchLabel',
+        'nav.chatMode',
+        'chat.navigation.fileLibrary',
+      ])
+    expect(collapsedActions[2]!.attributes('href')).toBe('/library')
 
     await wrapper.get('button[aria-label="chat.history.searchLabel"]').trigger('click')
     await nextTick()

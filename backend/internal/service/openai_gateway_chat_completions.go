@@ -98,6 +98,13 @@ func (s *OpenAIGatewayService) ForwardAsChatCompletions(
 	if err := json.Unmarshal(body, &chatReq); err != nil {
 		return nil, fmt.Errorf("parse chat completions request: %w", err)
 	}
+	if options, ok := GetWebChatReasoningOptions(c); ok {
+		// reasoning_mode is server-owned Web Chat state. Public JSON cannot
+		// populate ChatCompletionsRequest.ReasoningMode; only the validated Gin
+		// context may inject mode and its independently validated effort.
+		chatReq.ReasoningMode = options.Mode
+		chatReq.ReasoningEffort = options.Effort
+	}
 	originalModel := chatReq.Model
 	clientStream := chatReq.Stream
 	clientDisconnectResult := func() *OpenAIForwardResult {
@@ -176,6 +183,9 @@ func (s *OpenAIGatewayService) ForwardAsChatCompletions(
 		// ChatCompletionsToResponses always sets Stream=true (upstream always streams).
 		responsesReq, err = apicompat.ChatCompletionsToResponses(&chatReq)
 		if err != nil {
+			if apicompat.IsProviderFileCompatibilityError(err) {
+				writeChatCompletionsError(c, http.StatusBadRequest, "invalid_request_error", err.Error())
+			}
 			return nil, fmt.Errorf("convert chat completions to responses: %w", err)
 		}
 		responsesReq.Model = upstreamModel
@@ -572,6 +582,7 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 	clientDisconnected := false
 	clientOutputStarted := false
 	pendingSSE := make([]string, 0, 4)
+	_, webChatActivityEnabled := GetWebChatReasoningOptions(c)
 	refusalDetector := newOpenAIChatSilentRefusalDetector(requestBodyLen)
 	var streamFailoverErr *UpstreamFailoverError
 	var streamNonFailoverErr error
@@ -580,6 +591,37 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 		if drainGuard != nil {
 			drainGuard.Start()
 		}
+	}
+	writeClientSSE := func(sse string, forceRelease bool) bool {
+		if clientDisconnected || strings.TrimSpace(sse) == "" {
+			return false
+		}
+		if !clientOutputStarted && !forceRelease && !refusalDetector.ShouldReleaseClientOutput() {
+			pendingSSE = append(pendingSSE, sse)
+			return true
+		}
+		if !clientOutputStarted {
+			writeStreamHeaders()
+			for _, pending := range pendingSSE {
+				if _, err := fmt.Fprint(c.Writer, pending); err != nil {
+					markClientDisconnected()
+					logger.L().Info("openai chat_completions stream: client disconnected while flushing pending chunks",
+						zap.String("request_id", requestID),
+					)
+					return false
+				}
+			}
+			pendingSSE = pendingSSE[:0]
+			clientOutputStarted = true
+		}
+		if _, err := fmt.Fprint(c.Writer, sse); err != nil {
+			markClientDisconnected()
+			logger.L().Info("openai chat_completions stream: client disconnected, continuing to drain upstream for billing",
+				zap.String("request_id", requestID),
+			)
+			return false
+		}
+		return true
 	}
 
 	scanner := s.newUpstreamSSEScanner(resp.Body)
@@ -676,6 +718,11 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 				streamFailoverErr = s.newOpenAIStreamFailoverError(c, account, false, requestID, payloadBytes, message)
 				return true
 			}
+			if webChatActivityEnabled {
+				if activitySSE, ok := buildWebChatActivitySSE(payloadBytes, &event); ok {
+					_ = writeClientSSE(activitySSE, true)
+				}
+			}
 			message = s.recordOpenAIStreamUpstreamError(c, account, false, requestID, "http_error", payloadBytes, message)
 			defaultStatus, defaultErrType, defaultMsg := http.StatusBadGateway, "upstream_error", message
 			// 统一走语义状态推断 + body 归一化（与 /v1/responses 路径一致），
@@ -713,7 +760,17 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 			return true
 		}
 
+		wroteEvent := false
+		if webChatActivityEnabled {
+			if activitySSE, ok := buildWebChatActivitySSE([]byte(payload), &event); ok {
+				wroteEvent = writeClientSSE(activitySSE, false) || wroteEvent
+			}
+		}
+
 		chunks := apicompat.ResponsesEventToChatChunks(&event, state)
+		if webChatActivityEnabled && webChatSuppressConvertedReasoning(&event) {
+			chunks = nil
+		}
 		if !clientDisconnected {
 			for _, chunk := range chunks {
 				refusalDetector.ObserveChatChunk(chunk)
@@ -725,37 +782,13 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 					)
 					continue
 				}
-				if !clientOutputStarted && !refusalDetector.ShouldReleaseClientOutput() {
-					pendingSSE = append(pendingSSE, sse)
-					continue
-				}
-				if !clientOutputStarted {
-					writeStreamHeaders()
-					for _, pending := range pendingSSE {
-						if _, err := fmt.Fprint(c.Writer, pending); err != nil {
-							markClientDisconnected()
-							logger.L().Info("openai chat_completions stream: client disconnected while flushing pending chunks",
-								zap.String("request_id", requestID),
-							)
-							break
-						}
-					}
-					pendingSSE = pendingSSE[:0]
-					clientOutputStarted = !clientDisconnected
-					if clientDisconnected {
-						break
-					}
-				}
-				if _, err := fmt.Fprint(c.Writer, sse); err != nil {
-					markClientDisconnected()
-					logger.L().Info("openai chat_completions stream: client disconnected, continuing to drain upstream for billing",
-						zap.String("request_id", requestID),
-					)
+				if !writeClientSSE(sse, false) && clientDisconnected {
 					break
 				}
+				wroteEvent = true
 			}
 		}
-		if len(chunks) > 0 && !clientDisconnected && clientOutputStarted {
+		if wroteEvent && !clientDisconnected && clientOutputStarted {
 			c.Writer.Flush()
 		}
 		return isTerminalEvent

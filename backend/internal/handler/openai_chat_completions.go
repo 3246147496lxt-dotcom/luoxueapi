@@ -15,6 +15,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/gin-gonic/gin"
 	"github.com/tidwall/gjson"
+	"github.com/tidwall/sjson"
 	"go.uber.org/zap"
 )
 
@@ -84,6 +85,14 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 		h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "This model is not supported on the Chat Completions endpoint")
 		return
 	}
+	// reasoning_mode is not part of the public Chat Completions contract.
+	// Always remove a client-supplied copy; validated Web Chat mode travels via
+	// trusted Gin context and is injected only inside the Responses conversion.
+	body, err = sjson.DeleteBytes(body, "reasoning_mode")
+	if err != nil {
+		h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", "Failed to parse request body")
+		return
+	}
 
 	reqLog = reqLog.With(zap.String("model", reqModel), zap.Bool("stream", reqStream))
 
@@ -105,6 +114,7 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 	if channelMapping.Mapped {
 		selectedModel = channelMapping.MappedModel
 	}
+	webChatReasoning, hasWebChatReasoning := service.GetWebChatReasoningOptions(c)
 
 	if h.errorPassthroughService != nil {
 		service.BindErrorPassthroughService(c, h.errorPassthroughService)
@@ -144,6 +154,7 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 	var lastFailoverErr *service.UpstreamFailoverError
 	var oauth429FailoverState service.OpenAIOAuth429FailoverState
 	visionRejectedAccounts := 0
+	reasoningRejectedAccounts := 0
 
 	for {
 		if failoverClientGone(c) {
@@ -181,6 +192,14 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 				h.handleStreamingAwareError(c, cls.Status, cls.ErrType, cls.Message, streamStarted)
 				return
 			} else {
+				if hasWebChatReasoning && reasoningRejectedAccounts > 0 && lastFailoverErr == nil {
+					if webChatReasoning.Mode == service.WebChatReasoningModePro {
+						h.handleStreamingAwareError(c, http.StatusBadRequest, "PRO_REASONING_UNAVAILABLE", "Pro reasoning is not available for the selected model or account", streamStarted)
+					} else {
+						h.handleStreamingAwareError(c, http.StatusBadRequest, "CHAT_MODEL_NOT_AVAILABLE", "The selected model cannot provide a reasoning summary", streamStarted)
+					}
+					return
+				}
 				if requiresVision && visionRejectedAccounts > 0 && lastFailoverErr == nil {
 					h.handleStreamingAwareError(c, http.StatusBadRequest, "model_vision_unsupported", "No available account supports image input for the selected model", streamStarted)
 					return
@@ -194,6 +213,14 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 			}
 		}
 		if selection == nil || selection.Account == nil {
+			if hasWebChatReasoning && reasoningRejectedAccounts > 0 {
+				if webChatReasoning.Mode == service.WebChatReasoningModePro {
+					h.handleStreamingAwareError(c, http.StatusBadRequest, "PRO_REASONING_UNAVAILABLE", "Pro reasoning is not available for the selected model or account", streamStarted)
+				} else {
+					h.handleStreamingAwareError(c, http.StatusBadRequest, "CHAT_MODEL_NOT_AVAILABLE", "The selected model cannot provide a reasoning summary", streamStarted)
+				}
+				return
+			}
 			cls := classifyOpenAICompatibleNoAccountErrorFromGin(c, h.gatewayService, apiKey, reqModel, reqModel)
 			if !cls.ModelNotFound {
 				markOpsRoutingCapacityLimited(c)
@@ -202,6 +229,17 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 			return
 		}
 		account := selection.Account
+		if hasWebChatReasoning && !h.gatewayService.AccountSupportsWebChatReasoningForModel(account, selectedModel, webChatReasoning) {
+			failedAccountIDs[account.ID] = struct{}{}
+			reasoningRejectedAccounts++
+			reqLog.Info("openai_chat_completions.account_rejected_reasoning_capability",
+				zap.Int64("account_id", account.ID),
+				zap.String("selected_model", selectedModel),
+				zap.String("reasoning_mode", webChatReasoning.Mode),
+				zap.String("reasoning_effort", webChatReasoning.Effort),
+			)
+			continue
+		}
 		if requiresVision && !h.gatewayService.AccountSupportsVision(account, selectedModel) {
 			failedAccountIDs[account.ID] = struct{}{}
 			visionRejectedAccounts++

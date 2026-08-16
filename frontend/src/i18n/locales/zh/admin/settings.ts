@@ -20,7 +20,7 @@ export default {
         loading: '正在加载语音识别设置',
         loadFailed: '无法加载语音识别设置',
         enabled: '启用网页语音输入',
-        enabledHint: '关闭后聊天输入框隐藏麦克风入口；已保存的模型和资源组配置会保留。',
+        enabledHint: '关闭后聊天输入框仍保留麦克风入口，并在点击时提示服务不可用；已保存的模型和资源组配置会保留。',
         model: '默认转写模型',
         modelPlaceholder: '例如 TeleAI/TeleSpeechASR',
         modelHint: '可从候选列表选择，也可以填写上游支持的精确模型 ID。账号的模型映射必须包含同名入口。',

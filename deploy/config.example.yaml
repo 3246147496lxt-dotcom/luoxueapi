@@ -33,9 +33,12 @@ server:
   # Bounded wait after forced cancellation; dependencies stay open on timeout.
   # 强制取消后等待 handler 退出的时间（秒）。
   shutdown_force_wait_seconds: 10
-  # Trusted proxies for X-Forwarded-For parsing (CIDR/IP). Empty disables trusted proxies.
-  # 信任的代理地址（CIDR/IP 格式），用于解析 X-Forwarded-For 头。留空则禁用代理信任。
-  trusted_proxies: []
+  # Trust only the bundled host-level Caddy loopback hops by default. If your
+  # reverse proxy runs in another container/network, replace or extend this
+  # list with that proxy's exact IP/CIDR; never trust arbitrary internet CIDRs.
+  # 默认只信任宿主机 Caddy 的回环地址。若反向代理位于其他容器/网络，请按实际
+  # 代理地址精确补充 IP/CIDR，切勿信任任意公网网段。设为空列表可完全禁用代理头信任。
+  trusted_proxies: ["127.0.0.1", "::1"]
   # Global max request body size in bytes (default: 256MB)
   # 全局最大请求体大小（字节，默认 256MB）
   # Applies to all requests, especially important for h2c first request memory protection
@@ -124,6 +127,44 @@ transcription:
   upstream_response_max_bytes: 1048576
   probe_timeout_seconds: 3
   ffprobe_path: "ffprobe"
+
+# =============================================================================
+# Private File Library / 私有资料库
+# =============================================================================
+# Local mode stores objects below /app/data in the standard Docker deployment.
+# A zero default quota means unlimited until the operator maps real product
+# entitlements; do not infer package capacities from marketing plan names.
+# local 模式在标准 Docker 部署中写入 /app/data。默认额度为 0 表示不限额，
+# 请按真实产品权益配置全局额度或订阅资源组覆盖值，不要从套餐名称推断容量。
+library:
+  storage_driver: "local" # local | s3
+  storage_dir: "./data/library-files"
+  default_storage_bytes: 0
+  # Active subscriptions use the largest matching group override (not a sum).
+  # 活跃订阅采用命中的最大资源组额度（不叠加）。键为数据库 group_id。
+  subscription_group_storage_bytes: {}
+  max_file_bytes: 20971520
+  batch_download_limit: 100
+  batch_download_max_bytes: 104857600
+  deleted_retention_days: 30
+  # Crash recovery: pending uploads older than this are reclaimed immediately.
+  pending_upload_stale_minutes: 60
+  cleanup_interval_minutes: 60
+  cleanup_batch_size: 100
+  s3:
+    endpoint: ""
+    # Leave empty to inherit image_storage.region; set explicitly when needed.
+    # 留空时复用 image_storage.region；也可按需显式配置（例如 R2 使用 auto）。
+    region: ""
+    # Required in s3 mode. The bucket is never inherited from image_storage,
+    # because that bucket may intentionally be public.
+    bucket: ""
+    access_key_id: ""
+    secret_access_key: ""
+    force_path_style: false
+  # Endpoint/region/credentials may fall back to image_storage; the private
+  # bucket remains independent and no public URL is ever returned.
+  # 端点、区域和凭据可复用 image_storage；私有 bucket 必须单独配置。
 
 # =============================================================================
 # CORS Configuration

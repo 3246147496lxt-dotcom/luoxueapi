@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { mount, type VueWrapper } from '@vue/test-utils'
+import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
 import type { ChatAttachment } from '@/types/chat'
 import type { ChatAttachmentDraft } from '../chatAttachmentUi'
 
@@ -114,6 +114,7 @@ function mountPreviewList(
     global: {
       stubs: {
         Icon: IconStub,
+        Transition: { props: ['name'], template: '<slot />' },
       },
     },
   })
@@ -173,6 +174,102 @@ describe('ChatAttachmentPreviewList', () => {
     expect(item.get('.sr-only').text()).toBe('photo.png: chat.attachments.ready')
   })
 
+  it('only makes locally previewable images dialog triggers', () => {
+    const wrapper = mountPreviewList([
+      makeImageDraft(),
+      makeImageDraft({
+        key: 'image-without-preview',
+        previewUrl: undefined,
+      }),
+      makeDocumentDraft(),
+    ])
+    const triggers = wrapper.findAll('[data-test="chat-attachment-preview-trigger"]')
+
+    expect(triggers).toHaveLength(1)
+    expect(triggers[0]?.element.tagName).toBe('BUTTON')
+    expect(triggers[0]?.attributes()).toMatchObject({
+      type: 'button',
+      'aria-haspopup': 'dialog',
+      'aria-label': 'chat.attachments.viewImage photo.png',
+    })
+    expect(triggers[0]?.get('img').attributes('alt')).toBe('')
+  })
+
+  it('opens the chosen image in an accessible dialog and restores focus on close', async () => {
+    const first = makeImageDraft()
+    const second = makeImageDraft({
+      key: 'image-draft-2',
+      file: makeFile('second.png'),
+      previewUrl: 'blob:second-preview',
+    })
+    const wrapper = mountPreviewList([first, second])
+    const trigger = wrapper.findAll('[data-test="chat-attachment-preview-trigger"]')[1]
+    expect(trigger).toBeDefined()
+
+    await trigger!.trigger('click')
+    await flushPromises()
+
+    const dialog = document.body.querySelector<HTMLElement>(
+      '[data-test="chat-image-preview-dialog"]',
+    )
+    const closeButton = dialog?.querySelector<HTMLButtonElement>(
+      '[data-test="chat-image-preview-close"]',
+    )
+    const image = dialog?.querySelector<HTMLImageElement>(
+      '[data-test="chat-image-preview-image"]',
+    )
+    expect(dialog?.getAttribute('role')).toBe('dialog')
+    expect(dialog?.getAttribute('aria-modal')).toBe('true')
+    expect(dialog?.getAttribute('aria-label')).toBe(
+      'chat.attachments.imagePreview second.png',
+    )
+    expect(image?.getAttribute('src')).toBe('blob:second-preview')
+    expect(image?.getAttribute('alt')).toBe('second.png')
+    expect(document.activeElement).toBe(closeButton)
+    expect(document.body.style.overflow).toBe('hidden')
+
+    document.dispatchEvent(new KeyboardEvent('keydown', {
+      key: 'Escape',
+      bubbles: true,
+      cancelable: true,
+    }))
+    await flushPromises()
+
+    expect(document.body.querySelector('[data-test="chat-image-preview-dialog"]')).toBeNull()
+    expect(document.activeElement).toBe(trigger!.element)
+    expect(document.body.style.overflow).toBe('')
+
+    await trigger!.trigger('click')
+    await flushPromises()
+    document.body.querySelector<HTMLButtonElement>(
+      '[data-test="chat-image-preview-close"]',
+    )?.click()
+    await flushPromises()
+
+    expect(document.body.querySelector('[data-test="chat-image-preview-dialog"]')).toBeNull()
+    expect(document.activeElement).toBe(trigger!.element)
+  })
+
+  it('closes a preview when its attachment is removed from the draft list', async () => {
+    const first = makeImageDraft()
+    const second = makeImageDraft({
+      key: 'image-draft-2',
+      file: makeFile('second.png'),
+      previewUrl: 'blob:second-preview',
+    })
+    const wrapper = mountPreviewList([first, second])
+
+    await wrapper.findAll('[data-test="chat-attachment-preview-trigger"]')[0]!.trigger('click')
+    await flushPromises()
+    expect(document.body.querySelector('[data-test="chat-image-preview-dialog"]')).not.toBeNull()
+
+    await wrapper.setProps({ items: [second] })
+    await flushPromises()
+
+    expect(document.body.querySelector('[data-test="chat-image-preview-dialog"]')).toBeNull()
+    expect(document.body.style.overflow).toBe('')
+  })
+
   it('labels the remove control, exposes its tooltip, and emits the attachment key', async () => {
     const wrapper = mountPreviewList([makeImageDraft()])
     const remove = wrapper.get('[data-test="chat-attachment-remove"]')
@@ -206,7 +303,7 @@ describe('ChatAttachmentPreviewList', () => {
     const [uploading, processing] = wrapper.findAll('[data-test="chat-attachment-item"]')
 
     expect(uploading?.attributes('data-state')).toBe('uploading')
-    expect(uploading?.get('.chat-attachment-preview__progress-copy').text()).toBe('42%')
+    expect(uploading?.find('.chat-attachment-preview__spinner').exists()).toBe(true)
     expect(uploading?.get('progress').attributes()).toMatchObject({
       max: '100',
       value: '42',
@@ -216,10 +313,25 @@ describe('ChatAttachmentPreviewList', () => {
       .toBe('photo.png: chat.attachments.uploading 42')
 
     expect(processing?.attributes('data-state')).toBe('processing')
-    expect(processing?.find('.chat-attachment-preview__progress-copy').exists()).toBe(false)
+    expect(processing?.find('.chat-attachment-preview__spinner').exists()).toBe(true)
     expect(processing?.find('progress').exists()).toBe(false)
     expect(processing?.get('.sr-only').text())
       .toBe('photo.png: chat.attachments.processing')
+  })
+
+  it('matches the official attachment loading and remove-control geometry', () => {
+    expect(SCOPED_STYLE).toMatch(
+      /\.chat-attachment-preview__scrim\s*\{[^}]*background: rgb\(255 255 255 \/ 80%\);/,
+    )
+    expect(SCOPED_STYLE).toMatch(
+      /\.chat-attachment-preview__spinner\s*\{[^}]*width: 24px;[^}]*height: 24px;[^}]*border: 2px solid #b4b4b4;[^}]*border-block-start-color: transparent;[^}]*animation: chat-attachment-spin 1s linear infinite;/,
+    )
+    expect(SCOPED_STYLE).toMatch(
+      /\.chat-attachment-preview__remove\s*\{[^}]*inset-block-start: 0;[^}]*inset-inline-end: 0;[^}]*width: 32px;[^}]*height: 32px;[^}]*color: #212121;[^}]*opacity: 1;/,
+    )
+    expect(SCOPED_STYLE).toMatch(
+      /\.chat-attachment-preview__remove::before\s*\{[^}]*inset-block-start: -3px;[^}]*inset-inline-end: -3px;[^}]*width: 18px;[^}]*height: 18px;[^}]*border: 0;[^}]*background: #fff;/,
+    )
   })
 
   it('keeps a failed image in the rail and emits retry from its accessible action', async () => {

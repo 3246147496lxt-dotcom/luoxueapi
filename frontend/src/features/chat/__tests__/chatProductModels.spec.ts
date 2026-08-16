@@ -16,10 +16,10 @@ describe('Web Chat product model configuration', () => {
     expect(CHAT_PRODUCT_MODELS.filter(({ recommended }) => recommended)).toHaveLength(1)
   })
 
-  it('declares the product capabilities used by the existing composer controls', () => {
+  it('declares stable product capabilities while leaving reasoning to runtime capability data', () => {
     expect(CHAT_PRODUCT_MODELS.every(({ supports_vision }) => supports_vision)).toBe(true)
     expect(CHAT_PRODUCT_MODELS.every(({ supports_reasoning_slider }) => (
-      supports_reasoning_slider
+      supports_reasoning_slider === undefined
     ))).toBe(true)
   })
 })

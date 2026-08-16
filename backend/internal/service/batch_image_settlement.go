@@ -334,6 +334,7 @@ func BuildBatchImageSettlementManifestHash(job *BatchImageJob) string {
 type BatchImagePipelineProcessor struct {
 	ProviderProcessor *BatchImageProviderProcessor
 	SettlementService *BatchImageSettlementService
+	LibraryIngestor   *BatchImageLibraryIngestor
 	RetryDelay        time.Duration
 }
 
@@ -344,6 +345,9 @@ func (p *BatchImagePipelineProcessor) Process(ctx context.Context, batchID strin
 	job, err := p.ProviderProcessor.Repo.GetBatchImageJobByBatchID(ctx, batchID)
 	if err != nil {
 		return BatchImageProcessResult{}, err
+	}
+	if job.Status == BatchImageJobStatusCompleted {
+		return p.processLibraryIngest(ctx, job), nil
 	}
 	if job.Status == BatchImageJobStatusSettling {
 		if p.SettlementService == nil {
@@ -364,9 +368,31 @@ func (p *BatchImagePipelineProcessor) Process(ctx context.Context, batchID strin
 			}
 			return BatchImageProcessResult{}, err
 		}
-		return BatchImageProcessResult{Terminal: true}, nil
+		completed, getErr := p.ProviderProcessor.Repo.GetBatchImageJobByBatchID(ctx, batchID)
+		if getErr != nil {
+			// Settlement is already committed, but ACK would make the generated
+			// result unreachable by the durable library ingestor. Requeueing is safe:
+			// settlement is idempotent and the next pass observes status=completed.
+			delay := p.RetryDelay
+			if delay <= 0 {
+				delay = batchImageSettlementRetryDelay
+			}
+			return BatchImageProcessResult{RequeueAfter: delay}, nil
+		}
+		return p.processLibraryIngest(ctx, completed), nil
 	}
 	return p.ProviderProcessor.Process(ctx, batchID)
+}
+
+func (p *BatchImagePipelineProcessor) processLibraryIngest(ctx context.Context, job *BatchImageJob) BatchImageProcessResult {
+	if p == nil || p.LibraryIngestor == nil {
+		return BatchImageProcessResult{Terminal: true}
+	}
+	result := p.LibraryIngestor.Ingest(ctx, job)
+	if result.Done {
+		return BatchImageProcessResult{Terminal: true}
+	}
+	return BatchImageProcessResult{RequeueAfter: result.RetryAfter}
 }
 
 func (r *BatchImageSettlementResult) String() string {

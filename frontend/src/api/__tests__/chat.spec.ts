@@ -37,6 +37,7 @@ vi.mock('@/api/client', () => ({
 
 import {
   ChatAPIError,
+  buildChatReasoningPayload,
   createChatConversation,
   deleteChatAttachment,
   deleteChatConversation,
@@ -53,6 +54,7 @@ import {
   patchChatConversation,
   pollChatReceipt,
   searchChatConversations,
+  stopChatAttempt,
   streamChatCompletion,
   transcribeChatAudio,
   uploadChatAttachment,
@@ -71,6 +73,20 @@ const refreshedSession = {
   expiresAt: null,
   user: { id: 7 },
 }
+
+describe('buildChatReasoningPayload', () => {
+  it('keeps standard effort and Pro mode mutually exclusive', () => {
+    expect(buildChatReasoningPayload({
+      reasoningMode: 'standard',
+      reasoningEffort: 'xhigh',
+    })).toEqual({ mode: 'standard', effort: 'xhigh', summary: 'auto' })
+
+    expect(buildChatReasoningPayload({
+      reasoningMode: 'pro',
+      reasoningEffort: 'xhigh',
+    })).toEqual({ mode: 'pro', summary: 'auto' })
+  })
+})
 
 function sessionIdentity(
   session: {
@@ -197,6 +213,166 @@ describe('parseChatCompletionSSE', () => {
 
     expect(content).toEqual(['tail'])
     expect(result.receivedDone).toBe(false)
+  })
+
+  it('parses mixed Chat Completions chunks and private Responses activity envelopes', async () => {
+    const envelope = (eventType: string, payload: unknown) => (
+      `data: ${JSON.stringify({ source: 'openai_responses', eventType, payload })}\n\n`
+    )
+    const source = [
+      'data: {"choices":[{"index":0,"delta":{"content":"answer ","reasoning_content":"legacy-private"},"finish_reason":null}]}\n\n',
+      envelope('response.created', {
+        sequence_number: 0,
+        response: { id: 'resp-mixed' },
+      }),
+      envelope('response.output_item.added', {
+        sequence_number: 1,
+        output_index: 0,
+        item: { id: 'reasoning-mixed', type: 'reasoning' },
+      }),
+      envelope('response.reasoning_summary_part.added', {
+        sequence_number: 2,
+        item_id: 'reasoning-mixed',
+        output_index: 0,
+        summary_index: 0,
+        part: { type: 'summary_text' },
+      }),
+      envelope('response.reasoning_summary_text.delta', {
+        sequence_number: 3,
+        item_id: 'reasoning-mixed',
+        output_index: 0,
+        summary_index: 0,
+        delta: 'Checking ',
+      }),
+      envelope('response.output_text.delta', {
+        sequence_number: 4,
+        delta: 'must not enter activity',
+      }),
+      envelope('response.reasoning_text.delta', {
+        sequence_number: 5,
+        delta: 'private chain of thought',
+      }),
+      envelope('response.reasoning_summary_text.done', {
+        sequence_number: 6,
+        item_id: 'reasoning-mixed',
+        output_index: 0,
+        summary_index: 0,
+        text: 'Checking safely.',
+      }),
+      envelope('response.completed', {
+        sequence_number: 7,
+        response: { id: 'resp-mixed' },
+      }),
+      'data: {"choices":[{"index":0,"delta":{"content":"done"},"finish_reason":"stop"}]}\n\n',
+      'data: [DONE]\n\n',
+    ].join('')
+    const content: string[] = []
+    const legacyReasoning: string[] = []
+    const events: string[] = []
+    const activities: Array<{ status: string; text: string; mode?: string; effort?: string }> = []
+
+    await parseChatCompletionSSE(streamFromBytes(encoder.encode(source)), {
+      onContent: (delta) => content.push(delta),
+      onReasoningContent: (delta) => legacyReasoning.push(delta),
+      onActivityEvent: ({ eventType }) => events.push(eventType),
+      onActivity: (activity) => activities.push({
+        status: activity.status,
+        text: activity.items[0]?.parts[0]?.text ?? '',
+        mode: activity.reasoningMode,
+        effort: activity.reasoningEffort,
+      }),
+    }, { reasoningMode: 'pro', reasoningEffort: 'medium' })
+
+    expect(content).toEqual(['answer ', 'done'])
+    expect(legacyReasoning).toEqual(['legacy-private'])
+    expect(events).toEqual([
+      'response.created',
+      'response.output_item.added',
+      'response.reasoning_summary_part.added',
+      'response.reasoning_summary_text.delta',
+      'response.reasoning_summary_text.done',
+      'response.completed',
+    ])
+    expect(activities.at(-1)).toEqual({
+      status: 'completed',
+      text: 'Checking safely.',
+      mode: 'pro',
+      effort: undefined,
+    })
+    expect(JSON.stringify(activities)).not.toContain('legacy-private')
+    expect(JSON.stringify(activities)).not.toContain('must not enter activity')
+    expect(JSON.stringify(activities)).not.toContain('private chain of thought')
+  })
+
+  it('flushes batched summary deltas as disconnected when the stream ends without DONE', async () => {
+    const envelope = (eventType: string, payload: unknown) => (
+      `data: ${JSON.stringify({ source: 'openai_responses', eventType, payload })}\n\n`
+    )
+    const source = [
+      envelope('response.created', {
+        sequence_number: 0,
+        response: { id: 'resp-disconnected' },
+      }),
+      envelope('response.output_item.added', {
+        sequence_number: 1,
+        output_index: 0,
+        item: { id: 'reasoning-disconnected', type: 'reasoning' },
+      }),
+      envelope('response.reasoning_summary_part.added', {
+        sequence_number: 2,
+        item_id: 'reasoning-disconnected',
+        output_index: 0,
+        summary_index: 0,
+        part: { type: 'summary_text' },
+      }),
+      envelope('response.reasoning_summary_text.delta', {
+        sequence_number: 3,
+        item_id: 'reasoning-disconnected',
+        output_index: 0,
+        summary_index: 0,
+        delta: 'batched ',
+      }),
+      envelope('response.reasoning_summary_text.delta', {
+        sequence_number: 4,
+        item_id: 'reasoning-disconnected',
+        output_index: 0,
+        summary_index: 0,
+        delta: 'text',
+      }),
+    ].join('')
+    const activities: Array<{ status: string; text: string }> = []
+
+    const result = await parseChatCompletionSSE(
+      streamFromBytes(encoder.encode(source)),
+      {
+        onActivity: (activity) => activities.push({
+          status: activity.status,
+          text: activity.items[0]?.parts[0]?.text ?? '',
+        }),
+      },
+    )
+
+    expect(result.receivedDone).toBe(false)
+    expect(activities.at(-1)).toEqual({
+      status: 'disconnected',
+      text: 'batched text',
+    })
+    expect(activities.filter(({ text }) => text !== '')).toHaveLength(1)
+  })
+
+  it('safely ignores malformed or unknown private Responses envelopes', async () => {
+    const source = [
+      'data: {"source":"openai_responses","eventType":"response.reasoning_summary_text.delta","payload":"malformed"}\n\n',
+      'data: {"source":"openai_responses","eventType":"response.unknown","payload":{"text":"ignored"}}\n\n',
+      'data: [DONE]\n\n',
+    ].join('')
+    const onActivity = vi.fn()
+
+    await expect(parseChatCompletionSSE(
+      streamFromBytes(encoder.encode(source)),
+      { onActivity },
+    )).resolves.toMatchObject({ receivedDone: true })
+    expect(onActivity).not.toHaveBeenCalled()
   })
 
   it('turns an SSE error event into a structured ChatAPIError', async () => {
@@ -370,9 +546,21 @@ describe('chatAPI', () => {
     mocks.apiGet.mockResolvedValue({
       data: {
         models: [
-          { id: 'sol', supports_reasoning_slider: true },
+          {
+            id: 'sol',
+            supports_reasoning_slider: true,
+            supports_responses: true,
+            supports_reasoning_summary: true,
+            supports_reasoning_pro_mode: true,
+            supported_reasoning_efforts: ['low', 'medium', 'invalid', 'xhigh'],
+          },
           { id: 'legacy', supportsReasoningSlider: false },
-          { id: 'spoofed', supports_reasoning_slider: 'true' },
+          {
+            id: 'spoofed',
+            supports_reasoning_slider: 'true',
+            supports_responses: 'true',
+            supported_reasoning_efforts: 'medium',
+          },
         ],
         balance: 2,
       },
@@ -380,7 +568,14 @@ describe('chatAPI', () => {
 
     await expect(getChatModels()).resolves.toEqual({
       models: [
-        { id: 'sol', supports_reasoning_slider: true },
+        {
+          id: 'sol',
+          supports_reasoning_slider: true,
+          supports_responses: true,
+          supports_reasoning_summary: true,
+          supports_reasoning_pro_mode: true,
+          supported_reasoning_efforts: ['low', 'medium', 'xhigh'],
+        },
         { id: 'legacy', supports_reasoning_slider: false },
         { id: 'spoofed' },
       ],
@@ -747,6 +942,58 @@ describe('chatAPI', () => {
     )
   })
 
+  it('normalizes snake_case reasoning activities from server history messages', async () => {
+    mocks.apiGet.mockResolvedValueOnce({
+      data: {
+        items: [{
+          id: 'assistant-activity',
+          role: 'assistant',
+          content: 'Final answer',
+          status: 'completed',
+          position: 1,
+          created_at: '2026-08-09T08:00:00Z',
+          activities: [{
+            response_id: 'resp-history',
+            source: 'openai_responses',
+            activity_type: 'reasoning_summary',
+            item_id: 'reasoning-history',
+            output_index: 0,
+            summary_index: 0,
+            sort_order: 1,
+            status: 'completed',
+            text: 'Checked the persisted evidence.',
+            sequence_start: 1,
+            sequence_end: 7,
+            reasoning_mode: 'pro',
+            reasoning_effort: 'high',
+            started_at: '2026-08-09T08:00:01Z',
+            completed_at: '2026-08-09T08:00:02Z',
+            metadata: { last_event: 'response.completed' },
+            reasoning_content: 'must not survive',
+          }],
+        }],
+        next_before_position: null,
+        has_more: false,
+      },
+    })
+
+    const page = await getChatConversationMessages('conversation-activity')
+    const activity = page.items[0]?.activities?.[0]
+    expect(activity).toMatchObject({
+      key: 'resp-history',
+      responseId: 'resp-history',
+      status: 'completed',
+      reasoningMode: 'pro',
+      items: [{
+        itemId: 'reasoning-history',
+        outputIndex: 0,
+        parts: [{ text: 'Checked the persisted evidence.' }],
+      }],
+    })
+    expect(activity?.reasoningEffort).toBeUndefined()
+    expect(JSON.stringify(page.items[0]?.activities)).not.toContain('must not survive')
+  })
+
   it('sends optimistic revisions for patch and delete', async () => {
     mocks.apiPatch.mockResolvedValue({
       data: {
@@ -824,6 +1071,80 @@ describe('chatAPI', () => {
     })
   })
 
+  it('records an explicit stop against the authenticated attempt endpoint', async () => {
+    mocks.apiPost.mockResolvedValueOnce({
+      data: {
+        attempt_id: 'attempt-12345678',
+        accepted: true,
+        attempt_status: 'interrupted',
+        delivery_status: 'stopped',
+        stopped_at: '2026-08-14T08:00:00Z',
+      },
+    })
+
+    await expect(stopChatAttempt(' attempt-12345678 ')).resolves.toMatchObject({
+      attemptId: 'attempt-12345678',
+      accepted: true,
+      attemptStatus: 'interrupted',
+      deliveryStatus: 'stopped',
+      stoppedAt: Date.parse('2026-08-14T08:00:00Z'),
+    })
+
+    expect(mocks.apiPost).toHaveBeenCalledWith(
+      '/chat/attempts/attempt-12345678/stop',
+    )
+  })
+
+  it('rejects an empty stop attempt ID without sending a request', async () => {
+    await expect(stopChatAttempt('   ')).rejects.toMatchObject({
+      code: 'INVALID_CHAT_ATTEMPT_ID',
+    })
+    expect(mocks.apiPost).not.toHaveBeenCalled()
+  })
+
+  it('retries a transient stop failure against the idempotent endpoint', async () => {
+    mocks.apiPost
+      .mockRejectedValueOnce({ status: 503, message: 'temporarily unavailable' })
+      .mockResolvedValueOnce({
+        data: {
+          attempt_id: 'attempt-12345678',
+          accepted: true,
+          attempt_status: 'interrupted',
+          delivery_status: 'stopped',
+        },
+      })
+
+    await expect(stopChatAttempt('attempt-12345678', { delays: [0] }))
+      .resolves.toMatchObject({ accepted: true, deliveryStatus: 'stopped' })
+    expect(mocks.apiPost).toHaveBeenCalledTimes(2)
+  })
+
+  it('returns a completed-before-stop race for caller reconciliation', async () => {
+    mocks.apiPost.mockResolvedValueOnce({
+      data: {
+        attempt_id: 'attempt-12345678',
+        accepted: false,
+        attempt_status: 'completed',
+        delivery_status: 'completed',
+      },
+    })
+
+    await expect(stopChatAttempt('attempt-12345678')).resolves.toEqual({
+      attemptId: 'attempt-12345678',
+      accepted: false,
+      attemptStatus: 'completed',
+      deliveryStatus: 'completed',
+    })
+  })
+
+  it('does not retry a terminal stop request error', async () => {
+    mocks.apiPost.mockRejectedValueOnce({ status: 404, message: 'not found' })
+
+    await expect(stopChatAttempt('attempt-12345678', { delays: [0, 0] }))
+      .rejects.toMatchObject({ status: 404 })
+    expect(mocks.apiPost).toHaveBeenCalledTimes(1)
+  })
+
   it('posts a streaming request with the JWT and emits content', async () => {
     const fetchMock = vi.fn().mockResolvedValue(successfulStreamResponse(
       [
@@ -839,6 +1160,7 @@ describe('chatAPI', () => {
     const result = await streamChatCompletion(
       {
         ...historyCompletionRequest(' gpt-5 '),
+        reasoningMode: 'pro',
         reasoningEffort: 'xhigh',
       },
       {
@@ -861,7 +1183,10 @@ describe('chatAPI', () => {
     expect(JSON.parse(String(init.body))).toMatchObject({
       conversation_id: 'conversation-1',
       model: 'gpt-5',
-      reasoning_effort: 'xhigh',
+      reasoning: {
+        mode: 'pro',
+        summary: 'auto',
+      },
       expected_head_message_id: 'assistant-previous',
       user_message: { id: 'user-1', content: 'Hi' },
       assistant_message_id: 'assistant-1',
@@ -871,9 +1196,63 @@ describe('chatAPI', () => {
       'conversation_id',
       'expected_head_message_id',
       'model',
-      'reasoning_effort',
+      'reasoning',
       'user_message',
     ])
+    expect(JSON.parse(String(init.body)).reasoning).not.toHaveProperty('effort')
+  })
+
+  it('seeds Activity snapshots from the completion request without rewriting envelopes', async () => {
+    const payload = {
+      sequence_number: 1,
+      output_index: 0,
+      item: { id: 'reasoning-request', type: 'reasoning' },
+    }
+    const source = [
+      `data: ${JSON.stringify({
+        source: 'openai_responses',
+        eventType: 'response.created',
+        payload: { sequence_number: 0, response: { id: 'resp-request' } },
+      })}\n\n`,
+      `data: ${JSON.stringify({
+        source: 'openai_responses',
+        eventType: 'response.output_item.added',
+        payload,
+      })}\n\n`,
+      `data: ${JSON.stringify({
+        source: 'openai_responses',
+        eventType: 'response.reasoning_summary_text.delta',
+        payload: {
+          sequence_number: 2,
+          item_id: 'reasoning-request',
+          output_index: 0,
+          summary_index: 0,
+          delta: 'Request metadata is preserved.',
+        },
+      })}\n\n`,
+      'data: [DONE]\n\n',
+    ].join('')
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(successfulStreamResponse(source)))
+    const onActivity = vi.fn()
+    const onActivityEvent = vi.fn()
+
+    await streamChatCompletion({
+      ...historyCompletionRequest(),
+      reasoningMode: 'pro',
+      reasoningEffort: 'high',
+    }, { onActivity, onActivityEvent })
+
+    const lastActivity = onActivity.mock.calls.at(-1)?.[0]
+    expect(lastActivity).toEqual(expect.objectContaining({
+      responseId: 'resp-request',
+      reasoningMode: 'pro',
+    }))
+    expect(lastActivity?.reasoningEffort).toBeUndefined()
+    expect(onActivityEvent).toHaveBeenCalledWith({
+      source: 'openai_responses',
+      eventType: 'response.output_item.added',
+      payload,
+    })
   })
 
   it('refreshes an expired JWT once before opening the stream', async () => {
@@ -1343,6 +1722,16 @@ describe('chatAPI', () => {
       pageCount: 3,
     })
 
+		expect(normalizeChatAttachment({
+			id: 'library-file-1',
+			name: 'notes.txt',
+			kind: 'document',
+			mime_type: 'text/plain',
+			size: 12,
+			status: 'ready',
+			expires_at: '2126-01-01T00:00:00Z',
+		})).toMatchObject({ id: 'library-file-1', expiresAt: '2126-01-01T00:00:00Z' })
+
     const fetchMock = vi.fn().mockResolvedValue(successfulStreamResponse('data: [DONE]\n\n'))
     vi.stubGlobal('fetch', fetchMock)
     const onAccepted = vi.fn()
@@ -1367,6 +1756,34 @@ describe('chatAPI', () => {
       },
     })
     expect(onAccepted).toHaveBeenCalledTimes(1)
+  })
+
+  it('serializes library references separately from uploaded attachment ids', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(successfulStreamResponse('data: [DONE]\n\n'))
+    vi.stubGlobal('fetch', fetchMock)
+
+    await streamChatCompletion({
+      conversationId: 'conversation-library',
+      model: 'gpt-5',
+      expectedHeadMessageId: null,
+      userMessage: {
+        id: 'user-library',
+        content: 'Summarize this library file',
+        attachments: [{ source: 'library', fileId: 'library-file-1' }],
+      },
+      assistantMessageId: 'assistant-library',
+    })
+
+    const request = fetchMock.mock.calls[0]?.[1] as RequestInit
+    const body = JSON.parse(String(request.body)) as {
+      user_message: Record<string, unknown>
+    }
+    expect(body.user_message).toEqual({
+      id: 'user-library',
+      content: 'Summarize this library file',
+      attachments: [{ source: 'library', file_id: 'library-file-1' }],
+    })
+    expect(body.user_message).not.toHaveProperty('attachment_ids')
   })
 
   it('treats a non-2xx completion with an explicit chat receipt as accepted before surfacing the error', async () => {

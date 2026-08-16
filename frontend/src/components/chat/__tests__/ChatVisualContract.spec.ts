@@ -25,6 +25,11 @@ const workspaceTokens = readFileSync(resolve(directory, '../../../styles/luoxue-
 const messageStyles = scopedStyles(readFileSync(resolve(directory, '../ChatMessageItem.vue'), 'utf8'))
 const attachmentSource = readFileSync(resolve(directory, '../ChatAttachmentPicker.vue'), 'utf8')
 const attachmentStyles = scopedStyles(attachmentSource)
+const messageAttachmentSource = readFileSync(
+  resolve(directory, '../ChatMessageAttachments.vue'),
+  'utf8',
+)
+const messageAttachmentStyles = scopedStyles(messageAttachmentSource)
 const viewSource = readFileSync(resolve(directory, '../../../views/user/ChatView.vue'), 'utf8')
 const viewStyles = scopedStyles(viewSource)
 
@@ -53,7 +58,7 @@ describe('Chat shell visual contract', () => {
     const historyList = cssRule(historyStyles, '.chat-history__list')
     const activeNewChat = cssRule(
       historyStyles,
-      '.chat-history__new--active,\n.chat-history__new--active:hover',
+      '.chat-history__new--active,\n.chat-history__new--active:hover,\n.chat-history__primary-action--active,\n.chat-history__primary-action--active:hover',
     )
     const primaryAction = cssRule(
       historyStyles,
@@ -203,10 +208,18 @@ describe('Chat shell visual contract', () => {
       /v-show="!sidebarCollapsed"[\s\S]*?class="chat-history__list"/,
     )
     expect(historySource).toContain('aria-disabled="true"')
-    expect(historySource).not.toContain('to="/library"')
+    expect(historySource).toContain('to="/library"')
+    expect(historySource).toMatch(
+      /id: 'library',[\s\S]*?path: '\/library',[\s\S]*?available: true/,
+    )
     expect(historySource).not.toContain('to="/projects"')
     expect(historySource).not.toContain('to="/scheduled"')
     expect(historySource).not.toContain('to="/plugins"')
+    for (const unavailableSection of ['projects', 'scheduled', 'plugins']) {
+      expect(historySource).toMatch(new RegExp(
+        `id: '${unavailableSection}',[\\s\\S]*?path: '',[\\s\\S]*?available: false`,
+      ))
+    }
     const navigationCopyIndexes = [
       'chat.actions.newChat',
       'chat.navigation.fileLibrary',
@@ -350,6 +363,8 @@ describe('Chat shell visual contract', () => {
     const message = cssRule(messageStyles, '.chat-message')
     const assistant = cssRule(messageStyles, '.chat-message--assistant')
     const userBody = cssRule(messageStyles, '.chat-message--user .chat-message__body')
+    const userGroup = cssRule(messageStyles, '.user-message-group')
+    const userActions = cssRule(messageStyles, '.user-message-group > .chat-message__actions')
     const userBubble = cssRule(messageStyles, '.chat-message--user .chat-message__plain')
     const markdown = cssRule(messageStyles, '.chat-message__markdown')
     const heading = cssRule(messageStyles, '.chat-message__markdown :deep(h2)')
@@ -378,8 +393,16 @@ describe('Chat shell visual contract', () => {
     expect(assistant).toContain('box-shadow: none')
     expect(assistant).not.toContain('accent')
     expect(userBody).toContain('align-items: flex-end')
+    expect(userGroup).toContain('display: flex')
+    expect(userGroup).toContain('width: 100%')
+    expect(userGroup).toContain('flex-direction: column')
+    expect(userGroup).toContain('align-items: flex-end')
+    expect(userGroup).toContain('margin-left: auto')
+    expect(userActions).toContain('align-self: flex-end')
+    expect(userActions).toContain('margin-left: auto')
     expect(userBubble).toContain('width: fit-content')
     expect(userBubble).toContain('max-width: min(70%, 640px)')
+    expect(userBubble).toContain('margin-left: auto')
     expect(userBubble).toContain('border-radius: 22px')
     expect(userBubble).toContain('padding: 10px 16px')
     expect(userBubble).toContain('var(--chat-message-user-surface)')
@@ -434,6 +457,61 @@ describe('Chat shell visual contract', () => {
     )
     expect(messageStyles).toMatch(
       /@media \(prefers-reduced-motion: reduce\)[\s\S]*?\.chat-message__streaming-dot\s*\{[^}]*opacity: 1;[^}]*transform: none;/,
+    )
+  })
+
+  it('renders sent images as intrinsic, right-aligned previews while retaining document cards', () => {
+    const attachmentGroup = cssRule(messageAttachmentStyles, '.chat-message-attachments')
+    const attachmentSpacing = cssRule(
+      messageAttachmentStyles,
+      '.chat-message-attachments--with-content',
+    )
+    const imageLists = cssRule(
+      messageAttachmentStyles,
+      '.chat-message-attachments__images,\n.chat-message-attachments__documents',
+    )
+    const imageList = cssRule(messageAttachmentStyles, '.chat-message-attachments__images')
+    const imageItem = cssRule(messageAttachmentStyles, '.chat-message-attachments__image-item')
+    const imageTrigger = cssRule(messageAttachmentStyles, '.chat-message-attachments__image-trigger')
+    const image = cssRule(
+      messageAttachmentStyles,
+      '.chat-message-attachments__image-trigger img',
+    )
+    const documentCard = cssRule(messageAttachmentStyles, '.chat-message-attachments__item')
+
+    expect(attachmentGroup).toContain('width: fit-content')
+    expect(attachmentGroup).toContain('max-width: 100%')
+    expect(attachmentGroup).toContain('align-items: flex-end')
+    expect(attachmentGroup).toContain('margin: 0 0 0 auto')
+    expect(attachmentSpacing).toContain('margin-bottom: 10px')
+    expect(imageLists).toContain('flex-wrap: wrap')
+    expect(imageLists).toContain('justify-content: flex-end')
+    expect(imageList).toContain('width: fit-content')
+    expect(imageList).toContain('max-width: min(760px, 72vw)')
+    expect(imageItem).toContain('width: fit-content')
+    expect(imageItem).toContain('margin-left: auto')
+    expect(imageTrigger).toContain('width: fit-content')
+    expect(imageTrigger).toContain('max-width: 100%')
+    expect(imageTrigger).toContain('border: 0')
+    expect(imageTrigger).toContain('border-radius: 28px')
+    expect(imageTrigger).toContain('background: transparent')
+    expect(imageTrigger).toContain('box-shadow: none')
+    expect(image).toContain('display: block')
+    expect(image).toContain('width: auto')
+    expect(image).toContain('height: auto')
+    expect(image).toContain('max-width: 100%')
+    expect(image).toContain('max-height: 560px')
+    expect(image).toContain('object-fit: contain')
+    expect(image).not.toContain('aspect-ratio')
+    expect(image).not.toContain('object-fit: cover')
+    expect(documentCard).toContain('border: 1px solid var(--workspace-border)')
+    expect(documentCard).toContain('background: var(--workspace-surface)')
+    expect(messageAttachmentSource).not.toContain('chat-message-attachments__image-name')
+    expect(messageAttachmentStyles).toMatch(
+      /@media \(max-width: 640px\)[\s\S]*?\.chat-message-attachments__images--multiple\s*\{[^}]*width: 100%;/,
+    )
+    expect(messageAttachmentStyles).toMatch(
+      /@media \(max-width: 640px\)[\s\S]*?\.chat-message-attachments__item\s*\{[^}]*width: 100%;[^}]*max-width: 100%;/,
     )
   })
 

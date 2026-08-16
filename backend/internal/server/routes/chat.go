@@ -38,6 +38,7 @@ func RegisterChatRoutes(
 	chat.GET("/attachments/:id/content", h.Chat.AttachmentContent)
 	chat.GET("/receipts/:receipt_id", h.Chat.Receipt)
 	chat.GET("/attempts/:attempt_id", h.Chat.Attempt)
+	chat.POST("/attempts/:attempt_id/stop", h.Chat.StopAttempt)
 	chat.GET("/sync", h.Chat.SyncConversations)
 	chat.POST("/conversations/search", h.Chat.SearchConversations)
 	chat.POST("/conversations", h.Chat.CreateConversation)

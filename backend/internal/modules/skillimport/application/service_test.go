@@ -21,6 +21,10 @@ type applicationRepositoryStub struct {
 	keyHash         string
 	getRun          *domain.SkillImportRun
 	listRuns        []domain.SkillImportRun
+	eligibleIDs     []int64
+	listEligible    bool
+	publishCalled   bool
+	publishResult   *domain.SkillImportPublishResult
 }
 
 func (r *applicationRepositoryStub) GetRun(context.Context, int64) (*domain.SkillImportRun, error) {
@@ -49,6 +53,16 @@ func (r *applicationRepositoryStub) GetSchedule(context.Context, int64) (*domain
 func (r *applicationRepositoryStub) UpdateSchedule(_ context.Context, schedule *domain.SkillImportSchedule) error {
 	r.updatedSchedule = schedule
 	return nil
+}
+
+func (r *applicationRepositoryStub) ListEligibleItemIDs(context.Context, int64) ([]int64, error) {
+	r.listEligible = true
+	return append([]int64(nil), r.eligibleIDs...), nil
+}
+
+func (r *applicationRepositoryStub) PublishEligibleItems(context.Context, int64, []int64, string, *int64) (*domain.SkillImportPublishResult, error) {
+	r.publishCalled = true
+	return r.publishResult, nil
 }
 
 type applicationAdapterStub struct{}
@@ -101,6 +115,55 @@ func TestCreateRunRejectsModeThatBypassesReviewPolicy(t *testing.T) {
 	}, nil, "")
 	require.ErrorContains(t, err, "must match publish_policy")
 	require.Nil(t, repo.createdRun)
+}
+
+func TestPublishRunRejectsPreparedItemsFrozenUnderUnavailableRules(t *testing.T) {
+	tests := map[string]func(*FrozenRunConfig){
+		"old normalizer": func(frozen *FrozenRunConfig) { frozen.NormalizerVersion = "0.9.0" },
+		"old validator":  func(frozen *FrozenRunConfig) { frozen.ValidatorVersion = "skill-archive-v0" },
+		"old adapter":    func(frozen *FrozenRunConfig) { frozen.AdapterVersion = "2.4.0" },
+	}
+	for name, mutate := range tests {
+		t.Run(name, func(t *testing.T) {
+			frozen := FrozenRunConfig{
+				AdapterType: "fixture", AdapterVersion: applicationAdapterStub{}.Version(),
+				NormalizerVersion: core.CoreVersion, ValidatorVersion: validatorRulesetVersion,
+			}
+			mutate(&frozen)
+			requestConfig, err := json.Marshal(frozen)
+			require.NoError(t, err)
+			repo := &applicationRepositoryStub{getRun: &domain.SkillImportRun{
+				ID: 41, Status: domain.SkillImportRunStatusAwaitingReview, RequestConfig: requestConfig,
+			}}
+			service := NewService(repo, NewAdapterRegistry(applicationAdapterStub{}), enabledTestConfig())
+
+			_, err = service.PublishRun(context.Background(), 41, []int64{51}, nil)
+			require.ErrorIs(t, err, domain.ErrSkillImportPublishInvalid)
+			require.ErrorContains(t, err, "frozen importer rules")
+			require.False(t, repo.listEligible)
+			require.False(t, repo.publishCalled)
+		})
+	}
+}
+
+func TestPublishRunAllowsPreparedItemsFrozenUnderCurrentRules(t *testing.T) {
+	frozen := FrozenRunConfig{
+		AdapterType: "fixture", AdapterVersion: applicationAdapterStub{}.Version(),
+		NormalizerVersion: core.CoreVersion, ValidatorVersion: validatorRulesetVersion,
+	}
+	requestConfig, err := json.Marshal(frozen)
+	require.NoError(t, err)
+	want := &domain.SkillImportPublishResult{RunID: 41, Status: domain.SkillImportRunStatusSucceeded}
+	repo := &applicationRepositoryStub{
+		getRun:        &domain.SkillImportRun{ID: 41, Status: domain.SkillImportRunStatusAwaitingReview, RequestConfig: requestConfig},
+		publishResult: want,
+	}
+	service := NewService(repo, NewAdapterRegistry(applicationAdapterStub{}), enabledTestConfig())
+
+	got, err := service.PublishRun(context.Background(), 41, []int64{51}, nil)
+	require.NoError(t, err)
+	require.Same(t, want, got)
+	require.True(t, repo.publishCalled)
 }
 
 func TestRunResponsesRedactInlineManifestWithoutMutatingWorkerConfig(t *testing.T) {

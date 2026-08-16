@@ -83,10 +83,10 @@ Account and support destinations are declared in
 `frontend/src/navigation/shellDestinations.ts`. Use that registry when adding or
 removing links for subscriptions, wallet, orders, profile, home, model catalog,
 contact, or documentation so the sidebar and account panel share one visibility
-policy. In the personal workspace, announcements and help resources belong to the
-scrolling sidebar's `Support` group, not the account overlay. The administrator
-workspace omits that end-user support cluster; announcement and documentation
-management remain in their administrator task sections.
+policy. In the personal workspace, documentation is the low-frequency external link
+below account destinations; announcements remain in dashboard/global notification
+surfaces. The administrator workspace omits that end-user documentation link while
+announcement and documentation management remain in its administrator task sections.
 
 On mobile, the menu button in `AppMobileHeader` controls
 `useAppStore().mobileOpen`. Selecting a sidebar route closes the drawer.

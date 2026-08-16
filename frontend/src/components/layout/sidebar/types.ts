@@ -2,6 +2,8 @@ import type { CustomMenuItem } from '@/types'
 
 export interface NavItem {
   path: string
+  /** Additional route paths that should share this item's selected state. */
+  activePaths?: readonly string[]
   label: string
   icon: unknown
   iconSvg?: string
@@ -15,7 +17,7 @@ export interface NavItem {
   featureFlag?: () => boolean | undefined
 }
 
-export type UserNavSectionId = 'workbench' | 'account' | 'more'
+export type UserNavSectionId = 'workbench' | 'api' | 'account'
 export type AdminNavSectionId = 'overview' | 'business' | 'operations' | 'system'
 export type NavSectionId = UserNavSectionId | AdminNavSectionId
 

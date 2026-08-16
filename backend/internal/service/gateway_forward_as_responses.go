@@ -48,6 +48,9 @@ func (s *GatewayService) ForwardAsResponses(
 	// 2. Convert Responses → Anthropic
 	anthropicReq, err := apicompat.ResponsesToAnthropicRequest(&responsesReq)
 	if err != nil {
+		if apicompat.IsProviderFileCompatibilityError(err) {
+			writeResponsesError(c, http.StatusBadRequest, "invalid_request_error", err.Error())
+		}
 		return nil, fmt.Errorf("convert responses to anthropic: %w", err)
 	}
 

@@ -26,6 +26,46 @@ function conversation(id: string, updatedAt: number, userId = 'user-1'): Record<
   }
 }
 
+function activityRecord(
+  text: string,
+  status: 'streaming' | 'completed' | 'incomplete' | 'failed' | 'stopped' | 'disconnected',
+  updatedAt: number,
+  sequence: number,
+): Record<string, unknown> {
+  const terminal = status !== 'streaming'
+  return {
+    response_id: 'resp-persisted',
+    status,
+    reasoning_mode: 'pro',
+    reasoning_effort: 'medium',
+    started_at: 90,
+    updated_at: updatedAt,
+    ...(terminal ? { completed_at: updatedAt } : {}),
+    last_sequence_number: sequence,
+    ignored: 'must-not-persist',
+    items: [{
+      item_id: 'reasoning-persisted',
+      output_index: 0,
+      status,
+      started_at: 90,
+      updated_at: updatedAt,
+      ...(terminal ? { completed_at: updatedAt } : {}),
+      last_sequence_number: sequence,
+      parts: [{
+        type: 'summary_text',
+        summary_index: 0,
+        text,
+        status,
+        started_at: 90,
+        updated_at: updatedAt,
+        ...(terminal ? { completed_at: updatedAt } : {}),
+        last_sequence_number: sequence,
+        reasoning_content: 'private-content-must-not-persist',
+      }],
+    }],
+  }
+}
+
 function state(
   conversations: Array<Record<string, unknown>>,
   options: { clearRevision?: number; deletedConversationIds?: string[]; activeId?: string | null } = {},
@@ -432,6 +472,198 @@ describe('mergeChatHistoryStates', () => {
     expect(message.unexpectedCostAdjustment).toBeUndefined()
     expect(message.secret).toBeUndefined()
   })
+
+  it('canonicalizes and deduplicates persisted reasoning Activities', () => {
+    const candidate = {
+      ...conversation('activity-canonical', 100),
+      messages: [{
+        id: 'assistant-activity',
+        role: 'assistant',
+        content: 'answer',
+        createdAt: 80,
+        status: 'complete',
+        activities: [
+          activityRecord('older summary', 'streaming', 95, 2),
+          activityRecord('newer summary', 'streaming', 99, 3),
+        ],
+      }],
+    }
+    const merged = mergedState(mergeChatHistoryStates(
+      null,
+      state([candidate]),
+      'user-1',
+      {
+        upsertConversationIds: ['activity-canonical'],
+        createdConversations: [{ id: 'activity-canonical', operationAt: 100 }],
+      },
+    ))
+    const message = (
+      merged.conversations[0]?.messages as Array<Record<string, unknown>>
+    )[0]!
+    const activities = message.activities as Array<Record<string, unknown>>
+    const items = activities[0]?.items as Array<Record<string, unknown>>
+    const parts = items[0]?.parts as Array<Record<string, unknown>>
+
+    expect(activities).toHaveLength(1)
+    expect(activities[0]).toMatchObject({
+      key: 'resp-persisted',
+      responseId: 'resp-persisted',
+      reasoningMode: 'pro',
+    })
+    expect(parts).toHaveLength(1)
+    expect(parts[0]).toMatchObject({ text: 'newer summary', lastSequenceNumber: 3 })
+    expect(JSON.stringify(activities)).not.toContain('must-not-persist')
+    expect(JSON.stringify(activities)).not.toContain('private-content')
+  })
+
+  it('preserves live summary chunks without materializing the accumulated text', () => {
+    const liveActivity = activityRecord('', 'streaming', 99, 4)
+    const items = liveActivity.items as Array<Record<string, unknown>>
+    const parts = items[0]?.parts as Array<Record<string, unknown>>
+    parts[0]!.streaming_text_chunks = ['first ', 'second', ' third']
+
+    const merged = mergedState(mergeChatHistoryStates(
+      null,
+      state([{
+        ...conversation('activity-stream-chunks', 100),
+        messages: [{
+          id: 'assistant-activity',
+          role: 'assistant',
+          content: '',
+          createdAt: 80,
+          status: 'streaming',
+          activities: [liveActivity],
+        }],
+      }]),
+      'user-1',
+      {
+        upsertConversationIds: ['activity-stream-chunks'],
+        createdConversations: [{ id: 'activity-stream-chunks', operationAt: 100 }],
+      },
+    ))
+    const message = (
+      merged.conversations[0]?.messages as Array<Record<string, unknown>>
+    )[0]!
+    const persistedActivities = message.activities as Array<Record<string, unknown>>
+    const persistedItems = persistedActivities[0]?.items as Array<Record<string, unknown>>
+    const persistedParts = persistedItems[0]?.parts as Array<Record<string, unknown>>
+
+    expect(persistedParts[0]).toMatchObject({
+      text: '',
+      streamingTextChunks: ['first ', 'second', ' third'],
+      status: 'streaming',
+    })
+  })
+
+  it('keeps newer local Activity progress when a stale peer writes a terminal snapshot', () => {
+    const withActivity = (
+      updatedAt: number,
+      activity: Record<string, unknown>,
+    ): Record<string, unknown> => ({
+      ...conversation('activity-merge', updatedAt),
+      messages: [{
+        id: 'assistant-activity',
+        role: 'assistant',
+        content: 'answer',
+        createdAt: 80,
+        status: 'complete',
+        activities: [activity],
+      }],
+    })
+    let stored = mergeChatHistoryStates(
+      null,
+      state([withActivity(100, activityRecord('new local stream', 'streaming', 500, 10))]),
+      'user-1',
+      {
+        upsertConversationIds: ['activity-merge'],
+        createdConversations: [{ id: 'activity-merge', operationAt: 100 }],
+      },
+    )
+    stored = mergeChatHistoryStates(
+      stored,
+      state([withActivity(101, activityRecord('old peer stream', 'streaming', 100, 2))]),
+      'user-1',
+      { upsertConversationIds: ['activity-merge'] },
+    )
+    let message = (
+      mergedState(stored).conversations[0]?.messages as Array<Record<string, unknown>>
+    )[0]!
+    let activities = message.activities as Array<Record<string, unknown>>
+    let items = activities[0]?.items as Array<Record<string, unknown>>
+    let parts = items[0]?.parts as Array<Record<string, unknown>>
+    expect(parts[0]?.text).toBe('new local stream')
+    expect(activities[0]?.status).toBe('streaming')
+
+    stored = mergeChatHistoryStates(
+      stored,
+      state([withActivity(102, activityRecord('server final', 'completed', 110, 3))]),
+      'user-1',
+      { upsertConversationIds: ['activity-merge'] },
+    )
+    message = (
+      mergedState(stored).conversations[0]?.messages as Array<Record<string, unknown>>
+    )[0]!
+    activities = message.activities as Array<Record<string, unknown>>
+    items = activities[0]?.items as Array<Record<string, unknown>>
+    parts = items[0]?.parts as Array<Record<string, unknown>>
+    expect(activities[0]?.status).toBe('streaming')
+    expect(parts[0]?.text).toBe('new local stream')
+  })
+
+  it.each(['stopped', 'disconnected'] as const)(
+    'does not let a stale peer completed snapshot overwrite newer local %s state',
+    (newerStatus) => {
+      const withActivity = (
+        updatedAt: number,
+        activity: Record<string, unknown>,
+      ): Record<string, unknown> => ({
+        ...conversation('activity-terminal-race', updatedAt),
+        messages: [{
+          id: 'assistant-activity',
+          role: 'assistant',
+          content: 'partial answer',
+          createdAt: 80,
+          status: 'stopped',
+          activities: [activity],
+        }],
+      })
+      let stored = mergeChatHistoryStates(
+        null,
+        state([withActivity(
+          500,
+          activityRecord('newer partial summary', newerStatus, 500, 10),
+        )]),
+        'user-1',
+        {
+          upsertConversationIds: ['activity-terminal-race'],
+          createdConversations: [{ id: 'activity-terminal-race', operationAt: 500 }],
+        },
+      )
+
+      stored = mergeChatHistoryStates(
+        stored,
+        state([withActivity(
+          510,
+          activityRecord('stale completed summary', 'completed', 110, 3),
+        )]),
+        'user-1',
+        { upsertConversationIds: ['activity-terminal-race'] },
+      )
+
+      const message = (
+        mergedState(stored).conversations[0]?.messages as Array<Record<string, unknown>>
+      )[0]!
+      const activities = message.activities as Array<Record<string, unknown>>
+      const items = activities[0]?.items as Array<Record<string, unknown>>
+      const parts = items[0]?.parts as Array<Record<string, unknown>>
+      expect(activities[0]?.status).toBe(newerStatus)
+      expect(parts[0]).toMatchObject({
+        status: newerStatus,
+        text: 'newer partial summary',
+        lastSequenceNumber: 10,
+      })
+    },
+  )
 
   it('normalizes clock-skewed records without letting them crowd out valid history', () => {
     const now = Date.now()

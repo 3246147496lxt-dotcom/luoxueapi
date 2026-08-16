@@ -116,8 +116,8 @@
   --workspace-mode-switch-height-mobile: 60px;
 
   /* Stable light primitives */
-  --workspace-light-canvas: #fcfcfc;
-  --workspace-light-sidebar-surface: var(--workspace-light-canvas);
+  --workspace-light-canvas: #f8fafc;
+  --workspace-light-sidebar-surface: #ffffff;
   --workspace-light-surface: #ffffff;
   --workspace-light-popup-surface: #ffffff;
   --workspace-light-surface-subtle: #f7f7f8;
@@ -165,6 +165,20 @@
   --workspace-light-work-track: #ececec;
   --workspace-light-work-chart-primary: #8b5cf6;
   --workspace-light-work-chart-secondary: #a78bfa;
+  --workspace-light-dashboard-card-border: #f1f5f9;
+  --workspace-light-dashboard-card-shadow:
+    0 1px 3px 0 rgb(0 0 0 / 0.05),
+    0 1px 2px 0 rgb(0 0 0 / 0.03);
+  --workspace-light-dashboard-text-strong: #0f172a;
+  --workspace-light-dashboard-text-heading: #475569;
+  --workspace-light-dashboard-text-muted: #64748b;
+  --workspace-light-dashboard-text-subtle: #94a3b8;
+  --workspace-light-dashboard-period-text: #334155;
+  --workspace-light-dashboard-divider: #f8fafc;
+  --workspace-light-dashboard-track: #f1f5f9;
+  --workspace-light-dashboard-success: #22c55e;
+  --workspace-light-dashboard-hover: rgb(248 250 252 / 0.5);
+  --workspace-light-dashboard-notification-hover: #2563eb;
   --workspace-light-mode-switch-border: var(--workspace-light-border);
   --workspace-light-mode-switch-shadow: 0 1px 2px rgb(0 0 0 / 0.06);
   --workspace-light-shadow-mode-switch: 0 1px 2px rgb(17 17 17 / 0.08);
@@ -220,6 +234,18 @@
   --workspace-dark-shadow-float: 0 16px 40px rgba(0, 0, 0, 0.28);
   --workspace-dark-shadow-mode-switch: 0 1px 2px rgb(0 0 0 / 0.28);
   --workspace-dark-shadow-popover: inset 0 0 1px rgb(255 255 255 / 0.2);
+  --workspace-dark-dashboard-card-border: var(--workspace-dark-border);
+  --workspace-dark-dashboard-card-shadow: none;
+  --workspace-dark-dashboard-text-strong: var(--workspace-dark-text);
+  --workspace-dark-dashboard-text-heading: var(--workspace-dark-text-secondary);
+  --workspace-dark-dashboard-text-muted: var(--workspace-dark-text-muted);
+  --workspace-dark-dashboard-text-subtle: var(--workspace-dark-text-muted);
+  --workspace-dark-dashboard-period-text: var(--workspace-dark-text);
+  --workspace-dark-dashboard-divider: var(--workspace-dark-divider);
+  --workspace-dark-dashboard-track: var(--workspace-dark-border);
+  --workspace-dark-dashboard-success: #22c55e;
+  --workspace-dark-dashboard-hover: var(--workspace-dark-hover);
+  --workspace-dark-dashboard-notification-hover: var(--workspace-dark-text);
 
   /* Active Workspace shell roles. Chat and Work consume this same canvas. */
   --workspace-canvas: var(--workspace-light-canvas);
@@ -280,6 +306,21 @@
   --workspace-work-chart-primary: var(--workspace-light-work-chart-primary);
   --workspace-work-chart-secondary: var(--workspace-light-work-chart-secondary);
   --workspace-work-shadow-card: var(--workspace-light-shadow-card);
+
+  /* Dashboard faithfully follows the approved Superdesign surface while
+     keeping its denser slate hierarchy scoped away from the shared shell. */
+  --workspace-dashboard-card-border: var(--workspace-light-dashboard-card-border);
+  --workspace-dashboard-card-shadow: var(--workspace-light-dashboard-card-shadow);
+  --workspace-dashboard-text-strong: var(--workspace-light-dashboard-text-strong);
+  --workspace-dashboard-text-heading: var(--workspace-light-dashboard-text-heading);
+  --workspace-dashboard-text-muted: var(--workspace-light-dashboard-text-muted);
+  --workspace-dashboard-text-subtle: var(--workspace-light-dashboard-text-subtle);
+  --workspace-dashboard-period-text: var(--workspace-light-dashboard-period-text);
+  --workspace-dashboard-divider: var(--workspace-light-dashboard-divider);
+  --workspace-dashboard-track: var(--workspace-light-dashboard-track);
+  --workspace-dashboard-success: var(--workspace-light-dashboard-success);
+  --workspace-dashboard-hover: var(--workspace-light-dashboard-hover);
+  --workspace-dashboard-notification-hover: var(--workspace-light-dashboard-notification-hover);
 
   /* Shared mode switch and Account popover roles */
   --workspace-mode-switch-track: var(--workspace-surface-subtle);
@@ -594,6 +635,18 @@ html.dark {
   --workspace-action-hover: var(--workspace-dark-action-hover);
   --workspace-action-soft: var(--workspace-dark-active);
   --workspace-shadow-float: var(--workspace-dark-shadow-float);
+  --workspace-dashboard-card-border: var(--workspace-dark-dashboard-card-border);
+  --workspace-dashboard-card-shadow: var(--workspace-dark-dashboard-card-shadow);
+  --workspace-dashboard-text-strong: var(--workspace-dark-dashboard-text-strong);
+  --workspace-dashboard-text-heading: var(--workspace-dark-dashboard-text-heading);
+  --workspace-dashboard-text-muted: var(--workspace-dark-dashboard-text-muted);
+  --workspace-dashboard-text-subtle: var(--workspace-dark-dashboard-text-subtle);
+  --workspace-dashboard-period-text: var(--workspace-dark-dashboard-period-text);
+  --workspace-dashboard-divider: var(--workspace-dark-dashboard-divider);
+  --workspace-dashboard-track: var(--workspace-dark-dashboard-track);
+  --workspace-dashboard-success: var(--workspace-dark-dashboard-success);
+  --workspace-dashboard-hover: var(--workspace-dark-dashboard-hover);
+  --workspace-dashboard-notification-hover: var(--workspace-dark-dashboard-notification-hover);
   --workspace-mode-switch-track: var(--workspace-surface-subtle);
   --workspace-mode-switch-border: var(--workspace-dark-border);
   --workspace-mode-switch-active: var(--workspace-dark-mode-switch-active);

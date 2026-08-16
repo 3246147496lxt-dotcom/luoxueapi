@@ -13,10 +13,20 @@ import {
   patchChatConversation as patchRemoteConversation,
   searchChatConversations,
 } from '@/api/chat'
+import {
+  cloneChatActivity,
+  finalizeChatActivityPartText,
+  isTerminalChatActivityStatus,
+  mergeChatActivities,
+  normalizeChatActivities,
+} from '@/features/chat/activity'
 import { chatHistoryPersistence } from '@/features/chat/persistence'
 import type { ChatHistoryMutation } from '@/features/chat/persistence'
 import type {
   ChatAttempt,
+  ChatActivity,
+  ChatActivityError,
+  ChatActivityStatus,
   ChatAttachment,
   ChatConversation,
   ChatHistoryOutboxMutation,
@@ -31,7 +41,7 @@ import type {
 
 export const MAX_CHAT_CONVERSATIONS = 50
 
-const STORAGE_VERSION = 4
+const STORAGE_VERSION = 5
 const DEFAULT_CONVERSATION_TITLE = '新对话'
 const STREAM_PERSIST_THROTTLE_MS = 300
 const MAX_FUTURE_TIMESTAMP_SKEW_MS = 5 * 60 * 1000
@@ -56,6 +66,16 @@ interface PersistedChatState {
 interface ChatStreamError {
   code?: string
   message: string
+}
+
+export interface ChatPersistenceDiagnostic {
+  code: 'CHAT_PERSISTENCE_READ_FAILED'
+    | 'CHAT_PERSISTENCE_WRITE_FAILED'
+    | 'CHAT_PERSISTENCE_RETRY_FAILED'
+    | 'CHAT_PERSISTENCE_PAYLOAD_INVALID'
+    | 'CHAT_PERSISTENCE_PROBE_FAILED'
+  message: string
+  occurredAt: number
 }
 
 export interface CreateChatMessage {
@@ -87,6 +107,7 @@ export interface CreateChatMessage {
   excludedFromContext?: boolean
   supersededByMessageId?: string
   attachments?: ChatAttachment[]
+  activities?: ChatActivity[]
 }
 
 export type ChatMessagePatch = Partial<
@@ -116,8 +137,9 @@ export type ChatMessagePatch = Partial<
     | 'receiptCreatedAt'
     | 'excludedFromContext'
     | 'supersededByMessageId'
+    | 'activities'
   >
->
+> & { pendingStopRequestedAt?: number | null }
 
 let generatedIdCounter = 0
 
@@ -249,6 +271,14 @@ function sanitizedAttachments(value: unknown): ChatAttachment[] {
   }, [])
 }
 
+function sanitizedActivities(
+  value: unknown,
+  fallbackStartedAt: number,
+  markDisconnected = false,
+): ChatActivity[] {
+  return normalizeChatActivities(value, { fallbackStartedAt, markDisconnected })
+}
+
 function copyAssistantMetadata(
   target: ChatMessage,
   source: Record<string, unknown>,
@@ -257,6 +287,9 @@ function copyAssistantMetadata(
 
   if (typeof source.attemptId === 'string' && source.attemptId.trim()) {
     target.attemptId = source.attemptId.trim()
+  }
+  if (isFiniteTimestamp(source.pendingStopRequestedAt)) {
+    target.pendingStopRequestedAt = source.pendingStopRequestedAt
   }
   if (typeof source.receiptId === 'string' && source.receiptId.trim()) {
     target.receiptId = source.receiptId.trim()
@@ -361,6 +394,14 @@ function sanitizeMessage(value: unknown): ChatMessage | null {
   copyAssistantMetadata(message, value)
   const attachments = sanitizedAttachments(value.attachments)
   if (attachments.length > 0) message.attachments = attachments
+  if (message.role === 'assistant') {
+    const activities = sanitizedActivities(
+      value.activities,
+      value.createdAt,
+      true,
+    )
+    if (activities.length > 0) message.activities = activities
+  }
 
   return message
 }
@@ -432,6 +473,10 @@ function createPersistedMessage(message: ChatMessage): ChatMessage {
   copyAssistantMetadata(persisted, message as unknown as Record<string, unknown>)
   const attachments = sanitizedAttachments(message.attachments)
   if (attachments.length > 0) persisted.attachments = attachments
+  if (message.role === 'assistant') {
+    const activities = sanitizedActivities(message.activities, message.createdAt)
+    if (activities.length > 0) persisted.activities = activities.map(cloneChatActivity)
+  }
   return persisted
 }
 
@@ -501,6 +546,7 @@ export const useChatStore = defineStore('chat', () => {
   const hydrated = ref(false)
   const hydrating = ref(false)
   const persistenceAvailable = ref(true)
+  const persistenceDiagnostic = ref<ChatPersistenceDiagnostic | null>(null)
   const serverVersion = ref(0)
   const outbox = ref<ChatHistoryOutboxMutation[]>([])
   const syncStatus = ref<ChatHistorySyncStatus>('idle')
@@ -588,6 +634,7 @@ export const useChatStore = defineStore('chat', () => {
     streamError.value = null
     hydrated.value = false
     hydrating.value = false
+    persistenceDiagnostic.value = null
     serverVersion.value = 0
     outbox.value = []
     syncStatus.value = 'idle'
@@ -625,6 +672,25 @@ export const useChatStore = defineStore('chat', () => {
     if (isCurrentPersistenceContext(context)) persistenceAvailable.value = available
   }
 
+  function recordPersistenceFailure(
+    context: PersistenceContext,
+    code: ChatPersistenceDiagnostic['code'],
+    error: unknown,
+  ): void {
+    if (!isCurrentPersistenceContext(context)) return
+    persistenceAvailable.value = false
+    // Keep diagnostics useful without copying IndexedDB payloads, user text,
+    // filesystem paths, or arbitrary exception messages into application state.
+    const errorName = error instanceof Error && error.name.trim()
+      ? error.name.trim()
+      : 'UnknownError'
+    persistenceDiagnostic.value = {
+      code,
+      message: errorName.slice(0, 80),
+      occurredAt: Date.now(),
+    }
+  }
+
   async function runPersistenceOperations(operation?: PersistenceOperation): Promise<void> {
     const operations = failedPersistenceOperations
     failedPersistenceOperations = []
@@ -649,8 +715,8 @@ export const useChatStore = defineStore('chat', () => {
       .then(() => {
         setPersistenceAvailable(context, true)
       })
-      .catch(() => {
-        setPersistenceAvailable(context, false)
+      .catch((error) => {
+        recordPersistenceFailure(context, 'CHAT_PERSISTENCE_WRITE_FAILED', error)
       })
   }
 
@@ -664,8 +730,8 @@ export const useChatStore = defineStore('chat', () => {
         setPersistenceAvailable(context, true)
         succeeded = true
       })
-      .catch(() => {
-        setPersistenceAvailable(context, false)
+      .catch((error) => {
+        recordPersistenceFailure(context, 'CHAT_PERSISTENCE_RETRY_FAILED', error)
       })
     await persistenceChain
     return succeeded
@@ -740,8 +806,8 @@ export const useChatStore = defineStore('chat', () => {
     try {
       parsed = await chatHistoryPersistence.load(bucketUserId)
       setPersistenceAvailable(context, true)
-    } catch {
-      setPersistenceAvailable(context, false)
+    } catch (error) {
+      recordPersistenceFailure(context, 'CHAT_PERSISTENCE_READ_FAILED', error)
       return null
     }
     if (parsed === null) return null
@@ -753,6 +819,7 @@ export const useChatStore = defineStore('chat', () => {
           parsed.version !== 1
           && parsed.version !== 2
           && parsed.version !== 3
+          && parsed.version !== 4
           && parsed.version !== STORAGE_VERSION
         )
         || !Array.isArray(parsed.conversations)
@@ -847,7 +914,8 @@ export const useChatStore = defineStore('chat', () => {
         legacyImportDecision: restoredLegacyImportDecision,
         legacyConversationIds: [...restoredLegacyConversationIds],
       }
-    } catch {
+    } catch (error) {
+      recordPersistenceFailure(context, 'CHAT_PERSISTENCE_PAYLOAD_INVALID', error)
       removePersistedBucket(bucketUserId, context)
       return null
     }
@@ -1192,8 +1260,8 @@ export const useChatStore = defineStore('chat', () => {
     try {
       await chatHistoryPersistence.load(bucketUserId)
       setPersistenceAvailable(context, true)
-    } catch {
-      setPersistenceAvailable(context, false)
+    } catch (error) {
+      recordPersistenceFailure(context, 'CHAT_PERSISTENCE_PROBE_FAILED', error)
     }
   }
 
@@ -1242,6 +1310,10 @@ export const useChatStore = defineStore('chat', () => {
     copyAssistantMetadata(message, input as unknown as Record<string, unknown>)
     const attachments = sanitizedAttachments(input.attachments)
     if (attachments.length > 0) message.attachments = attachments
+    if (message.role === 'assistant') {
+      const activities = sanitizedActivities(input.activities, message.createdAt)
+      if (activities.length > 0) message.activities = activities
+    }
 
     conversation.messages.push(message)
     moveConversationToFront(conversation)
@@ -1272,7 +1344,16 @@ export const useChatStore = defineStore('chat', () => {
     }
     if (typeof patch.errorCode === 'string') message.errorCode = patch.errorCode
     if (typeof patch.errorMessage === 'string') message.errorMessage = patch.errorMessage
+    if (patch.pendingStopRequestedAt === null) delete message.pendingStopRequestedAt
+    else if (isFiniteTimestamp(patch.pendingStopRequestedAt)) {
+      message.pendingStopRequestedAt = patch.pendingStopRequestedAt
+    }
     copyAssistantMetadata(message, patch as unknown as Record<string, unknown>)
+    if (message.role === 'assistant' && patch.activities !== undefined) {
+      const activities = sanitizedActivities(patch.activities, message.createdAt)
+      if (activities.length > 0) message.activities = activities
+      else delete message.activities
+    }
 
     moveConversationToFront(conversation)
     persist({ upsertConversationIds: [conversationId] })
@@ -1294,6 +1375,178 @@ export const useChatStore = defineStore('chat', () => {
       clearStreamingRuntime(true)
     }
     conversation.messages = nextMessages
+    moveConversationToFront(conversation)
+    persist({ upsertConversationIds: [conversationId] })
+    return true
+  }
+
+  function upsertMessageActivity(
+    conversationId: string,
+    messageId: string,
+    activity: ChatActivity,
+  ): boolean {
+    const conversation = findConversation(conversationId)
+    const message = findMessage(conversationId, messageId)
+    if (!conversation || !message || message.role !== 'assistant') return false
+    const normalized = sanitizedActivities([activity], message.createdAt)
+    if (normalized.length !== 1) return false
+    if (!isTerminalChatActivityStatus(normalized[0]!.status) && message.status !== 'streaming') {
+      if (message.status === 'stopped') {
+        applyActivityTerminal(normalized[0]!, 'stopped')
+      } else if (message.status === 'error') {
+        applyActivityTerminal(normalized[0]!, 'failed', {
+          ...(message.errorCode ? { code: message.errorCode } : {}),
+          ...(message.errorMessage ? { message: message.errorMessage } : {}),
+        })
+      } else {
+        applyActivityTerminal(normalized[0]!, 'completed')
+      }
+    }
+    message.activities = mergeChatActivities(message.activities, normalized)
+    moveConversationToFront(conversation)
+    if (isTerminalChatActivityStatus(normalized[0]!.status)) {
+      persist({ upsertConversationIds: [conversationId] })
+    } else {
+      schedulePersist(conversationId)
+    }
+    return true
+  }
+
+  function activityPart(
+    message: ChatMessage,
+    activityKey: string,
+    partKey: string,
+  ): {
+    activity: ChatActivity
+    item: ChatActivity['items'][number]
+    part: ChatActivity['items'][number]['parts'][number]
+  } | null {
+    const activity = message.activities?.find((candidate) => candidate.key === activityKey)
+    if (!activity) return null
+    for (const item of activity.items) {
+      const part = item.parts.find((candidate) => candidate.key === partKey)
+      if (part) return { activity, item, part }
+    }
+    return null
+  }
+
+  function appendMessageActivityDelta(
+    conversationId: string,
+    messageId: string,
+    activityKey: string,
+    partKey: string,
+    delta: string,
+  ): boolean {
+    if (!delta) return false
+    const conversation = findConversation(conversationId)
+    const message = findMessage(conversationId, messageId)
+    if (!conversation || !message || message.role !== 'assistant') return false
+    const target = activityPart(message, activityKey, partKey)
+    if (!target || isTerminalChatActivityStatus(target.activity.status)) return false
+    const now = epochNow()
+    if (!target.part.streamingTextChunks) target.part.streamingTextChunks = []
+    target.part.streamingTextChunks.push(delta)
+    target.part.status = 'streaming'
+    target.part.updatedAt = now
+    target.item.status = 'streaming'
+    target.item.updatedAt = now
+    target.activity.status = 'streaming'
+    target.activity.updatedAt = now
+    moveConversationToFront(conversation, now)
+    schedulePersist(conversationId)
+    return true
+  }
+
+  function replaceMessageActivityText(
+    conversationId: string,
+    messageId: string,
+    activityKey: string,
+    partKey: string,
+    text: string,
+  ): boolean {
+    const conversation = findConversation(conversationId)
+    const message = findMessage(conversationId, messageId)
+    if (!conversation || !message || message.role !== 'assistant') return false
+    const target = activityPart(message, activityKey, partKey)
+    if (!target || isTerminalChatActivityStatus(target.activity.status)) return false
+    const now = epochNow()
+    target.part.text = text
+    delete target.part.streamingTextChunks
+    target.part.status = 'completed'
+    target.part.updatedAt = now
+    target.part.completedAt = now
+    target.item.status = 'streaming'
+    target.item.updatedAt = now
+    target.activity.status = 'streaming'
+    target.activity.updatedAt = now
+    moveConversationToFront(conversation, now)
+    schedulePersist(conversationId)
+    return true
+  }
+
+  function applyActivityTerminal(
+    activity: ChatActivity,
+    status: Exclude<ChatActivityStatus, 'pending' | 'streaming'>,
+    error?: ChatActivityError,
+  ): void {
+    const now = epochNow()
+    activity.status = status
+    activity.updatedAt = now
+    activity.completedAt = now
+    if (error && (error.code || error.message)) activity.error = { ...error }
+    else if (status !== 'failed') delete activity.error
+    for (const item of activity.items) {
+      if (!isTerminalChatActivityStatus(item.status)) item.status = status
+      item.updatedAt = Math.max(item.updatedAt, now)
+      item.completedAt = item.completedAt ?? now
+      for (const part of item.parts) {
+        finalizeChatActivityPartText(part)
+        if (!isTerminalChatActivityStatus(part.status)) part.status = status
+        part.updatedAt = Math.max(part.updatedAt, now)
+        part.completedAt = part.completedAt ?? now
+      }
+    }
+  }
+
+  function setMessageActivityTerminal(
+    conversationId: string,
+    messageId: string,
+    activityKey: string,
+    status: Exclude<ChatActivityStatus, 'pending' | 'streaming'>,
+    error?: ChatActivityError,
+  ): boolean {
+    const conversation = findConversation(conversationId)
+    const message = findMessage(conversationId, messageId)
+    const activity = message?.activities?.find((candidate) => candidate.key === activityKey)
+    if (!conversation || !message || message.role !== 'assistant' || !activity) return false
+    applyActivityTerminal(activity, status, error)
+    moveConversationToFront(conversation)
+    persist({ upsertConversationIds: [conversationId] })
+    return true
+  }
+
+  function applyOpenMessageActivities(
+    message: ChatMessage,
+    status: Exclude<ChatActivityStatus, 'pending' | 'streaming'>,
+    error?: ChatActivityError,
+  ): boolean {
+    const openActivities = message.activities?.filter(
+      (activity) => !isTerminalChatActivityStatus(activity.status),
+    ) ?? []
+    for (const activity of openActivities) applyActivityTerminal(activity, status, error)
+    return openActivities.length > 0
+  }
+
+  function stopMessageActivities(
+    conversationId: string,
+    messageId: string,
+    status: Exclude<ChatActivityStatus, 'pending' | 'streaming'> = 'stopped',
+    error?: ChatActivityError,
+  ): boolean {
+    const conversation = findConversation(conversationId)
+    const message = findMessage(conversationId, messageId)
+    if (!conversation || !message || message.role !== 'assistant') return false
+    if (!applyOpenMessageActivities(message, status, error)) return false
     moveConversationToFront(conversation)
     persist({ upsertConversationIds: [conversationId] })
     return true
@@ -1353,6 +1606,7 @@ export const useChatStore = defineStore('chat', () => {
 
     message.status = 'complete'
     message.finishReason = finishReason
+    applyOpenMessageActivities(message, 'completed')
     delete message.errorCode
     delete message.errorMessage
     clearStreamingRuntime(false)
@@ -1380,6 +1634,10 @@ export const useChatStore = defineStore('chat', () => {
     message.errorMessage = errorMessage
     if (errorCode) message.errorCode = errorCode
     else delete message.errorCode
+    applyOpenMessageActivities(message, 'failed', {
+      ...(errorCode ? { code: errorCode } : {}),
+      message: errorMessage,
+    })
     streamError.value = { message: errorMessage, ...(errorCode ? { code: errorCode } : {}) }
     clearStreamingRuntime(false)
     moveConversationToFront(conversation)
@@ -1398,6 +1656,7 @@ export const useChatStore = defineStore('chat', () => {
 
     message.status = 'stopped'
     message.finishReason = 'stopped'
+    applyOpenMessageActivities(message, 'stopped')
     moveConversationToFront(conversation)
     persist({ upsertConversationIds: [conversation.id] })
     return true
@@ -1472,14 +1731,30 @@ export const useChatStore = defineStore('chat', () => {
     incoming: ChatServerMessage,
     conversationId: string,
   ): ChatMessage {
+    const protectsCurrentStream = Boolean(
+      existing
+      && isCurrentStream(conversationId, existing.id)
+      && existing.status === 'streaming',
+    )
+    // The API intentionally maps a server-side processing checkpoint to a
+    // stopped/disconnected snapshot for cold history recovery. While this tab
+    // still owns the live stream, that synthetic terminal must not outrank a
+    // newer local Activity. A genuinely completed/failed server response keeps
+    // normal server authority.
+    const incomingIsProcessingCheckpoint = protectsCurrentStream
+      && incoming.status === 'stopped'
+      && incoming.finishReason === 'interrupted'
     const merged: ChatMessage = existing
       ? { ...existing, ...incoming }
       : { ...incoming }
-    if (
-      existing
-      && isCurrentStream(conversationId, existing.id)
-      && existing.status === 'streaming'
-    ) {
+    if (incoming.activities?.length) {
+      merged.activities = mergeChatActivities(existing?.activities, incoming.activities, {
+        incomingIsServer: !incomingIsProcessingCheckpoint,
+      })
+    } else if (existing?.activities?.length) {
+      merged.activities = existing.activities.map(cloneChatActivity)
+    }
+    if (protectsCurrentStream && existing) {
       merged.status = 'streaming'
       if (existing.content.length > incoming.content.length) merged.content = existing.content
       delete merged.finishReason
@@ -2097,6 +2372,7 @@ export const useChatStore = defineStore('chat', () => {
     hydrated,
     hydrating,
     persistenceAvailable,
+    persistenceDiagnostic,
     serverVersion,
     outbox,
     syncStatus,
@@ -2125,6 +2401,11 @@ export const useChatStore = defineStore('chat', () => {
     addMessage,
     updateMessage,
     removeMessages,
+    upsertMessageActivity,
+    appendMessageActivityDelta,
+    replaceMessageActivityText,
+    setMessageActivityTerminal,
+    stopMessageActivities,
     startStreaming,
     appendStreamingContent,
     finishStreaming,

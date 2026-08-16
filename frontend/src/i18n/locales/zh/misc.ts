@@ -69,6 +69,34 @@ export default {
     notConfiguredDesc: '管理员已开启入口，但尚未配置充值链接，请联系管理员。'
   },
 
+  // Balance and current membership overview. The full plan catalogue remains
+  // on the standalone pricing page.
+  balanceMembership: {
+    balanceTitle: '账户余额',
+    balanceHint: '用于按量使用',
+    pointsUnit: '积分',
+    paygNote: '按量使用，不等同于会员订阅',
+    recharge: '充值余额',
+    redeem: '兑换码',
+    currentMember: '当前会员',
+    monthlyQuota: '本月额度',
+    remaining: '剩余',
+    monthlyQuotaUnavailable: '本月额度暂未设置',
+    remainingLabel: '剩余额度',
+    monthlyResetPending: '等待首次使用',
+    monthlyReset: '{date} 重置',
+    expires: '{date} 到期',
+    renew: '续费会员',
+    upgrade: '升级会员',
+    viewPlans: '查看会员方案',
+    freeTitle: '免费版',
+    freeBadge: '未开通',
+    freeDescription: '当前尚未开通会员',
+    freeHint: '开通会员后可获得每月会员额度',
+    subscribe: '开通会员',
+    memberFallback: '会员'
+  },
+
   pricing: {
     eyebrow: '订阅套餐',
     title: '选择适合你的套餐',
@@ -97,6 +125,7 @@ export default {
       }
     },
     recommended: '推荐选择',
+    currentPlan: '当前套餐',
     renewalOption: '续费可选',
     choosePlan: '选择此套餐',
     renewPlan: '选择续费方案',
@@ -172,8 +201,8 @@ export default {
 
   // User Subscriptions Page
   userSubscriptions: {
-    title: '我的订阅',
-    description: '查看您的订阅计划和用量',
+    title: '余额与会员',
+    description: '管理账户余额、兑换码与当前会员',
     loading: '正在加载订阅',
     emptyWithPlansTitle: '还没有订阅',
     emptyWithPlansDesc: '查看可用套餐的额度、有效期和计费规则，选择适合您的方案。',
@@ -194,7 +223,8 @@ export default {
     status: {
       active: '有效',
       expired: '已过期',
-      revoked: '已撤销'
+      revoked: '已撤销',
+      suspended: '已暂停'
     },
     usage: '用量',
     expires: '到期时间',

@@ -78,6 +78,12 @@ func acquireRemoteArtifact(
 	integrityChecks := 0
 
 	if strings.TrimSpace(artifact.URL) != "" {
+		kind := strings.ToLower(strings.TrimSpace(artifact.Type))
+		switch kind {
+		case "", "auto", "archive", "zip", "skill", "skill-md", "skill_md", "markdown":
+		default:
+			return SourceBundle{}, NewAdapterError(adapter, "acquire", ErrorInvalidSource, fmt.Errorf("unsupported artifact type %q", artifact.Type))
+		}
 		resolved, resolveErr := resolveReference(baseURL, artifact.URL)
 		if resolveErr != nil {
 			return SourceBundle{}, NewAdapterError(adapter, "resolve artifact", ErrorInvalidSource, resolveErr)
@@ -96,21 +102,31 @@ func acquireRemoteArtifact(
 			}
 			integrityChecks++
 		}
-		kind := strings.ToLower(strings.TrimSpace(artifact.Type))
 		if kind == "" || kind == "auto" {
-			if strings.HasSuffix(strings.ToLower(resolved), ".zip") || allowedContentType(result.Evidence.ContentType, []string{"application/zip", "application/x-zip-compressed"}) {
+			parsedArtifactURL, _ := url.Parse(resolved)
+			lowerPath := strings.ToLower(parsedArtifactURL.Path)
+			switch {
+			case strings.HasSuffix(lowerPath, ".zip") || strings.HasSuffix(lowerPath, ".tar.gz") || strings.HasSuffix(lowerPath, ".tgz") ||
+				allowedContentType(result.Evidence.ContentType, []string{"application/zip", "application/x-zip-compressed", "application/gzip", "application/x-gzip"}):
 				kind = "archive"
-			} else {
+			case strings.HasSuffix(lowerPath, ".md") || allowedContentType(result.Evidence.ContentType, []string{"text/markdown", "text/plain"}):
 				kind = "skill_md"
+			default:
+				return SourceBundle{}, NewAdapterError(adapter, "acquire", ErrorInvalidSource, errors.New("artifact format cannot be inferred safely"))
 			}
 		}
 		switch kind {
-		case "archive", "zip":
+		case "archive":
+			files, err = ReadSourceArchive(result.Body)
+			if err != nil {
+				return SourceBundle{}, withAdapter(err, adapter, "read artifact")
+			}
+		case "zip":
 			files, err = ReadZIPArtifact(result.Body)
 			if err != nil {
 				return SourceBundle{}, withAdapter(err, adapter, "read artifact")
 			}
-		case "skill", "skill_md", "markdown":
+		case "skill", "skill-md", "skill_md", "markdown":
 			files = append(files, SourceFile{Path: "SKILL.md", Data: result.Body})
 		default:
 			return SourceBundle{}, NewAdapterError(adapter, "acquire", ErrorInvalidSource, fmt.Errorf("unsupported artifact type %q", artifact.Type))

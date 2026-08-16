@@ -63,6 +63,7 @@ func buildApplicationSupervisor(
 	desktopCleanup *service.DesktopCleanupService,
 	chatAttemptRecovery *service.ChatAttemptService,
 	chatAttachmentCleanup *service.ChatAttachmentService,
+	libraryCleanup *service.LibraryService,
 	dashboardAggregation *service.DashboardAggregationService,
 	usageCleanup *service.UsageCleanupService,
 	opsMetricsCollector *service.OpsMetricsCollector,
@@ -192,7 +193,6 @@ func buildApplicationSupervisor(
 		applicationVoidLifecycleComponent("openai-websocket-pool", nil, openAIGateway.CloseOpenAIWSPool),
 		applicationVoidLifecycleComponent("email-queue", emailQueue.Start, emailQueue.Stop),
 		applicationVoidLifecycleComponent("usage-record-worker-pool", usageRecordWorkerPool.Start, usageRecordWorkerPool.Stop),
-		applicationVoidLifecycleComponent("batch-image-worker", batchImageWorker.Start, batchImageWorker.Stop),
 		lifecycle.ComponentFuncs{
 			ComponentName: "api-key-cache-subscriber",
 			StartFunc: func(ctx context.Context) error {
@@ -265,7 +265,12 @@ func buildApplicationSupervisor(
 			StartFunc:     chatAttemptRecovery.StartRecovery,
 			StopFunc:      chatAttemptRecovery.StopRecovery,
 		},
+		applicationVoidLifecycleComponent("library-cleanup", libraryCleanup.Start, libraryCleanup.Stop),
 		applicationVoidLifecycleComponent("chat-attachment-cleanup", chatAttachmentCleanup.Start, chatAttachmentCleanup.Stop),
+		// The batch worker imports generated images through LibraryService. Keep it
+		// after both storage consumers so reverse-order shutdown stops the worker
+		// before either shared blob-store lifecycle is closed.
+		applicationVoidLifecycleComponent("batch-image-worker", batchImageWorker.Start, batchImageWorker.Stop),
 		lifecycle.ComponentFuncs{
 			ComponentName: "dashboard-aggregation",
 			StartFunc: func(context.Context) error {

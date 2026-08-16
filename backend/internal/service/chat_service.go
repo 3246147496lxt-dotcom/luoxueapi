@@ -13,12 +13,14 @@ import (
 )
 
 var (
-	ErrChatInsufficientBalance = infraerrors.Forbidden("INSUFFICIENT_BALANCE", "Insufficient account balance")
-	ErrChatModelNotAvailable   = infraerrors.BadRequest("CHAT_MODEL_NOT_AVAILABLE", "The selected model is not available")
-	ErrChatReasoningNotAllowed = infraerrors.BadRequest("CHAT_REASONING_EFFORT_NOT_AVAILABLE", "The selected reasoning effort is not available for this model")
-	ErrChatCatalogUnavailable  = infraerrors.ServiceUnavailable("CHAT_CATALOG_UNAVAILABLE", "Chat model catalog is temporarily unavailable")
-	ErrChatTranscriptionOff    = infraerrors.NotFound("TRANSCRIPTION_DISABLED", "Voice transcription is not enabled")
-	ErrChatTranscriptionAbsent = infraerrors.ServiceUnavailable("TRANSCRIPTION_UNAVAILABLE", "Voice transcription is temporarily unavailable")
+	ErrChatInsufficientBalance     = infraerrors.Forbidden("INSUFFICIENT_BALANCE", "Insufficient account balance")
+	ErrChatModelNotAvailable       = infraerrors.BadRequest("CHAT_MODEL_NOT_AVAILABLE", "The selected model is not available")
+	ErrChatReasoningNotAllowed     = infraerrors.BadRequest("CHAT_REASONING_EFFORT_NOT_AVAILABLE", "The selected reasoning effort is not available for this model")
+	ErrChatReasoningModeInvalid    = infraerrors.BadRequest("CHAT_REASONING_MODE_INVALID", "The selected reasoning mode is invalid")
+	ErrChatProReasoningUnavailable = infraerrors.BadRequest("PRO_REASONING_UNAVAILABLE", "Pro reasoning is not available for this model or account")
+	ErrChatCatalogUnavailable      = infraerrors.ServiceUnavailable("CHAT_CATALOG_UNAVAILABLE", "Chat model catalog is temporarily unavailable")
+	ErrChatTranscriptionOff        = infraerrors.NotFound("TRANSCRIPTION_DISABLED", "Voice transcription is not enabled")
+	ErrChatTranscriptionAbsent     = infraerrors.ServiceUnavailable("TRANSCRIPTION_UNAVAILABLE", "Voice transcription is temporarily unavailable")
 )
 
 const preferredChatModelID = "gpt-5.6-sol"
@@ -33,14 +35,18 @@ type ChatModelPricing struct {
 }
 
 type ChatModel struct {
-	ID                      string           `json:"id"`
-	DisplayName             string           `json:"display_name"`
-	Recommended             bool             `json:"recommended"`
-	InputPrice              float64          `json:"input_price"`
-	OutputPrice             float64          `json:"output_price"`
-	Pricing                 ChatModelPricing `json:"pricing"`
-	SupportsVision          bool             `json:"supports_vision"`
-	SupportsReasoningSlider bool             `json:"supports_reasoning_slider"`
+	ID                        string           `json:"id"`
+	DisplayName               string           `json:"display_name"`
+	Recommended               bool             `json:"recommended"`
+	InputPrice                float64          `json:"input_price"`
+	OutputPrice               float64          `json:"output_price"`
+	Pricing                   ChatModelPricing `json:"pricing"`
+	SupportsVision            bool             `json:"supports_vision"`
+	SupportsReasoningSlider   bool             `json:"supports_reasoning_slider"`
+	SupportsResponses         bool             `json:"supports_responses"`
+	SupportsReasoningSummary  bool             `json:"supports_reasoning_summary"`
+	SupportsReasoningProMode  bool             `json:"supports_reasoning_pro_mode"`
+	SupportedReasoningEfforts []string         `json:"supported_reasoning_efforts"`
 }
 
 type ChatModelsResult struct {
@@ -93,6 +99,7 @@ type chatModelCatalog interface {
 
 type chatModelSchedulability interface {
 	HasSchedulableChatCompletionsAccount(ctx context.Context, groupID int64, model string) (bool, error)
+	HasSchedulableWebChatReasoningAccount(ctx context.Context, groupID int64, model string, options WebChatReasoningOptions) (bool, error)
 }
 
 type chatTranscriptionSchedulability interface {
@@ -348,6 +355,39 @@ func (s *ChatService) ResolvePrincipal(ctx context.Context, userID int64, model 
 	return nil, ErrChatModelNotAvailable
 }
 
+// ResolveWebChatPrincipal binds billing to the same capability-qualified group
+// used for reasoning admission. This prevents a Pro-capable wallet group from
+// being validated and then replaced by a higher-priority raw-CC group.
+func (s *ChatService) ResolveWebChatPrincipal(
+	ctx context.Context,
+	userID int64,
+	model string,
+	options WebChatReasoningOptions,
+) (*ChatPrincipal, error) {
+	_, _, choices, err := s.authorizedModelChoicesForReasoning(ctx, userID, &options)
+	if err != nil {
+		return nil, err
+	}
+	model = strings.TrimSpace(model)
+	for i := range choices {
+		if choices[i].model.ID != model {
+			continue
+		}
+		if s.principals == nil {
+			return nil, fmt.Errorf("chat principal resolver is unavailable")
+		}
+		principal, resolveErr := s.principals.Resolve(ctx, userID, choices[i].group, choices[i].subscription)
+		if resolveErr != nil {
+			return nil, resolveErr
+		}
+		return &ChatPrincipal{APIKey: principal, Subscription: choices[i].subscription}, nil
+	}
+	if mode, valid := NormalizeWebChatReasoningMode(options.Mode); valid && mode == WebChatReasoningModePro {
+		return nil, ErrChatProReasoningUnavailable
+	}
+	return nil, ErrChatModelNotAvailable
+}
+
 // NormalizeReasoningEffort validates Web Chat's reasoning contract against the
 // authorized model's effective channel mapping. Mapping lookup stays strict so
 // an unavailable or ambiguous alias never silently bypasses model constraints.
@@ -379,18 +419,113 @@ func (s *ChatService) NormalizeReasoningEffort(ctx context.Context, userID int64
 		if effectiveModel == "" {
 			return "", ErrChatModelNotAvailable
 		}
-		if effort == "max" {
-			// Upstream-billed channels may apply an account-level credentials
-			// model_mapping after this channel mapping. The catalog choice cannot
-			// prove every eligible account stays off Sol, so max fails closed.
-			if mapping.BillingModelSource == BillingModelSourceUpstream ||
-				normalizeKnownOpenAICodexModel(effectiveModel) == "gpt-5.6-sol" {
-				return "", ErrChatReasoningNotAllowed
-			}
+		if !webChatReasoningEffortAllowedForMapping(mapping, effort) {
+			return "", ErrChatReasoningNotAllowed
 		}
 		return effort, nil
 	}
 	return "", ErrChatModelNotAvailable
+}
+
+// NormalizeWebChatReasoning validates mode and effort as separate dimensions,
+// then proves that the authorized model has at least one currently schedulable
+// native Responses account. Pro is never rewritten to standard.
+func (s *ChatService) NormalizeWebChatReasoning(
+	ctx context.Context,
+	userID int64,
+	model string,
+	options WebChatReasoningOptions,
+) (WebChatReasoningOptions, error) {
+	mode, valid := NormalizeWebChatReasoningMode(options.Mode)
+	if !valid {
+		return WebChatReasoningOptions{}, ErrChatReasoningModeInvalid
+	}
+	effort := strings.ToLower(strings.TrimSpace(options.Effort))
+	if effort == "" {
+		effort = "low"
+	}
+	switch effort {
+	case "low", "medium", "high", "xhigh", "max":
+	default:
+		return WebChatReasoningOptions{}, ErrChatReasoningNotAllowed
+	}
+	options = WebChatReasoningOptions{Mode: mode, Effort: effort}
+
+	_, _, choices, err := s.authorizedModelChoicesForReasoning(ctx, userID, &options)
+	if err != nil {
+		return WebChatReasoningOptions{}, err
+	}
+	model = strings.TrimSpace(model)
+	for i := range choices {
+		if choices[i].model.ID != model {
+			continue
+		}
+		mapping, mappingErr := s.catalog.ResolveChannelMappingStrict(ctx, choices[i].group.ID, model)
+		if mappingErr != nil {
+			return WebChatReasoningOptions{}, chatCatalogUnavailable(fmt.Errorf("resolve chat reasoning mode mapping: %w", mappingErr))
+		}
+		capability, known := openai.DefaultModelByID(mapping.MappedModel)
+		if !known || !capability.SupportsResponses || !capability.SupportsReasoningSummary {
+			if mode == WebChatReasoningModePro {
+				return WebChatReasoningOptions{}, ErrChatProReasoningUnavailable
+			}
+			return WebChatReasoningOptions{}, ErrChatModelNotAvailable
+		}
+		if !capability.SupportsReasoningEffort(effort) {
+			return WebChatReasoningOptions{}, ErrChatReasoningNotAllowed
+		}
+		if !webChatReasoningEffortAllowedForMapping(mapping, effort) {
+			return WebChatReasoningOptions{}, ErrChatReasoningNotAllowed
+		}
+		if mode == WebChatReasoningModePro && !capability.SupportsReasoningProMode {
+			return WebChatReasoningOptions{}, ErrChatProReasoningUnavailable
+		}
+
+		schedulable, scheduleErr := s.scheduler.HasSchedulableWebChatReasoningAccount(
+			ctx,
+			choices[i].group.ID,
+			model,
+			options,
+		)
+		if scheduleErr != nil {
+			return WebChatReasoningOptions{}, chatCatalogUnavailable(scheduleErr)
+		}
+		if !schedulable {
+			if mode == WebChatReasoningModePro {
+				return WebChatReasoningOptions{}, ErrChatProReasoningUnavailable
+			}
+			return WebChatReasoningOptions{}, ErrChatModelNotAvailable
+		}
+		return options, nil
+	}
+	if mode == WebChatReasoningModePro {
+		return WebChatReasoningOptions{}, ErrChatProReasoningUnavailable
+	}
+	return WebChatReasoningOptions{}, ErrChatModelNotAvailable
+}
+
+// webChatReasoningEffortAllowedForMapping is shared by request admission and
+// the authenticated model catalog. Keeping this rule in one place prevents
+// the UI from advertising a mode/effort combination that the POST path will
+// immediately reject.
+func webChatReasoningEffortAllowedForMapping(mapping ChannelMappingResult, effort string) bool {
+	if !strings.EqualFold(strings.TrimSpace(effort), "max") {
+		return true
+	}
+	// Upstream-billed channels may apply an account-level credentials mapping
+	// after the channel mapping. The catalog cannot prove every eligible account
+	// stays off Sol, so max fails closed for the same reason as request admission.
+	return mapping.BillingModelSource != BillingModelSourceUpstream &&
+		normalizeKnownOpenAICodexModel(mapping.MappedModel) != "gpt-5.6-sol"
+}
+
+func isWebChatCatalogReasoningEffort(effort string) bool {
+	switch strings.ToLower(strings.TrimSpace(effort)) {
+	case "low", "medium", "high", "xhigh":
+		return true
+	default:
+		return false
+	}
 }
 
 func (s *ChatService) SupportsVision(ctx context.Context, userID int64, model string) (bool, error) {
@@ -414,6 +549,14 @@ type chatModelChoice struct {
 }
 
 func (s *ChatService) authorizedModelChoices(ctx context.Context, userID int64) (*User, float64, []chatModelChoice, error) {
+	return s.authorizedModelChoicesForReasoning(ctx, userID, nil)
+}
+
+func (s *ChatService) authorizedModelChoicesForReasoning(
+	ctx context.Context,
+	userID int64,
+	reasoning *WebChatReasoningOptions,
+) (*User, float64, []chatModelChoice, error) {
 	if s == nil || s.users == nil || s.groups == nil || s.catalog == nil || s.scheduler == nil || s.pricing == nil {
 		return nil, 0, nil, fmt.Errorf("chat model service is unavailable")
 	}
@@ -480,6 +623,9 @@ func (s *ChatService) authorizedModelChoices(ctx context.Context, userID int64) 
 			if !ok {
 				continue
 			}
+			if reasoning != nil && !chatModelSupportsReasoningOptions(chatModel, *reasoning) {
+				continue
+			}
 			models = append(models, chatModel)
 		}
 		if len(models) == 0 {
@@ -541,6 +687,24 @@ func (s *ChatService) authorizedModelChoices(ctx context.Context, userID int64) 
 		return choices[i].model.ID < choices[j].model.ID
 	})
 	return user, balance, choices, nil
+}
+
+func chatModelSupportsReasoningOptions(model ChatModel, options WebChatReasoningOptions) bool {
+	mode, valid := NormalizeWebChatReasoningMode(options.Mode)
+	if !valid || !model.SupportsResponses || !model.SupportsReasoningSummary {
+		return false
+	}
+	effortSupported := false
+	for _, effort := range model.SupportedReasoningEfforts {
+		if strings.EqualFold(strings.TrimSpace(effort), strings.TrimSpace(options.Effort)) {
+			effortSupported = true
+			break
+		}
+	}
+	if !effortSupported {
+		return false
+	}
+	return mode != WebChatReasoningModePro || model.SupportsReasoningProMode
 }
 
 func (s *ChatService) resolveEligibleChatSubscription(
@@ -683,20 +847,99 @@ func (s *ChatService) buildChatModel(ctx context.Context, userID int64, group *G
 	if capabilities, ok := s.pricing.(interface{ SupportsVision(string) bool }); ok {
 		supportsVision = capabilities.SupportsVision(billingModel)
 	}
+	modelCapability, knownCapability := openai.DefaultModelByID(mapping.MappedModel)
+	supportedReasoningEfforts := make([]string, 0)
+	supportsResponses := false
+	supportsReasoningSummary := false
+	supportsReasoningProMode := false
+	if knownCapability && modelCapability.SupportsResponses && modelCapability.SupportsReasoningSummary {
+		seenEfforts := make(map[string]struct{}, len(modelCapability.SupportedReasoningEfforts))
+		for _, advertisedEffort := range modelCapability.SupportedReasoningEfforts {
+			effort := strings.ToLower(strings.TrimSpace(advertisedEffort))
+			if !isWebChatCatalogReasoningEffort(effort) ||
+				!webChatReasoningEffortAllowedForMapping(mapping, effort) {
+				continue
+			}
+			if _, duplicate := seenEfforts[effort]; duplicate {
+				continue
+			}
+			seenEfforts[effort] = struct{}{}
+			standardSchedulable, scheduleErr := s.scheduler.HasSchedulableWebChatReasoningAccount(
+				ctx,
+				group.ID,
+				requestedModel,
+				WebChatReasoningOptions{Mode: WebChatReasoningModeStandard, Effort: effort},
+			)
+			if scheduleErr != nil {
+				return ChatModel{}, false, scheduleErr
+			}
+			if standardSchedulable {
+				supportedReasoningEfforts = append(supportedReasoningEfforts, effort)
+			}
+		}
+		supportsResponses = len(supportedReasoningEfforts) > 0
+		supportsReasoningSummary = supportsResponses
+		if modelCapability.SupportsReasoningProMode && supportsReasoningSummary {
+			// The existing catalog schema exposes one effort list shared by both
+			// modes. Advertise Pro only when every visible effort remains
+			// schedulable in Pro, so the picker cannot form an invalid pair.
+			supportsReasoningProMode = true
+			for _, effort := range supportedReasoningEfforts {
+				proSchedulable, scheduleErr := s.scheduler.HasSchedulableWebChatReasoningAccount(
+					ctx,
+					group.ID,
+					requestedModel,
+					WebChatReasoningOptions{Mode: WebChatReasoningModePro, Effort: effort},
+				)
+				if scheduleErr != nil {
+					return ChatModel{}, false, scheduleErr
+				}
+				if !proSchedulable {
+					supportsReasoningProMode = false
+					break
+				}
+			}
+		}
+	}
 	return ChatModel{
-		ID:                      requestedModel,
-		DisplayName:             chatModelDisplayName(requestedModel),
-		InputPrice:              price.InputPrice,
-		OutputPrice:             price.OutputPrice,
-		Pricing:                 price,
-		SupportsVision:          supportsVision,
-		SupportsReasoningSlider: true,
+		ID:                        requestedModel,
+		DisplayName:               chatModelDisplayName(requestedModel),
+		InputPrice:                price.InputPrice,
+		OutputPrice:               price.OutputPrice,
+		Pricing:                   price,
+		SupportsVision:            supportsVision,
+		SupportsReasoningSlider:   len(supportedReasoningEfforts) > 0,
+		SupportsResponses:         supportsResponses,
+		SupportsReasoningSummary:  supportsReasoningSummary,
+		SupportsReasoningProMode:  supportsReasoningProMode,
+		SupportedReasoningEfforts: supportedReasoningEfforts,
 	}, true, nil
 }
 
 // HasSchedulableChatCompletionsAccount is a read-only catalog check. The real
 // request still goes through the scheduler and repeats all runtime checks.
 func (s *OpenAIGatewayService) HasSchedulableChatCompletionsAccount(ctx context.Context, groupID int64, model string) (bool, error) {
+	return s.hasSchedulableWebChatAccount(ctx, groupID, model, nil)
+}
+
+// HasSchedulableWebChatReasoningAccount is a fail-closed read-only admission
+// check for reasoning summaries. Runtime selection must repeat the same
+// AccountSupportsWebChatReasoning predicate before forwarding.
+func (s *OpenAIGatewayService) HasSchedulableWebChatReasoningAccount(
+	ctx context.Context,
+	groupID int64,
+	model string,
+	options WebChatReasoningOptions,
+) (bool, error) {
+	return s.hasSchedulableWebChatAccount(ctx, groupID, model, &options)
+}
+
+func (s *OpenAIGatewayService) hasSchedulableWebChatAccount(
+	ctx context.Context,
+	groupID int64,
+	model string,
+	reasoning *WebChatReasoningOptions,
+) (bool, error) {
 	if s == nil || (s.schedulerSnapshot == nil && s.accountRepo == nil) {
 		return false, errors.New("OpenAI scheduler is unavailable")
 	}
@@ -736,6 +979,10 @@ func (s *OpenAIGatewayService) HasSchedulableChatCompletionsAccount(ctx context.
 	parentLoaded := make(map[int64]struct{})
 	var parentLookupErr error
 	hasSchedulableAccount := false
+	requiredCapability := OpenAIEndpointCapabilityChatCompletions
+	if reasoning != nil {
+		requiredCapability = OpenAIEndpointCapabilityResponses
+	}
 	for i := range accounts {
 		account := &accounts[i]
 		if !isOpenAICompatibleAccountEligibleForRequest(
@@ -744,7 +991,7 @@ func (s *OpenAIGatewayService) HasSchedulableChatCompletionsAccount(ctx context.
 			PlatformOpenAI,
 			model,
 			false,
-			OpenAIEndpointCapabilityChatCompletions,
+			requiredCapability,
 		) || s.isOpenAIAccountRequestRuntimeBlocked(account, model) {
 			continue
 		}
@@ -783,10 +1030,16 @@ func (s *OpenAIGatewayService) HasSchedulableChatCompletionsAccount(ctx context.
 		accountMappedModel := resolveOpenAIAccountUpstreamModelForRequest(account, forwardedModel, false)
 		upstreamModel := normalizeOpenAIModelForUpstream(account, accountMappedModel)
 		if !s.isWebChatTextGPTModel(accountMappedModel) || !s.isWebChatTextGPTModel(upstreamModel) {
+			if reasoning != nil {
+				continue
+			}
 			// The runtime scheduler does not know about the Web Chat capability
 			// boundary. If any currently selectable account can turn this model
 			// into a dedicated non-text model, reject the whole alias.
 			return false, nil
+		}
+		if reasoning != nil && !s.AccountSupportsWebChatReasoningForModel(account, forwardedModel, *reasoning) {
+			continue
 		}
 		hasSchedulableAccount = true
 	}

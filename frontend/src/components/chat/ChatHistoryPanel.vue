@@ -61,11 +61,11 @@
           type="button"
           class="chat-history__new"
           :class="{
-            'chat-history__new--active': activeId === null,
+            'chat-history__new--active': activeSection === 'chat' && activeId === null,
             'chat-history__new--collapsed': sidebarCollapsed,
           }"
           :aria-label="t('chat.actions.newChat')"
-          :aria-current="activeId === null ? 'page' : undefined"
+          :aria-current="activeSection === 'chat' && activeId === null ? 'page' : undefined"
           :title="sidebarCollapsed ? t('chat.actions.newChat') : undefined"
           @click="$emit('new')"
         >
@@ -123,9 +123,18 @@
         class="chat-history__collapsed-nav-action chat-history__chat-entry"
         :aria-label="t('nav.chatMode')"
         :title="t('nav.chatMode')"
-        aria-current="page"
+        :aria-current="activeSection === 'chat' ? 'page' : undefined"
       >
         <Icon name="chat" size="sm" aria-hidden="true" />
+      </RouterLink>
+      <RouterLink
+        to="/library"
+        class="chat-history__collapsed-nav-action chat-history__library-entry"
+        :aria-label="t('chat.navigation.fileLibrary')"
+        :title="t('chat.navigation.fileLibrary')"
+        :aria-current="activeSection === 'library' ? 'page' : undefined"
+      >
+        <Icon name="chatSidebarLibrary" size="sm" aria-hidden="true" />
       </RouterLink>
     </nav>
 
@@ -166,10 +175,12 @@
           :key="item.id"
           type="button"
           class="chat-history__primary-action"
-          aria-disabled="true"
+          :class="{ 'chat-history__primary-action--active': activeSection === item.id }"
+          :aria-disabled="item.available ? undefined : 'true'"
+          :aria-current="activeSection === item.id ? 'page' : undefined"
           :aria-label="t(item.labelKey)"
-          :title="t('chat.navigation.unavailable', { name: t(item.labelKey) })"
-          @click="showUnavailableNavigation(item.labelKey)"
+          :title="item.available ? t(item.labelKey) : t('chat.navigation.unavailable', { name: t(item.labelKey) })"
+          @click="activatePrimaryNavigation(item)"
         >
           <Icon :name="item.icon" size="md" aria-hidden="true" />
           <span>{{ t(item.labelKey) }}</span>
@@ -187,7 +198,7 @@
           <li v-for="conversation in conversations" :key="conversation.id">
             <div
               class="chat-history__item"
-              :class="{ 'chat-history__item--active': conversation.id === activeId }"
+              :class="{ 'chat-history__item--active': activeSection === 'chat' && conversation.id === activeId }"
             >
               <button
                 v-if="renamingId !== conversation.id"
@@ -195,7 +206,7 @@
                 type="button"
                 class="chat-history__select"
                 :aria-label="conversation.title"
-                :aria-current="conversation.id === activeId ? 'page' : undefined"
+                :aria-current="activeSection === 'chat' && conversation.id === activeId ? 'page' : undefined"
                 @click="$emit('select', conversation.id)"
               >
                 <strong :title="conversation.title">
@@ -323,6 +334,7 @@ const props = withDefaults(defineProps<{
   hasMore?: boolean
   loadingMore?: boolean
   shell?: boolean
+  activeSection?: 'chat' | 'library'
 }>(), {
   activeId: null,
   mobile: false,
@@ -333,6 +345,7 @@ const props = withDefaults(defineProps<{
   hasMore: false,
   loadingMore: false,
   shell: false,
+  activeSection: 'chat',
 })
 
 const emit = defineEmits<{
@@ -370,24 +383,33 @@ const chatPrimaryItems = [
     id: 'library',
     labelKey: 'chat.navigation.fileLibrary',
     icon: 'chatSidebarLibrary',
+    path: '/library',
+    available: true,
   },
   {
     id: 'projects',
     labelKey: 'chat.navigation.projects',
     icon: 'chatSidebarProjects',
+    path: '',
+    available: false,
   },
   {
     id: 'scheduled',
     labelKey: 'chat.navigation.scheduled',
     icon: 'chatSidebarScheduled',
+    path: '',
+    available: false,
   },
   {
     id: 'plugins',
     labelKey: 'chat.navigation.plugins',
     icon: 'chatSidebarPlugins',
+    path: '',
+    available: false,
   },
 ] as const
 type ChatPrimaryLabelKey = (typeof chatPrimaryItems)[number]['labelKey']
+type ChatPrimaryItem = (typeof chatPrimaryItems)[number]
 const conversationMenuActions = [
   {
     id: 'share',
@@ -455,6 +477,15 @@ function updateSearchQuery(event: Event) {
 
 function showUnavailableNavigation(labelKey: ChatPrimaryLabelKey) {
   appStore.showInfo(t('chat.navigation.unavailable', { name: t(labelKey) }))
+}
+
+async function activatePrimaryNavigation(item: ChatPrimaryItem) {
+  if (!item.available || !item.path) {
+    showUnavailableNavigation(item.labelKey)
+    return
+  }
+  if (props.mobile || props.overlay) emit('close')
+  await router?.push(item.path)
 }
 
 function handleHistoryScroll(event: Event) {
@@ -852,7 +883,8 @@ onBeforeUnmount(() => {
   background: var(--workspace-hover);
 }
 
-.chat-history__chat-entry[aria-current='page'] {
+.chat-history__chat-entry[aria-current='page'],
+.chat-history__library-entry[aria-current='page'] {
   color: var(--workspace-text);
   background: var(--workspace-selected);
 }
@@ -982,7 +1014,9 @@ onBeforeUnmount(() => {
 }
 
 .chat-history__new--active,
-.chat-history__new--active:hover {
+.chat-history__new--active:hover,
+.chat-history__primary-action--active,
+.chat-history__primary-action--active:hover {
   color: var(--workspace-text);
   background: var(--workspace-selected);
 }

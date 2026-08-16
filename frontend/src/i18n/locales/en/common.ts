@@ -153,7 +153,6 @@ export default {
     dashboard: 'Dashboard',
     gptChat: 'GPT Chat',
     adminDashboard: 'Data Dashboard',
-    announcements: 'Announcements',
     adminWorkspace: 'Admin Workspace',
     personalWorkspace: 'My Workspace',
     switchToAdminWorkspace: 'Switch to Admin Workspace',
@@ -190,6 +189,8 @@ export default {
     modelCenter: 'Model Center',
     balance: 'Balance',
     subscription: 'Plan',
+    balanceAndMembership: 'Balance & Membership',
+    memberSubscription: 'Membership plans',
     orders: 'Orders',
     serviceStatusNav: 'Service Status',
     adminSections: {
@@ -200,9 +201,8 @@ export default {
     },
     userSections: {
       workbench: 'Workbench',
+      api: 'API',
       account: 'Account',
-      resources: 'Resources',
-      more: 'More tools',
     },
     serviceStatus: {
       label: 'Session status',

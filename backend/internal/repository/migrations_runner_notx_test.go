@@ -308,6 +308,42 @@ CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS idx_api_keys_web_chat_active_user
 	require.NoError(t, mock.ExpectationsWereMet())
 }
 
+func TestApplyMigrationsFS_LibraryAliasUniqueIndexMigration_DropsInvalidIndexBeforeRetry(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	defer func() { _ = db.Close() }()
+
+	prepareMigrationsBootstrapExpectations(mock)
+	mock.ExpectQuery("SELECT checksum FROM schema_migrations WHERE filename = \\$1").
+		WithArgs(libraryAliasUniqueIndexMigration).
+		WillReturnError(sql.ErrNoRows)
+	mock.ExpectQuery("SELECT EXISTS \\(").
+		WithArgs(libraryAliasUniqueIndex).
+		WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(true))
+	mock.ExpectExec("DROP INDEX CONCURRENTLY IF EXISTS idx_chat_attachments_library_file_unique").
+		WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectExec("CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS idx_chat_attachments_library_file_unique").
+		WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectExec("INSERT INTO schema_migrations \\(filename, checksum\\) VALUES \\(\\$1, \\$2\\)").
+		WithArgs(libraryAliasUniqueIndexMigration, sqlmock.AnyArg()).
+		WillReturnResult(sqlmock.NewResult(1, 1))
+	expectMigrationsUnlock(mock, true)
+
+	fsys := fstest.MapFS{
+		libraryAliasUniqueIndexMigration: &fstest.MapFile{
+			Data: []byte(`
+CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS idx_chat_attachments_library_file_unique
+    ON chat_attachments (library_file_id)
+    WHERE library_file_id IS NOT NULL;
+`),
+		},
+	}
+
+	err = applyMigrationsFS(context.Background(), db, fsys)
+	require.NoError(t, err)
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
 func TestApplyMigrationsFS_TransactionalMigration(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	require.NoError(t, err)

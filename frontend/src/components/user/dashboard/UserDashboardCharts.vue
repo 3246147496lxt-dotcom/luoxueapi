@@ -1,422 +1,862 @@
 <template>
-  <section class="dashboard-panel dashboard-model-usage" :aria-label="t('dashboard.workspace.modelUsage')">
-    <header class="dashboard-panel-header">
-      <div>
-        <h2>{{ t('dashboard.workspace.modelUsage') }}</h2>
-        <p>{{ t('dashboard.workspace.selectedRange', { start: startDate, end: endDate }) }}</p>
+  <section class="dashboard-usage" :aria-label="t('dashboard.workspace.usageStatistics')">
+    <header class="dashboard-usage__header">
+      <h2>{{ t('dashboard.workspace.usageStatistics') }}</h2>
+      <div
+        ref="periodMenuRef"
+        class="dashboard-period-select"
+        :class="{ 'is-open': periodMenuOpen }"
+      >
+        <button
+          type="button"
+          class="dashboard-period-select__trigger"
+          data-testid="dashboard-period-trigger"
+          :aria-label="t('dashboard.workspace.statisticsPeriod')"
+          :aria-expanded="periodMenuOpen"
+          aria-haspopup="listbox"
+          aria-controls="dashboard-period-menu"
+          @click="togglePeriodMenu"
+          @keydown="handlePeriodTriggerKeydown"
+        >
+          <span class="dashboard-period-select__label">
+            {{ t('dashboard.workspace.statisticsPeriod') }}
+          </span>
+          <span class="dashboard-period-select__value">{{ currentPeriodLabel }}</span>
+          <Icon
+            :name="periodMenuOpen ? 'chevronUp' : 'chevronDown'"
+            size="sm"
+            :stroke-width="2"
+            class="dashboard-period-select__icon"
+            aria-hidden="true"
+          />
+        </button>
+
+        <Transition name="dashboard-period-dropdown">
+          <div
+            v-if="periodMenuOpen"
+            id="dashboard-period-menu"
+            class="dashboard-period-select__menu"
+            data-testid="dashboard-period-menu"
+            role="listbox"
+            :aria-label="t('dashboard.workspace.statisticsPeriod')"
+          >
+            <button
+              v-for="option in periodOptions"
+              :key="option.value"
+              type="button"
+              class="dashboard-period-select__option"
+              role="option"
+              :data-period="option.value"
+              :aria-selected="period === option.value"
+              @click="selectPeriod(option.value)"
+            >
+              {{ t(option.labelKey) }}
+            </button>
+          </div>
+        </Transition>
       </div>
-      <RouterLink to="/usage" class="dashboard-panel-link">
-        {{ t('dashboard.workspace.viewAll') }}
-        <Icon name="arrowRight" size="xs" aria-hidden="true" />
-      </RouterLink>
     </header>
 
-    <div class="dashboard-usage-summary" :aria-label="t('dashboard.workspace.rangeSummary')">
-      <div>
-        <span>{{ t('dashboard.workspace.requests') }}</span>
-        <strong>{{ formatNumber(rangeRequests) }}</strong>
-      </div>
-      <div>
-        <span>{{ t('dashboard.workspace.tokens') }}</span>
-        <strong>{{ formatNumber(rangeTokens) }}</strong>
-      </div>
-      <div>
-        <span>{{ t('dashboard.workspace.spend') }}</span>
-        <strong>{{ formatCredit(rangeCost) }}</strong>
-      </div>
-    </div>
-
-    <div class="dashboard-model-list">
-      <div class="dashboard-model-list__head" aria-hidden="true">
-        <span>{{ t('dashboard.workspace.model') }}</span>
-        <span>{{ t('dashboard.workspace.requests') }}</span>
-        <span>{{ t('dashboard.workspace.tokens') }}</span>
-        <span>{{ t('dashboard.workspace.spend') }}</span>
-      </div>
-
-      <div v-if="loading" class="dashboard-model-loading" aria-live="polite">
-        <LoadingSpinner size="md" />
-        <span>{{ t('dashboard.workspace.loadingModels') }}</span>
-      </div>
-
-      <div v-else-if="topModels.length === 0" class="dashboard-model-empty">
-        <Icon name="destinationModels" size="lg" aria-hidden="true" />
-        <p>{{ t('dashboard.workspace.noModelUsage') }}</p>
-        <RouterLink to="/models">{{ t('dashboard.workspace.exploreModels') }}</RouterLink>
-      </div>
-
-      <ol v-else class="dashboard-model-rows">
-        <li v-for="model in topModels" :key="model.model" class="dashboard-model-row">
-          <div class="dashboard-model-row__identity">
-            <span class="dashboard-model-row__name" :title="model.model">{{ model.model }}</span>
-            <span class="dashboard-model-row__track" aria-hidden="true">
-              <span :style="{ width: `${modelShare(model.requests)}%` }" />
-            </span>
+    <div class="dashboard-usage__grid">
+      <article class="dashboard-chart-card dashboard-chart-card--credits">
+        <div class="dashboard-chart-card__heading">
+          <h3>{{ t('dashboard.workspace.creditsTrend') }}</h3>
+          <span data-testid="credits-total">{{ formattedCreditsTotal }}</span>
+        </div>
+        <div class="dashboard-chart dashboard-chart--credits">
+          <div v-if="loading" class="dashboard-chart__state" role="status">
+            <span class="skeleton h-full w-full" aria-hidden="true" />
+            <span class="sr-only">{{ t('common.loading') }}</span>
           </div>
-          <span class="dashboard-model-row__metric" :data-label="t('dashboard.workspace.requests')">
-            {{ formatNumber(model.requests) }}
-          </span>
-          <span class="dashboard-model-row__metric" :data-label="t('dashboard.workspace.tokens')">
-            {{ formatNumber(model.total_tokens) }}
-          </span>
-          <span class="dashboard-model-row__metric" :data-label="t('dashboard.workspace.spend')">
-            {{ formatCredit(model.actual_cost) }}
-          </span>
-        </li>
-      </ol>
+          <div v-else-if="!hasData" class="dashboard-chart__state dashboard-chart__empty">
+            {{ t('dashboard.workspace.noUsageData') }}
+          </div>
+          <Line
+            v-else
+            :key="`credits-${period}-${themeRevision}`"
+            :data="creditsChartData"
+            :options="creditsChartOptions"
+            :plugins="lineChartPlugins"
+            role="img"
+            :aria-label="`${t('dashboard.workspace.creditsTrend')} ${formattedCreditsTotal}`"
+          />
+        </div>
+      </article>
+
+      <div class="dashboard-usage__side">
+        <article class="dashboard-chart-card dashboard-chart-card--token">
+          <div class="dashboard-chart-card__heading">
+            <h3>{{ t('dashboard.workspace.token') }}</h3>
+            <span data-testid="tokens-total">{{ formattedTokensTotal }}</span>
+          </div>
+          <div class="dashboard-chart dashboard-chart--token">
+            <div v-if="loading" class="dashboard-chart__state" role="status">
+              <span class="skeleton h-full w-full" aria-hidden="true" />
+              <span class="sr-only">{{ t('common.loading') }}</span>
+            </div>
+            <div v-else-if="!hasData" class="dashboard-chart__state dashboard-chart__empty">
+              {{ t('dashboard.workspace.noUsageData') }}
+            </div>
+            <Bar
+              v-else
+              :key="`tokens-${period}-${themeRevision}`"
+              :data="tokensChartData"
+              :options="tokensChartOptions"
+              :plugins="barChartPlugins"
+              role="img"
+              :aria-label="`${t('dashboard.workspace.token')} ${formattedTokensTotal}`"
+            />
+          </div>
+        </article>
+
+        <article class="dashboard-chart-card dashboard-chart-card--requests">
+          <div class="dashboard-chart-card__heading">
+            <h3>{{ t('dashboard.workspace.requestCount') }}</h3>
+            <span data-testid="requests-total">{{ formattedRequestsTotal }}</span>
+          </div>
+          <div class="dashboard-chart dashboard-chart--requests">
+            <div v-if="loading" class="dashboard-chart__state" role="status">
+              <span class="skeleton h-full w-full" aria-hidden="true" />
+              <span class="sr-only">{{ t('common.loading') }}</span>
+            </div>
+            <div v-else-if="!hasData" class="dashboard-chart__state dashboard-chart__empty">
+              {{ t('dashboard.workspace.noUsageData') }}
+            </div>
+            <Bar
+              v-else
+              :key="`requests-${period}-${themeRevision}`"
+              :data="requestsChartData"
+              :options="requestsChartOptions"
+              :plugins="barChartPlugins"
+              role="img"
+              :aria-label="`${t('dashboard.workspace.requestCount')} ${formattedRequestsTotal}`"
+            />
+          </div>
+        </article>
+      </div>
     </div>
+
+    <table v-if="hasData" class="sr-only">
+      <caption>{{ t('dashboard.workspace.usageStatistics') }}</caption>
+      <thead>
+        <tr>
+          <th scope="col">{{ t('usage.time') }}</th>
+          <th scope="col">{{ t('dashboard.workspace.creditsTrend') }}</th>
+          <th scope="col">{{ t('dashboard.workspace.cachedInput') }}</th>
+          <th scope="col">{{ t('dashboard.workspace.uncachedInput') }}</th>
+          <th scope="col">{{ t('dashboard.workspace.outputTokens') }}</th>
+          <th scope="col">{{ t('dashboard.workspace.requestCount') }}</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr v-for="point in usagePoints" :key="point.date">
+          <th scope="row">{{ tooltipRange(point.date) }}</th>
+          <td>{{ formatCredits(point.credits) }}</td>
+          <td>{{ formatInteger(point.cachedInputTokens) }}</td>
+          <td>{{ formatInteger(point.uncachedInputTokens) }}</td>
+          <td>{{ formatInteger(point.outputTokens) }}</td>
+          <td>{{ formatInteger(point.requests) }}</td>
+        </tr>
+      </tbody>
+    </table>
   </section>
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import Icon from '@/components/icons/Icon.vue'
-import LoadingSpinner from '@/components/common/LoadingSpinner.vue'
-import type { ModelStat, TrendDataPoint } from '@/types'
+import {
+  BarElement,
+  CategoryScale,
+  Chart as ChartJS,
+  Filler,
+  LineElement,
+  LinearScale,
+  PointElement,
+  Tooltip,
+  type ChartData,
+  type ChartOptions,
+  type Plugin,
+} from 'chart.js'
+import { Bar, Line } from 'vue-chartjs'
+import type { TrendDataPoint } from '@/types'
+import {
+  buildDashboardUsageSeries,
+  type DashboardUsagePeriod,
+} from './dashboardUsage'
+
+ChartJS.register(
+  CategoryScale,
+  LinearScale,
+  PointElement,
+  LineElement,
+  BarElement,
+  Tooltip,
+  Filler,
+)
 
 const props = defineProps<{
   loading: boolean
-  startDate: string
-  endDate: string
+  period: DashboardUsagePeriod
   trend: TrendDataPoint[]
-  models: ModelStat[]
+}>()
+
+const emit = defineEmits<{
+  'update:period': [period: DashboardUsagePeriod]
 }>()
 
 const { t, locale } = useI18n()
+const themeRevision = ref(0)
+const periodMenuRef = ref<HTMLElement | null>(null)
+const periodMenuOpen = ref(false)
+let themeObserver: MutationObserver | null = null
 
-const rangeRequests = computed(() => props.trend.reduce((sum, point) => sum + finiteNumber(point.requests), 0))
-const rangeTokens = computed(() => props.trend.reduce((sum, point) => sum + finiteNumber(point.total_tokens), 0))
-const rangeCost = computed(() => props.trend.reduce((sum, point) => sum + finiteNumber(point.actual_cost), 0))
-const topModels = computed(() => [...props.models]
-  .filter((model) => model.requests > 0 || model.total_tokens > 0 || model.actual_cost > 0)
-  .sort((left, right) => right.requests - left.requests || right.total_tokens - left.total_tokens)
-  .slice(0, 6))
-const maxModelRequests = computed(() => Math.max(0, ...topModels.value.map((model) => finiteNumber(model.requests))))
+const periodOptions = [
+  { value: 'today' as DashboardUsagePeriod, labelKey: 'dashboard.workspace.periods.today' },
+  { value: 'week' as DashboardUsagePeriod, labelKey: 'dashboard.workspace.periods.week' },
+  { value: 'month' as DashboardUsagePeriod, labelKey: 'dashboard.workspace.periods.month' },
+  { value: 'thirtyDays' as DashboardUsagePeriod, labelKey: 'dashboard.workspace.periods.thirtyDays' },
+]
 
-function finiteNumber(value: number | null | undefined): number {
-  return Number.isFinite(value) ? Number(value) : 0
+const currentPeriodLabel = computed(() => {
+  const option = periodOptions.find((candidate) => candidate.value === props.period) || periodOptions[0]
+  return t(option.labelKey)
+})
+
+const usagePoints = computed(() => buildDashboardUsageSeries(props.trend, props.period))
+const hasData = computed(() => props.trend.length > 0)
+const numberLocale = computed(() => locale.value.startsWith('zh') ? 'zh-CN' : 'en-US')
+const isDark = computed(() => {
+  themeRevision.value
+  return typeof document !== 'undefined' && document.documentElement.classList.contains('dark')
+})
+
+const chartTheme = computed(() => ({
+  text: isDark.value ? 'rgba(203, 213, 225, 0.72)' : 'rgba(100, 116, 139, 0.60)',
+  grid: isDark.value ? 'rgba(148, 163, 184, 0.18)' : 'rgba(226, 232, 240, 0.70)',
+  guide: isDark.value ? 'rgba(226, 232, 240, 0.38)' : 'rgba(148, 163, 184, 0.70)',
+  tooltip: isDark.value ? '#020617' : '#0f172a',
+  tooltipText: '#f8fafc',
+  tooltipTitle: '#94a3b8',
+  orange: '#FF8A00',
+  token: '#8B5CF6',
+  request: '#A78BFA',
+}))
+
+const creditsTotal = computed(() => usagePoints.value.reduce((sum, point) => sum + point.credits, 0))
+const tokensTotal = computed(() => usagePoints.value.reduce((sum, point) => sum + point.totalTokens, 0))
+const requestsTotal = computed(() => usagePoints.value.reduce((sum, point) => sum + point.requests, 0))
+const formattedCreditsTotal = computed(() => formatCredits(creditsTotal.value, creditsTotal.value >= 100))
+const formattedTokensTotal = computed(() => formatInteger(tokensTotal.value))
+const formattedRequestsTotal = computed(() => formatInteger(requestsTotal.value))
+const chartLabels = computed(() => usagePoints.value.map((point) => axisLabel(point.date)))
+
+const creditsChartData = computed<ChartData<'line'>>(() => ({
+  labels: chartLabels.value,
+  datasets: [{
+    label: t('dashboard.workspace.creditsTrend'),
+    data: usagePoints.value.map((point) => point.credits),
+    borderColor: chartTheme.value.orange,
+    backgroundColor: (context: any) => {
+      const chart = context.chart
+      const area = chart.chartArea
+      if (!area) return 'rgba(255, 138, 0, 0.12)'
+      const gradient = chart.ctx.createLinearGradient(0, area.top, 0, area.bottom)
+      gradient.addColorStop(0, 'rgba(255, 138, 0, 0.18)')
+      gradient.addColorStop(0.62, 'rgba(255, 138, 0, 0.06)')
+      gradient.addColorStop(1, 'rgba(255, 138, 0, 0)')
+      return gradient
+    },
+    borderWidth: 2,
+    fill: true,
+    tension: 0.36,
+    cubicInterpolationMode: 'monotone',
+    pointRadius: 0,
+    pointHoverRadius: 4,
+    pointHitRadius: 12,
+    pointHoverBackgroundColor: '#ffffff',
+    pointHoverBorderColor: chartTheme.value.orange,
+    pointHoverBorderWidth: 2,
+  }],
+}))
+
+const tokensChartData = computed<ChartData<'bar'>>(() => ({
+  labels: chartLabels.value,
+  datasets: [{
+    label: t('dashboard.workspace.token'),
+    data: usagePoints.value.map((point) => point.totalTokens),
+    backgroundColor: chartTheme.value.token,
+    hoverBackgroundColor: '#7C3AED',
+    borderRadius: 4,
+    borderSkipped: false,
+    barPercentage: 0.64,
+    categoryPercentage: 0.72,
+  }],
+}))
+
+const requestsChartData = computed<ChartData<'bar'>>(() => ({
+  labels: chartLabels.value,
+  datasets: [{
+    label: t('dashboard.workspace.requestCount'),
+    data: usagePoints.value.map((point) => point.requests),
+    backgroundColor: chartTheme.value.request,
+    hoverBackgroundColor: '#8B5CF6',
+    borderRadius: 3,
+    borderSkipped: false,
+    barPercentage: 0.64,
+    categoryPercentage: 0.72,
+  }],
+}))
+
+const creditsChartOptions = computed<ChartOptions<'line'>>(() => ({
+  ...baseOptions<'line'>(usagePoints.value.map((point) => point.credits), formatAxisCredit, 10),
+  plugins: {
+    legend: { display: false },
+    tooltip: tooltipOptions((index) => [
+      `${t('dashboard.workspace.creditsUsed')}: ${formatCredits(usagePoints.value[index]?.credits ?? 0)} ${t('dashboard.workspace.creditsUnit')}`,
+    ]),
+  },
+}))
+
+const tokensChartOptions = computed<ChartOptions<'bar'>>(() => ({
+  ...baseOptions<'bar'>(usagePoints.value.map((point) => point.totalTokens), formatAxisNumber, 9),
+  plugins: {
+    legend: { display: false },
+    tooltip: tooltipOptions((index) => {
+      const point = usagePoints.value[index]
+      if (!point) return []
+      return [
+        `${t('dashboard.workspace.cachedInput')}: ${formatInteger(point.cachedInputTokens)}`,
+        `${t('dashboard.workspace.uncachedInput')}: ${formatInteger(point.uncachedInputTokens)}`,
+        `${t('dashboard.workspace.outputTokens')}: ${formatInteger(point.outputTokens)}`,
+      ]
+    }),
+  },
+}))
+
+const requestsChartOptions = computed<ChartOptions<'bar'>>(() => ({
+  ...baseOptions<'bar'>(usagePoints.value.map((point) => point.requests), formatAxisNumber, 9),
+  plugins: {
+    legend: { display: false },
+    tooltip: tooltipOptions((index) => [
+      `${t('dashboard.workspace.requestCount')}: ${formatInteger(usagePoints.value[index]?.requests ?? 0)}`,
+    ]),
+  },
+}))
+
+function createHoverGuidePlugin<T extends 'line' | 'bar'>(): Plugin<T> {
+  return {
+    id: 'dashboardHoverGuide',
+    afterDatasetsDraw(chart) {
+      const active = chart.tooltip?.getActiveElements?.()?.[0]
+      if (!active) return
+      const x = active.element.x
+      const { top, bottom } = chart.chartArea
+      const context = chart.ctx
+      context.save()
+      context.beginPath()
+      context.setLineDash([4, 4])
+      context.moveTo(x, top)
+      context.lineTo(x, bottom)
+      context.lineWidth = 1
+      context.strokeStyle = chartTheme.value.guide
+      context.stroke()
+      context.restore()
+    },
+  }
 }
 
-function formatNumber(value: number | null | undefined): string {
-  return new Intl.NumberFormat(locale.value.startsWith('zh') ? 'zh-CN' : 'en-US', {
-    notation: finiteNumber(value) >= 100_000 ? 'compact' : 'standard',
+const lineChartPlugins: Plugin<'line'>[] = [createHoverGuidePlugin<'line'>()]
+const barChartPlugins: Plugin<'bar'>[] = [createHoverGuidePlugin<'bar'>()]
+
+function baseOptions<T extends 'line' | 'bar'>(
+  values: number[],
+  tickFormatter: (value: number) => string,
+  axisFontSize: number,
+): ChartOptions<T> {
+  return {
+    responsive: true,
+    maintainAspectRatio: false,
+    animation: false,
+    interaction: { intersect: false, mode: 'index' },
+    layout: { padding: { top: 6 } },
+    scales: {
+      x: {
+        border: { display: false },
+        grid: { display: false },
+        ticks: {
+          color: chartTheme.value.text,
+          font: {
+            family: 'Inter, "PingFang SC", "Microsoft YaHei", sans-serif',
+            size: axisFontSize,
+            weight: 500,
+          },
+          autoSkip: true,
+          maxTicksLimit: 4,
+          maxRotation: 0,
+          padding: 8,
+        },
+      },
+      y: {
+        beginAtZero: true,
+        max: niceMaximum(values),
+        border: { display: false },
+        grid: { color: chartTheme.value.grid, drawTicks: false },
+        ticks: {
+          color: chartTheme.value.text,
+          font: {
+            family: 'Inter, "PingFang SC", "Microsoft YaHei", sans-serif',
+            size: axisFontSize,
+            weight: 500,
+          },
+          count: 3,
+          padding: 8,
+          callback: (value: string | number) => tickFormatter(Number(value)),
+        },
+      },
+    },
+  } as unknown as ChartOptions<T>
+}
+
+function tooltipOptions(lines: (index: number) => string[]) {
+  return {
+    enabled: true,
+    displayColors: false,
+    backgroundColor: chartTheme.value.tooltip,
+    titleColor: chartTheme.value.tooltipTitle,
+    bodyColor: chartTheme.value.tooltipText,
+    borderColor: 'rgba(255, 255, 255, 0.10)',
+    borderWidth: 1,
+    cornerRadius: 12,
+    padding: 12,
+    caretPadding: 8,
+    titleFont: { size: 11, weight: 500 },
+    bodyFont: { size: 11, weight: 400 },
+    titleMarginBottom: 6,
+    callbacks: {
+      title: (items: any[]) => {
+        const index = items[0]?.dataIndex ?? 0
+        return tooltipRange(usagePoints.value[index]?.date ?? '')
+      },
+      label: (context: any) => lines(context.dataIndex),
+    },
+  }
+}
+
+function niceMaximum(values: number[]): number {
+  const maximum = Math.max(0, ...values)
+  if (maximum <= 0) return 1
+  const exponent = 10 ** Math.floor(Math.log10(maximum))
+  const normalized = maximum / exponent
+  const step = normalized <= 1 ? 1 : normalized <= 2 ? 2 : normalized <= 5 ? 5 : 10
+  return step * exponent
+}
+
+function parsePointDate(value: string): Date | null {
+  const normalized = /^\d{4}-\d{2}-\d{2}$/.test(value)
+    ? `${value}T00:00:00`
+    : value.replace(' ', 'T')
+  const date = new Date(normalized)
+  return Number.isFinite(date.getTime()) ? date : null
+}
+
+function axisLabel(value: string): string {
+  const date = parsePointDate(value)
+  if (!date) return value
+  if (props.period === 'today') {
+    return `${String(date.getHours()).padStart(2, '0')}:00`
+  }
+  if (props.period === 'week') {
+    return new Intl.DateTimeFormat(numberLocale.value, { weekday: 'short' }).format(date)
+  }
+  if (props.period === 'month') return String(date.getDate())
+  return new Intl.DateTimeFormat(numberLocale.value, { month: 'numeric', day: 'numeric' }).format(date)
+}
+
+function tooltipRange(value: string): string {
+  const date = parsePointDate(value)
+  if (!date) return value
+  if (props.period === 'today') {
+    const start = `${String(date.getHours()).padStart(2, '0')}:00`
+    const endDate = new Date(date)
+    endDate.setHours(date.getHours() + 1)
+    const end = `${String(endDate.getHours()).padStart(2, '0')}:00`
+    return `${start}~${end}`
+  }
+  return new Intl.DateTimeFormat(numberLocale.value, {
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+  }).format(date)
+}
+
+function formatInteger(value: number): string {
+  return new Intl.NumberFormat(numberLocale.value, { maximumFractionDigits: 0 }).format(value)
+}
+
+function formatCredits(value: number, forceInteger = false): string {
+  return new Intl.NumberFormat(numberLocale.value, {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: forceInteger ? 0 : value > 0 && value < 0.01 ? 4 : 2,
+  }).format(value)
+}
+
+function formatAxisNumber(value: number): string {
+  return new Intl.NumberFormat(numberLocale.value, {
+    notation: value >= 1_000 ? 'compact' : 'standard',
     maximumFractionDigits: 1,
-  }).format(finiteNumber(value))
+  }).format(value)
 }
 
-function formatCredit(value: number | null | undefined): string {
-  return finiteNumber(value).toFixed(2)
+function formatAxisCredit(value: number): string {
+  return new Intl.NumberFormat(numberLocale.value, { maximumFractionDigits: value < 10 ? 1 : 0 }).format(value)
 }
 
-function modelShare(requests: number): number {
-  if (maxModelRequests.value <= 0) return 0
-  return Math.max(3, Math.min(100, (finiteNumber(requests) / maxModelRequests.value) * 100))
+function togglePeriodMenu(): void {
+  periodMenuOpen.value = !periodMenuOpen.value
 }
+
+function selectPeriod(value: DashboardUsagePeriod): void {
+  periodMenuOpen.value = false
+  if (value !== props.period) emit('update:period', value)
+}
+
+function handlePeriodTriggerKeydown(event: KeyboardEvent): void {
+  if (event.key === 'Escape') {
+    periodMenuOpen.value = false
+    return
+  }
+  if (event.key === 'ArrowDown' || event.key === 'Enter' || event.key === ' ') {
+    event.preventDefault()
+    periodMenuOpen.value = true
+  }
+}
+
+function handlePeriodOutsidePointerDown(event: PointerEvent): void {
+  if (!periodMenuRef.value?.contains(event.target as Node)) {
+    periodMenuOpen.value = false
+  }
+}
+
+onMounted(() => {
+  document.addEventListener('pointerdown', handlePeriodOutsidePointerDown)
+
+  if (typeof MutationObserver === 'undefined') return
+  themeObserver = new MutationObserver(() => {
+    themeRevision.value += 1
+  })
+  themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ['class'] })
+})
+
+onBeforeUnmount(() => {
+  document.removeEventListener('pointerdown', handlePeriodOutsidePointerDown)
+  themeObserver?.disconnect()
+})
 </script>
 
 <style scoped>
-.dashboard-panel {
+.dashboard-usage {
   min-width: 0;
-  overflow: hidden;
-  border: 1px solid var(--workspace-border);
-  border-radius: var(--workspace-radius-work-card);
-  background: var(--workspace-card-surface);
-  box-shadow: var(--workspace-work-shadow-card);
 }
 
-.dashboard-panel-header {
+.dashboard-usage__header {
   display: flex;
-  min-height: 78px;
+  min-height: 44px;
   align-items: center;
   justify-content: space-between;
-  gap: 20px;
-  padding: var(--workspace-space-4-5) var(--workspace-space-5);
-  border-bottom: 1px solid var(--workspace-border);
+  gap: var(--workspace-space-4);
+  margin-bottom: var(--workspace-space-4);
 }
 
-.dashboard-panel-header h2 {
-  color: var(--workspace-work-text);
-  font-size: var(--workspace-type-navigation-size);
-  font-weight: var(--workspace-type-navigation-weight);
-  line-height: 1.35rem;
+.dashboard-usage__header h2 {
+  color: var(--workspace-dashboard-text-strong);
+  font-size: calc(var(--workspace-type-navigation-size) + 0.375rem);
+  font-weight: 700;
+  line-height: var(--workspace-space-7);
 }
 
-.dashboard-panel-header p {
-  margin-top: 3px;
-  color: var(--workspace-work-text-muted);
-  font-size: var(--workspace-type-secondary-size);
-  font-weight: var(--workspace-type-secondary-weight);
-  line-height: 1rem;
-}
-
-.dashboard-panel-link {
-  display: inline-flex;
-  min-height: 34px;
-  flex: 0 0 auto;
-  align-items: center;
-  gap: 5px;
-  border-radius: var(--workspace-radius-compact);
-  color: var(--workspace-work-text-secondary);
-  font-size: var(--workspace-type-navigation-size);
-  font-weight: var(--workspace-type-navigation-weight);
-}
-
-.dashboard-panel-link:hover {
-  color: var(--workspace-work-accent-hover);
-  text-decoration: underline;
-  text-underline-offset: 3px;
-}
-
-.dashboard-panel-link:focus-visible {
-  outline: 2px solid var(--workspace-work-accent);
-  outline-offset: 3px;
-}
-
-.dashboard-usage-summary {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  border-bottom: 1px solid var(--workspace-border);
-}
-
-.dashboard-usage-summary > div {
-  min-width: 0;
-  padding: 17px 20px;
-}
-
-.dashboard-usage-summary > div + div {
-  border-left: 1px solid var(--workspace-border);
-}
-
-.dashboard-usage-summary span {
-  display: block;
-  color: var(--workspace-work-text-muted);
-  font-size: var(--workspace-type-secondary-size);
-  font-weight: var(--workspace-type-secondary-weight);
-  line-height: 1rem;
-}
-
-.dashboard-usage-summary strong {
-  display: block;
-  overflow: hidden;
-  margin-top: 5px;
-  color: var(--workspace-work-text);
-  font-size: var(--workspace-type-body-size);
-  font-weight: var(--workspace-type-body-weight);
-  line-height: 1.5rem;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-variant-numeric: tabular-nums;
-}
-
-.dashboard-usage-summary > div:last-child strong {
-  color: var(--workspace-work-accent-deep);
-}
-
-.dashboard-model-list__head,
-.dashboard-model-row {
-  display: grid;
-  grid-template-columns: minmax(12rem, 1.6fr) repeat(3, minmax(5.5rem, 0.55fr));
-  align-items: center;
-  column-gap: var(--workspace-space-4);
-}
-
-.dashboard-model-list__head {
-  min-height: 38px;
-  padding: 0 20px;
-  border-bottom: 1px solid var(--workspace-border);
-  color: var(--workspace-work-text-muted);
-  font-size: var(--workspace-type-secondary-size);
-  font-weight: var(--workspace-type-secondary-weight);
-}
-
-.dashboard-model-list__head span:not(:first-child) {
-  text-align: right;
-}
-
-.dashboard-model-rows {
-  padding: 0 20px;
-}
-
-.dashboard-model-row {
-  min-height: 68px;
-  border-bottom: 1px solid var(--workspace-divider);
-}
-
-.dashboard-model-row:last-child {
-  border-bottom: 0;
-}
-
-.dashboard-model-row__identity {
-  min-width: 0;
-}
-
-.dashboard-model-row__name {
-  display: block;
-  overflow: hidden;
-  color: var(--workspace-work-text);
-  font-size: var(--workspace-type-body-size);
-  font-weight: var(--workspace-type-body-weight);
-  line-height: 1.15rem;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.dashboard-model-row__track {
-  display: block;
-  width: min(100%, 13rem);
-  height: 3px;
-  overflow: hidden;
-  margin-top: 8px;
-  border-radius: 999px;
-  background: var(--workspace-work-track);
-}
-
-.dashboard-model-row__track > span {
-  display: block;
-  height: 100%;
-  border-radius: inherit;
-  background: var(--workspace-work-accent);
-}
-
-.dashboard-model-row:nth-child(2) .dashboard-model-row__track > span {
-  background: var(--workspace-work-chart-primary);
-}
-
-.dashboard-model-row:nth-child(3) .dashboard-model-row__track > span {
-  background: var(--workspace-work-chart-secondary);
-}
-
-.dashboard-model-row:nth-child(n + 4) .dashboard-model-row__track > span {
-  background: var(--workspace-work-accent-border-strong);
-}
-
-.dashboard-model-row__metric {
-  overflow: hidden;
-  color: var(--workspace-work-text-muted);
-  font-size: var(--workspace-type-secondary-size);
-  font-weight: var(--workspace-type-secondary-weight);
-  font-variant-numeric: tabular-nums;
-  text-align: right;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.dashboard-model-loading,
-.dashboard-model-empty {
+.dashboard-period-select {
+  position: relative;
   display: flex;
-  min-height: 286px;
-  flex-direction: column;
+  min-height: 40px;
+  align-items: center;
+  z-index: 1;
+}
+
+.dashboard-period-select__trigger {
+  display: flex;
+  min-width: 142px;
+  min-height: 40px;
+  align-items: center;
+  gap: var(--workspace-space-3);
+  padding: 0 var(--workspace-space-3);
+  border: 0;
+  border-radius: 0;
+  color: var(--workspace-dashboard-period-text);
+  background: var(--workspace-canvas);
+  font-size: var(--workspace-type-body-size);
+  font-weight: var(--workspace-type-body-weight);
+  line-height: 1.25rem;
+  cursor: pointer;
+}
+
+.dashboard-period-select__trigger:focus {
+  outline: none;
+}
+
+.dashboard-period-select__trigger:focus-visible {
+  outline: none;
+}
+
+.dashboard-period-select__label {
+  color: var(--workspace-dashboard-text-subtle);
+  font-weight: var(--workspace-type-navigation-weight);
+  white-space: nowrap;
+}
+
+.dashboard-period-select__value {
+  color: var(--workspace-dashboard-period-text);
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.dashboard-period-select__icon {
+  flex: 0 0 auto;
+  margin-left: auto;
+  color: var(--workspace-dashboard-text-muted);
+}
+
+.dashboard-period-select.is-open {
+  z-index: 30;
+}
+
+.dashboard-period-select.is-open .dashboard-period-select__trigger {
+  background: transparent;
+}
+
+.dashboard-period-select.is-open .dashboard-period-select__trigger:focus-visible {
+  outline: none;
+}
+
+.dashboard-period-select__menu {
+  position: absolute;
+  top: calc(100% + var(--workspace-space-2));
+  right: 0;
+  z-index: 40;
+  width: 128px;
+  padding: var(--workspace-space-2) 0;
+  border: 1px solid var(--workspace-dashboard-card-border);
+  border-radius: 16px;
+  background: var(--workspace-card-surface);
+  box-shadow: var(--workspace-dashboard-card-shadow);
+}
+
+.dashboard-period-select__option {
+  display: flex;
+  width: 100%;
+  min-height: 32px;
+  align-items: center;
+  padding: var(--workspace-space-2) var(--workspace-space-4);
+  border: 0;
+  color: var(--workspace-dashboard-text-heading);
+  background: transparent;
+  font-size: var(--workspace-type-secondary-size);
+  font-weight: var(--workspace-type-body-weight);
+  line-height: 1rem;
+  text-align: left;
+  cursor: pointer;
+}
+
+.dashboard-period-select__option:hover {
+  background: var(--workspace-dashboard-hover);
+}
+
+.dashboard-period-dropdown-enter-active,
+.dashboard-period-dropdown-leave-active {
+  transition: opacity 120ms ease, transform 120ms ease;
+  transform-origin: top right;
+}
+
+.dashboard-period-dropdown-enter-from,
+.dashboard-period-dropdown-leave-to {
+  opacity: 0;
+  transform: translateY(-4px) scale(0.98);
+}
+
+.dashboard-usage__grid {
+  display: grid;
+  grid-template-columns: minmax(0, 3fr) minmax(20rem, 2fr);
+  gap: var(--workspace-space-6);
+  align-items: stretch;
+}
+
+.dashboard-usage__side {
+  display: grid;
+  min-width: 0;
+  gap: var(--workspace-space-6);
+}
+
+.dashboard-chart-card {
+  min-width: 0;
+  padding: var(--workspace-space-6);
+  border: 1px solid var(--workspace-dashboard-card-border);
+  border-radius: 24px;
+  background: var(--workspace-card-surface);
+  box-shadow: var(--workspace-dashboard-card-shadow);
+}
+
+.dashboard-chart-card__heading {
+  display: flex;
+  min-width: 0;
+  min-height: 36px;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 8px;
+  white-space: nowrap;
+}
+
+.dashboard-chart-card__heading h3 {
+  flex: 0 0 auto;
+  color: var(--workspace-dashboard-text-heading);
+  font-size: var(--workspace-type-navigation-size);
+  font-weight: 700;
+  line-height: 1.25rem;
+}
+
+.dashboard-chart-card__heading > span {
+  overflow: hidden;
+  color: var(--workspace-dashboard-text-subtle);
+  font-size: var(--workspace-type-navigation-size);
+  font-weight: var(--workspace-type-body-weight);
+  line-height: 1.25rem;
+  letter-spacing: -0.025em;
+  text-overflow: ellipsis;
+  font-variant-numeric: tabular-nums;
+}
+
+.dashboard-chart-card--credits .dashboard-chart-card__heading {
+  min-height: 52px;
+  margin-bottom: var(--workspace-space-8);
+}
+
+.dashboard-chart-card--requests .dashboard-chart-card__heading {
+  margin-bottom: var(--workspace-space-1);
+}
+
+.dashboard-chart {
+  position: relative;
+  min-width: 0;
+}
+
+.dashboard-chart--credits {
+  height: 320px;
+}
+
+.dashboard-chart--token {
+  height: 168px;
+}
+
+.dashboard-chart--requests {
+  height: 86px;
+}
+
+.dashboard-chart__state {
+  display: flex;
+  width: 100%;
+  height: 100%;
   align-items: center;
   justify-content: center;
-  gap: 10px;
-  padding: 32px;
-  color: var(--workspace-work-text-muted);
-  font-size: var(--workspace-type-body-size);
-  font-weight: var(--workspace-type-body-weight);
+}
+
+.dashboard-chart__empty {
+  color: var(--workspace-dashboard-text-muted);
+  font-size: var(--workspace-type-secondary-size);
+  font-weight: var(--workspace-type-secondary-weight);
   text-align: center;
 }
 
-.dashboard-model-empty :deep(svg) {
-  color: var(--workspace-work-accent);
-}
+@media (max-width: 1279px) {
+  .dashboard-usage__grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
 
-.dashboard-model-empty a {
-  min-height: 32px;
-  color: var(--workspace-work-accent-hover);
-  font-size: var(--workspace-type-navigation-size);
-  font-weight: var(--workspace-type-navigation-weight);
-  text-decoration: underline;
-  text-underline-offset: 3px;
+  .dashboard-usage__side {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 
 @media (max-width: 767px) {
-  .dashboard-panel-link,
-  .dashboard-model-empty a {
+  .dashboard-usage__header {
+    align-items: flex-start;
+  }
+
+  .dashboard-period-select {
     min-height: 44px;
   }
 
-  .dashboard-model-empty a {
-    display: inline-flex;
-    align-items: center;
+  .dashboard-period-select__trigger {
+    min-height: 42px;
   }
 
-  .dashboard-model-list__head {
-    display: none;
+  .dashboard-usage__side {
+    grid-template-columns: minmax(0, 1fr);
   }
 
-  .dashboard-model-rows {
-    padding: 0 18px;
+  .dashboard-chart-card {
+    padding: 18px;
   }
 
-  .dashboard-model-row {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-    row-gap: 11px;
-    padding: 16px 0;
-  }
-
-  .dashboard-model-row__identity {
-    grid-column: 1 / -1;
-  }
-
-  .dashboard-model-row__metric {
-    display: flex;
-    min-width: 0;
-    flex-direction: column;
-    gap: 3px;
-    text-align: left;
-  }
-
-  .dashboard-model-row__metric::before {
-    color: var(--workspace-work-text-muted);
-    content: attr(data-label);
-    font-size: var(--workspace-type-secondary-size);
-    font-weight: var(--workspace-type-secondary-weight);
+  .dashboard-chart--credits {
+    height: 260px;
   }
 }
 
 @media (max-width: 479px) {
-  .dashboard-panel-header {
-    align-items: flex-start;
-    padding: 16px 18px;
+  .dashboard-usage__header {
+    flex-direction: column;
   }
 
-  .dashboard-usage-summary > div {
-    padding: 14px 12px;
+  .dashboard-period-select {
+    width: 100%;
+  }
+
+  .dashboard-period-select__trigger {
+    width: 100%;
+    justify-content: flex-start;
   }
 }
 
-:global(html.dark) .dashboard-panel {
-  border-color: var(--workspace-border);
+:global(html.dark) .dashboard-chart-card,
+:global(html.dark) .dashboard-period-select__menu {
+  border-color: var(--workspace-dashboard-card-border);
   background: var(--workspace-card-surface);
-  box-shadow: none;
+  box-shadow: var(--workspace-dashboard-card-shadow);
 }
 
-:global(html.dark) .dashboard-panel-header,
-:global(html.dark) .dashboard-usage-summary,
-:global(html.dark) .dashboard-usage-summary > div + div,
-:global(html.dark) .dashboard-model-list__head {
-  border-color: var(--workspace-border);
+:global(html.dark) .dashboard-usage__header h2,
+:global(html.dark) .dashboard-period-select__value {
+  color: var(--workspace-dashboard-text-strong);
 }
 
-:global(html.dark) .dashboard-panel-header h2,
-:global(html.dark) .dashboard-usage-summary strong,
-:global(html.dark) .dashboard-model-row__name {
-  color: var(--workspace-dark-text);
+:global(html.dark) .dashboard-chart-card__heading h3 {
+  color: var(--workspace-dashboard-text-heading);
 }
 
-:global(html.dark) .dashboard-panel-header p,
-:global(html.dark) .dashboard-usage-summary span,
-:global(html.dark) .dashboard-model-row__metric {
-  color: var(--workspace-dark-text-muted);
+:global(html.dark) .dashboard-chart-card__heading > span {
+  color: var(--workspace-dashboard-text-subtle);
 }
 
-:global(html.dark) .dashboard-model-row {
-  border-color: var(--workspace-border);
+:global(html.dark) .dashboard-chart__empty {
+  color: var(--workspace-dashboard-text-subtle);
 }
 
-:global(html.dark) .dashboard-model-row__track {
-  background: var(--workspace-border);
+:global(html.dark) .dashboard-period-select__trigger {
+  color: var(--workspace-dashboard-period-text);
+  background: var(--workspace-canvas);
 }
 
+:global(html.dark) .dashboard-period-select__option {
+  color: var(--workspace-dashboard-text-heading);
+}
 </style>

@@ -1242,7 +1242,11 @@ FOR UPDATE OF o, s`, runSourceID, namespace, externalID).Scan(
 		}, nil
 	}
 	input.DesiredSkill.Slug = marketSlug
-	var stagedPackageData []byte
+	// Keep the interface itself nil for unchanged packages so database/sql sends
+	// SQL NULL. A typed nil []byte is encoded by lib/pq as an empty bytea (\\x),
+	// which violates the staging constraint that permits only NULL or non-empty
+	// retryable package bytes.
+	var stagedPackageData any
 	var stagedSkillID, stagedVersionID any
 	if !originSkillID.Valid {
 		result.Action = service.SkillImportStageActionCreate

@@ -1,99 +1,99 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
-import { createI18n } from 'vue-i18n'
-import CreditAmount from '@/components/common/CreditAmount.vue'
 import UserDashboardStats from '../UserDashboardStats.vue'
 
-const i18n = createI18n({
-  legacy: false,
-  locale: 'zh',
-  messages: {
-    zh: {
-      dashboard: {
-        accountMetrics: '账户指标',
-        workspace: {
-          balance: '可用余额',
-          balanceHint: '余额说明',
-          manageBalance: '管理余额',
-          todayUsage: '今日使用',
-          todayRequestsHint: '今日共 {count} 次请求',
-          viewUsage: '查看使用记录',
-          tokenConsumption: 'Token 消耗',
-          tokenBreakdownHint: '输入 {input} · 输出 {output}',
-          currentPlan: '当前套餐',
-          planLoading: '正在读取套餐信息',
-          planExpires: '有效期至 {date}',
-          planNoExpiry: '当前套餐长期有效',
-          planFlexible: '按需使用，随时管理',
-          managePlan: '管理套餐',
-        },
-      },
-    },
-  },
+vi.mock('vue-i18n', async () => {
+  const actual = await vi.importActual<typeof import('vue-i18n')>('vue-i18n')
+  const { ref } = await import('vue')
+  const messages: Record<string, string> = {
+    'dashboard.accountMetrics': '账户指标',
+    'dashboard.workspace.accountBalance': '账户余额',
+    'dashboard.workspace.planQuota': '{plan}额度',
+    'dashboard.workspace.planLoading': '正在读取套餐信息',
+    'dashboard.workspace.remaining': '剩余',
+    'dashboard.workspace.cumulativeTokens': '累计Token',
+    'dashboard.workspace.cumulativeSpend': '累计积分消耗',
+    'dashboard.workspace.creditsUnit': '积分',
+    'dashboard.workspace.tokenUnit': 'Token',
+    'dashboard.workspace.tokenBreakdownHint': '输入 {input} · 输出 {output}',
+    'payment.tabTopUp': '充值',
+  }
+  return {
+    ...actual,
+    useI18n: () => ({
+      locale: ref('zh'),
+      t: (key: string, params: Record<string, unknown> = {}) => Object.entries(params)
+        .reduce((text, [name, value]) => text.replace(`{${name}}`, String(value)), messages[key] ?? key),
+    }),
+  }
 })
 
 const stats = {
-  today_actual_cost: 1.25,
-  today_requests: 3,
-  today_tokens: 162,
-  today_input_tokens: 100,
-  today_output_tokens: 62,
+  total_tokens: 200,
+  total_input_tokens: 100,
+  total_output_tokens: 50,
+  total_cache_creation_tokens: 20,
+  total_cache_read_tokens: 30,
+  total_actual_cost: 3420,
 } as never
 
 function mountStats(overrides: Record<string, unknown> = {}) {
   return mount(UserDashboardStats, {
     props: {
       stats,
-      balance: 0.66,
-      planName: 'Pro',
-      planExpiresAt: '2026-08-31T00:00:00Z',
+      balance: 1280,
+      planName: 'Ultra',
+      quotaRemainingPercent: 72.8,
       planLoading: false,
-      subscriptionsLoaded: true,
-      hasActiveSubscription: true,
       ...overrides,
     },
     global: {
-      plugins: [i18n],
       stubs: {
-        Icon: true,
-        RouterLink: { props: ['to'], template: '<a :href="to"><slot /></a>' },
+        RouterLink: {
+          props: ['to'],
+          template: '<a :href="to"><slot /></a>',
+        },
       },
     },
   })
 }
 
 describe('UserDashboardStats', () => {
-  it('renders the four end-user overview cards requested by the workspace IA', () => {
+  it('renders the four stable account status cards from real summary data', () => {
     const wrapper = mountStats()
 
     expect(wrapper.get('[data-testid="dashboard-metric-grid"]').findAll('.dashboard-metric-card')).toHaveLength(4)
-    expect(wrapper.text()).toContain('dashboard.workspace.balance')
-    expect(wrapper.text()).toContain('dashboard.workspace.todayUsage')
-    expect(wrapper.text()).toContain('dashboard.workspace.tokenConsumption')
-    expect(wrapper.text()).toContain('dashboard.workspace.currentPlan')
-    expect(wrapper.text()).toContain('Pro')
-    expect(wrapper.text()).toContain('dashboard.workspace.todayRequestsHint')
-    expect(wrapper.text()).toContain('dashboard.workspace.tokenBreakdownHint')
+    expect(wrapper.text()).toContain('账户余额')
+    expect(wrapper.text()).toContain('1,280')
+    expect(wrapper.text()).toContain('Ultra额度')
+    expect(wrapper.text()).toContain('72.8%')
+    expect(wrapper.text()).toContain('累计Token')
+    expect(wrapper.text()).toContain('200')
+    expect(wrapper.text()).toContain('累计积分消耗')
+    expect(wrapper.text()).toContain('3,420')
+
+    const recharge = wrapper.get('[data-testid="dashboard-balance-recharge"]')
+    expect(recharge.text()).toBe('充值')
+    expect(recharge.attributes('href')).toBe('/purchase')
   })
 
-  it('uses the current balance and today actual cost without surfacing lifetime admin-like metrics', () => {
+  it('keeps the cumulative token breakdown weak and reconciled with cached input', () => {
     const wrapper = mountStats()
-    const credits = wrapper.findAllComponents(CreditAmount)
 
-    expect(credits.map(component => component.props('value'))).toEqual(['0.66', '1.25'])
-    expect(wrapper.text()).not.toContain('历史消耗')
-    expect(wrapper.text()).not.toContain('RPM')
-    expect(wrapper.text()).not.toContain('TPM')
+    expect(wrapper.get('.dashboard-metric-card__detail').text()).toBe('输入 150 · 输出 50')
+    expect(wrapper.findAll('a')).toHaveLength(1)
   })
 
-  it('uses Free as the membership label when there is no active subscription', () => {
-    const wrapper = mountStats({
-      planName: 'Free',
-      planExpiresAt: null,
-      hasActiveSubscription: false,
-    })
+  it.each([
+    [72.8, 'healthy'],
+    [35, 'attention'],
+    [12, 'critical'],
+    [null, 'neutral'],
+  ])('maps %s percent remaining to the %s quota state', (quotaRemainingPercent, tone) => {
+    const wrapper = mountStats({ quotaRemainingPercent })
 
-    expect(wrapper.text()).toContain('Free')
-    expect(wrapper.text()).toContain('dashboard.workspace.planFlexible')
+    expect(wrapper.get('.dashboard-quota-track__value').classes()).toContain(
+      `dashboard-quota-track__value--${tone}`,
+    )
   })
 })

@@ -33,6 +33,8 @@ const (
 	ChatAttachmentStatusPending = "pending"
 	ChatAttachmentStatusExpired = "expired"
 	ChatAttachmentStatusDeleted = "deleted"
+
+	libraryAliasLifetimeYears = 100
 )
 
 var (
@@ -51,6 +53,9 @@ type ChatAttachment struct {
 	ID        string    `json:"id"`
 	Name      string    `json:"name"`
 	Kind      string    `json:"kind"`
+	Category  string    `json:"category,omitempty"`
+	Type      string    `json:"type,omitempty"`
+	Source    string    `json:"source,omitempty"`
 	MIMEType  string    `json:"mime_type"`
 	Size      int64     `json:"size"`
 	Status    string    `json:"status"`
@@ -58,12 +63,17 @@ type ChatAttachment struct {
 	PageCount int       `json:"page_count,omitempty"`
 	Width     int       `json:"width,omitempty"`
 	Height    int       `json:"height,omitempty"`
+	CreatedAt time.Time `json:"created_at,omitempty"`
+	UpdatedAt time.Time `json:"updated_at,omitempty"`
 
-	Format        string `json:"-"`
-	StorageKey    string `json:"-"`
-	StoredSize    int64  `json:"-"`
-	Digest        string `json:"-"`
-	ExtractedText string `json:"-"`
+	Format        string     `json:"-"`
+	IsLibrary     bool       `json:"-"`
+	LibraryFileID int64      `json:"-"`
+	LastUsedAt    *time.Time `json:"-"`
+	StorageKey    string     `json:"-"`
+	StoredSize    int64      `json:"-"`
+	Digest        string     `json:"-"`
+	ExtractedText string     `json:"-"`
 }
 
 type CreateChatAttachmentInput struct {
@@ -111,9 +121,13 @@ type ChatModelContextMessage struct {
 }
 
 type ChatAttachmentService struct {
-	repo  ChatAttachmentRepository
-	store ChatAttachmentBlobStore
-	cfg   config.ChatAttachmentConfig
+	repo         ChatAttachmentRepository
+	store        ChatAttachmentBlobStore
+	library      *LibraryService
+	libraryImage *LibraryService
+	libraryStore LibraryBlobStore
+	cfg          config.ChatAttachmentConfig
+	libraryCfg   config.LibraryConfig
 
 	mu           sync.Mutex
 	cancel       context.CancelFunc
@@ -123,6 +137,51 @@ type ChatAttachmentService struct {
 }
 
 func NewChatAttachmentService(repo ChatAttachmentRepository, store ChatAttachmentBlobStore, cfg *config.Config) *ChatAttachmentService {
+	return newChatAttachmentService(repo, store, nil, cfg)
+}
+
+// ProvideChatAttachmentService is the production constructor. The legacy
+// NewChatAttachmentService remains available to tests and chat-only callers
+// which never resolve durable library objects.
+func ProvideChatAttachmentService(
+	repo ChatAttachmentRepository,
+	store ChatAttachmentBlobStore,
+	library *LibraryService,
+	cfg *config.Config,
+) *ChatAttachmentService {
+	service := newChatAttachmentService(repo, store, nil, cfg)
+	if library != nil {
+		service.library = library
+		service.libraryImage = library
+		service.libraryStore = library.store
+	}
+	return service
+}
+
+// NewChatAttachmentServiceWithLibraryStore allows focused tests to inject a
+// private library object store without changing the legacy constructor.
+func NewChatAttachmentServiceWithLibraryStore(
+	repo ChatAttachmentRepository,
+	store ChatAttachmentBlobStore,
+	libraryStore LibraryBlobStore,
+	cfg *config.Config,
+) *ChatAttachmentService {
+	service := newChatAttachmentService(repo, store, libraryStore, cfg)
+	if libraryStore != nil {
+		// Focused/legacy callers can still exercise the same bounded image
+		// renderer without enabling durable-upload delegation (which requires a
+		// real LibraryFileRepository).
+		service.libraryImage = NewLibraryService(nil, libraryStore, cfg)
+	}
+	return service
+}
+
+func newChatAttachmentService(
+	repo ChatAttachmentRepository,
+	store ChatAttachmentBlobStore,
+	libraryStore LibraryBlobStore,
+	cfg *config.Config,
+) *ChatAttachmentService {
 	attachmentCfg := config.ChatAttachmentConfig{
 		StorageDir: "./data/chat-attachments", RetentionDays: 30, MaxPerTurn: 4,
 		MaxTurnBytes: 20 << 20, MaxImageBytes: 10 << 20, MaxDocumentBytes: 20 << 20,
@@ -130,10 +189,20 @@ func NewChatAttachmentService(repo ChatAttachmentRepository, store ChatAttachmen
 		JanitorIntervalMinutes: 60, CleanupBatchSize: 100,
 		UploadsPerMinute: 10, DailyUploadBytes: 100 << 20, MaxConcurrentGlobal: 4, MaxConcurrentPerUser: 2,
 	}
+	libraryCfg := config.LibraryConfig{
+		StorageDriver: "local", StorageDir: "./data/library-files",
+		DefaultStorageBytes: 0, MaxFileBytes: 20 << 20,
+		BatchDownloadLimit: 100, BatchDownloadMaxBytes: 100 << 20,
+		DeletedRetentionDays: 30, PendingUploadStaleMinutes: 60, CleanupIntervalMinutes: 60, CleanupBatchSize: 100,
+	}
 	if cfg != nil {
 		attachmentCfg = cfg.ChatAttachments
+		libraryCfg = cfg.Library
 	}
-	return &ChatAttachmentService{repo: repo, store: store, cfg: attachmentCfg, activeByUser: make(map[int64]int)}
+	return &ChatAttachmentService{
+		repo: repo, store: store, libraryStore: libraryStore, cfg: attachmentCfg, libraryCfg: libraryCfg,
+		activeByUser: make(map[int64]int),
+	}
 }
 
 func (s *ChatAttachmentService) Upload(ctx context.Context, userID int64, input ChatAttachmentUpload) (*ChatAttachment, error) {
@@ -151,6 +220,12 @@ func (s *ChatAttachmentService) AdmitUpload(userID int64) (func(), error) {
 	if s == nil || userID <= 0 {
 		return nil, ErrChatAttachmentUnavailable
 	}
+	// Production chat uploads are persisted by LibraryService. Share its
+	// admission counter so simultaneous Chat and Library requests cannot each
+	// consume a separate copy of the configured global parser/memory budget.
+	if s.library != nil {
+		return s.library.AdmitUpload(userID)
+	}
 	release, admitted := s.admitUpload(userID)
 	if !admitted {
 		return nil, ErrChatAttachmentRateLimit
@@ -161,6 +236,15 @@ func (s *ChatAttachmentService) AdmitUpload(userID int64) (func(), error) {
 func (s *ChatAttachmentService) UploadAdmitted(ctx context.Context, userID int64, input ChatAttachmentUpload) (*ChatAttachment, error) {
 	if s == nil || s.repo == nil || s.store == nil || userID <= 0 {
 		return nil, ErrChatAttachmentUnavailable
+	}
+	if s.library != nil {
+		file, err := s.library.UploadAdmitted(ctx, userID, LibraryUpload{
+			Filename: input.Filename, DeclaredMIME: input.DeclaredMIME, Data: input.Data,
+		}, "uploaded")
+		if err != nil {
+			return nil, err
+		}
+		return libraryFileAsChatAttachment(file), nil
 	}
 	name := strings.TrimSpace(filepath.Base(strings.ReplaceAll(input.Filename, "\\", "/")))
 	if name == "" || name == "." || utf8.RuneCountInString(name) > 255 || len(input.Data) == 0 {
@@ -245,21 +329,57 @@ func (s *ChatAttachmentService) UploadAdmitted(ctx context.Context, userID int64
 	return created, nil
 }
 
+func libraryFileAsChatAttachment(file *LibraryFile) *ChatAttachment {
+	if file == nil {
+		return nil
+	}
+	kind := ChatAttachmentKindDocument
+	if file.Category == "image" || file.Type == "image" {
+		kind = ChatAttachmentKindImage
+	}
+	return &ChatAttachment{
+		ID: file.ID, Name: file.Name, Kind: kind, Category: file.Category, Type: file.Type,
+		Source: file.Source, MIMEType: file.MIMEType, Size: file.Size, Status: file.Status,
+		PageCount: file.PageCount, Width: file.Width, Height: file.Height,
+		ExpiresAt: time.Now().UTC().AddDate(libraryAliasLifetimeYears, 0, 0),
+		CreatedAt: file.CreatedAt, UpdatedAt: file.UpdatedAt,
+		Format: file.Format, IsLibrary: true, LibraryFileID: file.InternalID,
+		LastUsedAt: file.LastUsedAt, StorageKey: file.StorageKey, StoredSize: file.StoredSize, Digest: file.Digest,
+	}
+}
+
 func (s *ChatAttachmentService) GetImageContent(ctx context.Context, userID int64, publicID string) (*ChatAttachmentContent, error) {
-	if s == nil || s.repo == nil || s.store == nil || userID <= 0 || !validChatHistoryPublicID(strings.TrimSpace(publicID)) {
+	if s == nil || s.repo == nil || userID <= 0 || !validChatHistoryPublicID(strings.TrimSpace(publicID)) {
 		return nil, ErrChatAttachmentNotFound
 	}
 	attachment, err := s.repo.GetOwned(ctx, userID, strings.TrimSpace(publicID))
 	if err != nil || attachment == nil || attachment.Kind != ChatAttachmentKindImage ||
-		attachment.Status != ChatAttachmentStatusReady || !attachment.ExpiresAt.After(time.Now().UTC()) || attachment.StorageKey == "" {
+		attachment.Status != ChatAttachmentStatusReady || (!attachment.IsLibrary && !attachment.ExpiresAt.After(time.Now().UTC())) || attachment.StorageKey == "" {
 		return nil, ErrChatAttachmentNotFound
 	}
-	data, err := s.store.Get(ctx, attachment.StorageKey)
-	if err != nil {
-		return nil, ErrChatAttachmentUnavailable.WithCause(err)
-	}
-	if !chatAttachmentDigestMatches(data, attachment.Digest) {
-		return nil, ErrChatAttachmentUnavailable.WithCause(errors.New("chat attachment digest mismatch"))
+	var data []byte
+	if attachment.IsLibrary || attachment.LibraryFileID > 0 {
+		var mimeType string
+		data, mimeType, err = s.libraryImageData(ctx, *attachment, "thumbnail")
+		if err != nil {
+			return nil, err
+		}
+		copyAttachment := *attachment
+		copyAttachment.MIMEType = mimeType
+		copyAttachment.Size = int64(len(data))
+		copyAttachment.StoredSize = copyAttachment.Size
+		attachment = &copyAttachment
+	} else {
+		if s.store == nil {
+			return nil, ErrChatAttachmentUnavailable
+		}
+		data, err = s.store.Get(ctx, attachment.StorageKey)
+		if err != nil {
+			return nil, ErrChatAttachmentUnavailable.WithCause(err)
+		}
+		if !chatAttachmentDigestMatches(data, attachment.Digest) {
+			return nil, ErrChatAttachmentUnavailable.WithCause(errors.New("chat attachment digest mismatch"))
+		}
 	}
 	return &ChatAttachmentContent{Attachment: attachment, Data: data}, nil
 }
@@ -467,11 +587,31 @@ func (s *ChatAttachmentService) BuildModelContext(ctx context.Context, messages 
 	if documentBudget <= 0 {
 		documentBudget = 256 << 10
 	}
+	// Raw durable files are base64-embedded upstream. Bound their aggregate
+	// encoded size and count across the whole history (newest first), rather
+	// than applying only the per-turn upload limit and allowing every previous
+	// turn to accumulate indefinitely.
+	rawDocumentBytes := s.cfg.MaxTurnBytes
+	if rawDocumentBytes <= 0 {
+		rawDocumentBytes = 20 << 20
+	}
+	rawDocumentRawBudget := rawDocumentBytes
+	rawDocumentEncodedBudget := ((rawDocumentBytes + 2) / 3) * 4
+	rawDocumentCountBudget := s.cfg.MaxPerTurn
+	if rawDocumentCountBudget <= 0 {
+		rawDocumentCountBudget = 4
+	}
 	imageCountBudget := s.cfg.ContextMaxImages
 	if imageCountBudget <= 0 {
 		imageCountBudget = 4
 	}
+	// Rendering work has its own raw-byte ceiling. It is consumed before a
+	// private object is opened, so old oversized images cannot force repeated
+	// full-resolution decode/re-encode work merely to discover that the safe
+	// rendition does not fit the outgoing context budget.
+	imageRenderRawBudget := imageBudget
 	selected := make(map[[2]int]struct{})
+	imagePayloads := make(map[[2]int]chatModelImagePayload)
 	now := time.Now().UTC()
 	// Spend budgets newest-message-first so the current turn wins over old
 	// context, while the second pass below preserves the original message and
@@ -479,7 +619,8 @@ func (s *ChatAttachmentService) BuildModelContext(ctx context.Context, messages 
 	for i := len(messages) - 1; i >= 0; i-- {
 		for j := range messages[i].Attachments {
 			attachment := messages[i].Attachments[j]
-			if attachment.Status != ChatAttachmentStatusReady || !attachment.ExpiresAt.After(now) {
+			isLibrary := attachment.LibraryFileID > 0
+			if attachment.Status != ChatAttachmentStatusReady || (!isLibrary && !attachment.ExpiresAt.After(now)) {
 				if i == len(messages)-1 {
 					return nil, false, ErrChatAttachmentNotFound
 				}
@@ -487,14 +628,63 @@ func (s *ChatAttachmentService) BuildModelContext(ctx context.Context, messages 
 			}
 			switch attachment.Kind {
 			case ChatAttachmentKindImage:
-				if imageCountBudget > 0 && attachment.StorageKey != "" && attachment.StoredSize > 0 && attachment.StoredSize <= imageBudget {
+				if imageCountBudget <= 0 {
+					if i == len(messages)-1 {
+						return nil, false, ErrChatAttachmentLimit
+					}
+					continue
+				}
+				imageSize := attachment.StoredSize
+				if isLibrary && attachment.StorageKey != "" && attachment.StoredSize > 0 {
+					if attachment.StoredSize > imageRenderRawBudget {
+						if i == len(messages)-1 {
+							return nil, false, ErrChatAttachmentLimit
+						}
+						continue
+					}
+					imageRenderRawBudget -= attachment.StoredSize
+					// Consume a work slot before rendering even when the eventual
+					// safe payload is too large for the remaining output budget.
+					imageCountBudget--
+					data, mimeType, err := s.modelImageData(ctx, attachment)
+					if err != nil {
+						return nil, false, err
+					}
+					imageSize = int64(len(data))
+					if imageSize > 0 && imageSize <= imageBudget {
+						selected[[2]int{i, j}] = struct{}{}
+						imageBudget -= imageSize
+						imagePayloads[[2]int{i, j}] = chatModelImagePayload{Data: data, MIMEType: mimeType}
+					} else if i == len(messages)-1 {
+						return nil, false, ErrChatAttachmentLimit
+					}
+					continue
+				}
+				if attachment.StorageKey != "" && imageSize > 0 && imageSize <= imageBudget {
 					selected[[2]int{i, j}] = struct{}{}
-					imageBudget -= attachment.StoredSize
+					imageBudget -= imageSize
 					imageCountBudget--
 				} else if i == len(messages)-1 {
 					return nil, false, ErrChatAttachmentLimit
 				}
 			case ChatAttachmentKindDocument:
+				if isLibrary {
+					encodedSize := ((attachment.StoredSize + 2) / 3) * 4
+					if attachment.StorageKey != "" && attachment.StoredSize > 0 &&
+						rawDocumentCountBudget > 0 && attachment.StoredSize <= rawDocumentRawBudget &&
+						encodedSize <= rawDocumentEncodedBudget {
+						selected[[2]int{i, j}] = struct{}{}
+						rawDocumentRawBudget -= attachment.StoredSize
+						rawDocumentEncodedBudget -= encodedSize
+						rawDocumentCountBudget--
+					} else if i == len(messages)-1 {
+						if attachment.StorageKey == "" || attachment.StoredSize <= 0 {
+							return nil, false, ErrChatAttachmentNotFound
+						}
+						return nil, false, ErrChatAttachmentLimit
+					}
+					continue
+				}
 				size := int64(len([]byte(attachment.ExtractedText)))
 				if size <= documentBudget {
 					selected[[2]int{i, j}] = struct{}{}
@@ -519,33 +709,46 @@ func (s *ChatAttachmentService) BuildModelContext(ctx context.Context, messages 
 		for j := range message.Attachments {
 			attachment := message.Attachments[j]
 			_, include := selected[[2]int{i, j}]
+			isLibrary := attachment.LibraryFileID > 0
 			switch attachment.Kind {
 			case ChatAttachmentKindImage:
 				if !include {
 					text += "\n\n[An image attachment was omitted because it is unavailable or exceeds the context budget.]"
 					continue
 				}
-				data, err := s.store.Get(ctx, attachment.StorageKey)
-				if err != nil {
-					return nil, false, ErrChatAttachmentUnavailable.WithCause(err)
-				}
-				if int64(len(data)) != attachment.StoredSize {
-					return nil, false, ErrChatAttachmentUnavailable.WithCause(errors.New("chat attachment size mismatch"))
-				}
-				if !chatAttachmentDigestMatches(data, attachment.Digest) {
-					return nil, false, ErrChatAttachmentUnavailable.WithCause(errors.New("chat attachment digest mismatch"))
+				payload, exists := imagePayloads[[2]int{i, j}]
+				if !exists {
+					data, mimeType, err := s.modelImageData(ctx, attachment)
+					if err != nil {
+						return nil, false, err
+					}
+					payload = chatModelImagePayload{Data: data, MIMEType: mimeType}
 				}
 				requiresVision = true
 				parts = append(parts, map[string]any{
 					"type":      "image_url",
-					"image_url": map[string]string{"url": "data:" + attachment.MIMEType + ";base64," + base64.StdEncoding.EncodeToString(data)},
+					"image_url": map[string]string{"url": "data:" + payload.MIMEType + ";base64," + base64.StdEncoding.EncodeToString(payload.Data)},
 				})
 			case ChatAttachmentKindDocument:
 				if !include {
 					text += "\n\n[Document attachment omitted because the document context budget was exhausted.]"
 					continue
 				}
-				text += untrustedAttachmentText(attachment.Name, attachment.ExtractedText)
+				if isLibrary {
+					data, err := s.readLibraryAttachment(ctx, attachment)
+					if err != nil {
+						return nil, false, err
+					}
+					parts = append(parts, map[string]any{
+						"type": "file",
+						"file": map[string]string{
+							"filename":  attachment.Name,
+							"file_data": "data:" + attachment.MIMEType + ";base64," + base64.StdEncoding.EncodeToString(data),
+						},
+					})
+				} else {
+					text += untrustedAttachmentText(attachment.Name, attachment.ExtractedText)
+				}
 			}
 		}
 		if text != "" || len(parts) == 0 {
@@ -558,6 +761,81 @@ func (s *ChatAttachmentService) BuildModelContext(ctx context.Context, messages 
 		result = append(result, ChatModelContextMessage{Role: message.Role, Content: encoded})
 	}
 	return result, requiresVision, nil
+}
+
+type chatModelImagePayload struct {
+	Data     []byte
+	MIMEType string
+}
+
+func (s *ChatAttachmentService) modelImageData(ctx context.Context, attachment ChatAttachment) ([]byte, string, error) {
+	if attachment.LibraryFileID <= 0 {
+		if s == nil || s.store == nil {
+			return nil, "", ErrChatAttachmentUnavailable
+		}
+		data, err := s.store.Get(ctx, attachment.StorageKey)
+		if err != nil {
+			return nil, "", ErrChatAttachmentUnavailable.WithCause(err)
+		}
+		if int64(len(data)) != attachment.StoredSize {
+			return nil, "", ErrChatAttachmentUnavailable.WithCause(errors.New("chat attachment size mismatch"))
+		}
+		if !chatAttachmentDigestMatches(data, attachment.Digest) {
+			return nil, "", ErrChatAttachmentUnavailable.WithCause(errors.New("chat attachment digest mismatch"))
+		}
+		return data, attachment.MIMEType, nil
+	}
+
+	return s.libraryImageData(ctx, attachment, "preview")
+}
+
+func (s *ChatAttachmentService) libraryImageData(ctx context.Context, attachment ChatAttachment, mode string) ([]byte, string, error) {
+	if s == nil || s.libraryImage == nil || attachment.LibraryFileID <= 0 {
+		return nil, "", ErrChatAttachmentUnavailable
+	}
+	rendition, err := s.libraryImage.renderSafeImage(ctx, &LibraryFile{
+		ID: attachment.ID, InternalID: attachment.LibraryFileID,
+		Name: attachment.Name, MIMEType: attachment.MIMEType,
+		Category: "image", Type: "image", Format: attachment.Format,
+		Size: attachment.Size, StoredSize: attachment.StoredSize,
+		StorageKey: attachment.StorageKey, Digest: attachment.Digest,
+	}, mode)
+	if err != nil {
+		return nil, "", ErrChatAttachmentUnavailable.WithCause(err)
+	}
+	return rendition.data, rendition.mimeType, nil
+}
+
+func (s *ChatAttachmentService) readLibraryAttachment(ctx context.Context, attachment ChatAttachment) ([]byte, error) {
+	if s == nil || s.libraryStore == nil || attachment.LibraryFileID <= 0 || attachment.StorageKey == "" || attachment.StoredSize <= 0 {
+		return nil, ErrChatAttachmentUnavailable
+	}
+	maxBytes := s.libraryCfg.MaxFileBytes
+	if maxBytes <= 0 {
+		maxBytes = 20 << 20
+	}
+	if attachment.StoredSize > maxBytes {
+		return nil, ErrChatAttachmentLimit
+	}
+	body, err := s.libraryStore.Open(ctx, attachment.StorageKey)
+	if err != nil {
+		return nil, ErrChatAttachmentUnavailable.WithCause(err)
+	}
+	data, readErr := io.ReadAll(io.LimitReader(body, attachment.StoredSize+1))
+	closeErr := body.Close()
+	if readErr != nil {
+		return nil, ErrChatAttachmentUnavailable.WithCause(readErr)
+	}
+	if closeErr != nil {
+		return nil, ErrChatAttachmentUnavailable.WithCause(closeErr)
+	}
+	if int64(len(data)) != attachment.StoredSize {
+		return nil, ErrChatAttachmentUnavailable.WithCause(errors.New("library attachment size mismatch"))
+	}
+	if !chatAttachmentDigestMatches(data, attachment.Digest) {
+		return nil, ErrChatAttachmentUnavailable.WithCause(errors.New("library attachment digest mismatch"))
+	}
+	return data, nil
 }
 
 func untrustedAttachmentText(name, content string) string {
@@ -584,7 +862,6 @@ func ValidateAttachmentSelection(attachments []ChatAttachment, cfg config.ChatAt
 	}
 	var total int64
 	seen := make(map[string]struct{}, len(attachments))
-	documents := 0
 	for i := range attachments {
 		if attachments[i].ID == "" {
 			return ErrChatAttachmentNotFound
@@ -593,13 +870,7 @@ func ValidateAttachmentSelection(attachments []ChatAttachment, cfg config.ChatAt
 			return ErrChatAttachmentLimit
 		}
 		seen[attachments[i].ID] = struct{}{}
-		if attachments[i].Kind == ChatAttachmentKindDocument {
-			documents++
-			if documents > 1 {
-				return ErrChatAttachmentLimit
-			}
-		}
-		if attachments[i].Status != ChatAttachmentStatusReady || !attachments[i].ExpiresAt.After(time.Now().UTC()) {
+		if attachments[i].Status != ChatAttachmentStatusReady || (attachments[i].LibraryFileID <= 0 && !attachments[i].ExpiresAt.After(time.Now().UTC())) {
 			return ErrChatAttachmentNotFound
 		}
 		if attachments[i].Size < 0 || total > maxBytes-attachments[i].Size {

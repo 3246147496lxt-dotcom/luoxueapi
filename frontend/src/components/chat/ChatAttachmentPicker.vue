@@ -268,11 +268,19 @@ import Icon from '@/components/icons/Icon.vue'
 import {
   CHAT_ATTACHMENT_ACCEPT,
   CHAT_ATTACHMENT_MAX_COUNT,
+  CHAT_ATTACHMENT_TOTAL_MAX_BYTES,
   attachmentFileKind,
   validateAttachmentFile,
   type ChatAttachmentDraft,
 } from './chatAttachmentUi'
 import type { ChatAttachment } from '@/types/chat'
+import type { LibraryFile } from '@/types/library'
+
+export interface ChatAttachmentReadySelection {
+  attachments: ChatAttachment[]
+  uploadAttachmentIds: string[]
+  libraryAttachments: Array<{ source: 'library'; fileId: string }>
+}
 
 type ChatToolIcon = 'upload' | 'library' | 'image' | 'web' | 'research'
   | 'github' | 'figma' | 'heygen' | 'gmail'
@@ -297,6 +305,7 @@ const emit = defineEmits<{
   change: [items: ChatAttachmentDraft[]]
   'busy-change': [busy: boolean]
   'valid-change': [valid: boolean]
+  'select-library': []
 }>()
 
 const { t } = useI18n()
@@ -330,7 +339,7 @@ const menuItems = computed<ChatToolMenuItem[]>(() => [
     icon: 'library',
     label: t('chat.tools.fileLibrary.label'),
     description: t('chat.tools.fileLibrary.description'),
-    available: false,
+    available: true,
   },
   {
     id: 'image',
@@ -584,7 +593,8 @@ function onMenuItemSelect(item: ChatToolMenuItem): void {
   }
   closeMenu(false)
   triggerRef.value?.focus({ preventScroll: true })
-  open()
+  if (item.id === 'library') emit('select-library')
+  else open()
 }
 
 function onTriggerKeydown(event: KeyboardEvent): void {
@@ -730,6 +740,7 @@ function addFiles(files: File[]): void {
         key,
         file,
         kind: validation.kind,
+        source: 'upload',
         state: 'uploading',
         progress: 0,
         ...(previewUrl ? { previewUrl } : {}),
@@ -738,6 +749,69 @@ function addFiles(files: File[]): void {
     publish()
     void startUpload(key)
   }
+}
+
+function addLibraryFiles(files: LibraryFile[]): void {
+  closeMenu(false)
+  if (props.disabled || files.length === 0) return
+  for (const file of files) {
+    if (drafts.value.some((draft) => draft.libraryFileId === file.id)) continue
+    if (drafts.value.length >= CHAT_ATTACHMENT_MAX_COUNT) {
+      showSelectionError(t('chat.attachments.errors.tooMany', {
+        count: CHAT_ATTACHMENT_MAX_COUNT,
+      }))
+      break
+    }
+    if (file.type === 'image' && !props.supportsVision) {
+      showSelectionError(t('chat.attachments.errors.visionUnsupported'))
+      continue
+    }
+    const selectedBytes = drafts.value.reduce((total, draft) => total + draft.file.size, 0)
+    if (
+      !Number.isFinite(file.size)
+      || file.size < 0
+      || selectedBytes > CHAT_ATTACHMENT_TOTAL_MAX_BYTES - file.size
+    ) {
+      showSelectionError(t('chat.attachments.errors.totalTooLarge', {
+        size: Math.round(CHAT_ATTACHMENT_TOTAL_MAX_BYTES / 1024 / 1024),
+      }))
+      continue
+    }
+    const kind = file.type === 'image' ? 'image' : 'document'
+    const syntheticFile = new File([], file.name, {
+      type: file.mimeType,
+      lastModified: Date.parse(file.updatedAt) || Date.now(),
+    })
+    Object.defineProperty(syntheticFile, 'size', { configurable: true, value: file.size })
+    drafts.value = [
+      ...drafts.value,
+      {
+        key: makeKey(),
+        file: syntheticFile,
+        kind,
+        source: 'library',
+        libraryFileId: file.id,
+        state: 'ready',
+        progress: 100,
+        attachment: {
+          id: file.id,
+          name: file.name,
+          kind,
+          mimeType: file.mimeType,
+          size: file.size,
+          status: 'ready',
+          // The chat attachment shape requires an expiry timestamp. Library
+          // lifecycle is actually governed by its durable row, so use the same
+          // far-future compatibility value as the backend alias.
+          expiresAt: '2126-01-01T00:00:00Z',
+          ...(file.pageCount ? { pageCount: file.pageCount } : {}),
+          ...(file.width ? { width: file.width } : {}),
+          ...(file.height ? { height: file.height } : {}),
+        },
+      },
+    ]
+  }
+  publish()
 }
 
 async function startUpload(key: string): Promise<void> {
@@ -840,7 +914,7 @@ function cancel(key: string): void {
 }
 
 function retry(key: string): void {
-  if (!drafts.value.some((draft) => draft.key === key)) return
+  if (!drafts.value.some((draft) => draft.key === key && draft.source !== 'library')) return
   void startUpload(key)
 }
 
@@ -852,7 +926,9 @@ function remove(key: string): void {
   drafts.value = drafts.value.filter((candidate) => candidate.key !== key)
   revokePreview(draft)
   publish()
-  if (draft.attachment?.id) void deleteChatAttachment(draft.attachment.id).catch(() => undefined)
+  if (draft.source !== 'library' && draft.attachment?.id) {
+    void deleteChatAttachment(draft.attachment.id).catch(() => undefined)
+  }
 }
 
 function getReadyAttachments(): ChatAttachment[] {
@@ -870,6 +946,24 @@ function getReadyAttachments(): ChatAttachment[] {
     ready.push(draft.attachment)
   }
   return ready
+}
+
+function getReadySelection(): ChatAttachmentReadySelection {
+  const attachments = getReadyAttachments()
+  const readyDrafts = drafts.value.filter((draft) => (
+    draft.state === 'ready' && Boolean(draft.attachment)
+  ))
+  return {
+    attachments,
+    uploadAttachmentIds: readyDrafts.flatMap((draft) => (
+      draft.source === 'library' || !draft.attachment ? [] : [draft.attachment.id]
+    )),
+    libraryAttachments: readyDrafts.flatMap((draft) => (
+      draft.source === 'library' && draft.libraryFileId
+        ? [{ source: 'library' as const, fileId: draft.libraryFileId }]
+        : []
+    )),
+  }
 }
 
 function commitAll(): void {
@@ -893,6 +987,7 @@ async function discardAll(): Promise<void> {
   }
   publish()
   await Promise.allSettled(previous
+    .filter((draft) => draft.source !== 'library')
     .map((draft) => draft.attachment?.id)
     .filter((id): id is string => Boolean(id))
     .map((id) => deleteChatAttachment(id)))
@@ -906,7 +1001,9 @@ onBeforeUnmount(() => {
   for (const draft of previous) {
     controllers.get(draft.key)?.abort()
     revokePreview(draft)
-    if (draft.attachment?.id) void deleteChatAttachment(draft.attachment.id).catch(() => undefined)
+    if (draft.source !== 'library' && draft.attachment?.id) {
+      void deleteChatAttachment(draft.attachment.id).catch(() => undefined)
+    }
   }
   controllers.clear()
 })
@@ -914,10 +1011,12 @@ onBeforeUnmount(() => {
 defineExpose({
   open,
   addFiles,
+  addLibraryFiles,
   cancel,
   retry,
   remove,
   getReadyAttachments,
+  getReadySelection,
   commitAll,
   discardAll,
 })

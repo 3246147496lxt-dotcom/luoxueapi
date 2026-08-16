@@ -38,9 +38,9 @@ export interface RecordedAudio {
 }
 
 interface UseAudioRecorderOptions {
-  maxDurationMs?: number
-  maxBytes?: number
-  acceptedMimeTypes?: readonly string[]
+  maxDurationMs?: number | (() => number)
+  maxBytes?: number | (() => number)
+  acceptedMimeTypes?: readonly string[] | (() => readonly string[])
   onMaximumDuration?: () => void
   onError?: (error: AudioRecorderError) => void
 }
@@ -51,6 +51,10 @@ function stopTracks(stream: MediaStream | null): void {
 
 function cancelledError(): AudioRecorderError {
   return new AudioRecorderError('RECORDING_CANCELLED', 'Audio recording was cancelled.')
+}
+
+function optionValue<T>(value: T | (() => T) | undefined, fallback: T): T {
+  return typeof value === 'function' ? (value as () => T)() : (value ?? fallback)
 }
 
 function normalizeCaptureError(error: unknown): AudioRecorderError {
@@ -93,15 +97,19 @@ export function preferredAudioMimeType(acceptedMimeTypes: readonly string[] = []
 }
 
 export function useAudioRecorder(options: UseAudioRecorderOptions = {}) {
-  const maxDurationMs = options.maxDurationMs ?? CHAT_AUDIO_MAX_DURATION_MS
-  const maxBytes = options.maxBytes ?? CHAT_AUDIO_MAX_BYTES
   const state = ref<AudioRecorderState>('idle')
   const elapsedMs = ref(0)
+  const audioLevel = ref(0)
   const error = ref<AudioRecorderError | null>(null)
   const supported = computed(audioRecordingSupported)
 
   let stream: MediaStream | null = null
   let mediaRecorder: MediaRecorder | null = null
+  let audioContext: AudioContext | null = null
+  let audioSource: MediaStreamAudioSourceNode | null = null
+  let audioAnalyser: AnalyserNode | null = null
+  let audioSamples: Uint8Array | null = null
+  let audioAnalysisFrame: number | null = null
   let chunks: Blob[] = []
   let startedAt = 0
   let requestedDurationMs = 0
@@ -110,6 +118,8 @@ export function useAudioRecorder(options: UseAudioRecorderOptions = {}) {
   let maximumTimer: ReturnType<typeof setTimeout> | null = null
   let stopResolve: ((recording: RecordedAudio) => void) | null = null
   let stopReject: ((reason: AudioRecorderError) => void) | null = null
+  let activeMaxDurationMs = CHAT_AUDIO_MAX_DURATION_MS
+  let activeMaxBytes = CHAT_AUDIO_MAX_BYTES
 
   function clearTimers(): void {
     if (elapsedTimer !== null) clearInterval(elapsedTimer)
@@ -118,7 +128,76 @@ export function useAudioRecorder(options: UseAudioRecorderOptions = {}) {
     maximumTimer = null
   }
 
+  function releaseAudioAnalysis(): void {
+    if (audioAnalysisFrame !== null && typeof cancelAnimationFrame === 'function') {
+      cancelAnimationFrame(audioAnalysisFrame)
+    }
+    audioAnalysisFrame = null
+    try {
+      audioSource?.disconnect()
+      audioAnalyser?.disconnect()
+    } catch {
+      // Audio nodes may already be disconnected when the capture device disappears.
+    }
+    audioSource = null
+    audioAnalyser = null
+    audioSamples = null
+    audioLevel.value = 0
+    const context = audioContext
+    audioContext = null
+    if (context) {
+      try {
+        void context.close().catch(() => undefined)
+      } catch {
+        // Closing an already-closed context is harmless for recorder cleanup.
+      }
+    }
+  }
+
+  function startAudioAnalysis(capturedStream: MediaStream): void {
+    if (typeof window === 'undefined' || typeof requestAnimationFrame !== 'function') return
+    const AudioContextConstructor = window.AudioContext
+      ?? (window as typeof window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext
+    if (!AudioContextConstructor) return
+
+    try {
+      audioContext = new AudioContextConstructor()
+      audioSource = audioContext.createMediaStreamSource(capturedStream)
+      audioAnalyser = audioContext.createAnalyser()
+      audioAnalyser.fftSize = 256
+      audioAnalyser.smoothingTimeConstant = 0.72
+      audioSamples = new Uint8Array(audioAnalyser.fftSize)
+      audioSource.connect(audioAnalyser)
+      if (audioContext.state === 'suspended') void audioContext.resume().catch(() => undefined)
+
+      const sample = () => {
+        if (!audioAnalyser || !audioSamples) return
+        try {
+          audioAnalyser.getByteTimeDomainData(audioSamples)
+          let squaredTotal = 0
+          for (const value of audioSamples) {
+            const centered = (value - 128) / 128
+            squaredTotal += centered * centered
+          }
+          const rms = Math.sqrt(squaredTotal / audioSamples.length)
+          const normalized = Math.min(1, Math.max(0, (rms - 0.008) * 7.5))
+          const smoothing = normalized > audioLevel.value ? 0.52 : 0.18
+          audioLevel.value += (normalized - audioLevel.value) * smoothing
+          audioAnalysisFrame = requestAnimationFrame(sample)
+        } catch {
+          // Analyser failure must not interrupt the MediaRecorder session.
+          releaseAudioAnalysis()
+        }
+      }
+      audioAnalysisFrame = requestAnimationFrame(sample)
+    } catch {
+      // Audio analysis is progressive enhancement; recording must still work without it.
+      releaseAudioAnalysis()
+    }
+  }
+
   function releaseStream(): void {
+    releaseAudioAnalysis()
     stopTracks(stream)
     stream = null
   }
@@ -152,7 +231,7 @@ export function useAudioRecorder(options: UseAudioRecorderOptions = {}) {
 
   function elapsedDuration(): number {
     if (!startedAt) return 0
-    return Math.min(maxDurationMs, Math.max(0, Date.now() - startedAt))
+    return Math.min(activeMaxDurationMs, Math.max(0, Date.now() - startedAt))
   }
 
   async function start(): Promise<void> {
@@ -168,8 +247,17 @@ export function useAudioRecorder(options: UseAudioRecorderOptions = {}) {
       throw unsupported
     }
 
-    const mimeType = preferredAudioMimeType(options.acceptedMimeTypes)
-    if ((options.acceptedMimeTypes?.length ?? 0) > 0 && !mimeType) {
+    const acceptedMimeTypes = optionValue(options.acceptedMimeTypes, [])
+    activeMaxDurationMs = Math.min(
+      CHAT_AUDIO_MAX_DURATION_MS,
+      optionValue(options.maxDurationMs, CHAT_AUDIO_MAX_DURATION_MS),
+    )
+    activeMaxBytes = Math.min(
+      CHAT_AUDIO_MAX_BYTES,
+      optionValue(options.maxBytes, CHAT_AUDIO_MAX_BYTES),
+    )
+    const mimeType = preferredAudioMimeType(acceptedMimeTypes)
+    if (acceptedMimeTypes.length > 0 && !mimeType) {
       const unsupported = new AudioRecorderError(
         'AUDIO_RECORDING_UNSUPPORTED',
         'This browser cannot record an audio format accepted by the server.',
@@ -205,6 +293,7 @@ export function useAudioRecorder(options: UseAudioRecorderOptions = {}) {
     }
 
     stream = capturedStream
+    startAudioAnalysis(capturedStream)
     chunks = []
     try {
       mediaRecorder = mimeType
@@ -257,7 +346,7 @@ export function useAudioRecorder(options: UseAudioRecorderOptions = {}) {
         reject?.(empty)
         return
       }
-      if (blob.size > maxBytes) {
+      if (blob.size > activeMaxBytes) {
         const tooLarge = new AudioRecorderError('AUDIO_TOO_LARGE', 'The audio recording is too large.')
         error.value = tooLarge
         state.value = 'error'
@@ -283,9 +372,9 @@ export function useAudioRecorder(options: UseAudioRecorderOptions = {}) {
     }, 250)
     maximumTimer = setTimeout(() => {
       if (version !== sessionVersion || state.value !== 'recording') return
-      elapsedMs.value = maxDurationMs
+      elapsedMs.value = activeMaxDurationMs
       options.onMaximumDuration?.()
-    }, maxDurationMs)
+    }, activeMaxDurationMs)
   }
 
   function stop(): Promise<RecordedAudio> {
@@ -335,6 +424,7 @@ export function useAudioRecorder(options: UseAudioRecorderOptions = {}) {
   return {
     state,
     elapsedMs,
+    audioLevel,
     error,
     supported,
     start,

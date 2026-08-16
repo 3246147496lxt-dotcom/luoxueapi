@@ -5,140 +5,153 @@
     :aria-label="t('dashboard.accountMetrics')"
   >
     <article class="dashboard-metric-card dashboard-metric-card--balance">
-      <div class="dashboard-metric-card__header">
-        <span>{{ t('dashboard.workspace.balance') }}</span>
-        <span class="dashboard-metric-card__icon-well" aria-hidden="true">
-          <Icon name="wallet" size="sm" :stroke-width="1.7" />
-        </span>
-      </div>
-      <div class="dashboard-metric-card__value dashboard-metric-card__value--credit">
-        <CreditAmount
-          :value="formatCredit(balance)"
-          icon-size="md"
-          :label="`${t('dashboard.workspace.balance')} ${formatCredit(balance)}`"
-        />
-      </div>
-      <p class="dashboard-metric-card__hint">{{ t('dashboard.workspace.balanceHint') }}</p>
-      <RouterLink to="/purchase" class="dashboard-metric-card__link">
-        {{ t('dashboard.workspace.manageBalance') }}
-        <Icon name="arrowRight" size="xs" aria-hidden="true" />
-      </RouterLink>
-    </article>
-
-    <article class="dashboard-metric-card dashboard-metric-card--usage">
-      <div class="dashboard-metric-card__header">
-        <span>{{ t('dashboard.workspace.todayUsage') }}</span>
-        <span class="dashboard-metric-card__icon-well" aria-hidden="true">
-          <Icon name="activity" size="sm" :stroke-width="1.7" />
-        </span>
-      </div>
-      <div class="dashboard-metric-card__value dashboard-metric-card__value--credit">
-        <CreditAmount
-          :value="formatCredit(stats.today_actual_cost)"
-          icon-size="md"
-          :label="`${t('dashboard.workspace.todayUsage')} ${formatCredit(stats.today_actual_cost)}`"
-        />
-      </div>
-      <p class="dashboard-metric-card__hint">
-        {{ t('dashboard.workspace.todayRequestsHint', { count: formatNumber(stats.today_requests) }) }}
+      <h2 class="dashboard-metric-card__title">
+        {{ t('dashboard.workspace.accountBalance') }}
+      </h2>
+      <p class="dashboard-metric-card__value">
+        <strong>{{ formatCredit(balance) }}</strong>
+        <span>{{ t('dashboard.workspace.creditsUnit') }}</span>
       </p>
-      <RouterLink to="/usage" class="dashboard-metric-card__link">
-        {{ t('dashboard.workspace.viewUsage') }}
-        <Icon name="arrowRight" size="xs" aria-hidden="true" />
+      <RouterLink
+        to="/purchase"
+        class="dashboard-metric-card__action"
+        data-testid="dashboard-balance-recharge"
+      >
+        {{ t('payment.tabTopUp') }}
       </RouterLink>
     </article>
 
-    <article class="dashboard-metric-card dashboard-metric-card--tokens">
-      <div class="dashboard-metric-card__header">
-        <span>{{ t('dashboard.workspace.tokenConsumption') }}</span>
-        <span class="dashboard-metric-card__icon-well" aria-hidden="true">
-          <Icon name="type" size="sm" :stroke-width="1.7" />
-        </span>
-      </div>
-      <strong class="dashboard-metric-card__value">
-        {{ formatNumber(stats.today_tokens) }}
-      </strong>
-      <p class="dashboard-metric-card__hint">
-        {{ t('dashboard.workspace.tokenBreakdownHint', {
-          input: formatNumber(stats.today_input_tokens),
-          output: formatNumber(stats.today_output_tokens),
-        }) }}
-      </p>
-      <RouterLink to="/usage" class="dashboard-metric-card__link">
-        {{ t('dashboard.workspace.viewUsage') }}
-        <Icon name="arrowRight" size="xs" aria-hidden="true" />
-      </RouterLink>
-    </article>
-
-    <article class="dashboard-metric-card dashboard-metric-card--plan">
-      <div class="dashboard-metric-card__header">
-        <span>{{ t('dashboard.workspace.currentPlan') }}</span>
-        <span class="dashboard-metric-card__icon-well" aria-hidden="true">
-          <Icon name="creditCard" size="sm" :stroke-width="1.7" />
-        </span>
-      </div>
-      <div v-if="planLoading && !subscriptionsLoaded" class="dashboard-plan-loading" aria-live="polite">
-        <span class="skeleton h-8 w-36" />
+    <article class="dashboard-metric-card dashboard-metric-card--quota">
+      <h2 class="dashboard-metric-card__title">
+        {{ t('dashboard.workspace.planQuota', { plan: planName }) }}
+      </h2>
+      <div v-if="planLoading" class="dashboard-metric-card__loading" aria-live="polite">
+        <span class="skeleton h-8 w-28" aria-hidden="true" />
         <span class="sr-only">{{ t('dashboard.workspace.planLoading') }}</span>
       </div>
-      <strong v-else class="dashboard-metric-card__value dashboard-metric-card__value--plan">
-        <span class="dashboard-plan-dot" aria-hidden="true" />
-        <span class="truncate" :title="planName">{{ planName }}</span>
-      </strong>
-      <p class="dashboard-metric-card__hint">
-        {{ planExpiresAt
-          ? t('dashboard.workspace.planExpires', { date: formatPlanDate(planExpiresAt) })
-          : hasActiveSubscription
-            ? t('dashboard.workspace.planNoExpiry')
-            : t('dashboard.workspace.planFlexible') }}
+      <template v-else>
+        <p class="dashboard-metric-card__value">
+          <strong>{{ quotaDisplay }}</strong>
+          <span>{{ t('dashboard.workspace.remaining') }}</span>
+        </p>
+        <div
+          class="dashboard-quota-track"
+          role="progressbar"
+          :aria-label="t('dashboard.workspace.planQuota', { plan: planName })"
+          :aria-valuemin="0"
+          :aria-valuemax="100"
+          :aria-valuenow="quotaRemainingPercent ?? undefined"
+        >
+          <span
+            class="dashboard-quota-track__value"
+            :class="`dashboard-quota-track__value--${quotaTone}`"
+            :style="{ width: `${quotaProgress}%` }"
+          />
+        </div>
+      </template>
+    </article>
+
+    <article class="dashboard-metric-card">
+      <h2 class="dashboard-metric-card__title">
+        {{ t('dashboard.workspace.cumulativeTokens') }}
+      </h2>
+      <p class="dashboard-metric-card__value">
+        <strong>{{ tokenMagnitude.value }}</strong>
+        <span>{{ tokenMagnitude.unit }} {{ t('dashboard.workspace.tokenUnit') }}</span>
       </p>
-      <RouterLink to="/subscriptions" class="dashboard-metric-card__link">
-        {{ t('dashboard.workspace.managePlan') }}
-        <Icon name="arrowRight" size="xs" aria-hidden="true" />
-      </RouterLink>
+      <p class="dashboard-metric-card__detail">
+        {{ t('dashboard.workspace.tokenBreakdownHint', {
+          input: formatNumber(cumulativeInputTokens),
+          output: formatNumber(stats.total_output_tokens),
+        }) }}
+      </p>
+    </article>
+
+    <article class="dashboard-metric-card">
+      <h2 class="dashboard-metric-card__title">
+        {{ t('dashboard.workspace.cumulativeSpend') }}
+      </h2>
+      <p class="dashboard-metric-card__value">
+        <strong>{{ formatCredit(stats.total_actual_cost) }}</strong>
+        <span>{{ t('dashboard.workspace.creditsUnit') }}</span>
+      </p>
     </article>
   </section>
 </template>
 
 <script setup lang="ts">
+import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
-import CreditAmount from '@/components/common/CreditAmount.vue'
-import Icon from '@/components/icons/Icon.vue'
 import type { UserDashboardStats as UserStatsType } from '@/api/usage'
 
-defineProps<{
+const props = defineProps<{
   stats: UserStatsType
   balance: number
   planName: string
-  planExpiresAt: string | null
+  quotaRemainingPercent: number | null
   planLoading: boolean
-  subscriptionsLoaded: boolean
-  hasActiveSubscription: boolean
 }>()
 
 const { t, locale } = useI18n()
+
+const numberLocale = computed(() => locale.value.startsWith('zh') ? 'zh-CN' : 'en-US')
+const cumulativeInputTokens = computed(() => (
+  finiteNumber(props.stats.total_input_tokens)
+  + finiteNumber(props.stats.total_cache_creation_tokens)
+  + finiteNumber(props.stats.total_cache_read_tokens)
+))
+
+const quotaProgress = computed(() => {
+  if (props.quotaRemainingPercent == null) return 0
+  return Math.min(100, Math.max(0, props.quotaRemainingPercent))
+})
+
+const quotaDisplay = computed(() => (
+  props.quotaRemainingPercent == null
+    ? '—'
+    : `${new Intl.NumberFormat(numberLocale.value, { maximumFractionDigits: 1 }).format(quotaProgress.value)}%`
+))
+
+const quotaTone = computed<'healthy' | 'attention' | 'critical' | 'neutral'>(() => {
+  if (props.quotaRemainingPercent == null) return 'neutral'
+  if (quotaProgress.value >= 50) return 'healthy'
+  if (quotaProgress.value >= 20) return 'attention'
+  return 'critical'
+})
+
+const tokenMagnitude = computed(() => {
+  const value = finiteNumber(props.stats.total_tokens)
+  if (locale.value.startsWith('zh') && Math.abs(value) >= 10_000) {
+    return {
+      value: new Intl.NumberFormat('zh-CN', { maximumFractionDigits: 1 }).format(value / 10_000),
+      unit: '万',
+    }
+  }
+  if (!locale.value.startsWith('zh') && Math.abs(value) >= 1_000) {
+    return {
+      value: new Intl.NumberFormat('en-US', {
+        notation: 'compact',
+        maximumFractionDigits: 1,
+      }).format(value),
+      unit: '',
+    }
+  }
+  return { value: formatNumber(value), unit: '' }
+})
 
 function finiteNumber(value: number | null | undefined): number {
   return Number.isFinite(value) ? Number(value) : 0
 }
 
-function formatCredit(value: number | null | undefined): string {
-  return finiteNumber(value).toFixed(2)
-}
-
 function formatNumber(value: number | null | undefined): string {
-  return new Intl.NumberFormat(locale.value.startsWith('zh') ? 'zh-CN' : 'en-US')
-    .format(finiteNumber(value))
+  return new Intl.NumberFormat(numberLocale.value).format(finiteNumber(value))
 }
 
-function formatPlanDate(value: string): string {
-  const date = new Date(value)
-  if (!Number.isFinite(date.getTime())) return value
-  return new Intl.DateTimeFormat(locale.value.startsWith('zh') ? 'zh-CN' : 'en-US', {
-    year: 'numeric',
-    month: 'short',
-    day: 'numeric',
-  }).format(date)
+function formatCredit(value: number | null | undefined): string {
+  return new Intl.NumberFormat(numberLocale.value, {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 2,
+  }).format(finiteNumber(value))
 }
 </script>
 
@@ -146,122 +159,139 @@ function formatPlanDate(value: string): string {
 .dashboard-metric-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: var(--workspace-space-4);
+  gap: var(--workspace-space-6);
 }
 
 .dashboard-metric-card {
   min-width: 0;
-  padding: var(--workspace-space-5);
-  border: 1px solid var(--workspace-border);
-  border-radius: var(--workspace-radius-work-card);
+  min-height: 138px;
+  padding: var(--workspace-space-6);
+  border: 1px solid var(--workspace-dashboard-card-border);
+  border-radius: 24px;
   background: var(--workspace-card-surface);
-  box-shadow: var(--workspace-work-shadow-card);
+  box-shadow: var(--workspace-dashboard-card-shadow);
 }
 
-.dashboard-metric-card__header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  color: var(--workspace-work-text-muted);
-  font-size: var(--workspace-type-secondary-size);
-  font-weight: var(--workspace-type-secondary-weight);
-  line-height: 1.25rem;
+.dashboard-metric-card--balance {
+  position: relative;
 }
 
-.dashboard-metric-card__icon-well {
+.dashboard-metric-card__action {
+  position: absolute;
+  right: var(--workspace-space-6);
+  bottom: var(--workspace-space-6);
   display: inline-flex;
-  width: 34px;
-  height: 34px;
-  flex: 0 0 34px;
   align-items: center;
   justify-content: center;
-  border-radius: var(--workspace-radius-button);
-  color: var(--workspace-work-accent);
-  background: var(--workspace-work-accent-soft);
+  padding: var(--workspace-space-1) var(--workspace-space-3);
+  border: 1px solid #dbeafe;
+  border-radius: var(--workspace-radius-compact);
+  color: #2563eb;
+  background: #eff6ff;
+  font-size: calc(var(--workspace-type-secondary-size) - 1px);
+  font-weight: 700;
+  line-height: 1rem;
+  text-decoration: none;
+  transition: background-color 140ms ease;
 }
 
-.dashboard-metric-card--tokens .dashboard-metric-card__icon-well {
-  color: var(--workspace-work-info);
-  background: var(--workspace-work-info-soft);
+.dashboard-metric-card__action:hover {
+  background: #dbeafe;
 }
 
-.dashboard-metric-card--plan .dashboard-metric-card__icon-well {
-  color: var(--workspace-work-text-secondary);
-  background: var(--workspace-surface-subtle);
+.dashboard-metric-card__action:focus-visible {
+  outline: 2px solid #2563eb;
+  outline-offset: 2px;
+}
+
+.dashboard-metric-card__title {
+  overflow: hidden;
+  color: var(--workspace-dashboard-text-muted);
+  font-size: var(--workspace-type-navigation-size);
+  font-weight: var(--workspace-type-navigation-weight);
+  line-height: 1.25rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .dashboard-metric-card__value {
   display: flex;
-  min-height: 2.25rem;
-  align-items: center;
-  margin-top: 18px;
-  color: var(--workspace-work-text);
-  font-size: var(--workspace-type-numeric-size);
-  font-weight: var(--workspace-type-numeric-weight);
-  line-height: 2.25rem;
+  min-width: 0;
+  min-height: 2rem;
+  align-items: baseline;
+  gap: var(--workspace-space-1);
+  margin-top: var(--workspace-space-4);
+  color: var(--workspace-dashboard-text-strong);
+  white-space: nowrap;
+}
+
+.dashboard-metric-card__value strong {
+  overflow: hidden;
+  font-size: calc(var(--workspace-type-page-title-size) - 0.25rem);
+  font-weight: 700;
+  line-height: 2rem;
   letter-spacing: -0.025em;
+  text-overflow: ellipsis;
   font-variant-numeric: tabular-nums;
 }
 
-.dashboard-metric-card--balance .dashboard-metric-card__value {
-  color: var(--workspace-work-accent-deep);
+.dashboard-metric-card__value span {
+  flex: 0 0 auto;
+  color: var(--workspace-dashboard-text-muted);
+  font-size: var(--workspace-type-body-size);
+  font-weight: var(--workspace-type-body-weight);
+  line-height: 1.25rem;
 }
 
-.dashboard-metric-card--balance .dashboard-metric-card__value--credit :deep([data-testid="snowflake-credit-icon"]) {
-  opacity: 1;
+.dashboard-metric-card__detail {
+  overflow: hidden;
+  margin-top: 8px;
+  color: var(--workspace-dashboard-text-subtle);
+  font-size: calc(var(--workspace-type-secondary-size) - 1px);
+  font-weight: var(--workspace-type-secondary-weight);
+  line-height: normal;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
 }
 
-.dashboard-metric-card__value--plan {
-  gap: 9px;
-}
-
-.dashboard-plan-dot {
-  width: 7px;
-  height: 7px;
-  flex: 0 0 7px;
-  border-radius: 999px;
-  background: var(--workspace-work-success);
-}
-
-.dashboard-plan-loading {
+.dashboard-metric-card__loading {
   display: flex;
   min-height: 2.25rem;
   align-items: center;
   margin-top: 18px;
 }
 
-.dashboard-metric-card__hint {
-  min-height: 2.5rem;
-  margin-top: 8px;
-  color: var(--workspace-work-text-muted);
-  font-size: var(--workspace-type-secondary-size);
-  font-weight: var(--workspace-type-secondary-weight);
-  line-height: 1.25rem;
+.dashboard-quota-track {
+  width: 100%;
+  height: 6px;
+  overflow: hidden;
+  margin-top: var(--workspace-space-4);
+  border-radius: 999px;
+  background: var(--workspace-dashboard-track);
 }
 
-.dashboard-metric-card__link {
-  display: inline-flex;
-  min-height: 32px;
-  align-items: center;
-  gap: 5px;
-  margin-top: 12px;
-  border-radius: var(--workspace-radius-compact);
-  color: var(--workspace-work-text-secondary);
-  font-size: var(--workspace-type-navigation-size);
-  font-weight: var(--workspace-type-navigation-weight);
-  transition: color 140ms ease, background-color 140ms ease;
+.dashboard-quota-track__value {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  transition: background-color 180ms ease;
 }
 
-.dashboard-metric-card__link:hover {
-  color: var(--workspace-work-accent-hover);
-  text-decoration: underline;
-  text-underline-offset: 3px;
+.dashboard-quota-track__value--healthy {
+  background: var(--workspace-dashboard-success);
 }
 
-.dashboard-metric-card__link:focus-visible {
-  outline: 2px solid var(--workspace-work-accent);
-  outline-offset: 3px;
+.dashboard-quota-track__value--attention {
+  background: var(--lx-clay-warning-bright);
+}
+
+.dashboard-quota-track__value--critical {
+  background: var(--lx-clay-danger);
+}
+
+.dashboard-quota-track__value--neutral {
+  background: var(--workspace-work-text-muted);
 }
 
 @media (max-width: 1279px) {
@@ -277,42 +307,49 @@ function formatPlanDate(value: string): string {
   }
 
   .dashboard-metric-card {
+    min-height: 132px;
     padding: 17px 18px;
   }
 
   .dashboard-metric-card__value {
     margin-top: 12px;
   }
+}
 
-  .dashboard-metric-card__hint {
-    min-height: auto;
-  }
-
-  .dashboard-metric-card__link {
-    min-height: 44px;
+@media (prefers-reduced-motion: reduce) {
+  .dashboard-metric-card__action,
+  .dashboard-quota-track__value {
+    transition-duration: 0.01ms;
   }
 }
 
 :global(html.dark) .dashboard-metric-card {
-  border-color: var(--workspace-border);
+  border-color: var(--workspace-dashboard-card-border);
   background: var(--workspace-card-surface);
-  box-shadow: none;
+  box-shadow: var(--workspace-dashboard-card-shadow);
 }
 
-:global(html.dark) .dashboard-metric-card__header,
-:global(html.dark) .dashboard-metric-card__hint {
-  color: var(--workspace-dark-text-muted);
+:global(html.dark) .dashboard-metric-card__title,
+:global(html.dark) .dashboard-metric-card__value span,
+:global(html.dark) .dashboard-metric-card__detail {
+  color: var(--workspace-dashboard-text-muted);
 }
 
 :global(html.dark) .dashboard-metric-card__value {
-  color: var(--workspace-dark-text);
+  color: var(--workspace-dashboard-text-strong);
 }
 
-:global(html.dark) .dashboard-metric-card__link {
-  color: var(--workspace-dark-text-secondary);
+:global(html.dark) .dashboard-metric-card__action {
+  border-color: rgb(96 165 250 / 35%);
+  color: #93c5fd;
+  background: rgb(30 64 175 / 30%);
 }
 
-:global(html.dark) .dashboard-metric-card__link:hover {
-  color: var(--workspace-light-surface);
+:global(html.dark) .dashboard-metric-card__action:hover {
+  background: rgb(30 64 175 / 45%);
+}
+
+:global(html.dark) .dashboard-quota-track {
+  background: var(--workspace-dashboard-track);
 }
 </style>

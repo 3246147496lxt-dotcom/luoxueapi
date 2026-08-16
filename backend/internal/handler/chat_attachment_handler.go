@@ -52,6 +52,13 @@ func (h *ChatHandler) DeleteAttachment(c *gin.Context) {
 	if !ok {
 		return
 	}
+	if h.library != nil {
+		if file, err := h.library.Get(c.Request.Context(), userID, c.Param("id")); err == nil && file != nil {
+			// Removing a draft from Chat must not delete the durable library file.
+			response.Success(c, gin.H{"deleted": true})
+			return
+		}
+	}
 	if err := h.attachments.Delete(c.Request.Context(), userID, c.Param("id")); err != nil {
 		response.ErrorFrom(c, err)
 		return

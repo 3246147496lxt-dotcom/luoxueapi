@@ -6,6 +6,7 @@
 export { useAuthStore } from './auth'
 export { useAppStore } from './app'
 export { useUserProfileStore } from './userProfile'
+export { useLibraryStore } from './library'
 
 // Re-export types for convenience
 export type { User, LoginRequest, RegisterRequest, AuthResponse } from '@/types'

@@ -410,6 +410,170 @@ describe('ChatComposer voice transcription integration', () => {
     expect(wrapper.emitted('send')?.map(([value]) => value)).toEqual(['已有文字'])
   })
 
+  it('emits pasted clipboard images with a valid upload filename', async () => {
+    vi.spyOn(Date, 'now').mockReturnValue(1_725_000_000_000)
+    const wrapper = mountComposer({ imagePasteEnabled: true })
+    const clipboardImage = new File(['png'], '', { type: 'image/png' })
+    const paste = new Event('paste', { bubbles: true, cancelable: true })
+    Object.defineProperty(paste, 'clipboardData', {
+      value: {
+        items: [{
+          kind: 'file',
+          type: 'image/png',
+          getAsFile: () => clipboardImage,
+        }],
+        files: [],
+      },
+    })
+
+    wrapper.get('.chat-composer__input').element.dispatchEvent(paste)
+    await nextTick()
+
+    expect(wrapper.emitted('paste-images')).toHaveLength(1)
+    const emittedFiles = wrapper.emitted('paste-images')?.[0]?.[0] as File[] | undefined
+    expect(paste.defaultPrevented).toBe(true)
+    expect(emittedFiles).toHaveLength(1)
+    expect(emittedFiles?.[0]).toMatchObject({
+      name: 'pasted-image-1725000000000.png',
+      type: 'image/png',
+      size: clipboardImage.size,
+    })
+    expect((wrapper.get('.chat-composer__input').element as HTMLTextAreaElement).value)
+      .toBe('已有文字')
+  })
+
+  it('pairs distinct item and file wrappers without duplicating one clipboard image', async () => {
+    vi.spyOn(Date, 'now').mockReturnValue(1_725_000_000_001)
+    const wrapper = mountComposer({ imagePasteEnabled: true })
+    const genericImage = new File(['png'], 'wrong.jpg', {
+      type: 'application/octet-stream',
+      lastModified: 10,
+    })
+    const fallbackImage = new File(['webp'], 'second.webp', {
+      type: 'image/webp',
+      lastModified: 11,
+    })
+    const duplicateGenericImage = new File(['png'], 'clipboard.png', {
+      type: 'image/png',
+      lastModified: 99,
+    })
+    const paste = new Event('paste', { bubbles: true, cancelable: true })
+    Object.defineProperty(paste, 'clipboardData', {
+      value: {
+        items: [{
+          kind: 'file',
+          type: 'image/png',
+          getAsFile: () => genericImage,
+        }, {
+          kind: 'file',
+          type: '',
+          getAsFile: () => null,
+        }],
+        files: [duplicateGenericImage, fallbackImage],
+      },
+    })
+
+    wrapper.get('.chat-composer__input').element.dispatchEvent(paste)
+    await nextTick()
+
+    expect(wrapper.emitted('paste-images')).toHaveLength(1)
+    const emittedFiles = wrapper.emitted('paste-images')?.[0]?.[0] as File[] | undefined
+    expect(emittedFiles).toHaveLength(2)
+    expect(emittedFiles?.map(({ name, type }) => ({ name, type }))).toEqual([
+      { name: 'pasted-image-1725000000001.png', type: 'image/png' },
+      { name: 'second.webp', type: 'image/webp' },
+    ])
+  })
+
+  it('canonicalizes supported clipboard MIME types that contain parameters', async () => {
+    const wrapper = mountComposer({ imagePasteEnabled: true })
+    const parameterizedImage = new File(['png'], 'parameterized.png', {
+      type: 'image/png; charset=binary',
+    })
+    const paste = new Event('paste', { bubbles: true, cancelable: true })
+    Object.defineProperty(paste, 'clipboardData', {
+      value: {
+        items: [],
+        files: [parameterizedImage],
+      },
+    })
+
+    wrapper.get('.chat-composer__input').element.dispatchEvent(paste)
+    await nextTick()
+
+    const emittedFile = (wrapper.emitted('paste-images')?.[0]?.[0] as File[] | undefined)?.[0]
+    expect(emittedFile).not.toBe(parameterizedImage)
+    expect(emittedFile).toMatchObject({
+      name: 'parameterized.png',
+      type: 'image/png',
+      size: parameterizedImage.size,
+    })
+  })
+
+  it('uploads supported images without swallowing accompanying clipboard text', async () => {
+    const wrapper = mountComposer({ imagePasteEnabled: true })
+    const mixedPaste = new Event('paste', { bubbles: true, cancelable: true })
+    Object.defineProperty(mixedPaste, 'clipboardData', {
+      value: {
+        getData: (type: string) => type === 'text/plain' ? '说明文字' : '',
+        items: [],
+        files: [new File(['png'], 'mixed.png', { type: 'image/png' })],
+      },
+    })
+
+    wrapper.get('.chat-composer__input').element.dispatchEvent(mixedPaste)
+    await nextTick()
+
+    expect(mixedPaste.defaultPrevented).toBe(false)
+    expect(wrapper.emitted('paste-images')?.[0]?.[0]).toEqual([
+      expect.objectContaining({ name: 'mixed.png', type: 'image/png' }),
+    ])
+  })
+
+  it('does not intercept unsupported clipboard image formats', () => {
+    const wrapper = mountComposer({ imagePasteEnabled: true })
+    const gifPaste = new Event('paste', { bubbles: true, cancelable: true })
+    Object.defineProperty(gifPaste, 'clipboardData', {
+      value: {
+        items: [],
+        files: [new File(['gif'], 'animated.gif', { type: 'image/gif' })],
+      },
+    })
+
+    wrapper.get('.chat-composer__input').element.dispatchEvent(gifPaste)
+
+    expect(gifPaste.defaultPrevented).toBe(false)
+    expect(wrapper.emitted('paste-images')).toBeUndefined()
+  })
+
+  it('preserves normal paste behavior when the clipboard has no image or uploads are disabled', async () => {
+    const wrapper = mountComposer({ imagePasteEnabled: true })
+    const textPaste = new Event('paste', { bubbles: true, cancelable: true })
+    Object.defineProperty(textPaste, 'clipboardData', {
+      value: {
+        items: [{ kind: 'string', type: 'text/plain', getAsFile: () => null }],
+        files: [],
+      },
+    })
+    wrapper.get('.chat-composer__input').element.dispatchEvent(textPaste)
+
+    expect(textPaste.defaultPrevented).toBe(false)
+    expect(wrapper.emitted('paste-images')).toBeUndefined()
+
+    await wrapper.setProps({ imagePasteEnabled: false })
+    const imagePaste = new Event('paste', { bubbles: true, cancelable: true })
+    Object.defineProperty(imagePaste, 'clipboardData', {
+      value: {
+        items: [],
+        files: [new File(['png'], 'image.png', { type: 'image/png' })],
+      },
+    })
+    wrapper.get('.chat-composer__input').element.dispatchEvent(imagePaste)
+
+    expect(imagePaste.defaultPrevented).toBe(false)
+    expect(wrapper.emitted('paste-images')).toBeUndefined()
+  })
+
   it('inserts transcription at the current selection and restores the caret', async () => {
     const wrapper = mountComposer()
     const textarea = wrapper.get('textarea').element as HTMLTextAreaElement
@@ -464,5 +628,91 @@ describe('ChatComposer voice transcription integration', () => {
     expect((wrapper.get('textarea').element as HTMLTextAreaElement).value)
       .toBe('附件过期也别清空')
     expect(wrapper.emitted('update:modelValue')).toBeUndefined()
+  })
+
+  it('optimistically clears a submitted draft and attachment preview while acceptance is pending', async () => {
+    let acknowledge: ((accepted: boolean) => void) | undefined
+    const wrapper = mountComposer({
+      modelValue: '请分析这张图',
+      hasAttachments: true,
+      onSend: (_value: string, callback: (accepted: boolean) => void) => {
+        acknowledge = callback
+      },
+    }, {
+      attachments: '<div data-test="pending-attachment">图片</div>',
+    })
+
+    await wrapper.get('form').trigger('submit')
+    await nextTick()
+
+    const textarea = wrapper.get('.chat-composer__input')
+    expect((textarea.element as HTMLTextAreaElement).value).toBe('')
+    expect(textarea.attributes('readonly')).toBeDefined()
+    expect(wrapper.find('[data-test="pending-attachment"]').exists()).toBe(false)
+    expect(wrapper.get('form').classes()).not.toContain('chat-composer--has-attachments')
+    expect(wrapper.emitted('update:modelValue')?.at(-1)).toEqual([''])
+    expect(wrapper.emitted('submitting-change')).toEqual([[true]])
+
+    await wrapper.setProps({ hasAttachments: false })
+    acknowledge?.(true)
+    await nextTick()
+
+    expect((textarea.element as HTMLTextAreaElement).value).toBe('')
+    expect(textarea.attributes('readonly')).toBeUndefined()
+    expect(wrapper.find('[data-test="pending-attachment"]').exists()).toBe(false)
+    expect(wrapper.emitted('submitting-change')).toEqual([[true], [false]])
+  })
+
+  it('restores the snapshotted draft and attachment preview when submission is rejected', async () => {
+    let acknowledge: ((accepted: boolean) => void) | undefined
+    const wrapper = mountComposer({
+      modelValue: '失败后继续编辑',
+      hasAttachments: true,
+      onSend: (_value: string, callback: (accepted: boolean) => void) => {
+        acknowledge = callback
+      },
+    }, {
+      attachments: '<div data-test="rejected-attachment">图片</div>',
+    })
+
+    await wrapper.get('form').trigger('submit')
+    await nextTick()
+    acknowledge?.(false)
+    await nextTick()
+
+    const textarea = wrapper.get('.chat-composer__input')
+    expect((textarea.element as HTMLTextAreaElement).value).toBe('失败后继续编辑')
+    expect(textarea.attributes('readonly')).toBeUndefined()
+    expect(wrapper.find('[data-test="rejected-attachment"]').exists()).toBe(true)
+    expect(wrapper.get('form').classes()).toContain('chat-composer--has-attachments')
+    expect(wrapper.emitted('update:modelValue')?.at(-1)).toEqual(['失败后继续编辑'])
+    expect(wrapper.emitted('submitting-change')).toEqual([[true], [false]])
+  })
+
+  it('ignores stale prop echoes and rejected callbacks after its submission context resets', async () => {
+    const sourceDraft = '不能复活到另一个会话'
+    let acknowledge: ((accepted: boolean) => void) | undefined
+    const wrapper = mountComposer({
+      modelValue: sourceDraft,
+      onSend: (_value: string, callback: (accepted: boolean) => void) => {
+        acknowledge = callback
+      },
+    })
+
+    await wrapper.get('form').trigger('submit')
+    await wrapper.setProps({ modelValue: '' })
+    await wrapper.setProps({ modelValue: sourceDraft })
+    expect((wrapper.get('textarea').element as HTMLTextAreaElement).value).toBe('')
+
+    await wrapper.setProps({ submissionResetKey: 1, modelValue: '' })
+    acknowledge?.(false)
+    await nextTick()
+
+    const textarea = wrapper.get('textarea')
+    expect((textarea.element as HTMLTextAreaElement).value).toBe('')
+    expect(textarea.attributes('readonly')).toBeUndefined()
+    expect(wrapper.emitted('submitting-change')).toEqual([[true], [false]])
+    expect(wrapper.emitted('update:modelValue')?.filter(([value]) => value === sourceDraft))
+      .toEqual([])
   })
 })

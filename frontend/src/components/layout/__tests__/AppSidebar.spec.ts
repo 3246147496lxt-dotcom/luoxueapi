@@ -172,9 +172,6 @@ describe('AppSidebar navigation shell', () => {
     expect(componentSource).not.toMatch(
       /\.sidebar-label-collapsed\s*\{[^}]*transform:/s,
     )
-    expect(componentSource).toMatch(
-      /\.sidebar-announcement-entry--collapsed :deep\(\.announcement-bell-row\)\s*\{[^}]*width: var\(--workspace-sidebar-touch-target\);[^}]*justify-content: flex-start;/s,
-    )
     expect(componentSource).toContain('border-width: 0 1px 0 0;')
     expect(headerSource).toContain('height: var(--workspace-sidebar-header-height);')
     expect(headerSource).toContain('flex: 0 0 var(--workspace-sidebar-header-height);')
@@ -250,7 +247,7 @@ describe('AppSidebar navigation shell', () => {
     expect(componentSource).toContain('font-size: 0.75rem;')
     expect(componentSource).toContain('font-weight: 400;')
     expect(componentSource).toMatch(
-      /\.sidebar--personal-work \.sidebar-link\s*,[\s\S]*?font-size: var\(--workspace-type-navigation-size\);[\s\S]*?font-weight: var\(--workspace-type-navigation-weight\);/,
+      /\.sidebar--personal-work \.sidebar-link\s*\{[\s\S]*?font-size: var\(--workspace-type-navigation-size\);[\s\S]*?font-weight: var\(--workspace-type-navigation-weight\);/,
     )
     expect(componentSource).toMatch(
       /\.sidebar--personal-work \.sidebar-section-title[\s\S]*?font-size: var\(--workspace-type-secondary-size\);[\s\S]*?font-weight: var\(--workspace-type-secondary-weight\);/,
@@ -287,7 +284,9 @@ describe('AppSidebar utility actions', () => {
     expect(support).toBeLessThan(navEnd)
     expect(navEnd).toBeGreaterThan(-1)
     expect(dock).toBeGreaterThan(navEnd)
-    expect(componentSource).toContain('data-testid="sidebar-announcements"')
+    expect(componentSource).not.toContain('data-testid="sidebar-announcements"')
+    expect(componentSource).not.toContain('data-testid="sidebar-settings"')
+    expect(componentSource).not.toContain("t('nav.userSections.resources')")
     expect(componentSource).toContain("'sidebar-docs-tutorial'")
     expect(componentSource).toContain("'sidebar-contact-us'")
     expect(componentSource).not.toContain('data-testid="sidebar-help-resources"')

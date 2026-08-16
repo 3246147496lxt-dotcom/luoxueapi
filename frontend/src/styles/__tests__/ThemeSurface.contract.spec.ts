@@ -29,7 +29,7 @@ const batchImageGuideSource = readSource('views/user/BatchImageGuideView.vue')
 describe('authenticated theme surface contract', () => {
   it('exposes one semantic surface hierarchy to CSS and Tailwind consumers', () => {
     for (const declaration of [
-      '--workspace-light-sidebar-surface: var(--workspace-light-canvas);',
+      '--workspace-light-sidebar-surface: #ffffff;',
       '--workspace-dark-sidebar-surface: var(--workspace-dark-canvas);',
       '--workspace-canvas: var(--workspace-light-canvas);',
       '--workspace-sidebar-surface: var(--workspace-light-sidebar-surface);',

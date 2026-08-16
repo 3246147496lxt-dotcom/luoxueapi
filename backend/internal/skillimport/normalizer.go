@@ -107,10 +107,8 @@ func (n *Normalizer) Normalize(input NormalizeInput) (NormalizedSkill, error) {
 	}
 	if len(excluded) > 0 {
 		result.Transformed = true
-		result.NeedsReview = true
-		result.ReviewReasons = append(result.ReviewReasons, "one or more upstream files were excluded by marketplace safety limits")
 		result.Warnings = append(result.Warnings, service.SkillValidationIssue{
-			Code: "FILES_EXCLUDED", Message: fmt.Sprintf("%d upstream file(s) were excluded; publication requires review", len(excluded)),
+			Code: "METADATA_EXCLUDED", Message: fmt.Sprintf("%d inert metadata file(s) were safely excluded from the marketplace package", len(excluded)),
 		})
 	}
 	archive, err := buildNormalizerZIP(result.MarketSlug, included)
@@ -223,6 +221,16 @@ func selectMarketFiles(files []SourceFile) ([]SourceFile, []ExcludedFile, []stri
 				continue
 			}
 			excluded = append(excluded, ExcludedFile{Path: file.Path, Reason: reason, Bytes: int64(len(file.Data))})
+			switch reason {
+			case "marketplace file count limit":
+				blocked = append(blocked, "source bundle exceeds the marketplace file count limit; functional files would be omitted")
+			case "marketplace unpacked size limit":
+				blocked = append(blocked, "source bundle exceeds the marketplace unpacked size limit; functional files would be omitted")
+			default:
+				if !isSafelyIgnorableMetadata(file.Path) {
+					blocked = append(blocked, fmt.Sprintf("functional source file %q cannot be safely omitted: %s", file.Path, reason))
+				}
+			}
 			continue
 		}
 		included = append(included, file)
@@ -243,6 +251,9 @@ func exclusionReason(file SourceFile) string {
 	if base == ".ds_store" || strings.HasPrefix(base, "._") {
 		return "operating-system metadata"
 	}
+	if base == ".coverage" || strings.HasPrefix(base, ".coverage.") {
+		return "test-coverage metadata"
+	}
 	if base == ".env" || strings.HasPrefix(base, ".env.") {
 		return "environment file"
 	}
@@ -262,6 +273,17 @@ func exclusionReason(file SourceFile) string {
 		return "private-key material"
 	}
 	return ""
+}
+
+func isSafelyIgnorableMetadata(filePath string) bool {
+	lowerPath := strings.ToLower(filePath)
+	for _, component := range strings.Split(lowerPath, "/") {
+		if component == ".git" || component == ".svn" || component == ".hg" || component == "__macosx" {
+			return true
+		}
+	}
+	base := path.Base(lowerPath)
+	return base == ".ds_store" || strings.HasPrefix(base, "._") || base == ".coverage" || strings.HasPrefix(base, ".coverage.")
 }
 
 func containsPrivateKeyMaterial(data []byte) bool {

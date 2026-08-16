@@ -313,6 +313,23 @@ func (h *ChatHandler) Attempt(c *gin.Context) {
 	response.Success(c, attempt)
 }
 
+func (h *ChatHandler) StopAttempt(c *gin.Context) {
+	userID, ok := h.chatHistoryUser(c)
+	if !ok {
+		return
+	}
+	result, err := h.history.StopCompletion(
+		c.Request.Context(),
+		userID,
+		c.Param("attempt_id"),
+	)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, result)
+}
+
 func (h *ChatHandler) chatHistoryUser(c *gin.Context) (int64, bool) {
 	c.Header("Cache-Control", "private, no-store")
 	subject, ok := middleware2.GetAuthSubjectFromContext(c)

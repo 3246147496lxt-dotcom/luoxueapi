@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
 import ChatMessageItem from '../ChatMessageItem.vue'
@@ -25,10 +27,26 @@ const RouterLinkStub = {
   template: '<a :href="to"><slot /></a>',
 }
 
+const ChatMessageAttachmentsStub = {
+  props: ['attachments'],
+  template: '<div class="chat-message-attachments" data-test="message-attachments"></div>',
+}
+
 function assistantMessage(overrides: Partial<ChatMessage> = {}): ChatMessage {
   return {
     id: 'assistant-1',
     role: 'assistant',
+    content: '',
+    createdAt: 1,
+    status: 'complete',
+    ...overrides,
+  }
+}
+
+function userMessage(overrides: Partial<ChatMessage> = {}): ChatMessage {
+  return {
+    id: 'user-1',
+    role: 'user',
     content: '',
     createdAt: 1,
     status: 'complete',
@@ -47,6 +65,7 @@ function mountMessage(message: ChatMessage, state: MessageStateProps = {}) {
     props: { message, ...state },
     global: {
       stubs: {
+        ChatMessageAttachments: ChatMessageAttachmentsStub,
         Icon: IconStub,
         RouterLink: RouterLinkStub,
       },
@@ -160,6 +179,90 @@ describe('ChatMessageItem safe Markdown rendering', () => {
   it('空的完整回复不会占用一个不可见操作栏', () => {
     const wrapper = mountMessage(assistantMessage())
     expect(wrapper.find('.chat-message__actions').exists()).toBe(false)
+  })
+
+  it('只为含非空官方摘要的 assistant message 提供查看活动入口', async () => {
+    const wrapper = mountMessage(assistantMessage({
+      activities: [{
+        key: 'resp-1',
+        responseId: 'resp-1',
+        status: 'completed',
+        startedAt: 1,
+        updatedAt: 2,
+        completedAt: 2,
+        items: [{
+          key: 'item-1',
+          itemId: 'rs-1',
+          outputIndex: 0,
+          status: 'completed',
+          startedAt: 1,
+          updatedAt: 2,
+          completedAt: 2,
+          parts: [{
+            key: 'part-1',
+            itemId: 'rs-1',
+            outputIndex: 0,
+            summaryIndex: 0,
+            text: 'Official summary',
+            status: 'completed',
+            startedAt: 1,
+            updatedAt: 2,
+            completedAt: 2,
+          }],
+        }],
+      }],
+    }), { retryable: false })
+
+    const button = wrapper.get('.chat-message__activity-button')
+    expect(button.attributes('data-chat-activity-message-id')).toBe('assistant-1')
+    expect(button.attributes('aria-label')).toBe('chat.activity.view')
+    await button.trigger('click')
+    expect(wrapper.emitted('viewActivity')).toHaveLength(1)
+  })
+
+  it('流式摘要只有分片尚未合并时仍显示 Activity 入口', () => {
+    const wrapper = mountMessage(assistantMessage({
+      status: 'streaming',
+      activities: [{
+        key: 'resp-streaming',
+        responseId: 'resp-streaming',
+        status: 'streaming',
+        startedAt: 1,
+        updatedAt: 2,
+        items: [{
+          key: 'item-streaming',
+          itemId: 'rs-streaming',
+          outputIndex: 0,
+          status: 'streaming',
+          startedAt: 1,
+          updatedAt: 2,
+          parts: [{
+            key: 'part-streaming',
+            itemId: 'rs-streaming',
+            outputIndex: 0,
+            summaryIndex: 0,
+            text: '',
+            streamingTextChunks: ['Official ', 'summary'],
+            status: 'streaming',
+            startedAt: 1,
+            updatedAt: 2,
+          }],
+        }],
+      }],
+    }))
+
+    expect(wrapper.find('.chat-message__activity-button').exists()).toBe(true)
+  })
+
+  it('在触控设备上为查看活动入口保留至少 44px 的点击高度', () => {
+    const source = readFileSync(
+      resolve(process.cwd(), 'src/components/chat/ChatMessageItem.vue'),
+      'utf8',
+    )
+
+    expect(source).toMatch(
+      /@media \(hover: none\) and \(pointer: coarse\)[\s\S]*\.chat-message__activity-button[\s\S]*min-height: 44px/,
+    )
   })
 
   it('移除不安全协议并把未知代码语言限制为安全标签', () => {
@@ -345,6 +448,54 @@ describe('ChatMessageItem safe Markdown rendering', () => {
     })
 
     expect(wrapper.find('.chat-message__streaming-dot').exists()).toBe(false)
+  })
+
+  it('keeps a user image and text in one right-aligned message group', () => {
+    const wrapper = mountMessage(userMessage({
+      content: '请帮我看看这张图',
+      attachments: [{
+        id: 'image-1',
+        name: 'CleanShot.png',
+        kind: 'image',
+        mimeType: 'image/png',
+        size: 1024,
+        status: 'ready',
+        expiresAt: '2099-01-01T00:00:00Z',
+      }],
+    }))
+    const group = wrapper.get('[data-test="user-message-group"]')
+    const attachments = group.get('[data-test="message-attachments"]')
+    const bubble = group.get('.chat-message__plain')
+
+    expect(wrapper.findAll('[data-test="user-message-group"]')).toHaveLength(1)
+    expect(group.classes()).toContain('user-message-group')
+    expect(attachments.classes()).toContain('chat-message-attachments--with-content')
+    expect(Array.from(group.element.children)).toEqual([
+      attachments.element,
+      bubble.element,
+    ])
+    expect(bubble.text()).toBe('请帮我看看这张图')
+  })
+
+  it('keeps an image-only user message in the same group without an empty text bubble', () => {
+    const wrapper = mountMessage(userMessage({
+      attachments: [{
+        id: 'image-1',
+        name: 'photo.png',
+        kind: 'image',
+        mimeType: 'image/png',
+        size: 1024,
+        status: 'ready',
+        expiresAt: '2099-01-01T00:00:00Z',
+      }],
+    }))
+    const group = wrapper.get('[data-test="user-message-group"]')
+    const attachments = group.get('[data-test="message-attachments"]')
+
+    expect(Array.from(group.element.children)).toEqual([attachments.element])
+    expect(attachments.classes()).not.toContain('chat-message-attachments--with-content')
+    expect(group.find('.chat-message__plain').exists()).toBe(false)
+    expect(group.find('.chat-message__streaming-placeholder').exists()).toBe(false)
   })
 
   it.each(['pending', 'charged', 'not_charged', 'subscription', 'failed'] as const)(

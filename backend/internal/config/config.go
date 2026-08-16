@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -102,6 +103,50 @@ type Config struct {
 	Desktop                 DesktopConfig                 `mapstructure:"desktop"`
 	Transcription           TranscriptionConfig           `mapstructure:"transcription"`
 	ChatAttachments         ChatAttachmentConfig          `mapstructure:"chat_attachments"`
+	Library                 LibraryConfig                 `mapstructure:"library"`
+}
+
+// LibraryConfig controls the durable, private file library exposed by the
+// library API and reusable from Web Chat. SubscriptionGroupStorageBytes is keyed by the
+// existing subscription group ID because user subscriptions in this project
+// are group-based and do not retain a subscription-plan code.
+type LibraryConfig struct {
+	StorageDriver                 string           `mapstructure:"storage_driver"`
+	StorageDir                    string           `mapstructure:"storage_dir"`
+	DefaultStorageBytes           int64            `mapstructure:"default_storage_bytes"`
+	SubscriptionGroupStorageBytes map[string]int64 `mapstructure:"subscription_group_storage_bytes"`
+	MaxFileBytes                  int64            `mapstructure:"max_file_bytes"`
+	BatchDownloadLimit            int              `mapstructure:"batch_download_limit"`
+	BatchDownloadMaxBytes         int64            `mapstructure:"batch_download_max_bytes"`
+	DeletedRetentionDays          int              `mapstructure:"deleted_retention_days"`
+	PendingUploadStaleMinutes     int              `mapstructure:"pending_upload_stale_minutes"`
+	CleanupIntervalMinutes        int              `mapstructure:"cleanup_interval_minutes"`
+	CleanupBatchSize              int              `mapstructure:"cleanup_batch_size"`
+	S3                            LibraryS3Config  `mapstructure:"s3"`
+}
+
+// LibraryS3Config configures a private S3-compatible bucket. Endpoint, region
+// and credentials may reuse image_storage, but Bucket is always explicit so a
+// potentially public image bucket can never receive private library objects.
+type LibraryS3Config struct {
+	Endpoint        string `mapstructure:"endpoint"`
+	Region          string `mapstructure:"region"`
+	Bucket          string `mapstructure:"bucket"`
+	AccessKeyID     string `mapstructure:"access_key_id"`
+	SecretAccessKey string `mapstructure:"secret_access_key"`
+	ForcePathStyle  bool   `mapstructure:"force_path_style"`
+}
+
+func (c LibraryConfig) RequestBodyLimit() int64 {
+	const multipartOverhead = int64(1 << 20)
+	limit := c.MaxFileBytes
+	if limit <= 0 {
+		limit = 20 << 20
+	}
+	if limit > math.MaxInt64-multipartOverhead {
+		return math.MaxInt64
+	}
+	return limit + multipartOverhead
 }
 
 // ChatAttachmentConfig controls Web Chat's private attachment store and the
@@ -1750,6 +1795,13 @@ func load(allowMissingJWTSecret bool) (*Config, error) {
 	cfg.Transcription.FFprobePath = strings.TrimSpace(cfg.Transcription.FFprobePath)
 	cfg.Transcription.AcceptedMIMETypes = normalizeStringSlice(cfg.Transcription.AcceptedMIMETypes)
 	cfg.ChatAttachments.StorageDir = strings.TrimSpace(cfg.ChatAttachments.StorageDir)
+	cfg.Library.StorageDriver = strings.ToLower(strings.TrimSpace(cfg.Library.StorageDriver))
+	cfg.Library.StorageDir = strings.TrimSpace(cfg.Library.StorageDir)
+	cfg.Library.S3.Endpoint = strings.TrimSpace(cfg.Library.S3.Endpoint)
+	cfg.Library.S3.Region = strings.TrimSpace(cfg.Library.S3.Region)
+	cfg.Library.S3.Bucket = strings.TrimSpace(cfg.Library.S3.Bucket)
+	cfg.Library.S3.AccessKeyID = strings.TrimSpace(cfg.Library.S3.AccessKeyID)
+	cfg.Library.S3.SecretAccessKey = strings.TrimSpace(cfg.Library.S3.SecretAccessKey)
 	cfg.SetTrustForwardedIPForAPIKeyACL(cfg.Security.TrustForwardedIPForAPIKeyACL)
 	cfg.Log.Level = strings.ToLower(strings.TrimSpace(cfg.Log.Level))
 	cfg.Log.Format = strings.ToLower(strings.TrimSpace(cfg.Log.Format))
@@ -1874,6 +1926,24 @@ func setDefaults() {
 	viper.SetDefault("chat_attachments.max_concurrent_global", 4)
 	viper.SetDefault("chat_attachments.max_concurrent_per_user", 2)
 
+	// Private persistent file library. A zero storage quota means unlimited;
+	// operators explicitly assign real product entitlements through the global
+	// default and/or subscription-group overrides instead of code guessing them.
+	viper.SetDefault("library.storage_driver", "local")
+	viper.SetDefault("library.storage_dir", "./data/library-files")
+	viper.SetDefault("library.default_storage_bytes", int64(0))
+	viper.SetDefault("library.subscription_group_storage_bytes", map[string]int64{})
+	viper.SetDefault("library.max_file_bytes", int64(20*1024*1024))
+	viper.SetDefault("library.batch_download_limit", 100)
+	viper.SetDefault("library.batch_download_max_bytes", int64(100*1024*1024))
+	viper.SetDefault("library.deleted_retention_days", 30)
+	viper.SetDefault("library.pending_upload_stale_minutes", 60)
+	viper.SetDefault("library.cleanup_interval_minutes", 60)
+	viper.SetDefault("library.cleanup_batch_size", 100)
+	// Empty lets the storage provider reuse image_storage.region when credentials
+	// are shared; the common S3 client otherwise falls back to "auto" for R2.
+	viper.SetDefault("library.s3.region", "")
+
 	// Server
 	viper.SetDefault("server.host", "0.0.0.0")
 	viper.SetDefault("server.port", 8080)
@@ -1884,7 +1954,11 @@ func setDefaults() {
 	viper.SetDefault("server.idle_timeout", 120)       // 120秒空闲超时
 	viper.SetDefault("server.shutdown_grace_seconds", 30)
 	viper.SetDefault("server.shutdown_force_wait_seconds", 10)
-	viper.SetDefault("server.trusted_proxies", []string{})
+	// Trust only loopback reverse proxies by default. The bundled Caddy setup
+	// connects over loopback; without this, every proxied client collapses into
+	// one rate-limit/session-binding identity. Operators using a container or
+	// network proxy must still opt in its exact IP/CIDR explicitly.
+	viper.SetDefault("server.trusted_proxies", []string{"127.0.0.1", "::1"})
 	viper.SetDefault("server.max_request_body_size", int64(256*1024*1024))
 	// H2C 默认配置
 	viper.SetDefault("server.h2c.enabled", false)
@@ -3408,7 +3482,13 @@ func (c *Config) Validate() error {
 	if err := validateChatAttachmentConfig(c.ChatAttachments); err != nil {
 		return err
 	}
+	if err := validateLibraryConfig(c.Library, c.ImageStorage); err != nil {
+		return err
+	}
 	attachmentBodyLimit := c.ChatAttachments.RequestBodyLimit()
+	if libraryLimit := c.Library.RequestBodyLimit(); libraryLimit > attachmentBodyLimit {
+		attachmentBodyLimit = libraryLimit
+	}
 	if c.Gateway.MaxBodySize < attachmentBodyLimit {
 		return fmt.Errorf("gateway.max_body_size must be at least chat attachment request body limit (%d bytes)", attachmentBodyLimit)
 	}
@@ -3455,6 +3535,59 @@ func validateChatAttachmentConfig(c ChatAttachmentConfig) error {
 	if c.MaxConcurrentGlobal != 4 ||
 		c.MaxConcurrentPerUser != 2 || c.MaxConcurrentPerUser > c.MaxConcurrentGlobal {
 		return fmt.Errorf("chat_attachments concurrency limits are invalid")
+	}
+	return nil
+}
+
+func validateLibraryConfig(c LibraryConfig, imageStorage ImageStorageConfig) error {
+	switch c.StorageDriver {
+	case "local":
+		if strings.TrimSpace(c.StorageDir) == "" {
+			return fmt.Errorf("library.storage_dir must not be empty for local storage")
+		}
+	case "s3":
+		bucket := strings.TrimSpace(c.S3.Bucket)
+		accessKey := firstNonEmptyString(c.S3.AccessKeyID, imageStorage.AccessKeyID)
+		secretKey := firstNonEmptyString(c.S3.SecretAccessKey, imageStorage.SecretAccessKey)
+		if bucket == "" || accessKey == "" || secretKey == "" {
+			return fmt.Errorf("library.s3 bucket and credentials must be configured for s3 storage")
+		}
+		if strings.TrimSpace(imageStorage.PublicBaseURL) != "" && bucket == strings.TrimSpace(imageStorage.Bucket) {
+			return fmt.Errorf("library.s3.bucket must differ from image_storage.bucket when image_storage.public_base_url is configured")
+		}
+	default:
+		return fmt.Errorf("library.storage_driver must be local or s3")
+	}
+	if c.DefaultStorageBytes < 0 || c.DefaultStorageBytes > 1024*1024*1024*1024 {
+		return fmt.Errorf("library.default_storage_bytes must be zero (unlimited) or no more than 1TB")
+	}
+	for groupID, limit := range c.SubscriptionGroupStorageBytes {
+		parsedGroupID, err := strconv.ParseInt(strings.TrimSpace(groupID), 10, 64)
+		if err != nil || parsedGroupID <= 0 || limit < 0 || limit > 1024*1024*1024*1024 {
+			return fmt.Errorf("library.subscription_group_storage_bytes contains an invalid group or limit")
+		}
+	}
+	if c.MaxFileBytes <= 0 || c.MaxFileBytes > 100*1024*1024 ||
+		(c.DefaultStorageBytes > 0 && c.MaxFileBytes > c.DefaultStorageBytes) {
+		return fmt.Errorf("library.max_file_bytes must be positive, no more than 100MB, and within a finite default storage limit")
+	}
+	if c.BatchDownloadLimit <= 0 || c.BatchDownloadLimit > 100 {
+		return fmt.Errorf("library.batch_download_limit must be between 1 and 100")
+	}
+	if c.BatchDownloadMaxBytes <= 0 || c.BatchDownloadMaxBytes > 100*1024*1024 {
+		return fmt.Errorf("library.batch_download_max_bytes must be positive and no more than 100MB")
+	}
+	if c.DeletedRetentionDays < 0 || c.DeletedRetentionDays > 365 {
+		return fmt.Errorf("library.deleted_retention_days must be between 0 and 365")
+	}
+	if c.PendingUploadStaleMinutes < 15 || c.PendingUploadStaleMinutes > 1440 {
+		return fmt.Errorf("library.pending_upload_stale_minutes must be between 15 and 1440")
+	}
+	if c.CleanupIntervalMinutes <= 0 || c.CleanupIntervalMinutes > 1440 {
+		return fmt.Errorf("library.cleanup_interval_minutes must be between 1 and 1440")
+	}
+	if c.CleanupBatchSize <= 0 || c.CleanupBatchSize > 1000 {
+		return fmt.Errorf("library.cleanup_batch_size must be between 1 and 1000")
 	}
 	return nil
 }

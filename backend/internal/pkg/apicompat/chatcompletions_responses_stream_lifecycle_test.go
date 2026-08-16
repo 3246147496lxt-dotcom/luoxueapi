@@ -2,11 +2,82 @@ package apicompat
 
 import (
 	"encoding/json"
+	"os"
 	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 )
+
+func TestResponsesReasoningSummaryCompleteFixture(t *testing.T) {
+	raw, err := os.ReadFile("testdata/responses_reasoning_summary_complete.sse")
+	require.NoError(t, err)
+
+	expectedTypes := []string{
+		"response.created",
+		"response.in_progress",
+		"response.output_item.added",
+		"response.reasoning_summary_part.added",
+		"response.reasoning_summary_text.delta",
+		"response.reasoning_summary_text.delta",
+		"response.reasoning_summary_text.done",
+		"response.reasoning_summary_part.done",
+		"response.reasoning_summary_part.added",
+		"response.reasoning_summary_text.delta",
+		"response.reasoning_summary_text.done",
+		"response.reasoning_summary_part.done",
+		"response.output_item.done",
+		"response.output_item.added",
+		"response.content_part.added",
+		"response.output_text.delta",
+		"response.output_text.done",
+		"response.content_part.done",
+		"response.output_item.done",
+		"response.completed",
+	}
+	blocks := strings.Split(strings.TrimSpace(string(raw)), "\n\n")
+	require.Len(t, blocks, len(expectedTypes))
+
+	state := NewResponsesEventToChatState()
+	var publicContent strings.Builder
+	var publicReasoning strings.Builder
+	for index, block := range blocks {
+		lines := strings.Split(block, "\n")
+		require.Len(t, lines, 2, "fixture block %d must contain one event and one data line", index)
+		eventName := strings.TrimPrefix(lines[0], "event: ")
+		require.Equal(t, expectedTypes[index], eventName)
+		require.True(t, strings.HasPrefix(lines[1], "data: "))
+
+		var event ResponsesStreamEvent
+		require.NoError(t, json.Unmarshal([]byte(strings.TrimPrefix(lines[1], "data: ")), &event))
+		require.Equal(t, expectedTypes[index], event.Type)
+		require.Equal(t, index, event.SequenceNumber)
+
+		if strings.HasPrefix(event.Type, "response.reasoning_summary_") {
+			require.Equal(t, "rs_fixture_1", event.ItemID)
+			require.Zero(t, event.OutputIndex)
+			require.Contains(t, []int{0, 1}, event.SummaryIndex)
+		}
+		for _, chunk := range ResponsesEventToChatChunks(&event, state) {
+			for _, choice := range chunk.Choices {
+				if choice.Delta.Content != nil {
+					_, _ = publicContent.WriteString(*choice.Delta.Content)
+				}
+				if choice.Delta.ReasoningContent != nil {
+					_, _ = publicReasoning.WriteString(*choice.Delta.ReasoningContent)
+				}
+			}
+		}
+	}
+
+	require.Equal(t, "The implementation is ready for verification.", publicContent.String())
+	require.Equal(
+		t,
+		"Inspecting the request path and validating the event lifecycle.Preparing the final response.",
+		publicReasoning.String(),
+	)
+	require.True(t, state.Finalized)
+}
 
 func collectStreamEvents(t *testing.T, chunks []string) []ResponsesStreamEvent {
 	t.Helper()

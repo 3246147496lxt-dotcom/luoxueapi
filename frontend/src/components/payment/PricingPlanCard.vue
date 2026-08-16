@@ -1,16 +1,23 @@
 <template>
   <article
     class="pricing-plan-card"
-    :class="{ 'pricing-plan-card--featured': featured }"
+    :class="{
+      'pricing-plan-card--featured': featured,
+      'pricing-plan-card--current': current,
+    }"
     :data-plan-id="String(plan.id)"
     :data-plan-group="String(plan.group_id)"
     :data-featured="featured ? 'true' : 'false'"
+    :data-current="current ? 'true' : 'false'"
   >
     <div v-if="featured" class="pricing-plan-card__aura" aria-hidden="true"></div>
 
     <div class="pricing-plan-card__inner">
       <div class="pricing-plan-card__heading">
         <h3>{{ plan.name }}</h3>
+        <span v-if="current" class="pricing-plan-card__badge pricing-plan-card__badge--current">
+          {{ t('pricing.currentPlan') }}
+        </span>
         <span v-if="featured" class="pricing-plan-card__badge">
           {{ t('pricing.recommended') }}
         </span>
@@ -28,10 +35,12 @@
       <button
         type="button"
         class="pricing-plan-card__action"
-        :aria-label="t('pricing.choosePlanAccessible', { plan: plan.name })"
+        :aria-label="actionLabel
+          ? `${actionLabel} · ${plan.name}`
+          : t('pricing.choosePlanAccessible', { plan: plan.name })"
         @click="emit('select', plan)"
       >
-        {{ t('pricing.choosePlan') }}
+        {{ actionLabel || t('pricing.choosePlan') }}
       </button>
 
       <div class="pricing-plan-card__divider" aria-hidden="true"></div>
@@ -68,8 +77,12 @@ import type { SubscriptionPlan } from '@/types/payment'
 const props = withDefaults(defineProps<{
   plan: SubscriptionPlan
   featured?: boolean
+  current?: boolean
+  actionLabel?: string
 }>(), {
   featured: false,
+  current: false,
+  actionLabel: '',
 })
 
 const emit = defineEmits<{
@@ -135,6 +148,11 @@ const planFacts = computed(() => [...new Set(
     box-shadow 520ms;
 }
 
+.pricing-plan-card--current {
+  border-color: rgb(124 58 237 / 35%);
+  box-shadow: 0 0 0 3px rgb(124 58 237 / 8%), 0 1px 2px rgb(0 0 0 / 3%);
+}
+
 .pricing-plan-card__aura {
   position: absolute;
   z-index: 0;
@@ -161,6 +179,7 @@ const planFacts = computed(() => [...new Set(
   justify-content: space-between;
   gap: 12px;
   margin-bottom: 8px;
+  flex-wrap: wrap;
 }
 
 .pricing-plan-card__heading h3 {
@@ -182,6 +201,11 @@ const planFacts = computed(() => [...new Set(
   font-weight: 600;
   letter-spacing: 0.02em;
   line-height: 1.5;
+}
+
+.pricing-plan-card__badge--current {
+  color: #5b21b6;
+  background: #ede9fe;
 }
 
 .pricing-plan-card__description {

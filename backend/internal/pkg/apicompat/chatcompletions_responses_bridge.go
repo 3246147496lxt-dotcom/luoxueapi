@@ -338,8 +338,14 @@ func buildChatMessagesFromItems(messages []ChatMessage, rawItems []json.RawMessa
 			messages = append(messages, ChatMessage{Role: "user", Content: content})
 			pendingReasoning = ""
 			continue
-		case "input_image":
-			content, err := chatContentFromSingleResponsesPart(itemType, item)
+		case "input_image", "input_file":
+			if itemType == "input_file" && role != "user" {
+				return nil, NewProviderFileUnsupportedError(
+					"openai chat completions", rawString(item["filename"]),
+					"document inputs can only be represented in user messages on this route",
+				)
+			}
+			content, err := chatContentFromSingleResponsesPart(itemType, item, role)
 			if err != nil {
 				return nil, err
 			}
@@ -540,7 +546,7 @@ func responsesContentToChatContent(raw json.RawMessage, role string) (json.RawMe
 
 	var obj map[string]json.RawMessage
 	if err := json.Unmarshal(raw, &obj); err == nil {
-		return chatContentFromSingleResponsesPart(rawString(obj["type"]), obj)
+		return chatContentFromSingleResponsesPart(rawString(obj["type"]), obj, role)
 	}
 
 	return raw, nil
@@ -578,6 +584,32 @@ func responsesContentPartsToChatContent(rawParts []json.RawMessage, role string)
 				Type:     "image_url",
 				ImageURL: &ChatImageURL{URL: imageURL},
 			})
+		case "input_file", "file":
+			if role != "user" {
+				return nil, NewProviderFileUnsupportedError(
+					"openai chat completions", rawString(part["filename"]),
+					"document inputs can only be represented in user messages on this route",
+				)
+			}
+			if fileURL := rawString(part["file_url"]); fileURL != "" {
+				return nil, NewProviderFileUnsupportedError(
+					"openai chat completions", rawString(part["filename"]),
+					"file_url inputs cannot be represented on this route; send inline file_data instead",
+				)
+			}
+			file := &ChatFile{
+				Filename: rawString(part["filename"]),
+				FileData: rawString(part["file_data"]),
+				FileID:   rawString(part["file_id"]),
+			}
+			if file.FileID == "" && (file.Filename == "" || file.FileData == "") {
+				return nil, NewProviderFileInvalidError(
+					"openai chat completions", file.Filename,
+					"input_file requires file_id or both filename and inline file_data",
+				)
+			}
+			hasNonText = true
+			chatParts = append(chatParts, ChatContentPart{Type: "file", File: file})
 		}
 	}
 
@@ -596,7 +628,7 @@ func responsesContentPartsToChatContent(rawParts []json.RawMessage, role string)
 	return json.Marshal(chatParts)
 }
 
-func chatContentFromSingleResponsesPart(partType string, part map[string]json.RawMessage) (json.RawMessage, error) {
+func chatContentFromSingleResponsesPart(partType string, part map[string]json.RawMessage, role string) (json.RawMessage, error) {
 	switch partType {
 	case "input_image", "image_url":
 		imageURL := rawString(part["image_url"])
@@ -606,6 +638,34 @@ func chatContentFromSingleResponsesPart(partType string, part map[string]json.Ra
 		return json.Marshal([]ChatContentPart{{
 			Type:     "image_url",
 			ImageURL: &ChatImageURL{URL: imageURL},
+		}})
+	case "input_file", "file":
+		if role != "user" {
+			return nil, NewProviderFileUnsupportedError(
+				"openai chat completions", rawString(part["filename"]),
+				"document inputs can only be represented in user messages on this route",
+			)
+		}
+		if fileURL := rawString(part["file_url"]); fileURL != "" {
+			return nil, NewProviderFileUnsupportedError(
+				"openai chat completions", rawString(part["filename"]),
+				"file_url inputs cannot be represented on this route; send inline file_data instead",
+			)
+		}
+		file := &ChatFile{
+			Filename: rawString(part["filename"]),
+			FileData: rawString(part["file_data"]),
+			FileID:   rawString(part["file_id"]),
+		}
+		if file.FileID == "" && (file.Filename == "" || file.FileData == "") {
+			return nil, NewProviderFileInvalidError(
+				"openai chat completions", file.Filename,
+				"input_file requires file_id or both filename and inline file_data",
+			)
+		}
+		return json.Marshal([]ChatContentPart{{
+			Type: "file",
+			File: file,
 		}})
 	default:
 		return json.Marshal(rawString(part["text"]))

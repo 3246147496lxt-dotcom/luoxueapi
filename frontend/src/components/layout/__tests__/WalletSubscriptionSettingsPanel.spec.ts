@@ -236,7 +236,7 @@ describe('WalletSubscriptionSettingsPanel', () => {
     expect(wrapper.get('[data-testid="wallet-orders-link"]').attributes('href')).toBe('/orders')
     expect(
       wrapper.get('[data-renew-group="101"]').attributes('href'),
-    ).toBe('/pricing?group=101')
+    ).toBe('/pricing?mode=renew&group=101')
 
     await wrapper.setProps({
       summary: {

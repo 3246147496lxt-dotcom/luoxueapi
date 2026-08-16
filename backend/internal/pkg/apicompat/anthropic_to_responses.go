@@ -163,6 +163,12 @@ func parseAnthropicSystemContentParts(raw json.RawMessage) ([]ResponsesContentPa
 	}
 	var parts []ResponsesContentPart
 	for _, b := range blocks {
+		if b.Type == "document" {
+			return nil, NewProviderFileUnsupportedError(
+				"openai", b.Title,
+				"document blocks cannot be represented in the system role; move the document to a user message",
+			)
+		}
 		if b.Type == "text" && b.Text != "" && !isAnthropicBillingHeaderText(b.Text) {
 			parts = append(parts, ResponsesContentPart{Type: "input_text", Text: b.Text})
 		}
@@ -189,7 +195,8 @@ func anthropicMsgToResponsesItems(m AnthropicMessage) ([]ResponsesInputItem, err
 
 // anthropicUserToResponses handles an Anthropic user message. Content can be a
 // plain string or an array of blocks. tool_result blocks are extracted into
-// function_call_output items. Image blocks are converted to input_image parts.
+// function_call_output items. Image and document blocks are converted to
+// input_image/input_file parts.
 func anthropicUserToResponses(raw json.RawMessage) ([]ResponsesInputItem, error) {
 	// Try plain string.
 	var s string
@@ -208,26 +215,29 @@ func anthropicUserToResponses(raw json.RawMessage) ([]ResponsesInputItem, error)
 	}
 
 	var out []ResponsesInputItem
-	var toolResultImageParts []ResponsesContentPart
+	var toolResultAttachmentParts []ResponsesContentPart
 
 	// Extract tool_result blocks → function_call_output items.
-	// Images inside tool_results are extracted separately because the
+	// Images/documents inside tool_results are extracted separately because the
 	// Responses API function_call_output.output only accepts strings.
 	for _, b := range blocks {
 		if b.Type != "tool_result" {
 			continue
 		}
-		outputText, imageParts := convertToolResultOutput(b)
+		outputText, attachmentParts, err := convertToolResultOutput(b)
+		if err != nil {
+			return nil, err
+		}
 		out = append(out, ResponsesInputItem{
 			Type:   "function_call_output",
 			CallID: toResponsesCallID(b.ToolUseID),
 			Output: outputText,
 		})
-		toolResultImageParts = append(toolResultImageParts, imageParts...)
+		toolResultAttachmentParts = append(toolResultAttachmentParts, attachmentParts...)
 	}
 
-	// Remaining text + image blocks → user message with content parts.
-	// Also include images extracted from tool_results so the model can see them.
+	// Remaining text + image/document blocks → user message with content parts.
+	// Also include attachments extracted from tool_results so the model can see them.
 	var parts []ResponsesContentPart
 	for _, b := range blocks {
 		switch b.Type {
@@ -239,9 +249,15 @@ func anthropicUserToResponses(raw json.RawMessage) ([]ResponsesInputItem, error)
 			if uri := anthropicImageToDataURI(b.Source); uri != "" {
 				parts = append(parts, ResponsesContentPart{Type: "input_image", ImageURL: uri})
 			}
+		case "document":
+			part, err := anthropicDocumentToResponsesPart(b)
+			if err != nil {
+				return nil, err
+			}
+			parts = append(parts, part)
 		}
 	}
-	parts = append(parts, toolResultImageParts...)
+	parts = append(parts, toolResultAttachmentParts...)
 
 	if len(parts) > 0 {
 		content, err := json.Marshal(parts)
@@ -290,6 +306,12 @@ func anthropicAssistantToResponses(raw json.RawMessage) ([]ResponsesInputItem, e
 
 	// tool_use → function_call items.
 	for _, b := range blocks {
+		if b.Type == "document" {
+			return nil, NewProviderFileUnsupportedError(
+				"openai", b.Title,
+				"document blocks cannot be represented in the assistant role; move the document to a user message",
+			)
+		}
 		if b.Type != "tool_use" {
 			continue
 		}
@@ -341,13 +363,13 @@ func anthropicImageToDataURI(src *AnthropicImageSource) string {
 	return "data:" + mediaType + ";base64," + src.Data
 }
 
-// convertToolResultOutput extracts text and image content from a tool_result
+// convertToolResultOutput extracts text and attachment content from a tool_result
 // block. Returns the text as a string for the function_call_output Output
-// field, plus any image parts that must be sent in a separate user message
+// field, plus any image/document parts that must be sent in a separate user message
 // (the Responses API output field only accepts strings).
-func convertToolResultOutput(b AnthropicContentBlock) (string, []ResponsesContentPart) {
+func convertToolResultOutput(b AnthropicContentBlock) (string, []ResponsesContentPart, error) {
 	if len(b.Content) == 0 {
-		return "(empty)", nil
+		return "(empty)", nil, nil
 	}
 
 	// Try plain string content.
@@ -356,18 +378,18 @@ func convertToolResultOutput(b AnthropicContentBlock) (string, []ResponsesConten
 		if s == "" {
 			s = "(empty)"
 		}
-		return s, nil
+		return s, nil, nil
 	}
 
-	// Array of content blocks — may contain text and/or images.
+	// Array of content blocks — may contain text and/or attachments.
 	var inner []AnthropicContentBlock
 	if err := json.Unmarshal(b.Content, &inner); err != nil {
-		return "(empty)", nil
+		return "(empty)", nil, nil
 	}
 
-	// Separate text (for function_call_output) from images (for user message).
+	// Separate text (for function_call_output) from attachments (for user message).
 	var textParts []string
-	var imageParts []ResponsesContentPart
+	var attachmentParts []ResponsesContentPart
 	for _, ib := range inner {
 		switch ib.Type {
 		case "text":
@@ -376,8 +398,14 @@ func convertToolResultOutput(b AnthropicContentBlock) (string, []ResponsesConten
 			}
 		case "image":
 			if uri := anthropicImageToDataURI(ib.Source); uri != "" {
-				imageParts = append(imageParts, ResponsesContentPart{Type: "input_image", ImageURL: uri})
+				attachmentParts = append(attachmentParts, ResponsesContentPart{Type: "input_image", ImageURL: uri})
 			}
+		case "document":
+			part, err := anthropicDocumentToResponsesPart(ib)
+			if err != nil {
+				return "", nil, err
+			}
+			attachmentParts = append(attachmentParts, part)
 		}
 	}
 
@@ -385,7 +413,7 @@ func convertToolResultOutput(b AnthropicContentBlock) (string, []ResponsesConten
 	if text == "" {
 		text = "(empty)"
 	}
-	return text, imageParts
+	return text, attachmentParts, nil
 }
 
 // extractAnthropicTextFromBlocks joins all text blocks, ignoring thinking/

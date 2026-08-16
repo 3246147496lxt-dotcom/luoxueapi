@@ -76,6 +76,8 @@ const latestAPIKeyIPIndex = "idx_usage_logs_api_key_latest_ip"
 const apiKeyPurposeWebChatIndexesMigration = "183a_api_key_purpose_web_chat_indexes_notx.sql"
 const apiKeyPurposeIndex = "idx_api_keys_purpose"
 const apiKeyWebChatActiveUserGroupIndex = "idx_api_keys_web_chat_active_user_group"
+const libraryAliasUniqueIndexMigration = "201a_library_alias_unique_index_notx.sql"
+const libraryAliasUniqueIndex = "idx_chat_attachments_library_file_unique"
 const subscriptionAnchoredMonthlyQuotaMigration = "195_subscription_anchored_monthly_quota.sql"
 const schemaMigrationOriginStateKey = "schema_origin"
 
@@ -614,6 +616,8 @@ func prepareNonTransactionalMigration(ctx context.Context, db migrationQueryExec
 			}
 		}
 		return nil
+	case libraryAliasUniqueIndexMigration:
+		return dropInvalidIndexIfPresent(ctx, db, libraryAliasUniqueIndex)
 	default:
 		return nil
 	}

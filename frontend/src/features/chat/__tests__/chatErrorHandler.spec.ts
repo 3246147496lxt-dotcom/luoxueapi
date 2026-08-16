@@ -56,6 +56,24 @@ describe('Chat error handler', () => {
     })
   })
 
+  it('maps PRO_REASONING_UNAVAILABLE to the dedicated safe presentation', () => {
+    const expected = {
+      code: 'PRO_REASONING_UNAVAILABLE',
+      messageKey: 'chat.errors.proReasoningUnavailable' as const,
+      retryable: false,
+    }
+
+    expect(describeChatError({
+      status: 400,
+      code: 'PRO_REASONING_UNAVAILABLE',
+      message: 'raw backend detail',
+    })).toEqual(expected)
+    expect(describeChatMessageError({
+      errorCode: 'PRO_REASONING_UNAVAILABLE',
+      errorMessage: 'raw persisted detail',
+    })).toEqual(expected)
+  })
+
   it.each([
     ['Unauthorized', 'chat.errors.sessionExpired', false],
     ['Forbidden', 'chat.errors.permissionDenied', false],

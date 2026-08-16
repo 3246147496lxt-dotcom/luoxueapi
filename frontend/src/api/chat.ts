@@ -5,8 +5,14 @@ import {
   type AuthSessionInvalidationExpectation,
 } from '@/auth/authSession'
 import { refreshAuthSession } from '@/auth/authRefresh'
+import {
+  ChatActivityStateMachine,
+  isChatActivityEventType,
+  normalizeChatActivities,
+} from '@/features/chat/activity'
 import { getLocale } from '@/i18n'
 import type {
+  ChatActivityEvent,
   ChatCompletionChunk,
   ChatCompletionRequest,
   ChatCompletionStreamHandlers,
@@ -17,6 +23,7 @@ import type {
   ChatAttachment,
   ChatAttempt,
   ChatAttemptStatus,
+  ChatStopAttemptResult,
   ChatConversationPage,
   ChatMessage,
   ChatMessagePage,
@@ -24,6 +31,7 @@ import type {
   ChatReceipt,
   ChatReceiptPollOptions,
   ChatReceiptStatus,
+  ChatReasoningPayload,
   ChatServerConversation,
   ChatServerMessage,
   ChatSyncChange,
@@ -234,6 +242,7 @@ function dispatchSSEEvent(
   event: SSEEventState,
   handlers: ChatCompletionStreamHandlers,
   result: ChatCompletionStreamResult,
+  activityMachine: ChatActivityStateMachine,
 ): boolean {
   const eventName = event.name || 'message'
   const data = event.data.join('\n')
@@ -247,13 +256,35 @@ function dispatchSSEEvent(
   }
   if (!data.trim()) return false
   if (data.trim() === '[DONE]') {
+    activityMachine.flush()
     result.receivedDone = true
     return true
   }
 
   const payload = parseJSON(data)
   const record = asRecord(payload)
-  if (eventName === 'error' || record?.error !== undefined) {
+  if (eventName === 'error') {
+    throw createErrorFromPayload(payload, 'The chat stream reported an error.', {
+      code: 'STREAM_ERROR',
+    })
+  }
+  if (record?.source === 'openai_responses') {
+    const eventType = record.eventType
+    if (
+      isChatActivityEventType(eventType)
+      && Object.prototype.hasOwnProperty.call(record, 'payload')
+    ) {
+      const activityEvent: ChatActivityEvent = {
+        source: 'openai_responses',
+        eventType,
+        payload: record.payload,
+      }
+      handlers.onActivityEvent?.(activityEvent)
+      activityMachine.consume(activityEvent)
+    }
+    return false
+  }
+  if (record?.error !== undefined) {
     throw createErrorFromPayload(payload, 'The chat stream reported an error.', {
       code: 'STREAM_ERROR',
     })
@@ -291,10 +322,15 @@ export async function parseChatCompletionSSE(
     usage: null,
     receiptId: null,
   }
+  const activityMachine = new ChatActivityStateMachine({
+    onActivity: handlers.onActivity,
+    reasoningMode: options.reasoningMode,
+    reasoningEffort: options.reasoningEffort,
+  })
   let buffer = ''
 
   const processLine = (line: string): boolean => {
-    if (line === '') return dispatchSSEEvent(event, handlers, result)
+    if (line === '') return dispatchSSEEvent(event, handlers, result, activityMachine)
     if (line.startsWith(':')) return false
 
     const separator = line.indexOf(':')
@@ -363,7 +399,7 @@ export async function parseChatCompletionSSE(
         buffer += decoder.decode()
         stopped = consumeLines(true)
         if (!stopped && (event.data.length > 0 || event.name === 'error')) {
-          dispatchSSEEvent(event, handlers, result)
+          dispatchSSEEvent(event, handlers, result, activityMachine)
         }
         break
       }
@@ -376,13 +412,23 @@ export async function parseChatCompletionSSE(
       await cancelReader()
     }
 
+    if (result.receivedDone) activityMachine.flush()
+    else activityMachine.disconnect()
     handlers.onDone?.(result)
     return result
   } catch (error) {
+    try {
+      if (signal?.aborted) activityMachine.stop()
+      else if (!result.receivedDone) activityMachine.disconnect()
+      else activityMachine.flush()
+    } catch {
+      // Preserve the original stream or callback error.
+    }
     await cancelReader()
     if (signal?.aborted) throw abortError()
     throw error
   } finally {
+    activityMachine.dispose()
     signal?.removeEventListener('abort', cancelOnAbort)
     try {
       reader.releaseLock()
@@ -413,6 +459,35 @@ function normalizeChatModel(value: unknown): ChatModel | null {
   } else {
     delete model.supports_reasoning_slider
   }
+  const modelCapabilities = model as unknown as Record<string, unknown>
+  for (const [snakeCase, camelCase] of [
+    ['supports_responses', 'supportsResponses'],
+    ['supports_reasoning_summary', 'supportsReasoningSummary'],
+    ['supports_reasoning_pro_mode', 'supportsReasoningProMode'],
+  ] as const) {
+    const capability = candidate[snakeCase] ?? candidate[camelCase]
+    delete modelCapabilities[camelCase]
+    if (typeof capability === 'boolean') {
+      modelCapabilities[snakeCase] = capability
+    } else {
+      delete modelCapabilities[snakeCase]
+    }
+  }
+  const supportedReasoningEfforts = candidate.supported_reasoning_efforts
+    ?? candidate.supportedReasoningEfforts
+  delete modelCapabilities.supportedReasoningEfforts
+  if (Array.isArray(supportedReasoningEfforts)) {
+    model.supported_reasoning_efforts = supportedReasoningEfforts.filter(
+      (effort): effort is 'low' | 'medium' | 'high' | 'xhigh' => (
+        effort === 'low'
+        || effort === 'medium'
+        || effort === 'high'
+        || effort === 'xhigh'
+      ),
+    )
+  } else {
+    delete model.supported_reasoning_efforts
+  }
   return model
 }
 
@@ -431,9 +506,11 @@ function normalizeRequestError(error: unknown, fallbackMessage: string): ChatAPI
   })
 }
 
-export async function getChatModels(): Promise<ChatCatalog> {
+export async function getChatModels(signal?: AbortSignal): Promise<ChatCatalog> {
   try {
-    const { data } = await apiClient.get<unknown>('/chat/models')
+    const { data } = signal
+      ? await apiClient.get<unknown>('/chat/models', { signal })
+      : await apiClient.get<unknown>('/chat/models')
     const response = asRecord(data)
     const items = modelList(data)
     const balance = response?.balance
@@ -450,6 +527,7 @@ export async function getChatModels(): Promise<ChatCatalog> {
     if (transcription) catalog.transcription = transcription
     return catalog
   } catch (error) {
+    if (signal?.aborted || isAbortError(error)) throw error
     throw normalizeRequestError(error, 'Unable to load the chat model list.')
   }
 }
@@ -501,7 +579,8 @@ export function normalizeChatAttachment(value: unknown): ChatAttachment | null {
   const mimeType = nonEmptyString(candidate.mime_type ?? candidate.mimeType)
   const size = normalizeNonNegativeInteger(candidate.size)
   const status = candidate.status
-  const expiresAt = nonEmptyString(candidate.expires_at ?? candidate.expiresAt)
+  const rawExpiresAt = candidate.expires_at ?? candidate.expiresAt
+  const expiresAt = typeof rawExpiresAt === 'string' ? rawExpiresAt.trim() : null
 
   if (
     !id
@@ -510,7 +589,7 @@ export function normalizeChatAttachment(value: unknown): ChatAttachment | null {
     || !mimeType
     || size === undefined
     || (status !== 'ready' && status !== 'expired')
-    || !expiresAt
+    || expiresAt === null
   ) return null
 
   const attachment: ChatAttachment = {
@@ -733,6 +812,7 @@ const CHAT_RECEIPT_STATUSES = new Set<ChatReceiptStatus>([
   'failed',
 ])
 const DEFAULT_CHAT_RECEIPT_POLL_DELAYS = [150, 300, 600, 1200, 2400] as const
+const DEFAULT_CHAT_STOP_RETRY_DELAYS = [0, 250, 1000] as const
 
 function optionalFiniteNumber(value: unknown): number | undefined {
   if (typeof value === 'number' && Number.isFinite(value)) return value
@@ -941,6 +1021,13 @@ function normalizeServerMessage(value: unknown): ChatServerMessage | null {
       .filter((attachment): attachment is ChatAttachment => attachment !== null)
     if (attachments.length > 0) message.attachments = attachments
   }
+  const activities = normalizeChatActivities(candidate.activities, {
+    fallbackStartedAt: createdAt,
+    markDisconnected: rawStatus === 'streaming'
+      || rawStatus === 'processing'
+      || rawStatus === 'interrupted',
+  })
+  if (activities.length > 0) message.activities = activities
   if (
     rawStatus === 'streaming'
     || rawStatus === 'processing'
@@ -1422,6 +1509,74 @@ export async function getChatAttempt(
   }
 }
 
+// Record an authenticated, explicit user stop separately from a transport
+// disconnect. The backend makes this intent idempotent and gives it precedence
+// over the streaming request's cancellation/finalization race.
+export async function stopChatAttempt(
+  attemptId: string,
+  options: { delays?: readonly number[] } = {},
+): Promise<ChatStopAttemptResult> {
+  const normalizedAttemptId = attemptId.trim()
+  if (!normalizedAttemptId) {
+    throw new ChatAPIError('A chat attempt ID is required.', {
+      code: 'INVALID_CHAT_ATTEMPT_ID',
+    })
+  }
+  const delays = options.delays ?? DEFAULT_CHAT_STOP_RETRY_DELAYS
+  let lastError: ChatAPIError | null = null
+  for (let attempt = 0; attempt <= delays.length; attempt += 1) {
+    try {
+      const { data } = await apiClient.post<unknown>(
+        `/chat/attempts/${encodeURIComponent(normalizedAttemptId)}/stop`,
+      )
+      const candidate = asRecord(data)
+      const resultAttemptId = nonEmptyString(candidate?.attempt_id ?? candidate?.attemptId)
+      const accepted = optionalBoolean(candidate?.accepted)
+      const rawAttemptStatus = nonEmptyString(
+        candidate?.attempt_status ?? candidate?.attemptStatus,
+      )
+      const attemptStatus = rawAttemptStatus === 'accepted'
+        || rawAttemptStatus === 'processing'
+        || rawAttemptStatus === 'interrupted'
+        || rawAttemptStatus === 'completed'
+        || rawAttemptStatus === 'failed'
+        ? rawAttemptStatus
+        : null
+      const rawDeliveryStatus = nonEmptyString(
+        candidate?.delivery_status ?? candidate?.deliveryStatus,
+      )
+      const deliveryStatus = rawDeliveryStatus === 'stopped'
+        || rawDeliveryStatus === 'completed'
+        || rawDeliveryStatus === 'error'
+        ? rawDeliveryStatus
+        : null
+      if (!candidate || !resultAttemptId || accepted === undefined || !attemptStatus || !deliveryStatus) {
+        throw new ChatAPIError('The stop attempt endpoint returned an invalid response.', {
+          code: 'INVALID_CHAT_STOP_RESPONSE',
+        })
+      }
+      const stoppedAt = optionalTimestamp(candidate.stopped_at ?? candidate.stoppedAt)
+      return {
+        attemptId: resultAttemptId,
+        accepted,
+        attemptStatus,
+        deliveryStatus,
+        ...(stoppedAt !== undefined ? { stoppedAt } : {}),
+      }
+    } catch (error) {
+      lastError = normalizeRequestError(error, 'Unable to stop the chat attempt.')
+      const retryable = lastError.status === 0
+        || lastError.status === 408
+        || lastError.status === 425
+        || lastError.status === 429
+        || lastError.status >= 500
+      if (!retryable || attempt >= delays.length) throw lastError
+      await waitForReceiptPoll(delays[attempt] ?? 0)
+    }
+  }
+  throw lastError ?? new ChatAPIError('Unable to stop the chat attempt.')
+}
+
 async function responseError(response: Response): Promise<ChatAPIError> {
   const requestId = response.headers.get('X-Request-Id')
     ?? response.headers.get('X-Request-ID')
@@ -1448,6 +1603,20 @@ async function responseError(response: Response): Promise<ChatAPIError> {
   )
 }
 
+export function buildChatReasoningPayload(
+  request: Pick<ChatCompletionRequest, 'reasoningMode' | 'reasoningEffort'>,
+): ChatReasoningPayload | undefined {
+  if (request.reasoningMode === 'pro') {
+    return { mode: 'pro', summary: 'auto' }
+  }
+  if (!request.reasoningEffort) return undefined
+  return {
+    mode: 'standard',
+    effort: request.reasoningEffort,
+    summary: 'auto',
+  }
+}
+
 async function postCompletion(
   request: ChatCompletionRequest,
   accessToken: string,
@@ -1455,6 +1624,10 @@ async function postCompletion(
   attemptId: string,
   signal?: AbortSignal,
 ): Promise<Response> {
+  // Web Chat uses the Responses reasoning shape at the request boundary. Pro
+  // is a mode, not an effort value, so it deliberately omits `effort` while
+  // retaining the required automatic summary contract.
+  const reasoning = buildChatReasoningPayload(request)
   return fetch(buildApiUrl('/chat/completions'), {
     method: 'POST',
     credentials: 'include',
@@ -1469,9 +1642,7 @@ async function postCompletion(
     body: JSON.stringify({
       conversation_id: request.conversationId,
       model: request.model.trim(),
-      ...(request.reasoningEffort
-        ? { reasoning_effort: request.reasoningEffort }
-        : {}),
+      ...(reasoning ? { reasoning } : {}),
       expected_head_message_id: request.expectedHeadMessageId,
       ...(request.userMessage
         ? {
@@ -1480,6 +1651,14 @@ async function postCompletion(
               content: request.userMessage.content,
               ...(request.userMessage.attachmentIds?.length
                 ? { attachment_ids: request.userMessage.attachmentIds }
+                : {}),
+              ...(request.userMessage.attachments?.length
+                ? {
+                    attachments: request.userMessage.attachments.map((attachment) => ({
+                      source: attachment.source,
+                      file_id: attachment.fileId,
+                    })),
+                  }
                 : {}),
             },
           }
@@ -1577,6 +1756,7 @@ export async function streamChatCompletion(
     && (
       request.userMessage.content.trim()
       || request.userMessage.attachmentIds?.some((id) => id.trim())
+      || request.userMessage.attachments?.some(({ fileId }) => fileId.trim())
     ),
   )
   const hasRetryMessage = Boolean(request.retryOfMessageId?.trim())
@@ -1678,7 +1858,13 @@ export async function streamChatCompletion(
         code: 'EMPTY_STREAM',
       })
     }
-    const result = await parseChatCompletionSSE(response.body, handlers, options)
+    const result = await parseChatCompletionSSE(response.body, handlers, {
+      ...options,
+      reasoningMode: request.reasoningMode,
+      reasoningEffort: request.reasoningMode === 'pro'
+        ? undefined
+        : request.reasoningEffort,
+    })
     result.receiptId = receiptId
     if (!result.receivedDone) {
       throw new ChatAPIError('The chat stream ended before it completed.', {

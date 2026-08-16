@@ -33,7 +33,7 @@
         :aria-controls="panelId"
         :aria-label="t('chat.settings.label', {
           model: selectedModelLabel,
-          effort: selectedEffortLabel,
+          effort: selectedLevelLabel,
         })"
         data-chat-control-anchor
         data-test="chat-model-settings-trigger"
@@ -124,10 +124,10 @@
                       'chat-model-settings-popover__range-wrap--settling': rangeSettling,
                       'chat-model-settings-popover__range-wrap--keyboard-focus': rangeFocused && keyboardFocusVisible,
                       'chat-model-settings-popover__range-wrap--thumb-nearby': nearbyReasoningIndex === visualReasoningIndex,
-                      'chat-model-settings-popover__range-wrap--maximum': isMaximumReasoning,
+                      'chat-model-settings-popover__range-wrap--maximum': premiumReasoningActive,
                     }"
                     :style="capabilityRangeStyle"
-                    :data-max="isMaximumReasoning ? 'true' : undefined"
+                    :data-max="premiumReasoningActive ? 'true' : undefined"
                     data-test="chat-settings-capability-visual"
                   >
                     <span class="chat-model-settings-popover__range-rail" aria-hidden="true">
@@ -135,7 +135,7 @@
                       <span class="chat-model-settings-popover__max-effects-viewport">
                         <Transition name="chat-reasoning-max-effects">
                           <span
-                            v-if="isMaximumReasoning"
+                            v-if="premiumReasoningActive"
                             :key="maximumEntryGeneration ?? 'stable'"
                             class="chat-model-settings-popover__max-effects"
                             :class="{
@@ -176,7 +176,7 @@
                       </span>
                       <span class="chat-model-settings-popover__range-thumb-track">
                         <span
-                          v-if="isMaximumReasoning && maxBurstToken !== null"
+                          v-if="premiumReasoningActive && maxBurstToken !== null"
                           :key="maxBurstToken"
                           class="chat-model-settings-popover__max-burst"
                           :data-entry-token="maxBurstToken"
@@ -252,11 +252,12 @@
                   </button>
 
                   <button
+                    v-if="showsReasoningSelector"
                     type="button"
                     class="chat-model-settings-popover__row"
                     role="menuitem"
                     aria-haspopup="menu"
-                    :aria-label="`${t('chat.settings.reasoning')} ${selectedEffortLabel}`"
+                    :aria-label="`${t('chat.settings.reasoning')} ${selectedLevelLabel}`"
                     :aria-expanded="pane === 'reasoning'"
                     :data-state="pane === 'reasoning' ? 'open' : 'closed'"
                     :aria-controls="submenuId"
@@ -270,7 +271,7 @@
                       <small>{{ t('chat.settings.reasoning') }}</small>
                     </span>
                     <span class="chat-model-settings-popover__row-trailing">
-                      <strong>{{ selectedEffortLabel }}</strong>
+                      <strong>{{ selectedLevelLabel }}</strong>
                       <Icon name="chevronRight" size="sm" aria-hidden="true" />
                     </span>
                   </button>
@@ -317,7 +318,7 @@
                 { 'chat-model-settings-popover__submenu--compact': isCompact },
               ]"
               role="menu"
-              :aria-label="pane === 'models' ? t('chat.settings.model') : t('chat.settings.reasoning')"
+              :aria-label="submenuLabel"
               data-test="chat-settings-submenu"
               @pointerenter="onSubmenuPointerEnter"
               @pointerleave="onSubmenuPointerLeave"
@@ -358,22 +359,23 @@
                 class="chat-model-settings-popover__options"
                 role="group"
                 :aria-label="t('chat.settings.reasoning')"
+                data-test="chat-settings-reasoning-options"
               >
                 <button
                   v-for="option in reasoningOptions"
                   :key="option.value"
                   type="button"
                   class="chat-model-settings-popover__option"
-                  :class="{ 'chat-model-settings-popover__option--selected': option.value === reasoningEffort }"
+                  :class="{ 'chat-model-settings-popover__option--selected': option.value === selectedReasoningLevel }"
                   role="menuitemradio"
-                  :aria-checked="option.value === reasoningEffort"
+                  :aria-checked="option.value === selectedReasoningLevel"
                   :data-value="option.value"
-                  @click="selectReasoning(option.value)"
+                  @click="selectReasoningLevel(option.value)"
                 >
                   <strong>{{ option.label }}</strong>
                   <span class="chat-model-settings-popover__check-slot" aria-hidden="true">
                     <Icon
-                      v-if="option.value === reasoningEffort"
+                      v-if="option.value === selectedReasoningLevel"
                       name="chatCheck"
                       size="sm"
                       class="chat-model-settings-popover__check"
@@ -404,7 +406,7 @@ import ChatControlTooltip from '@/components/chat/ChatControlTooltip.vue'
 import { chatControlShortcutIsInScope } from '@/components/chat/chatControlShortcut'
 import Icon from '@/components/icons/Icon.vue'
 import ReasoningMaxCanvas from '@/components/chat/ReasoningMaxCanvas.vue'
-import type { ChatReasoningEffort } from '@/types/chat'
+import type { ChatReasoningEffort, ChatReasoningMode } from '@/types/chat'
 
 export interface ChatModelSettingsOption {
   value: string
@@ -412,12 +414,16 @@ export interface ChatModelSettingsOption {
   description?: string
   recommended?: boolean
   supportsReasoningSlider?: boolean
+  supportsReasoningSummary?: boolean
+  supportsReasoningProMode?: boolean
+  supportedReasoningEfforts?: ChatReasoningEffort[]
 }
 
 type SettingsPane = 'root' | 'models' | 'reasoning'
 type SubmenuPane = Exclude<SettingsPane, 'root'>
 type PaneActivation = 'none' | 'hover' | 'persistent'
 type SupportedReasoningEffort = Extract<ChatReasoningEffort, 'low' | 'medium' | 'high' | 'xhigh'>
+type ReasoningLevel = SupportedReasoningEffort | 'pro'
 type PanelPlacement = 'above' | 'below'
 type SubmenuPlacement = 'left' | 'right'
 
@@ -448,10 +454,12 @@ const EFFORT_ONLY_TRIGGER_MODEL_ID = 'gpt-5.6-sol'
 const props = withDefaults(defineProps<{
   modelValue: string
   reasoningEffort: SupportedReasoningEffort
+  reasoningMode: ChatReasoningMode
   modelOptions: ChatModelSettingsOption[]
   disabled?: boolean
   loading?: boolean
 }>(), {
+  reasoningMode: 'standard',
   disabled: false,
   loading: false,
 })
@@ -459,13 +467,13 @@ const props = withDefaults(defineProps<{
 const emit = defineEmits<{
   'update:modelValue': [value: string]
   'update:reasoningEffort': [value: SupportedReasoningEffort]
+  'update:reasoningMode': [value: ChatReasoningMode]
 }>()
 
 const { t } = useI18n()
 const panelId = `chat-model-settings-${Math.random().toString(36).slice(2, 9)}`
 const submenuId = `${panelId}-submenu`
 const advancedContentId = `${panelId}-advanced`
-const reasoningValues = REASONING_VALUES
 const open = ref(false)
 const pane = ref<SettingsPane>('root')
 const advancedExpanded = ref(false)
@@ -474,7 +482,8 @@ const panelStyle = ref<CSSProperties>({})
 const panelPlacement = ref<PanelPlacement>('above')
 const submenuPlacement = ref<SubmenuPlacement>('right')
 const isCompact = ref(false)
-const visualReasoningIndex = ref(Math.max(0, REASONING_VALUES.indexOf(props.reasoningEffort)))
+const visualReasoningIndex = ref(0)
+const visualReasoningMode = ref<ChatReasoningMode>(props.reasoningMode)
 const rangeDragging = ref(false)
 const rangeSettling = ref(false)
 const rangeFocused = ref(false)
@@ -497,8 +506,18 @@ const submenuSurfaceRef = ref<HTMLElement | null>(null)
 const selectedModel = computed(() => (
   props.modelOptions.find((option) => option.value === props.modelValue) ?? null
 ))
+const reasoningValues = computed<readonly SupportedReasoningEffort[]>(() => {
+  const supported = new Set(selectedModel.value?.supportedReasoningEfforts ?? [])
+  return REASONING_VALUES.filter((effort) => supported.has(effort))
+})
 const showsReasoningSlider = computed(() => (
-  selectedModel.value !== null
+  selectedModel.value?.supportsReasoningSlider === true
+  && reasoningValues.value.length > 0
+))
+const showsReasoningSelector = computed(() => (
+  (selectedModel.value?.supportsReasoningSummary === true
+    || selectedModel.value?.supportsReasoningProMode === true)
+  && reasoningValues.value.length > 0
 ))
 const selectedModelLabel = computed(() => {
   if (props.loading) return t('chat.models.loading')
@@ -518,34 +537,59 @@ const selectedTriggerModelLabel = computed(() => {
   return selectedMenuModelLabel.value
 })
 const selectedTriggerValueLabel = computed(() => (
-  selectedModel.value ? selectedEffortLabel.value : selectedModelLabel.value
+  selectedModel.value
+    ? selectedLevelLabel.value
+    : selectedModelLabel.value
 ))
+const selectedReasoningLevel = computed<ReasoningLevel>(() => (
+  props.reasoningMode === 'pro' ? 'pro' : props.reasoningEffort
+))
+const submenuLabel = computed(() => {
+  if (pane.value === 'models') return t('chat.settings.model')
+  return t('chat.settings.reasoning')
+})
 const reasoningOptions = computed<Array<{
-  value: SupportedReasoningEffort
+  value: ReasoningLevel
   label: string
-}>>(() => [
-  { value: 'low', label: t('chat.settings.reasoningLevels.low') },
-  { value: 'medium', label: t('chat.settings.reasoningLevels.medium') },
-  { value: 'high', label: t('chat.settings.reasoningLevels.high') },
-  { value: 'xhigh', label: t('chat.settings.reasoningLevels.xhigh') },
-])
-const selectedEffortLabel = computed(() => (
-  reasoningOptions.value.find((option) => option.value === props.reasoningEffort)?.label
-  || t('chat.settings.reasoningLevels.low')
+}>>(() => {
+  const options: Array<{ value: ReasoningLevel; label: string }> = [
+    { value: 'low', label: t('chat.settings.reasoningLevels.low') },
+    { value: 'medium', label: t('chat.settings.reasoningLevels.medium') },
+    { value: 'high', label: t('chat.settings.reasoningLevels.high') },
+    { value: 'xhigh', label: t('chat.settings.reasoningLevels.xhigh') },
+  ]
+  const supported = options.filter((option) => (
+    option.value !== 'pro'
+      && reasoningValues.value.includes(option.value as SupportedReasoningEffort)
+  ))
+  if (selectedModel.value?.supportsReasoningProMode === true) {
+    supported.push({ value: 'pro', label: t('chat.settings.reasoningLevels.pro') })
+  }
+  return supported
+})
+const selectedLevelLabel = computed(() => (
+  reasoningOptions.value.find((option) => option.value === selectedReasoningLevel.value)?.label
+  || (props.reasoningMode === 'pro'
+    ? t('chat.settings.reasoningLevels.pro')
+    : t('chat.settings.reasoningLevels.low'))
 ))
 const visualEffortLabel = computed(() => (
-  reasoningOptions.value[visualReasoningIndex.value]?.label
-  || t('chat.settings.reasoningLevels.low')
+  visualReasoningMode.value === 'pro'
+    ? t('chat.settings.reasoningLevels.pro')
+    : reasoningOptions.value.find((option) => option.value === reasoningValues.value[visualReasoningIndex.value])?.label
+    || t('chat.settings.reasoningLevels.low')
 ))
-const isMaximumReasoning = computed(() => (
-  visualReasoningIndex.value === REASONING_VALUES.length - 1
+const premiumReasoningActive = computed(() => (
+  visualReasoningMode.value === 'pro'
+  || reasoningValues.value[visualReasoningIndex.value] === 'xhigh'
 ))
 const selectedReasoningIndex = computed(() => {
-  const index = REASONING_VALUES.indexOf(props.reasoningEffort)
+  const index = reasoningValues.value.indexOf(props.reasoningEffort)
+  if (props.reasoningMode === 'pro') return Math.max(0, reasoningValues.value.length - 1)
   return index >= 0 ? index : 0
 })
-const reasoningStops = REASONING_VALUES.map((value, index) => {
-  const progress = index / Math.max(1, REASONING_VALUES.length - 1)
+const reasoningStops = computed(() => reasoningValues.value.map((value, index) => {
+  const progress = index / Math.max(1, reasoningValues.value.length - 1)
   const position = REASONING_SLIDER_STOP_INSET
     + progress * (REASONING_SLIDER_RAIL_WIDTH - (REASONING_SLIDER_STOP_INSET * 2))
   return {
@@ -553,18 +597,19 @@ const reasoningStops = REASONING_VALUES.map((value, index) => {
     offset: position,
     position: `${position}px`,
   }
-})
+}))
 const capabilityRangeStyle = computed<CSSProperties>(() => {
+  const valueCount = Math.max(1, reasoningValues.value.length)
   const index = Math.min(
-    REASONING_VALUES.length - 1,
+    valueCount - 1,
     Math.max(0, visualReasoningIndex.value),
   )
-  const progress = index / Math.max(1, REASONING_VALUES.length - 1)
+  const progress = index / Math.max(1, valueCount - 1)
   const position = REASONING_SLIDER_STOP_INSET
     + progress * (REASONING_SLIDER_RAIL_WIDTH - (REASONING_SLIDER_STOP_INSET * 2))
   const fillWidth = index === 0
     ? 0
-    : index === REASONING_VALUES.length - 1
+    : index === valueCount - 1
       ? REASONING_SLIDER_RAIL_WIDTH
       : position
   return {
@@ -587,6 +632,32 @@ watch(() => props.reasoningEffort, () => {
   visualReasoningIndex.value = nextIndex
 })
 
+watch(() => props.reasoningMode, (mode) => {
+  visualReasoningMode.value = mode
+  const nextIndex = selectedReasoningIndex.value
+  if (nextIndex !== visualReasoningIndex.value) resetMaximumEntryMotion()
+  visualReasoningIndex.value = nextIndex
+})
+
+watch(selectedReasoningLevel, (level, previousLevel) => {
+  const enteredPremium = level === 'pro'
+    && premiumReasoningActive.value
+    && level !== previousLevel
+    && (previousLevel === 'low' || previousLevel === 'medium' || previousLevel === 'high')
+  if (enteredPremium) startMaximumEntryMotion()
+  if (!premiumReasoningActive.value) resetMaximumEntryMotion()
+})
+
+watch(reasoningValues, (values) => {
+  const nextIndex = selectedReasoningIndex.value
+  const effortIndex = values.indexOf(props.reasoningEffort)
+  if (values.length > 0 && effortIndex < 0) {
+    emit('update:reasoningEffort', values[0]!)
+  }
+  visualReasoningIndex.value = Math.max(0, nextIndex)
+  resetMaximumEntryMotion()
+}, { immediate: true })
+
 watch(() => props.modelValue, () => {
   resetMaximumEntryMotion()
 })
@@ -606,6 +677,8 @@ function toggleMenu() {
   resetPaneInteraction()
   resetMaximumEntryMotion()
   clearRangeProximity()
+  visualReasoningMode.value = props.reasoningMode
+  visualReasoningIndex.value = selectedReasoningIndex.value
   open.value = true
   pane.value = 'root'
   advancedExpanded.value = false
@@ -812,25 +885,45 @@ function onSubmenuFocusIn() {
 }
 
 function selectModel(value: string) {
+  const option = props.modelOptions.find((candidate) => candidate.value === value)
+  if (props.reasoningMode === 'pro' && option?.supportsReasoningProMode !== true) {
+    emit('update:reasoningMode', 'standard')
+  }
+  const supportedEfforts = option?.supportedReasoningEfforts ?? []
+  if (supportedEfforts.length > 0 && !supportedEfforts.includes(props.reasoningEffort)) {
+    emit('update:reasoningEffort', supportedEfforts[0]!)
+  }
   emit('update:modelValue', value)
   closeMenu()
 }
 
-function selectReasoning(value: SupportedReasoningEffort) {
+function selectReasoningLevel(value: ReasoningLevel) {
+  if (!reasoningOptions.value.some((option) => option.value === value)) return
+  if (value === 'pro') {
+    if (props.reasoningMode !== 'pro') {
+      emit('update:reasoningMode', 'pro')
+    }
+    closeMenu()
+    return
+  }
+  if (props.reasoningMode === 'pro') emit('update:reasoningMode', 'standard')
   emit('update:reasoningEffort', value)
   closeMenu()
 }
 
 function onCapabilityInput(event: Event) {
   const index = Number((event.currentTarget as HTMLInputElement).value)
-  const value = REASONING_VALUES[index]
+  const value = reasoningValues.value[index]
   if (!value) return
   const previousIndex = visualReasoningIndex.value
-  if (index !== REASONING_VALUES.length - 1) resetMaximumEntryMotion()
+  const previousValue = reasoningValues.value[previousIndex]
+  if (value !== 'xhigh') resetMaximumEntryMotion()
+  visualReasoningMode.value = 'standard'
   visualReasoningIndex.value = index
-  if (index === REASONING_VALUES.length - 1 && previousIndex !== index) {
+  if (value === 'xhigh' && previousValue !== 'xhigh') {
     startMaximumEntryMotion()
   }
+  if (props.reasoningMode === 'pro') emit('update:reasoningMode', 'standard')
   if (value && value !== props.reasoningEffort) emit('update:reasoningEffort', value)
 }
 
@@ -908,7 +1001,7 @@ function updateRangeProximity(event: PointerEvent) {
   let nearestIndex: number | null = null
   let nearestDistance = Number.POSITIVE_INFINITY
 
-  reasoningStops.forEach((stop, index) => {
+  reasoningStops.value.forEach((stop, index) => {
     const distance = Math.max(
       Math.abs(pointerX - stop.offset),
       Math.abs(pointerY - trackCenterY),

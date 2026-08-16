@@ -110,8 +110,9 @@ shows identity and balance details, personal profile and preferences, theme,
 language, onboarding, and logout.
 
 Task destinations such as subscriptions, wallet, orders, and quota tools belong to
-the workspace navigation. Announcements and help resources belong to the scrolling
-sidebar's `Support` group; do not add them back to the account overlay.
+the workspace navigation. Documentation is a low-frequency external link below the
+account destinations; announcements remain in the dashboard and global notification
+surfaces rather than as a Work sidebar row.
 
 The overlay is anchored to the dock on desktop and becomes a modal bottom sheet on
 mobile. It handles focus return, Escape dismissal, outside-click dismissal, and

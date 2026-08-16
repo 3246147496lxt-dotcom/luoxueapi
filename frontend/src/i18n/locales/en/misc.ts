@@ -71,6 +71,34 @@ export default {
       'The administrator enabled the entry but has not configured a recharge URL. Please contact admin.'
   },
 
+  // Balance and current membership overview. The full plan catalogue remains
+  // on the standalone pricing page.
+  balanceMembership: {
+    balanceTitle: 'Account balance',
+    balanceHint: 'For pay-as-you-go usage',
+    pointsUnit: 'credits',
+    paygNote: 'For pay-as-you-go usage, separate from membership',
+    recharge: 'Top up balance',
+    redeem: 'Redeem code',
+    currentMember: 'Current membership',
+    monthlyQuota: 'Monthly quota',
+    remaining: 'remaining',
+    monthlyQuotaUnavailable: 'Monthly quota is not configured',
+    remainingLabel: 'Remaining',
+    monthlyResetPending: 'Awaiting first use',
+    monthlyReset: 'Resets {date}',
+    expires: 'Expires {date}',
+    renew: 'Renew membership',
+    upgrade: 'Upgrade membership',
+    viewPlans: 'View membership plans',
+    freeTitle: 'Free plan',
+    freeBadge: 'Not active',
+    freeDescription: 'No membership is active yet',
+    freeHint: 'Activate a membership to receive a monthly quota',
+    subscribe: 'Activate membership',
+    memberFallback: 'Membership'
+  },
+
   pricing: {
     eyebrow: 'Subscription plans',
     title: 'Choose the plan that fits',
@@ -99,6 +127,7 @@ export default {
       }
     },
     recommended: 'Recommended',
+    currentPlan: 'Current plan',
     renewalOption: 'Renewal option',
     choosePlan: 'Choose this plan',
     renewPlan: 'Choose renewal',
@@ -174,8 +203,8 @@ export default {
 
   // User Subscriptions Page
   userSubscriptions: {
-    title: 'My Subscriptions',
-    description: 'View your subscription plans and usage',
+    title: 'Balance & Membership',
+    description: 'Manage your balance, redeem codes, and current membership',
     loading: 'Loading subscriptions',
     emptyWithPlansTitle: 'No subscription yet',
     emptyWithPlansDesc:
@@ -202,7 +231,8 @@ export default {
     status: {
       active: 'Active',
       expired: 'Expired',
-      revoked: 'Revoked'
+      revoked: 'Revoked',
+      suspended: 'Suspended'
     },
     usage: 'Usage',
     expires: 'Expires',

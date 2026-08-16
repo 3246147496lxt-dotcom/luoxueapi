@@ -93,6 +93,18 @@ export const userRoutes: RouteRecordRaw[] = [
     }
   },
   {
+    path: '/library',
+    name: 'Library',
+    component: () => import('@/views/user/LibraryView.vue'),
+    meta: {
+      requiresAuth: true,
+      requiresAdmin: false,
+      title: 'Library',
+      titleKey: 'library.title',
+      shellMode: 'chat'
+    }
+  },
+  {
     path: '/keys',
     name: 'Keys',
     component: () => import('@/views/user/KeysView.vue'),
@@ -241,7 +253,7 @@ export const userRoutes: RouteRecordRaw[] = [
     meta: {
       requiresAuth: true,
       requiresAdmin: false,
-      title: 'My Subscriptions',
+      title: 'Balance & Membership',
       titleKey: 'userSubscriptions.title',
       descriptionKey: 'userSubscriptions.description'
     }

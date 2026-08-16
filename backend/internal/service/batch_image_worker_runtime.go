@@ -29,13 +29,16 @@ func ProvideBatchImageWorkerRuntime(
 	usageLogRepo UsageLogRepository,
 	pricing *BatchImageModelPricingResolver,
 	authCache APIKeyAuthCacheInvalidator,
+	library *LibraryService,
 	cfg *config.Config,
 ) *BatchImageWorkerRuntime {
+	registry := NewBatchImageProviderRegistryFromConfig(cfg)
+	accountResolver := &BatchImageAccountRepositoryResolver{Repo: accountRepo}
 	processor := &BatchImagePipelineProcessor{
 		ProviderProcessor: &BatchImageProviderProcessor{
 			Repo:             repo,
-			ProviderRegistry: NewBatchImageProviderRegistryFromConfig(cfg),
-			AccountResolver:  &BatchImageAccountRepositoryResolver{Repo: accountRepo},
+			ProviderRegistry: registry,
+			AccountResolver:  accountResolver,
 			BillingRepo:      billingRepo,
 			AuthCache:        authCache,
 		},
@@ -46,6 +49,10 @@ func ProvideBatchImageWorkerRuntime(
 			Pricing:      pricing,
 			AuthCache:    authCache,
 			Config:       cfg,
+		},
+		LibraryIngestor: &BatchImageLibraryIngestor{
+			Repo: repo, StateRepo: batchImageLibraryStateRepository(repo),
+			ProviderRegistry: registry, AccountResolver: accountResolver, Library: library,
 		},
 	}
 	runtime := NewBatchImageWorkerRuntime(NewBatchImageWorker(queue, processor, NewBatchImageWorkerOptionsFromConfig(cfg)), cfg)
@@ -58,6 +65,11 @@ func ProvideBatchImageWorkerRuntime(
 		Limit:      NewBatchImageWorkerOptionsFromConfig(cfg).RecoverLimit,
 	}
 	return runtime
+}
+
+func batchImageLibraryStateRepository(repo BatchImageRepository) BatchImageLibraryIngestStateRepository {
+	stateRepo, _ := repo.(BatchImageLibraryIngestStateRepository)
+	return stateRepo
 }
 
 func (r *BatchImageWorkerRuntime) Start() {

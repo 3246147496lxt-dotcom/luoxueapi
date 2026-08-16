@@ -24,24 +24,25 @@
         :data-state="item.state"
         data-test="chat-attachment-item"
       >
-        <div class="chat-attachment-preview__visual" aria-hidden="true">
+        <button
+          v-if="item.kind === 'image' && item.previewUrl"
+          type="button"
+          class="chat-attachment-preview__visual chat-attachment-preview__visual--interactive"
+          :aria-label="t('chat.attachments.viewImage', { name: item.file.name })"
+          aria-haspopup="dialog"
+          data-test="chat-attachment-preview-trigger"
+          @click="openPreview(item.key, $event)"
+        >
           <img
-            v-if="item.kind === 'image' && item.previewUrl"
             :src="item.previewUrl"
             alt=""
           />
-          <Icon v-else :name="item.kind === 'image' ? 'photo' : 'document'" size="lg" />
 
           <span
             v-if="item.state === 'uploading' || item.state === 'processing'"
             class="chat-attachment-preview__scrim"
           >
-            <span class="chat-attachment-preview__state-icon">
-              <Icon name="refresh" size="sm" />
-            </span>
-            <span v-if="item.state === 'uploading'" class="chat-attachment-preview__progress-copy">
-              {{ item.progress }}%
-            </span>
+            <span class="chat-attachment-preview__spinner"></span>
           </span>
           <span
             v-else-if="itemIsInvalid(item)"
@@ -51,6 +52,9 @@
               <Icon name="exclamationCircle" size="sm" />
             </span>
           </span>
+        </button>
+        <div v-else class="chat-attachment-preview__visual" aria-hidden="true">
+          <Icon :name="item.kind === 'image' ? 'photo' : 'document'" size="lg" />
         </div>
 
         <div v-if="item.kind === 'document'" class="chat-attachment-preview__document-copy">
@@ -103,13 +107,21 @@
         </ChatControlTooltip>
       </li>
     </ul>
+
+    <ChatImagePreviewDialog
+      :show="Boolean(previewedItem)"
+      :src="previewedItem?.previewUrl"
+      :name="previewedItem?.file.name"
+      @close="previewedKey = null"
+    />
   </section>
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import Icon from '@/components/icons/Icon.vue'
+import ChatImagePreviewDialog from './ChatImagePreviewDialog.vue'
 import ChatControlTooltip from './ChatControlTooltip.vue'
 import {
   formatAttachmentBytes,
@@ -134,6 +146,21 @@ const { t } = useI18n()
 const isSingleImage = computed(() => (
   props.items.length === 1 && props.items[0]?.kind === 'image'
 ))
+const previewedKey = ref<string | null>(null)
+const previewedItem = computed(() => props.items.find((item) => (
+  item.key === previewedKey.value && item.kind === 'image' && Boolean(item.previewUrl)
+)) ?? null)
+
+watch(previewedItem, (item) => {
+  if (!item) previewedKey.value = null
+})
+
+function openPreview(key: string, event: MouseEvent) {
+  if (event.currentTarget instanceof HTMLButtonElement) {
+    event.currentTarget.focus({ preventScroll: true })
+  }
+  previewedKey.value = key
+}
 
 function itemIsInvalid(item: ChatAttachmentDraft): boolean {
   return item.state === 'error' || (item.kind === 'image' && !props.supportsVision)
@@ -175,7 +202,7 @@ function isDocx(item: ChatAttachmentDraft): boolean {
   align-items: flex-start;
   gap: 8px;
   margin: 0;
-  padding: 0 6px 0 0;
+  padding: 3px 6px 0 0;
   overflow-x: auto;
   overflow-y: hidden;
   list-style: none;
@@ -230,6 +257,17 @@ function isDocx(item: ChatAttachmentDraft): boolean {
   background: var(--workspace-surface-subtle);
 }
 
+.chat-attachment-preview__visual--interactive {
+  border: 1px solid var(--workspace-border);
+  padding: 0;
+  cursor: zoom-in;
+}
+
+.chat-attachment-preview__visual--interactive:focus-visible {
+  outline: 3px solid color-mix(in srgb, var(--lx-clay-accent) 42%, transparent);
+  outline-offset: 2px;
+}
+
 .chat-attachment-preview__item--document .chat-attachment-preview__visual {
   width: 48px;
   height: 48px;
@@ -252,12 +290,11 @@ function isDocx(item: ChatAttachmentDraft): boolean {
   display: grid;
   place-content: center;
   justify-items: center;
-  gap: 3px;
-  color: #fff;
-  background: rgb(13 13 13 / 48%);
+  background: rgb(255 255 255 / 80%);
 }
 
 .chat-attachment-preview__scrim--error {
+  color: #fff;
   background: rgb(127 29 29 / 50%);
 }
 
@@ -270,15 +307,13 @@ function isDocx(item: ChatAttachmentDraft): boolean {
   background: rgb(0 0 0 / 58%);
 }
 
-.chat-attachment-preview__item--uploading .chat-attachment-preview__state-icon,
-.chat-attachment-preview__item--processing .chat-attachment-preview__state-icon {
-  animation: chat-attachment-spin 900ms linear infinite;
-}
-
-.chat-attachment-preview__progress-copy {
-  font-size: 11px;
-  font-weight: 600;
-  line-height: 14px;
+.chat-attachment-preview__spinner {
+  width: 24px;
+  height: 24px;
+  border: 2px solid #b4b4b4;
+  border-block-start-color: transparent;
+  border-radius: 50%;
+  animation: chat-attachment-spin 1s linear infinite;
 }
 
 .chat-attachment-preview__document-copy {
@@ -326,8 +361,10 @@ function isDocx(item: ChatAttachmentDraft): boolean {
 .chat-attachment-preview__remove {
   inset-block-start: 0;
   inset-inline-end: 0;
-  width: 44px;
-  height: 44px;
+  width: 32px;
+  height: 32px;
+  color: #212121;
+  opacity: 1;
 }
 
 .chat-attachment-preview__retry {
@@ -349,10 +386,13 @@ function isDocx(item: ChatAttachmentDraft): boolean {
 }
 
 .chat-attachment-preview__remove::before {
-  inset-block-start: 5px;
-  inset-inline-end: 5px;
-  width: 22px;
-  height: 22px;
+  inset-block-start: -3px;
+  inset-inline-end: -3px;
+  width: 18px;
+  height: 18px;
+  border: 0;
+  background: #fff;
+  box-shadow: 0 1px 2px rgb(0 0 0 / 16%);
 }
 
 .chat-attachment-preview__retry::before {
@@ -370,8 +410,8 @@ function isDocx(item: ChatAttachmentDraft): boolean {
 }
 
 .chat-attachment-preview__remove .chat-attachment-preview__action-icon {
-  inset-block-start: 10px;
-  inset-inline-end: 10px;
+  inset-block-start: 0;
+  inset-inline-end: 0;
   width: 12px;
   height: 12px;
 }
@@ -390,9 +430,13 @@ function isDocx(item: ChatAttachmentDraft): boolean {
   opacity: 1;
 }
 
-.chat-attachment-preview__remove:hover::before,
 .chat-attachment-preview__retry:hover::before {
   background: #0d0d0d;
+  transform: scale(1.04);
+}
+
+.chat-attachment-preview__remove:hover::before {
+  background: #ececec;
   transform: scale(1.04);
 }
 
@@ -423,8 +467,7 @@ function isDocx(item: ChatAttachmentDraft): boolean {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .chat-attachment-preview__item--uploading .chat-attachment-preview__state-icon,
-  .chat-attachment-preview__item--processing .chat-attachment-preview__state-icon {
+  .chat-attachment-preview__spinner {
     animation: none;
   }
 

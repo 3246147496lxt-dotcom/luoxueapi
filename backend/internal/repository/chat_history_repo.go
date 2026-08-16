@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/base64"
+	"encoding/json"
 	"errors"
 	"strconv"
 	"strings"
@@ -425,8 +426,13 @@ func (r *chatHistoryRepository) ListMessages(
 	if err != nil {
 		return nil, err
 	}
+	activitiesByMessage, err := loadChatMessageActivitiesForMessages(ctx, r.db, messageInternalIDs)
+	if err != nil {
+		return nil, err
+	}
 	for i := range descending {
 		descending[i].Attachments = attachmentsByMessage[messageInternalIDs[i]]
+		descending[i].Activities = activitiesByMessage[messageInternalIDs[i]]
 	}
 	items := make([]*service.ChatHistoryMessage, len(descending))
 	for i := range descending {
@@ -598,7 +604,7 @@ func (r *chatHistoryRepository) DeleteConversation(
 	if _, err = tx.ExecContext(ctx, `
 		UPDATE chat_attachments
 		SET status='deleted', extracted_text=NULL, updated_at=$3
-		WHERE user_id=$1 AND conversation_id=$2
+		WHERE user_id=$1 AND conversation_id=$2 AND library_file_id IS NULL
 	`, userID, conversationID, now); err != nil {
 		return err
 	}
@@ -931,12 +937,25 @@ func (r *chatHistoryRepository) PrepareCompletion(
 		for position := range input.UserMessage.Attachments {
 			attachment := input.UserMessage.Attachments[position]
 			var attachmentInternalID int64
+			if attachment.LibraryFileID > 0 {
+				// Library lifecycle transactions lock library_files before their
+				// reusable chat alias. Keep the same row-lock order here to avoid a
+				// send-vs-delete deadlock.
+				if _, err = tx.ExecContext(ctx, `
+					UPDATE library_files
+					SET last_used_at=$2, updated_at=$2
+					WHERE id=$1 AND user_id=$3 AND status='ready'
+				`, attachment.LibraryFileID, now, userID); err != nil {
+					return nil, err
+				}
+			}
 			if err = tx.QueryRowContext(ctx, `
 				UPDATE chat_attachments
-				SET conversation_id=$3, updated_at=$4
+				SET conversation_id=CASE WHEN library_file_id IS NOT NULL THEN NULL ELSE $3 END,
+				    updated_at=CASE WHEN library_file_id IS NOT NULL THEN updated_at ELSE $4 END
 				WHERE user_id=$1 AND public_id=$2
-				  AND status='ready' AND expires_at > $4
-				  AND (conversation_id IS NULL OR conversation_id=$3)
+				  AND status='ready' AND (library_file_id IS NOT NULL OR expires_at > $4)
+				  AND (library_file_id IS NOT NULL OR conversation_id IS NULL OR conversation_id=$3)
 				  AND sha256=$5
 				RETURNING id
 			`, userID, attachment.ID, conversationID, now, attachment.Digest).Scan(&attachmentInternalID); err != nil {
@@ -1254,7 +1273,64 @@ func (r *chatHistoryRepository) CheckpointCompletion(
 	if r == nil || r.db == nil {
 		return errors.New("chat history repository db is nil")
 	}
-	_, err := r.db.ExecContext(ctx, `
+	if len(input.Activities) == 0 {
+		_, err := r.db.ExecContext(ctx, chatHistoryCheckpointSQL,
+			userID,
+			input.AttemptID,
+			input.AssistantMessageID,
+			input.Content,
+			input.CheckpointSeq,
+		)
+		return err
+	}
+
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	var assistantMessageID int64
+	err = tx.QueryRowContext(ctx, `
+		SELECT message.id
+		FROM chat_messages AS message
+		JOIN chat_request_attempts AS attempt
+		  ON attempt.assistant_message_id = message.id
+		 AND attempt.user_id = message.user_id
+		JOIN chat_conversations AS conversation
+		  ON conversation.id = message.conversation_id
+		 AND conversation.user_id = message.user_id
+		WHERE attempt.user_id = $1
+		  AND attempt.attempt_id = $2
+		  AND attempt.status = 'processing'
+		  AND attempt.assistant_message_public_id = $3
+		  AND message.user_id = $1
+		  AND message.public_id = $3
+		  AND message.role = 'assistant'
+		  AND conversation.deleted_at IS NULL
+		FOR UPDATE OF message
+	`, userID, input.AttemptID, input.AssistantMessageID).Scan(&assistantMessageID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return tx.Commit()
+	}
+	if err != nil {
+		return err
+	}
+	if _, err = tx.ExecContext(ctx, chatHistoryCheckpointSQL,
+		userID,
+		input.AttemptID,
+		input.AssistantMessageID,
+		input.Content,
+		input.CheckpointSeq,
+	); err != nil {
+		return err
+	}
+	if err = upsertChatMessageActivities(ctx, tx, assistantMessageID, input.Activities); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+const chatHistoryCheckpointSQL = `
 		UPDATE chat_messages AS message
 		SET content = $4,
 		    checkpoint_seq = $5,
@@ -1275,14 +1351,181 @@ func (r *chatHistoryRepository) CheckpointCompletion(
 		  AND message.delivery_status IN ('pending', 'streaming')
 		  AND message.checkpoint_seq < $5
 		  AND LEFT($4, LENGTH(message.content)) = message.content
-	`,
-		userID,
-		input.AttemptID,
-		input.AssistantMessageID,
-		input.Content,
-		input.CheckpointSeq,
+		`
+
+func (r *chatHistoryRepository) StopCompletion(
+	ctx context.Context,
+	userID int64,
+	attemptID string,
+) (*service.StopChatCompletionResult, error) {
+	if r == nil || r.db == nil {
+		return nil, errors.New("chat history repository db is nil")
+	}
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if _, err = lockChatHistorySyncState(ctx, tx, userID); err != nil {
+		return nil, err
+	}
+
+	var (
+		currentStatus     string
+		assistantInternal sql.NullInt64
+		stopRequestedAt   sql.NullTime
 	)
-	return err
+	err = tx.QueryRowContext(ctx, `
+		SELECT status, assistant_message_id, stop_requested_at
+		FROM chat_request_attempts
+		WHERE user_id = $1
+		  AND attempt_id = $2
+		FOR UPDATE
+	`, userID, attemptID).Scan(
+		&currentStatus,
+		&assistantInternal,
+		&stopRequestedAt,
+	)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, service.ErrChatAttemptNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	result := &service.StopChatCompletionResult{
+		AttemptID:     attemptID,
+		AttemptStatus: currentStatus,
+	}
+	switch currentStatus {
+	case service.ChatAttemptStatusCompleted:
+		result.DeliveryStatus = service.ChatMessageDeliveryCompleted
+		if err = tx.Commit(); err != nil {
+			return nil, err
+		}
+		return result, nil
+	case service.ChatAttemptStatusFailed:
+		result.DeliveryStatus = service.ChatMessageDeliveryError
+		if err = tx.Commit(); err != nil {
+			return nil, err
+		}
+		return result, nil
+	}
+
+	now := time.Now().UTC()
+	stoppedAt := now
+	if stopRequestedAt.Valid {
+		stoppedAt = stopRequestedAt.Time.UTC()
+	}
+	if _, err = tx.ExecContext(ctx, `
+		UPDATE chat_request_attempts
+		SET stop_requested_at = COALESCE(stop_requested_at, $3),
+		    status = 'interrupted',
+		    lease_expires_at = NULL,
+		    terminal_at = COALESCE(terminal_at, $3),
+		    updated_at = CASE
+		        WHEN stop_requested_at IS NULL OR status <> 'interrupted' OR lease_expires_at IS NOT NULL
+		        THEN $3
+		        ELSE updated_at
+		    END
+		WHERE user_id = $1
+		  AND attempt_id = $2
+		  AND status IN ('accepted', 'processing', 'interrupted')
+	`, userID, attemptID, now); err != nil {
+		return nil, err
+	}
+	result.Accepted = true
+	result.AttemptStatus = service.ChatAttemptStatusInterrupted
+	result.DeliveryStatus = service.ChatMessageDeliveryStopped
+	result.StoppedAt = &stoppedAt
+	if !assistantInternal.Valid {
+		if err = tx.Commit(); err != nil {
+			return nil, err
+		}
+		return result, nil
+	}
+
+	var (
+		conversationID       int64
+		conversationPublicID string
+	)
+	err = tx.QueryRowContext(ctx, `
+		SELECT m.conversation_id, c.public_id
+		FROM chat_messages m
+		JOIN chat_conversations c
+		  ON c.id = m.conversation_id
+		 AND c.user_id = m.user_id
+		WHERE m.id = $1
+		  AND m.user_id = $2
+		  AND m.role = 'assistant'
+		  AND c.deleted_at IS NULL
+		FOR UPDATE OF c, m
+	`, assistantInternal.Int64, userID).Scan(
+		&conversationID,
+		&conversationPublicID,
+	)
+	if errors.Is(err, sql.ErrNoRows) {
+		if err = tx.Commit(); err != nil {
+			return nil, err
+		}
+		return result, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+
+	messageResult, err := tx.ExecContext(ctx, `
+		UPDATE chat_messages
+		SET delivery_status = 'stopped',
+		    finish_reason = 'stopped',
+		    error_code = NULL,
+		    error_message = NULL,
+		    terminal_at = COALESCE(terminal_at, $3),
+		    updated_at = $3
+		WHERE id = $1
+		  AND user_id = $2
+		  AND delivery_status IN ('pending', 'streaming', 'partial', 'interrupted', 'stopped')
+		  AND (delivery_status <> 'stopped' OR finish_reason IS DISTINCT FROM 'stopped')
+	`, assistantInternal.Int64, userID, now)
+	if err != nil {
+		return nil, err
+	}
+	messageChanged, err := messageResult.RowsAffected()
+	if err != nil {
+		return nil, err
+	}
+	activityResult, err := tx.ExecContext(ctx, `
+		UPDATE chat_message_activities
+		SET status = 'stopped',
+		    completed_at = COALESCE(completed_at, $2),
+		    metadata = metadata || jsonb_build_object('last_event', 'user_stopped'),
+		    updated_at = $2
+		WHERE message_id = $1
+		  AND status <> 'stopped'
+	`, assistantInternal.Int64, now)
+	if err != nil {
+		return nil, err
+	}
+	activitiesChanged, err := activityResult.RowsAffected()
+	if err != nil {
+		return nil, err
+	}
+	if messageChanged > 0 || activitiesChanged > 0 {
+		if err = recordChatHistoryConversationUpsert(
+			ctx,
+			tx,
+			userID,
+			conversationID,
+			conversationPublicID,
+			now,
+		); err != nil {
+			return nil, err
+		}
+	}
+	if err = tx.Commit(); err != nil {
+		return nil, err
+	}
+	return result, nil
 }
 
 func (r *chatHistoryRepository) FinalizeCompletion(
@@ -1306,9 +1549,10 @@ func (r *chatHistoryRepository) FinalizeCompletion(
 		currentStatus           string
 		assistantInternal       sql.NullInt64
 		stableAssistantPublicID sql.NullString
+		stopRequestedAt         sql.NullTime
 	)
 	err = tx.QueryRowContext(ctx, `
-		SELECT status, assistant_message_id, assistant_message_public_id
+		SELECT status, assistant_message_id, assistant_message_public_id, stop_requested_at
 		FROM chat_request_attempts
 		WHERE user_id = $1
 		  AND attempt_id = $2
@@ -1317,6 +1561,7 @@ func (r *chatHistoryRepository) FinalizeCompletion(
 		&currentStatus,
 		&assistantInternal,
 		&stableAssistantPublicID,
+		&stopRequestedAt,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
 		return service.ErrChatAttemptNotFound
@@ -1324,18 +1569,58 @@ func (r *chatHistoryRepository) FinalizeCompletion(
 	if err != nil {
 		return err
 	}
-	switch currentStatus {
-	case service.ChatAttemptStatusCompleted,
-		service.ChatAttemptStatusInterrupted,
-		service.ChatAttemptStatusFailed:
-		return tx.Commit()
-	}
 	if stableAssistantPublicID.Valid &&
 		stableAssistantPublicID.String != input.AssistantMessageID {
 		return service.ErrChatAttemptConflict
 	}
-
 	now := time.Now().UTC()
+	switch currentStatus {
+	case service.ChatAttemptStatusCompleted, service.ChatAttemptStatusFailed:
+		terminalStatus := service.ChatMessageActivityStatusCompleted
+		lastEvent := "server_completed"
+		if currentStatus == service.ChatAttemptStatusFailed {
+			terminalStatus = service.ChatMessageActivityStatusFailed
+			lastEvent = "server_failed"
+		}
+		activities := service.TerminalizeChatMessageActivities(input.Activities, terminalStatus, lastEvent, now)
+		if assistantInternal.Valid && len(input.Activities) > 0 {
+			if err = upsertChatMessageActivities(ctx, tx, assistantInternal.Int64, activities); err != nil {
+				return err
+			}
+		}
+		return tx.Commit()
+	case service.ChatAttemptStatusInterrupted:
+		if stopRequestedAt.Valid && assistantInternal.Valid {
+			stoppedInput := stoppedFinalizeChatCompletionInput(input, now)
+			if err = reconcileStoppedChatCompletion(
+				ctx,
+				tx,
+				userID,
+				assistantInternal.Int64,
+				stoppedInput,
+				now,
+			); err != nil {
+				return err
+			}
+			return tx.Commit()
+		}
+		activities := service.TerminalizeChatMessageActivities(
+			input.Activities,
+			service.ChatMessageActivityStatusDisconnected,
+			"client_disconnected",
+			now,
+		)
+		if assistantInternal.Valid && len(activities) > 0 {
+			if err = upsertChatMessageActivities(ctx, tx, assistantInternal.Int64, activities); err != nil {
+				return err
+			}
+		}
+		return tx.Commit()
+	}
+
+	if stopRequestedAt.Valid {
+		input = stoppedFinalizeChatCompletionInput(input, now)
+	}
 	if !assistantInternal.Valid {
 		if err = updateTerminalChatAttempt(ctx, tx, userID, input, now); err != nil {
 			return err
@@ -1421,6 +1706,9 @@ func (r *chatHistoryRepository) FinalizeCompletion(
 	if messageUpdated != 1 {
 		return service.ErrChatAttemptConflict
 	}
+	if err = upsertChatMessageActivities(ctx, tx, assistantInternal.Int64, input.Activities); err != nil {
+		return err
+	}
 	version, err := bumpChatHistorySyncVersion(ctx, tx, userID)
 	if err != nil {
 		return err
@@ -1463,6 +1751,153 @@ func (r *chatHistoryRepository) FinalizeCompletion(
 		return err
 	}
 	return tx.Commit()
+}
+
+func stoppedFinalizeChatCompletionInput(
+	input *service.FinalizeChatCompletionInput,
+	now time.Time,
+) *service.FinalizeChatCompletionInput {
+	stopped := *input
+	stopped.DeliveryStatus = service.ChatMessageDeliveryStopped
+	stopped.AttemptStatus = service.ChatAttemptStatusInterrupted
+	stopped.FinishReason = "stopped"
+	stopped.ErrorCode = ""
+	stopped.ErrorMessage = ""
+	stopped.Activities = service.TerminalizeChatMessageActivities(
+		input.Activities,
+		service.ChatMessageActivityStatusStopped,
+		"user_stopped",
+		now,
+	)
+	return &stopped
+}
+
+func reconcileStoppedChatCompletion(
+	ctx context.Context,
+	tx *sql.Tx,
+	userID int64,
+	assistantInternalID int64,
+	input *service.FinalizeChatCompletionInput,
+	now time.Time,
+) error {
+	var (
+		conversationID       int64
+		conversationPublicID string
+		assistantPublicID    string
+		conversationDeleted  sql.NullTime
+	)
+	err := tx.QueryRowContext(ctx, `
+		SELECT m.conversation_id, c.public_id, m.public_id, c.deleted_at
+		FROM chat_messages m
+		JOIN chat_conversations c
+		  ON c.id = m.conversation_id
+		 AND c.user_id = m.user_id
+		WHERE m.id = $1
+		  AND m.user_id = $2
+		  AND m.role = 'assistant'
+		FOR UPDATE OF c, m
+	`, assistantInternalID, userID).Scan(
+		&conversationID,
+		&conversationPublicID,
+		&assistantPublicID,
+		&conversationDeleted,
+	)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if assistantPublicID != input.AssistantMessageID {
+		return service.ErrChatAttemptConflict
+	}
+
+	messageResult, err := tx.ExecContext(ctx, `
+		UPDATE chat_messages
+		SET content = $3,
+		    delivery_status = 'stopped',
+		    finish_reason = 'stopped',
+		    error_code = NULL,
+		    error_message = NULL,
+		    checkpoint_seq = $4,
+		    updated_at = $5,
+		    terminal_at = COALESCE(terminal_at, $5)
+		WHERE id = $1
+		  AND user_id = $2
+		  AND delivery_status IN ('pending', 'streaming', 'partial', 'interrupted', 'stopped')
+		  AND checkpoint_seq < $4
+		  AND LEFT($3, LENGTH(content)) = content
+	`, assistantInternalID, userID, input.Content, input.CheckpointSeq, now)
+	if err != nil {
+		return err
+	}
+	messageChanged, err := messageResult.RowsAffected()
+	if err != nil {
+		return err
+	}
+	activitiesChanged, err := upsertChatMessageActivitiesWithResult(
+		ctx,
+		tx,
+		assistantInternalID,
+		input.Activities,
+	)
+	if err != nil {
+		return err
+	}
+	if !conversationDeleted.Valid && (messageChanged > 0 || activitiesChanged > 0) {
+		return recordChatHistoryConversationUpsert(
+			ctx,
+			tx,
+			userID,
+			conversationID,
+			conversationPublicID,
+			now,
+		)
+	}
+	return nil
+}
+
+func recordChatHistoryConversationUpsert(
+	ctx context.Context,
+	tx *sql.Tx,
+	userID int64,
+	conversationID int64,
+	conversationPublicID string,
+	now time.Time,
+) error {
+	version, err := bumpChatHistorySyncVersion(ctx, tx, userID)
+	if err != nil {
+		return err
+	}
+	result, err := tx.ExecContext(ctx, `
+		UPDATE chat_conversations
+		SET revision = revision + 1,
+		    version = $3,
+		    updated_at = $4
+		WHERE user_id = $1
+		  AND id = $2
+		  AND deleted_at IS NULL
+	`, userID, conversationID, version, now)
+	if err != nil {
+		return err
+	}
+	updated, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if updated == 0 {
+		return nil
+	}
+	return insertChatHistoryChange(
+		ctx,
+		tx,
+		userID,
+		version,
+		"upsert",
+		conversationID,
+		conversationPublicID,
+		nil,
+	)
 }
 
 func updateTerminalChatAttempt(
@@ -1525,6 +1960,7 @@ func (r *chatHistoryRepository) GetAttempt(
 			a.failure_reason,
 			a.created_at,
 			a.updated_at,
+			m.id,
 			m.public_id,
 			m.position,
 			m.role,
@@ -1563,6 +1999,7 @@ func (r *chatHistoryRepository) GetAttempt(
 		httpStatus         sql.NullInt64
 		failureCode        sql.NullString
 		failureReason      sql.NullString
+		messageInternalID  sql.NullInt64
 		messageID          sql.NullString
 		position           sql.NullInt64
 		role               sql.NullString
@@ -1592,6 +2029,7 @@ func (r *chatHistoryRepository) GetAttempt(
 		&failureReason,
 		&attempt.CreatedAt,
 		&attempt.UpdatedAt,
+		&messageInternalID,
 		&messageID,
 		&position,
 		&role,
@@ -1674,6 +2112,17 @@ func (r *chatHistoryRepository) GetAttempt(
 		if terminalAt.Valid {
 			value := terminalAt.Time
 			message.TerminalAt = &value
+		}
+		if messageInternalID.Valid {
+			activitiesByMessage, loadErr := loadChatMessageActivitiesForMessages(
+				ctx,
+				r.db,
+				[]int64{messageInternalID.Int64},
+			)
+			if loadErr != nil {
+				return nil, loadErr
+			}
+			message.Activities = activitiesByMessage[messageInternalID.Int64]
 		}
 		attempt.AssistantMessage = message
 	}
@@ -1803,6 +2252,276 @@ func loadChatAttachmentsForMessages(
 			return nil, scanErr
 		}
 		result[messageID] = append(result[messageID], *attachment)
+	}
+	return result, rows.Err()
+}
+
+type chatHistoryExecer interface {
+	ExecContext(context.Context, string, ...any) (sql.Result, error)
+}
+
+type chatMessageActivityPersistenceRow struct {
+	ResponseID      string          `json:"response_id"`
+	Source          string          `json:"source"`
+	ActivityType    string          `json:"activity_type"`
+	ItemID          string          `json:"item_id"`
+	OutputIndex     int             `json:"output_index"`
+	SummaryIndex    int             `json:"summary_index"`
+	SortOrder       int64           `json:"sort_order"`
+	Status          string          `json:"status"`
+	Text            string          `json:"text"`
+	SequenceStart   int64           `json:"sequence_start"`
+	SequenceEnd     int64           `json:"sequence_end"`
+	ReasoningMode   string          `json:"reasoning_mode"`
+	ReasoningEffort string          `json:"reasoning_effort"`
+	StartedAt       time.Time       `json:"started_at"`
+	CompletedAt     *time.Time      `json:"completed_at"`
+	Metadata        json.RawMessage `json:"metadata"`
+}
+
+const upsertChatMessageActivitiesSQL = `
+	INSERT INTO chat_message_activities (
+		message_id,
+		response_id,
+		source,
+		activity_type,
+		item_id,
+		output_index,
+		summary_index,
+		sort_order,
+		status,
+		text,
+		sequence_start,
+		sequence_end,
+		reasoning_mode,
+		reasoning_effort,
+		started_at,
+		completed_at,
+		metadata
+	)
+	SELECT
+		$1,
+		activity.response_id,
+		activity.source,
+		activity.activity_type,
+		activity.item_id,
+		activity.output_index,
+		activity.summary_index,
+		activity.sort_order,
+		activity.status,
+		activity.text,
+		activity.sequence_start,
+		activity.sequence_end,
+		NULLIF(activity.reasoning_mode, ''),
+		NULLIF(activity.reasoning_effort, ''),
+		activity.started_at,
+		activity.completed_at,
+		COALESCE(activity.metadata, '{}'::jsonb)
+	FROM jsonb_to_recordset($2::jsonb) AS activity (
+		response_id TEXT,
+		source TEXT,
+		activity_type TEXT,
+		item_id TEXT,
+		output_index INTEGER,
+		summary_index INTEGER,
+		sort_order BIGINT,
+		status TEXT,
+		text TEXT,
+		sequence_start BIGINT,
+		sequence_end BIGINT,
+		reasoning_mode TEXT,
+		reasoning_effort TEXT,
+		started_at TIMESTAMPTZ,
+		completed_at TIMESTAMPTZ,
+		metadata JSONB
+	)
+	ON CONFLICT (
+		message_id,
+		source,
+		response_id,
+		item_id,
+		output_index,
+		summary_index
+	) DO UPDATE SET
+		activity_type = EXCLUDED.activity_type,
+		sort_order = LEAST(chat_message_activities.sort_order, EXCLUDED.sort_order),
+		status = EXCLUDED.status,
+		text = EXCLUDED.text,
+		sequence_start = LEAST(chat_message_activities.sequence_start, EXCLUDED.sequence_start),
+		sequence_end = GREATEST(chat_message_activities.sequence_end, EXCLUDED.sequence_end),
+		reasoning_mode = COALESCE(EXCLUDED.reasoning_mode, chat_message_activities.reasoning_mode),
+		reasoning_effort = COALESCE(EXCLUDED.reasoning_effort, chat_message_activities.reasoning_effort),
+		started_at = LEAST(chat_message_activities.started_at, EXCLUDED.started_at),
+		completed_at = COALESCE(EXCLUDED.completed_at, chat_message_activities.completed_at),
+		metadata = chat_message_activities.metadata || EXCLUDED.metadata,
+		updated_at = NOW()
+	WHERE (
+		chat_message_activities.status <> 'stopped'
+		OR EXCLUDED.status = 'stopped'
+	)
+	AND (
+		EXCLUDED.sequence_end > chat_message_activities.sequence_end
+	   OR (
+		EXCLUDED.sequence_end = chat_message_activities.sequence_end
+		AND CASE EXCLUDED.status
+			WHEN 'in_progress' THEN 0
+			WHEN 'interrupted' THEN 1
+			WHEN 'incomplete' THEN 2
+			WHEN 'completed' THEN 3
+			WHEN 'failed' THEN 4
+			WHEN 'disconnected' THEN 5
+			WHEN 'stopped' THEN 6
+			ELSE -1
+		END >= CASE chat_message_activities.status
+			WHEN 'in_progress' THEN 0
+			WHEN 'interrupted' THEN 1
+			WHEN 'incomplete' THEN 2
+			WHEN 'completed' THEN 3
+			WHEN 'failed' THEN 4
+			WHEN 'disconnected' THEN 5
+			WHEN 'stopped' THEN 6
+			ELSE -1
+		END
+	   )
+	)
+`
+
+func upsertChatMessageActivities(
+	ctx context.Context,
+	execer chatHistoryExecer,
+	messageID int64,
+	activities []service.ChatMessageActivity,
+) error {
+	_, err := upsertChatMessageActivitiesWithResult(ctx, execer, messageID, activities)
+	return err
+}
+
+func upsertChatMessageActivitiesWithResult(
+	ctx context.Context,
+	execer chatHistoryExecer,
+	messageID int64,
+	activities []service.ChatMessageActivity,
+) (int64, error) {
+	if len(activities) == 0 {
+		return 0, nil
+	}
+	rows := make([]chatMessageActivityPersistenceRow, len(activities))
+	now := time.Now().UTC()
+	for i := range activities {
+		activity := activities[i]
+		if activity.StartedAt.IsZero() {
+			activity.StartedAt = now
+		}
+		if len(activity.Metadata) == 0 || string(activity.Metadata) == "null" {
+			activity.Metadata = json.RawMessage(`{}`)
+		}
+		rows[i] = chatMessageActivityPersistenceRow{
+			ResponseID:      activity.ResponseID,
+			Source:          activity.Source,
+			ActivityType:    activity.ActivityType,
+			ItemID:          activity.ItemID,
+			OutputIndex:     activity.OutputIndex,
+			SummaryIndex:    activity.SummaryIndex,
+			SortOrder:       activity.SortOrder,
+			Status:          activity.Status,
+			Text:            activity.Text,
+			SequenceStart:   activity.SequenceStart,
+			SequenceEnd:     activity.SequenceEnd,
+			ReasoningMode:   activity.ReasoningMode,
+			ReasoningEffort: activity.ReasoningEffort,
+			StartedAt:       activity.StartedAt,
+			CompletedAt:     activity.CompletedAt,
+			Metadata:        activity.Metadata,
+		}
+	}
+	payload, err := json.Marshal(rows)
+	if err != nil {
+		return 0, err
+	}
+	result, err := execer.ExecContext(ctx, upsertChatMessageActivitiesSQL, messageID, payload)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
+func loadChatMessageActivitiesForMessages(
+	ctx context.Context,
+	queryer sqlQueryer,
+	messageIDs []int64,
+) (map[int64][]service.ChatMessageActivity, error) {
+	result := make(map[int64][]service.ChatMessageActivity)
+	if len(messageIDs) == 0 {
+		return result, nil
+	}
+	rows, err := queryer.QueryContext(ctx, `
+		SELECT
+			a.message_id,
+			a.id,
+			a.response_id,
+			a.source,
+			a.activity_type,
+			a.item_id,
+			a.output_index,
+			a.summary_index,
+			a.sort_order,
+			a.status,
+			a.text,
+			a.sequence_start,
+			a.sequence_end,
+			COALESCE(a.reasoning_mode, ''),
+			COALESCE(a.reasoning_effort, ''),
+			a.started_at,
+			a.completed_at,
+			a.metadata,
+			a.created_at,
+			a.updated_at
+		FROM chat_message_activities a
+		JOIN chat_messages m ON m.id = a.message_id AND m.role = 'assistant'
+		WHERE a.message_id = ANY($1)
+		ORDER BY a.message_id, a.sort_order, a.id
+	`, pq.Array(messageIDs))
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+	for rows.Next() {
+		var (
+			messageID   int64
+			activity    service.ChatMessageActivity
+			completedAt sql.NullTime
+			metadata    []byte
+		)
+		if err = rows.Scan(
+			&messageID,
+			&activity.ID,
+			&activity.ResponseID,
+			&activity.Source,
+			&activity.ActivityType,
+			&activity.ItemID,
+			&activity.OutputIndex,
+			&activity.SummaryIndex,
+			&activity.SortOrder,
+			&activity.Status,
+			&activity.Text,
+			&activity.SequenceStart,
+			&activity.SequenceEnd,
+			&activity.ReasoningMode,
+			&activity.ReasoningEffort,
+			&activity.StartedAt,
+			&completedAt,
+			&metadata,
+			&activity.CreatedAt,
+			&activity.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		if completedAt.Valid {
+			value := completedAt.Time
+			activity.CompletedAt = &value
+		}
+		activity.Metadata = append(json.RawMessage(nil), metadata...)
+		result[messageID] = append(result[messageID], activity)
 	}
 	return result, rows.Err()
 }

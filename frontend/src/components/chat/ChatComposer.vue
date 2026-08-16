@@ -16,14 +16,14 @@
         'chat-composer--maximized': composerMaximized,
         'chat-composer--overflowing': inputOverflowing,
         'chat-composer--has-expand-toggle': showExpandToggle,
-        'chat-composer--has-attachments': hasAttachments,
+        'chat-composer--has-attachments': showAttachments,
       }"
       :data-expanded="composerExpanded ? '' : undefined"
       :data-expanded-composer="composerMaximized ? '' : undefined"
       :aria-busy="submissionBusy || submitting ? 'true' : undefined"
       @submit.prevent="submit"
     >
-      <div v-if="hasAttachments" class="chat-composer__attachments">
+      <div v-if="showAttachments" class="chat-composer__attachments">
         <slot name="attachments"></slot>
       </div>
 
@@ -41,9 +41,11 @@
           :maxlength="maxLength"
           :placeholder="placeholder"
           :disabled="disabled || insufficientBalance"
+          :readonly="submitting"
           :aria-label="t('chat.composer.label')"
           @input="resize"
           @keydown="onKeydown"
+          @paste="onPaste"
         ></textarea>
 
         <button
@@ -114,6 +116,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, useId, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import Icon from '@/components/icons/Icon.vue'
+import { pastedChatImageFiles } from '@/components/chat/chatAttachmentUi'
 
 const props = withDefaults(defineProps<{
   modelValue?: string
@@ -123,6 +126,8 @@ const props = withDefaults(defineProps<{
   submissionBusy?: boolean
   hasAttachments?: boolean
   attachmentsValid?: boolean
+  imagePasteEnabled?: boolean
+  submissionResetKey?: number
   maxLength?: number
 }>(), {
   modelValue: '',
@@ -132,13 +137,17 @@ const props = withDefaults(defineProps<{
   submissionBusy: false,
   hasAttachments: false,
   attachmentsValid: true,
+  imagePasteEnabled: false,
+  submissionResetKey: 0,
   maxLength: 20_000,
 })
 
 const emit = defineEmits<{
   'update:modelValue': [value: string]
   send: [value: string, acknowledge: (accepted: boolean) => void]
+  'submitting-change': [value: boolean]
   stop: []
+  'paste-images': [files: File[]]
 }>()
 
 const { t } = useI18n()
@@ -152,6 +161,9 @@ const composerMaximized = ref(false)
 const inputOverflowing = ref(false)
 const showExpandToggle = ref(false)
 const submitting = ref(false)
+let submittedDraft: string | null = null
+let submissionSequence = 0
+let activeSubmissionId: number | null = null
 const COMPOSER_COMPACT_INPUT_HEIGHT = 36
 const COMPOSER_STACKED_INPUT_HEIGHT = 48
 const COMPOSER_SINGLE_LINE_THRESHOLD = 54
@@ -165,6 +177,7 @@ let ensureSelectionVisibleAfterResize = false
 const observedWidths = new WeakMap<Element, number>()
 
 const hasContent = computed(() => draft.value.trim().length > 0 || props.hasAttachments)
+const showAttachments = computed(() => props.hasAttachments && !submitting.value)
 
 const canSubmit = computed(() => (
   hasContent.value
@@ -193,14 +206,19 @@ watch(composerExpanded, () => {
 })
 
 watch(() => props.modelValue, (value) => {
+  if (submitting.value) return
   if (value === draft.value) return
   draft.value = value
   if (!value) composerMaximized.value = false
   void nextTick(resize)
 })
 
-watch(() => props.hasAttachments, () => {
+watch(showAttachments, () => {
   void nextTick(resize)
+})
+
+watch(() => props.submissionResetKey, () => {
+  cancelSubmission()
 })
 
 watch(draft, (value) => {
@@ -418,17 +436,42 @@ function onKeydown(event: KeyboardEvent) {
   submit()
 }
 
+function onPaste(event: ClipboardEvent) {
+  if (submitting.value || !props.imagePasteEnabled) return
+  const files = pastedChatImageFiles(event.clipboardData)
+  if (files.length === 0) return
+  let includesText = false
+  try {
+    includesText = (event.clipboardData?.getData('text/plain') ?? '').length > 0
+  } catch {
+    // Some browsers restrict clipboard string access while still exposing files.
+  }
+  if (!includesText) event.preventDefault()
+  emit('paste-images', files)
+}
+
 function submit() {
+  const sourceDraft = draft.value
   const value = draft.value.trim()
   if (!canSubmit.value) return
+  const submissionId = ++submissionSequence
+  activeSubmissionId = submissionId
   submitting.value = true
+  submittedDraft = sourceDraft
+  draft.value = ''
+  emit('submitting-change', true)
   let acknowledged = false
   emit('send', value, (accepted) => {
-    if (acknowledged) return
+    if (acknowledged || activeSubmissionId !== submissionId) return
     acknowledged = true
+    const rejectedDraft = submittedDraft
+    submittedDraft = null
+    activeSubmissionId = null
     submitting.value = false
-    if (!accepted) return
-    draft.value = ''
+    emit('submitting-change', false)
+    if (!accepted && rejectedDraft !== null && !draft.value) {
+      draft.value = rejectedDraft
+    }
     void nextTick(() => {
       resize()
       textareaRef.value?.focus()
@@ -436,11 +479,21 @@ function submit() {
   })
 }
 
+function cancelSubmission() {
+  if (!submitting.value) return
+  activeSubmissionId = null
+  submittedDraft = null
+  submitting.value = false
+  emit('submitting-change', false)
+  void nextTick(resize)
+}
+
 function focus() {
   textareaRef.value?.focus()
 }
 
 function insertText(value: string): boolean {
+  if (submitting.value) return false
   const text = value.trim()
   if (!text) return false
 
@@ -496,13 +549,15 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
+  activeSubmissionId = null
+  submittedDraft = null
   if (queuedResizeFrame !== null) cancelAnimationFrame(queuedResizeFrame)
   composerResizeObserver?.disconnect()
   window.removeEventListener('resize', queueResize)
   window.visualViewport?.removeEventListener('resize', queueResize)
 })
 
-defineExpose({ focus, insertText })
+defineExpose({ focus, insertText, cancelSubmission })
 </script>
 
 <style scoped>

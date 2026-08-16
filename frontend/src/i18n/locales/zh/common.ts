@@ -153,7 +153,6 @@ export default {
     dashboard: '仪表盘',
     gptChat: 'GPT 聊天',
     adminDashboard: '数据看板',
-    announcements: '公告',
     adminWorkspace: '管理后台',
     personalWorkspace: '我的工作台',
     switchToAdminWorkspace: '切换到管理后台',
@@ -190,6 +189,8 @@ export default {
     modelCenter: '模型中心',
     balance: '余额',
     subscription: '套餐',
+    balanceAndMembership: '余额与会员',
+    memberSubscription: '会员订阅',
     orders: '订单',
     serviceStatusNav: '服务状态',
     adminSections: {
@@ -200,9 +201,8 @@ export default {
     },
     userSections: {
       workbench: '工作台',
+      api: 'API',
       account: '账户',
-      resources: '资源',
-      more: '更多工具',
     },
     serviceStatus: {
       label: '会话状态',

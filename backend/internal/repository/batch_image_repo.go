@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/service"
@@ -809,6 +810,127 @@ func appendBatchImageEventWithSQL(ctx context.Context, sqlq batchImageSQLExecuto
 INSERT INTO batch_image_events (job_id, event_type, payload)
 VALUES ($1, $2, $3)`, batchID, eventType, payloadArg)
 	return err
+}
+
+func (r *batchImageRepository) BeginBatchImageLibraryIngest(ctx context.Context, batchID string, maxAttempts int) (*service.BatchImageLibraryIngestState, bool, error) {
+	if maxAttempts <= 0 {
+		maxAttempts = 3
+	}
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, false, err
+	}
+	defer func() { _ = tx.Rollback() }()
+	if _, err = tx.ExecContext(ctx, `
+INSERT INTO batch_image_library_ingests (job_id)
+VALUES ($1)
+ON CONFLICT (job_id) DO NOTHING`, batchID); err != nil {
+		return nil, false, err
+	}
+
+	state, err := scanBatchImageLibraryIngestState(tx.QueryRowContext(ctx, `
+SELECT job_id, status, attempts, imported_count, suppressed_count, failed_count,
+       COALESCE(last_error_code,''), COALESCE(last_error_message,'')
+FROM batch_image_library_ingests
+WHERE job_id=$1
+FOR UPDATE`, batchID).Scan)
+	if err != nil {
+		return nil, false, err
+	}
+	if state.Status == service.BatchImageLibraryIngestCompleted || state.Status == service.BatchImageLibraryIngestCompletedWithErrors {
+		if err = tx.Commit(); err != nil {
+			return nil, false, err
+		}
+		return state, false, nil
+	}
+	if state.Attempts >= maxAttempts {
+		state.Status = service.BatchImageLibraryIngestCompletedWithErrors
+		if _, err = tx.ExecContext(ctx, `
+UPDATE batch_image_library_ingests
+SET status='completed_with_errors', completed_at=COALESCE(completed_at,NOW()), updated_at=NOW(),
+    last_error_code=COALESCE(last_error_code,'LIBRARY_INGEST_RETRY_EXHAUSTED'),
+    last_error_message=COALESCE(last_error_message,'batch library ingestion retry limit reached')
+WHERE job_id=$1`, batchID); err != nil {
+			return nil, false, err
+		}
+		if err = tx.Commit(); err != nil {
+			return nil, false, err
+		}
+		return state, false, nil
+	}
+	if err = tx.QueryRowContext(ctx, `
+UPDATE batch_image_library_ingests
+SET attempts=attempts+1, started_at=COALESCE(started_at,NOW()), updated_at=NOW()
+WHERE job_id=$1
+RETURNING job_id, status, attempts, imported_count, suppressed_count, failed_count,
+          COALESCE(last_error_code,''), COALESCE(last_error_message,'')`, batchID).Scan(
+		&state.JobID, &state.Status, &state.Attempts, &state.ImportedCount,
+		&state.SuppressedCount, &state.FailedCount, &state.LastErrorCode, &state.LastErrorMessage,
+	); err != nil {
+		return nil, false, err
+	}
+	if err = tx.Commit(); err != nil {
+		return nil, false, err
+	}
+	return state, true, nil
+}
+
+func (r *batchImageRepository) RetryBatchImageLibraryIngest(ctx context.Context, batchID string, attempt service.BatchImageLibraryIngestAttempt) error {
+	result, err := r.sql.ExecContext(ctx, `
+UPDATE batch_image_library_ingests
+SET status='retrying', imported_count=$2, suppressed_count=$3, failed_count=$4,
+    last_error_code=NULLIF($5,''), last_error_message=NULLIF($6,''), updated_at=NOW()
+WHERE job_id=$1 AND status IN ('pending','retrying')`, batchID,
+		attempt.ImportedCount, attempt.SuppressedCount, attempt.FailedCount,
+		attempt.ErrorCode, truncateRepositoryMessage(attempt.ErrorMessage, 1000))
+	if err != nil {
+		return err
+	}
+	return requireBatchImageLibraryIngestUpdated(result)
+}
+
+func (r *batchImageRepository) CompleteBatchImageLibraryIngest(ctx context.Context, batchID, status string, attempt service.BatchImageLibraryIngestAttempt) error {
+	if status != service.BatchImageLibraryIngestCompleted && status != service.BatchImageLibraryIngestCompletedWithErrors {
+		return service.ErrLibraryInvalidRequest
+	}
+	result, err := r.sql.ExecContext(ctx, `
+UPDATE batch_image_library_ingests
+SET status=$2, imported_count=$3, suppressed_count=$4, failed_count=$5,
+    last_error_code=NULLIF($6,''), last_error_message=NULLIF($7,''),
+    completed_at=COALESCE(completed_at,NOW()), updated_at=NOW()
+WHERE job_id=$1 AND status IN ('pending','retrying')`, batchID, status,
+		attempt.ImportedCount, attempt.SuppressedCount, attempt.FailedCount,
+		attempt.ErrorCode, truncateRepositoryMessage(attempt.ErrorMessage, 1000))
+	if err != nil {
+		return err
+	}
+	return requireBatchImageLibraryIngestUpdated(result)
+}
+
+func scanBatchImageLibraryIngestState(scan func(...any) error) (*service.BatchImageLibraryIngestState, error) {
+	state := &service.BatchImageLibraryIngestState{}
+	err := scan(&state.JobID, &state.Status, &state.Attempts, &state.ImportedCount,
+		&state.SuppressedCount, &state.FailedCount, &state.LastErrorCode, &state.LastErrorMessage)
+	return state, err
+}
+
+func requireBatchImageLibraryIngestUpdated(result sql.Result) error {
+	updated, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if updated != 1 {
+		return service.ErrBatchImageJobNotFound
+	}
+	return nil
+}
+
+func truncateRepositoryMessage(message string, limit int) string {
+	message = strings.TrimSpace(message)
+	if limit > 0 && len(message) > limit {
+		return message[:limit]
+	}
+	return message
 }
 
 type rowScanner interface {

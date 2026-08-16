@@ -96,13 +96,15 @@ async function mountPricing(path = '/pricing', previousPath?: string) {
           template: '<canvas class="fluid-stub" :data-tier="tier" />',
         },
         PricingPlanCard: {
-          props: ['plan', 'featured'],
+          props: ['plan', 'featured', 'current', 'actionLabel'],
           emits: ['select', 'details'],
           template: `
             <div
               class="plan-stub"
               :data-plan-id="String(plan.id)"
               :data-featured="String(featured)"
+              :data-current="String(current)"
+              :data-action-label="actionLabel"
             >
               <span>{{ plan.name }}</span>
               <button class="select-stub" @click="$emit('select', plan)">select</button>
@@ -232,6 +234,85 @@ describe('PricingView', () => {
     expect(wrapper.get('[data-testid="pricing-page"]').attributes('data-tier')).toBe('high')
     expect(wrapper.findAll('.plan-stub')).toHaveLength(7)
     expect(wrapper.find('[data-testid="pricing-group-filter"]').exists()).toBe(false)
+  })
+
+  it('uses an explicit tier or plan deep link before falling back to group', async () => {
+    vi.mocked(paymentAPI.getCheckoutInfo).mockResolvedValue({
+      data: checkoutInfoFixture(approvedPlans()),
+    } as never)
+
+    const explicitTier = await mountPricing('/pricing?tier=high&group=11')
+    expect(explicitTier.wrapper.get('[data-testid="pricing-page"]').attributes('data-tier'))
+      .toBe('high')
+
+    const planName = await mountPricing('/pricing?plan=Pro')
+    expect(planName.wrapper.get('[data-testid="pricing-page"]').attributes('data-tier'))
+      .toBe('mid')
+
+    const planId = await mountPricing('/pricing?plan=7')
+    expect(planId.wrapper.get('[data-testid="pricing-page"]').attributes('data-tier'))
+      .toBe('high')
+  })
+
+  it('does not let repeated group values choose a tier', async () => {
+    vi.mocked(paymentAPI.getCheckoutInfo).mockResolvedValue({
+      data: checkoutInfoFixture(approvedPlans()),
+    } as never)
+
+    const { wrapper } = await mountPricing('/pricing?group=17&group=11')
+    expect(wrapper.get('[data-testid="pricing-page"]').attributes('data-tier')).toBe('low')
+  })
+
+  it.each(['subscribe', 'renew', 'upgrade'] as const)(
+    'keeps the valid %s mode visible and forwards it to checkout',
+    async (mode) => {
+      vi.mocked(paymentAPI.getCheckoutInfo).mockResolvedValue({
+        data: checkoutInfoFixture(approvedPlans()),
+      } as never)
+
+      const { router, wrapper } = await mountPricing(`/pricing?mode=${mode}`)
+
+      expect(wrapper.get('[data-testid="pricing-page"]').attributes('data-mode')).toBe(mode)
+
+      await wrapper.get('[data-plan-id="4"] .select-stub').trigger('click')
+      await flushPromises()
+      expect(router.currentRoute.value.fullPath)
+        .toBe(`/purchase?tab=subscription&plan=4&mode=${mode}`)
+    },
+  )
+
+  it('marks the renewal plan and keeps the upgrade target actionable', async () => {
+    vi.mocked(paymentAPI.getCheckoutInfo).mockResolvedValue({
+      data: checkoutInfoFixture(approvedPlans()),
+    } as never)
+
+    const renewal = await mountPricing('/pricing?mode=renew&tier=high&plan=Ultra&group=17')
+    const renewalCard = renewal.wrapper.get('[data-plan-id="7"]')
+    expect(renewalCard.attributes('data-current')).toBe('true')
+    expect(renewalCard.attributes('data-action-label')).toBe('balanceMembership.renew')
+
+    const upgrade = await mountPricing('/pricing?mode=upgrade&tier=high&group=12')
+    const currentCard = upgrade.wrapper.get('[data-plan-id="2"]')
+    const targetCard = upgrade.wrapper.get('[data-plan-id="7"]')
+    expect(currentCard.attributes('data-current')).toBe('true')
+    expect(currentCard.attributes('data-action-label')).toBe('pricing.currentPlan')
+    expect(targetCard.attributes('data-action-label')).toBe('balanceMembership.upgrade')
+  })
+
+  it.each([
+    'unknown',
+    'subscribe&mode=upgrade',
+  ])('ignores invalid or repeated membership mode %s', async (modeQuery) => {
+    vi.mocked(paymentAPI.getCheckoutInfo).mockResolvedValue({
+      data: checkoutInfoFixture(approvedPlans()),
+    } as never)
+
+    const { router, wrapper } = await mountPricing(`/pricing?mode=${modeQuery}`)
+
+    expect(wrapper.get('[data-testid="pricing-page"]').attributes('data-mode')).toBeUndefined()
+    await wrapper.get('[data-plan-id="4"] .select-stub').trigger('click')
+    await flushPromises()
+    expect(router.currentRoute.value.fullPath).toBe('/purchase?tab=subscription&plan=4')
   })
 
   it('opens the existing purchase flow from both the CTA and quota-details entry', async () => {

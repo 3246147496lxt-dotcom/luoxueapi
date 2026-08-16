@@ -340,7 +340,7 @@ function retrySubscriptions() {
 }
 
 function renewalPath(groupId: number) {
-  return `/pricing?group=${groupId}`
+  return `/pricing?mode=renew&group=${groupId}`
 }
 
 function subscriptionName(subscription: UserSubscription) {

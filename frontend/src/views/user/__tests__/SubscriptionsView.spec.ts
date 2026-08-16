@@ -5,10 +5,8 @@ import { createMemoryHistory, createRouter } from 'vue-router'
 
 import SubscriptionsView from '../SubscriptionsView.vue'
 import subscriptionsAPI from '@/api/subscriptions'
-import { useAppStore } from '@/stores/app'
-import { usePaymentStore } from '@/stores/payment'
-import type { PublicSettings, UserSubscription } from '@/types'
-import type { CheckoutInfoResponse, SubscriptionPlan } from '@/types/payment'
+import { useAuthStore } from '@/stores/auth'
+import type { User, UserSubscription } from '@/types'
 
 vi.mock('vue-i18n', async () => {
   const actual = await vi.importActual<typeof import('vue-i18n')>('vue-i18n')
@@ -26,61 +24,95 @@ vi.mock('@/api/subscriptions', () => ({
   },
 }))
 
-function checkoutInfoFixture(plans: SubscriptionPlan[] = []): CheckoutInfoResponse {
-  return { plans } as CheckoutInfoResponse
+function userFixture(overrides: Partial<User> = {}): User {
+  return {
+    id: 7,
+    username: 'overview-user',
+    email: 'overview@example.com',
+    role: 'user',
+    balance: 1280,
+    concurrency: 2,
+    status: 'active',
+    allowed_groups: null,
+    balance_notify_enabled: true,
+    balance_notify_threshold: null,
+    balance_notify_extra_emails: [],
+    created_at: '2026-07-18T00:00:00Z',
+    updated_at: '2026-07-18T00:00:00Z',
+    ...overrides,
+  }
 }
 
-function subscriptionFixture(): UserSubscription {
+function subscriptionFixture(
+  overrides: Partial<UserSubscription> = {},
+): UserSubscription {
   return {
     id: 1,
     user_id: 7,
     group_id: 3,
-    status: 'expired',
-    starts_at: '2026-01-01T00:00:00Z',
+    status: 'active',
+    starts_at: '2026-08-01T00:00:00Z',
     daily_usage_usd: 0,
     weekly_usage_usd: 0,
-    monthly_usage_usd: 0,
+    monthly_usage_usd: 2720,
     daily_window_start: null,
     weekly_window_start: null,
-    monthly_window_start: null,
-    created_at: '2026-01-01T00:00:00Z',
-    updated_at: '2026-01-01T00:00:00Z',
-    expires_at: '2026-02-01T00:00:00Z',
+    monthly_window_start: '2026-08-01T00:00:00Z',
+    created_at: '2026-08-01T00:00:00Z',
+    updated_at: '2026-08-01T00:00:00Z',
+    expires_at: '2026-09-30T00:00:00Z',
+    group: {
+      id: 3,
+      name: 'Ultra',
+      description: null,
+      platform: 'openai',
+      rate_multiplier: 1,
+      is_exclusive: false,
+      status: 'active',
+      subscription_type: 'subscription',
+      daily_limit_usd: null,
+      weekly_limit_usd: null,
+      monthly_limit_usd: 10000,
+      allow_image_generation: false,
+      allow_batch_image_generation: false,
+      image_rate_independent: false,
+      image_rate_multiplier: 1,
+      batch_image_discount_multiplier: 1,
+      batch_image_hold_multiplier: 1,
+      image_price_1k: null,
+      image_price_2k: null,
+      image_price_4k: null,
+      video_rate_independent: false,
+      video_rate_multiplier: 1,
+      video_price_480p: null,
+      video_price_720p: null,
+      video_price_1080p: null,
+      web_search_price_per_call: null,
+      peak_rate_enabled: false,
+      peak_start: '',
+      peak_end: '',
+      peak_rate_multiplier: 1,
+      claude_code_only: false,
+      fallback_group_id: null,
+      fallback_group_id_on_invalid_request: null,
+      require_oauth_only: false,
+      require_privacy_set: false,
+      created_at: '2026-08-01T00:00:00Z',
+      updated_at: '2026-08-01T00:00:00Z',
+    },
+    ...overrides,
   }
 }
 
-type MountOptions = {
-  paymentEnabled?: boolean
-  plans?: SubscriptionPlan[]
-  checkoutError?: Error
-  contactInfo?: string
-  documentationUrl?: string
-}
-
-async function mountSubscriptions(options: MountOptions = {}) {
-  const {
-    paymentEnabled = true,
-    plans = [],
-    checkoutError,
-    contactInfo = '',
-    documentationUrl = '/tutorial-docs/',
-  } = options
-
-  const appStore = useAppStore()
-  appStore.publicSettingsLoaded = true
-  appStore.cachedPublicSettings = {
-    payment_enabled: paymentEnabled,
-    contact_info: contactInfo,
-    doc_url: documentationUrl,
-  } as PublicSettings
-
-  const paymentStore = usePaymentStore()
-  const ensureCheckoutInfo = vi.spyOn(paymentStore, 'ensureCheckoutInfo')
-  if (checkoutError) {
-    ensureCheckoutInfo.mockRejectedValue(checkoutError)
-  } else {
-    ensureCheckoutInfo.mockResolvedValue(checkoutInfoFixture(plans))
-  }
+async function mountOverview(
+  subscriptions: UserSubscription[] = [],
+): Promise<{
+  router: ReturnType<typeof createRouter>
+  wrapper: ReturnType<typeof shallowMount>
+}> {
+  const authStore = useAuthStore()
+  authStore.user = userFixture()
+  vi.mocked(subscriptionsAPI.getMySubscriptions).mockResolvedValue(subscriptions)
 
   const router = createRouter({
     history: createMemoryHistory(),
@@ -88,7 +120,6 @@ async function mountSubscriptions(options: MountOptions = {}) {
       { path: '/subscriptions', component: { template: '<div />' } },
       { path: '/pricing', component: { template: '<div />' } },
       { path: '/purchase', component: { template: '<div />' } },
-      { path: '/quota-viewer', component: { template: '<div />' } },
     ],
   })
   await router.push('/subscriptions')
@@ -99,117 +130,167 @@ async function mountSubscriptions(options: MountOptions = {}) {
       plugins: [router],
       stubs: {
         AppLayout: { template: '<main><slot /></main>' },
-        AdminPageHeader: { template: '<header><slot name="secondary-actions" /></header>' },
-        CreditAmount: true,
-        Icon: { template: '<svg />' },
-        RouterLink: {
-          props: ['to'],
-          template: '<a :href="typeof to === \'string\' ? to : to.path"><slot /></a>',
+        AdminPageHeader: {
+          props: ['title', 'description'],
+          template: '<header><h1>{{ title }}</h1><p>{{ description }}</p></header>',
         },
+        CreditAmount: {
+          props: ['value'],
+          template: '<span data-testid="credit-amount-stub">{{ value }}</span>',
+        },
+        Icon: { template: '<svg />' },
       },
     },
   })
   await flushPromises()
-
-  return { ensureCheckoutInfo, router, wrapper }
+  return { router, wrapper }
 }
 
-describe('SubscriptionsView empty states', () => {
+describe('SubscriptionsView balance and membership overview', () => {
   beforeEach(() => {
     setActivePinia(createPinia())
     vi.mocked(subscriptionsAPI.getMySubscriptions).mockReset()
-    vi.mocked(subscriptionsAPI.getMySubscriptions).mockResolvedValue([])
   })
 
-  it('offers the pricing catalogue when purchasable plans exist', async () => {
-    const { wrapper } = await mountSubscriptions({
-      plans: [{ id: 9 } as SubscriptionPlan],
+  it('renders the concise overview without an embedded plan catalogue', async () => {
+    const { wrapper } = await mountOverview()
+
+    expect(wrapper.get('h1').text()).toBe('userSubscriptions.title')
+    expect(wrapper.get('header p').text()).toBe('userSubscriptions.description')
+    expect(wrapper.findAll('[data-testid="balance-membership-overview"]')).toHaveLength(1)
+    expect(wrapper.get('[data-testid="balance-card"]').text()).toContain('balanceMembership.balanceTitle')
+    expect(wrapper.get('[data-testid="balance-card"]').text()).toContain('balanceMembership.recharge')
+    expect(wrapper.findAll('[data-testid="pricing-section"]')).toHaveLength(0)
+    expect(wrapper.text()).not.toContain('Try')
+    expect(wrapper.text()).not.toContain('Standard')
+    expect(wrapper.text()).not.toContain('Ultra')
+  })
+
+  it('keeps recharge and redeem actions on the existing purchase flow', async () => {
+    const { router, wrapper } = await mountOverview()
+
+    await wrapper.get('[data-testid="balance-recharge"]').trigger('click')
+    await flushPromises()
+    expect(router.currentRoute.value.fullPath).toBe('/purchase')
+
+    await router.push('/subscriptions')
+    await wrapper.get('[data-testid="balance-redeem"]').trigger('click')
+    await flushPromises()
+    expect(router.currentRoute.value.fullPath).toBe('/purchase#redeem')
+  })
+
+  it('shows a neutral free state with a clear catalogue entry and no fake quota', async () => {
+    const { router, wrapper } = await mountOverview()
+
+    const card = wrapper.get('[data-testid="free-member-card"]')
+    expect(card.text()).toContain('balanceMembership.freeTitle')
+    expect(card.text()).toContain('balanceMembership.freeDescription')
+    expect(card.findAll('[role="progressbar"]')).toHaveLength(0)
+    expect(card.text()).not.toContain('0 / 0')
+
+    await card.get('[data-testid="member-subscribe"]').trigger('click')
+    await flushPromises()
+    expect(router.currentRoute.value.query).toEqual({ mode: 'subscribe', tier: 'low' })
+  })
+
+  it('shows only the monthly quota for an active member and routes renewal to pricing', async () => {
+    const { router, wrapper } = await mountOverview([subscriptionFixture()])
+
+    const card = wrapper.get('[data-testid="current-member-card"]')
+    expect(card.text()).toContain('Ultra')
+    expect(card.text()).toContain('72.8')
+    expect(card.get('[role="progressbar"]').attributes('aria-valuenow')).toBe('72.8')
+    expect(card.text()).not.toMatch(/daily|weekly|每日|每周/i)
+    expect(card.text()).toContain('balanceMembership.viewPlans')
+
+    await card.get('[data-testid="member-renew"]').trigger('click')
+    await flushPromises()
+    expect(router.currentRoute.value.query).toEqual({
+      mode: 'renew',
+      tier: 'high',
+      plan: 'Ultra',
+      group: '3',
     })
-
-    expect(wrapper.get('[data-testid="subscriptions-empty-title"]').text())
-      .toBe('userSubscriptions.emptyWithPlansTitle')
-    expect(wrapper.get('[data-testid="subscriptions-view-plans"]').attributes('href'))
-      .toBe('/pricing')
-    expect(wrapper.get('[data-testid="subscriptions-recharge"]').attributes('href'))
-      .toBe('/purchase')
-    expect(wrapper.find('[data-testid="subscriptions-support"]').exists()).toBe(false)
   })
 
-  it('explains that no plans are listed and keeps recharge and contact actions available', async () => {
-    const { wrapper } = await mountSubscriptions()
+  it('uses a plain catalogue link for a highest-tier member', async () => {
+    const { router, wrapper } = await mountOverview([subscriptionFixture()])
+    const card = wrapper.get('[data-testid="current-member-card"]')
 
-    expect(wrapper.get('[data-testid="subscriptions-empty-title"]').text())
-      .toBe('userSubscriptions.noPlansTitle')
-    expect(wrapper.find('[data-testid="subscriptions-view-plans"]').exists()).toBe(false)
-    expect(wrapper.get('[data-testid="subscriptions-recharge"]').attributes('href'))
-      .toBe('/purchase')
-    expect(wrapper.get('[data-testid="subscriptions-support"]').attributes('href'))
-      .toBe('http://127.0.0.1:4179/tutorial-docs/#recharge')
-    expect(wrapper.get('[data-testid="subscriptions-support"]').text())
-      .toContain('userSubscriptions.viewSubscriptionHelp')
-  })
-
-  it('labels a configured support URL as direct administrator contact', async () => {
-    const { wrapper } = await mountSubscriptions({
-      contactInfo: 'https://support.example.com/contact',
+    await card.get('[data-testid="member-upgrade"]').trigger('click')
+    await flushPromises()
+    expect(router.currentRoute.value.query).toEqual({
+      tier: 'high',
+      plan: 'Ultra',
+      group: '3',
     })
-
-    expect(wrapper.get('[data-testid="subscriptions-support"]').attributes('href'))
-      .toBe('https://support.example.com/contact')
-    expect(wrapper.get('[data-testid="subscriptions-support"]').text())
-      .toContain('userSubscriptions.contactAdmin')
   })
 
-  it('skips checkout when self-service payment is disabled', async () => {
-    const { ensureCheckoutInfo, wrapper } = await mountSubscriptions({
-      paymentEnabled: false,
-      plans: [{ id: 9 } as SubscriptionPlan],
+  it('uses upgrade intent for members below the highest tier', async () => {
+    const base = subscriptionFixture()
+    const subscription = subscriptionFixture({
+      group: { ...base.group!, name: 'Pro' },
     })
+    const { router, wrapper } = await mountOverview([subscription])
+    const card = wrapper.get('[data-testid="current-member-card"]')
 
-    expect(ensureCheckoutInfo).not.toHaveBeenCalled()
-    expect(wrapper.get('[data-testid="subscriptions-empty-title"]').text())
-      .toBe('userSubscriptions.selfServiceDisabledTitle')
-    expect(wrapper.find('[data-testid="subscriptions-view-plans"]').exists()).toBe(false)
+    expect(card.text()).toContain('balanceMembership.upgrade')
+    await card.get('[data-testid="member-upgrade"]').trigger('click')
+    await flushPromises()
+    expect(router.currentRoute.value.query).toEqual({
+      mode: 'upgrade',
+      tier: 'high',
+      group: '3',
+    })
   })
 
-  it('uses a neutral state when checkout capability cannot be confirmed', async () => {
-    const consoleWarn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
-    const { wrapper } = await mountSubscriptions({ checkoutError: new Error('offline') })
+  it('falls back to viewing plans when the live tier cannot be classified', async () => {
+    const base = subscriptionFixture()
+    const { router, wrapper } = await mountOverview([
+      subscriptionFixture({ group: { ...base.group!, name: 'Custom member' } }),
+    ])
+    const card = wrapper.get('[data-testid="current-member-card"]')
 
-    expect(wrapper.get('[data-testid="subscriptions-empty-title"]').text())
-      .toBe('userSubscriptions.purchaseOptionsUnknownTitle')
-    expect(wrapper.find('[data-testid="subscriptions-view-plans"]').exists()).toBe(false)
-    expect(wrapper.get('[data-testid="subscriptions-recharge"]').attributes('href'))
-      .toBe('/purchase')
-    consoleWarn.mockRestore()
+    expect(card.text()).toContain('balanceMembership.viewPlans')
+    await card.get('[data-testid="member-upgrade"]').trigger('click')
+    await flushPromises()
+    expect(router.currentRoute.value.query).toEqual({
+      plan: 'Custom member',
+      group: '3',
+    })
   })
 
-  it('shows a retryable error instead of misreporting an empty subscription list', async () => {
-    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+  it('keeps a retryable error state and does not invent membership data', async () => {
     vi.mocked(subscriptionsAPI.getMySubscriptions)
       .mockRejectedValueOnce(new Error('network unavailable'))
       .mockResolvedValueOnce([])
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined)
 
-    const { wrapper } = await mountSubscriptions()
-
-    expect(wrapper.find('[data-testid="subscriptions-load-error"]').exists()).toBe(true)
-    expect(wrapper.find('[data-testid="subscriptions-empty-state"]').exists()).toBe(false)
+    const { wrapper } = await mountOverview()
+    expect(wrapper.findAll('[data-testid="subscriptions-load-error"]')).toHaveLength(1)
+    expect(wrapper.findAll('[data-testid="current-member-card"]')).toHaveLength(0)
 
     await wrapper.get('[data-testid="subscriptions-load-error"] button').trigger('click')
     await flushPromises()
-
-    expect(subscriptionsAPI.getMySubscriptions).toHaveBeenCalledTimes(2)
-    expect(wrapper.find('[data-testid="subscriptions-load-error"]').exists()).toBe(false)
-    expect(wrapper.find('[data-testid="subscriptions-empty-state"]').exists()).toBe(true)
+    expect(wrapper.findAll('[data-testid="subscriptions-load-error"]')).toHaveLength(0)
+    expect(wrapper.findAll('[data-testid="free-member-card"]')).toHaveLength(1)
     consoleError.mockRestore()
   })
 
-  it('keeps existing subscription records out of the empty state', async () => {
-    vi.mocked(subscriptionsAPI.getMySubscriptions).mockResolvedValue([subscriptionFixture()])
+  it('does not turn missing balance or monthly usage into zero-valued data', async () => {
+    const base = subscriptionFixture()
+    const { wrapper } = await mountOverview([
+      subscriptionFixture({
+        monthly_usage_usd: null as unknown as number,
+        group: { ...base.group!, monthly_limit_usd: 10000 },
+      }),
+    ])
 
-    const { wrapper } = await mountSubscriptions()
-
-    expect(wrapper.find('[data-testid="subscriptions-empty-state"]').exists()).toBe(false)
-    expect(wrapper.text()).toContain('Group #3')
+    expect(wrapper.get('[data-testid="balance-card"] [data-testid="credit-amount-stub"]').text())
+      .toBe('1,280')
+    expect(wrapper.get('[data-testid="current-member-card"]').text())
+      .toContain('balanceMembership.monthlyQuotaUnavailable')
+    expect(wrapper.get('[data-testid="current-member-card"]').findAll('[role="progressbar"]'))
+      .toHaveLength(0)
   })
 })

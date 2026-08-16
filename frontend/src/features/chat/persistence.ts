@@ -2,9 +2,13 @@ import type {
   ChatHistoryOutboxMutation,
   ChatLegacyImportDecision,
 } from '@/types/chat'
+import {
+  mergeChatActivities,
+  normalizeChatActivities,
+} from '@/features/chat/activity'
 
 const CHAT_HISTORY_DATABASE_NAME = 'luoxueapi-chat'
-const CHAT_HISTORY_DATABASE_VERSION = 3
+const CHAT_HISTORY_DATABASE_VERSION = 4
 const CHAT_HISTORY_STORE_NAME = 'history'
 const CHAT_HISTORY_MAX_CONVERSATIONS = 50
 const CHAT_HISTORY_MAX_FUTURE_SKEW_MS = 5 * 60 * 1000
@@ -151,6 +155,9 @@ function copyCanonicalAssistantMetadata(
   if (isChatReceiptStatus(source.settlementStatus)) {
     target.settlementStatus = source.settlementStatus
   }
+  if (isFiniteTimestamp(source.pendingStopRequestedAt)) {
+    target.pendingStopRequestedAt = source.pendingStopRequestedAt
+  }
   for (const field of [
     'usageLogId',
     'inputTokens',
@@ -244,6 +251,12 @@ function canonicalMessage(value: unknown): Record<string, unknown> | null {
   if (isFiniteTimestamp(value.updatedAt)) message.updatedAt = value.updatedAt
   if (isNonNegativeInteger(value.position)) message.position = value.position
   copyCanonicalAssistantMetadata(message, value)
+  if (value.role === 'assistant') {
+    const activities = normalizeChatActivities(value.activities, {
+      fallbackStartedAt: value.createdAt,
+    })
+    if (activities.length > 0) message.activities = activities
+  }
   if (Array.isArray(value.attachments)) {
     const attachmentIds = new Set<string>()
     const attachments = value.attachments.reduce<Record<string, unknown>[]>((result, candidate) => {
@@ -258,6 +271,36 @@ function canonicalMessage(value: unknown): Record<string, unknown> | null {
     if (attachments.length > 0) message.attachments = attachments
   }
   return message
+}
+
+function mergeCanonicalConversationActivities(
+  existing: Record<string, unknown>,
+  incoming: Record<string, unknown>,
+): Record<string, unknown> {
+  const existingMessages = Array.isArray(existing.messages) ? existing.messages : []
+  const existingById = new Map(
+    existingMessages
+      .filter(isRecord)
+      .map((message) => [String(message.id ?? ''), message]),
+  )
+  const incomingMessages = Array.isArray(incoming.messages) ? incoming.messages : []
+  return {
+    ...incoming,
+    messages: incomingMessages.map((messageValue) => {
+      if (!isRecord(messageValue) || messageValue.role !== 'assistant') return messageValue
+      const previous = existingById.get(String(messageValue.id ?? ''))
+      if (!previous) return messageValue
+      const previousActivities = normalizeChatActivities(previous.activities, {
+        fallbackStartedAt: Number(previous.createdAt) || 0,
+      })
+      const incomingActivities = normalizeChatActivities(messageValue.activities, {
+        fallbackStartedAt: Number(messageValue.createdAt) || 0,
+      })
+      const activities = mergeChatActivities(previousActivities, incomingActivities)
+      if (activities.length === 0) return messageValue
+      return { ...messageValue, activities }
+    }),
+  }
 }
 
 function canonicalConversation(
@@ -582,7 +625,13 @@ export function mergeChatHistoryStates(
         continue
       }
     }
-    byId.set(id, conversation)
+    const currentConversation = byId.get(id)
+    byId.set(
+      id,
+      currentConversation
+        ? mergeCanonicalConversationActivities(currentConversation, conversation)
+        : conversation,
+    )
   }
   for (const id of new Set(mutation.deletedConversationIds ?? [])) {
     byId.delete(id)

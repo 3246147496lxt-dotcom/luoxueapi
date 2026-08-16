@@ -5,7 +5,11 @@
     :aria-label="message.role === 'user' ? t('chat.message.you') : t('chat.message.assistant')"
     :aria-busy="message.status === 'streaming' ? 'true' : undefined"
   >
-    <div class="chat-message__body">
+    <div
+      class="chat-message__body"
+      :class="{ 'user-message-group': message.role === 'user' }"
+      :data-test="message.role === 'user' ? 'user-message-group' : undefined"
+    >
       <div
         v-if="message.excludedFromContext || message.status === 'stopped'"
         class="chat-message__meta"
@@ -21,6 +25,9 @@
       <ChatMessageAttachments
         v-if="message.attachments?.length"
         :attachments="message.attachments"
+        :class="{
+          'chat-message-attachments--with-content': hasRenderableContent,
+        }"
       />
 
       <div
@@ -66,9 +73,22 @@
       </div>
 
       <div
-        v-if="message.role === 'assistant' && message.status !== 'streaming' && (hasRenderableContent || ((retryable || retrying) && message.status !== 'error'))"
+        v-if="showActions"
         class="chat-message__actions"
       >
+        <button
+          v-if="hasActivities"
+          type="button"
+          class="chat-message__activity-button"
+          :data-chat-activity-message-id="message.id"
+          :aria-label="t('chat.activity.view')"
+          :aria-expanded="activityExpanded"
+          :aria-controls="activityControls"
+          @click="$emit('viewActivity')"
+        >
+          <Icon name="brain" size="sm" aria-hidden="true" />
+          <span>{{ t('chat.activity.view') }}</span>
+        </button>
         <button
           v-if="hasRenderableContent"
           type="button"
@@ -103,6 +123,7 @@ import DOMPurify from 'dompurify'
 import { marked, Renderer } from 'marked'
 import ChatMessageAttachments from '@/components/chat/ChatMessageAttachments.vue'
 import Icon from '@/components/icons/Icon.vue'
+import { chatActivityPartHasText } from '@/features/chat/activity'
 import { describeChatMessageError } from '@/features/chat/chatErrorHandler'
 import type { ChatMessage } from '@/types/chat'
 
@@ -111,20 +132,41 @@ const props = withDefaults(defineProps<{
   retryable?: boolean
   retrying?: boolean
   announceFailure?: boolean
+  activityExpanded?: boolean
+  activityControls?: string
 }>(), {
   retryable: false,
   retrying: false,
   announceFailure: false,
+  activityExpanded: false,
+  activityControls: undefined,
 })
 
 defineEmits<{
   retry: []
+  viewActivity: []
 }>()
 
 const { t } = useI18n()
 const copied = ref(false)
 let copiedTimer: ReturnType<typeof setTimeout> | undefined
 const hasRenderableContent = computed(() => props.message.content.trim().length > 0)
+const hasActivities = computed(() => props.message.activities?.some((activity) => (
+  activity.items.some((item) => item.parts.some(chatActivityPartHasText))
+)) === true)
+const showActions = computed(() => (
+  props.message.role === 'assistant'
+  && (
+    hasActivities.value
+    || (
+      props.message.status !== 'streaming'
+      && (
+        hasRenderableContent.value
+        || ((props.retryable || props.retrying) && props.message.status !== 'error')
+      )
+    )
+  )
+))
 const errorPresentation = computed(() => describeChatMessageError(props.message))
 const showStreamingIndicator = computed(() => (
   props.message.role === 'assistant'
@@ -262,6 +304,20 @@ onBeforeUnmount(() => {
   align-items: flex-end;
 }
 
+.user-message-group {
+  display: flex;
+  width: 100%;
+  max-width: 100%;
+  flex-direction: column;
+  align-items: flex-end;
+  margin-left: auto;
+}
+
+.user-message-group > .chat-message__actions {
+  align-self: flex-end;
+  margin-left: auto;
+}
+
 .chat-message__meta {
   display: flex;
   align-items: center;
@@ -292,6 +348,7 @@ onBeforeUnmount(() => {
 .chat-message--user .chat-message__plain {
   width: fit-content;
   max-width: min(70%, 640px);
+  margin-left: auto;
   border-radius: 22px;
   padding: 10px 16px;
   color: var(--chat-message-user-text);
@@ -633,9 +690,36 @@ onBeforeUnmount(() => {
 
 .chat-message__actions {
   display: flex;
+  align-items: center;
   gap: 4px;
   min-height: 32px;
   margin-top: 10px;
+}
+
+.chat-message__activity-button {
+  display: inline-flex;
+  min-height: 32px;
+  align-items: center;
+  gap: 6px;
+  border: 0;
+  border-radius: 7px;
+  padding: 0 8px;
+  color: var(--workspace-text-secondary);
+  background: transparent;
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 20px;
+  transition: color 150ms ease, background-color 150ms ease;
+}
+
+.chat-message__activity-button:hover {
+  color: var(--workspace-text);
+  background: var(--chat-message-action-hover);
+}
+
+.chat-message__activity-button:focus-visible {
+  outline: 2px solid var(--lx-clay-accent);
+  outline-offset: 2px;
 }
 
 .chat-message__icon-button {
@@ -700,7 +784,8 @@ onBeforeUnmount(() => {
 }
 
 @media (hover: none) and (pointer: coarse) {
-  .chat-message__retry-button {
+  .chat-message__retry-button,
+  .chat-message__activity-button {
     min-height: 44px;
   }
 }

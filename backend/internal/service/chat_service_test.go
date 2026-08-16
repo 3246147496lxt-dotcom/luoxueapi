@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"testing"
 	"time"
@@ -75,6 +76,11 @@ type chatTestScheduler struct {
 	schedulable          bool
 	err                  error
 	calls                int
+	reasoningCalls       int
+	reasoningOptions     []WebChatReasoningOptions
+	reasoningSchedulable *bool
+	reasoningByGroup     map[int64]bool
+	reasoningByOptions   map[WebChatReasoningOptions]bool
 	transcriptionByGroup map[int64]bool
 	transcriptionCalls   []int64
 }
@@ -86,6 +92,21 @@ func (s *chatTestScheduler) HasSchedulableTranscriptionAccount(_ context.Context
 
 func (s *chatTestScheduler) HasSchedulableChatCompletionsAccount(context.Context, int64, string) (bool, error) {
 	s.calls++
+	return s.schedulable, s.err
+}
+
+func (s *chatTestScheduler) HasSchedulableWebChatReasoningAccount(_ context.Context, groupID int64, _ string, options WebChatReasoningOptions) (bool, error) {
+	s.reasoningCalls++
+	s.reasoningOptions = append(s.reasoningOptions, options)
+	if s.reasoningByOptions != nil {
+		return s.reasoningByOptions[options], s.err
+	}
+	if s.reasoningByGroup != nil {
+		return s.reasoningByGroup[groupID], s.err
+	}
+	if s.reasoningSchedulable != nil {
+		return *s.reasoningSchedulable, s.err
+	}
 	return s.schedulable, s.err
 }
 
@@ -103,6 +124,11 @@ func (s *chatCapabilitiesSchedulerStub) EffectiveTranscriptionConfig(context.Con
 }
 
 func (s *chatCapabilitiesSchedulerStub) HasSchedulableChatCompletionsAccount(context.Context, int64, string) (bool, error) {
+	s.chatScheduleCalls++
+	return false, nil
+}
+
+func (s *chatCapabilitiesSchedulerStub) HasSchedulableWebChatReasoningAccount(context.Context, int64, string, WebChatReasoningOptions) (bool, error) {
 	s.chatScheduleCalls++
 	return false, nil
 }
@@ -929,6 +955,191 @@ func TestChatServiceReasoningEffortDefaultsToLowAndPreservesSupportedLevels(t *t
 			}
 		})
 	}
+}
+
+func TestChatServiceNormalizesWebChatReasoningModeWithoutChangingEffort(t *testing.T) {
+	for _, tt := range []struct {
+		name       string
+		mode       string
+		effort     string
+		wantMode   string
+		wantEffort string
+	}{
+		{name: "omitted mode defaults standard", effort: "high", wantMode: WebChatReasoningModeStandard, wantEffort: "high"},
+		{name: "explicit standard", mode: " STANDARD ", effort: "medium", wantMode: WebChatReasoningModeStandard, wantEffort: "medium"},
+		{name: "Pro preserves effort", mode: " PRO ", effort: "xhigh", wantMode: WebChatReasoningModePro, wantEffort: "xhigh"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			svc, _, catalog, _, _, _ := newChatServiceBehaviorTest()
+			catalog.models = []string{"gpt-5.6-sol"}
+
+			got, err := svc.NormalizeWebChatReasoning(context.Background(), 7, "gpt-5.6-sol", WebChatReasoningOptions{
+				Mode: tt.mode, Effort: tt.effort,
+			})
+			require.NoError(t, err)
+			require.Equal(t, WebChatReasoningOptions{Mode: tt.wantMode, Effort: tt.wantEffort}, got)
+		})
+	}
+}
+
+func TestChatServiceRejectsInvalidWebChatReasoningMode(t *testing.T) {
+	svc, _, _, scheduler, _, _ := newChatServiceBehaviorTest()
+
+	got, err := svc.NormalizeWebChatReasoning(context.Background(), 7, "gpt-5.6-sol", WebChatReasoningOptions{
+		Mode: "turbo", Effort: "medium",
+	})
+	require.Empty(t, got)
+	require.ErrorIs(t, err, ErrChatReasoningModeInvalid)
+	require.Equal(t, "CHAT_REASONING_MODE_INVALID", infraerrors.Reason(err))
+	require.Zero(t, scheduler.calls)
+}
+
+func TestChatServiceProReasoningUnavailableDoesNotDowngrade(t *testing.T) {
+	t.Run("model does not support Pro", func(t *testing.T) {
+		svc, _, catalog, _, _, _ := newChatServiceBehaviorTest()
+		catalog.models = []string{"gpt-5.5"}
+
+		got, err := svc.NormalizeWebChatReasoning(context.Background(), 7, "gpt-5.5", WebChatReasoningOptions{
+			Mode: WebChatReasoningModePro, Effort: "medium",
+		})
+		require.Empty(t, got)
+		require.ErrorIs(t, err, ErrChatProReasoningUnavailable)
+		require.Equal(t, "PRO_REASONING_UNAVAILABLE", infraerrors.Reason(err))
+	})
+
+	t.Run("Responses account is unavailable", func(t *testing.T) {
+		svc, _, catalog, scheduler, _, _ := newChatServiceBehaviorTest()
+		catalog.models = []string{"gpt-5.6-sol"}
+		unavailable := false
+		scheduler.reasoningSchedulable = &unavailable
+
+		got, err := svc.NormalizeWebChatReasoning(context.Background(), 7, "gpt-5.6-sol", WebChatReasoningOptions{
+			Mode: WebChatReasoningModePro, Effort: "high",
+		})
+		require.Empty(t, got)
+		require.ErrorIs(t, err, ErrChatProReasoningUnavailable)
+		require.Equal(t, "PRO_REASONING_UNAVAILABLE", infraerrors.Reason(err))
+	})
+}
+
+func TestChatServiceReasoningPrincipalUsesCapabilityQualifiedGroup(t *testing.T) {
+	svc, groups, catalog, scheduler, _, principals := newChatServiceBehaviorTest()
+	groups.groups = []Group{
+		{ID: 10, Name: "raw-cc", Platform: PlatformOpenAI, Status: StatusActive, SubscriptionType: SubscriptionTypeStandard, SortOrder: 1, RateMultiplier: 1},
+		{ID: 20, Name: "responses-pro", Platform: PlatformOpenAI, Status: StatusActive, SubscriptionType: SubscriptionTypeStandard, SortOrder: 2, RateMultiplier: 1},
+	}
+	catalog.models = []string{"gpt-5.6-sol"}
+	scheduler.reasoningByGroup = map[int64]bool{10: false, 20: true}
+	options := WebChatReasoningOptions{Mode: WebChatReasoningModePro, Effort: "low"}
+
+	normalized, err := svc.NormalizeWebChatReasoning(context.Background(), 7, "gpt-5.6-sol", options)
+	require.NoError(t, err)
+	require.Equal(t, options, normalized)
+
+	principal, err := svc.ResolveWebChatPrincipal(context.Background(), 7, "gpt-5.6-sol", normalized)
+	require.NoError(t, err)
+	require.NotNil(t, principal)
+	require.Equal(t, []int64{20}, principals.groupIDs)
+}
+
+func TestChatServiceProLowPreservesEffortIndependently(t *testing.T) {
+	for _, model := range []string{"gpt-5.6", "gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"} {
+		t.Run(model, func(t *testing.T) {
+			svc, _, catalog, _, _, _ := newChatServiceBehaviorTest()
+			catalog.models = []string{model}
+
+			got, err := svc.NormalizeWebChatReasoning(context.Background(), 7, model, WebChatReasoningOptions{
+				Mode: WebChatReasoningModePro, Effort: "low",
+			})
+			require.NoError(t, err)
+			require.Equal(t, WebChatReasoningOptions{Mode: WebChatReasoningModePro, Effort: "low"}, got)
+		})
+	}
+}
+
+func TestChatServiceCatalogPublishesReasoningCapabilities(t *testing.T) {
+	svc, _, catalog, _, _, _ := newChatServiceBehaviorTest()
+	catalog.models = []string{"gpt-5.6-sol"}
+
+	result, err := svc.ListModels(context.Background(), 7)
+	require.NoError(t, err)
+	require.Len(t, result.Models, 1)
+	model := result.Models[0]
+	require.True(t, model.SupportsResponses)
+	require.True(t, model.SupportsReasoningSummary)
+	require.True(t, model.SupportsReasoningProMode)
+	require.Equal(t, []string{"low", "medium", "high", "xhigh"}, model.SupportedReasoningEfforts)
+
+	payload, err := json.Marshal(model)
+	require.NoError(t, err)
+	require.Contains(t, string(payload), `"supports_responses":true`)
+	require.Contains(t, string(payload), `"supports_reasoning_summary":true`)
+	require.Contains(t, string(payload), `"supports_reasoning_pro_mode":true`)
+	require.Contains(t, string(payload), `"supported_reasoning_efforts"`)
+}
+
+func TestChatServiceCatalogPublishesProForVisibleGPT56FamilyOnly(t *testing.T) {
+	svc, _, catalog, _, _, _ := newChatServiceBehaviorTest()
+	catalog.models = []string{"gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna", "gpt-5.5"}
+
+	result, err := svc.ListModels(context.Background(), 7)
+	require.NoError(t, err)
+	byID := make(map[string]ChatModel, len(result.Models))
+	for _, model := range result.Models {
+		byID[model.ID] = model
+	}
+	for _, model := range []string{"gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"} {
+		require.True(t, byID[model].SupportsReasoningProMode, model)
+	}
+	require.False(t, byID["gpt-5.5"].SupportsReasoningProMode)
+}
+
+func TestChatServiceCatalogPublishesOnlySchedulableReasoningEffortPairs(t *testing.T) {
+	t.Run("standard effort list is intersected with runtime accounts", func(t *testing.T) {
+		svc, _, catalog, scheduler, _, _ := newChatServiceBehaviorTest()
+		catalog.models = []string{"gpt-5.6-terra"}
+		scheduler.reasoningByOptions = map[WebChatReasoningOptions]bool{
+			{Mode: WebChatReasoningModeStandard, Effort: "low"}:  true,
+			{Mode: WebChatReasoningModeStandard, Effort: "high"}: true,
+			{Mode: WebChatReasoningModeStandard, Effort: "max"}:  true,
+			{Mode: WebChatReasoningModePro, Effort: "low"}:       true,
+			{Mode: WebChatReasoningModePro, Effort: "high"}:      false,
+			{Mode: WebChatReasoningModePro, Effort: "max"}:       true,
+		}
+
+		result, err := svc.ListModels(context.Background(), 7)
+		require.NoError(t, err)
+		require.Len(t, result.Models, 1)
+		model := result.Models[0]
+		require.Equal(t, []string{"low", "high"}, model.SupportedReasoningEfforts)
+		require.NotContains(t, scheduler.reasoningOptions,
+			WebChatReasoningOptions{Mode: WebChatReasoningModeStandard, Effort: "max"},
+			"the Web Chat catalog must expose only efforts understood by its picker")
+		require.True(t, model.SupportsReasoningSummary)
+		require.False(t, model.SupportsReasoningProMode,
+			"Pro must stay hidden when any picker-visible effort would be rejected")
+	})
+
+	t.Run("upstream billing applies the same max fail-closed rule as POST admission", func(t *testing.T) {
+		svc, _, catalog, scheduler, _, _ := newChatServiceBehaviorTest()
+		catalog.models = []string{"gpt-5.6-terra"}
+		catalog.mapping = ChannelMappingResult{
+			MappedModel:        "gpt-5.6-terra",
+			BillingModelSource: BillingModelSourceUpstream,
+		}
+		scheduler.schedulable = true
+
+		result, err := svc.ListModels(context.Background(), 7)
+		require.NoError(t, err)
+		require.Len(t, result.Models, 1)
+		model := result.Models[0]
+		require.Equal(t, []string{"low", "medium", "high", "xhigh"}, model.SupportedReasoningEfforts)
+		require.NotContains(t, scheduler.reasoningOptions,
+			WebChatReasoningOptions{Mode: WebChatReasoningModeStandard, Effort: "max"})
+		require.NotContains(t, scheduler.reasoningOptions,
+			WebChatReasoningOptions{Mode: WebChatReasoningModePro, Effort: "max"})
+		require.True(t, model.SupportsReasoningProMode)
+	})
 }
 
 func TestChatServiceReasoningEffortRejectsMaxForEffectiveGPT56Sol(t *testing.T) {

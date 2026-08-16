@@ -3,6 +3,7 @@
     class="pricing-page font-[family-name:var(--lx-clay-font-ui)]"
     :class="activeDefinition.themeClass"
     :data-tier="activeTier"
+    :data-mode="membershipMode || undefined"
     data-testid="pricing-page"
   >
     <a
@@ -106,6 +107,8 @@
                 :key="plan.id"
                 :plan="plan"
                 :featured="isFeaturedPlan(tier.id, plan)"
+                :current="isCurrentPlan(plan)"
+                :action-label="planActionLabel(plan)"
                 @select="selectPlan"
                 @details="viewPlanDetails"
               />
@@ -139,6 +142,11 @@ import PricingFluidBackground from '@/components/payment/PricingFluidBackground.
 import PricingPlanCard from '@/components/payment/PricingPlanCard.vue'
 import { usePaymentStore } from '@/stores/payment'
 import type { SubscriptionPlan } from '@/types/payment'
+import {
+  readMembershipMode,
+  readPositiveQueryInteger,
+  readSingleQueryString,
+} from '@/navigation/purchaseQueryState'
 
 const TIER_DEFINITIONS = [
   {
@@ -169,6 +177,21 @@ const TIER_DEFINITIONS = [
 
 type PricingTier = typeof TIER_DEFINITIONS[number]['id']
 
+const TIER_QUERY_ALIASES: Record<string, PricingTier> = {
+  low: 'low',
+  light: 'low',
+  lightweight: 'low',
+  '轻量级': 'low',
+  mid: 'mid',
+  middle: 'mid',
+  medium: 'mid',
+  '中量级': 'mid',
+  high: 'high',
+  heavy: 'high',
+  heavyweight: 'high',
+  '高量级': 'high',
+}
+
 const { t } = useI18n()
 const route = useRoute()
 const router = useRouter()
@@ -178,7 +201,7 @@ const tabListRef = ref<HTMLElement | null>(null)
 const activeTier = ref<PricingTier>('low')
 const loading = ref(paymentStore.checkoutInfo === null)
 const loadError = ref(false)
-const appliedPreferredGroupId = ref<number | null>(null)
+const appliedPreferredSelection = ref('')
 
 const normalizePlanName = (name: string) => name.trim().toLocaleLowerCase('en-US')
 
@@ -187,12 +210,35 @@ const activeDefinition = computed(() => (
 ))
 const activeTabId = computed(() => `pricing-tier-tab-${activeTier.value}`)
 const plans = computed(() => paymentStore.checkoutInfo?.plans ?? [])
+const membershipMode = computed(() => readMembershipMode(route.query))
+const preferredTier = computed<PricingTier | null>(() => {
+  const value = readSingleQueryString(route.query, 'tier').trim().toLocaleLowerCase('en-US')
+  if (value) {
+    const aliasedTier = TIER_QUERY_ALIASES[value]
+    if (aliasedTier) return aliasedTier
+
+    // Accept a plan name as a convenience for copied links while keeping the
+    // canonical tier ids (`low`, `mid`, `high`) as the primary contract.
+    const matchingTier = TIER_DEFINITIONS.find((tier) => (
+      tier.planNames.some((name) => normalizePlanName(name) === value)
+    ))
+    if (matchingTier) return matchingTier.id
+  }
+
+  // Renewal/upgrade links may carry a concrete plan name or id. Resolve it
+  // only after checkout data is available, without inventing a fallback tier.
+  const planQuery = readSingleQueryString(route.query, 'plan').trim()
+  if (!planQuery) return null
+  const normalizedPlanQuery = normalizePlanName(planQuery)
+  const planFromCatalogue = plans.value.find((plan) => (
+    String(plan.id) === planQuery || normalizePlanName(plan.name) === normalizedPlanQuery
+  ))
+  return planFromCatalogue ? tierForPlan(planFromCatalogue) : TIER_DEFINITIONS.find((tier) => (
+    tier.planNames.some((name) => normalizePlanName(name) === normalizedPlanQuery)
+  ))?.id ?? null
+})
 const preferredGroupId = computed(() => {
-  const value = Array.isArray(route.query.group)
-    ? route.query.group[0]
-    : route.query.group
-  const parsed = Number(value)
-  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : null
+  return readPositiveQueryInteger(route.query, 'group')
 })
 
 const plansByTier = computed<Record<PricingTier, SubscriptionPlan[]>>(() => {
@@ -230,6 +276,29 @@ function isFeaturedPlan(tier: PricingTier, plan: SubscriptionPlan) {
   return definition
     ? normalizePlanName(plan.name) === normalizePlanName(definition.featuredPlan)
     : false
+}
+
+function isCurrentPlan(plan: SubscriptionPlan): boolean {
+  const planQuery = readSingleQueryString(route.query, 'plan').trim()
+  if (planQuery && (
+    String(plan.id) === planQuery
+    || normalizePlanName(plan.name) === normalizePlanName(planQuery)
+  )) return true
+
+  // A bare `group` query is also used by legacy catalogue links. Only treat
+  // it as the current membership when it carries a renewal/upgrade intent.
+  if (membershipMode.value !== 'renew' && membershipMode.value !== 'upgrade') return false
+  const groupId = preferredGroupId.value
+  return groupId !== null && plan.group_id === groupId
+}
+
+function planActionLabel(plan: SubscriptionPlan): string {
+  const mode = membershipMode.value
+  const current = isCurrentPlan(plan)
+  if (mode === 'renew') return current ? t('balanceMembership.renew') : ''
+  if (mode === 'upgrade') return current ? t('pricing.currentPlan') : t('balanceMembership.upgrade')
+  if (mode === 'subscribe') return t('balanceMembership.subscribe')
+  return current ? t('pricing.currentPlan') : ''
 }
 
 function selectTier(tier: PricingTier) {
@@ -296,11 +365,13 @@ async function loadPlans(force = false) {
 }
 
 function openPlan(plan: SubscriptionPlan) {
+  const mode = membershipMode.value
   void router.push({
     path: '/purchase',
     query: {
       tab: 'subscription',
       plan: String(plan.id),
+      ...(mode ? { mode } : {}),
     },
   })
 }
@@ -313,19 +384,32 @@ function viewPlanDetails(plan: SubscriptionPlan) {
   openPlan(plan)
 }
 
-watch([plans, preferredGroupId], ([availablePlans, groupId]) => {
-  if (groupId === null) {
-    appliedPreferredGroupId.value = null
+watch([plans, preferredTier, preferredGroupId], ([availablePlans, tier, groupId]) => {
+  // An explicit tier is authoritative. This is used by upgrade links, while
+  // renewal links can continue to use the legacy group id to infer a tier.
+  const planQuery = readSingleQueryString(route.query, 'plan').trim()
+  const selectionKey = `${tier ?? ''}:${groupId ?? ''}:${planQuery}`
+  if (selectionKey === '::') {
+    activeTier.value = 'low'
+    appliedPreferredSelection.value = ''
     return
   }
-  if (appliedPreferredGroupId.value === groupId || availablePlans.length === 0) return
+  if (appliedPreferredSelection.value === selectionKey) return
+
+  if (tier) {
+    activeTier.value = tier
+    appliedPreferredSelection.value = selectionKey
+    return
+  }
+
+  if (groupId === null || availablePlans.length === 0) return
 
   const preferredPlan = availablePlans.find((plan) => (
     plan.group_id === groupId && tierForPlan(plan) !== null
   ))
-  const preferredTier = preferredPlan ? tierForPlan(preferredPlan) : null
-  if (preferredTier) activeTier.value = preferredTier
-  appliedPreferredGroupId.value = groupId
+  const inferredTier = preferredPlan ? tierForPlan(preferredPlan) : null
+  if (inferredTier) activeTier.value = inferredTier
+  appliedPreferredSelection.value = selectionKey
 }, { immediate: true })
 
 onMounted(() => {

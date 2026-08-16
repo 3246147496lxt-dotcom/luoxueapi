@@ -55,7 +55,11 @@ func (s *OpenAIGatewayService) ForwardCountTokensAsAnthropic(
 
 	prepared, err := prepareOpenAIInputTokensCountRequest(body, account, defaultMappedModel)
 	if err != nil {
-		writeAnthropicCountTokensError(c, http.StatusBadRequest, "invalid_request_error", "Failed to parse request body")
+		message := "Failed to parse request body"
+		if apicompat.IsProviderFileCompatibilityError(err) {
+			message = err.Error()
+		}
+		writeAnthropicCountTokensError(c, http.StatusBadRequest, "invalid_request_error", message)
 		return err
 	}
 

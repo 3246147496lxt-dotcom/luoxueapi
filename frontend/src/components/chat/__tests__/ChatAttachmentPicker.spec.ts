@@ -3,7 +3,11 @@ import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
 import enChat from '@/i18n/locales/en/chat'
 import zhChat from '@/i18n/locales/zh/chat'
 import type { ChatAttachment } from '@/types/chat'
-import type { ChatAttachmentDraft } from '../chatAttachmentUi'
+import type { LibraryFile } from '@/types/library'
+import {
+  CHAT_ATTACHMENT_TOTAL_MAX_BYTES,
+  type ChatAttachmentDraft,
+} from '../chatAttachmentUi'
 
 const apiMocks = vi.hoisted(() => ({
   upload: vi.fn(),
@@ -63,6 +67,21 @@ const attachment: ChatAttachment = {
   height: 32,
 }
 
+const libraryFile: LibraryFile = {
+  id: 'library-image-1',
+  name: 'library-snow.png',
+  mimeType: 'image/png',
+  size: 2048,
+  source: 'uploaded',
+  type: 'image',
+  category: 'image',
+  status: 'ready',
+  createdAt: '2026-08-14T01:00:00.000Z',
+  updatedAt: '2026-08-14T02:00:00.000Z',
+  width: 64,
+  height: 48,
+}
+
 const wrappers: VueWrapper[] = []
 
 function mountPicker(props: Record<string, unknown> = {}) {
@@ -77,10 +96,17 @@ function mountPicker(props: Record<string, unknown> = {}) {
 function pickerApi(wrapper: VueWrapper) {
   return wrapper.vm as unknown as {
     addFiles: (files: File[]) => void
+    addLibraryFiles: (files: LibraryFile[]) => void
     cancel: (key: string) => void
     retry: (key: string) => void
     remove: (key: string) => void
     getReadyAttachments: () => ChatAttachment[]
+    getReadySelection: () => {
+      attachments: ChatAttachment[]
+      uploadAttachmentIds: string[]
+      libraryAttachments: Array<{ source: 'library'; fileId: string }>
+    }
+    discardAll: () => Promise<void>
   }
 }
 
@@ -176,7 +202,7 @@ describe('ChatAttachmentPicker', () => {
     expect(click).not.toHaveBeenCalled()
   })
 
-  it('keeps the nine reference rows in order and marks unsupported tools honestly', async () => {
+  it('keeps the nine reference rows in order and exposes only implemented tools', async () => {
     const wrapper = mountPicker()
 
     await wrapper.get('[data-test="chat-attachment-menu-trigger"]').trigger('click')
@@ -210,8 +236,8 @@ describe('ChatAttachmentPicker', () => {
       'heygen',
       'gmail',
     ])
-    expect(items[0]?.hasAttribute('aria-disabled')).toBe(false)
-    expect(items.slice(1).every((item) => item.getAttribute('aria-disabled') === 'true')).toBe(true)
+    expect(items.slice(0, 2).every((item) => !item.hasAttribute('aria-disabled'))).toBe(true)
+    expect(items.slice(2).every((item) => item.getAttribute('aria-disabled') === 'true')).toBe(true)
     expect(items.at(-1)?.querySelector('.chat-attachment-menu__status')?.classList)
       .toContain('chat-attachment-menu__status--persistent')
     expect(items.at(-1)?.querySelector('.chat-attachment-menu__status')?.textContent)
@@ -273,22 +299,21 @@ describe('ChatAttachmentPicker', () => {
     await vi.waitFor(() => expect(attachmentMenu()).toBeNull())
   })
 
-  it('does not fake unavailable tools and explains the missing capability', async () => {
+  it('emits the library selection request without opening the native picker', async () => {
     const wrapper = mountPicker()
     const input = wrapper.get('input[type="file"]')
     const click = vi.spyOn(input.element as HTMLInputElement, 'click')
 
     await wrapper.get('[data-test="chat-attachment-menu-trigger"]').trigger('click')
-    const unsupported = getAttachmentMenu().querySelector<HTMLButtonElement>(
+    const libraryItem = getAttachmentMenu().querySelector<HTMLButtonElement>(
       '[aria-label^="chat.tools.fileLibrary.label"]',
     )
-    unsupported?.click()
+    expect(libraryItem?.hasAttribute('aria-disabled')).toBe(false)
+    libraryItem?.click()
     await wrapper.vm.$nextTick()
 
     expect(click).not.toHaveBeenCalled()
-    expect(wrapper.text()).toContain(
-      'chat.tools.notSupportedAction chat.tools.fileLibrary.label',
-    )
+    expect(wrapper.emitted('select-library')).toEqual([[]])
     await vi.waitFor(() => expect(attachmentMenu()).toBeNull())
   })
 
@@ -411,6 +436,96 @@ describe('ChatAttachmentPicker', () => {
     expect(apiMocks.upload).not.toHaveBeenCalled()
     expect(lastDrafts(wrapper)).toEqual([])
     expect(wrapper.emitted('change')).toBeUndefined()
+  })
+
+  it('adds a ready library file without uploading and serializes only its library reference', async () => {
+    const wrapper = mountPicker()
+
+    pickerApi(wrapper).addLibraryFiles([libraryFile])
+    await wrapper.vm.$nextTick()
+
+    expect(apiMocks.upload).not.toHaveBeenCalled()
+    expect(lastDrafts(wrapper)).toHaveLength(1)
+    expect(lastDrafts(wrapper)[0]).toMatchObject({
+      source: 'library',
+      libraryFileId: 'library-image-1',
+      state: 'ready',
+      progress: 100,
+      attachment: {
+        id: 'library-image-1',
+        name: 'library-snow.png',
+        kind: 'image',
+        expiresAt: '2126-01-01T00:00:00Z',
+      },
+    })
+    expect(pickerApi(wrapper).getReadySelection()).toEqual({
+      attachments: [expect.objectContaining({ id: 'library-image-1' })],
+      uploadAttachmentIds: [],
+      libraryAttachments: [{ source: 'library', fileId: 'library-image-1' }],
+    })
+  })
+
+  it('rejects library files that would exceed the shared attachment byte budget', async () => {
+    const wrapper = mountPicker()
+    const first = {
+      ...libraryFile,
+      id: 'library-large-1',
+      name: 'first-large.png',
+      size: 12 * 1024 * 1024,
+    }
+    const second = {
+      ...libraryFile,
+      id: 'library-large-2',
+      name: 'second-large.png',
+      size: 9 * 1024 * 1024,
+    }
+
+    pickerApi(wrapper).addLibraryFiles([first, second])
+    await wrapper.vm.$nextTick()
+
+    expect(lastDrafts(wrapper)).toHaveLength(1)
+    expect(lastDrafts(wrapper)[0]?.libraryFileId).toBe('library-large-1')
+    expect(lastDrafts(wrapper).reduce((total, draft) => total + draft.file.size, 0))
+      .toBeLessThanOrEqual(CHAT_ATTACHMENT_TOTAL_MAX_BYTES)
+    expect(wrapper.text()).toContain('chat.attachments.errors.totalTooLarge 20')
+  })
+
+  it('removes a library selection without deleting a chat upload', async () => {
+    const wrapper = mountPicker()
+    pickerApi(wrapper).addLibraryFiles([libraryFile])
+    await wrapper.vm.$nextTick()
+
+    pickerApi(wrapper).remove(lastDrafts(wrapper)[0]!.key)
+    await flushPromises()
+
+    expect(apiMocks.upload).not.toHaveBeenCalled()
+    expect(apiMocks.remove).not.toHaveBeenCalled()
+    expect(lastDrafts(wrapper)).toEqual([])
+  })
+
+  it('discards a library selection without deleting a chat upload', async () => {
+    const wrapper = mountPicker()
+    pickerApi(wrapper).addLibraryFiles([libraryFile])
+    await wrapper.vm.$nextTick()
+
+    await pickerApi(wrapper).discardAll()
+
+    expect(apiMocks.upload).not.toHaveBeenCalled()
+    expect(apiMocks.remove).not.toHaveBeenCalled()
+    expect(lastDrafts(wrapper)).toEqual([])
+  })
+
+  it('unmounts a library selection without deleting a chat upload', async () => {
+    const wrapper = mountPicker()
+    pickerApi(wrapper).addLibraryFiles([libraryFile])
+    await wrapper.vm.$nextTick()
+
+    wrapper.unmount()
+    wrappers.splice(wrappers.indexOf(wrapper), 1)
+    await flushPromises()
+
+    expect(apiMocks.upload).not.toHaveBeenCalled()
+    expect(apiMocks.remove).not.toHaveBeenCalled()
   })
 
   it('reports upload progress, keeps server metadata, and deletes an unbound upload on remove', async () => {

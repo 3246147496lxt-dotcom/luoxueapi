@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -19,6 +20,7 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/apicompat"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/ctxkey"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/geminicli"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/googleapi"
@@ -3061,6 +3063,9 @@ func convertClaudeMessagesToGeminiGenerateContent(body []byte) ([]byte, error) {
 
 	toolUseIDToName := make(map[string]string)
 
+	if err := rejectClaudeSystemDocumentsForGemini(req["system"]); err != nil {
+		return nil, err
+	}
 	systemText := extractClaudeSystemText(req["system"])
 	contents, err := convertClaudeMessagesToGeminiContents(req["messages"], toolUseIDToName)
 	if err != nil {
@@ -3086,6 +3091,25 @@ func convertClaudeMessagesToGeminiGenerateContent(body []byte) ([]byte, error) {
 
 	stripGeminiFunctionIDs(out)
 	return json.Marshal(out)
+}
+
+func rejectClaudeSystemDocumentsForGemini(system any) error {
+	blocks, ok := system.([]any)
+	if !ok {
+		return nil
+	}
+	for _, block := range blocks {
+		blockMap, ok := block.(map[string]any)
+		if !ok || blockMap["type"] != "document" {
+			continue
+		}
+		title, _ := blockMap["title"].(string)
+		return apicompat.NewProviderFileUnsupportedError(
+			"gemini", title,
+			"document blocks cannot be represented in the system role; move the document to a user message",
+		)
+	}
+	return nil
 }
 
 func stripGeminiFunctionIDs(req map[string]any) {
@@ -3209,14 +3233,19 @@ func convertClaudeMessagesToGeminiContents(messages any, toolUseIDToName map[str
 					if name == "" {
 						name = "tool"
 					}
+					toolContent, documentParts, err := extractClaudeToolResultContentForGemini(bm["content"])
+					if err != nil {
+						return nil, err
+					}
 					parts = append(parts, map[string]any{
 						"functionResponse": map[string]any{
 							"name": name,
 							"response": map[string]any{
-								"content": extractClaudeContentText(bm["content"]),
+								"content": toolContent,
 							},
 						},
 					})
+					parts = append(parts, documentParts...)
 				case "image":
 					if src, ok := bm["source"].(map[string]any); ok {
 						if srcType, _ := src["type"].(string); srcType == "base64" {
@@ -3232,6 +3261,12 @@ func convertClaudeMessagesToGeminiContents(messages any, toolUseIDToName map[str
 							}
 						}
 					}
+				case "document":
+					documentParts, err := convertClaudeDocumentToGeminiParts(bm)
+					if err != nil {
+						return nil, err
+					}
+					parts = append(parts, documentParts...)
 				default:
 					// best-effort: preserve unknown blocks as text
 					if b, err := json.Marshal(bm); err == nil {
@@ -3249,6 +3284,96 @@ func convertClaudeMessagesToGeminiContents(messages any, toolUseIDToName map[str
 		})
 	}
 	return out, nil
+}
+
+func convertClaudeDocumentToGeminiParts(block map[string]any) ([]any, error) {
+	const provider = "gemini"
+	title, _ := block["title"].(string)
+	title = strings.TrimSpace(title)
+	if title == "" {
+		title = "document"
+	}
+	source, ok := block["source"].(map[string]any)
+	if !ok || source == nil {
+		return nil, apicompat.NewProviderFileInvalidError(provider, title, "document source is required")
+	}
+	sourceType, _ := source["type"].(string)
+	sourceType = strings.ToLower(strings.TrimSpace(sourceType))
+	mediaType, _ := source["media_type"].(string)
+	mediaType = strings.ToLower(strings.TrimSpace(mediaType))
+
+	switch sourceType {
+	case "base64":
+		data, _ := source["data"].(string)
+		data = strings.TrimSpace(data)
+		if mediaType != "application/pdf" {
+			return nil, apicompat.NewProviderFileUnsupportedError(
+				provider, title,
+				"this generateContent route accepts base64 document blocks only for application/pdf; convert the file to PDF or UTF-8 text before retrying",
+			)
+		}
+		if data == "" {
+			return nil, apicompat.NewProviderFileInvalidError(provider, title, "PDF document data is empty")
+		}
+		if !validGeminiDocumentBase64(data) {
+			return nil, apicompat.NewProviderFileInvalidError(provider, title, "PDF document data is not valid base64")
+		}
+		return []any{map[string]any{
+			"inlineData": map[string]any{"mimeType": "application/pdf", "data": data},
+		}}, nil
+
+	case "text":
+		if mediaType != "" && mediaType != "text/plain" {
+			return nil, apicompat.NewProviderFileUnsupportedError(
+				provider, title, fmt.Sprintf("text document media type %q is not supported; use text/plain", mediaType),
+			)
+		}
+		data, _ := source["data"].(string)
+		if data == "" {
+			return nil, apicompat.NewProviderFileInvalidError(provider, title, "text document data is empty")
+		}
+		return []any{map[string]any{"text": "[Document: " + title + "]\n" + data}}, nil
+
+	case "file", "url":
+		return nil, apicompat.NewProviderFileUnsupportedError(
+			provider, title,
+			"provider-specific file and URL document references cannot be resolved by this generateContent route; send inline PDF or text data instead",
+		)
+	default:
+		return nil, apicompat.NewProviderFileUnsupportedError(
+			provider, title, fmt.Sprintf("document source type %q is not supported", sourceType),
+		)
+	}
+}
+
+func validGeminiDocumentBase64(data string) bool {
+	validate := func(encoding *base64.Encoding) bool {
+		decoder := base64.NewDecoder(encoding, strings.NewReader(data))
+		written, err := io.Copy(io.Discard, decoder)
+		return err == nil && written > 0
+	}
+	return validate(base64.StdEncoding) || validate(base64.RawStdEncoding)
+}
+
+func extractClaudeToolResultContentForGemini(v any) (string, []any, error) {
+	content := extractClaudeContentText(v)
+	blocks, ok := v.([]any)
+	if !ok {
+		return content, nil, nil
+	}
+	var documentParts []any
+	for _, block := range blocks {
+		blockMap, ok := block.(map[string]any)
+		if !ok || blockMap["type"] != "document" {
+			continue
+		}
+		converted, err := convertClaudeDocumentToGeminiParts(blockMap)
+		if err != nil {
+			return "", nil, err
+		}
+		documentParts = append(documentParts, converted...)
+	}
+	return content, documentParts, nil
 }
 
 func extractClaudeContentText(v any) string {

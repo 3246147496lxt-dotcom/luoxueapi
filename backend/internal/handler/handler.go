@@ -71,6 +71,7 @@ type Handlers struct {
 	SkillMarket      *SkillMarketHandler
 	Documentation    *DocumentationHandler
 	Chat             *ChatHandler
+	Library          *LibraryHandler
 	Desktop          *DesktopHandler
 	QuotaAuth        *QuotaAuthHandler
 	QuotaOverview    *QuotaOverviewHandler

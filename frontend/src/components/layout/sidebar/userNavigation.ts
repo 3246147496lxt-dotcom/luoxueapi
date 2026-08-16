@@ -1,4 +1,5 @@
 import keyOutlineIconSvg from '@/assets/icons/key-outline.svg?raw'
+import skillMarketIconSvg from '@/assets/icons/skill.svg?raw'
 import { FeatureFlags, makeSidebarFlag } from '@/utils/featureFlags'
 import { ACCOUNT_DESTINATION_PATHS } from '@/navigation/shellDestinations'
 import {
@@ -14,18 +15,21 @@ const flagPayment = makeSidebarFlag(FeatureFlags.payment)
 const flagAvailableChannels = makeSidebarFlag(FeatureFlags.availableChannels)
 const flagPublicModelCatalog = makeSidebarFlag(FeatureFlags.publicModelCatalog)
 const flagSkillMarketplace = makeSidebarFlag(FeatureFlags.skillMarketplace)
-const flagAffiliate = makeSidebarFlag(FeatureFlags.affiliate)
 
 const USER_WORKBENCH_PATHS = new Set<string>([
   '/dashboard',
   '/models',
+  '/skills',
+])
+const USER_API_PATHS = new Set<string>([
   '/keys',
   '/usage',
 ])
 const USER_ACCOUNT_PATHS = new Set<string>([
-  ACCOUNT_DESTINATION_PATHS.wallet,
   ACCOUNT_DESTINATION_PATHS.subscriptions,
+  ACCOUNT_DESTINATION_PATHS.pricing,
   ACCOUNT_DESTINATION_PATHS.orders,
+  '/affiliate',
 ])
 
 function buildUserItems(context: UserNavigationContext): NavItem[] {
@@ -41,6 +45,13 @@ function buildUserItems(context: UserNavigationContext): NavItem[] {
       label: t('nav.modelCenter'),
       icon: icons.model,
       featureFlag: flagPublicModelCatalog,
+    },
+    {
+      path: '/skills',
+      label: t('skills.navLabel'),
+      icon: null,
+      iconSvg: skillMarketIconSvg,
+      featureFlag: flagSkillMarketplace,
     },
     { path: '/keys', label: t('nav.apiKeys'), icon: null, iconSvg: keyOutlineIconSvg },
     {
@@ -59,7 +70,6 @@ function buildUserItems(context: UserNavigationContext): NavItem[] {
       featureFlag: flagAvailableChannels,
     },
     { path: '/monitor', label: t('nav.serviceStatusNav'), icon: icons.signal, featureFlag: flagChannelMonitor },
-    { path: '/skills', label: t('skills.navLabel'), icon: icons.skillMarket, featureFlag: flagSkillMarketplace },
     {
       path: ACCOUNT_DESTINATION_PATHS.quotaViewer,
       label: t('quotaViewerLanding.meta.title'),
@@ -67,13 +77,14 @@ function buildUserItems(context: UserNavigationContext): NavItem[] {
       trailingIcon: 'destinationArrowUpRight',
     },
     {
-      path: ACCOUNT_DESTINATION_PATHS.wallet,
-      label: t('nav.balance'),
+      path: ACCOUNT_DESTINATION_PATHS.subscriptions,
+      activePaths: [ACCOUNT_DESTINATION_PATHS.wallet],
+      label: t('nav.balanceAndMembership'),
       icon: icons.rechargeSubscription,
     },
     {
-      path: ACCOUNT_DESTINATION_PATHS.subscriptions,
-      label: t('nav.subscription'),
+      path: ACCOUNT_DESTINATION_PATHS.pricing,
+      label: t('nav.memberSubscription'),
       icon: icons.creditCard,
       hideInSimpleMode: true,
     },
@@ -85,11 +96,12 @@ function buildUserItems(context: UserNavigationContext): NavItem[] {
       featureFlag: flagPayment,
     },
     {
+      // Keep the entry discoverable in the standard Work rail; the affiliate
+      // view/API continues to enforce the backend capability for actions.
       path: '/affiliate',
       label: t('nav.affiliate'),
       icon: icons.users,
       hideInSimpleMode: true,
-      featureFlag: flagAffiliate,
     },
     { path: ACCOUNT_DESTINATION_PATHS.profile, label: t('nav.profile'), icon: icons.user },
     ...customItems.map((item): NavItem => ({
@@ -113,6 +125,11 @@ export function buildUserNavigation(context: UserNavigationContext): NavSection<
       id: 'workbench',
       label: context.t('nav.userSections.workbench'),
       items: items.filter((item) => USER_WORKBENCH_PATHS.has(item.path)),
+    },
+    {
+      id: 'api',
+      label: context.t('nav.userSections.api'),
+      items: items.filter((item) => USER_API_PATHS.has(item.path)),
     },
     {
       id: 'account',

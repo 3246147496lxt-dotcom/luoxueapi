@@ -178,36 +178,52 @@ func anthropicUserToChatMessages(raw json.RawMessage) ([]ChatMessage, error) {
 	}
 
 	var out []ChatMessage
-	var toolResultImageParts []ChatContentPart
+	var toolResultAttachmentParts []ChatContentPart
 
-	// tool_result → "tool" role messages, text extracted; images deferred.
+	// tool_result → "tool" role messages, text extracted; attachments deferred.
 	for _, b := range blocks {
 		if b.Type != "tool_result" {
 			continue
 		}
-		text, imageParts := convertToolResultOutput(b)
+		text, attachmentParts, err := convertToolResultOutput(b)
+		if err != nil {
+			return nil, err
+		}
 		content, _ := json.Marshal(text)
 		out = append(out, ChatMessage{
 			Role:       "tool",
 			Content:    content,
 			ToolCallID: b.ToolUseID,
 		})
-		for _, ip := range imageParts {
-			toolResultImageParts = append(toolResultImageParts, ChatContentPart{
-				Type:     "image_url",
-				ImageURL: &ChatImageURL{URL: ip.ImageURL},
-			})
+		for _, part := range attachmentParts {
+			switch part.Type {
+			case "input_image":
+				toolResultAttachmentParts = append(toolResultAttachmentParts, ChatContentPart{
+					Type: "image_url", ImageURL: &ChatImageURL{URL: part.ImageURL},
+				})
+			case "input_file":
+				if part.FileURL != "" {
+					return nil, NewProviderFileUnsupportedError(
+						"openai chat completions", part.Filename,
+						"file URL inputs cannot be represented on this route; send inline file data instead",
+					)
+				}
+				toolResultAttachmentParts = append(toolResultAttachmentParts, ChatContentPart{
+					Type: "file",
+					File: &ChatFile{Filename: part.Filename, FileData: part.FileData, FileID: part.FileID},
+				})
+			}
 		}
 	}
 
-	// Remaining text + image blocks → user message. The double-conversion path
+	// Remaining text + image/document blocks → user message. The double-conversion path
 	// (responsesContentPartsToChatContent) folds text-only content into a single
-	// string joined with "\n\n" and only uses the parts-array form when an image
+	// string joined with "\n\n" and only uses the parts-array form when an attachment
 	// is present — strict chat upstreams reject array content — so the direct
 	// bridge preserves that folding.
 	var textParts []string
 	var parts []ChatContentPart
-	hasImage := false
+	hasNonText := false
 	for _, b := range blocks {
 		switch b.Type {
 		case "text":
@@ -217,20 +233,36 @@ func anthropicUserToChatMessages(raw json.RawMessage) ([]ChatMessage, error) {
 			}
 		case "image":
 			if uri := anthropicImageToDataURI(b.Source); uri != "" {
-				hasImage = true
+				hasNonText = true
 				parts = append(parts, ChatContentPart{
 					Type:     "image_url",
 					ImageURL: &ChatImageURL{URL: uri},
 				})
 			}
+		case "document":
+			filePart, err := anthropicDocumentToResponsesPart(b)
+			if err != nil {
+				return nil, err
+			}
+			if filePart.FileURL != "" {
+				return nil, NewProviderFileUnsupportedError(
+					"openai chat completions", filePart.Filename,
+					"file URL inputs cannot be represented on this route; send inline file data instead",
+				)
+			}
+			hasNonText = true
+			parts = append(parts, ChatContentPart{
+				Type: "file",
+				File: &ChatFile{Filename: filePart.Filename, FileData: filePart.FileData, FileID: filePart.FileID},
+			})
 		}
 	}
-	if len(toolResultImageParts) > 0 {
-		hasImage = true
-		parts = append(parts, toolResultImageParts...)
+	if len(toolResultAttachmentParts) > 0 {
+		hasNonText = true
+		parts = append(parts, toolResultAttachmentParts...)
 	}
 
-	if !hasImage {
+	if !hasNonText {
 		if len(textParts) > 0 {
 			content, _ := json.Marshal(strings.Join(textParts, "\n\n"))
 			out = append(out, ChatMessage{Role: "user", Content: content})
@@ -272,6 +304,12 @@ func anthropicAssistantToChatMessages(raw json.RawMessage) ([]ChatMessage, error
 	}
 
 	for _, b := range blocks {
+		if b.Type == "document" {
+			return nil, NewProviderFileUnsupportedError(
+				"openai chat completions", b.Title,
+				"document blocks cannot be represented in the assistant role; move the document to a user message",
+			)
+		}
 		if b.Type != "tool_use" {
 			continue
 		}

@@ -35,6 +35,14 @@ func TestLoadServerTimingConfig(t *testing.T) {
 	})
 }
 
+func TestLoadDefaultTrustedProxiesIncludesOnlyLoopback(t *testing.T) {
+	resetViperWithJWTSecret(t)
+
+	cfg, err := Load()
+	require.NoError(t, err)
+	require.ElementsMatch(t, []string{"127.0.0.1", "::1"}, cfg.Server.TrustedProxies)
+}
+
 func TestLoadServerShutdownConfig(t *testing.T) {
 	t.Run("defaults", func(t *testing.T) {
 		resetViperWithJWTSecret(t)
@@ -171,6 +179,46 @@ func TestLoadChatAttachmentDefaults(t *testing.T) {
 	require.Equal(t, 4, cfg.ChatAttachments.MaxConcurrentGlobal)
 	require.Equal(t, 2, cfg.ChatAttachments.MaxConcurrentPerUser)
 	require.EqualValues(t, 21*1024*1024, cfg.ChatAttachments.RequestBodyLimit())
+	require.Equal(t, "local", cfg.Library.StorageDriver)
+	require.Equal(t, "./data/library-files", cfg.Library.StorageDir)
+	require.Zero(t, cfg.Library.DefaultStorageBytes)
+	require.EqualValues(t, 20*1024*1024, cfg.Library.MaxFileBytes)
+	require.Equal(t, 100, cfg.Library.BatchDownloadLimit)
+	require.EqualValues(t, 100*1024*1024, cfg.Library.BatchDownloadMaxBytes)
+	require.Equal(t, 60, cfg.Library.PendingUploadStaleMinutes)
+	require.Equal(t, 60, cfg.Library.CleanupIntervalMinutes)
+}
+
+func TestValidateLibraryConfigRejectsPublicImageBucketReuse(t *testing.T) {
+	resetViperWithJWTSecret(t)
+	cfg, err := Load()
+	require.NoError(t, err)
+
+	cfg.Library.StorageDriver = "s3"
+	cfg.Library.S3.Bucket = "shared-public-bucket"
+	cfg.ImageStorage.Bucket = "shared-public-bucket"
+	cfg.ImageStorage.AccessKeyID = "access-key"
+	cfg.ImageStorage.SecretAccessKey = "secret-key"
+	cfg.ImageStorage.PublicBaseURL = "https://cdn.example.test"
+
+	err = validateLibraryConfig(cfg.Library, cfg.ImageStorage)
+	require.ErrorContains(t, err, "library.s3.bucket must differ from image_storage.bucket")
+
+	cfg.Library.S3.Bucket = "private-library-bucket"
+	require.NoError(t, validateLibraryConfig(cfg.Library, cfg.ImageStorage))
+}
+
+func TestValidateLibraryConfigCapsBatchDownloadAt100MiB(t *testing.T) {
+	resetViperWithJWTSecret(t)
+	cfg, err := Load()
+	require.NoError(t, err)
+
+	cfg.Library.BatchDownloadMaxBytes = 100*1024*1024 + 1
+	err = validateLibraryConfig(cfg.Library, cfg.ImageStorage)
+	require.ErrorContains(t, err, "no more than 100MB")
+
+	cfg.Library.BatchDownloadMaxBytes = 100 * 1024 * 1024
+	require.NoError(t, validateLibraryConfig(cfg.Library, cfg.ImageStorage))
 }
 
 func TestValidateEnabledTranscriptionRequiresExplicitGroupsAndProbe(t *testing.T) {

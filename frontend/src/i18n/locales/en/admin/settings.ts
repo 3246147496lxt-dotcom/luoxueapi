@@ -20,7 +20,7 @@ export default {
         loading: 'Loading voice transcription settings',
         loadFailed: 'Unable to load voice transcription settings',
         enabled: 'Enable voice input in Web Chat',
-        enabledHint: 'When disabled, the microphone is hidden from the chat composer while the saved model and groups are retained.',
+        enabledHint: 'When disabled, the microphone remains in the chat composer and explains that the service is unavailable when selected; the saved model and groups are retained.',
         model: 'Default transcription model',
         modelPlaceholder: 'For example, TeleAI/TeleSpeechASR',
         modelHint: 'Choose a discovered model or enter an exact upstream model ID. The account model mapping must expose the same input ID.',

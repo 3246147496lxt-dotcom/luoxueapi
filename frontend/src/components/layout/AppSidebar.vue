@@ -190,7 +190,7 @@
                   v-else
                   :to="item.path"
                   class="sidebar-link mb-1"
-                  :class="{ 'sidebar-link-active': isActive(item.path), 'sidebar-link-collapsed': sidebarCollapsed }"
+                  :class="{ 'sidebar-link-active': isActive(item.path, item.activePaths), 'sidebar-link-collapsed': sidebarCollapsed }"
                   :title="sidebarCollapsed ? item.label : undefined"
                   :id="
                     item.path === '/admin/accounts'
@@ -269,7 +269,7 @@
               v-else
               :to="item.path"
               class="sidebar-link mb-1"
-              :class="{ 'sidebar-link-active': isActive(item.path), 'sidebar-link-collapsed': sidebarCollapsed }"
+              :class="{ 'sidebar-link-active': isActive(item.path, item.activePaths), 'sidebar-link-collapsed': sidebarCollapsed }"
               :title="sidebarCollapsed ? item.label : undefined"
               :data-tour="item.path === '/keys' ? 'sidebar-my-keys' : undefined"
               @click="handleMenuItemClick(item.path)"
@@ -297,25 +297,18 @@
       </template>
 
       <div
-        v-if="!isAdminWorkspace"
-        class="sidebar-section sidebar-support-section"
-        data-testid="sidebar-support-section"
-        role="group"
-        :aria-label="t('nav.userSections.resources')"
+        v-if="sidebarSearchQuery && !hasSidebarSearchResults"
+        class="sidebar-search-empty"
+        role="status"
       >
-        <div
-          class="sidebar-section-title"
-          :class="{ 'sidebar-section-title-collapsed': sidebarCollapsed }"
-          aria-hidden="true"
-        >
-          <span
-            class="sidebar-section-title-text"
-            :class="{ 'sidebar-section-title-text-collapsed': sidebarCollapsed }"
-          >
-            {{ t('nav.userSections.resources') }}
-          </span>
-        </div>
+        {{ t('common.noData') }}
+      </div>
 
+      <div
+        v-if="!isAdminWorkspace && displayedSidebarSupportLinks.length"
+        class="sidebar-section sidebar-support-section sidebar-support-section--bottom"
+        data-testid="sidebar-support-section"
+      >
         <a
           v-for="item in displayedSidebarSupportLinks"
           :key="item.id"
@@ -352,41 +345,6 @@
             aria-hidden="true"
           />
         </a>
-
-        <AnnouncementBell
-          v-if="matchesSidebarSearch(t('nav.announcements'))"
-          variant="row"
-          class="sidebar-announcement-entry"
-          :class="{ 'sidebar-announcement-entry--collapsed': sidebarCollapsed }"
-          data-testid="sidebar-announcements"
-        />
-
-        <button
-          v-if="matchesSidebarSearch(t('accountDock.settings'))"
-          type="button"
-          class="sidebar-link sidebar-resource-action mb-1 w-full"
-          :class="{ 'sidebar-link-collapsed': sidebarCollapsed }"
-          :title="sidebarCollapsed ? t('accountDock.settings') : undefined"
-          data-testid="sidebar-settings"
-          @click="handleOpenSettings"
-        >
-          <Icon name="cog" size="md" class="sidebar-nav-icon flex-shrink-0" />
-          <span
-            class="sidebar-label min-w-0 flex-1 truncate text-left"
-            :class="{ 'sidebar-label-collapsed': sidebarCollapsed }"
-            :aria-hidden="sidebarCollapsed ? 'true' : 'false'"
-          >
-            {{ t('accountDock.settings') }}
-          </span>
-        </button>
-      </div>
-
-      <div
-        v-if="sidebarSearchQuery && !hasSidebarSearchResults"
-        class="sidebar-search-empty"
-        role="status"
-      >
-        {{ t('common.noData') }}
       </div>
     </nav>
 
@@ -418,7 +376,6 @@ import { useOnboardingStore } from '@/stores/onboarding'
 import { resolveDocumentationUrl } from '@/utils/documentationUrl'
 import { sanitizeSvg } from '@/utils/sanitize'
 import { resolveSupportContactUrl } from '@/utils/supportUrl'
-import { openPersonalSettings } from '@/navigation/personalSettingsRoute'
 import {
   getShellDestinationSpecs,
   selectVisibleShellDestinations,
@@ -426,7 +383,6 @@ import {
   type ShellDestinationSpec,
 } from '@/navigation/shellDestinations'
 import { useBatchImageAccess } from '@/composables/useBatchImageAccess'
-import AnnouncementBell from '@/components/common/AnnouncementBell.vue'
 import { Icon } from '@/components/icons'
 import AppBrand from './AppBrand.vue'
 import AppModeSwitch from './AppModeSwitch.vue'
@@ -877,6 +833,13 @@ const QuotaViewerIcon = {
 }
 
 const SkillMarketIcon = {
+  render: () => h(Icon, { name: 'sparkles', size: 'md', strokeWidth: 1.7 })
+}
+
+// The user-facing Work entry supplies the uploaded Skill icon as `iconSvg` in
+// userNavigation.ts. Keep this fallback and the established admin icon
+// separate for consumers that still request an icon component directly.
+const AdminSkillMarketIcon = {
   render: () => h(Icon, { name: 'cube', size: 'md', strokeWidth: 1.7 })
 }
 
@@ -977,7 +940,7 @@ const adminNavigationIcons: AdminNavigationIcons = {
   channel: ChannelIcon,
   priceTag: PriceTagIcon,
   signal: SignalIcon,
-  skillMarket: SkillMarketIcon,
+  skillMarket: AdminSkillMarketIcon,
   creditCard: CreditCardIcon,
   order: OrderIcon,
   ticket: TicketIcon,
@@ -1112,8 +1075,6 @@ const hasSidebarSearchResults = computed(() => {
 
   return displayedUserNavSections.value.length > 0
     || displayedSidebarSupportLinks.value.length > 0
-    || matchesSidebarSearch(t('nav.announcements'))
-    || matchesSidebarSearch(t('accountDock.settings'))
 })
 
 function closeMobile() {
@@ -1172,21 +1133,26 @@ function handleMenuItemClick(itemPath: string) {
   }
 }
 
-async function handleOpenSettings() {
-  await openPersonalSettings(router, route, 'user', 'general')
-  handleMenuItemClick('settings')
-}
-
-function isActive(path: string): boolean {
-  return route.path === path || route.path.startsWith(path + '/')
+function isActive(path: string, activePaths: readonly string[] = []): boolean {
+  // Vue Router exposes query parameters separately, but normalizing here also
+  // keeps the selected state correct for lightweight route mocks and direct
+  // deep links such as `/pricing?mode=renew`.
+  const currentPath = route.path.split(/[?#]/, 1)[0]
+  return [path, ...activePaths].some((candidate) => (
+    currentPath === candidate || currentPath.startsWith(candidate + '/')
+  ))
 }
 
 function isChildActive(parent: NavItem, child: NavItem): boolean {
-  return child.path === parent.path ? route.path === child.path : isActive(child.path)
+  const currentPath = route.path.split(/[?#]/, 1)[0]
+  return child.path === parent.path
+    ? currentPath === child.path
+    : isActive(child.path, child.activePaths)
 }
 
 function isNavItemActive(item: NavItem): boolean {
-  return isActive(item.path) || Boolean(item.children?.some(child => isNavItemActive(child)))
+  return isActive(item.path, item.activePaths)
+    || Boolean(item.children?.some(child => isNavItemActive(child)))
 }
 
 function isGroupActive(item: NavItem): boolean {
@@ -1323,8 +1289,10 @@ onBeforeUnmount(() => {
 .workspace-sidebar-navigation {
   position: relative;
   z-index: 1;
+  display: flex;
   min-height: 0;
   flex: 1 1 auto;
+  flex-direction: column;
   overflow-y: auto;
   padding: 0;
 }
@@ -1367,12 +1335,6 @@ onBeforeUnmount(() => {
   text-align: center;
 }
 
-.sidebar-resource-action {
-  display: flex;
-  align-items: center;
-  text-align: left;
-}
-
 .sidebar-child-group {
   border-color: var(--workspace-border);
 }
@@ -1409,84 +1371,12 @@ onBeforeUnmount(() => {
 }
 
 .sidebar-support-section {
-  margin-top: 0.25rem;
+  margin-top: var(--workspace-space-3);
 }
 
-.sidebar-announcement-entry {
-  margin-bottom: 0.25rem;
-}
-
-.sidebar-announcement-entry :deep(.announcement-bell-row) {
-  width: 100%;
-  min-height: 2.25rem;
-  justify-content: flex-start;
-  gap: 0.625rem;
-  padding: 0.25rem 0.75rem;
-  border-radius: 0.625rem;
-  color: var(--workspace-text);
-  font-size: 0.875rem;
-  font-weight: 400;
-  line-height: 1.5rem;
-  transition:
-    width var(--workspace-sidebar-transition-duration) var(--workspace-sidebar-transition-easing),
-    color 0.2s ease,
-    background-color 0.2s ease,
-    box-shadow 0.2s ease;
-}
-
-.sidebar-announcement-entry :deep(.announcement-bell-row > span:first-of-type) {
-  max-width: 12rem;
-  margin-left: 0;
-  overflow: hidden;
-  opacity: 1;
-  font-size: inherit;
-  font-weight: inherit;
-  line-height: inherit;
-  transition:
-    max-width 0.2s ease,
-    opacity 0.12s ease;
-}
-
-.sidebar-announcement-entry :deep(.announcement-bell-row > span:last-of-type:not(:first-of-type)) {
-  margin-left: auto;
-}
-
-.sidebar-announcement-entry :deep(.announcement-bell-row:hover) {
-  color: var(--app-shell-sidebar-hover-color, var(--workspace-text));
-  background: var(--app-shell-sidebar-hover-bg, var(--workspace-hover));
-  box-shadow: var(--app-shell-sidebar-hover-shadow, none);
-}
-
-.sidebar-announcement-entry :deep(.announcement-bell-row:focus-visible) {
-  outline: 2px solid var(--app-shell-sidebar-focus, var(--lx-clay-accent));
-  outline-offset: 2px;
-}
-
-.sidebar-announcement-entry--collapsed :deep(.announcement-bell-row) {
-  width: var(--workspace-sidebar-touch-target);
-  min-height: 2.75rem;
-  justify-content: flex-start;
-  gap: 0;
-  padding-right: 0;
-  padding-left: var(--workspace-space-3);
-}
-
-.sidebar-announcement-entry--collapsed :deep(.announcement-bell-row > span:first-of-type) {
-  max-width: 0;
-  flex: 0 0 0;
-  opacity: 0;
-  pointer-events: none;
-}
-
-.sidebar-announcement-entry--collapsed :deep(.announcement-bell-row > span:last-of-type:not(:first-of-type)) {
-  position: absolute;
-  top: 0.1875rem;
-  right: 0.1875rem;
-  min-width: 1rem;
-  margin-left: 0;
-  padding: 0 0.25rem;
-  font-size: 0.625rem;
-  line-height: 1rem;
+.sidebar-support-section--bottom {
+  margin-top: auto;
+  padding-top: var(--workspace-space-3);
 }
 
 .sidebar-nav-trailing-icon {
@@ -1495,15 +1385,6 @@ onBeforeUnmount(() => {
 
 :global([dir='rtl']) .sidebar-nav-trailing-icon {
   transform: scaleX(-1);
-}
-
-:global(.dark .sidebar-announcement-entry .announcement-bell-row) {
-  color: var(--workspace-text);
-}
-
-:global(.dark .sidebar-announcement-entry .announcement-bell-row:hover) {
-  color: var(--app-shell-sidebar-hover-color, var(--workspace-text));
-  background: var(--app-shell-sidebar-hover-bg, var(--workspace-hover));
 }
 
 .sidebar-link {
@@ -1582,13 +1463,20 @@ onBeforeUnmount(() => {
   margin-top: 0.25rem;
 }
 
+/* Keep the documentation link anchored immediately above the footer divider in
+ * both themes. The navigation column is flexed so the support link consumes
+ * the remaining space without pushing account destinations out of view. */
+:global(html:not(.dark) .sidebar--personal-work .sidebar-section.sidebar-support-section),
+:global(html.dark .sidebar--personal-work .sidebar-section.sidebar-support-section) {
+  margin-top: auto;
+}
+
 .sidebar--personal-work .sidebar-link-active {
   font-size: var(--workspace-type-navigation-size);
   font-weight: var(--workspace-type-navigation-weight);
 }
 
-.sidebar--personal-work .sidebar-link,
-.sidebar--personal-work .sidebar-announcement-entry :deep(.announcement-bell-row) {
+.sidebar--personal-work .sidebar-link {
   font-size: var(--workspace-type-navigation-size);
   font-weight: var(--workspace-type-navigation-weight);
 }
@@ -1599,9 +1487,7 @@ onBeforeUnmount(() => {
 }
 
 .sidebar--personal-work .sidebar-search-empty,
-.sidebar--personal-work .sidebar-section-title,
-.sidebar--personal-work .sidebar-announcement-entry--collapsed
-  :deep(.announcement-bell-row > span:last-of-type:not(:first-of-type)) {
+.sidebar--personal-work .sidebar-section-title {
   font-size: var(--workspace-type-secondary-size);
   font-weight: var(--workspace-type-secondary-weight);
 }
@@ -1758,8 +1644,7 @@ onBeforeUnmount(() => {
   .sidebar-label,
   .sidebar-section-title-text,
   .sidebar-section-chevron,
-  .sidebar-nav-icon,
-  .sidebar-announcement-entry :deep(.announcement-bell-row) {
+  .sidebar-nav-icon {
     transition-duration: 0.01ms;
   }
 }
@@ -1797,7 +1682,6 @@ onBeforeUnmount(() => {
   }
 
   .sidebar-link,
-  .sidebar-announcement-entry :deep(.announcement-bell-row),
   .sidebar-section-toggle {
     min-height: 2.75rem;
   }

@@ -34,7 +34,7 @@ func NewChatAttachmentRepository(db *sql.DB, cfg *config.Config) service.ChatAtt
 const chatAttachmentColumns = `
 	a.public_id,
 	a.original_name,
-	a.kind,
+	COALESCE((SELECT lf.storage_kind FROM library_files lf WHERE lf.id=a.library_file_id), a.kind),
 	a.mime_type,
 	a.byte_size,
 	a.stored_size,
@@ -43,9 +43,16 @@ const chatAttachmentColumns = `
 	a.page_count,
 	a.width,
 	a.height,
-	COALESCE(a.storage_key, ''),
+	COALESCE((SELECT lf.storage_key FROM library_files lf WHERE lf.id=a.library_file_id), a.storage_key, ''),
 	a.sha256,
-	COALESCE(a.extracted_text, '')`
+	COALESCE(a.extracted_text, ''),
+	COALESCE(a.library_file_id, 0),
+	(a.library_file_id IS NOT NULL),
+	COALESCE((SELECT lf.source FROM library_files lf WHERE lf.id=a.library_file_id), ''),
+	COALESCE((SELECT lf.file_type FROM library_files lf WHERE lf.id=a.library_file_id), ''),
+	a.created_at,
+	a.updated_at,
+	(SELECT lf.last_used_at FROM library_files lf WHERE lf.id=a.library_file_id)`
 
 func scanChatAttachment(scan chatHistoryScanner) (*service.ChatAttachment, error) {
 	var (
@@ -54,12 +61,14 @@ func scanChatAttachment(scan chatHistoryScanner) (*service.ChatAttachment, error
 		pageCount   sql.NullInt64
 		width       sql.NullInt64
 		height      sql.NullInt64
+		lastUsedAt  sql.NullTime
 	)
 	if err := scan(
 		&attachment.ID, &attachment.Name, &storageKind, &attachment.MIMEType,
 		&attachment.Size, &attachment.StoredSize, &attachment.Status, &attachment.ExpiresAt,
 		&pageCount, &width, &height, &attachment.StorageKey, &attachment.Digest,
-		&attachment.ExtractedText,
+		&attachment.ExtractedText, &attachment.LibraryFileID, &attachment.IsLibrary, &attachment.Source, &attachment.Type,
+		&attachment.CreatedAt, &attachment.UpdatedAt, &lastUsedAt,
 	); err != nil {
 		return nil, err
 	}
@@ -73,9 +82,15 @@ func scanChatAttachment(scan chatHistoryScanner) (*service.ChatAttachment, error
 		attachment.Height = int(height.Int64)
 	}
 	attachment.Format = storageKind
+	if lastUsedAt.Valid {
+		value := lastUsedAt.Time
+		attachment.LastUsedAt = &value
+	}
 	attachment.Kind = service.ChatAttachmentKindDocument
-	if storageKind == service.ChatAttachmentKindImage {
+	attachment.Category = "file"
+	if storageKind == service.ChatAttachmentKindImage || attachment.Type == "image" {
 		attachment.Kind = service.ChatAttachmentKindImage
+		attachment.Category = "image"
 	}
 	return &attachment, nil
 }
@@ -112,7 +127,7 @@ func (r *chatAttachmentRepository) Create(ctx context.Context, input *service.Cr
 			COUNT(*) FILTER (WHERE created_at >= NOW() - INTERVAL '1 minute'),
 			COALESCE(SUM(byte_size) FILTER (WHERE created_at >= NOW() - INTERVAL '24 hours'), 0)
 		FROM chat_attachments
-		WHERE user_id=$1
+		WHERE user_id=$1 AND library_file_id IS NULL
 	`, input.UserID).Scan(&uploadsLastMinute, &bytesLastDay); err != nil {
 		return nil, err
 	}
@@ -180,7 +195,7 @@ func (r *chatAttachmentRepository) CheckUploadQuota(ctx context.Context, userID,
 			COUNT(*) FILTER (WHERE created_at >= NOW() - INTERVAL '1 minute'),
 			COALESCE(SUM(byte_size) FILTER (WHERE created_at >= NOW() - INTERVAL '24 hours'), 0)
 		FROM chat_attachments
-		WHERE user_id=$1
+		WHERE user_id=$1 AND library_file_id IS NULL
 	`, userID).Scan(&uploadsLastMinute, &bytesLastDay); err != nil {
 		return err
 	}
@@ -199,6 +214,8 @@ func (r *chatAttachmentRepository) ResolveForCompletion(ctx context.Context, use
 		FROM unnest($2::text[]) WITH ORDINALITY requested(public_id, position)
 		JOIN chat_attachments a
 		  ON a.public_id=requested.public_id AND a.user_id=$1
+		LEFT JOIN library_files selected_library ON selected_library.id=a.library_file_id
+		WHERE a.library_file_id IS NULL OR selected_library.status='ready'
 		ORDER BY requested.position`, userID, pq.Array(publicIDs))
 	if err != nil {
 		return nil, err
@@ -228,7 +245,7 @@ func (r *chatAttachmentRepository) MarkDeleted(ctx context.Context, userID int64
 	row := r.db.QueryRowContext(ctx, `
 		UPDATE chat_attachments a
 		SET status='deleted', extracted_text=NULL, updated_at=NOW()
-		WHERE a.user_id=$1 AND a.public_id=$2 AND a.conversation_id IS NULL
+		WHERE a.user_id=$1 AND a.public_id=$2 AND a.library_file_id IS NULL AND a.conversation_id IS NULL
 		RETURNING `+chatAttachmentColumns, userID, publicID)
 	attachment, err := scanChatAttachment(row.Scan)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -246,7 +263,7 @@ func (r *chatAttachmentRepository) MarkConversationDeleted(ctx context.Context, 
 		SET status='deleted', extracted_text=NULL, updated_at=NOW()
 		FROM chat_conversations c
 		WHERE c.user_id=$1 AND c.public_id=$2
-		  AND a.user_id=c.user_id AND a.conversation_id=c.id
+		  AND a.user_id=c.user_id AND a.conversation_id=c.id AND a.library_file_id IS NULL
 		RETURNING `+chatAttachmentColumns, userID, conversationPublicID)
 	if err != nil {
 		return nil, err
@@ -275,19 +292,19 @@ func (r *chatAttachmentRepository) ClaimCleanup(ctx context.Context, now time.Ti
 	if _, err = tx.ExecContext(ctx, `
 		UPDATE chat_attachments
 		SET status='expired', extracted_text=NULL, updated_at=$1
-		WHERE status='ready' AND expires_at <= $1`, now); err != nil {
+		WHERE status='ready' AND library_file_id IS NULL AND expires_at <= $1`, now); err != nil {
 		return nil, err
 	}
 	if _, err = tx.ExecContext(ctx, `
 		UPDATE chat_attachments
 		SET status='deleted', extracted_text=NULL, updated_at=$1
-		WHERE status='pending' AND updated_at <= $1 - INTERVAL '1 hour'`, now); err != nil {
+		WHERE status='pending' AND library_file_id IS NULL AND updated_at <= $1 - INTERVAL '1 hour'`, now); err != nil {
 		return nil, err
 	}
 	rows, err := tx.QueryContext(ctx, `
 		SELECT `+chatAttachmentColumns+`
 		FROM chat_attachments a
-		WHERE a.status IN ('expired','deleted') AND a.storage_key IS NOT NULL
+		WHERE a.status IN ('expired','deleted') AND a.library_file_id IS NULL AND a.storage_key IS NOT NULL
 		ORDER BY a.updated_at, a.id
 		LIMIT $1
 		FOR UPDATE SKIP LOCKED`, limit)
@@ -323,7 +340,8 @@ func (r *chatAttachmentRepository) FinalizeCleanup(ctx context.Context, userID i
 	result, err := r.db.ExecContext(ctx, `
 		UPDATE chat_attachments
 		SET storage_key=NULL, extracted_text=NULL, cleaned_at=NOW(), updated_at=NOW()
-		WHERE public_id=$1 AND ($2=0 OR user_id=$2) AND status IN ('expired','deleted')`, publicID, userID)
+		WHERE public_id=$1 AND ($2=0 OR user_id=$2) AND library_file_id IS NULL
+		  AND status IN ('expired','deleted')`, publicID, userID)
 	if err != nil {
 		return err
 	}
@@ -342,7 +360,7 @@ func (r *chatAttachmentRepository) ListStorageKeys(ctx context.Context) (map[str
 		return nil, service.ErrChatAttachmentUnavailable
 	}
 	rows, err := r.db.QueryContext(ctx, `
-		SELECT storage_key FROM chat_attachments WHERE storage_key IS NOT NULL
+		SELECT storage_key FROM chat_attachments WHERE storage_key IS NOT NULL AND library_file_id IS NULL
 	`)
 	if err != nil {
 		return nil, err

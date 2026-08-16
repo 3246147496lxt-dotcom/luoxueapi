@@ -65,10 +65,12 @@ func TestChatAttachmentCreateAliasesInsertForReturningColumns(t *testing.T) {
 	mock.ExpectQuery("INSERT INTO chat_attachments AS a").
 		WillReturnRows(sqlmock.NewRows([]string{
 			"public_id", "original_name", "kind", "mime_type", "byte_size", "stored_size", "status", "expires_at",
-			"page_count", "width", "height", "storage_key", "sha256", "extracted_text",
+			"page_count", "width", "height", "storage_key", "sha256", "extracted_text", "library_file_id",
+			"is_library", "source", "file_type", "created_at", "updated_at", "last_used_at",
 		}).AddRow(
 			"att_success", "logo.png", "image", "image/png", int64(10), int64(8), "pending", expiresAt,
-			nil, 2, 2, "7/att_success.png", strings.Repeat("0", 64), "",
+			nil, 2, 2, "7/att_success.png", strings.Repeat("0", 64), "", int64(0), false, "", "",
+			time.Now(), time.Now(), nil,
 		))
 	mock.ExpectCommit()
 
@@ -97,10 +99,11 @@ func TestChatAttachmentCleanupNeverClaimsFreshPendingRows(t *testing.T) {
 	mock.ExpectBegin()
 	mock.ExpectExec("UPDATE chat_attachments\\s+SET status='expired'").WillReturnResult(sqlmock.NewResult(0, 0))
 	mock.ExpectExec("UPDATE chat_attachments\\s+SET status='deleted'.*status='pending'").WillReturnResult(sqlmock.NewResult(0, 0))
-	mock.ExpectQuery(regexp.QuoteMeta("WHERE a.status IN ('expired','deleted') AND a.storage_key IS NOT NULL")).
+	mock.ExpectQuery("WHERE a.status IN \\('expired','deleted'\\).*library_file_id IS NULL.*storage_key IS NOT NULL").
 		WithArgs(100).WillReturnRows(sqlmock.NewRows([]string{
 		"public_id", "original_name", "kind", "mime_type", "byte_size", "stored_size", "status", "expires_at",
-		"page_count", "width", "height", "storage_key", "sha256", "extracted_text",
+		"page_count", "width", "height", "storage_key", "sha256", "extracted_text", "library_file_id",
+		"is_library", "source", "file_type", "created_at", "updated_at", "last_used_at",
 	}))
 	mock.ExpectCommit()
 	items, err := repo.ClaimCleanup(context.Background(), time.Now(), 100)

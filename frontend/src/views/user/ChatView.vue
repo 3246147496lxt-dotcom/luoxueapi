@@ -8,6 +8,8 @@
         v-show="!narrowSidebar"
         shell
         class="chat-workspace__history chat-workspace__history--desktop"
+        :aria-hidden="activityModalActive ? 'true' : undefined"
+        :inert="activityModalActive ? true : undefined"
         :conversations="historyConversations"
         :active-id="chatStore.activeConversationId"
         :search-query="historySearchQuery"
@@ -31,6 +33,8 @@
           class="chat-workspace__drawer"
           role="dialog"
           aria-modal="true"
+          :aria-hidden="activityModalActive ? 'true' : undefined"
+          :inert="activityModalActive ? true : undefined"
           :aria-label="t('chat.history.title')"
           tabindex="-1"
           @keydown="onHistoryDrawerKeydown"
@@ -99,8 +103,8 @@
         class="chat-workspace__main"
         :class="{ 'chat-workspace__main--new-chat': isNewConversationHome }"
         :aria-label="t('chat.title')"
-        :aria-hidden="historyModalActive ? 'true' : undefined"
-        :inert="historyModalActive ? true : undefined"
+        :aria-hidden="modalLayerActive ? 'true' : undefined"
+        :inert="modalLayerActive ? true : undefined"
         tabindex="-1"
       >
         <div class="chat-mobile-actions">
@@ -217,7 +221,10 @@
                 :retryable="canRetryMessage(message, index)"
                 :retrying="retryPendingMessageId === message.id"
                 :announce-failure="liveFailureMessageId === message.id"
+                :activity-expanded="activityPanelOpen && selectedActivityMessageId === message.id"
+                activity-controls="chat-activity-panel"
                 @retry="retryMessage(message.id)"
+                @view-activity="openActivityForMessage(message.id)"
               />
             </div>
           </div>
@@ -238,16 +245,32 @@
         </div>
 
         <div class="chat-composer-region">
+          <p
+            v-if="chatReady && !selectedModelReasoningReady"
+            class="chat-composer-region__capability"
+            role="status"
+            data-test="chat-reasoning-capability-state"
+          >
+            {{ t(modelCapabilityState === 'loading'
+              ? 'chat.settings.capabilityChecking'
+              : modelCapabilityState === 'unavailable'
+                ? 'chat.settings.capabilityUnavailable'
+                : 'chat.settings.summaryUnavailable') }}
+          </p>
           <ChatComposer
             ref="composerRef"
             v-model="composerDraft"
             :streaming="chatStore.isStreaming"
-            :disabled="!chatReady || !selectedModelAvailable"
+            :disabled="!chatReady || !completionAvailable"
             :submission-busy="voiceBusy || attachmentBusy"
             :has-attachments="attachmentDrafts.length > 0"
             :attachments-valid="attachmentValid"
+            :image-paste-enabled="attachmentDropEnabled"
+            :submission-reset-key="composerSubmissionResetKey"
             @send="sendMessage"
-            @stop="stopStreaming"
+            @submitting-change="composerSubmitting = $event"
+            @stop="stopStreaming(true)"
+            @paste-images="addPastedImages"
           >
             <template #attachments>
               <ChatAttachmentPreviewList
@@ -266,20 +289,22 @@
                 @change="attachmentDrafts = $event"
                 @busy-change="attachmentBusy = $event"
                 @valid-change="attachmentValid = $event"
+                @select-library="libraryPickerOpen = true"
               />
             </template>
             <template #trailing>
               <ChatModelSettings
                 v-model="selectedModel"
                 v-model:reasoning-effort="selectedReasoningEffort"
+                v-model:reasoning-mode="selectedReasoningMode"
                 :model-options="modelOptions"
-                :disabled="chatStore.isStreaming || voiceBusy"
+                :disabled="chatStore.isStreaming || voiceBusy || composerSubmitting"
               />
               <ChatVoiceInput
-                v-if="transcriptionEnabled"
-                :key="voiceCapabilityKey"
                 :context-key="voiceContextKey"
-                :disabled="!chatReady || !selectedModelAvailable || chatStore.isStreaming"
+                :disabled="!chatReady || !completionAvailable || chatStore.isStreaming || composerSubmitting"
+                :capability-state="voiceCapabilityState"
+                :initialize-capability="initializeVoiceCapability"
                 :max-duration-ms="voiceMaxDurationMs"
                 :max-bytes="voiceMaxBytes"
                 :accepted-mime-types="voiceAcceptedMimeTypes"
@@ -290,14 +315,35 @@
             <template #empty-action>
               <ChatVoiceModeButton
                 :available="false"
-                :disabled="!chatReady || !selectedModelAvailable"
+                :disabled="!chatReady || !completionAvailable"
               />
             </template>
           </ChatComposer>
         </div>
         </div>
       </section>
+
+      <Transition name="chat-activity-panel">
+        <ChatActivityPanel
+          v-if="activityPanelOpen && selectedActivities.length > 0"
+          id="chat-activity-panel"
+          :activities="selectedActivities"
+          :mobile="activityMobileLayout"
+          @close="closeActivityPanel"
+        />
+      </Transition>
     </div>
+
+    <LibraryFilePickerDialog
+      :show="libraryPickerOpen"
+      :excluded-ids="selectedLibraryFileIds"
+      :max-selection="remainingAttachmentSlots"
+      :max-selection-bytes="remainingAttachmentBytes"
+      :total-limit-bytes="CHAT_ATTACHMENT_TOTAL_MAX_BYTES"
+      :supports-vision="selectedModelSupportsVision"
+      @close="libraryPickerOpen = false"
+      @select="addLibraryAttachments"
+    />
 
     <BaseDialog
       :show="confirmation !== null"
@@ -387,9 +433,15 @@ import Icon from '@/components/icons/Icon.vue'
 import ChatComposer from '@/components/chat/ChatComposer.vue'
 import ChatAttachmentPicker from '@/components/chat/ChatAttachmentPicker.vue'
 import ChatAttachmentPreviewList from '@/components/chat/ChatAttachmentPreviewList.vue'
+import LibraryFilePickerDialog from '@/components/library/LibraryFilePickerDialog.vue'
 import ChatFileDropOverlay from '@/components/chat/ChatFileDropOverlay.vue'
 import type { ChatAttachmentDraft } from '@/components/chat/chatAttachmentUi'
+import {
+  CHAT_ATTACHMENT_MAX_COUNT,
+  CHAT_ATTACHMENT_TOTAL_MAX_BYTES,
+} from '@/components/chat/chatAttachmentUi'
 import ChatHistoryPanel from '@/components/chat/ChatHistoryPanel.vue'
+import ChatActivityPanel from '@/components/chat/ChatActivityPanel.vue'
 import ChatMessageItem from '@/components/chat/ChatMessageItem.vue'
 import ChatVoiceInput from '@/components/chat/ChatVoiceInput.vue'
 import ChatVoiceModeButton from '@/components/chat/ChatVoiceModeButton.vue'
@@ -404,11 +456,14 @@ import {
   ChatAPIError,
   createChatAttemptId,
   getChatCapabilities,
+  getChatModels,
   isAbortError,
   pollChatReceipt,
+  stopChatAttempt,
   streamChatCompletion,
 } from '@/api/chat'
 import { pickChatGreeting } from '@/features/chat/chatGreetings'
+import { chatActivityPartHasText } from '@/features/chat/activity'
 import {
   describeChatError,
   describeChatMessageError,
@@ -423,21 +478,34 @@ import { useAuthStore } from '@/stores/auth'
 import { useAppStore } from '@/stores/app'
 import { useChatStore, type ChatMessagePatch } from '@/stores/chat'
 import type {
+  ChatActivity,
   ChatCompletionRequest,
   ChatAttempt,
   ChatMessage,
   ChatModel,
+  ChatReasoningMode,
   ChatReasoningEffort,
   ChatReceipt,
   ChatTranscriptionCapability,
 } from '@/types/chat'
+import type { LibraryFile } from '@/types/library'
 
 type Confirmation =
   | { kind: 'delete'; conversationId: string; title: string; displayTitle: string }
   | { kind: 'clear' }
 
+type VoiceCapabilityState = 'idle' | 'initializing' | 'ready' | 'unavailable'
+
+type VoiceCapabilityResult = {
+  state: VoiceCapabilityState
+  capability: ChatTranscriptionCapability | null
+}
+
 const SCROLL_FOLLOW_RESUME_DISTANCE = 8
 const DEFAULT_REASONING_EFFORT: ChatReasoningEffort = 'low'
+const DEFAULT_REASONING_MODE: ChatReasoningMode = 'standard'
+const REASONING_PREFERENCE_STORAGE_KEY = 'sub2api.chat.reasoning-preference.v1'
+const ACTIVITY_DRAWER_MEDIA_QUERY = '(max-width: 1023px)'
 const NEW_CHAT_QUERY_KEY = 'conversation'
 const NEW_CHAT_QUERY_VALUE = 'new'
 
@@ -477,20 +545,43 @@ function setNewChatRouteIntent(enabled: boolean): void {
   }
 }
 
-const models: readonly ChatModel[] = CHAT_PRODUCT_MODELS
+const modelCapabilityCatalog = ref<ReadonlyMap<string, ChatModel>>(new Map())
+const modelCapabilityState = ref<'loading' | 'ready' | 'unavailable'>('loading')
+const models = computed<readonly ChatModel[]>(() => CHAT_PRODUCT_MODELS.map((productModel) => {
+  const capability = modelCapabilityCatalog.value.get(productModel.id)
+  return {
+    ...productModel,
+    supports_reasoning_slider: capability?.supports_reasoning_slider === true,
+    supports_responses: capability?.supports_responses === true,
+    supports_reasoning_summary: capability?.supports_reasoning_summary === true,
+    supports_reasoning_pro_mode: capability?.supports_reasoning_pro_mode === true,
+    supported_reasoning_efforts: capability?.supported_reasoning_efforts ?? [],
+  }
+}))
 const transcriptionCapability = ref<ChatTranscriptionCapability | null>(null)
+const voiceCapabilityState = ref<VoiceCapabilityState>('idle')
 const defaultModel = ref(DEFAULT_CHAT_PRODUCT_MODEL_ID)
 const persistenceRetrying = ref(false)
 const historySyncRetrying = ref(false)
 const historySyncAnnouncement = ref('')
 const composerDraft = ref('')
+const composerSubmitting = ref(false)
+const composerSubmissionResetKey = ref(0)
 const newChatGreeting = ref(pickChatGreeting())
 const voiceBusy = ref(false)
 const attachmentDrafts = ref<ChatAttachmentDraft[]>([])
 const attachmentBusy = ref(false)
 const attachmentValid = ref(true)
+const libraryPickerOpen = ref(false)
 const pageFileDragActive = ref(false)
 const selectedReasoningEffort = ref<ChatReasoningEffort>(DEFAULT_REASONING_EFFORT)
+const selectedReasoningMode = ref<ChatReasoningMode>(DEFAULT_REASONING_MODE)
+const reasoningPreferenceLoadedForUser = ref('')
+const activityPanelOpen = ref(false)
+const activityMobileLayout = ref(false)
+const selectedActivityMessageId = ref<string | null>(null)
+const dismissedActivityMessageIds = new Set<string>()
+const autoOpenedActivityMessageIds = new Set<string>()
 const historySearchQuery = ref('')
 const legacyImportPromptVisible = ref(true)
 const historyOpen = ref(false)
@@ -520,19 +611,44 @@ let attachmentContextChangeOwnedBySend = false
 let pageFileDragDepth = 0
 let messageResizeObserver: ResizeObserver | null = null
 let capabilitiesController: AbortController | null = null
+let capabilitiesPromise: Promise<VoiceCapabilityResult> | null = null
+let capabilitiesRequestSequence = 0
+let modelCatalogController: AbortController | null = null
+let modelCatalogRequestSequence = 0
+let activityDrawerMedia: MediaQueryList | null = null
 const receiptPolls = new Map<string, {
   receiptId: string
   controller: AbortController
   promise: Promise<void>
 }>()
+const explicitStopRequests = new Map<string, Promise<void>>()
 
 const activeConversation = computed(() => chatStore.activeConversation)
+const selectedActivityMessage = computed(() => (
+  activeConversation.value?.messages.find((message) => (
+    message.id === selectedActivityMessageId.value
+  )) ?? null
+))
+const selectedActivities = computed(() => selectedActivityMessage.value?.activities ?? [])
+const selectedLibraryFileIds = computed(() => attachmentDrafts.value.flatMap((draft) => (
+  draft.source === 'library' && draft.libraryFileId ? [draft.libraryFileId] : []
+)))
+const remainingAttachmentSlots = computed(() => Math.max(
+  0,
+  CHAT_ATTACHMENT_MAX_COUNT - attachmentDrafts.value.length,
+))
+const remainingAttachmentBytes = computed(() => Math.max(
+  0,
+  CHAT_ATTACHMENT_TOTAL_MAX_BYTES - attachmentDrafts.value.reduce(
+    (total, draft) => total + draft.file.size,
+    0,
+  ),
+))
 const historyConversations = computed(() => (
   historySearchQuery.value.trim()
     ? chatStore.searchResults
     : chatStore.conversations
 ))
-const transcriptionEnabled = computed(() => transcriptionCapability.value?.enabled === true)
 const voiceContextKey = computed(() => (
   `${currentAuthUserId()}:${chatStore.activeConversationId ?? 'new'}`
 ))
@@ -547,14 +663,15 @@ const voiceMaxBytes = computed(() => Math.min(
 const voiceAcceptedMimeTypes = computed(() => (
   transcriptionCapability.value?.accepted_mime_types ?? []
 ))
-const voiceCapabilityKey = computed(() => [
-  voiceMaxDurationMs.value,
-  voiceMaxBytes.value,
-  ...voiceAcceptedMimeTypes.value,
-].join(':'))
 const historyModalActive = computed(() => (
   (historyOpen.value && mobileHistoryLayout.value)
   || (narrowSidebar.value && narrowSidebarOpen.value)
+))
+const activityModalActive = computed(() => (
+  activityPanelOpen.value && activityMobileLayout.value
+))
+const modalLayerActive = computed(() => (
+  historyModalActive.value || activityModalActive.value
 ))
 const chatReady = computed(() => {
   const authenticatedUserId = authStore.user?.id
@@ -566,7 +683,7 @@ const chatReady = computed(() => {
 const streamAnnouncement = computed(() => (
   chatStore.isStreaming ? t('chat.message.generating') : ''
 ))
-const modelOptions = computed<ChatModelSettingsOption[]>(() => models.map((model) => {
+const modelOptions = computed<ChatModelSettingsOption[]>(() => models.value.map((model) => {
   const label = model.display_name?.trim() || model.id
   const description = model.description?.trim() || ''
   return {
@@ -574,10 +691,13 @@ const modelOptions = computed<ChatModelSettingsOption[]>(() => models.map((model
     label,
     description: description === label || description === model.id ? '' : description,
     recommended: model.recommended === true,
-    supportsReasoningSlider: true,
+    supportsReasoningSlider: model.supports_reasoning_slider !== false,
+    supportsReasoningSummary: model.supports_reasoning_summary === true,
+    supportsReasoningProMode: model.supports_reasoning_pro_mode === true,
+    supportedReasoningEfforts: model.supported_reasoning_efforts,
   }
 }))
-const availableModelIds = new Set(models.map((model) => model.id))
+const availableModelIds = new Set(CHAT_PRODUCT_MODELS.map((model) => model.id))
 const preferredModel = DEFAULT_CHAT_PRODUCT_MODEL_ID
 
 const selectedModel = computed<string>({
@@ -593,17 +713,40 @@ const selectedModel = computed<string>({
 const selectedModelAvailable = computed(() => (
   selectedModel.value.trim().length > 0
 ))
+const selectedModelCapability = computed(() => (
+  models.value.find((model) => model.id === selectedModel.value)
+  ?? modelCapabilityCatalog.value.get(selectedModel.value)
+  ?? null
+))
+const selectedModelSupportedReasoningEfforts = computed<ChatReasoningEffort[]>(() => (
+  selectedModelCapability.value?.supported_reasoning_efforts ?? []
+))
+const selectedModelSupportsReasoningSummary = computed(() => (
+  selectedModelCapability.value?.supports_responses === true
+  && selectedModelCapability.value.supports_reasoning_summary === true
+))
+const selectedModelReasoningReady = computed(() => (
+  selectedModelSupportsReasoningSummary.value
+  && selectedModelSupportedReasoningEfforts.value.includes(selectedReasoningEffort.value)
+))
+const completionAvailable = computed(() => (
+  selectedModelAvailable.value && selectedModelReasoningReady.value
+))
 const selectedModelSupportsVision = computed(() => (
-  models.find((model) => model.id === selectedModel.value)?.supports_vision === true
+  selectedModelCapability.value?.supports_vision === true
+))
+const selectedModelSupportsProReasoning = computed(() => (
+  selectedModelCapability.value?.supports_reasoning_pro_mode === true
 ))
 const attachmentInputDisabled = computed(() => (
   !chatReady.value
-  || !selectedModelAvailable.value
+  || !completionAvailable.value
   || chatStore.isStreaming
+  || composerSubmitting.value
 ))
 const attachmentDropEnabled = computed(() => (
   !attachmentInputDisabled.value
-  && !historyModalActive.value
+  && !modalLayerActive.value
   && confirmation.value === null
   && !(legacyImportPromptVisible.value && chatStore.legacyImportRequired)
 ))
@@ -615,7 +758,7 @@ const isNewConversationHome = computed(() => {
 })
 const emptyComposerReady = computed(() => (
   chatReady.value
-  && selectedModelAvailable.value
+  && completionAvailable.value
   && isNewConversationHome.value
 ))
 const showScrollToLatest = computed(() => (
@@ -628,17 +771,35 @@ watch(
   () => authStore.user?.id,
   (userId) => {
     const normalizedUserId = normalizeUserId(userId)
+    reasoningPreferenceLoadedForUser.value = ''
     abortReceiptPolls()
     if (observedAuthUserId !== undefined && observedAuthUserId !== normalizedUserId) {
+      composerSubmissionResetKey.value += 1
+      capabilitiesController?.abort()
+      capabilitiesController = null
+      capabilitiesPromise = null
+      capabilitiesRequestSequence += 1
+      modelCatalogController?.abort()
+      modelCatalogController = null
+      modelCatalogRequestSequence += 1
+      modelCapabilityCatalog.value = new Map()
+      transcriptionCapability.value = null
+      voiceCapabilityState.value = 'idle'
       void discardPendingAttachments()
       composerDraft.value = ''
       selectedReasoningEffort.value = DEFAULT_REASONING_EFFORT
+      selectedReasoningMode.value = DEFAULT_REASONING_MODE
+      dismissedActivityMessageIds.clear()
+      autoOpenedActivityMessageIds.clear()
+      if (activityPanelOpen.value) void closeActivityPanel(false)
       historySearchQuery.value = ''
     }
     observedAuthUserId = normalizedUserId
+    resetChatProductState()
+    restoreReasoningPreference(normalizedUserId)
+    if (normalizedUserId) void initializeReasoningCapabilities(normalizedUserId)
     historySyncAnnouncement.value = ''
     legacyImportPromptVisible.value = true
-    resetChatProductState()
     const hydration = chatStore.hydrate(userId)
     if (normalizedUserId && hasNewChatRouteIntent()) {
       chatStore.selectConversation(null)
@@ -655,6 +816,37 @@ watch(
     })
   },
   { immediate: true, flush: 'sync' },
+)
+
+watch([selectedModelSupportsProReasoning, modelCapabilityState], ([supported, capabilityState]) => {
+  if (
+    capabilityState === 'ready'
+    && !supported
+    && selectedReasoningMode.value === 'pro'
+  ) {
+    selectedReasoningMode.value = DEFAULT_REASONING_MODE
+  }
+}, { immediate: true, flush: 'sync' })
+
+watch(selectedModelSupportedReasoningEfforts, (efforts) => {
+  if (efforts.length > 0 && !efforts.includes(selectedReasoningEffort.value)) {
+    selectedReasoningEffort.value = efforts[0]!
+  }
+}, { immediate: true, flush: 'sync' })
+
+watch(
+  [selectedReasoningMode, selectedReasoningEffort],
+  ([mode, effort]) => {
+    const userId = currentAuthUserId()
+    if (
+      !userId
+      || reasoningPreferenceLoadedForUser.value !== userId
+      || !isChatReasoningMode(mode)
+      || !isChatReasoningEffort(effort)
+    ) return
+    writeReasoningPreference(userId, mode, effort)
+  },
+  { flush: 'post' },
 )
 
 watch(
@@ -689,9 +881,11 @@ watch(() => chatStore.activeConversationId, () => {
   if (attachmentContextChangeOwnedBySend) {
     attachmentContextChangeOwnedBySend = false
   } else {
+    composerSubmissionResetKey.value += 1
     void discardPendingAttachments()
   }
   if (historyModalActive.value) void closeHistory()
+  if (activityPanelOpen.value) void closeActivityPanel(false)
   shouldFollowStream.value = true
   isAwayFromLatest.value = false
   lastMessageScrollTop = 0
@@ -702,8 +896,17 @@ watch(mobileHistoryLayout, (mobile) => {
   if (!mobile && historyOpen.value) void closeHistory(chatMainRef.value)
 })
 
+watch(historyModalActive, (active) => {
+  if (active && activityModalActive.value) void closeActivityPanel(false)
+})
+
 onMounted(() => {
-  void loadChatCapabilities()
+  void initializeVoiceCapability()
+  if (typeof window.matchMedia === 'function') {
+    activityDrawerMedia = window.matchMedia(ACTIVITY_DRAWER_MEDIA_QUERY)
+    syncActivityLayout(activityDrawerMedia)
+    activityDrawerMedia.addEventListener?.('change', syncActivityLayout)
+  }
   window.addEventListener('online', syncServerHistory)
   window.addEventListener('dragenter', onPageFileDragEnter, true)
   window.addEventListener('dragover', onPageFileDragOver, true)
@@ -728,6 +931,11 @@ onBeforeUnmount(() => {
   viewDisposed = true
   capabilitiesController?.abort()
   capabilitiesController = null
+  capabilitiesPromise = null
+  capabilitiesRequestSequence += 1
+  modelCatalogController?.abort()
+  modelCatalogController = null
+  modelCatalogRequestSequence += 1
   void discardPendingAttachments()
   cancelPendingMessageScroll()
   abortReceiptPolls()
@@ -739,26 +947,76 @@ onBeforeUnmount(() => {
   window.removeEventListener('drop', onPageFileDrop, true)
   window.removeEventListener('dragend', resetPageFileDrag, true)
   window.removeEventListener('blur', resetPageFileDrag)
+  activityDrawerMedia?.removeEventListener?.('change', syncActivityLayout)
+  activityDrawerMedia = null
   resetPageFileDrag()
   messageResizeObserver?.disconnect()
-  if (chatStore.isStreaming) chatStore.stopStreaming()
+  if (chatStore.isStreaming) stopStreaming()
 })
 
-async function loadChatCapabilities() {
-  capabilitiesController?.abort()
+async function initializeVoiceCapability(): Promise<VoiceCapabilityState> {
+  if (voiceCapabilityState.value === 'ready') return 'ready'
+  if (capabilitiesPromise) return (await capabilitiesPromise).state
+
   const controller = new AbortController()
+  const requestSequence = ++capabilitiesRequestSequence
   capabilitiesController = controller
-  try {
-    const capabilities = await getChatCapabilities(controller.signal)
-    if (!viewDisposed && capabilitiesController === controller) {
-      transcriptionCapability.value = capabilities.transcription ?? null
+  voiceCapabilityState.value = 'initializing'
+
+  const pending = (async (): Promise<VoiceCapabilityResult> => {
+    try {
+      const capabilities = await getChatCapabilities(controller.signal)
+      const capability = capabilities.transcription ?? null
+      const nextState: VoiceCapabilityState = capability?.enabled === true
+        ? 'ready'
+        : 'unavailable'
+      return { state: nextState, capability }
+    } catch (error) {
+      if (!isAbortError(error)) return { state: 'unavailable', capability: null }
+      return { state: 'unavailable', capability: null }
+    } finally {
+      if (capabilitiesController === controller) capabilitiesController = null
+      if (requestSequence === capabilitiesRequestSequence) capabilitiesPromise = null
     }
+  })()
+
+  capabilitiesPromise = pending
+  const result = await pending
+  if (!viewDisposed && requestSequence === capabilitiesRequestSequence) {
+    transcriptionCapability.value = result.capability
+    voiceCapabilityState.value = result.state
+    await nextTick()
+  }
+  return result.state
+}
+
+async function initializeReasoningCapabilities(expectedUserId: string): Promise<void> {
+  const controller = new AbortController()
+  const requestSequence = ++modelCatalogRequestSequence
+  modelCatalogController?.abort()
+  modelCatalogController = controller
+  // Missing, stale, aborted, or failed catalog data is fail-closed for
+  // Responses summary and Pro. Fixed product labels/order remain available so
+  // a catalog outage does not remove ordinary Chat navigation.
+  modelCapabilityCatalog.value = new Map()
+  modelCapabilityState.value = 'loading'
+  try {
+    const catalog = await getChatModels(controller.signal)
+    if (
+      viewDisposed
+      || controller.signal.aborted
+      || requestSequence !== modelCatalogRequestSequence
+      || expectedUserId !== currentAuthUserId()
+    ) return
+    modelCapabilityCatalog.value = new Map(catalog.models.map((model) => [model.id, model]))
+    modelCapabilityState.value = 'ready'
   } catch (error) {
-    if (!isAbortError(error) && !viewDisposed && capabilitiesController === controller) {
-      transcriptionCapability.value = null
+    if (!isAbortError(error) && requestSequence === modelCatalogRequestSequence) {
+      modelCapabilityCatalog.value = new Map()
+      modelCapabilityState.value = 'unavailable'
     }
   } finally {
-    if (capabilitiesController === controller) capabilitiesController = null
+    if (modelCatalogController === controller) modelCatalogController = null
   }
 }
 
@@ -770,12 +1028,140 @@ function normalizeUserId(id: string | number | null | undefined) {
   return id === null || id === undefined ? '' : String(id)
 }
 
+function isChatReasoningEffort(value: unknown): value is ChatReasoningEffort {
+  return value === 'low'
+    || value === 'medium'
+    || value === 'high'
+    || value === 'xhigh'
+}
+
+function isChatReasoningMode(value: unknown): value is ChatReasoningMode {
+  return value === 'standard' || value === 'pro'
+}
+
+function readReasoningPreference(userId: string): {
+  mode: ChatReasoningMode
+  effort: ChatReasoningEffort
+} | null {
+  if (!userId || typeof window === 'undefined') return null
+  try {
+    const raw = window.localStorage.getItem(REASONING_PREFERENCE_STORAGE_KEY)
+    if (!raw) return null
+    const parsed: unknown = JSON.parse(raw)
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null
+    const record = parsed as Record<string, unknown>
+    const preference = record[userId]
+    if (!preference || typeof preference !== 'object' || Array.isArray(preference)) return null
+    const candidate = preference as Record<string, unknown>
+    if (!isChatReasoningMode(candidate.mode) || !isChatReasoningEffort(candidate.effort)) return null
+    return { mode: candidate.mode, effort: candidate.effort }
+  } catch {
+    return null
+  }
+}
+
+function writeReasoningPreference(
+  userId: string,
+  mode: ChatReasoningMode,
+  effort: ChatReasoningEffort,
+): void {
+  if (!userId || typeof window === 'undefined') return
+  try {
+    let record: Record<string, unknown> = {}
+    const raw = window.localStorage.getItem(REASONING_PREFERENCE_STORAGE_KEY)
+    if (raw) {
+      const parsed: unknown = JSON.parse(raw)
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        record = parsed as Record<string, unknown>
+      }
+    }
+    record[userId] = { mode, effort }
+    window.localStorage.setItem(REASONING_PREFERENCE_STORAGE_KEY, JSON.stringify(record))
+  } catch {
+    // A blocked or unavailable localStorage must not disable Chat.
+  }
+}
+
+function restoreReasoningPreference(userId: string): void {
+  reasoningPreferenceLoadedForUser.value = userId
+  const preference = readReasoningPreference(userId)
+  if (!preference) return
+  selectedReasoningEffort.value = preference.effort
+  selectedReasoningMode.value = preference.mode
+}
+
+function currentReasoningRequestSelection():
+  | { reasoningMode: 'pro' }
+  | { reasoningMode: 'standard'; reasoningEffort: ChatReasoningEffort } {
+  if (selectedReasoningMode.value === 'pro') return { reasoningMode: 'pro' }
+  return {
+    reasoningMode: 'standard',
+    reasoningEffort: selectedReasoningEffort.value,
+  }
+}
+
 function resetChatProductState() {
   defaultModel.value = DEFAULT_CHAT_PRODUCT_MODEL_ID
 }
 
 function reconcileSelectedModel() {
   if (!availableModelIds.has(defaultModel.value)) defaultModel.value = preferredModel
+  if (
+    modelCapabilityState.value === 'ready'
+    && !selectedModelSupportsProReasoning.value
+  ) {
+    selectedReasoningMode.value = DEFAULT_REASONING_MODE
+  }
+}
+
+function syncActivityLayout(query: MediaQueryList | MediaQueryListEvent): void {
+  activityMobileLayout.value = query.matches
+}
+
+function activityHasSummary(activity: ChatActivity): boolean {
+  return activity.items.some((item) => (
+    item.parts.some(chatActivityPartHasText)
+  ))
+}
+
+function openActivityForMessage(messageId: string): void {
+  const message = activeConversation.value?.messages.find((candidate) => candidate.id === messageId)
+  if (!message?.activities?.some(activityHasSummary)) return
+  prepareActivityModalOpen()
+  selectedActivityMessageId.value = messageId
+  activityPanelOpen.value = true
+}
+
+function maybeAutoOpenActivity(messageId: string, activity: ChatActivity): void {
+  if (
+    !activityHasSummary(activity)
+    || dismissedActivityMessageIds.has(messageId)
+    || autoOpenedActivityMessageIds.has(messageId)
+    || activeConversation.value?.id !== chatStore.streamingConversationId
+  ) return
+  autoOpenedActivityMessageIds.add(messageId)
+  prepareActivityModalOpen()
+  selectedActivityMessageId.value = messageId
+  activityPanelOpen.value = true
+}
+
+function prepareActivityModalOpen(): void {
+  if (activityMobileLayout.value && historyModalActive.value) {
+    void closeHistory(null)
+  }
+}
+
+async function closeActivityPanel(restoreFocus = true): Promise<void> {
+  const messageId = selectedActivityMessageId.value
+  if (!activityPanelOpen.value && !messageId) return
+  if (messageId) dismissedActivityMessageIds.add(messageId)
+  activityPanelOpen.value = false
+  selectedActivityMessageId.value = null
+  await nextTick()
+  if (!restoreFocus || !messageId) return
+  Array.from(document.querySelectorAll<HTMLElement>('[data-chat-activity-message-id]'))
+    .find((element) => element.dataset.chatActivityMessageId === messageId)
+    ?.focus()
 }
 
 async function focusComposer() {
@@ -786,6 +1172,16 @@ async function focusComposer() {
 function insertVoiceTranscription(text: string, acknowledge?: (inserted: boolean) => void) {
   const inserted = composerRef.value?.insertText?.(text) === true
   acknowledge?.(inserted)
+}
+
+function addPastedImages(files: File[]): void {
+  if (!attachmentDropEnabled.value || files.length === 0) return
+  attachmentPickerRef.value?.addFiles(files)
+}
+
+function addLibraryAttachments(files: LibraryFile[]): void {
+  attachmentPickerRef.value?.addLibraryFiles(files)
+  libraryPickerOpen.value = false
 }
 
 function isPageFileDrag(event: DragEvent): boolean {
@@ -861,6 +1257,8 @@ async function retryPersistence() {
 }
 
 async function initializeServerHistory(expectedUserId: string): Promise<boolean> {
+  await replayPendingStopIntents(expectedUserId)
+  if (viewDisposed || expectedUserId !== currentAuthUserId()) return false
   await chatStore.syncHistory()
   if (viewDisposed || expectedUserId !== currentAuthUserId()) return false
   if (chatStore.syncStatus !== 'idle' || chatStore.serverHistoryAvailable !== true) return false
@@ -1068,10 +1466,43 @@ async function sendMessage(
   content: string,
   acknowledge?: (accepted: boolean) => void,
 ) {
-  const attachments = attachmentPickerRef.value?.getReadyAttachments() ?? []
+  let settled = false
+  const settle = (accepted: boolean) => {
+    if (settled) return
+    settled = true
+    acknowledge?.(accepted)
+  }
+  try {
+    await sendMessageTransaction(content, settle)
+  } catch {
+    // The transaction and stream layers already surface user-safe failures.
+    // Keep this final guard free of raw exception logging in production.
+  } finally {
+    settle(false)
+  }
+}
+
+async function sendMessageTransaction(
+  content: string,
+  acknowledge: (accepted: boolean) => void,
+) {
+  const picker = attachmentPickerRef.value
+  const attachmentSelection = typeof picker?.getReadySelection === 'function'
+    ? picker.getReadySelection()
+    : (() => {
+        const attachments = typeof picker?.getReadyAttachments === 'function'
+          ? picker.getReadyAttachments()
+          : []
+        return {
+          attachments,
+          uploadAttachmentIds: attachments.map(({ id }) => id),
+          libraryAttachments: [],
+        }
+      })()
+  const attachments = attachmentSelection.attachments
   if (
     !chatReady.value
-    || !selectedModelAvailable.value
+    || !completionAvailable.value
     || chatStore.isStreaming
     || voiceBusy.value
     || attachmentBusy.value
@@ -1102,6 +1533,7 @@ async function sendMessage(
   }
   chatStore.setConversationModel(conversation.id, requestModel)
   const expectedUserId = currentAuthUserId()
+  const expectedSubmissionResetKey = composerSubmissionResetKey.value
   const completionReady = await chatStore.prepareConversationForCompletion(conversation.id)
   if (
     !completionReady
@@ -1142,18 +1574,30 @@ async function sendMessage(
   const streamResult = await runStream({
     conversationId: conversation.id,
     model: requestModel,
-    reasoningEffort: selectedReasoningEffort.value,
+    ...currentReasoningRequestSelection(),
     expectedHeadMessageId,
     userMessage: {
       id: userMessage.id,
       content: userMessage.content,
       ...(attachments.length > 0
-        ? { attachmentIds: attachments.map(({ id }) => id) }
+        ? {
+            ...(attachmentSelection.uploadAttachmentIds.length > 0
+              ? { attachmentIds: attachmentSelection.uploadAttachmentIds }
+              : {}),
+            ...(attachmentSelection.libraryAttachments.length > 0
+              ? { attachments: attachmentSelection.libraryAttachments }
+              : {}),
+          }
         : {}),
     },
     assistantMessageId: assistant.id,
   }, attemptId, attachments.length > 0
     ? () => {
+        if (
+          expectedUserId !== currentAuthUserId()
+          || expectedSubmissionResetKey !== composerSubmissionResetKey.value
+          || activeConversation.value?.id !== conversation.id
+        ) return
         attachmentPickerRef.value?.commitAll()
         acknowledge?.(true)
       }
@@ -1177,14 +1621,14 @@ function canRetryMessage(message: ChatMessage, index: number) {
     && index === (activeConversation.value?.messages.length ?? 0) - 1
     && !chatStore.isStreaming
     && retryPendingMessageId.value === null
-    && selectedModelAvailable.value
+    && completionAvailable.value
 }
 
 async function retryMessage(messageId: string) {
   const conversation = activeConversation.value
   if (
     !conversation
-    || !selectedModelAvailable.value
+    || !completionAvailable.value
     || chatStore.isStreaming
     || retryPendingMessageId.value !== null
   ) return
@@ -1218,7 +1662,7 @@ async function retryMessage(messageId: string) {
     await runStream({
       conversationId: conversation.id,
       model: requestModel,
-      reasoningEffort: selectedReasoningEffort.value,
+      ...currentReasoningRequestSelection(),
       expectedHeadMessageId,
       assistantMessageId: replacement.id,
       retryOfMessageId: messageId,
@@ -1276,6 +1720,10 @@ async function runStream(
         onContent: (content) => {
           chatStore.appendStreamingContent(conversationId, assistantMessageId, content)
         },
+        onActivity: (activity) => {
+          chatStore.upsertMessageActivity(conversationId, assistantMessageId, activity)
+          maybeAutoOpenActivity(assistantMessageId, activity)
+        },
       },
       { signal: controller.signal, attemptId },
     )
@@ -1312,6 +1760,7 @@ async function runStream(
       }
       return { accepted, keepMessages: accepted }
     }
+    chatStore.stopMessageActivities(conversationId, assistantMessageId, 'disconnected')
     const presentation = describeChatError(error)
     if (!duplicateReceiptId) {
       logChatCompletionError(error, {
@@ -1372,16 +1821,127 @@ async function recoverStreamAttempt(
   return attempt
 }
 
-function stopStreaming() {
+function stopStreaming(recordUserIntent = false) {
   const conversationId = chatStore.streamingConversationId
   const messageId = chatStore.streamingMessageId
-  const receiptId = conversationId && messageId
-    ? findMessage(conversationId, messageId)?.receiptId
+  const streamingMessage = conversationId && messageId
+    ? findMessage(conversationId, messageId)
     : undefined
+  const receiptId = streamingMessage?.receiptId
+  const attemptId = streamingMessage?.attemptId
   const streamUserId = currentAuthUserId()
   const stopped = chatStore.stopStreaming()
+  if (stopped && conversationId && messageId) {
+    chatStore.stopMessageActivities(conversationId, messageId, 'stopped')
+  }
+  if (
+    stopped
+    && recordUserIntent
+    && attemptId
+    && conversationId
+    && messageId
+    && streamUserId
+  ) {
+    // This request deliberately outlives the stream AbortController. The
+    // server resolves either arrival order so a user stop is not persisted as
+    // a generic network disconnect.
+    chatStore.updateMessage(conversationId, messageId, {
+      pendingStopRequestedAt: Date.now(),
+    })
+    void persistExplicitStop(conversationId, messageId, attemptId, streamUserId)
+  }
   if (stopped && conversationId && messageId && receiptId && streamUserId) {
     void syncChatReceipt(conversationId, messageId, receiptId, streamUserId)
+  }
+}
+
+function persistExplicitStop(
+  conversationId: string,
+  messageId: string,
+  attemptId: string,
+  expectedUserId: string,
+): Promise<void> {
+  const requestKey = `${expectedUserId}:${attemptId}`
+  const existing = explicitStopRequests.get(requestKey)
+  if (existing) return existing
+  const request = persistExplicitStopOnce(
+    conversationId,
+    messageId,
+    attemptId,
+    expectedUserId,
+  ).finally(() => {
+    if (explicitStopRequests.get(requestKey) === request) {
+      explicitStopRequests.delete(requestKey)
+    }
+  })
+  explicitStopRequests.set(requestKey, request)
+  return request
+}
+
+async function persistExplicitStopOnce(
+  conversationId: string,
+  messageId: string,
+  attemptId: string,
+  expectedUserId: string,
+): Promise<void> {
+  let stopPersisted = false
+  try {
+    const result = await stopChatAttempt(attemptId)
+    stopPersisted = result.accepted && result.deliveryStatus === 'stopped'
+    // Completion can win immediately before the authenticated stop locks the
+    // attempt. In that race the server response is authoritative; restore the
+    // actual assistant terminal state instead of leaving the optimistic local
+    // "stopped" snapshot in place.
+    if (!stopPersisted) {
+      const recovered = await recoverStreamAttempt(
+        conversationId,
+        messageId,
+        expectedUserId,
+      )
+      stopPersisted = recovered !== null && recovered.status !== 'processing'
+    }
+  } catch {
+    // The stop request already performs bounded transient retries. A final
+    // failure still triggers recovery. Keep the durable pending marker unless
+    // that GET confirms a terminal server state, so refresh/online replay can
+    // retry after a transient reconciliation failure.
+    const recovered = await recoverStreamAttempt(
+      conversationId,
+      messageId,
+      expectedUserId,
+    )
+    stopPersisted = recovered !== null && recovered.status !== 'processing'
+  }
+  if (stopPersisted && expectedUserId === currentAuthUserId()) {
+    chatStore.updateMessage(conversationId, messageId, {
+      pendingStopRequestedAt: null,
+    })
+  }
+}
+
+async function replayPendingStopIntents(expectedUserId: string): Promise<void> {
+  const pending = chatStore.conversations.flatMap((conversation) => (
+    conversation.messages.flatMap((message) => (
+      message.role === 'assistant'
+      && message.attemptId
+      && typeof message.pendingStopRequestedAt === 'number'
+      && Number.isFinite(message.pendingStopRequestedAt)
+        ? [{
+            conversationId: conversation.id,
+            messageId: message.id,
+            attemptId: message.attemptId,
+          }]
+        : []
+    ))
+  ))
+  for (const intent of pending) {
+    if (viewDisposed || expectedUserId !== currentAuthUserId()) return
+    await persistExplicitStop(
+      intent.conversationId,
+      intent.messageId,
+      intent.attemptId,
+      expectedUserId,
+    )
   }
 }
 
@@ -1875,6 +2435,13 @@ function scheduleScrollToBottom() {
   background: transparent;
 }
 
+.chat-composer-region__capability {
+  margin: 0 12px 8px;
+  color: var(--workspace-text-muted);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
 .chat-conversation-flow--new-chat .chat-messages-region {
   min-height: 232px;
   flex: 0 0 max(232px, 42svh);
@@ -2085,6 +2652,16 @@ function scheduleScrollToBottom() {
   opacity: 0;
 }
 
+.chat-activity-panel-enter-active,
+.chat-activity-panel-leave-active {
+  transition: opacity 160ms ease;
+}
+
+.chat-activity-panel-enter-from,
+.chat-activity-panel-leave-to {
+  opacity: 0;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .chat-conversation-flow--new-chat {
     animation: none;
@@ -2092,6 +2669,8 @@ function scheduleScrollToBottom() {
 
   .chat-drawer-enter-active,
   .chat-drawer-leave-active,
+  .chat-activity-panel-enter-active,
+  .chat-activity-panel-leave-active,
   .chat-scroll-control-enter-active,
   .chat-scroll-control-leave-active {
     transition: none;

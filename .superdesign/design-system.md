@@ -1,5 +1,22 @@
 # Luoxue API Snow Clay Design System
 
+## Dashboard GPT Usage Lower Region — Current Design Override
+
+This section is the active authority for the current Superdesign Dashboard iteration. Preserve the existing Work Sidebar, mobile header, account-balance card, Ultra quota card, purple quota percentage/progress bar, and all geometry above them exactly. The usage region below those two top cards keeps the measured DeepSeek layout but is customized for the `gpt-5.6-sol` model.
+
+- The entire Dashboard uses one active theme at a time; never alternate a light top region with a dark usage region. Every page, Sidebar, top card, usage control, usage card, chart card, heading, label, axis, grid, and border must consume the existing semantic `--workspace-*` theme aliases.
+- Light mode: page and usage canvas `var(--workspace-canvas)` = `#FCFCFC`; every summary/chart/top card uses `var(--workspace-card-surface)` = `#FFFFFF`; controls use `var(--workspace-surface-subtle)` = `#F7F7F8`; text uses `--workspace-text`, `--workspace-text-secondary`, and `--workspace-text-muted`; borders use `--workspace-border`. The lower region must look like a natural continuation of the original light Dashboard background, not a dark insert.
+- Dark mode under `html.dark`: the same elements automatically resolve to the original Workspace dark tokens: canvas `#000000`, Sidebar canvas `#000000`, cards/surfaces `#171717`, primary text `#ECECEC`, secondary text `#B4B4B4`, muted text `#8A8A8A`, and border/divider `rgb(255 255 255 / 0.1)`. Do not introduce a second custom dark palette.
+- Keep `Inter, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif` for the usage typography while consuming the same active theme colors as the surrounding Workspace.
+- The reproduced inner content width is exactly 920px at desktop. Use 32px vertical rhythm, 12px gaps between sibling cards, no borders, no shadows, and no gradients or glow outside the chart data fills.
+- The usage region starts directly with the exact 36px filter toolbar; do not render a timezone notice or leave reserved space for one. Keep only the time-dimension pill, 18px radius, 14px type, and `0 14px` horizontal padding, plus `清除筛选条件`, the 36px `导出` pill, and the vertical-more action. Remove the API Key filter completely. All control surfaces and text follow the active Workspace theme.
+- Next row contains exactly three equal 102px summary cards with 12px gaps. Card surface is `var(--workspace-card-surface)`, with a 1px `var(--workspace-border)` border in light and dark modes, radius 16px, padding `16px 20px`; labels 14/400/22px, values 29/500/36px. Content: `消费金额 ¥0.45 CNY`, `API 请求次数 79`, and `Tokens 8,445,868`.
+- The main chart is exactly 920px × 341px, surface `var(--workspace-card-surface)`, 1px theme border, radius 16px, padding `20px 20px 12px`. Header text `消费金额（CNY）` is 14/500/22px with adjacent muted `¥0.45`. Do not render the `模型 / API Key` segmented control or any API Key option. Chart axes consume `--workspace-text-muted`; grid lines use the active theme divider; Y labels are 0, 0.3, 0.6, and X labels are 00:00, 08:00, 15:00, 23:00. Use the exact orange series colors `#FF810C`, `#FFA10A`, and `#FFC104`; the visible sample peaks at 22:00–23:00. Its compact inverse tooltip names the model `gpt-5.6-sol`.
+- After a 24px gap, render the exact 16/500/24px model heading `gpt-5.6-sol`. After 16px, render two 454px × 340px chart cards with a 12px gap; each uses `var(--workspace-card-surface)`, a 1px theme border, radius 16px, and padding `23px 20px 12px`.
+- Left detail chart header is `API 请求次数 79`, axes 0/50/100 and 00:00/08:00/15:00/23:00, with the reference blue line/area using `#0C70F3` and `#70B2FE` and a narrow late-evening peak.
+- Right detail chart header is `Tokens 8,445,868`, axes 0/5M/10M and 00:00/08:00/15:00/23:00, with the reference stacked blue bar using `#0C70F3`, `#60B3FE`, and `#A0DCFD` near 23:00.
+- Desktop and mobile may stack responsively, but desktop dimensions, colors, radii, padding, typography, ordering, and chart proportions must match the measured reference exactly. Do not retain the previous light chart component, orange range buttons, model select, empty-state card, legend, or any additional content below the preserved top cards.
+
 ## Authenticated Workspace Runtime Token Contract — Implemented
 
 - Chat, Work and Account share one runtime authority: `frontend/src/styles/luoxue-clay-tokens.css`.

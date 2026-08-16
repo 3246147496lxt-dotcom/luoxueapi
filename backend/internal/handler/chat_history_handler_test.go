@@ -19,6 +19,8 @@ type chatHistoryHandlerRepositoryStub struct {
 	listCalls      int
 	syncAfter      int64
 	deleteRevision int64
+	stopUserID     int64
+	stopAttemptID  string
 }
 
 func (s *chatHistoryHandlerRepositoryStub) CreateConversation(
@@ -100,6 +102,21 @@ func (*chatHistoryHandlerRepositoryStub) CheckpointCompletion(
 	return errors.New("unexpected checkpoint completion")
 }
 
+func (s *chatHistoryHandlerRepositoryStub) StopCompletion(
+	_ context.Context,
+	userID int64,
+	attemptID string,
+) (*service.StopChatCompletionResult, error) {
+	s.stopUserID = userID
+	s.stopAttemptID = attemptID
+	return &service.StopChatCompletionResult{
+		AttemptID:      attemptID,
+		Accepted:       true,
+		AttemptStatus:  service.ChatAttemptStatusInterrupted,
+		DeliveryStatus: service.ChatMessageDeliveryStopped,
+	}, nil
+}
+
 func chatHistoryTestContext(method, target, body string) (*gin.Context, *httptest.ResponseRecorder) {
 	gin.SetMode(gin.TestMode)
 	recorder := httptest.NewRecorder()
@@ -171,4 +188,23 @@ func TestChatHistoryListRejectsSearchInURL(t *testing.T) {
 
 	require.Equal(t, http.StatusBadRequest, recorder.Code)
 	require.Zero(t, repo.listCalls)
+}
+
+func TestChatHistoryStopAttemptUsesAuthenticatedUserAndAttemptID(t *testing.T) {
+	repo := &chatHistoryHandlerRepositoryStub{}
+	handler := &ChatHandler{history: service.NewChatHistoryService(repo)}
+	c, recorder := chatHistoryTestContext(
+		http.MethodPost,
+		"/api/v1/chat/attempts/attempt-12345678/stop",
+		"",
+	)
+	c.Params = gin.Params{{Key: "attempt_id", Value: "attempt-12345678"}}
+
+	handler.StopAttempt(c)
+
+	require.Equal(t, http.StatusOK, recorder.Code)
+	require.Equal(t, int64(42), repo.stopUserID)
+	require.Equal(t, "attempt-12345678", repo.stopAttemptID)
+	require.Contains(t, recorder.Body.String(), `"accepted":true`)
+	require.Contains(t, recorder.Body.String(), `"delivery_status":"stopped"`)
 }

@@ -125,8 +125,37 @@ func convertResponsesInputToAnthropic(instructions string, inputRaw json.RawMess
 	var messages []AnthropicMessage
 
 	for _, item := range items {
+		if item.Type == "input_file" || item.Type == "file" {
+			role := strings.ToLower(strings.TrimSpace(item.Role))
+			if role != "" && role != "user" {
+				return nil, nil, NewProviderFileUnsupportedError(
+					"selected provider route", item.Filename,
+					"document inputs can only be represented in user messages on this provider route",
+				)
+			}
+			block, err := responsesFileToAnthropicBlock(ResponsesContentPart{
+				Type: "input_file", Filename: item.Filename, FileData: item.FileData,
+				FileID: item.FileID, FileURL: item.FileURL,
+			})
+			if err != nil {
+				return nil, nil, err
+			}
+			blockJSON, marshalErr := json.Marshal([]AnthropicContentBlock{block})
+			if marshalErr != nil {
+				return nil, nil, marshalErr
+			}
+			messages = append(messages, AnthropicMessage{Role: "user", Content: blockJSON})
+			continue
+		}
+
 		switch {
 		case item.Role == "system" || item.Role == "developer":
+			if file, ok := firstResponsesFilePart(item.Content); ok {
+				return nil, nil, NewProviderFileUnsupportedError(
+					"selected provider route", file.Filename,
+					"document inputs can only be represented in user messages on this provider route",
+				)
+			}
 			text := extractTextFromContent(item.Content)
 			if text != "" {
 				systemParts = append(systemParts, text)
@@ -189,11 +218,16 @@ func convertResponsesInputToAnthropic(instructions string, inputRaw json.RawMess
 			})
 
 		default:
-			// Unknown role/type — attempt as user message
+			// Unknown role/type — attempt as user content so typed parts are
+			// validated and attachments cannot be silently dropped.
 			if item.Content != nil {
+				content, err := convertResponsesUserToAnthropicContent(item.Content)
+				if err != nil {
+					return nil, nil, err
+				}
 				messages = append(messages, AnthropicMessage{
 					Role:    "user",
-					Content: item.Content,
+					Content: content,
 				})
 			}
 		}
@@ -372,6 +406,12 @@ func convertResponsesUserToAnthropicContent(raw json.RawMessage) (json.RawMessag
 	// Array of content parts → Anthropic content blocks.
 	var parts []ResponsesContentPart
 	if err := json.Unmarshal(raw, &parts); err != nil {
+		if file, ok := firstResponsesFilePart(raw); ok {
+			return nil, NewProviderFileInvalidError(
+				"selected provider route", file.Filename,
+				"input_file fields must be valid strings",
+			)
+		}
 		// Pass through as-is if we can't parse
 		return raw, nil
 	}
@@ -394,6 +434,12 @@ func convertResponsesUserToAnthropicContent(raw json.RawMessage) (json.RawMessag
 					Source: src,
 				})
 			}
+		case "input_file", "file":
+			block, err := responsesFileToAnthropicBlock(p)
+			if err != nil {
+				return nil, err
+			}
+			blocks = append(blocks, block)
 		}
 	}
 
@@ -419,6 +465,12 @@ func convertResponsesAssistantToAnthropicContent(raw json.RawMessage) (json.RawM
 	// Array of content parts → Anthropic content blocks.
 	var parts []ResponsesContentPart
 	if err := json.Unmarshal(raw, &parts); err != nil {
+		if file, ok := firstResponsesFilePart(raw); ok {
+			return nil, NewProviderFileInvalidError(
+				"selected provider route", file.Filename,
+				"input_file fields must be valid strings",
+			)
+		}
 		return raw, nil
 	}
 
@@ -432,6 +484,11 @@ func convertResponsesAssistantToAnthropicContent(raw json.RawMessage) (json.RawM
 					Text: p.Text,
 				})
 			}
+		case "input_file", "file":
+			return nil, NewProviderFileUnsupportedError(
+				"selected provider route", p.Filename,
+				"document inputs can only be represented in user messages on this provider route",
+			)
 		}
 	}
 

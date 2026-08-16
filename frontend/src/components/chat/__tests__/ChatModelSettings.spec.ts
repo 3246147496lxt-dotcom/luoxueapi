@@ -5,7 +5,7 @@ import { mount, type VueWrapper } from '@vue/test-utils'
 import { nextTick } from 'vue'
 import AppIcon from '@/components/icons/Icon.vue'
 import zhChat from '@/i18n/locales/zh/chat'
-import ChatModelSettings from '../ChatModelSettings.vue'
+import ChatModelSettings, { type ChatModelSettingsOption } from '../ChatModelSettings.vue'
 
 const COMPONENT_SOURCE = readFileSync(
   resolve(process.cwd(), 'src/components/chat/ChatModelSettings.vue'),
@@ -28,13 +28,23 @@ const IconStub = {
   template: '<span :data-icon="name" />',
 }
 
-const MODEL_OPTIONS = [
-  { value: 'gpt-5', label: 'GPT-5', description: 'Legacy description' },
+const MODEL_OPTIONS: ChatModelSettingsOption[] = [
+  {
+    value: 'gpt-5',
+    label: 'GPT-5',
+    description: 'Legacy description',
+    supportsReasoningSlider: true,
+    supportsReasoningSummary: true,
+    supportedReasoningEfforts: ['low', 'medium', 'high', 'xhigh'],
+  },
   {
     value: 'gpt-5.6-sol',
     label: 'GPT-5.6 Sol',
     recommended: true,
     supportsReasoningSlider: true,
+    supportsReasoningSummary: true,
+    supportsReasoningProMode: true,
+    supportedReasoningEfforts: ['low', 'medium', 'high', 'xhigh'],
   },
 ]
 
@@ -107,6 +117,7 @@ function mountSettings(overrides: Record<string, unknown> = {}) {
     props: {
       modelValue: 'gpt-5.6-sol',
       reasoningEffort: 'low',
+      reasoningMode: 'standard',
       modelOptions: MODEL_OPTIONS,
       ...overrides,
     },
@@ -184,6 +195,94 @@ describe('ChatModelSettings', () => {
     expect(tooltip?.textContent).toContain('M')
   })
 
+  it('offers Pro only when the selected model capability allows it', async () => {
+    const view = mountSettings({
+      modelOptions: [{
+        value: 'gpt-5.6-sol',
+        label: 'GPT-5.6 Sol',
+        supportsReasoningSlider: true,
+        supportsReasoningSummary: true,
+        supportsReasoningProMode: true,
+        supportedReasoningEfforts: ['low', 'medium', 'high', 'xhigh'],
+      }],
+    })
+    await view.get('[data-test="chat-model-settings-trigger"]').trigger('click')
+    await expandAdvancedSettings()
+    panelElement('[data-test="chat-settings-reasoning-menu"]').click()
+    await nextTick()
+
+    panelElement('[role="menuitemradio"][data-value="pro"]').click()
+    await nextTick()
+    expect(view.emitted('update:reasoningMode')).toEqual([['pro']])
+    expect(document.body.querySelector('[data-test="chat-model-settings-popover"]')).toBeNull()
+
+    view.unmount()
+    const standardOnly = mountSettings({
+      modelOptions: [{
+        value: 'gpt-5.5',
+        label: 'GPT-5.5',
+        supportsReasoningSlider: true,
+        supportsReasoningSummary: true,
+        supportsReasoningProMode: false,
+        supportedReasoningEfforts: ['low', 'medium', 'high', 'xhigh'],
+      }],
+      modelValue: 'gpt-5.5',
+      reasoningMode: 'standard',
+    })
+    await standardOnly.get('[data-test="chat-model-settings-trigger"]').trigger('click')
+    await expandAdvancedSettings()
+    panelElement('[data-test="chat-settings-reasoning-menu"]').click()
+    await nextTick()
+    expect(document.body.querySelector('[role="menuitemradio"][data-value="pro"]')).toBeNull()
+  })
+
+  it('renders Pro as the selected reasoning level and reuses the premium xhigh visual state', async () => {
+    const view = mountSettings({ reasoningMode: 'pro', reasoningEffort: 'medium' })
+    const trigger = view.get('[data-test="chat-model-settings-trigger"]')
+
+    expect(trigger.get('[data-test="chat-model-settings-trigger-value"]').text())
+      .toBe('chat.settings.reasoningLevels.pro')
+
+    await trigger.trigger('click')
+    const visual = panelElement('[data-test="chat-settings-capability-visual"]')
+    expect(visual.classList).toContain(
+      'chat-model-settings-popover__range-wrap--maximum',
+    )
+    expect(visual.dataset.max).toBe('true')
+    expect(panelElement('[data-test="chat-settings-maximum-effects"]')).toBeTruthy()
+
+    await expandAdvancedSettings()
+    const reasoningRow = panelElement('[data-test="chat-settings-reasoning-menu"]')
+    expect(reasoningRow.textContent).toContain('chat.settings.reasoningLevels.pro')
+    reasoningRow.click()
+    await nextTick()
+
+    const selected = panelElement('[role="menuitemradio"][data-value="pro"]')
+    expect(selected.getAttribute('aria-checked')).toBe('true')
+    expect(selected.querySelector('[data-icon="chatCheck"]')).not.toBeNull()
+    expect(GLOBAL_STYLE).not.toContain('.chat-model-settings-popover__option--selected')
+    expect(document.body.querySelector('[data-test="chat-settings-mode-menu"]')).toBeNull()
+  })
+
+  it('leaves the Pro visual state immediately when the slider selects a standard effort', async () => {
+    const view = mountSettings({ reasoningMode: 'pro', reasoningEffort: 'medium' })
+    await view.get('[data-test="chat-model-settings-trigger"]').trigger('click')
+    const slider = panelElement('[data-test="chat-settings-capability-slider"]') as HTMLInputElement
+    const visual = panelElement('[data-test="chat-settings-capability-visual"]')
+
+    slider.value = '2'
+    slider.dispatchEvent(new Event('input', { bubbles: true }))
+    await nextTick()
+
+    expect(view.emitted('update:reasoningMode')).toEqual([['standard']])
+    expect(view.emitted('update:reasoningEffort')).toEqual([['high']])
+    expect(slider.getAttribute('aria-valuetext')).toBe('chat.settings.reasoningLevels.high')
+    expect(visual.classList).not.toContain(
+      'chat-model-settings-popover__range-wrap--maximum',
+    )
+    expect(visual.querySelector('[data-test="chat-settings-maximum-effects"]')).toBeNull()
+  })
+
   it('toggles the settings menu from the advertised keyboard shortcut', async () => {
     const view = mountSettings()
     const trigger = view.get('[data-test="chat-model-settings-trigger"]')
@@ -222,7 +321,12 @@ describe('ChatModelSettings', () => {
     const view = mountSettings({
       modelValue: 'gpt-5.5',
       reasoningEffort: 'xhigh',
-      modelOptions: [{ value: 'gpt-5.5', label: 'GPT-5.5' }],
+      modelOptions: [{
+        value: 'gpt-5.5',
+        label: 'GPT-5.5',
+        supportsReasoningSlider: true,
+        supportedReasoningEfforts: ['low', 'medium', 'high', 'xhigh'],
+      }],
     })
     const trigger = view.get('[data-test="chat-model-settings-trigger"]')
 
@@ -253,7 +357,7 @@ describe('ChatModelSettings', () => {
     expect(SCOPED_STYLE).toContain('width: 164px;')
   })
 
-  it('renders the four-step capability control for Sol and no automatic or Pro mode', async () => {
+  it('keeps the four-step effort slider and adds Pro to the official reasoning list', async () => {
     const view = mountSettings()
     await view.get('[data-test="chat-model-settings-trigger"]').trigger('click')
 
@@ -312,10 +416,10 @@ describe('ChatModelSettings', () => {
     expect(reasoningSubmenu.getAttribute('aria-label')).toBe('chat.settings.reasoning')
     const values = Array.from(document.body.querySelectorAll<HTMLElement>('[role="menuitemradio"]'))
       .map((element) => element.dataset.value)
-    expect(values).toEqual(['low', 'medium', 'high', 'xhigh'])
+    expect(values).toEqual(['low', 'medium', 'high', 'xhigh', 'pro'])
     expect(document.body.textContent).not.toContain('chat.settings.reasoningLevels.auto')
     expect(document.body.textContent).not.toContain('chat.settings.reasoningDescriptions')
-    expect(document.body.textContent).not.toMatch(/\bPro\b|专业/)
+    expect(document.body.textContent).toContain('chat.settings.reasoningLevels.pro')
   })
 
   it('previews desktop submenus on hover without moving focus', async () => {
@@ -578,6 +682,7 @@ describe('ChatModelSettings', () => {
         value: 'sol-stable-alias',
         label: 'Sol Stable',
         supportsReasoningSlider: true,
+        supportedReasoningEfforts: ['low', 'medium', 'high', 'xhigh'],
       }],
     })
 
@@ -653,13 +758,13 @@ describe('ChatModelSettings', () => {
 
   it.each([
     ['GPT-5.5', { value: 'gpt-5.5', label: 'GPT-5.5' }],
-    ['a model without the legacy capability flag', { value: 'gpt-5.6-terra', label: 'GPT-5.6 Terra' }],
-    ['a model with an explicit legacy false flag', {
+    ['a model without an affirmative capability', { value: 'gpt-5.6-terra', label: 'GPT-5.6 Terra' }],
+    ['a model with an explicit false capability', {
       value: 'gpt-5.6-luna',
       label: 'GPT-5.6 Luna',
       supportsReasoningSlider: false,
     }],
-  ])('renders the four-level capability slider for %s', async (_name, option) => {
+  ])('hides reasoning controls for %s', async (_name, option) => {
     const view = mountSettings({
       modelValue: option.value,
       modelOptions: [option],
@@ -667,15 +772,51 @@ describe('ChatModelSettings', () => {
 
     await view.get('[data-test="chat-model-settings-trigger"]').trigger('click')
 
-    expect(document.body.querySelector('[data-test="chat-settings-capability-slider"]')).not.toBeNull()
-    expect(document.body.querySelector('[data-test="chat-settings-capability-visual"]')).not.toBeNull()
+    expect(document.body.querySelector('[data-test="chat-settings-capability-slider"]')).toBeNull()
+    expect(document.body.querySelector('[data-test="chat-settings-capability-visual"]')).toBeNull()
+    expect(document.body.querySelector('[data-test="chat-settings-reasoning-menu"]')).toBeNull()
+  })
 
+  it('limits the slider and submenu to the server-supported effort intersection', async () => {
+    const view = mountSettings({
+      reasoningEffort: 'medium',
+      modelOptions: [{
+        value: 'gpt-5.6-sol',
+        label: 'GPT-5.6 Sol',
+        supportsReasoningSlider: true,
+        supportsReasoningSummary: true,
+        supportedReasoningEfforts: ['medium', 'high'],
+      }],
+    })
+
+    await view.get('[data-test="chat-model-settings-trigger"]').trigger('click')
+    expect(panelElement('[data-test="chat-settings-capability-slider"]').getAttribute('max')).toBe('1')
     await expandAdvancedSettings()
     panelElement('[data-test="chat-settings-reasoning-menu"]').click()
     await nextTick()
     const values = Array.from(document.body.querySelectorAll<HTMLElement>('[role="menuitemradio"]'))
       .map((element) => element.dataset.value)
-    expect(values).toEqual(['low', 'medium', 'high', 'xhigh'])
+    expect(values).toEqual(['medium', 'high'])
+  })
+
+  it('does not treat the highest available non-xhigh effort as premium', async () => {
+    const view = mountSettings({
+      reasoningEffort: 'high',
+      modelOptions: [{
+        value: 'gpt-5.6-sol',
+        label: 'GPT-5.6 Sol',
+        supportsReasoningSlider: true,
+        supportsReasoningSummary: true,
+        supportedReasoningEfforts: ['medium', 'high'],
+      }],
+    })
+
+    await view.get('[data-test="chat-model-settings-trigger"]').trigger('click')
+    const visual = panelElement('[data-test="chat-settings-capability-visual"]')
+    expect(visual.classList).not.toContain(
+      'chat-model-settings-popover__range-wrap--maximum',
+    )
+    expect(visual.querySelector('[data-test="chat-settings-maximum-effects"]')).toBeNull()
   })
 
   it('keeps the root menu fixed and opens a desktop submenu to the left near the right edge', async () => {
@@ -1410,6 +1551,8 @@ describe('ChatModelSettings', () => {
       label: index === 6 ? 'GPT-5.6 Sol' : `Model ${index}`,
       description: `Description ${index}`,
       recommended: index === 6,
+      supportsReasoningSlider: true,
+      supportedReasoningEfforts: ['low', 'medium', 'high', 'xhigh'],
     }))
     const view = mountSettings({
       modelValue: 'model-6',

@@ -2,37 +2,9 @@
   <AppLayout>
     <div class="yunwu-dashboard">
       <header class="dashboard-page-header">
-        <div class="min-w-0">
-          <h1>{{ t('dashboard.workspace.greeting', { period: greetingPeriod, name: dashboardUserName }) }}</h1>
-          <p>{{ t('dashboard.workspace.welcomeDescription') }}</p>
-        </div>
-
-        <div class="dashboard-page-actions">
-          <button
-            type="button"
-            class="dashboard-toolbar-button dashboard-toolbar-button--range"
-            :aria-label="t('dashboard.openFilters')"
-            @click="openFilters"
-          >
-            <Icon name="calendar" size="sm" :stroke-width="1.7" aria-hidden="true" />
-            <span>{{ formattedDateRange }}</span>
-          </button>
-          <button
-            type="button"
-            class="dashboard-toolbar-button dashboard-toolbar-button--icon"
-            :disabled="isRefreshing"
-            :aria-label="t('dashboard.refreshDashboard')"
-            :title="t('dashboard.refreshDashboard')"
-            @click="refreshAll"
-          >
-            <Icon
-              name="refresh"
-              size="sm"
-              :stroke-width="1.7"
-              :class="{ 'animate-spin': isRefreshing }"
-              aria-hidden="true"
-            />
-          </button>
+        <h1>{{ t('dashboard.title') }}</h1>
+        <div class="dashboard-notification">
+          <DashboardNotificationPopover />
         </div>
       </header>
 
@@ -41,20 +13,28 @@
           <div v-for="index in 4" :key="index" class="dashboard-panel dashboard-loading-card">
             <span class="skeleton h-4 w-24" />
             <span class="skeleton mt-6 h-9 w-32" />
-            <span class="skeleton mt-3 h-3 w-40 max-w-full" />
+            <span v-if="index === 2 || index === 3" class="skeleton mt-3 h-3 w-40 max-w-full" />
           </div>
         </div>
-        <div class="dashboard-loading-body">
-          <div class="dashboard-panel min-h-[420px] p-5">
-            <span class="skeleton h-5 w-32" />
-            <span class="skeleton mt-8 block h-[300px] w-full" />
+        <div class="dashboard-loading-section">
+          <div class="dashboard-loading-section__header">
+            <span class="skeleton h-5 w-24" />
+            <span class="skeleton h-9 w-32" />
           </div>
-          <div class="space-y-4">
-            <div class="dashboard-panel min-h-[210px] p-5">
-              <span class="skeleton h-5 w-28" />
+          <div class="dashboard-loading-body">
+            <div class="dashboard-panel min-h-[408px] p-5">
+              <span class="skeleton h-5 w-40" />
+              <span class="skeleton mt-8 block h-[320px] w-full" />
             </div>
-            <div class="dashboard-panel min-h-[210px] p-5">
-              <span class="skeleton h-5 w-28" />
+            <div class="space-y-4">
+              <div class="dashboard-panel min-h-[228px] p-5">
+                <span class="skeleton h-5 w-44" />
+                <span class="skeleton mt-5 block h-36 w-full" />
+              </div>
+              <div class="dashboard-panel min-h-[164px] p-5">
+                <span class="skeleton h-5 w-36" />
+                <span class="skeleton mt-5 block h-16 w-full" />
+              </div>
             </div>
           </div>
         </div>
@@ -64,7 +44,7 @@
         <Icon name="exclamationCircle" size="lg" aria-hidden="true" />
         <h2>{{ t('dashboard.loadErrorTitle') }}</h2>
         <p>{{ t('dashboard.loadErrorDescription') }}</p>
-        <button type="button" class="dashboard-primary-button" @click="refreshAll">
+        <button type="button" class="dashboard-primary-button" :disabled="isRefreshing" @click="refreshAll">
           <Icon name="refresh" size="sm" aria-hidden="true" />
           {{ t('dashboard.retry') }}
         </button>
@@ -73,129 +53,49 @@
       <template v-else>
         <UserDashboardStats
           :stats="stats"
-          :balance="user?.balance || 0"
+          :balance="accountBalance"
           :plan-name="currentPlanName"
-          :plan-expires-at="primarySubscription?.expiresAt || null"
-          :plan-loading="membership.state.value === 'pending' || subscriptionsLoading"
-          :subscriptions-loaded="subscriptionsLoaded"
-          :has-active-subscription="membership.hasActiveMembership.value"
+          :quota-remaining-percent="quotaRemainingPercent"
+          :plan-loading="planLoading"
         />
 
-        <div class="dashboard-secondary-grid">
-          <UserDashboardCharts
-            class="dashboard-secondary-grid__models"
-            :loading="loadingCharts"
-            :start-date="startDate"
-            :end-date="endDate"
-            :trend="trendData"
-            :models="modelStats"
-          />
-          <UserDashboardRecentConversations
-            :conversations="chatStore.conversations"
-            :loading="loadingConversations || chatStore.hydrating || chatStore.loadingConversationPage"
-            @select="openConversation"
-          />
-          <UserDashboardQuickActions />
-        </div>
+        <UserDashboardCharts
+          :loading="loadingCharts"
+          :period="usagePeriod"
+          :trend="trendData"
+          @update:period="usagePeriod = $event"
+        />
 
-        <div class="dashboard-tertiary-grid">
-          <UserDashboardApiInfo
-            :api-base-url="apiBaseUrl"
-            :custom-endpoints="customEndpoints"
-          />
-          <UserDashboardAccountInfo
-            :display-name="dashboardUserName"
-            :email="user?.email || t('dashboard.workspace.notAvailable')"
-            :status="user?.status || 'active'"
-            :active-api-keys="stats.active_api_keys"
-            :total-api-keys="stats.total_api_keys"
-            :created-at="user?.created_at || ''"
-          />
-        </div>
+        <UserDashboardInsights :period="usagePeriod" />
       </template>
     </div>
-
-    <BaseDialog
-      :show="showFilters"
-      :title="t('dashboard.filterTitle')"
-      width="narrow"
-      @close="showFilters = false"
-    >
-      <div class="space-y-4">
-        <label class="block">
-          <span class="dashboard-filter-label">{{ t('dashboard.filterStart') }}</span>
-          <input
-            v-model="draftStartDate"
-            type="date"
-            class="dashboard-filter-input"
-            :max="draftEndDate"
-          />
-        </label>
-        <label class="block">
-          <span class="dashboard-filter-label">{{ t('dashboard.filterEnd') }}</span>
-          <input
-            v-model="draftEndDate"
-            type="date"
-            class="dashboard-filter-input"
-            :min="draftStartDate"
-            :max="today"
-          />
-        </label>
-        <label class="block">
-          <span class="dashboard-filter-label">{{ t('dashboard.filterGranularity') }}</span>
-          <select v-model="draftGranularity" class="dashboard-filter-input">
-            <option value="day">{{ t('dashboard.day') }}</option>
-            <option value="hour">{{ t('dashboard.hour') }}</option>
-          </select>
-        </label>
-      </div>
-
-      <template #footer>
-        <button type="button" class="dashboard-dialog-button" @click="showFilters = false">
-          {{ t('common.cancel') }}
-        </button>
-        <button
-          type="button"
-          class="dashboard-dialog-button dashboard-dialog-button--primary"
-          :disabled="!canApplyFilters"
-          @click="applyFilters"
-        >
-          {{ t('common.confirm') }}
-        </button>
-      </template>
-    </BaseDialog>
   </AppLayout>
 </template>
 
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { storeToRefs } from 'pinia'
 import { useI18n } from 'vue-i18n'
-import { useRouter } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
-import { useAppStore } from '@/stores/app'
 import { useUserProfileStore } from '@/stores/userProfile'
-import { useChatStore } from '@/stores/chat'
 import { useUserMembership } from '@/composables/useUserMembership'
 import { usageAPI, type UserDashboardStats as UserStatsType } from '@/api/usage'
+import subscriptionsAPI from '@/api/subscriptions'
 import AppLayout from '@/components/layout/AppLayout.vue'
-import BaseDialog from '@/components/common/BaseDialog.vue'
 import Icon from '@/components/icons/Icon.vue'
+import DashboardNotificationPopover from '@/components/user/dashboard/DashboardNotificationPopover.vue'
 import UserDashboardStats from '@/components/user/dashboard/UserDashboardStats.vue'
 import UserDashboardCharts from '@/components/user/dashboard/UserDashboardCharts.vue'
-import UserDashboardApiInfo from '@/components/user/dashboard/UserDashboardApiInfo.vue'
-import UserDashboardRecentConversations from '@/components/user/dashboard/UserDashboardRecentConversations.vue'
-import UserDashboardQuickActions from '@/components/user/dashboard/UserDashboardQuickActions.vue'
-import UserDashboardAccountInfo from '@/components/user/dashboard/UserDashboardAccountInfo.vue'
-import type { CustomEndpoint, ModelStat, TrendDataPoint } from '@/types'
-import { formatDateLocalInput } from '@/utils/format'
+import UserDashboardInsights from '@/components/user/dashboard/UserDashboardInsights.vue'
+import {
+  resolveDashboardUsagePeriod,
+  type DashboardUsagePeriod,
+} from '@/components/user/dashboard/dashboardUsage'
+import type { SubscriptionProgressInfo, SubscriptionUsageWindowProgress, TrendDataPoint } from '@/types'
 
-const { t, locale } = useI18n()
-const router = useRouter()
+const { t } = useI18n()
 const authStore = useAuthStore()
-const appStore = useAppStore()
 const userProfileStore = useUserProfileStore()
-const chatStore = useChatStore()
 const {
   profile,
   primarySubscription,
@@ -208,71 +108,54 @@ const membership = useUserMembership({
   activeSubscriptionCount,
   primarySubscription,
 })
-const user = computed(() => authStore.user)
 
 const stats = ref<UserStatsType | null>(null)
 const loading = ref(true)
 const loadingCharts = ref(false)
-const loadingConversations = ref(false)
+const quotaLoading = ref(false)
 const trendData = ref<TrendDataPoint[]>([])
-const modelStats = ref<ModelStat[]>([])
-const today = formatDateLocalInput(new Date())
-
-const startDate = ref(formatDateLocalInput(new Date(Date.now() - 6 * 86_400_000)))
-const endDate = ref(today)
-const granularity = ref<'day' | 'hour'>('day')
-const showFilters = ref(false)
-const draftStartDate = ref(startDate.value)
-const draftEndDate = ref(endDate.value)
-const draftGranularity = ref<'day' | 'hour'>(granularity.value)
+const subscriptionProgress = ref<SubscriptionProgressInfo[]>([])
+const usagePeriod = ref<DashboardUsagePeriod>('today')
 let chartsRequestId = 0
-
-const greetingPeriod = computed(() => {
-  const hour = new Date().getHours()
-  if (hour < 12) return t('dashboard.greeting.morning')
-  if (hour < 18) return t('dashboard.greeting.afternoon')
-  return t('dashboard.greeting.evening')
-})
-
-const dashboardUserName = computed(() => (
-  profile.value?.displayName
-  || user.value?.email?.split('@')[0]
-  || appStore.siteName
-))
+let quotaRequestId = 0
 
 const currentPlanName = membership.accountPlanLabel
-
-const formattedDateRange = computed(() => {
-  const start = new Date(`${startDate.value}T00:00:00`)
-  const end = new Date(`${endDate.value}T00:00:00`)
-  if (!Number.isFinite(start.getTime()) || !Number.isFinite(end.getTime())) {
-    return `${startDate.value} – ${endDate.value}`
-  }
-  const formatter = new Intl.DateTimeFormat(locale.value.startsWith('zh') ? 'zh-CN' : 'en-US', {
-    month: 'short',
-    day: 'numeric',
-  })
-  return `${formatter.format(start)} – ${formatter.format(end)}`
-})
-
-const apiBaseUrl = computed(() => (
-  appStore.cachedPublicSettings?.api_base_url
-  || appStore.apiBaseUrl
-  || (typeof window === 'undefined' ? '' : window.location.origin)
+const accountBalance = computed(() => (
+  profile.value?.availableBalance
+  ?? authStore.user?.balance
+  ?? 0
 ))
-const customEndpoints = computed<CustomEndpoint[]>(() => appStore.cachedPublicSettings?.custom_endpoints || [])
-const isRefreshing = computed(() => (
-  loading.value
-  || loadingCharts.value
-  || loadingConversations.value
+const planLoading = computed(() => (
+  membership.state.value === 'pending'
   || subscriptionsLoading.value
+  || quotaLoading.value
 ))
-const canApplyFilters = computed(() => Boolean(
-  draftStartDate.value
-  && draftEndDate.value
-  && draftStartDate.value <= draftEndDate.value
-  && draftEndDate.value <= today,
-))
+const isRefreshing = computed(() => loading.value || loadingCharts.value || quotaLoading.value)
+
+const quotaRemainingPercent = computed<number | null>(() => {
+  const subscriptionId = primarySubscription.value?.id
+  if (subscriptionId == null || membership.state.value !== 'active') return null
+  const progress = subscriptionProgress.value.find(
+    item => item.subscription.id === subscriptionId,
+  )?.progress
+  if (!progress) return null
+
+  const windows: Array<SubscriptionUsageWindowProgress | undefined> = [
+    progress.daily,
+    progress.weekly,
+    progress.monthly,
+  ]
+  const usedPercentages = windows
+    .filter((window): window is SubscriptionUsageWindowProgress => (
+      window?.state !== 'unknown'
+      && typeof window?.percentage === 'number'
+      && Number.isFinite(window.percentage)
+    ))
+    .map(window => Math.min(100, Math.max(0, Number(window.percentage))))
+
+  if (!usedPercentages.length) return null
+  return Math.max(0, 100 - Math.max(...usedPercentages))
+})
 
 async function loadStats(): Promise<void> {
   loading.value = true
@@ -287,22 +170,17 @@ async function loadStats(): Promise<void> {
 
 async function loadCharts(): Promise<void> {
   const requestId = ++chartsRequestId
+  const range = resolveDashboardUsagePeriod(usagePeriod.value)
   loadingCharts.value = true
   try {
-    const [trendResult, modelsResult] = await Promise.all([
-      usageAPI.getDashboardTrend({
-        start_date: startDate.value,
-        end_date: endDate.value,
-        granularity: granularity.value,
-      }),
-      usageAPI.getDashboardModels({
-        start_date: startDate.value,
-        end_date: endDate.value,
-      }),
-    ])
+    const result = await usageAPI.getDashboardTrend({
+      start_date: range.startDate,
+      end_date: range.endDate,
+      granularity: range.granularity,
+      timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+    })
     if (requestId !== chartsRequestId) return
-    trendData.value = trendResult.trend || []
-    modelStats.value = modelsResult.models || []
+    trendData.value = result.trend || []
   } catch (error) {
     if (requestId === chartsRequestId) {
       console.error('Failed to load dashboard charts:', error)
@@ -312,58 +190,49 @@ async function loadCharts(): Promise<void> {
   }
 }
 
-async function loadRecentConversations(): Promise<void> {
-  const userId = user.value?.id
-  if (userId === null || userId === undefined) return
-  loadingConversations.value = true
+async function loadQuotaProgress(): Promise<void> {
+  const requestId = ++quotaRequestId
+  quotaLoading.value = true
   try {
-    await chatStore.hydrate(userId)
-    if (chatStore.userId !== String(userId)) return
-    await chatStore.syncHistory()
-    if (chatStore.userId !== String(userId)) return
-    await chatStore.loadConversationPage(true)
+    const result = await subscriptionsAPI.getSubscriptionsProgress()
+    if (requestId !== quotaRequestId) return
+    subscriptionProgress.value = result
   } catch (error) {
-    console.warn('Failed to load recent conversations:', error)
+    if (requestId === quotaRequestId) {
+      subscriptionProgress.value = []
+      console.warn('Failed to load subscription quota progress:', error)
+    }
   } finally {
-    loadingConversations.value = false
+    if (requestId === quotaRequestId) quotaLoading.value = false
   }
 }
 
 async function loadDashboard(refreshProfile: boolean): Promise<void> {
-  await appStore.fetchPublicSettings()
+  if (refreshProfile) {
+    try {
+      await userProfileStore.refreshProfile()
+    } catch (error) {
+      console.warn('Failed to refresh dashboard profile:', error)
+    }
+  }
   await Promise.allSettled([
     loadStats(),
     loadCharts(),
-    ...(refreshProfile ? [userProfileStore.refreshProfile()] : []),
+    loadQuotaProgress(),
   ])
-  await loadRecentConversations()
 }
 
 async function refreshAll(): Promise<void> {
   await loadDashboard(true)
 }
 
-function openFilters(): void {
-  draftStartDate.value = startDate.value
-  draftEndDate.value = endDate.value
-  draftGranularity.value = granularity.value
-  showFilters.value = true
-}
+watch(usagePeriod, () => {
+  void loadCharts()
+})
 
-async function applyFilters(): Promise<void> {
-  if (!canApplyFilters.value) return
-  startDate.value = draftStartDate.value
-  endDate.value = draftEndDate.value
-  granularity.value = draftGranularity.value
-  showFilters.value = false
-  await loadCharts()
-}
-
-async function openConversation(id: string): Promise<void> {
-  if (!chatStore.selectConversation(id)) return
-  void chatStore.loadConversationDetail(id)
-  await router.push('/chat')
-}
+watch(() => primarySubscription.value?.id, (current, previous) => {
+  if (current !== previous) void loadQuotaProgress()
+})
 
 onMounted(() => {
   void loadDashboard(false)
@@ -371,6 +240,7 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   chartsRequestId += 1
+  quotaRequestId += 1
 })
 </script>
 
@@ -380,96 +250,39 @@ onBeforeUnmount(() => {
   width: 100%;
   min-width: 0;
   flex-direction: column;
-  gap: var(--workspace-space-6);
+  gap: var(--workspace-space-8);
   color: var(--workspace-work-text);
   background: var(--workspace-canvas);
 }
 
 .dashboard-page-header {
   display: flex;
-  min-height: 64px;
-  align-items: flex-start;
+  min-height: 44px;
+  align-items: center;
   justify-content: space-between;
   gap: var(--workspace-space-6);
 }
 
 .dashboard-page-header h1 {
-  color: var(--workspace-work-text);
-  font-size: var(--workspace-type-page-title-size);
-  font-weight: var(--workspace-type-page-title-weight);
+  color: var(--workspace-dashboard-text-strong);
+  font-size: calc(var(--workspace-type-page-title-size) + 0.125rem);
+  font-weight: 700;
   line-height: 1.2;
-  letter-spacing: -0.025em;
 }
 
-.dashboard-page-header p {
-  max-width: 65ch;
-  margin-top: 7px;
-  color: var(--workspace-work-text-muted);
-  font-size: var(--workspace-type-body-size);
-  font-weight: var(--workspace-type-body-weight);
-  line-height: 1.35rem;
-}
-
-.dashboard-page-actions {
+.dashboard-notification {
   display: flex;
-  flex: 0 0 auto;
-  align-items: center;
-  gap: 8px;
-}
-
-.dashboard-toolbar-button,
-.dashboard-primary-button,
-.dashboard-dialog-button {
-  display: inline-flex;
-  min-height: 38px;
   align-items: center;
   justify-content: center;
-  gap: 8px;
-  border: 1px solid var(--workspace-border);
-  border-radius: var(--workspace-radius-work-button);
-  color: var(--workspace-work-text-secondary);
-  background: var(--workspace-card-surface);
-  font-size: var(--workspace-type-navigation-size);
-  font-weight: var(--workspace-type-navigation-weight);
-  transition: color 140ms ease, background-color 140ms ease, border-color 140ms ease;
 }
 
-.dashboard-toolbar-button:hover:not(:disabled),
-.dashboard-dialog-button:hover:not(:disabled) {
-  border-color: var(--workspace-border-strong);
-  color: var(--workspace-work-text);
-  background: var(--workspace-surface-subtle);
-}
-
-.dashboard-toolbar-button:focus-visible,
-.dashboard-primary-button:focus-visible,
-.dashboard-dialog-button:focus-visible,
-.dashboard-filter-input:focus-visible {
-  outline: 2px solid var(--workspace-work-accent);
-  outline-offset: 2px;
-}
-
-.dashboard-toolbar-button:disabled,
-.dashboard-dialog-button:disabled {
-  cursor: wait;
-  opacity: 0.55;
-}
-
-.dashboard-toolbar-button--range {
-  padding: 0 12px;
-}
-
-.dashboard-toolbar-button--icon {
-  width: 38px;
-  padding: 0;
-}
 
 .dashboard-panel {
   min-width: 0;
-  border: 1px solid var(--workspace-border);
-  border-radius: var(--workspace-radius-work-card);
+  border: 1px solid var(--workspace-dashboard-card-border);
+  border-radius: 24px;
   background: var(--workspace-card-surface);
-  box-shadow: var(--workspace-work-shadow-card);
+  box-shadow: var(--workspace-dashboard-card-shadow);
 }
 
 .dashboard-loading,
@@ -481,15 +294,25 @@ onBeforeUnmount(() => {
 
 .dashboard-loading-metrics {
   grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--workspace-space-6);
 }
 
 .dashboard-loading-card {
-  min-height: 180px;
-  padding: var(--workspace-space-5);
+  min-height: 138px;
+  padding: var(--workspace-space-6);
+}
+
+.dashboard-loading-section__header {
+  display: flex;
+  min-height: 44px;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: var(--workspace-space-4);
 }
 
 .dashboard-loading-body {
-  grid-template-columns: minmax(0, 1.6fr) minmax(18rem, 0.75fr);
+  grid-template-columns: minmax(0, 3fr) minmax(20rem, 2fr);
+  gap: var(--workspace-space-6);
 }
 
 .dashboard-error {
@@ -508,7 +331,7 @@ onBeforeUnmount(() => {
 
 .dashboard-error h2 {
   margin-top: 16px;
-  color: var(--workspace-work-text);
+  color: var(--workspace-dashboard-text-strong);
   font-size: var(--workspace-type-navigation-size);
   font-weight: var(--workspace-type-navigation-weight);
 }
@@ -516,71 +339,42 @@ onBeforeUnmount(() => {
 .dashboard-error p {
   max-width: 30rem;
   margin-top: 8px;
-  color: var(--workspace-work-text-muted);
+  color: var(--workspace-dashboard-text-muted);
   font-size: var(--workspace-type-body-size);
   font-weight: var(--workspace-type-body-weight);
   line-height: 1.3rem;
 }
 
-.dashboard-primary-button,
-.dashboard-dialog-button--primary {
-  border-color: var(--workspace-work-accent);
-  color: var(--workspace-light-surface);
-  background: var(--workspace-work-accent);
-}
-
 .dashboard-primary-button {
+  display: inline-flex;
+  min-height: 38px;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
   margin-top: 20px;
   padding: 0 14px;
+  border: 1px solid var(--workspace-work-accent);
+  border-radius: var(--workspace-radius-work-button);
+  color: var(--workspace-light-surface);
+  background: var(--workspace-work-accent);
+  font-size: var(--workspace-type-navigation-size);
+  font-weight: var(--workspace-type-navigation-weight);
+  transition: background-color 140ms ease, border-color 140ms ease;
 }
 
-.dashboard-primary-button:hover,
-.dashboard-dialog-button--primary:hover:not(:disabled) {
+.dashboard-primary-button:hover:not(:disabled) {
   border-color: var(--workspace-work-accent-hover);
-  color: var(--workspace-light-surface);
   background: var(--workspace-work-accent-hover);
 }
 
-.dashboard-secondary-grid {
-  display: grid;
-  grid-template-columns: minmax(0, 1.55fr) minmax(18rem, 0.8fr);
-  gap: var(--workspace-space-4);
-  align-items: stretch;
+.dashboard-primary-button:focus-visible {
+  outline: 2px solid var(--workspace-work-accent);
+  outline-offset: 2px;
 }
 
-.dashboard-secondary-grid__models {
-  grid-row: span 2;
-}
-
-.dashboard-tertiary-grid {
-  display: grid;
-  grid-template-columns: minmax(0, 1.25fr) minmax(19rem, 0.75fr);
-  gap: var(--workspace-space-4);
-  align-items: stretch;
-}
-
-.dashboard-filter-label {
-  display: block;
-  margin-bottom: 6px;
-  color: var(--workspace-work-text-secondary);
-  font-size: var(--workspace-type-navigation-size);
-  font-weight: var(--workspace-type-navigation-weight);
-}
-
-.dashboard-filter-input {
-  width: 100%;
-  min-height: 40px;
-  padding: 0 12px;
-  border: 1px solid var(--workspace-border-strong);
-  border-radius: var(--workspace-radius-button);
-  color: var(--workspace-work-text);
-  background: var(--workspace-card-surface);
-  font-size: var(--workspace-type-body-size);
-  font-weight: var(--workspace-type-body-weight);
-}
-
-.dashboard-dialog-button {
-  padding: 0 14px;
+.dashboard-primary-button:disabled {
+  cursor: wait;
+  opacity: 0.55;
 }
 
 @media (max-width: 1279px) {
@@ -588,14 +382,8 @@ onBeforeUnmount(() => {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
-  .dashboard-secondary-grid,
-  .dashboard-tertiary-grid,
   .dashboard-loading-body {
     grid-template-columns: minmax(0, 1fr);
-  }
-
-  .dashboard-secondary-grid__models {
-    grid-row: auto;
   }
 }
 
@@ -604,44 +392,19 @@ onBeforeUnmount(() => {
     gap: 20px;
   }
 
-  .dashboard-page-header {
-    flex-direction: column;
-    gap: var(--workspace-space-4);
-  }
-
-  .dashboard-page-actions {
-    width: 100%;
-  }
-
-  .dashboard-toolbar-button {
+  .dashboard-primary-button {
     min-height: 44px;
-  }
-
-  .dashboard-primary-button,
-  .dashboard-dialog-button {
-    min-height: 44px;
-  }
-
-  .dashboard-toolbar-button--range {
-    min-width: 0;
-    flex: 1 1 auto;
-  }
-
-  .dashboard-toolbar-button--icon {
-    width: 44px;
   }
 }
 
-@media (max-width: 479px) {
+@media (max-width: 639px) {
   .dashboard-loading-metrics {
     grid-template-columns: minmax(0, 1fr);
   }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .dashboard-toolbar-button,
-  .dashboard-primary-button,
-  .dashboard-dialog-button {
+  .dashboard-primary-button {
     transition-duration: 0.01ms;
   }
 }
@@ -649,28 +412,17 @@ onBeforeUnmount(() => {
 :global(html.dark) .yunwu-dashboard,
 :global(html.dark) .dashboard-page-header h1,
 :global(html.dark) .dashboard-error h2 {
-  color: var(--workspace-dark-text);
+  color: var(--workspace-dashboard-text-strong);
 }
 
-:global(html.dark) .yunwu-dashboard {
-  background: var(--workspace-canvas);
-}
-
-:global(html.dark) .dashboard-page-header p,
-:global(html.dark) .dashboard-error p {
-  color: var(--workspace-dark-text-muted);
-}
-
-:global(html.dark) .dashboard-panel,
-:global(html.dark) .dashboard-toolbar-button,
-:global(html.dark) .dashboard-dialog-button,
-:global(html.dark) .dashboard-filter-input {
-  border-color: var(--workspace-border);
-  color: var(--workspace-dark-text-secondary);
+:global(html.dark) .dashboard-panel {
+  border-color: var(--workspace-dashboard-card-border);
   background: var(--workspace-card-surface);
+  box-shadow: var(--workspace-dashboard-card-shadow);
 }
 
-:global(html.dark) .dashboard-filter-label {
-  color: var(--workspace-dark-text-secondary);
+:global(html.dark) .dashboard-error p {
+  color: var(--workspace-dashboard-text-muted);
 }
+
 </style>

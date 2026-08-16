@@ -41,10 +41,15 @@ vi.mock('@/api/chat', async (importOriginal) => {
 })
 
 import { ChatAPIError } from '@/api/chat'
+import {
+  chatActivityPartKey,
+  chatActivityPartText,
+} from '@/features/chat/activity'
 import { mergeChatHistoryStates } from '@/features/chat/persistence'
 import type { ChatHistoryMutation } from '@/features/chat/persistence'
 import { MAX_CHAT_CONVERSATIONS, useChatStore } from '@/stores/chat'
 import type {
+  ChatActivity,
   ChatServerConversation,
   CreateChatConversationRequest,
 } from '@/types/chat'
@@ -120,6 +125,46 @@ function persistedChatState(
     outbox: [],
     legacyImportDecision: null,
     legacyConversationIds: [],
+    ...overrides,
+  }
+}
+
+function reasoningActivity(
+  responseId: string,
+  text = '',
+  overrides: Partial<ChatActivity> = {},
+): ChatActivity {
+  const itemId = `reasoning-${responseId}`
+  const partKey = chatActivityPartKey(responseId, itemId, 0, 0)
+  return {
+    key: responseId,
+    responseId,
+    status: 'streaming',
+    reasoningMode: 'pro',
+    reasoningEffort: 'medium',
+    startedAt: 100,
+    updatedAt: 101,
+    lastSequenceNumber: 2,
+    items: [{
+      key: JSON.stringify([responseId, itemId, 0]),
+      itemId,
+      outputIndex: 0,
+      status: 'streaming',
+      startedAt: 100,
+      updatedAt: 101,
+      lastSequenceNumber: 2,
+      parts: [{
+        key: partKey,
+        itemId,
+        outputIndex: 0,
+        summaryIndex: 0,
+        text,
+        status: 'streaming',
+        startedAt: 100,
+        updatedAt: 101,
+        lastSequenceNumber: 2,
+      }],
+    }],
     ...overrides,
   }
 }
@@ -203,7 +248,7 @@ describe('useChatStore', () => {
     expect(JSON.stringify(persistedState('202'))).toContain(second.id)
   })
 
-  it('从 v2 历史恢复附件元数据，并以 v4 schema 持久化', async () => {
+  it('从 v2 历史恢复附件元数据，并以 v5 schema 持久化', async () => {
     const conversation = {
       id: 'attachment-conversation',
       userId: 'attachment-user',
@@ -251,7 +296,7 @@ describe('useChatStore', () => {
     store.addMessage('attachment-conversation', { role: 'assistant', content: 'Done' })
     await store.flushPersistence()
     const persisted = persistedState('attachment-user')
-    expect(persisted.version).toBe(4)
+    expect(persisted.version).toBe(5)
     expect(persisted.conversations[0]?.messages[0]?.attachments).toEqual(
       store.conversations[0]?.messages[0]?.attachments,
     )
@@ -774,6 +819,39 @@ describe('useChatStore', () => {
     ).toBeUndefined()
   })
 
+  it('持久化待同步停止意图并在服务端确认后清除', async () => {
+    const store = useChatStore()
+    await store.hydrate('stop-intent-user')
+    const conversation = store.createConversation('gpt-5.6-sol')!
+    const assistant = store.addMessage(conversation.id, {
+      role: 'assistant',
+      content: 'Partial',
+      status: 'stopped',
+      attemptId: 'attempt-stop-intent',
+    })!
+
+    expect(store.updateMessage(conversation.id, assistant.id, {
+      pendingStopRequestedAt: 1_765_800_000_000,
+    })).toBe(true)
+    await store.flushPersistence()
+
+    setActivePinia(createPinia())
+    const restored = useChatStore()
+    await restored.hydrate('stop-intent-user')
+    expect(restored.activeConversation?.messages[0]?.pendingStopRequestedAt)
+      .toBe(1_765_800_000_000)
+
+    expect(restored.updateMessage(conversation.id, assistant.id, {
+      pendingStopRequestedAt: null,
+    })).toBe(true)
+    await restored.flushPersistence()
+
+    setActivePinia(createPinia())
+    const confirmed = useChatStore()
+    await confirmed.hydrate('stop-intent-user')
+    expect(confirmed.activeConversation?.messages[0]?.pendingStopRequestedAt).toBeUndefined()
+  })
+
   it('恢复时清洗数据并将遗留 streaming 消息标记为 stopped', async () => {
     persistedBuckets.set('restore-user', {
       version: 1,
@@ -828,6 +906,67 @@ describe('useChatStore', () => {
     expect(sanitized.conversations[0].messages[0].secret).toBeUndefined()
   })
 
+  it('恢复部分 reasoning Activity 文本并把开放状态标记为 disconnected', async () => {
+    const conversation = {
+      id: 'partial-activity-conversation',
+      userId: 'partial-activity-user',
+      title: 'Partial activity',
+      model: 'gpt-5',
+      messages: [{
+        id: 'partial-assistant',
+        role: 'assistant',
+        content: '',
+        createdAt: 10,
+        status: 'streaming',
+        activities: [{
+          response_id: 'resp-partial',
+          status: 'streaming',
+          reasoning_mode: 'pro',
+          reasoning_effort: 'medium',
+          started_at: 11,
+          updated_at: 12,
+          items: [{
+            item_id: 'reasoning-partial',
+            output_index: 0,
+            status: 'streaming',
+            started_at: 11,
+            updated_at: 12,
+            summary: [{
+              type: 'summary_text',
+              summary_index: 0,
+              text: 'partial safe summary',
+              status: 'streaming',
+              started_at: 11,
+              updated_at: 12,
+            }],
+          }],
+        }],
+      }],
+      createdAt: 10,
+      updatedAt: 12,
+    }
+    persistedBuckets.set(
+      'partial-activity-user',
+      persistedChatState('partial-activity-user', conversation, { version: 4 }),
+    )
+
+    const store = useChatStore()
+    await store.hydrate('partial-activity-user')
+
+    const message = store.conversations[0]?.messages[0]
+    expect(message?.status).toBe('stopped')
+    expect(message?.activities?.[0]).toMatchObject({
+      responseId: 'resp-partial',
+      status: 'disconnected',
+      items: [{
+        status: 'disconnected',
+        parts: [{ text: 'partial safe summary', status: 'disconnected' }],
+      }],
+    })
+    await store.flushPersistence()
+    expect(persistedState('partial-activity-user').version).toBe(5)
+  })
+
   it('损坏的持久化数据会被忽略且不影响后续使用', async () => {
     persistedBuckets.set('corrupt-user', 'not-a-chat-state')
 
@@ -839,6 +978,10 @@ describe('useChatStore', () => {
     expect(persistedBuckets.has('corrupt-user')).toBe(false)
     expect(store.createConversation('gpt-4.1')).not.toBeNull()
     expect(store.persistenceAvailable).toBe(true)
+    expect(store.persistenceDiagnostic).toMatchObject({
+      code: 'CHAT_PERSISTENCE_PAYLOAD_INVALID',
+      message: 'Error',
+    })
     await store.flushPersistence()
   })
 
@@ -855,6 +998,10 @@ describe('useChatStore', () => {
     expect(conversation).not.toBeNull()
     expect(store.conversations).toHaveLength(1)
     expect(store.persistenceAvailable).toBe(false)
+    expect(store.persistenceDiagnostic).toMatchObject({
+      code: expect.stringMatching(/^CHAT_PERSISTENCE_/),
+      message: expect.stringMatching(/Error$/),
+    })
   })
 
   it('首次读取瞬时失败后可通过只读探测恢复持久化状态', async () => {
@@ -972,6 +1119,194 @@ describe('useChatStore', () => {
     expect(controller.signal.aborted).toBe(false)
     expect(store.appendStreamingContent(conversation.id, assistant.id, '迟到分片')).toBe(false)
     expect(persistedState('stream-user').conversations[0].messages[0].content).toBe('你好，世界')
+  })
+
+  it('创建、增量校正并即时持久化 assistant Activity', async () => {
+    const store = useChatStore()
+    await store.hydrate('activity-user')
+    const conversation = store.createConversation('gpt-5')!
+    const assistant = store.addMessage(conversation.id, {
+      id: 'assistant-activity',
+      role: 'assistant',
+      content: '',
+      status: 'streaming',
+    })!
+    store.startStreaming(conversation.id, assistant.id)
+    await store.flushPersistence()
+
+    const activity = reasoningActivity('resp-store')
+    const partKey = activity.items[0]!.parts[0]!.key
+    expect(store.upsertMessageActivity(conversation.id, assistant.id, activity)).toBe(true)
+    expect(store.appendMessageActivityDelta(
+      conversation.id,
+      assistant.id,
+      activity.key,
+      partKey,
+      'draft',
+    )).toBe(true)
+    expect(assistant.activities?.[0]?.items[0]?.parts[0]).toMatchObject({
+      text: '',
+      streamingTextChunks: ['draft'],
+    })
+    expect(store.replaceMessageActivityText(
+      conversation.id,
+      assistant.id,
+      activity.key,
+      partKey,
+      'authoritative summary',
+    )).toBe(true)
+    expect(assistant.activities?.[0]?.items[0]?.parts[0]?.streamingTextChunks).toBeUndefined()
+    expect(store.setMessageActivityTerminal(
+      conversation.id,
+      assistant.id,
+      activity.key,
+      'completed',
+    )).toBe(true)
+    await store.flushPersistence()
+
+    expect(assistant.activities?.[0]).toMatchObject({
+      responseId: 'resp-store',
+      status: 'completed',
+      reasoningMode: 'pro',
+      items: [{ parts: [{ text: 'authoritative summary', status: 'completed' }] }],
+    })
+    const persisted = persistedState('activity-user')
+    expect(persisted.version).toBe(5)
+    expect(persisted.conversations[0]?.messages[0]?.activities).toEqual(assistant.activities)
+
+    setActivePinia(createPinia())
+    const restored = useChatStore()
+    await restored.hydrate('activity-user')
+    expect(restored.conversations[0]?.messages[0]?.activities).toEqual(assistant.activities)
+  })
+
+  it('Activity delta 以分片追加，并仅在终态一次性合并正文', async () => {
+    const store = useChatStore()
+    await store.hydrate('activity-chunk-user')
+    const conversation = store.createConversation('gpt-5')!
+    const assistant = store.addMessage(conversation.id, {
+      id: 'assistant-activity-chunks',
+      role: 'assistant',
+      content: '',
+      status: 'streaming',
+    })!
+    store.startStreaming(conversation.id, assistant.id)
+
+    const activity = reasoningActivity('resp-chunks', 'Base ')
+    const partKey = activity.items[0]!.parts[0]!.key
+    expect(store.upsertMessageActivity(conversation.id, assistant.id, activity)).toBe(true)
+    expect(store.appendMessageActivityDelta(
+      conversation.id,
+      assistant.id,
+      activity.key,
+      partKey,
+      'first ',
+    )).toBe(true)
+    expect(store.appendMessageActivityDelta(
+      conversation.id,
+      assistant.id,
+      activity.key,
+      partKey,
+      'second',
+    )).toBe(true)
+
+    const streamingPart = assistant.activities?.[0]?.items[0]?.parts[0]
+    expect(streamingPart).toMatchObject({
+      text: 'Base ',
+      streamingTextChunks: ['first ', 'second'],
+      status: 'streaming',
+    })
+    expect(chatActivityPartText(streamingPart!)).toBe('Base first second')
+
+    expect(store.setMessageActivityTerminal(
+      conversation.id,
+      assistant.id,
+      activity.key,
+      'completed',
+    )).toBe(true)
+    expect(streamingPart).toMatchObject({
+      text: 'Base first second',
+      status: 'completed',
+    })
+    expect(streamingPart?.streamingTextChunks).toBeUndefined()
+  })
+
+  it('keeps Activities isolated by conversation and assistant message during retries', async () => {
+    const store = useChatStore()
+    await store.hydrate('activity-isolation-user')
+    const firstConversation = store.createConversation('gpt-5', 'First')!
+    const secondConversation = store.createConversation('gpt-5', 'Second')!
+    const firstAssistant = store.addMessage(firstConversation.id, {
+      id: 'shared-assistant-id',
+      role: 'assistant',
+      content: '',
+      status: 'streaming',
+    })!
+    const secondAssistant = store.addMessage(secondConversation.id, {
+      id: 'shared-assistant-id',
+      role: 'assistant',
+      content: '',
+      status: 'streaming',
+    })!
+
+    const firstActivity = reasoningActivity('resp-first', 'first')
+    const secondActivity = reasoningActivity('resp-second', 'second')
+    expect(store.upsertMessageActivity(
+      firstConversation.id,
+      firstAssistant.id,
+      firstActivity,
+    )).toBe(true)
+    expect(store.upsertMessageActivity(
+      secondConversation.id,
+      secondAssistant.id,
+      secondActivity,
+    )).toBe(true)
+
+    expect(firstAssistant.activities?.map(({ responseId }) => responseId)).toEqual(['resp-first'])
+    expect(secondAssistant.activities?.map(({ responseId }) => responseId)).toEqual(['resp-second'])
+    expect(store.selectConversation(firstConversation.id)).toBe(true)
+    expect(secondAssistant.activities?.[0]?.items[0]?.parts[0]?.text).toBe('second')
+  })
+
+  it('stops the old assistant Activity before starting a retry assistant', async () => {
+    const store = useChatStore()
+    await store.hydrate('activity-retry-user')
+    const conversation = store.createConversation('gpt-5')!
+    const first = store.addMessage(conversation.id, {
+      role: 'assistant',
+      content: '',
+      status: 'streaming',
+    })!
+    const second = store.addMessage(conversation.id, {
+      role: 'assistant',
+      content: '',
+      status: 'streaming',
+    })!
+    store.startStreaming(conversation.id, first.id)
+    const firstActivity = reasoningActivity('resp-old', 'old')
+    store.upsertMessageActivity(conversation.id, first.id, firstActivity)
+
+    store.startStreaming(conversation.id, second.id)
+    const secondActivity = reasoningActivity('resp-new', 'new')
+    store.upsertMessageActivity(conversation.id, second.id, secondActivity)
+    store.upsertMessageActivity(
+      conversation.id,
+      first.id,
+      reasoningActivity('resp-late-buffer', 'late buffered summary'),
+    )
+
+    expect(first.activities?.[0]?.status).toBe('stopped')
+    expect(first.activities?.find(({ responseId }) => responseId === 'resp-late-buffer')?.status)
+      .toBe('stopped')
+    expect(store.appendMessageActivityDelta(
+      conversation.id,
+      first.id,
+      firstActivity.key,
+      firstActivity.items[0]!.parts[0]!.key,
+      ' late',
+    )).toBe(false)
+    expect(second.activities?.[0]?.items[0]?.parts[0]?.text).toBe('new')
+    store.stopStreaming()
   })
 
   it('即时保存会合并尚未到期的流式节流写入', async () => {
@@ -1114,7 +1449,7 @@ describe('useChatStore', () => {
     expect(store.outbox).toEqual([])
     expect(chatApiMocks.createChatConversation).not.toHaveBeenCalled()
     expect(persistedState('legacy-user')).toMatchObject({
-      version: 4,
+      version: 5,
       legacyImportDecision: 'pending',
       legacyConversationIds: ['legacy-conversation'],
       outbox: [],
@@ -1864,6 +2199,151 @@ describe('useChatStore', () => {
     expect(chatApiMocks.getChatAttempt).toHaveBeenCalledTimes(1)
     expect(chatApiMocks.createChatConversation).not.toHaveBeenCalled()
     expect(chatApiMocks.patchChatConversation).not.toHaveBeenCalled()
+  })
+
+  it('rejects an older server streaming Activity but accepts a server terminal snapshot', async () => {
+    const store = useChatStore()
+    await store.hydrate('activity-server-merge')
+    const conversation = store.createConversation('gpt-5')!
+    const assistant = store.addMessage(conversation.id, {
+      role: 'assistant',
+      content: 'answer',
+      status: 'streaming',
+    })!
+    store.startStreaming(conversation.id, assistant.id)
+    const local = reasoningActivity('resp-merge', 'new local stream', {
+      updatedAt: 500,
+      lastSequenceNumber: 10,
+    })
+    local.items[0]!.updatedAt = 500
+    local.items[0]!.lastSequenceNumber = 10
+    local.items[0]!.parts[0]!.updatedAt = 500
+    local.items[0]!.parts[0]!.lastSequenceNumber = 10
+    store.upsertMessageActivity(conversation.id, assistant.id, local)
+
+    const olderStreaming = reasoningActivity('resp-merge', 'old server stream', {
+      updatedAt: 50,
+      lastSequenceNumber: 2,
+    })
+    chatApiMocks.getChatConversation.mockResolvedValueOnce(serverConversation(conversation.id, {
+      headMessageId: assistant.id,
+      messageCount: 1,
+      messages: [{ ...assistant, activities: [olderStreaming] }],
+    }))
+    await store.loadConversationDetail(conversation.id)
+    let mergedAssistant = store.conversations
+      .find(({ id }) => id === conversation.id)
+      ?.messages.find(({ id }) => id === assistant.id)
+    expect(mergedAssistant?.activities?.[0]?.items[0]?.parts[0]?.text).toBe('new local stream')
+    expect(mergedAssistant?.activities?.[0]?.status).toBe('streaming')
+
+    const terminal = reasoningActivity('resp-merge', 'server final', {
+      status: 'completed',
+      updatedAt: 60,
+      completedAt: 60,
+      lastSequenceNumber: 3,
+    })
+    terminal.items[0]!.status = 'completed'
+    terminal.items[0]!.updatedAt = 60
+    terminal.items[0]!.completedAt = 60
+    terminal.items[0]!.lastSequenceNumber = 3
+    terminal.items[0]!.parts[0]!.status = 'completed'
+    terminal.items[0]!.parts[0]!.updatedAt = 60
+    terminal.items[0]!.parts[0]!.completedAt = 60
+    terminal.items[0]!.parts[0]!.lastSequenceNumber = 3
+    chatApiMocks.getChatConversation.mockResolvedValueOnce(serverConversation(conversation.id, {
+      headMessageId: assistant.id,
+      messageCount: 1,
+      messages: [{ ...assistant, activities: [terminal] }],
+    }))
+    await store.loadConversationDetail(conversation.id)
+
+    mergedAssistant = store.conversations
+      .find(({ id }) => id === conversation.id)
+      ?.messages.find(({ id }) => id === assistant.id)
+    expect(mergedAssistant?.activities?.[0]).toMatchObject({
+      status: 'completed',
+      items: [{ parts: [{ text: 'server final', status: 'completed' }] }],
+    })
+    store.stopStreaming()
+  })
+
+  it('does not let a processing history checkpoint freeze the current live Activity', async () => {
+    const store = useChatStore()
+    await store.hydrate('activity-live-checkpoint')
+    const conversation = store.createConversation('gpt-5')!
+    const assistant = store.addMessage(conversation.id, {
+      role: 'assistant',
+      content: 'live answer',
+      status: 'streaming',
+    })!
+    store.startStreaming(conversation.id, assistant.id)
+
+    const local = reasoningActivity('resp-live-checkpoint', 'new local summary', {
+      updatedAt: 500,
+      lastSequenceNumber: 10,
+    })
+    local.items[0]!.updatedAt = 500
+    local.items[0]!.lastSequenceNumber = 10
+    local.items[0]!.parts[0]!.updatedAt = 500
+    local.items[0]!.parts[0]!.lastSequenceNumber = 10
+    store.upsertMessageActivity(conversation.id, assistant.id, local)
+
+    const staleCheckpoint = reasoningActivity('resp-live-checkpoint', 'old server summary', {
+      status: 'disconnected',
+      updatedAt: 100,
+      completedAt: 100,
+      lastSequenceNumber: 3,
+    })
+    staleCheckpoint.items[0]!.status = 'disconnected'
+    staleCheckpoint.items[0]!.updatedAt = 100
+    staleCheckpoint.items[0]!.completedAt = 100
+    staleCheckpoint.items[0]!.lastSequenceNumber = 3
+    staleCheckpoint.items[0]!.parts[0]!.status = 'disconnected'
+    staleCheckpoint.items[0]!.parts[0]!.updatedAt = 100
+    staleCheckpoint.items[0]!.parts[0]!.completedAt = 100
+    staleCheckpoint.items[0]!.parts[0]!.lastSequenceNumber = 3
+    chatApiMocks.getChatConversation.mockResolvedValueOnce(serverConversation(conversation.id, {
+      headMessageId: assistant.id,
+      messageCount: 1,
+      messages: [{
+        ...assistant,
+        status: 'stopped',
+        finishReason: 'interrupted',
+        activities: [staleCheckpoint],
+      }],
+    }))
+
+    await store.loadConversationDetail(conversation.id)
+    let mergedActivity = store.conversations
+      .find(({ id }) => id === conversation.id)
+      ?.messages.find(({ id }) => id === assistant.id)
+      ?.activities?.[0]
+    expect(mergedActivity).toMatchObject({
+      status: 'streaming',
+      lastSequenceNumber: 10,
+      items: [{ parts: [{ text: 'new local summary', status: 'streaming' }] }],
+    })
+
+    const nextLocal = reasoningActivity('resp-live-checkpoint', 'newest local summary', {
+      updatedAt: 600,
+      lastSequenceNumber: 11,
+    })
+    nextLocal.items[0]!.updatedAt = 600
+    nextLocal.items[0]!.lastSequenceNumber = 11
+    nextLocal.items[0]!.parts[0]!.updatedAt = 600
+    nextLocal.items[0]!.parts[0]!.lastSequenceNumber = 11
+    expect(store.upsertMessageActivity(conversation.id, assistant.id, nextLocal)).toBe(true)
+    mergedActivity = store.conversations
+      .find(({ id }) => id === conversation.id)
+      ?.messages.find(({ id }) => id === assistant.id)
+      ?.activities?.[0]
+    expect(mergedActivity).toMatchObject({
+      status: 'streaming',
+      lastSequenceNumber: 11,
+      items: [{ parts: [{ text: 'newest local summary', status: 'streaming' }] }],
+    })
+    store.stopStreaming()
   })
 
   it('旧记录导入按 UTF-8 字节截断，完整请求保持在 2 MiB 内', async () => {

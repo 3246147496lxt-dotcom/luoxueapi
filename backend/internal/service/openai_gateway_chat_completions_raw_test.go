@@ -501,6 +501,66 @@ func TestHandleChatStreamingResponse_SilentRefusalReasoningSummaryExempt(t *test
 	require.Contains(t, rec.Body.String(), "data: [DONE]")
 }
 
+func TestHandleChatStreamingResponse_WebChatForwardsOfficialActivityWithoutReasoningContent(t *testing.T) {
+	setGinTestMode()
+
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/api/v1/chat/completions", nil)
+	SetWebChatReasoningOptions(c, WebChatReasoningOptions{
+		Mode: WebChatReasoningModePro, Effort: "medium",
+	})
+
+	upstreamBody := strings.Join([]string{
+		`data: {"type":"response.created","response":{"id":"resp_activity","model":"gpt-5.6-sol","status":"in_progress","reasoning":{"mode":"pro","effort":"medium"}},"sequence_number":0}`,
+		"",
+		`data: {"type":"response.output_item.added","output_index":0,"item":{"id":"rs_1","type":"reasoning","status":"in_progress","summary":[]},"sequence_number":1}`,
+		"",
+		`data: {"type":"response.reasoning_summary_part.added","item_id":"rs_1","output_index":0,"summary_index":0,"part":{"type":"summary_text","text":""},"sequence_number":2}`,
+		"",
+		`data: {"type":"response.reasoning_summary_text.delta","item_id":"rs_1","output_index":0,"summary_index":0,"delta":"Checking inputs","sequence_number":3}`,
+		"",
+		`data: {"type":"response.reasoning_summary_text.done","item_id":"rs_1","output_index":0,"summary_index":0,"text":"Checking inputs","sequence_number":4}`,
+		"",
+		`data: {"type":"response.reasoning_summary_part.done","item_id":"rs_1","output_index":0,"summary_index":0,"part":{"type":"summary_text","text":"Checking inputs"},"sequence_number":5}`,
+		"",
+		`data: {"type":"response.output_item.done","output_index":0,"item":{"id":"rs_1","type":"reasoning","status":"completed","summary":[{"type":"summary_text","text":"Checking inputs"}]},"sequence_number":6}`,
+		"",
+		`data: {"type":"response.output_text.delta","item_id":"msg_1","output_index":1,"content_index":0,"delta":"Final answer","sequence_number":7}`,
+		"",
+		`data: {"type":"response.completed","response":{"id":"resp_activity","model":"gpt-5.6-sol","status":"completed","usage":{"input_tokens":3,"output_tokens":4,"total_tokens":7}},"sequence_number":8}`,
+		"",
+	}, "\n")
+	resp := &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"text/event-stream"}, "x-request-id": []string{"rid_activity"}},
+		Body:       io.NopCloser(strings.NewReader(upstreamBody)),
+	}
+	svc := &OpenAIGatewayService{cfg: rawChatCompletionsTestConfig()}
+
+	result, err := svc.handleChatStreamingResponse(
+		resp,
+		c,
+		rawChatCompletionsTestAccount(),
+		"gpt-5.6-sol",
+		"gpt-5.6-sol",
+		"gpt-5.6-sol",
+		time.Now(),
+		0,
+		nil,
+	)
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	body := rec.Body.String()
+	require.Contains(t, body, `"source":"openai_responses"`)
+	require.Contains(t, body, `"eventType":"response.reasoning_summary_text.delta"`)
+	require.Contains(t, body, `"delta":"Checking inputs"`)
+	require.Contains(t, body, `"eventType":"response.completed"`)
+	require.NotContains(t, body, `"reasoning_content"`)
+	require.Contains(t, body, `"content":"Final answer"`)
+	require.Contains(t, body, "data: [DONE]")
+}
+
 func TestForwardAsRawChatCompletions_SilentRefusalNormalContentExempt(t *testing.T) {
 	setGinTestMode()
 

@@ -7,6 +7,7 @@ import personalSettings from './personalSettings'
 import desktop from './desktop'
 import quotaViewerLanding from './quotaViewerLanding'
 import skills from './skills'
+import library from './library'
 import admin from './admin/portal'
 
 export default {
@@ -19,5 +20,6 @@ export default {
   ...desktop,
   ...quotaViewerLanding,
   ...skills,
+  ...library,
   admin,
 }
