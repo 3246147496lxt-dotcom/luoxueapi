@@ -295,7 +295,6 @@ func validJPEGEnvelope(data []byte) bool {
 		if data[position] != 0xff {
 			return false
 		}
-		markerStart := position
 		for position < len(data) && data[position] == 0xff {
 			position++
 		}
@@ -332,7 +331,7 @@ func validJPEGEnvelope(data []byte) bool {
 				position++
 				continue
 			}
-			markerStart = position
+			markerStart := position
 			position++
 			for position < len(data) && data[position] == 0xff {
 				position++

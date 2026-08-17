@@ -351,7 +351,8 @@ func TestLibraryImageRenditionFollowerSurvivesLeaderCancellation(t *testing.T) {
 		libraryBlobStoreFake: libraryBlobStoreFake{files: map[string][]byte{file.StorageKey: original.Bytes()}},
 		opened:               make(chan struct{}), release: make(chan struct{}), ignoreContext: true,
 	}, nil)
-	store := service.store.(*blockingLibraryBlobStore)
+	store, ok := service.store.(*blockingLibraryBlobStore)
+	require.True(t, ok)
 	leaderCtx, cancelLeader := context.WithCancel(context.Background())
 	leaderResult := make(chan error, 1)
 	go func() {

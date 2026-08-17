@@ -238,9 +238,7 @@ func (s *ChatAttachmentService) UploadAdmitted(ctx context.Context, userID int64
 		return nil, ErrChatAttachmentUnavailable
 	}
 	if s.library != nil {
-		file, err := s.library.UploadAdmitted(ctx, userID, LibraryUpload{
-			Filename: input.Filename, DeclaredMIME: input.DeclaredMIME, Data: input.Data,
-		}, "uploaded")
+		file, err := s.library.UploadAdmitted(ctx, userID, LibraryUpload(input), "uploaded")
 		if err != nil {
 			return nil, err
 		}

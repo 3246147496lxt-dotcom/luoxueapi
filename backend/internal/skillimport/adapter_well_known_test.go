@@ -273,7 +273,7 @@ func TestWellKnownAdapterV02IgnoresExtensionFilesWhenURLExists(t *testing.T) {
 
 func TestWellKnownAdapterEnforcesSchemaVersionAndV02EntryContract(t *testing.T) {
 	tests := map[string]string{
-		"unknown schema": fmt.Sprintf(`{"$schema":"https://schemas.agentskills.io/discovery/9.9.9/schema.json","skills":[]}`),
+		"unknown schema": `{"$schema":"https://schemas.agentskills.io/discovery/9.9.9/schema.json","skills":[]}`,
 		"missing type":   fmt.Sprintf(`{"$schema":%q,"skills":[{"name":"demo","description":"Demo","url":"demo.md","digest":"sha256:%s"}]}`, wellKnownSchemaV02, strings.Repeat("0", 64)),
 		"unknown type":   fmt.Sprintf(`{"$schema":%q,"skills":[{"name":"demo","description":"Demo","type":"rar","url":"demo.rar","digest":"sha256:%s"}]}`, wellKnownSchemaV02, strings.Repeat("0", 64)),
 		"missing url":    fmt.Sprintf(`{"$schema":%q,"skills":[{"name":"demo","description":"Demo","type":"skill-md","digest":"sha256:%s"}]}`, wellKnownSchemaV02, strings.Repeat("0", 64)),

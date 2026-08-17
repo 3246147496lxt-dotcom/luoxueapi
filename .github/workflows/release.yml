@@ -289,7 +289,7 @@ jobs:
         shell: bash
         run: |
           set -Eeuo pipefail
-          go version | grep -q 'go1.26.5'
+          go version | grep -q 'go1.26.6'
           test -f internal/web/dist/index.html
           test -f internal/web/dist/admin/index.html
           test -f internal/web/dist/tutorial-docs/index.html

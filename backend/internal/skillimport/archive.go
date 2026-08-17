@@ -194,7 +194,7 @@ func ReadTarGZArtifact(raw []byte) ([]SourceFile, error) {
 				return nil, NewAdapterError("", "read tar.gz", ErrorUnsafe, fmt.Errorf("invalid TAR directory entry %q", name))
 			}
 			continue
-		case tar.TypeReg, tar.TypeRegA:
+		case tar.TypeReg:
 			if isDirectory || strings.TrimSpace(header.Linkname) != "" {
 				return nil, NewAdapterError("", "read tar.gz", ErrorUnsafe, fmt.Errorf("invalid regular TAR entry %q", name))
 			}

@@ -905,26 +905,6 @@ func safeLibraryFilename(value string) (string, error) {
 	return value, nil
 }
 
-func uniqueLibraryZipName(name string, used map[string]int) string {
-	key := strings.ToLower(name)
-	if used[key] == 0 {
-		used[key] = 1
-		return name
-	}
-	extension := filepath.Ext(name)
-	base := strings.TrimSuffix(name, extension)
-	for suffix := used[key] + 1; ; suffix++ {
-		candidate := fmt.Sprintf("%s (%d)%s", base, suffix, extension)
-		candidateKey := strings.ToLower(candidate)
-		if used[candidateKey] != 0 {
-			continue
-		}
-		used[key] = suffix
-		used[candidateKey] = 1
-		return candidate
-	}
-}
-
 func newLibraryFilePublicID() (string, error) {
 	var random [16]byte
 	if _, err := io.ReadFull(rand.Reader, random[:]); err != nil {
@@ -947,7 +927,7 @@ func validLibraryPublicID(value string) bool {
 		return false
 	}
 	for _, r := range value {
-		if !((r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '-' || r == '_') {
+		if (r < 'a' || r > 'z') && (r < 'A' || r > 'Z') && (r < '0' || r > '9') && r != '-' && r != '_' {
 			return false
 		}
 	}

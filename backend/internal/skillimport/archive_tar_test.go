@@ -32,7 +32,7 @@ func makeSourceTarGZ(t *testing.T, entries []tarFixtureEntry) []byte {
 		if header.Typeflag == 0 {
 			header.Typeflag = tar.TypeReg
 		}
-		if header.Typeflag == tar.TypeReg || header.Typeflag == tar.TypeRegA {
+		if header.Typeflag == tar.TypeReg {
 			header.Size = int64(len(entry.Data))
 		}
 		if err := tarWriter.WriteHeader(&header); err != nil {

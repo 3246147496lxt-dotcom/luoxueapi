@@ -350,7 +350,8 @@ func TestChatHistoryStopCompletionPersistsAuthenticatedIntentAndPartialActivity(
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectCommit()
 
-	repo := NewChatHistoryRepository(db).(*chatHistoryRepository)
+	repo, ok := NewChatHistoryRepository(db).(*chatHistoryRepository)
+	require.True(t, ok)
 	result, err := repo.StopCompletion(context.Background(), 42, "attempt-12345678")
 
 	require.NoError(t, err)
@@ -380,7 +381,8 @@ func TestChatHistoryStopCompletionDoesNotOverrideCompletedAttempt(t *testing.T) 
 		}).AddRow(service.ChatAttemptStatusCompleted, int64(77), nil))
 	mock.ExpectCommit()
 
-	repo := NewChatHistoryRepository(db).(*chatHistoryRepository)
+	repo, ok := NewChatHistoryRepository(db).(*chatHistoryRepository)
+	require.True(t, ok)
 	result, err := repo.StopCompletion(context.Background(), 42, "attempt-12345678")
 
 	require.NoError(t, err)
@@ -432,7 +434,8 @@ func TestChatHistoryStopCompletionCorrectsPriorDisconnectedFinalize(t *testing.T
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectCommit()
 
-	repo := NewChatHistoryRepository(db).(*chatHistoryRepository)
+	repo, ok := NewChatHistoryRepository(db).(*chatHistoryRepository)
+	require.True(t, ok)
 	result, err := repo.StopCompletion(context.Background(), 42, "attempt-12345678")
 
 	require.NoError(t, err)
