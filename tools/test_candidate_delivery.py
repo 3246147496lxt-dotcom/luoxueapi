@@ -22,6 +22,7 @@ ROOT = Path(__file__).resolve().parents[1]
 CANDIDATE_DIR = ROOT / "deploy" / "candidate"
 BUILD_SCRIPT = ROOT / "tools" / "build_candidate_image.sh"
 FORWARD_SCHEMA_SCRIPT = ROOT / "deploy" / "tests" / "candidate-forward-schema-test.sh"
+E2E_SCRIPT = ROOT / "backend" / "scripts" / "e2e-test.sh"
 CANDIDATE_COMPOSE = ROOT / "deploy" / "docker-compose.candidate-ci.yml"
 EMBED_TEST = ROOT / "backend" / "internal" / "web" / "embed_test.go"
 OBSOLETE_MARKERS = {
@@ -37,6 +38,7 @@ def candidate_sources() -> dict[Path, str]:
     paths = sorted(CANDIDATE_DIR.rglob("*")) + [
         BUILD_SCRIPT,
         FORWARD_SCHEMA_SCRIPT,
+        E2E_SCRIPT,
         CANDIDATE_COMPOSE,
     ]
     return {
@@ -51,6 +53,7 @@ class CandidateDeliveryContractTest(unittest.TestCase):
         shell_scripts = [
             BUILD_SCRIPT,
             FORWARD_SCHEMA_SCRIPT,
+            E2E_SCRIPT,
             *sorted(CANDIDATE_DIR.rglob("*.sh")),
         ]
         for script in shell_scripts:

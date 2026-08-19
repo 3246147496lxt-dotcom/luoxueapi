@@ -550,18 +550,6 @@ jobs:
           export CANDIDATE_IMAGE_REPOSITORY="ghcr.io/${registry_owner}/luoxueapi"
           export CANDIDATE_OUTPUT_FILE="$GITHUB_OUTPUT"
           ./tools/build_candidate_image.sh
-      - name: Run published immutable image smoke
-        shell: bash
-        env:
-          SMOKE_IMAGE: ${{ steps.build.outputs.immutable_image }}
-        run: bash backend/scripts/e2e-test.sh
-      - name: Verify old application startup on candidate forward schema
-        shell: bash
-        env:
-          CANDIDATE_IMAGE: ${{ steps.build.outputs.immutable_image }}
-          CANDIDATE_COMMIT: ${{ steps.build.outputs.commit }}
-          CANDIDATE_VERSION: ${{ steps.build.outputs.version }}
-        run: bash deploy/tests/candidate-forward-schema-test.sh
       - name: Write candidate build evidence
         shell: bash
         env:
@@ -596,3 +584,40 @@ jobs:
             candidate-migration-manifest.json
           retention-days: 14
           if-no-files-found: error
+
+  candidate-image-validation:
+    needs: candidate-image
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          fetch-tags: false
+          persist-credentials: false
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Pull published immutable linux/amd64 image
+        env:
+          CANDIDATE_IMAGE: ${{ needs.candidate-image.outputs.immutable_image }}
+        run: docker pull --platform linux/amd64 "$CANDIDATE_IMAGE"
+      - name: Run published immutable image smoke
+        shell: bash
+        env:
+          SMOKE_IMAGE: ${{ needs.candidate-image.outputs.immutable_image }}
+        run: bash backend/scripts/e2e-test.sh
+      - name: Verify old application startup on candidate forward schema
+        shell: bash
+        env:
+          CANDIDATE_IMAGE: ${{ needs.candidate-image.outputs.immutable_image }}
+          CANDIDATE_COMMIT: ${{ needs.candidate-image.outputs.commit }}
+          CANDIDATE_VERSION: ${{ needs.candidate-image.outputs.version }}
+        run: bash deploy/tests/candidate-forward-schema-test.sh

@@ -63,6 +63,10 @@ compose=(
 cleanup() {
   local exit_code=$?
   set +e
+  if ((exit_code != 0)); then
+    "${compose[@]}" ps --all
+    "${compose[@]}" logs --no-color --timestamps sub2api
+  fi
   if [[ "$project_name" =~ ^candidate-forward-[0-9]+-[0-9]+$ ]]; then
     "${compose[@]}" down --volumes --remove-orphans >/dev/null 2>&1
   else

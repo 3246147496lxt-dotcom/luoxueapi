@@ -128,6 +128,7 @@ class ReleaseWorkflowSecurityTest(unittest.TestCase):
             "compose-smoke",
             "golangci-lint",
             "candidate-image",
+            "candidate-image-validation",
         ]:
             self.assertRegex(BACKEND_CI, rf"(?m)^  {re.escape(job)}:$")
         for job in ["backend-security", "frontend-security"]:
@@ -170,6 +171,13 @@ class ReleaseWorkflowSecurityTest(unittest.TestCase):
         ]:
             with self.subTest(dependency=dependency):
                 self.assertRegex(candidate_job, rf"(?m)^      - {re.escape(dependency)}$")
+
+        validation_job = BACKEND_CI.split("  candidate-image-validation:", 1)[1]
+        self.assertIn("needs: candidate-image", validation_job)
+        self.assertIn("needs.candidate-image.outputs.immutable_image", validation_job)
+        self.assertIn("docker pull --platform linux/amd64", validation_job)
+        self.assertIn("backend/scripts/e2e-test.sh", validation_job)
+        self.assertIn("candidate-forward-schema-test.sh", validation_job)
 
     def test_only_release_job_has_write_permissions(self) -> None:
         self.assertEqual(RELEASE.count("contents: write"), 1)
