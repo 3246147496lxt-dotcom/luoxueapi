@@ -274,6 +274,9 @@ class CandidateDeliveryContractTest(unittest.TestCase):
             owned_tmp.mkdir()
             sentinel = test_root / "must-survive"
             sentinel.write_text("preserve", encoding="utf-8")
+            available_old_commit = subprocess.check_output(
+                ["git", "rev-parse", "HEAD"], cwd=ROOT, text=True
+            ).strip()
             env = os.environ.copy()
             env.update(
                 {
@@ -283,6 +286,7 @@ class CandidateDeliveryContractTest(unittest.TestCase):
                     + "a" * 64,
                     "CANDIDATE_COMMIT": "b" * 40,
                     "CANDIDATE_VERSION": "2.0.0-rc.5",
+                    "OLD_APPLICATION_COMMIT": available_old_commit,
                 }
             )
             result = subprocess.run(
