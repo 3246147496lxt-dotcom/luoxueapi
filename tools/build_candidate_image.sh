@@ -135,6 +135,11 @@ image_migration_set="$(docker image inspect --format '{{ index .Config.Labels "o
 version_output="$(docker run --rm --platform linux/amd64 --entrypoint /app/sub2api "$immutable_image" --version 2>&1)"
 grep -Fq -- "LuoxueAPI ${CANDIDATE_VERSION} (commit: ${CANDIDATE_COMMIT}," <<<"$version_output" || die "binary version metadata mismatch"
 
+entrypoint_version_output="$(docker run --rm --platform linux/amd64 --user sub2api \
+  "$immutable_image" --version 2>&1)"
+grep -Fq -- "LuoxueAPI ${CANDIDATE_VERSION} (commit: ${CANDIDATE_COMMIT}," \
+  <<<"$entrypoint_version_output" || die "non-root default entrypoint is not executable and readable"
+
 docker run --rm --platform linux/amd64 --entrypoint /app/sub2api \
   "$immutable_image" --migration-manifest >"$image_manifest_file"
 jq -e --argjson expected "$manifest_json" '. == $expected' "$image_manifest_file" >/dev/null || die "binary migration manifest differs from clean archive"

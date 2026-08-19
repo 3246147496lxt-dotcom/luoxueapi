@@ -162,6 +162,21 @@ class CandidateDeliveryContractTest(unittest.TestCase):
         self.assertIn(":sha-${CANDIDATE_COMMIT}", source)
         self.assertNotIn(":latest", source)
 
+    def test_runtime_entrypoint_mode_is_explicit_and_non_root_is_exercised(self) -> None:
+        for dockerfile in [
+            ROOT / "Dockerfile",
+            ROOT / "Dockerfile.goreleaser",
+            ROOT / "deploy" / "Dockerfile",
+        ]:
+            with self.subTest(dockerfile=dockerfile.relative_to(ROOT)):
+                source = dockerfile.read_text(encoding="utf-8")
+                self.assertIn("chmod 0755 /app/docker-entrypoint.sh", source)
+                self.assertNotIn("chmod +x /app/docker-entrypoint.sh", source)
+
+        build_script = BUILD_SCRIPT.read_text(encoding="utf-8")
+        self.assertIn("--user sub2api", build_script)
+        self.assertIn("non-root default entrypoint", build_script)
+
     def test_forward_schema_runtime_is_isolated_and_workers_are_disabled(self) -> None:
         script = FORWARD_SCHEMA_SCRIPT.read_text(encoding="utf-8")
         compose = CANDIDATE_COMPOSE.read_text(encoding="utf-8")
