@@ -41,6 +41,7 @@ jobs:
           python3 tools/test_release_workflow.py
           python3 tools/test_pnpm_audit_exceptions.py
           python3 tools/test_delivery_runtime_contract.py
+          python3 tools/test_candidate_delivery.py
       - name: Lint GitHub Actions workflows
         run: go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.7
 
@@ -154,6 +155,41 @@ jobs:
           path: backend/coverage-unit.out
           retention-days: 14
           if-no-files-found: error
+
+  postgresql18-integration:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ inputs.checkout_ref || github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
+        with:
+          go-version-file: backend/go.mod
+          check-latest: false
+          cache: true
+          cache-dependency-path: backend/go.sum
+      - name: Execute candidate SQL and 246-to-250 migration contract on PostgreSQL 18
+        working-directory: backend
+        env:
+          CI: 'true'
+        run: go test -tags=integration ./internal/repository -run '^TestCandidate' -count=1 -v
+
+  deployment-script-regression:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ inputs.checkout_ref || github.sha }}
+          persist-credentials: false
+      - name: Install ShellCheck
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes shellcheck
+      - name: Validate candidate delivery and cleanup contracts
+        run: python3 tools/test_candidate_delivery.py
 
   frontend:
     runs-on: ubuntu-latest
@@ -455,3 +491,108 @@ jobs:
           version: v2.9
           args: --timeout=30m
           working-directory: backend
+
+  candidate-image:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/codex/quota-viewer-macos-dmg'
+    needs:
+      - shell
+      - compose-contract
+      - release-contract
+      - test
+      - postgresql18-integration
+      - deployment-script-regression
+      - frontend
+      - quota-viewer
+      - quota-viewer-windows
+      - docs-site
+      - embedded-web
+      - compose-smoke
+      - golangci-lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      commit: ${{ steps.build.outputs.commit }}
+      version: ${{ steps.build.outputs.version }}
+      immutable_image: ${{ steps.build.outputs.immutable_image }}
+      image_digest: ${{ steps.build.outputs.image_digest }}
+      migration_count: ${{ steps.build.outputs.migration_count }}
+      migration_set_sha256: ${{ steps.build.outputs.migration_set_sha256 }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          fetch-tags: false
+          persist-credentials: false
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.repository_owner }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build, push and verify clean linux/amd64 candidate image
+        id: build
+        shell: bash
+        env:
+          CANDIDATE_COMMIT: ${{ github.sha }}
+          CANDIDATE_VERSION: 2.0.0-rc.5
+          REGISTRY_OWNER: ${{ github.repository_owner }}
+        run: |
+          set -Eeuo pipefail
+          # REGISTRY_OWNER is provided by the step environment.
+          # shellcheck disable=SC2153
+          registry_owner="$(printf '%s' "$REGISTRY_OWNER" | tr '[:upper:]' '[:lower:]')"
+          export CANDIDATE_IMAGE_REPOSITORY="ghcr.io/${registry_owner}/luoxueapi"
+          export CANDIDATE_OUTPUT_FILE="$GITHUB_OUTPUT"
+          ./tools/build_candidate_image.sh
+      - name: Run published immutable image smoke
+        shell: bash
+        env:
+          SMOKE_IMAGE: ${{ steps.build.outputs.immutable_image }}
+        run: bash backend/scripts/e2e-test.sh
+      - name: Verify old application startup on candidate forward schema
+        shell: bash
+        env:
+          CANDIDATE_IMAGE: ${{ steps.build.outputs.immutable_image }}
+          CANDIDATE_COMMIT: ${{ steps.build.outputs.commit }}
+          CANDIDATE_VERSION: ${{ steps.build.outputs.version }}
+        run: bash deploy/tests/candidate-forward-schema-test.sh
+      - name: Write candidate build evidence
+        shell: bash
+        env:
+          CANDIDATE_COMMIT: ${{ steps.build.outputs.commit }}
+          CANDIDATE_VERSION: ${{ steps.build.outputs.version }}
+          CANDIDATE_IMAGE_REF: ${{ steps.build.outputs.image_ref }}
+          CANDIDATE_IMAGE_DIGEST: ${{ steps.build.outputs.image_digest }}
+          CANDIDATE_IMMUTABLE_IMAGE: ${{ steps.build.outputs.immutable_image }}
+          MIGRATION_COUNT: ${{ steps.build.outputs.migration_count }}
+          MIGRATION_SET_SHA256: ${{ steps.build.outputs.migration_set_sha256 }}
+          CLEAN_ARCHIVE_SHA256: ${{ steps.build.outputs.clean_archive_sha256 }}
+        run: |
+          set -Eeuo pipefail
+          python3 tools/migration_manifest.py > candidate-migration-manifest.json
+          {
+            printf 'commit=%s\n' "$CANDIDATE_COMMIT"
+            printf 'version=%s\n' "$CANDIDATE_VERSION"
+            printf 'image_ref=%s\n' "$CANDIDATE_IMAGE_REF"
+            printf 'image_digest=%s\n' "$CANDIDATE_IMAGE_DIGEST"
+            printf 'immutable_image=%s\n' "$CANDIDATE_IMMUTABLE_IMAGE"
+            printf 'migration_count=%s\n' "$MIGRATION_COUNT"
+            printf 'migration_set_sha256=%s\n' "$MIGRATION_SET_SHA256"
+            printf 'clean_archive_sha256=%s\n' "$CLEAN_ARCHIVE_SHA256"
+            printf 'clean_archive_forbidden_entries=0\n'
+          } | tee candidate-build-evidence.txt >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload candidate build evidence
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: candidate-image-evidence-${{ github.sha }}
+          path: |
+            candidate-build-evidence.txt
+            candidate-migration-manifest.json
+          retention-days: 14
+          if-no-files-found: error

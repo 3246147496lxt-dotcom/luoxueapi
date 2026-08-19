@@ -5,8 +5,10 @@ package web
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"fmt"
 	"io/fs"
+	"mime"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -1217,6 +1219,67 @@ func TestEmbeddedFrontendBypassesBareVideoAPIRoutes(t *testing.T) {
 	} {
 		require.True(t, shouldBypassEmbeddedFrontend(path), "path=%s", path)
 	}
+}
+
+func TestEmbeddedFrontendServesEveryBuiltAssetExactly(t *testing.T) {
+	provider := &mockSettingsProvider{settings: map[string]string{"site_name": "Asset gate"}}
+	server, err := NewFrontendServer(provider)
+	require.NoError(t, err)
+
+	router := gin.New()
+	router.Use(func(c *gin.Context) {
+		c.Set(middleware.CSPNonceKey, "recursive-asset-gate")
+		c.Next()
+	})
+	router.Use(server.Middleware())
+
+	entrypoints := map[string]bool{
+		"index.html":               true,
+		"admin/index.html":         true,
+		"tutorial-docs/index.html": true,
+	}
+	seenEntrypoints := make(map[string]bool, len(entrypoints))
+	assetCount := 0
+
+	err = fs.WalkDir(server.distFS, ".", func(path string, entry fs.DirEntry, walkErr error) error {
+		require.NoError(t, walkErr)
+		if entry.IsDir() {
+			return nil
+		}
+		require.False(t, strings.HasPrefix(filepath.Base(path), "."),
+			"hidden build metadata must not enter the embedded bundle: %s", path)
+
+		body, readErr := fs.ReadFile(server.distFS, path)
+		require.NoError(t, readErr, path)
+		require.NotEmpty(t, body, path)
+
+		writer := httptest.NewRecorder()
+		request := httptest.NewRequest(http.MethodGet, "/"+path, nil)
+		router.ServeHTTP(writer, request)
+		require.Equal(t, http.StatusOK, writer.Code, path)
+		require.NotEmpty(t, writer.Body.Bytes(), path)
+
+		contentType, _, parseErr := mime.ParseMediaType(writer.Header().Get("Content-Type"))
+		require.NoError(t, parseErr, path)
+		if entrypoints[path] {
+			require.Equal(t, "text/html", contentType, path)
+			seenEntrypoints[path] = true
+			return nil
+		}
+
+		expectedType := mime.TypeByExtension(filepath.Ext(path))
+		require.NotEmpty(t, expectedType, "no MIME mapping for %s", path)
+		expectedType, _, parseErr = mime.ParseMediaType(expectedType)
+		require.NoError(t, parseErr, path)
+		require.NotEqual(t, "text/html", contentType, path)
+		require.Equal(t, expectedType, contentType, path)
+		require.Equal(t, sha256.Sum256(body), sha256.Sum256(writer.Body.Bytes()), path)
+		assetCount++
+		return nil
+	})
+	require.NoError(t, err)
+	require.Equal(t, entrypoints, seenEntrypoints)
+	require.Positive(t, assetCount)
 }
 
 func TestNewFrontendServer(t *testing.T) {
