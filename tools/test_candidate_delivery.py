@@ -22,6 +22,7 @@ ROOT = Path(__file__).resolve().parents[1]
 CANDIDATE_DIR = ROOT / "deploy" / "candidate"
 BUILD_SCRIPT = ROOT / "tools" / "build_candidate_image.sh"
 FORWARD_SCHEMA_SCRIPT = ROOT / "deploy" / "tests" / "candidate-forward-schema-test.sh"
+IDENTITY_FILTER = ROOT / "deploy" / "tests" / "extract-candidate-database-identity.awk"
 E2E_SCRIPT = ROOT / "backend" / "scripts" / "e2e-test.sh"
 CANDIDATE_COMPOSE = ROOT / "deploy" / "docker-compose.candidate-ci.yml"
 EMBED_TEST = ROOT / "backend" / "internal" / "web" / "embed_test.go"
@@ -189,6 +190,8 @@ class CandidateDeliveryContractTest(unittest.TestCase):
         self.assertIn("candidate-forward-", script)
         self.assertIn("Reproduce normal Git checkout readability", script)
         self.assertRegex(script, r"\(\n  umask 022\n  tar -xf")
+        self.assertIn("identity_stdout_file", script)
+        self.assertIn("extract-candidate-database-identity.awk", script)
         self.assertNotIn("docker system prune", script)
         self.assertNotIn("docker builder prune", script)
         self.assertNotIn(".Config.Env", script)
@@ -203,6 +206,39 @@ class CandidateDeliveryContractTest(unittest.TestCase):
         ]:
             with self.subTest(setting=setting):
                 self.assertIn(setting, compose)
+
+    def test_database_identity_filter_rejects_missing_or_ambiguous_json(self) -> None:
+        identity = {
+            "contract": "sub2api-database-identity/v2",
+            "database": "candidate",
+            "system_identifier": "123456789",
+            "in_recovery": False,
+        }
+        identity_line = json.dumps(identity, separators=(",", ":"), sort_keys=True)
+        progress = " Container candidate-forward-app Creating\n"
+        completed = " Container candidate-forward-app Removed\n"
+
+        result = subprocess.run(
+            ["awk", "-f", str(IDENTITY_FILTER)],
+            input=progress + identity_line + "\n" + completed,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(result.stdout), identity)
+
+        for invalid in [progress, identity_line + "\n" + identity_line + "\n"]:
+            with self.subTest(invalid=invalid):
+                rejected = subprocess.run(
+                    ["awk", "-f", str(IDENTITY_FILTER)],
+                    input=invalid,
+                    text=True,
+                    capture_output=True,
+                    check=False,
+                )
+                self.assertNotEqual(rejected.returncode, 0)
+                self.assertEqual(rejected.stdout, "")
 
     def test_failed_build_cleans_only_its_owned_temp_directory(self) -> None:
         with tempfile.TemporaryDirectory(prefix="candidate-delivery-test-") as root:

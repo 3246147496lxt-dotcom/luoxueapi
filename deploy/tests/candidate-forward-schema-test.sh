@@ -34,9 +34,11 @@ done
 
 temp_dir="$(mktemp -d "$temp_root/candidate-forward.XXXXXX")"
 identity_file="$temp_dir/database-identity.json"
+identity_stdout_file="$temp_dir/database-identity.stdout"
 archive="$temp_dir/old-source.tar"
 old_source="$temp_dir/old-source"
 touch "$identity_file"
+touch "$identity_stdout_file"
 
 export CANDIDATE_IDENTITY_FILE="$identity_file"
 export SMOKE_APP_CONTAINER_NAME="${project_name}-app"
@@ -164,8 +166,29 @@ wait_ready
 
 export SMOKE_IMAGE="$CANDIDATE_IMAGE"
 "${compose[@]}" run --rm --no-deps --entrypoint /app/sub2api sub2api \
-  --database-identity >"$identity_file"
-jq -e '.contract == "sub2api-database-identity/v2"' "$identity_file" >/dev/null
+  --database-identity >"$identity_stdout_file"
+# Docker Compose may emit one-off container lifecycle messages to stdout.
+# The binary's identity contract is one compact JSON object; require exactly
+# one such line so progress text cannot corrupt or ambiguously select evidence.
+if ! awk -f "$repo_dir/deploy/tests/extract-candidate-database-identity.awk" \
+  "$identity_stdout_file" >"$identity_file"; then
+  die "candidate database identity stdout is missing or ambiguous"
+fi
+jq -e '
+  type == "object"
+  and (keys == [
+    "contract",
+    "database",
+    "in_recovery",
+    "system_identifier"
+  ])
+  and .contract == "sub2api-database-identity/v2"
+  and ((.database | type) == "string")
+  and ((.database | length) > 0)
+  and ((.system_identifier | type) == "string")
+  and (.system_identifier | test("^[0-9]+$"))
+  and .in_recovery == false
+' "$identity_file" >/dev/null
 
 for replay in first second; do
   "${compose[@]}" run --rm --no-deps --entrypoint /app/sub2api sub2api \
