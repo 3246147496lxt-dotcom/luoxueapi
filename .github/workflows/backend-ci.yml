@@ -184,10 +184,10 @@ jobs:
         with:
           ref: ${{ inputs.checkout_ref || github.sha }}
           persist-credentials: false
-      - name: Install ShellCheck
+      - name: Verify preinstalled ShellCheck
         run: |
-          sudo apt-get update
-          sudo apt-get install --yes shellcheck
+          command -v shellcheck
+          shellcheck --version
       - name: Validate candidate delivery and cleanup contracts
         run: python3 tools/test_candidate_delivery.py
 

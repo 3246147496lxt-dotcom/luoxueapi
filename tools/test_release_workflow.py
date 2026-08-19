@@ -179,6 +179,15 @@ class ReleaseWorkflowSecurityTest(unittest.TestCase):
         self.assertIn("backend/scripts/e2e-test.sh", validation_job)
         self.assertIn("candidate-forward-schema-test.sh", validation_job)
 
+    def test_deployment_regression_uses_preinstalled_shellcheck(self) -> None:
+        deployment_job = BACKEND_CI.split(
+            "  deployment-script-regression:", 1
+        )[1].split("  frontend:", 1)[0]
+        self.assertIn("command -v shellcheck", deployment_job)
+        self.assertIn("shellcheck --version", deployment_job)
+        self.assertNotIn("apt-get", deployment_job)
+        self.assertNotIn("sudo ", deployment_job)
+
     def test_only_release_job_has_write_permissions(self) -> None:
         self.assertEqual(RELEASE.count("contents: write"), 1)
         self.assertEqual(RELEASE.count("packages: write"), 1)
