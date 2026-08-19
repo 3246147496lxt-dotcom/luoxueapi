@@ -105,7 +105,15 @@ if tar -tf "$archive" | awk '
 '; then
   die "old source archive contains an unsafe or forbidden entry"
 fi
-tar -xf "$archive" -C "$temp_dir"
+# Reproduce normal Git checkout readability for the historical source tree.
+# The surrounding runner keeps umask 077 for identities and other evidence,
+# but a 077 extraction turns tracked 100644 files into 0600 files. The old
+# Dockerfile uses `chmod +x` for its entrypoint, which would then create 0711
+# instead of the release-equivalent 0755 and fail before schema validation.
+(
+  umask 022
+  tar -xf "$archive" -C "$temp_dir"
+)
 
 docker buildx build \
   --platform linux/amd64 \

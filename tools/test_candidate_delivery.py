@@ -187,6 +187,8 @@ class CandidateDeliveryContractTest(unittest.TestCase):
         self.assertIn("for replay in first second", script)
         self.assertIn("--volumes --remove-orphans", script)
         self.assertIn("candidate-forward-", script)
+        self.assertIn("Reproduce normal Git checkout readability", script)
+        self.assertRegex(script, r"\(\n  umask 022\n  tar -xf")
         self.assertNotIn("docker system prune", script)
         self.assertNotIn("docker builder prune", script)
         self.assertNotIn(".Config.Env", script)
