@@ -36,6 +36,7 @@ jobs:
         run: |
           /bin/bash -n deploy/apple-container.sh
           /bin/bash deploy/tests/apple-container-test.sh
+          /bin/sh deploy/tests/docker-compose-security-test.sh
       - name: Check release workflow security contract
         run: |
           python3 tools/test_release_workflow.py
