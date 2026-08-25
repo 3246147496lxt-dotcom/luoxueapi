@@ -144,6 +144,18 @@ func TestBuildGrokMediaURLs(t *testing.T) {
 
 	_, err = BuildVideoURL(DefaultBaseURL, " ")
 	require.Error(t, err)
+
+	for _, requestID := range []string{".", "..", "req\x00id", "req\nid"} {
+		_, err := BuildVideoURL(DefaultBaseURL, requestID)
+		require.Error(t, err, "request ID %q must not alter the upstream path", requestID)
+	}
+	for _, requestID := range []string{"../escape", "/absolute", "https://evil.example/redirect"} {
+		videoURL, err := BuildVideoURL(DefaultBaseURL, requestID)
+		require.NoError(t, err)
+		parsed, err := url.Parse(videoURL)
+		require.NoError(t, err)
+		require.Equal(t, "api.x.ai", parsed.Host, "request ID %q must not become an absolute upstream URL", requestID)
+	}
 }
 
 func TestValidateXAIURLsRejectUntrustedOAuthAndUnsafeBaseURLsByDefault(t *testing.T) {
