@@ -1253,6 +1253,21 @@ func (h *AuthHandler) ExchangePendingOAuthCompletion(c *gin.Context) {
 		response.Success(c, payload)
 		return
 	}
+	// A pending session can have its TargetUserID populated solely because an
+	// account-creation/verification request supplied an email that already
+	// belongs to another user.  That state is only a choice/preview and does
+	// not prove ownership of the target account.  Never let an adoption decision
+	// turn that untrusted target into an OAuth identity binding.
+	//
+	// Binding is safe here only for a terminal login completion (where the
+	// identity has already been resolved to the login target) or for an
+	// explicitly initiated bind_current_user flow (whose target comes from the
+	// authenticated user's session).  Other pending states must remain a
+	// preview and keep the session unconsumed.
+	if !canIssueTokenPair && !strings.EqualFold(strings.TrimSpace(session.Intent), oauthIntentBindCurrentUser) {
+		response.Success(c, payload)
+		return
+	}
 	if !adoptionDecision.hasDecision() {
 		adoptionRequired, _ := payload["adoption_required"].(bool)
 		if adoptionRequired {
