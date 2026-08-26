@@ -242,6 +242,7 @@ func TestGatewayServiceRecordUsage_PeakRateAffectsTokenModeImageOutputTokens(t *
 	subRepo := &openAIRecordUsageSubRepoStub{}
 	svc := newGatewayRecordUsageServiceForTest(usageRepo, userRepo, subRepo)
 	svc.resolver = newOpenAITokenImageChannelPricingResolverForTest(t, groupID, "gemini-image")
+	pricingAt, peakStart, peakEnd := frozenPeakPricingWindowOutsideRecordTime()
 
 	err := svc.RecordUsage(context.Background(), &RecordUsageInput{
 		Result: &ForwardResult{
@@ -265,13 +266,14 @@ func TestGatewayServiceRecordUsage_PeakRateAffectsTokenModeImageOutputTokens(t *
 				RateMultiplier:     1.0,
 				SubscriptionType:   SubscriptionTypeSubscription,
 				PeakRateEnabled:    true,
-				PeakStart:          "00:00",
-				PeakEnd:            "23:59",
+				PeakStart:          peakStart,
+				PeakEnd:            peakEnd,
 				PeakRateMultiplier: 3.0,
 			},
 		},
-		User:    &User{ID: 602},
-		Account: &Account{ID: 702},
+		User:      &User{ID: 602},
+		Account:   &Account{ID: 702},
+		PricingAt: pricingAt,
 		Subscription: &UserSubscription{
 			ID:       subscriptionID,
 			UserID:   602,

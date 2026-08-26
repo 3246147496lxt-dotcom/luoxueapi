@@ -415,6 +415,10 @@ import {
   getDefaultVideoPreviewPrice,
 } from "./groupsImagePricing";
 import {
+  isProfitControlPlatform,
+  validateProfitControlFormState,
+} from "./groupsProfitControl";
+import {
   GROUP_EDITOR_SECTION_IDS,
   isCanonicalGroupEditorSection,
   normalizeGroupEditorSection,
@@ -1611,8 +1615,32 @@ const validateEditorBasics = async (
   return true;
 };
 
+const validateProfitControl = async (
+  mode: Exclude<GroupEditorMode, "list">,
+): Promise<boolean> => {
+  const form = mode === "create" ? createForm : editForm;
+  const errorKey = validateProfitControlFormState(form);
+  if (!errorKey) return true;
+
+  const message = t(`admin.groups.profitControl.${errorKey}`);
+  appStore.showError(message);
+  if (activeEditorSection.value !== "pricing") {
+    await router.push({
+      query: { ...route.query, section: "pricing" },
+    });
+  }
+  await nextTick();
+  const field =
+    errorKey === "bufferRangeError"
+      ? "profit-safety-buffer"
+      : "profit-min-margin";
+  document.getElementById(`${mode}-group-form-${field}`)?.focus();
+  return false;
+};
+
 const handleCreateGroup = async () => {
   if (!(await validateEditorBasics("create"))) return;
+  if (!(await validateProfitControl("create"))) return;
   submitting.value = true;
   try {
     const createPayload = serializeCreateGroupDraft(createForm, {
@@ -1878,6 +1906,7 @@ watch(
 const handleUpdateGroup = async () => {
   if (!editingGroup.value) return;
   if (!(await validateEditorBasics("edit"))) return;
+  if (!(await validateProfitControl("edit"))) return;
 
   submitting.value = true;
   try {
@@ -1988,6 +2017,11 @@ watch(
       createForm.require_oauth_only = false;
       createForm.require_privacy_set = false;
     }
+    if (!isProfitControlPlatform(newVal)) {
+      createForm.profit_control_enabled = false;
+      createForm.profit_min_margin_percent = 0;
+      createForm.profit_safety_buffer_percent = 0;
+    }
     resetDisabledBatchImagePricing(createForm);
     if (!editorLoading.value) {
       resetModelsListState(createModelsListState);
@@ -2022,6 +2056,11 @@ watch(
     if (!["openai", "antigravity", "anthropic", "gemini"].includes(newVal)) {
       editForm.require_oauth_only = false;
       editForm.require_privacy_set = false;
+    }
+    if (!isProfitControlPlatform(newVal)) {
+      editForm.profit_control_enabled = false;
+      editForm.profit_min_margin_percent = 0;
+      editForm.profit_safety_buffer_percent = 0;
     }
     resetDisabledBatchImagePricing(editForm);
     if (editingGroup.value && !editorLoading.value) {

@@ -11,6 +11,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/domain"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/antigravity"
@@ -198,6 +199,8 @@ func (h *GatewayHandler) GeminiV1BetaModels(c *gin.Context) {
 
 	setOpsRequestContext(c, modelName, stream)
 	setOpsEndpointContext(c, "", int16(service.RequestTypeFromLegacy(stream, false)))
+	pricingCtx, pricingAt := withGeminiActionTokenRequestPricing(c.Request.Context(), action)
+	c.Request = c.Request.WithContext(pricingCtx)
 
 	if decision := h.checkContentModeration(c, reqLog, apiKey, authSubject, service.ContentModerationProtocolGemini, modelName, body); decision != nil && decision.Blocked {
 		googleError(c, contentModerationStatus(decision), decision.Message)
@@ -460,8 +463,27 @@ func (h *GatewayHandler) GeminiV1BetaModels(c *gin.Context) {
 				geminiConcurrency.DecrementAccountWaitCount(c.Request.Context(), account.ID)
 				accountWaitCounted = false
 			}
-			if err := h.gatewayService.BindStickySession(c.Request.Context(), apiKey.GroupID, sessionKey, account.ID); err != nil {
-				reqLog.Warn("gemini.bind_sticky_session_failed", zap.Int64("account_id", account.ID), zap.Error(err))
+		}
+		admissionCtx := service.ContextWithSelectionProfitGate(c.Request.Context(), selection)
+		latest, vetoed, reason := h.gatewayService.GatewayProfitControlVetoLatest(admissionCtx, account)
+		if vetoed {
+			if accountReleaseFunc != nil {
+				accountReleaseFunc()
+			}
+			reqLog.Debug("gemini.account_slot_profit_vetoed", zap.Int64("account_id", account.ID), zap.String("reason", reason))
+			if fs.RecordProfitVeto(account.ID) == FailoverExhausted {
+				reqLog.Warn("gemini.profit_veto_attempts_exhausted", zap.Int("profit_veto_count", fs.ProfitVetoCount()))
+				markOpsRoutingCapacityLimited(c)
+				googleError(c, http.StatusServiceUnavailable, profitVetoExhaustedMessage)
+				return
+			}
+			continue
+		}
+		account = latest
+		selection.Account = latest
+		if selection.ProfitGateActive() || !selection.Acquired {
+			if err := h.gatewayService.BindStickySessionAfterProfitAdmission(admissionCtx, apiKey.GroupID, sessionKey, account.ID); err != nil {
+				reqLog.Warn("gemini.bind_sticky_session_after_profit_admission_failed", zap.Int64("account_id", account.ID), zap.Error(err))
 			}
 		}
 		// 账号槽位/等待计数需要在超时或断开时安全回收
@@ -546,6 +568,7 @@ func (h *GatewayHandler) GeminiV1BetaModels(c *gin.Context) {
 				User:                  apiKey.User,
 				Account:               account,
 				Subscription:          subscription,
+				PricingAt:             pricingAt,
 				InboundEndpoint:       inboundEndpoint,
 				UpstreamEndpoint:      upstreamEndpoint,
 				UserAgent:             userAgent,
@@ -572,6 +595,18 @@ func (h *GatewayHandler) GeminiV1BetaModels(c *gin.Context) {
 			zap.Int("switch_count", fs.SwitchCount),
 		)
 		return
+	}
+}
+
+func withGeminiActionTokenRequestPricing(ctx context.Context, action string) (context.Context, time.Time) {
+	switch action {
+	case "generateContent", "streamGenerateContent":
+		return service.WithGatewayTokenRequestPricing(ctx)
+	default:
+		if ctx == nil {
+			ctx = context.Background()
+		}
+		return ctx, time.Time{}
 	}
 }
 

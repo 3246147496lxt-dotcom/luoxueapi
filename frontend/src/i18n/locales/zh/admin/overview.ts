@@ -1134,6 +1134,18 @@ export default {
         peakMultiplier: '高峰倍率',
         multiplierHint: '作用于 token 计费倍率；token 计费的图片 token 同样适用，0 表示高峰 token 请求按 0 倍计费'
       },
+      profitControl: {
+        enable: '启用利润控制',
+        enabledHint: 'Token 调度仅允许“账号倍率 ≤ 请求实际下游倍率 ×（1 − 最低毛利率 − 安全缓冲）”的账号进入候选池；既有排序、粘性与熔断在合格账号间照常工作。图片和视频调度暂不参与。',
+        disabledHint: '默认关闭。未启用利润过滤时，账号倍率高于下游倍率的账号仍可能被选中。',
+        minMargin: '最低毛利率（%）',
+        minMarginHint: '输入百分比，例如 30 表示 30%。',
+        safetyBuffer: '安全缓冲（%）',
+        safetyBufferHint: '与最低毛利率相加后，从下游倍率中扣除。',
+        marginRangeError: '最低毛利率必须大于等于 0 且小于 100。',
+        bufferRangeError: '安全缓冲必须大于等于 0 且小于 100。',
+        sumTooHigh: '最低毛利率与安全缓冲之和必须小于 100%，否则将排除全部账号。'
+      },
       modelsList: {
         title: '自定义 /v1/models 模型列表',
         hint: '仅影响 /v1/models 展示结果，不影响白名单模型调用和账号调度。',

@@ -162,7 +162,8 @@ func (h *OpenAIGatewayHandler) handleGrokMedia(c *gin.Context, endpoint service.
 	if endpoint == service.GrokMediaEndpointVideoStatus {
 		sessionHash = service.GrokMediaVideoRequestSessionHash(requestID)
 	}
-	requestCtx := c.Request.Context()
+	requestCtx := service.WithOpenAIProfitControlSuppressed(c.Request.Context())
+	c.Request = c.Request.WithContext(requestCtx)
 	failedAccountIDs := make(map[int64]struct{})
 	sameAccountRetryCount := make(map[int64]int)
 	var lastFailoverErr *service.UpstreamFailoverError
@@ -238,8 +239,8 @@ func (h *OpenAIGatewayHandler) handleGrokMedia(c *gin.Context, endpoint service.
 		sessionHash = ensureOpenAIPoolModeSessionHash(sessionHash, account)
 		setOpsSelectedAccount(c, account.ID, account.Platform)
 
-		accountReleaseFunc, accountAcquired := h.acquireResponsesAccountSlot(c, apiKey.GroupID, sessionHash, selection, false, &streamStarted, reqLog)
-		if !accountAcquired {
+		accountReleaseFunc, slotResult := h.acquireResponsesAccountSlot(c, apiKey.GroupID, sessionHash, selection, false, &streamStarted, reqLog)
+		if slotResult != openAISlotAcquireOK {
 			return
 		}
 

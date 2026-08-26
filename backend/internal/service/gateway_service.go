@@ -522,6 +522,9 @@ type AccountSelectionResult struct {
 	Acquired    bool
 	ReleaseFunc func()
 	WaitPlan    *AccountWaitPlan // nil means no wait allowed
+	// profitGate carries the request-local admission threshold resolved inside
+	// the scheduler back to handlers for the post-slot terminal recheck.
+	profitGate *openAIProfitControlGate
 }
 
 // ClaudeUsage 表示Claude API返回的usage信息
@@ -853,6 +856,39 @@ func (s *GatewayService) BindStickySession(ctx context.Context, groupID *int64, 
 		return nil
 	}
 	return s.cache.SetSessionAccountID(ctx, derefGroupID(groupID), sessionHash, accountID, stickySessionTTL)
+}
+
+// bindGatewayStickySessionDuringSelection keeps the existing eager binding
+// behavior for ordinary traffic. Profit-controlled traffic binds only after
+// the post-slot terminal check so a refreshed, ineligible account cannot
+// replace a healthy sticky target.
+func (s *GatewayService) bindGatewayStickySessionDuringSelection(ctx context.Context, groupID *int64, sessionHash string, accountID int64) error {
+	if gatewayProfitControlGateActive(ctx) {
+		return nil
+	}
+	return s.BindStickySession(ctx, groupID, sessionHash, accountID)
+}
+
+// BindStickySessionAfterProfitAdmission records the terminally admitted
+// account. Under a profit gate it preserves a different pre-existing binding,
+// allowing a temporarily ineligible sticky account to become usable again
+// after its upstream rate recovers.
+func (s *GatewayService) BindStickySessionAfterProfitAdmission(ctx context.Context, groupID *int64, sessionHash string, accountID int64) error {
+	if sessionHash == "" || accountID <= 0 || s.cache == nil {
+		return nil
+	}
+	if !gatewayProfitControlGateActive(ctx) {
+		return s.BindStickySession(ctx, groupID, sessionHash, accountID)
+	}
+	existingAccountID, err := s.cache.GetSessionAccountID(ctx, derefGroupID(groupID), sessionHash)
+	if err != nil && !errors.Is(err, ErrStickySessionNotFound) {
+		slog.Warn("profit_control_sticky_binding_read_failed", "group_id", derefGroupID(groupID), "account_id", accountID, "error", err)
+		return nil
+	}
+	if existingAccountID > 0 && existingAccountID != accountID {
+		return nil
+	}
+	return s.BindStickySession(ctx, groupID, sessionHash, accountID)
 }
 
 // GetCachedSessionAccountID retrieves the account ID bound to a sticky session.

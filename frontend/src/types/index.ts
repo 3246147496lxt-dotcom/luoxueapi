@@ -562,6 +562,11 @@ export interface Group {
 }
 
 export interface AdminGroup extends Group {
+  // Profit admission policy (admin-only; decimal fractions, e.g. 0.3 = 30%).
+  profit_control_enabled: boolean
+  profit_min_margin: number
+  profit_safety_buffer: number
+
   // 模型路由配置（仅管理员可见，内部信息）
   model_routing: Record<string, number[]> | null
   model_routing_enabled: boolean
@@ -684,6 +689,9 @@ export interface CreateGroupRequest {
   peak_start?: string
   peak_end?: string
   peak_rate_multiplier?: number
+  profit_control_enabled?: boolean
+  profit_min_margin?: number
+  profit_safety_buffer?: number
   claude_code_only?: boolean
   fallback_group_id?: number | null
   fallback_group_id_on_invalid_request?: number | null
@@ -732,6 +740,9 @@ export interface UpdateGroupRequest {
   peak_start?: string
   peak_end?: string
   peak_rate_multiplier?: number
+  profit_control_enabled?: boolean
+  profit_min_margin?: number
+  profit_safety_buffer?: number
   claude_code_only?: boolean
   fallback_group_id?: number | null
   fallback_group_id_on_invalid_request?: number | null

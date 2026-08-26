@@ -3,12 +3,56 @@
 package handler
 
 import (
+	"context"
 	"net/http"
 	"testing"
 
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/stretchr/testify/require"
 )
+
+func TestWithGeminiActionTokenRequestPricing(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name       string
+		action     string
+		wantMarked bool
+	}{
+		{
+			name:       "countTokens remains outside profit gate",
+			action:     "countTokens",
+			wantMarked: false,
+		},
+		{
+			name:       "generateContent freezes pricing instant",
+			action:     "generateContent",
+			wantMarked: true,
+		},
+		{
+			name:       "streamGenerateContent freezes pricing instant",
+			action:     "streamGenerateContent",
+			wantMarked: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			ctx, pricingAt := withGeminiActionTokenRequestPricing(context.Background(), tt.action)
+			frozenPricingAt := service.GatewayTokenRequestPricingAtFromContext(ctx)
+			if tt.wantMarked {
+				require.False(t, pricingAt.IsZero())
+				require.Equal(t, pricingAt, frozenPricingAt)
+				return
+			}
+
+			require.True(t, pricingAt.IsZero())
+			require.True(t, frozenPricingAt.IsZero())
+		})
+	}
+}
 
 // TestGeminiV1BetaHandler_PlatformRoutingInvariant 文档化并验证 Handler 层的平台路由逻辑不变量
 // 该测试确保 gemini 和 antigravity 平台的路由逻辑符合预期

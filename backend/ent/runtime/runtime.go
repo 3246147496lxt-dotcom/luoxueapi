@@ -1272,6 +1272,18 @@ func init() {
 	groupDescRpmLimit := groupFields[44].Descriptor()
 	// group.DefaultRpmLimit holds the default value on creation for the rpm_limit field.
 	group.DefaultRpmLimit = groupDescRpmLimit.Default.(int)
+	// groupDescProfitControlEnabled is the schema descriptor for profit_control_enabled field.
+	groupDescProfitControlEnabled := groupFields[45].Descriptor()
+	// group.DefaultProfitControlEnabled holds the default value on creation for the profit_control_enabled field.
+	group.DefaultProfitControlEnabled = groupDescProfitControlEnabled.Default.(bool)
+	// groupDescProfitMinMargin is the schema descriptor for profit_min_margin field.
+	groupDescProfitMinMargin := groupFields[46].Descriptor()
+	// group.DefaultProfitMinMargin holds the default value on creation for the profit_min_margin field.
+	group.DefaultProfitMinMargin = groupDescProfitMinMargin.Default.(float64)
+	// groupDescProfitSafetyBuffer is the schema descriptor for profit_safety_buffer field.
+	groupDescProfitSafetyBuffer := groupFields[47].Descriptor()
+	// group.DefaultProfitSafetyBuffer holds the default value on creation for the profit_safety_buffer field.
+	group.DefaultProfitSafetyBuffer = groupDescProfitSafetyBuffer.Default.(float64)
 	idempotencyrecordMixin := schema.IdempotencyRecord{}.Mixin()
 	idempotencyrecordMixinFields0 := idempotencyrecordMixin[0].Fields()
 	_ = idempotencyrecordMixinFields0

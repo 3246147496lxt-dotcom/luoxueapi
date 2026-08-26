@@ -425,7 +425,7 @@ func (s *defaultOpenAIAccountScheduler) Select(
 			decision.SelectedAccountID = selection.Account.ID
 			decision.SelectedAccountType = selection.Account.Type
 			if req.SessionHash != "" {
-				_ = s.service.BindStickySession(ctx, req.GroupID, req.SessionHash, selection.Account.ID)
+				_ = s.service.bindOpenAIStickySessionDuringSelection(ctx, req.GroupID, req.SessionHash, selection.Account.ID)
 			}
 			return selection, decision, nil
 		}
@@ -1218,7 +1218,7 @@ func (s *defaultOpenAIAccountScheduler) tryAcquireOpenAISelectionOrderWithBudget
 			}
 		}
 		if req.SessionHash != "" && !req.PreserveStickyBinding {
-			_ = s.service.BindStickySession(ctx, req.GroupID, req.SessionHash, fresh.ID)
+			_ = s.service.bindOpenAIStickySessionDuringSelection(ctx, req.GroupID, req.SessionHash, fresh.ID)
 		}
 		return &AccountSelectionResult{
 			Account:     fresh,
@@ -1297,7 +1297,7 @@ func (s *defaultOpenAIAccountScheduler) tryFallbackToWeightedSticky(
 		}
 		if result != nil && result.Acquired {
 			if req.SessionHash != "" && !req.PreserveStickyBinding {
-				_ = s.service.BindStickySession(ctx, req.GroupID, req.SessionHash, account.ID)
+				_ = s.service.bindOpenAIStickySessionDuringSelection(ctx, req.GroupID, req.SessionHash, account.ID)
 			}
 			return &AccountSelectionResult{
 				Account:     account,
@@ -1656,6 +1656,9 @@ func (s *defaultOpenAIAccountScheduler) lookupShadowParentAccount(ctx context.Co
 
 func (s *defaultOpenAIAccountScheduler) isAccountRequestCompatible(ctx context.Context, account *Account, req OpenAIAccountScheduleRequest) bool {
 	if account == nil {
+		return false
+	}
+	if vetoed, _ := openAIProfitControlVetoReason(ctx, account); vetoed {
 		return false
 	}
 	if s != nil && s.service != nil && s.service.isOpenAIAccountRequestRuntimeBlocked(account, req.RequestedModel) {
@@ -2027,8 +2030,14 @@ func (s *OpenAIGatewayService) selectAccountWithScheduler(
 	platform string,
 	previousResponseCanMove bool,
 	useUpstreamTokenCost bool,
-) (*AccountSelectionResult, OpenAIAccountScheduleDecision, error) {
+) (selection *AccountSelectionResult, decision OpenAIAccountScheduleDecision, err error) {
 	ctx = s.withOpenAIQuotaAutoPauseContext(ctx)
+	if requiredImageCapability == "" {
+		ctx = s.withOpenAIProfitControlGate(ctx, groupID)
+	}
+	defer func() {
+		selection = attachSelectionProfitGate(ctx, selection)
+	}()
 	platform = normalizeOpenAICompatiblePlatform(platform)
 	// Priority is an inference-tier feature. Image capability requests and
 	// non-chat endpoints (embeddings, audio, alpha-search, and the image-only
@@ -2036,14 +2045,14 @@ func (s *OpenAIGatewayService) selectAccountWithScheduler(
 	preferPriority := requiredImageCapability == "" &&
 		(requiredCapability == "" || requiredCapability == OpenAIEndpointCapabilityChatCompletions) &&
 		s.preferPriorityServiceTierForScheduling(ctx, platform, requestedModel)
-	decision := OpenAIAccountScheduleDecision{}
+	decision = OpenAIAccountScheduleDecision{}
 	scheduler := s.getOpenAIAccountScheduler(ctx)
 	if scheduler == nil {
 		decision.Layer = openAIAccountScheduleLayerLoadBalance
 		if requiredTransport == OpenAIUpstreamTransportAny || requiredTransport == OpenAIUpstreamTransportHTTPSSE {
 			effectiveExcludedIDs := cloneExcludedAccountIDs(excludedIDs)
 			for {
-				selection, err := s.selectAccountWithLoadAwareness(ctx, groupID, platform, sessionHash, requestedModel, effectiveExcludedIDs, requireCompact, requiredCapability, useUpstreamTokenCost, preferPriority)
+				selection, err = s.selectAccountWithLoadAwareness(ctx, groupID, platform, sessionHash, requestedModel, effectiveExcludedIDs, requireCompact, requiredCapability, useUpstreamTokenCost, preferPriority)
 				if err != nil {
 					return nil, decision, err
 				}
@@ -2068,7 +2077,7 @@ func (s *OpenAIGatewayService) selectAccountWithScheduler(
 
 		effectiveExcludedIDs := cloneExcludedAccountIDs(excludedIDs)
 		for {
-			selection, err := s.selectAccountWithLoadAwareness(ctx, groupID, platform, sessionHash, requestedModel, effectiveExcludedIDs, requireCompact, requiredCapability, useUpstreamTokenCost, preferPriority)
+			selection, err = s.selectAccountWithLoadAwareness(ctx, groupID, platform, sessionHash, requestedModel, effectiveExcludedIDs, requireCompact, requiredCapability, useUpstreamTokenCost, preferPriority)
 			if err != nil {
 				return nil, decision, err
 			}

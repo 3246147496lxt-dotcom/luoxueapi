@@ -45,7 +45,7 @@ func TestAPIKeyService_RejectsV10AuthSnapshotWithoutModelsListConfig(t *testing.
 	}
 }
 
-func TestAPIKeyService_AuthSnapshotV16CarriesServiceTierPreference(t *testing.T) {
+func TestAPIKeyService_AuthSnapshotV17CarriesProfitControlAndServiceTierPreference(t *testing.T) {
 	groupID := int64(9)
 	svc := &APIKeyService{}
 	apiKey := &APIKey{
@@ -58,22 +58,30 @@ func TestAPIKeyService_AuthSnapshotV16CarriesServiceTierPreference(t *testing.T)
 		Purpose:               APIKeyPurposeUser,
 		ServiceTierPreference: ServiceTierPreferencePriority,
 		User:                  &User{ID: 2, Status: StatusActive, Role: RoleUser, Balance: 10},
-		Group:                 &Group{ID: groupID, Platform: PlatformOpenAI, Status: StatusActive, SubscriptionType: SubscriptionTypeStandard},
+		Group: &Group{
+			ID:                   groupID,
+			Platform:             PlatformOpenAI,
+			Status:               StatusActive,
+			SubscriptionType:     SubscriptionTypeStandard,
+			ProfitControlEnabled: true,
+			ProfitMinMargin:      0.25,
+			ProfitSafetyBuffer:   0.05,
+		},
 	}
 
 	snapshot := svc.snapshotFromAPIKey(context.Background(), apiKey)
 	if snapshot == nil {
 		t.Fatal("expected auth snapshot")
 	}
-	if snapshot.Version != 16 {
-		t.Fatalf("expected v16 auth snapshot, got %d", snapshot.Version)
+	if snapshot.Version != 17 {
+		t.Fatalf("expected v17 auth snapshot, got %d", snapshot.Version)
 	}
 	if snapshot.ServiceTierPreference != ServiceTierPreferencePriority {
 		t.Fatalf("expected priority preference in snapshot, got %q", snapshot.ServiceTierPreference)
 	}
 	roundTrip, ok, err := svc.applyAuthCacheEntry(apiKey.Key, &APIKeyAuthCacheEntry{Snapshot: snapshot})
 	if err != nil || !ok {
-		t.Fatalf("expected v16 snapshot to apply, ok=%v err=%v", ok, err)
+		t.Fatalf("expected v17 snapshot to apply, ok=%v err=%v", ok, err)
 	}
 	if roundTrip.ServiceTierPreference != ServiceTierPreferencePriority {
 		t.Fatalf("expected priority preference after round-trip, got %q", roundTrip.ServiceTierPreference)
@@ -81,13 +89,16 @@ func TestAPIKeyService_AuthSnapshotV16CarriesServiceTierPreference(t *testing.T)
 	if roundTrip.Purpose != APIKeyPurposeUser {
 		t.Fatalf("expected user purpose after round-trip, got %q", roundTrip.Purpose)
 	}
+	if roundTrip.Group == nil || !roundTrip.Group.ProfitControlEnabled || roundTrip.Group.ProfitMinMargin != 0.25 || roundTrip.Group.ProfitSafetyBuffer != 0.05 {
+		t.Fatalf("expected profit-control policy after round-trip, got %#v", roundTrip.Group)
+	}
 }
 
-func TestAPIKeyService_AuthSnapshotV15MissesAndReloads(t *testing.T) {
+func TestAPIKeyService_AuthSnapshotV16MissesAndReloads(t *testing.T) {
 	svc := &APIKeyService{}
-	apiKey, ok, err := svc.applyAuthCacheEntry("k-v15", &APIKeyAuthCacheEntry{
+	apiKey, ok, err := svc.applyAuthCacheEntry("k-v16", &APIKeyAuthCacheEntry{
 		Snapshot: &APIKeyAuthSnapshot{
-			Version:  15,
+			Version:  16,
 			APIKeyID: 1,
 			UserID:   2,
 			Status:   StatusActive,
@@ -95,7 +106,7 @@ func TestAPIKeyService_AuthSnapshotV15MissesAndReloads(t *testing.T) {
 		},
 	})
 	if err != nil || ok || apiKey != nil {
-		t.Fatalf("expected v15 snapshot miss, apiKey=%#v ok=%v err=%v", apiKey, ok, err)
+		t.Fatalf("expected v16 snapshot miss, apiKey=%#v ok=%v err=%v", apiKey, ok, err)
 	}
 }
 

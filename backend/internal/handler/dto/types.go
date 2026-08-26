@@ -161,6 +161,12 @@ type AdminGroup struct {
 	MessagesDispatchModelConfig domain.OpenAIMessagesDispatchModelConfig `json:"messages_dispatch_model_config"`
 	ModelsListConfig            domain.GroupModelsListConfig             `json:"models_list_config"`
 
+	// Profit policy is admin-only. Never add these fields to Group, which is
+	// also returned by user-facing endpoints.
+	ProfitControlEnabled bool    `json:"profit_control_enabled"`
+	ProfitMinMargin      float64 `json:"profit_min_margin"`
+	ProfitSafetyBuffer   float64 `json:"profit_safety_buffer"`
+
 	// 支持的模型系列（仅 antigravity 平台使用）
 	SupportedModelScopes    []string       `json:"supported_model_scopes"`
 	AccountGroups           []AccountGroup `json:"account_groups,omitempty"`

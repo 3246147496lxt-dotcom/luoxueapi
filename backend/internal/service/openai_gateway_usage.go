@@ -32,6 +32,9 @@ type OpenAIRecordUsageInput struct {
 	RequestPayloadHash string
 	APIKeyService      APIKeyQuotaUpdater
 	QuotaPlatform      string // user×platform quota platform resolved by the handler before async billing.
+	// PricingAt freezes the token-sale instant used by the admission gate and
+	// the peak multiplier. A zero value preserves record-time pricing.
+	PricingAt time.Time
 	// CyberBlocked 为 true 时把该用量行标记为 cyber（request_type=cyber），计费逻辑不变。
 	CyberBlocked bool
 	ChannelUsageFields
@@ -44,6 +47,9 @@ type CyberPolicyUsageInput struct {
 	APIKey       *APIKey
 	Account      *Account
 	Subscription *UserSubscription
+	// PricingAt preserves the request/turn pricing instant used by admission.
+	// A zero value keeps the legacy record-time fallback.
+	PricingAt    time.Time
 	RequestID    string
 	Model        string
 	Stream       bool
@@ -60,6 +66,33 @@ type CyberPolicyUsageInput struct {
 	ChannelUsageFields
 }
 
+func openAIRecordUsageInputFromCyberPolicy(in CyberPolicyUsageInput) *OpenAIRecordUsageInput {
+	return &OpenAIRecordUsageInput{
+		Result: &OpenAIForwardResult{
+			RequestID: in.RequestID,
+			Model:     in.Model,
+			Stream:    in.Stream,
+			Usage: OpenAIUsage{
+				InputTokens:  in.InputTokens,
+				OutputTokens: in.OutputTokens,
+			},
+		},
+		APIKey:             in.APIKey,
+		User:               in.APIKey.User,
+		Account:            in.Account,
+		Subscription:       in.Subscription,
+		PricingAt:          in.PricingAt,
+		InboundEndpoint:    in.InboundEndpoint,
+		UpstreamEndpoint:   in.UpstreamEndpoint,
+		UserAgent:          in.UserAgent,
+		IPAddress:          in.IPAddress,
+		RequestPayloadHash: in.RequestPayloadHash,
+		APIKeyService:      in.APIKeyService,
+		ChannelUsageFields: in.ChannelUsageFields,
+		CyberBlocked:       true,
+	}
+}
+
 // RecordCyberPolicyUsageLog 为被上游 cyber_policy 拒绝、未走正常 RecordUsage 的请求
 // （HTTP forward 返回错误路径）记录用量并按上游真实 token 计费，使其与 WS cyber 路径、
 // 与正常请求的计费口径统一（不再是 tokens=0 免费行）。token 取自上游 response.failed
@@ -70,30 +103,7 @@ func (s *OpenAIGatewayService) RecordCyberPolicyUsageLog(ctx context.Context, in
 	if s == nil || in.APIKey == nil || in.APIKey.User == nil || in.Account == nil || strings.TrimSpace(in.Model) == "" {
 		return nil
 	}
-	result := &OpenAIForwardResult{
-		RequestID: in.RequestID,
-		Model:     in.Model,
-		Stream:    in.Stream,
-		Usage: OpenAIUsage{
-			InputTokens:  in.InputTokens,
-			OutputTokens: in.OutputTokens,
-		},
-	}
-	if err := s.RecordUsage(ctx, &OpenAIRecordUsageInput{
-		Result:             result,
-		APIKey:             in.APIKey,
-		User:               in.APIKey.User,
-		Account:            in.Account,
-		Subscription:       in.Subscription,
-		InboundEndpoint:    in.InboundEndpoint,
-		UpstreamEndpoint:   in.UpstreamEndpoint,
-		UserAgent:          in.UserAgent,
-		IPAddress:          in.IPAddress,
-		RequestPayloadHash: in.RequestPayloadHash,
-		APIKeyService:      in.APIKeyService,
-		ChannelUsageFields: in.ChannelUsageFields,
-		CyberBlocked:       true,
-	}); err != nil {
+	if err := s.RecordUsage(ctx, openAIRecordUsageInputFromCyberPolicy(in)); err != nil {
 		logger.LegacyPrintf("service.openai_gateway", "cyber usage record failed: request_id=%s err=%v", in.RequestID, err)
 		return err
 	}
@@ -110,6 +120,13 @@ func (s *OpenAIGatewayService) ResolveUserGroupRateMultiplier(ctx context.Contex
 		resolver = newUserGroupRateResolver(nil, nil, resolveUserGroupRateCacheTTL(s.cfg), nil, "service.openai_gateway")
 	}
 	return resolver.Resolve(ctx, userID, groupID, groupDefaultMultiplier)
+}
+
+func openAIUsagePricingAt(input *OpenAIRecordUsageInput) time.Time {
+	if input != nil && !input.PricingAt.IsZero() {
+		return input.PricingAt
+	}
+	return timezone.Now()
 }
 
 // RecordUsage records usage and deducts balance
@@ -161,7 +178,7 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 	// token 倍率叠加高峰因子（token 计费含图片 token，图片按次倍率不受影响）。高峰因子按请求时刻现算，
 	// 不并入上面的 Resolve，以免污染 user:group 倍率缓存。
 	baseMultiplier := multiplier
-	multiplier, imageMultiplier := computePeakAwareMultipliers(apiKey, baseMultiplier, timezone.Now())
+	multiplier, imageMultiplier := computePeakAwareMultipliers(apiKey, baseMultiplier, openAIUsagePricingAt(input))
 	videoMultiplier := resolveVideoRateMultiplier(apiKey, baseMultiplier)
 
 	var cost *CostBreakdown

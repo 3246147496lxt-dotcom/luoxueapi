@@ -1137,6 +1137,18 @@ export default {
         peakMultiplier: 'Peak multiplier',
         multiplierHint: 'Applies to token billing multiplier; image tokens in token billing are also affected. 0 means peak token requests are billed at 0x.'
       },
+      profitControl: {
+        enable: 'Enable profit control',
+        enabledHint: 'Token scheduling only admits accounts whose account multiplier is no greater than the request\'s effective downstream multiplier × (1 − minimum margin − safety buffer). Existing ordering, stickiness, and breakers still apply among qualified accounts. Image and video scheduling are not covered.',
+        disabledHint: 'Disabled by default. Without profit filtering, an account whose multiplier exceeds the downstream multiplier may still be selected.',
+        minMargin: 'Minimum gross margin (%)',
+        minMarginHint: 'Enter a percentage; for example, 30 means 30%.',
+        safetyBuffer: 'Safety buffer (%)',
+        safetyBufferHint: 'Added to the minimum margin and deducted from the downstream multiplier.',
+        marginRangeError: 'Minimum gross margin must be at least 0 and less than 100.',
+        bufferRangeError: 'Safety buffer must be at least 0 and less than 100.',
+        sumTooHigh: 'Minimum gross margin plus safety buffer must be less than 100%, otherwise every account would be excluded.'
+      },
       modelsList: {
         title: 'Custom /v1/models Model List',
         hint: 'Only changes the /v1/models response. Whitelist model calls and account routing are unchanged.',

@@ -112,6 +112,12 @@ const (
 	FieldModelsListConfig = "models_list_config"
 	// FieldRpmLimit holds the string denoting the rpm_limit field in the database.
 	FieldRpmLimit = "rpm_limit"
+	// FieldProfitControlEnabled holds the string denoting the profit_control_enabled field in the database.
+	FieldProfitControlEnabled = "profit_control_enabled"
+	// FieldProfitMinMargin holds the string denoting the profit_min_margin field in the database.
+	FieldProfitMinMargin = "profit_min_margin"
+	// FieldProfitSafetyBuffer holds the string denoting the profit_safety_buffer field in the database.
+	FieldProfitSafetyBuffer = "profit_safety_buffer"
 	// EdgeAPIKeys holds the string denoting the api_keys edge name in mutations.
 	EdgeAPIKeys = "api_keys"
 	// EdgeRedeemCodes holds the string denoting the redeem_codes edge name in mutations.
@@ -235,6 +241,9 @@ var Columns = []string{
 	FieldMessagesDispatchModelConfig,
 	FieldModelsListConfig,
 	FieldRpmLimit,
+	FieldProfitControlEnabled,
+	FieldProfitMinMargin,
+	FieldProfitSafetyBuffer,
 }
 
 var (
@@ -344,6 +353,12 @@ var (
 	DefaultModelsListConfig domain.GroupModelsListConfig
 	// DefaultRpmLimit holds the default value on creation for the "rpm_limit" field.
 	DefaultRpmLimit int
+	// DefaultProfitControlEnabled holds the default value on creation for the "profit_control_enabled" field.
+	DefaultProfitControlEnabled bool
+	// DefaultProfitMinMargin holds the default value on creation for the "profit_min_margin" field.
+	DefaultProfitMinMargin float64
+	// DefaultProfitSafetyBuffer holds the default value on creation for the "profit_safety_buffer" field.
+	DefaultProfitSafetyBuffer float64
 )
 
 // OrderOption defines the ordering options for the Group queries.
@@ -572,6 +587,21 @@ func ByDefaultMappedModel(opts ...sql.OrderTermOption) OrderOption {
 // ByRpmLimit orders the results by the rpm_limit field.
 func ByRpmLimit(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldRpmLimit, opts...).ToFunc()
+}
+
+// ByProfitControlEnabled orders the results by the profit_control_enabled field.
+func ByProfitControlEnabled(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldProfitControlEnabled, opts...).ToFunc()
+}
+
+// ByProfitMinMargin orders the results by the profit_min_margin field.
+func ByProfitMinMargin(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldProfitMinMargin, opts...).ToFunc()
+}
+
+// ByProfitSafetyBuffer orders the results by the profit_safety_buffer field.
+func ByProfitSafetyBuffer(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldProfitSafetyBuffer, opts...).ToFunc()
 }
 
 // ByAPIKeysCount orders the results by api_keys count.

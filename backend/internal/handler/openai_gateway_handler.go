@@ -388,6 +388,7 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 	maxAccountSwitches := h.maxAccountSwitches
 	switchCount := 0
 	firstOutputTimeoutSwitchCount := 0
+	profitVetoCount := 0
 	failedAccountIDs := make(map[int64]struct{})
 	sameAccountRetryCount := make(map[int64]int)
 	var lastFailoverErr *service.UpstreamFailoverError
@@ -400,6 +401,8 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 	if imageIntent && requestPlatform == service.PlatformOpenAI {
 		requiredCapability = service.OpenAIEndpointCapabilityResponses
 	}
+	pricingCtx, pricingAt := h.gatewayService.WithOpenAIRequestPricingContext(c.Request.Context(), apiKey.GroupID)
+	c.Request = c.Request.WithContext(pricingCtx)
 
 	for {
 		// Streaming Forward intentionally detaches the upstream request so usage can
@@ -478,8 +481,15 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 		reqLog.Debug("openai.account_selected", zap.Int64("account_id", account.ID), zap.String("account_name", account.Name))
 		setOpsSelectedAccount(c, account.ID, account.Platform)
 
-		accountReleaseFunc, acquired := h.acquireResponsesAccountSlot(c, apiKey.GroupID, sessionHash, selection, reqStream, &streamStarted, reqLog)
-		if !acquired {
+		accountReleaseFunc, slotResult := h.acquireResponsesAccountSlot(c, apiKey.GroupID, sessionHash, selection, reqStream, &streamStarted, reqLog)
+		if slotResult == openAISlotAcquireProfitVetoed {
+			if !recordOpenAIProfitVeto(failedAccountIDs, account.ID, &profitVetoCount) {
+				h.handleOpenAIProfitVetoExhausted(c, streamStarted, reqLog, profitVetoCount)
+				return
+			}
+			continue
+		}
+		if slotResult != openAISlotAcquireOK {
 			return
 		}
 
@@ -538,6 +548,7 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 					User:               apiKey.User,
 					Account:            account,
 					Subscription:       subscription,
+					PricingAt:          pricingAt,
 					InboundEndpoint:    inboundEndpoint,
 					UpstreamEndpoint:   usageUpstreamEndpoint,
 					UserAgent:          userAgent,
@@ -988,11 +999,14 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 
 	maxAccountSwitches := h.maxAccountSwitches
 	switchCount := 0
+	profitVetoCount := 0
 	failedAccountIDs := make(map[int64]struct{})
 	sameAccountRetryCount := make(map[int64]int)
 	var lastFailoverErr *service.UpstreamFailoverError
 	var oauth429FailoverState service.OpenAIOAuth429FailoverState
 	effectiveMappedModel := preferredMappedModel
+	msgPricingCtx, pricingAt := h.gatewayService.WithOpenAIRequestPricingContext(c.Request.Context(), apiKey.GroupID)
+	c.Request = c.Request.WithContext(msgPricingCtx)
 
 	for {
 		if failoverClientGone(c) {
@@ -1058,8 +1072,15 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 		_ = scheduleDecision
 		setOpsSelectedAccount(c, account.ID, account.Platform)
 
-		accountReleaseFunc, acquired := h.acquireResponsesAccountSlot(c, apiKey.GroupID, sessionHash, selection, reqStream, &streamStarted, reqLog)
-		if !acquired {
+		accountReleaseFunc, slotResult := h.acquireResponsesAccountSlot(c, apiKey.GroupID, sessionHash, selection, reqStream, &streamStarted, reqLog)
+		if slotResult == openAISlotAcquireProfitVetoed {
+			if !recordOpenAIProfitVeto(failedAccountIDs, account.ID, &profitVetoCount) {
+				h.handleOpenAIProfitVetoExhausted(c, streamStarted, reqLog, profitVetoCount)
+				return
+			}
+			continue
+		}
+		if slotResult != openAISlotAcquireOK {
 			return
 		}
 
@@ -1119,6 +1140,7 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 					User:               apiKey.User,
 					Account:            account,
 					Subscription:       subscription,
+					PricingAt:          pricingAt,
 					InboundEndpoint:    inboundEndpoint,
 					UpstreamEndpoint:   usageUpstreamEndpoint,
 					UserAgent:          userAgent,
@@ -1398,6 +1420,26 @@ func (h *OpenAIGatewayHandler) acquireResponsesUserSlot(
 	return wrapGatewayRelease(ctx, userReleaseFunc), true
 }
 
+type openAISlotAcquireResult int
+
+const (
+	openAISlotAcquireOK openAISlotAcquireResult = iota
+	openAISlotAcquireFailed
+	openAISlotAcquireProfitVetoed
+)
+
+func recordOpenAIProfitVeto(failedAccountIDs map[int64]struct{}, accountID int64, vetoCount *int) bool {
+	failedAccountIDs[accountID] = struct{}{}
+	*vetoCount++
+	return *vetoCount < maxProfitVetoAttempts
+}
+
+func (h *OpenAIGatewayHandler) handleOpenAIProfitVetoExhausted(c *gin.Context, streamStarted bool, reqLog *zap.Logger, vetoCount int) {
+	reqLog.Warn("openai.profit_veto_attempts_exhausted", zap.Int("profit_veto_count", vetoCount))
+	markOpsRoutingCapacityLimited(c)
+	h.handleStreamingAwareError(c, http.StatusServiceUnavailable, "api_error", profitVetoExhaustedMessage, streamStarted)
+}
+
 func (h *OpenAIGatewayHandler) acquireResponsesAccountSlot(
 	c *gin.Context,
 	groupID *int64,
@@ -1406,22 +1448,40 @@ func (h *OpenAIGatewayHandler) acquireResponsesAccountSlot(
 	reqStream bool,
 	streamStarted *bool,
 	reqLog *zap.Logger,
-) (func(), bool) {
+) (func(), openAISlotAcquireResult) {
 	if selection == nil || selection.Account == nil {
 		markOpsRoutingCapacityLimited(c)
 		h.handleStreamingAwareError(c, http.StatusServiceUnavailable, "api_error", "No available accounts", *streamStarted)
-		return nil, false
+		return nil, openAISlotAcquireFailed
 	}
 
-	ctx := c.Request.Context()
+	ctx := service.ContextWithSelectionProfitGate(c.Request.Context(), selection)
 	account := selection.Account
 	if selection.Acquired {
-		return wrapGatewayRelease(ctx, selection.ReleaseFunc), true
+		latest, vetoed, reason := h.gatewayService.ProfitControlVetoLatest(ctx, account)
+		if vetoed {
+			if selection.ReleaseFunc != nil {
+				selection.ReleaseFunc()
+			}
+			reqLog.Debug("openai.account_slot_profit_vetoed", zap.Int64("account_id", account.ID), zap.String("reason", reason))
+			return nil, openAISlotAcquireProfitVetoed
+		}
+		account = latest
+		selection.Account = latest
+		// Ungated acquired selections already applied the scheduler's sticky
+		// policy (including PreserveStickyBinding). Only a gated selection
+		// deferred that write until this terminal admission check.
+		if selection.ProfitGateActive() {
+			if err := h.gatewayService.BindStickySessionAfterProfitAdmission(ctx, groupID, sessionHash, account.ID); err != nil {
+				reqLog.Warn("openai.bind_sticky_session_after_profit_admission_failed", zap.Int64("account_id", account.ID), zap.Error(err))
+			}
+		}
+		return wrapGatewayRelease(ctx, selection.ReleaseFunc), openAISlotAcquireOK
 	}
 	if selection.WaitPlan == nil {
 		markOpsRoutingCapacityLimited(c)
 		h.handleStreamingAwareError(c, http.StatusServiceUnavailable, "api_error", "No available accounts", *streamStarted)
-		return nil, false
+		return nil, openAISlotAcquireFailed
 	}
 
 	fastReleaseFunc, fastAcquired, err := h.concurrencyHelper.TryAcquireAccountSlot(
@@ -1432,13 +1492,23 @@ func (h *OpenAIGatewayHandler) acquireResponsesAccountSlot(
 	if err != nil {
 		reqLog.Warn("openai.account_slot_quick_acquire_failed", zap.Int64("account_id", account.ID), zap.Error(err))
 		h.handleConcurrencyError(c, err, "account", *streamStarted)
-		return nil, false
+		return nil, openAISlotAcquireFailed
 	}
 	if fastAcquired {
-		if err := h.gatewayService.BindStickySession(ctx, groupID, sessionHash, account.ID); err != nil {
-			reqLog.Warn("openai.bind_sticky_session_failed", zap.Int64("account_id", account.ID), zap.Error(err))
+		latest, vetoed, reason := h.gatewayService.ProfitControlVetoLatest(ctx, account)
+		if vetoed {
+			if fastReleaseFunc != nil {
+				fastReleaseFunc()
+			}
+			reqLog.Debug("openai.account_slot_profit_vetoed", zap.Int64("account_id", account.ID), zap.String("reason", reason))
+			return nil, openAISlotAcquireProfitVetoed
 		}
-		return wrapGatewayRelease(ctx, fastReleaseFunc), true
+		account = latest
+		selection.Account = latest
+		if err := h.gatewayService.BindStickySessionAfterProfitAdmission(ctx, groupID, sessionHash, account.ID); err != nil {
+			reqLog.Warn("openai.bind_sticky_session_after_profit_admission_failed", zap.Int64("account_id", account.ID), zap.Error(err))
+		}
+		return wrapGatewayRelease(ctx, fastReleaseFunc), openAISlotAcquireOK
 	}
 
 	canWait, waitErr := h.concurrencyHelper.IncrementAccountWaitCount(ctx, account.ID, selection.WaitPlan.MaxWaiting)
@@ -1450,7 +1520,7 @@ func (h *OpenAIGatewayHandler) acquireResponsesAccountSlot(
 			zap.Int("max_waiting", selection.WaitPlan.MaxWaiting),
 		)
 		h.handleStreamingAwareError(c, http.StatusTooManyRequests, "rate_limit_error", "Too many pending requests, please retry later", *streamStarted)
-		return nil, false
+		return nil, openAISlotAcquireFailed
 	}
 
 	accountWaitCounted := waitErr == nil && canWait
@@ -1473,15 +1543,25 @@ func (h *OpenAIGatewayHandler) acquireResponsesAccountSlot(
 	if err != nil {
 		reqLog.Warn("openai.account_slot_acquire_failed", zap.Int64("account_id", account.ID), zap.Error(err))
 		h.handleConcurrencyError(c, err, "account", *streamStarted)
-		return nil, false
+		return nil, openAISlotAcquireFailed
 	}
 
 	// Slot acquired: no longer waiting in queue.
 	releaseWait()
-	if err := h.gatewayService.BindStickySession(ctx, groupID, sessionHash, account.ID); err != nil {
-		reqLog.Warn("openai.bind_sticky_session_failed", zap.Int64("account_id", account.ID), zap.Error(err))
+	latest, vetoed, reason := h.gatewayService.ProfitControlVetoLatest(ctx, account)
+	if vetoed {
+		if accountReleaseFunc != nil {
+			accountReleaseFunc()
+		}
+		reqLog.Debug("openai.account_slot_profit_vetoed", zap.Int64("account_id", account.ID), zap.String("reason", reason))
+		return nil, openAISlotAcquireProfitVetoed
 	}
-	return wrapGatewayRelease(ctx, accountReleaseFunc), true
+	account = latest
+	selection.Account = latest
+	if err := h.gatewayService.BindStickySessionAfterProfitAdmission(ctx, groupID, sessionHash, account.ID); err != nil {
+		reqLog.Warn("openai.bind_sticky_session_after_profit_admission_failed", zap.Int64("account_id", account.ID), zap.Error(err))
+	}
+	return wrapGatewayRelease(ctx, accountReleaseFunc), openAISlotAcquireOK
 }
 
 // ResponsesWebSocket handles OpenAI Responses API WebSocket ingress endpoint
@@ -1717,6 +1797,7 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 	)
 	maxAccountSwitches := h.maxAccountSwitches
 	switchCount := 0
+	profitVetoCount := 0
 	failedAccountIDs := make(map[int64]struct{})
 	var lastFailoverErr *service.UpstreamFailoverError
 	var oauth429FailoverState service.OpenAIOAuth429FailoverState
@@ -1768,6 +1849,7 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 	if imageIntent && requestPlatform == service.PlatformOpenAI {
 		requiredCapability = service.OpenAIEndpointCapabilityResponses
 	}
+	ctx, _ = h.gatewayService.WithOpenAIRequestPricingContext(ctx, apiKey.GroupID)
 
 	for {
 		if ctx.Err() != nil {
@@ -1839,9 +1921,26 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 			}
 			accountReleaseFunc = fastReleaseFunc
 		}
+		admissionCtx := service.ContextWithSelectionProfitGate(ctx, selection)
+		latest, vetoed, reason := h.gatewayService.ProfitControlVetoLatest(admissionCtx, account)
+		if vetoed {
+			if accountReleaseFunc != nil {
+				accountReleaseFunc()
+			}
+			reqLog.Debug("openai.websocket_account_slot_profit_vetoed", zap.Int64("account_id", account.ID), zap.String("reason", reason))
+			if !recordOpenAIProfitVeto(failedAccountIDs, account.ID, &profitVetoCount) {
+				reqLog.Warn("openai.websocket_profit_veto_attempts_exhausted", zap.Int("profit_veto_count", profitVetoCount))
+				closeOpenAIClientWS(wsConn, coderws.StatusTryAgainLater, "no available account")
+				return
+			}
+			continue
+		}
+		account = latest
+		selection.Account = latest
+		ctx = admissionCtx
 		currentAccountRelease = wrapReleaseOnDone(ctx, accountReleaseFunc)
-		if err := h.gatewayService.BindStickySession(ctx, apiKey.GroupID, sessionHash, account.ID); err != nil {
-			reqLog.Warn("openai.websocket_bind_sticky_session_failed", zap.Int64("account_id", account.ID), zap.Error(err))
+		if err := h.gatewayService.BindStickySessionAfterProfitAdmission(ctx, apiKey.GroupID, sessionHash, account.ID); err != nil {
+			reqLog.Warn("openai.websocket_bind_sticky_session_after_profit_admission_failed", zap.Int64("account_id", account.ID), zap.Error(err))
 		}
 
 		token, _, err := h.gatewayService.GetRequestCredential(ctx, c, account)
@@ -1869,6 +1968,7 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 		)
 
 		var requestPayloadHash string
+		var turnPricingAt atomic.Pointer[time.Time]
 		hooks := &service.OpenAIWSIngressHooks{
 			InitialRequestModel: reqModel,
 			BeforeRequest: func(turn int, payload []byte, originalModel string) error {
@@ -1892,6 +1992,16 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 				return nil
 			},
 			BeforeTurn: func(turn int) error {
+				turnCtx, turnAt := h.gatewayService.WithOpenAITurnPricingContext(ctx, apiKey.GroupID)
+				if _, vetoed, reason := h.gatewayService.ProfitControlVetoLatest(turnCtx, account); vetoed {
+					reqLog.Info("openai.websocket_turn_profit_vetoed",
+						zap.Int("turn", turn),
+						zap.Int64("account_id", account.ID),
+						zap.String("reason", reason))
+					return service.NewOpenAIWSClientCloseError(coderws.StatusTryAgainLater, "account is no longer eligible for this connection, please reconnect", nil)
+				}
+				turnAtCopy := turnAt
+				turnPricingAt.Store(&turnAtCopy)
 				// turn==1 的会话屏蔽已由握手层检查覆盖；连接内 flag 只拦截后续 turn。
 				if cyberBlockedThisConn.Load() {
 					return service.NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, cyberSessionBlockedClientMsg, nil)
@@ -1940,7 +2050,11 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 				if result != nil && result.ClientDisconnect {
 					return
 				}
-				h.recordCyberPolicyIfMarked(c, apiKey, account, subscription, reqModel, turnErr != nil, cyberBlockKey, channelMappingWS.ToUsageFields(reqModel, ""), requestPayloadHash)
+				turnRecordPricingAt := time.Time{}
+				if frozen := turnPricingAt.Load(); frozen != nil {
+					turnRecordPricingAt = *frozen
+				}
+				h.recordCyberPolicyIfMarked(c, apiKey, account, subscription, reqModel, turnErr != nil, cyberBlockKey, channelMappingWS.ToUsageFields(reqModel, ""), requestPayloadHash, turnRecordPricingAt)
 				cyberBlocked := service.GetOpsCyberPolicy(c) != nil
 				if cyberBlocked {
 					cyberBlockedThisConn.Store(true)
@@ -1981,6 +2095,7 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 						User:               apiKey.User,
 						Account:            account,
 						Subscription:       subscription,
+						PricingAt:          turnRecordPricingAt,
 						InboundEndpoint:    inboundEndpoint,
 						UpstreamEndpoint:   upstreamEndpoint,
 						UserAgent:          userAgent,
@@ -3054,7 +3169,7 @@ func (h *OpenAIGatewayHandler) enqueueCyberSessionBlockedOpsEntry(c *gin.Context
 // 通过 usage worker 提交，Web Chat 会登记到 request barrier；风控日志、邮件、会话屏蔽和
 // Ops 记录继续后台执行。forwardErrored 为 true 时才写用量行，避免与正常 RecordUsage
 // 重复。每请求至多记录一次。
-func (h *OpenAIGatewayHandler) recordCyberPolicyIfMarked(c *gin.Context, apiKey *service.APIKey, account *service.Account, subscription *service.UserSubscription, model string, forwardErrored bool, cyberBlockKey string, channelFields service.ChannelUsageFields, requestPayloadHash string) {
+func (h *OpenAIGatewayHandler) recordCyberPolicyIfMarked(c *gin.Context, apiKey *service.APIKey, account *service.Account, subscription *service.UserSubscription, model string, forwardErrored bool, cyberBlockKey string, channelFields service.ChannelUsageFields, requestPayloadHash string, pricingAtOverride ...time.Time) {
 	mark := service.GetOpsCyberPolicy(c)
 	if mark == nil {
 		return
@@ -3136,12 +3251,17 @@ func (h *OpenAIGatewayHandler) recordCyberPolicyIfMarked(c *gin.Context, apiKey 
 	if c.Request != nil {
 		requestContext = c.Request.Context()
 	}
+	pricingAt := service.OpenAIPricingAtFromContext(requestContext)
+	if len(pricingAtOverride) > 0 {
+		pricingAt = pricingAtOverride[0]
+	}
 	if forwardErrored && gwSvc != nil {
 		h.submitCyberPolicyUsageRecordResultTask(requestContext, func(ctx context.Context) error {
 			err := gwSvc.RecordCyberPolicyUsageLog(ctx, service.CyberPolicyUsageInput{
 				APIKey:             apiKey,
 				Account:            account,
 				Subscription:       subscription,
+				PricingAt:          pricingAt,
 				RequestID:          requestID,
 				Model:              model,
 				Stream:             stream,

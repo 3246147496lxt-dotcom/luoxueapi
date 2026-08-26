@@ -399,6 +399,7 @@ func (s *OpenAIGatewayService) selectAccountByPreviousResponseIDForCapability(
 	if s == nil {
 		return nil, nil
 	}
+	ctx = s.withOpenAIProfitControlGate(ctx, groupID)
 	accountID, account, responseID, store := s.resolveAccountByPreviousResponseIDForCapability(ctx, groupID, previousResponseID, requestedModel, excludedIDs, requiredCapability, requireCompact)
 	if accountID <= 0 || account == nil || store == nil {
 		return nil, nil
@@ -412,16 +413,16 @@ func (s *OpenAIGatewayService) selectAccountByPreviousResponseIDForCapability(
 			responseID,
 			store.BindResponseAccount(ctx, derefGroupID(groupID), responseID, accountID, s.openAIWSResponseStickyTTL()),
 		)
-		return &AccountSelectionResult{
+		return attachSelectionProfitGate(ctx, &AccountSelectionResult{
 			Account:     account,
 			Acquired:    true,
 			ReleaseFunc: result.ReleaseFunc,
-		}, nil
+		}), nil
 	}
 
 	cfg := s.schedulingConfig()
 	if s.concurrencyService != nil {
-		return &AccountSelectionResult{
+		return attachSelectionProfitGate(ctx, &AccountSelectionResult{
 			Account: account,
 			WaitPlan: &AccountWaitPlan{
 				AccountID:      accountID,
@@ -429,7 +430,7 @@ func (s *OpenAIGatewayService) selectAccountByPreviousResponseIDForCapability(
 				Timeout:        cfg.StickySessionWaitTimeout,
 				MaxWaiting:     cfg.StickySessionMaxWaiting,
 			},
-		}, nil
+		}), nil
 	}
 	return nil, nil
 }
@@ -540,6 +541,11 @@ func (s *OpenAIGatewayService) resolveAccountByPreviousResponseIDForCapability(
 	}
 	if requireCompact && openAICompactSupportTier(account) == 0 {
 		_ = store.DeleteResponseAccount(ctx, derefGroupID(groupID), responseID)
+		return 0, nil, "", nil
+	}
+	if vetoed, _ := openAIProfitControlVetoReason(ctx, account); vetoed {
+		// Profit eligibility is transient; preserve the response binding so the
+		// chain can resume if the account rate later recovers.
 		return 0, nil, "", nil
 	}
 	return accountID, account, responseID, store

@@ -13,14 +13,14 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestCandidateMigrationsUpgradeProduction246To252AndReplay(t *testing.T) {
+func TestCandidateMigrationsUpgradeProduction246To253AndReplay(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	defer cancel()
 
 	files, err := collectValidatedMigrationFiles(migrationfs.FS)
 	require.NoError(t, err)
 	const productionBaselineCount = 246
-	require.Len(t, files, productionBaselineCount+6, "candidate binary must embed the reviewed 252-file manifest")
+	require.Len(t, files, productionBaselineCount+7, "candidate binary must embed the reviewed 253-file manifest")
 
 	wantTail := []MigrationManifestEntry{
 		{Filename: "201_library_files.sql", SHA256: "03f6a53d92e93fbfee37b9e5dd78dc11cae49dd921812253d0425154f1a9c23e"},
@@ -29,6 +29,7 @@ func TestCandidateMigrationsUpgradeProduction246To252AndReplay(t *testing.T) {
 		{Filename: "202_chat_message_activities.sql", SHA256: "e2ee8b4480af916327f132d378eb70b2291c85efba0ced4555452147b56fdb8f"},
 		{Filename: "231_add_users_email_alias_dedup_index_notx.sql", SHA256: "fd103466b72b14919fc7a0b02135f019f9fe7a409a434726467c3649551321e4"},
 		{Filename: "232_add_users_email_normalized_index_notx.sql", SHA256: "052a61bf4bdc89a5215970059a61096f4eaea5c244b6781f3ec42d6ac8e8bb5d"},
+		{Filename: "233_group_profit_control.sql", SHA256: "afd79e417fc16d34da93df95de87abef407f7cd21e16dae037e0aa59c048d52b"},
 	}
 	require.Len(t, files, productionBaselineCount+len(wantTail))
 	for index, want := range wantTail {
@@ -42,7 +43,7 @@ func TestCandidateMigrationsUpgradeProduction246To252AndReplay(t *testing.T) {
 		productionBaseline[file.name] = &fstest.MapFile{Data: []byte(file.content)}
 	}
 
-	db := openIsolatedMigrationIntegrationDB(t, "sub2api_candidate_246_to_252")
+	db := openIsolatedMigrationIntegrationDB(t, "sub2api_candidate_246_to_253")
 	require.NoError(t, applyMigrationsFSWithPolicy(
 		ctx,
 		db,
@@ -63,6 +64,7 @@ func TestCandidateMigrationsUpgradeProduction246To252AndReplay(t *testing.T) {
 	requireCandidateMigrationRows(t, ctx, db, wantTail)
 	requireCandidateLibrarySchema(t, ctx, db)
 	requireCandidateChatActivitySchema(t, ctx, db)
+	requireCandidateProfitControlSchema(t, ctx, db)
 
 	beforeReplay := schemaMigrationsFingerprint(t, ctx, db)
 	require.NoError(t, applyMigrationsFSWithExpectedDatabaseIdentity(
@@ -95,6 +97,22 @@ func requireSchemaMigrationCount(t *testing.T, ctx context.Context, db *sql.DB, 
 	require.Equal(t, want, got)
 }
 
+func requireCandidateProfitControlSchema(t *testing.T, ctx context.Context, db *sql.DB) {
+	t.Helper()
+	var count int
+	require.NoError(t, db.QueryRowContext(ctx, `
+SELECT COUNT(*)
+FROM information_schema.columns
+WHERE table_schema = 'public'
+  AND table_name = 'groups'
+  AND column_name IN (
+    'profit_control_enabled',
+    'profit_min_margin',
+    'profit_safety_buffer'
+  )`).Scan(&count))
+	require.Equal(t, 3, count)
+}
+
 func requireCandidateMigrationRows(
 	t *testing.T,
 	ctx context.Context,
@@ -111,7 +129,8 @@ WHERE filename IN (
   '201b_library_alias_constraints.sql',
   '202_chat_message_activities.sql',
   '231_add_users_email_alias_dedup_index_notx.sql',
-  '232_add_users_email_normalized_index_notx.sql'
+  '232_add_users_email_normalized_index_notx.sql',
+  '233_group_profit_control.sql'
 )
 ORDER BY filename`)
 	require.NoError(t, err)

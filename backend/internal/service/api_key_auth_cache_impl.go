@@ -14,7 +14,7 @@ import (
 	"github.com/dgraph-io/ristretto"
 )
 
-const apiKeyAuthSnapshotVersion = 16 // v16: include API key purpose and service tier preference
+const apiKeyAuthSnapshotVersion = 17 // v17: include group profit-control policy
 
 type apiKeyAuthCacheConfig struct {
 	l1Size        int
@@ -347,6 +347,9 @@ func (s *APIKeyService) snapshotFromAPIKey(ctx context.Context, apiKey *APIKey) 
 			MessagesDispatchModelConfig:     apiKey.Group.MessagesDispatchModelConfig,
 			ModelsListConfig:                apiKey.Group.ModelsListConfig,
 			RPMLimit:                        apiKey.Group.RPMLimit,
+			ProfitControlEnabled:            apiKey.Group.ProfitControlEnabled,
+			ProfitMinMargin:                 apiKey.Group.ProfitMinMargin,
+			ProfitSafetyBuffer:              apiKey.Group.ProfitSafetyBuffer,
 			PeakRateEnabled:                 apiKey.Group.PeakRateEnabled,
 			PeakStart:                       apiKey.Group.PeakStart,
 			PeakEnd:                         apiKey.Group.PeakEnd,
@@ -441,6 +444,9 @@ func (s *APIKeyService) snapshotToAPIKey(key string, snapshot *APIKeyAuthSnapsho
 			MessagesDispatchModelConfig:     snapshot.Group.MessagesDispatchModelConfig,
 			ModelsListConfig:                snapshot.Group.ModelsListConfig,
 			RPMLimit:                        snapshot.Group.RPMLimit,
+			ProfitControlEnabled:            snapshot.Group.ProfitControlEnabled,
+			ProfitMinMargin:                 snapshot.Group.ProfitMinMargin,
+			ProfitSafetyBuffer:              snapshot.Group.ProfitSafetyBuffer,
 			PeakRateEnabled:                 snapshot.Group.PeakRateEnabled,
 			PeakStart:                       snapshot.Group.PeakStart,
 			PeakEnd:                         snapshot.Group.PeakEnd,

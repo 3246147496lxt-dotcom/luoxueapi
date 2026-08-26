@@ -12,6 +12,11 @@ import {
   messagesDispatchConfigToFormState,
   type MessagesDispatchMappingRow,
 } from "../groupsMessagesDispatch";
+import {
+  isProfitControlPlatform,
+  profitDecimalToPercent,
+  profitPercentToDecimal,
+} from "../groupsProfitControl";
 
 export type GroupDraftMode = "create" | "edit";
 export type GroupDraftNumber = number | string | null;
@@ -50,6 +55,9 @@ export interface GroupDraft {
   peak_start: string;
   peak_end: string;
   peak_rate_multiplier: GroupDraftNumber;
+  profit_control_enabled: boolean;
+  profit_min_margin_percent: GroupDraftNumber;
+  profit_safety_buffer_percent: GroupDraftNumber;
   claude_code_only: boolean;
   fallback_group_id: number | null;
   fallback_group_id_on_invalid_request: number | null;
@@ -106,6 +114,9 @@ export function createGroupDraft(): GroupDraft {
     peak_start: "",
     peak_end: "",
     peak_rate_multiplier: 1,
+    profit_control_enabled: false,
+    profit_min_margin_percent: 0,
+    profit_safety_buffer_percent: 0,
     claude_code_only: false,
     fallback_group_id: null,
     fallback_group_id_on_invalid_request: null,
@@ -161,6 +172,13 @@ export function groupToDraft(group: AdminGroup): GroupDraft {
     peak_start: group.peak_start ?? "",
     peak_end: group.peak_end ?? "",
     peak_rate_multiplier: group.peak_rate_multiplier ?? 1,
+    profit_control_enabled: group.profit_control_enabled ?? false,
+    profit_min_margin_percent: profitDecimalToPercent(
+      group.profit_min_margin,
+    ),
+    profit_safety_buffer_percent: profitDecimalToPercent(
+      group.profit_safety_buffer,
+    ),
     claude_code_only: group.claude_code_only ?? false,
     fallback_group_id: group.fallback_group_id,
     fallback_group_id_on_invalid_request:
@@ -272,6 +290,14 @@ function commonPayload(
     peak_end: draft.peak_end,
     peak_rate_multiplier: normalizeGroupRateMultiplier(
       draft.peak_rate_multiplier,
+    ),
+    profit_control_enabled:
+      isProfitControlPlatform(draft.platform) && draft.profit_control_enabled,
+    profit_min_margin: profitPercentToDecimal(
+      draft.profit_min_margin_percent,
+    ),
+    profit_safety_buffer: profitPercentToDecimal(
+      draft.profit_safety_buffer_percent,
     ),
     claude_code_only: draft.claude_code_only,
     fallback_group_id:

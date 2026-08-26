@@ -302,6 +302,7 @@ func (h *OpenAIGatewayHandler) Transcriptions(c *gin.Context) {
 		transcriptionError(c, http.StatusServiceUnavailable, "TRANSCRIPTION_UNAVAILABLE", "Voice transcription is temporarily unavailable")
 		return
 	}
+	c.Request = c.Request.WithContext(service.WithOpenAIProfitControlSuppressed(c.Request.Context()))
 	selection, _, err := h.gatewayService.SelectAccountWithSchedulerForCapability(
 		c.Request.Context(),
 		apiKey.GroupID,

@@ -215,6 +215,19 @@ func (Group) Fields() []ent.Field {
 		field.Int("rpm_limit").
 			Default(0).
 			Comment("分组 RPM 上限，0 表示不限制；设置后接管该分组用户的限流"),
+
+		// 分组利润控制：仅在显式开启后影响账号调度准入，默认保持现有行为。
+		field.Bool("profit_control_enabled").
+			Default(false).
+			Comment("是否启用利润控制：调度时仅允许账号计费倍率满足毛利率要求的账号进入候选池"),
+		field.Float("profit_min_margin").
+			SchemaType(map[string]string{dialect.Postgres: "decimal(10,4)"}).
+			Default(0).
+			Comment("最低毛利率，小数（0.30=30%）"),
+		field.Float("profit_safety_buffer").
+			SchemaType(map[string]string{dialect.Postgres: "decimal(10,4)"}).
+			Default(0).
+			Comment("利润控制安全缓冲，小数；与最低毛利率相加后从下游倍率中扣除"),
 	}
 }
 
