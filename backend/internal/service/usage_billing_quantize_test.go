@@ -31,7 +31,7 @@ func TestQuantizeUsageBillingAmountUsesHalfAwayFromZero(t *testing.T) {
 }
 
 func TestUsageBillingNormalizeFingerprintUsesRawAmount(t *testing.T) {
-	cmd := &UsageBillingCommand{RequestID: "quantize-fingerprint", UserID: 1, AccountID: 2, APIKeyID: 3, BalanceCost: 0.000078125}
+	cmd := &UsageBillingCommand{RequestID: "quantize-fingerprint", UserID: 1, AccountID: 2, APIKeyID: 3, Source: BillingReceiptSourceAPI, GrossCost: 0.000078125, BalanceCost: 0.000078125}
 	want := buildUsageBillingFingerprint(cmd)
 	cmd.Normalize()
 	require.Equal(t, want, cmd.RequestFingerprint)
