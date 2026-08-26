@@ -413,6 +413,8 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 	}, s.billingDeps(), s.usageBillingRepo)
 
 	if billingErr != nil {
+		usageLog.ActualCost = 0
+		writeUsageLogBestEffort(ctx, s.usageLogRepo, usageLog, "service.openai_gateway")
 		return billingErr
 	}
 	if billingResult != nil && billingResult.SettlementClosed {

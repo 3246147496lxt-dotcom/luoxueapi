@@ -810,8 +810,8 @@ func TestComputeTokenBreakdown_GptImage2ImageEditIssue4386(t *testing.T) {
 
 	cost := svc.computeTokenBreakdown(pricing, tokens, 1.0, "", false)
 
-	wantTextInput := float64(19) * 5e-6    // 0.000095
-	wantImageInput := float64(352) * 8e-6  // 0.002816
+	wantTextInput := float64(19) * 5e-6     // 0.000095
+	wantImageInput := float64(352) * 8e-6   // 0.002816
 	wantImageOutput := float64(439) * 30e-6 // 0.013170
 	require.InDelta(t, wantTextInput, cost.InputCost, 1e-15, "InputCost 仅含文本输入")
 	require.InDelta(t, wantImageInput, cost.ImageInputCost, 1e-15, "图片输入按 $8/1M 独立计费")
@@ -1183,6 +1183,16 @@ func TestCalculateCost_SupportsCacheBreakdown(t *testing.T) {
 	expected5m := float64(tokens.CacheCreation5mTokens) * 4e-6
 	expected1h := float64(tokens.CacheCreation1hTokens) * 5e-6
 	require.InDelta(t, expected5m+expected1h, cost.CacheCreationCost, 1e-10)
+}
+
+func TestComputeCacheCreationCostCapsContradictoryBreakdown(t *testing.T) {
+	svc := &BillingService{}
+	pricing := &ModelPricing{SupportsCacheBreakdown: true, CacheCreation5mPrice: 1, CacheCreation1hPrice: 1}
+	tokens := UsageTokens{CacheCreationTokens: 100, CacheCreation5mTokens: 90, CacheCreation1hTokens: 60}
+	require.Equal(t, float64(100), svc.computeCacheCreationCost(pricing, tokens, 0, 1))
+
+	tokens = UsageTokens{CacheCreationTokens: 100, CacheCreation5mTokens: -1, CacheCreation1hTokens: 150}
+	require.Equal(t, float64(100), svc.computeCacheCreationCost(pricing, tokens, 0, 1))
 }
 
 func TestCalculateCost_LargeTokenCount(t *testing.T) {

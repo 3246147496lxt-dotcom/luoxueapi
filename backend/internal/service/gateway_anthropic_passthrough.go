@@ -265,6 +265,11 @@ func (s *GatewayService) forwardAnthropicAPIKeyPassthroughWithInput(
 	if input.RequestStream {
 		streamResult, err := s.handleStreamingResponseAnthropicAPIKeyPassthrough(ctx, resp, c, account, input.StartTime, input.RequestModel)
 		if err != nil {
+			// 流中断时保留已观测到的 usage 与错误一起返回，避免上游已计量的请求
+			// 完全漏记漏计费（issue #5148）。
+			if partial := partialStreamUsageResult(resp, streamResult, input.OriginalModel, input.RequestModel, input.StartTime, err); partial != nil {
+				return partial, err
+			}
 			return nil, err
 		}
 		usage = streamResult.usage
@@ -649,10 +654,10 @@ func (s *GatewayService) parseSSEUsagePassthrough(data string, usage *ClaudeUsag
 
 			cc5m := deltaUsage.Get("cache_creation.ephemeral_5m_input_tokens")
 			cc1h := deltaUsage.Get("cache_creation.ephemeral_1h_input_tokens")
-			if cc5m.Exists() && cc5m.Int() > 0 {
+			if cc5m.Exists() {
 				usage.CacheCreation5mTokens = int(cc5m.Int())
 			}
-			if cc1h.Exists() && cc1h.Int() > 0 {
+			if cc1h.Exists() {
 				usage.CacheCreation1hTokens = int(cc1h.Int())
 			}
 		}
