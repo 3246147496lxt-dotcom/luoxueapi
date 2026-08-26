@@ -2,7 +2,6 @@ import accountPoolIconSvg from '@/assets/icons/account-pool.svg?raw'
 import auditLogIconSvg from '@/assets/icons/audit-log.svg?raw'
 import keyOutlineIconSvg from '@/assets/icons/key-outline.svg?raw'
 import modelMarketplaceIconSvg from '@/assets/icons/model-marketplace.svg?raw'
-import reportDashboardIconSvg from '@/assets/icons/report-dashboard.svg?raw'
 import NotificationIcon from '@/components/icons/NotificationIcon.vue'
 import { FeatureFlags, makeSidebarFlag } from '@/utils/featureFlags'
 import {
@@ -66,19 +65,20 @@ function buildItems(context: AdminNavigationContext): NavItem[] {
     {
       path: '/admin/dashboard',
       label: context.isOpsShell ? t('admin.ops.sidebar.dashboard') : t('nav.adminDashboard'),
-      icon: context.isOpsShell ? icons.dashboard : null,
-      iconSvg: context.isOpsShell ? undefined : reportDashboardIconSvg,
+      // Keep the /admin/ops outline glyph on every administrator route. The
+      // selected state is route-owned, but the icon shape is not.
+      icon: icons.dashboard,
     },
     {
       path: '/admin/ops',
       label: t('nav.ops'),
-      icon: context.isOpsShell ? icons.opsChart : icons.chart,
+      icon: icons.opsChart,
       featureFlag: context.opsMonitoringEnabled,
     },
     {
       path: '/admin/usage',
       label: context.isOpsShell ? t('admin.ops.sidebar.usage') : t('nav.adminUsage'),
-      icon: context.isOpsShell ? icons.usageChart : icons.chart,
+      icon: icons.usageChart,
     },
     { path: '/admin/users', label: t('nav.users'), icon: icons.users, hideInSimpleMode: true },
     { path: '/admin/groups', label: t('nav.groups'), icon: icons.folder, hideInSimpleMode: true },

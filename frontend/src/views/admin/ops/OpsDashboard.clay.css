@@ -396,7 +396,9 @@ html:not(.dark) body.admin-ops-fullscreen {
 
 /* --------------------------------------------------------------------------
  * Superdesign Option B — Investigative Workbench Fidelity Polish (v3)
- * Route-scoped so the rest of the product keeps its shared Snow Clay shell.
+ * The workbench page owns the content canvas below. Its sidebar baseline is
+ * defined by the shared administrator shell so it remains stable on route
+ * changes.
  * -------------------------------------------------------------------------- */
 
 body.admin-ops-option-b {
@@ -432,115 +434,6 @@ body.admin-ops-option-b {
   color: #332f3a;
   background: #ffffff;
   font-family: var(--lx-clay-font-ui);
-}
-
-body.admin-ops-option-b #app-sidebar {
-  border-right: 1px solid #e5e7eb !important;
-  background: #fcfcfc !important;
-  box-shadow: none !important;
-  backdrop-filter: none !important;
-}
-
-body.admin-ops-option-b #app-sidebar::before,
-body.admin-ops-option-b #app-sidebar::after {
-  display: none !important;
-}
-
-body.admin-ops-option-b #app-sidebar .sidebar-header {
-  display: none !important;
-}
-
-body.admin-ops-option-b #app-sidebar .sidebar-nav {
-  padding: 12px 8px 8px;
-}
-
-body.admin-ops-option-b #app-sidebar .sidebar-section-title {
-  min-height: 28px;
-  padding: 4px 12px;
-  color: #5f6b7a;
-  font-size: 12px;
-  font-weight: 400;
-  line-height: 20px;
-}
-
-body.admin-ops-option-b #app-sidebar [data-testid="sidebar-admin-business-section"] .sidebar-section-title,
-body.admin-ops-option-b #app-sidebar [data-testid="sidebar-admin-operations-section"] .sidebar-section-title,
-body.admin-ops-option-b #app-sidebar [data-testid="sidebar-admin-system-section"] .sidebar-section-title {
-  min-height: 36px;
-  padding-block: 8px;
-}
-
-body.admin-ops-option-b #app-sidebar .sidebar-link,
-body.admin-ops-option-b #app-sidebar .announcement-bell-row {
-  min-height: 40px;
-  gap: 12px;
-  margin-bottom: 0;
-  padding: 8px 12px;
-  border-radius: 10px;
-  color: #332f3a;
-  font-size: 14px;
-  font-weight: 400;
-  line-height: 20px;
-}
-
-body.admin-ops-option-b #app-sidebar .sidebar-link > svg,
-body.admin-ops-option-b #app-sidebar .sidebar-link > .sidebar-svg-icon {
-  color: #635f69;
-}
-
-body.admin-ops-option-b #app-sidebar .sidebar-link-active,
-body.admin-ops-option-b #app-sidebar .sidebar-link-active:hover {
-  color: #332f3a;
-  background: rgb(0 0 0 / 5%);
-}
-
-body.admin-ops-option-b #app-sidebar .sidebar-link-active > svg,
-body.admin-ops-option-b #app-sidebar .sidebar-link-active > .sidebar-svg-icon {
-  color: #332f3a;
-}
-
-body.admin-ops-option-b #app-sidebar .sidebar-support-section {
-  margin-top: 8px;
-  padding-top: 8px;
-  border-top: 1px solid rgb(91 80 112 / 10%);
-}
-
-body.admin-ops-option-b #app-sidebar .sidebar-account-dock {
-  padding: 8px;
-  border-top: 1px solid #e5e7eb;
-  background: #fcfcfc;
-}
-
-body.admin-ops-option-b #app-sidebar .sidebar-account-row {
-  min-height: 48px;
-  padding-right: 0;
-  border-radius: 10px;
-}
-
-body.admin-ops-option-b #app-sidebar .sidebar-account-trigger {
-  min-height: 48px;
-  grid-template-columns: 32px minmax(0, 1fr) auto;
-  padding: 6px 8px;
-}
-
-body.admin-ops-option-b #app-sidebar .sidebar-account-trigger__avatar {
-  color: #7c3aed;
-  background: #f1eafe;
-}
-
-body.admin-ops-option-b #app-sidebar .sidebar-account-trigger__name {
-  color: #332f3a;
-  font-size: 14px;
-  font-weight: 700;
-}
-
-body.admin-ops-option-b #app-sidebar .sidebar-account-trigger__meta {
-  color: #756e80;
-  font-size: 11px;
-}
-
-body.admin-ops-option-b #app-sidebar .sidebar-account-cta {
-  display: none;
 }
 
 [data-admin-page-kind="ops"].ops-dashboard-shell {

@@ -68,6 +68,7 @@ vi.mock('@/composables/useBatchImageAccess', async () => {
 
 import AppSidebar from '../AppSidebar.vue'
 import { adminNavigationDefinition } from '../sidebar/adminNavigation'
+import type { AdminNavigationIcons } from '../sidebar/types'
 import {
   useAppStore,
   useAuthStore,
@@ -194,10 +195,10 @@ describe('AppSidebar grouped admin navigation', () => {
     }) as MediaQueryList)
   })
 
-  it('renders admin navigation directly without the operations wrapper', () => {
+  it('renders the shared operations-baseline icons without an operations wrapper', () => {
     const wrapper = mountSidebar()
     const navigation = wrapper.get('nav.workspace-sidebar-navigation')
-    const dashboardIcon = navigation.get('a[href="/admin/dashboard"] .sidebar-svg-icon svg')
+    const dashboardIcon = navigation.get('a[href="/admin/dashboard"] .sidebar-nav-icon')
     const accountPoolIcon = navigation.get('a[href="/admin/accounts"] .sidebar-svg-icon svg')
     const auditLogIcon = navigation.get('a[href="/admin/audit-logs"] .sidebar-svg-icon svg')
     const modelMarketplaceIcon = navigation.get('a[href="/admin/model-catalog"] .sidebar-svg-icon svg')
@@ -205,8 +206,9 @@ describe('AppSidebar grouped admin navigation', () => {
     expect(wrapper.find('#sidebar-admin-operations-toggle').exists()).toBe(false)
     expect(wrapper.find('#sidebar-admin-operations').exists()).toBe(false)
     expect(navigation.get('a[href="/admin/dashboard"]').text()).toContain('nav.adminDashboard')
-    expect(dashboardIcon.attributes('viewBox')).toBe('0 0 1024 1024')
-    expect(dashboardIcon.get('path').attributes('fill')).toBe('currentColor')
+    expect(dashboardIcon.attributes('viewBox')).toBe('0 0 24 24')
+    expect(dashboardIcon.attributes('stroke')).toBe('currentColor')
+    expect(dashboardIcon.attributes('stroke-width')).toBe('1.5')
     expect(accountPoolIcon.attributes('viewBox')).toBe('-112 -112 1248 1248')
     expect(accountPoolIcon.get('path').attributes('fill')).toBe('currentColor')
     expect(auditLogIcon.attributes('viewBox')).toBe('-32 -32 1088 1088')
@@ -216,6 +218,54 @@ describe('AppSidebar grouped admin navigation', () => {
     expect(modelMarketplaceIcon.attributes('fill')).toBe('currentColor')
     expect(modelMarketplaceIcon.findAll('path')).toHaveLength(3)
     expect(wrapper.text()).not.toContain('nav.operationsManagement')
+  })
+
+  it('keeps the three overview icon shapes independent of the current route copy', () => {
+    const icons = {
+      dashboard: Symbol('dashboard'),
+      chart: Symbol('chart'),
+      opsChart: Symbol('ops-chart'),
+      usageChart: Symbol('usage-chart'),
+      users: Symbol('users'),
+      folder: Symbol('folder'),
+      server: Symbol('server'),
+      channel: Symbol('channel'),
+      priceTag: Symbol('price-tag'),
+      signal: Symbol('signal'),
+      skillMarket: Symbol('skill-market'),
+      creditCard: Symbol('credit-card'),
+      order: Symbol('order'),
+      ticket: Symbol('ticket'),
+      gift: Symbol('gift'),
+      shield: Symbol('shield'),
+      diagnostics: Symbol('diagnostics'),
+      book: Symbol('book'),
+      cog: Symbol('cog'),
+    } as unknown as AdminNavigationIcons
+    const commonContext = {
+      t: (key: string) => key,
+      simpleMode: false,
+      opsMonitoringEnabled: () => true,
+      adminPaymentEnabled: () => true,
+      customMenuItems: [],
+      icons,
+    }
+    const standardItems = adminNavigationDefinition.buildItems({
+      ...commonContext,
+      isOpsShell: false,
+    })
+    const opsItems = adminNavigationDefinition.buildItems({
+      ...commonContext,
+      isOpsShell: true,
+    })
+
+    for (const path of ['/admin/dashboard', '/admin/ops', '/admin/usage']) {
+      const standard = standardItems.find(item => item.path === path)
+      const ops = opsItems.find(item => item.path === path)
+      expect(standard?.icon, path).toBe(ops?.icon)
+      expect(standard?.iconSvg, path).toBeUndefined()
+      expect(ops?.iconSvg, path).toBeUndefined()
+    }
   })
 
   it('keeps the full-height sidebar widths aligned with the application shell', () => {

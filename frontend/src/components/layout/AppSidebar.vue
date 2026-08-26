@@ -20,6 +20,7 @@
       class="app-sidebar"
       :class="{
         'sidebar-mobile-hidden': mobileViewport && !mobileOpen,
+        'sidebar--admin-workspace': isAdminWorkspace,
         'sidebar--personal-work': isPersonalWorkWorkspace,
       }"
     >
