@@ -116,6 +116,11 @@ async function mountDock(
         component: { template: '<div />' },
         meta: { requiresAuth: true, requiresAdmin: true },
       },
+      {
+        path: '/admin/ops',
+        component: { template: '<div />' },
+        meta: { requiresAuth: true, requiresAdmin: true },
+      },
       { path: '/pricing', component: { template: '<div />' } },
       { path: '/subscriptions', component: { template: '<div />' } },
       { path: '/login', component: { template: '<div />' } },
@@ -168,6 +173,7 @@ async function mountDock(
             'showOnboarding',
             'context',
             'variant',
+            'appearance',
             'planLabel',
             'helpHref',
             'workspaceTarget',
@@ -179,6 +185,7 @@ async function mountDock(
               data-testid="overlay-stub"
               :data-workspace-target="workspaceTarget?.href ?? ''"
               :data-variant="variant"
+              :data-appearance="appearance"
               :data-plan-label="planLabel"
               :data-help-href="helpHref"
             >
@@ -434,26 +441,75 @@ describe('SidebarAccountDock', () => {
     expect(focus.mock.instances).toContain(trigger.element)
   })
 
-  it('does not render an Upgrade control in the personal account area', async () => {
+  it('does not render an Upgrade control in the shared account area', async () => {
     const { wrapper } = await mountDock()
 
     expect(wrapper.find('[data-testid="account-upgrade-link"]').exists()).toBe(false)
+    expect(componentSource).not.toContain('account-upgrade-link')
+    expect(componentSource).not.toContain('pricingTarget')
     expect(componentSource).not.toContain("findVisibleRouteDestination('subscriptions')")
     expect(componentSource).not.toContain('accountDock.manageSubscription')
   })
 
-  it('preserves the existing Upgrade destination in the administrator workspace', async () => {
+  it('keeps the administrator footer on the same identity-only pattern', async () => {
     summaryState.isAdmin = true
     const { wrapper, router } = await mountDock({ payment_enabled: true })
     await router.replace('/admin/users')
     await flushPromises()
 
-    expect(wrapper.get('[data-testid="account-upgrade-link"]').attributes('href')).toBe('/pricing')
+    expect(wrapper.find('[data-testid="account-upgrade-link"]').exists()).toBe(false)
+    expect(wrapper.get('[data-testid="sidebar-account-dock"]').classes())
+      .toContain('sidebar-account-dock--personal')
+    expect(wrapper.find('.sidebar-account-trigger__chevrons').exists()).toBe(true)
+  })
 
-    const disabled = await mountDock({ payment_enabled: false })
-    await disabled.router.replace('/admin/users')
-    await flushPromises()
-    expect(disabled.wrapper.find('[data-testid="account-upgrade-link"]').exists()).toBe(false)
+  it('keeps the real account identity and user-side appearance on every admin route', async () => {
+    summaryState.isAdmin = true
+    summaryState.avatarUrl = '/avatars/riley.png'
+    summaryState.primarySubscription = { id: 1, name: 'Ultra', expiresAt: null }
+    const { wrapper, router } = await mountDock({ payment_enabled: true })
+
+    const readAccountState = async (path: '/admin/users' | '/admin/ops') => {
+      await router.replace(path)
+      await flushPromises()
+
+      const trigger = wrapper.get('.sidebar-account-trigger')
+      const avatar = wrapper.get<HTMLImageElement>('.sidebar-account-trigger__avatar img')
+      const state = {
+        name: wrapper.get('.sidebar-account-trigger__name').text(),
+        meta: wrapper.get('.sidebar-account-trigger__meta').text(),
+        avatar: avatar.attributes('src'),
+        avatarAlt: avatar.attributes('alt'),
+        ariaLabel: trigger.attributes('aria-label'),
+        hasChevrons: wrapper.find('.sidebar-account-trigger__chevrons').exists(),
+        hasUpgrade: wrapper.find('[data-testid="account-upgrade-link"]').exists(),
+      }
+
+      await trigger.trigger('click')
+      const overlay = wrapper.get('[data-testid="overlay-stub"]')
+      expect(overlay.attributes('data-variant')).toBe('admin')
+      expect(overlay.attributes('data-appearance')).toBe('personal')
+      expect(overlay.attributes('data-workspace-target')).toBe('/dashboard')
+      expect(wrapper.find('[data-testid="stub-admin-guide"]').exists()).toBe(true)
+      await wrapper.get('[data-testid="stub-close"]').trigger('click')
+      return state
+    }
+
+    const usersState = await readAccountState('/admin/users')
+    const operationsState = await readAccountState('/admin/ops')
+
+    expect(operationsState).toEqual(usersState)
+    expect(operationsState).toEqual({
+      name: 'Riley Quinn',
+      meta: 'Ultra',
+      avatar: '/avatars/riley.png',
+      avatarAlt: 'Riley Quinn',
+      ariaLabel: 'accountDock.open · Riley Quinn · Ultra',
+      hasChevrons: true,
+      hasUpgrade: false,
+    })
+    expect(componentSource).not.toContain('isOpsOptionB')
+    expect(componentSource).not.toContain('admin.ops.sidebar')
   })
 
   it('does not infer personal Work collapse from the application store', async () => {
@@ -571,20 +627,21 @@ describe('SidebarAccountDock', () => {
     expect(wrapper.get('.sidebar-account-trigger').attributes('aria-expanded')).toBe('false')
   })
 
-  it('closes the mobile sidebar when Upgrade is activated', async () => {
+  it('opens the administrator account sheet after closing the mobile sidebar', async () => {
     installMatchMedia(true)
     summaryState.isAdmin = true
-    summaryState.subscriptionsLoaded = false
     const { wrapper, appStore, router } = await mountDock()
     await router.replace('/admin/users')
     await flushPromises()
+    appStore.setWorkspaceMobileDrawer(true)
     appStore.setMobileOpen(true)
 
-    await wrapper.get('[data-testid="account-upgrade-link"]').trigger('click')
+    await wrapper.get('.sidebar-account-trigger').trigger('click')
     await flushPromises()
 
     expect(appStore.mobileOpen).toBe(false)
-    expect(router.currentRoute.value.path).toBe('/pricing')
-    expect(wrapper.get('.sidebar-account-trigger').attributes('aria-expanded')).toBe('false')
+    expect(router.currentRoute.value.path).toBe('/admin/users')
+    expect(wrapper.get('.sidebar-account-trigger').attributes('aria-expanded')).toBe('true')
+    expect(wrapper.find('[data-testid="overlay-stub"]').exists()).toBe(true)
   })
 })

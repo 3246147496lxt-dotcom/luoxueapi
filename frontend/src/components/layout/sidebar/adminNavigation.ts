@@ -64,7 +64,7 @@ function buildItems(context: AdminNavigationContext): NavItem[] {
   const baseItems: NavItem[] = [
     {
       path: '/admin/dashboard',
-      label: context.isOpsShell ? t('admin.ops.sidebar.dashboard') : t('nav.adminDashboard'),
+      label: t('nav.adminDashboard'),
       // Keep the /admin/ops outline glyph on every administrator route. The
       // selected state is route-owned, but the icon shape is not.
       icon: icons.dashboard,
@@ -77,7 +77,7 @@ function buildItems(context: AdminNavigationContext): NavItem[] {
     },
     {
       path: '/admin/usage',
-      label: context.isOpsShell ? t('admin.ops.sidebar.usage') : t('nav.adminUsage'),
+      label: t('nav.adminUsage'),
       icon: icons.usageChart,
     },
     { path: '/admin/users', label: t('nav.users'), icon: icons.users, hideInSimpleMode: true },
@@ -226,7 +226,6 @@ function activeSectionId(pathname: string): AdminNavSectionId | null {
 function buildSections(
   items: readonly NavItem[],
   t: (key: string) => string,
-  isOpsShell: boolean,
 ): AdminNavSection[] {
   const grouped = new Map<AdminNavSectionId, NavItem[]>(
     ADMIN_NAV_SECTION_CONFIG.map(({ id }) => [id, []]),
@@ -240,7 +239,7 @@ function buildSections(
   return ADMIN_NAV_SECTION_CONFIG
     .map(({ id, labelKey }) => ({
       id,
-      label: isOpsShell ? t(`admin.ops.sidebar.sections.${id}`) : t(labelKey),
+      label: t(labelKey),
       items: grouped.get(id) ?? [],
     }))
     .filter((section) => section.items.length > 0)

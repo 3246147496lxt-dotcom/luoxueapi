@@ -25,10 +25,18 @@ vi.mock('vue-i18n', async () => {
     'nav.adminSections.business': '用户与资源',
     'nav.adminSections.operations': '计费与运营',
     'nav.adminSections.system': '系统与审计',
+    'nav.adminDashboard': '数据看板',
+    'nav.ops': '运维监控',
     'nav.userSections.workbench': '工作台',
     'nav.userSections.api': 'API',
     'nav.userSections.account': '账户',
     'nav.adminUsage': '全站用量',
+    'admin.ops.sidebar.dashboard': '管理仪表盘',
+    'admin.ops.sidebar.usage': '用量明细',
+    'admin.ops.sidebar.sections.overview': '概览',
+    'admin.ops.sidebar.sections.business': '业务资源',
+    'admin.ops.sidebar.sections.operations': '运营管理',
+    'admin.ops.sidebar.sections.system': '系统安全',
     'nav.announcementManagement': '公告管理',
     'nav.systemSettings': '系统设置',
     'nav.support': '支持',
@@ -205,7 +213,7 @@ describe('AppSidebar grouped admin navigation', () => {
 
     expect(wrapper.find('#sidebar-admin-operations-toggle').exists()).toBe(false)
     expect(wrapper.find('#sidebar-admin-operations').exists()).toBe(false)
-    expect(navigation.get('a[href="/admin/dashboard"]').text()).toContain('nav.adminDashboard')
+    expect(navigation.get('a[href="/admin/dashboard"]').text()).toContain('数据看板')
     expect(dashboardIcon.attributes('viewBox')).toBe('0 0 24 24')
     expect(dashboardIcon.attributes('stroke')).toBe('currentColor')
     expect(dashboardIcon.attributes('stroke-width')).toBe('1.5')
@@ -220,7 +228,7 @@ describe('AppSidebar grouped admin navigation', () => {
     expect(wrapper.text()).not.toContain('nav.operationsManagement')
   })
 
-  it('keeps the three overview icon shapes independent of the current route copy', () => {
+  it('keeps the three overview icon shapes fixed in the shared navigation definition', () => {
     const icons = {
       dashboard: Symbol('dashboard'),
       chart: Symbol('chart'),
@@ -242,30 +250,63 @@ describe('AppSidebar grouped admin navigation', () => {
       book: Symbol('book'),
       cog: Symbol('cog'),
     } as unknown as AdminNavigationIcons
-    const commonContext = {
+    const items = adminNavigationDefinition.buildItems({
       t: (key: string) => key,
       simpleMode: false,
       opsMonitoringEnabled: () => true,
       adminPaymentEnabled: () => true,
       customMenuItems: [],
       icons,
-    }
-    const standardItems = adminNavigationDefinition.buildItems({
-      ...commonContext,
-      isOpsShell: false,
-    })
-    const opsItems = adminNavigationDefinition.buildItems({
-      ...commonContext,
-      isOpsShell: true,
     })
 
-    for (const path of ['/admin/dashboard', '/admin/ops', '/admin/usage']) {
-      const standard = standardItems.find(item => item.path === path)
-      const ops = opsItems.find(item => item.path === path)
-      expect(standard?.icon, path).toBe(ops?.icon)
-      expect(standard?.iconSvg, path).toBeUndefined()
-      expect(ops?.iconSvg, path).toBeUndefined()
+    expect(items.find(item => item.path === '/admin/dashboard')?.icon).toBe(icons.dashboard)
+    expect(items.find(item => item.path === '/admin/ops')?.icon).toBe(icons.opsChart)
+    expect(items.find(item => item.path === '/admin/usage')?.icon).toBe(icons.usageChart)
+    expect(items.slice(0, 3).every(item => item.iconSvg === undefined)).toBe(true)
+  })
+
+  it('keeps every administrator label unchanged when entering operations monitoring', () => {
+    enableAllAdminNavigation()
+
+    const readSidebarCopy = (path: string) => {
+      routeState.path = path
+      const wrapper = mountSidebar('admin')
+      const navigation = wrapper.get('nav.workspace-sidebar-navigation')
+      const copy = {
+        sections: wrapper
+          .findAll('[data-testid^="sidebar-admin-"] .sidebar-section-title')
+          .map(section => section.text()),
+        overview: [
+          '/admin/dashboard',
+          '/admin/ops',
+          '/admin/usage',
+        ].map(href => navigation.get(`a[href="${href}"]`).text().trim()),
+        allItems: navigation
+          .findAll('.sidebar-link')
+          .map(item => item.text().trim()),
+      }
+      wrapper.unmount()
+      return copy
     }
+
+    const dashboardCopy = readSidebarCopy('/admin/dashboard')
+    const operationsCopy = readSidebarCopy('/admin/ops')
+
+    expect(operationsCopy).toEqual(dashboardCopy)
+    expect(operationsCopy.sections).toEqual([
+      '概览',
+      '用户与资源',
+      '计费与运营',
+      '系统与审计',
+    ])
+    expect(operationsCopy.overview).toEqual(['数据看板', '运维监控', '全站用量'])
+    expect(operationsCopy.allItems).toEqual(expect.not.arrayContaining([
+      '管理仪表盘',
+      '用量明细',
+      '业务资源',
+      '运营管理',
+      '系统安全',
+    ]))
   })
 
   it('keeps the full-height sidebar widths aligned with the application shell', () => {

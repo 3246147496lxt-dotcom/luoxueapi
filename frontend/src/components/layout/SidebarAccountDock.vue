@@ -1,11 +1,10 @@
 <template>
   <div
     v-if="profile"
-    class="sidebar-account-dock"
+    class="sidebar-account-dock sidebar-account-dock--personal"
     :class="{
       'sidebar-account-dock--collapsed': sidebarCollapsed,
       'sidebar-account-dock--chat': context === 'chat',
-      'sidebar-account-dock--personal': !isAdminWorkspace,
       'sidebar-account-dock--work': context === 'work' && !isAdminWorkspace,
     }"
     data-testid="sidebar-account-dock"
@@ -28,11 +27,11 @@
       >
         <span class="sidebar-account-trigger__avatar">
           <img
-            v-if="profile.avatarUrl && !isOpsOptionB"
+            v-if="profile.avatarUrl"
             :src="profile.avatarUrl"
             :alt="profile.displayName"
           >
-          <span v-else>{{ isOpsOptionB ? t('admin.ops.sidebar.avatar') : profile.initials }}</span>
+          <span v-else>{{ profile.initials }}</span>
         </span>
 
         <span
@@ -40,34 +39,19 @@
           :aria-hidden="sidebarCollapsed ? 'true' : undefined"
         >
           <span class="sidebar-account-trigger__name">
-            {{ isOpsOptionB ? t('admin.ops.sidebar.admin') : profile.displayName }}
+            {{ profile.displayName }}
           </span>
-          <span v-if="isOpsOptionB" class="sidebar-account-trigger__meta">
-            {{ t('admin.ops.sidebar.balanceSubscription') }}
-          </span>
-          <span v-else class="sidebar-account-trigger__meta">
-            {{ accountPlanLabel }}
-          </span>
+          <span class="sidebar-account-trigger__meta">{{ accountPlanLabel }}</span>
         </span>
 
         <span
-          v-if="(isOpsOptionB || !isAdminWorkspace) && !sidebarCollapsed"
+          v-if="!sidebarCollapsed"
           class="sidebar-account-trigger__chevrons"
           aria-hidden="true"
         >
           <Icon name="chevronsUpDown" size="sm" />
         </span>
       </button>
-
-      <RouterLink
-        v-if="isAdminWorkspace && pricingTarget && !sidebarCollapsed && !isOpsOptionB"
-        data-testid="account-upgrade-link"
-        class="sidebar-account-cta"
-        :to="pricingTarget.path"
-        @click="handleCtaClick"
-      >
-        {{ t('accountDock.upgrade') }}
-      </RouterLink>
     </div>
 
     <SidebarAccountOverlay
@@ -77,6 +61,7 @@
       :show-onboarding="showOnboarding"
       :context="context"
       :variant="isAdminWorkspace ? 'admin' : 'personal'"
+      appearance="personal"
       :plan-label="accountPlanLabel"
       :help-href="helpHref"
       :workspace-target="workspaceTarget"
@@ -96,12 +81,6 @@ import { useRoute, useRouter } from 'vue-router'
 import { useUserMembership } from '@/composables/useUserMembership'
 import { openPersonalSettings } from '@/navigation/personalSettingsRoute'
 import { resolveDocumentationUrl } from '@/utils/documentationUrl'
-import {
-  getShellDestinationSpecs,
-  selectVisibleShellDestinations,
-  toShellCapabilityState,
-  type ShellDestinationSpec,
-} from '@/navigation/shellDestinations'
 import { useAppStore } from '@/stores/app'
 import { useAuthStore } from '@/stores/auth'
 import { useOnboardingStore } from '@/stores/onboarding'
@@ -141,12 +120,10 @@ const membership = useUserMembership({
 const panelOpen = ref(false)
 const dockRowRef = ref<HTMLElement | null>(null)
 const triggerRef = ref<HTMLButtonElement | null>(null)
-const isOpsOptionB = computed(() => route.path.startsWith('/admin/ops'))
 const isAdminWorkspace = computed(() => (
   authStore.isAdmin && route.path.startsWith('/admin')
 ))
 const sidebarCollapsed = computed(() => props.collapsed)
-const audience = computed(() => (isAdminWorkspace.value ? 'admin' as const : 'user' as const))
 const settingsAudience = computed(() => (
   isAdminWorkspace.value ? 'admin' as const : 'user' as const
 ))
@@ -154,65 +131,17 @@ const showOnboarding = computed(
   () => !authStore.isSimpleMode && isAdminWorkspace.value,
 )
 
-const destinationContext = computed(() => ({
-  audience: audience.value,
-  simpleMode: authStore.isSimpleMode,
-  capabilities: {
-    payment: toShellCapabilityState(
-      appStore.cachedPublicSettings?.payment_enabled,
-    ),
-    'public-model-catalog': toShellCapabilityState(
-      appStore.backendModeEnabled
-        ? false
-        : appStore.cachedPublicSettings?.public_model_catalog_enabled,
-    ),
-  },
-}))
-
-function findVisibleRouteDestination(id: ShellDestinationSpec['id']) {
-  const spec = selectVisibleShellDestinations(
-    getShellDestinationSpecs(audience.value),
-    destinationContext.value,
-  ).find((destination) => (
-    destination.id === id
-    && destination.target.kind === 'route'
-  ))
-
-  return spec?.target.kind === 'route' ? spec.target : null
-}
-
 function formatCredit(value: number) {
   return Number.isFinite(value) ? value.toFixed(2) : '0.00'
 }
 
-const adminSubscriptionStatusText = computed(() => t('accountDock.payAsYouGo'))
+const accountPlanLabel = computed(() => membership.accountPlanLabel.value)
 
-const accountPlanLabel = computed(() => (
-  isAdminWorkspace.value
-    ? adminSubscriptionStatusText.value
-    : membership.accountPlanLabel.value
-))
-
-const triggerAriaLabel = computed(() => (
-  isAdminWorkspace.value
-    ? [
-        t('accountDock.open'),
-        profile.value?.displayName ?? '',
-        t('accountDock.summary', {
-          balance: formatCredit(profile.value?.availableBalance ?? 0),
-          subscription: accountPlanLabel.value,
-        }),
-      ].join(' · ')
-    : [
-        t('accountDock.open'),
-        profile.value?.displayName ?? '',
-        accountPlanLabel.value,
-      ].filter(Boolean).join(' · ')
-))
-
-const pricingTarget = computed(() => (
-  props.context === 'chat' ? null : findVisibleRouteDestination('pricing')
-))
+const triggerAriaLabel = computed(() => [
+  t('accountDock.open'),
+  profile.value?.displayName ?? '',
+  accountPlanLabel.value,
+].filter(Boolean).join(' · '))
 
 const helpHref = computed(() => resolveDocumentationUrl(
   appStore.cachedPublicSettings?.doc_url || appStore.docUrl,
@@ -233,8 +162,8 @@ const panelSummary = computed<AccountPanelSummary>(() => ({
   frozenBalance: profile.value?.frozenBalance ?? 0,
   formattedAvailableBalance: formatCredit(profile.value?.availableBalance ?? 0),
   formattedFrozenBalance: formatCredit(profile.value?.frozenBalance ?? 0),
-  activeSubscriptionCount: isAdminWorkspace.value ? 0 : activeSubscriptionCount.value,
-  subscriptionsLoaded: isAdminWorkspace.value ? true : subscriptionsLoaded.value,
+  activeSubscriptionCount: activeSubscriptionCount.value,
+  subscriptionsLoaded: subscriptionsLoaded.value,
 }))
 
 function isMobileViewport() {
@@ -281,16 +210,6 @@ async function handleLogout() {
 function handleReplay() {
   closePanel(false)
   onboardingStore.replay()
-}
-
-function handleCtaClick() {
-  closePanel(false)
-  if (isMobileViewport() || appStore.mobileOpen) {
-    appStore.setMobileOpen(false)
-  }
-  if (appStore.workspaceNarrowSidebar) {
-    appStore.setWorkspaceNarrowSidebarOpen(false)
-  }
 }
 
 async function handleOpenSettings(section: PersonalSettingsSection) {
@@ -390,8 +309,7 @@ watch(
   text-align: left;
 }
 
-.sidebar-account-trigger:focus-visible,
-.sidebar-account-cta:focus-visible {
+.sidebar-account-trigger:focus-visible {
   outline: 2px solid var(--workspace-dock-focus);
   outline-offset: -2px;
 }
@@ -511,37 +429,6 @@ watch(
   line-height: 16px;
 }
 
-.sidebar-account-cta {
-  display: inline-flex;
-  min-width: 0;
-  min-height: var(--workspace-avatar-size-md);
-  align-self: center;
-  align-items: center;
-  justify-content: center;
-  padding: 0 var(--workspace-space-2-75);
-  border: 1px solid var(--workspace-dock-cta-border);
-  border-radius: var(--workspace-radius-control-sm);
-  color: var(--workspace-dock-cta-text);
-  background: var(--workspace-dock-cta-surface);
-  font-size: 0.8125rem;
-  font-weight: 500;
-  line-height: 1;
-  text-decoration: none;
-  white-space: nowrap;
-  transition:
-    border-color 150ms ease,
-    background-color 150ms ease;
-}
-
-.sidebar-account-dock--personal .sidebar-account-cta {
-  display: none;
-}
-
-.sidebar-account-cta:hover {
-  border-color: var(--workspace-dock-cta-border-hover);
-  background: var(--workspace-dock-cta-surface-hover);
-}
-
 .sidebar-account-dock--collapsed .sidebar-account-row {
   width: var(--workspace-sidebar-touch-target);
   padding-right: 0;
@@ -570,7 +457,6 @@ watch(
 
 @media (prefers-reduced-motion: reduce) {
   .sidebar-account-row,
-  .sidebar-account-cta,
   .sidebar-account-trigger__copy {
     transition-duration: 0.01ms;
   }

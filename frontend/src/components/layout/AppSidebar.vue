@@ -460,7 +460,6 @@ const personalNarrowViewport = computed(() => (
   isPersonalWorkWorkspace.value && narrowViewport.value
 ))
 const narrowSidebarOpen = computed(() => appStore.workspaceNarrowSidebarOpen)
-const isOpsOptionB = computed(() => route.path.startsWith('/admin/ops'))
 const documentationUrl = computed(() => resolveDocumentationUrl(
   appStore.cachedPublicSettings?.doc_url || appStore.docUrl,
 ))
@@ -898,19 +897,6 @@ const sidebarSupportLinks = computed<SidebarSupportLink[]>(() => {
     }]
   })
 
-  if (route.path.startsWith('/admin/ops')) {
-    const documentation = links.find((link) => link.id === 'documentation')
-    return [
-      {
-        id: 'home',
-        label: t('admin.ops.sidebar.backHome'),
-        href: '/',
-        icon: 'home',
-      },
-      ...(documentation ? [{ ...documentation, icon: 'document' as const }] : []),
-    ]
-  }
-
   return links.filter((link) => link.id === 'documentation')
 })
 
@@ -1018,7 +1004,6 @@ const adminNavItems = computed((): NavItem[] => (
   adminNavigationDefinition.value?.buildItems({
     t: (key) => t(key),
     simpleMode: authStore.isSimpleMode,
-    isOpsShell: isOpsOptionB.value,
     opsMonitoringEnabled: () => adminSettingsStore.value?.opsMonitoringEnabled,
     adminPaymentEnabled: () => adminSettingsStore.value?.paymentEnabled,
     customMenuItems: adminSettingsStore.value?.customMenuItems ?? [],
@@ -1056,7 +1041,6 @@ const adminNavSections = computed(() => (
   adminNavigationDefinition.value?.buildSections(
     adminNavItems.value,
     (key) => t(key),
-    isOpsOptionB.value,
   ) ?? []
 ))
 

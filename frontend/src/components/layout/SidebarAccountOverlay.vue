@@ -25,7 +25,7 @@
           class="account-panel"
           :class="{
             'account-panel--mobile': usesMobileSheet,
-            'account-panel--personal': variant === 'personal',
+            'account-panel--personal': usesPersonalAppearance,
           }"
           :style="panelStyle"
           role="dialog"
@@ -52,7 +52,7 @@
                 {{ summary.displayName }}
               </h2>
               <p class="account-panel__identity-meta">
-                <span v-if="variant === 'personal'" class="truncate">{{ planLabel }}</span>
+                <span v-if="usesPersonalAppearance" class="truncate">{{ planLabel }}</span>
                 <template v-else>
                   <span v-if="context === 'chat'" class="truncate">
                     {{ summary.email }}
@@ -83,7 +83,7 @@
               </p>
             </div>
             <AccountMenuIcon
-              v-if="variant === 'personal'"
+              v-if="usesPersonalAppearance"
               name="chevronRight"
               :size="16"
               class="account-panel__identity-chevron"
@@ -219,41 +219,79 @@
           </template>
 
           <template v-else>
-          <nav class="account-panel__section" :aria-label="t('accountDock.personalActions')">
+          <div
+            v-if="usesPersonalAppearance"
+            class="account-panel__divider"
+            aria-hidden="true"
+          ></div>
+
+          <nav
+            class="account-panel__section"
+            :class="{ 'account-panel__section--personal': usesPersonalAppearance }"
+            :aria-label="t('accountDock.personalActions')"
+          >
             <button
               type="button"
               data-testid="account-open-profile"
-              class="account-panel__row w-full"
+              class="account-panel__row account-panel__row--reserved w-full"
               @click="emit('open-settings', 'account')"
             >
-              <Icon name="user" size="sm" aria-hidden="true" />
+              <AccountMenuIcon
+                v-if="usesPersonalAppearance"
+                name="avatar"
+                class="account-panel__row-icon"
+                aria-hidden="true"
+              />
+              <Icon v-else name="user" size="sm" aria-hidden="true" />
               <span class="min-w-0 flex-1 truncate text-left">
                 {{ t('accountDock.personalProfile') }}
               </span>
-              <Icon name="chevronRight" size="xs" aria-hidden="true" />
+              <Icon
+                v-if="!usesPersonalAppearance"
+                name="chevronRight"
+                size="xs"
+                aria-hidden="true"
+              />
             </button>
 
             <button
               type="button"
               data-testid="account-open-preferences"
-              class="account-panel__row w-full"
+              class="account-panel__row account-panel__row--reserved w-full"
               @click="emit('open-settings', 'general')"
             >
-              <Icon name="slidersHorizontal" size="sm" aria-hidden="true" />
+              <AccountMenuIcon
+                v-if="usesPersonalAppearance"
+                name="settings"
+                class="account-panel__row-icon"
+                aria-hidden="true"
+              />
+              <Icon v-else name="slidersHorizontal" size="sm" aria-hidden="true" />
               <span class="min-w-0 flex-1 truncate text-left">
                 {{ t('accountDock.personalPreferences') }}
               </span>
-              <Icon name="chevronRight" size="xs" aria-hidden="true" />
+              <Icon
+                v-if="!usesPersonalAppearance"
+                name="chevronRight"
+                size="xs"
+                aria-hidden="true"
+              />
             </button>
 
             <button
               v-if="showOnboarding"
               type="button"
               data-testid="account-admin-guide"
-              class="account-panel__row w-full"
+              class="account-panel__row account-panel__row--reserved w-full"
               @click="emit('replay')"
             >
-              <Icon name="questionCircle" size="sm" aria-hidden="true" />
+              <AccountMenuIcon
+                v-if="usesPersonalAppearance"
+                name="help"
+                class="account-panel__row-icon"
+                aria-hidden="true"
+              />
+              <Icon v-else name="questionCircle" size="sm" aria-hidden="true" />
               <span class="min-w-0 flex-1 truncate text-left">
                 {{ t('accountDock.adminGuide') }}
               </span>
@@ -262,25 +300,47 @@
             <a
               v-if="workspaceTarget"
               data-testid="account-switch-workspace"
-              class="account-panel__row w-full"
+              class="account-panel__row account-panel__row--reserved w-full"
               :href="workspaceTarget.href"
             >
-              <Icon name="swap" size="sm" aria-hidden="true" />
+              <Icon
+                name="swap"
+                :size="usesPersonalAppearance ? 'md' : 'sm'"
+                class="account-panel__row-icon"
+                aria-hidden="true"
+              />
               <span class="min-w-0 flex-1 truncate text-left">
                 {{ workspaceTarget.label }}
               </span>
-              <Icon name="chevronRight" size="xs" aria-hidden="true" />
+              <Icon
+                v-if="!usesPersonalAppearance"
+                name="chevronRight"
+                size="xs"
+                aria-hidden="true"
+              />
             </a>
           </nav>
+
+          <div
+            v-if="usesPersonalAppearance"
+            class="account-panel__divider"
+            aria-hidden="true"
+          ></div>
 
           <div class="account-panel__section account-panel__section--danger">
             <button
               type="button"
               data-testid="account-logout"
-              class="account-panel__row account-panel__row--danger w-full"
+              class="account-panel__row account-panel__row--danger account-panel__row--reserved w-full"
               @click="emit('logout')"
             >
-              <Icon name="logout" size="sm" aria-hidden="true" />
+              <AccountMenuIcon
+                v-if="usesPersonalAppearance"
+                name="exit"
+                class="account-panel__row-icon"
+                aria-hidden="true"
+              />
+              <Icon v-else name="logout" size="sm" aria-hidden="true" />
               <span class="min-w-0 flex-1 truncate text-left">{{ t('nav.logout') }}</span>
             </button>
           </div>
@@ -315,6 +375,7 @@ const props = defineProps<{
   showOnboarding: boolean
   context?: 'work' | 'chat'
   variant: 'personal' | 'admin'
+  appearance?: 'personal' | 'admin'
   planLabel: string
   helpHref: string
   workspaceTarget?: {
@@ -336,6 +397,9 @@ const anchorRef = toRef(props, 'anchorElement')
 const openRef = toRef(props, 'open')
 const { desktopStyle, updatePosition } = useAnchoredOverlay(openRef, anchorRef, panelRef)
 const isMobile = ref(false)
+const usesPersonalAppearance = computed(() => (
+  (props.appearance ?? props.variant) === 'personal'
+))
 const usesMobileSheet = computed(() => isMobile.value && props.variant === 'admin')
 const scrollLockToken = Symbol('account-bottom-sheet')
 const modalLayerToken = Symbol('account-panel-layer')
@@ -834,7 +898,7 @@ onBeforeUnmount(() => {
   }
 }
 
-.account-panel--personal .account-panel__close {
+.account-panel--personal:not(.account-panel--mobile) .account-panel__close {
   display: none;
 }
 

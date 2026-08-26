@@ -93,7 +93,6 @@ export interface UserNavigationContext {
 export interface AdminNavigationContext {
   t: (key: string) => string
   simpleMode: boolean
-  isOpsShell: boolean
   opsMonitoringEnabled: () => boolean | undefined
   adminPaymentEnabled: () => boolean | undefined
   customMenuItems: readonly CustomMenuItem[]
@@ -105,7 +104,6 @@ export interface AdminNavigationDefinition {
   buildSections(
     items: readonly NavItem[],
     t: (key: string) => string,
-    isOpsShell: boolean,
   ): AdminNavSection[]
   activeSectionId(path: string): AdminNavSectionId | null
   defaultExpandedSections(): Set<AdminNavSectionId>
