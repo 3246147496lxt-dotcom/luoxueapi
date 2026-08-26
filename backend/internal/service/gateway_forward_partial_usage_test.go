@@ -127,6 +127,44 @@ func TestGatewayService_Forward_StreamReadErrorAfterOutputPreservesPartialUsage(
 	require.Equal(t, 4, result.Usage.CacheCreationInputTokens)
 }
 
+func TestGatewayService_Forward_StreamSSEErrorAfterOutputPreservesPartialUsage(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", nil)
+
+	body := []byte(`{"model":"claude-3-5-sonnet-latest","stream":true,"messages":[{"role":"user","content":[{"type":"text","text":"hello"}]}]}`)
+	parsed, err := ParseGatewayRequest(NewRequestBodyRef(body), PlatformAnthropic)
+	require.NoError(t, err)
+
+	const errorJSON = `{"type":"error","error":{"type":"rate_limit_error","message":"Rate limited"}}`
+	upstreamSSE := strings.Join([]string{
+		`data: {"type":"message_start","message":{"usage":{"input_tokens":9,"cache_creation_input_tokens":4}}}`,
+		"",
+		"event: error",
+		"data: " + errorJSON,
+		"",
+		"",
+	}, "\n")
+	upstream := &anthropicHTTPUpstreamRecorder{resp: &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+		Body:       io.NopCloser(strings.NewReader(upstreamSSE)),
+	}}
+	svc := newForwardPartialUsageServiceForTest(upstream)
+	account := newAnthropicOAuthAccountForPartialUsageTest()
+
+	result, err := svc.Forward(context.Background(), c, account, parsed)
+	require.Error(t, err)
+	var failoverErr *UpstreamFailoverError
+	require.True(t, errors.As(err, &failoverErr))
+	require.NotNil(t, result, "event:error 后已写出 message_start 时必须保留部分 usage")
+	require.Equal(t, 9, result.Usage.InputTokens)
+	require.Equal(t, 4, result.Usage.CacheCreationInputTokens)
+	require.Greater(t, rec.Body.Len(), 0)
+}
+
 func TestGatewayService_Forward_StreamErrorWithoutUsageReturnsNilResult(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 

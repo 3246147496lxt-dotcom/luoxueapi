@@ -60,6 +60,11 @@ type UserPlatformQuotaCacheEntry struct {
 // native miss representation.
 var ErrBillingCacheMiss = errors.New("billing cache miss")
 
+// ErrBillingCacheGenerationChanged indicates that an authoritative cache
+// invalidation raced a read-through reload. Callers must discard the snapshot
+// and retry rather than treating it as current billing state.
+var ErrBillingCacheGenerationChanged = errors.New("billing cache generation changed")
+
 // BillingCache defines cache operations for billing service
 type BillingCache interface {
 	// Balance operations
@@ -92,6 +97,31 @@ type BillingCache interface {
 	PopDirtyUserPlatformQuotaKeys(ctx context.Context, n int) ([]UserPlatformQuotaKey, error)
 	ReaddDirtyUserPlatformQuotaKeys(ctx context.Context, keys []UserPlatformQuotaKey) error
 	BatchGetUserPlatformQuotaCache(ctx context.Context, keys []UserPlatformQuotaKey) ([]*UserPlatformQuotaCacheEntry, error)
+}
+
+// VersionedBalanceCache is an optional extension implemented by distributed
+// cache backends.  The generation is advanced atomically with invalidation so
+// a DB snapshot that started before a deduction cannot be written back after
+// another process has evicted the key.  BillingCache implementations that do
+// not provide this extension are still protected by BillingCacheService's
+// in-process fence.
+type VersionedBalanceCache interface {
+	GetUserBalanceWithGeneration(ctx context.Context, userID int64) (balance float64, generation uint64, err error)
+	SetUserBalanceIfGeneration(ctx context.Context, userID int64, balance float64, generation uint64) error
+}
+
+// VersionedAPIKeyRateLimitCache is an optional extension implemented by
+// distributed cache backends.  Rate-limit snapshots are read through from the
+// database after a cache miss.  The generation token is advanced atomically
+// with invalidation so a slow read of the pre-charge DB row cannot repopulate
+// Redis after the authoritative billing transaction has committed.
+//
+// BillingCache deliberately keeps this extension optional: test doubles and
+// deployments with a non-Redis cache continue to satisfy the original
+// interface and are protected by BillingCacheService's in-process fence.
+type VersionedAPIKeyRateLimitCache interface {
+	GetAPIKeyRateLimitWithGeneration(ctx context.Context, keyID int64) (data *APIKeyRateLimitCacheData, generation uint64, err error)
+	SetAPIKeyRateLimitIfGeneration(ctx context.Context, keyID int64, data *APIKeyRateLimitCacheData, generation uint64) error
 }
 
 // ModelPricing 模型价格配置（per-token价格，与LiteLLM格式一致）
@@ -169,6 +199,33 @@ type CostBreakdown struct {
 	ActualCost                float64 // 应用倍率后的实际费用
 	BillingMode               string  // 计费模式（"token"/"per_request"/"image"），由 CalculateCostUnified 填充
 	LongContextBillingApplied bool
+}
+
+// ValidateMonetaryFields checks every component of a computed cost before it
+// reaches usage logging or a billing side effect.
+func (c *CostBreakdown) ValidateMonetaryFields() error {
+	if c == nil {
+		return nil
+	}
+	values := []struct {
+		name  string
+		value float64
+	}{
+		{"input_cost", c.InputCost},
+		{"image_input_cost", c.ImageInputCost},
+		{"output_cost", c.OutputCost},
+		{"image_output_cost", c.ImageOutputCost},
+		{"cache_creation_cost", c.CacheCreationCost},
+		{"cache_read_cost", c.CacheReadCost},
+		{"total_cost", c.TotalCost},
+		{"actual_cost", c.ActualCost},
+	}
+	for _, item := range values {
+		if math.IsNaN(item.value) || math.IsInf(item.value, 0) || item.value < 0 {
+			return fmt.Errorf("%w: %s=%v", ErrUsageBillingInvalidAmount, item.name, item.value)
+		}
+	}
+	return nil
 }
 
 // ErrModelPricingUnavailable indicates that none of the configured pricing

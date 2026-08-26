@@ -485,10 +485,13 @@ func TestHandleStreamingResponse_SSEErrorEvent_AfterPartialStreamOutput(t *testi
 		_, _ = pw.Write([]byte("event: error\ndata: " + errorJSON + "\n\n"))
 	}()
 
-	_, err := svc.handleStreamingResponse(context.Background(), resp, c, &Account{ID: 1}, time.Now(), "model", "model", false)
+	result, err := svc.handleStreamingResponse(context.Background(), resp, c, &Account{ID: 1}, time.Now(), "model", "model", false)
 	_ = pr.Close()
 
 	require.Error(t, err)
+	require.NotNil(t, result, "event:error 后仍应保留此前观测到的 usage，供上层记录部分计费")
+	require.NotNil(t, result.usage)
+	require.Equal(t, 5, result.usage.InputTokens)
 	var sseErr *sseStreamErrorEventError
 	require.True(t, errors.As(err, &sseErr), "已发数据后再来的 SSE event:error 必须仍包成 typed error，期望: %v", err)
 	require.Equal(t, errorJSON, sseErr.RawData)

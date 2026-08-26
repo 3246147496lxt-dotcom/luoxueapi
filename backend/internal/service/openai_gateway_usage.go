@@ -379,6 +379,14 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 				s.usageBillingRepo,
 			)
 			if billingErr != nil {
+				// Preserve the usage row when a simple-mode Web Chat receipt
+				// fails.  A terminally closed settlement is deliberately omitted
+				// to avoid creating a duplicate late row.
+				if billingResult != nil && billingResult.SettlementClosed {
+					return billingErr
+				}
+				usageLog.ActualCost = 0
+				writeUsageLogBestEffort(ctx, s.usageLogRepo, usageLog, "service.openai_gateway")
 				return billingErr
 			}
 			if billingResult != nil && billingResult.SettlementClosed {

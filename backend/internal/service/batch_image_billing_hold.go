@@ -3,6 +3,8 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
+	"math"
 	"strings"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
@@ -38,11 +40,10 @@ func buildBatchImageHoldCommand(job *BatchImageJob, requestID string, actualAmou
 	if job.HoldAmount != nil {
 		holdAmount = *job.HoldAmount
 	}
-	if holdAmount < 0 {
-		holdAmount = 0
-	}
-	if actualAmount < 0 {
-		actualAmount = 0
+	for name, value := range map[string]float64{"hold_amount": holdAmount, "actual_amount": actualAmount} {
+		if math.IsNaN(value) || math.IsInf(value, 0) || value < 0 {
+			return nil, fmt.Errorf("%w: %s=%v", ErrUsageBillingInvalidAmount, name, value)
+		}
 	}
 	return &BatchImageBalanceHoldCommand{
 		RequestID:          requestID,

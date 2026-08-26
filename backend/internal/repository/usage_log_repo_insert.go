@@ -116,8 +116,80 @@ type usageLogInsertPrepared struct {
 	createdAt      time.Time
 	requestID      string
 	rateMultiplier float64
+	actualCost     float64
 	requestType    int16
 	args           []any
+}
+
+// usageLogPromoteConflictClause keeps the request-id idempotency key while
+// replacing a zero-cost failure placeholder with the complete usage observed
+// by a later retry. Updating only actual_cost would leave tokens, model and
+// cost-breakdown columns describing the failed attempt, making the ledger
+// internally inconsistent and breaking downstream analytics.
+const usageLogPromoteConflictClause = `
+		ON CONFLICT (request_id, api_key_id) DO UPDATE
+			SET actual_cost = EXCLUDED.actual_cost,
+				account_id = EXCLUDED.account_id,
+				model = EXCLUDED.model,
+				requested_model = EXCLUDED.requested_model,
+				upstream_model = EXCLUDED.upstream_model,
+				group_id = EXCLUDED.group_id,
+				subscription_id = EXCLUDED.subscription_id,
+				input_tokens = EXCLUDED.input_tokens,
+				output_tokens = EXCLUDED.output_tokens,
+				cache_creation_tokens = EXCLUDED.cache_creation_tokens,
+				cache_read_tokens = EXCLUDED.cache_read_tokens,
+				cache_creation_5m_tokens = EXCLUDED.cache_creation_5m_tokens,
+				cache_creation_1h_tokens = EXCLUDED.cache_creation_1h_tokens,
+				image_output_tokens = EXCLUDED.image_output_tokens,
+				image_output_cost = EXCLUDED.image_output_cost,
+				image_input_tokens = EXCLUDED.image_input_tokens,
+				image_input_cost = EXCLUDED.image_input_cost,
+				input_cost = EXCLUDED.input_cost,
+				output_cost = EXCLUDED.output_cost,
+				cache_creation_cost = EXCLUDED.cache_creation_cost,
+				cache_read_cost = EXCLUDED.cache_read_cost,
+				total_cost = EXCLUDED.total_cost,
+				rate_multiplier = EXCLUDED.rate_multiplier,
+				account_rate_multiplier = EXCLUDED.account_rate_multiplier,
+				billing_type = EXCLUDED.billing_type,
+				request_type = EXCLUDED.request_type,
+				stream = EXCLUDED.stream,
+				openai_ws_mode = EXCLUDED.openai_ws_mode,
+				duration_ms = EXCLUDED.duration_ms,
+				first_token_ms = EXCLUDED.first_token_ms,
+				user_agent = EXCLUDED.user_agent,
+				ip_address = EXCLUDED.ip_address,
+				image_count = EXCLUDED.image_count,
+				image_size = EXCLUDED.image_size,
+				image_input_size = EXCLUDED.image_input_size,
+				image_output_size = EXCLUDED.image_output_size,
+				image_size_source = EXCLUDED.image_size_source,
+				image_size_breakdown = EXCLUDED.image_size_breakdown,
+				video_count = EXCLUDED.video_count,
+				video_resolution = EXCLUDED.video_resolution,
+				video_duration_seconds = EXCLUDED.video_duration_seconds,
+				service_tier = EXCLUDED.service_tier,
+				reasoning_effort = EXCLUDED.reasoning_effort,
+				inbound_endpoint = EXCLUDED.inbound_endpoint,
+				upstream_endpoint = EXCLUDED.upstream_endpoint,
+				cache_ttl_overridden = EXCLUDED.cache_ttl_overridden,
+				long_context_billing_applied = EXCLUDED.long_context_billing_applied,
+				channel_id = EXCLUDED.channel_id,
+				model_mapping_chain = EXCLUDED.model_mapping_chain,
+				billing_tier = EXCLUDED.billing_tier,
+				billing_mode = EXCLUDED.billing_mode,
+				account_stats_cost = EXCLUDED.account_stats_cost
+			WHERE usage_logs.actual_cost <= 0 AND EXCLUDED.actual_cost > 0`
+
+// preferSuccessfulUsageLog keeps the successful representative when a
+// zero-cost failure placeholder and a positive-cost retry share one batch
+// key.  The database upsert applies the same rule for rows already persisted.
+func preferSuccessfulUsageLog(current, candidate usageLogInsertPrepared) usageLogInsertPrepared {
+	if current.actualCost <= 0 && candidate.actualCost > 0 {
+		return candidate
+	}
+	return current
 }
 
 type usageLogBatchState struct {
@@ -179,9 +251,15 @@ func (r *usageLogRepository) CreateBestEffort(ctx context.Context, log *service.
 		apiKeyID: log.APIKeyID,
 		resultCh: make(chan error, 1),
 	}
-	if key, ok := r.bestEffortRecentKey(req.prepared.requestID, req.apiKeyID); ok {
-		if _, exists := r.bestEffortRecent.Get(key); exists {
-			return nil
+	// A recent zero-cost row is only a failure placeholder.  A later retry
+	// carrying observed usage must reach the database so the conditional
+	// upsert can promote that placeholder; otherwise the in-process TTL cache
+	// would hide the successful retry for up to 30 seconds.
+	if req.prepared.actualCost <= 0 {
+		if key, ok := r.bestEffortRecentKey(req.prepared.requestID, req.apiKeyID); ok {
+			if _, exists := r.bestEffortRecent.Get(key); exists {
+				return nil
+			}
 		}
 	}
 
@@ -275,7 +353,7 @@ func (r *usageLogRepository) createSingle(ctx context.Context, sqlq sqlExecutor,
 			$18, $19, $20, $21, $22, $23,
 			$24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39, $40, $41, $42, $43, $44, $45, $46, $47, $48, $49, $50, $51, $52, $53, $54, $55, $56
 		)
-		ON CONFLICT (request_id, api_key_id) DO NOTHING
+	` + usageLogPromoteConflictClause + `
 		RETURNING id, created_at
 	`
 
@@ -406,6 +484,7 @@ func (r *usageLogRepository) flushCreateBatch(db *sql.DB, batch []usageLogCreate
 	uniqueOrder := make([]string, 0, len(batch))
 	preparedByKey := make(map[string]usageLogInsertPrepared, len(batch))
 	requestsByKey := make(map[string][]usageLogCreateRequest, len(batch))
+	representativeIndexByKey := make(map[string]int, len(batch))
 	fallback := make([]usageLogCreateRequest, 0)
 
 	for _, req := range batch {
@@ -431,6 +510,13 @@ func (r *usageLogRepository) flushCreateBatch(db *sql.DB, batch []usageLogCreate
 		if _, exists := requestsByKey[key]; !exists {
 			uniqueOrder = append(uniqueOrder, key)
 			preparedByKey[key] = prepared
+			representativeIndexByKey[key] = 0
+		} else if current := preparedByKey[key]; current.actualCost <= 0 && prepared.actualCost > 0 {
+			// Keep a successful retry as the representative row when a failed
+			// placeholder and its retry are coalesced into one batch.  The SQL
+			// conflict clause can then promote the existing zero-cost row.
+			preparedByKey[key] = preferSuccessfulUsageLog(current, prepared)
+			representativeIndexByKey[key] = len(requestsByKey[key])
 		}
 		requestsByKey[key] = append(requestsByKey[key], req)
 	}
@@ -447,6 +533,7 @@ func (r *usageLogRepository) flushCreateBatch(db *sql.DB, batch []usageLogCreate
 					reqs := requestsByKey[key]
 					state, hasState := stateMap[key]
 					inserted := insertedMap[key]
+					representativeIdx := representativeIndexByKey[key]
 					for idx, req := range reqs {
 						req.log.RateMultiplier = preparedByKey[key].rateMultiplier
 						if hasState {
@@ -454,7 +541,7 @@ func (r *usageLogRepository) flushCreateBatch(db *sql.DB, batch []usageLogCreate
 							req.log.CreatedAt = state.CreatedAt
 						}
 						switch {
-						case inserted && idx == 0:
+						case inserted && idx == representativeIdx:
 							completeUsageLogCreateRequest(req, usageLogCreateResult{inserted: true, err: nil})
 						case inserted:
 							completeUsageLogCreateRequest(req, usageLogCreateResult{inserted: false, err: nil})
@@ -481,12 +568,13 @@ func (r *usageLogRepository) flushCreateBatch(db *sql.DB, batch []usageLogCreate
 					}
 					continue
 				}
+				representativeIdx := representativeIndexByKey[key]
 				for idx, req := range reqs {
 					req.log.ID = state.ID
 					req.log.CreatedAt = state.CreatedAt
 					req.log.RateMultiplier = preparedByKey[key].rateMultiplier
 					completeUsageLogCreateRequest(req, usageLogCreateResult{
-						inserted: idx == 0 && insertedMap[key],
+						inserted: idx == representativeIdx && insertedMap[key],
 						err:      nil,
 					})
 				}
@@ -512,10 +600,11 @@ func (r *usageLogRepository) flushBestEffortBatch(db *sql.DB, batch []usageLogBe
 	}
 
 	type bestEffortGroup struct {
-		prepared usageLogInsertPrepared
-		apiKeyID int64
-		key      string
-		reqs     []usageLogBestEffortRequest
+		prepared    usageLogInsertPrepared
+		apiKeyID    int64
+		key         string
+		preparedIdx int
+		reqs        []usageLogBestEffortRequest
 	}
 
 	groupsByKey := make(map[string]*bestEffortGroup, len(batch))
@@ -531,13 +620,19 @@ func (r *usageLogRepository) flushBestEffortBatch(db *sql.DB, batch []usageLogBe
 		group, exists := groupsByKey[key]
 		if !exists {
 			group = &bestEffortGroup{
-				prepared: prepared,
-				apiKeyID: req.apiKeyID,
-				key:      key,
+				prepared:    prepared,
+				apiKeyID:    req.apiKeyID,
+				key:         key,
+				preparedIdx: len(preparedList),
 			}
 			groupsByKey[key] = group
 			groupOrder = append(groupOrder, group)
 			preparedList = append(preparedList, prepared)
+		} else if group.prepared.actualCost <= 0 && prepared.actualCost > 0 {
+			// Prefer the successful retry over a zero-cost failure placeholder
+			// when both arrive during the same best-effort flush window.
+			group.prepared = preferSuccessfulUsageLog(group.prepared, prepared)
+			preparedList[group.preparedIdx] = group.prepared
 		}
 		group.reqs = append(group.reqs, req)
 	}
@@ -834,7 +929,9 @@ func buildUsageLogBatchInsertQuery(keys []string, preparedByKey map[string]usage
 				account_stats_cost,
 				created_at
 			FROM input
-			ON CONFLICT (request_id, api_key_id) DO NOTHING
+		`)
+	query.WriteString(usageLogPromoteConflictClause)
+	_, _ = query.WriteString(`
 			RETURNING request_id, api_key_id, id, created_at
 		),
 		resolved AS (
@@ -1074,8 +1171,10 @@ func buildUsageLogBestEffortInsertQuery(preparedList []usageLogInsertPrepared) (
 			account_stats_cost,
 			created_at
 		FROM input
-		ON CONFLICT (request_id, api_key_id) DO NOTHING
-	`)
+		`)
+	query.WriteString(usageLogPromoteConflictClause)
+	_, _ = query.WriteString(`
+		`)
 
 	return query.String(), args
 }
@@ -1147,8 +1246,8 @@ func execUsageLogInsertNoResult(ctx context.Context, sqlq sqlExecutor, prepared 
 			$18, $19, $20, $21, $22, $23,
 			$24, $25, $26, $27, $28, $29, $30, $31, $32, $33, $34, $35, $36, $37, $38, $39, $40, $41, $42, $43, $44, $45, $46, $47, $48, $49, $50, $51, $52, $53, $54, $55, $56
 		)
-		ON CONFLICT (request_id, api_key_id) DO NOTHING
-	`, prepared.args...)
+	`+usageLogPromoteConflictClause+`
+		`, prepared.args...)
 	return err
 }
 
@@ -1201,6 +1300,7 @@ func prepareUsageLogInsert(log *service.UsageLog) usageLogInsertPrepared {
 		createdAt:      createdAt,
 		requestID:      requestID,
 		rateMultiplier: rateMultiplier,
+		actualCost:     log.ActualCost,
 		requestType:    requestType,
 		args: []any{
 			log.UserID,

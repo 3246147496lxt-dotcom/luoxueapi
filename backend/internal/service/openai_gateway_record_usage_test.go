@@ -1395,7 +1395,10 @@ func TestOpenAIGatewayServiceRecordUsage_BillsMappedRequestsUsingRequestedModel(
 	require.Equal(t, "gpt-5.1", usageRepo.lastLog.Model)
 	require.Equal(t, expectedCost.ActualCost, usageRepo.lastLog.ActualCost)
 	require.Equal(t, expectedCost.TotalCost, usageRepo.lastLog.TotalCost)
-	require.Equal(t, expectedCost.ActualCost, userRepo.lastAmount)
+	// Monetary side effects are persisted/charged at NUMERIC(20,8) precision;
+	// CalculateCost intentionally retains the pre-quantization float for the
+	// usage-log detail assertions above.
+	require.Equal(t, QuantizeUsageBillingAmount(expectedCost.ActualCost), userRepo.lastAmount)
 }
 
 func TestOpenAIGatewayServiceRecordUsage_ChannelMappedDoesNotOverrideBillingModelWhenUnmapped(t *testing.T) {
@@ -1755,6 +1758,40 @@ func TestOpenAIGatewayServiceRecordUsage_SimpleModeWebChatWritesCanonicalNoCharg
 	require.Zero(t, billingRepo.lastCmd.AccountQuotaCost)
 	require.Greater(t, billingRepo.lastCmd.GrossCost, 0.0)
 	require.Equal(t, 1, usageRepo.calls)
+}
+
+func TestOpenAIGatewayServiceRecordUsage_SimpleModeWebChatBillingErrorStillWritesUsageLog(t *testing.T) {
+	usageRepo := &openAIRecordUsageLogRepoStub{inserted: true}
+	billingErr := errors.New("simple openai web chat receipt failed")
+	billingRepo := &openAIRecordUsageBillingRepoStub{err: billingErr}
+	svc := newOpenAIRecordUsageServiceWithBillingRepoForTest(
+		usageRepo,
+		billingRepo,
+		&openAIRecordUsageUserRepoStub{},
+		&openAIRecordUsageSubRepoStub{},
+		nil,
+	)
+	svc.cfg.RunMode = config.RunModeSimple
+
+	ctx := context.WithValue(context.Background(), ctxkey.ClientRequestID, "openai-simple-web-chat-fail")
+	ctx = context.WithValue(ctx, ctxkey.WebChat, true)
+	err := svc.RecordUsage(ctx, &OpenAIRecordUsageInput{
+		Result: &OpenAIForwardResult{
+			RequestID: "openai-simple-web-chat-fail-upstream",
+			Usage:     OpenAIUsage{InputTokens: 8, OutputTokens: 4},
+			Model:     "gpt-5.1",
+			Duration:  time.Second,
+		},
+		APIKey:  &APIKey{ID: 1003},
+		User:    &User{ID: 2003},
+		Account: &Account{ID: 3003},
+	})
+
+	require.ErrorIs(t, err, billingErr)
+	require.Equal(t, 1, billingRepo.calls)
+	require.Equal(t, 1, usageRepo.calls)
+	require.NotNil(t, usageRepo.lastLog)
+	require.Zero(t, usageRepo.lastLog.ActualCost)
 }
 
 func TestOpenAIGatewayServiceRecordUsage_SettlementClosedSkipsLateUsageLog(t *testing.T) {

@@ -516,6 +516,39 @@ func TestGatewayServiceRecordUsage_BillingErrorWritesUnsettledUsageLog(t *testin
 	require.Zero(t, usageRepo.lastLog.ActualCost)
 }
 
+func TestGatewayServiceRecordUsage_SimpleModeWebChatBillingErrorStillWritesUsageLog(t *testing.T) {
+	usageRepo := &openAIRecordUsageLogRepoStub{inserted: true}
+	billingErr := errors.New("simple web chat receipt failed")
+	billingRepo := &openAIRecordUsageBillingRepoStub{err: billingErr}
+	svc := newGatewayRecordUsageServiceWithBillingRepoForTest(
+		usageRepo,
+		billingRepo,
+		&openAIRecordUsageUserRepoStub{},
+		&openAIRecordUsageSubRepoStub{},
+	)
+	svc.cfg.RunMode = config.RunModeSimple
+
+	ctx := context.WithValue(context.Background(), ctxkey.ClientRequestID, "gateway-simple-web-chat-fail")
+	ctx = context.WithValue(ctx, ctxkey.WebChat, true)
+	err := svc.RecordUsage(ctx, &RecordUsageInput{
+		Result: &ForwardResult{
+			RequestID: "gateway-simple-web-chat-fail-upstream",
+			Usage:     ClaudeUsage{InputTokens: 10, OutputTokens: 6},
+			Model:     "claude-sonnet-4",
+			Duration:  time.Second,
+		},
+		APIKey:  &APIKey{ID: 509},
+		User:    &User{ID: 609},
+		Account: &Account{ID: 709},
+	})
+
+	require.ErrorIs(t, err, billingErr)
+	require.Equal(t, 1, billingRepo.calls)
+	require.Equal(t, 1, usageRepo.calls)
+	require.NotNil(t, usageRepo.lastLog)
+	require.Zero(t, usageRepo.lastLog.ActualCost)
+}
+
 func TestGatewayServiceRecordUsage_ReasoningEffortPersisted(t *testing.T) {
 	usageRepo := &openAIRecordUsageBestEffortLogRepoStub{}
 	svc := newGatewayRecordUsageServiceForTest(usageRepo, &openAIRecordUsageUserRepoStub{}, &openAIRecordUsageSubRepoStub{})

@@ -671,8 +671,12 @@ func partialStreamUsageResult(resp *http.Response, streamResult *streamingResult
 	if errors.As(err, &failoverErr) {
 		return nil
 	}
+	requestID := ""
+	if resp != nil {
+		requestID = resp.Header.Get("x-request-id")
+	}
 	return &ForwardResult{
-		RequestID:        resp.Header.Get("x-request-id"),
+		RequestID:        requestID,
 		Usage:            *streamResult.usage,
 		Model:            model,
 		UpstreamModel:    upstreamModel,
@@ -1057,6 +1061,14 @@ func (s *GatewayService) handleStreamingResponse(ctx context.Context, resp *http
 				if err != nil {
 					if clientDisconnected {
 						return &streamingResult{usage: usage, firstTokenMs: firstTokenMs, clientDisconnect: true}, nil
+					}
+					// Preserve usage observed in earlier events even when the upstream
+					// terminates the SSE stream with an explicit event:error frame.
+					// The caller records this partial result alongside the error so
+					// input/cache tokens from message_start are not lost. Keep the
+					// historical nil result when no usage was observed at all.
+					if usage.hasObservedTokens() {
+						return &streamingResult{usage: usage, firstTokenMs: firstTokenMs}, err
 					}
 					return nil, err
 				}

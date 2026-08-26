@@ -40,23 +40,32 @@ func newAPIKeyRepositoryWithSQL(client *dbent.Client, sqlq sqlExecutor) *apiKeyR
 }
 
 func (r *apiKeyRepository) activeQuery() *dbent.APIKeyQuery {
+	return r.activeQueryWithClient(r.client)
+}
+
+func (r *apiKeyRepository) activeQueryWithClient(client *dbent.Client) *dbent.APIKeyQuery {
 	// API-key management and authentication only see user-managed keys. Internal
 	// web-chat principals have a separate repository capability below.
-	return r.client.APIKey.Query().Where(
+	return client.APIKey.Query().Where(
 		apikey.DeletedAtIsNil(),
 		apikey.PurposeEQ(service.APIKeyPurposeUser),
 	)
 }
 
 func (r *apiKeyRepository) authQuery() *dbent.APIKeyQuery {
-	return r.client.APIKey.Query().Where(
+	return r.authQueryWithClient(r.client)
+}
+
+func (r *apiKeyRepository) authQueryWithClient(client *dbent.Client) *dbent.APIKeyQuery {
+	return client.APIKey.Query().Where(
 		apikey.DeletedAtIsNil(),
 		apikey.PurposeIn(service.APIKeyPurposeUser, service.APIKeyPurposeDesktop),
 	)
 }
 
 func (r *apiKeyRepository) Create(ctx context.Context, key *service.APIKey) error {
-	builder := r.client.APIKey.Create().
+	client := clientFromContext(ctx, r.client)
+	builder := client.APIKey.Create().
 		SetUserID(key.UserID).
 		SetKey(key.Key).
 		SetName(key.Name).
@@ -210,7 +219,8 @@ func (r *apiKeyRepository) webChatPrincipalQuery(client *dbent.Client) *dbent.AP
 }
 
 func (r *apiKeyRepository) GetByID(ctx context.Context, id int64) (*service.APIKey, error) {
-	m, err := r.activeQuery().
+	client := clientFromContext(ctx, r.client)
+	m, err := r.activeQueryWithClient(client).
 		Where(apikey.IDEQ(id)).
 		WithUser().
 		WithGroup().
@@ -230,7 +240,8 @@ func (r *apiKeyRepository) GetByID(ctx context.Context, id int64) (*service.APIK
 //   - 不加载完整的 API Key 实体及其关联数据（User、Group 等）
 //   - 适用于删除等只需 key 与用户 ID 的场景
 func (r *apiKeyRepository) GetKeyAndOwnerID(ctx context.Context, id int64) (string, int64, error) {
-	m, err := r.activeQuery().
+	client := clientFromContext(ctx, r.client)
+	m, err := r.activeQueryWithClient(client).
 		Where(apikey.IDEQ(id)).
 		Select(apikey.FieldKey, apikey.FieldUserID).
 		Only(ctx)
@@ -244,7 +255,8 @@ func (r *apiKeyRepository) GetKeyAndOwnerID(ctx context.Context, id int64) (stri
 }
 
 func (r *apiKeyRepository) GetByKey(ctx context.Context, key string) (*service.APIKey, error) {
-	m, err := r.activeQuery().
+	client := clientFromContext(ctx, r.client)
+	m, err := r.activeQueryWithClient(client).
 		Where(apikey.KeyEQ(key)).
 		WithUser(func(q *dbent.UserQuery) {
 			q.WithAllowedGroups(func(gq *dbent.GroupQuery) {
@@ -263,7 +275,8 @@ func (r *apiKeyRepository) GetByKey(ctx context.Context, key string) (*service.A
 }
 
 func (r *apiKeyRepository) GetByKeyForAuth(ctx context.Context, key string) (*service.APIKey, error) {
-	m, err := r.authQuery().
+	client := clientFromContext(ctx, r.client)
+	m, err := r.authQueryWithClient(client).
 		Where(apikey.KeyEQ(key)).
 		Select(
 			apikey.FieldID,
@@ -461,8 +474,9 @@ func (r *apiKeyRepository) Update(ctx context.Context, key *service.APIKey, fiel
 func (r *apiKeyRepository) Delete(ctx context.Context, id int64) error {
 	// 存在唯一键约束 生成tombstone key 用来释放原key，长度远小于 128，满足 schema 限制
 	tombstoneKey := fmt.Sprintf("__deleted__%d__%d", id, time.Now().UnixNano())
+	client := clientFromContext(ctx, r.client)
 	// 显式软删除：避免依赖 Hook 行为，确保 deleted_at 一定被设置。
-	affected, err := r.client.APIKey.Update().
+	affected, err := client.APIKey.Update().
 		Where(
 			apikey.IDEQ(id),
 			apikey.DeletedAtIsNil(),
@@ -478,7 +492,7 @@ func (r *apiKeyRepository) Delete(ctx context.Context, id int64) error {
 		return err
 	}
 	if affected == 0 {
-		exists, err := r.client.APIKey.Query().
+		exists, err := client.APIKey.Query().
 			Where(apikey.IDEQ(id), apikey.PurposeEQ(service.APIKeyPurposeUser)).
 			Exist(mixins.SkipSoftDelete(ctx))
 		if err != nil {
@@ -509,12 +523,14 @@ func (r *apiKeyRepository) DeleteWithAudit(ctx context.Context, id int64) error 
 		return err
 	}
 	exec := r.client
+	txCtx := ctx
 	if err == nil {
 		defer func() { _ = tx.Rollback() }()
 		exec = tx.Client()
+		txCtx = dbent.NewTxContext(ctx, tx)
 	}
 
-	if err := r.deleteWithAudit(ctx, exec, id, tombstoneKey); err != nil {
+	if err := r.deleteWithAudit(txCtx, exec, id, tombstoneKey); err != nil {
 		return err
 	}
 
@@ -548,7 +564,7 @@ func (r *apiKeyRepository) deleteWithAudit(ctx context.Context, exec *dbent.Clie
 	}
 	if affected == 0 {
 		// 并发/重复删除:记录已存在(已软删)则幂等返回 nil(defer 回滚空事务),否则 NotFound。
-		exists, existErr := r.client.APIKey.Query().
+		exists, existErr := exec.APIKey.Query().
 			Where(apikey.IDEQ(id), apikey.PurposeEQ(service.APIKeyPurposeUser)).
 			Exist(mixins.SkipSoftDelete(ctx))
 		if existErr != nil {
@@ -563,7 +579,11 @@ func (r *apiKeyRepository) deleteWithAudit(ctx context.Context, exec *dbent.Clie
 }
 
 func (r *apiKeyRepository) apiKeyListByUserIDQuery(userID int64, filters service.APIKeyListFilters) *dbent.APIKeyQuery {
-	q := r.activeQuery().Where(apikey.UserIDEQ(userID))
+	return r.apiKeyListByUserIDQueryWithClient(r.client, userID, filters)
+}
+
+func (r *apiKeyRepository) apiKeyListByUserIDQueryWithClient(client *dbent.Client, userID int64, filters service.APIKeyListFilters) *dbent.APIKeyQuery {
+	q := r.activeQueryWithClient(client).Where(apikey.UserIDEQ(userID))
 
 	if filters.Search != "" {
 		q = q.Where(apikey.Or(
@@ -586,7 +606,7 @@ func (r *apiKeyRepository) apiKeyListByUserIDQuery(userID int64, filters service
 }
 
 func (r *apiKeyRepository) ListByUserID(ctx context.Context, userID int64, params pagination.PaginationParams, filters service.APIKeyListFilters) ([]service.APIKey, *pagination.PaginationResult, error) {
-	q := r.apiKeyListByUserIDQuery(userID, filters)
+	q := r.apiKeyListByUserIDQueryWithClient(clientFromContext(ctx, r.client), userID, filters)
 
 	total, err := q.Count(ctx)
 	if err != nil {
@@ -618,7 +638,7 @@ func (r *apiKeyRepository) ListByUserID(ctx context.Context, userID int64, param
 }
 
 func (r *apiKeyRepository) ListAllByUserID(ctx context.Context, userID int64, filters service.APIKeyListFilters) ([]service.APIKey, error) {
-	keys, err := r.apiKeyListByUserIDQuery(userID, filters).
+	keys, err := r.apiKeyListByUserIDQueryWithClient(clientFromContext(ctx, r.client), userID, filters).
 		WithGroup().
 		Order(dbent.Asc(apikey.FieldID)).
 		All(ctx)
@@ -637,7 +657,8 @@ func (r *apiKeyRepository) ListAllByUserID(ctx context.Context, userID int64, fi
 }
 
 func (r *apiKeyRepository) attachLastUsedIPs(ctx context.Context, keys []service.APIKey) error {
-	if len(keys) == 0 || r.sql == nil {
+	exec := sqlExecutorFromContext(ctx, r.sql)
+	if len(keys) == 0 || exec == nil {
 		return nil
 	}
 
@@ -659,12 +680,14 @@ func (r *apiKeyRepository) attachLastUsedIPs(ctx context.Context, keys []service
 }
 
 func (r *apiKeyRepository) latestUsageLogIPs(ctx context.Context, apiKeyIDs []int64) (result map[int64]string, err error) {
-	if len(apiKeyIDs) == 0 || r.sql == nil {
+	exec := sqlExecutorFromContext(ctx, r.sql)
+	if len(apiKeyIDs) == 0 || exec == nil {
 		return map[int64]string{}, nil
 	}
 
-	query, args := latestUsageLogIPsQuery(apiKeyIDs, r.client.Driver().Dialect())
-	rows, err := r.sql.QueryContext(ctx, query, args...)
+	client := clientFromContext(ctx, r.client)
+	query, args := latestUsageLogIPsQuery(apiKeyIDs, client.Driver().Dialect())
+	rows, err := exec.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -730,7 +753,8 @@ func (r *apiKeyRepository) VerifyOwnership(ctx context.Context, userID int64, ap
 		return []int64{}, nil
 	}
 
-	ids, err := r.client.APIKey.Query().
+	client := clientFromContext(ctx, r.client)
+	ids, err := client.APIKey.Query().
 		Where(
 			apikey.UserIDEQ(userID),
 			apikey.IDIn(apiKeyIDs...),
@@ -745,17 +769,17 @@ func (r *apiKeyRepository) VerifyOwnership(ctx context.Context, userID int64, ap
 }
 
 func (r *apiKeyRepository) CountByUserID(ctx context.Context, userID int64) (int64, error) {
-	count, err := r.activeQuery().Where(apikey.UserIDEQ(userID)).Count(ctx)
+	count, err := r.activeQueryWithClient(clientFromContext(ctx, r.client)).Where(apikey.UserIDEQ(userID)).Count(ctx)
 	return int64(count), err
 }
 
 func (r *apiKeyRepository) ExistsByKey(ctx context.Context, key string) (bool, error) {
-	count, err := r.activeQuery().Where(apikey.KeyEQ(key)).Count(ctx)
+	count, err := r.activeQueryWithClient(clientFromContext(ctx, r.client)).Where(apikey.KeyEQ(key)).Count(ctx)
 	return count > 0, err
 }
 
 func (r *apiKeyRepository) ListByGroupID(ctx context.Context, groupID int64, params pagination.PaginationParams) ([]service.APIKey, *pagination.PaginationResult, error) {
-	q := r.activeQuery().Where(apikey.GroupIDEQ(groupID))
+	q := r.activeQueryWithClient(clientFromContext(ctx, r.client)).Where(apikey.GroupIDEQ(groupID))
 
 	total, err := q.Count(ctx)
 	if err != nil {
@@ -821,7 +845,7 @@ func apiKeyListOrder(params pagination.PaginationParams) []func(*entsql.Selector
 
 // SearchAPIKeys searches API keys by user ID and/or keyword (name)
 func (r *apiKeyRepository) SearchAPIKeys(ctx context.Context, userID int64, keyword string, limit int) ([]service.APIKey, error) {
-	q := r.activeQuery()
+	q := r.activeQueryWithClient(clientFromContext(ctx, r.client))
 	if userID > 0 {
 		q = q.Where(apikey.UserIDEQ(userID))
 	}
@@ -844,7 +868,8 @@ func (r *apiKeyRepository) SearchAPIKeys(ctx context.Context, userID int64, keyw
 
 // ClearGroupIDByGroupID 将指定分组的所有 API Key 的 group_id 设为 nil
 func (r *apiKeyRepository) ClearGroupIDByGroupID(ctx context.Context, groupID int64) (int64, error) {
-	n, err := r.client.APIKey.Update().
+	client := clientFromContext(ctx, r.client)
+	n, err := client.APIKey.Update().
 		Where(
 			apikey.GroupIDEQ(groupID),
 			apikey.DeletedAtIsNil(),
@@ -872,12 +897,12 @@ func (r *apiKeyRepository) UpdateGroupIDByUserAndGroup(ctx context.Context, user
 
 // CountByGroupID 获取分组的 API Key 数量
 func (r *apiKeyRepository) CountByGroupID(ctx context.Context, groupID int64) (int64, error) {
-	count, err := r.activeQuery().Where(apikey.GroupIDEQ(groupID)).Count(ctx)
+	count, err := r.activeQueryWithClient(clientFromContext(ctx, r.client)).Where(apikey.GroupIDEQ(groupID)).Count(ctx)
 	return int64(count), err
 }
 
 func (r *apiKeyRepository) ListKeysByUserID(ctx context.Context, userID int64) ([]string, error) {
-	keys, err := r.activeQuery().
+	keys, err := r.activeQueryWithClient(clientFromContext(ctx, r.client)).
 		Where(apikey.UserIDEQ(userID)).
 		Select(apikey.FieldKey).
 		Strings(ctx)
@@ -888,7 +913,7 @@ func (r *apiKeyRepository) ListKeysByUserID(ctx context.Context, userID int64) (
 }
 
 func (r *apiKeyRepository) ListKeysByGroupID(ctx context.Context, groupID int64) ([]string, error) {
-	keys, err := r.activeQuery().
+	keys, err := r.activeQueryWithClient(clientFromContext(ctx, r.client)).
 		Where(apikey.GroupIDEQ(groupID)).
 		Select(apikey.FieldKey).
 		Strings(ctx)
@@ -900,7 +925,8 @@ func (r *apiKeyRepository) ListKeysByGroupID(ctx context.Context, groupID int64)
 
 // IncrementQuotaUsed 使用 Ent 原子递增 quota_used 字段并返回新值
 func (r *apiKeyRepository) IncrementQuotaUsed(ctx context.Context, id int64, amount float64) (float64, error) {
-	updated, err := r.client.APIKey.UpdateOneID(id).
+	client := clientFromContext(ctx, r.client)
+	updated, err := client.APIKey.UpdateOneID(id).
 		Where(apikey.DeletedAtIsNil()).
 		AddQuotaUsed(amount).
 		Save(ctx)
@@ -930,7 +956,11 @@ func (r *apiKeyRepository) IncrementQuotaUsedAndGetState(ctx context.Context, id
 	`
 
 	state := &service.APIKeyQuotaUsageState{}
-	if err := scanSingleRow(ctx, r.sql, query, []any{amount, service.StatusAPIKeyQuotaExhausted, id}, &state.QuotaUsed, &state.Quota, &state.Key, &state.Status); err != nil {
+	exec := txAwareSQLExecutor(ctx, r.sql, r.client)
+	if exec == nil {
+		return nil, fmt.Errorf("sql executor is not configured")
+	}
+	if err := scanSingleRow(ctx, exec, query, []any{amount, service.StatusAPIKeyQuotaExhausted, id}, &state.QuotaUsed, &state.Quota, &state.Key, &state.Status); err != nil {
 		if err == sql.ErrNoRows {
 			return nil, service.ErrAPIKeyNotFound
 		}
@@ -940,7 +970,8 @@ func (r *apiKeyRepository) IncrementQuotaUsedAndGetState(ctx context.Context, id
 }
 
 func (r *apiKeyRepository) UpdateLastUsed(ctx context.Context, id int64, usedAt time.Time) error {
-	affected, err := r.client.APIKey.Update().
+	client := clientFromContext(ctx, r.client)
+	affected, err := client.APIKey.Update().
 		Where(apikey.IDEQ(id), apikey.DeletedAtIsNil()).
 		SetLastUsedAt(usedAt).
 		SetUpdatedAt(usedAt).
@@ -957,7 +988,11 @@ func (r *apiKeyRepository) UpdateLastUsed(ctx context.Context, id int64, usedAt 
 // IncrementRateLimitUsage atomically increments all rate limit usage counters and initializes
 // window start times via COALESCE if not already set.
 func (r *apiKeyRepository) IncrementRateLimitUsage(ctx context.Context, id int64, cost float64) error {
-	_, err := r.sql.ExecContext(ctx, `
+	exec := txAwareSQLExecutor(ctx, r.sql, r.client)
+	if exec == nil {
+		return fmt.Errorf("sql executor is not configured")
+	}
+	result, err := exec.ExecContext(ctx, `
 		UPDATE api_keys SET
 			usage_5h = CASE WHEN window_5h_start IS NOT NULL AND window_5h_start + INTERVAL '5 hours' <= NOW() THEN $1 ELSE usage_5h + $1 END,
 			usage_1d = CASE WHEN window_1d_start IS NOT NULL AND window_1d_start + INTERVAL '24 hours' <= NOW() THEN $1 ELSE usage_1d + $1 END,
@@ -968,12 +1003,26 @@ func (r *apiKeyRepository) IncrementRateLimitUsage(ctx context.Context, id int64
 			updated_at = NOW()
 		WHERE id = $2 AND deleted_at IS NULL`,
 		cost, id)
-	return err
+	if err != nil {
+		return err
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected == 0 {
+		return service.ErrAPIKeyNotFound
+	}
+	return nil
 }
 
 // ResetRateLimitWindows resets expired rate limit windows atomically.
 func (r *apiKeyRepository) ResetRateLimitWindows(ctx context.Context, id int64) error {
-	_, err := r.sql.ExecContext(ctx, `
+	exec := txAwareSQLExecutor(ctx, r.sql, r.client)
+	if exec == nil {
+		return fmt.Errorf("sql executor is not configured")
+	}
+	result, err := exec.ExecContext(ctx, `
 		UPDATE api_keys SET
 			usage_5h = CASE WHEN window_5h_start IS NOT NULL AND window_5h_start + INTERVAL '5 hours' <= NOW() THEN 0 ELSE usage_5h END,
 			window_5h_start = CASE WHEN window_5h_start IS NOT NULL AND window_5h_start + INTERVAL '5 hours' <= NOW() THEN NOW() ELSE window_5h_start END,
@@ -984,12 +1033,26 @@ func (r *apiKeyRepository) ResetRateLimitWindows(ctx context.Context, id int64) 
 			updated_at = NOW()
 		WHERE id = $1 AND deleted_at IS NULL`,
 		id)
-	return err
+	if err != nil {
+		return err
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected == 0 {
+		return service.ErrAPIKeyNotFound
+	}
+	return nil
 }
 
 // GetRateLimitData returns the current rate limit usage and window start times for an API key.
 func (r *apiKeyRepository) GetRateLimitData(ctx context.Context, id int64) (result *service.APIKeyRateLimitData, err error) {
-	rows, err := r.sql.QueryContext(ctx, `
+	exec := txAwareSQLExecutor(ctx, r.sql, r.client)
+	if exec == nil {
+		return nil, fmt.Errorf("sql executor is not configured")
+	}
+	rows, err := exec.QueryContext(ctx, `
 		SELECT usage_5h, usage_1d, usage_7d, window_5h_start, window_1d_start, window_7d_start
 		FROM api_keys
 		WHERE id = $1 AND deleted_at IS NULL`,
@@ -1003,6 +1066,9 @@ func (r *apiKeyRepository) GetRateLimitData(ctx context.Context, id int64) (resu
 		}
 	}()
 	if !rows.Next() {
+		if rowsErr := rows.Err(); rowsErr != nil {
+			return nil, rowsErr
+		}
 		return nil, service.ErrAPIKeyNotFound
 	}
 	data := &service.APIKeyRateLimitData{}

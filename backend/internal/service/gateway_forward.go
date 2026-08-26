@@ -825,10 +825,21 @@ func (s *GatewayService) Forward(ctx context.Context, c *gin.Context, account *A
 					truncateString(sseErr.RawData, 1000),
 				)
 
-				return nil, &UpstreamFailoverError{
+				failoverErr := &UpstreamFailoverError{
 					StatusCode:   403,
 					ResponseBody: body,
 				}
+				// An explicit SSE error after message_start means Anthropic has
+				// already observed/charged input (and the response is committed),
+				// so retain the partial result for billing.  Keep the result nil
+				// when no bytes were written: that path may retry another account
+				// and must not double-charge a failed attempt.
+				if c != nil && c.Writer != nil && c.Writer.Written() {
+					if partial := partialStreamUsageResult(resp, streamResult, originalModel, mappedModel, startTime, err); partial != nil {
+						return partial, failoverErr
+					}
+				}
+				return nil, failoverErr
 			}
 			// 流中断（缺失 terminal 事件、读错误、数据间隔超时等）时保留已观测到的
 			// usage 与错误一起返回，handler 在错误处理完成后照常提交 usage 记录。

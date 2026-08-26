@@ -931,6 +931,12 @@ func (h *GatewayHandler) Messages(c *gin.Context) {
 				if errors.As(err, &failoverErr) {
 					// 流式内容已写入客户端，无法撤销，禁止 failover 以防止流拼接腐化
 					if c.Writer.Size() != writerSizeBeforeForward {
+						// event:error after message_start returns a partial result
+						// alongside the failover error; bill observed tokens before
+						// emitting the terminal client-facing error.
+						if result != nil {
+							submitForwardUsage(result)
+						}
 						h.handleFailoverExhausted(c, failoverErr, account.Platform, true)
 						return
 					}
