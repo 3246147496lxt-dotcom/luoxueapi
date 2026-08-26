@@ -664,6 +664,7 @@ export default {
       refundSuccess: '退款成功',
       refundPending: '退款处理中，待网关确认',
       queryRefundStatus: '查询退款状态',
+      forceRefundConfirm: '退款等待期间余额发生变化。强制结算只会扣除当前可用余额，是否继续？',
       refundInfo: '退款信息',
       refundEnabled: '允许退款',
       allowUserRefund: '允许用户退款',

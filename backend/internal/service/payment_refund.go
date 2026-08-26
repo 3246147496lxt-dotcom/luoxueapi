@@ -26,6 +26,15 @@ import (
 
 var createPaymentProviderFromInstance = provider.CreateProvider
 
+// ErrRefundBalanceInsufficient is returned when a non-forced refund can no
+// longer deduct the full requested amount at commit time.  The caller must
+// explicitly retry with force; silently clamping the deduction would issue a
+// full gateway refund for only a partial account debit.
+var ErrRefundBalanceInsufficient = infraerrors.BadRequest(
+	"REFUND_BALANCE_INSUFFICIENT",
+	"user balance is insufficient for deduction, use force",
+)
+
 // getOrderProviderInstance looks up the provider instance that processed this order.
 // For legacy orders without provider_instance_id, it resolves only when the
 // historical instance is uniquely identifiable from the stored order fields.
@@ -210,7 +219,11 @@ func (s *PaymentService) PrepareRefund(ctx context.Context, oid int64, amt float
 	if err != nil {
 		return nil, nil, infraerrors.NotFound("NOT_FOUND", "order not found")
 	}
-	ok := []string{OrderStatusCompleted, OrderStatusRefundRequested, OrderStatusRefundPending, OrderStatusRefundFailed}
+	// A provider-pending refund must be finalized through the query path.  Do
+	// not let a second ProcessRefund call create another provider refund while
+	// the first one is still unresolved (non-Stripe providers may not be
+	// idempotent).
+	ok := []string{OrderStatusCompleted, OrderStatusRefundRequested, OrderStatusRefundFailed}
 	if !psSliceContains(ok, o.Status) {
 		return nil, nil, infraerrors.BadRequest("INVALID_STATUS", "order status does not allow refund")
 	}
@@ -290,6 +303,16 @@ type availableBalanceDeductor interface {
 	DeductAvailableBalance(ctx context.Context, id int64, amount float64) (float64, error)
 }
 
+// exactBalanceAdjuster is implemented by the SQL repository's atomic balance
+// mutation path.  A negative delta is rejected when it would make the balance
+// negative, so the deduction and the sufficiency check happen in one UPDATE.
+// It is intentionally optional to keep lightweight repository test doubles and
+// older integrations source-compatible; those integrations must opt in before
+// processing non-forced refunds.
+type exactBalanceAdjuster interface {
+	AdjustBalance(ctx context.Context, id int64, delta float64) (BalanceChange, error)
+}
+
 func (s *PaymentService) deductAvailableBalance(ctx context.Context, userID int64, amount float64) (float64, error) {
 	repo, ok := s.userRepo.(availableBalanceDeductor)
 	if !ok {
@@ -298,8 +321,33 @@ func (s *PaymentService) deductAvailableBalance(ctx context.Context, userID int6
 	return repo.DeductAvailableBalance(ctx, userID, amount)
 }
 
+func (s *PaymentService) deductRefundBalance(ctx context.Context, userID int64, amount float64, force bool) (float64, error) {
+	if force {
+		return s.deductAvailableBalance(ctx, userID, amount)
+	}
+	atomic, ok := s.userRepo.(exactBalanceAdjuster)
+	if !ok {
+		return 0, errors.New("user repository does not support exact refund balance deduction")
+	}
+	if _, err := atomic.AdjustBalance(ctx, userID, -amount); err != nil {
+		if errors.Is(err, ErrBalanceNegative) {
+			return 0, ErrRefundBalanceInsufficient.WithCause(err)
+		}
+		return 0, err
+	}
+	return amount, nil
+}
+
+func refundBalanceInsufficientResult() *RefundResult {
+	return &RefundResult{
+		Success:      false,
+		Warning:      "user balance is insufficient for deduction, use force",
+		RequireForce: true,
+	}
+}
+
 func (s *PaymentService) ExecuteRefund(ctx context.Context, p *RefundPlan) (*RefundResult, error) {
-	c, err := s.entClient.PaymentOrder.Update().Where(paymentorder.IDEQ(p.OrderID), paymentorder.StatusIn(OrderStatusCompleted, OrderStatusRefundRequested, OrderStatusRefundPending, OrderStatusRefundFailed)).SetStatus(OrderStatusRefunding).Save(ctx)
+	c, err := s.entClient.PaymentOrder.Update().Where(paymentorder.IDEQ(p.OrderID), paymentorder.StatusIn(OrderStatusCompleted, OrderStatusRefundRequested, OrderStatusRefundFailed)).SetStatus(OrderStatusRefunding).Save(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("lock: %w", err)
 	}
@@ -310,9 +358,13 @@ func (s *PaymentService) ExecuteRefund(ctx context.Context, p *RefundPlan) (*Ref
 		// Skip balance deduction on retry if previous attempt already deducted
 		// but failed to roll back (REFUND_ROLLBACK_FAILED in audit log).
 		if !s.hasAuditLog(ctx, p.OrderID, "REFUND_ROLLBACK_FAILED") {
-			deducted, err := s.deductAvailableBalance(ctx, p.Order.UserID, p.BalanceToDeduct)
+			deducted, err := s.deductRefundBalance(ctx, p.Order.UserID, p.BalanceToDeduct, p.Force)
 			if err != nil {
 				s.restoreStatus(ctx, p)
+				if errors.Is(err, ErrRefundBalanceInsufficient) {
+					p.BalanceToDeduct = 0
+					return refundBalanceInsufficientResult(), nil
+				}
 				return nil, fmt.Errorf("deduction: %w", err)
 			}
 			p.BalanceToDeduct = deducted
@@ -422,6 +474,19 @@ func (s *PaymentService) finishRefund(ctx context.Context, p *RefundPlan, resp *
 }
 
 func (s *PaymentService) QueryAndFinalizeRefund(ctx context.Context, oid int64) (*RefundResult, error) {
+	return s.queryAndFinalizeRefund(ctx, oid, false)
+}
+
+// QueryAndFinalizeRefundWithForce retries the local settlement of a provider
+// refund with an explicit force override.  The provider is only queried; it is
+// never called to create a second refund.  This is important for non-Stripe
+// providers when a concurrent balance spend makes a previously prepared,
+// non-forced deduction insufficient.
+func (s *PaymentService) QueryAndFinalizeRefundWithForce(ctx context.Context, oid int64, force bool) (*RefundResult, error) {
+	return s.queryAndFinalizeRefund(ctx, oid, force)
+}
+
+func (s *PaymentService) queryAndFinalizeRefund(ctx context.Context, oid int64, forceOverride bool) (*RefundResult, error) {
 	o, err := s.entClient.PaymentOrder.Get(ctx, oid)
 	if err != nil {
 		return nil, infraerrors.NotFound("NOT_FOUND", "order not found")
@@ -439,7 +504,14 @@ func (s *PaymentService) QueryAndFinalizeRefund(ctx context.Context, oid int64) 
 		return nil, infraerrors.BadRequest("REFUND_QUERY_UNSUPPORTED", "this payment provider does not support refund status query; please verify manually")
 	}
 
-	pendingDetail := s.latestRefundPendingDetail(ctx, oid)
+	pendingDetail, detailErr := s.latestRefundPendingDetail(ctx, oid)
+	if detailErr != nil {
+		// The audit row carries the original deduction intent.  Finalizing a
+		// provider refund without it could either deduct twice or silently skip a
+		// required reversal, so fail closed and leave the order pending for
+		// operator reconciliation.
+		return nil, infraerrors.Conflict("REFUND_AUDIT_UNAVAILABLE", "refund deduction intent is unavailable; manual review required")
+	}
 	finishProviderCall := servertiming.ObserveDependency(ctx, "payment")
 	resp, err := queryProvider.QueryRefund(ctx, payment.RefundQueryRequest{
 		TradeNo:  o.PaymentTradeNo,
@@ -455,26 +527,33 @@ func (s *PaymentService) QueryAndFinalizeRefund(ctx context.Context, oid int64) 
 		return nil, fmt.Errorf("query refund: %w", err)
 	}
 	if err := validateRefundProviderResponse(resp); err != nil {
-		return s.finalizeRefundFailed(ctx, o, err)
+		return s.finalizePendingRefundFailed(ctx, o, err)
 	}
 
-	plan := s.refundFinalizePlan(o)
+	plan := s.refundFinalizePlan(o, pendingDetail)
+	if forceOverride {
+		plan.Force = true
+	}
 	if !pendingDetail.DeductionRollbackOK {
 		plan.BalanceToDeduct = 0
 		plan.SubDaysToDeduct = 0
-	} else if o.OrderType == payment.OrderTypeSubscription {
-		if early := s.prepDeduct(ctx, o, plan, true); early != nil {
+	} else if plan.DeductBalance && o.OrderType == payment.OrderTypeSubscription {
+		if early := s.prepDeduct(ctx, o, plan, plan.Force); early != nil {
 			return early, nil
 		}
 	}
 	switch strings.TrimSpace(resp.Status) {
 	case payment.ProviderStatusSuccess, payment.ProviderStatusRefunded:
-		return s.finalizePendingRefundSuccess(ctx, plan)
+		result, finalizeErr := s.finalizePendingRefundSuccess(ctx, plan)
+		if errors.Is(finalizeErr, ErrRefundBalanceInsufficient) {
+			return refundBalanceInsufficientResult(), nil
+		}
+		return result, finalizeErr
 	case payment.ProviderStatusPending:
 		s.writeAuditLog(ctx, oid, "REFUND_QUERY_PENDING", "admin", map[string]any{"refundID": resp.RefundID})
 		return &RefundResult{Success: false, Warning: "gateway refund is still pending confirmation"}, nil
 	default:
-		return s.finalizeRefundFailed(ctx, o, fmt.Errorf("payment refund returned unknown status: %s", strings.TrimSpace(resp.Status)))
+		return s.finalizePendingRefundFailed(ctx, o, fmt.Errorf("payment refund returned unknown status: %s", strings.TrimSpace(resp.Status)))
 	}
 }
 
@@ -518,33 +597,49 @@ func (s *PaymentService) finalizePendingRefundSuccess(ctx context.Context, p *Re
 	return result, nil
 }
 
-func (s *PaymentService) refundFinalizePlan(o *dbent.PaymentOrder) *RefundPlan {
+func (s *PaymentService) refundFinalizePlan(o *dbent.PaymentOrder, pending ...refundPendingAuditDetail) *RefundPlan {
 	refundAmount := o.RefundAmount
 	reason := strings.TrimSpace(psStringValue(o.RefundReason))
 	if reason == "" {
 		reason = fmt.Sprintf("refund order:%d", o.ID)
 	}
-	return &RefundPlan{
+	// Older REFUND_PENDING audit rows predate the explicit deduction intent and
+	// historically finalized with a balance deduction.  Keep that fallback for
+	// compatibility, while every new pending row records the administrator's
+	// choice and can safely opt out.
+	deduct := true
+	if len(pending) > 0 && pending[0].DeductBalance != nil {
+		deduct = *pending[0].DeductBalance
+	}
+	p := &RefundPlan{
 		OrderID:       o.ID,
 		Order:         o,
 		RefundAmount:  refundAmount,
 		GatewayAmount: calculateGatewayRefundAmount(o.Amount, o.PayAmount, refundAmount, PaymentOrderCurrency(o)),
 		Reason:        reason,
 		Force:         o.ForceRefund,
-		DeductBalance: true,
-		DeductionType: payment.DeductionTypeBalance,
-		BalanceToDeduct: func() float64 {
-			if o.OrderType == payment.OrderTypeBalance {
-				return refundAmount
-			}
-			return 0
-		}(),
+		DeductBalance: deduct,
+		DeductionType: payment.DeductionTypeNone,
 	}
+	if !deduct {
+		return p
+	}
+	switch o.OrderType {
+	case payment.OrderTypeBalance:
+		p.DeductionType = payment.DeductionTypeBalance
+		p.BalanceToDeduct = refundAmount
+	case payment.OrderTypeSubscription:
+		p.DeductionType = payment.DeductionTypeSubscription
+		if o.SubscriptionDays != nil {
+			p.SubDaysToDeduct = *o.SubscriptionDays
+		}
+	}
+	return p
 }
 
 func (s *PaymentService) applyRefundFinalDeduction(ctx context.Context, p *RefundPlan) error {
 	if p.DeductionType == payment.DeductionTypeBalance && p.BalanceToDeduct > 0 {
-		deducted, err := s.deductAvailableBalance(ctx, p.Order.UserID, p.BalanceToDeduct)
+		deducted, err := s.deductRefundBalance(ctx, p.Order.UserID, p.BalanceToDeduct, p.Force)
 		if err != nil {
 			return fmt.Errorf("deduction: %w", err)
 		}
@@ -571,23 +666,58 @@ func (s *PaymentService) finalizeRefundFailed(ctx context.Context, o *dbent.Paym
 	return &RefundResult{Success: false, Warning: "gateway refund failed: " + psErrMsg(gErr)}, nil
 }
 
+// finalizePendingRefundFailed is the query-path counterpart to
+// finalizeRefundFailed.  A provider query can race with a successful
+// finalizer, so the failure transition must be conditional on the order still
+// being pending.  An unconditional UpdateOneID would otherwise overwrite a
+// REFUNDED/PARTIALLY_REFUNDED result with a late failure response.
+func (s *PaymentService) finalizePendingRefundFailed(ctx context.Context, o *dbent.PaymentOrder, gErr error) (*RefundResult, error) {
+	now := time.Now()
+	updated, err := s.entClient.PaymentOrder.Update().
+		Where(paymentorder.IDEQ(o.ID), paymentorder.StatusEQ(OrderStatusRefundPending)).
+		SetStatus(OrderStatusRefundFailed).
+		SetFailedAt(now).
+		SetFailedReason(psErrMsg(gErr)).
+		Save(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("mark pending refund failed: %w", err)
+	}
+	if updated == 0 {
+		return nil, infraerrors.Conflict("CONFLICT", "order status changed")
+	}
+	s.writeAuditLog(ctx, o.ID, "REFUND_FAILED", "admin", map[string]any{"detail": psErrMsg(gErr)})
+	return &RefundResult{Success: false, Warning: "gateway refund failed: " + psErrMsg(gErr)}, nil
+}
+
 type refundPendingAuditDetail struct {
 	RefundID            string `json:"refundID"`
 	DeductionRollbackOK bool   `json:"deductionRollbackOK"`
+	// DeductBalance is a pointer so old audit rows without the field remain
+	// distinguishable from an explicit false choice.
+	DeductBalance *bool  `json:"deductBalance"`
+	DeductionType string `json:"deductionType,omitempty"`
 }
 
-func (s *PaymentService) latestRefundPendingDetail(ctx context.Context, oid int64) refundPendingAuditDetail {
+func (s *PaymentService) latestRefundPendingDetail(ctx context.Context, oid int64) (refundPendingAuditDetail, error) {
 	logEntry, err := s.entClient.PaymentAuditLog.Query().
 		Where(paymentauditlog.OrderIDEQ(strconv.FormatInt(oid, 10)), paymentauditlog.ActionEQ("REFUND_PENDING")).
 		Order(paymentauditlog.ByCreatedAt(sql.OrderDesc())).
 		First(ctx)
-	if err != nil || logEntry == nil {
-		return refundPendingAuditDetail{DeductionRollbackOK: true}
+	if err != nil {
+		if dbent.IsNotFound(err) {
+			return refundPendingAuditDetail{}, fmt.Errorf("refund pending audit row is missing")
+		}
+		return refundPendingAuditDetail{}, fmt.Errorf("load refund pending audit row: %w", err)
+	}
+	if logEntry == nil {
+		return refundPendingAuditDetail{}, fmt.Errorf("refund pending audit row is missing")
 	}
 	detail := refundPendingAuditDetail{DeductionRollbackOK: true}
-	_ = json.Unmarshal([]byte(logEntry.Detail), &detail)
+	if err := json.Unmarshal([]byte(logEntry.Detail), &detail); err != nil {
+		return refundPendingAuditDetail{}, fmt.Errorf("decode refund pending audit row: %w", err)
+	}
 	detail.RefundID = strings.TrimSpace(detail.RefundID)
-	return detail
+	return detail, nil
 }
 
 // getRefundProvider creates a provider using the order's original instance config.
@@ -666,6 +796,12 @@ func (s *PaymentService) markRefundOkTx(ctx context.Context, client *dbent.Clien
 }
 
 func (s *PaymentService) markRefundPending(ctx context.Context, p *RefundPlan, resp *payment.RefundResponse) (*RefundResult, error) {
+	// Capture the requested deduction before rollback clears the working plan.
+	// The pending audit row is the durable source for the later query/finalize
+	// attempt, so an explicit "do not deduct" choice must survive this state
+	// transition.
+	deductBalanceRequested := p.DeductBalance
+	deductionTypeRequested := p.DeductionType
 	balanceDeducted := p.BalanceToDeduct
 	subDaysDeducted := p.SubDaysToDeduct
 	rollbackOK := s.RollbackRefund(ctx, p, nil)
@@ -692,6 +828,8 @@ func (s *PaymentService) markRefundPending(ctx context.Context, p *RefundPlan, r
 		"refundAmount":        p.RefundAmount,
 		"reason":              p.Reason,
 		"force":               p.Force,
+		"deductBalance":       deductBalanceRequested,
+		"deductionType":       deductionTypeRequested,
 		"balanceDeducted":     p.BalanceToDeduct,
 		"subDaysDeducted":     p.SubDaysToDeduct,
 		"balanceRolledBack":   balanceDeducted,
@@ -733,9 +871,14 @@ func (s *PaymentService) RollbackRefund(ctx context.Context, p *RefundPlan, gErr
 }
 
 func (s *PaymentService) restoreStatus(ctx context.Context, p *RefundPlan) {
-	rs := OrderStatusCompleted
-	if p.Order.Status == OrderStatusRefundRequested {
-		rs = OrderStatusRefundRequested
+	// Restore the state from which this attempt was claimed.  In particular,
+	// never turn a provider-pending order back into COMPLETED; doing so would
+	// make a later admin retry issue a duplicate refund.  REFUND_PENDING is not
+	// accepted by ExecuteRefund anymore, but preserving it here protects old
+	// callers and stale plans.
+	rs := p.Order.Status
+	if rs != OrderStatusRefundRequested && rs != OrderStatusRefundPending && rs != OrderStatusRefundFailed {
+		rs = OrderStatusCompleted
 	}
 	_, _ = s.entClient.PaymentOrder.UpdateOneID(p.OrderID).SetStatus(rs).Save(ctx)
 }

@@ -645,6 +645,7 @@ export default {
       refundSuccess: 'Refund successful',
       refundPending: 'Refund pending gateway confirmation',
       queryRefundStatus: 'Query refund status',
+      forceRefundConfirm: 'The balance changed while this refund was pending. Force settlement will deduct only the available balance. Continue?',
       refundInfo: 'Refund Info',
       refundEnabled: 'Refund Enabled',
       allowUserRefund: 'Allow User Refund',
