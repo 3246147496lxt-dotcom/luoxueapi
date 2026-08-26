@@ -593,20 +593,50 @@ func BuildVideoURL(baseURL, requestID string) (string, error) {
 	return BuildVideoURLWithValidator(baseURL, requestID, nil)
 }
 
+const maxVideoRequestIDLen = 128
+
+// isSafeVideoRequestID reports whether requestID can be appended as exactly one
+// upstream URL path segment. The ID is supplied by the caller and may pass
+// through more than one URL parser/proxy before reaching xAI, so accepting
+// characters that are merely escaped by url.PathEscape is not sufficient:
+// another decoder could turn an encoded slash, dot segment, or delimiter back
+// into URL structure. Keep this a closed allow-list of the characters used by
+// xAI request IDs and reject everything else, including whitespace and
+// non-ASCII input.
+func isSafeVideoRequestID(requestID string) bool {
+	if requestID == "" || len(requestID) > maxVideoRequestIDLen {
+		return false
+	}
+	dotsOnly := true
+	for i := 0; i < len(requestID); i++ {
+		b := requestID[i]
+		switch {
+		case b >= 'a' && b <= 'z', b >= 'A' && b <= 'Z', b >= '0' && b <= '9':
+			dotsOnly = false
+		case b == '_', b == '-':
+			dotsOnly = false
+		case b == '.':
+			// A segment made only of dots has special path semantics.
+		default:
+			return false
+		}
+	}
+	return !dotsOnly
+}
+
 func BuildVideoURLWithValidator(baseURL, requestID string, validator BaseURLValidator) (string, error) {
 	validatedBaseURL, err := validatedBaseURLWithValidator(baseURL, validator)
 	if err != nil {
 		return "", fmt.Errorf("invalid base url: %w", err)
 	}
-	requestID = strings.TrimSpace(requestID)
-	if requestID == "" {
-		return "", fmt.Errorf("request id is required")
-	}
-	// requestID 由客户端提供并拼进上游 URL 的 path。PathEscape 之外再要求它不是
-	// 纯点片段、不含控制字符，保证它只能是一个普通的路径片段。
-	if requestID == "." || requestID == ".." || strings.ContainsAny(requestID, "\x00\r\n") {
+	if !isSafeVideoRequestID(requestID) {
+		if strings.TrimSpace(requestID) == "" {
+			return "", fmt.Errorf("request id is required")
+		}
 		return "", fmt.Errorf("invalid request id")
 	}
+	// The allow-list above means PathEscape is currently a no-op. Keep it here
+	// as a final invariant if the accepted character set is ever extended.
 	return validatedBaseURL + "/videos/" + url.PathEscape(requestID), nil
 }
 

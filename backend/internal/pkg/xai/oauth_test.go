@@ -4,6 +4,7 @@ package xai
 
 import (
 	"net/url"
+	"strings"
 	"testing"
 
 	"github.com/Wei-Shaw/sub2api/internal/util/urlvalidator"
@@ -138,24 +139,49 @@ func TestBuildGrokMediaURLs(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, DefaultBaseURL+"/videos/extensions", videoExtensionsURL)
 
-	videoURL, err := BuildVideoURL(DefaultBaseURL, "req 123")
+	videoURL, err := BuildVideoURL(DefaultBaseURL, "req_123")
 	require.NoError(t, err)
-	require.Equal(t, DefaultBaseURL+"/videos/req%20123", videoURL)
+	require.Equal(t, DefaultBaseURL+"/videos/req_123", videoURL)
 
-	_, err = BuildVideoURL(DefaultBaseURL, " ")
-	require.Error(t, err)
-
-	for _, requestID := range []string{".", "..", "req\x00id", "req\nid"} {
+	for _, requestID := range []string{
+		"",
+		" ",
+		"req 123",
+		" req_123",
+		"req_123 ",
+		".",
+		"..",
+		"...",
+		"../escape",
+		"..\\escape",
+		"/absolute",
+		"\\absolute",
+		"https://evil.example/redirect",
+		"https:%2f%2fevil.example",
+		"%2e%2e%2fescape",
+		"req%2fid",
+		"req/id",
+		"req\\id",
+		"req:8080",
+		"req?a=b",
+		"req#fragment",
+		"req\x00id",
+		"req\nid",
+		"请求-id",
+	} {
 		_, err := BuildVideoURL(DefaultBaseURL, requestID)
-		require.Error(t, err, "request ID %q must not alter the upstream path", requestID)
+		require.Error(t, err, "request ID %q must be rejected rather than alter the upstream path", requestID)
 	}
-	for _, requestID := range []string{"../escape", "/absolute", "https://evil.example/redirect"} {
+
+	for _, requestID := range []string{"a", "req-123", "req_123", "req.123", "a.b-c_d"} {
 		videoURL, err := BuildVideoURL(DefaultBaseURL, requestID)
-		require.NoError(t, err)
-		parsed, err := url.Parse(videoURL)
-		require.NoError(t, err)
-		require.Equal(t, "api.x.ai", parsed.Host, "request ID %q must not become an absolute upstream URL", requestID)
+		require.NoError(t, err, "request ID %q should be a single safe path segment", requestID)
+		require.Equal(t, DefaultBaseURL+"/videos/"+requestID, videoURL)
 	}
+
+	tooLong := strings.Repeat("a", maxVideoRequestIDLen+1)
+	_, err = BuildVideoURL(DefaultBaseURL, tooLong)
+	require.Error(t, err, "over-long request IDs must be rejected")
 }
 
 func TestValidateXAIURLsRejectUntrustedOAuthAndUnsafeBaseURLsByDefault(t *testing.T) {
