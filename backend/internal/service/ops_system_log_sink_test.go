@@ -240,6 +240,50 @@ func TestOpsSystemLogSink_FlushFailureUpdatesHealth(t *testing.T) {
 	t.Fatalf("write_failed_count not updated")
 }
 
+func TestOpsSystemLogSink_FlushFailureBacksOff(t *testing.T) {
+	var calls int64
+	repo := &opsRepoMock{BatchInsertSystemLogsFn: func(context.Context, []*OpsInsertSystemLogInput) (int64, error) {
+		atomic.AddInt64(&calls, 1)
+		return 0, errors.New("db unavailable")
+	}}
+	sink := NewOpsSystemLogSink(repo)
+	sink.batchSize = 1
+	sink.flushInterval = 5 * time.Millisecond
+	sink.flushBackoff = 100 * time.Millisecond
+	sink.flushBackoffMax = 100 * time.Millisecond
+	sink.Start()
+	defer sink.Stop()
+	sink.WriteLogEvent(&logger.LogEvent{Level: "warn", Component: "app", Message: "first"})
+	deadline := time.Now().Add(time.Second)
+	for atomic.LoadInt64(&calls) == 0 && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	if atomic.LoadInt64(&calls) != 1 {
+		t.Fatalf("first failure was not flushed")
+	}
+	sink.WriteLogEvent(&logger.LogEvent{Level: "warn", Component: "app", Message: "suppressed"})
+	time.Sleep(25 * time.Millisecond)
+	if got := atomic.LoadInt64(&calls); got != 1 {
+		t.Fatalf("backoff made %d repository calls, want 1", got)
+	}
+	if got := sink.Health().DroppedCount; got == 0 {
+		t.Fatalf("suppressed batch should increment dropped count")
+	}
+}
+
+func TestOpsSystemLogSink_FlushBackoffForCapsAndDoubles(t *testing.T) {
+	sink := &OpsSystemLogSink{flushBackoff: time.Second, flushBackoffMax: 3 * time.Second}
+	if got := sink.flushBackoffFor(1); got != time.Second {
+		t.Fatalf("first backoff=%s", got)
+	}
+	if got := sink.flushBackoffFor(2); got != 2*time.Second {
+		t.Fatalf("second backoff=%s", got)
+	}
+	if got := sink.flushBackoffFor(4); got != 3*time.Second {
+		t.Fatalf("capped backoff=%s", got)
+	}
+}
+
 func TestOpsSystemLogSink_StopFlushUsesActiveContextAndDrainsQueue(t *testing.T) {
 	var inserted int64
 	var canceledCtxCalls int64

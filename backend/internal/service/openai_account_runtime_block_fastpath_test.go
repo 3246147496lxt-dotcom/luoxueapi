@@ -52,6 +52,46 @@ func TestOpenAI429FastPath_SkipsSparkShadow(t *testing.T) {
 	require.True(t, svc.isOpenAIAccountRuntimeBlocked(normal), "normal OpenAI OAuth account should still be runtime-blocked")
 }
 
+func TestClassifyOpenAIOAuth429DistinguishesQuotaWindows(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		header string
+		want   openAIOAuth429Disposition
+	}{
+		{name: "5h", header: "x-codex-primary-used-percent", want: openAIOAuth429Quota5h},
+		{name: "7d", header: "x-codex-primary-used-percent", want: openAIOAuth429Quota7d},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			h := http.Header{}
+			h.Set(tc.header, "100")
+			h.Set("x-codex-primary-reset-after-seconds", "60")
+			if tc.want == openAIOAuth429Quota5h {
+				h.Set("x-codex-primary-window-minutes", "300")
+			} else {
+				h.Set("x-codex-primary-window-minutes", "10080")
+			}
+			disposition, resetAt := classifyOpenAIOAuth429(h, nil)
+			require.Equal(t, tc.want, disposition)
+			require.NotNil(t, resetAt)
+		})
+	}
+}
+
+func TestOpenAI429FastPath_UsesQuotaResetWithoutRateLimitService(t *testing.T) {
+	svc := &OpenAIGatewayService{}
+	account := &Account{ID: 49, Platform: PlatformOpenAI, Type: AccountTypeOAuth}
+	h := http.Header{}
+	h.Set("x-codex-primary-used-percent", "100")
+	h.Set("x-codex-primary-reset-after-seconds", "600")
+	h.Set("x-codex-primary-window-minutes", "300")
+	svc.markOpenAIOAuth429RateLimited(context.Background(), account, h, nil)
+	value, ok := svc.openaiAccountRuntimeBlockUntil.Load(account.ID)
+	require.True(t, ok)
+	resetAt, ok := value.(time.Time)
+	require.True(t, ok)
+	require.Greater(t, resetAt.Sub(time.Now()), 9*time.Minute)
+}
+
 func TestOpenAIRuntimeBlock_AppliesToOpenAIAPIKeyWhenRateLimitServiceStopsScheduling(t *testing.T) {
 	svc := &OpenAIGatewayService{}
 	account := &Account{ID: 44, Platform: PlatformOpenAI, Type: AccountTypeAPIKey}

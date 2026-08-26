@@ -212,6 +212,36 @@ func TestNormalizeOpenAIResponsesLiteTools_RejectsUnsupportedTools(t *testing.T)
 	}
 }
 
+func TestNormalizeOpenAIResponsesLiteParallelToolCalls(t *testing.T) {
+	reqBody := map[string]any{
+		"tools":               []any{map[string]any{"type": "function", "name": "shell"}},
+		"parallel_tool_calls": true,
+		"input":               []any{map[string]any{"type": "message", "role": "user"}},
+	}
+	changed, err := ensureOpenAIResponsesLiteParallelToolCalls(reqBody, false)
+	require.NoError(t, err)
+	require.True(t, changed)
+	require.Equal(t, false, reqBody["parallel_tool_calls"])
+}
+
+func TestNormalizeOpenAIResponsesLiteParallelToolCallsRemovesWithoutTools(t *testing.T) {
+	reqBody := map[string]any{"parallel_tool_calls": false}
+	changed, err := ensureOpenAIResponsesLiteParallelToolCalls(reqBody, false)
+	require.NoError(t, err)
+	require.True(t, changed)
+	require.NotContains(t, reqBody, "parallel_tool_calls")
+}
+
+func TestNormalizeOpenAIResponsesLitePayloadForAccountPreservesNumbers(t *testing.T) {
+	account := &Account{Platform: PlatformOpenAI, Type: AccountTypeAPIKey}
+	body := []byte(`{"parallel_tool_calls":true,"temperature":0.1234567890123456789,"input":[{"type":"message"}],"tools":[{"type":"function","name":"shell"}]}`)
+	updated, changed, err := normalizeOpenAIResponsesLitePayloadForAccount(body, account)
+	require.NoError(t, err)
+	require.True(t, changed)
+	require.Contains(t, string(updated), "0.1234567890123456789")
+	require.Equal(t, false, gjson.GetBytes(updated, "parallel_tool_calls").Bool())
+}
+
 func TestNormalizeOpenAIResponsesLiteToolsPayload_PreservesResponseCreateShape(t *testing.T) {
 	body := []byte(`{
 		"type":"response.create",

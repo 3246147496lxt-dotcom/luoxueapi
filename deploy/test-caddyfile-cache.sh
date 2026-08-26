@@ -15,4 +15,9 @@ if ! printf '%s\n' "$active_config" | grep -Eq '^[[:space:]]*reverse_proxy[[:spa
 	exit 1
 fi
 
+if printf '%s\n' "$active_config" | grep -Eq '^[[:space:]]*header Content-Type text/\*'; then
+	echo "Caddyfile must not compress text/* because text/event-stream would buffer SSE" >&2
+	exit 1
+fi
+
 echo "Caddyfile preserves backend Cache-Control policy and reverse_proxy routing"
