@@ -193,7 +193,7 @@ func (s *AuthService) RegisterWithVerification(ctx context.Context, email, passw
 	}
 
 	// 检查邮箱是否已存在
-	existsEmail, err := s.userRepo.ExistsByEmail(ctx, email)
+	existsEmail, err := s.existsByEmailOrAlias(ctx, email)
 	if err != nil {
 		logger.LegacyPrintf("service.auth", "[Auth] Database error checking email exists: %v", err)
 		return "", nil, ErrServiceUnavailable
@@ -227,10 +227,13 @@ func (s *AuthService) RegisterWithVerification(ctx context.Context, email, passw
 		Status:       StatusActive,
 	}
 
-	if err := s.userRepo.Create(ctx, user); err != nil {
+	if err := s.createUserAndClaimInvitation(ctx, user, invitationRedeemCode); err != nil {
 		// 优先检查邮箱冲突错误（竞态条件下可能发生）
 		if errors.Is(err, ErrEmailExists) {
 			return "", nil, ErrEmailExists
+		}
+		if errors.Is(err, ErrInvitationCodeInvalid) {
+			return "", nil, ErrInvitationCodeInvalid
 		}
 		logger.LegacyPrintf("service.auth", "[Auth] Database error creating user: %v", err)
 		return "", nil, ErrServiceUnavailable
@@ -251,13 +254,7 @@ func (s *AuthService) RegisterWithVerification(ctx context.Context, email, passw
 		}
 	}
 
-	// 标记邀请码为已使用（如果使用了邀请码）
-	if invitationRedeemCode != nil {
-		if err := s.redeemRepo.Use(ctx, invitationRedeemCode.ID, user.ID); err != nil {
-			// 邀请码标记失败不影响注册，只记录日志
-			logger.LegacyPrintf("service.auth", "[Auth] Failed to mark invitation code as used for user %d: %v", user.ID, err)
-		}
-	}
+	// Invitation claim is committed atomically with user creation above.
 	// 应用优惠码（如果提供且功能已启用）
 	if promoCode != "" && s.promoService != nil && s.settingService != nil && s.settingService.IsPromoCodeEnabled(ctx) {
 		if err := s.promoService.ApplyPromoCode(ctx, user.ID, promoCode); err != nil {
@@ -300,7 +297,7 @@ func (s *AuthService) SendVerifyCode(ctx context.Context, email string, locale .
 	}
 
 	// 检查邮箱是否已存在
-	existsEmail, err := s.userRepo.ExistsByEmail(ctx, email)
+	existsEmail, err := s.existsByEmailOrAlias(ctx, email)
 	if err != nil {
 		logger.LegacyPrintf("service.auth", "[Auth] Database error checking email exists: %v", err)
 		return ErrServiceUnavailable
@@ -341,7 +338,7 @@ func (s *AuthService) SendVerifyCodeAsync(ctx context.Context, email string, loc
 	}
 
 	// 检查邮箱是否已存在
-	existsEmail, err := s.userRepo.ExistsByEmail(ctx, email)
+	existsEmail, err := s.existsByEmailOrAlias(ctx, email)
 	if err != nil {
 		logger.LegacyPrintf("service.auth", "[Auth] Database error checking email exists: %v", err)
 		return nil, ErrServiceUnavailable
@@ -690,7 +687,7 @@ func (s *AuthService) loginOrRegisterOAuthWithTokenPair(ctx context.Context, ema
 				defer func() { _ = tx.Rollback() }()
 				txCtx := dbent.NewTxContext(ctx, tx)
 
-				if err := s.userRepo.Create(txCtx, newUser); err != nil {
+				if err := s.createUserWithEmailAliasGuard(txCtx, newUser); err != nil {
 					if errors.Is(err, ErrEmailExists) {
 						user, err = s.userRepo.GetByEmail(ctx, email)
 						if err != nil {
@@ -718,7 +715,7 @@ func (s *AuthService) loginOrRegisterOAuthWithTokenPair(ctx context.Context, ema
 					s.bindOAuthAffiliate(ctx, user.ID, affiliateCode)
 				}
 			} else {
-				if err := s.userRepo.Create(ctx, newUser); err != nil {
+				if err := s.createUserWithEmailAliasGuard(ctx, newUser); err != nil {
 					if errors.Is(err, ErrEmailExists) {
 						user, err = s.userRepo.GetByEmail(ctx, email)
 						if err != nil {
@@ -1102,6 +1099,41 @@ func inferLegacySignupSource(email string) string {
 	default:
 		return "email"
 	}
+}
+
+// createUserAndClaimInvitation atomically creates a registration user and
+// consumes a one-time invitation. The redeem repository's conditional update
+// makes concurrent claimers lose; reusing the outer ent transaction ensures a
+// losing user insert is rolled back as well.
+func (s *AuthService) createUserAndClaimInvitation(ctx context.Context, user *User, invitation *RedeemCode) error {
+	commit := func(execCtx context.Context) error {
+		if err := s.createUserWithEmailAliasGuard(execCtx, user); err != nil {
+			return err
+		}
+		if invitation == nil {
+			return nil
+		}
+		if err := s.redeemRepo.Use(execCtx, invitation.ID, user.ID); err != nil {
+			logger.LegacyPrintf("service.auth", "[Auth] invitation %s already claimed: %v", invitation.Code, err)
+			return ErrInvitationCodeInvalid
+		}
+		return nil
+	}
+	if invitation == nil || s.entClient == nil {
+		return commit(ctx)
+	}
+	tx, err := s.entClient.Tx(ctx)
+	if err != nil {
+		return ErrServiceUnavailable
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := commit(dbent.NewTxContext(ctx, tx)); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return ErrServiceUnavailable
+	}
+	return nil
 }
 
 func (s *AuthService) validateRegistrationEmailPolicy(ctx context.Context, email string) error {

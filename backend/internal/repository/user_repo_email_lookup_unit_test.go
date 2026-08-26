@@ -72,6 +72,29 @@ func TestUserRepositoryExistsByEmailNormalizesLegacySpacingAndCase(t *testing.T)
 	require.True(t, exists)
 }
 
+func TestUserRepositoryExistsByEmailAliasDetectsGmailVariants(t *testing.T) {
+	repo, _ := newUserEntRepo(t)
+	ctx := context.Background()
+	require.NoError(t, repo.Create(ctx, &service.User{
+		Email: "some.one+seed@gmail.com", PasswordHash: "hash", Role: service.RoleUser, Status: service.StatusActive,
+	}))
+	found, err := repo.ExistsByEmailAlias(ctx, "someone@gmail.com")
+	require.NoError(t, err)
+	require.True(t, found)
+	found, err = repo.ExistsByEmailAlias(ctx, "other@gmail.com")
+	require.NoError(t, err)
+	require.False(t, found)
+}
+
+func TestUserRepositoryCreateWithEmailAliasGuardSerializesInboxVariants(t *testing.T) {
+	repo, _ := newUserEntRepo(t)
+	ctx := context.Background()
+	first := &service.User{Email: "alias.user@gmail.com", PasswordHash: "hash", Role: service.RoleUser, Status: service.StatusActive}
+	require.NoError(t, repo.CreateWithEmailAliasGuard(ctx, first))
+	second := &service.User{Email: "a.l.i.a.s.u.s.e.r+two@googlemail.com", PasswordHash: "hash", Role: service.RoleUser, Status: service.StatusActive}
+	require.ErrorIs(t, repo.CreateWithEmailAliasGuard(ctx, second), service.ErrEmailExists)
+}
+
 func TestUserRepositoryCreateRejectsNormalizedEmailDuplicate(t *testing.T) {
 	repo, _ := newUserEntRepo(t)
 	ctx := context.Background()

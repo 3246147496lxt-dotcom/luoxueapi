@@ -56,12 +56,8 @@ func (s *AuthService) BindEmailIdentity(
 		return nil, ErrPasswordIncorrect
 	}
 
-	existingUser, err := s.userRepo.GetByEmail(ctx, normalizedEmail)
-	switch {
-	case err == nil && existingUser != nil && existingUser.ID != userID:
-		return nil, ErrEmailExists
-	case err != nil && !errors.Is(err, ErrUserNotFound):
-		return nil, ErrServiceUnavailable
+	if err := s.ensureEmailIdentityAvailableForUser(ctx, currentUser, normalizedEmail); err != nil {
+		return nil, err
 	}
 
 	hashedPassword, err := s.HashPassword(password)
@@ -115,19 +111,16 @@ func (s *AuthService) SendEmailIdentityBindCode(ctx context.Context, userID int6
 	if s.emailService == nil {
 		return ErrServiceUnavailable
 	}
-	if _, err := s.userRepo.GetByID(ctx, userID); err != nil {
+	currentUser, err := s.userRepo.GetByID(ctx, userID)
+	if err != nil {
 		if errors.Is(err, ErrUserNotFound) {
 			return ErrUserNotFound
 		}
 		return ErrServiceUnavailable
 	}
 
-	existingUser, err := s.userRepo.GetByEmail(ctx, normalizedEmail)
-	switch {
-	case err == nil && existingUser != nil && existingUser.ID != userID:
-		return ErrEmailExists
-	case err != nil && !errors.Is(err, ErrUserNotFound):
-		return ErrServiceUnavailable
+	if err := s.ensureEmailIdentityAvailableForUser(ctx, currentUser, normalizedEmail); err != nil {
+		return err
 	}
 
 	siteName := defaultSiteName
@@ -135,6 +128,39 @@ func (s *AuthService) SendEmailIdentityBindCode(ctx context.Context, userID int6
 		siteName = s.settingService.GetSiteName(ctx)
 	}
 	return s.emailService.SendVerifyCode(ctx, normalizedEmail, siteName, firstEmailLocale(locale))
+}
+
+// ensureEmailIdentityAvailableForUser performs a quick exact/alias check for
+// bind flows. The repository transaction guard remains authoritative for the
+// write, and the current user's own inbox identity is allowed.
+func (s *AuthService) ensureEmailIdentityAvailableForUser(ctx context.Context, currentUser *User, email string) error {
+	if currentUser == nil {
+		return ErrUserNotFound
+	}
+	existing, err := s.userRepo.GetByEmail(ctx, email)
+	if err == nil {
+		if existing != nil && existing.ID != currentUser.ID {
+			return ErrEmailExists
+		}
+	} else if !errors.Is(err, ErrUserNotFound) {
+		return ErrServiceUnavailable
+	}
+	if NormalizeEmailForAliasDedup(currentUser.Email) == NormalizeEmailForAliasDedup(email) {
+		return nil
+	}
+	aliasExists := false
+	if repo, ok := s.userRepo.(interface {
+		ExistsByEmailAlias(context.Context, string) (bool, error)
+	}); ok {
+		aliasExists, err = repo.ExistsByEmailAlias(ctx, email)
+		if err != nil {
+			return ErrServiceUnavailable
+		}
+	}
+	if aliasExists {
+		return ErrEmailExists
+	}
+	return nil
 }
 
 func normalizeEmailForIdentityBinding(email string) (string, error) {
@@ -192,16 +218,16 @@ func (s *AuthService) updateBoundEmailIdentityWithClient(
 		return ErrServiceUnavailable
 	}
 
-	oldEmail := currentUser.Email
-	if _, err := client.User.UpdateOneID(currentUser.ID).
-		SetEmail(email).
-		SetPasswordHash(hashedPassword).
-		Save(ctx); err != nil {
-		if dbent.IsConstraintError(err) {
-			return ErrEmailExists
-		}
+	guard, ok := s.userRepo.(interface {
+		UpdateEmailWithAliasGuard(context.Context, int64, string, string) error
+	})
+	if !ok {
 		return ErrServiceUnavailable
 	}
+	if err := guard.UpdateEmailWithAliasGuard(ctx, currentUser.ID, email, hashedPassword); err != nil {
+		return err
+	}
+	oldEmail := currentUser.Email
 
 	if err := replaceBoundEmailAuthIdentityWithClient(ctx, client, currentUser.ID, oldEmail, email, "auth_service_email_bind"); err != nil {
 		if errors.Is(err, ErrEmailExists) {
