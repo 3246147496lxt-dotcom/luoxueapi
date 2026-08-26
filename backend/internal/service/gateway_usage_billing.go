@@ -967,13 +967,17 @@ func (s *GatewayService) recordUsageCore(ctx context.Context, input *recordUsage
 		Source:                resolveBillingReceiptSource(ctx),
 	}, s.billingDeps(), s.usageBillingRepo)
 
+	if billingResult != nil && billingResult.SettlementClosed {
+		// A terminal Web Chat attempt has already been settled (or explicitly
+		// closed).  Do not persist a duplicate late usage log.  The billing
+		// repository returns this marker together with an error, so check it
+		// before the generic billing-failure persistence path.
+		return billingErr
+	}
 	if billingErr != nil {
 		usageLog.ActualCost = 0
 		writeUsageLogBestEffort(ctx, s.usageLogRepo, usageLog, "service.gateway")
 		return billingErr
-	}
-	if billingResult != nil && billingResult.SettlementClosed {
-		return nil
 	}
 	writeUsageLogBestEffort(ctx, s.usageLogRepo, usageLog, "service.gateway")
 

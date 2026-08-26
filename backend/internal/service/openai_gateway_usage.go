@@ -412,13 +412,18 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 		Source:                resolveBillingReceiptSource(ctx),
 	}, s.billingDeps(), s.usageBillingRepo)
 
+	if billingResult != nil && billingResult.SettlementClosed {
+		// A terminal Web Chat attempt has already been settled (or explicitly
+		// closed).  A late producer must not create a second usage log; this is
+		// intentionally handled before the generic billing-error persistence
+		// path below because applyUsageBilling returns the terminal marker with
+		// ErrUsageBillingSettlementClosed.
+		return billingErr
+	}
 	if billingErr != nil {
 		usageLog.ActualCost = 0
 		writeUsageLogBestEffort(ctx, s.usageLogRepo, usageLog, "service.openai_gateway")
 		return billingErr
-	}
-	if billingResult != nil && billingResult.SettlementClosed {
-		return nil
 	}
 	writeUsageLogBestEffort(ctx, s.usageLogRepo, usageLog, "service.openai_gateway")
 
