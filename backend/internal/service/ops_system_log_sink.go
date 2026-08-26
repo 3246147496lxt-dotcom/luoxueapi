@@ -87,6 +87,13 @@ func (s *OpsSystemLogSink) flushBackoffFor(failures int) time.Duration {
 	}
 	backoff := base
 	for i := 1; i < failures && backoff < maxBackoff; i++ {
+		// Avoid duration overflow when callers tune the test/runtime knobs near
+		// time.Duration's limit.  Once doubling would cross the cap, clamp and
+		// stop; a negative wrapped duration would otherwise disable suppression.
+		if backoff > maxBackoff/2 {
+			backoff = maxBackoff
+			break
+		}
 		backoff *= 2
 	}
 	if backoff > maxBackoff {

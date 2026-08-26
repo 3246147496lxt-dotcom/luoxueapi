@@ -282,6 +282,16 @@ func TestOpsSystemLogSink_FlushBackoffForCapsAndDoubles(t *testing.T) {
 	if got := sink.flushBackoffFor(4); got != 3*time.Second {
 		t.Fatalf("capped backoff=%s", got)
 	}
+
+	// Near-MaxInt64 durations must clamp instead of wrapping negative on the
+	// next doubling (which would silently disable suppression).
+	nearMax := &OpsSystemLogSink{
+		flushBackoff:    time.Duration(1<<62 + 1),
+		flushBackoffMax: time.Duration(1<<63 - 1),
+	}
+	if got := nearMax.flushBackoffFor(2); got != nearMax.flushBackoffMax {
+		t.Fatalf("near-max backoff=%s, want %s", got, nearMax.flushBackoffMax)
+	}
 }
 
 func TestOpsSystemLogSink_StopFlushUsesActiveContextAndDrainsQueue(t *testing.T) {
