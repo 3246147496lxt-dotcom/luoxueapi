@@ -19,8 +19,10 @@ import (
 	"github.com/Wei-Shaw/sub2api/ent/pendingauthsession"
 	"github.com/Wei-Shaw/sub2api/ent/redeemcode"
 	dbuser "github.com/Wei-Shaw/sub2api/ent/user"
+	"github.com/Wei-Shaw/sub2api/ent/userplatformquota"
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/pagination"
+	"github.com/Wei-Shaw/sub2api/internal/repository"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/gin-gonic/gin"
 	"github.com/pquerna/otp/totp"
@@ -375,6 +377,48 @@ func TestExchangePendingOAuthCompletionBindCurrentUserPreviewThenFinalizeBindsId
 		Only(ctx)
 	require.NoError(t, err)
 	require.NotNil(t, consumed.ConsumedAt)
+}
+
+func TestExchangePendingOAuthCompletionRejectsBindCurrentUserWithoutTarget(t *testing.T) {
+	handler, client := newOAuthPendingFlowTestHandler(t, false)
+	ctx := context.Background()
+
+	session, err := client.PendingAuthSession.Create().
+		SetSessionToken("bind-missing-target-session-token").
+		SetIntent(oauthIntentBindCurrentUser).
+		SetProviderType("linuxdo").
+		SetProviderKey("linuxdo").
+		SetProviderSubject("bind-missing-target-123").
+		SetResolvedEmail("bind-missing-target@example.com").
+		SetBrowserSessionKey("bind-missing-target-browser-key").
+		SetLocalFlowState(map[string]any{
+			oauthCompletionResponseKey: map[string]any{
+				"access_token": "preview-only-token",
+			},
+		}).
+		SetExpiresAt(time.Now().UTC().Add(10 * time.Minute)).
+		Save(ctx)
+	require.NoError(t, err)
+
+	recorder := httptest.NewRecorder()
+	ginCtx, _ := gin.CreateTestContext(recorder)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/oauth/pending/exchange", nil)
+	req.AddCookie(&http.Cookie{Name: oauthPendingSessionCookieName, Value: encodeCookieValue(session.SessionToken)})
+	req.AddCookie(&http.Cookie{Name: oauthPendingBrowserCookieName, Value: encodeCookieValue(session.BrowserSessionKey)})
+	ginCtx.Request = req
+
+	handler.ExchangePendingOAuthCompletion(ginCtx)
+
+	require.Equal(t, http.StatusBadRequest, recorder.Code)
+	payload := decodeJSONBody(t, recorder)
+	require.Equal(t, "PENDING_AUTH_TARGET_USER_MISSING", payload["reason"])
+
+	storedSession, err := client.PendingAuthSession.Get(ctx, session.ID)
+	require.NoError(t, err)
+	require.Nil(t, storedSession.ConsumedAt)
+	decisionCount, err := client.IdentityAdoptionDecision.Query().Count(ctx)
+	require.NoError(t, err)
+	require.Zero(t, decisionCount, "malformed bind session must not persist an adoption decision")
 }
 
 func TestExchangePendingOAuthCompletionBindCurrentUserOwnershipConflict(t *testing.T) {
@@ -1075,7 +1119,24 @@ func TestExchangePendingOAuthCompletionInvitationRequiredFalseFalsePersistsDecis
 }
 
 func TestCreateOIDCOAuthAccountCreatesUserBindsIdentityAndConsumesSession(t *testing.T) {
-	handler, client := newOAuthPendingFlowTestHandlerWithEmailVerification(t, false, "fresh@example.com", "246810")
+	handler, client := newOAuthPendingFlowTestHandlerWithDependencies(t, oauthPendingFlowTestHandlerOptions{
+		emailVerifyEnabled: true,
+		emailCache: &oauthPendingFlowEmailCacheStub{
+			verificationCodes: map[string]*service.VerificationCodeData{
+				"fresh@example.com": {
+					Code:      "246810",
+					CreatedAt: time.Now().UTC(),
+					ExpiresAt: time.Now().UTC().Add(15 * time.Minute),
+				},
+			},
+		},
+		settingValues: map[string]string{
+			service.SettingKeyDefaultPlatformQuotas: `{"anthropic":{"daily":5}}`,
+		},
+		quotaRepoFactory: func(client *dbent.Client) service.UserPlatformQuotaRepository {
+			return repository.NewUserPlatformQuotaServiceAdapter(repository.NewUserPlatformQuotaRepository(client))
+		},
+	})
 	ctx := context.Background()
 
 	session, err := client.PendingAuthSession.Create().
@@ -1131,6 +1192,15 @@ func TestCreateOIDCOAuthAccountCreatesUserBindsIdentityAndConsumesSession(t *tes
 	storedSession, err := client.PendingAuthSession.Get(ctx, session.ID)
 	require.NoError(t, err)
 	require.NotNil(t, storedSession.ConsumedAt)
+
+	quota, err := client.UserPlatformQuota.Query().Where(
+		userplatformquota.UserIDEQ(createdUser.ID),
+		userplatformquota.PlatformEQ("anthropic"),
+		userplatformquota.DeletedAtIsNil(),
+	).Only(ctx)
+	require.NoError(t, err, "quota defaults must be inserted after the account transaction commits")
+	require.NotNil(t, quota.DailyLimitUsd)
+	require.InDelta(t, 5.0, *quota.DailyLimitUsd, 0.0001)
 }
 
 func TestCreateOIDCOAuthAccountAppliesPromoCodeFromPendingSession(t *testing.T) {
@@ -2457,6 +2527,8 @@ type oauthPendingFlowTestHandlerOptions struct {
 	defaultSubAssigner service.DefaultSubscriptionAssigner
 	affiliateService   *service.AffiliateService
 	affiliateFactory   func(*dbent.Client, *service.SettingService) *service.AffiliateService
+	quotaRepo          service.UserPlatformQuotaRepository
+	quotaRepoFactory   func(*dbent.Client) service.UserPlatformQuotaRepository
 	totpCache          service.TotpCache
 	totpEncryptor      service.SecretEncryptor
 	userRepoOptions    oauthPendingFlowUserRepoOptions
@@ -2541,6 +2613,10 @@ CREATE TABLE IF NOT EXISTS user_affiliates (
 	if affiliateService == nil && options.affiliateFactory != nil {
 		affiliateService = options.affiliateFactory(client, settingSvc)
 	}
+	quotaRepo := options.quotaRepo
+	if quotaRepo == nil && options.quotaRepoFactory != nil {
+		quotaRepo = options.quotaRepoFactory(client)
+	}
 	userRepo := &oauthPendingFlowUserRepo{
 		client:  client,
 		options: options.userRepoOptions,
@@ -2571,7 +2647,7 @@ CREATE TABLE IF NOT EXISTS user_affiliates (
 		promoService,
 		options.defaultSubAssigner,
 		affiliateService,
-		nil,
+		quotaRepo,
 	)
 	userSvc := service.NewUserService(userRepo, nil, nil, nil)
 	var totpSvc *service.TotpService
@@ -3036,8 +3112,16 @@ type oauthPendingFlowUserRepoOptions struct {
 	rejectDeleteWhileAuthIdentityExists bool
 }
 
+func (r *oauthPendingFlowUserRepo) clientForContext(ctx context.Context) *dbent.Client {
+	if tx := dbent.TxFromContext(ctx); tx != nil {
+		return tx.Client()
+	}
+	return r.client
+}
+
 func (r *oauthPendingFlowUserRepo) Create(ctx context.Context, user *service.User) error {
-	entity, err := r.client.User.Create().
+	client := r.clientForContext(ctx)
+	entity, err := client.User.Create().
 		SetEmail(user.Email).
 		SetUsername(user.Username).
 		SetNotes(user.Notes).
@@ -3063,8 +3147,23 @@ func (r *oauthPendingFlowUserRepo) Create(ctx context.Context, user *service.Use
 	return nil
 }
 
+func (r *oauthPendingFlowUserRepo) CreateWithEmailAliasGuard(ctx context.Context, user *service.User) error {
+	aliasExists, err := r.ExistsByEmailAlias(ctx, user.Email)
+	if err != nil {
+		return err
+	}
+	if aliasExists {
+		return service.ErrEmailExists
+	}
+	return r.Create(ctx, user)
+}
+
+func (r *oauthPendingFlowUserRepo) UpdateEmailWithAliasGuard(context.Context, int64, string, string) error {
+	panic("unexpected UpdateEmailWithAliasGuard call")
+}
+
 func (r *oauthPendingFlowUserRepo) GetByID(ctx context.Context, id int64) (*service.User, error) {
-	entity, err := r.client.User.Get(ctx, id)
+	entity, err := r.clientForContext(ctx).User.Get(ctx, id)
 	if err != nil {
 		if dbent.IsNotFound(err) {
 			return nil, service.ErrUserNotFound
@@ -3075,7 +3174,7 @@ func (r *oauthPendingFlowUserRepo) GetByID(ctx context.Context, id int64) (*serv
 }
 
 func (r *oauthPendingFlowUserRepo) GetByEmail(ctx context.Context, email string) (*service.User, error) {
-	entity, err := r.client.User.Query().Where(dbuser.EmailEQ(email)).Only(ctx)
+	entity, err := r.clientForContext(ctx).User.Query().Where(dbuser.EmailEQ(email)).Only(ctx)
 	if err != nil {
 		if dbent.IsNotFound(err) {
 			return nil, service.ErrUserNotFound
@@ -3090,7 +3189,7 @@ func (r *oauthPendingFlowUserRepo) GetFirstAdmin(context.Context) (*service.User
 }
 
 func (r *oauthPendingFlowUserRepo) Update(ctx context.Context, user *service.User, fields service.UserUpdateFields) error {
-	entity, err := r.client.User.UpdateOneID(user.ID).
+	entity, err := r.clientForContext(ctx).User.UpdateOneID(user.ID).
 		SetEmail(user.Email).
 		SetUsername(user.Username).
 		SetNotes(user.Notes).
@@ -3115,12 +3214,13 @@ func (r *oauthPendingFlowUserRepo) Update(ctx context.Context, user *service.Use
 }
 
 func (r *oauthPendingFlowUserRepo) UpdateUserLastActiveAt(ctx context.Context, userID int64, activeAt time.Time) error {
-	return r.client.User.UpdateOneID(userID).SetLastActiveAt(activeAt).Exec(ctx)
+	return r.clientForContext(ctx).User.UpdateOneID(userID).SetLastActiveAt(activeAt).Exec(ctx)
 }
 
 func (r *oauthPendingFlowUserRepo) Delete(ctx context.Context, id int64) error {
+	client := r.clientForContext(ctx)
 	if r.options.rejectDeleteWhileAuthIdentityExists {
-		count, err := r.client.AuthIdentity.Query().Where(authidentity.UserIDEQ(id)).Count(ctx)
+		count, err := client.AuthIdentity.Query().Where(authidentity.UserIDEQ(id)).Count(ctx)
 		if err != nil {
 			return err
 		}
@@ -3128,7 +3228,7 @@ func (r *oauthPendingFlowUserRepo) Delete(ctx context.Context, id int64) error {
 			return errors.New("cannot delete user while auth identities still exist")
 		}
 	}
-	return r.client.User.DeleteOneID(id).Exec(ctx)
+	return client.User.DeleteOneID(id).Exec(ctx)
 }
 
 func (r *oauthPendingFlowUserRepo) GetUserAvatar(ctx context.Context, userID int64) (*service.UserAvatar, error) {
@@ -3270,8 +3370,22 @@ func (r *oauthPendingFlowUserRepo) GetLatestUsedAtByUserID(context.Context, int6
 }
 
 func (r *oauthPendingFlowUserRepo) ExistsByEmail(ctx context.Context, email string) (bool, error) {
-	count, err := r.client.User.Query().Where(dbuser.EmailEQ(email)).Count(ctx)
+	count, err := r.clientForContext(ctx).User.Query().Where(dbuser.EmailEQ(email)).Count(ctx)
 	return count > 0, err
+}
+
+func (r *oauthPendingFlowUserRepo) ExistsByEmailAlias(ctx context.Context, email string) (bool, error) {
+	identity := service.NormalizeEmailForAliasDedup(email)
+	emails, err := r.clientForContext(ctx).User.Query().Select(dbuser.FieldEmail).Strings(ctx)
+	if err != nil {
+		return false, err
+	}
+	for _, stored := range emails {
+		if service.NormalizeEmailForAliasDedup(stored) == identity {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 func (r *oauthPendingFlowUserRepo) RemoveGroupFromAllowedGroups(context.Context, int64) (int64, error) {

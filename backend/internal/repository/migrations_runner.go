@@ -78,6 +78,17 @@ const apiKeyPurposeIndex = "idx_api_keys_purpose"
 const apiKeyWebChatActiveUserGroupIndex = "idx_api_keys_web_chat_active_user_group"
 const libraryAliasUniqueIndexMigration = "201a_library_alias_unique_index_notx.sql"
 const libraryAliasUniqueIndex = "idx_chat_attachments_library_file_unique"
+
+// These indexes are created by the local email-alias migrations.  Keep the
+// migration-to-index mapping explicit: an interrupted CREATE INDEX
+// CONCURRENTLY leaves an invalid relation behind, and IF NOT EXISTS would
+// otherwise skip it on the next run and incorrectly mark the migration as
+// applied.  Do not derive names from arbitrary migration SQL before dropping
+// anything; only these reviewed index names may be cleaned up automatically.
+const usersEmailAliasDedupIndexMigration = "231_add_users_email_alias_dedup_index_notx.sql"
+const usersEmailAliasDedupIndex = "idx_users_email_dot_stripped"
+const usersEmailNormalizedIndexMigration = "232_add_users_email_normalized_index_notx.sql"
+const usersEmailNormalizedIndex = "idx_users_email_normalized"
 const subscriptionAnchoredMonthlyQuotaMigration = "195_subscription_anchored_monthly_quota.sql"
 const schemaMigrationOriginStateKey = "schema_origin"
 
@@ -105,6 +116,51 @@ type validatedMigrationFile struct {
 	content  string
 	checksum string
 }
+
+// expectedConcurrentIndex describes the schema contract for a named index
+// created by a non-transactional migration.  CREATE INDEX IF NOT EXISTS only
+// checks the relation name; it does not verify the table or definition.  Keep
+// these expectations explicit and reviewed rather than deriving them from
+// arbitrary migration SQL before issuing any cleanup.
+type expectedConcurrentIndex struct {
+	migration     string
+	indexName     string
+	tableName     string
+	accessMethod  string
+	operatorClass string
+	unique        bool
+	keyAttributes int
+	attributes    int
+	expression    string
+	predicate     string
+}
+
+var (
+	usersEmailAliasDedupIndexSpec = expectedConcurrentIndex{
+		migration:     usersEmailAliasDedupIndexMigration,
+		indexName:     usersEmailAliasDedupIndex,
+		tableName:     "users",
+		accessMethod:  "btree",
+		operatorClass: "text_pattern_ops",
+		unique:        false,
+		keyAttributes: 1,
+		attributes:    1,
+		expression:    "REPLACE(LOWER(TRIM(email)), '.', '')",
+		predicate:     "deleted_at IS NULL",
+	}
+	usersEmailNormalizedIndexSpec = expectedConcurrentIndex{
+		migration:     usersEmailNormalizedIndexMigration,
+		indexName:     usersEmailNormalizedIndex,
+		tableName:     "users",
+		accessMethod:  "btree",
+		operatorClass: "text_pattern_ops",
+		unique:        false,
+		keyAttributes: 1,
+		attributes:    1,
+		expression:    "RTRIM(LOWER(TRIM(email)), '.')",
+		predicate:     "deleted_at IS NULL",
+	}
+)
 
 type migrationRunnerPolicy struct {
 	expectedIdentity     *ConfiguredDatabaseIdentity
@@ -618,9 +674,200 @@ func prepareNonTransactionalMigration(ctx context.Context, db migrationQueryExec
 		return nil
 	case libraryAliasUniqueIndexMigration:
 		return dropInvalidIndexIfPresent(ctx, db, libraryAliasUniqueIndex)
+	case usersEmailAliasDedupIndexMigration:
+		if err := validateExpectedConcurrentIndex(ctx, db, usersEmailAliasDedupIndexSpec); err != nil {
+			return err
+		}
+		return dropInvalidIndexIfPresent(ctx, db, usersEmailAliasDedupIndex)
+	case usersEmailNormalizedIndexMigration:
+		if err := validateExpectedConcurrentIndex(ctx, db, usersEmailNormalizedIndexSpec); err != nil {
+			return err
+		}
+		return dropInvalidIndexIfPresent(ctx, db, usersEmailNormalizedIndex)
 	default:
 		return nil
 	}
+}
+
+type observedConcurrentIndex struct {
+	tableSchema   string
+	tableName     string
+	valid         bool
+	ready         bool
+	unique        bool
+	accessMethod  string
+	keyAttributes int
+	attributes    int
+	expression    sql.NullString
+	predicate     sql.NullString
+	definition    string
+}
+
+// validateExpectedConcurrentIndex prevents CREATE INDEX IF NOT EXISTS from
+// silently accepting a valid relation with the same name but a different
+// table/definition. Invalid concurrent-index leftovers are deliberately
+// allowed through to dropInvalidIndexIfPresent, while a valid mismatch fails
+// closed and requires explicit operator remediation.
+func validateExpectedConcurrentIndex(ctx context.Context, db migrationQueryExecer, expected expectedConcurrentIndex) error {
+	var observed observedConcurrentIndex
+	err := db.QueryRowContext(ctx, `
+		SELECT table_namespace.nspname,
+		       table_class.relname,
+		       index_state.indisvalid,
+		       index_state.indisready,
+		       index_state.indisunique,
+		       access_method.amname,
+		       index_state.indnkeyatts,
+		       index_state.indnatts,
+		       pg_get_expr(index_state.indexprs, index_state.indrelid),
+		       pg_get_expr(index_state.indpred, index_state.indrelid),
+		       pg_get_indexdef(index_state.indexrelid)
+		FROM pg_class AS index_class
+		JOIN pg_namespace AS index_namespace ON index_namespace.oid = index_class.relnamespace
+		JOIN pg_index AS index_state ON index_state.indexrelid = index_class.oid
+		JOIN pg_class AS table_class ON table_class.oid = index_state.indrelid
+		JOIN pg_namespace AS table_namespace ON table_namespace.oid = table_class.relnamespace
+		JOIN pg_am AS access_method ON access_method.oid = index_class.relam
+		WHERE index_namespace.nspname = 'public'
+		  AND index_class.relname = $1
+	`, expected.indexName).Scan(
+		&observed.tableSchema,
+		&observed.tableName,
+		&observed.valid,
+		&observed.ready,
+		&observed.unique,
+		&observed.accessMethod,
+		&observed.keyAttributes,
+		&observed.attributes,
+		&observed.expression,
+		&observed.predicate,
+		&observed.definition,
+	)
+	if errors.Is(err, sql.ErrNoRows) {
+		// No relation with this name exists in public; the migration can create it.
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("inspect existing index %s for migration %s: %w", expected.indexName, expected.migration, err)
+	}
+
+	if !observed.valid {
+		// An interrupted CREATE INDEX CONCURRENTLY leaves an invalid relation.
+		// The explicit cleanup below is the only path permitted to drop it.
+		return nil
+	}
+	if !observed.ready {
+		return fmt.Errorf(
+			"existing index %s is valid but not ready for migration %s; refusing to apply until an operator repairs or removes the index",
+			expected.indexName,
+			expected.migration,
+		)
+	}
+
+	if observed.tableSchema != "public" || observed.tableName != expected.tableName {
+		return incompatibleConcurrentIndexError(expected, "table", observed.tableSchema+"."+observed.tableName, "public."+expected.tableName)
+	}
+	if observed.unique != expected.unique {
+		return incompatibleConcurrentIndexError(expected, "uniqueness", fmt.Sprintf("%t", observed.unique), fmt.Sprintf("%t", expected.unique))
+	}
+	if !strings.EqualFold(observed.accessMethod, expected.accessMethod) {
+		return incompatibleConcurrentIndexError(expected, "access method", observed.accessMethod, expected.accessMethod)
+	}
+	if observed.keyAttributes != expected.keyAttributes || observed.attributes != expected.attributes {
+		return incompatibleConcurrentIndexError(
+			expected,
+			"attribute count",
+			fmt.Sprintf("key=%d total=%d", observed.keyAttributes, observed.attributes),
+			fmt.Sprintf("key=%d total=%d", expected.keyAttributes, expected.attributes),
+		)
+	}
+
+	observedExpression := ""
+	if observed.expression.Valid {
+		observedExpression = canonicalizeIndexSQL(observed.expression.String)
+	}
+	if observedExpression != canonicalizeIndexSQL(expected.expression) {
+		return incompatibleConcurrentIndexError(expected, "expression", observedExpression, canonicalizeIndexSQL(expected.expression))
+	}
+	observedPredicate := ""
+	if observed.predicate.Valid {
+		observedPredicate = canonicalizeIndexSQL(observed.predicate.String)
+	}
+	if observedPredicate != canonicalizeIndexSQL(expected.predicate) {
+		return incompatibleConcurrentIndexError(expected, "predicate", observedPredicate, canonicalizeIndexSQL(expected.predicate))
+	}
+
+	// pg_get_expr does not expose operator classes.  Check the full generated
+	// definition for the reviewed class as well, so a default btree index with
+	// the same expression cannot silently satisfy the migration contract.
+	definition := canonicalizeIndexSQL(observed.definition)
+	if !strings.Contains(definition, canonicalizeIndexSQL(expected.operatorClass)) {
+		return incompatibleConcurrentIndexError(expected, "operator class", definition, expected.operatorClass)
+	}
+	return nil
+}
+
+func incompatibleConcurrentIndexError(expected expectedConcurrentIndex, field, got, want string) error {
+	return fmt.Errorf(
+		"existing index %s is incompatible with migration %s (%s=%q, want %q); refusing to mark migration applied; repair or remove the index explicitly",
+		expected.indexName,
+		expected.migration,
+		field,
+		got,
+		want,
+	)
+}
+
+var redundantIndexSQLParentheses = regexp.MustCompile(`\(\(([a-z_][a-z0-9_]*)\)\)`)
+var indexSQLTypeCast = regexp.MustCompile(`::(?:pg_catalog\.)?(?:text|character varying|varchar)`)
+
+// canonicalizeIndexSQL normalizes the stable semantic portions emitted by
+// pg_get_expr/pg_get_indexdef across PostgreSQL versions (casts and redundant
+// parentheses vary by server version). It intentionally does not attempt to
+// parse arbitrary SQL; the expected expressions are fixed reviewed literals.
+func canonicalizeIndexSQL(value string) string {
+	value = strings.ToLower(strings.TrimSpace(value))
+	value = strings.ReplaceAll(value, `"`, "")
+	value = strings.ReplaceAll(value, "pg_catalog.", "")
+	value = indexSQLTypeCast.ReplaceAllString(value, "")
+	value = strings.ReplaceAll(value, "btrim(", "trim(")
+	value = strings.Join(strings.Fields(value), "")
+	value = strings.ReplaceAll(value, "trim(bothfrom", "trim(")
+	for {
+		next := redundantIndexSQLParentheses.ReplaceAllString(value, "($1)")
+		if next == value {
+			break
+		}
+		value = next
+	}
+	return stripEnclosingIndexSQLParentheses(value)
+}
+
+func stripEnclosingIndexSQLParentheses(value string) string {
+	for len(value) >= 2 && value[0] == '(' && value[len(value)-1] == ')' {
+		depth := 0
+		encloses := true
+		for index := 0; index < len(value); index++ {
+			switch value[index] {
+			case '(':
+				depth++
+			case ')':
+				depth--
+				if depth == 0 && index != len(value)-1 {
+					encloses = false
+				}
+			}
+			if depth < 0 {
+				encloses = false
+				break
+			}
+		}
+		if !encloses || depth != 0 {
+			break
+		}
+		value = value[1 : len(value)-1]
+	}
+	return value
 }
 
 func preparePaymentOrdersOutTradeNoUniqueMigration(ctx context.Context, db migrationQueryExecer) error {

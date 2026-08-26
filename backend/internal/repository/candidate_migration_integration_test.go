@@ -13,39 +13,43 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestCandidateMigrationsUpgradeProduction246To250AndReplay(t *testing.T) {
+func TestCandidateMigrationsUpgradeProduction246To252AndReplay(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	defer cancel()
 
 	files, err := collectValidatedMigrationFiles(migrationfs.FS)
 	require.NoError(t, err)
-	require.Len(t, files, 250, "candidate binary must embed the reviewed 250-file manifest")
+	const productionBaselineCount = 246
+	require.Len(t, files, productionBaselineCount+6, "candidate binary must embed the reviewed 252-file manifest")
 
 	wantTail := []MigrationManifestEntry{
 		{Filename: "201_library_files.sql", SHA256: "03f6a53d92e93fbfee37b9e5dd78dc11cae49dd921812253d0425154f1a9c23e"},
 		{Filename: "201a_library_alias_unique_index_notx.sql", SHA256: "ba15a71ce63180c21f8addda85351b13171a0e6c22f7427bcb4b8c955499e564"},
 		{Filename: "201b_library_alias_constraints.sql", SHA256: "f52ac96a80583b4e7a3c7c5f9923eee5d95a47c4a2b2d9844c864f31abe83833"},
 		{Filename: "202_chat_message_activities.sql", SHA256: "e2ee8b4480af916327f132d378eb70b2291c85efba0ced4555452147b56fdb8f"},
+		{Filename: "231_add_users_email_alias_dedup_index_notx.sql", SHA256: "fd103466b72b14919fc7a0b02135f019f9fe7a409a434726467c3649551321e4"},
+		{Filename: "232_add_users_email_normalized_index_notx.sql", SHA256: "052a61bf4bdc89a5215970059a61096f4eaea5c244b6781f3ec42d6ac8e8bb5d"},
 	}
+	require.Len(t, files, productionBaselineCount+len(wantTail))
 	for index, want := range wantTail {
-		got := files[246+index]
+		got := files[productionBaselineCount+index]
 		require.Equal(t, want.Filename, got.name)
 		require.Equal(t, want.SHA256, got.checksum)
 	}
 
-	productionBaseline := make(fstest.MapFS, 246)
-	for _, file := range files[:246] {
+	productionBaseline := make(fstest.MapFS, productionBaselineCount)
+	for _, file := range files[:productionBaselineCount] {
 		productionBaseline[file.name] = &fstest.MapFile{Data: []byte(file.content)}
 	}
 
-	db := openIsolatedMigrationIntegrationDB(t, "sub2api_candidate_246_to_250")
+	db := openIsolatedMigrationIntegrationDB(t, "sub2api_candidate_246_to_252")
 	require.NoError(t, applyMigrationsFSWithPolicy(
 		ctx,
 		db,
 		productionBaseline,
 		migrationRunnerPolicy{},
 	))
-	requireSchemaMigrationCount(t, ctx, db, 246)
+	requireSchemaMigrationCount(t, ctx, db, productionBaselineCount)
 
 	identity, err := queryDatabaseIdentity(ctx, db)
 	require.NoError(t, err)
@@ -55,7 +59,7 @@ func TestCandidateMigrationsUpgradeProduction246To250AndReplay(t *testing.T) {
 		migrationfs.FS,
 		&identity,
 	))
-	requireSchemaMigrationCount(t, ctx, db, 250)
+	requireSchemaMigrationCount(t, ctx, db, len(files))
 	requireCandidateMigrationRows(t, ctx, db, wantTail)
 	requireCandidateLibrarySchema(t, ctx, db)
 	requireCandidateChatActivitySchema(t, ctx, db)
@@ -67,7 +71,7 @@ func TestCandidateMigrationsUpgradeProduction246To250AndReplay(t *testing.T) {
 		migrationfs.FS,
 		&identity,
 	), "the second migrate-only execution must be idempotent")
-	requireSchemaMigrationCount(t, ctx, db, 250)
+	requireSchemaMigrationCount(t, ctx, db, len(files))
 	require.Equal(t, beforeReplay, schemaMigrationsFingerprint(t, ctx, db),
 		"migrate-only replay must not rewrite migration evidence")
 
@@ -80,7 +84,7 @@ func TestCandidateMigrationsUpgradeProduction246To250AndReplay(t *testing.T) {
 		productionBaseline,
 		migrationRunnerPolicy{},
 	), "the old 246-migration application contract must start on the forward schema")
-	requireSchemaMigrationCount(t, ctx, db, 250)
+	requireSchemaMigrationCount(t, ctx, db, len(files))
 	require.Equal(t, beforeReplay, schemaMigrationsFingerprint(t, ctx, db))
 }
 
@@ -105,7 +109,9 @@ WHERE filename IN (
   '201_library_files.sql',
   '201a_library_alias_unique_index_notx.sql',
   '201b_library_alias_constraints.sql',
-  '202_chat_message_activities.sql'
+  '202_chat_message_activities.sql',
+  '231_add_users_email_alias_dedup_index_notx.sql',
+  '232_add_users_email_normalized_index_notx.sql'
 )
 ORDER BY filename`)
 	require.NoError(t, err)

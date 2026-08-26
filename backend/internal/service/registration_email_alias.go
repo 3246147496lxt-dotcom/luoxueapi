@@ -82,29 +82,50 @@ func isGmailFamilyDomain(domain string) bool {
 	return ok
 }
 
+// Keep the alias-specific capabilities out of the broad UserRepository
+// interface so existing adapters and test doubles remain source-compatible.
+// Every security-sensitive call site type-asserts these ports and fails closed
+// when they are unavailable; there is no fallback to the unguarded methods.
+type emailAliasLookupRepository interface {
+	ExistsByEmailAlias(ctx context.Context, email string) (bool, error)
+}
+
+type emailAliasCreateRepository interface {
+	CreateWithEmailAliasGuard(ctx context.Context, user *User) error
+}
+
+type emailIdentityAliasGuardRepository interface {
+	UpdateEmailWithAliasGuard(ctx context.Context, userID int64, email, passwordHash string) error
+}
+
 // existsByEmailOrAlias is used by local registration and verification-code
-// flows. Exact lookup remains the fast path; alias lookup is fail-closed.
+// flows. Exact lookup remains the fast path; the repository port requires the
+// alias probe so implementations cannot silently fail open.
 func (s *AuthService) existsByEmailOrAlias(ctx context.Context, email string) (bool, error) {
+	if s == nil || s.userRepo == nil {
+		return false, ErrServiceUnavailable
+	}
 	exists, err := s.userRepo.ExistsByEmail(ctx, email)
 	if err != nil || exists {
 		return exists, err
 	}
-	if repo, ok := s.userRepo.(interface {
-		ExistsByEmailAlias(context.Context, string) (bool, error)
-	}); ok {
-		return repo.ExistsByEmailAlias(ctx, email)
+	repo, ok := s.userRepo.(emailAliasLookupRepository)
+	if !ok {
+		return false, ErrServiceUnavailable
 	}
-	return false, nil
+	return repo.ExistsByEmailAlias(ctx, email)
 }
 
-// createUserWithEmailAliasGuard keeps legacy test doubles and third-party
-// repository implementations source-compatible while using the stronger
-// atomic guard whenever the concrete repository provides it.
+// createUserWithEmailAliasGuard routes every registration through the
+// repository's atomic alias reservation. The interface requirement prevents a
+// lightweight implementation from accidentally bypassing the guard.
 func (s *AuthService) createUserWithEmailAliasGuard(ctx context.Context, user *User) error {
-	if repo, ok := s.userRepo.(interface {
-		CreateWithEmailAliasGuard(context.Context, *User) error
-	}); ok {
-		return repo.CreateWithEmailAliasGuard(ctx, user)
+	if s == nil || s.userRepo == nil {
+		return ErrServiceUnavailable
 	}
-	return s.userRepo.Create(ctx, user)
+	repo, ok := s.userRepo.(emailAliasCreateRepository)
+	if !ok {
+		return ErrServiceUnavailable
+	}
+	return repo.CreateWithEmailAliasGuard(ctx, user)
 }

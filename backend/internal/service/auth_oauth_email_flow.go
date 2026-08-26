@@ -26,6 +26,15 @@ func normalizeOAuthSignupSource(signupSource string) string {
 	}
 }
 
+// oauthInvitationLifecycleRepository is the repository capability required by
+// OAuth flows that do not have direct access to the Ent client.  Keeping the
+// predicates inside one repository operation prevents a validated invitation
+// from expiring, changing type, or being claimed between the read and write.
+type oauthInvitationLifecycleRepository interface {
+	UseInvitation(ctx context.Context, id, userID int64) error
+	RestoreInvitation(ctx context.Context, code string, userID int64) error
+}
+
 // SendPendingOAuthVerifyCode sends a local verification code for pending OAuth
 // account-creation flows without relying on the public registration gate.
 func (s *AuthService) SendPendingOAuthVerifyCode(ctx context.Context, email string, locale ...string) (*SendVerifyCodeResult, error) {
@@ -166,6 +175,14 @@ func (s *AuthService) RegisterOAuthEmailAccount(
 		slog.Error("oauth email register: userRepo.Create failed", "email", email, "signup_source", signupSource, "error", err.Error())
 		return nil, nil, ErrServiceUnavailable
 	}
+	// A pending OAuth coordinator may call this method inside its outer Ent
+	// transaction. Token caches are external side effects and must not be
+	// populated before that transaction commits; the coordinator issues the
+	// pair after commit. Preserve the historical behavior for standalone
+	// callers that do not carry a transaction.
+	if dbent.TxFromContext(ctx) != nil {
+		return nil, user, nil
+	}
 
 	tokenPair, err := s.GenerateTokenPair(ctx, user, "")
 	if err != nil {
@@ -247,6 +264,9 @@ func (s *AuthService) RegisterVerifiedOAuthEmailAccount(
 		}
 		return nil, nil, ErrServiceUnavailable
 	}
+	if dbent.TxFromContext(ctx) != nil {
+		return nil, user, nil
+	}
 
 	tokenPair, err := s.GenerateTokenPair(ctx, user, "")
 	if err != nil {
@@ -283,8 +303,17 @@ func (s *AuthService) FinalizeOAuthEmailAccount(
 	s.updateOAuthSignupSource(ctx, user.ID, signupSource)
 	grantPlan := s.resolveSignupGrantPlan(ctx, signupSource)
 	s.assignSubscriptions(ctx, user.ID, grantPlan.Subscriptions, "auto assigned by signup defaults")
-	// snapshot user × platform quota（fail-open）
-	_ = s.snapshotPlatformQuotaDefaults(ctx, user.ID, &grantPlan)
+	// The pending-account coordinator may call this method while the newly
+	// created user is still inside its caller-owned transaction.  A quota
+	// snapshot is deliberately best-effort and runs on the base client (see
+	// snapshotPlatformQuotaDefaults), so it cannot see an uncommitted parent
+	// row.  In that case the coordinator invokes
+	// SnapshotPlatformQuotaDefaultsAfterCommit after the outer commit.  Keep
+	// the standalone path's historical behavior for callers that are not in a
+	// transaction.
+	if dbent.TxFromContext(ctx) == nil {
+		_ = s.snapshotPlatformQuotaDefaults(ctx, user.ID, &grantPlan)
+	}
 	s.bindOAuthAffiliate(ctx, user.ID, affiliateCode)
 	return nil
 }
@@ -295,11 +324,80 @@ func (s *AuthService) RollbackOAuthEmailAccountCreation(ctx context.Context, use
 	if s == nil || s.userRepo == nil || userID <= 0 {
 		return ErrServiceUnavailable
 	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	rollbackCtx := ctx
+	cancel := func() {}
+	if dbent.TxFromContext(ctx) == nil {
+		if rollbackCtx == nil {
+			rollbackCtx = context.Background()
+		} else {
+			rollbackCtx = context.WithoutCancel(rollbackCtx)
+		}
+		rollbackCtx, cancel = context.WithTimeout(rollbackCtx, 5*time.Second)
+	}
+	defer cancel()
+
+	// Keep deletion and invitation restoration in one Ent transaction whenever
+	// the service has a client.  The invitation must be restored before deleting
+	// the user because the redeem-code foreign key uses ON DELETE SET NULL for
+	// used_by; doing it in the opposite order would make the conditional restore
+	// predicate miss the row.  In the shared transaction a delete failure still
+	// rolls back the restore, so the code cannot become reusable alongside an
+	// active account.  A caller-owned transaction remains the owner of commit and
+	// rollback; the helper below only performs mutations on its client.
+	if tx := dbent.TxFromContext(rollbackCtx); tx != nil {
+		if err := s.rollbackOAuthEmailAccountTx(rollbackCtx, userID, invitationCode); err != nil {
+			return err
+		}
+		return s.clearOAuthRollbackTokens(rollbackCtx, userID)
+	}
+	if s.entClient != nil {
+		tx, err := s.entClient.Tx(rollbackCtx)
+		if err != nil {
+			return fmt.Errorf("begin oauth rollback transaction: %w", err)
+		}
+		txCtx := dbent.NewTxContext(rollbackCtx, tx)
+		if err := s.rollbackOAuthEmailAccountTx(txCtx, userID, invitationCode); err != nil {
+			_ = tx.Rollback()
+			return err
+		}
+		if err := tx.Commit(); err != nil {
+			return fmt.Errorf("commit oauth rollback transaction: %w", err)
+		}
+		return s.clearOAuthRollbackTokens(rollbackCtx, userID)
+	}
+
+	// Lightweight adapters used by tests and deployments without an Ent client
+	// cannot provide a transaction.  Preserve the foreign-key ordering here as
+	// well; concrete production repositories always take the transactional path
+	// above, while adapters should surface a delete failure to their caller.
+	if err := s.restoreOAuthRegistrationInvitation(rollbackCtx, invitationCode, userID); err != nil {
+		return err
+	}
+	if err := s.userRepo.Delete(rollbackCtx, userID); err != nil {
+		return fmt.Errorf("delete created oauth user: %w", err)
+	}
+	return s.clearOAuthRollbackTokens(rollbackCtx, userID)
+}
+
+func (s *AuthService) rollbackOAuthEmailAccountTx(ctx context.Context, userID int64, invitationCode string) error {
 	if err := s.restoreOAuthRegistrationInvitation(ctx, invitationCode, userID); err != nil {
 		return err
 	}
 	if err := s.userRepo.Delete(ctx, userID); err != nil {
 		return fmt.Errorf("delete created oauth user: %w", err)
+	}
+	return nil
+}
+
+func (s *AuthService) clearOAuthRollbackTokens(ctx context.Context, userID int64) error {
+	if s == nil || s.refreshTokenCache == nil || userID <= 0 {
+		return nil
+	}
+	if err := s.refreshTokenCache.DeleteUserRefreshTokens(ctx, userID); err != nil {
+		return fmt.Errorf("clear oauth refresh tokens after rollback: %w", err)
 	}
 	return nil
 }
@@ -317,32 +415,42 @@ func (s *AuthService) restoreOAuthRegistrationInvitation(ctx context.Context, in
 		return nil
 	}
 
-	redeemCode, err := s.loadOAuthRegistrationInvitation(ctx, invitationCode)
-	if err != nil {
-		if errors.Is(err, ErrRedeemCodeNotFound) {
-			return nil
+	if client := s.oauthEmailFlowClient(ctx); client != nil {
+		_, err := client.RedeemCode.Update().
+			Where(
+				redeemcode.CodeEQ(invitationCode),
+				redeemcode.TypeEQ(RedeemTypeInvitation),
+				redeemcode.StatusEQ(StatusUsed),
+				redeemcode.UsedByEQ(userID),
+			).
+			SetStatus(StatusUnused).
+			ClearUsedBy().
+			ClearUsedAt().
+			Save(ctx)
+		if err != nil {
+			return fmt.Errorf("restore invitation code: %w", err)
 		}
-		return fmt.Errorf("load invitation code: %w", err)
-	}
-	if redeemCode.Type != RedeemTypeInvitation || redeemCode.Status != StatusUsed || redeemCode.UsedBy == nil || *redeemCode.UsedBy != userID {
 		return nil
 	}
-
-	redeemCode.Status = StatusUnused
-	redeemCode.UsedBy = nil
-	redeemCode.UsedAt = nil
-	if err := s.updateOAuthRegistrationInvitation(ctx, redeemCode); err != nil {
+	lifecycleRepo, ok := s.redeemRepo.(oauthInvitationLifecycleRepository)
+	if !ok {
+		return ErrServiceUnavailable
+	}
+	if err := lifecycleRepo.RestoreInvitation(ctx, invitationCode, userID); err != nil {
 		return fmt.Errorf("restore invitation code: %w", err)
 	}
 	return nil
 }
 
 func (s *AuthService) oauthEmailFlowClient(ctx context.Context) *dbent.Client {
-	if s == nil || s.entClient == nil {
+	if s == nil {
 		return nil
 	}
 	if tx := dbent.TxFromContext(ctx); tx != nil {
 		return tx.Client()
+	}
+	if s.entClient == nil {
+		return nil
 	}
 	return s.entClient
 }
@@ -371,20 +479,25 @@ func (s *AuthService) loadOAuthRegistrationInvitation(ctx context.Context, invit
 			ValidityDays: entity.ValidityDays,
 		}, nil
 	}
+	if s == nil || s.redeemRepo == nil {
+		return nil, ErrServiceUnavailable
+	}
 	return s.redeemRepo.GetByCode(ctx, invitationCode)
 }
 
 func (s *AuthService) useOAuthRegistrationInvitation(ctx context.Context, invitationID, userID int64) error {
 	if client := s.oauthEmailFlowClient(ctx); client != nil {
+		now := time.Now().UTC()
 		affected, err := client.RedeemCode.Update().
 			Where(
 				redeemcode.IDEQ(invitationID),
+				redeemcode.TypeEQ(RedeemTypeInvitation),
 				redeemcode.StatusEQ(StatusUnused),
-				redeemcode.Or(redeemcode.ExpiresAtIsNil(), redeemcode.ExpiresAtGT(time.Now().UTC())),
+				redeemcode.Or(redeemcode.ExpiresAtIsNil(), redeemcode.ExpiresAtGT(now)),
 			).
 			SetStatus(StatusUsed).
 			SetUsedBy(userID).
-			SetUsedAt(time.Now().UTC()).
+			SetUsedAt(now).
 			Save(ctx)
 		if err != nil {
 			return err
@@ -394,7 +507,14 @@ func (s *AuthService) useOAuthRegistrationInvitation(ctx context.Context, invita
 		}
 		return nil
 	}
-	return s.redeemRepo.Use(ctx, invitationID, userID)
+	if s == nil || s.redeemRepo == nil {
+		return ErrServiceUnavailable
+	}
+	lifecycleRepo, ok := s.redeemRepo.(oauthInvitationLifecycleRepository)
+	if !ok {
+		return ErrServiceUnavailable
+	}
+	return lifecycleRepo.UseInvitation(ctx, invitationID, userID)
 }
 
 func (s *AuthService) updateOAuthRegistrationInvitation(ctx context.Context, code *RedeemCode) error {

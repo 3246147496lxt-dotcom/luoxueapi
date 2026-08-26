@@ -463,13 +463,28 @@ func (s *UserService) updateProfile(ctx context.Context, userID int64, req Updat
 
 	// 更新字段
 	if req.Email != nil {
-		// 检查新邮箱是否已被使用
+		// 先做快速精确查重，再检查 provider alias。最终的并发安全检查由
+		// userRepository.Update 在目标邮箱/收件箱锁内复查；这里仅用于尽早
+		// 返回业务错误，避免继续执行头像等其它资料操作。
 		exists, err := s.userRepo.ExistsByEmail(ctx, *req.Email)
 		if err != nil {
 			return nil, oldConcurrency, fmt.Errorf("check email exists: %w", err)
 		}
-		if exists && *req.Email != user.Email {
+		if exists && !strings.EqualFold(strings.TrimSpace(*req.Email), strings.TrimSpace(user.Email)) {
 			return nil, oldConcurrency, ErrEmailExists
+		}
+		if !exists && NormalizeEmailForAliasDedup(user.Email) != NormalizeEmailForAliasDedup(*req.Email) {
+			aliasRepo, ok := s.userRepo.(emailAliasLookupRepository)
+			if !ok {
+				return nil, oldConcurrency, fmt.Errorf("check email alias exists: %w", ErrServiceUnavailable)
+			}
+			aliasExists, err := aliasRepo.ExistsByEmailAlias(ctx, *req.Email)
+			if err != nil {
+				return nil, oldConcurrency, fmt.Errorf("check email alias exists: %w", err)
+			}
+			if aliasExists {
+				return nil, oldConcurrency, ErrEmailExists
+			}
 		}
 		user.Email = *req.Email
 		fields.Email = true

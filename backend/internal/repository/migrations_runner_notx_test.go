@@ -344,6 +344,137 @@ CREATE UNIQUE INDEX CONCURRENTLY IF NOT EXISTS idx_chat_attachments_library_file
 	require.NoError(t, mock.ExpectationsWereMet())
 }
 
+func TestPrepareNonTransactionalMigration_EmailAliasIndexesDropOnlyExplicitInvalidIndexes(t *testing.T) {
+	tests := []struct {
+		name      string
+		migration string
+		index     string
+		expected  expectedConcurrentIndex
+	}{
+		{
+			name:      "dot stripped alias index",
+			migration: usersEmailAliasDedupIndexMigration,
+			index:     usersEmailAliasDedupIndex,
+			expected:  usersEmailAliasDedupIndexSpec,
+		},
+		{
+			name:      "normalized email index",
+			migration: usersEmailNormalizedIndexMigration,
+			index:     usersEmailNormalizedIndex,
+			expected:  usersEmailNormalizedIndexSpec,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			db, mock, err := sqlmock.New()
+			require.NoError(t, err)
+			defer func() { _ = db.Close() }()
+
+			// An invalid index is the only condition under which the runner may
+			// issue a DROP.  The index name is supplied by the explicit mapping
+			// above, never by parsing arbitrary migration text.
+			expectConcurrentIndexMetadata(mock, tc.index, false, false, tc.expected, nil, nil, "CREATE INDEX "+tc.index)
+			mock.ExpectQuery("SELECT EXISTS \\(").
+				WithArgs(tc.index).
+				WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(true))
+			mock.ExpectExec("DROP INDEX CONCURRENTLY IF EXISTS " + tc.index).
+				WillReturnResult(sqlmock.NewResult(0, 0))
+
+			err = prepareNonTransactionalMigration(context.Background(), db, tc.migration)
+			require.NoError(t, err)
+			require.NoError(t, mock.ExpectationsWereMet())
+		})
+	}
+}
+
+func TestPrepareNonTransactionalMigration_EmailAliasIndexValidExpectedPassesWithoutDrop(t *testing.T) {
+	tests := []struct {
+		name      string
+		migration string
+		index     string
+		expected  expectedConcurrentIndex
+	}{
+		{name: "dot stripped", migration: usersEmailAliasDedupIndexMigration, index: usersEmailAliasDedupIndex, expected: usersEmailAliasDedupIndexSpec},
+		{name: "normalized", migration: usersEmailNormalizedIndexMigration, index: usersEmailNormalizedIndex, expected: usersEmailNormalizedIndexSpec},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			db, mock, err := sqlmock.New()
+			require.NoError(t, err)
+			defer func() { _ = db.Close() }()
+
+			expectConcurrentIndexMetadata(
+				mock,
+				tc.index,
+				true,
+				true,
+				tc.expected,
+				catalogExpressionForExpectedIndex(tc.expected),
+				"(deleted_at IS NULL)",
+				"CREATE INDEX "+tc.index+" ON public.users USING btree ("+tc.expected.expression+") text_pattern_ops WHERE (deleted_at IS NULL)",
+			)
+			mock.ExpectQuery("SELECT EXISTS \\(").
+				WithArgs(tc.index).
+				WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(false))
+
+			require.NoError(t, prepareNonTransactionalMigration(context.Background(), db, tc.migration))
+			require.NoError(t, mock.ExpectationsWereMet())
+		})
+	}
+}
+
+func TestPrepareNonTransactionalMigration_EmailAliasIndexValidWrongDefinitionFailsClosed(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	defer func() { _ = db.Close() }()
+
+	expectConcurrentIndexMetadata(
+		mock,
+		usersEmailAliasDedupIndex,
+		true,
+		true,
+		usersEmailAliasDedupIndexSpec,
+		"lower(trim((email)::text))",
+		"(deleted_at IS NULL)",
+		"CREATE INDEX idx_users_email_dot_stripped ON public.users USING btree (lower(trim(email))) text_pattern_ops WHERE (deleted_at IS NULL)",
+	)
+
+	err = prepareNonTransactionalMigration(context.Background(), db, usersEmailAliasDedupIndexMigration)
+	require.Error(t, err)
+	require.ErrorContains(t, err, "incompatible")
+	require.ErrorContains(t, err, usersEmailAliasDedupIndex)
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func expectConcurrentIndexMetadata(
+	mock sqlmock.Sqlmock,
+	index string,
+	valid bool,
+	ready bool,
+	expected expectedConcurrentIndex,
+	expression any,
+	predicate any,
+	definition string,
+) {
+	mock.ExpectQuery("SELECT table_namespace\\.nspname").
+		WithArgs(index).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"nspname", "relname", "indisvalid", "indisready", "indisunique", "amname", "indnkeyatts", "indnatts", "indexprs", "indpred", "indexdef",
+		}).AddRow(
+			"public", expected.tableName, valid, ready, expected.unique, expected.accessMethod,
+			expected.keyAttributes, expected.attributes, expression, predicate, definition,
+		))
+}
+
+func catalogExpressionForExpectedIndex(expected expectedConcurrentIndex) string {
+	if expected.indexName == usersEmailNormalizedIndex {
+		return "rtrim(lower(TRIM(BOTH FROM email)), '.'::text)"
+	}
+	return "replace(lower(TRIM(BOTH FROM email)), '.'::text, ''::text)"
+}
+
 func TestApplyMigrationsFS_TransactionalMigration(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	require.NoError(t, err)

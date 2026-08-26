@@ -364,41 +364,61 @@ func (h *AuthHandler) completeEmailOAuthRegistration(c *gin.Context, provider st
 		affiliateCode = pendingSessionStringValue(session.UpstreamIdentityClaims, "aff_code")
 	}
 
-	tokenPair, user, err := h.authService.RegisterVerifiedOAuthEmailAccount(
-		c.Request.Context(),
-		strings.TrimSpace(session.ResolvedEmail),
-		req.Password,
-		strings.TrimSpace(req.InvitationCode),
-		strings.TrimSpace(session.ProviderType),
-	)
-	if err != nil {
-		response.ErrorFrom(c, err)
-		return
-	}
-
 	sessionForBinding := *session
 	sessionForBinding.UpstreamIdentityClaims = clonePendingMap(session.UpstreamIdentityClaims)
 	if strings.TrimSpace(req.InvitationCode) != "" {
 		sessionForBinding.UpstreamIdentityClaims["invitation_code"] = strings.TrimSpace(req.InvitationCode)
 	}
-	decision, err := h.ensurePendingOAuthAdoptionDecision(c, session.ID, oauthAdoptionDecisionRequest{})
-	if err != nil {
-		_ = h.authService.RollbackOAuthEmailAccountCreation(c.Request.Context(), user.ID, strings.TrimSpace(req.InvitationCode))
-		response.ErrorFrom(c, err)
+	var tokenPair *service.TokenPair
+	var user *service.User
+	var decision *service.PendingIdentityDecision
+	registrationErr := h.authService.RunInTransaction(c.Request.Context(), func(txCtx context.Context) error {
+		var err error
+		tokenPair, user, err = h.authService.RegisterVerifiedOAuthEmailAccount(
+			txCtx,
+			strings.TrimSpace(session.ResolvedEmail),
+			req.Password,
+			strings.TrimSpace(req.InvitationCode),
+			strings.TrimSpace(session.ProviderType),
+		)
+		if err != nil {
+			return err
+		}
+		decision, err = h.ensurePendingOAuthAdoptionDecisionWithContext(txCtx, session.ID, oauthAdoptionDecisionRequest{})
+		if err != nil {
+			return err
+		}
+		return h.authService.FinalizePendingOAuthAccount(txCtx, service.FinalizePendingOAuthAccountInput{
+			Session:        &sessionForBinding,
+			Decision:       decision,
+			User:           user,
+			InvitationCode: req.InvitationCode,
+			ProviderType:   session.ProviderType,
+			AffiliateCode:  affiliateCode,
+			AvatarWriter:   h.pendingIdentityAvatarWriter(),
+		})
+	})
+	if registrationErr != nil {
+		respondPendingOAuthBindingApplyError(c, registrationErr)
 		return
 	}
-	if err := h.authService.FinalizePendingOAuthAccount(c.Request.Context(), service.FinalizePendingOAuthAccountInput{
-		Session:        &sessionForBinding,
-		Decision:       decision,
-		User:           user,
-		InvitationCode: req.InvitationCode,
-		ProviderType:   session.ProviderType,
-		AffiliateCode:  affiliateCode,
-		AvatarWriter:   h.pendingIdentityAvatarWriter(),
-	}); err != nil {
-		_ = h.authService.RollbackOAuthEmailAccountCreation(c.Request.Context(), user.ID, strings.TrimSpace(req.InvitationCode))
-		respondPendingOAuthBindingApplyError(c, err)
-		return
+
+	// Register/finalize ran in the caller-owned transaction above.  Perform the
+	// best-effort quota snapshot after commit, otherwise the detached quota
+	// client cannot see this newly-created user.
+	h.authService.SnapshotPlatformQuotaDefaultsAfterCommit(
+		c.Request.Context(),
+		user.ID,
+		session.ProviderType,
+	)
+
+	if tokenPair == nil {
+		var err error
+		tokenPair, err = h.authService.GenerateTokenPair(c.Request.Context(), user, "")
+		if err != nil {
+			response.InternalError(c, "Failed to generate token pair")
+			return
+		}
 	}
 	h.authService.ApplyOAuthSignupPromoCode(c.Request.Context(), user.ID, pendingOAuthPromoCode(session))
 	h.authService.RecordSuccessfulLogin(c.Request.Context(), user.ID)

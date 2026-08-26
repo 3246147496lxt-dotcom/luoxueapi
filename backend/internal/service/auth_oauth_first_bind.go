@@ -33,10 +33,15 @@ func (s *AuthService) ApplyProviderDefaultSettingsOnFirstBind(
 	defer func() { _ = tx.Rollback() }()
 
 	txCtx := dbent.NewTxContext(ctx, tx)
+	txCtx, deferredInvalidations := withDeferredSubscriptionCacheInvalidations(txCtx)
 	if err := s.applyProviderDefaultSettingsOnFirstBind(txCtx, userID, providerType); err != nil {
 		return err
 	}
-	return tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	flushDeferredSubscriptionCacheInvalidations(deferredInvalidations)
+	return nil
 }
 
 func (s *AuthService) applyProviderDefaultSettingsOnFirstBind(

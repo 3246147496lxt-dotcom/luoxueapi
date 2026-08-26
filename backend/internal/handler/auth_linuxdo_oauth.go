@@ -562,21 +562,20 @@ func (h *AuthHandler) CompleteLinuxDoOAuthRegistration(c *gin.Context) {
 		response.ErrorFrom(c, err)
 		return
 	}
-	tokenPair, user, err := h.authService.LoginOrRegisterOAuthWithTokenPairAndPromoCode(
+	tokenPair, user, _, err := h.completePendingOAuthLoginOrRegistration(
 		c.Request.Context(),
+		session,
+		decision,
 		email,
 		username,
 		req.InvitationCode,
 		req.AffCode,
 		pendingOAuthPromoCode(session),
 		"linuxdo",
+		false,
 	)
 	if err != nil {
 		response.ErrorFrom(c, err)
-		return
-	}
-	if err := h.applyPendingIdentityBindingAndConsume(c.Request.Context(), session, decision, user.ID); err != nil {
-		respondPendingOAuthBindingApplyError(c, err)
 		return
 	}
 	h.authService.RecordSuccessfulLogin(c.Request.Context(), user.ID)

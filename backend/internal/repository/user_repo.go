@@ -70,13 +70,20 @@ func (r *userRepository) create(ctx context.Context, userIn *service.User, guard
 		txClient = existingTx.Client()
 	} else {
 		tx, err := r.client.Tx(ctx)
-		if err != nil {
+		if errors.Is(err, dbent.ErrTxStarted) {
+			// Some callers construct a repository with tx.Client() but cannot
+			// propagate the matching Tx context.  Ent reports ErrTxStarted in
+			// that compatibility mode; the repository must use the supplied
+			// transaction client and leave ownership/commit to the caller.
+			txClient = r.client
+		} else if err != nil {
 			return err
+		} else {
+			ownedTx = tx
+			defer func() { _ = ownedTx.Rollback() }()
+			txClient = tx.Client()
+			txCtx = dbent.NewTxContext(ctx, tx)
 		}
-		ownedTx = tx
-		defer func() { _ = ownedTx.Rollback() }()
-		txClient = tx.Client()
-		txCtx = dbent.NewTxContext(ctx, tx)
 	}
 
 	lockKeys := []string{normalizedEmailUniquenessLockKey(userIn.Email)}
@@ -144,7 +151,8 @@ func (r *userRepository) create(ctx context.Context, userIn *service.User, guard
 }
 
 func (r *userRepository) GetByID(ctx context.Context, id int64) (*service.User, error) {
-	m, err := r.client.User.Query().Where(dbuser.IDEQ(id)).Only(ctx)
+	client := clientFromContext(ctx, r.client)
+	m, err := client.User.Query().Where(dbuser.IDEQ(id)).Only(ctx)
 	if err != nil {
 		return nil, translatePersistenceError(err, service.ErrUserNotFound, nil)
 	}
@@ -162,7 +170,8 @@ func (r *userRepository) GetByID(ctx context.Context, id int64) (*service.User, 
 
 func (r *userRepository) GetByIDIncludeDeleted(ctx context.Context, id int64) (*service.User, error) {
 	ctx = mixins.SkipSoftDelete(ctx)
-	m, err := r.client.User.Query().Where(dbuser.IDEQ(id)).Only(ctx)
+	client := clientFromContext(ctx, r.client)
+	m, err := client.User.Query().Where(dbuser.IDEQ(id)).Only(ctx)
 	if err != nil {
 		return nil, translatePersistenceError(err, service.ErrUserNotFound, nil)
 	}
@@ -178,7 +187,8 @@ func (r *userRepository) GetByIDIncludeDeleted(ctx context.Context, id int64) (*
 }
 
 func (r *userRepository) GetByEmail(ctx context.Context, email string) (*service.User, error) {
-	matches, err := r.client.User.Query().
+	client := clientFromContext(ctx, r.client)
+	matches, err := client.User.Query().
 		Where(userEmailLookupPredicate(email)).
 		Order(dbent.Asc(dbuser.FieldID)).
 		All(ctx)
@@ -213,23 +223,26 @@ func (r *userRepository) Update(ctx context.Context, userIn *service.User, field
 	}
 
 	// 使用 ent 事务包裹用户更新与 allowed_groups 同步，避免跨层事务不一致。
-	tx, err := r.client.Tx(ctx)
-	if err != nil && !errors.Is(err, dbent.ErrTxStarted) {
-		return err
-	}
-
+	// Ent 的 Client.Tx 不读取 context 中的事务；显式复用外层事务，否则在
+	// UpdateProfile 等调用链中会开启独立事务，破坏头像/身份与用户更新的原子性。
 	var txClient *dbent.Client
 	txCtx := ctx
-	if err == nil {
-		defer func() { _ = tx.Rollback() }()
-		txClient = tx.Client()
-		txCtx = dbent.NewTxContext(ctx, tx)
+	var ownedTx *dbent.Tx
+	if existingTx := dbent.TxFromContext(ctx); existingTx != nil {
+		txClient = existingTx.Client()
 	} else {
-		// 已处于外部事务中（ErrTxStarted），复用当前事务 client 并由调用方负责提交/回滚。
-		if existingTx := dbent.TxFromContext(ctx); existingTx != nil {
-			txClient = existingTx.Client()
-		} else {
+		tx, err := r.client.Tx(ctx)
+		if errors.Is(err, dbent.ErrTxStarted) {
+			// See create(): a tx.Client()-backed repository may arrive without
+			// TxFromContext.  Do not open/commit a nested transaction.
 			txClient = r.client
+		} else if err != nil {
+			return err
+		} else {
+			ownedTx = tx
+			defer func() { _ = ownedTx.Rollback() }()
+			txClient = tx.Client()
+			txCtx = dbent.NewTxContext(ctx, tx)
 		}
 	}
 
@@ -239,6 +252,8 @@ func (r *userRepository) Update(ctx context.Context, userIn *service.User, field
 			txClient,
 			txAwareSQLExecutor(txCtx, r.sql, r.client),
 			normalizedEmailUniquenessLockKey(userIn.Email),
+			emailAliasUniquenessLockKey(userIn.Email),
+			userEmailIdentityLockKey(userIn.ID),
 		)
 		if err != nil {
 			return err
@@ -246,6 +261,16 @@ func (r *userRepository) Update(ctx context.Context, userIn *service.User, field
 		defer releaseEmailLock()
 		if err := ensureNormalizedEmailAvailableWithClient(txCtx, txClient, userIn.ID, userIn.Email); err != nil {
 			return err
+		}
+		// Generic profile/admin email updates must use the same inbox-identity
+		// guard as explicit email binding.  The service-layer precheck is only a
+		// fast path; this locked recheck closes the concurrent alias race.
+		ownerID, aliasExists, err := emailAliasOwnerIDWithClient(txCtx, txClient, userIn.Email, userIn.ID)
+		if err != nil {
+			return err
+		}
+		if aliasExists && ownerID != userIn.ID {
+			return service.ErrEmailExists
 		}
 	}
 
@@ -255,54 +280,78 @@ func (r *userRepository) Update(ctx context.Context, userIn *service.User, field
 	}
 	oldEmail := existing.Email
 
-	updateOp := txClient.User.UpdateOneID(userIn.ID)
+	// UpdateOneID does not inherit the soft-delete interceptor (it only applies
+	// to queries and delete mutations). Keep the liveness predicate on the
+	// write itself so a concurrent soft-delete cannot be overwritten by a stale
+	// profile snapshot.
+	updateOp := txClient.User.UpdateOneID(userIn.ID).Where(dbuser.DeletedAtIsNil())
+	hasColumnUpdate := false
 	if fields.Email {
 		updateOp = updateOp.SetEmail(userIn.Email)
+		hasColumnUpdate = true
 	}
 	if fields.Username {
 		updateOp = updateOp.SetUsername(userIn.Username)
+		hasColumnUpdate = true
 	}
 	if fields.Notes {
 		updateOp = updateOp.SetNotes(userIn.Notes)
+		hasColumnUpdate = true
 	}
 	if fields.PasswordHash {
 		updateOp = updateOp.SetPasswordHash(userIn.PasswordHash)
+		hasColumnUpdate = true
 	}
 	if fields.Role {
 		updateOp = updateOp.SetRole(userIn.Role)
+		hasColumnUpdate = true
 	}
 	if fields.Concurrency {
 		updateOp = updateOp.SetConcurrency(userIn.Concurrency)
+		hasColumnUpdate = true
 	}
 	if fields.Status {
 		updateOp = updateOp.SetStatus(userIn.Status)
+		hasColumnUpdate = true
 	}
 	if fields.RPMLimit {
 		updateOp = updateOp.SetRpmLimit(userIn.RPMLimit)
+		hasColumnUpdate = true
 	}
 	if fields.BalanceNotifySettings {
 		updateOp = updateOp.SetBalanceNotifyEnabled(userIn.BalanceNotifyEnabled).
 			SetBalanceNotifyThresholdType(userIn.BalanceNotifyThresholdType).
 			SetNillableBalanceNotifyThreshold(userIn.BalanceNotifyThreshold)
+		hasColumnUpdate = true
 		if userIn.BalanceNotifyThreshold == nil {
 			updateOp = updateOp.ClearBalanceNotifyThreshold()
 		}
 	}
 	if fields.BalanceNotifyExtraEmails {
 		updateOp = updateOp.SetBalanceNotifyExtraEmails(marshalExtraEmails(userIn.BalanceNotifyExtraEmails))
+		hasColumnUpdate = true
 	}
 	if fields.SignupSource && userIn.SignupSource != "" {
 		updateOp = updateOp.SetSignupSource(userIn.SignupSource)
+		hasColumnUpdate = true
 	}
 	if fields.LastLoginAt && userIn.LastLoginAt != nil {
 		updateOp = updateOp.SetLastLoginAt(*userIn.LastLoginAt)
+		hasColumnUpdate = true
 	}
 	if fields.LastActiveAt && userIn.LastActiveAt != nil {
 		updateOp = updateOp.SetLastActiveAt(*userIn.LastActiveAt)
+		hasColumnUpdate = true
 	}
-	updated, err := updateOp.Save(txCtx)
-	if err != nil {
-		return translatePersistenceError(err, service.ErrUserNotFound, service.ErrEmailExists)
+	// AllowedGroups is a relation-only update. Ent rejects UpdateOneID.Save
+	// when no scalar field was set, so keep the initial row for that case and
+	// apply the join-table synchronization below without issuing an empty UPDATE.
+	updated := existing
+	if hasColumnUpdate {
+		updated, err = updateOp.Save(txCtx)
+		if err != nil {
+			return translatePersistenceError(err, service.ErrUserNotFound, service.ErrEmailExists)
+		}
 	}
 
 	if fields.AllowedGroups {
@@ -316,8 +365,8 @@ func (r *userRepository) Update(ctx context.Context, userIn *service.User, field
 		}
 	}
 
-	if tx != nil {
-		if err := tx.Commit(); err != nil {
+	if ownedTx != nil {
+		if err := ownedTx.Commit(); err != nil {
 			return err
 		}
 	}
@@ -381,19 +430,22 @@ func replaceEmailAuthIdentityWithClient(ctx context.Context, client *dbent.Clien
 		return err
 	}
 
-	oldSubject := normalizeEmailAuthIdentitySubject(oldEmail)
-	if oldSubject == "" || oldSubject == newSubject {
-		return nil
+	// A stale caller snapshot can make two concurrent email updates each try to
+	// remove only its own observed old subject. Keep the new primary subject and
+	// remove every other email identity so a stale update cannot leave multiple
+	// local-email login identities attached to one user. The oldEmail argument
+	// remains part of the helper contract for callers that track the previous
+	// value; cleanup intentionally does not rely on it.
+	_ = oldEmail
+	deleteQuery := clientFromContext(ctx, client).AuthIdentity.Delete().Where(
+		authidentity.UserIDEQ(userID),
+		authidentity.ProviderTypeEQ("email"),
+		authidentity.ProviderKeyEQ("email"),
+	)
+	if newSubject != "" {
+		deleteQuery = deleteQuery.Where(authidentity.ProviderSubjectNEQ(newSubject))
 	}
-
-	_, err := clientFromContext(ctx, client).AuthIdentity.Delete().
-		Where(
-			authidentity.UserIDEQ(userID),
-			authidentity.ProviderTypeEQ("email"),
-			authidentity.ProviderKeyEQ("email"),
-			authidentity.ProviderSubjectEQ(oldSubject),
-		).
-		Exec(ctx)
+	_, err := deleteQuery.Exec(ctx)
 	return err
 }
 
@@ -489,7 +541,8 @@ func (r *userRepository) ListWithFilters(ctx context.Context, params pagination.
 		userCtx = mixins.SkipSoftDelete(ctx)
 	}
 
-	q := r.client.User.Query()
+	client := clientFromContext(ctx, r.client)
+	q := client.User.Query()
 
 	if filters.Status != "" {
 		q = q.Where(dbuser.StatusEQ(filters.Status))
@@ -578,7 +631,7 @@ func (r *userRepository) ListWithFilters(ctx context.Context, params pagination.
 	shouldLoadSubscriptions := filters.IncludeSubscriptions == nil || *filters.IncludeSubscriptions
 	if shouldLoadSubscriptions {
 		// Batch load active subscriptions with groups to avoid N+1.
-		subs, err := r.client.UserSubscription.Query().
+		subs, err := client.UserSubscription.Query().
 			Where(
 				usersubscription.UserIDIn(userIDs...),
 				usersubscription.StatusEQ(service.SubscriptionStatusActive),
@@ -679,9 +732,6 @@ func (r *userRepository) GetLatestUsedAtByUserIDs(ctx context.Context, userIDs [
 	if len(userIDs) == 0 {
 		return result, nil
 	}
-	if r.sql == nil {
-		return nil, fmt.Errorf("sql executor is not configured")
-	}
 
 	const query = `
 		SELECT user_id, MAX(created_at) AS last_used_at
@@ -690,7 +740,11 @@ func (r *userRepository) GetLatestUsedAtByUserIDs(ctx context.Context, userIDs [
 		GROUP BY user_id
 	`
 
-	rows, err := r.sql.QueryContext(ctx, query, pq.Array(userIDs))
+	exec := txAwareSQLExecutor(ctx, r.sql, r.client)
+	if exec == nil {
+		return nil, fmt.Errorf("sql executor is not configured")
+	}
+	rows, err := exec.QueryContext(ctx, query, pq.Array(userIDs))
 	if err != nil {
 		return nil, err
 	}
@@ -746,7 +800,8 @@ func (r *userRepository) filterUsersByAttributes(ctx context.Context, attrs map[
 		return nil, nil
 	}
 
-	if r.sql == nil {
+	exec := txAwareSQLExecutor(ctx, r.sql, r.client)
+	if exec == nil {
 		return nil, fmt.Errorf("sql executor is not configured")
 	}
 
@@ -770,7 +825,7 @@ func (r *userRepository) filterUsersByAttributes(ctx context.Context, attrs map[
 	)
 	args = append(args, len(attrs))
 
-	rows, err := r.sql.QueryContext(ctx, query, args...)
+	rows, err := exec.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -792,7 +847,7 @@ func (r *userRepository) filterUsersByAttributes(ctx context.Context, attrs map[
 
 func (r *userRepository) UpdateBalance(ctx context.Context, id int64, amount float64) error {
 	client := clientFromContext(ctx, r.client)
-	update := client.User.Update().Where(dbuser.IDEQ(id)).AddBalance(amount)
+	update := client.User.Update().Where(dbuser.IDEQ(id), dbuser.DeletedAtIsNil()).AddBalance(amount)
 	// Track cumulative recharge amount for percentage-based notifications
 	if amount > 0 {
 		update = update.AddTotalRecharged(amount)
@@ -903,7 +958,7 @@ func (r *userRepository) ApplyRedeemBalanceAdjustment(ctx context.Context, id in
 func (r *userRepository) DeductBalance(ctx context.Context, id int64, amount float64) error {
 	client := clientFromContext(ctx, r.client)
 	n, err := client.User.Update().
-		Where(dbuser.IDEQ(id), dbuser.BalanceGTE(amount)).
+		Where(dbuser.IDEQ(id), dbuser.DeletedAtIsNil(), dbuser.BalanceGTE(amount)).
 		AddBalance(-amount).
 		Save(ctx)
 	if err != nil {
@@ -914,7 +969,7 @@ func (r *userRepository) DeductBalance(ctx context.Context, id int64, amount flo
 	}
 
 	n, err = client.User.Update().
-		Where(dbuser.IDEQ(id)).
+		Where(dbuser.IDEQ(id), dbuser.DeletedAtIsNil()).
 		AddBalance(-amount).
 		Save(ctx)
 	if err != nil {
@@ -971,7 +1026,7 @@ func (r *userRepository) DeductAvailableBalance(ctx context.Context, id int64, a
 
 func (r *userRepository) UpdateConcurrency(ctx context.Context, id int64, amount int) error {
 	client := clientFromContext(ctx, r.client)
-	n, err := client.User.Update().Where(dbuser.IDEQ(id)).AddConcurrency(amount).Save(ctx)
+	n, err := client.User.Update().Where(dbuser.IDEQ(id), dbuser.DeletedAtIsNil()).AddConcurrency(amount).Save(ctx)
 	if err != nil {
 		return translatePersistenceError(err, service.ErrUserNotFound, nil)
 	}
@@ -1009,7 +1064,11 @@ func (r *userRepository) BatchSetConcurrency(ctx context.Context, userIDs []int6
 	if value < 0 {
 		value = 0
 	}
-	res, err := r.sql.ExecContext(ctx,
+	exec := txAwareSQLExecutor(ctx, r.sql, r.client)
+	if exec == nil {
+		return 0, fmt.Errorf("sql executor is not configured")
+	}
+	res, err := exec.ExecContext(ctx,
 		"UPDATE users SET concurrency = $1, updated_at = NOW() WHERE id = ANY($2) AND deleted_at IS NULL",
 		value, pq.Array(userIDs))
 	if err != nil {
@@ -1023,7 +1082,11 @@ func (r *userRepository) BatchAddConcurrency(ctx context.Context, userIDs []int6
 	if len(userIDs) == 0 {
 		return 0, nil
 	}
-	res, err := r.sql.ExecContext(ctx,
+	exec := txAwareSQLExecutor(ctx, r.sql, r.client)
+	if exec == nil {
+		return 0, fmt.Errorf("sql executor is not configured")
+	}
+	res, err := exec.ExecContext(ctx,
 		"UPDATE users SET concurrency = GREATEST(concurrency + $1, 0), updated_at = NOW() WHERE id = ANY($2) AND deleted_at IS NULL",
 		delta, pq.Array(userIDs))
 	if err != nil {
@@ -1034,14 +1097,15 @@ func (r *userRepository) BatchAddConcurrency(ctx context.Context, userIDs []int6
 }
 
 func (r *userRepository) ExistsByEmail(ctx context.Context, email string) (bool, error) {
-	return r.client.User.Query().Where(userEmailLookupPredicate(email)).Exist(ctx)
+	client := clientFromContext(ctx, r.client)
+	return client.User.Query().Where(userEmailLookupPredicate(email)).Exist(ctx)
 }
 
-const emailAliasCandidateLimit = 50
-
-// ExistsByEmailAlias checks the bounded set of dot/plus variants that could
-// resolve to the same inbox. The final comparison always uses the complete
-// service normalization to avoid overmatching non-Gmail domains.
+// ExistsByEmailAlias checks whether another active user already owns the same
+// provider inbox identity.  The predicates are built from the same
+// normalization rules as the service layer, so the database can return only
+// the first conflicting owner instead of loading an arbitrary, truncated
+// candidate set into memory.
 func (r *userRepository) ExistsByEmailAlias(ctx context.Context, email string) (bool, error) {
 	_, exists, err := emailAliasOwnerIDWithClient(ctx, clientFromContext(ctx, r.client), email, 0)
 	return exists, err
@@ -1056,37 +1120,117 @@ func emailAliasOwnerIDWithClient(ctx context.Context, client *dbent.Client, emai
 	if client == nil {
 		return 0, false, nil
 	}
-	probes := service.EmailAliasDedupProbes(email)
-	if len(probes) == 0 {
+	match, ok := emailAliasMatchPredicate(email)
+	if !ok {
 		return 0, false, nil
 	}
-	preds := make([]predicate.User, 0, 2*len(probes))
-	for _, probe := range probes {
-		preds = append(preds,
-			dotStrippedEmailEQ(probe.Local+"@"+probe.Domain),
-			dotStrippedEmailLike(escapeLikeWildcards(probe.Local)+"+%@"+escapeLikeWildcards(probe.Domain)),
-		)
+	otherQuery := client.User.Query().Where(match)
+	if currentUserID > 0 {
+		otherQuery = otherQuery.Where(dbuser.IDNEQ(currentUserID))
 	}
-	candidates, err := client.User.Query().Where(dbuser.Or(preds...)).Limit(emailAliasCandidateLimit).
-		Select(dbuser.FieldID, dbuser.FieldEmail).All(ctx)
+	other, err := otherQuery.Order(dbent.Asc(dbuser.FieldID)).Select(dbuser.FieldID).First(ctx)
+	if err == nil {
+		return other.ID, true, nil
+	}
+	if !dbent.IsNotFound(err) {
+		return 0, false, err
+	}
+	if currentUserID <= 0 {
+		return 0, false, nil
+	}
+	selfExists, err := client.User.Query().Where(match, dbuser.IDEQ(currentUserID)).Exist(ctx)
 	if err != nil {
 		return 0, false, err
 	}
-	identity := service.NormalizeEmailForAliasDedup(email)
-	var selfID int64
-	selfExists := false
-	for _, candidate := range candidates {
-		if service.NormalizeEmailForAliasDedup(candidate.Email) != identity {
-			continue
-		}
-		if candidate.ID != 0 && candidate.ID != currentUserID {
-			return candidate.ID, true, nil
-		}
-		if candidate.ID == currentUserID {
-			selfID, selfExists = candidate.ID, true
-		}
+	if selfExists {
+		return currentUserID, true, nil
 	}
-	return selfID, selfExists, nil
+	return 0, false, nil
+}
+
+// emailAliasMatchPredicate renders an exact SQL representation of
+// NormalizeEmailForAliasDedup.  Gmail/Googlemail uses the indexed
+// dot-stripped expression, constrained by an exact domain suffix; other
+// providers retain significant local-part dots and only match the canonical
+// address plus its plus-suffix variants.
+func emailAliasMatchPredicate(email string) (predicate.User, bool) {
+	identity := service.NormalizeEmailForAliasDedup(email)
+	local, domain, ok := strings.Cut(identity, "@")
+	if !ok || local == "" || domain == "" {
+		return nil, false
+	}
+
+	if domain == "gmail.com" {
+		probes := service.EmailAliasDedupProbes(email)
+		if len(probes) == 0 {
+			return nil, false
+		}
+		// The service normalizer trims every trailing root dot.  Keep the SQL
+		// predicate in lock-step so a legacy `user@gmail.com..` row cannot
+		// evade the alias guard when the canonical address is registered.
+		domainPredicate := emailDomainSuffixPredicate("gmail.com", "googlemail.com")
+		preds := make([]predicate.User, 0, len(probes)*2)
+		for _, probe := range probes {
+			// Keep the domain predicate alongside the indexed expression:
+			// dot-stripping the whole address is intentionally broader than
+			// Gmail semantics for legacy rows with unusual domain dots.
+			preds = append(preds, dbuser.And(dotStrippedEmailEQ(probe.Local+"@"+probe.Domain), domainPredicate))
+			// A leading '+' is intentionally not treated as a plus-address
+			// separator by the service normalizer (e.g. `+alice` and
+			// `+alice+tag` remain distinct identities).  Skip the suffix
+			// probe in that case to avoid a false-positive lockout.
+			if !strings.HasPrefix(local, "+") {
+				preds = append(preds, dbuser.And(
+					dotStrippedEmailLike(escapeLikeWildcards(probe.Local)+"+%@"+escapeLikeWildcards(probe.Domain)),
+					domainPredicate,
+				))
+			}
+		}
+		return dbuser.Or(preds...), true
+	}
+
+	// RTRIM in normalizedEmailEQ/Like folds any number of root dots while
+	// retaining significant local-part dots for non-Gmail providers.
+	address := local + "@" + domain
+	preds := make([]predicate.User, 0, 2)
+	preds = append(preds, normalizedEmailEQ(address))
+	if !strings.HasPrefix(local, "+") {
+		preds = append(preds, normalizedEmailLike(
+			escapeLikeWildcards(local)+"+%"+escapeLikeWildcards("@"+domain),
+		))
+	}
+	return dbuser.Or(preds...), true
+}
+
+func emailDomainSuffixPredicate(domains ...string) predicate.User {
+	return predicate.User(func(s *entsql.Selector) {
+		s.Where(entsql.P(func(b *entsql.Builder) {
+			b.WriteString("(")
+			for i, domain := range domains {
+				if i > 0 {
+					b.WriteString(" OR ")
+				}
+				b.WriteString("RTRIM(LOWER(TRIM(").Ident(s.C(dbuser.FieldEmail)).WriteString(")), '.') LIKE ").Arg("%@" + domain)
+			}
+			b.WriteString(")")
+		}))
+	})
+}
+
+func normalizedEmailEQ(value string) predicate.User {
+	return predicate.User(func(s *entsql.Selector) {
+		s.Where(entsql.P(func(b *entsql.Builder) {
+			b.WriteString("RTRIM(LOWER(TRIM(").Ident(s.C(dbuser.FieldEmail)).WriteString(")), '.') = ").Arg(value)
+		}))
+	})
+}
+
+func normalizedEmailLike(pattern string) predicate.User {
+	return predicate.User(func(s *entsql.Selector) {
+		s.Where(entsql.P(func(b *entsql.Builder) {
+			b.WriteString("RTRIM(LOWER(TRIM(").Ident(s.C(dbuser.FieldEmail)).WriteString(")), '.') LIKE ").Arg(pattern).WriteString(` ESCAPE '\'`)
+		}))
+	})
 }
 
 func dotStrippedEmailExpr(b *entsql.Builder, s *entsql.Selector) *entsql.Builder {
@@ -1125,7 +1269,14 @@ func (r *userRepository) UpdateEmailWithAliasGuard(ctx context.Context, userID i
 		return fmt.Errorf("email identity update requires a transaction")
 	}
 	client := tx.Client()
-	release, err := lockRepositoryScopedKeys(ctx, client, txAwareSQLExecutor(ctx, r.sql, r.client), normalizedEmailUniquenessLockKey(email), emailAliasUniquenessLockKey(email))
+	release, err := lockRepositoryScopedKeys(
+		ctx,
+		client,
+		txAwareSQLExecutor(ctx, r.sql, r.client),
+		normalizedEmailUniquenessLockKey(email),
+		emailAliasUniquenessLockKey(email),
+		userEmailIdentityLockKey(userID),
+	)
 	if err != nil {
 		return err
 	}
@@ -1137,7 +1288,11 @@ func (r *userRepository) UpdateEmailWithAliasGuard(ctx context.Context, userID i
 	if exists && ownerID != userID {
 		return service.ErrEmailExists
 	}
-	_, err = client.User.UpdateOneID(userID).SetEmail(email).SetPasswordHash(passwordHash).Save(ctx)
+	_, err = client.User.UpdateOneID(userID).
+		Where(dbuser.DeletedAtIsNil()).
+		SetEmail(email).
+		SetPasswordHash(passwordHash).
+		Save(ctx)
 	return translatePersistenceError(err, service.ErrUserNotFound, service.ErrEmailExists)
 }
 
@@ -1196,6 +1351,17 @@ func emailAliasUniquenessLockKey(email string) string {
 	return "users:email-alias-identity:" + identity
 }
 
+// userEmailIdentityLockKey serializes primary-email replacement for one user.
+// It is acquired together with the target-address locks, in normalized key
+// order by lockRepositoryScopedKeys. PostgreSQL gets a transaction-scoped
+// advisory lock; the in-process registry covers SQLite/unit-test clients.
+func userEmailIdentityLockKey(userID int64) string {
+	if userID <= 0 {
+		return ""
+	}
+	return fmt.Sprintf("users:email-identity-user:%d", userID)
+}
+
 func (r *userRepository) AddGroupToAllowedGroups(ctx context.Context, userID int64, groupID int64) error {
 	client := clientFromContext(ctx, r.client)
 	err := client.UserAllowedGroup.Create().
@@ -1212,7 +1378,8 @@ func (r *userRepository) AddGroupToAllowedGroups(ctx context.Context, userID int
 
 func (r *userRepository) RemoveGroupFromAllowedGroups(ctx context.Context, groupID int64) (int64, error) {
 	// 仅操作 user_allowed_groups 联接表，legacy users.allowed_groups 列已弃用。
-	affected, err := r.client.UserAllowedGroup.Delete().
+	client := clientFromContext(ctx, r.client)
+	affected, err := client.UserAllowedGroup.Delete().
 		Where(userallowedgroup.GroupIDEQ(groupID)).
 		Exec(ctx)
 	if err != nil {
@@ -1231,7 +1398,8 @@ func (r *userRepository) RemoveGroupFromUserAllowedGroups(ctx context.Context, u
 }
 
 func (r *userRepository) GetFirstAdmin(ctx context.Context) (*service.User, error) {
-	m, err := r.client.User.Query().
+	client := clientFromContext(ctx, r.client)
+	m, err := client.User.Query().
 		Where(
 			dbuser.RoleEQ(service.RoleAdmin),
 			dbuser.StatusEQ(service.StatusActive),
@@ -1259,7 +1427,8 @@ func (r *userRepository) loadAllowedGroups(ctx context.Context, userIDs []int64)
 		return out, nil
 	}
 
-	rows, err := r.client.UserAllowedGroup.Query().
+	client := clientFromContext(ctx, r.client)
+	rows, err := client.UserAllowedGroup.Query().
 		Where(userallowedgroup.UserIDIn(userIDs...)).
 		All(ctx)
 	if err != nil {
@@ -1348,7 +1517,7 @@ func marshalExtraEmails(entries []service.NotifyEmailEntry) string {
 // UpdateTotpSecret 更新用户的 TOTP 加密密钥
 func (r *userRepository) UpdateTotpSecret(ctx context.Context, userID int64, encryptedSecret *string) error {
 	client := clientFromContext(ctx, r.client)
-	update := client.User.UpdateOneID(userID)
+	update := client.User.UpdateOneID(userID).Where(dbuser.DeletedAtIsNil())
 	if encryptedSecret == nil {
 		update = update.ClearTotpSecretEncrypted()
 	} else {
@@ -1365,6 +1534,7 @@ func (r *userRepository) UpdateTotpSecret(ctx context.Context, userID int64, enc
 func (r *userRepository) EnableTotp(ctx context.Context, userID int64) error {
 	client := clientFromContext(ctx, r.client)
 	_, err := client.User.UpdateOneID(userID).
+		Where(dbuser.DeletedAtIsNil()).
 		SetTotpEnabled(true).
 		SetTotpEnabledAt(time.Now()).
 		Save(ctx)
@@ -1378,6 +1548,7 @@ func (r *userRepository) EnableTotp(ctx context.Context, userID int64) error {
 func (r *userRepository) DisableTotp(ctx context.Context, userID int64) error {
 	client := clientFromContext(ctx, r.client)
 	_, err := client.User.UpdateOneID(userID).
+		Where(dbuser.DeletedAtIsNil()).
 		SetTotpEnabled(false).
 		ClearTotpEnabledAt().
 		ClearTotpSecretEncrypted().
