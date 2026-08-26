@@ -898,7 +898,7 @@ func (s *emailBindUserRepoStub) GetFirstAdmin(context.Context) (*service.User, e
 	panic("unexpected GetFirstAdmin call")
 }
 
-func (s *emailBindUserRepoStub) Update(_ context.Context, user *service.User) error {
+func (s *emailBindUserRepoStub) Update(_ context.Context, user *service.User, _ service.UserUpdateFields) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	existing, ok := s.usersByID[user.ID]

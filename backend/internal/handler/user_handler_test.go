@@ -38,7 +38,7 @@ func (s *userHandlerRepoStub) GetFirstAdmin(context.Context) (*service.User, err
 	cloned := *s.user
 	return &cloned, nil
 }
-func (s *userHandlerRepoStub) Update(_ context.Context, user *service.User) error {
+func (s *userHandlerRepoStub) Update(_ context.Context, user *service.User, _ service.UserUpdateFields) error {
 	cloned := *user
 	s.user = &cloned
 	return nil

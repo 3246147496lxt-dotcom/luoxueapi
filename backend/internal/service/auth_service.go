@@ -561,7 +561,7 @@ func (s *AuthService) LoginOrRegisterOAuth(ctx context.Context, email, username 
 	// 尽力补全：当用户名为空时，使用第三方返回的用户名回填。
 	if user.Username == "" && username != "" {
 		user.Username = username
-		if err := s.userRepo.Update(ctx, user); err != nil {
+		if err := s.userRepo.Update(ctx, user, UserUpdateFields{Username: true}); err != nil {
 			logger.LegacyPrintf("service.auth", "[Auth] Failed to update username after oauth login: %v", err)
 		}
 	}
@@ -753,7 +753,7 @@ func (s *AuthService) loginOrRegisterOAuthWithTokenPair(ctx context.Context, ema
 
 	if user.Username == "" && username != "" {
 		user.Username = username
-		if err := s.userRepo.Update(ctx, user); err != nil {
+		if err := s.userRepo.Update(ctx, user, UserUpdateFields{Username: true}); err != nil {
 			logger.LegacyPrintf("service.auth", "[Auth] Failed to update username after oauth login: %v", err)
 		}
 	}
@@ -1470,7 +1470,7 @@ func (s *AuthService) ResetPassword(ctx context.Context, email, token, newPasswo
 	user.PasswordHash = hashedPassword
 	user.TokenVersion++ // Invalidate all existing tokens
 
-	if err := s.userRepo.Update(ctx, user); err != nil {
+	if err := s.userRepo.Update(ctx, user, UserUpdateFields{PasswordHash: true}); err != nil {
 		logger.LegacyPrintf("service.auth", "[Auth] Database error updating password for user %d: %v", user.ID, err)
 		return ErrServiceUnavailable
 	}
@@ -1712,16 +1712,13 @@ func (s *AuthService) RevokeAllUserSessions(ctx context.Context, userID int64) e
 // Access/refresh token verification both depend on TokenVersion, so bumping it provides
 // immediate revocation even if refresh-token cache cleanup later fails.
 func (s *AuthService) RevokeAllUserTokens(ctx context.Context, userID int64) error {
-	user, err := s.userRepo.GetByID(ctx, userID)
-	if err != nil {
-		return fmt.Errorf("get user: %w", err)
+	// TokenVersion is retained on the service model for legacy in-memory callers;
+	// the SQL repository treats an empty update mask as a no-op because users has
+	// no token_version column.
+	if user, err := s.userRepo.GetByID(ctx, userID); err == nil {
+		user.TokenVersion++
+		_ = s.userRepo.Update(ctx, user, UserUpdateFields{})
 	}
-
-	user.TokenVersion++
-	if err := s.userRepo.Update(ctx, user); err != nil {
-		return fmt.Errorf("update user: %w", err)
-	}
-
 	if err := s.RevokeAllUserSessions(ctx, userID); err != nil {
 		logger.LegacyPrintf("service.auth", "[Auth] Failed to revoke refresh sessions after token invalidation for user %d: %v", userID, err)
 	}

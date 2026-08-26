@@ -60,7 +60,7 @@ func (s *emailSyncRepoStub) GetFirstAdmin(context.Context) (*User, error) {
 	return nil, fmt.Errorf("unexpected GetFirstAdmin call")
 }
 
-func (s *emailSyncRepoStub) Update(_ context.Context, user *User) error {
+func (s *emailSyncRepoStub) Update(_ context.Context, user *User, _ UserUpdateFields) error {
 	s.updateCalls++
 	s.updated = append(s.updated, user)
 	s.user = user

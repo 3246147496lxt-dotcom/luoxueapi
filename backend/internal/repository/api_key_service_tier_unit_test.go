@@ -30,7 +30,7 @@ func TestAPIKeyRepositoryServiceTierPreferenceRoundTripSQLite(t *testing.T) {
 	require.Equal(t, service.ServiceTierPreferenceStandard, authGot.ServiceTierPreference)
 
 	key.ServiceTierPreference = service.ServiceTierPreferencePriority
-	require.NoError(t, repo.Update(ctx, key))
+	require.NoError(t, repo.Update(ctx, key, service.APIKeyUpdateFields{ServiceTierPreference: true}))
 	got, err = repo.GetByKey(ctx, key.Key)
 	require.NoError(t, err)
 	require.Equal(t, service.ServiceTierPreferencePriority, got.ServiceTierPreference)
@@ -40,5 +40,5 @@ func TestAPIKeyRepositoryServiceTierPreferenceRoundTripSQLite(t *testing.T) {
 
 	invalid := *key
 	invalid.ServiceTierPreference = "fast"
-	require.ErrorIs(t, repo.Update(ctx, &invalid), service.ErrInvalidServiceTierPreference)
+	require.ErrorIs(t, repo.Update(ctx, &invalid, service.APIKeyUpdateFields{ServiceTierPreference: true}), service.ErrInvalidServiceTierPreference)
 }
