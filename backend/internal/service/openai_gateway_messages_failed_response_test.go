@@ -43,9 +43,11 @@ func TestForwardAsAnthropic_BufferedResponseFailed_ReturnsError(t *testing.T) {
 	}
 
 	account := rawChatCompletionsTestAccount()
-	_, err := svc.ForwardAsAnthropic(context.Background(), c, account, body, "", "")
+	result, err := svc.ForwardAsAnthropic(context.Background(), c, account, body, "", "")
 
 	require.Error(t, err, "non-cyber response.failed must return an error, not swallow as 200")
+	require.NotNil(t, result, "observed terminal usage must survive buffered error handling")
+	require.Equal(t, 10, result.Usage.InputTokens)
 	require.Contains(t, err.Error(), "upstream response failed")
 	require.Equal(t, http.StatusBadGateway, rec.Code, "should write 502 for non-failover failed response")
 }
@@ -177,9 +179,10 @@ func TestForwardAsAnthropic_BufferedResponseFailed_Failover(t *testing.T) {
 	}
 
 	account := rawChatCompletionsTestAccount()
-	_, err := svc.ForwardAsAnthropic(context.Background(), c, account, body, "", "")
+	result, err := svc.ForwardAsAnthropic(context.Background(), c, account, body, "", "")
 
 	require.Error(t, err)
 	var failoverErr *UpstreamFailoverError
 	require.True(t, errors.As(err, &failoverErr), "rate_limit_error should trigger UpstreamFailoverError for failover, got: %T: %v", err, err)
+	require.Nil(t, result, "replayable failover must not return partial usage for double billing")
 }

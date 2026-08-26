@@ -1564,6 +1564,314 @@ type openAIWSUsageHandlerUsageLogRepoStub struct {
 	created chan *service.UsageLog
 }
 
+type openAIMessagesPartialUsageUpstream struct {
+	service.HTTPUpstream
+	responseBody   string
+	beforeResponse func()
+}
+
+func (u *openAIMessagesPartialUsageUpstream) Do(_ *http.Request, _ string, _ int64, _ int) (*http.Response, error) {
+	if u.beforeResponse != nil {
+		u.beforeResponse()
+	}
+	return &http.Response{
+		StatusCode: http.StatusOK,
+		Header: http.Header{
+			"Content-Type": []string{"text/event-stream"},
+			"x-request-id": []string{"req-partial-messages"},
+		},
+		Body: io.NopCloser(strings.NewReader(u.responseBody)),
+	}, nil
+}
+
+func TestOpenAIMessagesRecordsObservedUsageWhenStreamEndsWithError(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	cfg := &config.Config{RunMode: config.RunModeSimple}
+	cfg.Default.RateMultiplier = 1
+	cfg.Security.URLAllowlist.Enabled = false
+	cfg.Security.URLAllowlist.AllowInsecureHTTP = true
+
+	groupID := int64(8801)
+	account := service.Account{
+		ID: 8802, Name: "messages-partial-usage", Platform: service.PlatformOpenAI,
+		Type: service.AccountTypeOAuth, Status: service.StatusActive, Schedulable: true,
+		Concurrency: 1,
+		Credentials: map[string]any{"access_token": "oauth-token"},
+	}
+	accountRepo := &openAIWSUsageHandlerAccountRepoStub{account: account}
+	usageRepo := &openAIWSUsageHandlerUsageLogRepoStub{created: make(chan *service.UsageLog, 1)}
+	upstream := &openAIMessagesPartialUsageUpstream{responseBody: strings.Join([]string{
+		`data: {"type":"response.output_item.added","output_index":1,"item":{"id":"msg_partial","type":"message","role":"assistant","status":"in_progress","content":[]},"sequence_number":2}`,
+		`data: {"type":"response.output_text.delta","item_id":"msg_partial","output_index":1,"content_index":0,"delta":"partial","sequence_number":7}`,
+		`data: {"type":"response.failed","response":{"id":"resp_partial_messages","model":"gpt-5.5","status":"failed","usage":{"input_tokens":7,"output_tokens":3},"error":{"code":"server_error","message":"upstream failed"}}}`,
+		"",
+	}, "\n\n") + "\n"}
+
+	billingCacheSvc := service.NewBillingCacheService(nil, nil, nil, nil, nil, nil, cfg, nil)
+	t.Cleanup(billingCacheSvc.Stop)
+	concurrencyCache := &concurrencyCacheMock{
+		acquireUserSlotFn:    func(context.Context, int64, int, string) (bool, error) { return true, nil },
+		acquireAccountSlotFn: func(context.Context, int64, int, string) (bool, error) { return true, nil },
+	}
+	concurrencySvc := service.NewConcurrencyService(concurrencyCache)
+	rateLimitSvc := service.NewRateLimitService(accountRepo, usageRepo, cfg, nil, nil)
+	gatewaySvc := service.NewOpenAIGatewayService(
+		accountRepo, usageRepo, nil, nil, nil, nil, nil, cfg, nil,
+		concurrencySvc, service.NewBillingService(cfg, nil), rateLimitSvc,
+		billingCacheSvc, upstream, &service.DeferredService{}, nil, nil, nil,
+		nil, nil, nil, nil,
+	)
+	h := NewOpenAIGatewayHandler(
+		gatewaySvc, concurrencySvc, billingCacheSvc,
+		service.NewAPIKeyService(nil, nil, nil, nil, nil, nil, cfg),
+		nil, nil, nil, nil, cfg,
+	)
+
+	apiKey := &service.APIKey{
+		ID: 8803, GroupID: &groupID,
+		User:  &service.User{ID: 8804, Status: service.StatusActive},
+		Group: &service.Group{ID: groupID, Platform: service.PlatformOpenAI, Status: service.StatusActive, RateMultiplier: 1, AllowMessagesDispatch: true},
+	}
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(`{"model":"claude-sonnet-4-5","max_tokens":64,"stream":true,"messages":[{"role":"user","content":"hello"}]}`))
+	c.Request.Header.Set("Content-Type", "application/json")
+	c.Set(string(middleware.ContextKeyAPIKey), apiKey)
+	c.Set(string(middleware.ContextKeyUser), middleware.AuthSubject{UserID: apiKey.User.ID, Concurrency: 1})
+
+	h.Messages(c)
+
+	select {
+	case log := <-usageRepo.created:
+		require.Equal(t, 7, log.InputTokens)
+		require.Equal(t, 3, log.OutputTokens)
+	case <-time.After(3 * time.Second):
+		t.Fatal("timed out waiting for partial usage record")
+	}
+	require.Contains(t, recorder.Body.String(), "partial")
+}
+
+func TestOpenAIChatCompletionsRecordsObservedUsageWhenStreamEndsWithError(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	cfg := &config.Config{RunMode: config.RunModeSimple}
+	cfg.Default.RateMultiplier = 1
+	cfg.Security.URLAllowlist.Enabled = false
+	cfg.Security.URLAllowlist.AllowInsecureHTTP = true
+
+	groupID := int64(8811)
+	account := service.Account{
+		ID: 8812, Name: "chat-partial-usage", Platform: service.PlatformOpenAI,
+		Type: service.AccountTypeOAuth, Status: service.StatusActive, Schedulable: true,
+		Concurrency: 1,
+		Credentials: map[string]any{"access_token": "oauth-token", "chatgpt_account_id": "chatgpt-acc"},
+	}
+	accountRepo := &openAIWSUsageHandlerAccountRepoStub{account: account}
+	usageRepo := &openAIWSUsageHandlerUsageLogRepoStub{created: make(chan *service.UsageLog, 1)}
+	upstream := &openAIMessagesPartialUsageUpstream{responseBody: strings.Join([]string{
+		`data: {"type":"response.created","response":{"id":"resp_partial_chat","model":"gpt-5.5","status":"in_progress","output":[]}}`,
+		`data: {"type":"response.output_text.delta","delta":"partial"}`,
+		`data: {"type":"response.failed","response":{"id":"resp_partial_chat","model":"gpt-5.5","status":"failed","usage":{"input_tokens":7,"output_tokens":3},"error":{"code":"invalid_request_error","message":"upstream validation failed"}}}`,
+		"",
+	}, "\n\n") + "\n"}
+
+	billingCacheSvc := service.NewBillingCacheService(nil, nil, nil, nil, nil, nil, cfg, nil)
+	t.Cleanup(billingCacheSvc.Stop)
+	concurrencyCache := &concurrencyCacheMock{
+		acquireUserSlotFn:    func(context.Context, int64, int, string) (bool, error) { return true, nil },
+		acquireAccountSlotFn: func(context.Context, int64, int, string) (bool, error) { return true, nil },
+	}
+	concurrencySvc := service.NewConcurrencyService(concurrencyCache)
+	rateLimitSvc := service.NewRateLimitService(accountRepo, usageRepo, cfg, nil, nil)
+	gatewaySvc := service.NewOpenAIGatewayService(
+		accountRepo, usageRepo, nil, nil, nil, nil, nil, cfg, nil,
+		concurrencySvc, service.NewBillingService(cfg, nil), rateLimitSvc,
+		billingCacheSvc, upstream, &service.DeferredService{}, nil, nil, nil,
+		nil, nil, nil, nil,
+	)
+	h := NewOpenAIGatewayHandler(
+		gatewaySvc, concurrencySvc, billingCacheSvc,
+		service.NewAPIKeyService(nil, nil, nil, nil, nil, nil, cfg),
+		nil, nil, nil, nil, cfg,
+	)
+
+	apiKey := &service.APIKey{
+		ID: 8813, GroupID: &groupID,
+		User:  &service.User{ID: 8814, Status: service.StatusActive},
+		Group: &service.Group{ID: groupID, Platform: service.PlatformOpenAI, Status: service.StatusActive, RateMultiplier: 1},
+	}
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"gpt-5.5","stream":true,"messages":[{"role":"user","content":"hello"}]}`))
+	c.Request.Header.Set("Content-Type", "application/json")
+	c.Set(string(middleware.ContextKeyAPIKey), apiKey)
+	c.Set(string(middleware.ContextKeyUser), middleware.AuthSubject{UserID: apiKey.User.ID, Concurrency: 1})
+
+	h.ChatCompletions(c)
+
+	select {
+	case log := <-usageRepo.created:
+		require.Equal(t, 7, log.InputTokens)
+		require.Equal(t, 3, log.OutputTokens)
+	case <-time.After(3 * time.Second):
+		t.Fatalf("timed out waiting for partial Chat Completions usage record; status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+	require.Contains(t, recorder.Body.String(), "partial")
+}
+
+// A retryable response.failed after Chat Completions output cannot switch to a
+// second account without splicing streams. The handler terminates that attempt,
+// but must still persist the usage carried by the failed terminal event exactly
+// once.
+func TestOpenAIChatCompletionsRecordsObservedUsageWhenFailoverExhaustedAfterWrite(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	cfg := &config.Config{RunMode: config.RunModeSimple}
+	cfg.Default.RateMultiplier = 1
+	cfg.Security.URLAllowlist.Enabled = false
+	cfg.Security.URLAllowlist.AllowInsecureHTTP = true
+
+	groupID := int64(8821)
+	account := service.Account{
+		ID: 8822, Name: "chat-failover-partial-usage", Platform: service.PlatformOpenAI,
+		Type: service.AccountTypeOAuth, Status: service.StatusActive, Schedulable: true,
+		Concurrency: 1,
+		Credentials: map[string]any{"access_token": "oauth-token", "chatgpt_account_id": "chatgpt-acc"},
+	}
+	accountRepo := &openAIWSUsageHandlerAccountRepoStub{account: account}
+	usageRepo := &openAIWSUsageHandlerUsageLogRepoStub{created: make(chan *service.UsageLog, 2)}
+	upstream := &openAIMessagesPartialUsageUpstream{responseBody: strings.Join([]string{
+		`data: {"type":"response.created","response":{"id":"resp_failover_chat","model":"gpt-5.5","status":"in_progress","output":[]}}`,
+		`data: {"type":"response.output_text.delta","delta":"partial"}`,
+		`data: {"type":"response.failed","response":{"id":"resp_failover_chat","model":"gpt-5.5","status":"failed","usage":{"input_tokens":11,"output_tokens":4},"error":{"code":"server_is_overloaded","message":"retry later"}}}`,
+		"",
+	}, "\n\n") + "\n"}
+
+	billingCacheSvc := service.NewBillingCacheService(nil, nil, nil, nil, nil, nil, cfg, nil)
+	t.Cleanup(billingCacheSvc.Stop)
+	concurrencyCache := &concurrencyCacheMock{
+		acquireUserSlotFn:    func(context.Context, int64, int, string) (bool, error) { return true, nil },
+		acquireAccountSlotFn: func(context.Context, int64, int, string) (bool, error) { return true, nil },
+	}
+	concurrencySvc := service.NewConcurrencyService(concurrencyCache)
+	rateLimitSvc := service.NewRateLimitService(accountRepo, usageRepo, cfg, nil, nil)
+	gatewaySvc := service.NewOpenAIGatewayService(
+		accountRepo, usageRepo, nil, nil, nil, nil, nil, cfg, nil,
+		concurrencySvc, service.NewBillingService(cfg, nil), rateLimitSvc,
+		billingCacheSvc, upstream, &service.DeferredService{}, nil, nil, nil,
+		nil, nil, nil, nil,
+	)
+	h := NewOpenAIGatewayHandler(
+		gatewaySvc, concurrencySvc, billingCacheSvc,
+		service.NewAPIKeyService(nil, nil, nil, nil, nil, nil, cfg),
+		nil, nil, nil, nil, cfg,
+	)
+
+	apiKey := &service.APIKey{
+		ID: 8823, GroupID: &groupID,
+		User:  &service.User{ID: 8824, Status: service.StatusActive},
+		Group: &service.Group{ID: groupID, Platform: service.PlatformOpenAI, Status: service.StatusActive, RateMultiplier: 1},
+	}
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", strings.NewReader(`{"model":"gpt-5.5","stream":true,"messages":[{"role":"user","content":"hello"}]}`))
+	c.Request.Header.Set("Content-Type", "application/json")
+	c.Set(string(middleware.ContextKeyAPIKey), apiKey)
+	c.Set(string(middleware.ContextKeyUser), middleware.AuthSubject{UserID: apiKey.User.ID, Concurrency: 1})
+
+	h.ChatCompletions(c)
+
+	select {
+	case log := <-usageRepo.created:
+		require.Equal(t, 11, log.InputTokens)
+		require.Equal(t, 4, log.OutputTokens)
+	default:
+		t.Fatalf("expected failover-exhausted Chat Completions usage record; status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+	select {
+	case duplicate := <-usageRepo.created:
+		t.Fatalf("partial failover usage recorded more than once: %+v", duplicate)
+	case <-time.After(100 * time.Millisecond):
+	}
+	require.Contains(t, recorder.Body.String(), "partial")
+}
+
+// The Messages handler also guards the terminal failover-after-write branch.
+// The pre-write callback models an outer heartbeat/middleware write that makes
+// replay unsafe while the upstream failed event still carries billable usage.
+func TestOpenAIMessagesRecordsObservedUsageWhenFailoverExhaustedAfterWrite(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	cfg := &config.Config{RunMode: config.RunModeSimple}
+	cfg.Default.RateMultiplier = 1
+	cfg.Security.URLAllowlist.Enabled = false
+	cfg.Security.URLAllowlist.AllowInsecureHTTP = true
+
+	groupID := int64(8831)
+	account := service.Account{
+		ID: 8832, Name: "messages-failover-partial-usage", Platform: service.PlatformOpenAI,
+		Type: service.AccountTypeOAuth, Status: service.StatusActive, Schedulable: true,
+		Concurrency: 1,
+		Credentials: map[string]any{"access_token": "oauth-token"},
+	}
+	accountRepo := &openAIWSUsageHandlerAccountRepoStub{account: account}
+	usageRepo := &openAIWSUsageHandlerUsageLogRepoStub{created: make(chan *service.UsageLog, 2)}
+	upstream := &openAIMessagesPartialUsageUpstream{responseBody: strings.Join([]string{
+		`data: {"type":"response.failed","response":{"id":"resp_failover_messages","model":"gpt-5.5","status":"failed","usage":{"input_tokens":13,"output_tokens":2},"error":{"code":"server_is_overloaded","message":"retry later"}}}`,
+		"",
+	}, "\n\n") + "\n"}
+
+	billingCacheSvc := service.NewBillingCacheService(nil, nil, nil, nil, nil, nil, cfg, nil)
+	t.Cleanup(billingCacheSvc.Stop)
+	concurrencyCache := &concurrencyCacheMock{
+		acquireUserSlotFn:    func(context.Context, int64, int, string) (bool, error) { return true, nil },
+		acquireAccountSlotFn: func(context.Context, int64, int, string) (bool, error) { return true, nil },
+	}
+	concurrencySvc := service.NewConcurrencyService(concurrencyCache)
+	rateLimitSvc := service.NewRateLimitService(accountRepo, usageRepo, cfg, nil, nil)
+	gatewaySvc := service.NewOpenAIGatewayService(
+		accountRepo, usageRepo, nil, nil, nil, nil, nil, cfg, nil,
+		concurrencySvc, service.NewBillingService(cfg, nil), rateLimitSvc,
+		billingCacheSvc, upstream, &service.DeferredService{}, nil, nil, nil,
+		nil, nil, nil, nil,
+	)
+	h := NewOpenAIGatewayHandler(
+		gatewaySvc, concurrencySvc, billingCacheSvc,
+		service.NewAPIKeyService(nil, nil, nil, nil, nil, nil, cfg),
+		nil, nil, nil, nil, cfg,
+	)
+
+	apiKey := &service.APIKey{
+		ID: 8833, GroupID: &groupID,
+		User: &service.User{ID: 8834, Status: service.StatusActive},
+		Group: &service.Group{
+			ID: groupID, Platform: service.PlatformOpenAI, Status: service.StatusActive,
+			RateMultiplier: 1, AllowMessagesDispatch: true,
+		},
+	}
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", strings.NewReader(`{"model":"claude-sonnet-4-5","max_tokens":64,"stream":true,"messages":[{"role":"user","content":"hello"}]}`))
+	c.Request.Header.Set("Content-Type", "application/json")
+	c.Set(string(middleware.ContextKeyAPIKey), apiKey)
+	c.Set(string(middleware.ContextKeyUser), middleware.AuthSubject{UserID: apiKey.User.ID, Concurrency: 1})
+	upstream.beforeResponse = func() {
+		_, _ = c.Writer.WriteString(": upstream-attempt-started\n\n")
+	}
+
+	h.Messages(c)
+
+	select {
+	case log := <-usageRepo.created:
+		require.Equal(t, 13, log.InputTokens)
+		require.Equal(t, 2, log.OutputTokens)
+	default:
+		t.Fatalf("expected failover-exhausted Messages usage record; status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+	select {
+	case duplicate := <-usageRepo.created:
+		t.Fatalf("partial failover usage recorded more than once: %+v", duplicate)
+	case <-time.After(100 * time.Millisecond):
+	}
+}
+
 func (s *openAIWSUsageHandlerUsageLogRepoStub) Create(ctx context.Context, log *service.UsageLog) (bool, error) {
 	if s.created != nil {
 		s.created <- log

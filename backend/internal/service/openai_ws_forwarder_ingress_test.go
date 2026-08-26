@@ -213,6 +213,7 @@ func TestStripOpenAIImageGenerationToolsFromRawPayload(t *testing.T) {
 		payload := []byte(`{
 			"type":"response.create",
 			"model":"gpt-5.5",
+			"sequence":900719925474099312345,
 			"tools":[
 				{"type":"namespace","name":"image_gen","tools":[{"type":"function","name":"imagegen"}]},
 				{"type":"namespace","name":"code_tools","tools":[{"type":"function","name":"run"}]}
@@ -230,6 +231,7 @@ func TestStripOpenAIImageGenerationToolsFromRawPayload(t *testing.T) {
 		require.True(t, changed)
 		require.False(t, IsImageGenerationIntent(openAIResponsesEndpoint, "gpt-5.5", updated))
 		require.True(t, gjson.GetBytes(updated, `tools.#(name=="code_tools")`).Exists())
+		require.Equal(t, "900719925474099312345", gjson.GetBytes(updated, "sequence").Raw)
 		require.Equal(t, "hello", gjson.GetBytes(updated, "input.0.content").String())
 		require.False(t, gjson.GetBytes(updated, "tool_choice").Exists())
 	})
@@ -533,6 +535,10 @@ func TestNormalizeOpenAIWSJSONForCompare(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, `{"a":1,"b":2}`, string(normalized))
 
+	large, err := normalizeOpenAIWSJSONForCompare([]byte(`{"sequence":900719925474099312345,"a":1}`))
+	require.NoError(t, err)
+	require.Equal(t, "900719925474099312345", gjson.GetBytes(large, "sequence").Raw)
+
 	_, err = normalizeOpenAIWSJSONForCompare([]byte("   "))
 	require.Error(t, err)
 
@@ -551,11 +557,12 @@ func TestNormalizeOpenAIWSPayloadWithoutInputAndPreviousResponseID(t *testing.T)
 	t.Parallel()
 
 	normalized, err := normalizeOpenAIWSPayloadWithoutInputAndPreviousResponseID(
-		[]byte(`{"model":"gpt-5.1","input":[1],"previous_response_id":"resp_x","metadata":{"b":2,"a":1}}`),
+		[]byte(`{"model":"gpt-5.1","sequence":900719925474099312345,"input":[1],"previous_response_id":"resp_x","metadata":{"b":2,"a":1}}`),
 	)
 	require.NoError(t, err)
 	require.False(t, gjson.GetBytes(normalized, "input").Exists())
 	require.False(t, gjson.GetBytes(normalized, "previous_response_id").Exists())
+	require.Equal(t, "900719925474099312345", gjson.GetBytes(normalized, "sequence").Raw)
 	require.Equal(t, float64(1), gjson.GetBytes(normalized, "metadata.a").Float())
 
 	_, err = normalizeOpenAIWSPayloadWithoutInputAndPreviousResponseID(nil)

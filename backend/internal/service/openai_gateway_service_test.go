@@ -2451,6 +2451,20 @@ func TestNormalizeOpenAICompactRequestBodyPreservesCurrentCodexPayloadFields(t *
 	require.False(t, gjson.GetBytes(normalized, "prompt_cache_key").Exists())
 }
 
+func TestNormalizeOpenAICompactRequestBodyParallelToolCallNormalization(t *testing.T) {
+	withoutTools := []byte(`{"model":"gpt-5.5","input":"compact me","parallel_tool_calls":true}`)
+	normalized, changed, err := normalizeOpenAICompactRequestBody(withoutTools)
+	require.NoError(t, err)
+	require.True(t, changed)
+	require.False(t, gjson.GetBytes(normalized, "parallel_tool_calls").Exists())
+
+	withLiteAdditionalTools := []byte(`{"model":"gpt-5.5","input":[{"type":"additional_tools","tools":[{"type":"function","name":"spawn_agent"}]}],"parallel_tool_calls":false}`)
+	normalized, changed, err = normalizeOpenAICompactRequestBody(withLiteAdditionalTools)
+	require.NoError(t, err)
+	require.False(t, changed)
+	require.Equal(t, gjson.False, gjson.GetBytes(normalized, "parallel_tool_calls").Type)
+}
+
 func TestOpenAIBuildUpstreamRequestOpenAIPassthroughPreservesCompactPath(t *testing.T) {
 	setGinTestMode()
 	rec := httptest.NewRecorder()

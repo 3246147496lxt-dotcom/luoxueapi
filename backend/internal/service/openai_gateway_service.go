@@ -66,6 +66,7 @@ var openaiAllowedHeaders = map[string]bool{
 	"conversation_id":       true,
 	"user-agent":            true,
 	"originator":            true,
+	"session-id":            true,
 	"session_id":            true,
 	"x-codex-beta-features": true,
 	"x-codex-turn-state":    true,
@@ -83,6 +84,7 @@ var openaiPassthroughAllowedHeaders = map[string]bool{
 	"openai-beta":           true,
 	"user-agent":            true,
 	"originator":            true,
+	"session-id":            true,
 	"session_id":            true,
 	"x-codex-beta-features": true,
 	"x-codex-turn-state":    true,
@@ -98,6 +100,8 @@ var codexCLIOnlyDebugHeaderWhitelist = []string{
 	"Accept-Language",
 	"OpenAI-Beta",
 	"Originator",
+	"Session-Id",
+	"Session-ID",
 	"Session_ID",
 	"Conversation_ID",
 	"X-Request-ID",
@@ -263,6 +267,33 @@ type OpenAIForwardResult struct {
 
 	wsReplayInput       []json.RawMessage
 	wsReplayInputExists bool
+}
+
+// HasObservedUsage reports whether the upstream supplied any usage-bearing
+// tokens or billable item counts. It is used on error paths where a streaming
+// response may have been interrupted after the provider already measured work;
+// zero-value results must not create phantom usage rows.
+func (r *OpenAIForwardResult) HasObservedUsage() bool {
+	if r == nil {
+		return false
+	}
+	return hasObservedOpenAIUsage(r.Usage) ||
+		r.ImageCount > 0 ||
+		r.VideoCount > 0 ||
+		r.WebSearchCalls > 0
+}
+
+// hasObservedOpenAIUsage is the scalar usage counterpart used by protocol
+// adapters before they have enough information to build an OpenAIForwardResult.
+// Keep the zero-value check in one place so an error path can preserve real
+// provider usage without manufacturing a 0/0 billing row.
+func hasObservedOpenAIUsage(usage OpenAIUsage) bool {
+	return usage.InputTokens > 0 ||
+		usage.ImageInputTokens > 0 ||
+		usage.OutputTokens > 0 ||
+		usage.CacheCreationInputTokens > 0 ||
+		usage.CacheReadInputTokens > 0 ||
+		usage.ImageOutputTokens > 0
 }
 
 // SucceededForScheduling reports whether this result is an upstream success

@@ -214,7 +214,7 @@ func (s *OpenAIGatewayService) ForwardAsChatCompletions(
 
 	if account.Type == AccountTypeOAuth {
 		var reqBody map[string]any
-		if err := json.Unmarshal(responsesBody, &reqBody); err != nil {
+		if err := decodeOpenAIJSONUseNumber(responsesBody, &reqBody); err != nil {
 			return nil, fmt.Errorf("unmarshal for codex transform: %w", err)
 		}
 		codexResult := applyCodexOAuthTransformWithOptions(reqBody, codexOAuthTransformOptions{
@@ -240,7 +240,7 @@ func (s *OpenAIGatewayService) ForwardAsChatCompletions(
 	if account.Type == AccountTypeAPIKey {
 		if trimmedKey := strings.TrimSpace(promptCacheKey); trimmedKey != "" {
 			var reqBody map[string]any
-			if err := json.Unmarshal(responsesBody, &reqBody); err != nil {
+			if err := decodeOpenAIJSONUseNumber(responsesBody, &reqBody); err != nil {
 				return nil, fmt.Errorf("unmarshal for prompt cache key injection: %w", err)
 			}
 			if existing, ok := reqBody["prompt_cache_key"].(string); !ok || strings.TrimSpace(existing) == "" {
@@ -302,9 +302,28 @@ func (s *OpenAIGatewayService) ForwardAsChatCompletions(
 		return nil, fmt.Errorf("build upstream request: %w", err)
 	}
 
-	if promptCacheKey != "" {
+	// buildUpstreamRequest already isolates the client session headers.  Keep the
+	// UUID form required by the compat bridge, but resolve the seed with the same
+	// explicit-header priority (session-id > session_id > conversation_id) so a
+	// regenerated/rewritten body cannot let prompt_cache_key override Codex's
+	// canonical session signal.
+	sessionSeed := explicitOpenAIRequestSessionID(c, nil)
+	if sessionSeed == "" {
+		sessionSeed = strings.TrimSpace(promptCacheKey)
+	}
+	if sessionSeed != "" {
 		apiKeyID := getAPIKeyIDFromContext(c)
-		upstreamReq.Header.Set("session_id", generateSessionUUID(isolateOpenAISessionID(apiKeyID, promptCacheKey)))
+		upstreamReq.Header.Set("session_id", generateSessionUUID(isolateOpenAISessionID(apiKeyID, sessionSeed)))
+	}
+	if upstreamReq.Header.Get("conversation_id") != "" {
+		conversationSeed := strings.TrimSpace(c.GetHeader("conversation_id"))
+		if conversationSeed == "" {
+			conversationSeed = sessionSeed
+		}
+		if conversationSeed != "" {
+			apiKeyID := getAPIKeyIDFromContext(c)
+			upstreamReq.Header.Set("conversation_id", generateSessionUUID(isolateOpenAISessionID(apiKeyID, conversationSeed)))
+		}
 	}
 
 	// 7. Send request
@@ -384,7 +403,7 @@ func (s *OpenAIGatewayService) ForwardAsChatCompletions(
 	}
 
 	// Propagate ServiceTier and ReasoningEffort to result for billing
-	if handleErr == nil && result != nil {
+	if result != nil {
 		// Billing must observe the body after API-key default injection and the
 		// administrator policy, not the pre-policy conversion DTO.
 		result.ServiceTier = extractOpenAIServiceTierFromBody(responsesBody)
@@ -476,15 +495,39 @@ func (s *OpenAIGatewayService) handleChatBufferedStreamingResponse(
 	startTime time.Time,
 ) (*OpenAIForwardResult, error) {
 	requestID := resp.Header.Get("x-request-id")
+	// Keep a scalar result when buffering terminates with an upstream error. A
+	// response.failed event can carry usage even though no Chat Completions JSON
+	// is emitted; returning that observation lets the handler bill the work. Do
+	// not manufacture a zero-usage row (and keep failover/cyber paths separate).
+	resultWithUsage := func(responseID string, usage OpenAIUsage) *OpenAIForwardResult {
+		return &OpenAIForwardResult{
+			RequestID:       requestID,
+			ResponseID:      strings.TrimSpace(responseID),
+			Usage:           usage,
+			Model:           originalModel,
+			BillingModel:    billingModel,
+			UpstreamModel:   upstreamModel,
+			Stream:          false,
+			ResponseHeaders: resp.Header.Clone(),
+			Duration:        time.Since(startTime),
+		}
+	}
+	observedResult := func(responseID string, usage OpenAIUsage) *OpenAIForwardResult {
+		result := resultWithUsage(responseID, usage)
+		if !result.HasObservedUsage() {
+			return nil
+		}
+		return result
+	}
 
 	finalResponse, usage, acc, err := s.readOpenAICompatBufferedTerminal(resp, "openai chat_completions buffered", requestID)
 	if err != nil {
-		return nil, err
+		return observedResult("", usage), err
 	}
 
 	if finalResponse == nil {
 		writeChatCompletionsError(c, http.StatusBadGateway, "api_error", "Upstream stream ended without a terminal response event")
-		return nil, fmt.Errorf("upstream stream ended without terminal event")
+		return observedResult("", usage), fmt.Errorf("upstream stream ended without terminal event")
 	}
 	if strings.TrimSpace(finalResponse.Status) == "failed" {
 		payload, _ := json.Marshal(gin.H{"type": "response.failed", "response": finalResponse})
@@ -508,7 +551,7 @@ func (s *OpenAIGatewayService) handleChatBufferedStreamingResponse(
 		}
 		message := openAICompatFailedResponseMessage(finalResponse)
 		if openAIStreamFailedEventShouldFailover(payload, message) {
-			return nil, s.newOpenAIStreamFailoverError(c, account, false, requestID, payload, message)
+			return nil, s.newOpenAIStreamFailoverError(c, account, false, requestID, payload, message, resp.Header)
 		}
 		message = s.recordOpenAIStreamUpstreamError(c, account, false, requestID, "http_error", payload, message)
 		// response.failed 到达在 HTTP 200 SSE 流上，无真实 HTTP 错误码；统一走语义
@@ -521,10 +564,10 @@ func (s *OpenAIGatewayService) handleChatBufferedStreamingResponse(
 			}
 			MarkResponseCommitted(c)
 			writeChatCompletionsError(c, status, errType, errMsg)
-			return nil, fmt.Errorf("upstream response failed (passthrough): %s", errMsg)
+			return observedResult(finalResponse.ID, usage), fmt.Errorf("upstream response failed (passthrough): %s", errMsg)
 		}
 		writeChatCompletionsError(c, http.StatusBadGateway, "upstream_error", message)
-		return nil, fmt.Errorf("upstream response failed: %s", message)
+		return observedResult(finalResponse.ID, usage), fmt.Errorf("upstream response failed: %s", message)
 	}
 
 	// When the terminal event has an empty output array, reconstruct from
@@ -543,15 +586,7 @@ func (s *OpenAIGatewayService) handleChatBufferedStreamingResponse(
 	c.Writer.Header().Set("Content-Type", "application/json; charset=utf-8")
 	c.JSON(http.StatusOK, chatResp)
 
-	return &OpenAIForwardResult{
-		RequestID:     requestID,
-		Usage:         usage,
-		Model:         originalModel,
-		BillingModel:  billingModel,
-		UpstreamModel: upstreamModel,
-		Stream:        false,
-		Duration:      time.Since(startTime),
-	}, nil
+	return resultWithUsage(finalResponse.ID, usage), nil
 }
 
 // handleChatStreamingResponse reads Responses SSE events from upstream,
@@ -714,9 +749,17 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 				}
 				return true
 			}
-			if openAIStreamFailedEventShouldFailover(payloadBytes, message) {
-				streamFailoverErr = s.newOpenAIStreamFailoverError(c, account, false, requestID, payloadBytes, message)
+			// Once Chat Completions has released output to the client, retrying a
+			// semantic failure would splice two attempts and the forwarding layer
+			// deliberately drops the partial result to avoid double billing. Treat
+			// the terminal error as non-failover in that case, while still applying
+			// account-health handling (notably for a semantic 429 over HTTP 200).
+			if !clientOutputStarted && openAIStreamFailedEventShouldFailover(payloadBytes, message) {
+				streamFailoverErr = s.newOpenAIStreamFailoverError(c, account, false, requestID, payloadBytes, message, resp.Header)
 				return true
+			}
+			if clientOutputStarted {
+				s.handleOpenAIStreamTerminalAccountSideEffects(c, account, payloadBytes, message, resp.Header)
 			}
 			if webChatActivityEnabled {
 				if activitySSE, ok := buildWebChatActivitySSE(payloadBytes, &event); ok {

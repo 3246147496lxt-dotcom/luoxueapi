@@ -201,7 +201,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClientSession(
 
 		// 仅在确实需要修改 payload 且 sjson 失败时，退回 map 路径确保兼容性。
 		payload := make(map[string]any)
-		if unmarshalErr := json.Unmarshal(current, &payload); unmarshalErr != nil {
+		if unmarshalErr := decodeOpenAIJSONUseNumber(current, &payload); unmarshalErr != nil {
 			return nil, err
 		}
 		switch path {
@@ -299,6 +299,19 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClientSession(
 			}
 			normalized = litePayload
 		}
+		if account.IsOpenAIApiKey() {
+			parallelPayload, parallelChanged, parallelErr := normalizeOpenAIParallelToolCallsWithoutTools(normalized)
+			if parallelErr != nil {
+				return openAIWSClientPayload{}, NewOpenAIWSClientCloseError(
+					coderws.StatusPolicyViolation,
+					parallelErr.Error(),
+					parallelErr,
+				)
+			}
+			if parallelChanged {
+				normalized = parallelPayload
+			}
+		}
 		apiKey := getAPIKeyFromContext(c)
 		imageGenerationAllowed := GroupAllowsImageGeneration(apiKeyGroup(apiKey))
 		codexImageGenerationExplicitToolPolicy := codexImageGenerationExplicitToolPolicyAllow
@@ -312,7 +325,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClientSession(
 			s.isCodexImageGenerationBridgeEnabled(ctx, account, apiKey)
 		if codexBridgeEnabled {
 			payloadMap := make(map[string]any)
-			if err := json.Unmarshal(normalized, &payloadMap); err != nil {
+			if err := decodeOpenAIJSONUseNumber(normalized, &payloadMap); err != nil {
 				return openAIWSClientPayload{}, NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "invalid websocket request payload", err)
 			}
 			bridgeModified := false
@@ -1280,7 +1293,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClientSession(
 		}
 		if toolSignals.HasFunctionCallOutput {
 			var currentReqBody map[string]any
-			if err := json.Unmarshal(currentPayload, &currentReqBody); err == nil {
+			if err := decodeOpenAIJSONUseNumber(currentPayload, &currentReqBody); err == nil {
 				toolSignals = AnalyzeToolContinuationSignals(currentReqBody)
 			}
 		}

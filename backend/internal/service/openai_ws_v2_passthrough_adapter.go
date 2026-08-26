@@ -209,6 +209,15 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 		}
 		firstClientMessage = liteFirstMessage
 	}
+	if account.IsOpenAIApiKey() {
+		parallelMessage, parallelChanged, parallelErr := normalizeOpenAIParallelToolCallsWithoutTools(firstClientMessage)
+		if parallelErr != nil {
+			return NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, parallelErr.Error(), parallelErr)
+		}
+		if parallelChanged {
+			firstClientMessage = parallelMessage
+		}
+	}
 	requestModel := strings.TrimSpace(gjson.GetBytes(firstClientMessage, "model").String())
 	requestPreviousResponseID := strings.TrimSpace(gjson.GetBytes(firstClientMessage, "previous_response_id").String())
 	logOpenAIWSV2Passthrough(
@@ -470,6 +479,15 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 						return payload, nil, NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, liteErr.Error(), liteErr)
 					}
 					payload = litePayload
+				}
+				if account.IsOpenAIApiKey() {
+					parallelPayload, parallelChanged, parallelErr := normalizeOpenAIParallelToolCallsWithoutTools(payload)
+					if parallelErr != nil {
+						return payload, nil, NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, parallelErr.Error(), parallelErr)
+					}
+					if parallelChanged {
+						payload = parallelPayload
+					}
 				}
 				if !turnActive.CompareAndSwap(false, true) {
 					return payload, nil, NewOpenAIWSClientCloseError(

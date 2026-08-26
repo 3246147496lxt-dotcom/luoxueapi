@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
@@ -19,6 +20,8 @@ import (
 
 const openAIWSMessageReadLimitBytes int64 = 16 * 1024 * 1024
 const (
+	openAIWSProxyDialTimeout                  = 10 * time.Second
+	openAIWSProxyDialKeepAlive                = 30 * time.Second
 	openAIWSProxyTransportMaxIdleConns        = 128
 	openAIWSProxyTransportMaxIdleConnsPerHost = 64
 	openAIWSProxyTransportIdleConnTimeout     = 90 * time.Second
@@ -168,6 +171,7 @@ func (d *coderOpenAIWSClientDialer) proxyHTTPClient(proxy string) (*http.Client,
 	d.cleanupProxyClientsLocked(now)
 	transport := &http.Transport{
 		Proxy:               http.ProxyURL(parsedProxyURL),
+		DialContext:         (&net.Dialer{Timeout: openAIWSProxyDialTimeout, KeepAlive: openAIWSProxyDialKeepAlive}).DialContext,
 		MaxIdleConns:        openAIWSProxyTransportMaxIdleConns,
 		MaxIdleConnsPerHost: openAIWSProxyTransportMaxIdleConnsPerHost,
 		IdleConnTimeout:     openAIWSProxyTransportIdleConnTimeout,

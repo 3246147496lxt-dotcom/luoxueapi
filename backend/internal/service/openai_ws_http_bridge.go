@@ -65,7 +65,7 @@ func (s *OpenAIGatewayService) shouldBridgeOpenAIWSHTTP(account *Account, payloa
 
 func prepareOpenAIWSHTTPBridgeBody(payload []byte) ([]byte, error) {
 	var body map[string]any
-	if err := json.Unmarshal(payload, &body); err != nil {
+	if err := decodeOpenAIJSONUseNumber(payload, &body); err != nil {
 		return nil, err
 	}
 	if body == nil {
@@ -192,6 +192,15 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 		}
 		if liteChanged {
 			body = liteBody
+		}
+	}
+	if account.IsOpenAIApiKey() {
+		normalized, parallelChanged, parallelErr := normalizeOpenAIParallelToolCallsWithoutTools(body)
+		if parallelErr != nil {
+			return nil, fmt.Errorf("normalize parallel tool calls: %w", parallelErr)
+		}
+		if parallelChanged {
+			body = normalized
 		}
 	}
 

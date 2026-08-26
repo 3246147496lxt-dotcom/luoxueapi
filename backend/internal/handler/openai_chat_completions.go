@@ -288,12 +288,67 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 		if err == nil && result != nil && result.FirstTokenMs != nil {
 			service.SetOpsLatencyMs(c, service.OpsTimeToFirstTokenMsKey, int64(*result.FirstTokenMs))
 		}
+		// Keep one usage producer for normal completions and for a non-failover
+		// streaming interruption that returned observed upstream usage. A partial
+		// Chat Completions stream can carry usage even when the terminal event is
+		// missing; returning before recording it would undercount the request.
+		userAgent := c.GetHeader("User-Agent")
+		clientIP := ip.GetClientIP(c)
+		requestPayloadHash := service.HashUsageRequestPayload(body)
+		inboundEndpoint := GetInboundEndpoint(c)
+		upstreamEndpoint := resolveOpenAIUpstreamEndpoint(c, account, result)
+		quotaPlatform := service.QuotaPlatform(c.Request.Context(), apiKey)
+		cyberBlocked := service.GetOpsCyberPolicy(c) != nil
+		submitChatUsage := func(usageResult *service.OpenAIForwardResult) {
+			if usageResult == nil {
+				return
+			}
+			usageUpstreamEndpoint := upstreamEndpoint
+			if usageResult != result {
+				usageUpstreamEndpoint = resolveOpenAIUpstreamEndpoint(c, account, usageResult)
+			}
+			h.submitOpenAIUsageRecordResultTask(c.Request.Context(), usageResult, func(ctx context.Context) error {
+				if err := h.gatewayService.RecordUsage(ctx, &service.OpenAIRecordUsageInput{
+					Result:             usageResult,
+					APIKey:             apiKey,
+					User:               apiKey.User,
+					Account:            account,
+					Subscription:       subscription,
+					InboundEndpoint:    inboundEndpoint,
+					UpstreamEndpoint:   usageUpstreamEndpoint,
+					UserAgent:          userAgent,
+					IPAddress:          clientIP,
+					RequestPayloadHash: requestPayloadHash,
+					APIKeyService:      h.apiKeyService,
+					QuotaPlatform:      quotaPlatform,
+					ChannelUsageFields: channelMapping.ToUsageFields(reqModel, usageResult.UpstreamModel),
+					CyberBlocked:       cyberBlocked,
+				}); err != nil {
+					logger.L().With(
+						zap.String("component", "handler.openai_gateway.chat_completions"),
+						zap.Int64("user_id", subject.UserID),
+						zap.Int64("api_key_id", apiKey.ID),
+						zap.Any("group_id", apiKey.GroupID),
+						zap.String("model", reqModel),
+						zap.Int64("account_id", account.ID),
+					).Error("openai_chat_completions.record_usage_failed", zap.Error(err))
+					return err
+				}
+				return nil
+			})
+		}
 		if err != nil {
 			if result != nil && result.ClientDisconnect {
 				reqLog.Info("openai_chat_completions.client_disconnected_drain_ended",
 					zap.Int64("account_id", account.ID),
 					zap.Error(err),
 				)
+				// The upstream stream is drained after a client disconnect so
+				// terminal usage remains available; record that observed usage even
+				// though account health and failover stay neutral.
+				if result.HasObservedUsage() && !cyberBlocked {
+					submitChatUsage(result)
+				}
 				return
 			}
 			if result != nil && result.ImageCount > 0 {
@@ -302,10 +357,21 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 					zap.Int("image_count", result.ImageCount),
 					zap.Error(err),
 				)
+				// A cyber-marked failed stream is billed by the dedicated cyber
+				// producer above; do not enqueue a second normal usage record.
+				if cyberBlocked {
+					return
+				}
 			} else {
 				var failoverErr *service.UpstreamFailoverError
 				if errors.As(err, &failoverErr) {
 					if failoverClientGone(c) {
+						// The detached upstream can finish draining after the client
+						// cancels. No replay will be attempted in this branch, so retain
+						// any usage observed before returning silently.
+						if result != nil && result.HasObservedUsage() && !cyberBlocked {
+							submitChatUsage(result)
+						}
 						reqLog.Info("openai_chat_completions.failover_aborted_client_disconnected",
 							zap.Int64("account_id", account.ID),
 							zap.Int("upstream_status", failoverErr.StatusCode),
@@ -313,6 +379,13 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 						return
 					}
 					if c.Writer.Size() != writerSizeBeforeForward {
+						// A Chat Completions stream may have emitted useful output before
+						// the upstream returned a failover-class response.  Retrying would
+						// splice two attempts, so this branch terminates the request; keep
+						// the usage observed on the first attempt instead of dropping it.
+						if result != nil && result.HasObservedUsage() && !cyberBlocked {
+							submitChatUsage(result)
+						}
 						h.handleFailoverExhausted(c, failoverErr, true)
 						return
 					}
@@ -374,6 +447,9 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 					zap.Bool("upstream_error_response_already_written", upstreamErrorAlreadyCommunicated),
 					zap.Error(err),
 				)
+				if result != nil && result.HasObservedUsage() && !cyberBlocked {
+					submitChatUsage(result)
+				}
 				return
 			}
 		}
@@ -383,43 +459,7 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 			h.gatewayService.ReportOpenAIAccountScheduleResult(account.ID, account.GetMappedModel(reqModel), true, nil)
 		}
 
-		userAgent := c.GetHeader("User-Agent")
-		clientIP := ip.GetClientIP(c)
-		requestPayloadHash := service.HashUsageRequestPayload(body)
-		inboundEndpoint := GetInboundEndpoint(c)
-		upstreamEndpoint := resolveOpenAIUpstreamEndpoint(c, account, result)
-		quotaPlatform := service.QuotaPlatform(c.Request.Context(), apiKey)
-
-		cyberBlocked := service.GetOpsCyberPolicy(c) != nil
-		h.submitOpenAIUsageRecordResultTask(c.Request.Context(), result, func(ctx context.Context) error {
-			err := h.gatewayService.RecordUsage(ctx, &service.OpenAIRecordUsageInput{
-				Result:             result,
-				APIKey:             apiKey,
-				User:               apiKey.User,
-				Account:            account,
-				Subscription:       subscription,
-				InboundEndpoint:    inboundEndpoint,
-				UpstreamEndpoint:   upstreamEndpoint,
-				UserAgent:          userAgent,
-				IPAddress:          clientIP,
-				RequestPayloadHash: requestPayloadHash,
-				APIKeyService:      h.apiKeyService,
-				QuotaPlatform:      quotaPlatform,
-				ChannelUsageFields: channelMapping.ToUsageFields(reqModel, result.UpstreamModel),
-				CyberBlocked:       cyberBlocked,
-			})
-			if err != nil {
-				logger.L().With(
-					zap.String("component", "handler.openai_gateway.chat_completions"),
-					zap.Int64("user_id", subject.UserID),
-					zap.Int64("api_key_id", apiKey.ID),
-					zap.Any("group_id", apiKey.GroupID),
-					zap.String("model", reqModel),
-					zap.Int64("account_id", account.ID),
-				).Error("openai_chat_completions.record_usage_failed", zap.Error(err))
-			}
-			return err
-		})
+		submitChatUsage(result)
 		reqLog.Debug("openai_chat_completions.request_completed",
 			zap.Int64("account_id", account.ID),
 			zap.Int("switch_count", switchCount),

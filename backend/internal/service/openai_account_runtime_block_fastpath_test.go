@@ -92,6 +92,32 @@ func TestOpenAI429FastPath_UsesQuotaResetWithoutRateLimitService(t *testing.T) {
 	require.Greater(t, resetAt.Sub(time.Now()), 9*time.Minute)
 }
 
+func TestOpenAIStream429Failover_IgnoresSuccessfulQuotaSnapshotHeaders(t *testing.T) {
+	svc := &OpenAIGatewayService{}
+	account := &Account{ID: 50, Platform: PlatformOpenAI, Type: AccountTypeOAuth}
+	headers := http.Header{}
+	headers.Set("x-codex-primary-used-percent", "37")
+	headers.Set("x-codex-primary-reset-after-seconds", "604800")
+	headers.Set("x-codex-primary-window-minutes", "10080")
+	payload := []byte(`{"type":"response.failed","response":{"error":{"code":"rate_limit_exceeded","message":"quota exhausted"}}}`)
+
+	failoverErr := svc.newOpenAIStreamFailoverError(nil, account, false, "req-stream-429", payload, "quota exhausted", headers)
+	require.Equal(t, "37", failoverErr.ResponseHeaders.Get("x-codex-primary-used-percent"))
+	// ResponseHeaders is metadata owned by the error; mutating the upstream
+	// request header map after construction must not change what the retry path
+	// or downstream handler observes.
+	headers.Set("x-codex-primary-used-percent", "0")
+	require.Equal(t, "37", failoverErr.ResponseHeaders.Get("x-codex-primary-used-percent"))
+
+	require.True(t, svc.isOpenAIAccountRuntimeBlocked(account))
+	value, ok := svc.openaiAccountRuntimeBlockUntil.Load(account.ID)
+	require.True(t, ok)
+	resetAt, ok := value.(time.Time)
+	require.True(t, ok)
+	require.Less(t, time.Until(resetAt), time.Minute,
+		"semantic 429 must not inherit the successful stream's seven-day quota snapshot")
+}
+
 func TestOpenAIRuntimeBlock_AppliesToOpenAIAPIKeyWhenRateLimitServiceStopsScheduling(t *testing.T) {
 	svc := &OpenAIGatewayService{}
 	account := &Account{ID: 44, Platform: PlatformOpenAI, Type: AccountTypeAPIKey}
