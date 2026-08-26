@@ -977,6 +977,84 @@ type recordUsageCoreInput struct {
 	ChannelUsageFields
 }
 
+// responseModelBillingCostEpsilon absorbs floating-point tail differences
+// between two otherwise equivalent pricing calculations.
+const responseModelBillingCostEpsilon = 1e-12
+
+// responseBillingCostResolution is the immutable pricing decision used for one
+// cost calculation. Keeping the effective model and source next to the cost
+// prevents a later cache/config lookup from reclassifying an already-computed
+// global price as channel-priced (or the reverse).
+type responseBillingCostResolution struct {
+	Cost          *CostBreakdown
+	Model         string
+	PricingSource string
+	Identified    bool
+	Err           error
+}
+
+func (r responseBillingCostResolution) channelPriced() bool {
+	return r.PricingSource == PricingSourceChannel
+}
+
+func responseModelPricingIdentified(resolution responseBillingCostResolution) bool {
+	return resolution.channelPriced() || resolution.Identified
+}
+
+// responseModelBillingDeclaration returns the upstream response model only
+// when the channel explicitly opted in and the request is safe for token-price
+// rebasing. Per-unit media/tool billing must never be driven by a token-price
+// admission check.
+func responseModelBillingDeclaration(source, responseModel string, conflict, mediaBilled bool) string {
+	if source != BillingModelSourceResponse || conflict || mediaBilled {
+		return ""
+	}
+	return strings.TrimSpace(responseModel)
+}
+
+// responseModelBillingAdoptable enforces the response-model billing invariants:
+// an upstream declaration cannot increase cost, zero a positive bill, or move
+// a channel-priced request onto the global catalog.
+func responseModelBillingAdoptable(baseline, response *CostBreakdown, baselineChannelPriced, responseChannelPriced bool) bool {
+	if baseline == nil || response == nil {
+		return false
+	}
+	if baseline.ValidateMonetaryFields() != nil || response.ValidateMonetaryFields() != nil {
+		return false
+	}
+	if response.TotalCost > baseline.TotalCost+responseModelBillingCostEpsilon {
+		return false
+	}
+	if response.ActualCost > baseline.ActualCost+responseModelBillingCostEpsilon {
+		return false
+	}
+	if (response.TotalCost <= 0 && baseline.TotalCost > 0) || (response.ActualCost <= 0 && baseline.ActualCost > 0) {
+		return false
+	}
+	return !baselineChannelPriced || responseChannelPriced
+}
+
+func logResponseModelBillingApplied(component string, account *Account, requestID, baselineModel, responseModel string, baselineCost, responseCost *CostBreakdown) {
+	baselineModel = strings.TrimSpace(baselineModel)
+	responseModel = strings.TrimSpace(responseModel)
+	if strings.EqualFold(baselineModel, responseModel) {
+		return
+	}
+	attrs := []any{
+		"component", component,
+		"request_id", strings.TrimSpace(requestID),
+		"baseline_model", baselineModel,
+		"response_model", responseModel,
+	}
+	if baselineCost != nil && responseCost != nil {
+		attrs = append(attrs, "baseline_cost", baselineCost.TotalCost, "billed_cost", responseCost.TotalCost)
+	}
+	if account != nil {
+		attrs = append(attrs, "platform", account.Platform, "account_id", account.ID)
+	}
+	slog.Info("billing.response_model_applied", attrs...)
+}
+
 // recordUsageCore 是 RecordUsage 和 RecordUsageWithLongContext 的统一实现。
 // LongContextThreshold > 0 时 Token 计费回退走 CalculateCostWithLongContext。
 func (s *GatewayService) recordUsageCore(ctx context.Context, input *recordUsageCoreInput, opts *recordUsageOpts) error {
@@ -1023,21 +1101,52 @@ func (s *GatewayService) recordUsageCore(ctx context.Context, input *recordUsage
 
 	// 确定计费模型
 	billingModel := forwardResultBillingModel(result.Model, result.UpstreamModel)
-	if input.BillingModelSource == BillingModelSourceChannelMapped && input.ChannelMappedModel != "" {
+	if (input.BillingModelSource == BillingModelSourceChannelMapped || input.BillingModelSource == BillingModelSourceResponse) && input.ChannelMappedModel != "" {
 		billingModel = input.ChannelMappedModel
 	}
 	if input.BillingModelSource == BillingModelSourceRequested && input.OriginalModel != "" {
 		billingModel = input.OriginalModel
 	}
-
 	// 确定 RequestedModel（渠道映射前的原始模型）
 	requestedModel := result.Model
 	if input.OriginalModel != "" {
 		requestedModel = input.OriginalModel
 	}
 
-	// 计算费用
-	cost := s.calculateRecordUsageCost(ctx, result, apiKey, billingModel, multiplier, imageMultiplier, opts)
+	// 计算费用。response_model 模式同时冻结实际命中的模型与定价来源，后续安全
+	// 比较不得再次查询可热更新的渠道价格，否则会产生 TOCTOU 来源错判。
+	baselineResolution := responseBillingCostResolution{Model: billingModel}
+	if input.BillingModelSource == BillingModelSourceResponse && result.ImageCount == 0 {
+		baselineResolution = s.calculateResponseBillingBaselineCost(
+			ctx,
+			result,
+			apiKey,
+			usageBillingModelCandidates(billingModel, result.UpstreamModel, result.Model),
+			multiplier,
+			opts,
+		)
+		billingModel = baselineResolution.Model
+	} else {
+		baselineResolution.Cost = s.calculateRecordUsageCost(ctx, result, apiKey, billingModel, multiplier, imageMultiplier, opts)
+	}
+	cost := baselineResolution.Cost
+	// response_model is explicit and fail-safe. Only an unambiguous,
+	// deterministically priced token model may replace the baseline, and only
+	// when all cost-source invariants remain satisfied.
+	if responseModel := responseModelBillingDeclaration(
+		input.BillingModelSource,
+		result.UpstreamResponseModel,
+		result.UpstreamResponseModelConflict,
+		result.ImageCount > 0,
+	); responseModel != "" && !strings.EqualFold(responseModel, strings.TrimSpace(billingModel)) {
+		responseResolution := s.calculateResponseBillingTokenCost(ctx, result, apiKey, responseModel, multiplier, opts)
+		if responseResolution.Err == nil && responseResolution.Cost != nil && responseModelPricingIdentified(responseResolution) {
+			if responseModelBillingAdoptable(cost, responseResolution.Cost, baselineResolution.channelPriced(), responseResolution.channelPriced()) {
+				logResponseModelBillingApplied("service.gateway", account, result.RequestID, billingModel, responseModel, cost, responseResolution.Cost)
+				cost = responseResolution.Cost
+			}
+		}
+	}
 
 	// 判断计费方式：订阅模式 vs 余额模式
 	isSubscriptionBilling := false
@@ -1179,10 +1288,67 @@ func (s *GatewayService) calculateRecordUsageCost(
 	return s.calculateTokenCost(ctx, result, apiKey, billingModel, multiplier, opts)
 }
 
+// calculateResponseBillingBaselineCost resolves fallback candidates and freezes
+// the exact model/source used by the successful calculation. This is scoped to
+// response_model mode so existing billing modes keep their candidate behavior.
+func (s *GatewayService) calculateResponseBillingBaselineCost(
+	ctx context.Context,
+	result *ForwardResult,
+	apiKey *APIKey,
+	billingModels []string,
+	multiplier float64,
+	opts *recordUsageOpts,
+) responseBillingCostResolution {
+	fallback := firstUsageBillingModel(billingModels)
+	var lastErr error
+	sawChannelPricing := false
+	for _, candidate := range billingModels {
+		candidate = strings.TrimSpace(candidate)
+		if candidate == "" {
+			continue
+		}
+		resolution := s.calculateResponseBillingTokenCost(ctx, result, apiKey, candidate, multiplier, opts)
+		sawChannelPricing = sawChannelPricing || resolution.channelPriced()
+		if resolution.Err == nil && resolution.Cost != nil {
+			if !strings.EqualFold(candidate, fallback) {
+				logger.LegacyPrintf("service.gateway", "[Billing] response_model baseline %q has no pricing, falling back to concrete model %q", fallback, candidate)
+			}
+			return resolution
+		}
+		lastErr = resolution.Err
+	}
+	if lastErr != nil {
+		logger.LegacyPrintf("service.gateway", "Calculate response_model baseline cost failed: %v", lastErr)
+	}
+	source := PricingSourceFallback
+	if sawChannelPricing {
+		// A zero-cost unresolved baseline must fail closed: an attempted channel
+		// price may not be bypassed by a global response declaration.
+		source = PricingSourceChannel
+	}
+	return responseBillingCostResolution{
+		Cost:          &CostBreakdown{ActualCost: 0},
+		Model:         fallback,
+		PricingSource: source,
+		Err:           lastErr,
+	}
+}
+
+func (s *GatewayService) calculateResponseBillingTokenCost(
+	ctx context.Context,
+	result *ForwardResult,
+	apiKey *APIKey,
+	billingModel string,
+	multiplier float64,
+	opts *recordUsageOpts,
+) responseBillingCostResolution {
+	return s.calculateTokenCostResolved(ctx, result, apiKey, billingModel, multiplier, opts)
+}
+
 // resolveChannelPricing 检查指定模型是否存在渠道级别定价。
 // 返回非 nil 的 ResolvedPricing 表示有渠道定价，nil 表示走默认定价路径。
 func (s *GatewayService) resolveChannelPricing(ctx context.Context, billingModel string, apiKey *APIKey) *ResolvedPricing {
-	if s.resolver == nil || apiKey.Group == nil {
+	if s == nil || s.resolver == nil || apiKey == nil || apiKey.Group == nil {
 		return nil
 	}
 	gid := apiKey.Group.ID
@@ -1255,8 +1421,6 @@ func (s *GatewayService) calculateTokenCost(
 
 	var cost *CostBreakdown
 	var err error
-
-	// 优先尝试渠道定价 → CalculateCostUnified
 	if resolved := s.resolveChannelPricing(ctx, billingModel, apiKey); resolved != nil {
 		gid := apiKey.Group.ID
 		cost, err = s.billingService.CalculateCostUnified(CostInput{
@@ -1270,8 +1434,9 @@ func (s *GatewayService) calculateTokenCost(
 			Resolved:       resolved,
 		})
 	} else if opts.LongContextThreshold > 0 {
-		// 长上下文双倍计费（如 Gemini 200K 阈值）
-		cost, err = s.billingService.CalculateCostWithLongContext(billingModel, tokens, multiplier, opts.LongContextThreshold, opts.LongContextMultiplier)
+		cost, err = s.billingService.CalculateCostWithLongContext(
+			billingModel, tokens, multiplier, opts.LongContextThreshold, opts.LongContextMultiplier,
+		)
 	} else {
 		cost, err = s.billingService.CalculateCost(billingModel, tokens, multiplier)
 	}
@@ -1280,6 +1445,75 @@ func (s *GatewayService) calculateTokenCost(
 		return &CostBreakdown{ActualCost: 0}
 	}
 	return cost
+}
+
+// calculateTokenCostResolved resolves channel pricing exactly once and passes
+// that immutable snapshot into the calculation. Its returned source therefore
+// always describes the cost returned by this same call.
+func (s *GatewayService) calculateTokenCostResolved(
+	ctx context.Context,
+	result *ForwardResult,
+	apiKey *APIKey,
+	billingModel string,
+	multiplier float64,
+	opts *recordUsageOpts,
+) responseBillingCostResolution {
+	resolution := responseBillingCostResolution{Model: strings.TrimSpace(billingModel)}
+	tokens := UsageTokens{
+		InputTokens:           result.Usage.InputTokens,
+		OutputTokens:          result.Usage.OutputTokens,
+		CacheCreationTokens:   result.Usage.CacheCreationInputTokens,
+		CacheReadTokens:       result.Usage.CacheReadInputTokens,
+		CacheCreation5mTokens: result.Usage.CacheCreation5mTokens,
+		CacheCreation1hTokens: result.Usage.CacheCreation1hTokens,
+		ImageOutputTokens:     result.Usage.ImageOutputTokens,
+	}
+
+	// 优先尝试渠道定价 → CalculateCostUnified. Resolve and cost must use
+	// the same snapshot; never call resolveChannelPricing again afterward.
+	if s.resolver != nil && apiKey != nil && apiKey.Group != nil {
+		gid := apiKey.Group.ID
+		resolved := s.resolver.Resolve(ctx, PricingInput{Model: billingModel, GroupID: &gid})
+		if resolved == nil {
+			resolution.Err = ErrModelPricingUnavailable
+			return resolution
+		}
+		resolution.PricingSource = resolved.Source
+		resolution.Identified = resolved.Identified
+		if opts.LongContextThreshold > 0 && resolved.Source != PricingSourceChannel {
+			resolution.Cost, resolution.Err = s.billingService.calculateCostWithLongContextPricing(
+				resolved.BasePricing, tokens, multiplier, opts.LongContextThreshold, opts.LongContextMultiplier,
+			)
+			return resolution
+		}
+		resolution.Cost, resolution.Err = s.billingService.CalculateCostUnified(CostInput{
+			Ctx:            ctx,
+			Model:          billingModel,
+			GroupID:        &gid,
+			Tokens:         tokens,
+			RequestCount:   1,
+			RateMultiplier: multiplier,
+			Resolver:       s.resolver,
+			Resolved:       resolved,
+		})
+		return resolution
+	}
+
+	pricing, source, identified, err := s.billingService.resolveModelPricingSnapshot(billingModel)
+	resolution.PricingSource = source
+	resolution.Identified = identified
+	if err != nil {
+		resolution.Err = err
+		return resolution
+	}
+	if opts.LongContextThreshold > 0 {
+		resolution.Cost, resolution.Err = s.billingService.calculateCostWithLongContextPricing(
+			pricing, tokens, multiplier, opts.LongContextThreshold, opts.LongContextMultiplier,
+		)
+	} else {
+		resolution.Cost = s.billingService.computeTokenBreakdown(pricing, tokens, multiplier, "", true)
+	}
+	return resolution
 }
 
 // buildRecordUsageLog 构建使用日志并设置计费模式。
@@ -1302,6 +1536,16 @@ func (s *GatewayService) buildRecordUsageLog(
 ) *UsageLog {
 	durationMs := int(result.Duration.Milliseconds())
 	requestID := resolveUsageBillingRequestID(ctx, result.RequestID)
+	sentModel := upstreamSentModel(result.Model, result.UpstreamModel)
+	if result.UpstreamResponseModelConflict {
+		slog.Warn("upstream_response_model_conflict",
+			"platform", account.Platform,
+			"account_id", account.ID,
+			"request_id", requestID,
+			"sent_model", sentModel,
+			"selected_response_model", strings.TrimSpace(result.UpstreamResponseModel),
+		)
+	}
 	usageLog := &UsageLog{
 		UserID:                user.ID,
 		APIKeyID:              apiKey.ID,
@@ -1310,6 +1554,8 @@ func (s *GatewayService) buildRecordUsageLog(
 		Model:                 result.Model,
 		RequestedModel:        requestedModel,
 		UpstreamModel:         optionalNonEqualStringPtr(result.UpstreamModel, result.Model),
+		UpstreamResponseModel: optionalTrimmedStringPtr(result.UpstreamResponseModel),
+		UpstreamModelMismatch: upstreamModelMismatch(sentModel, result.UpstreamResponseModel),
 		ReasoningEffort:       result.ReasoningEffort,
 		InboundEndpoint:       optionalTrimmedStringPtr(input.InboundEndpoint),
 		UpstreamEndpoint:      optionalTrimmedStringPtr(input.UpstreamEndpoint),

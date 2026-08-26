@@ -40,6 +40,11 @@ const messages: Record<string, string> = {
   'usage.chargedAmount': 'Charged',
   'usage.sourceWebChat': 'GPT Chat',
   'usage.sourceApi': 'API',
+  'usage.requestedModel': 'Requested',
+  'usage.sentUpstreamModel': 'Sent upstream',
+  'usage.upstreamResponseModel': 'Upstream response',
+  'usage.modelVariant': 'Possible version variant',
+  'usage.modelMismatch': 'Different model',
   'usage.accountBilled': 'Account billed',
   'usage.imageUnit': ' images',
   'usage.imageCount': 'Image count',
@@ -300,6 +305,104 @@ describe('admin UsageTable tooltip', () => {
     const text = wrapper.text()
     expect(text).toContain('claude-sonnet-4')
     expect(text).toContain('claude-sonnet-4-20250514')
+  })
+
+  it('shows response-model audit evidence only for explicit mismatches', () => {
+    const wrapper = mount(UsageTable, {
+      props: {
+        data: [
+          makeUsageRow({
+            request_id: 'req-model-audit-mismatch',
+            model: 'gpt-5.4',
+            upstream_model: 'gpt-5.4',
+            upstream_response_model: 'gpt-5.4-2026-08-01',
+            upstream_model_mismatch: true,
+          }),
+          makeUsageRow({
+            request_id: 'req-model-audit-match',
+            model: 'gpt-5.4',
+            upstream_response_model: 'gpt-5.4',
+            upstream_model_mismatch: false,
+          }),
+          makeUsageRow({
+            request_id: 'req-model-audit-unobserved',
+            model: 'gpt-5.4',
+            upstream_response_model: 'private-unobserved-value',
+            upstream_model_mismatch: null,
+          }),
+        ],
+        loading: false,
+        columns: [],
+        showUpstreamModelAudit: true,
+      },
+      global: {
+        stubs: {
+          DataTable: DataTableStub,
+          EmptyState: true,
+          Icon: true,
+          Teleport: true,
+        },
+      },
+    })
+
+    const auditRows = wrapper.findAll('[data-testid="upstream-response-model-audit"]')
+    expect(auditRows).toHaveLength(1)
+    expect(auditRows[0].text()).toContain('gpt-5.4-2026-08-01')
+    expect(auditRows[0].text()).toContain('Possible version variant')
+    expect(wrapper.text()).not.toContain('private-unobserved-value')
+  })
+
+  it('distinguishes a different response model from a dated model variant', () => {
+    const wrapper = mount(UsageTable, {
+      props: {
+        data: [makeUsageRow({
+          request_id: 'req-model-audit-different',
+          model: 'claude-sonnet-4',
+          upstream_model: 'claude-sonnet-4',
+          upstream_response_model: 'claude-opus-4',
+          upstream_model_mismatch: true,
+        })],
+        loading: false,
+        columns: [],
+        showUpstreamModelAudit: true,
+      },
+      global: {
+        stubs: {
+          DataTable: DataTableStub,
+          EmptyState: true,
+          Icon: true,
+          Teleport: true,
+        },
+      },
+    })
+
+    expect(wrapper.get('[data-testid="upstream-response-model-audit"]').text()).toContain('Different model')
+  })
+
+  it('keeps raw upstream response models hidden unless the admin audit switch is explicit', () => {
+    const wrapper = mount(UsageTable, {
+      props: {
+        data: [makeUsageRow({
+          request_id: 'req-user-facing-private',
+          model: 'gpt-5.4',
+          upstream_response_model: 'private-upstream-response-model',
+          upstream_model_mismatch: true,
+        })],
+        loading: false,
+        columns: [],
+      },
+      global: {
+        stubs: {
+          DataTable: DataTableStub,
+          EmptyState: true,
+          Icon: true,
+          Teleport: true,
+        },
+      },
+    })
+
+    expect(wrapper.find('[data-testid="upstream-response-model-audit"]').exists()).toBe(false)
+    expect(wrapper.text()).not.toContain('private-upstream-response-model')
   })
 
   it('renders Web Chat source, request ID, actual model, and server-reported usage cost', () => {

@@ -31,6 +31,7 @@ func (s *OpenAIGatewayService) ForwardAsAnthropic(
 	promptCacheKey string,
 	defaultMappedModel string,
 ) (*OpenAIForwardResult, error) {
+	beginUpstreamResponseModelObservation(c)
 	// 入口分流：APIKey 账号 + 上游不支持 Responses API → 走 CC 直转（与
 	// ForwardAsChatCompletions 对称）。缺少此分流时，/v1/messages 入站请求
 	// 会被无条件转为 Responses 格式发往上游 /v1/responses，导致只支持
@@ -498,21 +499,27 @@ func (s *OpenAIGatewayService) handleAnthropicBufferedStreamingResponse(
 	startTime time.Time,
 ) (*OpenAIForwardResult, error) {
 	requestID := resp.Header.Get("x-request-id")
+	observer := upstreamResponseModelObserverFromContext(c)
+	if observer == nil {
+		observer = beginUpstreamResponseModelObservation(c)
+	}
 	// Buffering can end in a semantic response.failed event that still reports
 	// tokens consumed upstream. Preserve that scalar usage for billing on
 	// non-failover errors, while keeping zero-usage and replayable failover paths
 	// free of phantom/double charges.
 	resultWithUsage := func(responseID string, usage OpenAIUsage) *OpenAIForwardResult {
 		return &OpenAIForwardResult{
-			RequestID:       requestID,
-			ResponseID:      strings.TrimSpace(responseID),
-			Usage:           usage,
-			Model:           originalModel,
-			BillingModel:    billingModel,
-			UpstreamModel:   upstreamModel,
-			Stream:          false,
-			ResponseHeaders: resp.Header.Clone(),
-			Duration:        time.Since(startTime),
+			RequestID:                     requestID,
+			ResponseID:                    strings.TrimSpace(responseID),
+			Usage:                         usage,
+			Model:                         originalModel,
+			BillingModel:                  billingModel,
+			UpstreamModel:                 upstreamModel,
+			UpstreamResponseModel:         observer.Model(),
+			UpstreamResponseModelConflict: observer.Conflict(),
+			Stream:                        false,
+			ResponseHeaders:               resp.Header.Clone(),
+			Duration:                      time.Since(startTime),
 		}
 	}
 	observedResult := func(responseID string, usage OpenAIUsage) *OpenAIForwardResult {
@@ -523,7 +530,7 @@ func (s *OpenAIGatewayService) handleAnthropicBufferedStreamingResponse(
 		return result
 	}
 
-	finalResponse, usage, acc, err := s.readOpenAICompatBufferedTerminal(resp, "openai messages buffered", requestID)
+	finalResponse, usage, acc, err := s.readOpenAICompatBufferedTerminal(resp, observer, "openai messages buffered", requestID)
 	if err != nil {
 		return observedResult("", usage), err
 	}
@@ -623,9 +630,13 @@ func isOpenAICompatDoneSentinelLine(line string) bool {
 
 func (s *OpenAIGatewayService) readOpenAICompatBufferedTerminal(
 	resp *http.Response,
+	observer *upstreamResponseModelObserver,
 	logPrefix string,
 	requestID string,
 ) (*apicompat.ResponsesResponse, OpenAIUsage, *apicompat.BufferedResponseAccumulator, error) {
+	if observer == nil {
+		observer = &upstreamResponseModelObserver{}
+	}
 	acc := apicompat.NewBufferedResponseAccumulator()
 	var usage OpenAIUsage
 	if resp == nil || resp.Body == nil {
@@ -704,6 +715,7 @@ func (s *OpenAIGatewayService) readOpenAICompatBufferedTerminal(
 					payload := openAICompatPayloadWithEventType(frame.Data, frame.EventType)
 					var event apicompat.ResponsesStreamEvent
 					if err := json.Unmarshal([]byte(payload), &event); err == nil {
+						observer.ObserveOpenAI([]byte(payload), event.Type)
 						acc.ProcessEvent(&event)
 						if isOpenAICompatResponsesTerminalEvent(event.Type) {
 							if event.Usage != nil {
@@ -759,6 +771,7 @@ func (s *OpenAIGatewayService) readOpenAICompatBufferedTerminal(
 				)
 				continue
 			}
+			observer.ObserveOpenAI([]byte(payload), event.Type)
 
 			acc.ProcessEvent(&event)
 
@@ -812,6 +825,10 @@ func (s *OpenAIGatewayService) handleAnthropicStreamingResponse(
 ) (*OpenAIForwardResult, error) {
 	requestID := resp.Header.Get("x-request-id")
 	writeStreamHeaders := s.newStreamHeaderWriter(c, resp.Header)
+	observer := upstreamResponseModelObserverFromContext(c)
+	if observer == nil {
+		observer = beginUpstreamResponseModelObservation(c)
+	}
 
 	state := apicompat.NewResponsesEventToAnthropicState()
 	state.Model = originalModel
@@ -843,17 +860,19 @@ func (s *OpenAIGatewayService) handleAnthropicStreamingResponse(
 	// resultWithUsage builds the final result snapshot.
 	resultWithUsage := func() *OpenAIForwardResult {
 		return &OpenAIForwardResult{
-			RequestID:        requestID,
-			ResponseID:       responseID,
-			Usage:            usage,
-			Model:            originalModel,
-			BillingModel:     billingModel,
-			UpstreamModel:    upstreamModel,
-			Stream:           true,
-			ResponseHeaders:  resp.Header.Clone(),
-			Duration:         time.Since(startTime),
-			FirstTokenMs:     firstTokenMs,
-			ClientDisconnect: clientDisconnected,
+			RequestID:                     requestID,
+			ResponseID:                    responseID,
+			Usage:                         usage,
+			Model:                         originalModel,
+			BillingModel:                  billingModel,
+			UpstreamModel:                 upstreamModel,
+			UpstreamResponseModel:         observer.Model(),
+			UpstreamResponseModelConflict: observer.Conflict(),
+			Stream:                        true,
+			ResponseHeaders:               resp.Header.Clone(),
+			Duration:                      time.Since(startTime),
+			FirstTokenMs:                  firstTokenMs,
+			ClientDisconnect:              clientDisconnected,
 		}
 	}
 
@@ -873,6 +892,7 @@ func (s *OpenAIGatewayService) handleAnthropicStreamingResponse(
 			)
 			return false
 		}
+		observer.ObserveOpenAI([]byte(payload), event.Type)
 
 		eventType := strings.TrimSpace(event.Type)
 		isBareErrorEvent := eventType == "error"

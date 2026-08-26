@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"net"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -450,6 +451,69 @@ func TestRelayTurnTimingHelpersCoverage(t *testing.T) {
 	// 删除不存在键
 	_, ok = openAIWSRelayDeleteTurnTiming(state, "resp_a")
 	require.False(t, ok)
+}
+
+func TestObserveUpstreamMessage_ResponseModelIsTurnLocalAndTerminalWins(t *testing.T) {
+	t.Parallel()
+
+	state := &relayState{requestModel: "gpt-5.6-sol"}
+	startAt := time.Unix(0, 0)
+	now := startAt
+	nowFn := func() time.Time {
+		now = now.Add(5 * time.Millisecond)
+		return now
+	}
+
+	created := observeUpstreamMessage(
+		state,
+		[]byte(`{"type":"response.created","response":{"id":"resp_1","model":"gpt-5.5"}}`),
+		startAt,
+		nowFn,
+		nil,
+	)
+	require.False(t, created.terminal)
+
+	completed := observeUpstreamMessage(
+		state,
+		[]byte(`{"type":"response.completed","response":{"id":"resp_1","model":"gpt-5.4","usage":{"input_tokens":1,"output_tokens":2}}}`),
+		startAt,
+		nowFn,
+		nil,
+	)
+	require.True(t, completed.terminal)
+	require.Equal(t, "gpt-5.4", completed.responseModel)
+	require.True(t, completed.responseModelConflict)
+
+	var firstTurn RelayTurnResult
+	emitTurnComplete(func(turn RelayTurnResult) { firstTurn = turn }, state, completed)
+	require.Equal(t, "gpt-5.4", firstTurn.ResponseModel)
+	require.True(t, firstTurn.ResponseModelConflict)
+
+	observeUpstreamMessage(
+		state,
+		[]byte(`{"type":"response.created","response":{"id":"resp_2","model":"gpt-5.3"}}`),
+		startAt,
+		nowFn,
+		nil,
+	)
+	second := observeUpstreamMessage(
+		state,
+		[]byte(`{"type":"response.completed","response":{"id":"resp_2","model":"GPT-5.3","usage":{"input_tokens":3,"output_tokens":4}}}`),
+		startAt,
+		nowFn,
+		nil,
+	)
+	require.Equal(t, "GPT-5.3", second.responseModel)
+	require.False(t, second.responseModelConflict, "the previous turn must not contaminate this turn")
+}
+
+func TestRelayResponseModelBoundsUnicodeAndRejectsMalformedJSON(t *testing.T) {
+	t.Parallel()
+
+	longModel := strings.Repeat("模", responseModelMaxRunes+1)
+	payload := []byte(`{"type":"response.completed","response":{"model":"` + longModel + `"}}`)
+	require.Len(t, []rune(firstRelayResponseModel(payload)), responseModelMaxRunes)
+	require.Empty(t, firstRelayResponseModel([]byte(`{"response":{"model":"gpt-5.4"}`)))
 }
 
 func TestObserveUpstreamMessage_ResponseIDFallbackPolicy(t *testing.T) {

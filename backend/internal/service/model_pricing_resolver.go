@@ -33,6 +33,11 @@ type ResolvedPricing struct {
 	// 来源标识
 	Source string // "channel", "litellm", "fallback"
 
+	// Identified means the global model lookup was deterministic. Explicit
+	// channel pricing is always identified. This bit belongs to the same pricing
+	// snapshot as BasePricing and must not be recomputed later.
+	Identified bool
+
 	// 是否支持缓存细分
 	SupportsCacheBreakdown bool
 
@@ -87,6 +92,7 @@ func (r *ModelPricingResolver) Resolve(ctx context.Context, input PricingInput) 
 				resolved := &ResolvedPricing{
 					Mode:           mode,
 					Source:         PricingSourceChannel,
+					Identified:     true,
 					channelPricing: chPricing,
 				}
 				r.applyRequestTierOverrides(chPricing, resolved)
@@ -96,18 +102,20 @@ func (r *ModelPricingResolver) Resolve(ctx context.Context, input PricingInput) 
 	}
 
 	// 1. 获取基础定价
-	basePricing, source := r.resolveBasePricing(input.Model)
+	basePricing, source, identified := r.resolveBasePricing(input.Model)
 
 	resolved := &ResolvedPricing{
 		Mode:                   BillingModeToken,
 		BasePricing:            basePricing,
 		Source:                 source,
+		Identified:             identified,
 		SupportsCacheBreakdown: basePricing != nil && basePricing.SupportsCacheBreakdown,
 	}
 
 	// 2. 如果有 GroupID，尝试渠道覆盖
 	if chPricing != nil {
 		resolved.Source = PricingSourceChannel
+		resolved.Identified = true
 		resolved.channelPricing = chPricing
 		r.applyTokenOverrides(chPricing, resolved)
 	} else if input.GroupID != nil {
@@ -118,14 +126,14 @@ func (r *ModelPricingResolver) Resolve(ctx context.Context, input PricingInput) 
 }
 
 // resolveBasePricing 从 LiteLLM 或 Fallback 获取基础定价
-func (r *ModelPricingResolver) resolveBasePricing(model string) (*ModelPricing, string) {
-	pricing, err := r.billingService.GetModelPricing(model)
+func (r *ModelPricingResolver) resolveBasePricing(model string) (*ModelPricing, string, bool) {
+	pricing, source, identified, err := r.billingService.resolveModelPricingSnapshot(model)
 	if err != nil {
 		slog.Debug("failed to get model pricing from LiteLLM, using fallback",
 			"model", model, "error", err)
-		return nil, PricingSourceFallback
+		return nil, PricingSourceFallback, false
 	}
-	return pricing, PricingSourceLiteLLM
+	return pricing, source, identified
 }
 
 // applyChannelOverrides 应用渠道定价覆盖
@@ -136,6 +144,7 @@ func (r *ModelPricingResolver) applyChannelOverrides(ctx context.Context, groupI
 	}
 
 	resolved.Source = PricingSourceChannel
+	resolved.Identified = true
 	resolved.channelPricing = chPricing
 	resolved.Mode = chPricing.BillingMode
 	if resolved.Mode == "" {

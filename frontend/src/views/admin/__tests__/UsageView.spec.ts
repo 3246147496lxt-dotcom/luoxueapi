@@ -136,6 +136,7 @@ const UsageTableStub = {
   props: {
     columns: { type: Array, default: () => [] },
     auditLayout: Boolean,
+    showUpstreamModelAudit: Boolean,
   },
   emits: ['userClick'],
   template: '<div data-test="usage-table"><button class="user-click" @click="$emit(\'userClick\', 2)">user</button></div>',
@@ -311,6 +312,7 @@ describe('admin UsageView distribution metric toggles', () => {
     expect(evidence.find('[data-test="usage-table"]').exists()).toBe(true)
     const usageTable = evidence.getComponent(UsageTableStub)
     expect(usageTable.props('auditLayout')).toBe(true)
+    expect(usageTable.props('showUpstreamModelAudit')).toBe(true)
     expect((usageTable.props('columns') as Array<{ key: string }>).map(column => column.key)).toEqual([
       'user',
       'model',
@@ -429,6 +431,39 @@ describe('admin UsageView distribution metric toggles', () => {
     expect(modelChart.find('.metric').text()).toBe('actual_cost')
     expect(groupChart.find('.metric').text()).toBe('actual_cost')
     expect(getSnapshotV2).toHaveBeenCalledTimes(1)
+  })
+
+  it('forwards the response-model mismatch filter to every supported usage query', async () => {
+    const wrapper = mount(UsageView, {
+      global: { stubs: {
+        AppLayout: AppLayoutStub, UsageStatsCards: true, UsageFilters: UsageFiltersStub,
+        UsageTable: true, UsageExportProgress: true, UsageCleanupDialog: true,
+        UserBalanceHistoryModal: true, Pagination: true, Select: true,
+        DateRangePicker: true, Icon: true, TokenUsageTrend: true,
+        ModelDistributionChart: true, GroupDistributionChart: true,
+        EndpointDistributionChart: true, UserTokenRanking: true,
+      } },
+    })
+
+    vi.advanceTimersByTime(120)
+    await flushPromises()
+    list.mockClear()
+    getStats.mockClear()
+    getModelStats.mockClear()
+    getSnapshotV2.mockClear()
+
+    const vm = wrapper.vm as any
+    vm.filters.upstream_model_mismatch = true
+    vm.applyFilters()
+    await flushPromises()
+
+    expect(list).toHaveBeenCalledWith(
+      expect.objectContaining({ upstream_model_mismatch: true }),
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    )
+    expect(getStats).toHaveBeenCalledWith(expect.objectContaining({ upstream_model_mismatch: true }))
+    expect(getModelStats).toHaveBeenCalledWith(expect.objectContaining({ upstream_model_mismatch: true }))
+    expect(getSnapshotV2).toHaveBeenCalledWith(expect.objectContaining({ upstream_model_mismatch: true }))
   })
 })
 

@@ -138,6 +138,7 @@ func (s *OpenAIGatewayService) forwardAlphaSearchViaResponsesWebSearch(
 	requestedModel string,
 	upstreamModel string,
 ) (*OpenAIForwardResult, error) {
+	observer := beginUpstreamResponseModelObservation(c)
 	if upstreamModel == "" {
 		upstreamModel = requestedModel
 	}
@@ -194,19 +195,25 @@ func (s *OpenAIGatewayService) forwardAlphaSearchViaResponsesWebSearch(
 	if !account.IsShadow() {
 		s.UpdateCodexUsageSnapshotFromHeaders(ctx, account.ID, resp.Header)
 	}
+	// Observe the raw Responses stream before converting it into the
+	// client-facing alpha/search payload, which intentionally drops provider
+	// response metadata such as response.model.
+	observeOpenAISSEBody(observer, string(respBody))
 	alphaRespBody, err := openAIAlphaSearchResponseFromResponsesSSE(respBody)
 	if err != nil {
 		return nil, err
 	}
 	c.Data(http.StatusOK, "application/json", alphaRespBody)
 	return &OpenAIForwardResult{
-		RequestID:        strings.TrimSpace(resp.Header.Get("x-request-id")),
-		Model:            requestedModel,
-		UpstreamModel:    upstreamModel,
-		UpstreamEndpoint: "/v1/responses",
-		ResponseHeaders:  resp.Header.Clone(),
-		Duration:         time.Since(upstreamStart),
-		WebSearchCalls:   1,
+		RequestID:                     strings.TrimSpace(resp.Header.Get("x-request-id")),
+		Model:                         requestedModel,
+		UpstreamModel:                 upstreamModel,
+		UpstreamResponseModel:         observer.Model(),
+		UpstreamResponseModelConflict: observer.Conflict(),
+		UpstreamEndpoint:              "/v1/responses",
+		ResponseHeaders:               resp.Header.Clone(),
+		Duration:                      time.Since(upstreamStart),
+		WebSearchCalls:                1,
 	}, nil
 }
 

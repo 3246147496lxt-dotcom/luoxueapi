@@ -92,7 +92,7 @@ func TestReadOpenAICompatBufferedTerminal_UsesTopLevelTerminalUsage(t *testing.T
 		Body:       io.NopCloser(strings.NewReader(bufferedResponseFailedSSE(true))),
 	}
 
-	finalResponse, usage, _, err := svc.readOpenAICompatBufferedTerminal(resp, "test buffered", "rid")
+	finalResponse, usage, _, err := svc.readOpenAICompatBufferedTerminal(resp, &upstreamResponseModelObserver{}, "test buffered", "rid")
 	require.NoError(t, err)
 	require.NotNil(t, finalResponse)
 	require.Equal(t, "failed", finalResponse.Status)

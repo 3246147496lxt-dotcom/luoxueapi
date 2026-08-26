@@ -19,6 +19,7 @@ import (
 
 // Forward forwards request to OpenAI API
 func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, account *Account, body []byte) (*OpenAIForwardResult, error) {
+	beginUpstreamResponseModelObservation(c)
 	startTime := time.Now()
 	// 固定渠道映射后的请求级 canonical body；账号 normalize/strip 不得改写跨 failover hint。
 	canonicalImageIntentBody := body
@@ -972,22 +973,24 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 					partialUsage = *streamResult.usage
 				}
 				partialResult := &OpenAIForwardResult{
-					RequestID:        resp.Header.Get("x-request-id"),
-					ResponseID:       strings.TrimSpace(streamResult.responseID),
-					Usage:            partialUsage,
-					Model:            originalModel,
-					BillingModel:     billingModel,
-					UpstreamModel:    upstreamModel,
-					ServiceTier:      serviceTier,
-					ReasoningEffort:  reasoningEffort,
-					Stream:           reqStream,
-					OpenAIWSMode:     false,
-					ResponseHeaders:  resp.Header.Clone(),
-					Duration:         time.Since(startTime),
-					FirstTokenMs:     streamResult.firstTokenMs,
-					ClientDisconnect: streamResult.clientDisconnect,
-					ImageCount:       streamResult.imageCount,
-					ImageOutputSizes: append([]string(nil), streamResult.imageOutputSizes...),
+					RequestID:                     resp.Header.Get("x-request-id"),
+					ResponseID:                    strings.TrimSpace(streamResult.responseID),
+					Usage:                         partialUsage,
+					Model:                         originalModel,
+					BillingModel:                  billingModel,
+					UpstreamModel:                 upstreamModel,
+					UpstreamResponseModel:         observedUpstreamResponseModel(c),
+					UpstreamResponseModelConflict: observedUpstreamResponseModelConflict(c),
+					ServiceTier:                   serviceTier,
+					ReasoningEffort:               reasoningEffort,
+					Stream:                        reqStream,
+					OpenAIWSMode:                  false,
+					ResponseHeaders:               resp.Header.Clone(),
+					Duration:                      time.Since(startTime),
+					FirstTokenMs:                  streamResult.firstTokenMs,
+					ClientDisconnect:              streamResult.clientDisconnect,
+					ImageCount:                    streamResult.imageCount,
+					ImageOutputSizes:              append([]string(nil), streamResult.imageOutputSizes...),
 				}
 				if partialResult.ImageCount > 0 {
 					partialResult.ImageSize = imageSizeTier
@@ -1013,20 +1016,22 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 					return nil, err
 				}
 				partialResult := &OpenAIForwardResult{
-					RequestID:        resp.Header.Get("x-request-id"),
-					ResponseID:       strings.TrimSpace(nonStreamResult.responseID),
-					Usage:            *nonStreamResult.usage,
-					Model:            originalModel,
-					BillingModel:     billingModel,
-					UpstreamModel:    upstreamModel,
-					ServiceTier:      serviceTier,
-					ReasoningEffort:  reasoningEffort,
-					Stream:           false,
-					OpenAIWSMode:     false,
-					ResponseHeaders:  resp.Header.Clone(),
-					Duration:         time.Since(startTime),
-					ImageCount:       nonStreamResult.imageCount,
-					ImageOutputSizes: append([]string(nil), nonStreamResult.imageOutputSizes...),
+					RequestID:                     resp.Header.Get("x-request-id"),
+					ResponseID:                    strings.TrimSpace(nonStreamResult.responseID),
+					Usage:                         *nonStreamResult.usage,
+					Model:                         originalModel,
+					BillingModel:                  billingModel,
+					UpstreamModel:                 upstreamModel,
+					UpstreamResponseModel:         observedUpstreamResponseModel(c),
+					UpstreamResponseModelConflict: observedUpstreamResponseModelConflict(c),
+					ServiceTier:                   serviceTier,
+					ReasoningEffort:               reasoningEffort,
+					Stream:                        false,
+					OpenAIWSMode:                  false,
+					ResponseHeaders:               resp.Header.Clone(),
+					Duration:                      time.Since(startTime),
+					ImageCount:                    nonStreamResult.imageCount,
+					ImageOutputSizes:              append([]string(nil), nonStreamResult.imageOutputSizes...),
 				}
 				if partialResult.ImageCount > 0 {
 					partialResult.ImageSize = imageSizeTier
@@ -1055,19 +1060,21 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		}
 
 		forwardResult := &OpenAIForwardResult{
-			RequestID:       resp.Header.Get("x-request-id"),
-			ResponseID:      responseID,
-			Usage:           *usage,
-			Model:           originalModel,
-			BillingModel:    billingModel,
-			UpstreamModel:   upstreamModel,
-			ServiceTier:     serviceTier,
-			ReasoningEffort: reasoningEffort,
-			Stream:          reqStream,
-			OpenAIWSMode:    false,
-			ResponseHeaders: resp.Header.Clone(),
-			Duration:        time.Since(startTime),
-			FirstTokenMs:    firstTokenMs,
+			RequestID:                     resp.Header.Get("x-request-id"),
+			ResponseID:                    responseID,
+			Usage:                         *usage,
+			Model:                         originalModel,
+			BillingModel:                  billingModel,
+			UpstreamModel:                 upstreamModel,
+			UpstreamResponseModel:         observedUpstreamResponseModel(c),
+			UpstreamResponseModelConflict: observedUpstreamResponseModelConflict(c),
+			ServiceTier:                   serviceTier,
+			ReasoningEffort:               reasoningEffort,
+			Stream:                        reqStream,
+			OpenAIWSMode:                  false,
+			ResponseHeaders:               resp.Header.Clone(),
+			Duration:                      time.Since(startTime),
+			FirstTokenMs:                  firstTokenMs,
 		}
 		if imageCount > 0 {
 			forwardResult.ImageCount = imageCount

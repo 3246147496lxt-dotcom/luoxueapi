@@ -886,7 +886,7 @@ func catalogBillingModelAndPricing(channel *Channel, supported SupportedModel) (
 				return "", nil, false
 			}
 		}
-	case BillingModelSourceChannelMapped:
+	case BillingModelSourceChannelMapped, BillingModelSourceResponse:
 		billingModel = supported.Name
 		mappedTarget := false
 		if mapping := channel.ModelMapping[supported.Platform]; len(mapping) > 0 {

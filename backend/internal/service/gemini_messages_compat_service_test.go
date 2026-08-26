@@ -46,7 +46,7 @@ func (s *geminiCompatHTTPUpstreamStub) DoWithTLS(req *http.Request, proxyURL str
 func TestGeminiForwardAsChatCompletions_OAuthRoutesToGeminiAndReturnsChatFormat(t *testing.T) {
 	setGinTestMode()
 
-	upstreamBody := `data: {"response":{"candidates":[{"content":{"parts":[{"text":"hello from gemini"}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":7,"candidatesTokenCount":3}}}` + "\n\n" +
+	upstreamBody := `data: {"modelVersion":"gemini-2.5-flash-actual","response":{"modelVersion":"gemini-2.5-flash-inner","candidates":[{"content":{"parts":[{"text":"hello from gemini"}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":7,"candidatesTokenCount":3}}}` + "\n\n" +
 		"data: [DONE]\n\n"
 	httpStub := &geminiCompatHTTPUpstreamStub{
 		response: &http.Response{
@@ -81,6 +81,8 @@ func TestGeminiForwardAsChatCompletions_OAuthRoutesToGeminiAndReturnsChatFormat(
 	require.NotNil(t, result)
 	require.Equal(t, http.StatusOK, rec.Code)
 	require.Equal(t, "gemini-2.5-flash", result.Model)
+	require.Equal(t, "gemini-2.5-flash-actual", result.UpstreamResponseModel)
+	require.True(t, result.UpstreamResponseModelConflict)
 	require.Equal(t, 7, result.Usage.InputTokens)
 	require.Equal(t, 3, result.Usage.OutputTokens)
 
@@ -118,11 +120,168 @@ func TestGeminiForwardAsChatCompletions_OAuthRoutesToGeminiAndReturnsChatFormat(
 	require.Equal(t, float64(10), usage["total_tokens"])
 }
 
+func TestGeminiMessagesForward_OAuthCollectedSSEKeepsRawOuterModelAndConflict(t *testing.T) {
+	setGinTestMode()
+
+	upstreamBody := `data: {"modelVersion":"gemini-outer","response":{"modelVersion":"gemini-inner","candidates":[{"content":{"parts":[{"text":"hello"}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":7,"candidatesTokenCount":3}}}` + "\n\n" +
+		"data: [DONE]\n\n"
+	httpStub := &geminiCompatHTTPUpstreamStub{
+		response: &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+			Body:       io.NopCloser(strings.NewReader(upstreamBody)),
+		},
+	}
+	svc := &GeminiMessagesCompatService{
+		tokenProvider: &GeminiTokenProvider{},
+		httpUpstream:  httpStub,
+		cfg:           &config.Config{},
+	}
+	account := &Account{
+		ID:       103,
+		Platform: PlatformGemini,
+		Type:     AccountTypeOAuth,
+		Credentials: map[string]any{
+			"access_token": "ya29.test-token",
+			"project_id":   "project-1",
+		},
+		Concurrency: 1,
+	}
+
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	body := []byte(`{"model":"gemini-2.5-flash","max_tokens":32,"messages":[{"role":"user","content":"hi"}]}`)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", bytes.NewReader(body))
+
+	result, err := svc.Forward(context.Background(), c, account, body)
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.Equal(t, "gemini-outer", result.UpstreamResponseModel)
+	require.True(t, result.UpstreamResponseModelConflict)
+	require.Contains(t, rec.Body.String(), "hello")
+}
+
+func TestGeminiMessagesOAuthHandlersObserveRawWrapperBeforeUnwrap(t *testing.T) {
+	setGinTestMode()
+	svc := &GeminiMessagesCompatService{cfg: &config.Config{}}
+	raw := `{"modelVersion":"gemini-outer","response":{"modelVersion":"gemini-inner","candidates":[{"content":{"parts":[{"text":"hello"}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":2,"candidatesTokenCount":1}}}`
+
+	t.Run("non streaming", func(t *testing.T) {
+		rec := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(rec)
+		resp := &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(strings.NewReader(raw)),
+		}
+
+		usage, err := svc.handleNonStreamingResponse(c, resp, "gemini-requested")
+		require.NoError(t, err)
+		require.NotNil(t, usage)
+		require.Equal(t, "gemini-outer", observedUpstreamResponseModel(c))
+		require.True(t, observedUpstreamResponseModelConflict(c))
+	})
+
+	t.Run("streaming", func(t *testing.T) {
+		rec := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(rec)
+		resp := &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+			Body:       io.NopCloser(strings.NewReader("data: " + raw + "\n\ndata: [DONE]\n\n")),
+		}
+
+		result, err := svc.handleStreamingResponse(c, resp, time.Now(), "gemini-requested")
+		require.NoError(t, err)
+		require.NotNil(t, result)
+		require.Equal(t, "gemini-outer", observedUpstreamResponseModel(c))
+		require.True(t, observedUpstreamResponseModelConflict(c))
+	})
+}
+
+func TestGeminiNativeOAuthHandlersObserveRawWrapperBeforeUnwrap(t *testing.T) {
+	setGinTestMode()
+	svc := &GeminiMessagesCompatService{cfg: &config.Config{}}
+	raw := `{"modelVersion":"gemini-outer","response":{"modelVersion":"gemini-inner","candidates":[{"content":{"parts":[{"text":"hello"}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":2,"candidatesTokenCount":1}}}`
+
+	t.Run("non streaming", func(t *testing.T) {
+		rec := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(rec)
+		resp := &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(strings.NewReader(raw)),
+		}
+
+		usage, err := svc.handleNativeNonStreamingResponse(c, resp, true)
+		require.NoError(t, err)
+		require.NotNil(t, usage)
+		require.Equal(t, "gemini-outer", observedUpstreamResponseModel(c))
+		require.True(t, observedUpstreamResponseModelConflict(c))
+		require.NotContains(t, rec.Body.String(), `"response"`)
+	})
+
+	t.Run("streaming", func(t *testing.T) {
+		rec := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(rec)
+		resp := &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+			Body:       io.NopCloser(strings.NewReader("data: " + raw + "\n\ndata: [DONE]\n\n")),
+		}
+
+		result, err := svc.handleNativeStreamingResponse(c, resp, time.Now(), true)
+		require.NoError(t, err)
+		require.NotNil(t, result)
+		require.Equal(t, "gemini-outer", observedUpstreamResponseModel(c))
+		require.True(t, observedUpstreamResponseModelConflict(c))
+		require.NotContains(t, rec.Body.String(), `"response"`)
+	})
+}
+
+func TestGeminiChatCompletionsOAuthHandlersObserveRawWrapperBeforeUnwrap(t *testing.T) {
+	setGinTestMode()
+	svc := &GeminiMessagesCompatService{cfg: &config.Config{}}
+	raw := `{"modelVersion":"gemini-outer","response":{"modelVersion":"gemini-inner","candidates":[{"content":{"parts":[{"text":"hello"}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":2,"candidatesTokenCount":1}}}`
+
+	t.Run("non streaming", func(t *testing.T) {
+		rec := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(rec)
+		resp := &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"application/json"}},
+			Body:       io.NopCloser(strings.NewReader(raw)),
+		}
+
+		usage, err := svc.handleChatCompletionsNonStreamingResponseFromGemini(c, resp, "gemini-requested", true)
+		require.NoError(t, err)
+		require.NotNil(t, usage)
+		require.Equal(t, "gemini-outer", observedUpstreamResponseModel(c))
+		require.True(t, observedUpstreamResponseModelConflict(c))
+	})
+
+	t.Run("streaming", func(t *testing.T) {
+		rec := httptest.NewRecorder()
+		c, _ := gin.CreateTestContext(rec)
+		resp := &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+			Body:       io.NopCloser(strings.NewReader("data: " + raw + "\n\ndata: [DONE]\n\n")),
+		}
+
+		result, err := svc.handleChatCompletionsStreamingResponseFromGemini(c, resp, time.Now(), "gemini-requested", true, true)
+		require.NoError(t, err)
+		require.NotNil(t, result)
+		require.Equal(t, "gemini-outer", observedUpstreamResponseModel(c))
+		require.True(t, observedUpstreamResponseModelConflict(c))
+	})
+}
+
 func TestGeminiForwardAsChatCompletions_StreamsOpenAIChunksFromGeminiSSE(t *testing.T) {
 	setGinTestMode()
 
-	upstreamBody := `data: {"candidates":[{"content":{"parts":[{"text":"hel"}]}}],"usageMetadata":{"promptTokenCount":2,"candidatesTokenCount":1}}` + "\n\n" +
-		`data: {"candidates":[{"content":{"parts":[{"text":"hello"}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":2,"candidatesTokenCount":2}}` + "\n\n" +
+	upstreamBody := `data: {"modelVersion":"gemini-2.5-flash-actual","candidates":[{"content":{"parts":[{"text":"hel"}]}}],"usageMetadata":{"promptTokenCount":2,"candidatesTokenCount":1}}` + "\n\n" +
+		`data: {"modelVersion":"gemini-2.5-flash-actual","candidates":[{"content":{"parts":[{"text":"hello"}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":2,"candidatesTokenCount":2}}` + "\n\n" +
 		"data: [DONE]\n\n"
 	httpStub := &geminiCompatHTTPUpstreamStub{
 		response: &http.Response{
@@ -155,6 +314,8 @@ func TestGeminiForwardAsChatCompletions_StreamsOpenAIChunksFromGeminiSSE(t *test
 	require.NotNil(t, result)
 	require.Equal(t, http.StatusOK, rec.Code)
 	require.True(t, result.Stream)
+	require.Equal(t, "gemini-2.5-flash-actual", result.UpstreamResponseModel)
+	require.False(t, result.UpstreamResponseModelConflict)
 	require.Equal(t, 2, result.Usage.InputTokens)
 	require.Equal(t, 2, result.Usage.OutputTokens)
 

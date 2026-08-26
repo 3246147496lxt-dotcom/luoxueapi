@@ -13,14 +13,14 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestCandidateMigrationsUpgradeProduction246To253AndReplay(t *testing.T) {
+func TestCandidateMigrationsUpgradeProduction246To255AndReplay(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	defer cancel()
 
 	files, err := collectValidatedMigrationFiles(migrationfs.FS)
 	require.NoError(t, err)
 	const productionBaselineCount = 246
-	require.Len(t, files, productionBaselineCount+7, "candidate binary must embed the reviewed 253-file manifest")
+	require.Len(t, files, productionBaselineCount+9, "candidate binary must embed the reviewed 255-file manifest")
 
 	wantTail := []MigrationManifestEntry{
 		{Filename: "201_library_files.sql", SHA256: "03f6a53d92e93fbfee37b9e5dd78dc11cae49dd921812253d0425154f1a9c23e"},
@@ -30,6 +30,8 @@ func TestCandidateMigrationsUpgradeProduction246To253AndReplay(t *testing.T) {
 		{Filename: "231_add_users_email_alias_dedup_index_notx.sql", SHA256: "fd103466b72b14919fc7a0b02135f019f9fe7a409a434726467c3649551321e4"},
 		{Filename: "232_add_users_email_normalized_index_notx.sql", SHA256: "052a61bf4bdc89a5215970059a61096f4eaea5c244b6781f3ec42d6ac8e8bb5d"},
 		{Filename: "233_group_profit_control.sql", SHA256: "afd79e417fc16d34da93df95de87abef407f7cd21e16dae037e0aa59c048d52b"},
+		{Filename: "234_add_usage_log_upstream_response_model.sql", SHA256: "cad520cbfcf7af7ea9acae92e5bcbe27501fd9e3ad5b02e306f4f97be4410a82"},
+		{Filename: "235_add_usage_log_upstream_model_mismatch_index_notx.sql", SHA256: "692f2a75f0c62670b4d68986912bf24eb92f6377ec904d3806ff7d62b0da8355"},
 	}
 	require.Len(t, files, productionBaselineCount+len(wantTail))
 	for index, want := range wantTail {
@@ -43,7 +45,7 @@ func TestCandidateMigrationsUpgradeProduction246To253AndReplay(t *testing.T) {
 		productionBaseline[file.name] = &fstest.MapFile{Data: []byte(file.content)}
 	}
 
-	db := openIsolatedMigrationIntegrationDB(t, "sub2api_candidate_246_to_253")
+	db := openIsolatedMigrationIntegrationDB(t, "sub2api_candidate_246_to_255")
 	require.NoError(t, applyMigrationsFSWithPolicy(
 		ctx,
 		db,
@@ -65,6 +67,7 @@ func TestCandidateMigrationsUpgradeProduction246To253AndReplay(t *testing.T) {
 	requireCandidateLibrarySchema(t, ctx, db)
 	requireCandidateChatActivitySchema(t, ctx, db)
 	requireCandidateProfitControlSchema(t, ctx, db)
+	requireCandidateUpstreamResponseModelSchema(t, ctx, db)
 
 	beforeReplay := schemaMigrationsFingerprint(t, ctx, db)
 	require.NoError(t, applyMigrationsFSWithExpectedDatabaseIdentity(
@@ -113,6 +116,54 @@ WHERE table_schema = 'public'
 	require.Equal(t, 3, count)
 }
 
+func requireCandidateUpstreamResponseModelSchema(t *testing.T, ctx context.Context, db *sql.DB) {
+	t.Helper()
+
+	var responseModelType, mismatchType, responseModelNullable, mismatchNullable string
+	var responseModelMaxLength sql.NullInt64
+	require.NoError(t, db.QueryRowContext(ctx, `
+SELECT
+  MAX(CASE WHEN column_name = 'upstream_response_model' THEN data_type END),
+  MAX(CASE WHEN column_name = 'upstream_model_mismatch' THEN data_type END),
+  MAX(CASE WHEN column_name = 'upstream_response_model' THEN is_nullable END),
+  MAX(CASE WHEN column_name = 'upstream_model_mismatch' THEN is_nullable END),
+  MAX(CASE WHEN column_name = 'upstream_response_model' THEN character_maximum_length END)
+FROM information_schema.columns
+WHERE table_schema = 'public'
+  AND table_name = 'usage_logs'
+  AND column_name IN ('upstream_response_model', 'upstream_model_mismatch')`).Scan(
+		&responseModelType,
+		&mismatchType,
+		&responseModelNullable,
+		&mismatchNullable,
+		&responseModelMaxLength,
+	))
+	require.Equal(t, "character varying", responseModelType)
+	require.Equal(t, "boolean", mismatchType)
+	require.Equal(t, "YES", responseModelNullable)
+	require.Equal(t, "YES", mismatchNullable)
+	require.Equal(t, sql.NullInt64{Int64: 200, Valid: true}, responseModelMaxLength)
+
+	var valid, ready bool
+	var definition string
+	require.NoError(t, db.QueryRowContext(ctx, `
+SELECT index_state.indisvalid, index_state.indisready,
+       pg_get_indexdef(index_state.indexrelid)
+FROM pg_class AS index_class
+JOIN pg_index AS index_state ON index_state.indexrelid = index_class.oid
+JOIN pg_namespace AS index_namespace ON index_namespace.oid = index_class.relnamespace
+WHERE index_namespace.nspname = 'public'
+  AND index_class.relname = 'idx_usage_logs_upstream_model_mismatch_created_at'`).Scan(
+		&valid,
+		&ready,
+		&definition,
+	))
+	require.True(t, valid)
+	require.True(t, ready)
+	require.Contains(t, definition, "(created_at DESC, id DESC)")
+	require.Contains(t, definition, "WHERE (upstream_model_mismatch IS TRUE)")
+}
+
 func requireCandidateMigrationRows(
 	t *testing.T,
 	ctx context.Context,
@@ -130,7 +181,9 @@ WHERE filename IN (
   '202_chat_message_activities.sql',
   '231_add_users_email_alias_dedup_index_notx.sql',
   '232_add_users_email_normalized_index_notx.sql',
-  '233_group_profit_control.sql'
+  '233_group_profit_control.sql',
+  '234_add_usage_log_upstream_response_model.sql',
+  '235_add_usage_log_upstream_model_mismatch_index_notx.sql'
 )
 ORDER BY filename`)
 	require.NoError(t, err)

@@ -172,6 +172,16 @@
           />
         </div>
 
+        <div v-if="mode === 'usage'" class="usage-filter-field w-full sm:w-auto sm:min-w-[220px]">
+          <label class="input-label mb-1.5 block">{{ t('admin.usage.upstreamModelAudit') }}</label>
+          <Select
+            v-model="filters.upstream_model_mismatch"
+            :options="upstreamModelMismatchOptions"
+            :ariaLabel="t('admin.usage.upstreamModelAudit')"
+            @change="emitChange"
+          />
+        </div>
+
         <!-- Error Phase Filter (errors only) -->
         <div v-if="mode === 'errors'" class="usage-filter-field w-full sm:w-auto sm:min-w-[180px]">
           <label class="input-label mb-1.5 block">{{ t('admin.ops.errorLog.type') }}</label>
@@ -365,6 +375,12 @@ const billingModeOptions = ref<SelectOption[]>([
   { value: 'per_request', label: t('admin.usage.billingModePerRequest') },
   { value: 'image', label: t('admin.usage.billingModeImage') },
   { value: 'video', label: t('admin.usage.billingModeVideo') }
+])
+
+const upstreamModelMismatchOptions = ref<SelectOption[]>([
+  { value: null, label: t('admin.usage.allUpstreamModelAudit') },
+  { value: true, label: t('admin.usage.upstreamModelMismatchOnly') },
+  { value: false, label: t('admin.usage.upstreamModelMatchedOnly') }
 ])
 
 const emitChange = () => emit('change')

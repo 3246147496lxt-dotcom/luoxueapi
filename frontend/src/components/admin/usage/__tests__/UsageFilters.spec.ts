@@ -29,6 +29,10 @@ const messages: Record<string, string> = {
   'admin.usage.billingModeToken': 'Token',
   'admin.usage.billingModePerRequest': 'Per Request',
   'admin.usage.billingModeImage': 'Image',
+  'admin.usage.upstreamModelAudit': 'Upstream model audit',
+  'admin.usage.allUpstreamModelAudit': 'All response model states',
+  'admin.usage.upstreamModelMismatchOnly': 'Mismatched only',
+  'admin.usage.upstreamModelMatchedOnly': 'Matched only',
   'admin.ops.errorLog.type': 'Error phase',
   'usage.errors.category': 'Error category',
   'admin.ops.errorLog.status': 'Status',
@@ -79,6 +83,7 @@ const defaultFilters = () => ({
   request_type: null,
   billing_type: null,
   billing_mode: null,
+  upstream_model_mismatch: null,
   group_id: null,
   start_date: '',
   end_date: '',
@@ -188,7 +193,7 @@ describe('UsageFilters — layout variants', () => {
         })
       },
     })
-    const expectedUsageLabels = ['Model', 'Type', 'Billing Type', 'Billing Mode', 'Group']
+    const expectedUsageLabels = ['Model', 'Type', 'Billing Type', 'Billing Mode', 'Upstream model audit', 'Group']
     const expectedErrorLabels = ['Model', 'Error phase', 'Error category', 'Status', 'Group']
 
     const usage = mount(UsageFilters, {
@@ -217,6 +222,20 @@ describe('UsageFilters — layout variants', () => {
       .toEqual(expectedUsageLabels)
     expect(errors.findAll('.select-aria-stub').map((select) => select.attributes('aria-label')))
       .toEqual(expectedErrorLabels)
+  })
+
+  it('keeps response-model audit as an explicit three-state filter', () => {
+    const wrapper = mountFilters()
+    const options = (wrapper.vm as any).upstreamModelMismatchOptions as Array<{
+      value: boolean | null
+      label: string
+    }>
+
+    expect(options).toEqual([
+      { value: null, label: 'All response model states' },
+      { value: true, label: 'Mismatched only' },
+      { value: false, label: 'Matched only' },
+    ])
   })
 })
 

@@ -30,12 +30,96 @@ func (r *alphaSearchAccountStateRepo) SetError(_ context.Context, _ int64, error
 }
 
 func alphaSearchResponsesSSE(output string) string {
-	return "event: response.output_text.delta\n" +
+	return alphaSearchResponsesSSEWithModels(output, "", "")
+}
+
+func alphaSearchResponsesSSEWithModels(output string, initialModel string, terminalModel string) string {
+	initialEvent := ""
+	if initialModel != "" {
+		initialEvent = "event: response.created\n" +
+			`data: {"type":"response.created","response":{"model":` + strconv.Quote(initialModel) + `}}` + "\n\n"
+	}
+	terminalModelMember := ""
+	if terminalModel != "" {
+		terminalModelMember = `"model":` + strconv.Quote(terminalModel) + `,`
+	}
+	return initialEvent +
+		"event: response.output_text.delta\n" +
 		`data: {"type":"response.output_text.delta","delta":` + strconv.Quote(output) + `}` + "\n\n" +
 		"event: response.output_text.annotation.added\n" +
 		`data: {"type":"response.output_text.annotation.added","annotation":{"type":"url_citation","url":"https://example.com/news","title":"Example News"}}` + "\n\n" +
 		"event: response.completed\n" +
-		`data: {"type":"response.completed","response":{"output":[{"type":"message","content":[{"type":"output_text","text":` + strconv.Quote(output) + `}]}]}}` + "\n\n"
+		`data: {"type":"response.completed","response":{` + terminalModelMember + `"output":[{"type":"message","content":[{"type":"output_text","text":` + strconv.Quote(output) + `}]}]}}` + "\n\n"
+}
+
+func TestForwardAlphaSearchPATResponseModelAudit(t *testing.T) {
+	setGinTestMode()
+	tests := []struct {
+		name          string
+		initialModel  string
+		terminalModel string
+		wantConflict  bool
+	}{
+		{
+			name:          "raw terminal model is captured before client rewrite",
+			terminalModel: "provider-runtime-build",
+		},
+		{
+			name:          "terminal model wins and conflict remains sticky",
+			initialModel:  "provider-created-model",
+			terminalModel: "provider-terminal-model",
+			wantConflict:  true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			body := []byte(`{"id":"search-session","model":"client-model","commands":{"search_query":[{"q":"news"}]}}`)
+			recorder := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(recorder)
+			c.Request = httptest.NewRequest(http.MethodPost, "/v1/alpha/search", bytes.NewReader(body))
+
+			upstream := &httpUpstreamRecorder{resp: &http.Response{
+				StatusCode: http.StatusOK,
+				Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+				Body: io.NopCloser(strings.NewReader(alphaSearchResponsesSSEWithModels(
+					"search result",
+					tt.initialModel,
+					tt.terminalModel,
+				))),
+			}}
+			service := &OpenAIGatewayService{cfg: &config.Config{}, httpUpstream: upstream}
+			account := &Account{
+				ID:          47,
+				Platform:    PlatformOpenAI,
+				Type:        AccountTypeOAuth,
+				Concurrency: 1,
+				Credentials: map[string]any{
+					"access_token":       "at-test-token",
+					"auth_mode":          OpenAIAuthModePersonalAccessToken,
+					"chatgpt_account_id": "chatgpt-account",
+					"model_mapping": map[string]any{
+						"client-model": "sent-model",
+					},
+				},
+			}
+
+			result, err := service.ForwardAlphaSearch(context.Background(), c, account, body)
+
+			require.NoError(t, err)
+			require.NotNil(t, result)
+			require.Equal(t, "sent-model", result.UpstreamModel)
+			require.Equal(t, tt.terminalModel, result.UpstreamResponseModel)
+			require.Equal(t, tt.wantConflict, result.UpstreamResponseModelConflict)
+			require.Equal(t, 1, result.WebSearchCalls)
+			require.Equal(t, "sent-model", gjson.GetBytes(upstream.lastBody, "model").String())
+			require.JSONEq(t, `{"output":"search result","results":[{"type":"text_result","ref_id":"turn0search0","url":"https://example.com/news","title":"Example News"}]}`, recorder.Body.String())
+			// The alpha/search compatibility response intentionally omits Responses
+			// metadata; the result above must therefore come from the raw SSE rather
+			// than from the rewritten client payload.
+			require.False(t, gjson.Get(recorder.Body.String(), "model").Exists())
+		})
+	}
 }
 
 func TestForwardAlphaSearchOAuthPreservesWire(t *testing.T) {

@@ -51,6 +51,8 @@ func TestForwardResponses_ForceChatCompletionsRoutesNonStreamingToChatCompletion
 	require.Equal(t, 3, result.Usage.InputTokens)
 	require.Equal(t, 2, result.Usage.OutputTokens)
 	require.Equal(t, 1, result.Usage.CacheReadInputTokens)
+	require.Equal(t, "gpt-5.4", result.UpstreamResponseModel)
+	require.False(t, result.UpstreamResponseModelConflict)
 	require.False(t, result.Stream)
 }
 
@@ -99,6 +101,8 @@ func TestForwardResponses_ForceChatCompletionsRoutesStreamingToChatCompletions(t
 	require.Contains(t, rec.Body.String(), "data: [DONE]")
 	require.Equal(t, 4, result.Usage.InputTokens)
 	require.Equal(t, 3, result.Usage.OutputTokens)
+	require.Equal(t, "gpt-5.4", result.UpstreamResponseModel)
+	require.False(t, result.UpstreamResponseModelConflict)
 	require.True(t, result.Stream)
 	require.NotNil(t, result.FirstTokenMs)
 }

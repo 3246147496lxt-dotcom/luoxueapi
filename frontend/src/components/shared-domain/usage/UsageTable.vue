@@ -128,32 +128,51 @@
         </template>
 
         <template #cell-model="{ row }">
-          <div v-if="auditLayout" class="usage-audit-model" data-testid="audit-model">
-            <span class="usage-audit-model__requested">{{ getRequestedModel(row) }}</span>
-            <span v-if="getAuditMappedModel(row)" class="usage-audit-model__mapped">
-              <span aria-hidden="true">↳ </span>{{ getAuditMappedModel(row) }}
-            </span>
-          </div>
-          <div v-else-if="row.model_mapping_chain && row.model_mapping_chain.includes('→')" class="space-y-0.5 text-xs">
-            <div v-for="(step, i) in row.model_mapping_chain.split('→')" :key="i"
-                 class="break-all"
-                 :class="i === 0 ? 'font-medium text-gray-900 dark:text-white' : 'text-gray-500 dark:text-gray-400'"
-                 :style="i > 0 ? `padding-left: ${i * 0.75}rem` : ''">
-              <span v-if="i > 0" class="mr-0.5">↳</span>{{ step }}
+          <div class="space-y-0.5 text-xs">
+            <div v-if="auditLayout" class="usage-audit-model" data-testid="audit-model">
+              <span class="usage-audit-model__requested">{{ getRequestedModel(row) }}</span>
+              <span v-if="getAuditMappedModel(row)" class="usage-audit-model__mapped">
+                <span aria-hidden="true">↳ </span>{{ getAuditMappedModel(row) }}
+              </span>
+            </div>
+            <div v-else-if="row.model_mapping_chain && row.model_mapping_chain.includes('→')" class="space-y-0.5">
+              <div v-for="(step, i) in row.model_mapping_chain.split('→')" :key="i"
+                   class="break-all"
+                   :class="i === 0 ? 'font-medium text-gray-900 dark:text-white' : 'text-gray-500 dark:text-gray-400'"
+                   :style="i > 0 ? `padding-left: ${i * 0.75}rem` : ''">
+                <span v-if="i > 0" class="mr-0.5">↳</span>{{ step }}
+              </div>
+            </div>
+            <div
+              v-else-if="getActualModel(row) && getActualModel(row) !== getRequestedModel(row)"
+              class="space-y-0.5"
+            >
+              <div class="break-all font-medium text-gray-900 dark:text-white">
+                {{ getRequestedModel(row) }}
+              </div>
+              <div class="break-all text-gray-500 dark:text-gray-400">
+                <span class="mr-0.5">↳</span>{{ getActualModel(row) }}
+              </div>
+            </div>
+            <span v-else class="font-medium text-gray-900 dark:text-white">{{ getRequestedModel(row) }}</span>
+            <div
+              v-if="showUpstreamModelAudit && row.upstream_model_mismatch === true && row.upstream_response_model"
+              class="break-all pl-3 text-[11px]"
+              :class="isLikelyModelVariant(row) ? 'text-amber-600 dark:text-amber-400' : 'text-orange-600 dark:text-orange-400'"
+              :title="modelAuditTitle(row)"
+              data-testid="upstream-response-model-audit"
+            >
+              <span class="mr-1">↳ {{ t('usage.upstreamResponseModel') }}:</span>{{ row.upstream_response_model }}
+              <span
+                class="ml-1 inline-flex rounded px-1 py-px text-[10px] font-medium ring-1 ring-inset"
+                :class="isLikelyModelVariant(row)
+                  ? 'bg-amber-50 text-amber-700 ring-amber-200 dark:bg-amber-500/10 dark:text-amber-300 dark:ring-amber-500/30'
+                  : 'bg-orange-50 text-orange-700 ring-orange-200 dark:bg-orange-500/10 dark:text-orange-300 dark:ring-orange-500/30'"
+              >
+                {{ isLikelyModelVariant(row) ? t('usage.modelVariant') : t('usage.modelMismatch') }}
+              </span>
             </div>
           </div>
-          <div
-            v-else-if="getActualModel(row) && getActualModel(row) !== getRequestedModel(row)"
-            class="space-y-0.5 text-xs"
-          >
-            <div class="break-all font-medium text-gray-900 dark:text-white">
-              {{ getRequestedModel(row) }}
-            </div>
-            <div class="break-all text-gray-500 dark:text-gray-400">
-              <span class="mr-0.5">↳</span>{{ getActualModel(row) }}
-            </div>
-          </div>
-          <span v-else class="font-medium text-gray-900 dark:text-white">{{ getRequestedModel(row) }}</span>
         </template>
 
         <template #cell-reasoning_effort="{ row }">
@@ -663,6 +682,8 @@ import type { Column } from '@/components/common/types'
 
 interface UsageTableRow extends UsageLog {
   upstream_model?: string | null
+  upstream_response_model?: string | null
+  upstream_model_mismatch?: boolean | null
   model_mapping_chain?: string | null
   account_rate_multiplier?: number | null
   account_stats_cost?: number | null
@@ -678,6 +699,8 @@ interface Props {
   defaultSortOrder?: 'asc' | 'desc'
   showAccountBilling?: boolean
   showUpstreamEndpoint?: boolean
+  /** Admin-only response-model audit evidence. Keep disabled for user-facing tables. */
+  showUpstreamModelAudit?: boolean
   creditMode?: boolean
   /** Superdesign 用量审计台账的紧凑八列复合单元格 */
   auditLayout?: boolean
@@ -692,6 +715,7 @@ const props = withDefaults(defineProps<Props>(), {
   defaultSortOrder: 'asc',
   showAccountBilling: true,
   showUpstreamEndpoint: true,
+  showUpstreamModelAudit: false,
   creditMode: false,
   auditLayout: false,
   flat: false
@@ -704,6 +728,7 @@ const emit = defineEmits<{
 const { t } = useI18n()
 const showAccountBilling = props.showAccountBilling
 const showUpstreamEndpoint = props.showUpstreamEndpoint
+const showUpstreamModelAudit = props.showUpstreamModelAudit
 const creditMode = props.creditMode
 const ipGeoBatchLoading = ref(false)
 
@@ -776,6 +801,28 @@ const getRequestedModel = (row: UsageTableRow): string =>
 
 const getActualModel = (row: UsageTableRow): string =>
   row.upstream_model?.trim() || row.model || '-'
+
+const sentUpstreamModel = (row: UsageTableRow): string =>
+  row.upstream_model?.trim() || row.model?.trim() || ''
+
+const normalizeModelVariant = (model: string): string => model
+  .trim()
+  .toLowerCase()
+  .replace(/-latest$/, '')
+  .replace(/-\d{4}-\d{2}-\d{2}$/, '')
+  .replace(/-\d{8}$/, '')
+
+const isLikelyModelVariant = (row: UsageTableRow): boolean => {
+  const sent = sentUpstreamModel(row)
+  const response = row.upstream_response_model?.trim() || ''
+  return sent !== '' && response !== '' && normalizeModelVariant(sent) === normalizeModelVariant(response)
+}
+
+const modelAuditTitle = (row: UsageTableRow): string => [
+  `${t('usage.requestedModel')}: ${row.model || '-'}`,
+  `${t('usage.sentUpstreamModel')}: ${sentUpstreamModel(row) || '-'}`,
+  `${t('usage.upstreamResponseModel')}: ${row.upstream_response_model || '-'}`,
+].join('\n')
 
 const getAuditMappedModel = (row: UsageTableRow): string => {
   const requested = getRequestedModel(row)

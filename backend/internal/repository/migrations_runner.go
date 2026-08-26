@@ -89,6 +89,8 @@ const usersEmailAliasDedupIndexMigration = "231_add_users_email_alias_dedup_inde
 const usersEmailAliasDedupIndex = "idx_users_email_dot_stripped"
 const usersEmailNormalizedIndexMigration = "232_add_users_email_normalized_index_notx.sql"
 const usersEmailNormalizedIndex = "idx_users_email_normalized"
+const upstreamModelMismatchIndexMigration = "235_add_usage_log_upstream_model_mismatch_index_notx.sql"
+const upstreamModelMismatchIndex = "idx_usage_logs_upstream_model_mismatch_created_at"
 const subscriptionAnchoredMonthlyQuotaMigration = "195_subscription_anchored_monthly_quota.sql"
 const schemaMigrationOriginStateKey = "schema_origin"
 
@@ -131,6 +133,7 @@ type expectedConcurrentIndex struct {
 	unique        bool
 	keyAttributes int
 	attributes    int
+	keyDefinition string
 	expression    string
 	predicate     string
 }
@@ -159,6 +162,19 @@ var (
 		attributes:    1,
 		expression:    "RTRIM(LOWER(TRIM(email)), '.')",
 		predicate:     "deleted_at IS NULL",
+	}
+	upstreamModelMismatchIndexSpec = expectedConcurrentIndex{
+		migration:     upstreamModelMismatchIndexMigration,
+		indexName:     upstreamModelMismatchIndex,
+		tableName:     "usage_logs",
+		accessMethod:  "btree",
+		operatorClass: "",
+		unique:        false,
+		keyAttributes: 2,
+		attributes:    2,
+		keyDefinition: "created_at DESC, id DESC",
+		expression:    "",
+		predicate:     "upstream_model_mismatch IS TRUE",
 	}
 )
 
@@ -684,6 +700,14 @@ func prepareNonTransactionalMigration(ctx context.Context, db migrationQueryExec
 			return err
 		}
 		return dropInvalidIndexIfPresent(ctx, db, usersEmailNormalizedIndex)
+	case upstreamModelMismatchIndexMigration:
+		if err := validateExpectedConcurrentIndex(ctx, db, upstreamModelMismatchIndexSpec); err != nil {
+			return err
+		}
+		if err := validateUpstreamResponseModelColumns(ctx, db); err != nil {
+			return err
+		}
+		return dropInvalidIndexIfPresent(ctx, db, upstreamModelMismatchIndex)
 	default:
 		return nil
 	}
@@ -705,9 +729,9 @@ type observedConcurrentIndex struct {
 
 // validateExpectedConcurrentIndex prevents CREATE INDEX IF NOT EXISTS from
 // silently accepting a valid relation with the same name but a different
-// table/definition. Invalid concurrent-index leftovers are deliberately
-// allowed through to dropInvalidIndexIfPresent, while a valid mismatch fails
-// closed and requires explicit operator remediation.
+// table/definition. Only structurally matching invalid concurrent-index
+// leftovers are allowed through to dropInvalidIndexIfPresent; every mismatch
+// fails closed and requires explicit operator remediation.
 func validateExpectedConcurrentIndex(ctx context.Context, db migrationQueryExecer, expected expectedConcurrentIndex) error {
 	var observed observedConcurrentIndex
 	err := db.QueryRowContext(ctx, `
@@ -744,24 +768,33 @@ func validateExpectedConcurrentIndex(ctx context.Context, db migrationQueryExece
 		&observed.definition,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
-		// No relation with this name exists in public; the migration can create it.
-		return nil
+		// The metadata query intentionally joins pg_index. Distinguish a genuinely
+		// absent name from a table/view/sequence using the same relation name;
+		// CREATE INDEX IF NOT EXISTS would otherwise skip and the runner could mark
+		// a migration applied without creating the required index.
+		var relationKind string
+		relationErr := db.QueryRowContext(ctx, `
+			SELECT index_class.relkind::text
+			FROM pg_class AS index_class
+			JOIN pg_namespace AS index_namespace ON index_namespace.oid = index_class.relnamespace
+			WHERE index_namespace.nspname = 'public'
+			  AND index_class.relname = $1
+		`, expected.indexName).Scan(&relationKind)
+		if errors.Is(relationErr, sql.ErrNoRows) {
+			return nil
+		}
+		if relationErr != nil {
+			return fmt.Errorf("inspect existing relation %s for migration %s: %w", expected.indexName, expected.migration, relationErr)
+		}
+		return fmt.Errorf(
+			"existing public relation %s has relkind %q, not an index; refusing migration %s because CREATE INDEX IF NOT EXISTS would not create the required index",
+			expected.indexName,
+			relationKind,
+			expected.migration,
+		)
 	}
 	if err != nil {
 		return fmt.Errorf("inspect existing index %s for migration %s: %w", expected.indexName, expected.migration, err)
-	}
-
-	if !observed.valid {
-		// An interrupted CREATE INDEX CONCURRENTLY leaves an invalid relation.
-		// The explicit cleanup below is the only path permitted to drop it.
-		return nil
-	}
-	if !observed.ready {
-		return fmt.Errorf(
-			"existing index %s is valid but not ready for migration %s; refusing to apply until an operator repairs or removes the index",
-			expected.indexName,
-			expected.migration,
-		)
 	}
 
 	if observed.tableSchema != "public" || observed.tableName != expected.tableName {
@@ -801,8 +834,69 @@ func validateExpectedConcurrentIndex(ctx context.Context, db migrationQueryExece
 	// definition for the reviewed class as well, so a default btree index with
 	// the same expression cannot silently satisfy the migration contract.
 	definition := canonicalizeIndexSQL(observed.definition)
-	if !strings.Contains(definition, canonicalizeIndexSQL(expected.operatorClass)) {
+	if expected.keyDefinition != "" {
+		keyDefinition := "using" + canonicalizeIndexSQL(expected.accessMethod) + "(" + canonicalizeIndexSQL(expected.keyDefinition) + ")"
+		if !strings.Contains(definition, keyDefinition) {
+			return incompatibleConcurrentIndexError(expected, "key definition", definition, keyDefinition)
+		}
+	}
+	if expected.operatorClass != "" && !strings.Contains(definition, canonicalizeIndexSQL(expected.operatorClass)) {
 		return incompatibleConcurrentIndexError(expected, "operator class", definition, expected.operatorClass)
+	}
+
+	if !observed.valid {
+		// An interrupted CREATE INDEX CONCURRENTLY leaves an invalid relation.
+		// It is safe to remove automatically only after every structural property
+		// above has matched the reviewed migration contract.
+		return nil
+	}
+	if !observed.ready {
+		return fmt.Errorf(
+			"existing index %s is valid but not ready for migration %s; refusing to apply until an operator repairs or removes the index",
+			expected.indexName,
+			expected.migration,
+		)
+	}
+	return nil
+}
+
+func validateUpstreamResponseModelColumns(ctx context.Context, db migrationQueryExecer) error {
+	type expectedColumn struct {
+		name      string
+		dataType  string
+		maxLength sql.NullInt64
+	}
+	for _, expected := range []expectedColumn{
+		{name: "upstream_response_model", dataType: "character varying", maxLength: sql.NullInt64{Int64: 200, Valid: true}},
+		{name: "upstream_model_mismatch", dataType: "boolean"},
+	} {
+		var dataType, nullable string
+		var maxLength sql.NullInt64
+		err := db.QueryRowContext(ctx, `
+			SELECT data_type, character_maximum_length, is_nullable
+			FROM information_schema.columns
+			WHERE table_schema = 'public'
+			  AND table_name = 'usage_logs'
+			  AND column_name = $1
+		`, expected.name).Scan(&dataType, &maxLength, &nullable)
+		if errors.Is(err, sql.ErrNoRows) {
+			return fmt.Errorf("required column usage_logs.%s is missing after migration 234; refusing migration %s", expected.name, upstreamModelMismatchIndexMigration)
+		}
+		if err != nil {
+			return fmt.Errorf("inspect required column usage_logs.%s: %w", expected.name, err)
+		}
+		if dataType != expected.dataType || maxLength != expected.maxLength || nullable != "YES" {
+			return fmt.Errorf(
+				"existing column usage_logs.%s is incompatible (type=%q max_length=%v nullable=%q, want type=%q max_length=%v nullable=\"YES\"); refusing migration %s",
+				expected.name,
+				dataType,
+				maxLength,
+				nullable,
+				expected.dataType,
+				expected.maxLength,
+				upstreamModelMismatchIndexMigration,
+			)
+		}
 	}
 	return nil
 }

@@ -794,7 +794,7 @@ func (s *ChatService) buildChatModel(ctx context.Context, userID int64, group *G
 	switch mapping.BillingModelSource {
 	case BillingModelSourceRequested:
 		billingModel = requestedModel
-	case BillingModelSourceChannelMapped, "":
+	case BillingModelSourceChannelMapped, BillingModelSourceResponse, "":
 		billingModel = mapping.MappedModel
 	case BillingModelSourceUpstream:
 		// Account-specific upstream mapping cannot be selected on a GET without

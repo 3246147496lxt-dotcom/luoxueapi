@@ -58,6 +58,7 @@ func (s *OpenAIGatewayService) ForwardAsChatCompletions(
 	promptCacheKey string,
 	defaultMappedModel string,
 ) (*OpenAIForwardResult, error) {
+	beginUpstreamResponseModelObservation(c)
 	restrictionResult := s.detectCodexClientRestriction(c, account, body)
 	logCodexCLIOnlyDetection(ctx, c, account, getAPIKeyIDFromContext(c), restrictionResult, body)
 	if restrictionResult.Enabled && !restrictionResult.Matched {
@@ -495,21 +496,27 @@ func (s *OpenAIGatewayService) handleChatBufferedStreamingResponse(
 	startTime time.Time,
 ) (*OpenAIForwardResult, error) {
 	requestID := resp.Header.Get("x-request-id")
+	observer := upstreamResponseModelObserverFromContext(c)
+	if observer == nil {
+		observer = beginUpstreamResponseModelObservation(c)
+	}
 	// Keep a scalar result when buffering terminates with an upstream error. A
 	// response.failed event can carry usage even though no Chat Completions JSON
 	// is emitted; returning that observation lets the handler bill the work. Do
 	// not manufacture a zero-usage row (and keep failover/cyber paths separate).
 	resultWithUsage := func(responseID string, usage OpenAIUsage) *OpenAIForwardResult {
 		return &OpenAIForwardResult{
-			RequestID:       requestID,
-			ResponseID:      strings.TrimSpace(responseID),
-			Usage:           usage,
-			Model:           originalModel,
-			BillingModel:    billingModel,
-			UpstreamModel:   upstreamModel,
-			Stream:          false,
-			ResponseHeaders: resp.Header.Clone(),
-			Duration:        time.Since(startTime),
+			RequestID:                     requestID,
+			ResponseID:                    strings.TrimSpace(responseID),
+			Usage:                         usage,
+			Model:                         originalModel,
+			BillingModel:                  billingModel,
+			UpstreamModel:                 upstreamModel,
+			UpstreamResponseModel:         observer.Model(),
+			UpstreamResponseModelConflict: observer.Conflict(),
+			Stream:                        false,
+			ResponseHeaders:               resp.Header.Clone(),
+			Duration:                      time.Since(startTime),
 		}
 	}
 	observedResult := func(responseID string, usage OpenAIUsage) *OpenAIForwardResult {
@@ -520,7 +527,7 @@ func (s *OpenAIGatewayService) handleChatBufferedStreamingResponse(
 		return result
 	}
 
-	finalResponse, usage, acc, err := s.readOpenAICompatBufferedTerminal(resp, "openai chat_completions buffered", requestID)
+	finalResponse, usage, acc, err := s.readOpenAICompatBufferedTerminal(resp, observer, "openai chat_completions buffered", requestID)
 	if err != nil {
 		return observedResult("", usage), err
 	}
@@ -604,6 +611,10 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 ) (*OpenAIForwardResult, error) {
 	requestID := resp.Header.Get("x-request-id")
 	writeStreamHeaders := s.newStreamHeaderWriter(c, resp.Header)
+	observer := upstreamResponseModelObserverFromContext(c)
+	if observer == nil {
+		observer = beginUpstreamResponseModelObservation(c)
+	}
 
 	state := apicompat.NewResponsesEventToChatState()
 	state.Model = originalModel
@@ -677,15 +688,17 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 
 	resultWithUsage := func() *OpenAIForwardResult {
 		return &OpenAIForwardResult{
-			RequestID:        requestID,
-			Usage:            usage,
-			Model:            originalModel,
-			BillingModel:     billingModel,
-			UpstreamModel:    upstreamModel,
-			Stream:           true,
-			Duration:         time.Since(startTime),
-			FirstTokenMs:     firstTokenMs,
-			ClientDisconnect: clientDisconnected || drainGuard.Started(),
+			RequestID:                     requestID,
+			Usage:                         usage,
+			Model:                         originalModel,
+			BillingModel:                  billingModel,
+			UpstreamModel:                 upstreamModel,
+			UpstreamResponseModel:         observer.Model(),
+			UpstreamResponseModelConflict: observer.Conflict(),
+			Stream:                        true,
+			Duration:                      time.Since(startTime),
+			FirstTokenMs:                  firstTokenMs,
+			ClientDisconnect:              clientDisconnected || drainGuard.Started(),
 		}
 	}
 
@@ -704,6 +717,7 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 			)
 			return false
 		}
+		observer.ObserveOpenAI([]byte(payload), event.Type)
 		refusalDetector.ObservePayload([]byte(payload))
 
 		isTerminalEvent := isOpenAICompatResponsesTerminalEvent(event.Type)

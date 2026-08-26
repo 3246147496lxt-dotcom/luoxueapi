@@ -371,10 +371,19 @@ func TestPrepareNonTransactionalMigration_EmailAliasIndexesDropOnlyExplicitInval
 			require.NoError(t, err)
 			defer func() { _ = db.Close() }()
 
-			// An invalid index is the only condition under which the runner may
-			// issue a DROP.  The index name is supplied by the explicit mapping
-			// above, never by parsing arbitrary migration text.
-			expectConcurrentIndexMetadata(mock, tc.index, false, false, tc.expected, nil, nil, "CREATE INDEX "+tc.index)
+			// A structurally matching invalid index is the only condition under
+			// which the runner may issue a DROP. The index name is supplied by the
+			// explicit mapping above, never by parsing arbitrary migration text.
+			expectConcurrentIndexMetadata(
+				mock,
+				tc.index,
+				false,
+				false,
+				tc.expected,
+				catalogExpressionForExpectedIndex(tc.expected),
+				"(deleted_at IS NULL)",
+				"CREATE INDEX "+tc.index+" ON public.users USING btree ("+tc.expected.expression+") text_pattern_ops WHERE (deleted_at IS NULL)",
+			)
 			mock.ExpectQuery("SELECT EXISTS \\(").
 				WithArgs(tc.index).
 				WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(true))
@@ -448,6 +457,164 @@ func TestPrepareNonTransactionalMigration_EmailAliasIndexValidWrongDefinitionFai
 	require.NoError(t, mock.ExpectationsWereMet())
 }
 
+func TestPrepareNonTransactionalMigration_UpstreamModelMismatchIndexDropsOnlyInvalidExpectedIndex(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	defer func() { _ = db.Close() }()
+
+	expectConcurrentIndexMetadata(
+		mock,
+		upstreamModelMismatchIndex,
+		false,
+		false,
+		upstreamModelMismatchIndexSpec,
+		nil,
+		"(upstream_model_mismatch IS TRUE)",
+		"CREATE INDEX "+upstreamModelMismatchIndex+" ON public.usage_logs USING btree (created_at DESC, id DESC) WHERE (upstream_model_mismatch IS TRUE)",
+	)
+	expectUpstreamResponseModelColumns(mock)
+	mock.ExpectQuery("SELECT EXISTS \\(").
+		WithArgs(upstreamModelMismatchIndex).
+		WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(true))
+	mock.ExpectExec("DROP INDEX CONCURRENTLY IF EXISTS " + upstreamModelMismatchIndex).
+		WillReturnResult(sqlmock.NewResult(0, 0))
+
+	require.NoError(t, prepareNonTransactionalMigration(context.Background(), db, upstreamModelMismatchIndexMigration))
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestPrepareNonTransactionalMigration_UpstreamModelMismatchIndexValidExpectedPassesWithoutDrop(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	defer func() { _ = db.Close() }()
+
+	expectConcurrentIndexMetadata(
+		mock,
+		upstreamModelMismatchIndex,
+		true,
+		true,
+		upstreamModelMismatchIndexSpec,
+		nil,
+		"(upstream_model_mismatch IS TRUE)",
+		"CREATE INDEX "+upstreamModelMismatchIndex+" ON public.usage_logs USING btree (created_at DESC, id DESC) WHERE (upstream_model_mismatch IS TRUE)",
+	)
+	expectUpstreamResponseModelColumns(mock)
+	mock.ExpectQuery("SELECT EXISTS \\(").
+		WithArgs(upstreamModelMismatchIndex).
+		WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(false))
+
+	require.NoError(t, prepareNonTransactionalMigration(context.Background(), db, upstreamModelMismatchIndexMigration))
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestPrepareNonTransactionalMigration_UpstreamModelMismatchIndexRejectsValidWrongPredicate(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	defer func() { _ = db.Close() }()
+
+	expectConcurrentIndexMetadata(
+		mock,
+		upstreamModelMismatchIndex,
+		true,
+		true,
+		upstreamModelMismatchIndexSpec,
+		nil,
+		"(upstream_model_mismatch IS NOT NULL)",
+		"CREATE INDEX "+upstreamModelMismatchIndex+" ON public.usage_logs USING btree (created_at DESC, id DESC) WHERE (upstream_model_mismatch IS NOT NULL)",
+	)
+
+	err = prepareNonTransactionalMigration(context.Background(), db, upstreamModelMismatchIndexMigration)
+	require.ErrorContains(t, err, "incompatible")
+	require.ErrorContains(t, err, "predicate")
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestPrepareNonTransactionalMigration_UpstreamModelMismatchIndexRejectsValidWrongKeyOrder(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	defer func() { _ = db.Close() }()
+
+	expectConcurrentIndexMetadata(
+		mock,
+		upstreamModelMismatchIndex,
+		true,
+		true,
+		upstreamModelMismatchIndexSpec,
+		nil,
+		"(upstream_model_mismatch IS TRUE)",
+		"CREATE INDEX "+upstreamModelMismatchIndex+" ON public.usage_logs USING btree (id DESC, created_at DESC) WHERE (upstream_model_mismatch IS TRUE)",
+	)
+
+	err = prepareNonTransactionalMigration(context.Background(), db, upstreamModelMismatchIndexMigration)
+	require.ErrorContains(t, err, "incompatible")
+	require.ErrorContains(t, err, "key definition")
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestPrepareNonTransactionalMigration_UpstreamModelMismatchIndexRejectsSameNameNonIndexRelation(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	defer func() { _ = db.Close() }()
+
+	mock.ExpectQuery("SELECT table_namespace\\.nspname").
+		WithArgs(upstreamModelMismatchIndex).
+		WillReturnError(sql.ErrNoRows)
+	mock.ExpectQuery("SELECT index_class\\.relkind::text").
+		WithArgs(upstreamModelMismatchIndex).
+		WillReturnRows(sqlmock.NewRows([]string{"relkind"}).AddRow("r"))
+
+	err = prepareNonTransactionalMigration(context.Background(), db, upstreamModelMismatchIndexMigration)
+	require.ErrorContains(t, err, "not an index")
+	require.ErrorContains(t, err, "relkind")
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestPrepareNonTransactionalMigration_UpstreamModelMismatchIndexRejectsInvalidWrongTable(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	defer func() { _ = db.Close() }()
+
+	mock.ExpectQuery("SELECT table_namespace\\.nspname").
+		WithArgs(upstreamModelMismatchIndex).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"nspname", "relname", "indisvalid", "indisready", "indisunique", "amname", "indnkeyatts", "indnatts", "indexprs", "indpred", "indexdef",
+		}).AddRow(
+			"public", "other_usage_logs", false, false, false, "btree", 2, 2, nil,
+			"(upstream_model_mismatch IS TRUE)",
+			"CREATE INDEX "+upstreamModelMismatchIndex+" ON public.other_usage_logs USING btree (created_at DESC, id DESC) WHERE (upstream_model_mismatch IS TRUE)",
+		))
+
+	err = prepareNonTransactionalMigration(context.Background(), db, upstreamModelMismatchIndexMigration)
+	require.ErrorContains(t, err, "incompatible")
+	require.ErrorContains(t, err, "table")
+	require.ErrorContains(t, err, "other_usage_logs")
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestPrepareNonTransactionalMigration_UpstreamModelMismatchIndexRejectsWrongExistingColumnType(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	defer func() { _ = db.Close() }()
+
+	expectConcurrentIndexMetadata(
+		mock,
+		upstreamModelMismatchIndex,
+		true,
+		true,
+		upstreamModelMismatchIndexSpec,
+		nil,
+		"(upstream_model_mismatch IS TRUE)",
+		"CREATE INDEX "+upstreamModelMismatchIndex+" ON public.usage_logs USING btree (created_at DESC, id DESC) WHERE (upstream_model_mismatch IS TRUE)",
+	)
+	mock.ExpectQuery("SELECT data_type, character_maximum_length, is_nullable").
+		WithArgs("upstream_response_model").
+		WillReturnRows(sqlmock.NewRows([]string{"data_type", "character_maximum_length", "is_nullable"}).AddRow("text", nil, "YES"))
+
+	err = prepareNonTransactionalMigration(context.Background(), db, upstreamModelMismatchIndexMigration)
+	require.ErrorContains(t, err, "column usage_logs.upstream_response_model is incompatible")
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
 func expectConcurrentIndexMetadata(
 	mock sqlmock.Sqlmock,
 	index string,
@@ -466,6 +633,15 @@ func expectConcurrentIndexMetadata(
 			"public", expected.tableName, valid, ready, expected.unique, expected.accessMethod,
 			expected.keyAttributes, expected.attributes, expression, predicate, definition,
 		))
+}
+
+func expectUpstreamResponseModelColumns(mock sqlmock.Sqlmock) {
+	mock.ExpectQuery("SELECT data_type, character_maximum_length, is_nullable").
+		WithArgs("upstream_response_model").
+		WillReturnRows(sqlmock.NewRows([]string{"data_type", "character_maximum_length", "is_nullable"}).AddRow("character varying", int64(200), "YES"))
+	mock.ExpectQuery("SELECT data_type, character_maximum_length, is_nullable").
+		WithArgs("upstream_model_mismatch").
+		WillReturnRows(sqlmock.NewRows([]string{"data_type", "character_maximum_length", "is_nullable"}).AddRow("boolean", nil, "YES"))
 }
 
 func catalogExpressionForExpectedIndex(expected expectedConcurrentIndex) string {

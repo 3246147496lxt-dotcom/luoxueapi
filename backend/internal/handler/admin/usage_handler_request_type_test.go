@@ -107,6 +107,36 @@ func TestAdminUsageListPassesSourceAndRequestID(t *testing.T) {
 	require.Equal(t, "receipt-1", repo.listFilters.RequestID)
 }
 
+func TestAdminUsageListPassesUpstreamModelMismatchTriState(t *testing.T) {
+	for _, tc := range []struct {
+		query string
+		want  bool
+	}{
+		{query: "true", want: true},
+		{query: "false", want: false},
+	} {
+		repo := &adminUsageRepoCapture{}
+		router := newAdminUsageRequestTypeTestRouter(repo)
+		req := httptest.NewRequest(http.MethodGet, "/admin/usage?upstream_model_mismatch="+tc.query, nil)
+		rec := httptest.NewRecorder()
+		router.ServeHTTP(rec, req)
+
+		require.Equal(t, http.StatusOK, rec.Code)
+		require.NotNil(t, repo.listFilters.UpstreamModelMismatch)
+		require.Equal(t, tc.want, *repo.listFilters.UpstreamModelMismatch)
+	}
+}
+
+func TestAdminUsageListRejectsInvalidUpstreamModelMismatch(t *testing.T) {
+	repo := &adminUsageRepoCapture{}
+	router := newAdminUsageRequestTypeTestRouter(repo)
+	req := httptest.NewRequest(http.MethodGet, "/admin/usage?upstream_model_mismatch=unknown", nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusBadRequest, rec.Code)
+}
+
 func TestAdminUsageListRejectsInvalidSource(t *testing.T) {
 	repo := &adminUsageRepoCapture{}
 	router := newAdminUsageRequestTypeTestRouter(repo)
@@ -141,6 +171,18 @@ func TestAdminUsageStatsRequestTypePriority(t *testing.T) {
 	require.NotNil(t, repo.statsFilters.RequestType)
 	require.Equal(t, int16(service.RequestTypeStream), *repo.statsFilters.RequestType)
 	require.Nil(t, repo.statsFilters.Stream)
+}
+
+func TestAdminUsageStatsPassesUpstreamModelMismatch(t *testing.T) {
+	repo := &adminUsageRepoCapture{}
+	router := newAdminUsageRequestTypeTestRouter(repo)
+	req := httptest.NewRequest(http.MethodGet, "/admin/usage/stats?upstream_model_mismatch=false", nil)
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.NotNil(t, repo.statsFilters.UpstreamModelMismatch)
+	require.False(t, *repo.statsFilters.UpstreamModelMismatch)
 }
 
 func TestAdminUsageStatsInvalidRequestType(t *testing.T) {

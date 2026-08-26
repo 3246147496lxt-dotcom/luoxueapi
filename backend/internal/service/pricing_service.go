@@ -742,16 +742,60 @@ func (s *PricingService) validatePricingURL(raw string) (string, error) {
 
 // GetModelPricing 获取模型价格（带模糊匹配）
 func (s *PricingService) GetModelPricing(modelName string) *LiteLLMModelPricing {
+	pricing, _ := s.GetModelPricingWithIdentification(modelName)
+	return pricing
+}
+
+// GetModelPricingWithIdentification resolves a model under one pricing-data
+// read lock and reports whether the match was deterministic. Callers that let
+// an upstream-declared model affect billing must use this atomic result instead
+// of performing a fuzzy lookup and an independent identification lookup.
+func (s *PricingService) GetModelPricingWithIdentification(modelName string) (*LiteLLMModelPricing, bool) {
+	if s == nil {
+		return nil, false
+	}
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
 	if modelName == "" {
-		return nil
+		return nil, false
 	}
 
 	// 标准化模型名称（同时兼容 "models/xxx"、VertexAI 资源名等前缀）
 	modelLower := strings.ToLower(strings.TrimSpace(modelName))
+	if modelLower == "" {
+		return nil, false
+	}
 	lookupCandidates := s.buildModelLookupCandidates(modelLower)
+	if len(lookupCandidates) == 0 {
+		return nil, false
+	}
+
+	// 1~3. 确定性识别（精确名 / 已知拼写变体 / 去掉日期版本后缀）
+	if pricing := s.lookupIdentifiedModelPricingLocked(lookupCandidates); pricing != nil {
+		return pricing, true
+	}
+
+	// 4. 基于模型系列匹配（Claude）
+	if pricing := s.matchByModelFamily(lookupCandidates[0]); pricing != nil {
+		return pricing, false
+	}
+
+	// 5. OpenAI 模型回退策略
+	if strings.HasPrefix(lookupCandidates[0], "gpt-") {
+		return s.matchOpenAIModel(lookupCandidates[0]), false
+	}
+
+	return nil, false
+}
+
+// lookupIdentifiedModelPricingLocked 只做确定性的三步查找：精确键、已知拼写
+// 变体、去掉日期/版本后缀后的同名条目。它刻意不包含 matchByModelFamily /
+// matchOpenAIModel 这类按系列猜测的兜底；调用方必须持有 s.mu 读锁。
+func (s *PricingService) lookupIdentifiedModelPricingLocked(lookupCandidates []string) *LiteLLMModelPricing {
+	if len(lookupCandidates) == 0 {
+		return nil
+	}
 
 	// 1. 精确匹配
 	for _, candidate := range lookupCandidates {
@@ -766,33 +810,61 @@ func (s *PricingService) GetModelPricing(modelName string) *LiteLLMModelPricing 
 	// 2. 处理常见的模型名称变体
 	// claude-opus-4-5-20251101 -> claude-opus-4.5-20251101
 	for _, candidate := range lookupCandidates {
-		normalized := strings.ReplaceAll(candidate, "-4-5-", "-4.5-")
+		normalized := normalizeKnownPricingModelSpelling(candidate)
 		if pricing, ok := s.pricingData[normalized]; ok {
 			return pricing
 		}
 	}
 
-	// 3. 尝试模糊匹配（去掉版本号后缀）
+	// 3. 去掉日期/版本后缀后优先使用明确的 base key。若价格表只有
+	// 多个 dated 版本而没有 base key，则无法确定未来日期应采用哪一版，
+	// 必须 fail closed，不能依赖 Go map 的随机遍历顺序。
 	// claude-opus-4-5-20251101 -> claude-opus-4.5
-	baseName := s.extractBaseName(lookupCandidates[0])
-	for key, pricing := range s.pricingData {
-		keyBase := s.extractBaseName(strings.ToLower(key))
-		if keyBase == baseName {
-			return pricing
-		}
-	}
-
-	// 4. 基于模型系列匹配（Claude）
-	if pricing := s.matchByModelFamily(lookupCandidates[0]); pricing != nil {
+	baseName := s.extractBaseName(normalizeKnownPricingModelSpelling(lookupCandidates[0]))
+	if pricing, ok := s.pricingData[baseName]; ok {
 		return pricing
 	}
-
-	// 5. OpenAI 模型回退策略
-	if strings.HasPrefix(lookupCandidates[0], "gpt-") {
-		return s.matchOpenAIModel(lookupCandidates[0])
+	var uniqueMatch *LiteLLMModelPricing
+	matchCount := 0
+	for key, pricing := range s.pricingData {
+		keyBase := s.extractBaseName(normalizeKnownPricingModelSpelling(strings.ToLower(key)))
+		if keyBase == baseName {
+			matchCount++
+			uniqueMatch = pricing
+		}
 	}
-
+	if matchCount == 1 {
+		return uniqueMatch
+	}
 	return nil
+}
+
+func normalizeKnownPricingModelSpelling(model string) string {
+	for _, version := range []string{"5", "6", "7"} {
+		hyphenated := "-4-" + version
+		dotted := "-4." + version
+		model = strings.ReplaceAll(model, hyphenated+"-", dotted+"-")
+		if strings.HasSuffix(model, hyphenated) {
+			model = strings.TrimSuffix(model, hyphenated) + dotted
+		}
+	}
+	return model
+}
+
+// GetIdentifiedModelPricing 在价格表中确定性地识别模型，识别不到时返回 nil。
+// 与 GetModelPricing 的区别是不会退化成按模型系列猜测出的兜底价。
+func (s *PricingService) GetIdentifiedModelPricing(modelName string) *LiteLLMModelPricing {
+	if s == nil {
+		return nil
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	modelLower := strings.ToLower(strings.TrimSpace(modelName))
+	if modelLower == "" {
+		return nil
+	}
+	return s.lookupIdentifiedModelPricingLocked(s.buildModelLookupCandidates(modelLower))
 }
 
 // GetExactModelPricing resolves only canonical spelling/prefix variants. It
