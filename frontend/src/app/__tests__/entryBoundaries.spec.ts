@@ -30,6 +30,7 @@ describe('user and admin application entry boundaries', () => {
     const adminMain = readSource('src/main-admin.ts')
 
     expect(adminApp).toContain('AdminComplianceRuntime')
+    expect(adminApp).toContain('UserSubscriptionRuntime')
     expect(adminApp).toContain('useAdminSettingsStore')
     expect(adminMain).toContain("import router from './router/admin'")
     expect(adminMain).toContain("bootstrapApp(AdminApp, router, 'admin')")
