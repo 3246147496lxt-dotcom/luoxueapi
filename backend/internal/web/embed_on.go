@@ -450,8 +450,8 @@ func injectModelCatalogMetadata(html, settingsJSON []byte) []byte {
 // without exposing its authenticated installer endpoints.
 func injectQuotaViewerMetadata(html, settingsJSON []byte) []byte {
 	siteName := publicSiteName(settingsJSON)
-	title := "桌面额度查看器 · " + siteName
-	description := "在 macOS 和 Windows 桌面查看周剩余、重置倒计时与月到期日，并通过只读授权连接 " + siteName + "。"
+	title := "桌面积分查看器 · " + siteName
+	description := "在 macOS 和 Windows 桌面查看周剩余积分、重置倒计时与月到期日，并通过只读授权连接 " + siteName + "。"
 	return injectIndexablePageMetadata(html, siteName, title, description, publicSiteOrigin+"/quota-viewer")
 }
 
@@ -483,7 +483,7 @@ func injectIndexablePageMetadata(html []byte, siteName, title, description, cano
 			`<p>` + htmlpkg.EscapeString(description) + `</p>` +
 			`<nav aria-label="公开页面">` +
 			`<a href="/home">首页</a> ` +
-			`<a href="/quota-viewer">桌面额度查看器</a> ` +
+			`<a href="/quota-viewer">桌面积分查看器</a> ` +
 			`<a href="/tutorial-docs/">使用教程</a>` +
 			`</nav></main></noscript>`,
 	)

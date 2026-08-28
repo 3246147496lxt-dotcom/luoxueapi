@@ -78,7 +78,7 @@ const quotaAriaLabel = computed(() => {
     return `查看${props.quota.name}详情，${props.quota.statusDetailLabel}`
   }
   if (displayedRemainingPercent.value == null) {
-    return `查看${props.quota.name}详情，额度状态待确认`
+    return `查看${props.quota.name}详情，积分状态待确认`
   }
 
   return `查看${props.quota.name}详情，周剩余 ${displayedRemainingPercent.value}%`
@@ -188,7 +188,7 @@ const stripLabel = (value: string, prefix: string) =>
         </strong>
       </span>
       <span>
-        <small>本周期剩余雪花额度</small>
+        <small>本周期剩余积分</small>
         <strong
           :class="{ 'metric-unavailable': remainingCreditText === '—' }"
         >

@@ -154,7 +154,7 @@ describe('UsageStatsCards', () => {
     expect(componentSource).toContain('position: fixed;')
   })
 
-  it('shows actual cost as snow credits while preserving account and standard USD', () => {
+  it('shows actual cost as points while preserving account and standard USD', () => {
     const wrapper = mountStats({ creditMode: true })
 
     expect(wrapper.get('[data-testid="credit-amount-value"]').text()).toBe('3.46')

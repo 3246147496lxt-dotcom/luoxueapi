@@ -4,11 +4,15 @@ import App from './App.vue'
 import MainPanel from './components/MainPanel.vue'
 import { demoOverview } from './data/demo'
 
+const legacyCurrencyMarker = String.fromCodePoint(0x2744)
 const hiddenDashboardCopy = [
   '账户余额',
   '今日消费',
   '本月消费',
-  '❄',
+  legacyCurrencyMarker,
+  '128.64 积分',
+  '136.20 积分',
+  '63.80 积分',
   'Token',
   '请求',
   '本周期已用',
@@ -20,6 +24,7 @@ const expectMembershipOnly = (text: string) => {
   for (const copy of hiddenDashboardCopy) {
     expect(text).not.toContain(copy)
   }
+  expect(text).not.toMatch(/\d+(?:\.\d+)?\s*积分/u)
 }
 
 const tapQuotaWidget = async (
@@ -52,7 +57,7 @@ describe('desktop floating quota App', () => {
       'floating-monitor-stage--expanded'
     )
     expect(wrapper.get('.floating-quota-viewport').attributes('aria-label')).toBe(
-      'Codex 会员周额度'
+      'Codex 会员周积分'
     )
     expect(wrapper.get('.floating-quota-widget__plan').text()).toBe(
       'CODEX · PRO'

@@ -22,7 +22,7 @@ vi.mock('@/i18n', () => ({
 }))
 
 describe('AccountTodayStatsCell', () => {
-  it('keeps account cost in USD and renders user cost as snowflake credits', () => {
+  it('keeps account cost in USD and renders user cost as points', () => {
     const wrapper = mount(AccountTodayStatsCell, {
       props: {
         stats: {

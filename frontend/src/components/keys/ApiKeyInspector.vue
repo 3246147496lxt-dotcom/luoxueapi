@@ -97,7 +97,7 @@
                 <CreditAmount v-if="hasQuotaLimit" :value="quotaAvailableValue.toFixed(2)" icon-size="xs" />
                 <span v-else>{{ t('keys.unlimitedQuota') }}</span>
               </dd>
-              <p>{{ t('keys.workspaceSnowCreditsUnit') }}</p>
+              <p>{{ t('keys.workspacePointsUnit') }}</p>
             </div>
             <div>
               <dt>{{ t('keys.workspaceTotalLimit') }}</dt>

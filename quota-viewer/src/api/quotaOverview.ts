@@ -104,8 +104,11 @@ const validTimestampOrNull = (value: string | null | undefined) => {
   return Number.isFinite(new Date(value).getTime()) ? value : null
 }
 
-const formatSnow = (value: DecimalString | null) =>
-  value == null ? '—' : `❄${decimalToFixed(value, 2)}`
+// The API still calls this wallet unit `snow_credit` for wire compatibility,
+// but the viewer presents the value as points. Keep the conversion in one
+// place so no legacy currency marker can leak back into the UI.
+const formatPoints = (value: DecimalString | null) =>
+  value == null ? '—' : `${decimalToFixed(value, 2)} 积分`
 
 const decimalToFixed = (value: string, digits: number) => {
   const match = value.trim().match(/^(\d+)(?:\.(\d+))?$/)
@@ -337,10 +340,10 @@ const mapSubscription = (
       !Number.isFinite(window.used_percent)
         ? null
         : Math.max(0, Math.min(100, window.used_percent)),
-    usedLabel: window.used == null ? '已用 —' : `已用 ${formatSnow(window.used)}`,
-    limitLabel: window.limit == null ? '额度 —' : `额度 ${formatSnow(window.limit)}`,
+    usedLabel: window.used == null ? '已用 —' : `已用 ${formatPoints(window.used)}`,
+    limitLabel: window.limit == null ? '额度 —' : `额度 ${formatPoints(window.limit)}`,
     remainingLabel:
-      window.remaining == null ? '剩余 —' : `剩余 ${formatSnow(window.remaining)}`,
+      window.remaining == null ? '剩余 —' : `剩余 ${formatPoints(window.remaining)}`,
     resetLabel:
       isActive
         ? resetsAt == null

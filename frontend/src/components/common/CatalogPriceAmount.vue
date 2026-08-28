@@ -11,14 +11,14 @@
 import { computed } from 'vue'
 import CreditAmount from '@/components/common/CreditAmount.vue'
 
-type CreditIconSize = 'xs' | 'sm' | 'md' | 'lg' | 'xl'
+type PointsIconSize = 'xs' | 'sm' | 'md' | 'lg' | 'xl'
 
 const props = withDefaults(defineProps<{
   value: number | null | undefined
   currency?: string
   scale?: number
   emptyText?: string
-  iconSize?: CreditIconSize
+  iconSize?: PointsIconSize
 }>(), {
   currency: '',
   scale: 1,

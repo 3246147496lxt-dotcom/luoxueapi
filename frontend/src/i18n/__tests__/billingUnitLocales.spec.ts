@@ -20,7 +20,7 @@ import zhMisc from '../locales/zh/misc'
 
 const currencyMarkers = /\bUSD\b|美元|\$\d/
 
-function expectSnowCreditCopy(values: string[], unit: RegExp) {
+function expectPointsCopy(values: string[], unit: RegExp) {
   for (const value of values) {
     expect(value).toMatch(unit)
     expect(value).not.toMatch(currencyMarkers)
@@ -28,8 +28,8 @@ function expectSnowCreditCopy(values: string[], unit: RegExp) {
 }
 
 describe('billing unit locale contract', () => {
-  it('labels user balances and quota limits as Snow credits', () => {
-    expectSnowCreditCopy([
+  it('labels user balances and quota limits as Points', () => {
+    expectPointsCopy([
       enDashboard.keys.workspaceRateHeading,
       enDashboard.keys.rateLimit5h,
       enDashboard.keys.rateLimit1d,
@@ -49,9 +49,9 @@ describe('billing unit locale contract', () => {
       enAdminResources.promo.bonusAmount,
       enMisc.payment.admin.insufficientBalance,
       enChat.chat.receipt.lowBalance,
-    ], /Snow credits?/)
+    ], /Points?/)
 
-    expectSnowCreditCopy([
+    expectPointsCopy([
       zhDashboard.keys.workspaceRateHeading,
       zhDashboard.keys.rateLimit5h,
       zhDashboard.keys.rateLimit1d,
@@ -71,22 +71,22 @@ describe('billing unit locale contract', () => {
       zhAdminResources.promo.bonusAmount,
       zhMisc.payment.admin.insufficientBalance,
       zhChat.chat.receipt.lowBalance,
-    ], /雪花额度/)
+    ], /积分/)
   })
 
-  it('describes CNY recharge as Snow credits granted', () => {
+  it('describes CNY recharge as Points granted', () => {
     const enPayment = enAdminSettings.settings.payment
     const zhPayment = zhAdminSettings.settings.payment
 
-    expect(enPayment.balanceRechargeMultiplierHint).toContain('Snow credits')
-    expect(enPayment.balanceRechargePreview).toBe('Preview: 1 CNY = {credit} Snow credits')
-    expect(zhPayment.balanceRechargeMultiplierHint).toContain('雪花额度')
-    expect(zhPayment.balanceRechargePreview).toBe('预览：1 CNY = {credit} 雪花额度')
+    expect(enPayment.balanceRechargeMultiplierHint).toContain('Points')
+    expect(enPayment.balanceRechargePreview).toBe('Preview: 1 CNY = {credit} Points')
+    expect(zhPayment.balanceRechargeMultiplierHint).toContain('积分')
+    expect(zhPayment.balanceRechargePreview).toBe('预览：1 CNY = {credit} 积分')
   })
 
-  it('describes group billing as USD source price converted to Snow credits', () => {
-    expect(enAdminOverview.groups.form.rateMultiplierHint).toContain('5 USD/MTok × 70 = 350 Snow credits/MTok')
-    expect(zhAdminOverview.groups.form.rateMultiplierHint).toContain('5 USD/MTok × 70 = 350 雪花额度/MTok')
+  it('describes group billing as USD source price converted to Points', () => {
+    expect(enAdminOverview.groups.form.rateMultiplierHint).toContain('5 USD/MTok × 70 = 350 Points/MTok')
+    expect(zhAdminOverview.groups.form.rateMultiplierHint).toContain('5 USD/MTok × 70 = 350 积分/MTok')
     expect(enMisc.onboarding.admin.groupMultiplier.description).not.toContain('charged $')
     expect(zhMisc.onboarding.admin.groupMultiplier.description).not.toContain('扣除 $')
   })
@@ -96,16 +96,16 @@ describe('billing unit locale contract', () => {
     expect(zhCommon.auth.promoCodeValid).not.toMatch(currencyMarkers)
   })
 
-  it('labels effective public catalog prices as Snow credits', () => {
-    expectSnowCreditCopy([
+  it('labels effective public catalog prices as Points', () => {
+    expectPointsCopy([
       enLanding.modelCatalog.publicPriceNote,
       enLanding.modelCatalog.pricing.dialogDescription,
-    ], /Snow credits?/)
+    ], /Points?/)
 
-    expectSnowCreditCopy([
+    expectPointsCopy([
       zhLanding.modelCatalog.publicPriceNote,
       zhLanding.modelCatalog.pricing.dialogDescription,
-    ], /雪花额度/)
+    ], /积分/)
   })
 
   it('keeps USD where it is the source price, conversion input, or upstream limit', () => {

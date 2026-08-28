@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "落雪额度",
+  "productName": "落雪积分",
   "version": "2.0.0-rc.6",
   "identifier": "cc.luoxueapi.quota-viewer",
   "build": {
@@ -14,7 +14,7 @@
     "windows": [
       {
         "label": "main",
-        "title": "落雪额度",
+        "title": "落雪积分",
         "width": 80,
         "height": 80,
         "center": true,
@@ -31,7 +31,7 @@
       },
       {
         "label": "tray",
-        "title": "落雪额度",
+        "title": "落雪积分",
         "url": "index.html?surface=tray",
         "width": 406,
         "height": 500,

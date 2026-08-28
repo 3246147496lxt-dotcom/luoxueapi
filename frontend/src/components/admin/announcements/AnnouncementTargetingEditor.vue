@@ -121,7 +121,7 @@
                 <div class="w-full sm:flex-1">
                   <label class="input-label">{{ t('admin.announcements.form.balanceValue') }}</label>
                   <div class="relative">
-                    <SnowflakeCreditIcon class="absolute left-3 top-1/2 -translate-y-1/2" size="sm" />
+                    <PointsIcon class="absolute left-3 top-1/2 -translate-y-1/2" size="sm" />
                     <input
                       :value="String(cond.value ?? '')"
                       type="number"
@@ -182,7 +182,7 @@ import type {
 import Select from '@/components/common/Select.vue'
 import GroupSelector from '@/components/common/GroupSelector.vue'
 import Icon from '@/components/icons/Icon.vue'
-import SnowflakeCreditIcon from '@/components/icons/SnowflakeCreditIcon.vue'
+import PointsIcon from '@/components/icons/PointsIcon.vue'
 
 const { t } = useI18n()
 

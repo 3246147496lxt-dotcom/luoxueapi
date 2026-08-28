@@ -129,7 +129,7 @@ export default {
       chargedAmount: '实际扣费',
       balanceRange: '余额',
       balanceAfter: '扣后余额',
-      lowBalance: '余额低于 1 雪花额度，建议及时充值。',
+      lowBalance: '余额低于 1 积分，建议及时充值。',
     },
     persistence: {
       title: '对话记录未保存',

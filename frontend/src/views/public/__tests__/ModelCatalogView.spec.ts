@@ -260,7 +260,7 @@ describe('ModelCatalogView', () => {
     expect(document.head.querySelector('link[rel="canonical"]')).toBeNull()
   })
 
-  it('renders effective public prices as Snow credits and preserves a real zero price', async () => {
+  it('renders effective public prices as Points and preserves a real zero price', async () => {
     testState.getCatalog.mockResolvedValue(catalogResponse([
       model(),
       model({
@@ -290,7 +290,7 @@ describe('ModelCatalogView', () => {
       '3',
       '15'
     ])
-    expect(wrapper.findAll('[data-testid="snowflake-credit-icon"]')).toHaveLength(4)
+    expect(wrapper.findAll('[data-testid="points-icon"]')).toHaveLength(4)
     expect(wrapper.text()).not.toMatch(/[$¥]/)
     expect(wrapper.text()).toContain('128K')
   })
@@ -367,7 +367,7 @@ describe('ModelCatalogView', () => {
     const dialog = wrapper.get('dialog')
     expect(dialog.attributes('open')).toBeDefined()
     expect(dialog.text()).toContain('缓存读取')
-    expect(dialog.find('[data-testid="snowflake-credit-icon"]').exists()).toBe(true)
+    expect(dialog.find('[data-testid="points-icon"]').exists()).toBe(true)
     expect(dialog.text()).not.toContain('$1')
     expect(dialog.text()).toContain('缓存写入（1 小时）')
     expect(dialog.text()).toContain('Priority 输入')

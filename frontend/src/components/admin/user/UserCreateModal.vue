@@ -36,7 +36,7 @@
         <div>
           <label class="input-label">{{ t('admin.users.columns.balance') }}</label>
           <div class="relative">
-            <SnowflakeCreditIcon class="absolute left-3 top-1/2 -translate-y-1/2" size="sm" />
+            <PointsIcon class="absolute left-3 top-1/2 -translate-y-1/2" size="sm" />
             <input v-model="form.balance" type="number" step="any" class="input pl-10" />
           </div>
         </div>
@@ -78,7 +78,7 @@ import { useI18n } from 'vue-i18n'; import { adminAPI } from '@/api/admin'
 import { useAppStore } from '@/stores/app'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import Icon from '@/components/icons/Icon.vue'
-import SnowflakeCreditIcon from '@/components/icons/SnowflakeCreditIcon.vue'
+import PointsIcon from '@/components/icons/PointsIcon.vue'
 import { useStepUp, isStepUpBlocked, isStepUpCancelled, stepUpBlockReason } from '@/composables/useStepUp'
 import TotpStepUpDialog from '@/components/auth/TotpStepUpDialog.vue'
 

@@ -56,7 +56,7 @@ describe('UserPlatformQuotaCell', () => {
     expect(html).toContain('0/—')
     expect(html).toContain('90.5/2000')
     expect(w.findAll('[data-testid="credit-amount"]')).toHaveLength(3)
-    expect(w.findAll('[data-testid="snowflake-credit-icon"]')).toHaveLength(3)
+    expect(w.findAll('[data-testid="points-icon"]')).toHaveLength(3)
     expect(w.text()).not.toContain('$')
   })
 

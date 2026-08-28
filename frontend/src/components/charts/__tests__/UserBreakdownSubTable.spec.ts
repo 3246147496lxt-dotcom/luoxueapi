@@ -25,7 +25,7 @@ const items = [{
 }]
 
 describe('UserBreakdownSubTable', () => {
-  it('renders actual cost as snow credits while preserving account and standard USD', () => {
+  it('renders actual cost as points while preserving account and standard USD', () => {
     const wrapper = mount(UserBreakdownSubTable, {
       props: { items, creditMode: true },
     })

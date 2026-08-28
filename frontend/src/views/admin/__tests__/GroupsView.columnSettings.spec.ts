@@ -409,7 +409,7 @@ describe('admin GroupsView column settings', () => {
     expect(getCapacitySummary).toHaveBeenCalledTimes(1)
   })
 
-  it('renders subscription limits and actual usage as Snow credits', async () => {
+  it('renders subscription limits and actual usage as Points', async () => {
     listGroups.mockResolvedValue({
       items: [createGroup({
         subscription_type: 'subscription',

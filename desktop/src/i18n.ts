@@ -9,7 +9,7 @@ export const messages = {
     },
     overview: {
       title: '本地网关', todayRequests: '今日请求', todayTokens: '今日 Token',
-      todayCost: '今日消费', balance: '可用余额', latency: '平均首字',
+      todayCost: '今日积分消费', balance: '积分余额', pointsUnit: '积分', latency: '平均首字',
       route: '当前线路', model: '默认模型', recent: '最近请求',
       takeoverOn: 'Codex 已接管', takeoverOff: 'Codex 未接管',
       restartHint: '线路已更新，重启 Codex 后生效',
@@ -66,7 +66,7 @@ export const messages = {
     },
     overview: {
       title: 'Local gateway', todayRequests: 'Requests today', todayTokens: 'Tokens today',
-      todayCost: 'Spend today', balance: 'Balance', latency: 'Avg. first token',
+      todayCost: 'Points spent today', balance: 'Points balance', pointsUnit: 'points', latency: 'Avg. first token',
       route: 'Route', model: 'Default model', recent: 'Recent requests',
       takeoverOn: 'Codex managed', takeoverOff: 'Codex not managed',
       restartHint: 'Route updated. Restart Codex to apply.',

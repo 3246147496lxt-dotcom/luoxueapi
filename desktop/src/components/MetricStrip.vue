@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { useI18n } from 'vue-i18n'
-import { Banknote, Coins, Gauge, Timer, Wallet } from 'lucide-vue-next'
+import { Coins, Gauge, Timer } from 'lucide-vue-next'
 import type { Component } from 'vue'
 import type { DesktopSnapshot } from '@/types'
 
@@ -11,11 +11,15 @@ function compact(value: number): string {
   return Intl.NumberFormat(locale.value, { notation: 'compact', maximumFractionDigits: 2 }).format(value)
 }
 
+function formatPoints(value: number): string {
+  return `${value.toFixed(2)} ${t('overview.pointsUnit')}`
+}
+
 const metrics: Array<{ key: keyof DesktopSnapshot['today']; label: string; icon: Component; format: (value: number) => string }> = [
   { key: 'requests', label: 'overview.todayRequests', icon: Gauge, format: compact },
   { key: 'tokens', label: 'overview.todayTokens', icon: Coins, format: compact },
-  { key: 'cost', label: 'overview.todayCost', icon: Banknote, format: (value) => `$${value.toFixed(2)}` },
-  { key: 'balance', label: 'overview.balance', icon: Wallet, format: (value) => `$${value.toFixed(2)}` },
+  { key: 'cost', label: 'overview.todayCost', icon: Coins, format: formatPoints },
+  { key: 'balance', label: 'overview.balance', icon: Coins, format: formatPoints },
   { key: 'averageFirstTokenMs', label: 'overview.latency', icon: Timer, format: (value) => `${Math.round(value)}ms` }
 ]
 </script>

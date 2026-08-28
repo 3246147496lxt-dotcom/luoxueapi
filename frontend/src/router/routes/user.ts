@@ -51,7 +51,7 @@ export const userRoutes: RouteRecordRaw[] = [
     meta: {
       requiresAuth: true,
       requiresAdmin: false,
-      title: 'Quota Viewer Authorization',
+      title: 'Points Viewer Authorization',
       titleKey: 'quotaViewerAuthorization.pageTitle'
     }
   },
@@ -62,7 +62,7 @@ export const userRoutes: RouteRecordRaw[] = [
     meta: {
       requiresAuth: true,
       requiresAdmin: false,
-      title: 'Quota Viewer Devices',
+      title: 'Points Viewer Devices',
       titleKey: 'quotaViewerDevices.title',
       descriptionKey: 'quotaViewerDevices.description'
     }

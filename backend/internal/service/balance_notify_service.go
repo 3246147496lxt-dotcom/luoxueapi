@@ -478,12 +478,12 @@ const balanceLowEmailTemplate = `<!DOCTYPE html>
     <div class="container">
         <div class="header"><h1>%s</h1></div>
         <div class="content">
-            <p style="font-size: 18px; color: #333;">%s，您的余额不足</p>
-            <p style="color: #666;">Dear %s, your balance is running low</p>
-            <div class="balance">❄ %.2f</div>
+            <p style="font-size: 18px; color: #333;">%s，您的积分余额不足</p>
+            <p style="color: #666;">Dear %s, your points balance is running low</p>
+            <div class="balance">%.2f points</div>
             <div class="info">
-                <p>您的账户余额已低于提醒阈值 <strong>❄ %.2f</strong>。</p>
-                <p>Your Snow credit balance has fallen below the alert threshold of <strong>❄ %.2f</strong>.</p>
+                <p>您的账户积分余额已低于提醒阈值 <strong>%.2f 积分</strong>。</p>
+                <p>Your points balance has fallen below the alert threshold of <strong>%.2f points</strong>.</p>
                 <p>请及时充值以免服务中断。</p>
                 <p>Please top up to avoid service interruption.</p>
             </div>

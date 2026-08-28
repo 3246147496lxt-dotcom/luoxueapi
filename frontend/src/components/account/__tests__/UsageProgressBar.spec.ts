@@ -147,7 +147,7 @@ describe('UsageProgressBar', () => {
     expect(wrapper.get('.h-1\\.5 > div').classes()).toContain('bg-red-500')
   })
 
-  it('keeps account cost in USD and renders user cost as snowflake credits', () => {
+  it('keeps account cost in USD and renders user cost as points', () => {
     const wrapper = mount(UsageProgressBar, {
       props: {
         label: '1d',

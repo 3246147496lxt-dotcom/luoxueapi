@@ -31,7 +31,7 @@ const messages: Record<string, string> = {
   'admin.dashboard.failedToLoad': 'Failed to load dashboard statistics',
   'admin.dashboard.retry': 'Reload',
   'admin.redeem.userPrefix': 'User #{id}',
-  'dashboard.creditUnit': 'Snow credits',
+  'dashboard.creditUnit': 'Points',
   'common.loading': 'Loading...',
   'usage.requestedModel': 'Requested',
   'usage.upstreamModel': 'Upstream',
@@ -153,7 +153,7 @@ describe('ModelDistributionChart', () => {
     expect(label).toBe('model-b: $1.40 (87.5%)')
   })
 
-  it('renders actual cost as snow credits when credit mode is enabled', () => {
+  it('renders actual cost as points when credit mode is enabled', () => {
     const wrapper = mount(ModelDistributionChart, {
       props: {
         modelStats,
@@ -173,7 +173,7 @@ describe('ModelDistributionChart', () => {
       raw: 1.4,
       dataset: { data: [1.4, 0.2] },
     })
-    expect(label).toBe('model-b: Snow credits 1.40 (87.5%)')
+    expect(label).toBe('model-b: Points 1.40 (87.5%)')
   })
 
   it('can hide account cost for user usage stats without account_cost', () => {

@@ -517,7 +517,7 @@
               <dl class="billing-receipts__settlement-list">
                 <div>
                   <dt>{{ t('usage.grossCost') }}</dt>
-                  <dd><CreditAmount :value="formatCredits(selectedReceipt.gross_cost)" icon-size="sm" /></dd>
+                  <dd data-test="drawer-gross-cost">${{ formatCredits(selectedReceipt.gross_cost) }}</dd>
                 </div>
                 <div class="billing-receipts__settlement-list-emphasis">
                   <dt>{{ t('usage.chargedAmount') }}</dt>

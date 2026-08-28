@@ -200,7 +200,7 @@ describe('AccountInspector', () => {
     expect(queryQuotaMock).toHaveBeenCalledTimes(1)
   })
 
-  it('keeps account cost in USD and renders user cost as snowflake credits', () => {
+  it('keeps account cost in USD and renders user cost as points', () => {
     const wrapper = mount(AccountInspector, {
       props: { account: makeAccount(), todayStats }
     })

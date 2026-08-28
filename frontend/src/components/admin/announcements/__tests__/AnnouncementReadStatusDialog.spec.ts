@@ -104,7 +104,7 @@ describe('AnnouncementReadStatusDialog', () => {
     expect(getReadStatus).toHaveBeenCalledTimes(1)
   })
 
-  it('renders user balances as Snow credits', async () => {
+  it('renders user balances as Points', async () => {
     getReadStatus.mockResolvedValue({
       items: [{ user_id: 7, email: 'user@example.com', username: 'User', balance: 35, eligible: true, read_at: null }],
       total: 1,
@@ -134,7 +134,7 @@ describe('AnnouncementReadStatusDialog', () => {
     const balance = wrapper.get('[data-testid="credit-amount"]')
 
     expect(balance.text()).toContain('35.00')
-    expect(balance.attributes('aria-label')).toMatch(/^35\.00 (Snow credits|雪花额度)$/)
+    expect(balance.attributes('aria-label')).toMatch(/^35\.00 (Points|积分)$/)
     expect(wrapper.text()).not.toContain('$35.00')
   })
 })

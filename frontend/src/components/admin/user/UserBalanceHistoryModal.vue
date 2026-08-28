@@ -171,7 +171,7 @@
                   getIconBg(item)
                 ]"
               >
-                <SnowflakeCreditIcon v-if="isBalanceType(item.type)" size="sm" />
+                <PointsIcon v-if="isBalanceType(item.type)" size="sm" />
                 <Icon v-else :name="getIconName(item)" size="sm" :class="getIconColor(item)" />
               </div>
               <div>
@@ -252,7 +252,7 @@ import BaseDialog from '@/components/common/BaseDialog.vue'
 import CreditAmount from '@/components/common/CreditAmount.vue'
 import Select from '@/components/common/Select.vue'
 import Icon from '@/components/icons/Icon.vue'
-import SnowflakeCreditIcon from '@/components/icons/SnowflakeCreditIcon.vue'
+import PointsIcon from '@/components/icons/PointsIcon.vue'
 
 const props = defineProps<{ show: boolean; user: AdminUser | null; hideActions?: boolean }>()
 const emit = defineEmits(['close', 'deposit', 'withdraw'])

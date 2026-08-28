@@ -11,7 +11,7 @@ const messages: Record<string, string> = {
   'admin.dashboard.actual': 'Actual',
   'admin.dashboard.standard': 'Standard',
   'admin.dashboard.noDataAvailable': 'No data available',
-  'dashboard.creditUnit': 'Snow credits',
+  'dashboard.creditUnit': 'Points',
 }
 
 vi.mock('vue-i18n', async () => {
@@ -37,7 +37,7 @@ describe('EndpointDistributionChart', () => {
     { endpoint: '/v1/responses', requests: 4, total_tokens: 600, cost: 0.7, actual_cost: 0.9 },
   ]
 
-  it('renders actual cost as snow credits while preserving standard USD in credit mode', () => {
+  it('renders actual cost as points while preserving standard USD in credit mode', () => {
     const wrapper = mount(EndpointDistributionChart, {
       props: {
         endpointStats,
@@ -57,7 +57,7 @@ describe('EndpointDistributionChart', () => {
       label: '/v1/responses',
       raw: 0.9,
       dataset: { data: [0.9, 0.1] },
-    })).toBe('/v1/responses: Snow credits 0.900 (90.0%)')
+    })).toBe('/v1/responses: Points 0.900 (90.0%)')
   })
 
   it('preserves dollar formatting by default for admin consumers', () => {

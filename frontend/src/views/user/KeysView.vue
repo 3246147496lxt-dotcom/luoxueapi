@@ -490,7 +490,7 @@
           <div class="space-y-4">
             <div>
               <div class="relative">
-                <SnowflakeCreditIcon class="absolute left-3 top-1/2 -translate-y-1/2" size="sm" />
+                <PointsIcon class="absolute left-3 top-1/2 -translate-y-1/2" size="sm" />
                 <input
                   v-model.number="formData.quota"
                   type="number"
@@ -560,7 +560,7 @@
             <div>
               <label class="input-label">{{ t('keys.rateLimit5h') }}</label>
               <div class="relative">
-                <SnowflakeCreditIcon class="absolute left-3 top-1/2 -translate-y-1/2" size="sm" />
+                <PointsIcon class="absolute left-3 top-1/2 -translate-y-1/2" size="sm" />
                 <input
                   v-model.number="formData.rate_limit_5h"
                   type="number"
@@ -610,7 +610,7 @@
             <div>
               <label class="input-label">{{ t('keys.rateLimit1d') }}</label>
               <div class="relative">
-                <SnowflakeCreditIcon class="absolute left-3 top-1/2 -translate-y-1/2" size="sm" />
+                <PointsIcon class="absolute left-3 top-1/2 -translate-y-1/2" size="sm" />
                 <input
                   v-model.number="formData.rate_limit_1d"
                   type="number"
@@ -660,7 +660,7 @@
             <div>
               <label class="input-label">{{ t('keys.rateLimit7d') }}</label>
               <div class="relative">
-                <SnowflakeCreditIcon class="absolute left-3 top-1/2 -translate-y-1/2" size="sm" />
+                <PointsIcon class="absolute left-3 top-1/2 -translate-y-1/2" size="sm" />
                 <input
                   v-model.number="formData.rate_limit_7d"
                   type="number"
@@ -1035,7 +1035,7 @@ import Select from '@/components/common/Select.vue'
 import type { Column } from '@/components/common/types'
 import Icon from '@/components/icons/Icon.vue'
 import KeysLucideIcon from '@/components/keys/KeysLucideIcon.vue'
-import SnowflakeCreditIcon from '@/components/icons/SnowflakeCreditIcon.vue'
+import PointsIcon from '@/components/icons/PointsIcon.vue'
 import ApiKeyDetailSheet from '@/components/keys/ApiKeyDetailSheet.vue'
 import ApiKeyInspector from '@/components/keys/ApiKeyInspector.vue'
 import ApiKeySummaryCard from '@/components/keys/ApiKeySummaryCard.vue'

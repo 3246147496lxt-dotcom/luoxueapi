@@ -129,7 +129,7 @@ export default {
       chargedAmount: 'Charged',
       balanceRange: 'Balance',
       balanceAfter: 'Balance after',
-      lowBalance: 'Your balance is below 1 Snow credit. Top up soon to avoid interruptions.',
+      lowBalance: 'Your balance is below 1 Point. Top up soon to avoid interruptions.',
     },
     persistence: {
       title: 'Conversation history is not saved',

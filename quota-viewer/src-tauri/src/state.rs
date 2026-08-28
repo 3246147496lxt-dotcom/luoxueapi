@@ -396,7 +396,7 @@ impl AppRuntime {
             .ok()
             .and_then(|value| value.into_string().ok())
             .filter(|value| !value.trim().is_empty())
-            .unwrap_or_else(|| "落雪额度查看器".into());
+            .unwrap_or_else(|| "落雪积分查看器".into());
         let context = self
             .cloud
             .create_pairing(&device_name, installation_id.as_str(), "")
