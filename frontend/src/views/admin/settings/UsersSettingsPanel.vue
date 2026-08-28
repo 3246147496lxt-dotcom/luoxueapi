@@ -22,7 +22,7 @@
                     {{ t("admin.settings.defaults.defaultBalance") }}
                   </label>
                   <div class="relative">
-                    <SnowflakeCreditIcon
+                    <PointsIcon
                       class="absolute left-3 top-1/2 -translate-y-1/2"
                       size="sm"
                     />
@@ -347,7 +347,7 @@
                           {{ t("admin.settings.defaults.defaultBalance") }}
                         </label>
                         <div class="relative">
-                          <SnowflakeCreditIcon
+                          <PointsIcon
                             class="absolute left-3 top-1/2 -translate-y-1/2"
                             size="sm"
                           />
@@ -634,7 +634,7 @@ import GroupBadge from "@/components/common/GroupBadge.vue";
 import GroupOptionItem from "@/components/common/GroupOptionItem.vue";
 import AppSelect from "@/components/common/Select.vue";
 import Toggle from "@/components/common/Toggle.vue";
-import SnowflakeCreditIcon from "@/components/icons/SnowflakeCreditIcon.vue";
+import PointsIcon from "@/components/icons/PointsIcon.vue";
 import { useSettingsPanelBindings } from "./settingsPanelContext";
 import type { DefaultSubscriptionGroupOption as _DefaultSubscriptionGroupOption } from "./settingsPanelContext";
 
@@ -645,7 +645,7 @@ export default defineComponent({
     GroupOptionItem,
     AppSelect,
     Toggle,
-    SnowflakeCreditIcon,
+    PointsIcon,
   },
   props: {
     active: {

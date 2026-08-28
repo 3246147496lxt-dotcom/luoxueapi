@@ -65,7 +65,7 @@ describe("SubscriptionPlanCard", () => {
     expect(text).toContain("Imagen");
   });
 
-  it("keeps the plan price monetary while showing quota limits as snowflake credits", () => {
+  it("keeps the plan price monetary while showing quota limits as points", () => {
     const wrapper = mount(SubscriptionPlanCard, {
       props: {
         plan: {

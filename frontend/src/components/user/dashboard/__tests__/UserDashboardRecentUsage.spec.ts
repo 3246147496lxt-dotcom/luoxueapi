@@ -19,14 +19,14 @@ const i18n = createI18n({
         actual: 'Actual',
         standard: 'Standard',
         viewAllUsage: 'View all usage',
-        creditUnit: 'Snow credits',
+        creditUnit: 'Points',
       },
     },
   },
 })
 
 describe('UserDashboardRecentUsage', () => {
-  it('uses snow credits for actual cost and USD for standard cost', () => {
+  it('uses points for actual cost and USD for standard cost', () => {
     const wrapper = mount(UserDashboardRecentUsage, {
       props: {
         loading: false,
@@ -51,7 +51,7 @@ describe('UserDashboardRecentUsage', () => {
 
     expect(wrapper.findAll('[data-testid="credit-amount-value"]').map((item) => item.text()))
       .toEqual(['0.1250'])
-    expect(wrapper.findAll('[data-testid="snowflake-credit-icon"]')).toHaveLength(1)
+    expect(wrapper.findAll('[data-testid="points-icon"]')).toHaveLength(1)
     expect(wrapper.text()).toContain('$0.2500')
   })
 })

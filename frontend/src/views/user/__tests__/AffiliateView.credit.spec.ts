@@ -33,7 +33,7 @@ vi.mock('@/composables/useClipboard', () => ({
 }))
 
 describe('AffiliateView credit display', () => {
-  it('uses snowflake credits for rebate balances and invitee rebates', async () => {
+  it('uses points for rebate balances and invitee rebates', async () => {
     getAffiliateDetail.mockResolvedValue({
       aff_code: 'SNOW-01',
       aff_count: 1,

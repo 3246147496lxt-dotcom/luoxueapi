@@ -67,11 +67,11 @@ const messages: Record<string, string> = {
   'keys.workspaceQuotaHeading': 'Quota Progress',
   'keys.workspaceCurrentAvailable': 'Currently Available',
   'keys.workspaceTotalLimit': 'Total Limit',
-  'keys.workspaceSnowCreditsUnit': 'SNOW CREDITS',
+  'keys.workspacePointsUnit': '积分',
   'keys.workspaceTodayUsage': 'Today Total',
   'keys.workspaceThirtyDayUsage': 'Last 30 Days Total',
   'keys.workspaceResetQuota': 'Reset Used Quota',
-  'keys.workspaceRateHeading': 'Rate Limits (Snow credits)',
+  'keys.workspaceRateHeading': 'Rate Limits (Points)',
   'keys.workspaceResetAll': 'Reset All',
   'keys.workspaceResetInInline': 'RESET IN: {time}',
   'keys.workspaceRate5hInline': '5h Limit (5-hour window)',
@@ -93,7 +93,7 @@ const messages: Record<string, string> = {
   'keys.workspaceSheetTokenLabel': 'Key Token (API KEY TOKEN)',
   'keys.workspaceSheetEndpointLabel': 'Endpoint (API ENDPOINT)',
   'keys.workspaceSheetQuotaHeading': 'Quota and Usage Overview',
-  'keys.workspaceSheetCurrentAvailable': 'Available Snow Credits',
+  'keys.workspaceSheetCurrentAvailable': 'Available Points',
   'keys.workspaceSheetTotalLimit': 'Total Usage Limit',
   'keys.workspaceSheetTodayUsage': 'Today Billing',
   'keys.workspaceSheetThirtyDayUsage': 'Last 30 Days Billing',
@@ -282,8 +282,8 @@ describe('ApiKeyInspector', () => {
 
     const quota = wrapper.get('[data-test="api-key-inspector-quota"]')
     expect(creditValues(quota)).toEqual(['75.00', '100.00', '1.25', '12.75'])
-    expect(quota.text()).toContain('SNOW CREDITS')
-    expect(quota.findAll('[data-testid="snowflake-credit-icon"]')).toHaveLength(4)
+    expect(quota.text()).toContain('积分')
+    expect(quota.findAll('[data-testid="points-icon"]')).toHaveLength(4)
     expect(quota.find('[role="progressbar"]').exists()).toBe(false)
     expect(wrapper.get('[data-test="key-inspector-reset-quota-7"]').attributes('disabled')).toBeUndefined()
 
@@ -291,7 +291,7 @@ describe('ApiKeyInspector', () => {
     expect(creditValues(usage)).toEqual(['1.25', '12.75'])
 
     const rateSection = wrapper.get('[data-test="api-key-inspector-rate-limits"]')
-    expect(rateSection.text()).toContain('Rate Limits (Snow credits)')
+    expect(rateSection.text()).toContain('Rate Limits (Points)')
     expect(rateSection.text()).not.toContain('USD')
 
     const rateItems = rateSection.findAll('.api-key-inspector__rate-item')

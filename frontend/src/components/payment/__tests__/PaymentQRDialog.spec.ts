@@ -103,7 +103,7 @@ describe('PaymentQRDialog currency display', () => {
     expect(wrapper.text()).toContain('¥108.00')
   })
 
-  it('uses snowflake credits for a balance order while keeping the CNY pay amount', async () => {
+  it('uses points for a balance order while keeping the CNY pay amount', async () => {
     pollOrderStatus.mockResolvedValue({ ...paidOrder, order_type: 'balance' })
     const wrapper = mount(PaymentQRDialog, {
       props: {

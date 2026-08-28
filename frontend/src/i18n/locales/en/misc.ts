@@ -76,7 +76,7 @@ export default {
   balanceMembership: {
     balanceTitle: 'Account balance',
     balanceHint: 'For pay-as-you-go usage',
-    pointsUnit: 'credits',
+    pointsUnit: 'Points',
     paygNote: 'For pay-as-you-go usage, separate from membership',
     recharge: 'Top up balance',
     redeem: 'Redeem code',
@@ -290,7 +290,7 @@ export default {
       },
       groupMultiplier: {
         title: '💰 3. Rate Multiplier',
-        description: '<div style="line-height: 1.7;"><p style="margin-bottom: 12px;">Snow credits charged to the user = channel USD base price × group multiplier.</p><div style="padding: 8px 12px; background: #fef3c7; border-left: 3px solid #f59e0b; border-radius: 4px; font-size: 13px; margin-bottom: 12px;"><b>⚙️ Billing Rules:</b><ul style="margin: 8px 0 0 16px;"><li>Keep channel prices entered in USD</li><li>The multiplier may include both the CNY/USD exchange rate and Snow-credit conversion</li><li><b>70</b> - 5 USD / MTok × 70 = 350 Snow credits / MTok</li><li><b>63</b> - 10% off a multiplier of 70 (70 × 0.9)</li></ul></div><p style="font-size: 13px; color: #6b7280;">When 1 CNY = 10 Snow credits and 1 USD = 7 CNY, the baseline multiplier is 70.</p></div>',
+        description: '<div style="line-height: 1.7;"><p style="margin-bottom: 12px;">Points charged to the user = channel USD base price × group multiplier.</p><div style="padding: 8px 12px; background: #fef3c7; border-left: 3px solid #f59e0b; border-radius: 4px; font-size: 13px; margin-bottom: 12px;"><b>⚙️ Billing Rules:</b><ul style="margin: 8px 0 0 16px;"><li>Keep channel prices entered in USD</li><li>The multiplier may include both the CNY/USD exchange rate and points conversion</li><li><b>70</b> - 5 USD / MTok × 70 = 350 Points / MTok</li><li><b>63</b> - 10% off a multiplier of 70 (70 × 0.9)</li></ul></div><p style="font-size: 13px; color: #6b7280;">When 1 CNY = 10 Points and 1 USD = 7 CNY, the baseline multiplier is 70.</p></div>',
         nextBtn: 'Next'
       },
       groupExclusive: {
@@ -518,7 +518,7 @@ export default {
     amountTooLow: 'Minimum amount is {min}',
     amountTooHigh: 'Maximum amount is {max}',
     amountNoMethod: 'No payment method available for this amount',
-    rechargeRatePreview: 'Current rate: ¥1 = {credit} Snow credits',
+    rechargeRatePreview: 'Current rate: ¥1 = {credit} Points',
     refundReason: 'Refund Reason',
     refundReasonPlaceholder: 'Please describe your refund reason',
     stripeLoadFailed: 'Failed to load payment component. Please refresh and try again.',
@@ -654,7 +654,7 @@ export default {
       deductBalanceHint: 'Subtract recharged amount from user balance',
       userBalance: 'User Balance',
       orderAmount: 'Order Amount',
-      insufficientBalance: 'Insufficient balance; balance will be reduced to 0 Snow credits',
+      insufficientBalance: 'Insufficient balance; balance will be reduced to 0 Points',
       noDeduction: 'Will NOT deduct user balance',
       forceRefund: 'Force refund (ignore balance check)',
       orderCancelled: 'Order Cancelled',

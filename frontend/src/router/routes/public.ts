@@ -64,7 +64,7 @@ export const publicRoutes: RouteRecordRaw[] = [
     component: () => import('@/views/public/QuotaViewerLandingView.vue'),
     meta: {
       requiresAuth: false,
-      title: 'Desktop Quota Viewer',
+      title: 'Desktop Points Viewer',
       titleKey: 'quotaViewerLanding.meta.title',
       descriptionKey: 'quotaViewerLanding.meta.description'
     }

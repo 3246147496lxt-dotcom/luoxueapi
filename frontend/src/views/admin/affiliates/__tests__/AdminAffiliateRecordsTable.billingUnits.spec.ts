@@ -73,7 +73,7 @@ describe('AdminAffiliateRecordsTable billing units', () => {
     api.listTransferRecords.mockResolvedValue({ items: [], total: 0 })
   })
 
-  it('renders accumulated rebates as snowflake credits', async () => {
+  it('renders accumulated rebates as points', async () => {
     api.listInviteRecords.mockResolvedValue({
       items: [{
         inviter_id: 1,
@@ -126,7 +126,7 @@ describe('AdminAffiliateRecordsTable billing units', () => {
     expect(wrapper.text()).not.toContain('¥80.00')
   })
 
-  it('renders transfer and balance snapshots as snowflake credits', async () => {
+  it('renders transfer and balance snapshots as points', async () => {
     api.listTransferRecords.mockResolvedValue({
       items: [{
         ledger_id: 4,

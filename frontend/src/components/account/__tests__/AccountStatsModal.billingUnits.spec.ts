@@ -44,7 +44,7 @@ vi.mock('vue-i18n', async () => {
   const messages: Record<string, string> = {
     'usage.accountBilled': 'Account billed',
     'usage.userBilled': 'User billed',
-    'dashboard.creditUnit': 'Snow credits',
+    'dashboard.creditUnit': 'Points',
   }
   return {
     ...actual,
@@ -172,7 +172,7 @@ describe.each([
     getStats.mockResolvedValue(stats)
   })
 
-  it('renders user charges as Snow credits while account and standard costs remain USD', async () => {
+  it('renders user charges as Points while account and standard costs remain USD', async () => {
     const wrapper = await mountModal(component)
     const creditValues = wrapper.findAll('[data-testid="credit-amount"]')
       .map((node) => node.attributes('data-value'))
@@ -193,7 +193,7 @@ describe.each([
     })
   }, 30_000)
 
-  it('keeps account history in USD and user charges in Snow credits', async () => {
+  it('keeps account history in USD and user charges in Points', async () => {
     const wrapper = await mountModal(component)
     const line = wrapper.getComponent({ name: 'LineChartStub' })
     const data = line.props('data') as {
@@ -220,7 +220,7 @@ describe.each([
       billingUnit: 'USD',
     })
     expect(data.datasets[1]).toMatchObject({
-      label: 'User billed (Snow credits)',
+      label: 'User billed (Points)',
       data: [9.99],
       yAxisID: 'yCredit',
       billingUnit: 'CREDIT',
@@ -232,10 +232,10 @@ describe.each([
     expect(options.plugins.tooltip.callbacks.label({
       dataset: data.datasets[1],
       raw: 9.99,
-    })).toBe('User billed (Snow credits): 9.99 Snow credits')
+    })).toBe('User billed (Points): 9.99 Points')
     expect(options.scales.yUsd.ticks.callback(8.88)).toBe('$8.88')
     expect(options.scales.yUsd.title.text).toBe('Account billed (USD)')
     expect(options.scales.yCredit.ticks.callback(9.99)).toBe('9.99')
-    expect(options.scales.yCredit.title.text).toBe('User billed (Snow credits)')
+    expect(options.scales.yCredit.title.text).toBe('User billed (Points)')
   }, 30_000)
 })

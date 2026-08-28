@@ -69,14 +69,14 @@ pub fn presentation(snapshot: &ViewerSnapshot) -> TrayPresentation {
         IndicatorState::Remaining {
             percent,
             stale: false,
-        } => format!("落雪额度 · 会员剩余 {percent}%"),
+        } => format!("落雪积分 · 会员剩余 {percent}%"),
         IndicatorState::Remaining {
             percent,
             stale: true,
-        } => format!("落雪额度 · 上次会员剩余 {percent}%"),
-        IndicatorState::NoMembership { stale: false } => "落雪额度 · 暂无会员订阅".into(),
-        IndicatorState::NoMembership { stale: true } => "落雪额度 · 上次记录暂无会员订阅".into(),
-        IndicatorState::Unknown => "落雪额度 · 会员额度待确认".into(),
+        } => format!("落雪积分 · 上次会员剩余 {percent}%"),
+        IndicatorState::NoMembership { stale: false } => "落雪积分 · 暂无会员订阅".into(),
+        IndicatorState::NoMembership { stale: true } => "落雪积分 · 上次记录暂无会员订阅".into(),
+        IndicatorState::Unknown => "落雪积分 · 会员积分待确认".into(),
     };
 
     TrayPresentation { state, tooltip }
@@ -453,7 +453,7 @@ mod tests {
         let result = presentation(&snapshot("ready", Some(overview(json!([older, newer])))));
 
         assert_eq!(result.remaining_percent(), Some(32));
-        assert_eq!(result.tooltip(), "落雪额度 · 会员剩余 32%");
+        assert_eq!(result.tooltip(), "落雪积分 · 会员剩余 32%");
     }
 
     #[test]
@@ -519,14 +519,14 @@ mod tests {
         ));
 
         assert_eq!(result.remaining_percent(), Some(32));
-        assert_eq!(result.tooltip(), "落雪额度 · 上次会员剩余 32%");
+        assert_eq!(result.tooltip(), "落雪积分 · 上次会员剩余 32%");
     }
 
     #[test]
     fn empty_or_inactive_memberships_are_not_presented_as_zero_percent() {
         let empty = presentation(&snapshot("ready", Some(overview(json!([])))));
         assert_eq!(empty.remaining_percent(), None);
-        assert_eq!(empty.tooltip(), "落雪额度 · 暂无会员订阅");
+        assert_eq!(empty.tooltip(), "落雪积分 · 暂无会员订阅");
 
         let mut expired = membership(
             "1",
@@ -537,14 +537,14 @@ mod tests {
         expired["status"] = json!("expired");
         let inactive = presentation(&snapshot("ready", Some(overview(json!([expired])))));
         assert_eq!(inactive.remaining_percent(), None);
-        assert_eq!(inactive.tooltip(), "落雪额度 · 暂无会员订阅");
+        assert_eq!(inactive.tooltip(), "落雪积分 · 暂无会员订阅");
     }
 
     #[test]
     fn missing_or_unknown_membership_data_stays_unknown() {
         let disconnected = presentation(&ViewerSnapshot::disconnected());
         assert_eq!(disconnected.remaining_percent(), None);
-        assert_eq!(disconnected.tooltip(), "落雪额度 · 会员额度待确认");
+        assert_eq!(disconnected.tooltip(), "落雪积分 · 会员积分待确认");
 
         let mut unknown = membership(
             "1",
@@ -555,7 +555,7 @@ mod tests {
         unknown["weekly_window"]["state"] = json!("unknown");
         let unknown = presentation(&snapshot("ready", Some(overview(json!([unknown])))));
         assert_eq!(unknown.remaining_percent(), None);
-        assert_eq!(unknown.tooltip(), "落雪额度 · 会员额度待确认");
+        assert_eq!(unknown.tooltip(), "落雪积分 · 会员积分待确认");
     }
 
     #[cfg(target_os = "macos")]

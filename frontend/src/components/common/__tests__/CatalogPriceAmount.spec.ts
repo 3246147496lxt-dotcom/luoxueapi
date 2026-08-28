@@ -4,7 +4,7 @@ import CatalogPriceAmount from '../CatalogPriceAmount.vue'
 import CreditAmount from '../CreditAmount.vue'
 
 describe('CatalogPriceAmount', () => {
-  it('renders effective CREDIT prices with the shared snowflake amount semantics', () => {
+  it('renders effective CREDIT prices with the shared points amount semantics', () => {
     const wrapper = mount(CatalogPriceAmount, {
       props: {
         value: 0.00035,
@@ -14,7 +14,7 @@ describe('CatalogPriceAmount', () => {
     })
 
     expect(wrapper.getComponent(CreditAmount).props('value')).toBe('350')
-    expect(wrapper.find('[data-testid="snowflake-credit-icon"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="points-icon"]').exists()).toBe(true)
     expect(wrapper.text()).not.toMatch(/[$¥]/)
   })
 

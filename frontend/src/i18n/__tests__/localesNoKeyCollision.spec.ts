@@ -91,7 +91,7 @@ describe('shared navigation copy', () => {
 })
 
 const keysWorkspaceLocalePaths = [
-  'workspaceSnowCreditsUnit',
+  'workspacePointsUnit',
   'workspaceUnassignedGroup',
   'workspaceThirtyDayShort',
   'workspaceResetInInline',
@@ -119,10 +119,10 @@ function valueAtPath(source: Record<string, unknown>, path: string): unknown {
 describe('API key Superdesign workspace copy', () => {
   it('keeps the exact Chinese Scheme B labels', () => {
     expect(zhDashboard.keys).toMatchObject({
-      workspaceSnowCreditsUnit: 'SNOW CREDITS',
+      workspacePointsUnit: '积分',
       workspaceUnassignedGroup: '未分配分组',
       workspaceThirtyDayShort: '30D',
-      workspaceRateHeading: '额度限制（雪花额度）',
+      workspaceRateHeading: '额度限制（积分）',
       workspaceResetInInline: 'RESET IN: {time}',
       workspaceResetInSheet: '{time} 后重置',
       workspaceIpConfigured: '{count} 项配置',

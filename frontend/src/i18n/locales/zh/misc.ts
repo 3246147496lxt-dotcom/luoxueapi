@@ -288,7 +288,7 @@ export default {
       groupMultiplier: {
         title: '💰 3. 费率倍数',
         description:
-          '<div style="line-height: 1.7;"><p style="margin-bottom: 12px;">用户实扣雪花额度 = 渠道 USD 基础价 × 分组倍率。</p><div style="padding: 8px 12px; background: #fef3c7; border-left: 3px solid #f59e0b; border-radius: 4px; font-size: 13px; margin-bottom: 12px;"><b>⚙️ 计费规则：</b><ul style="margin: 8px 0 0 16px;"><li>渠道价格仍按 USD 录入</li><li>倍率可同时包含 CNY/USD 汇率和雪花兑换比例</li><li><b>70</b> - 5 USD / MTok × 70 = 350 雪花额度 / MTok</li><li><b>63</b> - 在倍率 70 基础上九折（70 × 0.9）</li></ul></div><p style="font-size: 13px; color: #6b7280;">若 1 CNY = 10 雪花额度且 1 USD = 7 CNY，则基准倍率为 70。</p></div>',
+          '<div style="line-height: 1.7;"><p style="margin-bottom: 12px;">用户实扣积分 = 渠道 USD 基础价 × 分组倍率。</p><div style="padding: 8px 12px; background: #fef3c7; border-left: 3px solid #f59e0b; border-radius: 4px; font-size: 13px; margin-bottom: 12px;"><b>⚙️ 计费规则：</b><ul style="margin: 8px 0 0 16px;"><li>渠道价格仍按 USD 录入</li><li>倍率可同时包含 CNY/USD 汇率和积分兑换比例</li><li><b>70</b> - 5 USD / MTok × 70 = 350 积分 / MTok</li><li><b>63</b> - 在倍率 70 基础上九折（70 × 0.9）</li></ul></div><p style="font-size: 13px; color: #6b7280;">若 1 CNY = 10 积分且 1 USD = 7 CNY，则基准倍率为 70。</p></div>',
         nextBtn: '下一步'
       },
       groupExclusive: {
@@ -537,7 +537,7 @@ export default {
     amountTooLow: '最低金额为 {min}',
     amountTooHigh: '最高金额为 {max}',
     amountNoMethod: '该金额没有可用的支付方式',
-    rechargeRatePreview: '当前倍率：¥1 = {credit} 雪花额度',
+    rechargeRatePreview: '当前倍率：¥1 = {credit} 积分',
     refundReason: '退款原因',
     refundReasonPlaceholder: '请描述您的退款原因',
     stripeLoadFailed: '支付组件加载失败，请刷新页面重试',
@@ -673,7 +673,7 @@ export default {
       deductBalanceHint: '从用户余额中扣回充值金额',
       userBalance: '用户余额',
       orderAmount: '订单金额',
-      insufficientBalance: '余额不足，将扣至 0 雪花额度',
+      insufficientBalance: '余额不足，将扣至 0 积分',
       noDeduction: '将不扣除用户余额',
       forceRefund: '强制退款（忽略余额检查）',
       orderCancelled: '订单已取消',

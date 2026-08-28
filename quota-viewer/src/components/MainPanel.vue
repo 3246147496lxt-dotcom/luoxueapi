@@ -27,7 +27,7 @@ const emit = defineEmits<{
   <section
     class="floating-quota-viewport"
     :class="{ 'floating-quota-viewport--collapsed': collapsed }"
-    aria-label="Codex 会员周额度"
+    aria-label="Codex 会员周积分"
   >
     <FloatingQuotaWidget
       :overview="overview"

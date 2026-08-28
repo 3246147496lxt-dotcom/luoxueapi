@@ -73,7 +73,7 @@ describe('admin order currency display', () => {
     expect(text).toContain('$25.00')
   })
 
-  it('uses Snow credits for a balance order amount and refund', () => {
+  it('uses Points for a balance order amount and refund', () => {
     const wrapper = mount(AdminOrderDetail, {
       props: {
         show: true,
@@ -102,7 +102,7 @@ describe('admin order currency display', () => {
     expect(text).not.toContain('$100.00')
   })
 
-  it('uses order currency for pay_amount, USD for subscription amounts, and Snow credits for user balance', () => {
+  it('uses order currency for pay_amount, USD for subscription amounts, and Points for user balance', () => {
     const wrapper = mount(AdminRefundDialog, {
       props: {
         show: true,
@@ -130,7 +130,7 @@ describe('admin order currency display', () => {
     expect(wrapper.find('[data-testid="credit-amount"]').text()).toContain('200.00')
   })
 
-  it('uses Snow credits throughout the balance-order refund controls', () => {
+  it('uses Points throughout the balance-order refund controls', () => {
     const wrapper = mount(AdminRefundDialog, {
       props: {
         show: true,
@@ -153,7 +153,7 @@ describe('admin order currency display', () => {
 
     expect(wrapper.text()).toContain('¥10.80')
     expect(wrapper.findAll('[data-testid="credit-amount"]')).toHaveLength(5)
-    expect(wrapper.findAll('[data-testid="snowflake-credit-icon"]').length).toBeGreaterThanOrEqual(6)
+    expect(wrapper.findAll('[data-testid="points-icon"]').length).toBeGreaterThanOrEqual(6)
     expect(wrapper.text()).not.toContain('$100.00')
   })
 

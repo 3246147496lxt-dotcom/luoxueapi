@@ -214,7 +214,7 @@ describe('AdminBillingReceiptsPanel', () => {
     expect(drawer.text()).toContain('340')
     expect(drawer.text()).toContain('96')
     expect(drawer.text()).toContain('32')
-    expect(drawer.text()).toContain('0.024000')
+    expect(drawer.get('[data-test="drawer-gross-cost"]').text()).toBe('$0.024000')
     expect(drawer.text()).toContain('0.020000')
     expect(drawer.text()).toContain('4.500000')
     expect(drawer.text()).toContain('4.480000')

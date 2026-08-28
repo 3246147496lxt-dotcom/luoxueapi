@@ -68,8 +68,8 @@ export default {
             'Use request records and channel status to narrow down the cause of failed calls.'
         },
         quotaViewer: {
-          title: 'Keep quota on your desktop',
-          description: 'See weekly remaining, reset countdowns, and monthly expiry without repeatedly opening the web app.',
+          title: 'Keep points on your desktop',
+          description: 'See weekly points remaining, reset countdowns, and monthly expiry without repeatedly opening the web app.',
           link: 'View the desktop app'
         }
       }
@@ -157,7 +157,7 @@ export default {
     description: 'Browse published model IDs, capabilities, and public standard pricing without signing in.',
     workspaceTitle: 'Model Center',
     workspaceDescription: 'Review available model IDs, capabilities, and public standard pricing.',
-    publicPriceNote: 'Prices shown here are public standard rates in Snow credits. Exclusive groups, subscription discounts, and user-specific multipliers are not included. Actual usage records are authoritative.',
+    publicPriceNote: 'Prices shown here are public standard rates in Points. Exclusive groups, subscription discounts, and user-specific multipliers are not included. Actual usage records are authoritative.',
     modelCount: '{count} models',
     pricingUpdatedAt: 'Pricing updated {time}',
     searchLabel: 'Search models',
@@ -246,7 +246,7 @@ export default {
       publicLabel: 'Public standard price',
       details: 'Pricing details',
       dialogTitle: 'Public pricing details',
-      dialogDescription: 'All prices are shown in Snow credits. Token-based models are shown per million tokens. 0 means free; “—” means that price is not available.',
+      dialogDescription: 'All prices are shown in Points. Token-based models are shown per million tokens. 0 means free; “—” means that price is not available.',
       billingMode: 'Billing mode',
       billingModes: {
         token: 'Per token',

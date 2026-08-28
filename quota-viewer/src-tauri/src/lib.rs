@@ -445,8 +445,8 @@ fn handle_tray_panel_mouse_up(
 }
 
 fn tray_menu(app: &AppHandle) -> tauri::Result<Menu<Wry>> {
-    let open = MenuItem::with_id(app, "open", "打开额度面板", true, None::<&str>)?;
-    let quit = MenuItem::with_id(app, "quit", "退出落雪额度", true, None::<&str>)?;
+    let open = MenuItem::with_id(app, "open", "打开积分面板", true, None::<&str>)?;
+    let quit = MenuItem::with_id(app, "quit", "退出落雪积分", true, None::<&str>)?;
     Menu::with_items(app, &[&open, &quit])
 }
 

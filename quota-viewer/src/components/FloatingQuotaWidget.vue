@@ -179,13 +179,13 @@ const resetLine = computed(() => {
         case 'connecting':
           return '等待浏览器确认'
         case 'loading':
-          return '正在读取会员额度'
+          return '正在读取会员积分'
         case 'auth-invalid':
           return '账户连接已失效'
         case 'pairing-expired':
           return '本次授权已超时'
         default:
-          return props.errorMessage || '暂时无法读取额度'
+          return props.errorMessage || '暂时无法读取积分'
       }
     default:
       return resetCountdown.value || '重置时间待确认'
@@ -210,7 +210,7 @@ const showsMonthlyRemaining = computed(() =>
 )
 
 const refreshFeedbackLine = computed(() => {
-  if (props.refreshing) return '正在重新获取额度'
+  if (props.refreshing) return '正在重新获取积分'
   if (props.lastRefreshAt == null) return null
 
   const refreshedAt = new Date(props.lastRefreshAt)
@@ -229,7 +229,7 @@ const refreshFeedbackLine = computed(() => {
     return `${checkedAt} 获取失败，可再次重试`
   }
   if (visualState.value === 'unavailable') {
-    return `${checkedAt} 已检查，服务端额度待更新`
+    return `${checkedAt} 已检查，服务端积分待更新`
   }
   return `${checkedAt} 已更新`
 })
@@ -258,13 +258,13 @@ const supportingLine = computed(() => {
           ? `浏览器确认码 ${props.pairingCode}`
           : '请在浏览器完成只读授权'
       }
-      if (props.status === 'loading') return '正在同步最新额度'
-      if (props.status === 'disconnected') return '连接后显示会员周剩余额度'
-      if (props.status === 'auth-invalid') return '重新连接后获取最新额度'
+      if (props.status === 'loading') return '正在同步最新积分'
+      if (props.status === 'disconnected') return '连接后显示会员周剩余积分'
+      if (props.status === 'auth-invalid') return '重新连接后获取最新积分'
       if (props.status === 'pairing-expired') return '请重新发起连接'
-      return refreshFeedbackLine.value ?? '暂时无法获取额度'
+      return refreshFeedbackLine.value ?? '暂时无法获取积分'
     case 'no-membership':
-      return '开通后显示每周剩余额度与重置时间'
+      return '开通后显示每周剩余积分与重置时间'
     case 'stale':
       return `${monthlyRemainingLine.value} · 旧数据`
   }
@@ -417,7 +417,7 @@ const onCardClick = (event: MouseEvent) => {
           class="floating-quota-widget__ring"
           viewBox="0 0 160 160"
           role="progressbar"
-          aria-label="本周剩余额度"
+          aria-label="本周剩余积分"
           aria-valuemin="0"
           aria-valuemax="100"
           :aria-valuenow="displayPercent ?? undefined"

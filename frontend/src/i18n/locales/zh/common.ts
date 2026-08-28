@@ -254,7 +254,7 @@ export default {
     close: '关闭账户菜单',
     balanceShort: '余额',
     availableBalance: '可用余额',
-    frozenBalance: '冻结额度',
+    frozenBalance: '冻结积分',
     subscriptionStatus: '订阅状态',
     subscriptionLoading: '正在同步',
     activeSubscriptions: '{count} 个有效订阅',

@@ -65,8 +65,8 @@ export default {
           description: '发生调用异常时，结合使用记录与渠道状态缩小排查范围。'
         },
         quotaViewer: {
-          title: '额度留在桌面',
-          description: '查看周剩余、重置倒计时和月到期日，不必反复打开网页。',
+          title: '积分留在桌面',
+          description: '查看周剩余积分、重置倒计时和月到期日，不必反复打开网页。',
           link: '查看桌面版'
         }
       }
@@ -151,7 +151,7 @@ export default {
     description: '无需登录即可查看已上架模型的模型 ID、能力范围和公开标准价格。',
     workspaceTitle: '模型中心',
     workspaceDescription: '查看当前可用模型的模型 ID、能力范围与公开标准价格。',
-    publicPriceNote: '这里展示所有注册用户可使用的公开标准价，价格单位为雪花额度；不包含专属分组、订阅优惠或用户个性倍率。最终费用以实际调用记录为准。',
+    publicPriceNote: '这里展示所有注册用户可使用的公开标准价，价格单位为积分；不包含专属分组、订阅优惠或用户个性倍率。最终费用以实际调用记录为准。',
     modelCount: '{count} 个模型',
     pricingUpdatedAt: '价格更新于 {time}',
     searchLabel: '搜索模型',
@@ -240,7 +240,7 @@ export default {
       publicLabel: '公开标准价',
       details: '价格详情',
       dialogTitle: '公开价格详情',
-      dialogDescription: '所有价格均以雪花额度展示。Token 模型按每百万 Token 展示；0 表示免费，“—”表示暂未提供该项价格。',
+      dialogDescription: '所有价格均以积分展示。Token 模型按每百万 Token 展示；0 表示免费，“—”表示暂未提供该项价格。',
       billingMode: '计费方式',
       billingModes: {
         token: '按 Token 计费',

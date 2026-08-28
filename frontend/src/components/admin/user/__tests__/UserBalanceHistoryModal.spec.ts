@@ -97,7 +97,7 @@ describe('UserBalanceHistoryModal', () => {
     })
   })
 
-  it('renders balances as snowflake credits while leaving concurrency as a count', async () => {
+  it('renders balances as points while leaving concurrency as a count', async () => {
     const wrapper = mount(UserBalanceHistoryModal, {
       props: { show: false, user, hideActions: true },
       global: {
@@ -124,7 +124,7 @@ describe('UserBalanceHistoryModal', () => {
       '+12.50',
       '-2.00'
     ])
-    expect(wrapper.findAll('[data-testid="snowflake-credit-icon"]')).toHaveLength(6)
+    expect(wrapper.findAll('[data-testid="points-icon"]')).toHaveLength(6)
     expect(wrapper.text()).toContain('+3')
     expect(wrapper.text()).not.toContain('$42.50')
     expect(wrapper.text()).not.toContain('$100.00')

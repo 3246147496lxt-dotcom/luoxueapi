@@ -355,7 +355,7 @@ describe('PaymentView integrated purchase surface', () => {
     expect(wrapper.text()).not.toContain('redeem.dividerTitle')
   })
 
-  it('uses snowflake credits for balances while keeping recharge amounts in CNY', async () => {
+  it('uses points for balances while keeping recharge amounts in CNY', async () => {
     getCheckoutInfo.mockResolvedValue(checkoutInfoFixture({
       methods: {
         wxpay: {

@@ -324,8 +324,8 @@ func TestFrontendServer_InjectSettings(t *testing.T) {
 		result := server.injectSettingsForPath([]byte(`{"site_name":"落雪API"}`), "/quota-viewer")
 		body := string(result)
 
-		assert.Contains(t, body, "<title>桌面额度查看器 · 落雪API</title>")
-		assert.Contains(t, body, `content="在 macOS 和 Windows 桌面查看周剩余`)
+		assert.Contains(t, body, "<title>桌面积分查看器 · 落雪API</title>")
+		assert.Contains(t, body, `content="在 macOS 和 Windows 桌面查看周剩余积分`)
 		assert.Contains(t, body, `<meta name="robots" content="index, follow`)
 		assert.Contains(t, body, `<link rel="canonical" href="https://luoxueapi.cc/quota-viewer" />`)
 		assert.Contains(t, body, `<meta property="og:url" content="https://luoxueapi.cc/quota-viewer" />`)
