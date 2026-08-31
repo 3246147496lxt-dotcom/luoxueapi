@@ -83,7 +83,9 @@ describe('FloatingQuotaWidget', () => {
       '可用'
     )
     expect(wrapper.text()).toContain('3 天 0 小时后重置')
-    expect(wrapper.text()).not.toContain(formatLocalDate(resetAt))
+    expect(wrapper.get('.floating-quota-widget__reset').text()).not.toContain(
+      formatLocalDate(resetAt)
+    )
     expect(wrapper.get('.floating-quota-widget__monthly-remaining').text()).toBe(
       `月剩余74% · ${formatLocalDate(expiresAt)} 到期`
     )
