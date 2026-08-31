@@ -79,6 +79,88 @@ func TestParsePricingData_PreservesExplicitZeroPresence(t *testing.T) {
 	require.False(t, data["input-only"].OutputCostPerTokenSet)
 }
 
+func TestParsePricingData_CorrectsMythosPreviewToOfficialPricing(t *testing.T) {
+	svc := &PricingService{}
+	data, err := svc.parsePricingData([]byte(`{
+		"claude-mythos-preview": {
+			"input_cost_per_token": 0.00001,
+			"output_cost_per_token": 0.00005,
+			"cache_creation_input_token_cost": 0.0000125,
+			"cache_creation_input_token_cost_above_1hr": 0.00002,
+			"cache_read_input_token_cost": 0.000001,
+			"supports_prompt_caching": true,
+			"litellm_provider": "anthropic",
+			"mode": "chat"
+		},
+		"gpt-price-sentinel": {
+			"input_cost_per_token": 0.000003,
+			"output_cost_per_token": 0.000009,
+			"litellm_provider": "openai",
+			"mode": "chat"
+		}
+	}`))
+	require.NoError(t, err)
+
+	mythos := data["claude-mythos-preview"]
+	require.NotNil(t, mythos)
+	require.InDelta(t, 25e-6, mythos.InputCostPerToken, 1e-12)
+	require.InDelta(t, 125e-6, mythos.OutputCostPerToken, 1e-12)
+	require.InDelta(t, 31.25e-6, mythos.CacheCreationInputTokenCost, 1e-12)
+	require.InDelta(t, 50e-6, mythos.CacheCreationInputTokenCostAbove1hr, 1e-12)
+	require.InDelta(t, 2.5e-6, mythos.CacheReadInputTokenCost, 1e-12)
+	require.True(t, mythos.InputCostPerTokenSet)
+	require.True(t, mythos.OutputCostPerTokenSet)
+	require.True(t, mythos.CacheCreationInputTokenCostSet)
+	require.True(t, mythos.CacheReadInputTokenCostSet)
+
+	gpt := data["gpt-price-sentinel"]
+	require.NotNil(t, gpt)
+	require.InDelta(t, 3e-6, gpt.InputCostPerToken, 1e-12)
+	require.InDelta(t, 9e-6, gpt.OutputCostPerToken, 1e-12)
+}
+
+func TestBillingService_MythosPreviewAppliesClaudeGroupDiscount(t *testing.T) {
+	pricingSvc := &PricingService{}
+	data, err := pricingSvc.parsePricingData([]byte(`{
+		"claude-mythos-preview": {
+			"input_cost_per_token": 0.00001,
+			"output_cost_per_token": 0.00005,
+			"cache_creation_input_token_cost": 0.0000125,
+			"cache_creation_input_token_cost_above_1hr": 0.00002,
+			"cache_read_input_token_cost": 0.000001,
+			"supports_prompt_caching": true,
+			"litellm_provider": "anthropic",
+			"mode": "chat"
+		}
+	}`))
+	require.NoError(t, err)
+	pricingSvc.pricingData = data
+	billingSvc := NewBillingService(&config.Config{}, pricingSvc)
+
+	pricing, err := billingSvc.GetModelPricing("claude-mythos-preview")
+	require.NoError(t, err)
+	require.InDelta(t, 25e-6, pricing.InputPricePerToken, 1e-12)
+	require.InDelta(t, 125e-6, pricing.OutputPricePerToken, 1e-12)
+	require.InDelta(t, 31.25e-6, pricing.CacheCreation5mPrice, 1e-12)
+	require.InDelta(t, 50e-6, pricing.CacheCreation1hPrice, 1e-12)
+	require.InDelta(t, 2.5e-6, pricing.CacheReadPricePerToken, 1e-12)
+	require.True(t, pricing.SupportsCacheBreakdown)
+
+	cost, err := billingSvc.CalculateCost("claude-mythos-preview", UsageTokens{
+		InputTokens:           1_000_000,
+		OutputTokens:          1_000_000,
+		CacheCreation5mTokens: 1_000_000,
+		CacheCreation1hTokens: 1_000_000,
+		CacheReadTokens:       1_000_000,
+	}, 0.85)
+	require.NoError(t, err)
+	require.InDelta(t, 25, cost.InputCost, 1e-12)
+	require.InDelta(t, 125, cost.OutputCost, 1e-12)
+	require.InDelta(t, 31.25+50, cost.CacheCreationCost, 1e-12)
+	require.InDelta(t, 2.5, cost.CacheReadCost, 1e-12)
+	require.InDelta(t, (25+125+31.25+50+2.5)*0.85, cost.ActualCost, 1e-12)
+}
+
 func TestBillingService_GPT56CacheWritePricingUsesOfficialMultiplier(t *testing.T) {
 	tests := []struct {
 		model             string

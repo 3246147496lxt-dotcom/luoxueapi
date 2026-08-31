@@ -611,8 +611,34 @@ func (s *PricingService) parsePricingData(body []byte) (map[string]*LiteLLMModel
 	if len(result) == 0 {
 		return nil, fmt.Errorf("no valid pricing entries found")
 	}
+	applyVerifiedAnthropicPricing(result)
 
 	return result, nil
+}
+
+// applyVerifiedAnthropicPricing corrects narrowly scoped upstream catalog
+// entries whose published prices are known to be stale. Anthropic published
+// Claude Mythos Preview at $25 input / $125 output per million tokens; prompt
+// caching uses the standard 1.25x (5m write), 2x (1h write), and 0.1x (read)
+// input-price multipliers. Keeping the correction at parse time makes both
+// billing and catalog consumers use the same official base price after every
+// remote pricing refresh.
+func applyVerifiedAnthropicPricing(data map[string]*LiteLLMModelPricing) {
+	pricing := data["claude-mythos-preview"]
+	if pricing == nil {
+		return
+	}
+
+	pricing.InputCostPerToken = 25e-6
+	pricing.OutputCostPerToken = 125e-6
+	pricing.CacheCreationInputTokenCost = 31.25e-6
+	pricing.CacheCreationInputTokenCostAbove1hr = 50e-6
+	pricing.CacheReadInputTokenCost = 2.5e-6
+	pricing.InputCostPerTokenSet = true
+	pricing.OutputCostPerTokenSet = true
+	pricing.CacheCreationInputTokenCostSet = true
+	pricing.CacheReadInputTokenCostSet = true
+	pricing.SupportsPromptCaching = true
 }
 
 // loadPricingData 从本地文件加载价格数据
