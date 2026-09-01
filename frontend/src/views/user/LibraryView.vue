@@ -7,6 +7,7 @@
         active-section="library"
         class="library-workspace__history library-workspace__history--desktop"
         :conversations="historyConversations"
+        :projects="projectList"
         :active-id="chatStore.activeConversationId"
         :search-query="historySearchQuery"
         :searching="chatStore.searchingHistory"
@@ -45,6 +46,7 @@
             mobile
             active-section="library"
             :conversations="historyConversations"
+            :projects="projectList"
             :active-id="chatStore.activeConversationId"
             :search-query="historySearchQuery"
             :searching="chatStore.searchingHistory"
@@ -77,6 +79,7 @@
           active-section="library"
           sidebar-id="workspace-library-sidebar-overlay"
           :conversations="historyConversations"
+          :projects="projectList"
           :active-id="chatStore.activeConversationId"
           :search-query="historySearchQuery"
           :searching="chatStore.searchingHistory"
@@ -506,7 +509,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { computed, getCurrentInstance, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
 import AppLayout from '@/components/layout/AppLayout.vue'
@@ -527,6 +530,7 @@ import { useAppStore } from '@/stores/app'
 import { useAuthStore } from '@/stores/auth'
 import { useChatStore } from '@/stores/chat'
 import { useLibraryStore } from '@/stores/library'
+import { useProjectsStore } from '@/stores/projects'
 import {
   formatLibraryFileTime,
   formatLibraryFileTimeTooltip,
@@ -550,6 +554,23 @@ const appStore = useAppStore()
 const authStore = useAuthStore()
 const chatStore = useChatStore()
 const libraryStore = useLibraryStore()
+// LibraryView is also mounted in a few isolated visual/unit harnesses that do
+// not install Pinia. Keep those harnesses renderable while using the real
+// project store whenever the app is mounted normally.
+function hasProvidedPinia(): boolean {
+  const provides = getCurrentInstance()?.appContext.provides
+  if (!provides) return false
+  return Reflect.ownKeys(provides).some((key) => {
+    const value = (provides as Record<PropertyKey, unknown>)[key]
+    return value !== null
+      && typeof value === 'object'
+      && '_s' in value
+      && 'install' in value
+  })
+}
+
+const projectsStore = hasProvidedPinia() ? useProjectsStore() : null
+const projectList = computed(() => projectsStore?.projects ?? [])
 const { mobileDrawer: mobileHistoryLayout, narrowSidebar } = useWorkspaceResponsiveState()
 
 const mainRef = ref<HTMLElement | null>(null)
@@ -640,6 +661,7 @@ watch(mobileHistoryLayout, (mobile) => {
 watch(() => authStore.user?.id, async (userId) => {
   await chatStore.hydrate(userId)
   if (disposed || !userId) return
+  if (projectsStore) void projectsStore.load()
   await chatStore.syncHistory()
   if (!disposed) await chatStore.loadConversationPage(true)
 }, { immediate: true, flush: 'sync' })

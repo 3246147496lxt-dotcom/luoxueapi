@@ -10,7 +10,7 @@ repo_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 
 old_commit="${OLD_APPLICATION_COMMIT:-d7d138bb776a3608aea0c04634c01ff32e002f36}"
 expected_old_migrations="${EXPECTED_OLD_MIGRATIONS:-246}"
-expected_candidate_migrations="${EXPECTED_CANDIDATE_MIGRATIONS:-250}"
+expected_candidate_migrations="${EXPECTED_CANDIDATE_MIGRATIONS:-256}"
 temp_root="${TMPDIR:-/tmp}"
 temp_root="${temp_root%/}"
 temp_dir=""
@@ -160,8 +160,33 @@ wait_ready() {
   ' <<<"$ready_json" >/dev/null
 }
 
+assert_projects_schema() {
+  [[ "$(db_scalar "SELECT to_regclass('public.chat_projects') IS NOT NULL")" == "t" ]] ||
+    die "chat_projects table is missing"
+  [[ "$(db_scalar "SELECT to_regclass('public.chat_project_files') IS NOT NULL")" == "t" ]] ||
+    die "chat_project_files table is missing"
+  [[ "$(db_scalar "SELECT EXISTS (SELECT 1 FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'chat_conversations' AND column_name = 'project_id')")" == "t" ]] ||
+    die "chat_conversations.project_id column is missing"
+
+  project_column_count="$(db_scalar "SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'chat_projects' AND column_name IN ('id','public_id','user_id','name','icon','color','instructions','memory_mode','created_at','updated_at','deleted_at')")"
+  [[ "$project_column_count" == "11" ]] || die "chat_projects schema is incomplete"
+  project_file_column_count="$(db_scalar "SELECT COUNT(*) FROM information_schema.columns WHERE table_schema = 'public' AND table_name = 'chat_project_files' AND column_name IN ('project_id','library_file_id','user_id','created_at')")"
+  [[ "$project_file_column_count" == "4" ]] || die "chat_project_files schema is incomplete"
+
+  for index_name in \
+    idx_chat_projects_user_updated \
+    idx_chat_conversations_user_project_updated \
+    idx_chat_project_files_user; do
+    [[ "$(db_scalar "SELECT to_regclass('public.' || '$index_name') IS NOT NULL")" == "t" ]] ||
+      die "project migration index is missing: $index_name"
+  done
+
+  project_constraint_count="$(db_scalar "SELECT COUNT(*) FROM pg_constraint AS c JOIN pg_class AS tbl ON tbl.oid = c.conrelid JOIN pg_namespace AS ns ON ns.oid = tbl.relnamespace WHERE ns.nspname = 'public' AND c.conname IN ('chat_projects_name_check','chat_projects_memory_mode_check','chat_conversations_project_fkey','chat_project_files_user_project_fkey','chat_project_files_user_library_fkey')")"
+  [[ "$project_constraint_count" == "5" ]] || die "project migration constraints are incomplete"
+}
+
 wait_ready
-[[ "$(db_scalar 'SELECT COUNT(*) FROM schema_migrations')" == "$expected_old_migrations" ]] || die "old baseline is not 246 migrations"
+[[ "$(db_scalar 'SELECT COUNT(*) FROM schema_migrations')" == "$expected_old_migrations" ]] || die "old baseline is not $expected_old_migrations migrations"
 "${compose[@]}" stop -t 30 sub2api
 
 export SMOKE_IMAGE="$CANDIDATE_IMAGE"
@@ -194,12 +219,13 @@ for replay in first second; do
   "${compose[@]}" run --rm --no-deps --entrypoint /app/sub2api sub2api \
     --migrate-only \
     --expected-database-identity-file /run/candidate/database-identity.json
-  [[ "$(db_scalar 'SELECT COUNT(*) FROM schema_migrations')" == "$expected_candidate_migrations" ]] || die "candidate migrate-only $replay did not reach 250"
+  [[ "$(db_scalar 'SELECT COUNT(*) FROM schema_migrations')" == "$expected_candidate_migrations" ]] || die "candidate migrate-only $replay did not reach $expected_candidate_migrations"
 done
 
-candidate_tail="$(db_scalar "SELECT string_agg(filename || '=' || checksum, ',' ORDER BY filename) FROM schema_migrations WHERE filename IN ('201_library_files.sql','201a_library_alias_unique_index_notx.sql','201b_library_alias_constraints.sql','202_chat_message_activities.sql')")"
-expected_tail="201_library_files.sql=03f6a53d92e93fbfee37b9e5dd78dc11cae49dd921812253d0425154f1a9c23e,201a_library_alias_unique_index_notx.sql=ba15a71ce63180c21f8addda85351b13171a0e6c22f7427bcb4b8c955499e564,201b_library_alias_constraints.sql=f52ac96a80583b4e7a3c7c5f9923eee5d95a47c4a2b2d9844c864f31abe83833,202_chat_message_activities.sql=e2ee8b4480af916327f132d378eb70b2291c85efba0ced4555452147b56fdb8f"
+candidate_tail="$(db_scalar "SELECT string_agg(filename || '=' || checksum, ',' ORDER BY filename) FROM schema_migrations WHERE filename IN ('201_library_files.sql','201a_library_alias_unique_index_notx.sql','201b_library_alias_constraints.sql','202_chat_message_activities.sql','231_add_users_email_alias_dedup_index_notx.sql','232_add_users_email_normalized_index_notx.sql','233_group_profit_control.sql','234_add_usage_log_upstream_response_model.sql','235_add_usage_log_upstream_model_mismatch_index_notx.sql','236_projects.sql')")"
+expected_tail="201_library_files.sql=03f6a53d92e93fbfee37b9e5dd78dc11cae49dd921812253d0425154f1a9c23e,201a_library_alias_unique_index_notx.sql=ba15a71ce63180c21f8addda85351b13171a0e6c22f7427bcb4b8c955499e564,201b_library_alias_constraints.sql=f52ac96a80583b4e7a3c7c5f9923eee5d95a47c4a2b2d9844c864f31abe83833,202_chat_message_activities.sql=e2ee8b4480af916327f132d378eb70b2291c85efba0ced4555452147b56fdb8f,231_add_users_email_alias_dedup_index_notx.sql=fd103466b72b14919fc7a0b02135f019f9fe7a409a434726467c3649551321e4,232_add_users_email_normalized_index_notx.sql=052a61bf4bdc89a5215970059a61096f4eaea5c244b6781f3ec42d6ac8e8bb5d,233_group_profit_control.sql=b39b90d72d8869dc46beeb426f5db112ff04235c89ddb6d0ecee61a9bea95381,234_add_usage_log_upstream_response_model.sql=cad520cbfcf7af7ea9acae92e5bcbe27501fd9e3ad5b02e306f4f97be4410a82,235_add_usage_log_upstream_model_mismatch_index_notx.sql=692f2a75f0c62670b4d68986912bf24eb92f6377ec904d3806ff7d62b0da8355,236_projects.sql=050ad388c07995c4167ebd5ef52211f5cc2f04dfb74d6ab6655403d03f9936ce"
 [[ "$candidate_tail" == "$expected_tail" ]] || die "candidate migration tail differs"
+assert_projects_schema
 
 "${compose[@]}" up --no-build --detach --wait --wait-timeout 180 sub2api
 wait_ready

@@ -136,6 +136,15 @@
       >
         <Icon name="chatSidebarLibrary" size="sm" aria-hidden="true" />
       </RouterLink>
+      <RouterLink
+        to="/projects"
+        class="chat-history__collapsed-nav-action chat-history__projects-entry"
+        :aria-label="t('chat.navigation.projects')"
+        :title="t('chat.navigation.projects')"
+        :aria-current="activeSection === 'projects' ? 'page' : undefined"
+      >
+        <Icon name="chatSidebarProjects" size="sm" aria-hidden="true" />
+      </RouterLink>
     </nav>
 
     <form
@@ -186,6 +195,39 @@
           <span>{{ t(item.labelKey) }}</span>
         </button>
       </nav>
+
+      <section
+        v-if="shell && !sidebarCollapsed && projects.length > 0"
+        class="chat-history__projects"
+        :aria-label="t('chat.navigation.projects')"
+      >
+        <div class="chat-history__projects-heading">
+          <span>{{ t('chat.navigation.projects') }}</span>
+          <RouterLink
+            to="/projects"
+            class="chat-history__projects-add"
+            :aria-label="t('projects.newProject')"
+            :title="t('projects.newProject')"
+          >
+            <Icon name="plus" size="sm" aria-hidden="true" />
+          </RouterLink>
+        </div>
+        <nav class="chat-history__project-list">
+          <RouterLink
+            v-for="project in projects"
+            :key="project.id"
+            :to="`/projects/${encodeURIComponent(project.id)}`"
+            class="chat-history__project-link"
+            :class="{ 'chat-history__project-link--active': activeSection === 'projects' && router?.currentRoute.value.path === `/projects/${project.id}` }"
+            :aria-label="project.name"
+            :title="project.name"
+          >
+            <span class="chat-history__project-icon" :style="{ '--project-color': projectAccent(project.color) }" aria-hidden="true">{{ project.icon }}</span>
+            <span class="chat-history__project-name">{{ project.name }}</span>
+            <span class="chat-history__project-count">{{ project.conversationIds.length }}</span>
+          </RouterLink>
+        </nav>
+      </section>
 
       <div v-if="conversations.length === 0" class="chat-history__empty">
         <Icon name="chat" size="lg" />
@@ -322,6 +364,7 @@ import { useWorkspaceSidebarCollapse } from '@/components/layout/useWorkspaceSid
 import { toChatConversationTitlePreview } from '@/features/chat/conversationTitle'
 import { useAppStore } from '@/stores/app'
 import type { ChatConversation } from '@/types/chat'
+import type { Project } from '@/types/projects'
 
 const props = withDefaults(defineProps<{
   conversations: ChatConversation[]
@@ -334,7 +377,8 @@ const props = withDefaults(defineProps<{
   hasMore?: boolean
   loadingMore?: boolean
   shell?: boolean
-  activeSection?: 'chat' | 'library'
+  activeSection?: 'chat' | 'library' | 'projects'
+  projects?: Project[]
 }>(), {
   activeId: null,
   mobile: false,
@@ -346,6 +390,7 @@ const props = withDefaults(defineProps<{
   loadingMore: false,
   shell: false,
   activeSection: 'chat',
+  projects: () => [],
 })
 
 const emit = defineEmits<{
@@ -390,8 +435,8 @@ const chatPrimaryItems = [
     id: 'projects',
     labelKey: 'chat.navigation.projects',
     icon: 'chatSidebarProjects',
-    path: '',
-    available: false,
+    path: '/projects',
+    available: true,
   },
   {
     id: 'scheduled',
@@ -473,6 +518,21 @@ function setRenameInput(element: unknown) {
 function updateSearchQuery(event: Event) {
   const target = event.target
   emit('update:searchQuery', target instanceof HTMLInputElement ? target.value : '')
+}
+
+function projectAccent(value: string): string {
+  if (/^#[\da-f]{3,8}$/i.test(value)) return value
+  const palette: Record<string, string> = {
+    gray: '#6b7280',
+    red: '#ef4444',
+    orange: '#f97316',
+    yellow: '#eab308',
+    green: '#22c55e',
+    blue: '#3b82f6',
+    purple: '#8b5cf6',
+    pink: '#ec4899',
+  }
+  return palette[value] ?? '#7c3aed'
 }
 
 function showUnavailableNavigation(labelKey: ChatPrimaryLabelKey) {
@@ -884,7 +944,8 @@ onBeforeUnmount(() => {
 }
 
 .chat-history__chat-entry[aria-current='page'],
-.chat-history__library-entry[aria-current='page'] {
+.chat-history__library-entry[aria-current='page'],
+.chat-history__projects-entry[aria-current='page'] {
   color: var(--workspace-text);
   background: var(--workspace-selected);
 }
@@ -929,6 +990,88 @@ onBeforeUnmount(() => {
 
 .chat-history__primary-nav--scrolling {
   flex: 0 0 auto;
+}
+
+.chat-history__projects {
+  margin: 13px 2px 2px;
+  padding-top: 12px;
+  border-top: 1px solid var(--workspace-footer-divider);
+}
+
+.chat-history__projects-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 28px;
+  padding: 0 8px;
+  color: var(--workspace-sidebar-group-label);
+  font-size: var(--workspace-sidebar-group-label-size);
+  font-weight: var(--workspace-sidebar-group-label-weight);
+}
+
+.chat-history__projects-add {
+  display: grid;
+  width: 28px;
+  height: 28px;
+  place-items: center;
+  border-radius: 8px;
+  color: var(--workspace-text-muted);
+}
+
+.chat-history__projects-add:hover {
+  color: var(--workspace-text);
+  background: var(--workspace-hover);
+}
+
+.chat-history__project-list {
+  display: grid;
+  gap: 2px;
+  margin-top: 4px;
+}
+
+.chat-history__project-link {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  min-height: 36px;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 9px;
+  color: var(--workspace-text-secondary);
+  text-decoration: none;
+  transition: color 150ms ease, background-color 150ms ease;
+}
+
+.chat-history__project-link:hover,
+.chat-history__project-link--active {
+  color: var(--workspace-text);
+  background: var(--workspace-hover);
+}
+
+.chat-history__project-icon {
+  display: grid;
+  width: 22px;
+  height: 22px;
+  flex: 0 0 22px;
+  place-items: center;
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--project-color, #7c3aed) 14%, transparent);
+  font-size: 14px;
+  line-height: 1;
+}
+
+.chat-history__project-name {
+  min-width: 0;
+  flex: 1;
+  overflow: hidden;
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-history__project-count {
+  color: var(--workspace-text-muted);
+  font-size: 11px;
 }
 
 .chat-history__new,

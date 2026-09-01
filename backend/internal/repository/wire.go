@@ -98,6 +98,7 @@ var ProviderSet = wire.NewSet(
 	NewChatAttachmentRepository,
 	NewChatAttachmentBlobStore,
 	NewLibraryFileRepository,
+	NewProjectRepository,
 	ProvideLibraryBlobStore,
 	NewLibraryDownloadTicketStore,
 	NewAdminChatHistoryRepository,

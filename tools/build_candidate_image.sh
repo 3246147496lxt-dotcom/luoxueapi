@@ -8,7 +8,7 @@ repo_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 : "${CANDIDATE_VERSION:?CANDIDATE_VERSION is required}"
 : "${CANDIDATE_IMAGE_REPOSITORY:?CANDIDATE_IMAGE_REPOSITORY is required}"
 
-expected_migration_count="${EXPECTED_MIGRATION_COUNT:-250}"
+expected_migration_count="${EXPECTED_MIGRATION_COUNT:-256}"
 output_file="${CANDIDATE_OUTPUT_FILE:-}"
 temp_root="${TMPDIR:-/tmp}"
 temp_root="${temp_root%/}"

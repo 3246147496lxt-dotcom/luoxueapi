@@ -11,6 +11,7 @@
         :aria-hidden="activityModalActive ? 'true' : undefined"
         :inert="activityModalActive ? true : undefined"
         :conversations="historyConversations"
+        :projects="projectsStore.projects"
         :active-id="chatStore.activeConversationId"
         :search-query="historySearchQuery"
         :searching="chatStore.searchingHistory"
@@ -50,6 +51,7 @@
             shell
             mobile
             :conversations="historyConversations"
+            :projects="projectsStore.projects"
             :active-id="chatStore.activeConversationId"
             :search-query="historySearchQuery"
             :searching="chatStore.searchingHistory"
@@ -81,6 +83,7 @@
           overlay
           sidebar-id="workspace-chat-sidebar-overlay"
           :conversations="historyConversations"
+          :projects="projectsStore.projects"
           :active-id="chatStore.activeConversationId"
           :search-query="historySearchQuery"
           :searching="chatStore.searchingHistory"
@@ -477,6 +480,7 @@ import {
 import { useAuthStore } from '@/stores/auth'
 import { useAppStore } from '@/stores/app'
 import { useChatStore, type ChatMessagePatch } from '@/stores/chat'
+import { useProjectsStore } from '@/stores/projects'
 import type {
   ChatActivity,
   ChatCompletionRequest,
@@ -508,11 +512,13 @@ const REASONING_PREFERENCE_STORAGE_KEY = 'sub2api.chat.reasoning-preference.v1'
 const ACTIVITY_DRAWER_MEDIA_QUERY = '(max-width: 1023px)'
 const NEW_CHAT_QUERY_KEY = 'conversation'
 const NEW_CHAT_QUERY_VALUE = 'new'
+const PROJECT_QUERY_KEY = 'project'
 
 const { t } = useI18n()
 const appStore = useAppStore()
 const authStore = useAuthStore()
 const chatStore = useChatStore()
+const projectsStore = useProjectsStore()
 
 function hasNewChatRouteIntent(): boolean {
   if (typeof window === 'undefined') return false
@@ -542,6 +548,32 @@ function setNewChatRouteIntent(enabled: boolean): void {
     )
   } catch {
     // IndexedDB remains the fallback when the current environment cannot replace the URL.
+  }
+}
+
+function projectRouteIntent(): string | null {
+  if (typeof window === 'undefined') return null
+  try {
+    const value = new URL(window.location.href).searchParams.get(PROJECT_QUERY_KEY)?.trim()
+    return value || null
+  } catch {
+    return null
+  }
+}
+
+function setProjectRouteIntent(projectId: string | null): void {
+  if (typeof window === 'undefined') return
+  try {
+    const url = new URL(window.location.href)
+    if (projectId?.trim()) url.searchParams.set(PROJECT_QUERY_KEY, projectId.trim())
+    else url.searchParams.delete(PROJECT_QUERY_KEY)
+    window.history.replaceState(
+      window.history.state,
+      '',
+      `${url.pathname}${url.search}${url.hash}`,
+    )
+  } catch {
+    // The router remains the source of truth when URL replacement is unavailable.
   }
 }
 
@@ -804,6 +836,7 @@ watch(
     if (normalizedUserId && hasNewChatRouteIntent()) {
       chatStore.selectConversation(null)
     }
+    if (normalizedUserId) void projectsStore.load()
     void Promise.resolve(hydration).then(() => {
       if (
         !viewDisposed
@@ -1367,6 +1400,7 @@ function startNewConversation() {
   newChatGreeting.value = pickChatGreeting(newChatGreeting.value)
   defaultModel.value = preferredModel
   setNewChatRouteIntent(true)
+  setProjectRouteIntent(null)
   chatStore.selectConversation(null)
   reconcileSelectedModel()
   composerDraft.value = ''
@@ -1516,6 +1550,10 @@ async function sendMessageTransaction(
   const requestModel = selectedModel.value
   const titleSource = content.trim() || attachments[0]?.name || t('chat.history.newConversation')
   liveFailureMessageId.value = null
+  // Capture the project before creating the local conversation. Creating it
+  // synchronously updates activeConversationId, whose route watcher removes
+  // the `conversation=new` marker from the URL.
+  const pendingProjectId = hasNewChatRouteIntent() ? projectRouteIntent() : null
 
   let conversation = activeConversation.value
   if (!conversation) {
@@ -1543,6 +1581,23 @@ async function sendMessageTransaction(
   ) {
     acknowledge?.(false)
     return
+  }
+  // A project-created chat carries its context through the URL. The chat
+  // creation outbox is replayed by prepareConversationForCompletion above, so
+  // the dedicated move endpoint now sees a durable conversation instead of a
+  // local-only id. Keep this association best-effort when the browser is
+  // offline; the project page surfaces any sync error for a retry.
+  // A project query is only an intent for the project-created blank chat.
+  // Ignoring it on an existing conversation prevents a stale browser URL
+  // from unexpectedly reassigning a later message to a project.
+  if (pendingProjectId) {
+    const projectConversation = {
+      id: conversation.id,
+      title: conversation.title,
+      model: conversation.model,
+      updatedAt: new Date(conversation.updatedAt).toISOString(),
+    }
+    void projectsStore.addConversation(pendingProjectId, conversation.id, projectConversation)
   }
   const expectedHeadMessageId = conversation.headMessageId
     ?? conversation.messages[conversation.messages.length - 1]?.id

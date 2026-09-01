@@ -171,7 +171,7 @@ jobs:
           check-latest: false
           cache: true
           cache-dependency-path: backend/go.sum
-      - name: Execute candidate SQL and 246-to-250 migration contract on PostgreSQL 18
+      - name: Execute candidate SQL and 246-to-256 migration contract on PostgreSQL 18
         working-directory: backend
         env:
           CI: 'true'

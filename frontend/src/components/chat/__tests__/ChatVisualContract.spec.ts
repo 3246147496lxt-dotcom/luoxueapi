@@ -212,10 +212,11 @@ describe('Chat shell visual contract', () => {
     expect(historySource).toMatch(
       /id: 'library',[\s\S]*?path: '\/library',[\s\S]*?available: true/,
     )
-    expect(historySource).not.toContain('to="/projects"')
+    expect(historySource).toContain("path: '/projects'")
+    expect(historySource).toContain('to="/projects"')
     expect(historySource).not.toContain('to="/scheduled"')
     expect(historySource).not.toContain('to="/plugins"')
-    for (const unavailableSection of ['projects', 'scheduled', 'plugins']) {
+    for (const unavailableSection of ['scheduled', 'plugins']) {
       expect(historySource).toMatch(new RegExp(
         `id: '${unavailableSection}',[\\s\\S]*?path: '',[\\s\\S]*?available: false`,
       ))

@@ -13,14 +13,14 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestCandidateMigrationsUpgradeProduction246To255AndReplay(t *testing.T) {
+func TestCandidateMigrationsUpgradeProduction246To256AndReplay(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	defer cancel()
 
 	files, err := collectValidatedMigrationFiles(migrationfs.FS)
 	require.NoError(t, err)
 	const productionBaselineCount = 246
-	require.Len(t, files, productionBaselineCount+9, "candidate binary must embed the reviewed 255-file manifest")
+	require.Len(t, files, productionBaselineCount+10, "candidate binary must embed the reviewed 256-file manifest")
 
 	wantTail := []MigrationManifestEntry{
 		{Filename: "201_library_files.sql", SHA256: "03f6a53d92e93fbfee37b9e5dd78dc11cae49dd921812253d0425154f1a9c23e"},
@@ -29,9 +29,10 @@ func TestCandidateMigrationsUpgradeProduction246To255AndReplay(t *testing.T) {
 		{Filename: "202_chat_message_activities.sql", SHA256: "e2ee8b4480af916327f132d378eb70b2291c85efba0ced4555452147b56fdb8f"},
 		{Filename: "231_add_users_email_alias_dedup_index_notx.sql", SHA256: "fd103466b72b14919fc7a0b02135f019f9fe7a409a434726467c3649551321e4"},
 		{Filename: "232_add_users_email_normalized_index_notx.sql", SHA256: "052a61bf4bdc89a5215970059a61096f4eaea5c244b6781f3ec42d6ac8e8bb5d"},
-		{Filename: "233_group_profit_control.sql", SHA256: "afd79e417fc16d34da93df95de87abef407f7cd21e16dae037e0aa59c048d52b"},
+		{Filename: "233_group_profit_control.sql", SHA256: "b39b90d72d8869dc46beeb426f5db112ff04235c89ddb6d0ecee61a9bea95381"},
 		{Filename: "234_add_usage_log_upstream_response_model.sql", SHA256: "cad520cbfcf7af7ea9acae92e5bcbe27501fd9e3ad5b02e306f4f97be4410a82"},
 		{Filename: "235_add_usage_log_upstream_model_mismatch_index_notx.sql", SHA256: "692f2a75f0c62670b4d68986912bf24eb92f6377ec904d3806ff7d62b0da8355"},
+		{Filename: "236_projects.sql", SHA256: "050ad388c07995c4167ebd5ef52211f5cc2f04dfb74d6ab6655403d03f9936ce"},
 	}
 	require.Len(t, files, productionBaselineCount+len(wantTail))
 	for index, want := range wantTail {
@@ -45,7 +46,7 @@ func TestCandidateMigrationsUpgradeProduction246To255AndReplay(t *testing.T) {
 		productionBaseline[file.name] = &fstest.MapFile{Data: []byte(file.content)}
 	}
 
-	db := openIsolatedMigrationIntegrationDB(t, "sub2api_candidate_246_to_255")
+	db := openIsolatedMigrationIntegrationDB(t, "sub2api_candidate_246_to_256")
 	require.NoError(t, applyMigrationsFSWithPolicy(
 		ctx,
 		db,
@@ -68,6 +69,7 @@ func TestCandidateMigrationsUpgradeProduction246To255AndReplay(t *testing.T) {
 	requireCandidateChatActivitySchema(t, ctx, db)
 	requireCandidateProfitControlSchema(t, ctx, db)
 	requireCandidateUpstreamResponseModelSchema(t, ctx, db)
+	requireCandidateProjectsSchema(t, ctx, db)
 
 	beforeReplay := schemaMigrationsFingerprint(t, ctx, db)
 	require.NoError(t, applyMigrationsFSWithExpectedDatabaseIdentity(
@@ -164,6 +166,76 @@ WHERE index_namespace.nspname = 'public'
 	require.Contains(t, definition, "WHERE (upstream_model_mismatch IS TRUE)")
 }
 
+func requireCandidateProjectsSchema(t *testing.T, ctx context.Context, db *sql.DB) {
+	t.Helper()
+
+	var projectsTable, projectFilesTable, conversationProjectColumn bool
+	require.NoError(t, db.QueryRowContext(ctx, `
+SELECT to_regclass('public.chat_projects') IS NOT NULL,
+       to_regclass('public.chat_project_files') IS NOT NULL,
+       EXISTS (
+         SELECT 1
+         FROM information_schema.columns
+         WHERE table_schema = 'public'
+           AND table_name = 'chat_conversations'
+           AND column_name = 'project_id'
+       )`).Scan(&projectsTable, &projectFilesTable, &conversationProjectColumn))
+	require.True(t, projectsTable, "chat_projects table must exist")
+	require.True(t, projectFilesTable, "chat_project_files table must exist")
+	require.True(t, conversationProjectColumn, "chat_conversations.project_id must exist")
+
+	var projectColumnCount, projectFileColumnCount int
+	require.NoError(t, db.QueryRowContext(ctx, `
+SELECT
+  (SELECT COUNT(*)
+   FROM information_schema.columns
+   WHERE table_schema = 'public'
+     AND table_name = 'chat_projects'
+     AND column_name IN (
+       'id', 'public_id', 'user_id', 'name', 'icon', 'color',
+       'instructions', 'memory_mode', 'created_at', 'updated_at', 'deleted_at'
+     )),
+  (SELECT COUNT(*)
+   FROM information_schema.columns
+   WHERE table_schema = 'public'
+     AND table_name = 'chat_project_files'
+     AND column_name IN ('project_id', 'library_file_id', 'user_id', 'created_at'))`).Scan(
+		&projectColumnCount,
+		&projectFileColumnCount,
+	))
+	require.Equal(t, 11, projectColumnCount, "chat_projects must expose the complete project schema")
+	require.Equal(t, 4, projectFileColumnCount, "chat_project_files must expose the complete file-link schema")
+
+	for _, indexName := range []string{
+		"idx_chat_projects_user_updated",
+		"idx_chat_conversations_user_project_updated",
+		"idx_chat_project_files_user",
+	} {
+		var exists bool
+		require.NoError(t, db.QueryRowContext(ctx, `
+SELECT to_regclass('public.' || $1) IS NOT NULL`, indexName).Scan(&exists))
+		require.Truef(t, exists, "index %s must exist", indexName)
+	}
+
+	var constraintCount int
+	require.NoError(t, db.QueryRowContext(ctx, `
+SELECT COUNT(*)
+FROM pg_constraint AS constraint_state
+JOIN pg_class AS constrained_table
+  ON constrained_table.oid = constraint_state.conrelid
+JOIN pg_namespace AS constrained_namespace
+  ON constrained_namespace.oid = constrained_table.relnamespace
+WHERE constrained_namespace.nspname = 'public'
+  AND constraint_state.conname IN (
+    'chat_projects_name_check',
+    'chat_projects_memory_mode_check',
+    'chat_conversations_project_fkey',
+    'chat_project_files_user_project_fkey',
+    'chat_project_files_user_library_fkey'
+  )`).Scan(&constraintCount))
+	require.Equal(t, 5, constraintCount, "236 project constraints must be present")
+}
+
 func requireCandidateMigrationRows(
 	t *testing.T,
 	ctx context.Context,
@@ -183,7 +255,8 @@ WHERE filename IN (
   '232_add_users_email_normalized_index_notx.sql',
   '233_group_profit_control.sql',
   '234_add_usage_log_upstream_response_model.sql',
-  '235_add_usage_log_upstream_model_mismatch_index_notx.sql'
+  '235_add_usage_log_upstream_model_mismatch_index_notx.sql',
+  '236_projects.sql'
 )
 ORDER BY filename`)
 	require.NoError(t, err)

@@ -83,7 +83,10 @@ type ChatHandler struct {
 	attachments *service.ChatAttachmentService
 	library     *service.LibraryService
 	gateway     chatCompletionDelegator
+	projects    *service.ProjectService
 }
+
+func (h *ChatHandler) SetProjectService(projects *service.ProjectService) { h.projects = projects }
 
 func NewChatHandler(
 	chat *service.ChatService,
@@ -106,12 +109,14 @@ func ProvideChatHandler(
 	history *service.ChatHistoryService,
 	attachments *service.ChatAttachmentService,
 	library *service.LibraryService,
+	projects *service.ProjectService,
 	gateway *OpenAIGatewayHandler,
 ) *ChatHandler {
 	handler := NewChatHandler(chat, attempts, receipts, gateway)
 	handler.history = history
 	handler.attachments = attachments
 	handler.library = library
+	handler.projects = projects
 	return handler
 }
 

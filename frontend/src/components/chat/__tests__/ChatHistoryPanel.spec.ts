@@ -218,7 +218,8 @@ describe('ChatHistoryPanel focus management', () => {
     expect(scrollingNav.findAll('a')).toHaveLength(0)
     expect(wrapper.find('.chat-history__list .chat-history__new').exists()).toBe(false)
     expect(actions[1]!.attributes('aria-disabled')).toBeUndefined()
-    expect(actions.slice(2).every((action) => action.attributes('aria-disabled') === 'true'))
+    expect(actions[2]!.attributes('aria-disabled')).toBeUndefined()
+    expect(actions.slice(3).every((action) => action.attributes('aria-disabled') === 'true'))
       .toBe(true)
 
     await actions[0]!.trigger('click')
@@ -231,11 +232,10 @@ describe('ChatHistoryPanel focus management', () => {
     expect(appStore.toasts).toHaveLength(0)
 
     await actions[2]!.trigger('click')
-    expect(appStore.toasts.at(-1)).toMatchObject({
-      type: 'info',
-      message: 'chat.navigation.unavailable',
-    })
-    expect(push).toHaveBeenCalledOnce()
+    await flushPromises()
+    expect(push).toHaveBeenCalledWith('/projects')
+    expect(push).toHaveBeenCalledTimes(2)
+    expect(appStore.toasts).toHaveLength(0)
     expect(wrapper.emitted('new')).toEqual([[]])
   })
 
@@ -342,6 +342,7 @@ describe('ChatHistoryPanel focus management', () => {
         'chat.history.searchLabel',
         'nav.chatMode',
         'chat.navigation.fileLibrary',
+        'chat.navigation.projects',
       ])
     expect(collapsedActions[2]!.attributes('href')).toBe('/library')
 

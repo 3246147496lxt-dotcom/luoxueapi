@@ -119,13 +119,13 @@ class CandidateDeliveryContractTest(unittest.TestCase):
         second = build_manifest(ROOT)
         self.assertEqual(first, second)
         self.assertEqual(first["contract"], "sub2api-migration-manifest/v1")
-        self.assertEqual(len(first["migrations"]), 250)
+        self.assertEqual(len(first["migrations"]), 256)
         self.assertEqual(
             first["set_sha256"],
-            "3c2ad5841db29a52c573e63b297409745ad8520cbb3af62e69a6e914667f3585",
+            "34552e5dd1f16783654893774b6fe389d857eb10256032a76d15658aa39870f4",
         )
         self.assertEqual(
-            first["migrations"][-4:],
+            first["migrations"][-10:],
             [
                 {
                     "filename": "201_library_files.sql",
@@ -142,6 +142,30 @@ class CandidateDeliveryContractTest(unittest.TestCase):
                 {
                     "filename": "202_chat_message_activities.sql",
                     "sha256": "e2ee8b4480af916327f132d378eb70b2291c85efba0ced4555452147b56fdb8f",
+                },
+                {
+                    "filename": "231_add_users_email_alias_dedup_index_notx.sql",
+                    "sha256": "fd103466b72b14919fc7a0b02135f019f9fe7a409a434726467c3649551321e4",
+                },
+                {
+                    "filename": "232_add_users_email_normalized_index_notx.sql",
+                    "sha256": "052a61bf4bdc89a5215970059a61096f4eaea5c244b6781f3ec42d6ac8e8bb5d",
+                },
+                {
+                    "filename": "233_group_profit_control.sql",
+                    "sha256": "b39b90d72d8869dc46beeb426f5db112ff04235c89ddb6d0ecee61a9bea95381",
+                },
+                {
+                    "filename": "234_add_usage_log_upstream_response_model.sql",
+                    "sha256": "cad520cbfcf7af7ea9acae92e5bcbe27501fd9e3ad5b02e306f4f97be4410a82",
+                },
+                {
+                    "filename": "235_add_usage_log_upstream_model_mismatch_index_notx.sql",
+                    "sha256": "692f2a75f0c62670b4d68986912bf24eb92f6377ec904d3806ff7d62b0da8355",
+                },
+                {
+                    "filename": "236_projects.sql",
+                    "sha256": "050ad388c07995c4167ebd5ef52211f5cc2f04dfb74d6ab6655403d03f9936ce",
                 },
             ],
         )
@@ -183,7 +207,7 @@ class CandidateDeliveryContractTest(unittest.TestCase):
         compose = CANDIDATE_COMPOSE.read_text(encoding="utf-8")
         self.assertIn("@sha256:", script)
         self.assertIn("EXPECTED_OLD_MIGRATIONS:-246", script)
-        self.assertIn("EXPECTED_CANDIDATE_MIGRATIONS:-250", script)
+        self.assertIn("EXPECTED_CANDIDATE_MIGRATIONS:-256", script)
         self.assertIn("--migrate-only", script)
         self.assertIn("for replay in first second", script)
         self.assertIn("--volumes --remove-orphans", script)

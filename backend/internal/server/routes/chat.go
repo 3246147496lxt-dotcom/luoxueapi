@@ -46,6 +46,7 @@ func RegisterChatRoutes(
 	chat.GET("/conversations/:conversation_id", h.Chat.GetConversation)
 	chat.GET("/conversations/:conversation_id/messages", h.Chat.ListConversationMessages)
 	chat.PATCH("/conversations/:conversation_id", h.Chat.UpdateConversation)
+	chat.PATCH("/conversations/:conversation_id/project", h.Chat.MoveConversationToProject)
 	chat.DELETE("/conversations/:conversation_id", h.Chat.DeleteConversation)
 	chat.POST("/transcriptions", middleware.RequestBodyLimit(cfg.Transcription.RequestBodyLimit()), h.Chat.Transcriptions)
 	chat.POST("/completions", h.Chat.Completions)

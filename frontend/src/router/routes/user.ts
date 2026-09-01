@@ -105,6 +105,30 @@ export const userRoutes: RouteRecordRaw[] = [
     }
   },
   {
+    path: '/projects',
+    name: 'Projects',
+    component: () => import('@/views/user/ProjectsView.vue'),
+    meta: {
+      requiresAuth: true,
+      requiresAdmin: false,
+      title: 'Projects',
+      titleKey: 'projects.title',
+      shellMode: 'chat'
+    }
+  },
+  {
+    path: '/projects/:projectId',
+    name: 'ProjectDetail',
+    component: () => import('@/views/user/ProjectsView.vue'),
+    meta: {
+      requiresAuth: true,
+      requiresAdmin: false,
+      title: 'Project',
+      titleKey: 'projects.title',
+      shellMode: 'chat'
+    }
+  },
+  {
     path: '/keys',
     name: 'Keys',
     component: () => import('@/views/user/KeysView.vue'),

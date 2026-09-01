@@ -173,6 +173,18 @@ func TestMigrationsRunner_IsIdempotent_AndSchemaIsUpToDate(t *testing.T) {
 
 	// user_allowed_groups: created_at should be timestamptz
 	requireColumn(t, tx, "user_allowed_groups", "created_at", "timestamp with time zone", 0, false)
+
+	// projects: project metadata, conversation grouping, and file links.
+	var projectsRegclass sql.NullString
+	require.NoError(t, tx.QueryRowContext(context.Background(), "SELECT to_regclass('public.chat_projects')").Scan(&projectsRegclass))
+	require.True(t, projectsRegclass.Valid, "expected chat_projects table to exist")
+	requireColumn(t, tx, "chat_projects", "public_id", "character varying", 80, false)
+	requireColumn(t, tx, "chat_projects", "user_id", "bigint", 0, false)
+	requireColumn(t, tx, "chat_projects", "memory_mode", "character varying", 32, false)
+	requireColumn(t, tx, "chat_conversations", "project_id", "bigint", 0, true)
+	requireIndex(t, tx, "chat_projects", "idx_chat_projects_user_updated")
+	requireIndex(t, tx, "chat_conversations", "idx_chat_conversations_user_project_updated")
+	requireMigrationRecorded(t, tx, "236_projects.sql")
 }
 
 func TestMigrationsRunner_AuthIdentityAndPaymentSchemaStayAligned(t *testing.T) {

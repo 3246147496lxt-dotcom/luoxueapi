@@ -312,4 +312,7 @@ export default {
       clearDescription: '此操作会删除当前账户的全部对话记录，并同步到其他设备，且无法撤销。',
     },
   },
+  projects: {
+    eyebrow: '工作区', projectLabel: '项目', activityLabel: '活动', settingsLabel: '设置', sourcesLabel: '来源', title: '项目', subtitle: '把聊天、文件和指令放在同一个上下文中。', newProject: '新建项目', createFirst: '创建第一个项目', emptyTitle: '还没有项目', emptyDescription: '创建一个项目，集中管理相关聊天和文件。', loading: '正在加载项目…', saving: '保存中…', retry: '重试', recentlyUpdated: '最近更新', chats: '聊天', files: '文件', rename: '重命名项目', delete: '删除项目', edit: '编辑', newChat: '新聊天', allProjects: '全部项目', instructions: '项目指令', instructionsPlaceholder: '告诉项目中的 GPT 应该如何回应…', instructionsHelp: '这些指令会应用到此项目中的每个新聊天。', memory: '记忆', memoryDescription: '选择此项目是否只使用项目内的对话作为上下文。', memoryDefault: '默认记忆', memoryProjectOnly: '仅限项目记忆', noChats: '还没有加入聊天', noAvailableChats: '所有可用聊天都已加入此项目。', addChat: '添加聊天', removeChat: '移出项目', noFiles: '还没有文件', addFiles: '添加文件', removeFile: '从项目移除文件', sourcesHelp: '文件保存在资料库中，也可以在其他项目中复用。', name: '项目名称', icon: '图标', color: '颜色', editProject: '编辑项目', deleteConfirm: '确定要删除这个项目吗？聊天会保留，但会从项目中移除。',
+  },
 }

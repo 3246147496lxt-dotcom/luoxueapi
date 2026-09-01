@@ -328,7 +328,9 @@ func initializeApplication(buildInfo handler.BuildInfo, cfg *config.Config, entC
 	}
 	libraryService := service.NewLibraryService(libraryFileRepository, libraryBlobStore, cfg)
 	chatAttachmentService := service.ProvideChatAttachmentService(chatAttachmentRepository, chatAttachmentBlobStore, libraryService, cfg)
-	chatHandler := handler.ProvideChatHandler(chatService, chatAttemptService, billingReceiptService, chatHistoryService, chatAttachmentService, libraryService, openAIGatewayHandler)
+	projectRepository := repository.NewProjectRepository(db)
+	projectService := service.NewProjectService(projectRepository)
+	chatHandler := handler.ProvideChatHandler(chatService, chatAttemptService, billingReceiptService, chatHistoryService, chatAttachmentService, libraryService, projectService, openAIGatewayHandler)
 	libraryDownloadTicketStore := repository.NewLibraryDownloadTicketStore(redisClient)
 	libraryDownloadTicketService := service.NewLibraryDownloadTicketService(libraryService, libraryDownloadTicketStore)
 	libraryHandler := handler.NewLibraryHandler(libraryService, libraryDownloadTicketService)
