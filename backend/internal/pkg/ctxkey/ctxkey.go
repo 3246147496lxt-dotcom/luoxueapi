@@ -45,6 +45,11 @@ const (
 	// 供 service 层执行用户级策略，不能使用客户端请求体中的 user 标识替代。
 	UserID Key = "ctx_user_id"
 
+	// OpenAIServiceTierPreference 是已通过 API Key 鉴权的服务端默认
+	// service_tier 偏好。它只由认证中间件从可信 API Key 快照写入，不能
+	// 从请求体、Header 或客户端自定义字段读取。
+	OpenAIServiceTierPreference Key = "ctx_openai_service_tier_preference"
+
 	// WebChat 标识请求来自 JWT 认证的站内聊天入口。
 	// 该标记只由服务端在绑定内部 web_chat principal 后写入。
 	WebChat Key = "ctx_web_chat"

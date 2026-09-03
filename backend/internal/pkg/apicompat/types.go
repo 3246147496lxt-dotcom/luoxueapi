@@ -61,8 +61,9 @@ type AnthropicContentBlock struct {
 	// type=thinking
 	Thinking string `json:"thinking,omitempty"`
 
-	// type=image
-	Source *AnthropicImageSource `json:"source,omitempty"`
+	// type=image or type=document
+	Source *AnthropicContentSource `json:"source,omitempty"`
+	Title  string                  `json:"title,omitempty"`
 
 	// type=tool_use
 	ID    string          `json:"id,omitempty"`
@@ -97,12 +98,20 @@ func (b AnthropicContentBlock) MarshalJSON() ([]byte, error) {
 	}
 }
 
-// AnthropicImageSource describes the source data for an image content block.
-type AnthropicImageSource struct {
-	Type      string `json:"type"` // "base64"
-	MediaType string `json:"media_type"`
-	Data      string `json:"data"`
+// AnthropicContentSource describes the source data for image and document
+// content blocks. Images use base64 sources. Documents may use base64 PDF,
+// inline text, provider file IDs, or public URLs.
+type AnthropicContentSource struct {
+	Type      string `json:"type"` // "base64" | "text" | "file" | "url"
+	MediaType string `json:"media_type,omitempty"`
+	Data      string `json:"data,omitempty"`
+	FileID    string `json:"file_id,omitempty"`
+	URL       string `json:"url,omitempty"`
 }
+
+// AnthropicImageSource remains an alias for compatibility with callers that
+// construct image blocks directly.
+type AnthropicImageSource = AnthropicContentSource
 
 // AnthropicTool describes a tool available to the model.
 type AnthropicTool struct {
@@ -210,7 +219,8 @@ type ResponsesRequest struct {
 
 // ResponsesReasoning configures reasoning effort in the Responses API.
 type ResponsesReasoning struct {
-	Effort  string `json:"effort"`            // "low" | "medium" | "high" | "xhigh"
+	Mode    string `json:"mode,omitempty"`    // "standard" | "pro"
+	Effort  string `json:"effort,omitempty"`  // "low" | "medium" | "high" | "xhigh"; omitted for Pro
 	Summary string `json:"summary,omitempty"` // "auto" | "concise" | "detailed"
 }
 
@@ -238,13 +248,23 @@ type ResponsesInputItem struct {
 
 	// type=function_call_output
 	Output string `json:"output,omitempty"`
+
+	// type=input_file (the API also accepts input_file as a top-level item)
+	Filename string `json:"filename,omitempty"`
+	FileData string `json:"file_data,omitempty"`
+	FileID   string `json:"file_id,omitempty"`
+	FileURL  string `json:"file_url,omitempty"`
 }
 
 // ResponsesContentPart is a typed content part in a Responses message.
 type ResponsesContentPart struct {
-	Type     string `json:"type"` // "input_text" | "output_text" | "input_image"
+	Type     string `json:"type"` // "input_text" | "output_text" | "input_image" | "input_file"
 	Text     string `json:"text,omitempty"`
 	ImageURL string `json:"image_url,omitempty"` // data URI for input_image
+	Filename string `json:"filename,omitempty"`
+	FileData string `json:"file_data,omitempty"` // data URI for input_file
+	FileID   string `json:"file_id,omitempty"`
+	FileURL  string `json:"file_url,omitempty"`
 }
 
 // ResponsesTool describes a tool in the Responses API.
@@ -578,6 +598,7 @@ type ChatCompletionsRequest struct {
 	Tools               []ChatTool         `json:"tools,omitempty"`
 	ParallelToolCalls   *bool              `json:"parallel_tool_calls,omitempty"`
 	ToolChoice          json.RawMessage    `json:"tool_choice,omitempty"`
+	ReasoningMode       string             `json:"-"`                          // trusted Web Chat context only: "standard" | "pro"
 	ReasoningEffort     string             `json:"reasoning_effort,omitempty"` // "low" | "medium" | "high" | "xhigh"
 	ServiceTier         string             `json:"service_tier,omitempty"`
 	Stop                json.RawMessage    `json:"stop,omitempty"` // string or []string
@@ -608,15 +629,24 @@ type ChatMessage struct {
 
 // ChatContentPart is a typed content part in a multi-modal message.
 type ChatContentPart struct {
-	Type     string        `json:"type"` // "text" | "image_url"
+	Type     string        `json:"type"` // "text" | "image_url" | "file"
 	Text     string        `json:"text,omitempty"`
 	ImageURL *ChatImageURL `json:"image_url,omitempty"`
+	File     *ChatFile     `json:"file,omitempty"`
 }
 
 // ChatImageURL contains the URL for an image content part.
 type ChatImageURL struct {
 	URL    string `json:"url"`
 	Detail string `json:"detail,omitempty"` // "auto" | "low" | "high"
+}
+
+// ChatFile contains an inline file or an already-uploaded OpenAI file
+// reference for a Chat Completions file content part.
+type ChatFile struct {
+	Filename string `json:"filename,omitempty"`
+	FileData string `json:"file_data,omitempty"`
+	FileID   string `json:"file_id,omitempty"`
 }
 
 // ChatTool describes a tool available to the model.

@@ -143,6 +143,37 @@ func TestForwardAsRawChatCompletions_ForcesStreamUsageUpstreamAndPassesUsageDown
 	require.Contains(t, rec.Body.String(), "data: [DONE]")
 }
 
+func TestForwardAsRawChatCompletionsImageModelSkipsPriorityDefault(t *testing.T) {
+	setGinTestMode()
+
+	body := []byte(`{"model":"gpt-image-2","messages":[{"role":"user","content":"draw a cat"}],"stream":false}`)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader(body))
+	c.Request.Header.Set("Content-Type", "application/json")
+
+	upstream := &httpUpstreamRecorder{resp: &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"application/json"}},
+		Body: io.NopCloser(strings.NewReader(
+			`{"id":"chatcmpl_image","object":"chat.completion","model":"gpt-image-2","choices":[{"index":0,"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}`,
+		)),
+	}}
+	account := rawChatCompletionsTestAccount()
+	account.Credentials["model_mapping"] = map[string]any{"gpt-image-2": openAIServiceTierModel}
+	svc := newPriorityInjectionTestService()
+	svc.cfg = rawChatCompletionsTestConfig()
+	svc.httpUpstream = upstream
+	markPriorityCapability(svc, account, OpenAIServiceTierSupportSupported)
+	ctx := context.WithValue(context.Background(), ctxkey.OpenAIServiceTierPreference, ServiceTierPreferencePriority)
+
+	result, err := svc.forwardAsRawChatCompletions(ctx, c, account, body, "")
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.Equal(t, openAIServiceTierModel, gjson.GetBytes(upstream.lastBody, "model").String())
+	require.False(t, gjson.GetBytes(upstream.lastBody, "service_tier").Exists())
+}
+
 func TestForwardAsRawChatCompletions_PreservesMappedGPT56MaxEffort(t *testing.T) {
 	setGinTestMode()
 
@@ -470,6 +501,66 @@ func TestHandleChatStreamingResponse_SilentRefusalReasoningSummaryExempt(t *test
 	require.Contains(t, rec.Body.String(), "data: [DONE]")
 }
 
+func TestHandleChatStreamingResponse_WebChatForwardsOfficialActivityWithoutReasoningContent(t *testing.T) {
+	setGinTestMode()
+
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/api/v1/chat/completions", nil)
+	SetWebChatReasoningOptions(c, WebChatReasoningOptions{
+		Mode: WebChatReasoningModePro, Effort: "medium",
+	})
+
+	upstreamBody := strings.Join([]string{
+		`data: {"type":"response.created","response":{"id":"resp_activity","model":"gpt-5.6-sol","status":"in_progress","reasoning":{"mode":"pro","effort":"medium"}},"sequence_number":0}`,
+		"",
+		`data: {"type":"response.output_item.added","output_index":0,"item":{"id":"rs_1","type":"reasoning","status":"in_progress","summary":[]},"sequence_number":1}`,
+		"",
+		`data: {"type":"response.reasoning_summary_part.added","item_id":"rs_1","output_index":0,"summary_index":0,"part":{"type":"summary_text","text":""},"sequence_number":2}`,
+		"",
+		`data: {"type":"response.reasoning_summary_text.delta","item_id":"rs_1","output_index":0,"summary_index":0,"delta":"Checking inputs","sequence_number":3}`,
+		"",
+		`data: {"type":"response.reasoning_summary_text.done","item_id":"rs_1","output_index":0,"summary_index":0,"text":"Checking inputs","sequence_number":4}`,
+		"",
+		`data: {"type":"response.reasoning_summary_part.done","item_id":"rs_1","output_index":0,"summary_index":0,"part":{"type":"summary_text","text":"Checking inputs"},"sequence_number":5}`,
+		"",
+		`data: {"type":"response.output_item.done","output_index":0,"item":{"id":"rs_1","type":"reasoning","status":"completed","summary":[{"type":"summary_text","text":"Checking inputs"}]},"sequence_number":6}`,
+		"",
+		`data: {"type":"response.output_text.delta","item_id":"msg_1","output_index":1,"content_index":0,"delta":"Final answer","sequence_number":7}`,
+		"",
+		`data: {"type":"response.completed","response":{"id":"resp_activity","model":"gpt-5.6-sol","status":"completed","usage":{"input_tokens":3,"output_tokens":4,"total_tokens":7}},"sequence_number":8}`,
+		"",
+	}, "\n")
+	resp := &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"text/event-stream"}, "x-request-id": []string{"rid_activity"}},
+		Body:       io.NopCloser(strings.NewReader(upstreamBody)),
+	}
+	svc := &OpenAIGatewayService{cfg: rawChatCompletionsTestConfig()}
+
+	result, err := svc.handleChatStreamingResponse(
+		resp,
+		c,
+		rawChatCompletionsTestAccount(),
+		"gpt-5.6-sol",
+		"gpt-5.6-sol",
+		"gpt-5.6-sol",
+		time.Now(),
+		0,
+		nil,
+	)
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	body := rec.Body.String()
+	require.Contains(t, body, `"source":"openai_responses"`)
+	require.Contains(t, body, `"eventType":"response.reasoning_summary_text.delta"`)
+	require.Contains(t, body, `"delta":"Checking inputs"`)
+	require.Contains(t, body, `"eventType":"response.completed"`)
+	require.NotContains(t, body, `"reasoning_content"`)
+	require.Contains(t, body, `"content":"Final answer"`)
+	require.Contains(t, body, "data: [DONE]")
+}
+
 func TestForwardAsRawChatCompletions_SilentRefusalNormalContentExempt(t *testing.T) {
 	setGinTestMode()
 
@@ -669,8 +760,6 @@ func TestForwardAsRawChatCompletions_WebChatDoneReleasesBeforeUpstreamEOF(t *tes
 		_, _ = io.WriteString(pw, strings.Join([]string{
 			`data: {"id":"chatcmpl_1","object":"chat.completion.chunk","model":"gpt-5.4","choices":[{"index":0,"delta":{"content":"ok"}}]}`,
 			"",
-			`data: {"id":"chatcmpl_1","object":"chat.completion.chunk","model":"gpt-5.4","choices":[],"usage":{"prompt_tokens":7,"completion_tokens":3,"total_tokens":10}}`,
-			"",
 			"data: [DONE]",
 			"",
 		}, "\n"))
@@ -684,15 +773,266 @@ func TestForwardAsRawChatCompletions_WebChatDoneReleasesBeforeUpstreamEOF(t *tes
 	svc := &OpenAIGatewayService{cfg: rawChatCompletionsTestConfig(), httpUpstream: upstream}
 
 	started := time.Now()
-	result, err := svc.forwardAsRawChatCompletions(reqCtx, c, rawChatCompletionsTestAccount(), body, "")
+	var result *OpenAIForwardResult
+	var forwardErr error
+	forwardDone := make(chan struct{})
+	go func() {
+		defer close(forwardDone)
+		result, forwardErr = svc.forwardAsRawChatCompletions(reqCtx, c, rawChatCompletionsTestAccount(), body, "")
+	}()
+	select {
+	case <-forwardDone:
+	case <-time.After(time.Second):
+		t.Fatal("native [DONE] did not release the request")
+	}
 	<-writeDone
+
+	require.NoError(t, forwardErr)
+	require.NotNil(t, result)
+	require.Equal(t, 1, strings.Count(rec.Body.String(), "data: [DONE]\n\n"))
+	require.Less(t, time.Since(started), time.Second, "[DONE] must release the request without waiting for upstream EOF")
+}
+
+func TestForwardAsRawChatCompletions_WebChatTerminalUsageSynthesizesDoneBeforeUpstreamEOF(t *testing.T) {
+	setGinTestMode()
+
+	parent := context.WithValue(context.Background(), ctxkey.WebChat, true)
+	reqCtx, cancel := context.WithCancel(parent)
+	defer cancel()
+	body := []byte(`{"model":"gpt-5.4","messages":[{"role":"user","content":"hello"}],"stream":true}`)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader(body)).WithContext(reqCtx)
+	c.Request.Header.Set("Content-Type", "application/json")
+
+	pr, pw := io.Pipe()
+	t.Cleanup(func() { _ = pw.Close() })
+	writeDone := make(chan struct{})
+	go func() {
+		defer close(writeDone)
+		_, _ = io.WriteString(pw, strings.Join([]string{
+			`data: {"id":"chatcmpl_1","object":"chat.completion.chunk","model":"gpt-5.4","choices":[{"index":0,"delta":{"content":"complete answer"},"finish_reason":null}]}`,
+			"",
+			`data: {"id":"chatcmpl_1","object":"chat.completion.chunk","model":"gpt-5.4","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}`,
+			"",
+			`data: {"id":"chatcmpl_1","object":"chat.completion.chunk","model":"gpt-5.4","choices":[],"usage":{"prompt_tokens":11,"completion_tokens":4,"total_tokens":15}}`,
+			"",
+			"",
+		}, "\n"))
+	}()
+
+	upstream := &httpUpstreamRecorder{resp: &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"text/event-stream"}, "x-request-id": []string{"rid_raw_usage_without_done"}},
+		Body:       pr,
+	}}
+	svc := &OpenAIGatewayService{cfg: rawChatCompletionsTestConfig(), httpUpstream: upstream}
+
+	type forwardOutcome struct {
+		result *OpenAIForwardResult
+		err    error
+	}
+	started := time.Now()
+	forwardDone := make(chan forwardOutcome, 1)
+	go func() {
+		result, err := svc.forwardAsRawChatCompletions(reqCtx, c, rawChatCompletionsTestAccount(), body, "")
+		forwardDone <- forwardOutcome{result: result, err: err}
+	}()
+	var outcome forwardOutcome
+	select {
+	case outcome = <-forwardDone:
+	case <-time.After(time.Second):
+		t.Fatal("terminal usage did not release the request")
+	}
+	<-writeDone
+
+	require.NoError(t, outcome.err)
+	require.NotNil(t, outcome.result)
+	require.Equal(t, 11, outcome.result.Usage.InputTokens)
+	require.Equal(t, 4, outcome.result.Usage.OutputTokens)
+	require.Contains(t, rec.Body.String(), `"content":"complete answer"`)
+	require.Contains(t, rec.Body.String(), `"finish_reason":"stop"`)
+	require.Equal(t, 1, strings.Count(rec.Body.String(), "data: [DONE]\n\n"))
+	require.Less(t, time.Since(started), time.Second, "terminal usage must synthesize DONE without waiting for upstream EOF")
+}
+
+func TestForwardAsRawChatCompletions_WebChatTerminalUsageBeforeNativeDoneEmitsExactlyOnce(t *testing.T) {
+	setGinTestMode()
+
+	parent := context.WithValue(context.Background(), ctxkey.WebChat, true)
+	body := []byte(`{"model":"gpt-5.4","messages":[{"role":"user","content":"hello"}],"stream":true}`)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader(body)).WithContext(parent)
+	c.Request.Header.Set("Content-Type", "application/json")
+
+	pr, pw := io.Pipe()
+	t.Cleanup(func() { _ = pw.Close() })
+	writeDone := make(chan struct{})
+	go func() {
+		defer close(writeDone)
+		_, _ = io.WriteString(pw, strings.Join([]string{
+			`data: {"id":"chatcmpl_overlap","choices":[{"index":0,"delta":{"content":"complete"},"finish_reason":null}]}`,
+			"",
+			`data: {"id":"chatcmpl_overlap","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}`,
+			"",
+			`data: {"id":"chatcmpl_overlap","choices":[],"usage":{"prompt_tokens":9,"completion_tokens":2,"total_tokens":11}}`,
+			"",
+			"data: [DONE]",
+			"",
+		}, "\n"))
+	}()
+
+	upstream := &httpUpstreamRecorder{resp: &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+		Body:       pr,
+	}}
+	svc := &OpenAIGatewayService{cfg: rawChatCompletionsTestConfig(), httpUpstream: upstream}
+
+	type overlapOutcome struct {
+		result *OpenAIForwardResult
+		err    error
+	}
+	forwardDone := make(chan overlapOutcome, 1)
+	go func() {
+		result, err := svc.forwardAsRawChatCompletions(parent, c, rawChatCompletionsTestAccount(), body, "")
+		forwardDone <- overlapOutcome{result: result, err: err}
+	}()
+	var outcome overlapOutcome
+	select {
+	case outcome = <-forwardDone:
+	case <-time.After(time.Second):
+		t.Fatal("terminal usage before native [DONE] did not release the request")
+	}
+	<-writeDone
+
+	require.NoError(t, outcome.err)
+	require.NotNil(t, outcome.result)
+	require.Equal(t, 1, strings.Count(rec.Body.String(), "data: [DONE]\n\n"))
+}
+
+func TestForwardAsRawChatCompletions_WebChatTerminalUsageSynthesizesDoneAtCleanEOF(t *testing.T) {
+	setGinTestMode()
+
+	parent := context.WithValue(context.Background(), ctxkey.WebChat, true)
+	body := []byte(`{"model":"gpt-5.4","messages":[{"role":"user","content":"hello"}],"stream":true}`)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader(body)).WithContext(parent)
+	c.Request.Header.Set("Content-Type", "application/json")
+
+	stream := strings.Join([]string{
+		`data: {"id":"chatcmpl_eof","choices":[{"index":0,"delta":{"content":"complete"},"finish_reason":null}]}`,
+		"",
+		`data: {"id":"chatcmpl_eof","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}`,
+		"",
+		`data: {"id":"chatcmpl_eof","choices":[],"usage":{"prompt_tokens":9,"completion_tokens":2,"total_tokens":11}}`,
+	}, "\n")
+	upstream := &httpUpstreamRecorder{resp: &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+		Body:       io.NopCloser(strings.NewReader(stream)),
+	}}
+	svc := &OpenAIGatewayService{cfg: rawChatCompletionsTestConfig(), httpUpstream: upstream}
+
+	result, err := svc.forwardAsRawChatCompletions(parent, c, rawChatCompletionsTestAccount(), body, "")
 
 	require.NoError(t, err)
 	require.NotNil(t, result)
-	require.Equal(t, 7, result.Usage.InputTokens)
-	require.Equal(t, 3, result.Usage.OutputTokens)
-	require.Contains(t, rec.Body.String(), "data: [DONE]\n\n")
-	require.Less(t, time.Since(started), time.Second, "[DONE] must release the request without waiting for upstream EOF")
+	require.Equal(t, 9, result.Usage.InputTokens)
+	require.Equal(t, 2, result.Usage.OutputTokens)
+	require.Equal(t, 1, strings.Count(rec.Body.String(), "data: [DONE]\n\n"))
+}
+
+func TestForwardAsRawChatCompletions_WebChatFinishReasonSynthesizesDoneAtCleanEOFWithoutUsage(t *testing.T) {
+	setGinTestMode()
+
+	parent := context.WithValue(context.Background(), ctxkey.WebChat, true)
+	body := []byte(`{"model":"gpt-5.4","messages":[{"role":"user","content":"hello"}],"stream":true}`)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader(body)).WithContext(parent)
+	c.Request.Header.Set("Content-Type", "application/json")
+
+	stream := strings.Join([]string{
+		`data: {"id":"chatcmpl_eof_no_usage","choices":[{"index":0,"delta":{"content":"complete"},"finish_reason":null}]}`,
+		"",
+		`data: {"id":"chatcmpl_eof_no_usage","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}`,
+	}, "\n")
+	upstream := &httpUpstreamRecorder{resp: &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+		Body:       io.NopCloser(strings.NewReader(stream)),
+	}}
+	svc := &OpenAIGatewayService{cfg: rawChatCompletionsTestConfig(), httpUpstream: upstream}
+
+	result, err := svc.forwardAsRawChatCompletions(parent, c, rawChatCompletionsTestAccount(), body, "")
+
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.Contains(t, rec.Body.String(), `"finish_reason":"stop"`)
+	require.Equal(t, 1, strings.Count(rec.Body.String(), "data: [DONE]\n\n"))
+}
+
+func TestForwardAsRawChatCompletions_WebChatUsageWithoutFinishDoesNotSynthesizeDone(t *testing.T) {
+	setGinTestMode()
+
+	parent := context.WithValue(context.Background(), ctxkey.WebChat, true)
+	body := []byte(`{"model":"gpt-5.4","messages":[{"role":"user","content":"hello"}],"stream":true}`)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader(body)).WithContext(parent)
+	c.Request.Header.Set("Content-Type", "application/json")
+
+	stream := strings.Join([]string{
+		`data: {"id":"chatcmpl_partial","choices":[{"index":0,"delta":{"content":"partial"},"finish_reason":null}]}`,
+		"",
+		`data: {"id":"chatcmpl_partial","choices":[],"usage":{"prompt_tokens":9,"completion_tokens":2,"total_tokens":11}}`,
+	}, "\n")
+	upstream := &httpUpstreamRecorder{resp: &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+		Body:       io.NopCloser(strings.NewReader(stream)),
+	}}
+	svc := &OpenAIGatewayService{cfg: rawChatCompletionsTestConfig(), httpUpstream: upstream}
+
+	result, err := svc.forwardAsRawChatCompletions(parent, c, rawChatCompletionsTestAccount(), body, "")
+
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.NotContains(t, rec.Body.String(), "data: [DONE]")
+}
+
+func TestForwardAsRawChatCompletions_APICallerDoesNotSynthesizeDone(t *testing.T) {
+	setGinTestMode()
+
+	ctx := context.Background()
+	body := []byte(`{"model":"gpt-5.4","messages":[{"role":"user","content":"hello"}],"stream":true}`)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader(body)).WithContext(ctx)
+	c.Request.Header.Set("Content-Type", "application/json")
+
+	stream := strings.Join([]string{
+		`data: {"id":"chatcmpl_api","choices":[{"index":0,"delta":{"content":"complete"},"finish_reason":null}]}`,
+		"",
+		`data: {"id":"chatcmpl_api","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}`,
+		"",
+		`data: {"id":"chatcmpl_api","choices":[],"usage":{"prompt_tokens":9,"completion_tokens":2,"total_tokens":11}}`,
+	}, "\n")
+	upstream := &httpUpstreamRecorder{resp: &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+		Body:       io.NopCloser(strings.NewReader(stream)),
+	}}
+	svc := &OpenAIGatewayService{cfg: rawChatCompletionsTestConfig(), httpUpstream: upstream}
+
+	result, err := svc.forwardAsRawChatCompletions(ctx, c, rawChatCompletionsTestAccount(), body, "")
+
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.NotContains(t, rec.Body.String(), "data: [DONE]")
 }
 
 func TestForwardAsRawChatCompletions_WebChatDisconnectTerminalUsageReleasesBeforeTimeout(t *testing.T) {

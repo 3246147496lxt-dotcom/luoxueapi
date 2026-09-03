@@ -19,7 +19,7 @@
               class="auth-brand-mark flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-2xl border border-white bg-white shadow-sm dark:border-dark-700 dark:bg-dark-800 lg:h-16 lg:w-16"
             >
               <img
-                :src="siteLogo || '/brand/luoxue-snowpuff-extracted.svg'"
+                :src="siteLogo || '/logo.png'"
                 :alt="siteName"
                 class="h-full w-full object-contain"
               />

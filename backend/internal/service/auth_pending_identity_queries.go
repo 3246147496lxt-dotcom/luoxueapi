@@ -26,7 +26,13 @@ func (s *AuthPendingIdentityService) UpdateSessionProgress(ctx context.Context, 
 		return nil, infraerrors.BadRequest("PENDING_AUTH_SESSION_INVALID", "pending auth session is invalid")
 	}
 
-	session, err := s.entClient.PendingAuthSession.Get(ctx, input.SessionID)
+	client := s.clientForContext(ctx)
+	releaseLock, err := lockAuthPendingIdentityKeys(ctx, client, pendingAuthSessionLockKey(input.SessionID))
+	if err != nil {
+		return nil, err
+	}
+	defer releaseLock()
+	session, err := client.PendingAuthSession.Get(ctx, input.SessionID)
 	if err != nil {
 		if dbent.IsNotFound(err) {
 			return nil, ErrPendingAuthSessionNotFound
@@ -36,7 +42,7 @@ func (s *AuthPendingIdentityService) UpdateSessionProgress(ctx context.Context, 
 	localFlowState := copyPendingMap(session.LocalFlowState)
 	localFlowState["completion_response"] = copyPendingMap(input.CompletionResponse)
 
-	update := s.entClient.PendingAuthSession.UpdateOneID(session.ID).
+	update := client.PendingAuthSession.UpdateOneID(session.ID).
 		SetIntent(strings.TrimSpace(input.Intent)).
 		SetResolvedEmail(strings.TrimSpace(input.ResolvedEmail)).
 		SetLocalFlowState(localFlowState)
@@ -53,7 +59,7 @@ func (s *AuthPendingIdentityService) GetAdoptionDecision(ctx context.Context, pe
 	if s == nil || s.entClient == nil || pendingAuthSessionID <= 0 {
 		return nil, infraerrors.BadRequest("PENDING_AUTH_SESSION_INVALID", "pending auth session is invalid")
 	}
-	decision, err := s.entClient.IdentityAdoptionDecision.Query().
+	decision, err := s.clientForContext(ctx).IdentityAdoptionDecision.Query().
 		Where(identityadoptiondecision.PendingAuthSessionIDEQ(pendingAuthSessionID)).
 		Only(ctx)
 	if dbent.IsNotFound(err) {
@@ -81,7 +87,7 @@ func (s *AuthPendingIdentityService) FindUserByNormalizedEmail(ctx context.Conte
 	if s == nil || s.entClient == nil {
 		return nil, infraerrors.ServiceUnavailable("PENDING_AUTH_NOT_READY", "pending auth service is not ready")
 	}
-	matches, err := s.entClient.User.Query().
+	matches, err := s.clientForContext(ctx).User.Query().
 		Where(normalizedPendingAuthEmailPredicate(email)).
 		Order(dbent.Asc(dbuser.FieldID)).
 		All(ctx)
@@ -102,7 +108,7 @@ func (s *AuthPendingIdentityService) FindIdentityUser(ctx context.Context, ident
 	if s == nil || s.entClient == nil {
 		return nil, infraerrors.ServiceUnavailable("PENDING_AUTH_NOT_READY", "pending auth service is not ready")
 	}
-	record, err := s.entClient.AuthIdentity.Query().
+	record, err := s.clientForContext(ctx).AuthIdentity.Query().
 		Where(
 			authidentity.ProviderTypeEQ(strings.TrimSpace(identity.ProviderType)),
 			authidentity.ProviderKeyEQ(strings.TrimSpace(identity.ProviderKey)),
@@ -122,7 +128,7 @@ func (s *AuthPendingIdentityService) EnsureRegistrationIdentityAvailable(ctx con
 	if s == nil || s.entClient == nil || session == nil {
 		return infraerrors.BadRequest("PENDING_AUTH_SESSION_INVALID", "pending auth registration context is invalid")
 	}
-	identity, err := s.entClient.AuthIdentity.Query().
+	identity, err := s.clientForContext(ctx).AuthIdentity.Query().
 		Where(
 			authidentity.ProviderTypeEQ(strings.TrimSpace(session.ProviderType)),
 			authidentity.ProviderKeyEQ(strings.TrimSpace(session.ProviderKey)),
@@ -159,7 +165,7 @@ func (s *AuthPendingIdentityService) IdentityExistsForUser(ctx context.Context, 
 		return false, nil
 	}
 
-	query := s.entClient.AuthIdentity.Query().Where(
+	query := s.clientForContext(ctx).AuthIdentity.Query().Where(
 		authidentity.ProviderTypeEQ(providerType),
 		authidentity.ProviderSubjectEQ(providerSubject),
 		authidentity.UserIDEQ(userID),
@@ -180,7 +186,7 @@ func (s *AuthPendingIdentityService) findActiveUserByID(ctx context.Context, use
 	if userID <= 0 {
 		return nil, nil
 	}
-	userEntity, err := s.entClient.User.Get(ctx, userID)
+	userEntity, err := s.clientForContext(ctx).User.Get(ctx, userID)
 	if err != nil {
 		if dbent.IsNotFound(err) {
 			return nil, nil

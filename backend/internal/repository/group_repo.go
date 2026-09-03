@@ -76,6 +76,9 @@ func (r *groupRepository) Create(ctx context.Context, groupIn *service.Group) er
 			SetMessagesDispatchModelConfig(groupIn.MessagesDispatchModelConfig).
 			SetModelsListConfig(groupIn.ModelsListConfig).
 			SetRpmLimit(groupIn.RPMLimit).
+			SetProfitControlEnabled(groupIn.ProfitControlEnabled).
+			SetProfitMinMargin(groupIn.ProfitMinMargin).
+			SetProfitSafetyBuffer(groupIn.ProfitSafetyBuffer).
 			SetPeakRateEnabled(groupIn.PeakRateEnabled).
 			SetPeakStart(groupIn.PeakStart).
 			SetPeakEnd(groupIn.PeakEnd).
@@ -165,6 +168,9 @@ func (r *groupRepository) Update(ctx context.Context, groupIn *service.Group) er
 			SetMessagesDispatchModelConfig(groupIn.MessagesDispatchModelConfig).
 			SetModelsListConfig(groupIn.ModelsListConfig).
 			SetRpmLimit(groupIn.RPMLimit).
+			SetProfitControlEnabled(groupIn.ProfitControlEnabled).
+			SetProfitMinMargin(groupIn.ProfitMinMargin).
+			SetProfitSafetyBuffer(groupIn.ProfitSafetyBuffer).
 			SetPeakRateEnabled(groupIn.PeakRateEnabled).
 			SetPeakStart(groupIn.PeakStart).
 			SetPeakEnd(groupIn.PeakEnd).

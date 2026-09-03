@@ -205,7 +205,7 @@ describe('PersonalSettingsDialog', () => {
     expect(router.currentRoute.value.query.account_settings).toBe('account')
     expect(document.body.querySelector('#personal-settings-dialog-title')?.textContent?.trim())
       .toBe('personalSettings.dialog.sections.account')
-    expect(refreshUser).toHaveBeenCalledOnce()
+    expect(refreshUser).not.toHaveBeenCalled()
     expect(fetchPublicSettings).toHaveBeenCalledOnce()
     expect(bodyElement('account-panel-stub').exists()).toBe(true)
 
@@ -217,7 +217,7 @@ describe('PersonalSettingsDialog', () => {
     ).trigger('click')
     await flushPromises()
 
-    expect(refreshUser).toHaveBeenCalledOnce()
+    expect(refreshUser).not.toHaveBeenCalled()
     expect(fetchPublicSettings).toHaveBeenCalledOnce()
   })
 

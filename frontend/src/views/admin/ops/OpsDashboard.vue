@@ -1,8 +1,9 @@
 <template>
   <component
-    :is="isFullscreen ? 'div' : AppLayout"
+    :is="isFullscreen ? 'main' : AppLayout"
     :class="isFullscreen ? 'ops-fullscreen-shell' : ''"
     :variant="isFullscreen ? undefined : 'home-clay'"
+    :content-mode="isFullscreen ? undefined : 'workbench'"
   >
     <div
       data-admin-page-kind="ops"
@@ -32,6 +33,7 @@
 
       <OpsDashboardHeader
         v-else-if="opsEnabled"
+        compact
         :overview="activeWorkspace === 'traffic' ? overview : null"
         :platform="platform"
         :group-id="groupId"
@@ -82,53 +84,60 @@
           data-testid="ops-workspace-panel-traffic"
         >
           <template v-if="visitedWorkspaces.traffic">
-          <section class="ops-workspace-section" aria-labelledby="ops-traffic-heading" data-testid="ops-traffic-section">
-            <header class="ops-section-heading">
-              <div>
-                <h2 id="ops-traffic-heading">{{ t('admin.ops.trafficSectionTitle') }}</h2>
-                <p>{{ t('admin.ops.trafficSectionDescription') }}</p>
-              </div>
-              <span class="ops-section-signal ops-section-signal--live">
-                <i aria-hidden="true"></i>
-                {{ t('admin.ops.trafficSectionStatus') }}
-              </span>
-            </header>
-
-            <div class="ops-live-grid">
-              <div class="ops-panel ops-panel--throughput min-w-0">
-                <OpsThroughputTrendChart
-                  :points="throughputTrend?.points ?? []"
-                  :by-platform="throughputTrend?.by_platform ?? []"
-                  :top-groups="throughputTrend?.top_groups ?? []"
-                  :loading="loadingTrend"
+          <section class="ops-workspace-section ops-workspace-section--flush" aria-labelledby="ops-traffic-heading" data-testid="ops-traffic-section">
+            <OpsWorkbenchShell
+              :rail-label="t('admin.ops.trafficSectionTitle')"
+              :evidence-label="t('admin.ops.trafficSectionDescription')"
+              :default-mobile-rail-open="false"
+            >
+              <template #rail>
+                <OpsTrafficInvestigationRail
+                  :overview="overview"
+                  :platform="platform"
+                  :group-id="groupId"
                   :time-range="timeRange"
-                  :fullscreen="isFullscreen"
-                  @select-platform="handleThroughputSelectPlatform"
-                  @select-group="handleThroughputSelectGroup"
-                  @open-details="handleOpenRequestDetails"
+                  :loading="loading"
+                  @update:platform="onPlatformChange"
+                  @update:group="onGroupChange"
+                  @update:time-range="onTimeRangeChange"
+                  @select-signal="handleTrafficSignal"
                 />
-              </div>
-              <div class="ops-panel ops-panel--concurrency min-w-0">
-                <OpsConcurrencyCard
-                  :platform-filter="platform"
-                  :group-id-filter="groupId"
-                  :refresh-token="dashboardRefreshToken"
-                />
-              </div>
-            </div>
+              </template>
 
-            <div class="ops-performance-grid">
-              <div class="ops-panel ops-panel--latency min-w-0">
-                <OpsLatencyChart :latency-data="latencyHistogram" :loading="loadingLatency" />
-              </div>
-              <div v-if="showOpenAITokenStats" class="ops-model-panel min-w-0">
-                <OpsOpenAITokenStatsCard
-                  :platform-filter="platform"
-                  :group-id-filter="groupId"
-                  :refresh-token="dashboardRefreshToken"
-                />
-              </div>
-            </div>
+              <template #evidence>
+                <div class="ops-evidence-canvas">
+                  <div class="ops-live-grid">
+                    <div id="ops-traffic-evidence-throughput" class="ops-panel ops-panel--throughput min-w-0">
+                      <OpsThroughputTrendChart
+                        :points="throughputTrend?.points ?? []"
+                        :overview="overview"
+                        :by-platform="throughputTrend?.by_platform ?? []"
+                        :top-groups="throughputTrend?.top_groups ?? []"
+                        :loading="loadingTrend"
+                        :time-range="timeRange"
+                        :fullscreen="isFullscreen"
+                        @select-platform="handleThroughputSelectPlatform"
+                        @select-group="handleThroughputSelectGroup"
+                        @open-details="handleOpenRequestDetails"
+                      />
+                    </div>
+                  </div>
+
+                  <div class="ops-performance-grid">
+                    <div class="ops-panel ops-panel--latency min-w-0">
+                      <OpsLatencyChart :latency-data="latencyHistogram" :loading="loadingLatency" />
+                    </div>
+                    <div v-if="showOpenAITokenStats" class="ops-model-panel min-w-0">
+                      <OpsOpenAITokenStatsCard
+                        :platform-filter="platform"
+                        :group-id-filter="groupId"
+                        :refresh-token="dashboardRefreshToken"
+                      />
+                    </div>
+                  </div>
+                </div>
+              </template>
+            </OpsWorkbenchShell>
           </section>
           </template>
         </div>
@@ -142,56 +151,65 @@
           data-testid="ops-workspace-panel-incidents"
         >
           <template v-if="visitedWorkspaces.incidents">
-          <section class="ops-workspace-section" aria-labelledby="ops-incidents-heading" data-testid="ops-incidents-section">
-            <header class="ops-section-heading">
-              <div>
-                <h2 id="ops-incidents-heading">{{ t('admin.ops.incidentsSectionTitle') }}</h2>
-                <p>{{ t('admin.ops.incidentsSectionDescription') }}</p>
-              </div>
-              <span class="ops-section-signal ops-section-signal--risk">
-                <i aria-hidden="true"></i>
-                {{ t('admin.ops.incidentsSectionStatus') }}
-              </span>
-            </header>
-
-            <div class="ops-quality-grid">
-              <div class="ops-panel ops-panel--error-trend min-w-0">
-                <OpsErrorTrendChart
-                  :points="errorTrend?.points ?? []"
-                  :loading="loadingErrorTrend"
-                  :time-range="timeRange"
-                  @open-request-errors="openErrorDetails('request')"
-                  @open-upstream-errors="openErrorDetails('upstream')"
-                />
-              </div>
-              <div class="ops-panel ops-panel--switch-rate min-w-0">
-                <OpsSwitchRateTrendChart
-                  :points="switchTrend?.points ?? []"
-                  :loading="loadingSwitchTrend"
-                  :time-range="switchTrendTimeRange"
-                  :fullscreen="isFullscreen"
-                />
-              </div>
-              <div class="ops-panel ops-panel--error-distribution min-w-0">
-                <OpsErrorDistributionChart
-                  :data="errorDistribution"
-                  :loading="loadingErrorDistribution"
-                  @open-details="openErrorDetails('request')"
-                />
-              </div>
-            </div>
-          </section>
-
           <section
-            class="ops-workspace-section"
-            :aria-label="t('admin.ops.alertEvents.title')"
-            data-testid="ops-alerts-section"
+            class="ops-workspace-section ops-workspace-section--flush"
+            aria-labelledby="ops-incidents-heading"
+            data-testid="ops-incidents-section"
           >
-            <div class="ops-support-stack">
-              <OpsAlertEventsCard v-if="showAlertEvents" />
-              <p v-else class="ops-workspace-empty" role="status">
-                {{ t('admin.ops.workspace.alertsDisabled') }}
-              </p>
+            <h2 id="ops-incidents-heading" class="sr-only">
+              {{ t('admin.ops.incidentsSectionTitle') }}
+            </h2>
+            <div data-testid="ops-alerts-section">
+              <OpsAlertEventsCard
+                :enabled="showAlertEvents"
+                :platform-filter="platform"
+                :group-id-filter="groupId"
+                @update:platform="onPlatformChange"
+                @update:group="onGroupChange"
+                @view-related-logs="handleViewRelatedLogs"
+              >
+                <template #evidence>
+                  <section class="ops-incident-evidence" aria-labelledby="ops-incidents-evidence-heading">
+                    <header class="ops-section-heading ops-section-heading--evidence">
+                      <div>
+                        <h3 id="ops-incidents-evidence-heading">{{ t('admin.ops.incidentsSectionTitle') }}</h3>
+                        <p>{{ t('admin.ops.incidentsSectionDescription') }}</p>
+                      </div>
+                      <span class="ops-section-signal ops-section-signal--risk">
+                        <i aria-hidden="true"></i>
+                        {{ t('admin.ops.incidentsSectionStatus') }}
+                      </span>
+                    </header>
+
+                    <div class="ops-quality-grid">
+                      <div class="ops-panel ops-panel--error-trend min-w-0">
+                        <OpsErrorTrendChart
+                          :points="errorTrend?.points ?? []"
+                          :loading="loadingErrorTrend"
+                          :time-range="timeRange"
+                          @open-request-errors="openErrorDetails('request')"
+                          @open-upstream-errors="openErrorDetails('upstream')"
+                        />
+                      </div>
+                      <div class="ops-panel ops-panel--switch-rate min-w-0">
+                        <OpsSwitchRateTrendChart
+                          :points="switchTrend?.points ?? []"
+                          :loading="loadingSwitchTrend"
+                          :time-range="switchTrendTimeRange"
+                          :fullscreen="isFullscreen"
+                        />
+                      </div>
+                      <div class="ops-panel ops-panel--error-distribution min-w-0">
+                        <OpsErrorDistributionChart
+                          :data="errorDistribution"
+                          :loading="loadingErrorDistribution"
+                          @open-details="openErrorDetails('request')"
+                        />
+                      </div>
+                    </div>
+                  </section>
+                </template>
+              </OpsAlertEventsCard>
             </div>
           </section>
           </template>
@@ -207,27 +225,20 @@
         >
           <section
             v-if="visitedWorkspaces.diagnostics"
-            class="ops-workspace-section"
+            class="ops-workspace-section ops-workspace-section--flush"
             aria-labelledby="ops-diagnostics-heading"
             data-testid="ops-log-section"
           >
-            <header class="ops-section-heading">
-              <div>
-                <h2 id="ops-diagnostics-heading">{{ t('admin.ops.diagnosticsSectionTitle') }}</h2>
-                <p>{{ t('admin.ops.diagnosticsSectionDescription') }}</p>
-              </div>
-              <button
-                type="button"
-                class="ops-diagnostics-action"
-                @click="handleOpenRequestDetails()"
-              >
-                {{ t('admin.ops.diagnosticsSectionOpenRequestDetails') }}
-              </button>
-            </header>
+            <h2 id="ops-diagnostics-heading" class="sr-only">
+              {{ t('admin.ops.diagnosticsSectionTitle') }}
+            </h2>
             <div class="ops-support-stack">
               <OpsSystemLogTable
                 :platform-filter="platform"
                 :refresh-token="dashboardRefreshToken"
+                :investigation-preset="logInvestigationPreset"
+                @clear-investigation="logInvestigationPreset = null"
+                @open-request-details="handleOpenSystemLogRequestDetails"
               />
             </div>
           </section>
@@ -240,6 +251,21 @@
 
         <BaseDialog :show="showAlertRulesCard" :title="t('admin.ops.alertRules.title')" width="extra-wide" @close="showAlertRulesCard = false">
           <OpsAlertRulesCard />
+        </BaseDialog>
+
+        <BaseDialog
+          :show="showConcurrencyDialog"
+          :title="t('admin.ops.concurrency.title')"
+          width="wide"
+          @close="showConcurrencyDialog = false"
+        >
+          <div class="ops-concurrency-dialog-body">
+            <OpsConcurrencyCard
+              :platform-filter="platform"
+              :group-id-filter="groupId"
+              :refresh-token="dashboardRefreshToken"
+            />
+          </div>
         </BaseDialog>
 
         <OpsErrorDetailsModal
@@ -281,9 +307,11 @@ import {
   type OpsErrorTrendResponse,
   type OpsLatencyHistogramResponse,
   type OpsThroughputTrendResponse,
-  type OpsMetricThresholds
+  type OpsMetricThresholds,
+  type OpsSystemLog
 } from '@/api/admin/ops'
-import { useAdminSettingsStore, useAppStore } from '@/stores'
+import { useAdminSettingsStore } from '@/stores/adminSettings'
+import { useAppStore } from '@/stores/app'
 import OpsDashboardHeader from './components/OpsDashboardHeader.vue'
 import OpsDashboardSkeleton from './components/OpsDashboardSkeleton.vue'
 import OpsConcurrencyCard from './components/OpsConcurrencyCard.vue'
@@ -301,6 +329,9 @@ import OpsRequestDetailsModal, { type OpsRequestDetailsPreset } from './componen
 import OpsSettingsDialog from './components/OpsSettingsDialog.vue'
 import OpsAlertRulesCard from './components/OpsAlertRulesCard.vue'
 import OpsWorkspaceNav from './components/OpsWorkspaceNav.vue'
+import OpsWorkbenchShell from './components/OpsWorkbenchShell.vue'
+import OpsTrafficInvestigationRail from './components/OpsTrafficInvestigationRail.vue'
+import type { OpsAlertLogContext, OpsLogInvestigationPreset } from './types'
 import './OpsDashboard.clay.css'
 
 const route = useRoute()
@@ -402,10 +433,17 @@ const isFullscreen = computed(() => {
 })
 
 const OPS_FULLSCREEN_BODY_CLASS = 'admin-ops-fullscreen'
+const OPS_OPTION_B_BODY_CLASS = 'admin-ops-option-b'
+let previousSidebarCollapsed: boolean | null = null
 
 function syncFullscreenBodyClass(enabled: boolean) {
   if (typeof document === 'undefined') return
   document.body.classList.toggle(OPS_FULLSCREEN_BODY_CLASS, enabled)
+}
+
+function syncOpsOptionBBodyClass(enabled: boolean) {
+  if (typeof document === 'undefined') return
+  document.body.classList.toggle(OPS_OPTION_B_BODY_CLASS, enabled)
 }
 
 watch(isFullscreen, syncFullscreenBodyClass, { immediate: true })
@@ -611,6 +649,7 @@ const showErrorDetails = ref(false)
 const errorDetailsType = ref<'request' | 'upstream'>('request')
 
 const showRequestDetails = ref(false)
+const showConcurrencyDialog = ref(false)
 const requestDetailsPreset = ref<OpsRequestDetailsPreset>({
   title: '',
   kind: 'all',
@@ -619,6 +658,8 @@ const requestDetailsPreset = ref<OpsRequestDetailsPreset>({
 
 const showSettingsDialog = ref(false)
 const showAlertRulesCard = ref(false)
+const logInvestigationPreset = ref<OpsLogInvestigationPreset | null>(null)
+let logInvestigationSeq = 0
 
 function scrollWorkspaceIntoView(workspace: OpsWorkspace) {
   if (typeof document === 'undefined') return
@@ -646,6 +687,27 @@ async function onWorkspaceChange(value: string) {
   }
   await nextTick()
   scrollWorkspaceIntoView(nextWorkspace)
+}
+
+async function handleViewRelatedLogs(context: OpsAlertLogContext) {
+  const firedAt = new Date(context.firedAt)
+  if (!Number.isFinite(firedAt.getTime())) return
+
+  const investigationRadiusMs = 30 * 60 * 1000
+  logInvestigationSeq += 1
+  logInvestigationPreset.value = {
+    ...context,
+    key: logInvestigationSeq,
+    startTime: new Date(firedAt.getTime() - investigationRadiusMs).toISOString(),
+    endTime: new Date(firedAt.getTime() + investigationRadiusMs).toISOString()
+  }
+
+  if (activeWorkspace.value !== 'diagnostics') {
+    await onWorkspaceChange('diagnostics')
+  } else {
+    await nextTick()
+    scrollWorkspaceIntoView('diagnostics')
+  }
 }
 
 applyRouteQueryToState()
@@ -709,6 +771,31 @@ function handleThroughputSelectGroup(nextGroupId: number) {
   groupId.value = id
 }
 
+function scrollToEvidence(id: string) {
+  if (typeof document === 'undefined') return
+  document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+}
+
+function handleTrafficSignal(signal: 'health' | 'sla' | 'errors' | 'throughput' | 'concurrency') {
+  if (signal === 'sla') {
+    handleOpenRequestDetails({
+      title: t('admin.ops.requestDetails.title'),
+      kind: 'error',
+      sort: 'created_at_desc'
+    })
+    return
+  }
+  if (signal === 'errors') {
+    openErrorDetails('request')
+    return
+  }
+  if (signal === 'concurrency') {
+    showConcurrencyDialog.value = true
+    return
+  }
+  scrollToEvidence('ops-traffic-evidence-throughput')
+}
+
 function handleOpenRequestDetails(preset?: OpsRequestDetailsPreset) {
   const basePreset: OpsRequestDetailsPreset = {
     title: t('admin.ops.requestDetails.title'),
@@ -722,6 +809,21 @@ function handleOpenRequestDetails(preset?: OpsRequestDetailsPreset) {
   showErrorDetails.value = false
   showErrorModal.value = false
   showRequestDetails.value = true
+}
+
+function handleOpenSystemLogRequestDetails(log: OpsSystemLog) {
+  const createdAt = new Date(log.created_at)
+  const radiusMs = 5 * 60 * 1000
+  const hasValidTime = Number.isFinite(createdAt.getTime())
+  handleOpenRequestDetails({
+    title: t('admin.ops.requestDetails.title'),
+    kind: 'all',
+    sort: 'created_at_desc',
+    request_id: log.request_id || undefined,
+    platform: log.platform || undefined,
+    start_time: hasValidTime ? new Date(createdAt.getTime() - radiusMs).toISOString() : undefined,
+    end_time: hasValidTime ? new Date(createdAt.getTime() + radiusMs).toISOString() : undefined
+  })
 }
 
 function openErrorDetails(kind: 'request' | 'upstream') {
@@ -1045,6 +1147,11 @@ watch(
 onMounted(async () => {
   // Fullscreen mode: listen for ESC key
   window.addEventListener('keydown', handleKeydown)
+  syncOpsOptionBBodyClass(true)
+  previousSidebarCollapsed = appStore.sidebarCollapsed
+  if (typeof appStore.setSidebarCollapsed === 'function') {
+    appStore.setSidebarCollapsed(false)
+  }
 
   await adminSettingsStore.fetch()
   if (!adminSettingsStore.opsMonitoringEnabled) {
@@ -1082,6 +1189,10 @@ async function loadThresholds() {
 
 onUnmounted(() => {
   syncFullscreenBodyClass(false)
+  syncOpsOptionBBodyClass(false)
+  if (previousSidebarCollapsed !== null && typeof appStore.setSidebarCollapsed === 'function') {
+    appStore.setSidebarCollapsed(previousSidebarCollapsed)
+  }
   window.removeEventListener('keydown', handleKeydown)
   abortDashboardFetch()
   pauseCountdown()

@@ -82,7 +82,12 @@ type OpenAIAccountScheduleRequest struct {
 	RequiredCapability      OpenAIEndpointCapability
 	RequiredImageCapability OpenAIImagesCapability
 	RequireCompact          bool
-	ExcludedIDs             map[int64]struct{}
+	// PreferServiceTierPriority asks scheduling to try accounts with a
+	// verified Priority entitlement first. It is a preference only: sticky
+	// previous-response/session bindings are handled before load balancing and
+	// unsupported accounts remain available as Standard fallbacks.
+	PreferServiceTierPriority bool
+	ExcludedIDs               map[int64]struct{}
 }
 
 type OpenAIAccountScheduleDecision struct {
@@ -420,7 +425,7 @@ func (s *defaultOpenAIAccountScheduler) Select(
 			decision.SelectedAccountID = selection.Account.ID
 			decision.SelectedAccountType = selection.Account.Type
 			if req.SessionHash != "" {
-				_ = s.service.BindStickySession(ctx, req.GroupID, req.SessionHash, selection.Account.ID)
+				_ = s.service.bindOpenAIStickySessionDuringSelection(ctx, req.GroupID, req.SessionHash, selection.Account.ID)
 			}
 			return selection, decision, nil
 		}
@@ -601,14 +606,15 @@ func (s *defaultOpenAIAccountScheduler) shouldEscapeStickyAccount(accountID int6
 }
 
 type openAIAccountCandidateScore struct {
-	account   *Account
-	loadInfo  *AccountLoadInfo
-	loadKnown bool
-	score     float64
-	priority  int
-	errorRate float64
-	ttft      float64
-	hasTTFT   bool
+	account           *Account
+	loadInfo          *AccountLoadInfo
+	loadKnown         bool
+	prioritySupported bool
+	score             float64
+	priority          int
+	errorRate         float64
+	ttft              float64
+	hasTTFT           bool
 }
 
 type openAIAccountCandidateHeap []openAIAccountCandidateScore
@@ -824,6 +830,8 @@ func (s *defaultOpenAIAccountScheduler) buildOpenAIAccountLoadPlan(
 			account:   account,
 			loadInfo:  loadInfo,
 			loadKnown: loadKnown,
+			prioritySupported: req.PreferServiceTierPriority &&
+				s.service.supportsPriorityServiceTierForScheduling(ctx, account, req.RequestedModel, req.RequireCompact),
 			errorRate: errorRate,
 			ttft:      ttft,
 			hasTTFT:   hasTTFT,
@@ -1002,11 +1010,14 @@ func (s *defaultOpenAIAccountScheduler) buildOpenAISelectionOrder(
 	req OpenAIAccountScheduleRequest,
 	plan openAIAccountLoadPlan,
 ) []openAIAccountCandidateScore {
-	buildSelectionOrder := func(pool []openAIAccountCandidateScore) []openAIAccountCandidateScore {
+	buildSelectionOrder := func(pool []openAIAccountCandidateScore, includeAll bool) []openAIAccountCandidateScore {
 		if len(pool) == 0 || plan.topK <= 0 {
 			return nil
 		}
 		groupTopK := plan.topK
+		if includeAll {
+			groupTopK = len(pool)
+		}
 		if groupTopK > len(pool) {
 			groupTopK = len(pool)
 		}
@@ -1032,7 +1043,7 @@ func (s *defaultOpenAIAccountScheduler) buildOpenAISelectionOrder(
 		if len(primary) == 0 {
 			primary = buildOpenAIWeightedSelectionOrder(ranked, req)
 		}
-		if !plan.includeOverflowFallback || groupTopK >= len(pool) {
+		if includeAll || !plan.includeOverflowFallback || groupTopK >= len(pool) {
 			return primary
 		}
 
@@ -1051,6 +1062,31 @@ func (s *defaultOpenAIAccountScheduler) buildOpenAISelectionOrder(
 		})
 		return append(primary, overflow...)
 	}
+	priorityAwareSelectionOrder := func(pool []openAIAccountCandidateScore) []openAIAccountCandidateScore {
+		if !req.PreferServiceTierPriority || normalizeOpenAICompatiblePlatform(req.Platform) != PlatformOpenAI {
+			return buildSelectionOrder(pool, false)
+		}
+		supported := make([]openAIAccountCandidateScore, 0, len(pool))
+		fallback := make([]openAIAccountCandidateScore, 0, len(pool))
+		for _, candidate := range pool {
+			if candidate.prioritySupported {
+				supported = append(supported, candidate)
+			} else {
+				fallback = append(fallback, candidate)
+			}
+		}
+		if len(supported) == 0 {
+			return buildSelectionOrder(pool, false)
+		}
+		// Exhaust the verified Priority pool before falling back to Standard;
+		// otherwise a small configured Top-K could hide a healthy supported
+		// account behind one busy candidate.
+		ordered := buildSelectionOrder(supported, true)
+		// The fallback pool is deliberately ordered using the same score/load
+		// rules, but includes every candidate so a busy Priority pool never
+		// turns into an avoidable request failure.
+		return append(ordered, buildSelectionOrder(fallback, true)...)
+	}
 
 	if req.RequireCompact {
 		supported := make([]openAIAccountCandidateScore, 0, len(plan.candidates))
@@ -1064,15 +1100,15 @@ func (s *defaultOpenAIAccountScheduler) buildOpenAISelectionOrder(
 			}
 		}
 		selectionOrder := make([]openAIAccountCandidateScore, 0, len(plan.allCandidates))
-		selectionOrder = append(selectionOrder, buildSelectionOrder(supported)...)
-		selectionOrder = append(selectionOrder, buildSelectionOrder(unknown)...)
+		selectionOrder = append(selectionOrder, priorityAwareSelectionOrder(supported)...)
+		selectionOrder = append(selectionOrder, priorityAwareSelectionOrder(unknown)...)
 		if len(plan.staleSnapshotCompactRetry) > 0 && s.service.schedulerSnapshot != nil {
 			selectionOrder = append(selectionOrder, sortOpenAICompactRetryCandidates(plan.staleSnapshotCompactRetry)...)
 		}
 		return selectionOrder
 	}
 
-	return buildSelectionOrder(plan.candidates)
+	return priorityAwareSelectionOrder(plan.candidates)
 }
 
 func sortOpenAICompactRetryCandidates(pool []openAIAccountCandidateScore) []openAIAccountCandidateScore {
@@ -1182,7 +1218,7 @@ func (s *defaultOpenAIAccountScheduler) tryAcquireOpenAISelectionOrderWithBudget
 			}
 		}
 		if req.SessionHash != "" && !req.PreserveStickyBinding {
-			_ = s.service.BindStickySession(ctx, req.GroupID, req.SessionHash, fresh.ID)
+			_ = s.service.bindOpenAIStickySessionDuringSelection(ctx, req.GroupID, req.SessionHash, fresh.ID)
 		}
 		return &AccountSelectionResult{
 			Account:     fresh,
@@ -1261,7 +1297,7 @@ func (s *defaultOpenAIAccountScheduler) tryFallbackToWeightedSticky(
 		}
 		if result != nil && result.Acquired {
 			if req.SessionHash != "" && !req.PreserveStickyBinding {
-				_ = s.service.BindStickySession(ctx, req.GroupID, req.SessionHash, account.ID)
+				_ = s.service.bindOpenAIStickySessionDuringSelection(ctx, req.GroupID, req.SessionHash, account.ID)
 			}
 			return &AccountSelectionResult{
 				Account:     account,
@@ -1620,6 +1656,9 @@ func (s *defaultOpenAIAccountScheduler) lookupShadowParentAccount(ctx context.Co
 
 func (s *defaultOpenAIAccountScheduler) isAccountRequestCompatible(ctx context.Context, account *Account, req OpenAIAccountScheduleRequest) bool {
 	if account == nil {
+		return false
+	}
+	if vetoed, _ := openAIProfitControlVetoReason(ctx, account); vetoed {
 		return false
 	}
 	if s != nil && s.service != nil && s.service.isOpenAIAccountRequestRuntimeBlocked(account, req.RequestedModel) {
@@ -1991,17 +2030,29 @@ func (s *OpenAIGatewayService) selectAccountWithScheduler(
 	platform string,
 	previousResponseCanMove bool,
 	useUpstreamTokenCost bool,
-) (*AccountSelectionResult, OpenAIAccountScheduleDecision, error) {
+) (selection *AccountSelectionResult, decision OpenAIAccountScheduleDecision, err error) {
 	ctx = s.withOpenAIQuotaAutoPauseContext(ctx)
+	if requiredImageCapability == "" {
+		ctx = s.withOpenAIProfitControlGate(ctx, groupID)
+	}
+	defer func() {
+		selection = attachSelectionProfitGate(ctx, selection)
+	}()
 	platform = normalizeOpenAICompatiblePlatform(platform)
-	decision := OpenAIAccountScheduleDecision{}
+	// Priority is an inference-tier feature. Image capability requests and
+	// non-chat endpoints (embeddings, audio, alpha-search, and the image-only
+	// Responses capability) must retain their existing scheduling semantics.
+	preferPriority := requiredImageCapability == "" &&
+		(requiredCapability == "" || requiredCapability == OpenAIEndpointCapabilityChatCompletions) &&
+		s.preferPriorityServiceTierForScheduling(ctx, platform, requestedModel)
+	decision = OpenAIAccountScheduleDecision{}
 	scheduler := s.getOpenAIAccountScheduler(ctx)
 	if scheduler == nil {
 		decision.Layer = openAIAccountScheduleLayerLoadBalance
 		if requiredTransport == OpenAIUpstreamTransportAny || requiredTransport == OpenAIUpstreamTransportHTTPSSE {
 			effectiveExcludedIDs := cloneExcludedAccountIDs(excludedIDs)
 			for {
-				selection, err := s.selectAccountWithLoadAwareness(ctx, groupID, platform, sessionHash, requestedModel, effectiveExcludedIDs, requireCompact, requiredCapability, useUpstreamTokenCost)
+				selection, err = s.selectAccountWithLoadAwareness(ctx, groupID, platform, sessionHash, requestedModel, effectiveExcludedIDs, requireCompact, requiredCapability, useUpstreamTokenCost, preferPriority)
 				if err != nil {
 					return nil, decision, err
 				}
@@ -2026,7 +2077,7 @@ func (s *OpenAIGatewayService) selectAccountWithScheduler(
 
 		effectiveExcludedIDs := cloneExcludedAccountIDs(excludedIDs)
 		for {
-			selection, err := s.selectAccountWithLoadAwareness(ctx, groupID, platform, sessionHash, requestedModel, effectiveExcludedIDs, requireCompact, requiredCapability, useUpstreamTokenCost)
+			selection, err = s.selectAccountWithLoadAwareness(ctx, groupID, platform, sessionHash, requestedModel, effectiveExcludedIDs, requireCompact, requiredCapability, useUpstreamTokenCost, preferPriority)
 			if err != nil {
 				return nil, decision, err
 			}
@@ -2071,22 +2122,23 @@ func (s *OpenAIGatewayService) selectAccountWithScheduler(
 	}
 
 	return scheduler.Select(ctx, OpenAIAccountScheduleRequest{
-		GroupID:                 groupID,
-		Platform:                platform,
-		SessionHash:             sessionHash,
-		StickyAccountID:         stickyAccountID,
-		StickyPreviousAccountID: stickyPreviousAccountID,
-		StickyWeighted:          stickyWeighted,
-		SubscriptionPriority:    subscriptionPriority,
-		PreviousResponseID:      previousResponseID,
-		PreviousResponseCanMove: previousResponseCanMove,
-		UseUpstreamTokenCost:    useUpstreamTokenCost,
-		RequestedModel:          requestedModel,
-		RequiredTransport:       requiredTransport,
-		RequiredCapability:      requiredCapability,
-		RequiredImageCapability: requiredImageCapability,
-		RequireCompact:          requireCompact,
-		ExcludedIDs:             excludedIDs,
+		GroupID:                   groupID,
+		Platform:                  platform,
+		SessionHash:               sessionHash,
+		StickyAccountID:           stickyAccountID,
+		StickyPreviousAccountID:   stickyPreviousAccountID,
+		StickyWeighted:            stickyWeighted,
+		SubscriptionPriority:      subscriptionPriority,
+		PreviousResponseID:        previousResponseID,
+		PreviousResponseCanMove:   previousResponseCanMove,
+		UseUpstreamTokenCost:      useUpstreamTokenCost,
+		RequestedModel:            requestedModel,
+		RequiredTransport:         requiredTransport,
+		RequiredCapability:        requiredCapability,
+		RequiredImageCapability:   requiredImageCapability,
+		RequireCompact:            requireCompact,
+		PreferServiceTierPriority: preferPriority,
+		ExcludedIDs:               excludedIDs,
 	})
 }
 

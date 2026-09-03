@@ -281,6 +281,84 @@ func TestChatCompletionsToResponses_ReasoningEffort(t *testing.T) {
 	require.NotNil(t, resp.Reasoning)
 	assert.Equal(t, "high", resp.Reasoning.Effort)
 	assert.Equal(t, "auto", resp.Reasoning.Summary)
+	assert.Empty(t, resp.Reasoning.Mode, "public Chat Completions callers keep the prior default shape")
+	payload, err := json.Marshal(resp)
+	require.NoError(t, err)
+	assert.NotContains(t, string(payload), `"mode"`)
+}
+
+func TestChatCompletionsToResponses_WebChatReasoningMode(t *testing.T) {
+	for _, tt := range []struct {
+		mode   string
+		effort string
+	}{
+		{mode: "standard", effort: "low"},
+		{mode: "pro", effort: "medium"},
+		{mode: "pro"},
+	} {
+		t.Run(tt.mode+"/"+tt.effort, func(t *testing.T) {
+			req := &ChatCompletionsRequest{
+				Model:           "gpt-5.6-sol",
+				ReasoningMode:   tt.mode,
+				ReasoningEffort: tt.effort,
+				Messages:        []ChatMessage{{Role: "user", Content: json.RawMessage(`"Hi"`)}},
+			}
+
+			resp, err := ChatCompletionsToResponses(req)
+			require.NoError(t, err)
+			wantReasoning := &ResponsesReasoning{
+				Mode: tt.mode, Summary: "auto",
+			}
+			if tt.mode != "pro" {
+				wantReasoning.Effort = tt.effort
+			}
+			require.Equal(t, wantReasoning, resp.Reasoning)
+
+			payload, err := json.Marshal(resp)
+			require.NoError(t, err)
+			var body map[string]any
+			require.NoError(t, json.Unmarshal(payload, &body))
+			wantPayload := map[string]any{"mode": tt.mode, "summary": "auto"}
+			if tt.mode != "pro" {
+				wantPayload["effort"] = tt.effort
+			}
+			require.Equal(t, wantPayload, body["reasoning"])
+		})
+	}
+}
+
+func TestChatCompletionsToResponses_IgnoresPublicReasoningMode(t *testing.T) {
+	for _, tt := range []struct {
+		name          string
+		body          string
+		wantReasoning *ResponsesReasoning
+	}{
+		{
+			name: "mode only cannot create reasoning",
+			body: `{"model":"gpt-5.6-sol","messages":[{"role":"user","content":"Hi"}],"reasoning_mode":"pro"}`,
+		},
+		{
+			name: "forged Pro does not alter existing public effort behavior",
+			body: `{"model":"gpt-5.6-sol","messages":[{"role":"user","content":"Hi"}],"reasoning_mode":"pro","reasoning_effort":"high"}`,
+			wantReasoning: &ResponsesReasoning{
+				Effort: "high", Summary: "auto",
+			},
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			var req ChatCompletionsRequest
+			require.NoError(t, json.Unmarshal([]byte(tt.body), &req))
+			require.Empty(t, req.ReasoningMode, "public JSON must not populate trusted Web Chat state")
+
+			resp, err := ChatCompletionsToResponses(&req)
+			require.NoError(t, err)
+			require.Equal(t, tt.wantReasoning, resp.Reasoning)
+			payload, err := json.Marshal(resp)
+			require.NoError(t, err)
+			require.NotContains(t, string(payload), `"mode"`)
+			require.NotContains(t, string(payload), `"effort":""`)
+		})
+	}
 }
 
 func TestChatCompletionsToResponses_ResponseFormatJsonObject(t *testing.T) {
@@ -361,6 +439,33 @@ func TestChatCompletionsToResponses_ImageURL(t *testing.T) {
 	assert.Equal(t, "Describe this", parts[0].Text)
 	assert.Equal(t, "input_image", parts[1].Type)
 	assert.Equal(t, "data:image/png;base64,abc123", parts[1].ImageURL)
+}
+
+func TestChatCompletionsToResponses_InlineFile(t *testing.T) {
+	content := `[{
+		"type":"text","text":"Summarize this"
+	},{
+		"type":"file",
+		"file":{"filename":"notes.txt","file_data":"data:text/plain;base64,aGVsbG8="}
+	}]`
+	req := &ChatCompletionsRequest{
+		Model: "gpt-5.5",
+		Messages: []ChatMessage{
+			{Role: "user", Content: json.RawMessage(content)},
+		},
+	}
+
+	resp, err := ChatCompletionsToResponses(req)
+	require.NoError(t, err)
+	var items []ResponsesInputItem
+	require.NoError(t, json.Unmarshal(resp.Input, &items))
+	require.Len(t, items, 1)
+	var parts []ResponsesContentPart
+	require.NoError(t, json.Unmarshal(items[0].Content, &parts))
+	require.Len(t, parts, 2)
+	assert.Equal(t, "input_file", parts[1].Type)
+	assert.Equal(t, "notes.txt", parts[1].Filename)
+	assert.Equal(t, "data:text/plain;base64,aGVsbG8=", parts[1].FileData)
 }
 
 func TestChatCompletionsToResponses_EmptyBase64ImageURLSkipped(t *testing.T) {

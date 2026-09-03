@@ -7,7 +7,6 @@ import type { SubscriptionPlan } from '@/types/payment'
 
 vi.mock('vue-i18n', async (importOriginal) => {
   const actual = await importOriginal<typeof import('vue-i18n')>()
-
   return {
     ...actual,
     useI18n: () => ({
@@ -19,26 +18,24 @@ vi.mock('vue-i18n', async (importOriginal) => {
   }
 })
 
-vi.mock('@/stores/app', () => ({
-  useAppStore: () => ({
-    cachedPublicSettings: {
-      server_utc_offset: '+08:00',
-    },
-  }),
-}))
-
 function planFixture(overrides: Partial<SubscriptionPlan> = {}): SubscriptionPlan {
   return {
     id: 7,
     group_id: 3,
     group_name: 'OpenAI',
-    group_platform: 'antigravity',
-    name: 'Starter',
-    description: 'For individual API usage',
-    price: 9.99,
+    group_platform: 'openai',
+    name: 'Standard',
+    description: '日常 AI 工作',
+    price: 99,
+    currency: 'CNY',
     validity_days: 30,
     validity_unit: 'day',
-    features: ['Priority access'],
+    features: [
+      '高频 AI 对话体验',
+      '文档处理与内容创作',
+      '更高使用额度',
+      '支持更多 AI 模型',
+    ],
     for_sale: true,
     sort_order: 1,
     rate_multiplier: 1,
@@ -46,164 +43,106 @@ function planFixture(overrides: Partial<SubscriptionPlan> = {}): SubscriptionPla
   }
 }
 
+const global = {
+  stubs: {
+    Icon: true,
+  },
+}
+
 describe('PricingPlanCard', () => {
-  it('uses neutral renewal wording and exposes real peak-rate and model-scope facts', () => {
-    const wrapper = mount(PricingPlanCard, {
-      props: {
-        plan: planFixture({
-          peak_rate_enabled: true,
-          peak_start: '14:00',
-          peak_end: '18:00',
-          peak_rate_multiplier: 2,
-          supported_model_scopes: [
-            'claude',
-            'gemini_text',
-            'gemini_image',
-            'custom_scope',
-            'claude',
-          ],
-        }),
-        renewal: true,
-      },
-      global: {
-        stubs: {
-          Icon: true,
-        },
-      },
-    })
-
-    expect(wrapper.get('.pricing-plan-card__status').text()).toBe('pricing.renewalOption')
-    expect(wrapper.text()).not.toContain('pricing.currentSubscription')
-    expect(wrapper.text()).toContain(
-      'pricing.peakRateWindow:14:00-18:00 ×2 (UTC+08:00)',
-    )
-    expect(wrapper.text()).toContain(
-      'pricing.modelScopes:Claude, Gemini, Imagen, custom_scope',
-    )
-    expect(wrapper.get('.pricing-plan-card__action').attributes('aria-label')).toContain('Starter')
-    expect(wrapper.get('.pricing-plan-card__action').text()).toBe('pricing.renewPlan')
-  })
-
-  it('names the choose action with the plan and omits unproven facts', () => {
+  it('renders the approved featured anatomy and keeps its CTA copy unchanged', () => {
     const wrapper = mount(PricingPlanCard, {
       props: {
         plan: planFixture(),
-        renewal: false,
+        featured: true,
       },
-      global: {
-        stubs: {
-          Icon: true,
-        },
-      },
+      global,
     })
 
-    expect(wrapper.find('.pricing-plan-card__status').exists()).toBe(false)
-    expect(wrapper.find('.pricing-plan-card__group').exists()).toBe(false)
-    expect(wrapper.text()).not.toContain('OpenAI')
-    expect(wrapper.get('.pricing-plan-card__action').attributes('aria-label')).toContain('Starter')
+    expect(wrapper.classes()).toContain('pricing-plan-card--featured')
+    expect(wrapper.get('.pricing-plan-card__badge').text()).toBe('pricing.recommended')
+    expect(wrapper.get('.pricing-plan-card__description').text()).toBe('日常 AI 工作')
+    expect(wrapper.get('.pricing-plan-card__price').text()).toBe('¥99.00/ pricing.validityDays:30')
     expect(wrapper.get('.pricing-plan-card__action').text()).toBe('pricing.choosePlan')
-    expect(wrapper.text()).not.toContain('pricing.peakRateWindow')
-    expect(wrapper.text()).not.toContain('pricing.modelScopes')
+    expect(wrapper.get('.pricing-plan-card__action').attributes('aria-label')).toContain('Standard')
+    expect(wrapper.get('.pricing-plan-card__details').text()).toContain('pricing.viewQuotaDetails')
   })
 
-  it('renders plan facts before four quota terms in one vertical feature list', () => {
+  it('keeps normal cards white-state only and does not add a recommendation badge', () => {
+    const wrapper = mount(PricingPlanCard, {
+      props: {
+        plan: planFixture({ name: 'Try', price: 18, validity_days: 7 }),
+      },
+      global,
+    })
+
+    expect(wrapper.classes()).not.toContain('pricing-plan-card--featured')
+    expect(wrapper.attributes('data-featured')).toBe('false')
+    expect(wrapper.find('.pricing-plan-card__badge').exists()).toBe(false)
+    expect(wrapper.get('.pricing-plan-card__action').text()).toBe('pricing.choosePlan')
+  })
+
+  it('shows exactly the first four unique user-facing benefits and no technical quota rows', () => {
     const wrapper = mount(PricingPlanCard, {
       props: {
         plan: planFixture({
-          daily_limit_usd: 0,
+          features: ['一', '二', '二', '三', '四', '五'],
+          daily_limit_usd: 100,
           weekly_limit_usd: 200,
-          monthly_limit_usd: 0,
+          monthly_limit_usd: 300,
           peak_rate_enabled: true,
           peak_start: '14:00',
           peak_end: '18:00',
           peak_rate_multiplier: 2,
           supported_model_scopes: ['claude'],
         }),
-        renewal: false,
       },
-      global: {
-        stubs: {
-          Icon: true,
-        },
-      },
+      global,
     })
 
-    const factsList = wrapper.get('.pricing-plan-card__facts')
-    const rows = factsList.findAll('li')
-    const metrics = factsList.findAll('[data-metric]')
-    expect(factsList.element.tagName).toBe('UL')
-    expect(rows.slice(0, 3).map((row) => row.text())).toEqual([
-      'Priority access',
-      'pricing.peakRateWindow:14:00-18:00 ×2 (UTC+08:00)',
-      'pricing.modelScopes:Claude',
+    expect(wrapper.findAll('.pricing-plan-card__facts li').map((row) => row.text())).toEqual([
+      '一',
+      '二',
+      '三',
+      '四',
     ])
-    expect(metrics).toHaveLength(4)
-    expect(metrics.every((metric) => metric.element.tagName === 'LI')).toBe(true)
-    expect(metrics.every((metric) => metric.element.parentElement === factsList.element)).toBe(true)
-    expect(metrics.map((metric) => metric.attributes('data-metric'))).toEqual([
-      'rate',
-      'daily',
-      'weekly',
-      'monthly',
-    ])
-    expect(metrics.map((metric) => metric.text())).toEqual([
-      'pricing.rateMultiplier:1',
-      'pricing.dailyQuota:0.00',
-      'pricing.weeklyQuota:200.00',
-      'pricing.monthlyQuota:0.00',
-    ])
-    expect(wrapper.find('dl').exists()).toBe(false)
-    expect(wrapper.find('.pricing-plan-card__metrics').exists()).toBe(false)
-    expect(wrapper.findAllComponents({ name: 'CreditAmount' })).toHaveLength(0)
-
-    const facts = factsList.text()
-    expect(facts).toContain('Priority access')
-    expect(facts).toContain('pricing.peakRateWindow')
-    expect(facts).toContain('pricing.modelScopes')
-    expect(facts).not.toContain('pricing.metricLabels.rate')
-    expect(facts).not.toContain('pricing.metricLabels.daily')
+    expect(wrapper.text()).not.toContain('pricing.rateMultiplier')
+    expect(wrapper.text()).not.toContain('pricing.dailyQuota')
+    expect(wrapper.text()).not.toContain('pricing.peakRateWindow')
   })
 
-  it('keeps all four metrics when periodic quotas are unlimited', () => {
+  it('emits the real plan from both approved card actions', async () => {
+    const plan = planFixture()
     const wrapper = mount(PricingPlanCard, {
-      props: {
-        plan: planFixture({
-          daily_limit_usd: null,
-          weekly_limit_usd: undefined,
-          monthly_limit_usd: null,
-          features: [],
-        }),
-        renewal: false,
-      },
-      global: {
-        stubs: {
-          Icon: true,
-        },
-      },
+      props: { plan, featured: true },
+      global,
     })
 
-    const facts = wrapper.get('.pricing-plan-card__facts')
-    const metrics = facts.findAll('[data-metric]')
-    expect(metrics).toHaveLength(4)
-    expect(metrics.slice(1).every((metric) => (
-      metric.text().includes('payment.planCard.unlimited')
-    ))).toBe(true)
-    expect(facts.findAll('li')).toHaveLength(4)
-    expect(wrapper.text()).not.toContain('pricing.unlimitedQuota')
+    await wrapper.get('.pricing-plan-card__action').trigger('click')
+    await wrapper.get('.pricing-plan-card__details').trigger('click')
+
+    expect(wrapper.emitted('select')).toEqual([[plan]])
+    expect(wrapper.emitted('details')).toEqual([[plan]])
   })
 
-  it('keeps the pricing metric labels explicit in both locales', () => {
-    expect(zhMisc.pricing.metricLabels).toEqual({
-      rate: '计费倍率',
-      daily: '每日额度',
-      weekly: '每周额度',
-      monthly: '每月额度',
+  it('keeps the approved pricing labels in both locales', () => {
+    expect(zhMisc.pricing.recommended).toBe('推荐选择')
+    expect(zhMisc.pricing.viewQuotaDetails).toBe('查看额度详情')
+    expect(zhMisc.pricing.tiers).toEqual({
+      low: {
+        name: '轻量级',
+        description: '适合体验 AI、学习和日常轻任务',
+      },
+      mid: {
+        name: '中量级',
+        description: '适合高频办公、内容创作和专业个人用户',
+      },
+      high: {
+        name: '高量级',
+        description: '适合重度 AI 工作流、专业创作者和团队用户',
+      },
     })
-    expect(enMisc.pricing.metricLabels).toEqual({
-      rate: 'Billing rate',
-      daily: 'Daily quota',
-      weekly: 'Weekly quota',
-      monthly: 'Monthly quota',
-    })
+    expect(enMisc.pricing.recommended).toBe('Recommended')
+    expect(enMisc.pricing.viewQuotaDetails).toBe('View quota details')
   })
 })

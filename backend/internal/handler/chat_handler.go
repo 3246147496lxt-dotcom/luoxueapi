@@ -22,18 +22,44 @@ import (
 
 const (
 	maxChatRequestBytes              = 2 << 20
-	chatSettlementFailureCode        = "CHAT_SETTLEMENT_FAILED"
+	chatReceiptIDHeader              = "X-Chat-Receipt-ID"
 	chatSettlementFailureReason      = "Chat usage settlement could not be completed"
 	chatSettlementReceiptReadTimeout = 5 * time.Second
+	transcriptionForcedCloseKey      = "web_chat_transcription_forced_connection_close"
 )
 
 type chatApplication interface {
 	ListModels(ctx context.Context, userID int64) (*service.ChatModelsResult, error)
-	ResolvePrincipal(ctx context.Context, userID int64, model string) (*service.APIKey, error)
+	ResolvePrincipal(ctx context.Context, userID int64, model string) (*service.ChatPrincipal, error)
+}
+
+type chatCapabilitiesApplication interface {
+	Capabilities(ctx context.Context) (*service.ChatCapabilitiesResult, error)
+}
+
+type chatReasoningApplication interface {
+	NormalizeWebChatReasoning(ctx context.Context, userID int64, model string, options service.WebChatReasoningOptions) (service.WebChatReasoningOptions, error)
+}
+
+type chatReasoningPrincipalApplication interface {
+	ResolveWebChatPrincipal(ctx context.Context, userID int64, model string, options service.WebChatReasoningOptions) (*service.ChatPrincipal, error)
+}
+
+type chatVisionApplication interface {
+	SupportsVision(ctx context.Context, userID int64, model string) (bool, error)
 }
 
 type chatCompletionDelegator interface {
 	ChatCompletions(c *gin.Context)
+}
+
+type chatTranscriptionApplication interface {
+	ResolveTranscriptionPrincipal(ctx context.Context, userID int64) (*service.APIKey, error)
+}
+
+type chatTranscriptionDelegator interface {
+	AdmitTranscription(c *gin.Context) (release func(), admitted bool)
+	Transcriptions(c *gin.Context)
 }
 
 type chatAttemptLeaseManager interface {
@@ -49,12 +75,17 @@ const (
 )
 
 type ChatHandler struct {
-	chat     chatApplication
-	attempts chatAttemptLeaseManager
-	receipts *service.BillingReceiptService
-	history  *service.ChatHistoryService
-	gateway  chatCompletionDelegator
+	chat        chatApplication
+	attempts    chatAttemptLeaseManager
+	receipts    *service.BillingReceiptService
+	history     *service.ChatHistoryService
+	attachments *service.ChatAttachmentService
+	library     *service.LibraryService
+	gateway     chatCompletionDelegator
+	projects    *service.ProjectService
 }
+
+func (h *ChatHandler) SetProjectService(projects *service.ProjectService) { h.projects = projects }
 
 func NewChatHandler(
 	chat *service.ChatService,
@@ -75,10 +106,16 @@ func ProvideChatHandler(
 	attempts *service.ChatAttemptService,
 	receipts *service.BillingReceiptService,
 	history *service.ChatHistoryService,
+	attachments *service.ChatAttachmentService,
+	library *service.LibraryService,
+	projects *service.ProjectService,
 	gateway *OpenAIGatewayHandler,
 ) *ChatHandler {
 	handler := NewChatHandler(chat, attempts, receipts, gateway)
 	handler.history = history
+	handler.attachments = attachments
+	handler.library = library
+	handler.projects = projects
 	return handler
 }
 
@@ -95,6 +132,31 @@ func (h *ChatHandler) Models(c *gin.Context) {
 	}
 
 	result, err := h.chat.ListModels(c.Request.Context(), subject.UserID)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, result)
+}
+
+func (h *ChatHandler) Capabilities(c *gin.Context) {
+	c.Header("Cache-Control", "private, no-store")
+	subject, ok := middleware2.GetAuthSubjectFromContext(c)
+	if !ok || subject.UserID <= 0 {
+		response.Unauthorized(c, "User not authenticated")
+		return
+	}
+	if h == nil || h.chat == nil {
+		response.InternalError(c, "Chat service is unavailable")
+		return
+	}
+
+	application, ok := h.chat.(chatCapabilitiesApplication)
+	if !ok || application == nil {
+		response.InternalError(c, "Chat capabilities service is unavailable")
+		return
+	}
+	result, err := application.Capabilities(c.Request.Context())
 	if err != nil {
 		response.ErrorFrom(c, err)
 		return
@@ -129,6 +191,81 @@ func (h *ChatHandler) Receipt(c *gin.Context) {
 		return
 	}
 	response.Success(c, payload)
+}
+
+func (h *ChatHandler) Transcriptions(c *gin.Context) {
+	c.Header("Cache-Control", "private, no-store")
+	forceCloseUntilTranscriptionBodyRead(c)
+	subject, ok := middleware2.GetAuthSubjectFromContext(c)
+	if !ok || subject.UserID <= 0 {
+		response.Unauthorized(c, "User not authenticated")
+		return
+	}
+	if h == nil {
+		response.ErrorWithDetails(c, http.StatusServiceUnavailable, "Voice transcription is temporarily unavailable", "TRANSCRIPTION_UNAVAILABLE", nil)
+		return
+	}
+	application, appOK := h.chat.(chatTranscriptionApplication)
+	delegator, gatewayOK := h.gateway.(chatTranscriptionDelegator)
+	if !appOK || application == nil || !gatewayOK || delegator == nil {
+		response.ErrorWithDetails(c, http.StatusServiceUnavailable, "Voice transcription is temporarily unavailable", "TRANSCRIPTION_UNAVAILABLE", nil)
+		return
+	}
+	releaseAdmission, admitted := delegator.AdmitTranscription(c)
+	if !admitted {
+		return
+	}
+	if releaseAdmission == nil {
+		response.ErrorWithDetails(c, http.StatusServiceUnavailable, "Voice transcription is temporarily unavailable", "TRANSCRIPTION_UNAVAILABLE", nil)
+		return
+	}
+	defer releaseAdmission()
+	principal, err := application.ResolveTranscriptionPrincipal(c.Request.Context(), subject.UserID)
+	if err != nil {
+		if errors.Is(err, context.DeadlineExceeded) || errors.Is(c.Request.Context().Err(), context.DeadlineExceeded) {
+			response.ErrorWithDetails(c, http.StatusGatewayTimeout, "Voice transcription timed out", "TRANSCRIPTION_TIMEOUT", nil)
+			return
+		}
+		response.ErrorFrom(c, err)
+		return
+	}
+	if err := c.Request.Context().Err(); err != nil {
+		if errors.Is(err, context.DeadlineExceeded) {
+			response.ErrorWithDetails(c, http.StatusGatewayTimeout, "Voice transcription timed out", "TRANSCRIPTION_TIMEOUT", nil)
+		}
+		return
+	}
+	if principal == nil || principal.UserID != subject.UserID || !middleware2.BindChatPrincipalContext(c, principal) {
+		response.ErrorWithDetails(c, http.StatusServiceUnavailable, "Voice transcription is temporarily unavailable", "TRANSCRIPTION_UNAVAILABLE", nil)
+		return
+	}
+	delegator.Transcriptions(c)
+}
+
+// A rejected HTTP/1 transcription request may still have a large, slow body.
+// Prevent net/http from draining that unread body after the handler returns.
+// Once multipart parsing reaches EOF, the gateway explicitly restores reuse.
+func forceCloseUntilTranscriptionBodyRead(c *gin.Context) {
+	if c == nil || c.Request == nil {
+		return
+	}
+	if !c.Request.Close {
+		c.Set(transcriptionForcedCloseKey, true)
+	}
+	c.Request.Close = true
+	c.Header("Connection", "close")
+}
+
+func allowConnectionReuseAfterTranscriptionBodyRead(c *gin.Context) {
+	if c == nil || c.Request == nil {
+		return
+	}
+	forced, ok := c.Get(transcriptionForcedCloseKey)
+	if !ok || forced != true {
+		return
+	}
+	c.Request.Close = false
+	c.Writer.Header().Del("Connection")
 }
 
 type chatReceiptResponse struct {
@@ -214,6 +351,68 @@ func (h *ChatHandler) Completions(c *gin.Context) {
 		response.ErrorWithDetails(c, http.StatusBadRequest, "Invalid chat request", "INVALID_CHAT_REQUEST", nil)
 		return
 	}
+	libraryIDs, err := normalizeWebChatCompletionAttachments(req)
+	if err != nil {
+		response.ErrorWithDetails(c, http.StatusBadRequest, "Invalid chat request", "INVALID_CHAT_REQUEST", nil)
+		return
+	}
+	if len(libraryIDs) > 0 {
+		if h.library == nil {
+			response.ErrorFrom(c, service.ErrLibraryUnavailable)
+			return
+		}
+		if _, err = h.library.Resolve(c.Request.Context(), subject.UserID, libraryIDs); err != nil {
+			response.ErrorFrom(c, err)
+			return
+		}
+	}
+	reasoning, ok := h.chat.(chatReasoningApplication)
+	if !ok || reasoning == nil {
+		response.InternalError(c, "Chat reasoning service is unavailable")
+		return
+	}
+	normalizedReasoning, err := reasoning.NormalizeWebChatReasoning(
+		c.Request.Context(),
+		subject.UserID,
+		req.Model,
+		service.WebChatReasoningOptions{Mode: req.ReasoningMode, Effort: req.ReasoningEffort},
+	)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	req.ReasoningMode = normalizedReasoning.Mode
+	req.ReasoningEffort = normalizedReasoning.Effort
+	visionSupported := false
+	visionChecked := false
+	if req.UserMessage != nil && len(req.UserMessage.AttachmentIDs) > 0 {
+		if h.attachments == nil {
+			response.ErrorFrom(c, service.ErrChatAttachmentUnavailable)
+			return
+		}
+		_, requiresVision, resolveErr := h.attachments.ResolveSelection(c.Request.Context(), subject.UserID, req.UserMessage.AttachmentIDs)
+		if resolveErr != nil {
+			response.ErrorFrom(c, resolveErr)
+			return
+		}
+		if requiresVision {
+			visionApp, ok := h.chat.(chatVisionApplication)
+			if !ok {
+				response.ErrorFrom(c, service.ErrChatAttachmentVisionUnsupported)
+				return
+			}
+			visionSupported, err = visionApp.SupportsVision(c.Request.Context(), subject.UserID, req.Model)
+			visionChecked = true
+			if err != nil {
+				response.ErrorFrom(c, err)
+				return
+			}
+			if !visionSupported {
+				response.ErrorFrom(c, service.ErrChatAttachmentVisionUnsupported)
+				return
+			}
+		}
+	}
 
 	clientRequestID, _ := c.Request.Context().Value(ctxkey.ClientRequestID).(string)
 	attemptID := strings.TrimSpace(c.GetHeader("X-Chat-Attempt-ID"))
@@ -225,6 +424,7 @@ func (h *ChatHandler) Completions(c *gin.Context) {
 		&service.PrepareChatCompletionInput{
 			ConversationID:        req.ConversationID,
 			Model:                 req.Model,
+			ReasoningMode:         req.ReasoningMode,
 			ReasoningEffort:       req.ReasoningEffort,
 			ExpectedHeadMessageID: req.ExpectedHeadMessageID,
 			UserMessage:           chatCompletionUserMessageFromRequest(req.UserMessage),
@@ -233,7 +433,14 @@ func (h *ChatHandler) Completions(c *gin.Context) {
 		},
 	)
 	if prepared != nil && strings.TrimSpace(prepared.ClientRequestID) != "" {
-		c.Header("X-Client-Request-ID", strings.TrimSpace(prepared.ClientRequestID))
+		receiptID := strings.TrimSpace(prepared.ClientRequestID)
+		c.Header("X-Client-Request-ID", receiptID)
+		// X-Client-Request-ID is a request-correlation header written for every
+		// response by middleware. Keep a distinct header for the stronger
+		// contract that this chat attempt was persisted (or is a replay of one).
+		if err == nil || errors.Is(err, service.ErrChatAttemptAlreadySubmitted) {
+			c.Header(chatReceiptIDHeader, receiptID)
+		}
 	}
 	if err != nil {
 		response.ErrorFrom(c, err)
@@ -249,18 +456,61 @@ func (h *ChatHandler) Completions(c *gin.Context) {
 	}
 	defer stopHeartbeat()
 
-	messages := make([]webChatMessage, len(prepared.Messages))
-	for i := range prepared.Messages {
-		messages[i] = webChatMessage{
-			Role:    prepared.Messages[i].Role,
-			Content: prepared.Messages[i].Content,
+	messages := make([]webChatMessage, 0, len(prepared.Messages))
+	requiresVision := false
+	if h.attachments != nil {
+		modelMessages, modelRequiresVision, buildErr := h.attachments.BuildModelContext(c.Request.Context(), prepared.Messages)
+		if buildErr != nil {
+			response.ErrorFrom(c, buildErr)
+			h.finalizeChatCompletion(subject.UserID, attemptID, req.AssistantMessageID, c.Writer.Status(), deliveredChatStreamSnapshot{})
+			return
+		}
+		requiresVision = modelRequiresVision
+		for i := range modelMessages {
+			messages = append(messages, webChatMessage{Role: modelMessages[i].Role, Content: modelMessages[i].Content})
+		}
+	} else {
+		for i := range prepared.Messages {
+			content, _ := json.Marshal(prepared.Messages[i].Content)
+			messages = append(messages, webChatMessage{Role: prepared.Messages[i].Role, Content: content})
 		}
 	}
+	if requiresVision && !visionChecked {
+		visionApp, ok := h.chat.(chatVisionApplication)
+		if !ok {
+			response.ErrorFrom(c, service.ErrChatAttachmentVisionUnsupported)
+			h.finalizeChatCompletion(subject.UserID, attemptID, req.AssistantMessageID, c.Writer.Status(), deliveredChatStreamSnapshot{})
+			return
+		}
+		visionSupported, err = visionApp.SupportsVision(c.Request.Context(), subject.UserID, req.Model)
+		if err != nil {
+			response.ErrorFrom(c, err)
+			h.finalizeChatCompletion(subject.UserID, attemptID, req.AssistantMessageID, c.Writer.Status(), deliveredChatStreamSnapshot{})
+			return
+		}
+	}
+	if requiresVision && !visionSupported {
+		response.ErrorFrom(c, service.ErrChatAttachmentVisionUnsupported)
+		h.finalizeChatCompletion(subject.UserID, attemptID, req.AssistantMessageID, c.Writer.Status(), deliveredChatStreamSnapshot{})
+		return
+	}
 	body, err := json.Marshal(openAIWebChatCompletionRequest{
-		Model:           req.Model,
-		Messages:        messages,
-		ReasoningEffort: req.ReasoningEffort,
-		Stream:          true,
+		Model:    req.Model,
+		Messages: messages,
+		Reasoning: &webChatReasoningRequest{
+			Mode: req.ReasoningMode,
+			// Pro is a mode and must not carry an effort field to the
+			// upstream request. The normalized low effort remains an
+			// internal capability/scheduling default only.
+			Effort: func() string {
+				if req.ReasoningMode == service.WebChatReasoningModePro {
+					return ""
+				}
+				return req.ReasoningEffort
+			}(),
+			Summary: "auto",
+		},
+		Stream: true,
 	})
 	if err != nil {
 		response.InternalError(c, "Failed to initialize chat request")
@@ -274,7 +524,24 @@ func (h *ChatHandler) Completions(c *gin.Context) {
 		return
 	}
 
-	principal, err := h.chat.ResolvePrincipal(c.Request.Context(), subject.UserID, req.Model)
+	reasoningPrincipal, ok := h.chat.(chatReasoningPrincipalApplication)
+	if !ok || reasoningPrincipal == nil {
+		response.InternalError(c, "Chat reasoning principal service is unavailable")
+		h.finalizeChatCompletion(
+			subject.UserID,
+			attemptID,
+			req.AssistantMessageID,
+			c.Writer.Status(),
+			deliveredChatStreamSnapshot{},
+		)
+		return
+	}
+	resolvedPrincipal, err := reasoningPrincipal.ResolveWebChatPrincipal(
+		c.Request.Context(),
+		subject.UserID,
+		req.Model,
+		service.WebChatReasoningOptions{Mode: req.ReasoningMode, Effort: req.ReasoningEffort},
+	)
 	if err != nil {
 		response.ErrorFrom(c, err)
 		h.finalizeChatCompletion(
@@ -286,7 +553,9 @@ func (h *ChatHandler) Completions(c *gin.Context) {
 		)
 		return
 	}
-	if principal == nil || principal.UserID != subject.UserID || !middleware2.BindChatPrincipalContext(c, principal) {
+	if resolvedPrincipal == nil || resolvedPrincipal.APIKey == nil ||
+		resolvedPrincipal.APIKey.UserID != subject.UserID ||
+		!middleware2.BindChatPrincipalBillingContext(c, resolvedPrincipal.APIKey, resolvedPrincipal.Subscription) {
 		response.InternalError(c, "Failed to initialize chat request")
 		h.finalizeChatCompletion(
 			subject.UserID,
@@ -307,7 +576,9 @@ func (h *ChatHandler) Completions(c *gin.Context) {
 	c.Request = c.Request.WithContext(
 		withWebChatUsageBarrier(requestContext, usageBarrier),
 	)
-	checkpoint := func(sequence int64, content string) error {
+	observer := newDeliveredChatStreamObserver()
+	observer.setReasoningMetadata(req.ReasoningMode, req.ReasoningEffort)
+	observer.bindSnapshotCheckpoint(func(checkpoint deliveredChatStreamCheckpoint) error {
 		checkpointContext, cancel := context.WithTimeout(
 			context.WithoutCancel(requestContext),
 			3*time.Second,
@@ -319,18 +590,22 @@ func (h *ChatHandler) Completions(c *gin.Context) {
 			&service.CheckpointChatCompletionInput{
 				AttemptID:          attemptID,
 				AssistantMessageID: req.AssistantMessageID,
-				Content:            content,
-				CheckpointSeq:      sequence,
+				Content:            checkpoint.Content,
+				CheckpointSeq:      checkpoint.Sequence,
+				Activities:         checkpoint.Activities,
 			},
 		)
-	}
-	observer := newDeliveredChatStreamObserver(checkpoint)
+	})
 	observer.bindCancellation(requestContext.Done())
 	originalWriter := c.Writer
 	c.Writer = &deliveredChatResponseWriter{
 		ResponseWriter: originalWriter,
 		observer:       observer,
 	}
+	service.SetWebChatReasoningOptions(c, service.WebChatReasoningOptions{
+		Mode:   req.ReasoningMode,
+		Effort: req.ReasoningEffort,
+	})
 	h.gateway.ChatCompletions(c)
 	usageResult := usageBarrier.SealAndWait()
 	statusCode := c.Writer.Status()
@@ -363,12 +638,18 @@ func (h *ChatHandler) Completions(c *gin.Context) {
 				"error", usageErr,
 			)
 		case webChatSettlementNoBilling:
-			streamSnapshot.ErrorCode = chatSettlementFailureCode
-			streamSnapshot.ErrorMessage = chatSettlementFailureReason
+			// Keep the settlement failure on the attempt/receipt axis while the
+			// independently observed stream still determines message delivery.
+			if deliveredChatStreamCompletedSuccessfully(streamSnapshot) &&
+				streamSnapshot.ErrorCode == "" {
+				streamSnapshot.ErrorCode = service.ChatAttemptFailureCodeSettlement
+				streamSnapshot.ErrorMessage = chatSettlementFailureReason
+			}
 			slog.Error("web chat usage settlement failed without billing evidence",
 				"user_id", subject.UserID,
 				"attempt_id", attemptID,
 				"receipt_id", strings.TrimSpace(prepared.ClientRequestID),
+				"delivery_done", streamSnapshot.Done,
 				"producer_count", usageResult.ProducerCount,
 				"error", usageErr,
 			)
@@ -455,8 +736,18 @@ func (h *ChatHandler) finalizeChatCompletion(
 		CheckpointSeq:      stream.CheckpointSeq + 1,
 		HTTPStatus:         statusCode,
 		FinishReason:       stream.FinishReason,
+		Activities:         stream.Activities,
 	}
 	switch {
+	case statusCode < http.StatusBadRequest &&
+		deliveredChatStreamCompletedSuccessfully(stream) &&
+		stream.ErrorCode == service.ChatAttemptFailureCodeSettlement:
+		// The answer was delivered successfully. Keep the message completed,
+		// while the failed attempt retains settlement evidence for its receipt.
+		input.DeliveryStatus = service.ChatMessageDeliveryCompleted
+		input.AttemptStatus = service.ChatAttemptStatusFailed
+		input.ErrorCode = stream.ErrorCode
+		input.ErrorMessage = stream.ErrorMessage
 	case statusCode >= http.StatusBadRequest || stream.ErrorCode != "":
 		input.DeliveryStatus = service.ChatMessageDeliveryError
 		input.AttemptStatus = service.ChatAttemptStatusFailed
@@ -471,14 +762,35 @@ func (h *ChatHandler) finalizeChatCompletion(
 		if input.ErrorMessage == "" {
 			input.ErrorMessage = "Chat request failed"
 		}
+	case stream.ResponsesTerminalSeen &&
+		stream.ResponsesTerminalStatus == service.ChatMessageActivityStatusFailed:
+		input.DeliveryStatus = service.ChatMessageDeliveryError
+		input.AttemptStatus = service.ChatAttemptStatusFailed
+		input.ErrorCode = "OPENAI_RESPONSE_FAILED"
+		input.ErrorMessage = "OpenAI response failed"
+	case stream.ResponsesTerminalSeen &&
+		stream.ResponsesTerminalStatus == service.ChatMessageActivityStatusIncomplete:
+		input.DeliveryStatus = service.ChatMessageDeliveryPartial
+		input.AttemptStatus = service.ChatAttemptStatusInterrupted
+		if input.FinishReason == "" {
+			input.FinishReason = "incomplete"
+		}
 	case stream.Done:
 		input.DeliveryStatus = service.ChatMessageDeliveryCompleted
 		input.AttemptStatus = service.ChatAttemptStatusCompleted
 	default:
 		input.DeliveryStatus = service.ChatMessageDeliveryInterrupted
 		input.AttemptStatus = service.ChatAttemptStatusInterrupted
+		if !stream.ResponsesTerminalSeen {
+			input.Activities = service.TerminalizeChatMessageActivities(
+				input.Activities,
+				service.ChatMessageActivityStatusDisconnected,
+				"client_disconnected",
+				time.Now(),
+			)
+		}
 		if input.FinishReason == "" {
-			input.FinishReason = "interrupted"
+			input.FinishReason = "disconnected"
 		}
 	}
 
@@ -494,31 +806,138 @@ func (h *ChatHandler) finalizeChatCompletion(
 	}
 }
 
+func deliveredChatStreamCompletedSuccessfully(stream deliveredChatStreamSnapshot) bool {
+	if !stream.Done {
+		return false
+	}
+	return !stream.ResponsesTerminalSeen ||
+		stream.ResponsesTerminalStatus == service.ChatMessageActivityStatusCompleted
+}
+
 type webChatCompletionRequest struct {
-	ConversationID        string                        `json:"conversation_id"`
-	Model                 string                        `json:"model"`
-	ReasoningEffort       string                        `json:"reasoning_effort,omitempty"`
-	ExpectedHeadMessageID *string                       `json:"expected_head_message_id"`
-	UserMessage           *webChatCompletionUserMessage `json:"user_message,omitempty"`
-	RetryOfMessageID      string                        `json:"retry_of_message_id,omitempty"`
-	AssistantMessageID    string                        `json:"assistant_message_id"`
+	ConversationID        string                                 `json:"conversation_id"`
+	Model                 string                                 `json:"model"`
+	ReasoningMode         string                                 `json:"reasoning_mode,omitempty"`
+	ReasoningEffort       string                                 `json:"reasoning_effort,omitempty"`
+	Reasoning             *webChatReasoningRequest               `json:"reasoning,omitempty"`
+	ExpectedHeadMessageID *string                                `json:"expected_head_message_id"`
+	UserMessage           *webChatCompletionUserMessage          `json:"user_message,omitempty"`
+	Attachments           []webChatCompletionAttachmentReference `json:"attachments,omitempty"`
+	RetryOfMessageID      string                                 `json:"retry_of_message_id,omitempty"`
+	AssistantMessageID    string                                 `json:"assistant_message_id"`
+}
+
+// webChatReasoningRequest is the canonical Responses-shaped selector sent by
+// the Chat UI. The legacy flat fields above remain accepted for old clients,
+// but are normalized into this same trusted contract before forwarding.
+type webChatReasoningRequest struct {
+	Mode    string `json:"mode,omitempty"`
+	Effort  string `json:"effort,omitempty"`
+	Summary string `json:"summary,omitempty"`
 }
 
 type webChatCompletionUserMessage struct {
-	ID      string `json:"id"`
-	Content string `json:"content"`
+	ID            string                                 `json:"id"`
+	Content       string                                 `json:"content"`
+	AttachmentIDs []string                               `json:"attachment_ids,omitempty"`
+	Attachments   []webChatCompletionAttachmentReference `json:"attachments,omitempty"`
+}
+
+type webChatCompletionAttachmentReference struct {
+	Source      string `json:"source"`
+	FileID      string `json:"file_id,omitempty"`
+	FileIDCamel string `json:"fileId,omitempty"`
+}
+
+func normalizeWebChatCompletionAttachments(request *webChatCompletionRequest) ([]string, error) {
+	if request == nil {
+		return nil, errors.New("chat request is nil")
+	}
+	references := append([]webChatCompletionAttachmentReference(nil), request.Attachments...)
+	if request.UserMessage != nil {
+		references = append(references, request.UserMessage.Attachments...)
+	}
+	if len(references) > 0 && request.UserMessage == nil {
+		return nil, errors.New("attachments require a user message")
+	}
+	libraryIDs, err := normalizeLibraryAttachmentReferences(references)
+	if err != nil {
+		return nil, err
+	}
+	if request.UserMessage == nil {
+		return libraryIDs, nil
+	}
+	allIDs := make([]string, 0, len(request.UserMessage.AttachmentIDs)+len(libraryIDs))
+	allIDs = append(allIDs, request.UserMessage.AttachmentIDs...)
+	allIDs = append(allIDs, libraryIDs...)
+	seen := make(map[string]struct{}, len(allIDs))
+	request.UserMessage.AttachmentIDs = request.UserMessage.AttachmentIDs[:0]
+	for _, rawID := range allIDs {
+		id := strings.TrimSpace(rawID)
+		if _, exists := seen[id]; exists {
+			continue
+		}
+		seen[id] = struct{}{}
+		request.UserMessage.AttachmentIDs = append(request.UserMessage.AttachmentIDs, id)
+	}
+	return libraryIDs, nil
+}
+
+func normalizeLibraryAttachmentReferences(references []webChatCompletionAttachmentReference) ([]string, error) {
+	ids := make([]string, 0, len(references))
+	seen := make(map[string]struct{}, len(references))
+	for i := range references {
+		if strings.ToLower(strings.TrimSpace(references[i].Source)) != "library" {
+			return nil, errors.New("invalid attachment source")
+		}
+		snakeID := strings.TrimSpace(references[i].FileID)
+		camelID := strings.TrimSpace(references[i].FileIDCamel)
+		if snakeID != "" && camelID != "" && snakeID != camelID {
+			return nil, errors.New("conflicting library file ids")
+		}
+		id := snakeID
+		if id == "" {
+			id = camelID
+		}
+		if !validWebChatAttachmentReferenceID(id) {
+			return nil, errors.New("invalid library file id")
+		}
+		if _, exists := seen[id]; exists {
+			continue
+		}
+		seen[id] = struct{}{}
+		ids = append(ids, id)
+	}
+	return ids, nil
+}
+
+func validWebChatAttachmentReferenceID(value string) bool {
+	if len(value) < 8 || len(value) > 80 {
+		return false
+	}
+	for _, r := range value {
+		switch {
+		case r >= 'a' && r <= 'z':
+		case r >= 'A' && r <= 'Z':
+		case r >= '0' && r <= '9':
+		case r == '-', r == '_':
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 type openAIWebChatCompletionRequest struct {
-	Model           string           `json:"model"`
-	Messages        []webChatMessage `json:"messages"`
-	ReasoningEffort string           `json:"reasoning_effort,omitempty"`
-	Stream          bool             `json:"stream"`
+	Model     string                   `json:"model"`
+	Messages  []webChatMessage         `json:"messages"`
+	Reasoning *webChatReasoningRequest `json:"reasoning,omitempty"`
+	Stream    bool                     `json:"stream"`
 }
 
 type webChatMessage struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
+	Role    string          `json:"role"`
+	Content json.RawMessage `json:"content"`
 }
 
 func decodeWebChatCompletionRequest(c *gin.Context) (*webChatCompletionRequest, error) {
@@ -534,9 +953,29 @@ func decodeWebChatCompletionRequest(c *gin.Context) (*webChatCompletionRequest, 
 		return nil, err
 	}
 
+	if req.Reasoning != nil {
+		// The nested shape is authoritative when present. Ignore a client
+		// supplied summary value and add the product's required `auto` summary
+		// later in the trusted Responses conversion.
+		req.ReasoningMode = req.Reasoning.Mode
+		req.ReasoningEffort = req.Reasoning.Effort
+	}
+	req.ReasoningMode = strings.ToLower(strings.TrimSpace(req.ReasoningMode))
+	if req.ReasoningMode == "" {
+		req.ReasoningMode = service.WebChatReasoningModeStandard
+	}
+	switch req.ReasoningMode {
+	case service.WebChatReasoningModeStandard, service.WebChatReasoningModePro:
+	default:
+		return nil, errors.New("invalid reasoning mode")
+	}
+
 	req.ReasoningEffort = strings.ToLower(strings.TrimSpace(req.ReasoningEffort))
+	if req.ReasoningEffort == "" {
+		req.ReasoningEffort = "low"
+	}
 	switch req.ReasoningEffort {
-	case "", "low", "medium", "high", "xhigh", "max":
+	case "low", "medium", "high", "xhigh", "max":
 	default:
 		return nil, errors.New("invalid reasoning effort")
 	}
@@ -551,8 +990,9 @@ func chatCompletionUserMessageFromRequest(
 		return nil
 	}
 	return &service.ChatCompletionHistoryUserMessage{
-		ID:      message.ID,
-		Content: message.Content,
+		ID:            message.ID,
+		Content:       message.Content,
+		AttachmentIDs: append([]string(nil), message.AttachmentIDs...),
 	}
 }
 

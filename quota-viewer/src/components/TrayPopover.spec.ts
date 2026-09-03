@@ -32,20 +32,20 @@ describe('menu bar quota popover', () => {
     })
 
     expect(wrapper.text()).toContain('账户余额')
-    expect(wrapper.text()).toContain('❄128.64')
+    expect(wrapper.text()).toContain('128.64 积分')
     expect(wrapper.text()).toContain('今日消费')
-    expect(wrapper.text()).toContain('❄1.16')
+    expect(wrapper.text()).toContain('1.16 积分')
     expect(wrapper.text()).toContain('本月消费')
-    expect(wrapper.text()).toContain('❄10.74')
+    expect(wrapper.text()).toContain('10.74 积分')
     expect(wrapper.get('.quota-ring__copy strong').text()).toBe('100%')
     expect(wrapper.get('.quota-ring__copy').text()).toBe('100%')
     expect(wrapper.get('.membership-period-label').text()).toBe('周剩余：')
     expect(wrapper.text()).toContain('本周期 Token')
-    expect(wrapper.text()).toContain('本周期剩余雪花额度')
+    expect(wrapper.text()).toContain('本周期剩余积分')
     expect(wrapper.text()).toContain('1,906,000')
     expect(
       wrapper.get('.membership-summary > span:nth-child(3)').text()
-    ).toContain('❄63.80')
+    ).toContain('63.80 积分')
     expect(wrapper.text()).not.toContain('本周期请求')
     expect(wrapper.text()).not.toContain('99.97642371428%')
     expect(wrapper.find('.floating-quota-widget').exists()).toBe(false)
@@ -120,7 +120,7 @@ describe('menu bar quota popover', () => {
 
     expect(wrapper.text()).toContain('上次数据')
     expect(wrapper.text()).toContain('上次同步数据')
-    expect(wrapper.text()).toContain('❄128.64')
+    expect(wrapper.text()).toContain('128.64 积分')
     expect(wrapper.get('.membership-card').classes()).toContain(
       'membership-card--stale'
     )
@@ -133,7 +133,7 @@ describe('menu bar quota popover', () => {
     expect(wrapper.get('.membership-card').attributes('aria-expanded')).toBe(
       'false'
     )
-    await wrapper.get('[aria-label="刷新额度"]').trigger('click')
+    await wrapper.get('[aria-label="刷新积分"]').trigger('click')
     await wrapper.get('.membership-card').trigger('click')
     await wrapper.get('.tray-open-main').trigger('click')
 

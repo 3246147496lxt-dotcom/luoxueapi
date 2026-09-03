@@ -80,9 +80,6 @@ func (s *OpenAIGatewayService) forwardAsRawChatCompletions(
 		return clientDisconnectResult(), ctx.Err()
 	}
 
-	// 1b. Extract service tier from the raw body before any transformation.
-	serviceTier := extractOpenAIServiceTierFromBody(body)
-
 	// 2. Resolve model mapping (same as ForwardAsChatCompletions)
 	billingModel := resolveOpenAIForwardModel(account, originalModel, defaultMappedModel)
 	upstreamModel := normalizeOpenAIModelForUpstream(account, billingModel)
@@ -104,8 +101,23 @@ func (s *OpenAIGatewayService) forwardAsRawChatCompletions(
 	if normalizedBody, normalized := NormalizeGLMOpenAIReasoningEffort(upstreamBody, upstreamModel); normalized {
 		upstreamBody = normalizedBody
 	}
+	// Image-generation requests do not have OpenAI Priority semantics. Check
+	// both the client model/body and the final mapped model/body so aliases that
+	// resolve to an image model cannot receive the API-key default either.
+	imageIntent := IsImageGenerationIntentForPlatform(openAIResponsesEndpoint, originalModel, body, account.Platform) ||
+		IsImageGenerationIntentForPlatform(openAIResponsesEndpoint, upstreamModel, upstreamBody, account.Platform)
 
-	// 4. Apply OpenAI fast policy on the CC body
+	// 4. Apply the API-key default before the administrator fast policy. The
+	// helper is a no-op for Grok and for any explicit service_tier member.
+	if !imageIntent {
+		if updatedBody, injected, injectErr := s.injectDefaultOpenAIServiceTier(ctx, c, account, upstreamModel, upstreamBody); injectErr != nil {
+			return nil, fmt.Errorf("inject default service tier: %w", injectErr)
+		} else if injected {
+			upstreamBody = updatedBody
+		}
+	}
+
+	// Apply OpenAI fast policy on the CC body
 	updatedBody, policyErr := s.applyOpenAIFastPolicyToBody(ctx, account, upstreamModel, upstreamBody)
 	if policyErr != nil {
 		var blocked *OpenAIFastBlockedError
@@ -116,6 +128,7 @@ func (s *OpenAIGatewayService) forwardAsRawChatCompletions(
 		return nil, policyErr
 	}
 	upstreamBody = updatedBody
+	serviceTier := extractOpenAIServiceTierFromBody(upstreamBody)
 
 	// Grok Composer does not accept image_url parts directly, but Grok Build
 	// can describe the images first. Bridge only this exact failure mode.
@@ -285,6 +298,10 @@ func (s *OpenAIGatewayService) streamRawChatCompletions(
 	requestBodyLen int,
 	drainGuard *webChatDrainGuard,
 ) (*OpenAIForwardResult, error) {
+	observer := upstreamResponseModelObserverFromContext(c)
+	if observer == nil {
+		observer = beginUpstreamResponseModelObservation(c)
+	}
 	requestID := resp.Header.Get("x-request-id")
 	writeStreamHeaders := s.newStreamHeaderWriter(c, resp.Header)
 	scanner := s.newUpstreamSSEScanner(resp.Body)
@@ -336,6 +353,8 @@ func (s *OpenAIGatewayService) streamRawChatCompletions(
 
 	sawDone := false
 	sawTerminalUsage := false
+	sawTerminalFinishReason := false
+	webChatStream := isWebChatContext(c.Request.Context())
 	for scanner.Scan() {
 		line := scanner.Text()
 		refusalDetector.ObserveSSELine(line)
@@ -344,7 +363,9 @@ func (s *OpenAIGatewayService) streamRawChatCompletions(
 			if trimmedPayload == "[DONE]" {
 				sawDone = true
 			} else {
+				observer.ObserveOpenAI([]byte(payload), strings.TrimSpace(gjson.Get(payload, "type").String()))
 				usageOnlyChunk := isOpenAIChatUsageOnlyStreamChunk(payload)
+				sawTerminalFinishReason = sawTerminalFinishReason || hasOpenAIChatTerminalFinishReason(payload)
 				if u := extractCCStreamUsage(payload); u != nil {
 					usage = *u
 					sawTerminalUsage = sawTerminalUsage || usageOnlyChunk
@@ -369,6 +390,20 @@ func (s *OpenAIGatewayService) streamRawChatCompletions(
 			break
 		}
 		if line == "" {
+			if webChatStream && sawTerminalUsage && sawTerminalFinishReason {
+				// OpenAI-compatible providers do not always send the optional
+				// [DONE] sentinel after a finish_reason followed by their final
+				// usage-only chunk. Both terminal signals are present, so close
+				// the downstream SSE contract explicitly instead of making strict
+				// clients misclassify the delivered answer as interrupted.
+				writeLine("data: [DONE]")
+				writeLine("")
+				sawDone = true
+				if !clientDisconnected && clientOutputStarted {
+					c.Writer.Flush()
+				}
+				break
+			}
 			if !clientDisconnected && clientOutputStarted {
 				c.Writer.Flush()
 			}
@@ -383,6 +418,24 @@ func (s *OpenAIGatewayService) streamRawChatCompletions(
 	}
 
 	scanErr := scanner.Err()
+	if scanErr == nil &&
+		webChatStream &&
+		!sawDone &&
+		sawTerminalFinishReason &&
+		!clientDisconnected {
+		// A clean upstream EOF after finish_reason is also authoritative
+		// delivery evidence, even when a compatible provider ignored the
+		// forced include_usage option. Terminate the last event and synthesize
+		// the same downstream sentinel as the normal event-boundary path above;
+		// settlement remains an independent concern for the caller.
+		writeLine("")
+		writeLine("data: [DONE]")
+		writeLine("")
+		sawDone = true
+		if !clientDisconnected && clientOutputStarted {
+			c.Writer.Flush()
+		}
+	}
 	if scanErr != nil {
 		if !errors.Is(scanErr, context.Canceled) && !errors.Is(scanErr, context.DeadlineExceeded) {
 			logger.L().Warn("openai chat_completions raw: stream read error",
@@ -414,17 +467,19 @@ func (s *OpenAIGatewayService) streamRawChatCompletions(
 	}
 
 	result := &OpenAIForwardResult{
-		RequestID:        requestID,
-		Usage:            usage,
-		Model:            originalModel,
-		BillingModel:     billingModel,
-		UpstreamModel:    upstreamModel,
-		ReasoningEffort:  reasoningEffort,
-		ServiceTier:      serviceTier,
-		Stream:           true,
-		Duration:         time.Since(startTime),
-		FirstTokenMs:     firstTokenMs,
-		ClientDisconnect: clientDisconnected || drainGuard.Started(),
+		RequestID:                     requestID,
+		Usage:                         usage,
+		Model:                         originalModel,
+		BillingModel:                  billingModel,
+		UpstreamModel:                 upstreamModel,
+		UpstreamResponseModel:         observer.Model(),
+		UpstreamResponseModelConflict: observer.Conflict(),
+		ReasoningEffort:               reasoningEffort,
+		ServiceTier:                   serviceTier,
+		Stream:                        true,
+		Duration:                      time.Since(startTime),
+		FirstTokenMs:                  firstTokenMs,
+		ClientDisconnect:              clientDisconnected || drainGuard.Started(),
 	}
 	if drainGuard.TimedOut() {
 		return result, errWebChatUpstreamDrainTimeout
@@ -457,6 +512,19 @@ func isOpenAIChatUsageOnlyStreamChunk(payload string) bool {
 	}
 	choices := gjson.Get(payload, "choices")
 	return choices.Exists() && choices.IsArray() && len(choices.Array()) == 0
+}
+
+func hasOpenAIChatTerminalFinishReason(payload string) bool {
+	choices := gjson.Get(payload, "choices")
+	if !choices.Exists() || !choices.IsArray() {
+		return false
+	}
+	for _, choice := range choices.Array() {
+		if strings.TrimSpace(choice.Get("finish_reason").String()) != "" {
+			return true
+		}
+	}
+	return false
 }
 
 // extractCCStreamUsage 从单个 CC 流式 chunk 的 payload 中提取 usage 字段。
@@ -494,6 +562,11 @@ func (s *OpenAIGatewayService) bufferRawChatCompletions(
 		}
 		return nil, fmt.Errorf("read upstream body: %w", err)
 	}
+	observer := upstreamResponseModelObserverFromContext(c)
+	if observer == nil {
+		observer = beginUpstreamResponseModelObservation(c)
+	}
+	observer.ObserveOpenAI(respBody, strings.TrimSpace(gjson.GetBytes(respBody, "type").String()))
 
 	var usage OpenAIUsage
 	if parsedUsage, ok := extractOpenAIUsageFromJSONBytes(respBody); ok {
@@ -512,15 +585,17 @@ func (s *OpenAIGatewayService) bufferRawChatCompletions(
 	_, _ = c.Writer.Write(respBody)
 
 	return &OpenAIForwardResult{
-		RequestID:       requestID,
-		Usage:           usage,
-		Model:           originalModel,
-		BillingModel:    billingModel,
-		UpstreamModel:   upstreamModel,
-		ReasoningEffort: reasoningEffort,
-		ServiceTier:     serviceTier,
-		Stream:          false,
-		Duration:        time.Since(startTime),
+		RequestID:                     requestID,
+		Usage:                         usage,
+		Model:                         originalModel,
+		BillingModel:                  billingModel,
+		UpstreamModel:                 upstreamModel,
+		UpstreamResponseModel:         observer.Model(),
+		UpstreamResponseModelConflict: observer.Conflict(),
+		ReasoningEffort:               reasoningEffort,
+		ServiceTier:                   serviceTier,
+		Stream:                        false,
+		Duration:                      time.Since(startTime),
 	}, nil
 }
 

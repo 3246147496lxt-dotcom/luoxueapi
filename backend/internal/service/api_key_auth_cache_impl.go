@@ -14,7 +14,7 @@ import (
 	"github.com/dgraph-io/ristretto"
 )
 
-const apiKeyAuthSnapshotVersion = 15 // v15: include group web search per-call pricing
+const apiKeyAuthSnapshotVersion = 17 // v17: include group profit-control policy
 
 type apiKeyAuthCacheConfig struct {
 	l1Size        int
@@ -259,21 +259,31 @@ func (s *APIKeyService) snapshotFromAPIKey(ctx context.Context, apiKey *APIKey) 
 	if apiKey == nil || apiKey.User == nil {
 		return nil
 	}
+	serviceTierPreference := ServiceTierPreferenceStandard
+	if apiKey.Purpose == APIKeyPurposeUser {
+		var ok bool
+		serviceTierPreference, ok = NormalizeServiceTierPreference(apiKey.ServiceTierPreference)
+		if !ok {
+			serviceTierPreference = ServiceTierPreferenceStandard
+		}
+	}
 	snapshot := &APIKeyAuthSnapshot{
-		Version:     apiKeyAuthSnapshotVersion,
-		APIKeyID:    apiKey.ID,
-		UserID:      apiKey.UserID,
-		GroupID:     apiKey.GroupID,
-		Name:        apiKey.Name,
-		Status:      apiKey.Status,
-		IPWhitelist: apiKey.IPWhitelist,
-		IPBlacklist: apiKey.IPBlacklist,
-		Quota:       apiKey.Quota,
-		QuotaUsed:   apiKey.QuotaUsed,
-		ExpiresAt:   apiKey.ExpiresAt,
-		RateLimit5h: apiKey.RateLimit5h,
-		RateLimit1d: apiKey.RateLimit1d,
-		RateLimit7d: apiKey.RateLimit7d,
+		Version:               apiKeyAuthSnapshotVersion,
+		APIKeyID:              apiKey.ID,
+		UserID:                apiKey.UserID,
+		GroupID:               apiKey.GroupID,
+		Name:                  apiKey.Name,
+		Status:                apiKey.Status,
+		Purpose:               apiKey.Purpose,
+		ServiceTierPreference: serviceTierPreference,
+		IPWhitelist:           apiKey.IPWhitelist,
+		IPBlacklist:           apiKey.IPBlacklist,
+		Quota:                 apiKey.Quota,
+		QuotaUsed:             apiKey.QuotaUsed,
+		ExpiresAt:             apiKey.ExpiresAt,
+		RateLimit5h:           apiKey.RateLimit5h,
+		RateLimit1d:           apiKey.RateLimit1d,
+		RateLimit7d:           apiKey.RateLimit7d,
 		User: APIKeyAuthUserSnapshot{
 			ID:                         apiKey.User.ID,
 			Status:                     apiKey.User.Status,
@@ -337,6 +347,9 @@ func (s *APIKeyService) snapshotFromAPIKey(ctx context.Context, apiKey *APIKey) 
 			MessagesDispatchModelConfig:     apiKey.Group.MessagesDispatchModelConfig,
 			ModelsListConfig:                apiKey.Group.ModelsListConfig,
 			RPMLimit:                        apiKey.Group.RPMLimit,
+			ProfitControlEnabled:            apiKey.Group.ProfitControlEnabled,
+			ProfitMinMargin:                 apiKey.Group.ProfitMinMargin,
+			ProfitSafetyBuffer:              apiKey.Group.ProfitSafetyBuffer,
 			PeakRateEnabled:                 apiKey.Group.PeakRateEnabled,
 			PeakStart:                       apiKey.Group.PeakStart,
 			PeakEnd:                         apiKey.Group.PeakEnd,
@@ -350,21 +363,31 @@ func (s *APIKeyService) snapshotToAPIKey(key string, snapshot *APIKeyAuthSnapsho
 	if snapshot == nil {
 		return nil
 	}
+	serviceTierPreference := ServiceTierPreferenceStandard
+	if snapshot.Purpose == APIKeyPurposeUser {
+		var ok bool
+		serviceTierPreference, ok = NormalizeServiceTierPreference(snapshot.ServiceTierPreference)
+		if !ok {
+			serviceTierPreference = ServiceTierPreferenceStandard
+		}
+	}
 	apiKey := &APIKey{
-		ID:          snapshot.APIKeyID,
-		UserID:      snapshot.UserID,
-		GroupID:     snapshot.GroupID,
-		Key:         key,
-		Name:        snapshot.Name,
-		Status:      snapshot.Status,
-		IPWhitelist: snapshot.IPWhitelist,
-		IPBlacklist: snapshot.IPBlacklist,
-		Quota:       snapshot.Quota,
-		QuotaUsed:   snapshot.QuotaUsed,
-		ExpiresAt:   snapshot.ExpiresAt,
-		RateLimit5h: snapshot.RateLimit5h,
-		RateLimit1d: snapshot.RateLimit1d,
-		RateLimit7d: snapshot.RateLimit7d,
+		ID:                    snapshot.APIKeyID,
+		UserID:                snapshot.UserID,
+		GroupID:               snapshot.GroupID,
+		Key:                   key,
+		Name:                  snapshot.Name,
+		Status:                snapshot.Status,
+		Purpose:               snapshot.Purpose,
+		ServiceTierPreference: serviceTierPreference,
+		IPWhitelist:           snapshot.IPWhitelist,
+		IPBlacklist:           snapshot.IPBlacklist,
+		Quota:                 snapshot.Quota,
+		QuotaUsed:             snapshot.QuotaUsed,
+		ExpiresAt:             snapshot.ExpiresAt,
+		RateLimit5h:           snapshot.RateLimit5h,
+		RateLimit1d:           snapshot.RateLimit1d,
+		RateLimit7d:           snapshot.RateLimit7d,
 		User: &User{
 			ID:                         snapshot.User.ID,
 			Status:                     snapshot.User.Status,
@@ -421,6 +444,9 @@ func (s *APIKeyService) snapshotToAPIKey(key string, snapshot *APIKeyAuthSnapsho
 			MessagesDispatchModelConfig:     snapshot.Group.MessagesDispatchModelConfig,
 			ModelsListConfig:                snapshot.Group.ModelsListConfig,
 			RPMLimit:                        snapshot.Group.RPMLimit,
+			ProfitControlEnabled:            snapshot.Group.ProfitControlEnabled,
+			ProfitMinMargin:                 snapshot.Group.ProfitMinMargin,
+			ProfitSafetyBuffer:              snapshot.Group.ProfitSafetyBuffer,
 			PeakRateEnabled:                 snapshot.Group.PeakRateEnabled,
 			PeakStart:                       snapshot.Group.PeakStart,
 			PeakEnd:                         snapshot.Group.PeakEnd,

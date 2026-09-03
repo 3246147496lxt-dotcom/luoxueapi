@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 
 const directory = dirname(fileURLToPath(import.meta.url))
-const routerSource = readFileSync(resolve(directory, '../index.ts'), 'utf8')
+const routerSource = readFileSync(resolve(directory, '../routes/user.ts'), 'utf8')
 
 describe('desktop authorization route', () => {
   it('keeps the approval page behind the normal web login', () => {

@@ -6,8 +6,11 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"math"
 	"strings"
 	"time"
+
+	"github.com/shopspring/decimal"
 )
 
 var ErrUsageBillingRequestIDRequired = errors.New("usage billing request_id is required")
@@ -19,6 +22,16 @@ var ErrUsageBillingSettlementClosed = errors.New("web chat usage settlement is c
 var ErrUsageBillingSubscriptionTermRequired = errors.New("usage billing subscription starts_at term identity is required")
 var ErrUsageBillingSubscriptionTermMismatch = errors.New("usage billing subscription term no longer matches")
 var ErrUsageBillingSubscriptionTermUnsupported = errors.New("subscription repository does not support starts_at term-aware usage increments")
+var ErrUsageBillingContextRequired = errors.New("usage billing context is required")
+var ErrUsageBillingInvalidAmount = errors.New("usage billing amount must be finite and non-negative")
+
+// ErrUsageBillingHoldReservationInvalid indicates that a batch-image capture
+// or release did not present the reservation that originally moved funds into
+// frozen_balance.  It is deliberately distinct from
+// ErrUsageBillingRequestConflict: a release fingerprint conflict can be an
+// idempotent replay of an already-successful release, whereas a missing or
+// mismatched reservation must never be treated as success.
+var ErrUsageBillingHoldReservationInvalid = errors.New("usage billing batch image hold reservation is missing or inconsistent")
 
 // UsageBillingCommand describes one billable request that must be applied at most once.
 type UsageBillingCommand struct {
@@ -82,6 +95,81 @@ func (c *UsageBillingCommand) Normalize() {
 	if strings.TrimSpace(c.RequestFingerprint) == "" {
 		c.RequestFingerprint = buildUsageBillingFingerprint(c)
 	}
+	// 量化必须在指纹计算之后：指纹是请求幂等键，保持由原始金额派生可以避免
+	// 升级前后同一 request_id 的重试算出不同指纹而被判为 fingerprint conflict。
+	c.quantizeMonetaryFields()
+}
+
+// ValidateMonetaryFields rejects values that cannot be represented safely by
+// the NUMERIC ledger columns. In particular, comparisons such as `value > 0`
+// silently skip NaN and would otherwise leave a usage receipt claiming a cost
+// while applying no corresponding balance/quota effect.
+func (c *UsageBillingCommand) ValidateMonetaryFields() error {
+	if c == nil {
+		return nil
+	}
+	values := []struct {
+		name  string
+		value float64
+	}{
+		{"gross_cost", c.GrossCost},
+		{"balance_cost", c.BalanceCost},
+		{"subscription_cost", c.SubscriptionCost},
+		{"api_key_quota_cost", c.APIKeyQuotaCost},
+		{"api_key_rate_limit_cost", c.APIKeyRateLimitCost},
+		{"account_quota_cost", c.AccountQuotaCost},
+	}
+	for _, item := range values {
+		if math.IsNaN(item.value) || math.IsInf(item.value, 0) || item.value < 0 {
+			return fmt.Errorf("%w: %s=%v", ErrUsageBillingInvalidAmount, item.name, item.value)
+		}
+	}
+	return nil
+}
+
+// UsageBillingMonetaryScale 是所有计费金额的规范小数位数，
+// 对齐 users.balance / api_keys.quota_used 的 NUMERIC(20,8)。
+const UsageBillingMonetaryScale = 8
+
+// quantizeMonetaryFields 把命令中的金额统一量化到 NUMERIC(20,8)。
+//
+// 不量化时，同一笔 ActualCost 会在两条方向相反的 SQL 上被 PostgreSQL 分别舍入：
+//
+//	balance    = balance - $1      // 存剩余额度，舍入的是「减法结果」
+//	quota_used = quota_used + $1   // 存累计用量，舍入的是「加法结果」
+//
+// PostgreSQL 对 NUMERIC 采用 half-away-from-zero。当金额在第 9 位出现 half 边界
+// （例：10 输入 token × 0.00000125 + 5 输出 token × 0.00001000，再乘分组倍率
+// 1.25 = 0.000078125）时：
+//
+//	balance:    10000 - 0.000078125 = 9999.999921875 → 9999.99992188（delta 0.00007812）
+//	quota_used:     0 + 0.000078125 =     0.000078125 →     0.00007813（delta 0.00007813）
+//
+// 两个 delta 相差 1e-8，且方向相反——余额少扣、Key 配额多记，随请求量线性累积，
+// 使余额、API Key 配额与用量记录无法精确对账（需要 epsilon 比较才能勉强吻合）。
+//
+// 在参数进入 SQL 之前量化一次，两条语句就都拿到已经落在 8 位刻度上的同一个金额，
+// 存储阶段不再发生任何舍入，delta 精确相等。
+func (c *UsageBillingCommand) quantizeMonetaryFields() {
+	c.BalanceCost = QuantizeUsageBillingAmount(c.BalanceCost)
+	c.SubscriptionCost = QuantizeUsageBillingAmount(c.SubscriptionCost)
+	c.APIKeyQuotaCost = QuantizeUsageBillingAmount(c.APIKeyQuotaCost)
+	c.APIKeyRateLimitCost = QuantizeUsageBillingAmount(c.APIKeyRateLimitCost)
+	c.AccountQuotaCost = QuantizeUsageBillingAmount(c.AccountQuotaCost)
+}
+
+// QuantizeUsageBillingAmount 把金额舍入到 UsageBillingMonetaryScale 位小数，
+// 采用与 PostgreSQL NUMERIC 一致的 half-away-from-zero 规则。
+//
+// 走 decimal 而不是 math.Round(v*1e8)/1e8：后者在乘除过程中会引入额外的二进制
+// 误差，边界值可能被推到错误的一侧。decimal.NewFromFloat 取 float64 的最短十进制
+// 表示，正是 PostgreSQL 把 float8 参数转成 numeric 时所用的表示。
+func QuantizeUsageBillingAmount(v float64) float64 {
+	if v == 0 || math.IsNaN(v) || math.IsInf(v, 0) {
+		return v
+	}
+	quantized, _ := decimal.NewFromFloat(v).Round(UsageBillingMonetaryScale).Float64()
+	return quantized
 }
 
 func (c *UsageBillingCommand) ReceiptStatus() string {
@@ -168,6 +256,29 @@ type UsageBillingApplyResult struct {
 	NewBalance           *float64           // post-deduction balance (nil = no balance deduction)
 	BalanceOverdrafted   bool               // true when the sufficient-balance guard missed and debt was still recorded
 	QuotaState           *AccountQuotaState // post-increment quota state (nil = no quota increment)
+	// Charged costs are the exact normalized deltas applied by the billing
+	// transaction.  They are returned separately from the request's raw
+	// CostBreakdown so post-commit cache/notification sinks cannot re-use an
+	// unquantized float and drift from the NUMERIC(20,8) ledger values.
+	BalanceChargedCost         float64
+	SubscriptionChargedCost    float64
+	APIKeyQuotaChargedCost     float64
+	APIKeyRateLimitChargedCost float64
+	AccountQuotaChargedCost    float64
+	// The boolean markers distinguish an applied zero/absent effect from a
+	// legacy repository result that predates the charged-cost fields.  This
+	// prevents post-commit side effects from falling back to a raw request cost
+	// when an alternate repository intentionally applied no such effect.
+	BalanceCharged         bool
+	SubscriptionCharged    bool
+	APIKeyQuotaCharged     bool
+	APIKeyRateLimitCharged bool
+	AccountQuotaCharged    bool
+	// EffectsKnown is set by the built-in transactional repository.  A false
+	// value denotes a legacy/alternate implementation whose result may omit the
+	// per-effect fields; helpers retain their compatibility fallback in that
+	// case.
+	EffectsKnown bool
 }
 
 // BatchImageBalanceHoldCommand describes an idempotent balance hold operation.
@@ -191,6 +302,23 @@ func (c *BatchImageBalanceHoldCommand) Normalize() {
 	if strings.TrimSpace(c.RequestFingerprint) == "" {
 		c.RequestFingerprint = buildBatchImageBalanceHoldFingerprint(c)
 	}
+	c.HoldAmount = QuantizeUsageBillingAmount(c.HoldAmount)
+	c.ActualAmount = QuantizeUsageBillingAmount(c.ActualAmount)
+}
+
+func (c *BatchImageBalanceHoldCommand) ValidateMonetaryFields() error {
+	if c == nil {
+		return nil
+	}
+	for name, value := range map[string]float64{
+		"hold_amount":   c.HoldAmount,
+		"actual_amount": c.ActualAmount,
+	} {
+		if math.IsNaN(value) || math.IsInf(value, 0) || value < 0 {
+			return fmt.Errorf("%w: %s=%v", ErrUsageBillingInvalidAmount, name, value)
+		}
+	}
+	return nil
 }
 
 func buildBatchImageBalanceHoldFingerprint(c *BatchImageBalanceHoldCommand) string {

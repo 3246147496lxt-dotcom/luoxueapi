@@ -250,6 +250,82 @@ func TestSimpleModeBypassesQuotaCheck(t *testing.T) {
 	})
 }
 
+func TestAPIKeyAuthStoresTrustedServiceTierPreferenceInContext(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	user := &service.User{ID: 7, Role: service.RoleUser, Status: service.StatusActive, Balance: 10}
+	group := &service.Group{ID: 42, Name: "openai", Platform: service.PlatformOpenAI, Status: service.StatusActive, SubscriptionType: service.SubscriptionTypeStandard, Hydrated: true}
+	apiKey := &service.APIKey{
+		ID:                    100,
+		UserID:                user.ID,
+		Key:                   "priority-key",
+		Purpose:               service.APIKeyPurposeUser,
+		Status:                service.StatusActive,
+		ServiceTierPreference: service.ServiceTierPreferencePriority,
+		User:                  user,
+		Group:                 group,
+	}
+	apiKey.GroupID = &group.ID
+	repo := &stubApiKeyRepo{getByKey: func(context.Context, string) (*service.APIKey, error) {
+		clone := *apiKey
+		return &clone, nil
+	}}
+	cfg := &config.Config{RunMode: config.RunModeSimple}
+	svc := service.NewAPIKeyService(repo, nil, nil, nil, nil, nil, cfg)
+	router := gin.New()
+	router.Use(gin.HandlerFunc(NewAPIKeyAuthMiddleware(svc, nil, cfg)))
+	router.GET("/t", func(c *gin.Context) {
+		preference, ok := c.Request.Context().Value(ctxkey.OpenAIServiceTierPreference).(string)
+		if !ok || preference != service.ServiceTierPreferencePriority {
+			c.JSON(http.StatusInternalServerError, gin.H{"preference": preference})
+			return
+		}
+		c.Status(http.StatusOK)
+	})
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/t", nil)
+	req.Header.Set("x-api-key", apiKey.Key)
+	router.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code)
+}
+
+func TestAPIKeyAuthForcesStandardForNonUserManagedKey(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	user := &service.User{ID: 8, Role: service.RoleUser, Status: service.StatusActive, Balance: 10}
+	group := &service.Group{ID: 43, Name: "openai-desktop", Platform: service.PlatformOpenAI, Status: service.StatusActive, SubscriptionType: service.SubscriptionTypeStandard, Hydrated: true}
+	apiKey := &service.APIKey{
+		ID:                    101,
+		UserID:                user.ID,
+		Key:                   "desktop-priority-stale",
+		Purpose:               service.APIKeyPurposeDesktop,
+		Status:                service.StatusActive,
+		ServiceTierPreference: service.ServiceTierPreferencePriority,
+		User:                  user,
+		Group:                 group,
+	}
+	apiKey.GroupID = &group.ID
+	repo := &stubApiKeyRepo{getByKey: func(context.Context, string) (*service.APIKey, error) {
+		clone := *apiKey
+		return &clone, nil
+	}}
+	cfg := &config.Config{RunMode: config.RunModeSimple}
+	svc := service.NewAPIKeyService(repo, nil, nil, nil, nil, nil, cfg)
+	router := gin.New()
+	router.Use(gin.HandlerFunc(NewAPIKeyAuthMiddleware(svc, nil, cfg)))
+	router.GET("/t", func(c *gin.Context) {
+		preference, _ := c.Request.Context().Value(ctxkey.OpenAIServiceTierPreference).(string)
+		if preference != service.ServiceTierPreferenceStandard {
+			c.JSON(http.StatusInternalServerError, gin.H{"preference": preference})
+			return
+		}
+		c.Status(http.StatusOK)
+	})
+	w := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/t", nil)
+	req.Header.Set("x-api-key", apiKey.Key)
+	router.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code)
+}
+
 func TestAPIKeyAuthSetsGroupContext(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
@@ -1375,7 +1451,7 @@ func (r *stubApiKeyRepo) GetByKeyForAuth(ctx context.Context, key string) (*serv
 	return r.GetByKey(ctx, key)
 }
 
-func (r *stubApiKeyRepo) Update(ctx context.Context, key *service.APIKey) error {
+func (r *stubApiKeyRepo) Update(ctx context.Context, key *service.APIKey, fields service.APIKeyUpdateFields) error {
 	return errors.New("not implemented")
 }
 

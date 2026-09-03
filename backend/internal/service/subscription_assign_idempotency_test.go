@@ -49,6 +49,27 @@ func TestMaybeInvalidateAssignmentCaches_DefersForOuterTransactionOwner(t *testi
 	require.False(t, cachedAfterCommit, "post-commit invalidation must remove the cached subscription")
 }
 
+func TestDeferredSubscriptionCacheInvalidationFlushesOnlyAfterCommit(t *testing.T) {
+	cache, err := ristretto.NewCache(&ristretto.Config{NumCounters: 1_000, MaxCost: 100, BufferItems: 64})
+	require.NoError(t, err)
+	t.Cleanup(cache.Close)
+
+	svc := &SubscriptionService{subCacheL1: cache}
+	key := subCacheKey(17, 19)
+	require.True(t, cache.Set(key, &UserSubscription{ID: 99}, 1))
+	cache.Wait()
+
+	txCtx := dbent.NewTxContext(context.Background(), &dbent.Tx{})
+	txCtx, collector := withDeferredSubscriptionCacheInvalidations(txCtx)
+	svc.maybeInvalidateAssignmentCachesWithContext(txCtx, 17, 19, false)
+	_, cachedBeforeCommit := cache.Get(key)
+	require.True(t, cachedBeforeCommit)
+
+	flushDeferredSubscriptionCacheInvalidations(collector)
+	_, cachedAfterCommit := cache.Get(key)
+	require.False(t, cachedAfterCommit)
+}
+
 type groupRepoNoop struct{}
 
 func (groupRepoNoop) Create(context.Context, *Group) error { panic("unexpected Create call") }

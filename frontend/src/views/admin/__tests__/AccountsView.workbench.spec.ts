@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import { flushPromises, mount } from '@vue/test-utils'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import AccountsView from '../AccountsView.vue'
@@ -6,6 +8,18 @@ import {
   invalidateAccountUsageHealthSnapshot,
   publishAccountUsage
 } from '@/composables/useAccountUsageHealth'
+
+const accountsViewSource = readFileSync(
+  resolve(process.cwd(), 'src/views/admin/AccountsView.vue'),
+  'utf8'
+)
+
+function cssRule(selector: string): string {
+  const selectorStart = accountsViewSource.indexOf(selector)
+  const blockStart = accountsViewSource.indexOf('{', selectorStart)
+  const blockEnd = accountsViewSource.indexOf('}', blockStart)
+  return accountsViewSource.slice(selectorStart, blockEnd + 1)
+}
 
 const {
   listAccounts,
@@ -276,6 +290,28 @@ function setViewport(width: number) {
 }
 
 describe('admin AccountsView workbench', () => {
+  it('keeps the sticky identity offset aligned with the select column width', () => {
+    const compactTableRule = cssRule(
+      '.account-workbench__table-surface :deep(.data-table--desktop)'
+    )
+    const compactSelectRule = cssRule(
+      '.account-workbench__table-surface :deep(.account-table-col--select)'
+    )
+    const expandedTableRule = cssRule(
+      '.account-workbench__table-surface--expanded :deep(.data-table--desktop)'
+    )
+    const expandedSelectRule = cssRule(
+      '.account-workbench__table-surface--expanded :deep(.account-table-col--select)'
+    )
+
+    expect(compactTableRule).toContain('--select-col-width: 5%;')
+    expect(compactSelectRule).toContain('width: 5%;')
+    expect(expandedTableRule).toContain('--select-col-width: 40px;')
+    expect(expandedSelectRule).toContain('width: 40px;')
+    expect(expandedSelectRule).toContain('min-width: 40px;')
+    expect(expandedSelectRule).toContain('max-width: 40px;')
+  })
+
   beforeEach(() => {
     localStorage.clear()
     Object.defineProperty(window, 'innerWidth', {
@@ -316,6 +352,45 @@ describe('admin AccountsView workbench', () => {
     }
     document.body.style.overflow = ''
     document.body.replaceChildren()
+  })
+
+  it('keeps the identity cell to the account name only', async () => {
+    listAccounts.mockResolvedValue(
+      responseFor(makeAccount('name-only-account', '2026-07-01T00:00:00Z'))
+    )
+
+    const wrapper = mountView()
+    await flushPromises()
+
+    const identity = wrapper.get('.account-identity-cell')
+    expect(identity.text()).toBe('name-only-account')
+    expect(identity.find('.account-identity-cell__meta').exists()).toBe(false)
+    expect(identity.text()).not.toContain('ID:')
+    expect(identity.text()).not.toContain('OpenAI')
+    expect(identity.text()).not.toContain('OAuth')
+  })
+
+  it('maps the visible status sort to server-side effective status ordering', async () => {
+    listAccounts.mockResolvedValue(
+      responseFor(makeAccount('sortable-account', '2026-07-01T00:00:00Z'))
+    )
+
+    const wrapper = mountView()
+    await flushPromises()
+    listAccounts.mockClear()
+
+    wrapper.getComponent(DataTableStub).vm.$emit('sort', 'status', 'desc')
+    await flushPromises()
+
+    expect(listAccounts).toHaveBeenCalledWith(
+      1,
+      20,
+      expect.objectContaining({
+        sort_by: 'effective_status',
+        sort_order: 'desc'
+      }),
+      expect.anything()
+    )
   })
 
   it('auto-selects the first wide-screen row and keeps selection by ID after refresh', async () => {

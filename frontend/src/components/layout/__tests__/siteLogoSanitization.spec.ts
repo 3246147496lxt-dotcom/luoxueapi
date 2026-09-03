@@ -6,6 +6,7 @@ import { describe, expect, it } from 'vitest'
 
 const dir = dirname(fileURLToPath(import.meta.url))
 const brandSource = readFileSync(resolve(dir, '../AppBrand.vue'), 'utf8')
+const sidebarHeaderSource = readFileSync(resolve(dir, '../WorkspaceSidebarHeader.vue'), 'utf8')
 const publicSiteLayoutSource = readFileSync(resolve(dir, '../../public/PublicSiteLayout.vue'), 'utf8')
 const keyUsageViewSource = readFileSync(resolve(dir, '../../../views/KeyUsageView.vue'), 'utf8')
 
@@ -13,6 +14,11 @@ describe('site_logo sanitization', () => {
   it('AppBrand imports sanitizeUrl and applies it to siteLogo', () => {
     expect(brandSource).toContain("import { sanitizeUrl } from '@/utils/url'")
     expect(brandSource).toContain("sanitizeUrl(appStore.siteLogo || ''")
+  })
+
+  it('the collapsed Workspace header sanitizes its configurable logo source', () => {
+    expect(sidebarHeaderSource).toContain("import { sanitizeUrl } from '@/utils/url'")
+    expect(sidebarHeaderSource).toContain('sanitizeUrl(props.collapsedLogoSrc')
   })
 
   it('the shared public site layout applies sanitizeUrl to siteLogo', () => {
@@ -25,7 +31,12 @@ describe('site_logo sanitization', () => {
   })
 
   it('all three pass allowRelative and allowDataUrl options', () => {
-    for (const src of [brandSource, publicSiteLayoutSource, keyUsageViewSource]) {
+    for (const src of [
+      brandSource,
+      sidebarHeaderSource,
+      publicSiteLayoutSource,
+      keyUsageViewSource,
+    ]) {
       expect(src).toContain('allowRelative: true')
       expect(src).toContain('allowDataUrl: true')
     }

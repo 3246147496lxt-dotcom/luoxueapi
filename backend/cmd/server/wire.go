@@ -11,6 +11,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/handler"
 	"github.com/Wei-Shaw/sub2api/internal/lifecycle"
+	skillimportapp "github.com/Wei-Shaw/sub2api/internal/modules/skillimport/application"
 	"github.com/Wei-Shaw/sub2api/internal/payment"
 	"github.com/Wei-Shaw/sub2api/internal/repository"
 	"github.com/Wei-Shaw/sub2api/internal/server"
@@ -39,6 +40,7 @@ func initializeApplication(
 		// Business layer ProviderSets
 		repository.ProviderSet,
 		service.ProviderSet,
+		skillimportapp.ProviderSet,
 		payment.ProviderSet,
 		middleware.ProviderSet,
 		handler.ProviderSet,

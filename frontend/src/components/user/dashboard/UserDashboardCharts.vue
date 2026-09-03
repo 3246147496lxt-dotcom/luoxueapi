@@ -1,482 +1,869 @@
 <template>
-  <section
-    class="dashboard-panel relative overflow-hidden"
-    :aria-label="t('dashboard.modelAnalysis')"
-  >
-    <div class="border-b border-gray-100 px-5 py-4 dark:border-dark-700 md:px-6">
-      <div class="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
-        <div class="flex items-center gap-2 text-sm font-medium text-gray-800 dark:text-gray-100">
-          <Icon name="chartPie" size="sm" :stroke-width="2" />
-          <span>{{ t('dashboard.modelAnalysis') }}</span>
-        </div>
-
-        <div
-          class="flex flex-wrap items-center gap-1.5"
-          role="tablist"
-          :aria-label="t('dashboard.analysisTabs.label')"
-        >
-          <button
-            v-for="tab in tabs"
-            :key="tab.id"
-            type="button"
-            role="tab"
-            class="analysis-tab"
-            :class="activeTab === tab.id ? 'analysis-tab-active' : ''"
-            :aria-selected="activeTab === tab.id"
-            @click="activeTab = tab.id"
-          >
-            <Icon :name="tab.icon" size="xs" :stroke-width="1.8" />
-            <span>{{ t(tab.labelKey) }}</span>
-          </button>
-        </div>
-      </div>
-    </div>
-
-    <div class="relative min-h-[430px] px-5 py-6 md:px-7 md:py-7">
+  <section class="dashboard-usage" :aria-label="t('dashboard.workspace.usageStatistics')">
+    <header class="dashboard-usage__header">
+      <h2>{{ t('dashboard.workspace.usageStatistics') }}</h2>
       <div
-        v-if="loading"
-        class="absolute inset-0 z-10 flex items-center justify-center bg-white/80 backdrop-blur-[1px] dark:bg-dark-800/80"
+        ref="periodMenuRef"
+        class="dashboard-period-select"
+        :class="{ 'is-open': periodMenuOpen }"
       >
-        <LoadingSpinner size="md" />
-      </div>
+        <button
+          type="button"
+          class="dashboard-period-select__trigger"
+          data-testid="dashboard-period-trigger"
+          :aria-label="t('dashboard.workspace.statisticsPeriod')"
+          :aria-expanded="periodMenuOpen"
+          aria-haspopup="listbox"
+          aria-controls="dashboard-period-menu"
+          @click="togglePeriodMenu"
+          @keydown="handlePeriodTriggerKeydown"
+        >
+          <span class="dashboard-period-select__label">
+            {{ t('dashboard.workspace.statisticsPeriod') }}
+          </span>
+          <span class="dashboard-period-select__value">{{ currentPeriodLabel }}</span>
+          <Icon
+            :name="periodMenuOpen ? 'chevronUp' : 'chevronDown'"
+            size="sm"
+            :stroke-width="2"
+            class="dashboard-period-select__icon"
+            aria-hidden="true"
+          />
+        </button>
 
-      <div v-if="activeTab === 'calendar'" role="tabpanel" class="space-y-5">
-        <div class="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
-          <div>
-            <h3 class="text-base font-semibold text-gray-900 dark:text-white">
-              {{ t('dashboard.analysisTabs.usageCalendar') }}
-            </h3>
-            <p class="mt-1 text-sm text-gray-400 dark:text-dark-500">
-              {{ calendarMonthLabel }}
-            </p>
-          </div>
-          <div class="text-sm text-gray-500 dark:text-dark-400">
-            {{ t('dashboard.calendarSummary', { days: activeCalendarDays, requests: formatNumber(calendarMonthRequests) }) }}
-          </div>
-        </div>
-
-        <div class="overflow-hidden rounded-xl border border-gray-100 dark:border-dark-700">
-          <div class="grid grid-cols-7 border-b border-gray-100 bg-gray-50/75 dark:border-dark-700 dark:bg-dark-900/40">
-            <div
-              v-for="day in weekdays"
-              :key="day"
-              class="px-1 py-2 text-center text-[11px] font-medium text-gray-500 dark:text-dark-400"
+        <Transition name="dashboard-period-dropdown">
+          <div
+            v-if="periodMenuOpen"
+            id="dashboard-period-menu"
+            class="dashboard-period-select__menu"
+            data-testid="dashboard-period-menu"
+            role="listbox"
+            :aria-label="t('dashboard.workspace.statisticsPeriod')"
+          >
+            <button
+              v-for="option in periodOptions"
+              :key="option.value"
+              type="button"
+              class="dashboard-period-select__option"
+              role="option"
+              :data-period="option.value"
+              :aria-selected="period === option.value"
+              @click="selectPeriod(option.value)"
             >
-              {{ day }}
-            </div>
+              {{ t(option.labelKey) }}
+            </button>
           </div>
-          <div class="grid grid-cols-7 bg-gray-100/80 gap-px dark:bg-dark-700">
-            <div
-              v-for="cell in calendarCells"
-              :key="cell.key"
-              class="relative min-h-[64px] bg-white p-2 dark:bg-dark-800"
-              :class="cell.inMonth ? '' : 'text-gray-300 dark:text-dark-600'"
-            >
-              <span class="text-xs font-medium">{{ cell.day }}</span>
-              <span
-                v-if="cell.requests > 0"
-                class="absolute bottom-2 left-2 right-2 rounded-md px-1.5 py-1 text-center text-[10px] font-semibold text-white"
-                :style="{ backgroundColor: calendarCellColor(cell.requests) }"
-                :title="t('dashboard.calendarRequests', { count: formatNumber(cell.requests) })"
-              >
-                {{ formatCompact(cell.requests) }}
-              </span>
-              <span v-else class="absolute bottom-3 left-1/2 h-1.5 w-1.5 -translate-x-1/2 rounded-full bg-gray-200 dark:bg-dark-600" />
-            </div>
+        </Transition>
+      </div>
+    </header>
+
+    <div class="dashboard-usage__grid">
+      <article class="dashboard-chart-card dashboard-chart-card--credits">
+        <div class="dashboard-chart-card__heading">
+          <h3>{{ t('dashboard.workspace.creditsTrend') }}</h3>
+          <span data-testid="credits-total">{{ formattedCreditsTotal }}</span>
+        </div>
+        <div class="dashboard-chart dashboard-chart--credits">
+          <div v-if="loading" class="dashboard-chart__state" role="status">
+            <span class="skeleton h-full w-full" aria-hidden="true" />
+            <span class="sr-only">{{ t('common.loading') }}</span>
           </div>
+          <div v-else-if="!hasData" class="dashboard-chart__state dashboard-chart__empty">
+            {{ t('dashboard.workspace.noUsageData') }}
+          </div>
+          <Line
+            v-else
+            :key="`credits-${period}-${themeRevision}`"
+            :data="creditsChartData"
+            :options="creditsChartOptions"
+            :plugins="lineChartPlugins"
+            role="img"
+            :aria-label="`${t('dashboard.workspace.creditsTrend')} ${formattedCreditsTotal}`"
+          />
         </div>
-      </div>
+      </article>
 
-      <div v-else-if="activeTab === 'costDistribution'" role="tabpanel">
-        <ChartHeading
-          :title="t('dashboard.analysisTabs.costDistributionTitle')"
-          :summary="t('dashboard.analysisTotalCost', { value: formatCost(rangeCost) })"
-        />
-        <div v-if="costDistributionData" class="mt-5 h-[340px]">
-          <Doughnut :data="costDistributionData" :options="costDoughnutOptions" />
-        </div>
-        <DashboardChartEmpty v-else />
-      </div>
+      <div class="dashboard-usage__side">
+        <article class="dashboard-chart-card dashboard-chart-card--token">
+          <div class="dashboard-chart-card__heading">
+            <h3>{{ t('dashboard.workspace.token') }}</h3>
+            <span data-testid="tokens-total">{{ formattedTokensTotal }}</span>
+          </div>
+          <div class="dashboard-chart dashboard-chart--token">
+            <div v-if="loading" class="dashboard-chart__state" role="status">
+              <span class="skeleton h-full w-full" aria-hidden="true" />
+              <span class="sr-only">{{ t('common.loading') }}</span>
+            </div>
+            <div v-else-if="!hasData" class="dashboard-chart__state dashboard-chart__empty">
+              {{ t('dashboard.workspace.noUsageData') }}
+            </div>
+            <Line
+              v-else
+              :key="`tokens-${period}-${themeRevision}`"
+              :data="tokensChartData"
+              :options="tokensChartOptions"
+              :plugins="lineChartPlugins"
+              role="img"
+              :aria-label="`${t('dashboard.workspace.token')} ${formattedTokensTotal}`"
+            />
+          </div>
+        </article>
 
-      <div v-else-if="activeTab === 'costTrend'" role="tabpanel">
-        <ChartHeading
-          :title="t('dashboard.analysisTabs.costTrendTitle')"
-          :summary="t('dashboard.analysisTotalCost', { value: formatCost(rangeCost) })"
-        />
-        <div v-if="costTrendData" class="mt-5 h-[340px]">
-          <Line :data="costTrendData" :options="lineOptions" />
-        </div>
-        <DashboardChartEmpty v-else />
-      </div>
-
-      <div v-else-if="activeTab === 'requestDistribution'" role="tabpanel">
-        <ChartHeading
-          :title="t('dashboard.analysisTabs.requestDistributionTitle')"
-          :summary="t('dashboard.analysisTotalRequests', { value: formatNumber(rangeRequests) })"
-        />
-        <div v-if="requestDistributionData" class="mt-5 h-[340px]">
-          <Doughnut :data="requestDistributionData" :options="requestDoughnutOptions" />
-        </div>
-        <DashboardChartEmpty v-else />
-      </div>
-
-      <div v-else role="tabpanel">
-        <ChartHeading
-          :title="t('dashboard.analysisTabs.requestRankingTitle')"
-          :summary="t('dashboard.analysisTotalRequests', { value: formatNumber(rangeRequests) })"
-        />
-        <div v-if="requestRankingData" class="mt-5 h-[340px]">
-          <Bar :data="requestRankingData" :options="rankingOptions" />
-        </div>
-        <DashboardChartEmpty v-else />
+        <article class="dashboard-chart-card dashboard-chart-card--requests">
+          <div class="dashboard-chart-card__heading">
+            <h3>{{ t('dashboard.workspace.requestCount') }}</h3>
+            <span data-testid="requests-total">{{ formattedRequestsTotal }}</span>
+          </div>
+          <div class="dashboard-chart dashboard-chart--requests">
+            <div v-if="loading" class="dashboard-chart__state" role="status">
+              <span class="skeleton h-full w-full" aria-hidden="true" />
+              <span class="sr-only">{{ t('common.loading') }}</span>
+            </div>
+            <div v-else-if="!hasData" class="dashboard-chart__state dashboard-chart__empty">
+              {{ t('dashboard.workspace.noUsageData') }}
+            </div>
+            <Bar
+              v-else
+              :key="`requests-${period}-${themeRevision}`"
+              :data="requestsChartData"
+              :options="requestsChartOptions"
+              :plugins="barChartPlugins"
+              role="img"
+              :aria-label="`${t('dashboard.workspace.requestCount')} ${formattedRequestsTotal}`"
+            />
+          </div>
+        </article>
       </div>
     </div>
+
+    <table v-if="hasData" class="sr-only">
+      <caption>{{ t('dashboard.workspace.usageStatistics') }}</caption>
+      <thead>
+        <tr>
+          <th scope="col">{{ t('usage.time') }}</th>
+          <th scope="col">{{ t('dashboard.workspace.creditsTrend') }}</th>
+          <th scope="col">{{ t('dashboard.workspace.cachedInput') }}</th>
+          <th scope="col">{{ t('dashboard.workspace.uncachedInput') }}</th>
+          <th scope="col">{{ t('dashboard.workspace.outputTokens') }}</th>
+          <th scope="col">{{ t('dashboard.workspace.requestCount') }}</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr v-for="point in usagePoints" :key="point.date">
+          <th scope="row">{{ tooltipRange(point.date) }}</th>
+          <td>{{ formatCredits(point.credits) }}</td>
+          <td>{{ formatInteger(point.cachedInputTokens) }}</td>
+          <td>{{ formatInteger(point.uncachedInputTokens) }}</td>
+          <td>{{ formatInteger(point.outputTokens) }}</td>
+          <td>{{ formatInteger(point.requests) }}</td>
+        </tr>
+      </tbody>
+    </table>
   </section>
 </template>
 
 <script setup lang="ts">
-import { computed, defineComponent, h, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { Bar, Doughnut, Line } from 'vue-chartjs'
+import Icon from '@/components/icons/Icon.vue'
 import {
-  ArcElement,
   BarElement,
   CategoryScale,
   Chart as ChartJS,
   Filler,
-  Legend,
-  LinearScale,
   LineElement,
+  LinearScale,
   PointElement,
   Tooltip,
+  type ChartData,
+  type ChartOptions,
+  type Plugin,
 } from 'chart.js'
-import Icon from '@/components/icons/Icon.vue'
-import LoadingSpinner from '@/components/common/LoadingSpinner.vue'
-import type { ModelStat, TrendDataPoint } from '@/types'
+import { Bar, Line } from 'vue-chartjs'
+import type { TrendDataPoint } from '@/types'
 import {
-  formatCostFixed as formatCost,
-  formatNumberLocaleString as formatNumber,
-  formatTokensK as formatCompact,
-} from '@/utils/format'
+  buildDashboardUsageSeries,
+  type DashboardUsagePeriod,
+} from './dashboardUsage'
 
 ChartJS.register(
-  ArcElement,
-  BarElement,
   CategoryScale,
   LinearScale,
   PointElement,
   LineElement,
+  BarElement,
   Tooltip,
-  Legend,
   Filler,
 )
 
-type TabId = 'calendar' | 'costDistribution' | 'costTrend' | 'requestDistribution' | 'requestRanking'
-type ChartIconName = 'calendar' | 'chart' | 'trendingUp' | 'clock' | 'chartBar'
-
 const props = defineProps<{
   loading: boolean
-  startDate: string
-  endDate: string
-  granularity: string
+  period: DashboardUsagePeriod
   trend: TrendDataPoint[]
-  models: ModelStat[]
 }>()
 
-defineEmits<{
-  (event: 'update:startDate', value: string): void
-  (event: 'update:endDate', value: string): void
-  (event: 'update:granularity', value: string): void
-  (event: 'dateRangeChange'): void
-  (event: 'granularityChange'): void
-  (event: 'refresh'): void
+const emit = defineEmits<{
+  'update:period': [period: DashboardUsagePeriod]
 }>()
 
 const { t, locale } = useI18n()
-const activeTab = ref<TabId>('costDistribution')
+const themeRevision = ref(0)
+const periodMenuRef = ref<HTMLElement | null>(null)
+const periodMenuOpen = ref(false)
+let themeObserver: MutationObserver | null = null
 
-const tabs: Array<{ id: TabId; icon: ChartIconName; labelKey: string }> = [
-  { id: 'calendar', icon: 'calendar', labelKey: 'dashboard.analysisTabs.usageCalendar' },
-  { id: 'costDistribution', icon: 'chart', labelKey: 'dashboard.analysisTabs.costDistribution' },
-  { id: 'costTrend', icon: 'trendingUp', labelKey: 'dashboard.analysisTabs.costTrend' },
-  { id: 'requestDistribution', icon: 'clock', labelKey: 'dashboard.analysisTabs.requestDistribution' },
-  { id: 'requestRanking', icon: 'chartBar', labelKey: 'dashboard.analysisTabs.requestRanking' },
+const periodOptions = [
+  { value: 'today' as DashboardUsagePeriod, labelKey: 'dashboard.workspace.periods.today' },
+  { value: 'week' as DashboardUsagePeriod, labelKey: 'dashboard.workspace.periods.week' },
+  { value: 'month' as DashboardUsagePeriod, labelKey: 'dashboard.workspace.periods.month' },
+  { value: 'thirtyDays' as DashboardUsagePeriod, labelKey: 'dashboard.workspace.periods.thirtyDays' },
 ]
 
-const palette = ['#5b7cfa', '#6fcf97', '#f2c94c', '#bb6bd9', '#56ccf2', '#f2994a', '#eb5757', '#7f8c8d']
-
-const rangeCost = computed(() => props.trend.reduce((sum, point) => sum + (point.actual_cost || 0), 0))
-const rangeRequests = computed(() => props.trend.reduce((sum, point) => sum + (point.requests || 0), 0))
-
-const costDistributionModels = computed(() => props.models.filter((model) => model.actual_cost > 0))
-const requestDistributionModels = computed(() => props.models.filter((model) => model.requests > 0))
-
-const costDistributionData = computed(() => {
-  if (costDistributionModels.value.length === 0) return null
-  return {
-    labels: costDistributionModels.value.map((model) => model.model),
-    datasets: [{
-      data: costDistributionModels.value.map((model) => model.actual_cost),
-      backgroundColor: costDistributionModels.value.map((_, index) => palette[index % palette.length]),
-      borderColor: 'transparent',
-      borderWidth: 2,
-      hoverOffset: 6,
-    }],
-  }
+const currentPeriodLabel = computed(() => {
+  const option = periodOptions.find((candidate) => candidate.value === props.period) || periodOptions[0]
+  return t(option.labelKey)
 })
 
-const requestDistributionData = computed(() => {
-  if (requestDistributionModels.value.length === 0) return null
-  return {
-    labels: requestDistributionModels.value.map((model) => model.model),
-    datasets: [{
-      data: requestDistributionModels.value.map((model) => model.requests),
-      backgroundColor: requestDistributionModels.value.map((_, index) => palette[index % palette.length]),
-      borderColor: 'transparent',
-      borderWidth: 2,
-      hoverOffset: 6,
-    }],
-  }
+const usagePoints = computed(() => buildDashboardUsageSeries(props.trend, props.period))
+const hasData = computed(() => props.trend.length > 0)
+const numberLocale = computed(() => locale.value.startsWith('zh') ? 'zh-CN' : 'en-US')
+const isDark = computed(() => {
+  themeRevision.value
+  return typeof document !== 'undefined' && document.documentElement.classList.contains('dark')
 })
 
-const costTrendData = computed(() => {
-  if (props.trend.length === 0) return null
-  return {
-    labels: props.trend.map((point) => formatTrendLabel(point.date)),
-    datasets: [{
-      label: t('dashboard.actualCost'),
-      data: props.trend.map((point) => point.actual_cost),
-      borderColor: '#5b7cfa',
-      backgroundColor: 'rgba(91, 124, 250, 0.12)',
-      pointBackgroundColor: '#5b7cfa',
-      pointBorderColor: '#5b7cfa',
-      pointBorderWidth: 2,
-      pointRadius: props.trend.length > 20 ? 0 : 3,
-      tension: 0.32,
-      fill: true,
-    }],
-  }
-})
-
-const requestRankingData = computed(() => {
-  const ranked = [...requestDistributionModels.value]
-    .sort((a, b) => b.requests - a.requests || a.model.localeCompare(b.model))
-    .slice(0, 10)
-  if (ranked.length === 0) return null
-  return {
-    labels: ranked.map((model) => model.model),
-    datasets: [{
-      label: t('dashboard.requests'),
-      data: ranked.map((model) => model.requests),
-      backgroundColor: ranked.map((_, index) => `${palette[index % palette.length]}cc`),
-      borderRadius: 5,
-      barThickness: 18,
-    }],
-  }
-})
-
-const doughnutBaseOptions = {
-  responsive: true,
-  maintainAspectRatio: false,
-  cutout: '58%',
-  plugins: {
-    legend: {
-      display: true,
-      position: 'bottom',
-      labels: { usePointStyle: true, pointStyle: 'circle', padding: 18, boxWidth: 7, boxHeight: 7 },
-    },
-  },
+function readThemeColor(token: string, lightFallback: string, darkFallback = lightFallback): string {
+  themeRevision.value
+  const fallback = isDark.value ? darkFallback : lightFallback
+  if (typeof window === 'undefined') return fallback
+  return window.getComputedStyle(document.documentElement).getPropertyValue(token).trim() || fallback
 }
 
-const costDoughnutOptions: any = {
-  ...doughnutBaseOptions,
+const chartTheme = computed(() => ({
+  text: readThemeColor('--workspace-dashboard-text-muted', '#64748b', '#8a8a8a'),
+  grid: readThemeColor('--workspace-dashboard-card-border', '#f1f5f9', 'rgb(255 255 255 / 0.1)'),
+  guide: readThemeColor('--workspace-dashboard-text-subtle', '#64748b', '#8a8a8a'),
+  tooltip: readThemeColor('--workspace-dashboard-tooltip-surface', '#0f172a', '#212121'),
+  tooltipText: readThemeColor('--workspace-dashboard-tooltip-text', '#f8fafc', '#ececec'),
+  tooltipTitle: readThemeColor('--workspace-dashboard-tooltip-title', '#cbd5e1', '#b4b4b4'),
+  tooltipBorder: readThemeColor('--workspace-dashboard-tooltip-border', 'rgb(255 255 255 / 0.1)', 'rgb(255 255 255 / 0.16)'),
+  point: readThemeColor('--workspace-card-surface', '#ffffff', '#171717'),
+  cost: readThemeColor('--workspace-work-chart-cost', '#ea580c', '#fb923c'),
+  costFillStrong: readThemeColor('--workspace-work-chart-cost-fill-strong', 'rgb(234 88 12 / 0.18)', 'rgb(251 146 60 / 0.18)'),
+  costFillSoft: readThemeColor('--workspace-work-chart-cost-fill-soft', 'rgb(234 88 12 / 0.06)', 'rgb(251 146 60 / 0.06)'),
+  costFillTransparent: readThemeColor('--workspace-work-chart-cost-fill-transparent', 'rgb(234 88 12 / 0)', 'rgb(251 146 60 / 0)'),
+  token: readThemeColor('--workspace-work-chart-primary', '#2563eb', '#60a5fa'),
+  tokenFillStrong: readThemeColor('--workspace-work-chart-primary-fill-strong', 'rgb(37 99 235 / 0.18)', 'rgb(96 165 250 / 0.18)'),
+  tokenFillSoft: readThemeColor('--workspace-work-chart-primary-fill-soft', 'rgb(37 99 235 / 0.06)', 'rgb(96 165 250 / 0.06)'),
+  tokenFillTransparent: readThemeColor('--workspace-work-chart-primary-fill-transparent', 'rgb(37 99 235 / 0)', 'rgb(96 165 250 / 0)'),
+  request: readThemeColor('--workspace-work-chart-secondary', '#60a5fa', '#93c5fd'),
+  requestHover: readThemeColor('--workspace-work-accent', '#2563eb', '#60a5fa'),
+}))
+
+const creditsTotal = computed(() => usagePoints.value.reduce((sum, point) => sum + point.credits, 0))
+const tokensTotal = computed(() => usagePoints.value.reduce((sum, point) => sum + point.totalTokens, 0))
+const requestsTotal = computed(() => usagePoints.value.reduce((sum, point) => sum + point.requests, 0))
+const formattedCreditsTotal = computed(() => formatCredits(creditsTotal.value, creditsTotal.value >= 100))
+const formattedTokensTotal = computed(() => formatInteger(tokensTotal.value))
+const formattedRequestsTotal = computed(() => formatInteger(requestsTotal.value))
+const chartLabels = computed(() => usagePoints.value.map((point) => axisLabel(point.date)))
+
+function createAreaGradient(
+  context: any,
+  strong: string,
+  soft: string,
+  transparent: string,
+): string | CanvasGradient {
+  const chart = context.chart
+  const area = chart.chartArea
+  if (!area) return strong
+  const gradient = chart.ctx.createLinearGradient(0, area.top, 0, area.bottom)
+  gradient.addColorStop(0, strong)
+  gradient.addColorStop(0.62, soft)
+  gradient.addColorStop(1, transparent)
+  return gradient
+}
+
+const creditsChartData = computed<ChartData<'line'>>(() => ({
+  labels: chartLabels.value,
+  datasets: [{
+    label: t('dashboard.workspace.creditsTrend'),
+    data: usagePoints.value.map((point) => point.credits),
+    borderColor: chartTheme.value.cost,
+    backgroundColor: (context: any) => createAreaGradient(
+      context,
+      chartTheme.value.costFillStrong,
+      chartTheme.value.costFillSoft,
+      chartTheme.value.costFillTransparent,
+    ),
+    borderWidth: 2,
+    fill: true,
+    tension: 0.36,
+    cubicInterpolationMode: 'monotone',
+    pointRadius: 0,
+    pointHoverRadius: 4,
+    pointHitRadius: 12,
+    pointHoverBackgroundColor: chartTheme.value.point,
+    pointHoverBorderColor: chartTheme.value.cost,
+    pointHoverBorderWidth: 2,
+  }],
+}))
+
+const tokensChartData = computed<ChartData<'line'>>(() => ({
+  labels: chartLabels.value,
+  datasets: [{
+    label: t('dashboard.workspace.token'),
+    data: usagePoints.value.map((point) => point.totalTokens),
+    borderColor: chartTheme.value.token,
+    backgroundColor: (context: any) => createAreaGradient(
+      context,
+      chartTheme.value.tokenFillStrong,
+      chartTheme.value.tokenFillSoft,
+      chartTheme.value.tokenFillTransparent,
+    ),
+    borderWidth: 2,
+    fill: true,
+    tension: 0.36,
+    cubicInterpolationMode: 'monotone',
+    pointRadius: 0,
+    pointHoverRadius: 4,
+    pointHitRadius: 12,
+    pointHoverBackgroundColor: chartTheme.value.point,
+    pointHoverBorderColor: chartTheme.value.token,
+    pointHoverBorderWidth: 2,
+  }],
+}))
+
+const requestsChartData = computed<ChartData<'bar'>>(() => ({
+  labels: chartLabels.value,
+  datasets: [{
+    label: t('dashboard.workspace.requestCount'),
+    data: usagePoints.value.map((point) => point.requests),
+    backgroundColor: chartTheme.value.request,
+    hoverBackgroundColor: chartTheme.value.requestHover,
+    borderRadius: 3,
+    borderSkipped: false,
+    barPercentage: 0.64,
+    categoryPercentage: 0.72,
+  }],
+}))
+
+const creditsChartOptions = computed<ChartOptions<'line'>>(() => ({
+  ...baseOptions<'line'>(usagePoints.value.map((point) => point.credits), formatAxisCredit, 10),
   plugins: {
-    ...doughnutBaseOptions.plugins,
-    tooltip: {
-      callbacks: {
-        label: (context: any) => `${context.label}: ${t('dashboard.creditUnit')} ${formatCost(Number(context.parsed) || 0)}`,
+    legend: { display: false },
+    tooltip: tooltipOptions((index) => [
+      `${t('dashboard.workspace.creditsUsed')}: ${formatCredits(usagePoints.value[index]?.credits ?? 0)} ${t('dashboard.workspace.creditsUnit')}`,
+    ]),
+  },
+}))
+
+const tokensChartOptions = computed<ChartOptions<'line'>>(() => ({
+  ...baseOptions<'line'>(usagePoints.value.map((point) => point.totalTokens), formatAxisNumber, 9),
+  plugins: {
+    legend: { display: false },
+    tooltip: tooltipOptions((index) => {
+      const point = usagePoints.value[index]
+      if (!point) return []
+      return [
+        `${t('dashboard.workspace.cachedInput')}: ${formatInteger(point.cachedInputTokens)}`,
+        `${t('dashboard.workspace.uncachedInput')}: ${formatInteger(point.uncachedInputTokens)}`,
+        `${t('dashboard.workspace.outputTokens')}: ${formatInteger(point.outputTokens)}`,
+      ]
+    }),
+  },
+}))
+
+const requestsChartOptions = computed<ChartOptions<'bar'>>(() => ({
+  ...baseOptions<'bar'>(usagePoints.value.map((point) => point.requests), formatAxisNumber, 9),
+  plugins: {
+    legend: { display: false },
+    tooltip: tooltipOptions((index) => [
+      `${t('dashboard.workspace.requestCount')}: ${formatInteger(usagePoints.value[index]?.requests ?? 0)}`,
+    ]),
+  },
+}))
+
+function createHoverGuidePlugin<T extends 'line' | 'bar'>(): Plugin<T> {
+  return {
+    id: 'dashboardHoverGuide',
+    afterDatasetsDraw(chart) {
+      const active = chart.tooltip?.getActiveElements?.()?.[0]
+      if (!active) return
+      const x = active.element.x
+      const { top, bottom } = chart.chartArea
+      const context = chart.ctx
+      context.save()
+      context.beginPath()
+      context.setLineDash([4, 4])
+      context.moveTo(x, top)
+      context.lineTo(x, bottom)
+      context.lineWidth = 1
+      context.strokeStyle = chartTheme.value.guide
+      context.stroke()
+      context.restore()
+    },
+  }
+}
+
+const lineChartPlugins: Plugin<'line'>[] = [createHoverGuidePlugin<'line'>()]
+const barChartPlugins: Plugin<'bar'>[] = [createHoverGuidePlugin<'bar'>()]
+
+function baseOptions<T extends 'line' | 'bar'>(
+  values: number[],
+  tickFormatter: (value: number) => string,
+  axisFontSize: number,
+): ChartOptions<T> {
+  return {
+    responsive: true,
+    maintainAspectRatio: false,
+    animation: false,
+    interaction: { intersect: false, mode: 'index' },
+    layout: { padding: { top: 6 } },
+    scales: {
+      x: {
+        border: { display: false },
+        grid: { display: false },
+        ticks: {
+          color: chartTheme.value.text,
+          font: {
+            family: 'Inter, "PingFang SC", "Microsoft YaHei", sans-serif',
+            size: axisFontSize,
+            weight: 500,
+          },
+          autoSkip: true,
+          maxTicksLimit: 4,
+          maxRotation: 0,
+          padding: 8,
+        },
+      },
+      y: {
+        beginAtZero: true,
+        max: niceMaximum(values),
+        border: { display: false },
+        grid: { color: chartTheme.value.grid, drawTicks: false },
+        ticks: {
+          color: chartTheme.value.text,
+          font: {
+            family: 'Inter, "PingFang SC", "Microsoft YaHei", sans-serif',
+            size: axisFontSize,
+            weight: 500,
+          },
+          count: 3,
+          padding: 8,
+          callback: (value: string | number) => tickFormatter(Number(value)),
+        },
       },
     },
-  },
+  } as unknown as ChartOptions<T>
 }
 
-const requestDoughnutOptions: any = {
-  ...doughnutBaseOptions,
-  plugins: {
-    ...doughnutBaseOptions.plugins,
-    tooltip: {
-      callbacks: {
-        label: (context: any) => `${context.label}: ${formatNumber(Number(context.parsed) || 0)}`,
+function tooltipOptions(lines: (index: number) => string[]) {
+  return {
+    enabled: true,
+    displayColors: false,
+    backgroundColor: chartTheme.value.tooltip,
+    titleColor: chartTheme.value.tooltipTitle,
+    bodyColor: chartTheme.value.tooltipText,
+    borderColor: chartTheme.value.tooltipBorder,
+    borderWidth: 1,
+    cornerRadius: 12,
+    padding: 12,
+    caretPadding: 8,
+    titleFont: { size: 11, weight: 500 },
+    bodyFont: { size: 11, weight: 400 },
+    titleMarginBottom: 6,
+    callbacks: {
+      title: (items: any[]) => {
+        const index = items[0]?.dataIndex ?? 0
+        return tooltipRange(usagePoints.value[index]?.date ?? '')
       },
+      label: (context: any) => lines(context.dataIndex),
     },
-  },
+  }
 }
 
-const lineOptions: any = {
-  responsive: true,
-  maintainAspectRatio: false,
-  interaction: { intersect: false, mode: 'index' },
-  plugins: { legend: { display: false } },
-  scales: {
-    x: { grid: { display: false }, ticks: { maxRotation: 0, autoSkip: true, maxTicksLimit: 8 } },
-    y: { beginAtZero: true, grid: { color: 'rgba(148, 163, 184, 0.16)' } },
-  },
+function niceMaximum(values: number[]): number {
+  const maximum = Math.max(0, ...values)
+  if (maximum <= 0) return 1
+  const exponent = 10 ** Math.floor(Math.log10(maximum))
+  const normalized = maximum / exponent
+  const step = normalized <= 1 ? 1 : normalized <= 2 ? 2 : normalized <= 5 ? 5 : 10
+  return step * exponent
 }
 
-const rankingOptions: any = {
-  responsive: true,
-  maintainAspectRatio: false,
-  indexAxis: 'y',
-  plugins: { legend: { display: false } },
-  scales: {
-    x: { beginAtZero: true, grid: { color: 'rgba(148, 163, 184, 0.16)' } },
-    y: { grid: { display: false }, ticks: { autoSkip: false } },
-  },
+function parsePointDate(value: string): Date | null {
+  const normalized = /^\d{4}-\d{2}-\d{2}$/.test(value)
+    ? `${value}T00:00:00`
+    : value.replace(' ', 'T')
+  const date = new Date(normalized)
+  return Number.isFinite(date.getTime()) ? date : null
 }
 
-const calendarMonth = computed(() => {
-  const parsed = new Date(`${props.endDate}T00:00:00`)
-  return Number.isFinite(parsed.getTime()) ? parsed : new Date()
-})
+function axisLabel(value: string): string {
+  const date = parsePointDate(value)
+  if (!date) return value
+  if (props.period === 'today') {
+    return `${String(date.getHours()).padStart(2, '0')}:00`
+  }
+  if (props.period === 'week') {
+    return new Intl.DateTimeFormat(numberLocale.value, { weekday: 'short' }).format(date)
+  }
+  if (props.period === 'month') return String(date.getDate())
+  return new Intl.DateTimeFormat(numberLocale.value, { month: 'numeric', day: 'numeric' }).format(date)
+}
 
-const calendarMonthLabel = computed(() => calendarMonth.value.toLocaleDateString(
-  locale.value.startsWith('zh') ? 'zh-CN' : 'en-US',
-  { year: 'numeric', month: 'long' },
-))
+function tooltipRange(value: string): string {
+  const date = parsePointDate(value)
+  if (!date) return value
+  if (props.period === 'today') {
+    const start = `${String(date.getHours()).padStart(2, '0')}:00`
+    const endDate = new Date(date)
+    endDate.setHours(date.getHours() + 1)
+    const end = `${String(endDate.getHours()).padStart(2, '0')}:00`
+    return `${start}~${end}`
+  }
+  return new Intl.DateTimeFormat(numberLocale.value, {
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+  }).format(date)
+}
 
-const weekdays = computed(() => locale.value.startsWith('zh')
-  ? ['日', '一', '二', '三', '四', '五', '六']
-  : ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'])
+function formatInteger(value: number): string {
+  return new Intl.NumberFormat(numberLocale.value, { maximumFractionDigits: 0 }).format(value)
+}
 
-const calendarRequestMap = computed(() => props.trend.reduce((result, point) => {
-  const date = normaliseTrendDate(point.date)
-  result.set(date, (result.get(date) || 0) + (point.requests || 0))
-  return result
-}, new Map<string, number>()))
+function formatCredits(value: number, forceInteger = false): string {
+  return new Intl.NumberFormat(numberLocale.value, {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: forceInteger ? 0 : value > 0 && value < 0.01 ? 4 : 2,
+  }).format(value)
+}
 
-const calendarCells = computed(() => {
-  const year = calendarMonth.value.getFullYear()
-  const month = calendarMonth.value.getMonth()
-  const first = new Date(year, month, 1)
-  const start = new Date(year, month, 1 - first.getDay())
-  return Array.from({ length: 42 }, (_, index) => {
-    const date = new Date(start)
-    date.setDate(start.getDate() + index)
-    const key = formatLocalDate(date)
-    return {
-      key,
-      day: date.getDate(),
-      inMonth: date.getMonth() === month,
-      requests: calendarRequestMap.value.get(key) || 0,
-    }
+function formatAxisNumber(value: number): string {
+  return new Intl.NumberFormat(numberLocale.value, {
+    notation: value >= 1_000 ? 'compact' : 'standard',
+    maximumFractionDigits: 1,
+  }).format(value)
+}
+
+function formatAxisCredit(value: number): string {
+  return new Intl.NumberFormat(numberLocale.value, { maximumFractionDigits: value < 10 ? 1 : 0 }).format(value)
+}
+
+function togglePeriodMenu(): void {
+  periodMenuOpen.value = !periodMenuOpen.value
+}
+
+function selectPeriod(value: DashboardUsagePeriod): void {
+  periodMenuOpen.value = false
+  if (value !== props.period) emit('update:period', value)
+}
+
+function handlePeriodTriggerKeydown(event: KeyboardEvent): void {
+  if (event.key === 'Escape') {
+    periodMenuOpen.value = false
+    return
+  }
+  if (event.key === 'ArrowDown' || event.key === 'Enter' || event.key === ' ') {
+    event.preventDefault()
+    periodMenuOpen.value = true
+  }
+}
+
+function handlePeriodOutsidePointerDown(event: PointerEvent): void {
+  if (!periodMenuRef.value?.contains(event.target as Node)) {
+    periodMenuOpen.value = false
+  }
+}
+
+onMounted(() => {
+  document.addEventListener('pointerdown', handlePeriodOutsidePointerDown)
+
+  if (typeof MutationObserver === 'undefined') return
+  themeObserver = new MutationObserver(() => {
+    themeRevision.value += 1
   })
+  themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ['class'] })
 })
 
-const maxCalendarRequests = computed(() => Math.max(1, ...calendarCells.value.map((cell) => cell.requests)))
-const activeCalendarDays = computed(() => calendarCells.value.filter((cell) => cell.inMonth && cell.requests > 0).length)
-const calendarMonthRequests = computed(() => calendarCells.value.reduce(
-  (total, cell) => total + (cell.inMonth ? cell.requests : 0),
-  0,
-))
-
-function calendarCellColor(requests: number): string {
-  const strength = 0.44 + 0.48 * (requests / maxCalendarRequests.value)
-  return `rgba(91, 124, 250, ${strength.toFixed(2)})`
-}
-
-function formatTrendLabel(value: string): string {
-  const date = new Date(/^\d{4}-\d{2}-\d{2}$/.test(value) ? `${value}T00:00:00` : value)
-  if (!Number.isFinite(date.getTime())) return value
-  return date.toLocaleDateString(locale.value.startsWith('zh') ? 'zh-CN' : 'en-US', {
-    month: '2-digit',
-    day: '2-digit',
-    ...(props.granularity === 'hour' ? { hour: '2-digit' } : {}),
-  })
-}
-
-function normaliseTrendDate(value: string): string {
-  const direct = value.match(/^\d{4}-\d{2}-\d{2}/)?.[0]
-  if (direct) return direct
-  const parsed = new Date(value)
-  return Number.isFinite(parsed.getTime()) ? formatLocalDate(parsed) : value
-}
-
-function formatLocalDate(date: Date): string {
-  const year = date.getFullYear()
-  const month = String(date.getMonth() + 1).padStart(2, '0')
-  const day = String(date.getDate()).padStart(2, '0')
-  return `${year}-${month}-${day}`
-}
-
-const ChartHeading = defineComponent({
-  name: 'DashboardChartHeading',
-  props: {
-    title: { type: String, required: true },
-    summary: { type: String, required: true },
-  },
-  setup(componentProps) {
-    return () => h('div', {}, [
-      h('h3', { class: 'text-base font-semibold text-gray-900 dark:text-white' }, componentProps.title),
-      h('p', { class: 'mt-1 text-sm text-gray-400 dark:text-dark-500' }, componentProps.summary),
-    ])
-  },
-})
-
-const DashboardChartEmpty = defineComponent({
-  name: 'DashboardChartEmpty',
-  setup() {
-    return () => h('div', {
-      class: 'mt-5 flex h-[340px] flex-col items-center justify-center gap-3 text-center text-sm text-gray-400 dark:text-dark-500',
-    }, [
-      h(Icon, { name: 'chart', size: 'lg', strokeWidth: 1.5 }),
-      h('span', t('dashboard.noDataAvailable')),
-    ])
-  },
+onBeforeUnmount(() => {
+  document.removeEventListener('pointerdown', handlePeriodOutsidePointerDown)
+  themeObserver?.disconnect()
 })
 </script>
 
 <style scoped>
-.dashboard-panel {
-  border: 1px solid var(--lx-clay-border);
-  border-radius: var(--lx-clay-radius-surface);
-  background: var(--lx-clay-surface);
-  box-shadow: var(--lx-clay-shadow-form);
+.dashboard-usage {
+  min-width: 0;
 }
 
-.analysis-tab {
-  display: inline-flex;
+.dashboard-usage__header {
+  display: flex;
+  min-height: 44px;
   align-items: center;
-  gap: 0.35rem;
-  border-radius: 10px;
-  padding: 0.5rem 0.65rem;
-  color: rgb(107 114 128);
-  font-size: 0.75rem;
-  font-weight: 500;
+  justify-content: space-between;
+  gap: var(--workspace-space-4);
+  margin-bottom: var(--workspace-space-4);
+}
+
+.dashboard-usage__header h2 {
+  color: var(--workspace-dashboard-text-strong);
+  font-size: calc(var(--workspace-type-navigation-size) + 0.375rem);
+  font-weight: 700;
+  line-height: var(--workspace-space-7);
+}
+
+.dashboard-period-select {
+  position: relative;
+  display: flex;
+  min-height: 40px;
+  align-items: center;
+  z-index: 1;
+}
+
+.dashboard-period-select__trigger {
+  display: flex;
+  min-width: 142px;
+  min-height: 40px;
+  align-items: center;
+  gap: var(--workspace-space-3);
+  padding: 0 var(--workspace-space-3);
+  border: 0;
+  border-radius: 0;
+  color: var(--workspace-dashboard-period-text);
+  background: var(--workspace-canvas);
+  font-size: var(--workspace-type-body-size);
+  font-weight: var(--workspace-type-body-weight);
+  line-height: 1.25rem;
+  cursor: pointer;
+}
+
+.dashboard-period-select__trigger:focus {
+  outline: none;
+}
+
+.dashboard-period-select__trigger:focus-visible {
+  outline: none;
+}
+
+.dashboard-period-select__label {
+  color: var(--workspace-dashboard-text-subtle);
+  font-weight: var(--workspace-type-navigation-weight);
+  white-space: nowrap;
+}
+
+.dashboard-period-select__value {
+  color: var(--workspace-dashboard-period-text);
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.dashboard-period-select__icon {
+  flex: 0 0 auto;
+  margin-left: auto;
+  color: var(--workspace-dashboard-text-muted);
+}
+
+.dashboard-period-select.is-open {
+  z-index: 30;
+}
+
+.dashboard-period-select.is-open .dashboard-period-select__trigger {
+  background: transparent;
+}
+
+.dashboard-period-select.is-open .dashboard-period-select__trigger:focus-visible {
+  outline: none;
+}
+
+.dashboard-period-select__menu {
+  position: absolute;
+  top: calc(100% + var(--workspace-space-2));
+  right: 0;
+  z-index: 40;
+  width: 128px;
+  padding: var(--workspace-space-2) 0;
+  border: 1px solid var(--workspace-dashboard-card-border);
+  border-radius: 16px;
+  background: var(--workspace-card-surface);
+  box-shadow: var(--workspace-dashboard-card-shadow);
+}
+
+.dashboard-period-select__option {
+  display: flex;
+  width: 100%;
+  min-height: 32px;
+  align-items: center;
+  padding: var(--workspace-space-2) var(--workspace-space-4);
+  border: 0;
+  color: var(--workspace-dashboard-text-heading);
+  background: transparent;
+  font-size: var(--workspace-type-secondary-size);
+  font-weight: var(--workspace-type-body-weight);
   line-height: 1rem;
-  transition: background-color 160ms ease, color 160ms ease;
+  text-align: left;
+  cursor: pointer;
 }
 
-.analysis-tab:hover {
-  color: rgb(55 65 81);
-  background: rgb(249 250 251);
+.dashboard-period-select__option:hover {
+  background: var(--workspace-dashboard-hover);
 }
 
-.analysis-tab-active {
-  color: rgb(79 105 224);
-  background: rgb(239 243 255);
+.dashboard-period-dropdown-enter-active,
+.dashboard-period-dropdown-leave-active {
+  transition: opacity 120ms ease, transform 120ms ease;
+  transform-origin: top right;
 }
 
-:global(.dark) .analysis-tab {
-  color: rgb(148 163 184);
+.dashboard-period-dropdown-enter-from,
+.dashboard-period-dropdown-leave-to {
+  opacity: 0;
+  transform: translateY(-4px) scale(0.98);
 }
 
-:global(.dark) .analysis-tab:hover {
-  color: rgb(226 232 240);
-  background: rgb(15 23 42 / 0.55);
+.dashboard-usage__grid {
+  display: grid;
+  grid-template-columns: minmax(0, 3fr) minmax(20rem, 2fr);
+  gap: var(--workspace-space-6);
+  align-items: stretch;
 }
 
-:global(.dark) .analysis-tab-active {
-  color: rgb(165 180 252);
-  background: rgb(49 46 129 / 0.38);
+.dashboard-usage__side {
+  display: grid;
+  min-width: 0;
+  gap: var(--workspace-space-6);
 }
+
+.dashboard-chart-card {
+  min-width: 0;
+  padding: var(--workspace-space-6);
+  border: 1px solid var(--workspace-dashboard-card-border);
+  border-radius: 24px;
+  background: var(--workspace-card-surface);
+  box-shadow: var(--workspace-dashboard-card-shadow);
+}
+
+.dashboard-chart-card__heading {
+  display: flex;
+  min-width: 0;
+  min-height: 36px;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 8px;
+  white-space: nowrap;
+}
+
+.dashboard-chart-card__heading h3 {
+  flex: 0 0 auto;
+  color: var(--workspace-dashboard-text-heading);
+  font-size: var(--workspace-type-navigation-size);
+  font-weight: 700;
+  line-height: 1.25rem;
+}
+
+.dashboard-chart-card__heading > span {
+  overflow: hidden;
+  color: var(--workspace-dashboard-text-subtle);
+  font-size: var(--workspace-type-navigation-size);
+  font-weight: var(--workspace-type-body-weight);
+  line-height: 1.25rem;
+  letter-spacing: -0.025em;
+  text-overflow: ellipsis;
+  font-variant-numeric: tabular-nums;
+}
+
+.dashboard-chart-card--credits .dashboard-chart-card__heading {
+  min-height: 52px;
+  margin-bottom: var(--workspace-space-8);
+}
+
+.dashboard-chart-card--requests .dashboard-chart-card__heading {
+  margin-bottom: var(--workspace-space-1);
+}
+
+.dashboard-chart {
+  position: relative;
+  min-width: 0;
+}
+
+.dashboard-chart--credits {
+  height: 320px;
+}
+
+.dashboard-chart--token {
+  height: 168px;
+}
+
+.dashboard-chart--requests {
+  height: 86px;
+}
+
+.dashboard-chart__state {
+  display: flex;
+  width: 100%;
+  height: 100%;
+  align-items: center;
+  justify-content: center;
+}
+
+.dashboard-chart__empty {
+  color: var(--workspace-dashboard-text-muted);
+  font-size: var(--workspace-type-secondary-size);
+  font-weight: var(--workspace-type-secondary-weight);
+  text-align: center;
+}
+
+@media (max-width: 1279px) {
+  .dashboard-usage__grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .dashboard-usage__side {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 767px) {
+  .dashboard-usage__header {
+    align-items: flex-start;
+  }
+
+  .dashboard-period-select {
+    min-height: 44px;
+  }
+
+  .dashboard-period-select__trigger {
+    min-height: 42px;
+  }
+
+  .dashboard-usage__side {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .dashboard-chart-card {
+    padding: 18px;
+  }
+
+  .dashboard-chart--credits {
+    height: 260px;
+  }
+}
+
+@media (max-width: 479px) {
+  .dashboard-usage__header {
+    flex-direction: column;
+  }
+
+  .dashboard-period-select {
+    width: 100%;
+  }
+
+  .dashboard-period-select__trigger {
+    width: 100%;
+    justify-content: flex-start;
+  }
+}
+
 </style>

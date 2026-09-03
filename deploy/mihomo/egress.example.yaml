@@ -1,0 +1,19 @@
+# Copy this file to:
+#   mihomo/instances/<a|b|c>/etc/providers/egress.yaml
+#
+# Paste complete Mihomo `proxies:` entries for this shard below. Keep the
+# primary node first and use a different physical exit for every shard.
+# Leaving this list empty is intentionally fail-closed through AI-EGRESS's
+# `empty-fallback: REJECT` setting.
+
+proxies: []
+
+# Example shape only (replace it with the exact node definition supplied by
+# your provider; protocol-specific fields differ):
+# proxies:
+#   - name: "node-a-primary"
+#     type: socks5
+#     server: 203.0.113.10
+#     port: 1080
+#     username: "replace-me"
+#     password: "replace-me"

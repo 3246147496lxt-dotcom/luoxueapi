@@ -1,6 +1,8 @@
 package schema
 
 import (
+	"fmt"
+
 	"github.com/Wei-Shaw/sub2api/ent/schema/mixins"
 	"github.com/Wei-Shaw/sub2api/internal/domain"
 
@@ -51,6 +53,16 @@ func (APIKey) Fields() []ent.Field {
 			MaxLen(20).
 			Default("user").
 			Comment("API key purpose: user, web_chat, or desktop"),
+		field.String("service_tier_preference").
+			MaxLen(20).
+			Default("standard").
+			Validate(func(value string) error {
+				if value != "standard" && value != "priority" {
+					return fmt.Errorf("service tier preference must be standard or priority")
+				}
+				return nil
+			}).
+			Comment("Default OpenAI service tier preference: standard or priority"),
 		field.Int64("managed_device_id").
 			Optional().
 			Nillable(),

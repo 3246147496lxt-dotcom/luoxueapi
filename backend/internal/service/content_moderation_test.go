@@ -182,6 +182,10 @@ func (r *contentModerationTestUserRepo) Create(ctx context.Context, user *User) 
 	panic("unexpected Create call")
 }
 
+func (r *contentModerationTestUserRepo) CreateWithEmailAliasGuard(ctx context.Context, user *User) error {
+	panic("unexpected CreateWithEmailAliasGuard call")
+}
+
 func (r *contentModerationTestUserRepo) GetByID(ctx context.Context, id int64) (*User, error) {
 	if r.user == nil {
 		return nil, ErrUserNotFound
@@ -198,7 +202,7 @@ func (r *contentModerationTestUserRepo) GetFirstAdmin(ctx context.Context) (*Use
 	panic("unexpected GetFirstAdmin call")
 }
 
-func (r *contentModerationTestUserRepo) Update(ctx context.Context, user *User) error {
+func (r *contentModerationTestUserRepo) Update(ctx context.Context, user *User, _ UserUpdateFields) error {
 	if user == nil {
 		return nil
 	}
@@ -252,6 +256,13 @@ func (r *contentModerationTestUserRepo) DeductBalance(ctx context.Context, id in
 	panic("unexpected DeductBalance call")
 }
 
+func (r *contentModerationTestUserRepo) AdjustBalance(context.Context, int64, float64) (BalanceChange, error) {
+	return BalanceChange{}, nil
+}
+func (r *contentModerationTestUserRepo) SetBalance(context.Context, int64, float64) (BalanceChange, error) {
+	return BalanceChange{}, nil
+}
+
 func (r *contentModerationTestUserRepo) UpdateConcurrency(ctx context.Context, id int64, amount int) error {
 	panic("unexpected UpdateConcurrency call")
 }
@@ -266,6 +277,10 @@ func (r *contentModerationTestUserRepo) BatchAddConcurrency(ctx context.Context,
 
 func (r *contentModerationTestUserRepo) ExistsByEmail(ctx context.Context, email string) (bool, error) {
 	panic("unexpected ExistsByEmail call")
+}
+
+func (r *contentModerationTestUserRepo) ExistsByEmailAlias(ctx context.Context, email string) (bool, error) {
+	panic("unexpected ExistsByEmailAlias call")
 }
 
 func (r *contentModerationTestUserRepo) RemoveGroupFromAllowedGroups(ctx context.Context, groupID int64) (int64, error) {
@@ -947,7 +962,7 @@ func TestExtractContentModerationInput_OpenAIImagesIncludesPromptAndImages(t *te
 	require.Equal(t, []string{"https://example.com/source.png", "data:image/png;base64,aGVsbG8="}, input.Images)
 }
 
-func TestContentModerationInput_NormalizeKeepsImagesAndModerationInputSamplesOneImage(t *testing.T) {
+func TestContentModerationInput_NormalizeKeepsImagesAndModerationInputIncludesRuntimeImages(t *testing.T) {
 	images := []string{
 		"data:image/png;base64,Zmlyc3Q=",
 		"data:image/png;base64,c2Vjb25k",
@@ -962,11 +977,14 @@ func TestContentModerationInput_NormalizeKeepsImagesAndModerationInputSamplesOne
 
 	parts, ok := input.ModerationInput().([]moderationAPIInputPart)
 	require.True(t, ok)
-	require.Len(t, parts, 2)
+	require.Len(t, parts, 3)
 	require.Equal(t, "text", parts[0].Type)
-	require.Equal(t, "image_url", parts[1].Type)
-	require.NotNil(t, parts[1].ImageURL)
-	require.Contains(t, images, parts[1].ImageURL.URL)
+	for index, image := range images {
+		part := parts[index+1]
+		require.Equal(t, "image_url", part.Type)
+		require.NotNil(t, part.ImageURL)
+		require.Equal(t, image, part.ImageURL.URL)
+	}
 }
 
 func TestBuildModerationTestInputRejectsMultipleImages(t *testing.T) {

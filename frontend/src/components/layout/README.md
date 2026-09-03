@@ -65,6 +65,31 @@ The sidebar owns authenticated navigation on desktop and mobile:
 
 `AppLayout` mounts the sidebar automatically.
 
+### Workspace Sidebar state contract
+
+`useAppStore().sidebarCollapsed` is the only requested desktop collapse state for
+both Chat and Work. Sidebar hosts must consume it through
+`useWorkspaceSidebarCollapse()`, which returns the mobile-aware rendered state and
+the shared toggle, expand, focus-handoff behavior.
+
+```text
+appStore.sidebarCollapsed
+        ↓
+useWorkspaceSidebarCollapse({ enabled, mobile })
+        ↓
+Frame / Header / Brand control / ModeSwitch visibility / Navigation / UserAccountCard
+        ↓
+SidebarAccountDock (collapsed prop only)
+```
+
+Mobile drawer visibility (`mobileOpen`) is orthogonal to desktop collapse state.
+Opening a mobile drawer must not clear the desktop preference; mobile hosts render
+expanded and restore the stored collapsed state when returning to desktop.
+
+Do not add a component-local `collapsed` ref, read the Store again inside a Sidebar
+child, or infer Account Dock state from route or role. Children are controlled by
+the single rendered state supplied by their host.
+
 ### `AppMobileHeader.vue`
 
 The compact header is rendered only below the desktop breakpoint. It contains:
@@ -78,13 +103,17 @@ fallback. The compact title supplements rather than replaces the page's `h1`.
 
 ### `SidebarAccountDock.vue` and `SidebarAccountOverlay.vue`
 
-The account dock is the single entry point for identity and account actions. Its
-collapsed state keeps the avatar trigger visible. Opening it shows:
+The account dock is the single entry point for identity and personal account
+actions. Its expanded state keeps the capability-gated Upgrade action beside the
+account summary; its collapsed state keeps the avatar trigger visible. Opening it
+shows identity and balance details, personal profile and preferences, theme,
+language, onboarding, and logout.
 
-- identity, available balance, frozen balance, and subscription status;
-- subscriptions, wallet, orders, and profile destinations when available;
-- theme, language, announcements, help, and onboarding actions;
-- logout.
+Task destinations such as subscriptions, wallet, orders, and quota tools belong to
+the workspace navigation. Web Chat and documentation are low-frequency links below
+the account destinations; Web Chat opens the authenticated `/chat` surface in a new
+tab. Announcements remain in the dashboard and global notification surfaces rather
+than as a Work sidebar row.
 
 The overlay is anchored to the dock on desktop and becomes a modal bottom sheet on
 mobile. It handles focus return, Escape dismissal, outside-click dismissal, and

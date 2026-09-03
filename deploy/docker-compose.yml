@@ -20,6 +20,8 @@ services:
     container_name: sub2api
     restart: unless-stopped
     stop_grace_period: ${COMPOSE_STOP_GRACE_PERIOD:-60s}
+    security_opt:
+      - no-new-privileges:true
     # Pass the complete documented application contract through. Explicit
     # entries below keep canonical container-only host/port overrides.
     env_file:

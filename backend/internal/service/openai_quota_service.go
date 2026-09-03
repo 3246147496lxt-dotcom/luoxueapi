@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"reflect"
 	"strings"
 	"sync"
 	"time"
@@ -204,6 +205,159 @@ func (s *OpenAIQuotaService) QueryUsage(ctx context.Context, accountID int64) (*
 		}
 	}
 	return &payload, nil
+}
+
+// QuerySubscription refreshes the ChatGPT subscription-cycle metadata used by
+// the admin quota inspector. It is intentionally best-effort for PAT accounts
+// and unavailable for Agent Identity accounts, whose assertion is scoped to
+// Codex quota endpoints rather than the ChatGPT subscription endpoint.
+func (s *OpenAIQuotaService) QuerySubscription(ctx context.Context, accountID int64) (*OpenAISubscriptionInfo, error) {
+	accessToken, chatGPTAccountID, proxyURL, _, err := s.prepareUpstreamCall(ctx, accountID)
+	if err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(accessToken) == "" {
+		return nil, nil
+	}
+	credentialAccount, expectedCredentials, err := s.loadSubscriptionCredentialSnapshot(ctx, accountID, chatGPTAccountID, accessToken)
+	if err != nil {
+		return nil, err
+	}
+
+	info := fetchChatGPTSubscriptionInfo(ctx, s.privacyClientFactory, accessToken, proxyURL, chatGPTAccountID)
+	if info == nil {
+		return nil, nil
+	}
+	if err := s.persistSubscriptionInfo(ctx, credentialAccount.ID, expectedCredentials, info); err != nil {
+		slog.Warn("openai_subscription_persist_failed", "account_id", accountID, "error", err)
+		return nil, err
+	}
+	return info, nil
+}
+
+func storedChatGPTAccountID(account *Account) string {
+	if account == nil {
+		return ""
+	}
+	if value := strings.TrimSpace(account.GetCredential("chatgpt_account_id")); value != "" {
+		return value
+	}
+	return strings.TrimSpace(account.GetCredential("organization_id"))
+}
+
+func (s *OpenAIQuotaService) loadSubscriptionCredentialSnapshot(
+	ctx context.Context,
+	accountID int64,
+	expectedChatGPTAccountID string,
+	expectedAccessToken string,
+) (*Account, map[string]any, error) {
+	account, err := s.accountRepo.GetByID(ctx, accountID)
+	if err != nil {
+		return nil, nil, err
+	}
+	if account == nil {
+		return nil, nil, infraerrors.New(http.StatusNotFound, "OPENAI_QUOTA_ACCOUNT_NOT_FOUND", "account not found")
+	}
+	if account.IsShadow() {
+		account, err = resolveCredentialAccount(ctx, s.accountRepo, account)
+		if err != nil {
+			return nil, nil, err
+		}
+		if account == nil {
+			return nil, nil, infraerrors.New(http.StatusNotFound, "OPENAI_QUOTA_ACCOUNT_NOT_FOUND", "credential account not found")
+		}
+	}
+	if storedChatGPTAccountID(account) != strings.TrimSpace(expectedChatGPTAccountID) ||
+		strings.TrimSpace(account.GetOpenAIAccessToken()) != strings.TrimSpace(expectedAccessToken) {
+		return nil, nil, infraerrors.New(
+			http.StatusConflict,
+			"OPENAI_SUBSCRIPTION_IDENTITY_CHANGED",
+			"account credentials changed while preparing the subscription query; retry",
+		)
+	}
+	return account, shallowCopyMap(account.Credentials), nil
+}
+
+type openAISubscriptionCredentialsCAS interface {
+	UpdateOpenAISubscriptionCredentialsIfUnchanged(
+		ctx context.Context,
+		id int64,
+		expectedCredentials map[string]any,
+		credentials map[string]any,
+	) (bool, error)
+}
+
+func (s *OpenAIQuotaService) persistSubscriptionInfo(
+	ctx context.Context,
+	credentialAccountID int64,
+	expectedCredentials map[string]any,
+	info *OpenAISubscriptionInfo,
+) error {
+	if s == nil || s.accountRepo == nil || info == nil {
+		return nil
+	}
+
+	credentials := shallowCopyMap(expectedCredentials)
+	if credentials == nil {
+		credentials = make(map[string]any)
+	}
+	if planType := strings.TrimSpace(info.PlanType); planType == "" {
+		delete(credentials, "plan_type")
+	} else {
+		credentials["plan_type"] = planType
+	}
+	if info.ActiveUntil == "" {
+		delete(credentials, "subscription_expires_at")
+	} else {
+		credentials["subscription_expires_at"] = info.ActiveUntil
+	}
+	if info.WillRenew == nil {
+		delete(credentials, "subscription_will_renew")
+	} else {
+		credentials["subscription_will_renew"] = *info.WillRenew
+	}
+	if info.CheckedAt != "" {
+		credentials["subscription_checked_at"] = info.CheckedAt
+	}
+
+	if updater, ok := any(s.accountRepo).(openAISubscriptionCredentialsCAS); ok {
+		updated, err := updater.UpdateOpenAISubscriptionCredentialsIfUnchanged(
+			ctx,
+			credentialAccountID,
+			expectedCredentials,
+			credentials,
+		)
+		if err != nil {
+			return err
+		}
+		if !updated {
+			return infraerrors.New(
+				http.StatusConflict,
+				"OPENAI_SUBSCRIPTION_IDENTITY_CHANGED",
+				"account credentials changed during the subscription query; retry",
+			)
+		}
+		return nil
+	}
+
+	// Test and alternate repository implementations may not expose the atomic
+	// CAS extension. Re-read and require an exact credential match before using
+	// the legacy full-document updater; production uses the CAS path above.
+	account, err := s.accountRepo.GetByID(ctx, credentialAccountID)
+	if err != nil {
+		return err
+	}
+	if account == nil {
+		return infraerrors.New(http.StatusNotFound, "OPENAI_QUOTA_ACCOUNT_NOT_FOUND", "credential account not found")
+	}
+	if !reflect.DeepEqual(account.Credentials, expectedCredentials) {
+		return infraerrors.New(
+			http.StatusConflict,
+			"OPENAI_SUBSCRIPTION_IDENTITY_CHANGED",
+			"account credentials changed during the subscription query; retry",
+		)
+	}
+	return persistAccountCredentials(ctx, s.accountRepo, account, credentials)
 }
 
 func (s *OpenAIQuotaService) queryResetCreditDetails(ctx context.Context, client *req.Client, accessToken, chatGPTAccountID string, fedRAMP bool, accountID int64) *openAIRateLimitResetCreditDetails {
@@ -540,56 +694,46 @@ func buildCodexSparkWindowExtraUpdates(usage *OpenAIQuotaUsage, now time.Time) m
 	// Reuse OpenAICodexUsageSnapshot / Normalize to map primary/secondary windows
 	// to canonical 5h/7d buckets (same logic as probeOpenAICodexSnapshot).
 	snap := &OpenAICodexUsageSnapshot{}
+	resetAfterSeconds := func(window *OpenAIRateLimitWindow) *int {
+		if window == nil {
+			return nil
+		}
+		if window.ResetAfterSeconds > 0 {
+			value := int(window.ResetAfterSeconds)
+			return &value
+		}
+		if window.ResetAt <= 0 {
+			return nil
+		}
+		remaining := window.ResetAt - now.Unix()
+		if remaining < 0 {
+			remaining = 0
+		}
+		value := int(remaining)
+		return &value
+	}
 	if w := spark.PrimaryWindow; w != nil {
 		p := w.UsedPercent
 		snap.PrimaryUsedPercent = &p
-		ra := int(w.ResetAfterSeconds)
-		snap.PrimaryResetAfterSeconds = &ra
+		snap.PrimaryResetAfterSeconds = resetAfterSeconds(w)
 		wm := int(w.LimitWindowSeconds / 60)
 		snap.PrimaryWindowMinutes = &wm
 	}
 	if w := spark.SecondaryWindow; w != nil {
 		p := w.UsedPercent
 		snap.SecondaryUsedPercent = &p
-		ra := int(w.ResetAfterSeconds)
-		snap.SecondaryResetAfterSeconds = &ra
+		snap.SecondaryResetAfterSeconds = resetAfterSeconds(w)
 		wm := int(w.LimitWindowSeconds / 60)
 		snap.SecondaryWindowMinutes = &wm
 	}
 
 	normalized := snap.Normalize()
-	if normalized == nil {
+	if !normalizedCodexLimitsHaveData(normalized) {
 		return nil
 	}
 
-	updates := make(map[string]any)
-	if normalized.Used5hPercent != nil {
-		updates["codex_5h_used_percent"] = *normalized.Used5hPercent
-	}
-	if normalized.Reset5hSeconds != nil {
-		updates["codex_5h_reset_after_seconds"] = *normalized.Reset5hSeconds
-	}
-	if normalized.Window5hMinutes != nil {
-		updates["codex_5h_window_minutes"] = *normalized.Window5hMinutes
-	}
-	if normalized.Used7dPercent != nil {
-		updates["codex_7d_used_percent"] = *normalized.Used7dPercent
-	}
-	if normalized.Reset7dSeconds != nil {
-		updates["codex_7d_reset_after_seconds"] = *normalized.Reset7dSeconds
-	}
-	if normalized.Window7dMinutes != nil {
-		updates["codex_7d_window_minutes"] = *normalized.Window7dMinutes
-	}
-	if r := codexResetAtRFC3339(now, normalized.Reset5hSeconds); r != nil {
-		updates["codex_5h_reset_at"] = *r
-	}
-	if r := codexResetAtRFC3339(now, normalized.Reset7dSeconds); r != nil {
-		updates["codex_7d_reset_at"] = *r
-	}
-	if len(updates) == 0 {
-		return nil
-	}
+	updates := newNormalizedCodexWindowExtraUpdates()
+	applyNormalizedCodexWindowExtraUpdates(updates, normalized, now)
 	updates["codex_usage_updated_at"] = now.Format(time.RFC3339)
 	return updates
 }

@@ -4,13 +4,15 @@ import { flushPromises, mount } from '@vue/test-utils'
 import UserBalanceHistoryModal from '../UserBalanceHistoryModal.vue'
 import type { AdminUser } from '@/types'
 
-const { getUserBalanceHistory } = vi.hoisted(() => ({
-  getUserBalanceHistory: vi.fn()
+const { getUserBalanceHistory, listByUser } = vi.hoisted(() => ({
+  getUserBalanceHistory: vi.fn(),
+  listByUser: vi.fn()
 }))
 
 vi.mock('@/api/admin', () => ({
   adminAPI: {
-    users: { getUserBalanceHistory }
+    users: { getUserBalanceHistory },
+    subscriptions: { listByUser }
   }
 }))
 
@@ -44,6 +46,8 @@ const user = {
 describe('UserBalanceHistoryModal', () => {
   beforeEach(() => {
     getUserBalanceHistory.mockReset()
+    listByUser.mockReset()
+    listByUser.mockResolvedValue([])
     getUserBalanceHistory.mockResolvedValue({
       items: [
         {
@@ -93,7 +97,7 @@ describe('UserBalanceHistoryModal', () => {
     })
   })
 
-  it('renders balances as snowflake credits while leaving concurrency as a count', async () => {
+  it('renders balances as points while leaving concurrency as a count', async () => {
     const wrapper = mount(UserBalanceHistoryModal, {
       props: { show: false, user, hideActions: true },
       global: {
@@ -120,11 +124,159 @@ describe('UserBalanceHistoryModal', () => {
       '+12.50',
       '-2.00'
     ])
-    expect(wrapper.findAll('[data-testid="snowflake-credit-icon"]')).toHaveLength(6)
+    expect(wrapper.findAll('[data-testid="points-icon"]')).toHaveLength(6)
     expect(wrapper.text()).toContain('+3')
     expect(wrapper.text()).not.toContain('$42.50')
     expect(wrapper.text()).not.toContain('$100.00')
     expect(wrapper.text()).not.toContain('$12.50')
     expect(wrapper.text()).not.toContain('$2.00')
+  })
+
+  it('loads real user subscriptions instead of subscription redeem-code history', async () => {
+    listByUser.mockResolvedValue([
+      {
+        id: 91,
+        user_id: 17,
+        group_id: 8,
+        status: 'active',
+        starts_at: '2026-07-20T00:00:00Z',
+        expires_at: '2026-08-20T00:00:00Z',
+        daily_usage_usd: 0,
+        weekly_usage_usd: 0,
+        monthly_usage_usd: 0,
+        daily_window_start: null,
+        weekly_window_start: null,
+        monthly_window_start: null,
+        created_at: '2026-07-20T00:00:00Z',
+        updated_at: '2026-07-20T00:00:00Z',
+        group: { id: 8, name: 'Standard' }
+      }
+    ])
+
+    const wrapper = mount(UserBalanceHistoryModal, {
+      props: { show: false, user, hideActions: true },
+      global: {
+        stubs: {
+          BaseDialog: {
+            props: ['show'],
+            template: '<div v-if="show"><slot /></div>'
+          },
+          Select: {
+            props: ['modelValue', 'options'],
+            emits: ['update:modelValue', 'change'],
+            template: `<button
+              data-testid="select-subscription"
+              @click="$emit('update:modelValue', 'subscription'); $emit('change')"
+            >subscription</button>`
+          }
+        }
+      }
+    })
+
+    await wrapper.setProps({ show: true })
+    await flushPromises()
+    await wrapper.find('[data-testid="select-subscription"]').trigger('click')
+    await flushPromises()
+
+    expect(listByUser).toHaveBeenCalledWith(17)
+    expect(getUserBalanceHistory).not.toHaveBeenCalledWith(17, 1, 15, 'subscription')
+    expect(wrapper.find('[data-testid="subscription-record"]').text()).toContain('Standard')
+    expect(wrapper.find('[data-testid="subscription-record"]').text()).toContain(
+      'admin.subscriptions.status.active'
+    )
+    expect(wrapper.text()).not.toContain('admin.users.noBalanceHistory')
+  })
+
+  it('keeps the user recharge total when switching to subscriptions before history finishes', async () => {
+    let resolveHistory!: (value: unknown) => void
+    getUserBalanceHistory.mockImplementationOnce(
+      () => new Promise(resolve => { resolveHistory = resolve })
+    )
+
+    const wrapper = mount(UserBalanceHistoryModal, {
+      props: { show: false, user, hideActions: true },
+      global: {
+        stubs: {
+          BaseDialog: {
+            props: ['show'],
+            template: '<div v-if="show"><slot /></div>'
+          },
+          Select: {
+            props: ['modelValue', 'options'],
+            emits: ['update:modelValue', 'change'],
+            template: `<button
+              data-testid="select-subscription"
+              @click="$emit('update:modelValue', 'subscription'); $emit('change')"
+            >subscription</button>`
+          }
+        }
+      }
+    })
+
+    await wrapper.setProps({ show: true })
+    expect(getUserBalanceHistory).toHaveBeenCalledTimes(1)
+
+    await wrapper.find('[data-testid="select-subscription"]').trigger('click')
+    await flushPromises()
+
+    resolveHistory({
+      items: [],
+      total: 0,
+      page: 1,
+      page_size: 15,
+      total_recharged: 100
+    })
+    await flushPromises()
+
+    expect(wrapper.findAll('[data-testid="credit-amount-value"]').map(node => node.text()))
+      .toContain('100.00')
+    expect(wrapper.text()).toContain('admin.subscriptions.noSubscriptionsYet')
+  })
+
+  it('shows a retryable error when the subscription source fails', async () => {
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
+    listByUser
+      .mockRejectedValueOnce(new Error('network'))
+      .mockResolvedValueOnce([])
+
+    const wrapper = mount(UserBalanceHistoryModal, {
+      props: { show: false, user, hideActions: true },
+      global: {
+        stubs: {
+          BaseDialog: {
+            props: ['show'],
+            template: '<div v-if="show"><slot /></div>'
+          },
+          Select: {
+            props: ['modelValue', 'options'],
+            emits: ['update:modelValue', 'change'],
+            template: `<button
+              data-testid="select-subscription"
+              @click="$emit('update:modelValue', 'subscription'); $emit('change')"
+            >subscription</button>`
+          }
+        }
+      }
+    })
+
+    await wrapper.setProps({ show: true })
+    await flushPromises()
+    await wrapper.find('[data-testid="select-subscription"]').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.find('[data-testid="history-load-error"]').text()).toContain(
+      'admin.subscriptions.failedToLoad'
+    )
+
+    await wrapper.find('[data-testid="history-load-retry"]').trigger('click')
+    await flushPromises()
+
+    expect(listByUser).toHaveBeenCalledTimes(2)
+    expect(wrapper.text()).toContain('admin.subscriptions.noSubscriptionsYet')
+    expect(consoleError).toHaveBeenCalledWith(
+      'Failed to load user subscriptions:',
+      expect.any(Error)
+    )
+    consoleError.mockRestore()
   })
 })

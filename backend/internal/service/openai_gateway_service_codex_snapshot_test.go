@@ -104,6 +104,50 @@ func TestBuildCodexUsageExtraUpdates_UsesSnapshotUpdatedAt(t *testing.T) {
 	}
 }
 
+func TestBuildCodexUsageExtraUpdates_SevenDayOnlyTombstonesFiveHour(t *testing.T) {
+	primaryUsed := 38.0
+	primaryReset := 3 * 24 * 60 * 60
+	primaryWindow := 7 * 24 * 60
+	base := time.Date(2026, 8, 4, 12, 0, 0, 0, time.UTC)
+
+	updates := buildCodexUsageExtraUpdates(&OpenAICodexUsageSnapshot{
+		PrimaryUsedPercent:       &primaryUsed,
+		PrimaryResetAfterSeconds: &primaryReset,
+		PrimaryWindowMinutes:     &primaryWindow,
+		UpdatedAt:                base.Format(time.RFC3339),
+	}, base.Add(time.Hour))
+	if updates == nil {
+		t.Fatal("expected non-nil updates")
+	}
+
+	if got := updates["codex_7d_used_percent"]; got != primaryUsed {
+		t.Fatalf("codex_7d_used_percent = %v, want %v", got, primaryUsed)
+	}
+	if got := updates["codex_7d_reset_after_seconds"]; got != primaryReset {
+		t.Fatalf("codex_7d_reset_after_seconds = %v, want %d", got, primaryReset)
+	}
+	if got := updates["codex_7d_window_minutes"]; got != primaryWindow {
+		t.Fatalf("codex_7d_window_minutes = %v, want %d", got, primaryWindow)
+	}
+	if got := updates["codex_7d_reset_at"]; got != base.Add(time.Duration(primaryReset)*time.Second).Format(time.RFC3339) {
+		t.Fatalf("codex_7d_reset_at = %v, want %s", got, base.Add(time.Duration(primaryReset)*time.Second).Format(time.RFC3339))
+	}
+
+	for _, key := range []string{
+		"codex_5h_used_percent",
+		"codex_5h_reset_after_seconds",
+		"codex_5h_window_minutes",
+		"codex_5h_reset_at",
+		"codex_secondary_used_percent",
+		"codex_secondary_reset_after_seconds",
+		"codex_secondary_window_minutes",
+	} {
+		if got, ok := updates[key]; !ok || got != nil {
+			t.Fatalf("%s = %v (present=%v), want explicit nil tombstone", key, got, ok)
+		}
+	}
+}
+
 // TestBuildCodexUsageExtraUpdates_FreshAccountUsedPercentNotInverted_Issue2994 locks in the
 // canonical "used %" semantics for the 5h window. A fresh account reports a tiny
 // secondary-used-percent (~1%); the stored codex_5h_used_percent must equal that value
@@ -216,10 +260,9 @@ func TestBuildCodexUsageExtraUpdates_WithoutNormalizedWindowFields(t *testing.T)
 	if got := updates["codex_usage_updated_at"]; got != "2026-02-20T09:15:00Z" {
 		t.Fatalf("codex_usage_updated_at = %v, want %s", got, "2026-02-20T09:15:00Z")
 	}
-	if _, ok := updates["codex_5h_reset_at"]; ok {
-		t.Fatalf("did not expect codex_5h_reset_at in updates: %v", updates["codex_5h_reset_at"])
-	}
-	if _, ok := updates["codex_7d_reset_at"]; ok {
-		t.Fatalf("did not expect codex_7d_reset_at in updates: %v", updates["codex_7d_reset_at"])
+	for _, key := range []string{"codex_5h_reset_at", "codex_7d_reset_at"} {
+		if got, ok := updates[key]; !ok || got != nil {
+			t.Fatalf("%s = %v (present=%v), want explicit nil tombstone", key, got, ok)
+		}
 	}
 }

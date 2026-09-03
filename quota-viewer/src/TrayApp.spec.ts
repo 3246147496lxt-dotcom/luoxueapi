@@ -80,7 +80,7 @@ describe('menu bar App surface', () => {
     expect(wrapper.get('.quota-ring__copy strong').text()).toBe('32%')
     expect(wrapper.get('.quota-ring__copy').text()).toBe('32%')
     expect(wrapper.get('.membership-period-label').text()).toBe('周剩余：')
-    expect(wrapper.text()).toContain('本周期剩余雪花额度')
+    expect(wrapper.text()).toContain('本周期剩余积分')
     expect(wrapper.text()).not.toContain('本周期请求')
     expect(wrapper.find('.floating-quota-widget').exists()).toBe(false)
     wrapper.unmount()
@@ -119,7 +119,7 @@ describe('menu bar App surface', () => {
     const wrapper = mount(App)
     await flushPromises()
 
-    await wrapper.get('[aria-label="刷新额度"]').trigger('click')
+    await wrapper.get('[aria-label="刷新积分"]').trigger('click')
     await wrapper.get('.tray-open-main').trigger('click')
     window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' }))
     await flushPromises()

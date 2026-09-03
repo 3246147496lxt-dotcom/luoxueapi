@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
@@ -260,6 +261,11 @@ func (h *ChatHandler) DeleteConversation(c *gin.Context) {
 		response.ErrorFrom(c, err)
 		return
 	}
+	if h.attachments != nil {
+		if err := h.attachments.CleanupConversation(c.Request.Context(), userID, c.Param("conversation_id")); err != nil {
+			slog.Warn("chat attachment conversation cleanup deferred to janitor", "user_id", userID, "conversation_id", c.Param("conversation_id"), "error", err)
+		}
+	}
 	response.Success(c, gin.H{"deleted": true})
 }
 
@@ -305,6 +311,23 @@ func (h *ChatHandler) Attempt(c *gin.Context) {
 		return
 	}
 	response.Success(c, attempt)
+}
+
+func (h *ChatHandler) StopAttempt(c *gin.Context) {
+	userID, ok := h.chatHistoryUser(c)
+	if !ok {
+		return
+	}
+	result, err := h.history.StopCompletion(
+		c.Request.Context(),
+		userID,
+		c.Param("attempt_id"),
+	)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, result)
 }
 
 func (h *ChatHandler) chatHistoryUser(c *gin.Context) (int64, bool) {

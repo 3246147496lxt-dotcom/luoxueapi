@@ -144,6 +144,20 @@ func (c *dashboardCacheStub) readLastEntry(t *testing.T) dashboardStatsCacheEntr
 	return entry
 }
 
+func TestDashboardService_UpstreamMismatchFilterFailsClosedWithoutRepositoryCapability(t *testing.T) {
+	svc := NewDashboardService(&usageRepoStub{}, nil, nil, &config.Config{})
+	mismatch := true
+	filters := usagestats.UsageLogFilters{UpstreamModelMismatch: &mismatch}
+	start, end := time.Now().Add(-time.Hour), time.Now()
+
+	_, err := svc.GetUsageTrendWithUsageFilters(context.Background(), start, end, "hour", filters)
+	require.ErrorContains(t, err, "unsupported")
+	_, err = svc.GetModelStatsWithUsageFiltersBySource(context.Background(), start, end, filters, usagestats.ModelSourceRequested)
+	require.ErrorContains(t, err, "unsupported")
+	_, err = svc.GetGroupStatsWithUsageFilters(context.Background(), start, end, filters)
+	require.ErrorContains(t, err, "unsupported")
+}
+
 func TestDashboardService_CacheHitFresh(t *testing.T) {
 	stats := &usagestats.DashboardStats{
 		TotalUsers:     10,

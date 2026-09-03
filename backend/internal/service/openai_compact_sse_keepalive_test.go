@@ -276,11 +276,13 @@ func TestOpenAICompactKeepaliveAdjustedWrittenSize_ExcludesHeartbeatBytes(t *tes
 	before := OpenAICompactKeepaliveAdjustedWrittenSize(c)
 	waitForKeepaliveBeats()
 	require.Equal(t, before, OpenAICompactKeepaliveAdjustedWrittenSize(c), "仅心跳字节不得改变判定口径")
+	require.False(t, openAIStreamClientOutputStarted(c, false), "仅心跳不得被视为已向客户端输出语义响应")
 
 	// 真实响应字节写出（经包装器，先停拍再写）后口径必须变化。
 	_, err := c.Writer.Write([]byte("real-bytes"))
 	require.NoError(t, err)
 	require.Equal(t, len("real-bytes"), OpenAICompactKeepaliveAdjustedWrittenSize(c))
+	require.True(t, openAIStreamClientOutputStarted(c, false), "真实响应字节应被视为已向客户端输出")
 	require.Contains(t, rec.Body.String(), ": keepalive\n\n")
 }
 

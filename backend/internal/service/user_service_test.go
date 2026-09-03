@@ -23,25 +23,27 @@ import (
 // --- mock: UserRepository ---
 
 type mockUserRepo struct {
-	updateBalanceErr        error
-	updateBalanceFn         func(ctx context.Context, id int64, amount float64) error
-	deductBalanceFn         func(ctx context.Context, id int64, amount float64) error
-	getByIDUser             *User
-	getByIDErr              error
-	identities              []UserAuthIdentityRecord
-	unbindIdentityErr       error
-	unboundProviders        []string
-	updateLastActiveErr     error
-	updateLastActiveUserIDs []int64
-	updateLastActiveAt      []time.Time
-	updateFn                func(ctx context.Context, user *User) error
-	updateCalls             int
-	upsertAvatarFn          func(ctx context.Context, userID int64, input UpsertUserAvatarInput) (*UserAvatar, error)
-	upsertAvatarArgs        []UpsertUserAvatarInput
-	deleteAvatarFn          func(ctx context.Context, userID int64) error
-	deleteAvatarIDs         []int64
-	getAvatarFn             func(ctx context.Context, userID int64) (*UserAvatar, error)
-	txCalls                 int
+	updateBalanceErr         error
+	updateBalanceFn          func(ctx context.Context, id int64, amount float64) error
+	deductBalanceFn          func(ctx context.Context, id int64, amount float64) error
+	deductAvailableBalanceFn func(ctx context.Context, id int64, amount float64) (float64, error)
+	adjustBalanceFn          func(ctx context.Context, id int64, delta float64) (BalanceChange, error)
+	getByIDUser              *User
+	getByIDErr               error
+	identities               []UserAuthIdentityRecord
+	unbindIdentityErr        error
+	unboundProviders         []string
+	updateLastActiveErr      error
+	updateLastActiveUserIDs  []int64
+	updateLastActiveAt       []time.Time
+	updateFn                 func(ctx context.Context, user *User) error
+	updateCalls              int
+	upsertAvatarFn           func(ctx context.Context, userID int64, input UpsertUserAvatarInput) (*UserAvatar, error)
+	upsertAvatarArgs         []UpsertUserAvatarInput
+	deleteAvatarFn           func(ctx context.Context, userID int64) error
+	deleteAvatarIDs          []int64
+	getAvatarFn              func(ctx context.Context, userID int64) (*UserAvatar, error)
+	txCalls                  int
 }
 
 type mockUserRepoTxKey struct{}
@@ -107,7 +109,7 @@ func (m *mockUserRepo) GetByID(ctx context.Context, _ int64) (*User, error) {
 }
 func (m *mockUserRepo) GetByEmail(context.Context, string) (*User, error) { return &User{}, nil }
 func (m *mockUserRepo) GetFirstAdmin(context.Context) (*User, error)      { return &User{}, nil }
-func (m *mockUserRepo) Update(ctx context.Context, user *User) error {
+func (m *mockUserRepo) Update(ctx context.Context, user *User, _ UserUpdateFields) error {
 	m.updateCalls++
 	if m.updateFn != nil {
 		return m.updateFn(ctx, user)
@@ -199,6 +201,35 @@ func (m *mockUserRepo) DeductBalance(ctx context.Context, id int64, amount float
 		return m.deductBalanceFn(ctx, id, amount)
 	}
 	return nil
+}
+
+func (m *mockUserRepo) DeductAvailableBalance(ctx context.Context, id int64, amount float64) (float64, error) {
+	if m.deductAvailableBalanceFn != nil {
+		return m.deductAvailableBalanceFn(ctx, id, amount)
+	}
+	return amount, nil
+}
+
+func (m *mockUserRepo) AdjustBalance(ctx context.Context, id int64, delta float64) (BalanceChange, error) {
+	if m.adjustBalanceFn != nil {
+		return m.adjustBalanceFn(ctx, id, delta)
+	}
+	// Keep existing refund tests that model the available-balance operation
+	// useful while exercising the exact non-forced path.  A short deduction is
+	// represented as the same atomic insufficient-balance error the SQL
+	// repository returns, rather than silently accepting a partial debit.
+	if delta < 0 && m.deductAvailableBalanceFn != nil {
+		requested := -delta
+		deducted, err := m.deductAvailableBalanceFn(ctx, id, requested)
+		if err != nil {
+			return BalanceChange{}, err
+		}
+		if deducted < requested {
+			return BalanceChange{Old: requested, New: requested - deducted}, ErrBalanceNegative
+		}
+		return BalanceChange{Old: requested, New: 0}, nil
+	}
+	return BalanceChange{Old: 0, New: delta}, nil
 }
 func (m *mockUserRepo) UpdateConcurrency(context.Context, int64, int) error { return nil }
 func (m *mockUserRepo) ExistsByEmail(context.Context, string) (bool, error) { return false, nil }

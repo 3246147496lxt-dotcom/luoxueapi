@@ -4,6 +4,7 @@ import { createMemoryHistory, createRouter } from 'vue-router'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import ModelCatalogView from '../ModelCatalogView.vue'
+import CatalogPriceAmount from '@/components/common/CatalogPriceAmount.vue'
 import CreditAmount from '@/components/common/CreditAmount.vue'
 import type { PublicModelCatalogItem, PublicModelCatalogResponse } from '@/api/catalog'
 
@@ -30,6 +31,8 @@ const testState = vi.hoisted(() => ({
 const messages: Record<string, string> = {
   'modelCatalog.title': '模型广场',
   'modelCatalog.description': '公开查看模型',
+  'modelCatalog.workspaceTitle': '模型中心',
+  'modelCatalog.workspaceDescription': '查看当前可用模型',
   'modelCatalog.publicPriceNote': '公开标准价格说明',
   'modelCatalog.modelCount': '{count} 个模型',
   'modelCatalog.pricingUpdatedAt': '价格更新于 {time}',
@@ -58,12 +61,15 @@ const messages: Record<string, string> = {
   'modelCatalog.capabilityLabels.reasoning': '深度推理',
   'modelCatalog.pricing.publicLabel': '公开标准价',
   'modelCatalog.pricing.details': '价格详情',
+  'modelCatalog.pricing.shortDetails': '详情',
   'modelCatalog.pricing.dialogTitle': '公开价格详情',
   'modelCatalog.pricing.dialogDescription': '价格说明',
   'modelCatalog.pricing.billingMode': '计费方式',
+  'modelCatalog.pricing.usageBased': '按量计费',
   'modelCatalog.pricing.billingModes.token': '按 Token 计费',
   'modelCatalog.pricing.input': '输入',
   'modelCatalog.pricing.output': '输出',
+  'modelCatalog.pricing.cache': '缓存',
   'modelCatalog.pricing.cacheWrite': '缓存写入',
   'modelCatalog.pricing.cacheWrite1h': '缓存写入（1 小时）',
   'modelCatalog.pricing.cacheRead': '缓存读取',
@@ -143,7 +149,12 @@ vi.mock('@/composables/useClipboard', () => ({
 }))
 
 const PublicLayoutStub = defineComponent({
-  template: '<div class="model-catalog-page"><slot /></div>'
+  props: ['page'],
+  template: '<div data-testid="public-site-layout" :data-page="page"><slot /></div>'
+})
+
+const AppLayoutStub = defineComponent({
+  template: '<div data-testid="app-layout"><slot /></div>'
 })
 
 function model(overrides: Partial<PublicModelCatalogItem> = {}): PublicModelCatalogItem {
@@ -197,18 +208,23 @@ function catalogResponse(items: PublicModelCatalogItem[]): PublicModelCatalogRes
   }
 }
 
-async function mountCatalog(initialPath = '/models.html') {
+async function mountCatalog(initialPath = '/models.html', props: { embedded?: boolean } = {}) {
   const router = createRouter({
     history: createMemoryHistory(),
-    routes: [{ path: '/models.html', component: ModelCatalogView }]
+    routes: [
+      { path: '/models.html', component: ModelCatalogView },
+      { path: '/models', component: ModelCatalogView }
+    ]
   })
   await router.push(initialPath)
   await router.isReady()
   const wrapper = mount(ModelCatalogView, {
+    props,
     global: {
       plugins: [router],
       stubs: {
         PublicSiteLayout: PublicLayoutStub,
+        AppLayout: AppLayoutStub,
         ModelIcon: true,
         Icon: true,
         RouterLink: true
@@ -230,7 +246,25 @@ beforeEach(() => {
 })
 
 describe('ModelCatalogView', () => {
-  it('renders effective public prices as Snow credits and preserves a real zero price', async () => {
+  it('uses the public shell by default and the Work shell for its embedded variant', async () => {
+    testState.getCatalog.mockResolvedValue(catalogResponse([]))
+
+    const publicCatalog = await mountCatalog()
+    expect(publicCatalog.wrapper.get('[data-testid="public-site-layout"]').attributes('data-page')).toBe('models')
+    expect(publicCatalog.wrapper.find('[data-testid="app-layout"]').exists()).toBe(false)
+    publicCatalog.wrapper.unmount()
+
+    const workCatalog = await mountCatalog('/models', { embedded: true })
+    const workLayout = workCatalog.wrapper.get('[data-testid="app-layout"]')
+    expect(workCatalog.wrapper.find('[data-testid="public-site-layout"]').exists()).toBe(false)
+    expect(workLayout.classes()).toContain('model-catalog-page--embedded')
+    expect(workLayout.get('#catalog-title').text()).toBe('模型中心')
+    expect(workLayout.text()).toContain('查看当前可用模型')
+    expect(workLayout.text()).not.toContain('公开查看模型')
+    expect(document.head.querySelector('link[rel="canonical"]')).toBeNull()
+  })
+
+  it('converts effective public prices to CNY at 10 Points per yuan and preserves zero', async () => {
     testState.getCatalog.mockResolvedValue(catalogResponse([
       model(),
       model({
@@ -254,15 +288,17 @@ describe('ModelCatalogView', () => {
 
     expect(wrapper.findAll('.catalog-card')).toHaveLength(2)
     expect(wrapper.text()).toContain('GPT-4o')
-    expect(wrapper.findAllComponents(CreditAmount).map((amount) => amount.props('value'))).toEqual([
-      '0',
-      '10',
-      '3',
-      '15'
+    expect(wrapper.findAllComponents(CatalogPriceAmount).map((amount) => amount.text())).toEqual([
+      '¥0',
+      '¥1',
+      '¥0.1',
+      '¥0.3',
+      '¥1.5',
+      '¥0.1'
     ])
-    expect(wrapper.findAll('[data-testid="snowflake-credit-icon"]')).toHaveLength(4)
-    expect(wrapper.text()).not.toMatch(/[$¥]/)
-    expect(wrapper.text()).toContain('128K')
+    expect(wrapper.findAllComponents(CreditAmount)).toHaveLength(0)
+    expect(wrapper.findAll('[data-testid="points-icon"]')).toHaveLength(0)
+    expect(wrapper.findAll('.catalog-card .catalog-facts')).toHaveLength(0)
   })
 
   it('keeps an explicitly USD-denominated catalog price in dollars', async () => {
@@ -280,6 +316,78 @@ describe('ModelCatalogView', () => {
     expect(wrapper.text()).toContain('$0')
     expect(wrapper.text()).toContain('$10')
     expect(wrapper.findComponent(CreditAmount).exists()).toBe(false)
+  })
+
+  it('uses featured only for ordering and keeps the card focused on prices', async () => {
+    testState.getCatalog.mockResolvedValue(catalogResponse([
+      model({
+        slug: 'standard-model',
+        model: 'standard-model',
+        display_name: 'Standard model',
+        featured: false
+      }),
+      model({
+        slug: 'featured-model',
+        model: 'featured-model',
+        display_name: 'Featured model',
+        featured: true,
+        provider: 'anthropic',
+        summary: 'This summary should not be rendered inside the card.'
+      })
+    ]))
+
+    const { wrapper } = await mountCatalog()
+    const cards = wrapper.findAll('.catalog-card')
+
+    expect(cards.map((card) => card.get('h3').text())).toEqual(['Featured model', 'Standard model'])
+    expect(wrapper.findAll('.catalog-card .catalog-provider-line')).toHaveLength(0)
+    expect(wrapper.findAll('.catalog-card .catalog-summary')).toHaveLength(0)
+    expect(wrapper.findAll('.catalog-card .catalog-model-id-row')).toHaveLength(0)
+    expect(wrapper.findAll('.catalog-card .catalog-featured')).toHaveLength(0)
+    expect(wrapper.findAll('.catalog-card .catalog-price-item--cache')).toHaveLength(2)
+    expect(wrapper.text()).toContain('按量计费')
+  })
+
+  it('converts per-request and per-image CREDIT prices without changing their units', async () => {
+    testState.getCatalog.mockResolvedValue(catalogResponse([
+      model({
+        slug: 'request-model',
+        model: 'request-model',
+        display_name: 'Request model',
+        pricing: {
+          ...model().pricing,
+          billing_mode: 'per_request',
+          unit: 'per_request',
+          input_price: null,
+          output_price: null,
+          per_request_price: 25,
+        },
+      }),
+      model({
+        slug: 'image-model',
+        model: 'image-model',
+        display_name: 'Image model',
+        pricing: {
+          ...model().pricing,
+          billing_mode: 'image',
+          unit: 'per_request',
+          input_price: null,
+          output_price: null,
+          per_request_price: 12.5,
+        },
+      }),
+    ]))
+
+    const { wrapper } = await mountCatalog()
+    const cards = wrapper.findAll('.catalog-card')
+
+    expect(cards[0].get('[data-testid="catalog-price-cny"]').text()).toBe('¥2.5')
+    expect(cards[0].text()).toContain('单次请求')
+    expect(cards[0].text()).not.toContain('/ 次')
+    expect(cards[1].get('[data-testid="catalog-price-cny"]').text()).toBe('¥1.25')
+    expect(cards[1].text()).toContain('单张图片')
+    expect(cards[1].text()).not.toContain('/ 张')
+    expect(wrapper.find('[data-testid="points-icon"]').exists()).toBe(false)
   })
 
   it('filters by provider and writes filter state into the URL', async () => {
@@ -332,13 +440,25 @@ describe('ModelCatalogView', () => {
     expect(testState.copyToClipboard).toHaveBeenCalledWith('gpt-4o', '模型 ID 已复制')
     expect(wrapper.get('.catalog-copy-button').text()).toContain('已复制')
 
-    await wrapper.get('.catalog-pricing-heading button').trigger('click')
+    await wrapper.get('.catalog-details-button').trigger('click')
     await flushPromises()
     const dialog = wrapper.get('dialog')
     expect(dialog.attributes('open')).toBeDefined()
     expect(dialog.text()).toContain('缓存读取')
-    expect(dialog.find('[data-testid="snowflake-credit-icon"]').exists()).toBe(true)
-    expect(dialog.text()).not.toContain('$1')
+    expect(dialog.find('[data-testid="points-icon"]').exists()).toBe(false)
+    expect(dialog.findAll('[data-testid="catalog-price-cny"]').map((amount) => amount.text())).toEqual([
+      '¥0',
+      '¥1',
+      '¥0.4',
+      '¥0.1',
+      '¥0.8',
+      '¥2',
+      '¥1',
+      '¥3',
+      '¥1.2',
+      '¥1.6',
+      '¥0.2',
+    ])
     expect(dialog.text()).toContain('缓存写入（1 小时）')
     expect(dialog.text()).toContain('Priority 输入')
     expect(dialog.text()).toContain('长上下文价格')

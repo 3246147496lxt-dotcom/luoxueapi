@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"math"
 	"strings"
 	"time"
 
@@ -29,6 +30,9 @@ func (r *usageBillingRepository) Apply(ctx context.Context, cmd *service.UsageBi
 	}
 
 	cmd.Normalize()
+	if err := cmd.ValidateMonetaryFields(); err != nil {
+		return nil, err
+	}
 	if cmd.RequestID == "" {
 		return nil, service.ErrUsageBillingRequestIDRequired
 	}
@@ -67,7 +71,7 @@ func (r *usageBillingRepository) Apply(ctx context.Context, cmd *service.UsageBi
 		return &service.UsageBillingApplyResult{Applied: false}, nil
 	}
 
-	result := &service.UsageBillingApplyResult{Applied: true}
+	result := &service.UsageBillingApplyResult{Applied: true, EffectsKnown: true}
 	if err := r.applyUsageBillingEffects(ctx, tx, cmd, result); err != nil {
 		return nil, err
 	}
@@ -221,21 +225,22 @@ func (r *usageBillingRepository) claimUsageBillingRequest(ctx context.Context, t
 }
 
 func (r *usageBillingRepository) ReserveBatchImageBalance(ctx context.Context, cmd *service.BatchImageBalanceHoldCommand) (*service.BatchImageBalanceHoldResult, error) {
-	return r.applyBatchImageBalanceHold(ctx, cmd, reserveUsageBillingBatchImageBalance)
+	return r.applyBatchImageBalanceHold(ctx, cmd, reserveUsageBillingBatchImageBalance, false)
 }
 
 func (r *usageBillingRepository) CaptureBatchImageBalance(ctx context.Context, cmd *service.BatchImageBalanceHoldCommand) (*service.BatchImageBalanceHoldResult, error) {
-	return r.applyBatchImageBalanceHold(ctx, cmd, captureUsageBillingBatchImageBalance)
+	return r.applyBatchImageBalanceHold(ctx, cmd, captureUsageBillingBatchImageBalance, true)
 }
 
 func (r *usageBillingRepository) ReleaseBatchImageBalance(ctx context.Context, cmd *service.BatchImageBalanceHoldCommand) (*service.BatchImageBalanceHoldResult, error) {
-	return r.applyBatchImageBalanceHold(ctx, cmd, releaseUsageBillingBatchImageBalance)
+	return r.applyBatchImageBalanceHold(ctx, cmd, releaseUsageBillingBatchImageBalance, true)
 }
 
 func (r *usageBillingRepository) applyBatchImageBalanceHold(
 	ctx context.Context,
 	cmd *service.BatchImageBalanceHoldCommand,
 	apply func(context.Context, *sql.Tx, *service.BatchImageBalanceHoldCommand) (*service.BatchImageBalanceHoldResult, error),
+	requireReservation bool,
 ) (_ *service.BatchImageBalanceHoldResult, err error) {
 	if cmd == nil {
 		return &service.BatchImageBalanceHoldResult{}, nil
@@ -244,6 +249,9 @@ func (r *usageBillingRepository) applyBatchImageBalanceHold(
 		return nil, errors.New("usage billing repository db is nil")
 	}
 	cmd.Normalize()
+	if err := cmd.ValidateMonetaryFields(); err != nil {
+		return nil, err
+	}
 	if cmd.RequestID == "" {
 		return nil, service.ErrUsageBillingRequestIDRequired
 	}
@@ -264,6 +272,17 @@ func (r *usageBillingRepository) applyBatchImageBalanceHold(
 	}
 	if !applied {
 		return &service.BatchImageBalanceHoldResult{Applied: false}, nil
+	}
+	// A capture/release is allowed to move funds only when this batch's
+	// reservation is present and still describes the same principal and hold
+	// amount.  The operation dedup claim is intentionally made first: an
+	// already-applied replay returns without requiring the batch row to remain
+	// queryable (for example, after archival), while a new operation fails closed
+	// before touching frozen_balance.
+	if requireReservation {
+		if err := validateBatchImageHoldReservation(ctx, tx, cmd); err != nil {
+			return nil, err
+		}
 	}
 
 	result, err := apply(ctx, tx, cmd)
@@ -295,6 +314,8 @@ func (r *usageBillingRepository) applyUsageBillingEffects(ctx context.Context, t
 		); err != nil {
 			return err
 		}
+		result.SubscriptionChargedCost = cmd.SubscriptionCost
+		result.SubscriptionCharged = true
 	}
 
 	if cmd.BalanceCost > 0 {
@@ -305,6 +326,8 @@ func (r *usageBillingRepository) applyUsageBillingEffects(ctx context.Context, t
 		result.BalanceBefore = &balanceBefore
 		result.NewBalance = &newBalance
 		result.BalanceOverdrafted = !sufficient
+		result.BalanceChargedCost = cmd.BalanceCost
+		result.BalanceCharged = true
 	}
 
 	if cmd.APIKeyQuotaCost > 0 {
@@ -313,12 +336,16 @@ func (r *usageBillingRepository) applyUsageBillingEffects(ctx context.Context, t
 			return err
 		}
 		result.APIKeyQuotaExhausted = exhausted
+		result.APIKeyQuotaChargedCost = cmd.APIKeyQuotaCost
+		result.APIKeyQuotaCharged = true
 	}
 
 	if cmd.APIKeyRateLimitCost > 0 {
 		if err := incrementUsageBillingAPIKeyRateLimit(ctx, tx, cmd.APIKeyID, cmd.APIKeyRateLimitCost); err != nil {
 			return err
 		}
+		result.APIKeyRateLimitChargedCost = cmd.APIKeyRateLimitCost
+		result.APIKeyRateLimitCharged = true
 	}
 
 	if cmd.AccountQuotaCost > 0 && (strings.EqualFold(cmd.AccountType, service.AccountTypeAPIKey) || strings.EqualFold(cmd.AccountType, service.AccountTypeBedrock)) {
@@ -327,6 +354,8 @@ func (r *usageBillingRepository) applyUsageBillingEffects(ctx context.Context, t
 			return err
 		}
 		result.QuotaState = quotaState
+		result.AccountQuotaChargedCost = cmd.AccountQuotaCost
+		result.AccountQuotaCharged = true
 	}
 
 	return nil
@@ -664,6 +693,93 @@ func releaseUsageBillingBatchImageBalance(ctx context.Context, tx *sql.Tx, cmd *
 	return nil, errors.New("batch image frozen balance is insufficient")
 }
 
+// validateBatchImageHoldReservation verifies the immutable reservation
+// context before a capture/release update can touch users.frozen_balance.
+//
+// The dedup row is keyed by (batch-image hold request id, API key id), while
+// the batch row is the authoritative source for the user/API-key pairing and
+// the amount that was frozen.  Checking both inside the same transaction
+// prevents a caller with a stale or tampered job snapshot from consuming a
+// different user's frozen funds (or only releasing part of its own hold).
+func validateBatchImageHoldReservation(ctx context.Context, tx *sql.Tx, cmd *service.BatchImageBalanceHoldCommand) error {
+	if tx == nil || cmd == nil || strings.TrimSpace(cmd.BatchID) == "" || cmd.UserID <= 0 || cmd.APIKeyID <= 0 || cmd.HoldAmount < 0 || cmd.ActualAmount < 0 {
+		return service.ErrUsageBillingHoldReservationInvalid
+	}
+
+	var (
+		jobUserID    int64
+		jobAPIKeyID  sql.NullInt64
+		jobHold      float64
+		jobRequestID sql.NullString
+	)
+	err := tx.QueryRowContext(ctx, `
+		SELECT user_id, api_key_id, COALESCE(hold_amount, estimated_cost, 0), request_hash
+		FROM batch_image_jobs
+		WHERE batch_id = $1
+		FOR UPDATE
+	`, cmd.BatchID).Scan(&jobUserID, &jobAPIKeyID, &jobHold, &jobRequestID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return service.ErrUsageBillingHoldReservationInvalid
+	}
+	if err != nil {
+		return err
+	}
+	jobHoldAmount := service.QuantizeUsageBillingAmount(jobHold)
+	cmdHoldAmount := service.QuantizeUsageBillingAmount(cmd.HoldAmount)
+	if !jobAPIKeyID.Valid || jobUserID != cmd.UserID || jobAPIKeyID.Int64 != cmd.APIKeyID ||
+		math.IsNaN(jobHold) || math.IsInf(jobHold, 0) ||
+		jobHoldAmount != cmdHoldAmount {
+		return service.ErrUsageBillingHoldReservationInvalid
+	}
+	// A zero-priced batch never creates a reserve dedup claim because the
+	// reserve operation is intentionally a no-op.  Permit its matching
+	// zero-cost capture after validating the immutable job snapshot, but reject
+	// any attempt to smuggle a positive settlement through a zero hold.
+	zeroValueReservation := jobHoldAmount == 0 && cmdHoldAmount == 0
+	if zeroValueReservation && service.QuantizeUsageBillingAmount(cmd.ActualAmount) != 0 {
+		return service.ErrUsageBillingHoldReservationInvalid
+	}
+	if !zeroValueReservation && (jobHoldAmount <= 0 || cmdHoldAmount <= 0) {
+		return service.ErrUsageBillingHoldReservationInvalid
+	}
+
+	// Keep the explicit API-key ownership check separate from the batch-row
+	// check.  It protects against a corrupted batch row that pairs a valid key
+	// with another user's id, and intentionally does not filter deleted_at so a
+	// soft-deleted key can still release funds held before deletion.
+	var ownerID int64
+	err = tx.QueryRowContext(ctx, `
+		SELECT user_id
+		FROM api_keys
+		WHERE id = $1
+	`, cmd.APIKeyID).Scan(&ownerID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return service.ErrUsageBillingHoldReservationInvalid
+	}
+	if err != nil {
+		return err
+	}
+	if ownerID != cmd.UserID {
+		return service.ErrUsageBillingHoldReservationInvalid
+	}
+	if zeroValueReservation {
+		return nil
+	}
+
+	// request_hash is selected above to make the lock cover the complete
+	// reservation snapshot.  The operation fingerprint may intentionally differ
+	// (capture uses a manifest hash), so it is not compared here.
+	_ = jobRequestID
+	held, err := batchImageHoldClaimExists(ctx, tx, service.BatchImageHoldRequestID(cmd.BatchID), cmd.APIKeyID)
+	if err != nil {
+		return err
+	}
+	if !held {
+		return service.ErrUsageBillingHoldReservationInvalid
+	}
+	return nil
+}
+
 // batchImageHoldClaimExists 检查 hold request id 是否已在 dedup（或归档）表中被 claim，
 // 即该 batch 的冻结操作确实成功提交过。
 func batchImageHoldClaimExists(ctx context.Context, tx *sql.Tx, holdRequestID string, apiKeyID int64) (bool, error) {
@@ -672,6 +788,7 @@ func batchImageHoldClaimExists(ctx context.Context, tx *sql.Tx, holdRequestID st
 		SELECT 1
 		FROM usage_billing_dedup
 		WHERE request_id = $1 AND api_key_id = $2
+		FOR UPDATE
 	`, holdRequestID, apiKeyID).Scan(&exists)
 	if err == nil {
 		return true, nil
@@ -683,6 +800,7 @@ func batchImageHoldClaimExists(ctx context.Context, tx *sql.Tx, holdRequestID st
 		SELECT 1
 		FROM usage_billing_dedup_archive
 		WHERE request_id = $1 AND api_key_id = $2
+		FOR UPDATE
 	`, holdRequestID, apiKeyID).Scan(&exists)
 	if err == nil {
 		return true, nil

@@ -460,22 +460,13 @@ watch(
 .announcement-bell-row {
   justify-content: flex-start;
   border-radius: 0.75rem;
-  color: rgb(51 65 85);
+  color: var(--workspace-text-secondary);
   background: transparent;
 }
 
 .announcement-bell-row:hover {
-  color: rgb(15 23 42);
-  background: rgb(15 23 42 / 0.045);
-}
-
-:global(html.dark .announcement-bell-row) {
-  color: rgb(226 232 240);
-}
-
-:global(html.dark .announcement-bell-row:hover) {
-  color: #fff;
-  background: rgb(255 255 255 / 0.07);
+  color: var(--workspace-text);
+  background: var(--workspace-hover);
 }
 
 /* Modal Animations */
@@ -512,20 +503,20 @@ watch(
 }
 
 .overflow-y-auto::-webkit-scrollbar-thumb {
-  background: linear-gradient(to bottom, #cbd5e1, #94a3b8);
+  background: var(--workspace-text-muted);
   border-radius: 4px;
 }
 
 .dark .overflow-y-auto::-webkit-scrollbar-thumb {
-  background: linear-gradient(to bottom, #4b5563, #374151);
+  background: var(--workspace-text-muted);
 }
 
 .overflow-y-auto::-webkit-scrollbar-thumb:hover {
-  background: linear-gradient(to bottom, #94a3b8, #64748b);
+  background: var(--workspace-text-secondary);
 }
 
 .dark .overflow-y-auto::-webkit-scrollbar-thumb:hover {
-  background: linear-gradient(to bottom, #6b7280, #4b5563);
+  background: var(--workspace-text-secondary);
 }
 </style>
 

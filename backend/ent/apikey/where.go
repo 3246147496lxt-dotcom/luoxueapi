@@ -100,6 +100,11 @@ func Purpose(v string) predicate.APIKey {
 	return predicate.APIKey(sql.FieldEQ(FieldPurpose, v))
 }
 
+// ServiceTierPreference applies equality check predicate on the "service_tier_preference" field. It's identical to ServiceTierPreferenceEQ.
+func ServiceTierPreference(v string) predicate.APIKey {
+	return predicate.APIKey(sql.FieldEQ(FieldServiceTierPreference, v))
+}
+
 // ManagedDeviceID applies equality check predicate on the "managed_device_id" field. It's identical to ManagedDeviceIDEQ.
 func ManagedDeviceID(v int64) predicate.APIKey {
 	return predicate.APIKey(sql.FieldEQ(FieldManagedDeviceID, v))
@@ -608,6 +613,71 @@ func PurposeEqualFold(v string) predicate.APIKey {
 // PurposeContainsFold applies the ContainsFold predicate on the "purpose" field.
 func PurposeContainsFold(v string) predicate.APIKey {
 	return predicate.APIKey(sql.FieldContainsFold(FieldPurpose, v))
+}
+
+// ServiceTierPreferenceEQ applies the EQ predicate on the "service_tier_preference" field.
+func ServiceTierPreferenceEQ(v string) predicate.APIKey {
+	return predicate.APIKey(sql.FieldEQ(FieldServiceTierPreference, v))
+}
+
+// ServiceTierPreferenceNEQ applies the NEQ predicate on the "service_tier_preference" field.
+func ServiceTierPreferenceNEQ(v string) predicate.APIKey {
+	return predicate.APIKey(sql.FieldNEQ(FieldServiceTierPreference, v))
+}
+
+// ServiceTierPreferenceIn applies the In predicate on the "service_tier_preference" field.
+func ServiceTierPreferenceIn(vs ...string) predicate.APIKey {
+	return predicate.APIKey(sql.FieldIn(FieldServiceTierPreference, vs...))
+}
+
+// ServiceTierPreferenceNotIn applies the NotIn predicate on the "service_tier_preference" field.
+func ServiceTierPreferenceNotIn(vs ...string) predicate.APIKey {
+	return predicate.APIKey(sql.FieldNotIn(FieldServiceTierPreference, vs...))
+}
+
+// ServiceTierPreferenceGT applies the GT predicate on the "service_tier_preference" field.
+func ServiceTierPreferenceGT(v string) predicate.APIKey {
+	return predicate.APIKey(sql.FieldGT(FieldServiceTierPreference, v))
+}
+
+// ServiceTierPreferenceGTE applies the GTE predicate on the "service_tier_preference" field.
+func ServiceTierPreferenceGTE(v string) predicate.APIKey {
+	return predicate.APIKey(sql.FieldGTE(FieldServiceTierPreference, v))
+}
+
+// ServiceTierPreferenceLT applies the LT predicate on the "service_tier_preference" field.
+func ServiceTierPreferenceLT(v string) predicate.APIKey {
+	return predicate.APIKey(sql.FieldLT(FieldServiceTierPreference, v))
+}
+
+// ServiceTierPreferenceLTE applies the LTE predicate on the "service_tier_preference" field.
+func ServiceTierPreferenceLTE(v string) predicate.APIKey {
+	return predicate.APIKey(sql.FieldLTE(FieldServiceTierPreference, v))
+}
+
+// ServiceTierPreferenceContains applies the Contains predicate on the "service_tier_preference" field.
+func ServiceTierPreferenceContains(v string) predicate.APIKey {
+	return predicate.APIKey(sql.FieldContains(FieldServiceTierPreference, v))
+}
+
+// ServiceTierPreferenceHasPrefix applies the HasPrefix predicate on the "service_tier_preference" field.
+func ServiceTierPreferenceHasPrefix(v string) predicate.APIKey {
+	return predicate.APIKey(sql.FieldHasPrefix(FieldServiceTierPreference, v))
+}
+
+// ServiceTierPreferenceHasSuffix applies the HasSuffix predicate on the "service_tier_preference" field.
+func ServiceTierPreferenceHasSuffix(v string) predicate.APIKey {
+	return predicate.APIKey(sql.FieldHasSuffix(FieldServiceTierPreference, v))
+}
+
+// ServiceTierPreferenceEqualFold applies the EqualFold predicate on the "service_tier_preference" field.
+func ServiceTierPreferenceEqualFold(v string) predicate.APIKey {
+	return predicate.APIKey(sql.FieldEqualFold(FieldServiceTierPreference, v))
+}
+
+// ServiceTierPreferenceContainsFold applies the ContainsFold predicate on the "service_tier_preference" field.
+func ServiceTierPreferenceContainsFold(v string) predicate.APIKey {
+	return predicate.APIKey(sql.FieldContainsFold(FieldServiceTierPreference, v))
 }
 
 // ManagedDeviceIDEQ applies the EQ predicate on the "managed_device_id" field.

@@ -31,6 +31,7 @@ import (
 var (
 	ErrUserNotFound             = infraerrors.NotFound("USER_NOT_FOUND", "user not found")
 	ErrPasswordIncorrect        = infraerrors.BadRequest("PASSWORD_INCORRECT", "current password is incorrect")
+	ErrBalanceNegative          = infraerrors.BadRequest("BALANCE_NEGATIVE", "balance cannot be negative")
 	ErrInsufficientPerms        = infraerrors.Forbidden("INSUFFICIENT_PERMISSIONS", "insufficient permissions")
 	ErrNotifyCodeUserRateLimit  = infraerrors.TooManyRequests("NOTIFY_CODE_USER_RATE_LIMIT", "too many verification codes requested, please try again later")
 	ErrAvatarInvalid            = infraerrors.BadRequest("AVATAR_INVALID", "avatar must be a valid image data URL or http(s) URL")
@@ -83,6 +84,31 @@ type UserListFilters struct {
 	IncludeDeleted bool
 }
 
+// UserUpdateFields declares which user columns an Update call may write.
+// Fields maintained by atomic billing paths (balance, total_recharged and
+// counters) are intentionally absent so stale snapshots cannot roll them back.
+type UserUpdateFields struct {
+	Email                    bool
+	Username                 bool
+	Notes                    bool
+	PasswordHash             bool
+	Role                     bool
+	Status                   bool
+	Concurrency              bool
+	RPMLimit                 bool
+	SignupSource             bool
+	LastLoginAt              bool
+	LastActiveAt             bool
+	BalanceNotifySettings    bool
+	BalanceNotifyExtraEmails bool
+	AllowedGroups            bool
+}
+
+func (f UserUpdateFields) IsEmpty() bool { return f == (UserUpdateFields{}) }
+
+// BalanceChange reports an atomic balance mutation.
+type BalanceChange struct{ Old, New float64 }
+
 type UserRepository interface {
 	Create(ctx context.Context, user *User) error
 	GetByID(ctx context.Context, id int64) (*User, error)
@@ -90,7 +116,7 @@ type UserRepository interface {
 	GetByIDIncludeDeleted(ctx context.Context, id int64) (*User, error)
 	GetByEmail(ctx context.Context, email string) (*User, error)
 	GetFirstAdmin(ctx context.Context) (*User, error)
-	Update(ctx context.Context, user *User) error
+	Update(ctx context.Context, user *User, fields UserUpdateFields) error
 	Delete(ctx context.Context, id int64) error
 	GetUserAvatar(ctx context.Context, userID int64) (*UserAvatar, error)
 	UpsertUserAvatar(ctx context.Context, userID int64, input UpsertUserAvatarInput) (*UserAvatar, error)
@@ -433,22 +459,40 @@ func (s *UserService) updateProfile(ctx context.Context, userID int64, req Updat
 		return nil, 0, fmt.Errorf("get user: %w", err)
 	}
 	oldConcurrency := user.Concurrency
+	var fields UserUpdateFields
 
 	// 更新字段
 	if req.Email != nil {
-		// 检查新邮箱是否已被使用
+		// 先做快速精确查重，再检查 provider alias。最终的并发安全检查由
+		// userRepository.Update 在目标邮箱/收件箱锁内复查；这里仅用于尽早
+		// 返回业务错误，避免继续执行头像等其它资料操作。
 		exists, err := s.userRepo.ExistsByEmail(ctx, *req.Email)
 		if err != nil {
 			return nil, oldConcurrency, fmt.Errorf("check email exists: %w", err)
 		}
-		if exists && *req.Email != user.Email {
+		if exists && !strings.EqualFold(strings.TrimSpace(*req.Email), strings.TrimSpace(user.Email)) {
 			return nil, oldConcurrency, ErrEmailExists
 		}
+		if !exists && NormalizeEmailForAliasDedup(user.Email) != NormalizeEmailForAliasDedup(*req.Email) {
+			aliasRepo, ok := s.userRepo.(emailAliasLookupRepository)
+			if !ok {
+				return nil, oldConcurrency, fmt.Errorf("check email alias exists: %w", ErrServiceUnavailable)
+			}
+			aliasExists, err := aliasRepo.ExistsByEmailAlias(ctx, *req.Email)
+			if err != nil {
+				return nil, oldConcurrency, fmt.Errorf("check email alias exists: %w", err)
+			}
+			if aliasExists {
+				return nil, oldConcurrency, ErrEmailExists
+			}
+		}
 		user.Email = *req.Email
+		fields.Email = true
 	}
 
 	if req.Username != nil {
 		user.Username = *req.Username
+		fields.Username = true
 	}
 
 	if req.AvatarURL != nil {
@@ -461,10 +505,12 @@ func (s *UserService) updateProfile(ctx context.Context, userID int64, req Updat
 
 	if req.Concurrency != nil {
 		user.Concurrency = *req.Concurrency
+		fields.Concurrency = true
 	}
 
 	if req.BalanceNotifyEnabled != nil {
 		user.BalanceNotifyEnabled = *req.BalanceNotifyEnabled
+		fields.BalanceNotifySettings = true
 	}
 	if req.BalanceNotifyThreshold != nil {
 		if *req.BalanceNotifyThreshold <= 0 {
@@ -472,9 +518,10 @@ func (s *UserService) updateProfile(ctx context.Context, userID int64, req Updat
 		} else {
 			user.BalanceNotifyThreshold = req.BalanceNotifyThreshold
 		}
+		fields.BalanceNotifySettings = true
 	}
 
-	if err := s.userRepo.Update(ctx, user); err != nil {
+	if err := s.userRepo.Update(ctx, user, fields); err != nil {
 		return nil, oldConcurrency, fmt.Errorf("update user: %w", err)
 	}
 
@@ -961,7 +1008,7 @@ func (s *UserService) ChangePassword(ctx context.Context, userID int64, req Chan
 	// This ensures that any tokens issued before the password change become invalid
 	user.TokenVersion++
 
-	if err := s.userRepo.Update(ctx, user); err != nil {
+	if err := s.userRepo.Update(ctx, user, UserUpdateFields{PasswordHash: true}); err != nil {
 		return fmt.Errorf("update user: %w", err)
 	}
 
@@ -1116,7 +1163,7 @@ func (s *UserService) UpdateStatus(ctx context.Context, userID int64, status str
 
 	user.Status = status
 
-	if err := s.userRepo.Update(ctx, user); err != nil {
+	if err := s.userRepo.Update(ctx, user, UserUpdateFields{Status: true}); err != nil {
 		return fmt.Errorf("update user: %w", err)
 	}
 	if s.authCacheInvalidator != nil {
@@ -1276,7 +1323,7 @@ func (s *UserService) addOrVerifyNotifyEmail(ctx context.Context, userID int64, 
 		if strings.EqualFold(e.Email, email) {
 			if !e.Verified {
 				user.BalanceNotifyExtraEmails[i].Verified = true
-				return s.userRepo.Update(ctx, user)
+				return s.userRepo.Update(ctx, user, UserUpdateFields{BalanceNotifyExtraEmails: true})
 			}
 			return nil // Already verified
 		}
@@ -1289,7 +1336,7 @@ func (s *UserService) addOrVerifyNotifyEmail(ctx context.Context, userID int64, 
 		Disabled: false,
 		Verified: true,
 	})
-	return s.userRepo.Update(ctx, user)
+	return s.userRepo.Update(ctx, user, UserUpdateFields{BalanceNotifyExtraEmails: true})
 }
 
 // RemoveNotifyEmail removes an email from user's extra notification emails.
@@ -1312,7 +1359,7 @@ func (s *UserService) RemoveNotifyEmail(ctx context.Context, userID int64, email
 		return infraerrors.BadRequest("EMAIL_NOT_FOUND", "notification email not found")
 	}
 	user.BalanceNotifyExtraEmails = filtered
-	return s.userRepo.Update(ctx, user)
+	return s.userRepo.Update(ctx, user, UserUpdateFields{BalanceNotifyExtraEmails: true})
 }
 
 // ToggleNotifyEmail toggles the disabled state of a notification email entry.
@@ -1334,7 +1381,7 @@ func (s *UserService) ToggleNotifyEmail(ctx context.Context, userID int64, email
 		return infraerrors.BadRequest("EMAIL_NOT_FOUND", "notification email not found")
 	}
 
-	return s.userRepo.Update(ctx, user)
+	return s.userRepo.Update(ctx, user, UserUpdateFields{BalanceNotifyExtraEmails: true})
 }
 
 // notifyVerifyEmailTemplate is the HTML template for notify email verification.

@@ -150,6 +150,24 @@ func TestUpdateExtraNilProbeRemovesKeyInsteadOfWritingJSONNull(t *testing.T) {
 	require.NoError(t, mock.ExpectationsWereMet())
 }
 
+func TestUpdateExtraNilCodexWindowUsesGenericTombstoneDeletion(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = db.Close() })
+	client := dbent.NewClient(dbent.Driver(entsql.OpenDB(dialect.Postgres, db)))
+	t.Cleanup(func() { _ = client.Close() })
+
+	mock.ExpectExec(`(?s)UPDATE accounts SET extra = .*jsonb_each\(\$1::jsonb\).*entry\.value = 'null'::jsonb.*WHERE id = \$2`).
+		WithArgs(`{"codex_5h_used_percent":null}`, int64(27)).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	repo := newAccountRepositoryWithSQL(client, db, nil)
+
+	err = repo.UpdateExtra(context.Background(), 27, map[string]any{"codex_5h_used_percent": nil})
+
+	require.NoError(t, err)
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
 func TestBulkUpdateNilProbeRemovesKeyInsteadOfWritingJSONNull(t *testing.T) {
 	db, mock, err := sqlmock.New()
 	require.NoError(t, err)

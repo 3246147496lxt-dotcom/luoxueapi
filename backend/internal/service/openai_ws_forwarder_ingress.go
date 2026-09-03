@@ -201,7 +201,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClientSession(
 
 		// 仅在确实需要修改 payload 且 sjson 失败时，退回 map 路径确保兼容性。
 		payload := make(map[string]any)
-		if unmarshalErr := json.Unmarshal(current, &payload); unmarshalErr != nil {
+		if unmarshalErr := decodeOpenAIJSONUseNumber(current, &payload); unmarshalErr != nil {
 			return nil, err
 		}
 		switch path {
@@ -288,8 +288,8 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClientSession(
 			}
 			normalized = next
 		}
-		if account.IsOpenAIOAuth() && isOpenAIResponsesLiteWebSocketPayload(normalized) {
-			litePayload, _, liteErr := normalizeOpenAIResponsesLiteToolsPayload(normalized)
+		if account.IsOpenAI() && isOpenAIResponsesLiteWebSocketPayload(normalized) {
+			litePayload, _, liteErr := normalizeOpenAIResponsesLitePayloadForAccount(normalized, account)
 			if liteErr != nil {
 				return openAIWSClientPayload{}, NewOpenAIWSClientCloseError(
 					coderws.StatusPolicyViolation,
@@ -298,6 +298,19 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClientSession(
 				)
 			}
 			normalized = litePayload
+		}
+		if account.IsOpenAIApiKey() {
+			parallelPayload, parallelChanged, parallelErr := normalizeOpenAIParallelToolCallsWithoutTools(normalized)
+			if parallelErr != nil {
+				return openAIWSClientPayload{}, NewOpenAIWSClientCloseError(
+					coderws.StatusPolicyViolation,
+					parallelErr.Error(),
+					parallelErr,
+				)
+			}
+			if parallelChanged {
+				normalized = parallelPayload
+			}
 		}
 		apiKey := getAPIKeyFromContext(c)
 		imageGenerationAllowed := GroupAllowsImageGeneration(apiKeyGroup(apiKey))
@@ -312,7 +325,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClientSession(
 			s.isCodexImageGenerationBridgeEnabled(ctx, account, apiKey)
 		if codexBridgeEnabled {
 			payloadMap := make(map[string]any)
-			if err := json.Unmarshal(normalized, &payloadMap); err != nil {
+			if err := decodeOpenAIJSONUseNumber(normalized, &payloadMap); err != nil {
 				return openAIWSClientPayload{}, NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "invalid websocket request payload", err)
 			}
 			bridgeModified := false
@@ -377,6 +390,17 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClientSession(
 			imageBillingModel = imageCfg.Model
 			imageSizeTier = imageCfg.SizeTier
 			imageInputSize = imageCfg.InputSize
+		}
+
+		// Apply the API-key default before OpenAI Fast Policy on the response.create
+		// frame. Follow-up frames pass through this same closure, preserving the
+		// explicit-field precedence and capability gate without network I/O.
+		if !imageIntent {
+			if updatedPayload, injected, injectErr := s.injectDefaultOpenAIServiceTier(ctx, c, account, upstreamModel, normalized); injectErr != nil {
+				return openAIWSClientPayload{}, NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "invalid websocket request payload", injectErr)
+			} else if injected {
+				normalized = updatedPayload
+			}
 		}
 
 		// Apply OpenAI Fast Policy on the response.create frame using the same
@@ -808,6 +832,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClientSession(
 	}
 
 	sendAndRelay := func(turn int, lease *openAIWSConnLease, payload []byte, payloadBytes int, originalModel string, imageBillingModel string, imageSizeTier string, imageInputSize string) (*OpenAIForwardResult, error) {
+		responseModelObserver := &upstreamResponseModelObserver{}
 		if lease == nil {
 			return nil, errors.New("upstream websocket lease is nil")
 		}
@@ -869,6 +894,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClientSession(
 			}
 
 			eventType, eventResponseID, _ := parseOpenAIWSEventEnvelope(upstreamMessage)
+			responseModelObserver.ObserveOpenAI(upstreamMessage, eventType)
 			if responseID == "" && eventResponseID != "" {
 				responseID = eventResponseID
 			}
@@ -1036,18 +1062,20 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClientSession(
 				}
 				imageCount := imageCounter.Count()
 				result := &OpenAIForwardResult{
-					RequestID:             responseID,
-					Usage:                 usage,
-					Model:                 originalModel,
-					UpstreamModel:         mappedModel,
-					ServiceTier:           extractOpenAIServiceTierFromBody(payload),
-					ReasoningEffort:       ApplyThinkingEnabledFallback(extractOpenAIReasoningEffortFromBody(payload, mappedModel, originalModel), payload, mappedModel),
-					Stream:                reqStream,
-					OpenAIWSMode:          true,
-					UpstreamTerminalEvent: terminalEvent,
-					ResponseHeaders:       lease.HandshakeHeaders(),
-					Duration:              time.Since(turnStart),
-					FirstTokenMs:          firstTokenMs,
+					RequestID:                     responseID,
+					Usage:                         usage,
+					Model:                         originalModel,
+					UpstreamModel:                 mappedModel,
+					UpstreamResponseModel:         responseModelObserver.Model(),
+					UpstreamResponseModelConflict: responseModelObserver.Conflict(),
+					ServiceTier:                   extractOpenAIServiceTierFromBody(payload),
+					ReasoningEffort:               ApplyThinkingEnabledFallback(extractOpenAIReasoningEffortFromBody(payload, mappedModel, originalModel), payload, mappedModel),
+					Stream:                        reqStream,
+					OpenAIWSMode:                  true,
+					UpstreamTerminalEvent:         terminalEvent,
+					ResponseHeaders:               lease.HandshakeHeaders(),
+					Duration:                      time.Since(turnStart),
+					FirstTokenMs:                  firstTokenMs,
 				}
 				if replayInput := replayCollector.Items(); len(replayInput) > 0 {
 					result.wsReplayInput = replayInput
@@ -1269,7 +1297,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClientSession(
 		}
 		if toolSignals.HasFunctionCallOutput {
 			var currentReqBody map[string]any
-			if err := json.Unmarshal(currentPayload, &currentReqBody); err == nil {
+			if err := decodeOpenAIJSONUseNumber(currentPayload, &currentReqBody); err == nil {
 				toolSignals = AnalyzeToolContinuationSignals(currentReqBody)
 			}
 		}

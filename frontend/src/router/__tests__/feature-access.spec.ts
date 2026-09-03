@@ -7,7 +7,10 @@ type NavigationGuard = (
 ) => Promise<void>
 
 const routerHarness = vi.hoisted(() => ({
-  guard: null as NavigationGuard | null,
+  guards: {
+    user: null as NavigationGuard | null,
+    admin: null as NavigationGuard | null,
+  },
 }))
 
 const authStore = vi.hoisted(() => ({
@@ -25,6 +28,7 @@ const appStore = vi.hoisted(() => ({
   cachedPublicSettings: null as null | {
     payment_enabled?: boolean
     risk_control_enabled?: boolean
+    skill_marketplace_enabled?: boolean
     custom_menu_items?: []
   },
   fetchPublicSettings: vi.fn(),
@@ -39,13 +43,18 @@ const adminComplianceStore = vi.hoisted(() => ({
 
 vi.mock('vue-router', () => ({
   createWebHistory: vi.fn(() => ({})),
-  createRouter: vi.fn(() => ({
-    beforeEach: vi.fn((guard: NavigationGuard) => {
-      routerHarness.guard = guard
-    }),
-    afterEach: vi.fn(),
-    onError: vi.fn(),
-  })),
+  createRouter: vi.fn((options: { routes: Array<{ name?: string }> }) => {
+    const entry = options.routes.some((route) => route.name === 'AdminDashboard')
+      ? 'admin'
+      : 'user'
+    return {
+      beforeEach: vi.fn((guard: NavigationGuard) => {
+        routerHarness.guards[entry] = guard
+      }),
+      afterEach: vi.fn(),
+      onError: vi.fn(),
+    }
+  }),
 }))
 
 vi.mock('@/stores/auth', () => ({
@@ -94,7 +103,9 @@ function runGuard(
   query: Record<string, string | string[]> = {},
   hash = '',
 ) {
-  if (!routerHarness.guard) {
+  const entry = path === '/admin' || path.startsWith('/admin/') ? 'admin' : 'user'
+  const guard = routerHarness.guards[entry]
+  if (!guard) {
     throw new Error('router guard was not registered')
   }
 
@@ -106,7 +117,7 @@ function runGuard(
   })
   const search = searchParams.toString()
   const fullPath = `${path}${search ? `?${search}` : ''}${hash}`
-  const navigation = routerHarness.guard(
+  const navigation = guard(
     {
       path,
       fullPath,
@@ -125,6 +136,7 @@ function runGuard(
 describe('feature route guard', () => {
   beforeAll(async () => {
     await import('@/router')
+    await import('@/router/admin')
   })
 
   beforeEach(() => {
@@ -162,6 +174,79 @@ describe('feature route guard', () => {
     await navigation
     expect(next).toHaveBeenCalledOnce()
     expect(next).toHaveBeenCalledWith()
+  })
+
+  it('always refreshes the Skill marketplace flag before opening a public Skill route', async () => {
+    appStore.publicSettingsLoaded = true
+    appStore.cachedPublicSettings = { skill_marketplace_enabled: true }
+    appStore.fetchPublicSettings.mockImplementation(async () => {
+      const settings = { skill_marketplace_enabled: false }
+      appStore.cachedPublicSettings = settings
+      return settings
+    })
+
+    const { navigation, next } = runGuard(
+      { requiresAuth: false, requiresSkillMarketplace: true },
+      '/skills/frontend-design',
+    )
+    await navigation
+
+    expect(appStore.fetchPublicSettings).toHaveBeenCalledOnce()
+    expect(appStore.fetchPublicSettings).toHaveBeenCalledWith(true)
+    expect(next).toHaveBeenCalledWith('/home')
+  })
+
+  it('opens a public Skill route after the refreshed flag is enabled', async () => {
+    appStore.publicSettingsLoaded = true
+    appStore.cachedPublicSettings = { skill_marketplace_enabled: false }
+    appStore.fetchPublicSettings.mockImplementation(async () => {
+      const settings = { skill_marketplace_enabled: true }
+      appStore.cachedPublicSettings = settings
+      return settings
+    })
+
+    const { navigation, next } = runGuard(
+      { requiresAuth: false, requiresSkillMarketplace: true },
+      '/skills',
+    )
+    await navigation
+
+    expect(appStore.fetchPublicSettings).toHaveBeenCalledOnce()
+    expect(appStore.fetchPublicSettings).toHaveBeenCalledWith(true)
+    expect(next).toHaveBeenCalledOnce()
+    expect(next).toHaveBeenCalledWith()
+  })
+
+  it('fails closed when the Skill marketplace flag cannot be refreshed', async () => {
+    appStore.publicSettingsLoaded = true
+    appStore.cachedPublicSettings = { skill_marketplace_enabled: true }
+    appStore.fetchPublicSettings.mockResolvedValue(null)
+
+    const { navigation, next } = runGuard(
+      { requiresAuth: false, requiresSkillMarketplace: true },
+      '/skills',
+    )
+    await navigation
+
+    expect(next).toHaveBeenCalledOnce()
+    expect(next).toHaveBeenCalledWith('/home')
+  })
+
+  it('revalidates the Skill marketplace flag inside the authenticated Work shell', async () => {
+    appStore.publicSettingsLoaded = true
+    appStore.cachedPublicSettings = { skill_marketplace_enabled: true }
+    appStore.fetchPublicSettings.mockResolvedValue({ skill_marketplace_enabled: false })
+
+    const { navigation, next } = runGuard(
+      { requiresAuth: true, requiresSkillMarketplace: true },
+      '/skills',
+    )
+    await navigation
+
+    expect(appStore.fetchPublicSettings).toHaveBeenCalledOnce()
+    expect(appStore.fetchPublicSettings).toHaveBeenCalledWith(true)
+    expect(next).toHaveBeenCalledOnce()
+    expect(next).toHaveBeenCalledWith('/dashboard')
   })
 
   it('waits for public settings before opening a fresh subscription plan bridge', async () => {

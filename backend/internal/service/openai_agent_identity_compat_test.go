@@ -161,6 +161,29 @@ func TestOpenAIAgentIdentityPassthroughKeepsSessionAndPromptCacheHeaders(t *test
 	require.Equal(t, oauthReq.Header.Get("conversation_id"), req.Header.Get("conversation_id"))
 }
 
+func TestOpenAIOAuthPassthroughIsolatesHyphenatedSessionID(t *testing.T) {
+	setGinTestMode()
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	body := []byte(`{"model":"gpt-5.4","instructions":"Reply OK","input":[],"stream":true}`)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(body))
+	c.Request.Header.Set("session-id", "codex-session")
+
+	account := &Account{
+		ID:       27,
+		Platform: PlatformOpenAI,
+		Type:     AccountTypeOAuth,
+		Credentials: map[string]any{
+			"chatgpt_account_id": "account-oauth-hyphen",
+		},
+	}
+	svc := &OpenAIGatewayService{}
+	upstreamReq, err := svc.buildUpstreamRequestOpenAIPassthrough(context.Background(), c, account, body, "oauth-token")
+	require.NoError(t, err)
+	require.Empty(t, upstreamReq.Header.Get("session-id"))
+	require.Equal(t, isolateOpenAISessionID(0, "codex-session"), upstreamReq.Header.Get("session_id"))
+}
+
 func TestOpenAIAgentIdentityErrorRedactionDoesNotLeakCredentialValues(t *testing.T) {
 	key, privateKey := newTestAgentIdentityKey(t)
 	account := &Account{

@@ -1,10 +1,23 @@
 package service
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 )
+
+func TestLimitContentModerationImagesKeepsFourRuntimeImages(t *testing.T) {
+	images := make([]string, 6)
+	for i := range images {
+		images[i] = fmt.Sprintf("https://example.com/%d.png", i)
+	}
+	limited := limitContentModerationImages(images)
+	require.Len(t, limited, 4)
+	for _, image := range limited {
+		require.Contains(t, images, image)
+	}
+}
 
 // 当数组末尾不是用户消息时（典型场景：Agent 工具循环结束于 tool/assistant），
 // 应直接跳过审计——不再回溯查找历史中的某条用户消息。

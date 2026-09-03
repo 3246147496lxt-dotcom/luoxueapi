@@ -12,6 +12,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/handler"
 	"github.com/Wei-Shaw/sub2api/internal/lifecycle"
 	schedulerapp "github.com/Wei-Shaw/sub2api/internal/modules/scheduler/application"
+	skillimportapp "github.com/Wei-Shaw/sub2api/internal/modules/skillimport/application"
 	applogger "github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/websearch"
 	"github.com/Wei-Shaw/sub2api/internal/repository"
@@ -26,6 +27,8 @@ import (
 func buildApplicationSupervisor(
 	pricing *service.PricingService,
 	settingService *service.SettingService,
+	skillMarket *service.SkillMarketService,
+	skillImportWorker *skillimportapp.WorkerRuntime,
 	routerSettingsRuntime *server.RouterSettingsRuntime,
 	opsService *service.OpsService,
 	idempotencyCoordinator *service.IdempotencyCoordinator,
@@ -59,6 +62,8 @@ func buildApplicationSupervisor(
 	idempotencyCleanup *service.IdempotencyCleanupService,
 	desktopCleanup *service.DesktopCleanupService,
 	chatAttemptRecovery *service.ChatAttemptService,
+	chatAttachmentCleanup *service.ChatAttachmentService,
+	libraryCleanup *service.LibraryService,
 	dashboardAggregation *service.DashboardAggregationService,
 	usageCleanup *service.UsageCleanupService,
 	opsMetricsCollector *service.OpsMetricsCollector,
@@ -188,7 +193,6 @@ func buildApplicationSupervisor(
 		applicationVoidLifecycleComponent("openai-websocket-pool", nil, openAIGateway.CloseOpenAIWSPool),
 		applicationVoidLifecycleComponent("email-queue", emailQueue.Start, emailQueue.Stop),
 		applicationVoidLifecycleComponent("usage-record-worker-pool", usageRecordWorkerPool.Start, usageRecordWorkerPool.Stop),
-		applicationVoidLifecycleComponent("batch-image-worker", batchImageWorker.Start, batchImageWorker.Stop),
 		lifecycle.ComponentFuncs{
 			ComponentName: "api-key-cache-subscriber",
 			StartFunc: func(ctx context.Context) error {
@@ -261,6 +265,12 @@ func buildApplicationSupervisor(
 			StartFunc:     chatAttemptRecovery.StartRecovery,
 			StopFunc:      chatAttemptRecovery.StopRecovery,
 		},
+		applicationVoidLifecycleComponent("library-cleanup", libraryCleanup.Start, libraryCleanup.Stop),
+		applicationVoidLifecycleComponent("chat-attachment-cleanup", chatAttachmentCleanup.Start, chatAttachmentCleanup.Stop),
+		// The batch worker imports generated images through LibraryService. Keep it
+		// after both storage consumers so reverse-order shutdown stops the worker
+		// before either shared blob-store lifecycle is closed.
+		applicationVoidLifecycleComponent("batch-image-worker", batchImageWorker.Start, batchImageWorker.Stop),
 		lifecycle.ComponentFuncs{
 			ComponentName: "dashboard-aggregation",
 			StartFunc: func(context.Context) error {
@@ -292,6 +302,16 @@ func buildApplicationSupervisor(
 		applicationVoidLifecycleComponent("payment-order-expiry", paymentOrderExpiry.Start, paymentOrderExpiry.Stop),
 		applicationVoidLifecycleComponent("channel-monitor", channelMonitorRunner.Start, channelMonitorRunner.Stop),
 		applicationVoidLifecycleComponent("upstream-billing-probe", upstreamBillingProbe.Start, upstreamBillingProbe.Stop),
+		lifecycle.ComponentFuncs{
+			ComponentName: "skill-market-github-stars",
+			StartFunc:     skillMarket.Start,
+			StopFunc:      skillMarket.Stop,
+		},
+		lifecycle.ComponentFuncs{
+			ComponentName: "skill-import-worker",
+			StartFunc:     skillImportWorker.Start,
+			StopFunc:      skillImportWorker.Stop,
+		},
 	)
 }
 

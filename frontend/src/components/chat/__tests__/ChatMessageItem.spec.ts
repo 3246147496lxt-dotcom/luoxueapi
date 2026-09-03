@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 import { mount } from '@vue/test-utils'
 import ChatMessageItem from '../ChatMessageItem.vue'
@@ -25,6 +27,11 @@ const RouterLinkStub = {
   template: '<a :href="to"><slot /></a>',
 }
 
+const ChatMessageAttachmentsStub = {
+  props: ['attachments'],
+  template: '<div class="chat-message-attachments" data-test="message-attachments"></div>',
+}
+
 function assistantMessage(overrides: Partial<ChatMessage> = {}): ChatMessage {
   return {
     id: 'assistant-1',
@@ -36,11 +43,29 @@ function assistantMessage(overrides: Partial<ChatMessage> = {}): ChatMessage {
   }
 }
 
-function mountMessage(message: ChatMessage) {
+function userMessage(overrides: Partial<ChatMessage> = {}): ChatMessage {
+  return {
+    id: 'user-1',
+    role: 'user',
+    content: '',
+    createdAt: 1,
+    status: 'complete',
+    ...overrides,
+  }
+}
+
+interface MessageStateProps {
+  retryable?: boolean
+  retrying?: boolean
+  announceFailure?: boolean
+}
+
+function mountMessage(message: ChatMessage, state: MessageStateProps = {}) {
   return mount(ChatMessageItem, {
-    props: { message },
+    props: { message, ...state },
     global: {
       stubs: {
+        ChatMessageAttachments: ChatMessageAttachmentsStub,
         Icon: IconStub,
         RouterLink: RouterLinkStub,
       },
@@ -94,89 +119,413 @@ describe('ChatMessageItem safe Markdown rendering', () => {
     expect(link.attributes('href')).toBe('https://example.com/docs')
     expect(link.attributes('title')).toBe('文档')
     expect(markdown.get('p code').text()).toBe('const value = 1')
+    expect(markdown.get('pre').attributes('data-language')).toBe('TypeScript')
     expect(markdown.get('pre code').text()).toContain('const answer = 42')
   })
 
-  it('streaming 阶段仅输出转义纯文本，不挂载富 HTML', () => {
+  it('保留标题、列表、引用、表格与分隔线的语义结构', () => {
+    const wrapper = mountMessage(assistantMessage({
+      content: [
+        '## 小标题',
+        '',
+        '- 第一项',
+        '  - 子项',
+        '- 第二项',
+        '',
+        '> 引用内容',
+        '',
+        '| 名称 | 状态 |',
+        '| --- | --- |',
+        '| Chat | 可用 |',
+        '',
+        '---',
+      ].join('\n'),
+    }))
+
+    const markdown = wrapper.get('.chat-message__markdown')
+    expect(markdown.get('h2').text()).toBe('小标题')
+    expect(markdown.findAll('ul')).toHaveLength(2)
+    expect(markdown.get('blockquote').text()).toBe('引用内容')
+    expect(markdown.get('table th').text()).toBe('名称')
+    expect(markdown.get('table td').text()).toBe('Chat')
+    expect(markdown.find('hr').exists()).toBe(true)
+  })
+
+  it('支持三种标准 Markdown 分隔线并保留 Setext 标题语义', () => {
+    const wrapper = mountMessage(assistantMessage({
+      content: [
+        '第一层',
+        '',
+        '---',
+        '',
+        '第二层',
+        '',
+        '***',
+        '',
+        '第三层',
+        '',
+        '___',
+        '',
+        'Setext 标题',
+        '---',
+      ].join('\n'),
+    }))
+
+    const markdown = wrapper.get('.chat-message__markdown')
+    expect(markdown.findAll('hr')).toHaveLength(3)
+    expect(markdown.get('h2').text()).toBe('Setext 标题')
+  })
+
+  it('空的完整回复不会占用一个不可见操作栏', () => {
+    const wrapper = mountMessage(assistantMessage())
+    expect(wrapper.find('.chat-message__actions').exists()).toBe(false)
+  })
+
+  it('只为含非空官方摘要的 assistant message 提供查看活动入口', async () => {
+    const wrapper = mountMessage(assistantMessage({
+      activities: [{
+        key: 'resp-1',
+        responseId: 'resp-1',
+        status: 'completed',
+        startedAt: 1,
+        updatedAt: 2,
+        completedAt: 2,
+        items: [{
+          key: 'item-1',
+          itemId: 'rs-1',
+          outputIndex: 0,
+          status: 'completed',
+          startedAt: 1,
+          updatedAt: 2,
+          completedAt: 2,
+          parts: [{
+            key: 'part-1',
+            itemId: 'rs-1',
+            outputIndex: 0,
+            summaryIndex: 0,
+            text: 'Official summary',
+            status: 'completed',
+            startedAt: 1,
+            updatedAt: 2,
+            completedAt: 2,
+          }],
+        }],
+      }],
+    }), { retryable: false })
+
+    const button = wrapper.get('.chat-message__activity-button')
+    expect(button.attributes('data-chat-activity-message-id')).toBe('assistant-1')
+    expect(button.attributes('aria-label')).toBe('chat.activity.view')
+    await button.trigger('click')
+    expect(wrapper.emitted('viewActivity')).toHaveLength(1)
+  })
+
+  it('流式摘要只有分片尚未合并时仍显示 Activity 入口', () => {
+    const wrapper = mountMessage(assistantMessage({
+      status: 'streaming',
+      activities: [{
+        key: 'resp-streaming',
+        responseId: 'resp-streaming',
+        status: 'streaming',
+        startedAt: 1,
+        updatedAt: 2,
+        items: [{
+          key: 'item-streaming',
+          itemId: 'rs-streaming',
+          outputIndex: 0,
+          status: 'streaming',
+          startedAt: 1,
+          updatedAt: 2,
+          parts: [{
+            key: 'part-streaming',
+            itemId: 'rs-streaming',
+            outputIndex: 0,
+            summaryIndex: 0,
+            text: '',
+            streamingTextChunks: ['Official ', 'summary'],
+            status: 'streaming',
+            startedAt: 1,
+            updatedAt: 2,
+          }],
+        }],
+      }],
+    }))
+
+    expect(wrapper.find('.chat-message__activity-button').exists()).toBe(true)
+  })
+
+  it('在触控设备上为查看活动入口保留至少 44px 的点击高度', () => {
+    const source = readFileSync(
+      resolve(process.cwd(), 'src/components/chat/ChatMessageItem.vue'),
+      'utf8',
+    )
+
+    expect(source).toMatch(
+      /@media \(hover: none\) and \(pointer: coarse\)[\s\S]*\.chat-message__activity-button[\s\S]*min-height: 44px/,
+    )
+  })
+
+  it('移除不安全协议并把未知代码语言限制为安全标签', () => {
+    const wrapper = mountMessage(assistantMessage({
+      content: [
+        '[危险链接](javascript:alert(1))',
+        '',
+        '```custom-language<script>',
+        '<img src=x onerror=alert(1)>',
+        '```',
+      ].join('\n'),
+    }))
+
+    const markdown = wrapper.get('.chat-message__markdown')
+    expect(markdown.get('a').attributes('href')).toBeUndefined()
+    expect(markdown.get('pre').attributes('data-language')).toBe('custom-language')
+    expect(markdown.get('pre code').text()).toContain('<img src=x onerror=alert(1)>')
+    expect(markdown.find('img').exists()).toBe(false)
+  })
+
+  it('空内容 streaming 只显示正文行首的单个呼吸圆点，并在首个可见 token 后切换为 Markdown', async () => {
+    const message = assistantMessage({
+      content: ' \n\t',
+      status: 'streaming',
+    })
+    const wrapper = mountMessage(message)
+    const article = wrapper.get('article').element
+
+    expect(wrapper.findAll('.chat-message__streaming-dot')).toHaveLength(1)
+    expect(wrapper.get('.chat-message__streaming-placeholder').attributes('aria-hidden')).toBe('true')
+    expect(wrapper.find('.chat-message__plain').exists()).toBe(false)
+    expect(wrapper.find('.chat-message__markdown').exists()).toBe(false)
+    expect(wrapper.find('.chat-message__meta').exists()).toBe(false)
+    expect(wrapper.text()).not.toContain('chat.message.generating')
+    expect(wrapper.get('article').attributes('aria-busy')).toBe('true')
+
+    await wrapper.setProps({
+      message: { ...message, content: ' \n**首个回答**' },
+    })
+
+    expect(wrapper.get('article').element).toBe(article)
+    expect(wrapper.find('.chat-message__streaming-dot').exists()).toBe(false)
+    expect(wrapper.find('.chat-message__plain').exists()).toBe(false)
+    expect(wrapper.get('.chat-message__markdown').classes()).toContain('chat-message__markdown--streaming')
+    expect(wrapper.get('.chat-message__markdown strong').text()).toBe('首个回答')
+    expect(wrapper.get('article').attributes('aria-busy')).toBe('true')
+
+    await wrapper.setProps({
+      message: { ...message, content: ' \n**首个回答**', status: 'complete' },
+    })
+
+    expect(wrapper.get('article').element).toBe(article)
+    expect(wrapper.get('.chat-message__markdown').classes()).not.toContain('chat-message__markdown--streaming')
+    expect(wrapper.get('.chat-message__markdown strong').text()).toBe('首个回答')
+    expect(wrapper.get('article').attributes('aria-busy')).toBeUndefined()
+    expect(wrapper.find('.chat-message__actions').exists()).toBe(true)
+  })
+
+  it('streaming Markdown 复用完成态的安全清洗链路', () => {
     const content = '<form action="https://evil.example"><input autofocus><strong>继续</strong></form>'
     const wrapper = mountMessage(assistantMessage({
       content,
       status: 'streaming',
     }))
 
-    expect(wrapper.find('.chat-message__markdown').exists()).toBe(false)
-    expect(wrapper.get('.chat-message__plain').text()).toBe(content)
+    expect(wrapper.find('.chat-message__plain').exists()).toBe(false)
     expect(wrapper.find('form').exists()).toBe(false)
     expect(wrapper.find('input').exists()).toBe(false)
-    expect(wrapper.find('strong').exists()).toBe(false)
-    expect(wrapper.get('.chat-message__plain').html()).toContain('&lt;form')
+    expect(wrapper.get('.chat-message__markdown strong').text()).toBe('继续')
+    expect(wrapper.find('[autofocus]').exists()).toBe(false)
+    expect(wrapper.get('article').attributes('aria-busy')).toBe('true')
   })
 
-  it('显示服务端结算回执、实际模型、Token、费用与余额', () => {
-    const wrapper = mountMessage(assistantMessage({
-      content: 'Done',
-      receiptId: 'receipt-1',
-      settlementStatus: 'charged',
-      actualModel: 'gpt-5.5-2026-07-01',
-      inputTokens: 1200,
-      outputTokens: 80,
-      cacheCreationTokens: 20,
-      cacheReadTokens: 900,
-      grossCost: 0.003,
-      chargedAmount: 0.0024,
-      balanceBefore: 0.5024,
-      balanceAfter: 0.5,
-    }))
-    const receipt = wrapper.get('[data-test="chat-receipt"]')
+  it.each(['complete', 'error', 'stopped'] as const)(
+    '%s 状态的空白内容不会继续显示 streaming 圆点',
+    (status) => {
+      const wrapper = mountMessage(assistantMessage({ content: '\n\t', status }))
 
-    expect(receipt.text()).toContain('chat.receipt.status.charged')
-    expect(receipt.text()).toContain('gpt-5.5-2026-07-01')
-    expect(receipt.text()).toContain('1,200')
-    expect(receipt.text()).toContain('900')
-    expect(receipt.text()).toContain('$0.003000')
-    expect(receipt.text()).not.toContain('$0.002400')
-    expect(receipt.text()).not.toContain('$0.50')
-    expect(receipt.findAll('[data-testid="credit-amount"]')).toHaveLength(3)
-    expect(receipt.findAll('[data-testid="credit-amount-value"]').map((item) => item.text()))
-      .toEqual(['0.002400', '0.50', '0.50'])
-    expect(receipt.findAll('[data-testid="snowflake-credit-icon"]')).toHaveLength(3)
-    expect(wrapper.get('[data-test="chat-receipt-recharge"]').attributes('href')).toBe('/purchase')
+      expect(wrapper.find('.chat-message__streaming-dot').exists()).toBe(false)
+      expect(wrapper.find('.chat-message__plain').exists()).toBe(false)
+      expect(wrapper.find('.chat-message__markdown').exists()).toBe(false)
+      expect(wrapper.find('.chat-message__actions').exists()).toBe(false)
+      if (status === 'error') {
+        expect(wrapper.get('.chat-message__failure').attributes('role')).toBe('group')
+        expect(wrapper.find('[role="alert"]').exists()).toBe(false)
+      }
+      if (status === 'stopped') expect(wrapper.get('.chat-message__status').text()).toBe('chat.message.stopped')
+    },
+  )
+
+  it.each([
+    ['Unauthorized', 'chat.errors.sessionExpired'],
+    ['Forbidden', 'chat.errors.permissionDenied'],
+    ['Bad Gateway', 'chat.errors.serviceUnavailable'],
+  ] as const)('不会展示历史消息中的原始 HTTP 错误 %s', (raw, expectedKey) => {
+    const wrapper = mountMessage(assistantMessage({
+      status: 'error',
+      errorMessage: raw,
+    }), { retryable: true })
+
+    expect(wrapper.get('.chat-message__error').text()).toContain(expectedKey)
+    expect(wrapper.find('[role="alert"]').exists()).toBe(false)
+    expect(wrapper.text()).not.toContain(raw)
   })
 
-  it('pending 回执仅显示核对状态，不提前展示或估算费用', () => {
-    const wrapper = mountMessage(assistantMessage({
-      content: 'Partial',
-      receiptId: 'receipt-pending',
-      settlementStatus: 'pending',
-      requestedModel: 'gpt-5.5',
-    }))
-    const receipt = wrapper.get('[data-test="chat-receipt"]')
-
-    expect(receipt.text()).toContain('chat.receipt.status.pending')
-    expect(receipt.find('.chat-message__receipt-details').exists()).toBe(false)
-    expect(receipt.find('[data-test="chat-receipt-recharge"]').exists()).toBe(false)
-    expect(receipt.text()).not.toContain('gpt-5.5')
-  })
-
-  it('订阅额度和未扣费状态使用独立结算文案', async () => {
-    const wrapper = mountMessage(assistantMessage({
-      receiptId: 'receipt-subscription',
-      settlementStatus: 'subscription',
-      chargedAmount: 0,
-    }))
-    expect(wrapper.get('[data-test="chat-receipt"]').text())
-      .toContain('chat.receipt.status.subscription')
-
-    await wrapper.setProps({
-      message: assistantMessage({
-        receiptId: 'receipt-free',
-        settlementStatus: 'not_charged',
-        chargedAmount: 0,
-      }),
+  it('只有本次实时失败才通过 alert 公告，历史失败保持安静', () => {
+    const message = assistantMessage({
+      status: 'error',
+      errorCode: 'HTTP_502',
+      errorMessage: 'Bad Gateway',
     })
-    expect(wrapper.get('[data-test="chat-receipt"]').text())
-      .toContain('chat.receipt.status.notCharged')
+    const historical = mountMessage(message, { retryable: true })
+    const live = mountMessage(message, { retryable: true, announceFailure: true })
+
+    expect(historical.find('[role="alert"]').exists()).toBe(false)
+    expect(live.get('.chat-message__error').attributes('role')).toBe('alert')
+    expect(live.get('[role="alert"]').text()).toContain('chat.errors.serviceUnavailable')
   })
+
+  it('可恢复失败在消息内显示文字重试按钮并触发 retry', async () => {
+    const wrapper = mountMessage(assistantMessage({
+      content: '已经生成的部分内容',
+      status: 'error',
+      errorCode: 'HTTP_502',
+      errorMessage: 'Bad Gateway',
+    }), { retryable: true })
+
+    expect(wrapper.get('.chat-message__markdown').text()).toBe('已经生成的部分内容')
+    expect(wrapper.get('.chat-message__failure').element.closest('article')).toBe(
+      wrapper.get('article').element,
+    )
+    expect(wrapper.get('.chat-message__retry-button').text()).toBe('chat.actions.retryFailed')
+    expect(wrapper.findAll('.chat-message__icon-button')).toHaveLength(1)
+
+    await wrapper.get('.chat-message__retry-button').trigger('click')
+    expect(wrapper.emitted('retry')).toHaveLength(1)
+  })
+
+  it('重试中保留失败按钮并呈现不可重复提交的忙碌状态', async () => {
+    const wrapper = mountMessage(assistantMessage({
+      status: 'error',
+      errorCode: 'NETWORK_ERROR',
+      errorMessage: 'Failed to fetch',
+    }), { retrying: true })
+
+    const button = wrapper.get<HTMLButtonElement>('.chat-message__retry-button')
+    expect(button.attributes('disabled')).toBeDefined()
+    expect(button.attributes('aria-busy')).toBe('true')
+    expect(button.text()).toBe('chat.actions.retrying')
+
+    await button.trigger('click')
+    expect(wrapper.emitted('retry')).toBeUndefined()
+  })
+
+  it('不可恢复和已被替代的失败不显示重试或旧错误', () => {
+    const forbidden = mountMessage(assistantMessage({
+      status: 'error',
+      errorCode: 'HTTP_403',
+      errorMessage: 'Forbidden',
+    }), { retryable: true })
+    expect(forbidden.find('.chat-message__retry-button').exists()).toBe(false)
+    expect(forbidden.find('.chat-message__actions').exists()).toBe(false)
+
+    const superseded = mountMessage(assistantMessage({
+      status: 'error',
+      errorCode: 'HTTP_502',
+      errorMessage: 'Bad Gateway',
+      excludedFromContext: true,
+      supersededByMessageId: 'assistant-2',
+    }), { retryable: true })
+    expect(superseded.find('[role="alert"]').exists()).toBe(false)
+    expect(superseded.find('.chat-message__retry-button').exists()).toBe(false)
+    expect(superseded.text()).not.toContain('Bad Gateway')
+  })
+
+  it('不会为 user streaming 状态渲染 assistant 呼吸圆点', () => {
+    const wrapper = mountMessage({
+      id: 'user-streaming',
+      role: 'user',
+      content: '',
+      createdAt: 1,
+      status: 'streaming',
+    })
+
+    expect(wrapper.find('.chat-message__streaming-dot').exists()).toBe(false)
+  })
+
+  it('keeps a user image and text in one right-aligned message group', () => {
+    const wrapper = mountMessage(userMessage({
+      content: '请帮我看看这张图',
+      attachments: [{
+        id: 'image-1',
+        name: 'CleanShot.png',
+        kind: 'image',
+        mimeType: 'image/png',
+        size: 1024,
+        status: 'ready',
+        expiresAt: '2099-01-01T00:00:00Z',
+      }],
+    }))
+    const group = wrapper.get('[data-test="user-message-group"]')
+    const attachments = group.get('[data-test="message-attachments"]')
+    const bubble = group.get('.chat-message__plain')
+
+    expect(wrapper.findAll('[data-test="user-message-group"]')).toHaveLength(1)
+    expect(group.classes()).toContain('user-message-group')
+    expect(attachments.classes()).toContain('chat-message-attachments--with-content')
+    expect(Array.from(group.element.children)).toEqual([
+      attachments.element,
+      bubble.element,
+    ])
+    expect(bubble.text()).toBe('请帮我看看这张图')
+  })
+
+  it('keeps an image-only user message in the same group without an empty text bubble', () => {
+    const wrapper = mountMessage(userMessage({
+      attachments: [{
+        id: 'image-1',
+        name: 'photo.png',
+        kind: 'image',
+        mimeType: 'image/png',
+        size: 1024,
+        status: 'ready',
+        expiresAt: '2099-01-01T00:00:00Z',
+      }],
+    }))
+    const group = wrapper.get('[data-test="user-message-group"]')
+    const attachments = group.get('[data-test="message-attachments"]')
+
+    expect(Array.from(group.element.children)).toEqual([attachments.element])
+    expect(attachments.classes()).not.toContain('chat-message-attachments--with-content')
+    expect(group.find('.chat-message__plain').exists()).toBe(false)
+    expect(group.find('.chat-message__streaming-placeholder').exists()).toBe(false)
+  })
+
+  it.each(['pending', 'charged', 'not_charged', 'subscription', 'failed'] as const)(
+    '结算状态为 %s 时仍只展示回答内容，不把计费明细带进 Chat 消息流',
+    (settlementStatus) => {
+      const wrapper = mountMessage(assistantMessage({
+        content: 'Visible assistant answer',
+        receiptId: `receipt-${settlementStatus}`,
+        settlementStatus,
+        actualModel: 'internal-billing-model-id',
+        inputTokens: 123456,
+        outputTokens: 654321,
+        cacheCreationTokens: 222222,
+        cacheReadTokens: 333333,
+        grossCost: 987.654321,
+        chargedAmount: 876.54321,
+        balanceBefore: 765.4321,
+        balanceAfter: 654.321,
+      }))
+
+      expect(wrapper.get('.chat-message__markdown').text()).toBe('Visible assistant answer')
+      expect(wrapper.find('[data-test="chat-receipt"]').exists()).toBe(false)
+      expect(wrapper.find('[data-test="chat-receipt-recharge"]').exists()).toBe(false)
+      expect(wrapper.text()).not.toContain('internal-billing-model-id')
+      expect(wrapper.text()).not.toContain('123456')
+      expect(wrapper.text()).not.toContain('987.654321')
+      expect(wrapper.text()).not.toContain('876.54321')
+      expect(wrapper.text()).not.toContain('765.4321')
+    },
+  )
 
   it('被后续 retry 替代的旧 attempt 保留内容并标记为 superseded', () => {
     const wrapper = mountMessage(assistantMessage({

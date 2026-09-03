@@ -10,6 +10,7 @@ const pollOrderStatus = vi.hoisted(() => vi.fn())
 const verifyOrder = vi.hoisted(() => vi.fn())
 const verifyOrderPublic = vi.hoisted(() => vi.fn())
 const resolveOrderPublicByResumeToken = vi.hoisted(() => vi.fn())
+const refreshProfile = vi.hoisted(() => vi.fn())
 
 vi.mock('vue-router', async () => {
   const actual = await vi.importActual<typeof import('vue-router')>('vue-router')
@@ -33,6 +34,13 @@ vi.mock('vue-i18n', async () => {
 vi.mock('@/stores/payment', () => ({
   usePaymentStore: () => ({
     pollOrderStatus,
+  }),
+}))
+
+vi.mock('@/stores/userProfile', () => ({
+  useUserProfileStore: () => ({
+    profile: { id: 9 },
+    refreshProfile,
   }),
 }))
 
@@ -91,6 +99,7 @@ describe('PaymentResultView', () => {
     verifyOrder.mockReset()
     verifyOrderPublic.mockReset()
     resolveOrderPublicByResumeToken.mockReset()
+    refreshProfile.mockReset().mockResolvedValue(undefined)
     window.localStorage.clear()
   })
 
@@ -197,6 +206,7 @@ describe('PaymentResultView', () => {
     expect(wrapper.text()).toContain('¥103.00')
     expect(wrapper.text()).not.toContain('$100.00')
     expect(window.localStorage.getItem(PAYMENT_RECOVERY_STORAGE_KEY)).toBeNull()
+    expect(refreshProfile).toHaveBeenCalledTimes(1)
   })
 
   it('refreshes a pending resume-token result until the order becomes paid', async () => {

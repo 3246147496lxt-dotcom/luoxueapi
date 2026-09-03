@@ -41,6 +41,8 @@ type AdminHandlers struct {
 	Compliance             *admin.ComplianceHandler
 	AuditLog               *admin.AuditLogHandler
 	ModelCatalog           *admin.ModelCatalogHandler
+	SkillMarket            *admin.SkillMarketHandler
+	SkillImport            *admin.SkillImportHandler
 	Documentation          *admin.DocumentationHandler
 	DesktopDiagnostic      *admin.DesktopDiagnosticHandler
 }
@@ -66,8 +68,10 @@ type Handlers struct {
 	AsyncImage       *AsyncImageHandler
 	BatchImage       *BatchImageHandler
 	ModelCatalog     *ModelCatalogHandler
+	SkillMarket      *SkillMarketHandler
 	Documentation    *DocumentationHandler
 	Chat             *ChatHandler
+	Library          *LibraryHandler
 	Desktop          *DesktopHandler
 	QuotaAuth        *QuotaAuthHandler
 	QuotaOverview    *QuotaOverviewHandler

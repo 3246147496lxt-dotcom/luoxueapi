@@ -35,6 +35,14 @@ func TestLoadServerTimingConfig(t *testing.T) {
 	})
 }
 
+func TestLoadDefaultTrustedProxiesIncludesOnlyLoopback(t *testing.T) {
+	resetViperWithJWTSecret(t)
+
+	cfg, err := Load()
+	require.NoError(t, err)
+	require.ElementsMatch(t, []string{"127.0.0.1", "::1"}, cfg.Server.TrustedProxies)
+}
+
 func TestLoadServerShutdownConfig(t *testing.T) {
 	t.Run("defaults", func(t *testing.T) {
 		resetViperWithJWTSecret(t)
@@ -136,6 +144,144 @@ func TestLoadDefaultOpenAIFirstOutputTimeoutsDisabled(t *testing.T) {
 	require.NoError(t, err)
 	require.Zero(t, cfg.Gateway.OpenAIFirstOutputTimeoutSeconds)
 	require.Zero(t, cfg.Gateway.OpenAIHighEffortFirstOutputTimeoutSeconds)
+}
+
+func TestLoadTranscriptionDefaults(t *testing.T) {
+	resetViperWithJWTSecret(t)
+	cfg, err := Load()
+	require.NoError(t, err)
+	require.False(t, cfg.Transcription.Enabled)
+	require.Equal(t, "openai_compatible", cfg.Transcription.Provider)
+	require.Equal(t, "gpt-4o-mini-transcribe", cfg.Transcription.Model)
+	require.Empty(t, cfg.Transcription.GroupIDs)
+	require.EqualValues(t, 10*1024*1024, cfg.Transcription.MaxUploadBytes)
+	require.Equal(t, 30, cfg.Transcription.UploadTimeoutSeconds)
+	require.Equal(t, 120, cfg.Transcription.MaxDurationSeconds)
+	require.Equal(t, 45, cfg.Transcription.RequestTimeoutSeconds)
+	require.Equal(t, 600, cfg.Transcription.IdempotencyTTLSeconds)
+	require.EqualValues(t, 11*1024*1024, cfg.Transcription.RequestBodyLimit())
+}
+
+func TestLoadChatAttachmentDefaults(t *testing.T) {
+	resetViperWithJWTSecret(t)
+	cfg, err := Load()
+	require.NoError(t, err)
+	require.Equal(t, "./data/chat-attachments", cfg.ChatAttachments.StorageDir)
+	require.Equal(t, 30, cfg.ChatAttachments.RetentionDays)
+	require.Equal(t, 4, cfg.ChatAttachments.MaxPerTurn)
+	require.EqualValues(t, 20*1024*1024, cfg.ChatAttachments.MaxTurnBytes)
+	require.EqualValues(t, 10*1024*1024, cfg.ChatAttachments.MaxImageBytes)
+	require.EqualValues(t, 20*1024*1024, cfg.ChatAttachments.MaxDocumentBytes)
+	require.Equal(t, 4, cfg.ChatAttachments.ContextMaxImages)
+	require.EqualValues(t, 256*1024, cfg.ChatAttachments.ContextDocumentTextBytes)
+	require.Equal(t, 10, cfg.ChatAttachments.UploadsPerMinute)
+	require.EqualValues(t, 100*1024*1024, cfg.ChatAttachments.DailyUploadBytes)
+	require.Equal(t, 4, cfg.ChatAttachments.MaxConcurrentGlobal)
+	require.Equal(t, 2, cfg.ChatAttachments.MaxConcurrentPerUser)
+	require.EqualValues(t, 21*1024*1024, cfg.ChatAttachments.RequestBodyLimit())
+	require.Equal(t, "local", cfg.Library.StorageDriver)
+	require.Equal(t, "./data/library-files", cfg.Library.StorageDir)
+	require.Zero(t, cfg.Library.DefaultStorageBytes)
+	require.EqualValues(t, 20*1024*1024, cfg.Library.MaxFileBytes)
+	require.Equal(t, 100, cfg.Library.BatchDownloadLimit)
+	require.EqualValues(t, 100*1024*1024, cfg.Library.BatchDownloadMaxBytes)
+	require.Equal(t, 60, cfg.Library.PendingUploadStaleMinutes)
+	require.Equal(t, 60, cfg.Library.CleanupIntervalMinutes)
+}
+
+func TestValidateLibraryConfigRejectsPublicImageBucketReuse(t *testing.T) {
+	resetViperWithJWTSecret(t)
+	cfg, err := Load()
+	require.NoError(t, err)
+
+	cfg.Library.StorageDriver = "s3"
+	cfg.Library.S3.Bucket = "shared-public-bucket"
+	cfg.ImageStorage.Bucket = "shared-public-bucket"
+	cfg.ImageStorage.AccessKeyID = "access-key"
+	cfg.ImageStorage.SecretAccessKey = "secret-key"
+	cfg.ImageStorage.PublicBaseURL = "https://cdn.example.test"
+
+	err = validateLibraryConfig(cfg.Library, cfg.ImageStorage)
+	require.ErrorContains(t, err, "library.s3.bucket must differ from image_storage.bucket")
+
+	cfg.Library.S3.Bucket = "private-library-bucket"
+	require.NoError(t, validateLibraryConfig(cfg.Library, cfg.ImageStorage))
+}
+
+func TestValidateLibraryConfigCapsBatchDownloadAt100MiB(t *testing.T) {
+	resetViperWithJWTSecret(t)
+	cfg, err := Load()
+	require.NoError(t, err)
+
+	cfg.Library.BatchDownloadMaxBytes = 100*1024*1024 + 1
+	err = validateLibraryConfig(cfg.Library, cfg.ImageStorage)
+	require.ErrorContains(t, err, "no more than 100MB")
+
+	cfg.Library.BatchDownloadMaxBytes = 100 * 1024 * 1024
+	require.NoError(t, validateLibraryConfig(cfg.Library, cfg.ImageStorage))
+}
+
+func TestValidateEnabledTranscriptionRequiresExplicitGroupsAndProbe(t *testing.T) {
+	resetViperWithJWTSecret(t)
+	cfg, err := Load()
+	require.NoError(t, err)
+	cfg.Transcription.Enabled = true
+	cfg.Transcription.FFprobePath = os.Args[0]
+
+	err = cfg.Validate()
+	require.ErrorContains(t, err, "transcription.group_ids")
+
+	cfg.Transcription.GroupIDs = []int64{7, 9}
+	require.NoError(t, cfg.Validate())
+
+	cfg.Transcription.IdempotencyTTLSeconds = 139
+	err = cfg.Validate()
+	require.ErrorContains(t, err, "transcription.idempotency_ttl_seconds")
+	cfg.Transcription.IdempotencyTTLSeconds = 600
+
+	cfg.Transcription.GroupIDs = []int64{7, 7}
+	err = cfg.Validate()
+	require.ErrorContains(t, err, "duplicate ID 7")
+}
+
+func TestValidateEnabledTranscriptionRejectsSimpleMode(t *testing.T) {
+	resetViperWithJWTSecret(t)
+	cfg, err := Load()
+	require.NoError(t, err)
+	cfg.RunMode = RunModeSimple
+	cfg.Transcription.Enabled = true
+	cfg.Transcription.GroupIDs = []int64{7}
+	cfg.Transcription.FFprobePath = os.Args[0]
+
+	err = cfg.Validate()
+	require.ErrorContains(t, err, "run_mode=simple")
+}
+
+func TestValidateEnabledTranscriptionRequiresEffectiveIngressBodyCapacity(t *testing.T) {
+	buildEnabled := func(t *testing.T) *Config {
+		t.Helper()
+		resetViperWithJWTSecret(t)
+		cfg, err := Load()
+		require.NoError(t, err)
+		cfg.Transcription.Enabled = true
+		cfg.Transcription.GroupIDs = []int64{7}
+		cfg.Transcription.FFprobePath = os.Args[0]
+		return cfg
+	}
+
+	t.Run("chat gateway cap", func(t *testing.T) {
+		cfg := buildEnabled(t)
+		cfg.Gateway.MaxBodySize = cfg.Transcription.RequestBodyLimit() - 1
+		err := cfg.Validate()
+		require.ErrorContains(t, err, "gateway.max_body_size")
+	})
+
+	t.Run("global server cap", func(t *testing.T) {
+		cfg := buildEnabled(t)
+		cfg.Server.MaxRequestBodySize = cfg.Transcription.RequestBodyLimit() - 1
+		err := cfg.Validate()
+		require.ErrorContains(t, err, "server.max_request_body_size")
+	})
 }
 
 func TestLoadOpenAIFirstOutputTimeoutsFromEnv(t *testing.T) {
@@ -386,6 +532,32 @@ func TestLoadDefaultBatchImageQueueDisabled(t *testing.T) {
 	cfg, err := Load()
 	require.NoError(t, err)
 	require.False(t, cfg.BatchImage.QueueEnabled)
+}
+
+func TestLoadDefaultSkillImportConfig(t *testing.T) {
+	resetViperWithJWTSecret(t)
+
+	cfg, err := Load()
+	require.NoError(t, err)
+	require.True(t, cfg.SkillImport.Enabled)
+	require.True(t, cfg.SkillImport.WorkerEnabled)
+	require.Equal(t, 2, cfg.SkillImport.WorkerConcurrency)
+	require.Equal(t, 1, cfg.SkillImport.PerHostConcurrency)
+	require.Equal(t, 5, cfg.SkillImport.MaxAttempts)
+	require.Equal(t, 24, cfg.SkillImport.MaxRunDurationHours)
+}
+
+func TestLoadSkillImportConfigFromEnv(t *testing.T) {
+	resetViperWithJWTSecret(t)
+	t.Setenv("SKILL_IMPORT_WORKER_CONCURRENCY", "4")
+	t.Setenv("SKILL_IMPORT_PER_HOST_CONCURRENCY", "2")
+	t.Setenv("SKILL_IMPORT_GITHUB_TOKEN", "  token-value  ")
+
+	cfg, err := Load()
+	require.NoError(t, err)
+	require.Equal(t, 4, cfg.SkillImport.WorkerConcurrency)
+	require.Equal(t, 2, cfg.SkillImport.PerHostConcurrency)
+	require.Equal(t, "token-value", cfg.SkillImport.GitHubToken)
 }
 
 func TestLoadIdempotencyConfigFromEnv(t *testing.T) {

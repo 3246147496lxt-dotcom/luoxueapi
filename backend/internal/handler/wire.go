@@ -44,6 +44,8 @@ func ProvideAdminHandlers(
 	complianceHandler *admin.ComplianceHandler,
 	auditLogHandler *admin.AuditLogHandler,
 	modelCatalogHandler *admin.ModelCatalogHandler,
+	skillMarketHandler *admin.SkillMarketHandler,
+	skillImportHandler *admin.SkillImportHandler,
 	documentationHandler *admin.DocumentationHandler,
 	desktopDiagnosticHandler *admin.DesktopDiagnosticHandler,
 	upstreamBillingProbe *service.UpstreamBillingProbeService,
@@ -88,6 +90,8 @@ func ProvideAdminHandlers(
 		Compliance:             complianceHandler,
 		AuditLog:               auditLogHandler,
 		ModelCatalog:           modelCatalogHandler,
+		SkillMarket:            skillMarketHandler,
+		SkillImport:            skillImportHandler,
 		Documentation:          documentationHandler,
 		DesktopDiagnostic:      desktopDiagnosticHandler,
 	}
@@ -106,9 +110,10 @@ func ProvideSettingHandler(settingService *service.SettingService, buildInfo Bui
 }
 
 // ProvideAdminSettingHandler creates admin.SettingHandler with notification template APIs.
-func ProvideAdminSettingHandler(settingService *service.SettingService, emailService *service.EmailService, turnstileService *service.TurnstileService, opsService *service.OpsService, paymentConfigService *service.PaymentConfigService, paymentService *service.PaymentService, userAttributeService *service.UserAttributeService, notificationEmailService *service.NotificationEmailService) *admin.SettingHandler {
+func ProvideAdminSettingHandler(settingService *service.SettingService, emailService *service.EmailService, turnstileService *service.TurnstileService, opsService *service.OpsService, paymentConfigService *service.PaymentConfigService, paymentService *service.PaymentService, userAttributeService *service.UserAttributeService, notificationEmailService *service.NotificationEmailService, openAIGatewayService *service.OpenAIGatewayService) *admin.SettingHandler {
 	h := admin.NewSettingHandler(settingService, emailService, turnstileService, opsService, paymentConfigService, paymentService, userAttributeService)
 	h.SetNotificationEmailService(notificationEmailService)
+	h.SetOpenAIGatewayService(openAIGatewayService)
 	return h
 }
 
@@ -152,8 +157,10 @@ func ProvideHandlers(
 	asyncImageHandler *AsyncImageHandler,
 	batchImageHandler *BatchImageHandler,
 	modelCatalogHandler *ModelCatalogHandler,
+	skillMarketHandler *SkillMarketHandler,
 	documentationHandler *DocumentationHandler,
 	chatHandler *ChatHandler,
+	libraryHandler *LibraryHandler,
 	desktopHandler *DesktopHandler,
 	quotaAuthHandler *QuotaAuthHandler,
 	quotaOverviewHandler *QuotaOverviewHandler,
@@ -180,8 +187,10 @@ func ProvideHandlers(
 		AsyncImage:       asyncImageHandler,
 		BatchImage:       batchImageHandler,
 		ModelCatalog:     modelCatalogHandler,
+		SkillMarket:      skillMarketHandler,
 		Documentation:    documentationHandler,
 		Chat:             chatHandler,
+		Library:          libraryHandler,
 		Desktop:          desktopHandler,
 		QuotaAuth:        quotaAuthHandler,
 		QuotaOverview:    quotaOverviewHandler,
@@ -209,8 +218,10 @@ var ProviderSet = wire.NewSet(
 	NewAsyncImageHandler,
 	NewBatchImageHandler,
 	NewModelCatalogHandler,
+	NewSkillMarketHandler,
 	NewDocumentationHandler,
 	ProvideChatHandler,
+	NewLibraryHandler,
 	NewDesktopHandler,
 	NewQuotaAuthHandler,
 	NewQuotaOverviewHandler,
@@ -255,6 +266,8 @@ var ProviderSet = wire.NewSet(
 	admin.NewComplianceHandler,
 	admin.NewAuditLogHandler,
 	admin.NewModelCatalogHandler,
+	admin.NewSkillMarketHandler,
+	admin.NewSkillImportHandler,
 	admin.NewDocumentationHandler,
 	admin.NewDesktopDiagnosticHandler,
 

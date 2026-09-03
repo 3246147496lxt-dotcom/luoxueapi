@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"math"
 	"strings"
 	"sync"
 	"time"
@@ -59,6 +60,11 @@ type UserPlatformQuotaCacheEntry struct {
 // native miss representation.
 var ErrBillingCacheMiss = errors.New("billing cache miss")
 
+// ErrBillingCacheGenerationChanged indicates that an authoritative cache
+// invalidation raced a read-through reload. Callers must discard the snapshot
+// and retry rather than treating it as current billing state.
+var ErrBillingCacheGenerationChanged = errors.New("billing cache generation changed")
+
 // BillingCache defines cache operations for billing service
 type BillingCache interface {
 	// Balance operations
@@ -91,6 +97,31 @@ type BillingCache interface {
 	PopDirtyUserPlatformQuotaKeys(ctx context.Context, n int) ([]UserPlatformQuotaKey, error)
 	ReaddDirtyUserPlatformQuotaKeys(ctx context.Context, keys []UserPlatformQuotaKey) error
 	BatchGetUserPlatformQuotaCache(ctx context.Context, keys []UserPlatformQuotaKey) ([]*UserPlatformQuotaCacheEntry, error)
+}
+
+// VersionedBalanceCache is an optional extension implemented by distributed
+// cache backends.  The generation is advanced atomically with invalidation so
+// a DB snapshot that started before a deduction cannot be written back after
+// another process has evicted the key.  BillingCache implementations that do
+// not provide this extension are still protected by BillingCacheService's
+// in-process fence.
+type VersionedBalanceCache interface {
+	GetUserBalanceWithGeneration(ctx context.Context, userID int64) (balance float64, generation uint64, err error)
+	SetUserBalanceIfGeneration(ctx context.Context, userID int64, balance float64, generation uint64) error
+}
+
+// VersionedAPIKeyRateLimitCache is an optional extension implemented by
+// distributed cache backends.  Rate-limit snapshots are read through from the
+// database after a cache miss.  The generation token is advanced atomically
+// with invalidation so a slow read of the pre-charge DB row cannot repopulate
+// Redis after the authoritative billing transaction has committed.
+//
+// BillingCache deliberately keeps this extension optional: test doubles and
+// deployments with a non-Redis cache continue to satisfy the original
+// interface and are protected by BillingCacheService's in-process fence.
+type VersionedAPIKeyRateLimitCache interface {
+	GetAPIKeyRateLimitWithGeneration(ctx context.Context, keyID int64) (data *APIKeyRateLimitCacheData, generation uint64, err error)
+	SetAPIKeyRateLimitIfGeneration(ctx context.Context, keyID int64, data *APIKeyRateLimitCacheData, generation uint64) error
 }
 
 // ModelPricing 模型价格配置（per-token价格，与LiteLLM格式一致）
@@ -168,6 +199,33 @@ type CostBreakdown struct {
 	ActualCost                float64 // 应用倍率后的实际费用
 	BillingMode               string  // 计费模式（"token"/"per_request"/"image"），由 CalculateCostUnified 填充
 	LongContextBillingApplied bool
+}
+
+// ValidateMonetaryFields checks every component of a computed cost before it
+// reaches usage logging or a billing side effect.
+func (c *CostBreakdown) ValidateMonetaryFields() error {
+	if c == nil {
+		return nil
+	}
+	values := []struct {
+		name  string
+		value float64
+	}{
+		{"input_cost", c.InputCost},
+		{"image_input_cost", c.ImageInputCost},
+		{"output_cost", c.OutputCost},
+		{"image_output_cost", c.ImageOutputCost},
+		{"cache_creation_cost", c.CacheCreationCost},
+		{"cache_read_cost", c.CacheReadCost},
+		{"total_cost", c.TotalCost},
+		{"actual_cost", c.ActualCost},
+	}
+	for _, item := range values {
+		if math.IsNaN(item.value) || math.IsInf(item.value, 0) || item.value < 0 {
+			return fmt.Errorf("%w: %s=%v", ErrUsageBillingInvalidAmount, item.name, item.value)
+		}
+	}
+	return nil
 }
 
 // ErrModelPricingUnavailable indicates that none of the configured pricing
@@ -770,62 +828,74 @@ func (s *BillingService) getFallbackPricing(model string) *ModelPricing {
 	return nil
 }
 
-// GetModelPricing 获取模型价格配置
-func (s *BillingService) GetModelPricing(model string) (*ModelPricing, error) {
-	// 标准化模型名称（转小写）
-	model = strings.ToLower(model)
+// HasIdentifiedTokenPricing 判断模型能否在价格表中被确定性识别出 token 价格。
+// 与 GetModelPricing 不同，本函数拒绝按子串猜系列的兜底；外部响应自报的模型名
+// 只有经过这里或管理员显式渠道定价后，才可影响实际计费。
+func (s *BillingService) HasIdentifiedTokenPricing(model string) bool {
+	_, _, identified, err := s.resolveModelPricingSnapshot(model)
+	return err == nil && identified
+}
 
-	// 1. 优先从动态价格服务获取
+func modelPricingFromLiteLLM(litellmPricing *LiteLLMModelPricing) *ModelPricing {
+	if litellmPricing == nil || litellmPricing.TokenPricingAbsent {
+		return nil
+	}
+	price5m := litellmPricing.CacheCreationInputTokenCost
+	price1h := litellmPricing.CacheCreationInputTokenCostAbove1hr
+	return &ModelPricing{
+		InputPricePerToken:                 litellmPricing.InputCostPerToken,
+		InputPricePerTokenPriority:         litellmPricing.InputCostPerTokenPriority,
+		OutputPricePerToken:                litellmPricing.OutputCostPerToken,
+		OutputPricePerTokenPriority:        litellmPricing.OutputCostPerTokenPriority,
+		CacheCreationPricePerToken:         litellmPricing.CacheCreationInputTokenCost,
+		CacheCreationPricePerTokenPriority: litellmPricing.CacheCreationInputTokenCostPriority,
+		CacheReadPricePerToken:             litellmPricing.CacheReadInputTokenCost,
+		CacheReadPricePerTokenPriority:     litellmPricing.CacheReadInputTokenCostPriority,
+		CacheCreation5mPrice:               price5m,
+		CacheCreation1hPrice:               price1h,
+		SupportsCacheBreakdown:             price1h > 0 && price1h > price5m,
+		LongContextInputThreshold:          litellmPricing.LongContextInputTokenThreshold,
+		LongContextInputMultiplier:         litellmPricing.LongContextInputCostMultiplier,
+		LongContextOutputMultiplier:        litellmPricing.LongContextOutputCostMultiplier,
+		ImageInputPricePerToken:            litellmPricing.InputCostPerImageToken,
+		ImageOutputPricePerToken:           litellmPricing.OutputCostPerImageToken,
+	}
+}
+
+// resolveModelPricingSnapshot returns one immutable global-pricing decision.
+// identified describes the exact pricing object returned, not a second lookup.
+func (s *BillingService) resolveModelPricingSnapshot(model string) (*ModelPricing, string, bool, error) {
+	if s == nil {
+		return nil, PricingSourceFallback, false, fmt.Errorf("%w for model: %s", ErrModelPricingUnavailable, model)
+	}
+	model = strings.ToLower(strings.TrimSpace(model))
+	if model == "" {
+		return nil, PricingSourceFallback, false, fmt.Errorf("%w for model: %s", ErrModelPricingUnavailable, model)
+	}
+
 	if s.pricingService != nil {
-		litellmPricing := s.pricingService.GetModelPricing(model)
-		// 仅有图片价、无 token 价的条目（如 LiteLLM 的 imagen 类模型）不能用于
-		// token 计费：直接返回会把 token 流量按 $0 计费。跳过后走 fallback，
-		// 无 fallback 则 fail-closed（ErrModelPricingUnavailable）。
-		// 图片计费路径（getDefaultImagePrice / getImageUnitPrice）直接读
-		// PricingService，不受影响。
-		if litellmPricing != nil && litellmPricing.TokenPricingAbsent {
-			litellmPricing = nil
-		}
-		if litellmPricing != nil {
-			// 启用 5m/1h 分类计费的条件：
-			// 1. 存在 1h 价格
-			// 2. 1h 价格 > 5m 价格（防止 LiteLLM 数据错误导致少收费）
-			price5m := litellmPricing.CacheCreationInputTokenCost
-			price1h := litellmPricing.CacheCreationInputTokenCostAbove1hr
-			enableBreakdown := price1h > 0 && price1h > price5m
-			return s.applyModelSpecificPricingPolicy(model, &ModelPricing{
-				InputPricePerToken:                 litellmPricing.InputCostPerToken,
-				InputPricePerTokenPriority:         litellmPricing.InputCostPerTokenPriority,
-				OutputPricePerToken:                litellmPricing.OutputCostPerToken,
-				OutputPricePerTokenPriority:        litellmPricing.OutputCostPerTokenPriority,
-				CacheCreationPricePerToken:         litellmPricing.CacheCreationInputTokenCost,
-				CacheCreationPricePerTokenPriority: litellmPricing.CacheCreationInputTokenCostPriority,
-				CacheReadPricePerToken:             litellmPricing.CacheReadInputTokenCost,
-				CacheReadPricePerTokenPriority:     litellmPricing.CacheReadInputTokenCostPriority,
-				CacheCreation5mPrice:               price5m,
-				CacheCreation1hPrice:               price1h,
-				SupportsCacheBreakdown:             enableBreakdown,
-				LongContextInputThreshold:          litellmPricing.LongContextInputTokenThreshold,
-				LongContextInputMultiplier:         litellmPricing.LongContextInputCostMultiplier,
-				LongContextOutputMultiplier:        litellmPricing.LongContextOutputCostMultiplier,
-				ImageInputPricePerToken:            litellmPricing.InputCostPerImageToken,
-				ImageOutputPricePerToken:           litellmPricing.OutputCostPerImageToken,
-			}), nil
+		litellmPricing, identified := s.pricingService.GetModelPricingWithIdentification(model)
+		if pricing := modelPricingFromLiteLLM(litellmPricing); pricing != nil {
+			return s.applyModelSpecificPricingPolicy(model, pricing), PricingSourceLiteLLM, identified, nil
 		}
 	}
 
-	// 2. 使用硬编码回退价格
 	fallback := s.getFallbackPricing(model)
 	if fallback != nil {
-		// 按模型名去重:每个模型每进程最多打一条 warn,避免热路径每请求刷屏（issue #3394）。
-		// model 在函数入口已 ToLower,故 GLM-5.2 / glm-5.2 视为同一条目。
 		if _, seen := s.fallbackWarnSeen.LoadOrStore(model, struct{}{}); !seen {
 			log.Printf("[Billing] Using fallback pricing for model: %s", model)
 		}
-		return s.applyModelSpecificPricingPolicy(model, fallback), nil
+		_, identified := s.fallbackPrices[model]
+		return s.applyModelSpecificPricingPolicy(model, fallback), PricingSourceFallback, identified, nil
 	}
 
-	return nil, fmt.Errorf("%w for model: %s", ErrModelPricingUnavailable, model)
+	return nil, PricingSourceFallback, false, fmt.Errorf("%w for model: %s", ErrModelPricingUnavailable, model)
+}
+
+// GetModelPricing 获取模型价格配置。
+func (s *BillingService) GetModelPricing(model string) (*ModelPricing, error) {
+	pricing, _, _, err := s.resolveModelPricingSnapshot(model)
+	return pricing, err
 }
 
 // GetModelPricingWithChannel 获取模型定价，渠道配置的价格覆盖默认值
@@ -1072,14 +1142,41 @@ func (s *BillingService) computeTokenBreakdown(
 // multiplier 用于长上下文等场景下的整体价格缩放（普通调用传 1.0 即可）。
 func (s *BillingService) computeCacheCreationCost(pricing *ModelPricing, tokens UsageTokens, price, multiplier float64) float64 {
 	if pricing.SupportsCacheBreakdown && (pricing.CacheCreation5mPrice > 0 || pricing.CacheCreation1hPrice > 0) {
-		if tokens.CacheCreation5mTokens == 0 && tokens.CacheCreation1hTokens == 0 && tokens.CacheCreationTokens > 0 {
+		cacheCreation5mTokens, cacheCreation1hTokens := normalizeCacheCreationBreakdown(tokens)
+		if cacheCreation5mTokens == 0 && cacheCreation1hTokens == 0 && tokens.CacheCreationTokens > 0 {
 			// API 未返回 ephemeral 明细，回退到全部按 5m 单价计费
 			return float64(tokens.CacheCreationTokens) * pricing.CacheCreation5mPrice * multiplier
 		}
-		return float64(tokens.CacheCreation5mTokens)*pricing.CacheCreation5mPrice*multiplier +
-			float64(tokens.CacheCreation1hTokens)*pricing.CacheCreation1hPrice*multiplier
+		return float64(cacheCreation5mTokens)*pricing.CacheCreation5mPrice*multiplier +
+			float64(cacheCreation1hTokens)*pricing.CacheCreation1hPrice*multiplier
 	}
 	return float64(tokens.CacheCreationTokens) * price * multiplier
+}
+
+// normalizeCacheCreationBreakdown caps contradictory 5m/1h details at an explicitly
+// positive aggregate while retaining their reported ratio as closely as integer tokens allow.
+func normalizeCacheCreationBreakdown(tokens UsageTokens) (int, int) {
+	cacheCreation5mTokens := tokens.CacheCreation5mTokens
+	cacheCreation1hTokens := tokens.CacheCreation1hTokens
+	aggregate := tokens.CacheCreationTokens
+	if cacheCreation5mTokens < 0 {
+		cacheCreation5mTokens = 0
+	}
+	if cacheCreation1hTokens < 0 {
+		cacheCreation1hTokens = 0
+	}
+	if aggregate <= 0 || (cacheCreation5mTokens <= aggregate && cacheCreation1hTokens <= aggregate-cacheCreation5mTokens) {
+		return cacheCreation5mTokens, cacheCreation1hTokens
+	}
+
+	detailTotal := float64(cacheCreation5mTokens) + float64(cacheCreation1hTokens)
+	normalized5mTokens := math.Round(float64(aggregate) * float64(cacheCreation5mTokens) / detailTotal)
+	if normalized5mTokens >= float64(aggregate) {
+		cacheCreation5mTokens = aggregate
+	} else {
+		cacheCreation5mTokens = int(normalized5mTokens)
+	}
+	return cacheCreation5mTokens, aggregate - cacheCreation5mTokens
 }
 
 // calculatePerRequestCost 按次/图片计费
@@ -1264,15 +1361,29 @@ func (s *BillingService) CalculateCostWithConfig(model string, tokens UsageToken
 // 拆分为：范围内 (200k, 0) + 范围外 (10k, 10k)
 // 范围内正常计费，范围外 × 2 计费
 func (s *BillingService) CalculateCostWithLongContext(model string, tokens UsageTokens, rateMultiplier float64, threshold int, extraMultiplier float64) (*CostBreakdown, error) {
+	pricing, err := s.GetModelPricing(model)
+	if err != nil {
+		return nil, err
+	}
+	return s.calculateCostWithLongContextPricing(pricing, tokens, rateMultiplier, threshold, extraMultiplier)
+}
+
+// calculateCostWithLongContextPricing consumes one immutable global-pricing
+// snapshot. It is used by response_model billing so identification and cost
+// cannot observe different pricing refreshes.
+func (s *BillingService) calculateCostWithLongContextPricing(pricing *ModelPricing, tokens UsageTokens, rateMultiplier float64, threshold int, extraMultiplier float64) (*CostBreakdown, error) {
+	if pricing == nil {
+		return nil, ErrModelPricingUnavailable
+	}
 	// 未启用长上下文计费，直接走正常计费
 	if threshold <= 0 || extraMultiplier <= 1 {
-		return s.CalculateCost(model, tokens, rateMultiplier)
+		return s.computeTokenBreakdown(pricing, tokens, rateMultiplier, "", true), nil
 	}
 
 	// 计算总输入 token（缓存读取 + 新输入）
 	total := tokens.CacheReadTokens + tokens.InputTokens
 	if total <= threshold {
-		return s.CalculateCost(model, tokens, rateMultiplier)
+		return s.computeTokenBreakdown(pricing, tokens, rateMultiplier, "", true), nil
 	}
 
 	// 拆分成范围内和范围外
@@ -1303,20 +1414,14 @@ func (s *BillingService) CalculateCostWithLongContext(model string, tokens Usage
 		CacheCreation1hTokens: tokens.CacheCreation1hTokens,
 		ImageOutputTokens:     tokens.ImageOutputTokens,
 	}
-	inRangeCost, err := s.CalculateCost(model, inRangeTokens, rateMultiplier)
-	if err != nil {
-		return nil, err
-	}
+	inRangeCost := s.computeTokenBreakdown(pricing, inRangeTokens, rateMultiplier, "", true)
 
 	// 范围外部分：× extraMultiplier 计费
 	outRangeTokens := UsageTokens{
 		InputTokens:     outRangeInputTokens,
 		CacheReadTokens: outRangeCacheTokens,
 	}
-	outRangeCost, err := s.CalculateCost(model, outRangeTokens, rateMultiplier*extraMultiplier)
-	if err != nil {
-		return inRangeCost, fmt.Errorf("out-range cost: %w", err)
-	}
+	outRangeCost := s.computeTokenBreakdown(pricing, outRangeTokens, rateMultiplier*extraMultiplier, "", true)
 
 	// 合并成本
 	return &CostBreakdown{

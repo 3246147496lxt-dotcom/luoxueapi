@@ -39,7 +39,7 @@ vi.mock('@/composables/useRoutePrefetch', () => ({
 
 describe('admin shell route contract', () => {
   it('marks every renderable admin route for the shared admin shell', async () => {
-    const { default: router } = await import('@/router')
+    const { default: router } = await import('@/router/admin')
     const adminRoutes = router.getRoutes().filter((route) => route.path.startsWith('/admin'))
     const renderableRoutes = adminRoutes.filter((route) => route.components?.default)
 
@@ -51,7 +51,7 @@ describe('admin shell route contract', () => {
   })
 
   it('keeps non-rendering admin entries as explicit redirects', async () => {
-    const { default: router } = await import('@/router')
+    const { default: router } = await import('@/router/admin')
     const redirectRoutes = router
       .getRoutes()
       .filter((route) => route.path.startsWith('/admin') && !route.components?.default)

@@ -10,11 +10,15 @@ const desktopMocks = vi.hoisted(() => ({
 
 vi.mock('@/lib/desktop', () => desktopMocks)
 
+const legacyCurrencyMarker = String.fromCodePoint(0x2744)
 const hiddenDashboardCopy = [
   '账户余额',
   '今日消费',
   '本月消费',
-  '❄',
+  legacyCurrencyMarker,
+  '128.64 积分',
+  '136.20 积分',
+  '63.80 积分',
   'Token',
   '请求',
   '本周期已用',
@@ -40,6 +44,10 @@ const expectMembershipOnly = (text: string) => {
   for (const copy of hiddenDashboardCopy) {
     expect(text).not.toContain(copy)
   }
+  // The floating card may mention that points are being loaded, but it must
+  // never expose a wallet or quota amount. Guard every formatted point value,
+  // including fixture values added in the future.
+  expect(text).not.toMatch(/\d+(?:\.\d+)?\s*积分/u)
 }
 
 describe('FloatingQuotaWidget', () => {
@@ -152,7 +160,7 @@ describe('FloatingQuotaWidget', () => {
     await unavailable.get('.floating-quota-widget__refresh').trigger('click')
     expect(unavailable.emitted('refresh')).toHaveLength(1)
     await unavailable.setProps({ refreshing: true })
-    expect(unavailable.text()).toContain('正在重新获取额度')
+    expect(unavailable.text()).toContain('正在重新获取积分')
     expect(unavailable.get('.floating-quota-widget__refresh').text()).toBe('获取中')
     expect(unavailable.get('.floating-quota-widget__refresh').attributes()).toHaveProperty(
       'disabled'
@@ -181,7 +189,7 @@ describe('FloatingQuotaWidget', () => {
       lastRefreshAt: beforeReset.getTime()
     })
 
-    expect(wrapper.text()).toContain('已检查，服务端额度待更新')
+    expect(wrapper.text()).toContain('已检查，服务端积分待更新')
     expect(wrapper.get('.floating-quota-widget__refresh').text()).toBe('重新获取')
     wrapper.unmount()
   })

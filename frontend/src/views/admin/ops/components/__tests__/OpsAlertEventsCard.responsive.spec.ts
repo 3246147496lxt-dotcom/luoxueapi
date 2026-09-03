@@ -4,9 +4,10 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import OpsAlertEventsCard from '../OpsAlertEventsCard.vue'
 
-const { getAlertEvent, listAlertEvents, showError, showSuccess } = vi.hoisted(() => ({
+const { getAlertEvent, listAlertEvents, getGroups, showError, showSuccess } = vi.hoisted(() => ({
   getAlertEvent: vi.fn(),
   listAlertEvents: vi.fn(),
+  getGroups: vi.fn(),
   showError: vi.fn(),
   showSuccess: vi.fn(),
 }))
@@ -14,6 +15,10 @@ const { getAlertEvent, listAlertEvents, showError, showSuccess } = vi.hoisted(()
 vi.mock('@/api/admin/ops', () => ({
   default: { getAlertEvent, listAlertEvents },
   opsAPI: { getAlertEvent, listAlertEvents },
+}))
+
+vi.mock('@/api/admin', () => ({
+  adminAPI: { groups: { getAll: getGroups } },
 }))
 
 vi.mock('@/stores/app', () => ({
@@ -41,7 +46,7 @@ const SelectStub = defineComponent({
     modelValue: { type: [String, Number, Boolean], default: '' },
     options: { type: Array, default: () => [] },
   },
-  emits: ['change'],
+  emits: ['change', 'update:modelValue'],
   template: '<div data-testid="select-stub" :class="$attrs.class" />',
 })
 
@@ -68,11 +73,12 @@ describe('OpsAlertEventsCard responsive controls', () => {
   beforeEach(() => {
     getAlertEvent.mockReset().mockResolvedValue(alertEvent)
     listAlertEvents.mockReset().mockResolvedValue([alertEvent])
+    getGroups.mockReset().mockResolvedValue([])
     showError.mockReset()
     showSuccess.mockReset()
   })
 
-  it('lets the filter toolbar wrap without changing the filter request contract', async () => {
+  it('uses a compact two-column filter rail without changing the filter request contract', async () => {
     const wrapper = mount(OpsAlertEventsCard, {
       global: {
         stubs: {
@@ -85,24 +91,29 @@ describe('OpsAlertEventsCard responsive controls', () => {
     await flushPromises()
 
     const filters = wrapper.get('[data-testid="ops-alert-filters"]')
-    expect(filters.classes()).toEqual(expect.arrayContaining(['w-full', 'flex-wrap']))
+    expect(filters.classes()).toEqual(expect.arrayContaining(['grid', 'grid-cols-2']))
 
-    const selects = wrapper.findAllComponents(SelectStub)
-    expect(selects).toHaveLength(4)
-    expect(selects.every((select) => select.classes().includes('flex-1'))).toBe(true)
+    const selects = filters.findAllComponents(SelectStub)
+    expect(selects).toHaveLength(6)
+    for (const select of selects) {
+      expect(select.classes()).toContain('min-w-0')
+    }
 
     listAlertEvents.mockClear()
-    selects[1].vm.$emit('change', 'P0')
+    selects[3].vm.$emit('change', 'P0')
     await flushPromises()
 
-    expect(listAlertEvents).toHaveBeenCalledWith({
-      limit: 10,
-      time_range: '24h',
-      severity: 'P0',
-    })
+    expect(listAlertEvents).toHaveBeenCalledWith(
+      {
+        limit: 10,
+        time_range: '1h',
+        severity: 'P0',
+      },
+      { signal: expect.any(AbortSignal) },
+    )
   })
 
-  it('keeps the wide alert table keyboard-focusable and horizontally scrollable', async () => {
+  it('keeps the alert queue keyboard-focusable and exposes native row buttons', async () => {
     const wrapper = mount(OpsAlertEventsCard, {
       global: {
         stubs: {
@@ -114,15 +125,15 @@ describe('OpsAlertEventsCard responsive controls', () => {
     })
     await flushPromises()
 
-    const scrollRegion = wrapper.get('[data-testid="ops-alert-table-scroll"]')
-    expect(scrollRegion.classes()).toContain('overflow-auto')
-    expect(scrollRegion.classes()).not.toContain('overflow-y-auto')
+    const scrollRegion = wrapper.get('[data-testid="ops-alert-queue-scroll"]')
+    expect(scrollRegion.classes()).toContain('ops-alert-queue-scroll')
     expect(scrollRegion.attributes()).toMatchObject({
       role: 'region',
       tabindex: '0',
       'aria-label': 'admin.ops.alertEvents.title',
     })
-    expect(scrollRegion.find('table').exists()).toBe(true)
+    expect(scrollRegion.find('ul[role="list"]').exists()).toBe(true)
+    expect(scrollRegion.get('[data-testid="ops-alert-detail-trigger"]').element.tagName).toBe('BUTTON')
   })
 
   it('uses a native detail button so Enter and Space retain their standard activation behavior', async () => {
@@ -142,9 +153,12 @@ describe('OpsAlertEventsCard responsive controls', () => {
     expect(trigger.element.tagName).toBe('BUTTON')
     expect(trigger.attributes()).toMatchObject({
       type: 'button',
-      'aria-label': 'View alert details: Upstream latency warning',
+      'aria-labelledby': 'ops-alert-title-17',
+      'aria-describedby': 'ops-alert-status-17 ops-alert-description-17 ops-alert-context-17',
+      'aria-controls': 'ops-alert-inspector',
       'data-alert-id': '17',
     })
+    expect(wrapper.get('#ops-alert-title-17').text()).toBe('Upstream latency warning')
 
     const triggerButton = trigger.element as HTMLButtonElement
     triggerButton.focus()
@@ -156,5 +170,20 @@ describe('OpsAlertEventsCard responsive controls', () => {
     expect(getAlertEvent).toHaveBeenCalledWith(17)
 
     wrapper.unmount()
+  })
+
+  it('stays mounted but suppresses requests when alert display is disabled', async () => {
+    const wrapper = mount(OpsAlertEventsCard, {
+      props: { enabled: false },
+      global: { stubs: { Select: SelectStub, Icon: true } },
+    })
+    await flushPromises()
+
+    expect(wrapper.get('[data-testid="ops-alert-disabled"]').attributes('role')).toBe('status')
+    expect(listAlertEvents).not.toHaveBeenCalled()
+
+    await wrapper.setProps({ enabled: true })
+    await flushPromises()
+    expect(listAlertEvents).toHaveBeenCalledTimes(1)
   })
 })

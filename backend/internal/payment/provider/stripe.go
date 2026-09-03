@@ -230,6 +230,10 @@ func (s *Stripe) Refund(ctx context.Context, req payment.RefundRequest) (*paymen
 		Amount:        stripe.Int64(amountInMinorUnit),
 		Reason:        stripe.String(string(stripe.RefundReasonRequestedByCustomer)),
 	}
+	// Stripe retries are safe only when the key is stable for the logical
+	// order+amount. A retry with the same amount reuses the provider-side
+	// refund; a deliberately different amount gets a distinct key.
+	params.SetIdempotencyKey(fmt.Sprintf("re-%s-%d", req.OrderID, amountInMinorUnit))
 	params.Context = ctx
 
 	r, err := s.sc.V1Refunds.Create(ctx, params)

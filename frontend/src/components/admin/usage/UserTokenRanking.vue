@@ -26,12 +26,18 @@
             <th
               v-for="col in sortableColumns"
               :key="col.key"
-              class="cursor-pointer select-none whitespace-nowrap px-4 py-3 text-right text-xs font-medium uppercase tracking-wider transition-colors hover:bg-gray-100 dark:hover:bg-dark-700"
+              class="select-none whitespace-nowrap px-3 py-2 text-right text-xs font-medium uppercase tracking-wider"
               :class="sortBy === col.key ? 'text-primary-600 dark:text-primary-400' : 'text-gray-500 dark:text-dark-400'"
-              @click="setSort(col.key)"
+              :aria-sort="sortBy === col.key ? 'descending' : 'none'"
             >
-              {{ t(col.label) }}
-              <span v-if="sortBy === col.key" aria-hidden="true">↓</span>
+              <button
+                type="button"
+                class="inline-flex min-h-9 w-full items-center justify-end gap-1 rounded-md px-1 text-inherit transition-colors hover:bg-gray-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500 dark:hover:bg-dark-700"
+                @click="setSort(col.key)"
+              >
+                <span>{{ t(col.label) }}</span>
+                <span v-if="sortBy === col.key" aria-hidden="true">↓</span>
+              </button>
             </th>
           </tr>
         </thead>
@@ -68,7 +74,7 @@
             :key="item.user_id"
             class="cursor-pointer transition-colors hover:bg-gray-50 dark:hover:bg-dark-700/40"
             :title="t('admin.usage.tokenRanking.rowHint')"
-            @click="$emit('select-user', item.user_id, item.email)"
+            @click="selectUser(item)"
           >
             <td class="px-4 py-3 sm:px-6">
               <span
@@ -78,9 +84,27 @@
               >{{ index + 1 }}</span>
               <span v-else class="inline-block w-6 text-center text-sm tabular-nums text-gray-400">{{ index + 1 }}</span>
             </td>
-            <td class="max-w-[260px] truncate px-4 py-3 text-sm font-medium text-gray-700 dark:text-gray-200" :title="item.email">
-              {{ item.email || `User #${item.user_id}` }}
-              <span class="ml-1 font-normal text-gray-400 dark:text-gray-500">#{{ item.user_id }}</span>
+            <td class="max-w-[260px] px-4 py-3">
+              <button
+                type="button"
+                class="block w-full rounded-md text-left focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500"
+                :aria-label="userActionLabel(item)"
+                @click.stop="selectUser(item)"
+              >
+                <span
+                  class="block truncate text-sm font-semibold text-gray-800 dark:text-gray-100"
+                  :title="primaryIdentity(item)"
+                >
+                  {{ primaryIdentity(item) }}
+                </span>
+                <span
+                  v-if="secondaryIdentity(item)"
+                  class="mt-0.5 block truncate text-xs font-normal text-gray-400 dark:text-gray-500"
+                  :title="secondaryIdentity(item)"
+                >
+                  {{ secondaryIdentity(item) }}
+                </span>
+              </button>
             </td>
             <td class="whitespace-nowrap px-4 py-3 text-right text-sm tabular-nums text-gray-500 dark:text-gray-400">{{ item.requests.toLocaleString() }}</td>
             <td class="whitespace-nowrap px-4 py-3 text-right text-sm tabular-nums text-gray-500 dark:text-gray-400">{{ fmtTokens(item.input_tokens) }}</td>
@@ -119,7 +143,7 @@ const props = withDefaults(defineProps<{
   initialSortBy: 'total_tokens',
 })
 
-defineEmits<{ (e: 'select-user', userId: number, email: string): void }>()
+const emit = defineEmits<{ (e: 'select-user', userId: number, email: string): void }>()
 
 const { t } = useI18n()
 
@@ -155,6 +179,28 @@ let reqSeq = 0
 
 const fmtTokens = (v: number) => formatCompactNumber(v)
 const fmtCost = (v: number) => formatCostFixed(v, 4)
+
+const primaryIdentity = (item: UserBreakdownItem) => {
+  const username = item.username?.trim()
+  const email = item.email?.trim()
+  return username || email || `User #${item.user_id}`
+}
+
+const secondaryIdentity = (item: UserBreakdownItem) => {
+  const username = item.username?.trim()
+  return username ? item.email?.trim() || '' : ''
+}
+
+const userActionLabel = (item: UserBreakdownItem) => {
+  const identity = [primaryIdentity(item), secondaryIdentity(item), `#${item.user_id}`]
+    .filter(Boolean)
+    .join(' · ')
+  return `${t('admin.usage.tokenRanking.rowHint')} · ${identity}`
+}
+
+const selectUser = (item: UserBreakdownItem) => {
+  emit('select-user', item.user_id, item.email)
+}
 
 const setSort = (key: SortKey) => {
   if (sortBy.value === key) return

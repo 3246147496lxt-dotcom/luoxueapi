@@ -20,18 +20,62 @@ import (
 )
 
 type chatApplicationStub struct {
-	resolveCalls int
-	resolveErr   error
-	principal    *service.APIKey
+	listModelsCalls           int
+	capabilitiesCalls         int
+	capabilitiesResult        *service.ChatCapabilitiesResult
+	capabilitiesErr           error
+	resolveCalls              int
+	resolveErr                error
+	principal                 *service.APIKey
+	subscription              *service.UserSubscription
+	principalReasoningOptions service.WebChatReasoningOptions
+	reasoningCalls            int
+	reasoningErr              error
+	reasoningModel            string
+	reasoningMode             string
+	reasoningEffort           string
+	normalizedReasoningMode   string
+	normalizedReasoningEffort string
 }
 
 func (s *chatApplicationStub) ListModels(context.Context, int64) (*service.ChatModelsResult, error) {
+	s.listModelsCalls++
 	return nil, nil
 }
 
-func (s *chatApplicationStub) ResolvePrincipal(context.Context, int64, string) (*service.APIKey, error) {
+func (s *chatApplicationStub) Capabilities(context.Context) (*service.ChatCapabilitiesResult, error) {
+	s.capabilitiesCalls++
+	return s.capabilitiesResult, s.capabilitiesErr
+}
+
+func (s *chatApplicationStub) ResolvePrincipal(context.Context, int64, string) (*service.ChatPrincipal, error) {
 	s.resolveCalls++
-	return s.principal, s.resolveErr
+	if s.principal == nil {
+		return nil, s.resolveErr
+	}
+	return &service.ChatPrincipal{APIKey: s.principal, Subscription: s.subscription}, s.resolveErr
+}
+
+func (s *chatApplicationStub) ResolveWebChatPrincipal(_ context.Context, _ int64, _ string, options service.WebChatReasoningOptions) (*service.ChatPrincipal, error) {
+	s.principalReasoningOptions = options
+	return s.ResolvePrincipal(context.Background(), 0, "")
+}
+
+func (s *chatApplicationStub) NormalizeWebChatReasoning(_ context.Context, _ int64, model string, options service.WebChatReasoningOptions) (service.WebChatReasoningOptions, error) {
+	s.reasoningCalls++
+	s.reasoningModel = model
+	s.reasoningMode = options.Mode
+	s.reasoningEffort = options.Effort
+	if s.reasoningErr != nil {
+		return service.WebChatReasoningOptions{}, s.reasoningErr
+	}
+	if s.normalizedReasoningMode != "" {
+		options.Mode = s.normalizedReasoningMode
+	}
+	if s.normalizedReasoningEffort != "" {
+		options.Effort = s.normalizedReasoningEffort
+	}
+	return options, nil
 }
 
 type chatCompletionDelegatorStub struct {
@@ -234,6 +278,106 @@ func chatHistoryServiceForCompletion(
 	return service.NewChatHistoryService(repo)
 }
 
+func TestNormalizeWebChatCompletionAttachmentsMergesLegacyAndLibraryReferences(t *testing.T) {
+	request := &webChatCompletionRequest{
+		UserMessage: &webChatCompletionUserMessage{
+			AttachmentIDs: []string{"att_legacy_12345678", " att_legacy_12345678 "},
+			Attachments: []webChatCompletionAttachmentReference{
+				{Source: "library", FileIDCamel: "lib_nested_12345678"},
+				{Source: "LIBRARY", FileID: "lib_top_12345678"},
+			},
+		},
+		Attachments: []webChatCompletionAttachmentReference{
+			{Source: "library", FileID: "lib_top_12345678"},
+		},
+	}
+
+	libraryIDs, err := normalizeWebChatCompletionAttachments(request)
+	require.NoError(t, err)
+	require.Equal(t, []string{"lib_top_12345678", "lib_nested_12345678"}, libraryIDs)
+	require.Equal(t, []string{
+		"att_legacy_12345678",
+		"lib_top_12345678",
+		"lib_nested_12345678",
+	}, request.UserMessage.AttachmentIDs)
+}
+
+func TestNormalizeWebChatCompletionAttachmentsRejectsNonLibrarySources(t *testing.T) {
+	request := &webChatCompletionRequest{
+		UserMessage: &webChatCompletionUserMessage{},
+		Attachments: []webChatCompletionAttachmentReference{
+			{Source: "upload", FileID: "lib_file_12345678"},
+		},
+	}
+
+	_, err := normalizeWebChatCompletionAttachments(request)
+	require.Error(t, err)
+}
+
+func TestNormalizeWebChatCompletionAttachmentsRequiresUserMessage(t *testing.T) {
+	request := &webChatCompletionRequest{
+		Attachments: []webChatCompletionAttachmentReference{
+			{Source: "library", FileIDCamel: "lib_file_12345678"},
+		},
+	}
+
+	_, err := normalizeWebChatCompletionAttachments(request)
+	require.Error(t, err)
+}
+
+func TestChatCapabilitiesReturnsTranscriptionProductConfig(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/chat/capabilities", nil)
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = request
+	c.Set(string(middleware2.ContextKeyUser), middleware2.AuthSubject{UserID: 42})
+	application := &chatApplicationStub{
+		capabilitiesResult: &service.ChatCapabilitiesResult{
+			Transcription: service.ChatTranscriptionProductCapability{
+				Enabled:            true,
+				MaxUploadBytes:     8 << 20,
+				MaxDurationSeconds: 90,
+				AcceptedMIMETypes:  []string{"audio/webm", "audio/mp4"},
+			},
+		},
+	}
+
+	(&ChatHandler{chat: application}).Capabilities(c)
+
+	require.Equal(t, http.StatusOK, recorder.Code)
+	require.Equal(t, "private, no-store", recorder.Header().Get("Cache-Control"))
+	require.Equal(t, 1, application.capabilitiesCalls)
+	require.Zero(t, application.listModelsCalls)
+	var payload struct {
+		Code int `json:"code"`
+		Data struct {
+			Transcription service.ChatTranscriptionProductCapability `json:"transcription"`
+		} `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &payload))
+	require.Zero(t, payload.Code)
+	require.True(t, payload.Data.Transcription.Enabled)
+	require.Equal(t, int64(8<<20), payload.Data.Transcription.MaxUploadBytes)
+	require.Equal(t, 90, payload.Data.Transcription.MaxDurationSeconds)
+	require.Equal(t, []string{"audio/webm", "audio/mp4"}, payload.Data.Transcription.AcceptedMIMETypes)
+	require.NotContains(t, recorder.Body.String(), "billing_mode")
+}
+
+func TestChatCapabilitiesRequiresAuthenticatedUser(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	request := httptest.NewRequest(http.MethodGet, "/api/v1/chat/capabilities", nil)
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = request
+	application := &chatApplicationStub{}
+
+	(&ChatHandler{chat: application}).Capabilities(c)
+
+	require.Equal(t, http.StatusUnauthorized, recorder.Code)
+	require.Zero(t, application.capabilitiesCalls)
+}
+
 func TestChatCompletionsRejectsUnsupportedContentTypeBeforeBodyOrService(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
@@ -365,6 +509,363 @@ func TestChatCompletionsAcceptsJSONMediaTypeVariants(t *testing.T) {
 	}
 }
 
+func TestChatCompletionsDefaultsOmittedReasoningEffortToLow(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	c, recorder := newChatCompletionContractContext("server-request-id")
+	history := &chatCompletionHistoryRepositoryStub{}
+	application := &chatApplicationStub{principal: validChatHandlerPrincipal()}
+	gateway := &chatCompletionDelegatorStub{
+		response: "data: {\"choices\":[{\"delta\":{\"content\":\"hello\"},\"finish_reason\":\"stop\"}]}\n\n" +
+			"data: [DONE]\n\n",
+	}
+
+	(&ChatHandler{
+		chat:    application,
+		history: chatHistoryServiceForCompletion(history),
+		gateway: gateway,
+	}).Completions(c)
+
+	require.Equal(t, http.StatusOK, recorder.Code)
+	require.Equal(t, 1, application.reasoningCalls)
+	require.Equal(t, "gpt-5.5", application.reasoningModel)
+	require.Equal(t, service.WebChatReasoningModeStandard, application.reasoningMode)
+	require.Equal(t, "low", application.reasoningEffort)
+	require.NotNil(t, history.prepareInput)
+	require.Equal(t, service.WebChatReasoningModeStandard, history.prepareInput.ReasoningMode)
+	require.Equal(t, "low", history.prepareInput.ReasoningEffort)
+	require.Contains(t, gateway.requestBody, `"reasoning":{"mode":"standard","effort":"low","summary":"auto"}`)
+}
+
+func TestChatCompletionsCarriesTrustedProModeToGateway(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	c, recorder := newChatCompletionContractContext("server-request-id")
+	body := `{
+		"conversation_id":"conversation-12345678",
+		"model":"gpt-5.6-sol",
+		"reasoning":{"mode":"pro","summary":"auto"},
+		"expected_head_message_id":null,
+		"user_message":{"id":"message-user-12345678","content":"hello"},
+		"assistant_message_id":"message-assistant-12345678"
+	}`
+	c.Request.Body = io.NopCloser(strings.NewReader(body))
+	c.Request.ContentLength = int64(len(body))
+	history := &chatCompletionHistoryRepositoryStub{}
+	application := &chatApplicationStub{principal: validChatHandlerPrincipal()}
+	gateway := &chatCompletionDelegatorStub{
+		response: "data: {\"choices\":[{\"delta\":{\"content\":\"hello\"},\"finish_reason\":\"stop\"}]}\n\n" +
+			"data: [DONE]\n\n",
+		hook: func(c *gin.Context) {
+			options, ok := service.GetWebChatReasoningOptions(c)
+			require.True(t, ok)
+			require.Equal(t, service.WebChatReasoningOptions{
+				Mode: service.WebChatReasoningModePro, Effort: "low",
+			}, options)
+		},
+	}
+
+	(&ChatHandler{
+		chat:    application,
+		history: chatHistoryServiceForCompletion(history),
+		gateway: gateway,
+	}).Completions(c)
+
+	require.Equal(t, http.StatusOK, recorder.Code)
+	require.Equal(t, service.WebChatReasoningModePro, application.reasoningMode)
+	require.Equal(t, "low", application.reasoningEffort)
+	require.Equal(t, service.WebChatReasoningOptions{
+		Mode: service.WebChatReasoningModePro, Effort: "low",
+	}, application.principalReasoningOptions)
+	require.Equal(t, service.WebChatReasoningModePro, history.prepareInput.ReasoningMode)
+	require.Contains(t, gateway.requestBody, `"reasoning":{"mode":"pro","summary":"auto"}`)
+	require.NotContains(t, gateway.requestBody, `"effort"`)
+}
+
+func TestChatCompletionsPersistsReasoningActivitiesInCheckpointAndFinalize(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	c, recorder := newChatCompletionContractContext("server-request-id")
+	body := `{
+		"conversation_id":"conversation-12345678",
+		"model":"gpt-5.6-sol",
+		"reasoning":{"mode":"pro","summary":"auto"},
+		"expected_head_message_id":null,
+		"user_message":{"id":"message-user-12345678","content":"hello"},
+		"assistant_message_id":"message-assistant-12345678"
+	}`
+	c.Request.Body = io.NopCloser(strings.NewReader(body))
+	c.Request.ContentLength = int64(len(body))
+	history := &chatCompletionHistoryRepositoryStub{}
+	gateway := &chatCompletionDelegatorStub{
+		response: `data: {"source":"openai_responses","eventType":"response.created","payload":{"type":"response.created","sequence_number":0,"response":{"id":"resp_activity_123"}}}` + "\n\n" +
+			`data: {"source":"openai_responses","eventType":"response.reasoning_summary_part.added","payload":{"type":"response.reasoning_summary_part.added","sequence_number":1,"response_id":"resp_activity_123","item_id":"rs_activity_123","output_index":0,"summary_index":0,"part":{"type":"summary_text","text":""}}}` + "\n\n" +
+			`data: {"source":"openai_responses","eventType":"response.reasoning_summary_text.delta","payload":{"type":"response.reasoning_summary_text.delta","sequence_number":2,"response_id":"resp_activity_123","item_id":"rs_activity_123","output_index":0,"summary_index":0,"delta":"checked"}}` + "\n\n" +
+			`data: {"source":"openai_responses","eventType":"response.reasoning_summary_text.done","payload":{"type":"response.reasoning_summary_text.done","sequence_number":3,"response_id":"resp_activity_123","item_id":"rs_activity_123","output_index":0,"summary_index":0,"text":"checked upstream"}}` + "\n\n" +
+			`data: {"source":"openai_responses","eventType":"response.completed","payload":{"type":"response.completed","sequence_number":4,"response":{"id":"resp_activity_123","output":[{"id":"rs_activity_123","type":"reasoning","summary":[{"type":"summary_text","text":"checked upstream"}]}]}}}` + "\n\n" +
+			`data: {"choices":[{"delta":{"content":"hello"},"finish_reason":"stop"}]}` + "\n\n" +
+			"data: [DONE]\n\n",
+	}
+
+	(&ChatHandler{
+		chat:    &chatApplicationStub{principal: validChatHandlerPrincipal()},
+		history: chatHistoryServiceForCompletion(history),
+		gateway: gateway,
+	}).Completions(c)
+
+	require.Equal(t, http.StatusOK, recorder.Code)
+	require.NotNil(t, history.checkpointInput)
+	require.Equal(t, "hello", history.checkpointInput.Content)
+	require.Len(t, history.checkpointInput.Activities, 1)
+	checkpointActivity := history.checkpointInput.Activities[0]
+	require.Equal(t, "resp_activity_123", checkpointActivity.ResponseID)
+	require.Equal(t, "rs_activity_123", checkpointActivity.ItemID)
+	require.Equal(t, "checked upstream", checkpointActivity.Text)
+	require.Equal(t, service.ChatMessageActivityStatusCompleted, checkpointActivity.Status)
+	require.Equal(t, service.WebChatReasoningModePro, checkpointActivity.ReasoningMode)
+	require.Empty(t, checkpointActivity.ReasoningEffort)
+
+	require.NotNil(t, history.finalizeInput)
+	require.Equal(t, "hello", history.finalizeInput.Content)
+	require.Len(t, history.finalizeInput.Activities, 1)
+	require.Equal(t, checkpointActivity, history.finalizeInput.Activities[0])
+}
+
+func TestFinalizeChatCompletionMarksNetworkTerminationDisconnected(t *testing.T) {
+	history := &chatCompletionHistoryRepositoryStub{}
+	handler := &ChatHandler{history: chatHistoryServiceForCompletion(history)}
+	handler.finalizeChatCompletion(
+		42,
+		"attempt-12345678",
+		"message-assistant-12345678",
+		http.StatusOK,
+		deliveredChatStreamSnapshot{
+			Content:       "partial answer",
+			CheckpointSeq: 4,
+			Activities: []service.ChatMessageActivity{{
+				Source:        service.ChatMessageActivitySourceOpenAIResponses,
+				ActivityType:  service.ChatMessageActivityTypeReasoningSummary,
+				ItemID:        "rs_1",
+				OutputIndex:   0,
+				SummaryIndex:  0,
+				SortOrder:     1,
+				Status:        service.ChatMessageActivityStatusCompleted,
+				Text:          "kept partial summary",
+				SequenceStart: 1,
+				SequenceEnd:   3,
+				StartedAt:     time.Now().Add(-time.Second),
+				Metadata:      []byte(`{}`),
+			}},
+		},
+	)
+
+	require.NotNil(t, history.finalizeInput)
+	require.Equal(t, service.ChatMessageDeliveryInterrupted, history.finalizeInput.DeliveryStatus)
+	require.Equal(t, "disconnected", history.finalizeInput.FinishReason)
+	require.Len(t, history.finalizeInput.Activities, 1)
+	require.Equal(t, "kept partial summary", history.finalizeInput.Activities[0].Text)
+	require.Equal(t, service.ChatMessageActivityStatusDisconnected, history.finalizeInput.Activities[0].Status)
+}
+
+func TestFinalizeChatCompletionPreservesAppliedResponsesCompletedTerminal(t *testing.T) {
+	history := &chatCompletionHistoryRepositoryStub{}
+	handler := &ChatHandler{history: chatHistoryServiceForCompletion(history)}
+	handler.finalizeChatCompletion(
+		42,
+		"attempt-12345678",
+		"message-assistant-12345678",
+		http.StatusOK,
+		deliveredChatStreamSnapshot{
+			Content:                 "complete answer",
+			Done:                    true,
+			CheckpointSeq:           4,
+			ResponsesTerminalSeen:   true,
+			ResponsesTerminalStatus: service.ChatMessageActivityStatusCompleted,
+			Activities: []service.ChatMessageActivity{{
+				Source:        service.ChatMessageActivitySourceOpenAIResponses,
+				ActivityType:  service.ChatMessageActivityTypeReasoningSummary,
+				ItemID:        "rs_1",
+				OutputIndex:   0,
+				SummaryIndex:  0,
+				SortOrder:     1,
+				Status:        service.ChatMessageActivityStatusCompleted,
+				Text:          "finished summary",
+				SequenceStart: 1,
+				SequenceEnd:   3,
+				StartedAt:     time.Now().Add(-time.Second),
+				Metadata:      []byte(`{"last_event":"response.completed"}`),
+			}},
+		},
+	)
+
+	require.NotNil(t, history.finalizeInput)
+	require.Equal(t, service.ChatMessageDeliveryCompleted, history.finalizeInput.DeliveryStatus)
+	require.Equal(t, service.ChatAttemptStatusCompleted, history.finalizeInput.AttemptStatus)
+	require.Len(t, history.finalizeInput.Activities, 1)
+	require.Equal(t, service.ChatMessageActivityStatusCompleted, history.finalizeInput.Activities[0].Status)
+	require.JSONEq(t, `{"last_event":"response.completed"}`, string(history.finalizeInput.Activities[0].Metadata))
+}
+
+func TestFinalizeChatCompletionUsesAppliedResponsesNonCompletedTerminal(t *testing.T) {
+	for _, test := range []struct {
+		name           string
+		terminalStatus string
+		activityStatus string
+		wantDelivery   string
+		wantAttempt    string
+		wantErrorCode  string
+	}{
+		{
+			name:           "incomplete",
+			terminalStatus: service.ChatMessageActivityStatusIncomplete,
+			activityStatus: service.ChatMessageActivityStatusIncomplete,
+			wantDelivery:   service.ChatMessageDeliveryPartial,
+			wantAttempt:    service.ChatAttemptStatusInterrupted,
+		},
+		{
+			name:           "failed",
+			terminalStatus: service.ChatMessageActivityStatusFailed,
+			activityStatus: service.ChatMessageActivityStatusFailed,
+			wantDelivery:   service.ChatMessageDeliveryError,
+			wantAttempt:    service.ChatAttemptStatusFailed,
+			wantErrorCode:  "OPENAI_RESPONSE_FAILED",
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			history := &chatCompletionHistoryRepositoryStub{}
+			handler := &ChatHandler{history: chatHistoryServiceForCompletion(history)}
+			handler.finalizeChatCompletion(
+				42,
+				"attempt-12345678",
+				"message-assistant-12345678",
+				http.StatusOK,
+				deliveredChatStreamSnapshot{
+					Content:                 "partial answer",
+					CheckpointSeq:           4,
+					ResponsesTerminalSeen:   true,
+					ResponsesTerminalStatus: test.terminalStatus,
+					Activities: []service.ChatMessageActivity{{
+						Source:        service.ChatMessageActivitySourceOpenAIResponses,
+						ActivityType:  service.ChatMessageActivityTypeReasoningSummary,
+						ItemID:        "rs_1",
+						OutputIndex:   0,
+						SummaryIndex:  0,
+						SortOrder:     1,
+						Status:        test.activityStatus,
+						Text:          "partial summary",
+						SequenceStart: 1,
+						SequenceEnd:   3,
+						StartedAt:     time.Now().Add(-time.Second),
+						Metadata:      []byte(`{}`),
+					}},
+				},
+			)
+
+			require.NotNil(t, history.finalizeInput)
+			require.Equal(t, test.wantDelivery, history.finalizeInput.DeliveryStatus)
+			require.Equal(t, test.wantAttempt, history.finalizeInput.AttemptStatus)
+			require.Equal(t, test.wantErrorCode, history.finalizeInput.ErrorCode)
+			require.Equal(t, test.activityStatus, history.finalizeInput.Activities[0].Status)
+		})
+	}
+}
+
+func TestChatCompletionsPrePrepareModelFailureDoesNotAdvertiseReceipt(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	c, recorder := newChatCompletionContractContext("correlation-only")
+	history := &chatCompletionHistoryRepositoryStub{}
+	application := &chatApplicationStub{reasoningErr: service.ErrChatModelNotAvailable}
+	gateway := &chatCompletionDelegatorStub{}
+
+	(&ChatHandler{
+		chat:    application,
+		history: chatHistoryServiceForCompletion(history),
+		gateway: gateway,
+	}).Completions(c)
+
+	require.Equal(t, http.StatusBadRequest, recorder.Code)
+	require.Empty(t, recorder.Header().Get("X-Chat-Receipt-ID"))
+	require.Nil(t, history.prepareInput)
+	require.Zero(t, application.resolveCalls)
+	require.Zero(t, gateway.calls)
+}
+
+func TestChatCompletionsRejectsAutoReasoningBeforeApplicationCalls(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	request := httptest.NewRequest(
+		http.MethodPost,
+		"/api/v1/chat/completions",
+		strings.NewReader(`{
+			"conversation_id":"conversation-12345678",
+			"model":"gpt-5.6-sol",
+			"reasoning_effort":"auto",
+			"expected_head_message_id":null,
+			"user_message":{"id":"message-user-12345678","content":"hello"},
+			"assistant_message_id":"message-assistant-12345678"
+		}`),
+	)
+	request.Header.Set("Content-Type", "application/json")
+	recorder := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(recorder)
+	c.Request = request
+	c.Set(string(middleware2.ContextKeyUser), middleware2.AuthSubject{UserID: 42})
+	application := &chatApplicationStub{}
+	history := &chatCompletionHistoryRepositoryStub{}
+	gateway := &chatCompletionDelegatorStub{}
+
+	(&ChatHandler{
+		chat:    application,
+		history: chatHistoryServiceForCompletion(history),
+		gateway: gateway,
+	}).Completions(c)
+
+	require.Equal(t, http.StatusBadRequest, recorder.Code)
+	require.Contains(t, recorder.Body.String(), "INVALID_CHAT_REQUEST")
+	require.Zero(t, application.reasoningCalls)
+	require.Zero(t, application.resolveCalls)
+	require.Nil(t, history.prepareInput)
+	require.Zero(t, gateway.calls)
+}
+
+func TestDecodeWebChatCompletionRequestReasoningContract(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	for _, tt := range []struct {
+		name       string
+		body       string
+		wantMode   string
+		wantEffort string
+		wantErr    bool
+	}{
+		{name: "omitted defaults standard low", body: `{}`, wantMode: "standard", wantEffort: "low"},
+		{name: "empty defaults low", body: `{"reasoning_effort":""}`, wantMode: "standard", wantEffort: "low"},
+		{name: "whitespace defaults low", body: `{"reasoning_effort":"  "}`, wantMode: "standard", wantEffort: "low"},
+		{name: "low remains supported", body: `{"reasoning_effort":"low"}`, wantMode: "standard", wantEffort: "low"},
+		{name: "medium remains supported", body: `{"reasoning_effort":"medium"}`, wantMode: "standard", wantEffort: "medium"},
+		{name: "high remains supported", body: `{"reasoning_effort":"high"}`, wantMode: "standard", wantEffort: "high"},
+		{name: "xhigh remains supported", body: `{"reasoning_effort":"xhigh"}`, wantMode: "standard", wantEffort: "xhigh"},
+		{name: "Pro is a mode", body: `{"reasoning_mode":" PRO ","reasoning_effort":"medium"}`, wantMode: "pro", wantEffort: "medium"},
+		{name: "nested standard keeps effort", body: `{"reasoning":{"mode":"standard","effort":"xhigh","summary":"auto"}}`, wantMode: "standard", wantEffort: "xhigh"},
+		{name: "nested Pro omits effort", body: `{"reasoning":{"mode":"pro","summary":"auto"}}`, wantMode: "pro", wantEffort: "low"},
+		{name: "invalid mode is rejected", body: `{"reasoning_mode":"turbo","reasoning_effort":"medium"}`, wantErr: true},
+		{name: "invalid nested mode is rejected", body: `{"reasoning":{"mode":"turbo","summary":"auto"}}`, wantErr: true},
+		{name: "auto is rejected", body: `{"reasoning_effort":"auto"}`, wantErr: true},
+		{name: "pro is rejected", body: `{"reasoning_effort":"pro"}`, wantErr: true},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			recorder := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(recorder)
+			c.Request = httptest.NewRequest(http.MethodPost, "/api/v1/chat/completions", strings.NewReader(tt.body))
+
+			req, err := decodeWebChatCompletionRequest(c)
+			if tt.wantErr {
+				require.Error(t, err)
+				require.Nil(t, req)
+				return
+			}
+			require.NoError(t, err)
+			require.Equal(t, tt.wantMode, req.ReasoningMode)
+			require.Equal(t, tt.wantEffort, req.ReasoningEffort)
+		})
+	}
+}
+
 func TestChatCompletionsRejectsBodyOverTwoMiB(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 
@@ -405,7 +906,7 @@ func TestChatCompletionsClaimsAttemptBeforeForwarding(t *testing.T) {
 		strings.NewReader(`{
 			"conversation_id":"conversation-12345678",
 			"model":"gpt-5.5",
-			"reasoning_effort":"high",
+			"reasoning":{"mode":"standard","effort":"high","summary":"auto"},
 			"expected_head_message_id":"message-head-12345678",
 			"user_message":{"id":"message-user-12345678","content":"client-only user message"},
 			"assistant_message_id":"message-assistant-12345678"
@@ -448,10 +949,55 @@ func TestChatCompletionsClaimsAttemptBeforeForwarding(t *testing.T) {
 	require.Equal(t, int64(42), lease.userID)
 	require.Equal(t, "attempt-12345678", lease.attemptID)
 	require.Equal(t, "server-request-id", recorder.Header().Get("X-Client-Request-ID"))
+	require.Equal(t, "server-request-id", recorder.Header().Get("X-Chat-Receipt-ID"))
 	require.Equal(t, "high", history.prepareInput.ReasoningEffort)
 	require.Contains(t, gateway.requestBody, `"content":"server-owned context"`)
-	require.Contains(t, gateway.requestBody, `"reasoning_effort":"high"`)
+	require.Contains(t, gateway.requestBody, `"reasoning":{"mode":"standard","effort":"high","summary":"auto"}`)
 	require.NotContains(t, gateway.requestBody, "client-only user message")
+}
+
+func TestChatCompletionsCarriesSelectedSubscriptionIntoGatewayContext(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+
+	c, recorder := newChatCompletionContractContext(
+		"33333333-3333-4333-8333-333333333333",
+	)
+	principal := validChatHandlerPrincipal()
+	principal.Group.SubscriptionType = service.SubscriptionTypeSubscription
+	subscription := &service.UserSubscription{
+		ID:        700,
+		UserID:    principal.UserID,
+		GroupID:   principal.Group.ID,
+		Status:    service.SubscriptionStatusActive,
+		StartsAt:  time.Now().Add(-time.Hour),
+		ExpiresAt: time.Now().Add(time.Hour),
+	}
+	var gatewaySubscription *service.UserSubscription
+	gateway := &chatCompletionDelegatorStub{
+		response: "data: {\"choices\":[{\"delta\":{\"content\":\"hello\"},\"finish_reason\":\"stop\"}]}\n\n" +
+			"data: [DONE]\n\n",
+		hook: func(c *gin.Context) {
+			bound, ok := middleware2.GetSubscriptionFromContext(c)
+			require.True(t, ok)
+			gatewaySubscription = bound
+		},
+	}
+	history := &chatCompletionHistoryRepositoryStub{}
+	handler := &ChatHandler{
+		chat: &chatApplicationStub{
+			principal:    principal,
+			subscription: subscription,
+		},
+		attempts: &chatAttemptLeaseManagerStub{},
+		history:  chatHistoryServiceForCompletion(history),
+		gateway:  gateway,
+	}
+
+	handler.Completions(c)
+
+	require.Equal(t, http.StatusOK, recorder.Code)
+	require.Equal(t, 1, gateway.calls)
+	require.Same(t, subscription, gatewaySubscription)
 }
 
 func TestChatCompletionsReplayReturnsOriginalReceiptWithoutForwarding(t *testing.T) {
@@ -496,6 +1042,7 @@ func TestChatCompletionsReplayReturnsOriginalReceiptWithoutForwarding(t *testing
 
 	require.Equal(t, http.StatusConflict, recorder.Code)
 	require.Equal(t, "original-server-request-id", recorder.Header().Get("X-Client-Request-ID"))
+	require.Equal(t, "original-server-request-id", recorder.Header().Get("X-Chat-Receipt-ID"))
 	require.Zero(t, gateway.calls)
 	require.Nil(t, history.finalizeInput)
 }
@@ -571,6 +1118,7 @@ func TestChatCompletionsUsageProducerFailureSettlementContract(t *testing.T) {
 	producerErr := errors.New("usage database unavailable")
 	for _, tt := range []struct {
 		name               string
+		response           string
 		receipt            *service.BillingReceipt
 		receiptErr         error
 		wantFinalize       bool
@@ -589,14 +1137,35 @@ func TestChatCompletionsUsageProducerFailureSettlementContract(t *testing.T) {
 			wantDeliveryStatus: service.ChatMessageDeliveryCompleted,
 		},
 		{
-			name: "confirmed no billing finalizes settlement failure",
+			name: "confirmed no billing preserves delivery and records settlement failure",
 			receipt: &service.BillingReceipt{
 				Status: service.BillingReceiptStatusPending,
 			},
 			wantFinalize:       true,
 			wantAttemptStatus:  service.ChatAttemptStatusFailed,
-			wantFailureCode:    chatSettlementFailureCode,
+			wantFailureCode:    service.ChatAttemptFailureCodeSettlement,
+			wantDeliveryStatus: service.ChatMessageDeliveryCompleted,
+		},
+		{
+			name:     "settlement failure does not replace a generation error",
+			response: "data: {\"error\":{\"code\":\"upstream_error\",\"message\":\"failed\"}}\n\n",
+			receipt: &service.BillingReceipt{
+				Status: service.BillingReceiptStatusPending,
+			},
+			wantFinalize:       true,
+			wantAttemptStatus:  service.ChatAttemptStatusFailed,
+			wantFailureCode:    "upstream_error",
 			wantDeliveryStatus: service.ChatMessageDeliveryError,
+		},
+		{
+			name:     "settlement failure does not turn an interrupted stream into an error",
+			response: "data: {\"choices\":[{\"delta\":{\"content\":\"partial\"},\"finish_reason\":null}]}\n\n",
+			receipt: &service.BillingReceipt{
+				Status: service.BillingReceiptStatusPending,
+			},
+			wantFinalize:       true,
+			wantAttemptStatus:  service.ChatAttemptStatusInterrupted,
+			wantDeliveryStatus: service.ChatMessageDeliveryInterrupted,
 		},
 		{
 			name:         "unqueryable receipt leaves attempt processing",
@@ -610,9 +1179,13 @@ func TestChatCompletionsUsageProducerFailureSettlementContract(t *testing.T) {
 			)
 			history := &chatCompletionHistoryRepositoryStub{}
 			lease := &chatAttemptLeaseManagerStub{}
+			response := tt.response
+			if response == "" {
+				response = "data: {\"choices\":[{\"delta\":{\"content\":\"hello\"},\"finish_reason\":\"stop\"}]}\n\n" +
+					"data: [DONE]\n\n"
+			}
 			gateway := &chatCompletionDelegatorStub{
-				response: "data: {\"choices\":[{\"delta\":{\"content\":\"hello\"},\"finish_reason\":\"stop\"}]}\n\n" +
-					"data: [DONE]\n\n",
+				response: response,
 				hook: func(c *gin.Context) {
 					barrier := webChatUsageBarrierFromContext(c.Request.Context())
 					require.NotNil(t, barrier)

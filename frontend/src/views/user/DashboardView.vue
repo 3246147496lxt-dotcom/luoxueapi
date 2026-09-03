@@ -1,66 +1,51 @@
 <template>
   <AppLayout>
-    <div class="yunwu-dashboard space-y-4">
-      <header class="flex items-center justify-between gap-4 py-1">
-        <h1 class="min-w-0 truncate text-2xl font-semibold leading-8 text-gray-800 dark:text-gray-100">
-          {{ t('dashboard.greeting.line', { period: greetingPeriod, name: dashboardUserName }) }}
-        </h1>
-
-        <div class="flex shrink-0 items-center gap-2">
-          <button
-            type="button"
-            class="dashboard-icon-button"
-            :aria-label="t('dashboard.openFilters')"
-            :title="t('dashboard.openFilters')"
-            @click="openFilters"
-          >
-            <Icon name="search" size="sm" :stroke-width="1.8" />
-          </button>
-          <button
-            type="button"
-            class="dashboard-icon-button"
-            :disabled="isRefreshing"
-            :aria-label="t('dashboard.refreshDashboard')"
-            :title="t('dashboard.refreshDashboard')"
-            @click="refreshAll"
-          >
-            <Icon name="refresh" size="sm" :stroke-width="1.8" :class="{ 'animate-spin': isRefreshing }" />
-          </button>
+    <div class="yunwu-dashboard">
+      <header class="dashboard-page-header">
+        <h1>{{ t('dashboard.title') }}</h1>
+        <div class="dashboard-notification">
+          <DashboardNotificationPopover />
         </div>
       </header>
 
-      <div v-if="loading && !stats" class="space-y-4" aria-live="polite">
-        <div class="grid grid-cols-1 gap-3 min-[360px]:grid-cols-2 sm:gap-4 xl:grid-cols-4">
-          <div v-for="index in 4" :key="index" class="dashboard-panel min-h-[205px] p-5">
-            <div class="skeleton h-5 w-28"></div>
-            <div class="mt-8 space-y-5">
-              <div class="skeleton h-12 w-full"></div>
-              <div class="skeleton h-12 w-full"></div>
-            </div>
+      <div v-if="loading && !stats" class="dashboard-loading" aria-live="polite">
+        <div class="dashboard-loading-metrics">
+          <div v-for="index in 4" :key="index" class="dashboard-panel dashboard-loading-card">
+            <span class="skeleton h-4 w-24" />
+            <span class="skeleton mt-6 h-9 w-32" />
+            <span v-if="index === 2 || index === 3" class="skeleton mt-3 h-3 w-40 max-w-full" />
           </div>
         </div>
-        <div class="grid gap-4 xl:grid-cols-[minmax(0,3fr)_minmax(17.5rem,1fr)]">
-          <div class="dashboard-panel min-h-[550px] p-6">
-            <div class="skeleton h-5 w-36"></div>
-            <div class="skeleton mt-8 h-[410px] w-full"></div>
+        <div class="dashboard-loading-section">
+          <div class="dashboard-loading-section__header">
+            <span class="skeleton h-5 w-24" />
+            <span class="skeleton h-9 w-32" />
           </div>
-          <div class="dashboard-panel min-h-[550px] p-6">
-            <div class="skeleton h-5 w-28"></div>
-            <div class="skeleton mt-8 h-24 w-full"></div>
+          <div class="dashboard-loading-body">
+            <div class="dashboard-panel min-h-[408px] p-5">
+              <span class="skeleton h-5 w-40" />
+              <span class="skeleton mt-8 block h-[320px] w-full" />
+            </div>
+            <div class="space-y-4">
+              <div class="dashboard-panel min-h-[228px] p-5">
+                <span class="skeleton h-5 w-44" />
+                <span class="skeleton mt-5 block h-36 w-full" />
+              </div>
+              <div class="dashboard-panel min-h-[164px] p-5">
+                <span class="skeleton h-5 w-36" />
+                <span class="skeleton mt-5 block h-16 w-full" />
+              </div>
+            </div>
           </div>
         </div>
       </div>
 
-      <div v-else-if="!stats" class="dashboard-panel flex min-h-[360px] flex-col items-center justify-center px-6 text-center">
-        <Icon name="exclamationCircle" size="xl" class="text-amber-500" />
-        <h2 class="mt-4 text-base font-semibold text-gray-900 dark:text-white">
-          {{ t('dashboard.loadErrorTitle') }}
-        </h2>
-        <p class="mt-2 max-w-md text-sm leading-6 text-gray-500 dark:text-dark-400">
-          {{ t('dashboard.loadErrorDescription') }}
-        </p>
-        <button type="button" class="btn btn-primary mt-5" @click="refreshAll">
-          <Icon name="refresh" size="sm" />
+      <div v-else-if="!stats" class="dashboard-panel dashboard-error" role="alert">
+        <Icon name="exclamationCircle" size="lg" aria-hidden="true" />
+        <h2>{{ t('dashboard.loadErrorTitle') }}</h2>
+        <p>{{ t('dashboard.loadErrorDescription') }}</p>
+        <button type="button" class="dashboard-primary-button" :disabled="isRefreshing" @click="refreshAll">
+          <Icon name="refresh" size="sm" aria-hidden="true" />
           {{ t('dashboard.retry') }}
         </button>
       </div>
@@ -68,180 +53,113 @@
       <template v-else>
         <UserDashboardStats
           :stats="stats"
-          :balance="user?.balance || 0"
-          :is-simple="authStore.isSimpleMode"
-          :range-metrics="rangeMetrics"
+          :balance="accountBalance"
+          :plan-name="currentPlanName"
+          :quota-remaining-percent="quotaRemainingPercent"
+          :plan-loading="planLoading"
+        />
+
+        <UserDashboardCharts
+          :loading="loadingCharts"
+          :period="usagePeriod"
           :trend="trendData"
-          :start-date="startDate"
-          :end-date="endDate"
-          :granularity="granularity"
+          @update:period="usagePeriod = $event"
         />
 
-        <div class="grid items-stretch gap-4 xl:grid-cols-[minmax(0,3fr)_minmax(17.5rem,1fr)]">
-          <UserDashboardCharts
-            :loading="loadingCharts"
-            :start-date="startDate"
-            :end-date="endDate"
-            :granularity="granularity"
-            :trend="trendData"
-            :models="modelStats"
-          />
-          <UserDashboardApiInfo
-            :api-base-url="apiBaseUrl"
-            :custom-endpoints="customEndpoints"
-          />
-        </div>
-
-        <UserDashboardSupportPanels
-          :announcements="announcementStore.announcements"
-          :monitors="monitors"
-          :loading-announcements="announcementStore.loading"
-          :loading-monitors="loadingMonitors"
-          :monitor-enabled="monitorEnabled"
-        />
+        <UserDashboardInsights :period="usagePeriod" />
       </template>
-
-      <footer class="pb-2 pt-4 text-center text-xs text-gray-400 dark:text-dark-500">
-        © {{ currentYear }} {{ appStore.siteName }} · {{ t('dashboard.footer') }}
-      </footer>
     </div>
-
-    <BaseDialog
-      :show="showFilters"
-      :title="t('dashboard.filterTitle')"
-      width="narrow"
-      @close="showFilters = false"
-    >
-      <div class="space-y-4">
-        <label class="block">
-          <span class="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-200">
-            {{ t('dashboard.filterStart') }}
-          </span>
-          <input
-            v-model="draftStartDate"
-            type="date"
-            class="input w-full"
-            :max="draftEndDate"
-          />
-        </label>
-        <label class="block">
-          <span class="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-200">
-            {{ t('dashboard.filterEnd') }}
-          </span>
-          <input
-            v-model="draftEndDate"
-            type="date"
-            class="input w-full"
-            :min="draftStartDate"
-            :max="today"
-          />
-        </label>
-        <label class="block">
-          <span class="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-200">
-            {{ t('dashboard.filterGranularity') }}
-          </span>
-          <select v-model="draftGranularity" class="input w-full">
-            <option value="day">{{ t('dashboard.day') }}</option>
-            <option value="hour">{{ t('dashboard.hour') }}</option>
-          </select>
-        </label>
-      </div>
-
-      <template #footer>
-        <button type="button" class="btn btn-secondary" @click="showFilters = false">
-          {{ t('common.cancel') }}
-        </button>
-        <button type="button" class="btn btn-primary" :disabled="!canApplyFilters" @click="applyFilters">
-          {{ t('common.confirm') }}
-        </button>
-      </template>
-    </BaseDialog>
   </AppLayout>
 </template>
 
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { storeToRefs } from 'pinia'
 import { useI18n } from 'vue-i18n'
 import { useAuthStore } from '@/stores/auth'
-import { useAppStore } from '@/stores/app'
-import { useAnnouncementStore } from '@/stores/announcements'
+import { useUserProfileStore } from '@/stores/userProfile'
+import { useUserMembership } from '@/composables/useUserMembership'
 import { usageAPI, type UserDashboardStats as UserStatsType } from '@/api/usage'
-import { channelMonitorUserAPI, type UserMonitorView } from '@/api/channelMonitor'
+import subscriptionsAPI from '@/api/subscriptions'
 import AppLayout from '@/components/layout/AppLayout.vue'
-import BaseDialog from '@/components/common/BaseDialog.vue'
 import Icon from '@/components/icons/Icon.vue'
+import DashboardNotificationPopover from '@/components/user/dashboard/DashboardNotificationPopover.vue'
 import UserDashboardStats from '@/components/user/dashboard/UserDashboardStats.vue'
 import UserDashboardCharts from '@/components/user/dashboard/UserDashboardCharts.vue'
-import UserDashboardApiInfo from '@/components/user/dashboard/UserDashboardApiInfo.vue'
-import UserDashboardSupportPanels from '@/components/user/dashboard/UserDashboardSupportPanels.vue'
-import type { CustomEndpoint, ModelStat, TrendDataPoint } from '@/types'
-import { formatDateLocalInput } from '@/utils/format'
-import { aggregateDashboardRange } from '@/utils/dashboardMetrics'
+import UserDashboardInsights from '@/components/user/dashboard/UserDashboardInsights.vue'
+import {
+  resolveDashboardUsagePeriod,
+  type DashboardUsagePeriod,
+} from '@/components/user/dashboard/dashboardUsage'
+import type { SubscriptionProgressInfo, SubscriptionUsageWindowProgress, TrendDataPoint } from '@/types'
 
 const { t } = useI18n()
 const authStore = useAuthStore()
-const appStore = useAppStore()
-const announcementStore = useAnnouncementStore()
-const user = computed(() => authStore.user)
+const userProfileStore = useUserProfileStore()
+const {
+  profile,
+  primarySubscription,
+  subscriptionsLoading,
+  subscriptionsLoaded,
+  activeSubscriptionCount,
+} = storeToRefs(userProfileStore)
+const membership = useUserMembership({
+  subscriptionsLoaded,
+  activeSubscriptionCount,
+  primarySubscription,
+})
 
 const stats = ref<UserStatsType | null>(null)
 const loading = ref(true)
 const loadingCharts = ref(false)
-const loadingMonitors = ref(false)
+const quotaLoading = ref(false)
 const trendData = ref<TrendDataPoint[]>([])
-const modelStats = ref<ModelStat[]>([])
-const monitors = ref<UserMonitorView[]>([])
-const currentYear = new Date().getFullYear()
-const today = formatDateLocalInput(new Date())
-
-const startDate = ref(formatDateLocalInput(new Date(Date.now() - 6 * 86_400_000)))
-const endDate = ref(today)
-const granularity = ref<'day' | 'hour'>('day')
-const showFilters = ref(false)
-const draftStartDate = ref(startDate.value)
-const draftEndDate = ref(endDate.value)
-const draftGranularity = ref<'day' | 'hour'>(granularity.value)
-let monitorController: AbortController | null = null
+const subscriptionProgress = ref<SubscriptionProgressInfo[]>([])
+const usagePeriod = ref<DashboardUsagePeriod>('today')
 let chartsRequestId = 0
+let quotaRequestId = 0
 
-const greetingPeriod = computed(() => {
-  const hour = new Date().getHours()
-  if (hour < 12) return t('dashboard.greeting.morning')
-  if (hour < 18) return t('dashboard.greeting.afternoon')
-  return t('dashboard.greeting.evening')
+const currentPlanName = membership.accountPlanLabel
+const accountBalance = computed(() => (
+  profile.value?.availableBalance
+  ?? authStore.user?.balance
+  ?? 0
+))
+const planLoading = computed(() => (
+  membership.state.value === 'pending'
+  || subscriptionsLoading.value
+  || quotaLoading.value
+))
+const isRefreshing = computed(() => loading.value || loadingCharts.value || quotaLoading.value)
+
+const quotaRemainingPercent = computed<number | null>(() => {
+  const subscriptionId = primarySubscription.value?.id
+  if (subscriptionId == null || membership.state.value !== 'active') return null
+  const progress = subscriptionProgress.value.find(
+    item => item.subscription.id === subscriptionId,
+  )?.progress
+  if (!progress) return null
+
+  const windows: Array<SubscriptionUsageWindowProgress | undefined> = [
+    progress.daily,
+    progress.weekly,
+    progress.monthly,
+  ]
+  const usedPercentages = windows
+    .filter((window): window is SubscriptionUsageWindowProgress => (
+      window?.state !== 'unknown'
+      && typeof window?.percentage === 'number'
+      && Number.isFinite(window.percentage)
+    ))
+    .map(window => Math.min(100, Math.max(0, Number(window.percentage))))
+
+  if (!usedPercentages.length) return null
+  return Math.max(0, 100 - Math.max(...usedPercentages))
 })
-
-const dashboardUserName = computed(() => (
-  user.value?.username
-  || user.value?.email?.split('@')[0]
-  || appStore.siteName
-))
-
-const rangeMetrics = computed(() => aggregateDashboardRange(
-  trendData.value,
-  startDate.value,
-  endDate.value,
-))
-
-const apiBaseUrl = computed(() => (
-  appStore.cachedPublicSettings?.api_base_url
-  || appStore.apiBaseUrl
-  || (typeof window === 'undefined' ? '' : window.location.origin)
-))
-const customEndpoints = computed<CustomEndpoint[]>(() => appStore.cachedPublicSettings?.custom_endpoints || [])
-const monitorEnabled = computed(() => appStore.cachedPublicSettings?.channel_monitor_enabled !== false)
-const isRefreshing = computed(() => loading.value || loadingCharts.value || loadingMonitors.value || announcementStore.loading)
-const canApplyFilters = computed(() => Boolean(
-  draftStartDate.value
-  && draftEndDate.value
-  && draftStartDate.value <= draftEndDate.value
-  && draftEndDate.value <= today,
-))
 
 async function loadStats(): Promise<void> {
   loading.value = true
   try {
-    await authStore.refreshUser()
     stats.value = await usageAPI.getDashboardStats()
   } catch (error) {
     console.error('Failed to load dashboard stats:', error)
@@ -252,22 +170,17 @@ async function loadStats(): Promise<void> {
 
 async function loadCharts(): Promise<void> {
   const requestId = ++chartsRequestId
+  const range = resolveDashboardUsagePeriod(usagePeriod.value)
   loadingCharts.value = true
   try {
-    const [trendResult, modelsResult] = await Promise.all([
-      usageAPI.getDashboardTrend({
-        start_date: startDate.value,
-        end_date: endDate.value,
-        granularity: granularity.value,
-      }),
-      usageAPI.getDashboardModels({
-        start_date: startDate.value,
-        end_date: endDate.value,
-      }),
-    ])
+    const result = await usageAPI.getDashboardTrend({
+      start_date: range.startDate,
+      end_date: range.endDate,
+      granularity: range.granularity,
+      timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+    })
     if (requestId !== chartsRequestId) return
-    trendData.value = trendResult.trend || []
-    modelStats.value = modelsResult.models || []
+    trendData.value = result.trend || []
   } catch (error) {
     if (requestId === chartsRequestId) {
       console.error('Failed to load dashboard charts:', error)
@@ -277,109 +190,223 @@ async function loadCharts(): Promise<void> {
   }
 }
 
-async function loadMonitors(): Promise<void> {
-  if (!monitorEnabled.value) {
-    monitors.value = []
-    return
-  }
-
-  monitorController?.abort()
-  monitorController = new AbortController()
-  loadingMonitors.value = true
+async function loadQuotaProgress(): Promise<void> {
+  const requestId = ++quotaRequestId
+  quotaLoading.value = true
   try {
-    const response = await channelMonitorUserAPI.list({ signal: monitorController.signal })
-    monitors.value = response.items || []
+    const result = await subscriptionsAPI.getSubscriptionsProgress()
+    if (requestId !== quotaRequestId) return
+    subscriptionProgress.value = result
   } catch (error) {
-    if (!(error instanceof DOMException && error.name === 'AbortError')) {
-      console.warn('Failed to load channel monitors:', error)
-      monitors.value = []
+    if (requestId === quotaRequestId) {
+      subscriptionProgress.value = []
+      console.warn('Failed to load subscription quota progress:', error)
     }
   } finally {
-    loadingMonitors.value = false
+    if (requestId === quotaRequestId) quotaLoading.value = false
   }
 }
 
-async function refreshAll(): Promise<void> {
-  await appStore.fetchPublicSettings()
+async function loadDashboard(refreshProfile: boolean): Promise<void> {
+  if (refreshProfile) {
+    try {
+      await userProfileStore.refreshProfile()
+    } catch (error) {
+      console.warn('Failed to refresh dashboard profile:', error)
+    }
+  }
   await Promise.allSettled([
     loadStats(),
     loadCharts(),
-    announcementStore.fetchAnnouncements(true),
-    loadMonitors(),
+    loadQuotaProgress(),
   ])
 }
 
-function openFilters(): void {
-  draftStartDate.value = startDate.value
-  draftEndDate.value = endDate.value
-  draftGranularity.value = granularity.value
-  showFilters.value = true
+async function refreshAll(): Promise<void> {
+  await loadDashboard(true)
 }
 
-async function applyFilters(): Promise<void> {
-  if (!canApplyFilters.value) return
-  startDate.value = draftStartDate.value
-  endDate.value = draftEndDate.value
-  granularity.value = draftGranularity.value
-  showFilters.value = false
-  await loadCharts()
-}
+watch(usagePeriod, () => {
+  void loadCharts()
+})
+
+watch(() => primarySubscription.value?.id, (current, previous) => {
+  if (current !== previous) void loadQuotaProgress()
+})
 
 onMounted(() => {
-  void refreshAll()
+  void loadDashboard(false)
 })
 
 onBeforeUnmount(() => {
-  monitorController?.abort()
   chartsRequestId += 1
+  quotaRequestId += 1
 })
 </script>
 
 <style scoped>
-.dashboard-panel {
-  border: 1px solid var(--lx-clay-border);
-  border-radius: var(--lx-clay-radius-surface);
-  background: var(--lx-clay-surface);
-  box-shadow: var(--lx-clay-shadow-form);
+.yunwu-dashboard {
+  display: flex;
+  width: 100%;
+  min-width: 0;
+  flex-direction: column;
+  gap: var(--workspace-space-8);
+  color: var(--workspace-work-text);
+  background: var(--workspace-canvas);
 }
 
-.dashboard-icon-button {
-  display: inline-flex;
-  width: 2.25rem;
-  height: 2.25rem;
+.dashboard-page-header {
+  display: flex;
+  min-height: 44px;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--workspace-space-6);
+}
+
+.dashboard-page-header h1 {
+  color: var(--workspace-dashboard-text-strong);
+  font-size: calc(var(--workspace-type-page-title-size) + 0.125rem);
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.dashboard-notification {
+  display: flex;
   align-items: center;
   justify-content: center;
-  border: 0;
-  border-radius: 10px;
-  color: rgb(107 114 128);
-  background: transparent;
-  box-shadow: none;
-  transition: color 150ms ease, background-color 150ms ease;
 }
 
-.dashboard-icon-button:hover:not(:disabled) {
-  color: rgb(79 105 224);
-  background: transparent;
+
+.dashboard-panel {
+  min-width: 0;
+  border: 1px solid var(--workspace-dashboard-card-border);
+  border-radius: 24px;
+  background: var(--workspace-card-surface);
+  box-shadow: var(--workspace-dashboard-card-shadow);
 }
 
-.dashboard-icon-button:focus-visible {
-  outline: 2px solid rgb(129 140 248 / 0.55);
+.dashboard-loading,
+.dashboard-loading-metrics,
+.dashboard-loading-body {
+  display: grid;
+  gap: var(--workspace-space-4);
+}
+
+.dashboard-loading-metrics {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--workspace-space-6);
+}
+
+.dashboard-loading-card {
+  min-height: 138px;
+  padding: var(--workspace-space-6);
+}
+
+.dashboard-loading-section__header {
+  display: flex;
+  min-height: 44px;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: var(--workspace-space-4);
+}
+
+.dashboard-loading-body {
+  grid-template-columns: minmax(0, 3fr) minmax(20rem, 2fr);
+  gap: var(--workspace-space-6);
+}
+
+.dashboard-error {
+  display: flex;
+  min-height: 360px;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 32px;
+  text-align: center;
+}
+
+.dashboard-error > :deep(svg) {
+  color: var(--workspace-work-accent);
+}
+
+.dashboard-error h2 {
+  margin-top: 16px;
+  color: var(--workspace-dashboard-text-strong);
+  font-size: var(--workspace-type-navigation-size);
+  font-weight: var(--workspace-type-navigation-weight);
+}
+
+.dashboard-error p {
+  max-width: 30rem;
+  margin-top: 8px;
+  color: var(--workspace-dashboard-text-muted);
+  font-size: var(--workspace-type-body-size);
+  font-weight: var(--workspace-type-body-weight);
+  line-height: 1.3rem;
+}
+
+.dashboard-primary-button {
+  display: inline-flex;
+  min-height: 38px;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  margin-top: 20px;
+  padding: 0 14px;
+  border: 1px solid var(--workspace-work-accent);
+  border-radius: var(--workspace-radius-work-button);
+  color: var(--workspace-work-on-accent);
+  background: var(--workspace-work-accent);
+  font-size: var(--workspace-type-navigation-size);
+  font-weight: var(--workspace-type-navigation-weight);
+  transition: background-color 140ms ease, border-color 140ms ease;
+}
+
+.dashboard-primary-button:hover:not(:disabled) {
+  border-color: var(--workspace-work-accent-hover);
+  background: var(--workspace-work-accent-hover);
+}
+
+.dashboard-primary-button:focus-visible {
+  outline: 2px solid var(--workspace-work-accent);
   outline-offset: 2px;
 }
 
-.dashboard-icon-button:disabled {
+.dashboard-primary-button:disabled {
   cursor: wait;
-  opacity: 0.6;
+  opacity: 0.55;
 }
 
-:global(.dark) .dashboard-icon-button {
-  color: rgb(148 163 184);
-  background: transparent;
-  box-shadow: none;
+@media (max-width: 1279px) {
+  .dashboard-loading-metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .dashboard-loading-body {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 
-:global(.dark) .dashboard-icon-button:hover:not(:disabled) {
-  color: rgb(165 180 252);
-  background: transparent;
+@media (max-width: 767px) {
+  .yunwu-dashboard {
+    gap: 20px;
+  }
+
+  .dashboard-primary-button {
+    min-height: 44px;
+  }
 }
+
+@media (max-width: 639px) {
+  .dashboard-loading-metrics {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dashboard-primary-button {
+    transition-duration: 0.01ms;
+  }
+}
+
 </style>

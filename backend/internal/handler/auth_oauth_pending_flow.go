@@ -575,17 +575,141 @@ func (h *AuthHandler) applyPendingIdentityBindingAndConsume(
 	decision *service.PendingIdentityDecision,
 	userID int64,
 ) error {
+	return h.applyPendingIdentityBindingAndConsumeWithOptions(ctx, session, decision, userID, false, false)
+}
+
+// applyPendingIdentityBindingAndConsumeWithOptions is the one-shot completion
+// path for pending browser sessions.  Binding and the consumed_at CAS execute
+// in one transaction; if another request wins the CAS, all of this request's
+// identity/profile writes roll back together.
+func (h *AuthHandler) applyPendingIdentityBindingAndConsumeWithOptions(
+	ctx context.Context,
+	session *service.PendingAuthSession,
+	decision *service.PendingIdentityDecision,
+	userID int64,
+	forceBind bool,
+	applyFirstBindDefaults bool,
+) error {
 	svc, err := h.pendingIdentityService()
 	if err != nil {
 		return err
 	}
 	return svc.ApplyBindingAndConsume(ctx, service.ApplyPendingIdentityBindingInput{
-		Session:        session,
-		Decision:       decision,
-		OverrideUserID: &userID,
-		DefaultApplier: h.pendingIdentityDefaultApplier(),
-		AvatarWriter:   h.pendingIdentityAvatarWriter(),
+		Session:                session,
+		Decision:               decision,
+		OverrideUserID:         &userID,
+		ForceBind:              forceBind,
+		ApplyFirstBindDefaults: applyFirstBindDefaults,
+		DefaultApplier:         h.pendingIdentityDefaultApplier(),
+		AvatarWriter:           h.pendingIdentityAvatarWriter(),
 	})
+}
+
+// completePendingOAuthLoginOrRegistration performs every persistent completion
+// mutation (new-user creation when needed, identity/profile binding, and the
+// one-time pending-session consume CAS) in one transaction.  Token/cache and
+// other best-effort signup effects are deliberately deferred until commit.
+// This closes the replay window where a loser could create/update a user or
+// mint a refresh token before its pending-session CAS failed.
+func (h *AuthHandler) completePendingOAuthLoginOrRegistration(
+	ctx context.Context,
+	session *service.PendingAuthSession,
+	decision *service.PendingIdentityDecision,
+	email string,
+	username string,
+	invitationCode string,
+	affiliateCode string,
+	promoCode string,
+	signupSource string,
+	applyFirstBindDefaults bool,
+) (*service.TokenPair, *service.User, bool, error) {
+	if h == nil || h.authService == nil || h.userService == nil || session == nil {
+		return nil, nil, false, infraerrors.ServiceUnavailable("PENDING_AUTH_NOT_READY", "pending auth completion is not ready")
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if strings.EqualFold(strings.TrimSpace(session.Intent), oauthIntentBindCurrentUser) &&
+		(session.TargetUserID == nil || *session.TargetUserID <= 0) {
+		return nil, nil, false, infraerrors.BadRequest("PENDING_AUTH_TARGET_USER_MISSING", "pending oauth bind target user is missing")
+	}
+
+	// A target user is authoritative for existing-account login/bind flows.
+	// Do not look up by the mutable email field and accidentally bind an OAuth
+	// identity to a different account after a concurrent email change.
+	targetUserID := int64(0)
+	if session.TargetUserID != nil && *session.TargetUserID > 0 {
+		targetUserID = *session.TargetUserID
+	}
+
+	var user *service.User
+	var created bool
+	err := h.authService.RunInTransaction(ctx, func(txCtx context.Context) error {
+		var err error
+		if targetUserID > 0 {
+			user, err = h.userService.GetByID(txCtx, targetUserID)
+			if err != nil {
+				return err
+			}
+			if err := ensureLoginUserActive(user); err != nil {
+				return err
+			}
+		} else {
+			user, created, err = h.authService.LoginOrRegisterOAuthForPendingTransaction(
+				txCtx,
+				email,
+				username,
+				invitationCode,
+				affiliateCode,
+				promoCode,
+				signupSource,
+			)
+			if err != nil {
+				return err
+			}
+			// A pending registration with no authoritative target must never
+			// adopt an account that appeared after the OAuth callback.  The
+			// callback may have shown a choice/registration state while another
+			// request concurrently claimed this email; treating the login-or-
+			// register result as an implicit bind would attach the provider
+			// identity without an explicit bind_current_user decision.  Fail
+			// closed and leave the pending session unconsumed so the client can
+			// restart the flow or explicitly bind the account.
+			if !created {
+				return service.ErrEmailExists
+			}
+		}
+		if user == nil || user.ID <= 0 {
+			return infraerrors.InternalServer("PENDING_AUTH_USER_INVALID", "pending oauth target user is invalid")
+		}
+		return h.applyPendingIdentityBindingAndConsumeWithOptions(
+			txCtx,
+			session,
+			decision,
+			user.ID,
+			false,
+			applyFirstBindDefaults,
+		)
+	})
+	if err != nil {
+		return nil, nil, false, err
+	}
+	if user == nil || user.ID <= 0 {
+		return nil, nil, false, infraerrors.InternalServer("PENDING_AUTH_USER_INVALID", "pending oauth target user is invalid")
+	}
+
+	if created {
+		// These operations intentionally run only after the account/binding tx
+		// commits.  Both are idempotent/best-effort and use external stores or a
+		// detached quota client that cannot observe an uncommitted users row.
+		h.authService.SnapshotPlatformQuotaDefaultsAfterCommit(ctx, user.ID, signupSource)
+		h.authService.ApplyOAuthSignupPromoCode(ctx, user.ID, promoCode)
+	}
+	tokenPair, err := h.authService.GenerateTokenPair(ctx, user, "")
+	if err != nil {
+		return nil, nil, created, fmt.Errorf("generate token pair: %w", err)
+	}
+	return tokenPair, user, created, nil
 }
 
 func (h *AuthHandler) BindLinuxDoOAuthLogin(c *gin.Context) { h.bindPendingOAuthLogin(c, "linuxdo") }
@@ -663,11 +787,22 @@ func (h *AuthHandler) upsertPendingOAuthAdoptionDecision(
 	sessionID int64,
 	req oauthAdoptionDecisionRequest,
 ) (*service.PendingIdentityDecision, error) {
+	if c == nil || c.Request == nil {
+		return nil, infraerrors.ServiceUnavailable("PENDING_AUTH_NOT_READY", "pending auth request is not ready")
+	}
+	return h.upsertPendingOAuthAdoptionDecisionWithContext(c.Request.Context(), sessionID, req)
+}
+
+func (h *AuthHandler) upsertPendingOAuthAdoptionDecisionWithContext(
+	ctx context.Context,
+	sessionID int64,
+	req oauthAdoptionDecisionRequest,
+) (*service.PendingIdentityDecision, error) {
 	svc, err := h.pendingIdentityService()
 	if err != nil {
 		return nil, err
 	}
-	existing, err := svc.GetAdoptionDecision(c.Request.Context(), sessionID)
+	existing, err := svc.GetAdoptionDecision(ctx, sessionID)
 	if err != nil {
 		return nil, infraerrors.InternalServer("PENDING_AUTH_ADOPTION_LOAD_FAILED", "failed to load oauth profile adoption decision").WithCause(err)
 	}
@@ -693,7 +828,7 @@ func (h *AuthHandler) upsertPendingOAuthAdoptionDecision(
 		input.AdoptAvatar = *req.AdoptAvatar
 	}
 
-	decision, err := svc.UpsertAdoptionDecision(c.Request.Context(), input)
+	decision, err := svc.UpsertAdoptionDecision(ctx, input)
 	if err != nil {
 		return nil, infraerrors.InternalServer("PENDING_AUTH_ADOPTION_SAVE_FAILED", "failed to save oauth profile adoption decision").WithCause(err)
 	}
@@ -705,7 +840,18 @@ func (h *AuthHandler) ensurePendingOAuthAdoptionDecision(
 	sessionID int64,
 	req oauthAdoptionDecisionRequest,
 ) (*service.PendingIdentityDecision, error) {
-	decision, err := h.upsertPendingOAuthAdoptionDecision(c, sessionID, req)
+	if c == nil || c.Request == nil {
+		return nil, infraerrors.ServiceUnavailable("PENDING_AUTH_NOT_READY", "pending auth request is not ready")
+	}
+	return h.ensurePendingOAuthAdoptionDecisionWithContext(c.Request.Context(), sessionID, req)
+}
+
+func (h *AuthHandler) ensurePendingOAuthAdoptionDecisionWithContext(
+	ctx context.Context,
+	sessionID int64,
+	req oauthAdoptionDecisionRequest,
+) (*service.PendingIdentityDecision, error) {
+	decision, err := h.upsertPendingOAuthAdoptionDecisionWithContext(ctx, sessionID, req)
 	if err != nil {
 		return nil, err
 	}
@@ -717,7 +863,7 @@ func (h *AuthHandler) ensurePendingOAuthAdoptionDecision(
 	if err != nil {
 		return nil, err
 	}
-	decision, err = svc.UpsertAdoptionDecision(c.Request.Context(), service.PendingIdentityAdoptionDecisionInput{
+	decision, err = svc.UpsertAdoptionDecision(ctx, service.PendingIdentityAdoptionDecisionInput{
 		PendingAuthSessionID: sessionID,
 	})
 	if err != nil {
@@ -940,7 +1086,7 @@ func (h *AuthHandler) bindPendingOAuthLogin(c *gin.Context, provider string) {
 		return
 	}
 
-	pendingSvc, session, clearCookies, err := readPendingOAuthBrowserSession(c, h)
+	_, session, clearCookies, err := readPendingOAuthBrowserSession(c, h)
 	if err != nil {
 		response.ErrorFrom(c, err)
 		return
@@ -988,24 +1134,26 @@ func (h *AuthHandler) bindPendingOAuthLogin(c *gin.Context, provider string) {
 		})
 		return
 	}
-	if err := h.applyPendingIdentityBinding(c.Request.Context(), session, decision, &user.ID, true, true); err != nil {
+	if err := h.applyPendingIdentityBindingAndConsumeWithOptions(
+		c.Request.Context(),
+		session,
+		decision,
+		user.ID,
+		true,
+		true,
+	); err != nil {
 		respondPendingOAuthBindingApplyError(c, err)
 		return
 	}
 
-	h.loginCases().RecordSuccessfulLogin(c.Request.Context(), user.ID)
-	// bindPendingOAuthLogin = 绑定已有账户登录，不动 users.username（用户已有自己的名字）
-	h.maybeSyncDingTalkAfterLogin(c.Request.Context(), session, user.ID)
 	tokenPair, err := h.loginCases().GenerateTokenPair(c.Request.Context(), user, "")
 	if err != nil {
 		response.InternalError(c, "Failed to generate token pair")
 		return
 	}
-	if _, err := pendingSvc.ConsumeBrowserSession(c.Request.Context(), session.SessionToken, session.BrowserSessionKey); err != nil {
-		clearCookies()
-		response.ErrorFrom(c, err)
-		return
-	}
+	h.loginCases().RecordSuccessfulLogin(c.Request.Context(), user.ID)
+	// bindPendingOAuthLogin = 绑定已有账户登录，不动 users.username（用户已有自己的名字）
+	h.maybeSyncDingTalkAfterLogin(c.Request.Context(), session, user.ID)
 
 	clearCookies()
 	writeOAuthTokenPairResponse(c, tokenPair)
@@ -1068,18 +1216,53 @@ func (h *AuthHandler) createPendingOAuthAccount(c *gin.Context, provider string)
 		return
 	}
 
-	tokenPair, user, err := h.authService.RegisterOAuthEmailAccount(
-		c.Request.Context(),
-		email,
-		req.Password,
-		strings.TrimSpace(req.VerifyCode),
-		strings.TrimSpace(req.InvitationCode),
-		strings.TrimSpace(session.ProviderType),
-	)
-	if err != nil {
-		if errors.Is(err, service.ErrEmailExists) {
+	var tokenPair *service.TokenPair
+	var user *service.User
+	var decision *service.PendingIdentityDecision
+	registrationErr := h.authService.RunInTransaction(c.Request.Context(), func(txCtx context.Context) error {
+		var err error
+		// RegisterOAuthEmailAccount joins txCtx through userRepository. It
+		// deliberately does not issue/cache tokens while a transaction is
+		// active; all persistent pending-account mutations below therefore
+		// commit or roll back together.
+		tokenPair, user, err = h.authService.RegisterOAuthEmailAccount(
+			txCtx,
+			email,
+			req.Password,
+			strings.TrimSpace(req.VerifyCode),
+			strings.TrimSpace(req.InvitationCode),
+			strings.TrimSpace(session.ProviderType),
+		)
+		if err != nil {
+			return err
+		}
+		decision, err = h.ensurePendingOAuthAdoptionDecisionWithContext(txCtx, session.ID, req.adoptionDecision())
+		if err != nil {
+			return err
+		}
+		return h.authService.FinalizePendingOAuthAccount(txCtx, service.FinalizePendingOAuthAccountInput{
+			Session:        session,
+			Decision:       decision,
+			User:           user,
+			InvitationCode: req.InvitationCode,
+			ProviderType:   session.ProviderType,
+			AffiliateCode:  req.AffCode,
+			AvatarWriter:   h.pendingIdentityAvatarWriter(),
+			BeforeCommit:   pendingOAuthCreateAccountPreCommitHook,
+		})
+	})
+	if registrationErr != nil {
+		if errors.Is(registrationErr, service.ErrEmailExists) {
 			existingUser, lookupErr := h.findPendingUserByNormalizedEmail(c.Request.Context(), email)
 			if lookupErr != nil {
+				// An alias collision (for example owner+tag@gmail.com versus
+				// owner@gmail.com) has no exact normalized-email row to return.
+				// Do not turn that expected business conflict into a 404/500, and
+				// never guess an identity owner for the pending binding flow.
+				if errors.Is(lookupErr, service.ErrUserNotFound) {
+					response.ErrorFrom(c, service.ErrEmailExists)
+					return
+				}
 				response.ErrorFrom(c, lookupErr)
 				return
 			}
@@ -1091,53 +1274,26 @@ func (h *AuthHandler) createPendingOAuthAccount(c *gin.Context, provider string)
 			c.JSON(http.StatusOK, buildPendingOAuthSessionStatusPayload(session))
 			return
 		}
-		response.ErrorFrom(c, err)
+		respondPendingOAuthBindingApplyError(c, registrationErr)
 		return
 	}
 
-	rollbackCreatedUser := func(originalErr error) bool {
-		if user == nil || user.ID <= 0 {
-			return false
-		}
-		if rollbackErr := h.authService.RollbackOAuthEmailAccountCreation(
-			c.Request.Context(),
-			user.ID,
-			strings.TrimSpace(req.InvitationCode),
-		); rollbackErr != nil {
-			response.ErrorFrom(c, infraerrors.InternalServer(
-				"PENDING_AUTH_ACCOUNT_ROLLBACK_FAILED",
-				"failed to rollback pending oauth account creation",
-			).WithCause(fmt.Errorf("original error: %w; rollback error: %v", originalErr, rollbackErr)))
-			return true
-		}
-		user = nil
-		return false
-	}
+	// The account and pending-session mutations above share one transaction.
+	// Snapshot platform defaults only after that transaction commits so the
+	// detached/base quota client can see the newly-created users row.
+	h.authService.SnapshotPlatformQuotaDefaultsAfterCommit(
+		c.Request.Context(),
+		user.ID,
+		session.ProviderType,
+	)
 
-	decision, err := h.ensurePendingOAuthAdoptionDecision(c, session.ID, req.adoptionDecision())
-	if err != nil {
-		if rollbackCreatedUser(err) {
+	if tokenPair == nil {
+		var err error
+		tokenPair, err = h.authService.GenerateTokenPair(c.Request.Context(), user, "")
+		if err != nil {
+			response.InternalError(c, "Failed to generate token pair")
 			return
 		}
-		response.ErrorFrom(c, err)
-		return
-	}
-
-	if err := h.authService.FinalizePendingOAuthAccount(c.Request.Context(), service.FinalizePendingOAuthAccountInput{
-		Session:        session,
-		Decision:       decision,
-		User:           user,
-		InvitationCode: req.InvitationCode,
-		ProviderType:   session.ProviderType,
-		AffiliateCode:  req.AffCode,
-		AvatarWriter:   h.pendingIdentityAvatarWriter(),
-		BeforeCommit:   pendingOAuthCreateAccountPreCommitHook,
-	}); err != nil {
-		if rollbackCreatedUser(err) {
-			return
-		}
-		respondPendingOAuthBindingApplyError(c, err)
-		return
 	}
 
 	h.authService.ApplyOAuthSignupPromoCode(c.Request.Context(), user.ID, pendingOAuthPromoCode(session))
@@ -1186,6 +1342,16 @@ func (h *AuthHandler) ExchangePendingOAuthCompletion(c *gin.Context) {
 	if err != nil {
 		clearCookies()
 		response.ErrorFrom(c, err)
+		return
+	}
+	// bind_current_user sessions are authenticated against the user selected
+	// when the bind flow started.  A missing target is malformed state; reject it
+	// before reading/writing an adoption decision so a bad session cannot reach
+	// the terminal binding path (or panic while issuing a token).
+	if strings.EqualFold(strings.TrimSpace(session.Intent), oauthIntentBindCurrentUser) &&
+		(session.TargetUserID == nil || *session.TargetUserID <= 0) {
+		clearCookies()
+		response.ErrorFrom(c, infraerrors.BadRequest("PENDING_AUTH_TARGET_USER_MISSING", "pending oauth target user is missing"))
 		return
 	}
 
@@ -1253,6 +1419,21 @@ func (h *AuthHandler) ExchangePendingOAuthCompletion(c *gin.Context) {
 		response.Success(c, payload)
 		return
 	}
+	// A pending session can have its TargetUserID populated solely because an
+	// account-creation/verification request supplied an email that already
+	// belongs to another user.  That state is only a choice/preview and does
+	// not prove ownership of the target account.  Never let an adoption decision
+	// turn that untrusted target into an OAuth identity binding.
+	//
+	// Binding is safe here only for a terminal login completion (where the
+	// identity has already been resolved to the login target) or for an
+	// explicitly initiated bind_current_user flow (whose target comes from the
+	// authenticated user's session).  Other pending states must remain a
+	// preview and keep the session unconsumed.
+	if !canIssueTokenPair && !strings.EqualFold(strings.TrimSpace(session.Intent), oauthIntentBindCurrentUser) {
+		response.Success(c, payload)
+		return
+	}
 	if !adoptionDecision.hasDecision() {
 		adoptionRequired, _ := payload["adoption_required"].(bool)
 		if adoptionRequired {
@@ -1276,14 +1457,26 @@ func (h *AuthHandler) ExchangePendingOAuthCompletion(c *gin.Context) {
 		response.ErrorFrom(c, err)
 		return
 	}
-	if err := h.applyPendingIdentityBinding(c.Request.Context(), session, decision, session.TargetUserID, false, strings.EqualFold(strings.TrimSpace(session.Intent), "bind_current_user")); err != nil {
-		response.ErrorFrom(c, infraerrors.InternalServer("PENDING_AUTH_ADOPTION_APPLY_FAILED", "failed to apply oauth profile adoption").WithCause(err))
+	targetUserID := int64(0)
+	if session.TargetUserID != nil && *session.TargetUserID > 0 {
+		targetUserID = *session.TargetUserID
+	}
+	if targetUserID <= 0 {
+		// A malformed bind_current_user session must never be allowed to
+		// dereference a nil target or resolve an account from mutable email data.
+		clearCookies()
+		response.ErrorFrom(c, infraerrors.BadRequest("PENDING_AUTH_TARGET_USER_MISSING", "pending oauth target user is missing"))
 		return
 	}
-
-	if _, err := svc.ConsumeBrowserSession(c.Request.Context(), sessionToken, browserSessionKey); err != nil {
-		clearCookies()
-		response.ErrorFrom(c, err)
+	if err := h.applyPendingIdentityBindingAndConsumeWithOptions(
+		c.Request.Context(),
+		session,
+		decision,
+		targetUserID,
+		false,
+		strings.EqualFold(strings.TrimSpace(session.Intent), "bind_current_user"),
+	); err != nil {
+		response.ErrorFrom(c, infraerrors.InternalServer("PENDING_AUTH_ADOPTION_APPLY_FAILED", "failed to apply oauth profile adoption").WithCause(err))
 		return
 	}
 

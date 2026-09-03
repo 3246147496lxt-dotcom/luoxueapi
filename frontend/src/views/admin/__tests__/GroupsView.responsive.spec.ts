@@ -14,6 +14,7 @@ vi.mock('vue-router', () => ({
 const {
   listGroups,
   getAllGroups,
+  getAllIncludingInactive,
   getModelsListCandidates,
   getUsageSummary,
   getCapacitySummary,
@@ -25,6 +26,7 @@ const {
 } = vi.hoisted(() => ({
   listGroups: vi.fn(),
   getAllGroups: vi.fn(),
+  getAllIncludingInactive: vi.fn(),
   getModelsListCandidates: vi.fn(),
   getUsageSummary: vi.fn(),
   getCapacitySummary: vi.fn(),
@@ -42,6 +44,7 @@ const messages: Record<string, string> = {
   'common.edit': 'Edit',
   'common.delete': 'Delete',
   'admin.groups.columnSettings': 'Column Settings',
+  'admin.groups.cockpit.displayPreferences': '展示偏好',
   'admin.groups.sortOrder': 'Sort Order',
   'admin.groups.createGroup': 'Create Group',
   'admin.groups.rateMultipliers': 'Rate Multipliers',
@@ -64,6 +67,7 @@ vi.mock('@/api/admin', () => ({
     groups: {
       list: listGroups,
       getAll: getAllGroups,
+      getAllIncludingInactive,
       getModelsListCandidates,
       getUsageSummary,
       getCapacitySummary,
@@ -126,6 +130,9 @@ const createGroup = (overrides: Partial<AdminGroup> = {}): AdminGroup => ({
   peak_start: '00:00',
   peak_end: '00:00',
   peak_rate_multiplier: 1,
+  profit_control_enabled: false,
+  profit_min_margin: 0,
+  profit_safety_buffer: 0,
   claude_code_only: false,
   fallback_group_id: null,
   fallback_group_id_on_invalid_request: null,
@@ -233,6 +240,7 @@ describe('admin GroupsView responsive list contract', () => {
 
     listGroups.mockReset()
     getAllGroups.mockReset()
+    getAllIncludingInactive.mockReset()
     getModelsListCandidates.mockReset()
     getUsageSummary.mockReset()
     getCapacitySummary.mockReset()
@@ -250,6 +258,7 @@ describe('admin GroupsView responsive list contract', () => {
       pages: 1,
     })
     getAllGroups.mockResolvedValue([])
+    getAllIncludingInactive.mockResolvedValue([createGroup()])
     getModelsListCandidates.mockResolvedValue([])
     getUsageSummary.mockResolvedValue([])
     getCapacitySummary.mockResolvedValue([])
@@ -273,47 +282,42 @@ describe('admin GroupsView responsive list contract', () => {
 
     const toggle = wrapper.get('[data-test="groups-mobile-filter-toggle"]')
     const panel = wrapper.get('[data-test="groups-mobile-secondary-filters"]')
-    expect(toggle.classes()).toEqual(expect.arrayContaining(['min-h-11', 'min-w-11', 'lg:hidden']))
+    expect(toggle.classes()).toEqual(expect.arrayContaining(['min-h-11', 'min-w-11']))
     expect(toggle.attributes('aria-expanded')).toBe('false')
     expect(toggle.attributes('aria-controls')).toBe('groups-mobile-secondary-filters')
-    expect(panel.classes()).toEqual(expect.arrayContaining(['hidden', 'lg:flex']))
+    expect(panel.classes()).not.toContain('groups-cockpit__filters--expanded')
 
     await toggle.trigger('click')
 
     expect(toggle.attributes('aria-expanded')).toBe('true')
-    expect(panel.classes()).not.toContain('hidden')
-    expect(panel.classes()).toEqual(expect.arrayContaining(['grid', 'sm:grid-cols-3', 'lg:flex']))
+    expect(panel.classes()).toContain('groups-cockpit__filters--expanded')
     expect(panel.findAll('select')).toHaveLength(3)
   })
 
-  it('moves column settings and sorting into the mobile more menu while retaining desktop controls', async () => {
+  it('uses one display-preferences menu for column visibility and sorting', async () => {
     const wrapper = await mountView()
 
-    const moreToggle = wrapper.get('[data-test="groups-mobile-more-toggle"]')
-    expect(moreToggle.classes()).toEqual(expect.arrayContaining(['min-h-11', 'min-w-11']))
-    expect(moreToggle.element.parentElement?.classList.contains('lg:hidden')).toBe(true)
-    expect(wrapper.get('button[title="Column Settings"]').element.parentElement?.classList.contains('lg:block')).toBe(true)
-    expect(wrapper.get('button[title="Sort Order"]').classes()).toEqual(
-      expect.arrayContaining(['hidden', 'lg:inline-flex']),
-    )
+    expect(wrapper.findAll('[data-test="groups-preferences-toggle"]')).toHaveLength(1)
+    expect(wrapper.find('[data-test="groups-mobile-more-toggle"]').exists()).toBe(false)
+    const preferencesToggle = wrapper.get('[data-test="groups-preferences-toggle"]')
+    expect(preferencesToggle.classes()).toContain('min-h-11')
+    expect(preferencesToggle.text()).toContain('展示偏好')
+    expect(preferencesToggle.attributes('aria-expanded')).toBe('false')
+    expect(preferencesToggle.attributes('aria-controls')).toBe('groups-preferences-menu')
 
-    await moreToggle.trigger('click')
+    await preferencesToggle.trigger('click')
 
-    const menu = wrapper.get('[data-test="groups-mobile-tools-menu"]')
+    expect(preferencesToggle.attributes('aria-expanded')).toBe('true')
+    const menu = wrapper.get('[data-test="groups-preferences-menu"]')
     expect(menu.text()).toContain('Column Settings')
     expect(menu.text()).toContain('Sort Order')
   })
 
-  it('configures compact mobile group cards without changing the desktop column collection', async () => {
+  it('exposes the cockpit display preferences on the operational ledger', async () => {
     const wrapper = await mountView()
     const table = wrapper.get('[data-test="groups-data-table"]')
 
-    expect(table.attributes('data-mobile-primary-key')).toBe('name')
-    expect(table.attributes('data-mobile-visible-keys')).toBe(
-      'platform,billing_type,account_count,capacity,status',
-    )
-    expect(wrapper.get('[data-test="columns"]').text().split(',')).toEqual([
-      'name',
+    expect(table.attributes('data-visible-preferences')?.split(',')).toEqual([
       'platform',
       'billing_type',
       'rate_multiplier',
@@ -322,38 +326,58 @@ describe('admin GroupsView responsive list contract', () => {
       'capacity',
       'usage',
       'status',
-      'actions',
     ])
   })
 
-  it('keeps only edit and more upfront on mobile and progressively reveals secondary row actions', async () => {
+  it('opens row details directly while keeping Rate, RPM, and Delete in More', async () => {
     const wrapper = await mountView()
+    const row = wrapper.get('[data-test="group-row-actions"]')
+    const actions = row.get('.groups-cockpit__row-actions')
 
-    expect(wrapper.get('[data-test="groups-row-edit"]').classes()).toEqual(
+    expect(row.attributes('tabindex')).toBe('0')
+    expect(row.attributes('aria-expanded')).toBe('false')
+    expect(row.attributes('aria-controls')).toBe('groups-row-details-1')
+    expect(row.attributes('aria-label')).toBeTruthy()
+    expect(actions.get('[data-test="groups-row-edit"]').classes()).toEqual(
       expect.arrayContaining(['min-h-11', 'min-w-11']),
     )
-    expect(wrapper.get('[data-test="groups-row-more"]').classes()).toEqual(
-      expect.arrayContaining(['min-h-11', 'min-w-11', 'lg:hidden']),
+    const detailsToggle = actions.get('[data-test="groups-row-details-toggle"]')
+    expect(detailsToggle.classes()).toEqual(expect.arrayContaining(['min-h-11', 'min-w-11']))
+    expect(detailsToggle.attributes('aria-expanded')).toBe('false')
+    expect(detailsToggle.attributes('aria-controls')).toBe('groups-row-details-1')
+    expect(actions.get('[data-test="groups-row-more"]').classes()).toEqual(
+      expect.arrayContaining(['min-h-11', 'min-w-11']),
     )
-    expect(wrapper.get('[data-test="groups-row-rate-desktop"]').classes()).toEqual(
-      expect.arrayContaining(['hidden', 'lg:flex']),
-    )
-    expect(wrapper.get('[data-test="groups-row-rpm-desktop"]').classes()).toEqual(
-      expect.arrayContaining(['hidden', 'lg:flex']),
-    )
-    expect(wrapper.get('[data-test="groups-row-delete-desktop"]').classes()).toEqual(
-      expect.arrayContaining(['hidden', 'lg:flex']),
-    )
-    expect(wrapper.find('[data-test="groups-row-secondary-actions"]').exists()).toBe(false)
+    const detailsMenu = actions.get('details.groups-cockpit__row-menu')
+    expect(detailsMenu.attributes('open')).toBeUndefined()
+    expect(detailsMenu.findAll('button')).toHaveLength(3)
+    expect(detailsMenu.get('[data-test="groups-row-rate-desktop"]').text()).toContain('Rate Multipliers')
+    expect(detailsMenu.get('[data-test="groups-row-rpm-desktop"]').text()).toContain('RPM Overrides')
+    expect(detailsMenu.get('[data-test="groups-row-delete-desktop"]').text()).toContain('Delete')
 
-    await wrapper.get('[data-test="groups-row-more"]').trigger('click')
+    await detailsToggle.trigger('click')
+    expect(row.attributes('aria-expanded')).toBe('true')
+    expect(actions.get('[data-test="groups-row-details-toggle"]').attributes('aria-expanded')).toBe('true')
+    expect(row.find('.groups-cockpit__detail').exists()).toBe(true)
+    const expandedDetail = row.get('#groups-row-details-1')
+    expect(expandedDetail.attributes('role')).toBe('region')
+    expect(expandedDetail.findAll('.groups-cockpit__detail-section')).toHaveLength(2)
+    expect(expandedDetail.find('.groups-cockpit__detail-section--tools').exists()).toBe(false)
+    expect(detailsMenu.findAll('button')).toHaveLength(3)
 
-    const secondaryActions = wrapper.get('[data-test="groups-row-secondary-actions"]')
-    expect(secondaryActions.classes()).toContain('lg:hidden')
-    expect(secondaryActions.findAll('button')).toHaveLength(3)
-    secondaryActions.findAll('button').forEach((button) => {
-      expect(button.classes()).toContain('min-h-11')
-    })
+    await row.get('.groups-cockpit__identity').trigger('click')
+    expect(row.attributes('aria-expanded')).toBe('false')
+    expect(row.find('.groups-cockpit__detail').exists()).toBe(false)
+
+    await row.trigger('keydown', { key: 'Enter' })
+    expect(row.attributes('aria-expanded')).toBe('true')
+    await row.trigger('keydown', { key: ' ' })
+    expect(row.attributes('aria-expanded')).toBe('false')
+
+    await actions.get('[data-test="groups-row-edit"]').trigger('click')
+    expect(row.attributes('aria-expanded')).toBe('false')
+    await actions.get('[data-test="groups-row-more"]').trigger('click')
+    expect(row.attributes('aria-expanded')).toBe('false')
   })
 
   it('keeps the empty state explanatory without duplicating the create action', async () => {

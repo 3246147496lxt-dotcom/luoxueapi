@@ -931,6 +931,14 @@ func TestGetOpenAIRequestBodyMap_DoesNotWriteContextCache(t *testing.T) {
 	require.Empty(t, c.Keys)
 }
 
+func TestGetOpenAIRequestBodyMapPreservesLargeNumbers(t *testing.T) {
+	got, err := getOpenAIRequestBodyMap(nil, []byte(`{"sequence":900719925474099312345}`))
+	require.NoError(t, err)
+	number, ok := got["sequence"].(json.Number)
+	require.True(t, ok)
+	require.Equal(t, "900719925474099312345", number.String())
+}
+
 func TestSanitizeEmptyBase64InputImagesInOpenAIRequestBodyMap(t *testing.T) {
 	var reqBody map[string]any
 	require.NoError(t, json.Unmarshal([]byte(`{
@@ -969,6 +977,7 @@ func TestSanitizeEmptyBase64InputImagesInOpenAIBody(t *testing.T) {
 	body, changed, err := sanitizeEmptyBase64InputImagesInOpenAIBody([]byte(`{
 		"model":"gpt-5.4",
 		"stream":true,
+		"sequence":900719925474099312345,
 		"input":[
 			{"role":"user","content":[
 				{"type":"input_text","text":"Describe this"},
@@ -978,9 +987,11 @@ func TestSanitizeEmptyBase64InputImagesInOpenAIBody(t *testing.T) {
 	}`))
 	require.NoError(t, err)
 	require.True(t, changed)
+	require.Equal(t, "900719925474099312345", gjson.GetBytes(body, "sequence").Raw)
 	require.JSONEq(t, `{
 		"model":"gpt-5.4",
 		"stream":true,
+		"sequence":900719925474099312345,
 		"input":[
 			{"role":"user","content":[
 				{"type":"input_text","text":"Describe this"}

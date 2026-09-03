@@ -420,11 +420,14 @@ import type {
   AccountPlatform,
   AdminGroup,
   OpenAICompactMode,
-  OpenAIEndpointCapability,
   OpenAIResponsesMode,
 } from '@/types'
-import { normalizeOpenAIEndpointCapabilities, type AnthropicAPIKeyAuthScheme } from '../credentialDraftBuilders'
+import type { AnthropicAPIKeyAuthScheme } from '../credentialDraftBuilders'
 import type { AccountModelMappingDraft, CreateAccountCategory } from '../formDraft'
+import {
+  normalizeOpenAIEndpointCapabilities,
+  type OpenAIEndpointCapability,
+} from '../../openAIEndpointCapabilities'
 
 interface Props {
   platform: AccountPlatform
@@ -483,6 +486,7 @@ const openAITextEndpointCapabilityLabel = computed(() => {
 const openAIEndpointCapabilityOptions = computed(() => [
   { value: 'chat_completions' as const, label: openAITextEndpointCapabilityLabel.value },
   { value: 'embeddings' as const, label: t('admin.accounts.openai.capabilityEmbeddings') },
+  { value: 'audio_transcriptions' as const, label: t('admin.accounts.openai.capabilityAudioTranscriptions') },
 ])
 const openAITextGenerationCapabilityEnabled = computed(() =>
   openAIEndpointCapabilities.value.includes('chat_completions'),

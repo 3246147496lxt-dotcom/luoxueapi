@@ -31,7 +31,14 @@ if [[ -n "${SMOKE_IMAGE:-}" ]]; then
 fi
 
 cleanup() {
+  local exit_code=$?
+  set +e
+  if ((exit_code != 0)); then
+    "${compose[@]}" ps --all
+    "${compose[@]}" logs --no-color --timestamps sub2api
+  fi
   "${compose[@]}" down --volumes --remove-orphans >/dev/null 2>&1 || true
+  exit "$exit_code"
 }
 trap cleanup EXIT
 

@@ -1,45 +1,76 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount, type VueWrapper } from '@vue/test-utils'
 import { nextTick, ref } from 'vue'
-import type { ChatConversation, ChatMessage } from '@/types/chat'
+import { createPinia } from 'pinia'
+import {
+  chatActivityPartHasText,
+  chatActivityPartText,
+} from '@/features/chat/activity'
+import { CHAT_GREETINGS } from '@/features/chat/chatGreetings'
+import { toChatConversationTitlePreview } from '@/features/chat/conversationTitle'
+import {
+  WORKSPACE_MOBILE_DRAWER_MEDIA_QUERY,
+  WORKSPACE_NARROW_SIDEBAR_MEDIA_QUERY,
+} from '@/components/layout/workspaceResponsive'
+import type {
+  ChatActivity,
+  ChatAttachment,
+  ChatAttempt,
+  ChatConversation,
+  ChatMessage,
+} from '@/types/chat'
 
 const apiMocks = vi.hoisted(() => ({
   createChatAttemptId: vi.fn(),
+  createChatIdempotencyKey: vi.fn(),
+  getChatCapabilities: vi.fn(),
   getChatModels: vi.fn(),
   isAbortError: vi.fn(),
   pollChatReceipt: vi.fn(),
+  stopChatAttempt: vi.fn(),
   streamChatCompletion: vi.fn(),
+  transcribeChatAudio: vi.fn(),
 }))
 
 vi.mock('@/api/chat', () => {
   class MockChatAPIError extends Error {
     status: number
     code: string | number | null
+    reason: unknown
     metadata: unknown
+    requestId: string
 
     constructor(
       message: string,
       options: {
         status?: number
         code?: string | number | null
+        reason?: unknown
         metadata?: unknown
+        requestId?: string
       } = {},
     ) {
       super(message)
       this.name = 'ChatAPIError'
       this.status = options.status ?? 0
       this.code = options.code ?? null
+      this.reason = options.reason
       this.metadata = options.metadata
+      this.requestId = options.requestId ?? ''
     }
   }
 
   return {
     ChatAPIError: MockChatAPIError,
     createChatAttemptId: apiMocks.createChatAttemptId,
+    createChatIdempotencyKey: apiMocks.createChatIdempotencyKey,
+    getChatCapabilities: apiMocks.getChatCapabilities,
     getChatModels: apiMocks.getChatModels,
     isAbortError: apiMocks.isAbortError,
     pollChatReceipt: apiMocks.pollChatReceipt,
+    stopChatAttempt: apiMocks.stopChatAttempt,
     streamChatCompletion: apiMocks.streamChatCompletion,
+    transcribeChatAudio: apiMocks.transcribeChatAudio,
   }
 })
 
@@ -63,6 +94,7 @@ vi.mock('@/stores/chat', async () => {
     hydrating: false,
     persistenceAvailable: true,
     syncStatus: 'idle' as const,
+    syncError: null as string | null,
     serverHistoryAvailable: true as boolean | null,
     legacyImportRequired: false,
     legacyConversationIds: [] as string[],
@@ -79,10 +111,12 @@ vi.mock('@/stores/chat', async () => {
     syncHistory: vi.fn(),
     loadConversationPage: vi.fn(),
     searchHistory: vi.fn(),
+    invalidateHistorySearch: vi.fn(),
     loadConversationDetail: vi.fn(),
     loadOlderConversationMessages: vi.fn(),
     recoverAttempt: vi.fn(),
     prepareConversationForCompletion: vi.fn(),
+    markCompletionAccepted: vi.fn(),
     acceptLegacyImport: vi.fn(),
     declineLegacyImport: vi.fn(),
     createConversation: vi.fn(),
@@ -93,8 +127,11 @@ vi.mock('@/stores/chat', async () => {
     setConversationModel: vi.fn(),
     addMessage: vi.fn(),
     updateMessage: vi.fn(),
+    removeMessages: vi.fn(),
     startStreaming: vi.fn(),
     appendStreamingContent: vi.fn(),
+    upsertMessageActivity: vi.fn(),
+    stopMessageActivities: vi.fn(),
     finishStreaming: vi.fn(),
     failStreaming: vi.fn(),
     stopStreaming: vi.fn(),
@@ -102,18 +139,36 @@ vi.mock('@/stores/chat', async () => {
   return { useChatStore: () => store }
 })
 
+vi.mock('@/stores/projects', async () => {
+  const { reactive } = await vi.importActual<typeof import('vue')>('vue')
+  const store = reactive({
+    projects: [],
+    load: vi.fn(),
+    addConversation: vi.fn(),
+  })
+  return { useProjectsStore: () => store }
+})
+
 vi.mock('vue-i18n', async () => {
   const actual = await vi.importActual<typeof import('vue-i18n')>('vue-i18n')
+  const syncMessages: Record<string, string> = {
+    'chat.sync.errorDescription': '云端历史记录同步失败，当前聊天仍可正常使用',
+    'chat.sync.retry': '重新同步',
+    'chat.sync.syncing': '正在同步…',
+    'chat.sync.success': '云端历史记录已同步',
+  }
   return {
     ...actual,
     useI18n: () => ({
-      t: (key: string) => key,
+      t: (key: string) => syncMessages[key] ?? key,
     }),
   }
 })
 
 import { useAuthStore } from '@/stores/auth'
+import { useAppStore } from '@/stores/app'
 import { useChatStore } from '@/stores/chat'
+import { useProjectsStore } from '@/stores/projects'
 import { ChatAPIError } from '@/api/chat'
 import ChatView from '../ChatView.vue'
 
@@ -122,12 +177,29 @@ const AppLayoutStub = {
   template: '<div data-test="app-layout"><slot /></div>',
 }
 
+const composerInsertText = vi.fn()
+
 const ChatComposerStub = {
-  props: ['modelValue', 'streaming', 'disabled', 'insufficientBalance'],
-  emits: ['update:modelValue', 'send', 'stop'],
-  setup(_props: unknown, { expose }: { expose: (value: { focus: () => void }) => void }) {
+  props: [
+    'modelValue',
+    'streaming',
+    'disabled',
+    'insufficientBalance',
+    'submissionBusy',
+    'hasAttachments',
+    'attachmentsValid',
+    'imagePasteEnabled',
+    'submissionResetKey',
+  ],
+  emits: ['update:modelValue', 'send', 'submitting-change', 'stop', 'paste-images'],
+  setup(_props: unknown, { expose }: {
+    expose: (value: { focus: () => void; insertText: (text: string) => boolean }) => void
+  }) {
     const input = ref<HTMLTextAreaElement | null>(null)
-    expose({ focus: () => input.value?.focus() })
+    expose({
+      focus: () => input.value?.focus(),
+      insertText: composerInsertText,
+    })
     return { input }
   },
   template: `
@@ -136,24 +208,135 @@ const ChatComposerStub = {
       :data-disabled="String(disabled)"
       :data-streaming="String(streaming)"
       :data-insufficient-balance="String(insufficientBalance)"
+      :data-submission-busy="String(submissionBusy)"
+      :data-image-paste-enabled="String(imagePasteEnabled)"
     >
       <textarea ref="input" data-test="composer-input"></textarea>
-      <slot name="controls" />
+      <slot name="attachments" />
+      <slot name="leading" />
+      <slot name="trailing" />
+      <slot name="empty-action" />
       <button type="button" data-test="composer-stop" @click="$emit('stop')">Stop</button>
     </div>
   `,
 }
 
+const attachmentPickerReady = ref<ChatAttachment[]>([])
+const attachmentPickerAddFiles = vi.fn()
+const attachmentPickerCommitAll = vi.fn()
+const attachmentPickerDiscardAll = vi.fn().mockResolvedValue(undefined)
+
+type DataTransferStub = {
+  types: string[]
+  files: File[]
+  dropEffect: DataTransfer['dropEffect']
+}
+
+function dataTransfer(files: File[] = [], types = ['Files']): DataTransferStub {
+  return { types, files, dropEffect: 'none' }
+}
+
+function dispatchDataTransferEvent(
+  target: Element,
+  type: 'dragenter' | 'dragover' | 'dragleave' | 'drop',
+  transfer: DataTransferStub,
+  relatedTarget: EventTarget | null = null,
+): Event {
+  const event = new Event(type, { bubbles: true, cancelable: true })
+  Object.defineProperty(event, 'dataTransfer', { value: transfer })
+  Object.defineProperty(event, 'relatedTarget', { value: relatedTarget })
+  target.dispatchEvent(event)
+  return event
+}
+
+const ChatAttachmentPickerStub = {
+  props: ['disabled', 'supportsVision'],
+  emits: ['change', 'busy-change', 'valid-change'],
+  setup(_props: unknown, { expose }: {
+    expose: (value: Record<string, unknown>) => void
+  }) {
+    expose({
+      cancel: vi.fn(),
+      retry: vi.fn(),
+      remove: vi.fn(),
+      addFiles: attachmentPickerAddFiles,
+      getReadyAttachments: () => attachmentPickerReady.value,
+      commitAll: attachmentPickerCommitAll,
+      discardAll: attachmentPickerDiscardAll,
+    })
+  },
+  template: `
+    <div
+      data-test="chat-attachment-picker"
+      :data-disabled="String(disabled)"
+      :data-supports-vision="String(supportsVision)"
+    />
+  `,
+}
+
+const ChatAttachmentPreviewListStub = {
+  props: ['items', 'supportsVision'],
+  template: '<div data-test="chat-attachment-preview" />',
+}
+
+const ChatVoiceInputStub = {
+  props: [
+    'disabled',
+    'contextKey',
+    'capabilityState',
+    'initializeCapability',
+    'maxDurationMs',
+    'maxBytes',
+    'acceptedMimeTypes',
+  ],
+  emits: ['busy-change', 'transcribed'],
+  template: `
+    <div
+      data-test="chat-voice-input"
+      :data-disabled="String(disabled)"
+      :data-context-key="contextKey"
+      :data-capability-state="capabilityState"
+      :data-max-duration-ms="String(maxDurationMs)"
+      :data-max-bytes="String(maxBytes)"
+      :data-accepted-mime-types="acceptedMimeTypes.join(',')"
+    >
+      <button type="button" data-test="voice-busy" @click="$emit('busy-change', true)">Busy</button>
+      <button type="button" data-test="voice-idle" @click="$emit('busy-change', false)">Idle</button>
+      <button type="button" data-test="voice-transcribed" @click="$emit('transcribed', '语音草稿')">Text</button>
+    </div>
+  `,
+}
+
+const ChatVoiceModeButtonStub = {
+  props: ['available', 'disabled'],
+  emits: ['activate'],
+  template: `
+    <button
+      type="button"
+      data-test="chat-voice-mode"
+      :data-available="String(available)"
+      :disabled="disabled"
+      :aria-disabled="disabled || !available"
+      @click="available && $emit('activate')"
+    >Voice</button>
+  `,
+}
+
 const ChatModelSettingsStub = {
-  props: ['modelValue', 'reasoningEffort', 'modelOptions', 'disabled', 'loading'],
-  emits: ['update:modelValue', 'update:reasoningEffort'],
+  props: ['modelValue', 'reasoningMode', 'reasoningEffort', 'modelOptions', 'disabled', 'loading'],
+  emits: ['update:modelValue', 'update:reasoningMode', 'update:reasoningEffort'],
   template: `
     <div
       data-test="chat-model-settings"
       :data-disabled="String(disabled)"
       :data-option-count="String(modelOptions.length)"
       :data-first-option="modelOptions[0]?.value || ''"
+      :data-model="modelValue"
+      :data-reasoning-mode="reasoningMode"
       :data-reasoning-effort="reasoningEffort"
+      :data-reasoning-slider="String(
+        modelOptions.find((option) => option.value === modelValue)?.supportsReasoningSlider === true
+      )"
     />
   `,
 }
@@ -164,11 +347,24 @@ const ChatHistoryPanelStub = {
       type: Boolean,
       default: false,
     },
+    overlay: {
+      type: Boolean,
+      default: false,
+    },
+    sidebarId: {
+      type: String,
+      default: '',
+    },
   },
   emits: ['new', 'close', 'select', 'rename', 'delete', 'clear'],
   template: `
-    <aside data-test="chat-history" :data-mobile="String(!!mobile)">
-      <template v-if="mobile">
+    <aside
+      :id="sidebarId || undefined"
+      data-test="chat-history"
+      :data-mobile="String(!!mobile)"
+      :data-overlay="String(!!overlay)"
+    >
+      <template v-if="mobile || overlay">
         <button type="button" data-test="history-first">First</button>
         <input data-test="history-middle" />
         <button type="button" data-test="history-last">Last</button>
@@ -178,26 +374,76 @@ const ChatHistoryPanelStub = {
 }
 
 const ChatMessageItemStub = {
-  props: ['message', 'retryable'],
-  emits: ['retry'],
+  props: [
+    'message',
+    'retryable',
+    'retrying',
+    'announceFailure',
+    'activityExpanded',
+    'activityControls',
+  ],
+  emits: ['retry', 'viewActivity'],
+  methods: { chatActivityPartHasText },
   template: `
-    <article :data-message-id="message.id">
+    <article
+      :data-message-id="message.id"
+      :data-announce-failure="String(!!announceFailure)"
+    >
       <button
-        v-if="retryable"
+        v-if="retryable || retrying"
         type="button"
         data-test="retry-message"
+        :disabled="retrying"
+        :aria-busy="retrying ? 'true' : undefined"
         @click="$emit('retry')"
       >
         Retry
       </button>
+      <button
+        v-if="message.activities?.some((activity) => activity.items.some((item) => item.parts.some(chatActivityPartHasText)))"
+        type="button"
+        data-test="view-activity"
+        :data-chat-activity-message-id="message.id"
+        :aria-expanded="String(!!activityExpanded)"
+        :aria-controls="activityControls"
+        @click="$emit('viewActivity')"
+      >Activity</button>
     </article>
   `,
 }
 
-const BaseDialogStub = {
-  props: ['show', 'title'],
+const ChatActivityPanelStub = {
+  props: ['activities', 'mobile'],
   emits: ['close'],
-  template: '<div v-if="show"><slot /><slot name="footer" /></div>',
+  methods: { chatActivityPartText },
+  template: `
+    <aside data-test="chat-activity-panel" :data-mobile="String(!!mobile)">
+      <span
+        v-for="activity in activities"
+        :key="activity.key"
+        data-test="activity-summary"
+      >{{ activity.items.flatMap((item) => item.parts.map(chatActivityPartText)).join('') }}</span>
+      <button type="button" data-test="close-activity" @click="$emit('close')">Close</button>
+    </aside>
+  `,
+}
+
+const BaseDialogStub = {
+  props: ['show', 'title', 'variant', 'showCloseButton', 'descriptionId'],
+  emits: ['close'],
+  template: `
+    <div
+      v-if="show"
+      data-test="base-dialog"
+      :data-title="title"
+      :data-variant="variant"
+      :data-show-close="String(showCloseButton)"
+      :aria-describedby="descriptionId || undefined"
+    >
+      <slot />
+      <slot name="footer" />
+    </div>
+  `,
 }
 
 const IconStub = {
@@ -224,6 +470,7 @@ interface ChatStoreHarness {
   hydrating: boolean
   persistenceAvailable: boolean
   syncStatus: 'idle' | 'syncing' | 'offline' | 'error' | 'unavailable'
+  syncError: string | null
   serverHistoryAvailable: boolean | null
   legacyImportRequired: boolean
   legacyConversationIds: string[]
@@ -240,10 +487,12 @@ interface ChatStoreHarness {
   syncHistory: ReturnType<typeof vi.fn>
   loadConversationPage: ReturnType<typeof vi.fn>
   searchHistory: ReturnType<typeof vi.fn>
+  invalidateHistorySearch: ReturnType<typeof vi.fn>
   loadConversationDetail: ReturnType<typeof vi.fn>
   loadOlderConversationMessages: ReturnType<typeof vi.fn>
   recoverAttempt: ReturnType<typeof vi.fn>
   prepareConversationForCompletion: ReturnType<typeof vi.fn>
+  markCompletionAccepted: ReturnType<typeof vi.fn>
   acceptLegacyImport: ReturnType<typeof vi.fn>
   declineLegacyImport: ReturnType<typeof vi.fn>
   createConversation: ReturnType<typeof vi.fn>
@@ -254,38 +503,59 @@ interface ChatStoreHarness {
   setConversationModel: ReturnType<typeof vi.fn>
   addMessage: ReturnType<typeof vi.fn>
   updateMessage: ReturnType<typeof vi.fn>
+  removeMessages: ReturnType<typeof vi.fn>
   startStreaming: ReturnType<typeof vi.fn>
   appendStreamingContent: ReturnType<typeof vi.fn>
+  upsertMessageActivity: ReturnType<typeof vi.fn>
+  stopMessageActivities: ReturnType<typeof vi.fn>
   finishStreaming: ReturnType<typeof vi.fn>
   failStreaming: ReturnType<typeof vi.fn>
   stopStreaming: ReturnType<typeof vi.fn>
 }
 
+interface ProjectsStoreHarness {
+  projects: unknown[]
+  load: ReturnType<typeof vi.fn>
+  addConversation: ReturnType<typeof vi.fn>
+}
+
 const authStore = useAuthStore() as unknown as AuthStoreHarness
 const chatStore = useChatStore() as unknown as ChatStoreHarness
+const projectsStore = useProjectsStore() as unknown as ProjectsStoreHarness
 let wrapper: VueWrapper | undefined
 let generatedMessageId = 0
 
-async function mountView(): Promise<VueWrapper> {
+function mountViewImmediately(): VueWrapper {
   wrapper = mount(ChatView, {
     attachTo: document.body,
     global: {
+      plugins: [createPinia()],
       stubs: {
         AppLayout: AppLayoutStub,
         BaseDialog: BaseDialogStub,
         ChatComposer: ChatComposerStub,
+        ChatAttachmentPicker: ChatAttachmentPickerStub,
+        ChatAttachmentPreviewList: ChatAttachmentPreviewListStub,
+        ChatActivityPanel: ChatActivityPanelStub,
         ChatHistoryPanel: ChatHistoryPanelStub,
         ChatMessageItem: ChatMessageItemStub,
         ChatModelSettings: ChatModelSettingsStub,
+        ChatVoiceInput: ChatVoiceInputStub,
+        ChatVoiceModeButton: ChatVoiceModeButtonStub,
         Icon: IconStub,
         RouterLink: RouterLinkStub,
         Transition: true,
       },
     },
   })
+  return wrapper
+}
+
+async function mountView(): Promise<VueWrapper> {
+  const view = mountViewImmediately()
   await flushPromises()
   await nextTick()
-  return wrapper
+  return view
 }
 
 function installAnimationFrameHarness() {
@@ -443,10 +713,64 @@ function appendStreamingChunk(content: string) {
   message.content += content
 }
 
+function activitySnapshot(
+  text: string,
+  options: {
+    responseId?: string
+    status?: ChatActivity['status']
+    reasoningMode?: ChatActivity['reasoningMode']
+    updatedAt?: number
+    streamingTextChunks?: string[]
+  } = {},
+): ChatActivity {
+  const responseId = options.responseId ?? 'resp-activity'
+  const status = options.status ?? 'streaming'
+  const updatedAt = options.updatedAt ?? 2
+  return {
+    key: responseId,
+    responseId,
+    status,
+    reasoningMode: options.reasoningMode ?? 'standard',
+    reasoningEffort: 'medium',
+    startedAt: 1,
+    updatedAt,
+    ...(status === 'completed' ? { completedAt: updatedAt } : {}),
+    items: [{
+      key: `${responseId}:reasoning-1:0`,
+      itemId: 'reasoning-1',
+      outputIndex: 0,
+      status,
+      startedAt: 1,
+      updatedAt,
+      ...(status === 'completed' ? { completedAt: updatedAt } : {}),
+      parts: [{
+        key: `${responseId}:reasoning-1:0:0`,
+        itemId: 'reasoning-1',
+        outputIndex: 0,
+        summaryIndex: 0,
+        text,
+        ...(options.streamingTextChunks
+          ? { streamingTextChunks: [...options.streamingTextChunks] }
+          : {}),
+        status,
+        startedAt: 1,
+        updatedAt,
+        ...(status === 'completed' ? { completedAt: updatedAt } : {}),
+      }],
+    }],
+  }
+}
+
 describe('ChatView catalog and hydration gates', () => {
   beforeEach(() => {
     vi.resetAllMocks()
+    window.localStorage.clear()
+    window.history.replaceState(null, '', '/chat')
     generatedMessageId = 0
+    attachmentPickerReady.value = []
+    attachmentPickerAddFiles.mockReset()
+    attachmentPickerCommitAll.mockReset()
+    attachmentPickerDiscardAll.mockReset().mockResolvedValue(undefined)
     authStore.user = { id: 7, balance: 10 }
     chatStore.userId = null
     chatStore.conversations = []
@@ -456,6 +780,7 @@ describe('ChatView catalog and hydration gates', () => {
     chatStore.hydrating = false
     chatStore.persistenceAvailable = true
     chatStore.syncStatus = 'idle'
+    chatStore.syncError = null
     chatStore.serverHistoryAvailable = true
     chatStore.legacyImportRequired = false
     chatStore.legacyConversationIds = []
@@ -476,6 +801,15 @@ describe('ChatView catalog and hydration gates', () => {
     chatStore.loadOlderConversationMessages.mockResolvedValue(true)
     chatStore.recoverAttempt.mockResolvedValue(null)
     chatStore.prepareConversationForCompletion.mockResolvedValue(true)
+    chatStore.markCompletionAccepted.mockImplementation((
+      conversationId: string,
+      assistantMessageId: string,
+    ) => {
+      const conversation = chatStore.conversations.find(({ id }) => id === conversationId)
+      if (!conversation) return false
+      conversation.headMessageId = assistantMessageId
+      return true
+    })
     chatStore.acceptLegacyImport.mockReturnValue(0)
     chatStore.declineLegacyImport.mockReturnValue(undefined)
     chatStore.selectConversation.mockImplementation((id: string | null) => {
@@ -522,6 +856,20 @@ describe('ChatView catalog and hydration gates', () => {
       Object.assign(message, patch)
       return true
     })
+    chatStore.removeMessages.mockImplementation((
+      conversationId: string,
+      messageIds: string[],
+    ) => {
+      const conversation = chatStore.conversations.find(({ id }) => id === conversationId)
+      if (!conversation) return false
+      const ids = new Set(messageIds)
+      const before = conversation.messages.length
+      conversation.messages = conversation.messages.filter(({ id }) => !ids.has(id))
+      if (chatStore.activeConversationId === conversationId) {
+        chatStore.activeConversation = conversation
+      }
+      return before !== conversation.messages.length
+    })
     chatStore.startStreaming.mockImplementation((
       conversationId: string,
       messageId: string,
@@ -531,6 +879,23 @@ describe('ChatView catalog and hydration gates', () => {
       chatStore.streamingMessageId = messageId
       return true
     })
+    chatStore.upsertMessageActivity.mockImplementation((
+      conversationId: string,
+      messageId: string,
+      activity: ChatActivity,
+    ) => {
+      const message = chatStore.conversations
+        .find(({ id }) => id === conversationId)
+        ?.messages.find(({ id }) => id === messageId)
+      if (!message || message.role !== 'assistant') return false
+      const activities = message.activities ?? []
+      const index = activities.findIndex((candidate) => candidate.key === activity.key)
+      if (index >= 0) activities[index] = activity
+      else activities.push(activity)
+      message.activities = activities
+      return true
+    })
+    chatStore.stopMessageActivities.mockReturnValue(false)
     chatStore.finishStreaming.mockImplementation((
       conversationId: string,
       messageId: string,
@@ -568,34 +933,360 @@ describe('ChatView catalog and hydration gates', () => {
       return true
     })
     chatStore.stopStreaming.mockReturnValue(false)
+    projectsStore.projects = []
+    projectsStore.load.mockResolvedValue(undefined)
+    projectsStore.addConversation.mockResolvedValue(true)
     authStore.refreshUser.mockResolvedValue(authStore.user)
     apiMocks.isAbortError.mockImplementation((error: unknown) => (
       !!error && typeof error === 'object' && (error as { name?: unknown }).name === 'AbortError'
     ))
     apiMocks.getChatModels.mockResolvedValue({
-      models: [{ id: 'gpt-5', display_name: 'GPT-5', recommended: true }],
+      models: [
+        {
+          id: 'gpt-5',
+          supports_reasoning_slider: true,
+          supports_responses: true,
+          supports_reasoning_summary: true,
+          supports_reasoning_pro_mode: false,
+          supported_reasoning_efforts: ['low', 'medium', 'high', 'xhigh'],
+        },
+        {
+          id: 'gpt-5.6-sol',
+          supports_reasoning_slider: true,
+          supports_responses: true,
+          supports_reasoning_summary: true,
+          supports_reasoning_pro_mode: true,
+          supported_reasoning_efforts: ['low', 'medium', 'high', 'xhigh'],
+        },
+        {
+          id: 'gpt-5.5',
+          supports_reasoning_slider: true,
+          supports_responses: true,
+          supports_reasoning_summary: true,
+          supports_reasoning_pro_mode: false,
+          supported_reasoning_efforts: ['low', 'medium', 'high', 'xhigh'],
+        },
+        {
+          id: 'gpt-5.6-luna',
+          supports_reasoning_slider: true,
+          supports_responses: true,
+          supports_reasoning_summary: true,
+          supports_reasoning_pro_mode: true,
+          supported_reasoning_efforts: ['low', 'medium', 'high', 'xhigh'],
+        },
+        {
+          id: 'gpt-5.6-terra',
+          supports_reasoning_slider: true,
+          supports_responses: true,
+          supports_reasoning_summary: true,
+          supports_reasoning_pro_mode: true,
+          supported_reasoning_efforts: ['low', 'medium', 'high', 'xhigh'],
+        },
+      ],
       balance: 10,
     })
+    apiMocks.getChatCapabilities.mockResolvedValue({})
     apiMocks.createChatAttemptId.mockReturnValue('attempt-generated')
+    apiMocks.createChatIdempotencyKey.mockReturnValue('11111111-2222-4333-8444-555555555555')
+    composerInsertText.mockReturnValue(true)
     apiMocks.pollChatReceipt.mockResolvedValue({
       receiptId: 'receipt-pending',
       status: 'pending',
     })
-    apiMocks.streamChatCompletion.mockResolvedValue({
-      receivedDone: true,
-      finishReason: 'stop',
-      usage: null,
-      receiptId: null,
+    apiMocks.stopChatAttempt.mockResolvedValue({
+      attemptId: 'attempt-generated',
+      accepted: true,
+      attemptStatus: 'interrupted',
+      deliveryStatus: 'stopped',
+    })
+    apiMocks.streamChatCompletion.mockImplementation(async (
+      _request: unknown,
+      handlers: { onAccepted?: () => void },
+    ) => {
+      handlers.onAccepted?.()
+      return {
+        receivedDone: true,
+        finishReason: 'stop',
+        usage: null,
+        receiptId: null,
+      }
     })
   })
 
   afterEach(() => {
     wrapper?.unmount()
     wrapper = undefined
+    window.history.replaceState(null, '', '/chat')
     document.body.innerHTML = ''
+    window.localStorage.clear()
     vi.restoreAllMocks()
     vi.unstubAllGlobals()
     vi.unstubAllGlobals()
+  })
+
+  it('在真正的新对话中展示随机 Greeting 与单一 composer', async () => {
+    vi.spyOn(Math, 'random').mockReturnValue(0)
+    chatStore.userId = '7'
+    chatStore.hydrated = true
+
+    const view = await mountView()
+
+    expect(view.findAll('[data-test="chat-composer"]')).toHaveLength(1)
+    expect(view.get('[data-test="chat-new-chat-hero"]').text()).toBe(CHAT_GREETINGS[0])
+    expect(view.get('[data-test="chat-new-chat-hero"]').findAll('h2')).toHaveLength(1)
+    expect(view.get('[data-test="chat-new-chat-hero"]').find('p').exists()).toBe(false)
+    expect(view.find('[data-test="chat-new-chat-shortcuts"]').exists()).toBe(false)
+    expect(view.find('header.chat-toolbar').exists()).toBe(false)
+    expect(view.find('.chat-toolbar__session').exists()).toBe(false)
+    expect(view.find('.chat-mobile-actions__history-button').exists()).toBe(true)
+    expect(view.get('.chat-workspace__main').classes()).toContain('chat-workspace__main--new-chat')
+  })
+
+  it('按 ChatGPT 结构确认删除时展示真实标题，并仅在确认后删除目标会话', async () => {
+    const conversation: ChatConversation = {
+      id: 'delete-target',
+      userId: '7',
+      title: '我现在的网站需要一个语音。对话聊天的功能，然后的话，我需要把这个语音聊天的音频就是它...',
+      model: 'gpt-5',
+      messages: [],
+      createdAt: 1,
+      updatedAt: 1,
+    }
+    chatStore.userId = '7'
+    chatStore.hydrated = true
+    chatStore.conversations = [conversation]
+
+    const view = await mountView()
+    view.findComponent(ChatHistoryPanelStub).vm.$emit('delete', conversation.id)
+    await flushPromises()
+
+    const dialog = view.get('[data-test="base-dialog"]')
+    expect(dialog.attributes('data-title')).toBe('chat.confirm.deleteTitle')
+    expect(dialog.attributes('data-variant')).toBe('workspace-confirm')
+    expect(dialog.attributes('data-show-close')).toBe('false')
+    expect(dialog.attributes('aria-describedby')).toBe('chat-delete-confirm-description')
+    const displayedTitle = dialog.get('.chat-delete-confirm__message strong')
+    expect(displayedTitle.text()).toBe(toChatConversationTitlePreview(conversation.title))
+    expect(displayedTitle.attributes('aria-label')).toBe(conversation.title)
+    expect(displayedTitle.attributes('title')).toBe(conversation.title)
+    expect(dialog.get('.chat-delete-confirm__memory').text()).toContain('chat.confirm.memorySettings')
+
+    await dialog.get('.chat-delete-confirm__button--cancel').trigger('click')
+    expect(chatStore.deleteConversation).not.toHaveBeenCalled()
+    expect(view.find('[data-test="base-dialog"]').exists()).toBe(false)
+
+    view.findComponent(ChatHistoryPanelStub).vm.$emit('delete', conversation.id)
+    await flushPromises()
+    await view.get('.chat-delete-confirm__button--danger').trigger('click')
+
+    expect(chatStore.deleteConversation).toHaveBeenCalledTimes(1)
+    expect(chatStore.deleteConversation).toHaveBeenCalledWith(conversation.id)
+    expect(view.find('[data-test="base-dialog"]').exists()).toBe(false)
+  })
+
+  it('重复创建新聊天时也会换一条 Greeting', async () => {
+    vi.spyOn(Math, 'random')
+      .mockReturnValueOnce(0)
+      .mockReturnValueOnce(0.999999)
+    chatStore.userId = '7'
+    chatStore.hydrated = true
+
+    const view = await mountView()
+    expect(view.get('[data-test="chat-new-chat-hero"]').text()).toBe(CHAT_GREETINGS[0])
+
+    view.findComponent(ChatHistoryPanelStub).vm.$emit('new')
+    await nextTick()
+
+    expect(view.get('[data-test="chat-new-chat-hero"]').text()).toBe(CHAT_GREETINGS.at(-1))
+    expect(Math.random).toHaveBeenCalledTimes(2)
+    expect(chatStore.selectConversation).toHaveBeenCalledWith(null)
+    expect(new URL(window.location.href).searchParams.get('conversation')).toBe('new')
+    expect(chatStore.createConversation).not.toHaveBeenCalled()
+    expect(chatStore.addMessage).not.toHaveBeenCalled()
+    expect(apiMocks.streamChatCompletion).not.toHaveBeenCalled()
+  })
+
+  it('刷新入口声明新聊天时会在历史恢复前保持空态，并在选择会话后清除声明', async () => {
+    const conversation: ChatConversation = {
+      id: 'persisted-conversation',
+      userId: '7',
+      title: 'Persisted conversation',
+      model: 'gpt-5.6-sol',
+      messages: [{
+        id: 'persisted-message',
+        role: 'user',
+        content: 'Old message',
+        createdAt: 1,
+        status: 'complete',
+      }],
+      createdAt: 1,
+      updatedAt: 1,
+    }
+    window.history.replaceState(null, '', '/chat?conversation=new')
+    chatStore.userId = '7'
+    chatStore.hydrated = true
+    chatStore.conversations = [conversation]
+    chatStore.activeConversationId = conversation.id
+    chatStore.activeConversation = conversation
+
+    const view = await mountView()
+    await nextTick()
+
+    expect(chatStore.selectConversation).toHaveBeenCalledWith(null)
+    expect(chatStore.activeConversationId).toBeNull()
+    expect(view.find('[data-test="chat-new-chat-hero"]').exists()).toBe(true)
+    expect(new URL(window.location.href).searchParams.get('conversation')).toBe('new')
+
+    view.findComponent(ChatHistoryPanelStub).vm.$emit('select', conversation.id)
+    await nextTick()
+
+    expect(chatStore.activeConversationId).toBe(conversation.id)
+    expect(new URL(window.location.href).searchParams.has('conversation')).toBe(false)
+  })
+
+  it('新聊天发送首条消息创建会话时会同步清除刷新声明', async () => {
+    window.history.replaceState(null, '', '/chat?conversation=new')
+    chatStore.userId = '7'
+    chatStore.hydrated = true
+    chatStore.createConversation.mockImplementation((model: string, title: string) => {
+      const conversation: ChatConversation = {
+        id: 'first-message-conversation',
+        userId: '7',
+        title,
+        model,
+        messages: [],
+        createdAt: 1,
+        updatedAt: 1,
+      }
+      chatStore.conversations = [conversation]
+      chatStore.activeConversationId = conversation.id
+      chatStore.activeConversation = conversation
+      return conversation
+    })
+
+    const view = await mountView()
+    view.findComponent(ChatComposerStub).vm.$emit('send', 'First message')
+
+    expect(chatStore.activeConversationId).toBe('first-message-conversation')
+    expect(new URL(window.location.href).searchParams.has('conversation')).toBe(false)
+    await flushPromises()
+  })
+
+  it('一次性消费项目首条消息意图，清除 prompt 并沿用现有发送与项目关联流程', async () => {
+    window.history.replaceState(
+      null,
+      '',
+      '/chat?conversation=new&project=project-apollo&prompt=Draft%20the%20launch%20plan',
+    )
+    chatStore.createConversation.mockImplementation((model: string, title: string) => {
+      const conversation: ChatConversation = {
+        id: 'project-first-message',
+        userId: '7',
+        title,
+        model,
+        messages: [],
+        createdAt: 1,
+        updatedAt: 1,
+      }
+      chatStore.conversations = [conversation]
+      chatStore.activeConversationId = conversation.id
+      chatStore.activeConversation = conversation
+      return conversation
+    })
+
+    await mountView()
+    expect(new URL(window.location.href).searchParams.has('prompt')).toBe(false)
+    expect(chatStore.createConversation).not.toHaveBeenCalled()
+
+    chatStore.userId = '7'
+    chatStore.hydrated = true
+    await flushPromises()
+
+    expect(chatStore.createConversation).toHaveBeenCalledTimes(1)
+    expect(chatStore.addMessage).toHaveBeenCalledWith(
+      'project-first-message',
+      expect.objectContaining({
+        role: 'user',
+        content: 'Draft the launch plan',
+      }),
+    )
+    expect(apiMocks.streamChatCompletion).toHaveBeenCalledTimes(1)
+    expect(projectsStore.addConversation).toHaveBeenCalledWith(
+      'project-apollo',
+      'project-first-message',
+      expect.objectContaining({
+        id: 'project-first-message',
+        title: 'Draft the launch plan',
+      }),
+    )
+
+    const url = new URL(window.location.href)
+    expect(url.searchParams.get('project')).toBe('project-apollo')
+
+    chatStore.hydrated = false
+    await nextTick()
+    chatStore.hydrated = true
+    await flushPromises()
+
+    expect(chatStore.createConversation).toHaveBeenCalledTimes(1)
+    expect(apiMocks.streamChatCompletion).toHaveBeenCalledTimes(1)
+  })
+
+  it('项目首条消息 prompt 为空时保持普通新聊天空态且不发送', async () => {
+    window.history.replaceState(
+      null,
+      '',
+      '/chat?conversation=new&project=project-apollo&prompt=%20%20',
+    )
+    chatStore.userId = '7'
+    chatStore.hydrated = true
+
+    const view = await mountView()
+
+    expect(view.find('[data-test="chat-new-chat-hero"]').exists()).toBe(true)
+    expect(chatStore.createConversation).not.toHaveBeenCalled()
+    expect(chatStore.addMessage).not.toHaveBeenCalled()
+    expect(apiMocks.streamChatCompletion).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    ['/chat?conversation=new&prompt=Projectless%20prompt'],
+    ['/chat?conversation=existing&project=project-apollo&prompt=Existing%20chat%20prompt'],
+  ])('非 project/new 组合不会消费或自动发送 prompt：%s', async (path) => {
+    window.history.replaceState(null, '', path)
+    chatStore.userId = '7'
+    chatStore.hydrated = true
+
+    await mountView()
+
+    expect(chatStore.createConversation).not.toHaveBeenCalled()
+    expect(chatStore.addMessage).not.toHaveBeenCalled()
+    expect(apiMocks.streamChatCompletion).not.toHaveBeenCalled()
+    expect(new URL(window.location.href).searchParams.has('prompt')).toBe(true)
+  })
+
+  it('历史摘要尚未加载消息详情时不会误显示新聊天首页', async () => {
+    const conversation: ChatConversation = {
+      id: 'history-summary',
+      userId: '7',
+      title: 'History summary',
+      model: 'gpt-5.5',
+      messages: [],
+      messageCount: 4,
+      createdAt: 1,
+      updatedAt: 2,
+    }
+    chatStore.userId = '7'
+    chatStore.hydrated = true
+    chatStore.conversations = [conversation]
+    chatStore.activeConversationId = conversation.id
+    chatStore.activeConversation = conversation
+
+    const view = await mountView()
+
+    expect(view.find('[data-test="chat-new-chat-hero"]').exists()).toBe(false)
+    expect(view.findAll('[data-test="chat-composer"]')).toHaveLength(1)
+    expect(view.get('.chat-workspace__main').classes()).not.toContain('chat-workspace__main--new-chat')
   })
 
   it('在当前用户 history hydration 完成前保持 composer 禁用', async () => {
@@ -610,6 +1301,183 @@ describe('ChatView catalog and hydration gates', () => {
     await nextTick()
 
     expect(view.get('[data-test="chat-composer"]').attributes('data-disabled')).toBe('false')
+  })
+
+  it('从页面任意位置拖入文件时显示全屏接收态并原样交给上传器', async () => {
+    chatStore.userId = '7'
+    chatStore.hydrated = true
+    const view = await mountView()
+    const picker = view.findComponent(ChatAttachmentPickerStub)
+    const files = [
+      new File(['image'], 'photo.png', { type: 'image/png' }),
+      new File(['document'], 'brief.pdf', { type: 'application/pdf' }),
+    ]
+    const transfer = dataTransfer(files)
+
+    expect(picker.props('disabled')).toBe(false)
+    const enter = dispatchDataTransferEvent(document.body, 'dragenter', transfer)
+    await nextTick()
+
+    const overlay = document.querySelector('[data-test="chat-file-drop-overlay"]')
+    expect(enter.defaultPrevented).toBe(true)
+    expect(transfer.dropEffect).toBe('copy')
+    expect(overlay?.textContent).toContain('chat.attachments.dropHere')
+
+    const over = dispatchDataTransferEvent(view.get('.chat-messages').element, 'dragover', transfer)
+    const drop = dispatchDataTransferEvent(view.get('.chat-workspace__main').element, 'drop', transfer)
+    await nextTick()
+
+    expect(over.defaultPrevented).toBe(true)
+    expect(drop.defaultPrevented).toBe(true)
+    expect(attachmentPickerAddFiles).toHaveBeenCalledOnce()
+    expect(attachmentPickerAddFiles).toHaveBeenCalledWith(files)
+    expect(document.querySelector('[data-test="chat-file-drop-overlay"]')).toBeNull()
+  })
+
+  it('把输入框粘贴的图片交给现有附件上传器，并在不可上传时关闭入口', async () => {
+    chatStore.userId = '7'
+    chatStore.hydrated = true
+    const view = await mountView()
+    const composer = view.findComponent(ChatComposerStub)
+    const files = [new File(['image'], 'pasted-image.png', { type: 'image/png' })]
+
+    expect(composer.props('imagePasteEnabled')).toBe(true)
+    composer.vm.$emit('paste-images', files)
+    await nextTick()
+
+    expect(attachmentPickerAddFiles).toHaveBeenCalledOnce()
+    expect(attachmentPickerAddFiles).toHaveBeenCalledWith(files)
+
+    chatStore.isStreaming = true
+    await nextTick()
+    expect(composer.props('imagePasteEnabled')).toBe(false)
+
+    composer.vm.$emit('paste-images', files)
+    expect(attachmentPickerAddFiles).toHaveBeenCalledOnce()
+  })
+
+  it('跨过页面内嵌套区域时保持单一接收态，最后离开才收起', async () => {
+    chatStore.userId = '7'
+    chatStore.hydrated = true
+    const view = await mountView()
+    const transfer = dataTransfer([
+      new File(['image'], 'photo.png', { type: 'image/png' }),
+    ])
+    const workspace = view.get('.chat-workspace').element
+    const messagesRegion = view.get('.chat-messages-region').element
+
+    dispatchDataTransferEvent(workspace, 'dragenter', transfer)
+    dispatchDataTransferEvent(messagesRegion, 'dragenter', transfer)
+    dispatchDataTransferEvent(messagesRegion, 'dragleave', transfer, workspace)
+    await nextTick()
+    expect(document.querySelector('[data-test="chat-file-drop-overlay"]')).not.toBeNull()
+
+    dispatchDataTransferEvent(workspace, 'dragleave', transfer)
+    await nextTick()
+    expect(document.querySelector('[data-test="chat-file-drop-overlay"]')).toBeNull()
+  })
+
+  it('不拦截文本拖放，并在不可上传时只阻止浏览器打开文件', async () => {
+    const view = await mountView()
+    const textTransfer = dataTransfer([], ['text/plain', 'text/uri-list'])
+    const fileTransfer = dataTransfer([
+      new File(['image'], 'photo.png', { type: 'image/png' }),
+    ])
+
+    const textDrop = dispatchDataTransferEvent(document.body, 'drop', textTransfer)
+    const fileEnter = dispatchDataTransferEvent(document.body, 'dragenter', fileTransfer)
+    const fileDrop = dispatchDataTransferEvent(document.body, 'drop', fileTransfer)
+    await nextTick()
+
+    expect(textDrop.defaultPrevented).toBe(false)
+    expect(fileEnter.defaultPrevented).toBe(true)
+    expect(fileDrop.defaultPrevented).toBe(true)
+    expect(fileTransfer.dropEffect).toBe('none')
+    expect(document.querySelector('[data-test="chat-file-drop-overlay"]')).toBeNull()
+    expect(attachmentPickerAddFiles).not.toHaveBeenCalled()
+    expect(view.findComponent(ChatAttachmentPickerStub).props('disabled')).toBe(true)
+  })
+
+  it('拖动中开始生成会立即收起接收态，空文件和卸载后不残留监听', async () => {
+    chatStore.userId = '7'
+    chatStore.hydrated = true
+    const view = await mountView()
+    const transfer = dataTransfer([
+      new File(['image'], 'photo.png', { type: 'image/png' }),
+    ])
+
+    dispatchDataTransferEvent(document.body, 'dragenter', transfer)
+    await nextTick()
+    expect(document.querySelector('[data-test="chat-file-drop-overlay"]')).not.toBeNull()
+
+    chatStore.isStreaming = true
+    await nextTick()
+    expect(document.querySelector('[data-test="chat-file-drop-overlay"]')).toBeNull()
+
+    const blockedDrop = dispatchDataTransferEvent(document.body, 'drop', transfer)
+    const emptyDrop = dispatchDataTransferEvent(document.body, 'drop', dataTransfer())
+    expect(blockedDrop.defaultPrevented).toBe(true)
+    expect(emptyDrop.defaultPrevented).toBe(true)
+    expect(attachmentPickerAddFiles).not.toHaveBeenCalled()
+
+    view.unmount()
+    wrapper = undefined
+    const afterUnmount = dispatchDataTransferEvent(document.body, 'drop', transfer)
+    expect(afterUnmount.defaultPrevented).toBe(false)
+  })
+
+  it('capabilities 缺少或明确关闭 transcription 时保留固定麦克风入口', async () => {
+    chatStore.userId = '7'
+    chatStore.hydrated = true
+    const view = await mountView()
+    expect(view.get('[data-test="chat-voice-input"]').attributes('data-capability-state'))
+      .toBe('unavailable')
+    expect(view.get('[data-test="chat-voice-mode"]').attributes('data-available')).toBe('false')
+
+    view.unmount()
+    wrapper = undefined
+
+    apiMocks.getChatCapabilities.mockResolvedValue({
+      transcription: { enabled: false },
+    })
+    const disabledView = await mountView()
+    expect(disabledView.get('[data-test="chat-voice-input"]').attributes('data-capability-state'))
+      .toBe('unavailable')
+    expect(disabledView.get('[data-test="chat-voice-mode"]').attributes('data-available')).toBe('false')
+  })
+
+  it('按 capability 展示语音入口、回填草稿且转写期间拒绝发送', async () => {
+    chatStore.userId = '7'
+    chatStore.hydrated = true
+    apiMocks.getChatCapabilities.mockResolvedValue({
+      transcription: {
+        enabled: true,
+        max_upload_bytes: 20 * 1024 * 1024,
+        max_duration_seconds: 120,
+        accepted_mime_types: ['audio/webm;codecs=opus', 'audio/mp4'],
+      },
+    })
+    const view = await mountView()
+    const voice = view.get('[data-test="chat-voice-input"]')
+
+    expect(view.get('[data-test="chat-model-settings"]').attributes('data-reasoning-effort'))
+      .toBe('low')
+    expect(voice.attributes('data-max-duration-ms')).toBe('60000')
+    expect(voice.attributes('data-max-bytes')).toBe(String(10 * 1024 * 1024))
+    expect(voice.attributes('data-accepted-mime-types'))
+      .toBe('audio/webm;codecs=opus,audio/mp4')
+    expect(view.get('[data-test="chat-voice-mode"]').attributes('data-available')).toBe('false')
+
+    await view.get('[data-test="voice-transcribed"]').trigger('click')
+    expect(composerInsertText).toHaveBeenCalledWith('语音草稿')
+    expect(apiMocks.streamChatCompletion).not.toHaveBeenCalled()
+
+    await view.get('[data-test="voice-busy"]').trigger('click')
+    expect(view.get('[data-test="chat-composer"]').attributes('data-submission-busy')).toBe('true')
+    view.findComponent(ChatComposerStub).vm.$emit('send', '不得发送')
+    await nextTick()
+    expect(chatStore.createConversation).not.toHaveBeenCalled()
+    expect(apiMocks.streamChatCompletion).not.toHaveBeenCalled()
   })
 
   it('持久化不可用且 hydration 完成后显示历史丢失告警', async () => {
@@ -651,7 +1519,192 @@ describe('ChatView catalog and hydration gates', () => {
     expect(view.find('[data-test="chat-persistence-warning"]').exists()).toBe(false)
   })
 
-  it('目录先于 history hydration 返回时，将恢复出的退役模型纠正为当前推荐模型', async () => {
+  it.each(['error', 'unavailable'] as const)(
+    '云端历史状态为 %s 时显示轻量提示与重新同步，且不泄露原始同步错误',
+    async (syncStatus) => {
+      const rawSyncError = 'Bad Gateway: upstream history database unavailable'
+      chatStore.userId = '7'
+      chatStore.hydrated = true
+      chatStore.persistenceAvailable = true
+      chatStore.syncStatus = syncStatus
+      chatStore.syncError = rawSyncError
+      chatStore.serverHistoryAvailable = syncStatus === 'unavailable' ? false : true
+
+      const view = await mountView()
+      const notice = view.get('[data-test="chat-sync-warning"]')
+      const status = notice.get('[role="status"]')
+      const retry = notice.get('[data-test="chat-sync-retry"]')
+
+      expect(notice.classes()).toContain('chat-sync-notice')
+      expect(notice.classes()).not.toContain('chat-persistence-warning')
+      expect(notice.attributes('role')).toBeUndefined()
+      expect(status.attributes('aria-live')).toBe('polite')
+      expect(status.attributes('aria-atomic')).toBe('true')
+      expect(status.text()).toBe('云端历史记录同步失败，当前聊天仍可正常使用')
+      expect(retry.text()).toContain('重新同步')
+      expect(retry.attributes('aria-label')).toBe('重新同步')
+      expect(notice.text()).not.toContain(rawSyncError)
+    },
+  )
+
+  it('本地持久化不可用时优先显示保存告警并抑制云端同步提示', async () => {
+    chatStore.userId = '7'
+    chatStore.hydrated = true
+    chatStore.persistenceAvailable = false
+    chatStore.syncStatus = 'error'
+    chatStore.syncError = 'Forbidden'
+
+    const view = await mountView()
+
+    expect(view.get('[data-test="chat-persistence-warning"]').attributes('role')).toBe('alert')
+    expect(view.find('[data-test="chat-sync-warning"]').exists()).toBe(false)
+  })
+
+  it('重新同步期间锁定按钮并防止重复触发，失败后继续保留轻量提示', async () => {
+    chatStore.userId = '7'
+    chatStore.hydrated = true
+    chatStore.persistenceAvailable = true
+    chatStore.syncStatus = 'error'
+    chatStore.syncError = 'Initial cloud history failure'
+
+    const view = await mountView()
+    chatStore.syncHistory.mockClear()
+    chatStore.loadConversationPage.mockClear()
+
+    let resolveRetry: (() => void) | undefined
+    chatStore.syncHistory.mockImplementationOnce(() => new Promise<void>((resolve) => {
+      resolveRetry = () => {
+        chatStore.syncStatus = 'error'
+        chatStore.syncError = 'Cloud history still unavailable'
+        resolve()
+      }
+    }))
+
+    const retry = view.get('[data-test="chat-sync-retry"]')
+    const firstClick = retry.trigger('click')
+    const secondClick = retry.trigger('click')
+    await Promise.all([firstClick, secondClick])
+    await nextTick()
+
+    const pendingRetry = view.get('[data-test="chat-sync-retry"]')
+    expect(chatStore.syncHistory).toHaveBeenCalledTimes(1)
+    expect(pendingRetry.attributes('disabled')).toBeDefined()
+    expect(pendingRetry.attributes('aria-busy')).toBe('true')
+    expect(pendingRetry.attributes('aria-label')).toBe('正在同步…')
+    expect(view.get('[data-test="chat-sync-warning"]').text()).toContain('正在同步…')
+
+    resolveRetry?.()
+    await flushPromises()
+    await nextTick()
+
+    const retainedNotice = view.get('[data-test="chat-sync-warning"]')
+    const enabledRetry = retainedNotice.get('[data-test="chat-sync-retry"]')
+    expect(chatStore.loadConversationPage).not.toHaveBeenCalled()
+    expect(retainedNotice.text()).toContain('云端历史记录同步失败，当前聊天仍可正常使用')
+    expect(retainedNotice.text()).not.toContain('Cloud history still unavailable')
+    expect(enabledRetry.attributes('disabled')).toBeUndefined()
+    expect(enabledRetry.attributes('aria-busy')).toBeUndefined()
+  })
+
+  it('云端历史同步失败时仍发送 completion 并完成回答，且保持原同步状态', async () => {
+    const conversation: ChatConversation = {
+      id: 'sync-error-chat-success',
+      userId: '7',
+      title: 'Cloud sync failure does not block chat',
+      model: 'gpt-5',
+      messages: [],
+      createdAt: 1,
+      updatedAt: 1,
+    }
+    const rawSyncError = 'History service returned Bad Gateway'
+    chatStore.userId = '7'
+    chatStore.hydrated = true
+    chatStore.persistenceAvailable = true
+    chatStore.syncStatus = 'error'
+    chatStore.syncError = rawSyncError
+    chatStore.conversations = [conversation]
+    chatStore.activeConversationId = conversation.id
+    chatStore.activeConversation = conversation
+    apiMocks.streamChatCompletion.mockImplementationOnce(async (
+      _request: unknown,
+      handlers: { onAccepted?: () => void; onContent?: (content: string) => void },
+    ) => {
+      handlers.onAccepted?.()
+      handlers.onContent?.('聊天回答仍然成功')
+      return { receivedDone: true, finishReason: 'stop', usage: null, receiptId: null }
+    })
+
+    const view = await mountView()
+    view.findComponent(ChatComposerStub).vm.$emit('send', '同步失败时还能聊天吗？')
+    await flushPromises()
+    await nextTick()
+
+    expect(chatStore.prepareConversationForCompletion).toHaveBeenCalledWith(conversation.id)
+    expect(apiMocks.streamChatCompletion).toHaveBeenCalledTimes(1)
+    expect(chatStore.markCompletionAccepted).toHaveBeenCalledWith(
+      conversation.id,
+      'generated-message-2',
+    )
+    expect(chatStore.appendStreamingContent).toHaveBeenCalledWith(
+      conversation.id,
+      'generated-message-2',
+      '聊天回答仍然成功',
+    )
+    expect(chatStore.finishStreaming).toHaveBeenCalledWith(
+      conversation.id,
+      'generated-message-2',
+      'stop',
+    )
+    expect(chatStore.syncStatus).toBe('error')
+    expect(chatStore.syncError).toBe(rawSyncError)
+    expect(view.find('[data-test="chat-sync-warning"]').exists()).toBe(true)
+  })
+
+  it('completion 请求失败只更新消息失败状态，不覆盖云端历史同步错误', async () => {
+    const conversation: ChatConversation = {
+      id: 'sync-error-chat-error',
+      userId: '7',
+      title: 'Independent error channels',
+      model: 'gpt-5',
+      messages: [],
+      createdAt: 1,
+      updatedAt: 1,
+    }
+    const rawSyncError = 'History sync request was forbidden'
+    chatStore.userId = '7'
+    chatStore.hydrated = true
+    chatStore.persistenceAvailable = true
+    chatStore.syncStatus = 'error'
+    chatStore.syncError = rawSyncError
+    chatStore.conversations = [conversation]
+    chatStore.activeConversationId = conversation.id
+    chatStore.activeConversation = conversation
+    vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    apiMocks.streamChatCompletion.mockRejectedValueOnce(new ChatAPIError('Bad Gateway', {
+      status: 502,
+      code: 502,
+    }))
+
+    const view = await mountView()
+    view.findComponent(ChatComposerStub).vm.$emit('send', '触发独立的 completion 错误')
+    await flushPromises()
+    await nextTick()
+
+    expect(apiMocks.streamChatCompletion).toHaveBeenCalledTimes(1)
+    expect(chatStore.failStreaming).toHaveBeenCalledWith(
+      conversation.id,
+      'generated-message-2',
+      'chat.errors.serviceUnavailable',
+      'HTTP_502',
+    )
+    expect(chatStore.syncStatus).toBe('error')
+    expect(chatStore.syncError).toBe(rawSyncError)
+    expect(view.get('[data-test="chat-sync-warning"]').text())
+      .toContain('云端历史记录同步失败，当前聊天仍可正常使用')
+    expect(view.get('[data-test="chat-sync-warning"]').text()).not.toContain('Bad Gateway')
+  })
+
+  it('history hydration 恢复目录外模型时不在前端改写，交由发送接口最终校验', async () => {
     const view = await mountView()
     const conversation: ChatConversation = {
       id: 'hydrated-conversation',
@@ -670,17 +1723,17 @@ describe('ChatView catalog and hydration gates', () => {
     chatStore.hydrated = true
     await nextTick()
 
-    expect(chatStore.setConversationModel).toHaveBeenCalledWith(conversation.id, 'gpt-5')
-    expect(conversation.model).toBe('gpt-5')
-    expect(view.get('[data-test="chat-composer"]').attributes('data-disabled')).toBe('false')
+    expect(chatStore.setConversationModel).not.toHaveBeenCalled()
+    expect(conversation.model).toBe('gpt-retired')
+    expect(view.get('[data-test="chat-composer"]').attributes('data-disabled')).toBe('true')
   })
 
-  it('切换到使用目录外模型的历史会话时自动回退到当前推荐模型', async () => {
+  it('切换到使用目录外模型的历史会话时保留原始模型', async () => {
     const current: ChatConversation = {
       id: 'current-conversation',
       userId: '7',
       title: 'Current conversation',
-      model: 'gpt-5',
+      model: 'gpt-5.5',
       messages: [],
       createdAt: 1,
       updatedAt: 2,
@@ -705,11 +1758,14 @@ describe('ChatView catalog and hydration gates', () => {
     chatStore.activeConversation = retired
     await nextTick()
 
-    expect(chatStore.setConversationModel).toHaveBeenCalledWith(retired.id, 'gpt-5')
-    expect(retired.model).toBe('gpt-5')
+    expect(chatStore.setConversationModel).not.toHaveBeenCalledWith(
+      retired.id,
+      'gpt-5.6-sol',
+    )
+    expect(retired.model).toBe('gpt-retired')
   })
 
-  it('目录 membership 无法确认时即使收到 send 事件也拒绝创建请求', async () => {
+  it('目录外历史模型缺少 reasoning capability 时保留原模型并阻止无效请求', async () => {
     const conversation: ChatConversation = {
       id: 'unavailable-conversation',
       userId: '7',
@@ -724,16 +1780,15 @@ describe('ChatView catalog and hydration gates', () => {
     chatStore.conversations = [conversation]
     chatStore.activeConversationId = conversation.id
     chatStore.activeConversation = conversation
-    chatStore.setConversationModel.mockReturnValue(false)
-
     const view = await mountView()
     expect(view.get('[data-test="chat-composer"]').attributes('data-disabled')).toBe('true')
 
-    view.findComponent(ChatComposerStub).vm.$emit('send', 'must not be sent')
-    await nextTick()
+    view.findComponent(ChatComposerStub).vm.$emit('send', 'validate on send')
+    await flushPromises()
 
-    expect(chatStore.addMessage).not.toHaveBeenCalled()
     expect(apiMocks.streamChatCompletion).not.toHaveBeenCalled()
+    expect(chatStore.failStreaming).not.toHaveBeenCalled()
+    expect(view.find('[data-test="chat-reasoning-capability-state"]').exists()).toBe(true)
   })
 
   it('空会话在目录和 history 就绪后聚焦 composer', async () => {
@@ -745,19 +1800,65 @@ describe('ChatView catalog and hydration gates', () => {
     expect(document.activeElement).toBe(view.get('[data-test="composer-input"]').element)
   })
 
-  it('切换账号后忽略旧账号迟到的目录响应', async () => {
-    let resolveFirst!: (value: unknown) => void
-    apiMocks.getChatModels
-      .mockImplementationOnce(() => new Promise((resolve) => {
-        resolveFirst = resolve
-      }))
-      .mockResolvedValueOnce({
-        models: [{ id: 'gpt-new', display_name: 'GPT New', recommended: true }],
-        balance: 3,
-      })
+  it('固定产品配置始终以 gpt-5.6-sol 和极速推理作为新会话默认值', async () => {
+    chatStore.userId = '7'
+    chatStore.hydrated = true
 
     const view = await mountView()
+    const settings = view.get('[data-test="chat-model-settings"]')
+
+    expect(settings.attributes('data-option-count')).toBe('4')
+    expect(settings.attributes('data-first-option')).toBe('gpt-5.6-sol')
+    expect(settings.attributes('data-model')).toBe('gpt-5.6-sol')
+    expect(settings.attributes('data-reasoning-effort')).toBe('low')
+    expect(settings.attributes('data-reasoning-slider')).toBe('true')
+  })
+
+  it('固定产品模型均启用四档推理滑块', async () => {
+    chatStore.userId = '7'
+    chatStore.hydrated = true
+
+    const view = await mountView()
+
+    expect(view.get('[data-test="chat-model-settings"]').attributes('data-reasoning-slider'))
+      .toBe('true')
+  })
+
+  it('从旧模型会话新建对话时恢复 Sol 默认值', async () => {
+    const conversation: ChatConversation = {
+      id: 'conversation-old-model',
+      userId: '7',
+      title: 'Old model',
+      model: 'gpt-5.5',
+      messages: [],
+      createdAt: 1,
+      updatedAt: 1,
+    }
+    chatStore.userId = '7'
+    chatStore.hydrated = true
+    chatStore.conversations = [conversation]
+    chatStore.activeConversationId = conversation.id
+    chatStore.activeConversation = conversation
+
+    const view = await mountView()
+    expect(view.get('[data-test="chat-model-settings"]').attributes('data-model')).toBe('gpt-5.5')
+    expect(view.get('[data-test="chat-model-settings"]').attributes('data-reasoning-slider'))
+      .toBe('true')
+
+    view.findComponent(ChatHistoryPanelStub).vm.$emit('new')
+    await nextTick()
+
+    expect(chatStore.selectConversation).toHaveBeenCalledWith(null)
+    expect(view.get('[data-test="chat-model-settings"]').attributes('data-model'))
+      .toBe('gpt-5.6-sol')
+  })
+
+  it('初始化、切换账号和重新挂载都按账号刷新模型能力', async () => {
+    const view = await mountView()
     expect(apiMocks.getChatModels).toHaveBeenCalledTimes(1)
+    expect(apiMocks.getChatModels).toHaveBeenLastCalledWith(expect.any(AbortSignal))
+    expect(view.get('[data-test="chat-model-settings"]').attributes('data-first-option'))
+      .toBe('gpt-5.6-sol')
 
     authStore.user = { id: 8, balance: 2 }
     chatStore.userId = '8'
@@ -766,20 +1867,56 @@ describe('ChatView catalog and hydration gates', () => {
     await nextTick()
 
     expect(apiMocks.getChatModels).toHaveBeenCalledTimes(2)
-    expect(view.get('[data-test="chat-model-settings"]').attributes('data-first-option')).toBe('gpt-new')
-    expect(view.get('.chat-toolbar__balance strong').text()).toBe('3.00')
-    expect(view.get('.chat-toolbar__balance [data-testid="credit-amount"]').text()).toBe('3.00')
-    expect(view.find('.chat-toolbar__balance [data-testid="snowflake-credit-icon"]').exists()).toBe(true)
+    expect(view.find('[data-test="chat-balance-state"]').exists()).toBe(false)
 
-    resolveFirst({
-      models: [{ id: 'gpt-old', display_name: 'GPT Old', recommended: true }],
-      balance: 99,
-    })
+    view.unmount()
+    wrapper = undefined
+    const remounted = await mountView()
+    expect(apiMocks.getChatModels).toHaveBeenCalledTimes(3)
+    expect(remounted.get('[data-test="chat-model-settings"]').attributes('data-option-count')).toBe('4')
+  })
+
+  it('capabilities 请求长期 pending 时文本 Chat 仍立即可用', async () => {
+    chatStore.userId = '7'
+    chatStore.hydrated = true
+    apiMocks.getChatCapabilities.mockImplementationOnce(() => new Promise(() => undefined))
+
+    const view = await mountView()
+
+    expect(apiMocks.getChatCapabilities).toHaveBeenCalledTimes(1)
+    expect(apiMocks.getChatModels).toHaveBeenCalledTimes(1)
+    expect(view.get('[data-test="chat-model-settings"]').attributes('data-model'))
+      .toBe('gpt-5.6-sol')
+    expect(view.get('[data-test="chat-composer"]').attributes('data-disabled')).toBe('false')
+    expect(view.get('[data-test="chat-voice-input"]').attributes('data-capability-state'))
+      .toBe('initializing')
+    expect(view.find('[data-test="chat-voice-mode"]').exists()).toBe(true)
+  })
+
+  it('首个 DOM 提交即包含麦克风，能力返回前后不替换或插入控件', async () => {
+    chatStore.userId = '7'
+    chatStore.hydrated = true
+    let resolveCapabilities: ((value: { transcription: { enabled: true } }) => void) | undefined
+    apiMocks.getChatCapabilities.mockImplementationOnce(() => new Promise((resolve) => {
+      resolveCapabilities = resolve
+    }))
+
+    const view = mountViewImmediately()
+    await nextTick()
+    const initialVoice = view.get('[data-test="chat-voice-input"]')
+    const initialElement = initialVoice.element
+
+    expect(initialVoice.attributes('data-capability-state')).toBe('initializing')
+    expect(view.findAll('[data-test="chat-voice-input"]')).toHaveLength(1)
+
+    resolveCapabilities?.({ transcription: { enabled: true } })
     await flushPromises()
     await nextTick()
 
-    expect(view.get('[data-test="chat-model-settings"]').attributes('data-first-option')).toBe('gpt-new')
-    expect(view.get('.chat-toolbar__balance strong').text()).toBe('3.00')
+    const readyVoice = view.get('[data-test="chat-voice-input"]')
+    expect(readyVoice.attributes('data-capability-state')).toBe('ready')
+    expect(readyVoice.element).toBe(initialElement)
+    expect(view.findAll('[data-test="chat-voice-input"]')).toHaveLength(1)
   })
 
   it('账户对象刷新保留草稿，只有用户 identity 变化才清空草稿', async () => {
@@ -801,63 +1938,224 @@ describe('ChatView catalog and hydration gates', () => {
     expect(composer.props('modelValue')).toBe('')
   })
 
-  it('账户刷新后的余额淘汰旧目录余额快照', async () => {
+  it('账号切换会作废尚未完成的提交上下文', async () => {
     chatStore.userId = '7'
     chatStore.hydrated = true
-    apiMocks.getChatModels.mockResolvedValueOnce({
-      models: [{ id: 'gpt-5', display_name: 'GPT-5', recommended: true }],
-      balance: 3,
-    })
     const view = await mountView()
+    const composer = view.findComponent(ChatComposerStub)
+    const initialResetKey = composer.props('submissionResetKey') as number
 
-    expect(view.get('.chat-toolbar__balance strong').text()).toBe('3.00')
+    composer.vm.$emit('submitting-change', true)
+    await nextTick()
+    expect(view.findComponent(ChatModelSettingsStub).props('disabled')).toBe(true)
 
-    authStore.user = { id: 7, balance: 6 }
+    authStore.user = { id: 8, balance: 6 }
     await nextTick()
 
-    expect(view.get('.chat-toolbar__balance strong').text()).toBe('6.00')
+    expect(composer.props('submissionResetKey')).toBe(initialResetKey + 1)
+    expect(composer.props('modelValue')).toBe('')
   })
 
-  it('空模型目录显示可重试错误，重试成功后恢复 composer', async () => {
+  it('切换账号会恢复极速推理并在新账号请求中显式携带 low', async () => {
     chatStore.userId = '7'
     chatStore.hydrated = true
-    apiMocks.getChatModels
-      .mockResolvedValueOnce({ models: [], balance: 10 })
-      .mockResolvedValueOnce({
-        models: [{ id: 'gpt-5', display_name: 'GPT-5', recommended: true }],
-        balance: 10,
-      })
-
     const view = await mountView()
+    const settings = view.findComponent(ChatModelSettingsStub)
 
-    expect(view.get('.chat-catalog-error').text()).toContain('chat.errors.noModelsAvailable')
-    expect(view.get('[data-test="chat-composer"]').attributes('data-disabled')).toBe('true')
-    expect(view.get('[data-test="chat-model-settings"]').attributes('data-option-count')).toBe('0')
+    settings.vm.$emit('update:reasoningEffort', 'high')
+    await nextTick()
+    expect(settings.props('reasoningEffort')).toBe('high')
 
-    await view.get('.chat-catalog-error button').trigger('click')
+    authStore.user = { id: 8, balance: 10 }
+    chatStore.userId = '8'
+    chatStore.hydrated = true
     await flushPromises()
     await nextTick()
 
-    expect(apiMocks.getChatModels).toHaveBeenCalledTimes(2)
-    expect(view.find('.chat-catalog-error').exists()).toBe(false)
-    expect(view.get('[data-test="chat-model-settings"]').attributes('data-option-count')).toBe('1')
-    expect(view.get('[data-test="chat-composer"]').attributes('data-disabled')).toBe('false')
+    expect(settings.props('reasoningEffort')).toBe('low')
+
+    const conversation: ChatConversation = {
+      id: 'new-user-conversation',
+      userId: '8',
+      title: 'New user',
+      model: 'gpt-5',
+      messages: [],
+      createdAt: 1,
+      updatedAt: 1,
+    }
+    chatStore.conversations = [conversation]
+    chatStore.activeConversationId = conversation.id
+    chatStore.activeConversation = conversation
+
+    view.findComponent(ChatComposerStub).vm.$emit('send', 'First message after switching')
+    await flushPromises()
+
+    expect(apiMocks.streamChatCompletion.mock.calls[0]?.[0]).toMatchObject({
+      conversationId: conversation.id,
+      model: 'gpt-5',
+      reasoningMode: 'standard',
+      reasoningEffort: 'low',
+    })
   })
 
-  it('目录接口以余额不足拒绝时，以服务端结果覆盖当前用户的正余额状态', async () => {
+  it('刷新 Chat 页面后保留当前账号选择的 Pro 思考强度', async () => {
     chatStore.userId = '7'
     chatStore.hydrated = true
-    authStore.user = { id: 7, balance: 10 }
-    apiMocks.getChatModels.mockRejectedValueOnce(new ChatAPIError('Insufficient balance', {
-      status: 403,
-      code: 'INSUFFICIENT_BALANCE',
+    const firstView = await mountView()
+    const firstSettings = firstView.findComponent(ChatModelSettingsStub)
+
+    firstSettings.vm.$emit('update:reasoningMode', 'pro')
+    await nextTick()
+    await flushPromises()
+    expect(firstSettings.props('reasoningMode')).toBe('pro')
+
+    firstView.unmount()
+    wrapper = undefined
+
+    const refreshedView = await mountView()
+    expect(refreshedView.findComponent(ChatModelSettingsStub).props('reasoningMode')).toBe('pro')
+
+    const conversation: ChatConversation = {
+      id: 'pro-refresh-conversation',
+      userId: '7',
+      title: 'Pro refresh',
+      model: 'gpt-5.6-sol',
+      messages: [],
+      createdAt: 1,
+      updatedAt: 1,
+    }
+    chatStore.conversations = [conversation]
+    chatStore.activeConversationId = conversation.id
+    chatStore.activeConversation = conversation
+    refreshedView.findComponent(ChatComposerStub).vm.$emit('send', 'Keep Pro after refresh')
+    await flushPromises()
+
+    const request = apiMocks.streamChatCompletion.mock.calls[0]?.[0]
+    expect(request).toMatchObject({
+      conversationId: conversation.id,
+      model: 'gpt-5.6-sol',
+      reasoningMode: 'pro',
+    })
+    expect(request).not.toHaveProperty('reasoningEffort')
+  })
+
+  it('账户余额为零时不在前端拦截发送，由后端统一判断会员与钱包额度', async () => {
+    const conversation: ChatConversation = {
+      id: 'entitlement-conversation',
+      userId: '7',
+      title: 'Entitlement admission',
+      model: 'gpt-5.6-sol',
+      messages: [],
+      createdAt: 1,
+      updatedAt: 1,
+    }
+    chatStore.userId = '7'
+    chatStore.hydrated = true
+    chatStore.conversations = [conversation]
+    chatStore.activeConversationId = conversation.id
+    chatStore.activeConversation = conversation
+    authStore.user = { id: 7, balance: 0 }
+    const view = await mountView()
+
+    expect(view.find('[data-test="chat-balance-state"]').exists()).toBe(false)
+    expect(view.findComponent(ChatComposerStub).props('insufficientBalance')).toBeUndefined()
+
+    view.findComponent(ChatComposerStub).vm.$emit('send', 'Use my available entitlement')
+    await flushPromises()
+
+    expect(apiMocks.streamChatCompletion).toHaveBeenCalledTimes(1)
+    expect(apiMocks.streamChatCompletion.mock.calls[0]?.[0]).toMatchObject({
+      conversationId: conversation.id,
+      model: 'gpt-5.6-sol',
+    })
+  })
+
+  it('服务端额度不足只形成当前消息错误，不留下会永久锁死输入框的本地余额状态', async () => {
+    const conversation: ChatConversation = {
+      id: 'server-admission-conversation',
+      userId: '7',
+      title: 'Server admission',
+      model: 'gpt-5.6-sol',
+      messages: [],
+      createdAt: 1,
+      updatedAt: 1,
+    }
+    chatStore.userId = '7'
+    chatStore.hydrated = true
+    chatStore.conversations = [conversation]
+    chatStore.activeConversationId = conversation.id
+    chatStore.activeConversation = conversation
+    authStore.user = { id: 7, balance: 0 }
+    apiMocks.streamChatCompletion.mockRejectedValueOnce(new ChatAPIError(
+      'No usable entitlement',
+      { status: 403, code: 'INSUFFICIENT_BALANCE' },
+    ))
+    const view = await mountView()
+    const composer = view.findComponent(ChatComposerStub)
+
+    composer.vm.$emit('send', 'First admission attempt')
+    await flushPromises()
+
+    expect(apiMocks.streamChatCompletion).toHaveBeenCalledTimes(1)
+    expect(chatStore.failStreaming).toHaveBeenCalledWith(
+      conversation.id,
+      'generated-message-2',
+      'chat.errors.insufficientBalance',
+      'INSUFFICIENT_BALANCE',
+    )
+    expect(composer.props('insufficientBalance')).toBeUndefined()
+
+    composer.vm.$emit('send', 'Retry after entitlement refresh')
+    await flushPromises()
+
+    expect(apiMocks.streamChatCompletion).toHaveBeenCalledTimes(2)
+  })
+
+  it('模型能力接口异常时保持固定目录、普通文本可用并对 reasoning fail-closed', async () => {
+    chatStore.userId = '7'
+    chatStore.hydrated = true
+    apiMocks.getChatModels.mockRejectedValueOnce(new ChatAPIError('Unavailable', {
+      status: 503,
+      code: 'CHAT_CATALOG_UNAVAILABLE',
     }))
 
     const view = await mountView()
 
-    expect(view.get('.chat-toolbar__balance strong').text()).toBe('10.00')
-    expect(view.get('[data-test="chat-composer"]').attributes('data-insufficient-balance')).toBe('true')
-    expect(view.get('.chat-catalog-error').text()).toContain('chat.errors.insufficientBalance')
+    expect(apiMocks.getChatModels).toHaveBeenCalledTimes(1)
+    expect(view.find('.chat-catalog-error').exists()).toBe(false)
+    expect(view.get('[data-test="chat-model-settings"]').attributes('data-option-count')).toBe('4')
+    expect(view.get('[data-test="chat-model-settings"]').attributes('data-reasoning-slider'))
+      .toBe('false')
+    expect(view.get('[data-test="chat-composer"]').attributes('data-disabled')).toBe('true')
+    expect(view.find('[data-test="chat-reasoning-capability-state"]').exists()).toBe(false)
+  })
+
+  it('新聊天没有明确模型时不显示 reasoning 能力提示', async () => {
+    chatStore.userId = '7'
+    chatStore.hydrated = true
+    apiMocks.getChatModels.mockResolvedValueOnce({ models: [], balance: 10 })
+
+    const view = await mountView()
+
+    expect(view.find('[data-test="chat-reasoning-capability-state"]').exists()).toBe(false)
+  })
+
+  it('capabilities 异常不阻断固定模型与文本聊天', async () => {
+    chatStore.userId = '7'
+    chatStore.hydrated = true
+    authStore.user = { id: 7, balance: 10 }
+    apiMocks.getChatCapabilities.mockRejectedValueOnce(new ChatAPIError('Unavailable', {
+      status: 503,
+      code: 'CHAT_CAPABILITIES_UNAVAILABLE',
+    }))
+
+    const view = await mountView()
+
+    expect(view.find('[data-test="chat-balance-state"]').exists()).toBe(false)
+    expect(view.get('[data-test="chat-composer"]').attributes('data-disabled')).toBe('false')
+    expect(view.get('[data-test="chat-voice-input"]').attributes('data-capability-state'))
+      .toBe('unavailable')
+    expect(view.find('.chat-catalog-error').exists()).toBe(false)
   })
 
   it('流式更新排入 RAF 后，用户向上 wheel 或滚离底部都会阻止待执行的自动滚动', async () => {
@@ -1073,7 +2371,379 @@ describe('ChatView catalog and hydration gates', () => {
     expect(chatStore.stopStreaming).toHaveBeenCalledTimes(1)
   })
 
-  it('显式停止导致 Abort 后仍刷新同一用户的账户与模型目录', async () => {
+  it('将官方 summary 仅展示在右侧 Activity，并在主动关闭后不被后续 delta 重开', async () => {
+    const conversation: ChatConversation = {
+      id: 'activity-stream-conversation',
+      userId: '7',
+      title: 'Activity stream',
+      model: 'gpt-5.6-sol',
+      messages: [],
+      createdAt: 1,
+      updatedAt: 1,
+    }
+    chatStore.userId = '7'
+    chatStore.hydrated = true
+    chatStore.conversations = [conversation]
+    chatStore.activeConversationId = conversation.id
+    chatStore.activeConversation = conversation
+
+    let streamHandlers: {
+      onAccepted?: () => void
+      onContent?: (content: string) => void
+      onActivity?: (activity: ChatActivity) => void
+    } | null = null
+    let resolveStream!: (result: {
+      receivedDone: boolean
+      finishReason: string
+      usage: null
+      receiptId: null
+    }) => void
+    apiMocks.streamChatCompletion.mockImplementationOnce((_request, handlers) => {
+      streamHandlers = handlers
+      handlers.onAccepted?.()
+      handlers.onActivity?.(activitySnapshot('', {
+        streamingTextChunks: ['Official ', 'summary'],
+      }))
+      handlers.onContent?.('Assistant answer')
+      return new Promise((resolve) => {
+        resolveStream = resolve
+      })
+    })
+
+    const view = await mountView()
+    view.findComponent(ChatComposerStub).vm.$emit('send', 'Complex request')
+    await flushPromises()
+    await nextTick()
+
+    const panel = view.get('[data-test="chat-activity-panel"]')
+    const workspace = view.get('.chat-workspace')
+    const main = view.get('.chat-workspace__main')
+    expect(panel.text()).toContain('Official summary')
+    expect(panel.element.closest('.chat-workspace')).toBe(workspace.element)
+    expect(main.element.nextElementSibling).toBe(panel.element.parentElement)
+    expect(main.element.contains(panel.element)).toBe(false)
+    expect(main.find('[data-test="chat-composer"]').exists()).toBe(true)
+    expect(chatStore.appendStreamingContent).toHaveBeenCalledTimes(1)
+    expect(chatStore.appendStreamingContent).toHaveBeenCalledWith(
+      conversation.id,
+      'generated-message-2',
+      'Assistant answer',
+    )
+    expect(chatStore.appendStreamingContent).not.toHaveBeenCalledWith(
+      expect.any(String),
+      expect.any(String),
+      expect.stringContaining('Official summary'),
+    )
+
+    await view.get('[data-test="close-activity"]').trigger('click')
+    await nextTick()
+    expect(view.find('[data-test="chat-activity-panel"]').exists()).toBe(false)
+
+    streamHandlers!.onActivity?.(activitySnapshot('Official summary continued', { updatedAt: 3 }))
+    await nextTick()
+    expect(view.find('[data-test="chat-activity-panel"]').exists()).toBe(false)
+
+    resolveStream({
+      receivedDone: true,
+      finishReason: 'stop',
+      usage: null,
+      receiptId: null,
+    })
+    await flushPromises()
+  })
+
+  it('当前请求自动打开一次后尊重用户选择的历史 Activity', async () => {
+    const conversation: ChatConversation = {
+      id: 'activity-auto-once-conversation',
+      userId: '7',
+      title: 'Activity auto once',
+      model: 'gpt-5.6-sol',
+      messages: [{
+        id: 'historical-activity-message',
+        role: 'assistant',
+        content: 'Historical answer',
+        createdAt: 1,
+        status: 'complete',
+        activities: [activitySnapshot('Historical summary', {
+          responseId: 'resp-historical',
+          status: 'completed',
+        })],
+      }],
+      createdAt: 1,
+      updatedAt: 1,
+    }
+    chatStore.userId = '7'
+    chatStore.hydrated = true
+    chatStore.conversations = [conversation]
+    chatStore.activeConversationId = conversation.id
+    chatStore.activeConversation = conversation
+
+    let streamHandlers: {
+      onAccepted?: () => void
+      onActivity?: (activity: ChatActivity) => void
+    } | null = null
+    let resolveStream!: (result: {
+      receivedDone: boolean
+      finishReason: string
+      usage: null
+      receiptId: null
+    }) => void
+    apiMocks.streamChatCompletion.mockImplementationOnce((_request, handlers) => {
+      streamHandlers = handlers
+      handlers.onAccepted?.()
+      handlers.onActivity?.(activitySnapshot('Current summary'))
+      return new Promise((resolve) => {
+        resolveStream = resolve
+      })
+    })
+
+    const view = await mountView()
+    view.findComponent(ChatComposerStub).vm.$emit('send', 'Start current request')
+    await flushPromises()
+    await nextTick()
+    expect(view.get('[data-test="chat-activity-panel"]').text()).toContain('Current summary')
+
+    await view.get(
+      '[data-message-id="historical-activity-message"] [data-test="view-activity"]',
+    ).trigger('click')
+    await nextTick()
+    expect(view.get('[data-test="chat-activity-panel"]').text()).toContain('Historical summary')
+
+    streamHandlers!.onActivity?.(activitySnapshot('Current summary continued', { updatedAt: 3 }))
+    await nextTick()
+    expect(view.get('[data-test="chat-activity-panel"]').text()).toContain('Historical summary')
+    expect(view.get('[data-test="chat-activity-panel"]').text()).not.toContain(
+      'Current summary continued',
+    )
+
+    resolveStream({
+      receivedDone: true,
+      finishReason: 'stop',
+      usage: null,
+      receiptId: null,
+    })
+    await flushPromises()
+  })
+
+  it('Retry 创建的新 assistant message 可以独立自动打开一次 Activity', async () => {
+    const conversation: ChatConversation = {
+      id: 'activity-retry-conversation',
+      userId: '7',
+      title: 'Activity retry',
+      model: 'gpt-5.6-sol',
+      messages: [],
+      createdAt: 1,
+      updatedAt: 1,
+    }
+    chatStore.userId = '7'
+    chatStore.hydrated = true
+    chatStore.conversations = [conversation]
+    chatStore.activeConversationId = conversation.id
+    chatStore.activeConversation = conversation
+
+    apiMocks.streamChatCompletion
+      .mockImplementationOnce(async (_request, handlers) => {
+        handlers.onAccepted?.()
+        handlers.onActivity?.(activitySnapshot('First attempt summary', {
+          responseId: 'resp-first-attempt',
+        }))
+        return {
+          receivedDone: true,
+          finishReason: 'stop',
+          usage: null,
+          receiptId: null,
+        }
+      })
+      .mockImplementationOnce(async (_request, handlers) => {
+        handlers.onAccepted?.()
+        handlers.onActivity?.(activitySnapshot('Retry attempt summary', {
+          responseId: 'resp-retry-attempt',
+        }))
+        return {
+          receivedDone: true,
+          finishReason: 'stop',
+          usage: null,
+          receiptId: null,
+        }
+      })
+
+    const view = await mountView()
+    view.findComponent(ChatComposerStub).vm.$emit('send', 'Generate and retry')
+    await flushPromises()
+    expect(view.get('[data-test="chat-activity-panel"]').text()).toContain(
+      'First attempt summary',
+    )
+
+    await view.get('[data-test="close-activity"]').trigger('click')
+    await nextTick()
+    expect(view.find('[data-test="chat-activity-panel"]').exists()).toBe(false)
+
+    await view.get('[data-test="retry-message"]').trigger('click')
+    await flushPromises()
+    expect(view.get('[data-test="chat-activity-panel"]').text()).toContain(
+      'Retry attempt summary',
+    )
+  })
+
+  it('移动 Activity 同时隔离主区和 docked history，并在关闭后恢复', async () => {
+    vi.stubGlobal('matchMedia', vi.fn((query: string) => ({
+      matches: query === '(max-width: 1023px)',
+      media: query,
+      onchange: null,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+    } as unknown as MediaQueryList)))
+    const conversation: ChatConversation = {
+      id: 'activity-mobile-isolation',
+      userId: '7',
+      title: 'Activity mobile isolation',
+      model: 'gpt-5.6-sol',
+      messages: [{
+        id: 'activity-mobile-message',
+        role: 'assistant',
+        content: 'Answer',
+        createdAt: 1,
+        status: 'complete',
+        activities: [activitySnapshot('Mobile summary', { status: 'completed' })],
+      }],
+      createdAt: 1,
+      updatedAt: 1,
+    }
+    chatStore.userId = '7'
+    chatStore.hydrated = true
+    chatStore.conversations = [conversation]
+    chatStore.activeConversationId = conversation.id
+    chatStore.activeConversation = conversation
+
+    const view = await mountView()
+    await view.get('[data-test="view-activity"]').trigger('click')
+    await nextTick()
+
+    const main = view.get('.chat-workspace__main')
+    const history = view.get('.chat-workspace__history--desktop')
+    expect(view.get('[data-test="chat-activity-panel"]').attributes('data-mobile')).toBe('true')
+    expect(main.attributes('inert')).toBeDefined()
+    expect(main.attributes('aria-hidden')).toBe('true')
+    expect(history.attributes('inert')).toBeDefined()
+    expect(history.attributes('aria-hidden')).toBe('true')
+
+    await view.get('[data-test="close-activity"]').trigger('click')
+    await nextTick()
+    expect(main.attributes('inert')).toBeUndefined()
+    expect(main.attributes('aria-hidden')).toBeUndefined()
+    expect(history.attributes('inert')).toBeUndefined()
+    expect(history.attributes('aria-hidden')).toBeUndefined()
+  })
+
+  it('移动历史 drawer 打开时收到首段 summary 会先关闭历史层再打开 Activity', async () => {
+    vi.stubGlobal('matchMedia', vi.fn((query: string) => ({
+      matches: query === WORKSPACE_MOBILE_DRAWER_MEDIA_QUERY || query === '(max-width: 1023px)',
+      media: query,
+      onchange: null,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+    } as unknown as MediaQueryList)))
+    const conversation: ChatConversation = {
+      id: 'activity-mobile-exclusive',
+      userId: '7',
+      title: 'Activity mobile exclusive',
+      model: 'gpt-5.6-sol',
+      messages: [],
+      createdAt: 1,
+      updatedAt: 1,
+    }
+    chatStore.userId = '7'
+    chatStore.hydrated = true
+    chatStore.conversations = [conversation]
+    chatStore.activeConversationId = conversation.id
+    chatStore.activeConversation = conversation
+
+    let streamHandlers: { onAccepted?: () => void; onActivity?: (activity: ChatActivity) => void } | null = null
+    apiMocks.streamChatCompletion.mockImplementationOnce((_request, handlers) => {
+      streamHandlers = handlers
+      handlers.onAccepted?.()
+      return new Promise(() => {})
+    })
+
+    const view = await mountView()
+    view.findComponent(ChatComposerStub).vm.$emit('send', 'Open history before summary')
+    await flushPromises()
+    await view.get('.chat-mobile-actions__history-button').trigger('click')
+    await nextTick()
+    expect(view.find('.chat-workspace__drawer').exists()).toBe(true)
+
+    streamHandlers!.onActivity?.(activitySnapshot('Exclusive mobile summary'))
+    await nextTick()
+    expect(view.find('.chat-workspace__drawer').exists()).toBe(false)
+    expect(view.get('[data-test="chat-activity-panel"]').attributes('data-mobile')).toBe('true')
+  })
+
+  it('历史消息只打开自身 Activity，并在切换对话时关闭面板', async () => {
+    const first: ChatConversation = {
+      id: 'history-activity-first',
+      userId: '7',
+      title: 'First',
+      model: 'gpt-5.6-sol',
+      messages: [{
+        id: 'history-assistant-first',
+        role: 'assistant',
+        content: 'First answer',
+        createdAt: 1,
+        status: 'complete',
+        activities: [activitySnapshot('First persisted summary', { status: 'completed' })],
+      }],
+      createdAt: 1,
+      updatedAt: 2,
+    }
+    const second: ChatConversation = {
+      id: 'history-activity-second',
+      userId: '7',
+      title: 'Second',
+      model: 'gpt-5.6-sol',
+      messages: [{
+        id: 'history-assistant-second',
+        role: 'assistant',
+        content: 'Second answer',
+        createdAt: 3,
+        status: 'complete',
+        activities: [activitySnapshot('Second persisted summary', {
+          responseId: 'resp-second',
+          status: 'completed',
+        })],
+      }],
+      createdAt: 3,
+      updatedAt: 4,
+    }
+    chatStore.userId = '7'
+    chatStore.hydrated = true
+    chatStore.conversations = [first, second]
+    chatStore.activeConversationId = first.id
+    chatStore.activeConversation = first
+
+    const view = await mountView()
+    await view.get('[data-test="view-activity"]').trigger('click')
+    await nextTick()
+
+    expect(view.get('[data-test="chat-activity-panel"]').text()).toContain(
+      'First persisted summary',
+    )
+    expect(view.get('[data-test="chat-activity-panel"]').text()).not.toContain(
+      'Second persisted summary',
+    )
+
+    view.findComponent(ChatHistoryPanelStub).vm.$emit('select', second.id)
+    await flushPromises()
+    await nextTick()
+    expect(view.find('[data-test="chat-activity-panel"]').exists()).toBe(false)
+  })
+
+  it('显式停止导致 Abort 后核对 receipt，但不刷新模型列表', async () => {
     const conversation: ChatConversation = {
       id: 'stopped-conversation',
       userId: '7',
@@ -1136,12 +2806,11 @@ describe('ChatView catalog and hydration gates', () => {
         }, { once: true })
       })
     })
-    authStore.refreshUser.mockImplementation(async () => {
-      await Promise.resolve()
-      authStore.user = { id: 7, balance: 4 }
-      return authStore.user
+    apiMocks.pollChatReceipt.mockResolvedValueOnce({
+      receiptId: 'receipt-stop',
+      status: 'charged',
+      balanceAfter: 4,
     })
-
     const view = await mountView()
     await view.get('[data-test="retry-message"]').trigger('click')
     await nextTick()
@@ -1152,14 +2821,214 @@ describe('ChatView catalog and hydration gates', () => {
     await nextTick()
 
     expect(chatStore.stopStreaming).toHaveBeenCalledTimes(1)
+    expect(apiMocks.stopChatAttempt).toHaveBeenCalledWith('attempt-generated')
     expect(chatStore.failStreaming).not.toHaveBeenCalled()
     expect(apiMocks.pollChatReceipt).toHaveBeenCalledWith(
       'receipt-stop',
       { signal: expect.any(AbortSignal) },
     )
-    expect(authStore.refreshUser).toHaveBeenCalledTimes(1)
-    expect(apiMocks.getChatModels).toHaveBeenCalledTimes(2)
-    expect(view.get('.chat-toolbar__balance strong').text()).toBe('4.00')
+    expect(authStore.refreshUser).not.toHaveBeenCalled()
+    expect(apiMocks.getChatModels).toHaveBeenCalledTimes(1)
+    expect(view.find('[data-test="chat-balance-state"]').exists()).toBe(false)
+  })
+
+  it('服务端完成先于停止落锁时恢复真实终态', async () => {
+    const conversation: ChatConversation = {
+      id: 'stop-race-conversation',
+      userId: '7',
+      title: 'Stop race',
+      model: 'gpt-5',
+      messages: [
+        {
+          id: 'stop-race-user',
+          role: 'user',
+          content: 'Finish now',
+          createdAt: 1,
+          status: 'complete',
+        },
+        {
+          id: 'stop-race-assistant',
+          role: 'assistant',
+          content: 'Nearly done',
+          createdAt: 2,
+          status: 'stopped',
+        },
+      ],
+      createdAt: 1,
+      updatedAt: 2,
+    }
+    chatStore.userId = '7'
+    chatStore.hydrated = true
+    chatStore.conversations = [conversation]
+    chatStore.activeConversationId = conversation.id
+    chatStore.activeConversation = conversation
+
+    let activeController: AbortController | null = null
+    chatStore.startStreaming.mockImplementation((
+      conversationId: string,
+      messageId: string,
+      controller: AbortController,
+    ) => {
+      activeController = controller
+      chatStore.isStreaming = true
+      chatStore.streamingConversationId = conversationId
+      chatStore.streamingMessageId = messageId
+      return true
+    })
+    chatStore.stopStreaming.mockImplementation(() => {
+      if (!activeController) return false
+      chatStore.isStreaming = false
+      chatStore.streamingConversationId = null
+      chatStore.streamingMessageId = null
+      activeController.abort()
+      return true
+    })
+    apiMocks.streamChatCompletion.mockImplementationOnce((
+      _request: unknown,
+      _handlers: unknown,
+      options: { signal?: AbortSignal },
+    ) => new Promise((_resolve, reject) => {
+      options.signal?.addEventListener('abort', () => {
+        reject(new DOMException('The operation was aborted.', 'AbortError'))
+      }, { once: true })
+    }))
+    apiMocks.stopChatAttempt.mockResolvedValueOnce({
+      attemptId: 'attempt-generated',
+      accepted: false,
+      attemptStatus: 'completed',
+      deliveryStatus: 'completed',
+    })
+    chatStore.recoverAttempt.mockResolvedValueOnce({
+      attemptId: 'attempt-generated',
+      conversationId: conversation.id,
+      assistantMessageId: 'generated-message-1',
+      status: 'completed',
+    } satisfies ChatAttempt)
+
+    const view = await mountView()
+    await view.get('[data-test="retry-message"]').trigger('click')
+    await nextTick()
+    await view.get('[data-test="composer-stop"]').trigger('click')
+    await flushPromises()
+
+    expect(apiMocks.stopChatAttempt).toHaveBeenCalledWith('attempt-generated')
+    expect(chatStore.recoverAttempt).toHaveBeenCalledTimes(2)
+    expect(chatStore.recoverAttempt).toHaveBeenLastCalledWith(
+      conversation.id,
+      'generated-message-1',
+    )
+  })
+
+  it('持久化停止请求失败后在重新联网时重放并清除待同步意图', async () => {
+    const conversation: ChatConversation = {
+      id: 'pending-stop-conversation',
+      userId: '7',
+      title: 'Pending stop',
+      model: 'gpt-5',
+      messages: [{
+        id: 'pending-stop-assistant',
+        role: 'assistant',
+        content: 'Partial',
+        createdAt: 2,
+        status: 'stopped',
+        attemptId: 'attempt-pending-stop',
+        pendingStopRequestedAt: 1_765_800_000_000,
+      }],
+      createdAt: 1,
+      updatedAt: 2,
+    }
+    chatStore.userId = '7'
+    chatStore.hydrated = true
+    chatStore.conversations = [conversation]
+    chatStore.activeConversationId = conversation.id
+    chatStore.activeConversation = conversation
+    apiMocks.stopChatAttempt
+      .mockRejectedValueOnce(new Error('offline'))
+      .mockResolvedValueOnce({
+        attemptId: 'attempt-pending-stop',
+        accepted: true,
+        attemptStatus: 'interrupted',
+        deliveryStatus: 'stopped',
+      })
+
+    await mountView()
+    expect(apiMocks.stopChatAttempt).toHaveBeenCalledTimes(1)
+    expect(chatStore.updateMessage).not.toHaveBeenCalledWith(
+      conversation.id,
+      'pending-stop-assistant',
+      { pendingStopRequestedAt: null },
+    )
+
+    window.dispatchEvent(new Event('online'))
+    await flushPromises()
+    await nextTick()
+
+    expect(apiMocks.stopChatAttempt).toHaveBeenCalledTimes(2)
+    expect(apiMocks.stopChatAttempt).toHaveBeenLastCalledWith('attempt-pending-stop')
+    expect(chatStore.updateMessage).toHaveBeenCalledWith(
+      conversation.id,
+      'pending-stop-assistant',
+      { pendingStopRequestedAt: null },
+    )
+  })
+
+  it('完成先于停止但终态对账暂时失败时保留待同步意图', async () => {
+    const conversation: ChatConversation = {
+      id: 'pending-stop-reconcile-conversation',
+      userId: '7',
+      title: 'Pending stop reconciliation',
+      model: 'gpt-5',
+      messages: [{
+        id: 'pending-stop-reconcile-assistant',
+        role: 'assistant',
+        content: 'Optimistic partial',
+        createdAt: 2,
+        status: 'stopped',
+        attemptId: 'attempt-pending-stop-reconcile',
+        pendingStopRequestedAt: 1_765_800_000_000,
+      }],
+      createdAt: 1,
+      updatedAt: 2,
+    }
+    chatStore.userId = '7'
+    chatStore.hydrated = true
+    chatStore.conversations = [conversation]
+    chatStore.activeConversationId = conversation.id
+    chatStore.activeConversation = conversation
+    apiMocks.stopChatAttempt.mockResolvedValue({
+      attemptId: 'attempt-pending-stop-reconcile',
+      accepted: false,
+      attemptStatus: 'completed',
+      deliveryStatus: 'completed',
+    })
+    chatStore.recoverAttempt.mockResolvedValue(null)
+
+    await mountView()
+    await flushPromises()
+
+    expect(apiMocks.stopChatAttempt).toHaveBeenCalledTimes(1)
+    expect(chatStore.updateMessage).not.toHaveBeenCalledWith(
+      conversation.id,
+      'pending-stop-reconcile-assistant',
+      { pendingStopRequestedAt: null },
+    )
+
+    chatStore.recoverAttempt.mockResolvedValue({
+      attemptId: 'attempt-pending-stop-reconcile',
+      conversationId: conversation.id,
+      assistantMessageId: 'pending-stop-reconcile-assistant',
+      status: 'completed',
+    } satisfies ChatAttempt)
+    window.dispatchEvent(new Event('online'))
+    await flushPromises()
+    await nextTick()
+
+    expect(apiMocks.stopChatAttempt).toHaveBeenCalledTimes(2)
+    expect(chatStore.updateMessage).toHaveBeenCalledWith(
+      conversation.id,
+      'pending-stop-reconcile-assistant',
+      { pendingStopRequestedAt: null },
+    )
   })
 
   it('重试保留旧 assistant attempt，并用服务端会话信封创建独立 attempt', async () => {
@@ -1182,6 +3051,7 @@ describe('ChatView catalog and hydration gates', () => {
           content: 'Failed answer',
           createdAt: 2,
           status: 'error',
+          errorCode: 'NETWORK_ERROR',
           errorMessage: 'Request failed',
         },
       ],
@@ -1195,8 +3065,9 @@ describe('ChatView catalog and hydration gates', () => {
     chatStore.activeConversation = conversation
     apiMocks.streamChatCompletion.mockImplementationOnce(async (
       _request: unknown,
-      handlers: { onContent?: (content: string) => void },
+      handlers: { onAccepted?: () => void; onContent?: (content: string) => void },
     ) => {
+      handlers.onAccepted?.()
       handlers.onContent?.('Replacement answer')
       return { receivedDone: true, finishReason: 'stop', usage: null, receiptId: null }
     })
@@ -1229,6 +3100,8 @@ describe('ChatView catalog and hydration gates', () => {
     expect(apiMocks.streamChatCompletion.mock.calls[0]?.[0]).toEqual({
       conversationId: 'conversation-1',
       model: 'gpt-5',
+      reasoningMode: 'standard',
+      reasoningEffort: 'low',
       expectedHeadMessageId: 'assistant-1',
       assistantMessageId: 'generated-message-1',
       retryOfMessageId: 'assistant-1',
@@ -1252,6 +3125,211 @@ describe('ChatView catalog and hydration gates', () => {
       attemptId: 'attempt-generated',
       signal: expect.any(AbortSignal),
     })
+  })
+
+  it('慢 prepare 期间锁定当前重试，连续触发只创建一个 attempt', async () => {
+    const conversation: ChatConversation = {
+      id: 'slow-retry-conversation',
+      userId: '7',
+      title: 'Slow retry',
+      model: 'gpt-5',
+      messages: [
+        {
+          id: 'user-1',
+          role: 'user',
+          content: 'Original question',
+          createdAt: 1,
+          status: 'complete',
+        },
+        {
+          id: 'assistant-1',
+          role: 'assistant',
+          content: '',
+          createdAt: 2,
+          status: 'error',
+          errorCode: 'NETWORK_ERROR',
+        },
+      ],
+      createdAt: 1,
+      updatedAt: 2,
+    }
+    chatStore.userId = '7'
+    chatStore.hydrated = true
+    chatStore.conversations = [conversation]
+    chatStore.activeConversationId = conversation.id
+    chatStore.activeConversation = conversation
+    let resolvePrepare: ((ready: boolean) => void) | undefined
+    chatStore.prepareConversationForCompletion.mockImplementationOnce(() => (
+      new Promise<boolean>((resolve) => {
+        resolvePrepare = resolve
+      })
+    ))
+
+    const view = await mountView()
+    const failedMessage = view.findAllComponents(ChatMessageItemStub).at(-1)!
+    failedMessage.vm.$emit('retry')
+    failedMessage.vm.$emit('retry')
+    await nextTick()
+
+    const pendingMessage = view.findAllComponents(ChatMessageItemStub).at(-1)!
+    expect(chatStore.prepareConversationForCompletion).toHaveBeenCalledTimes(1)
+    expect(pendingMessage.props('retrying')).toBe(true)
+    expect(pendingMessage.get('[data-test="retry-message"]').attributes('disabled')).toBeDefined()
+    expect(pendingMessage.get('[data-test="retry-message"]').attributes('aria-busy')).toBe('true')
+    expect(chatStore.addMessage).not.toHaveBeenCalled()
+    expect(apiMocks.streamChatCompletion).not.toHaveBeenCalled()
+
+    resolvePrepare?.(true)
+    await flushPromises()
+    await nextTick()
+
+    expect(chatStore.prepareConversationForCompletion).toHaveBeenCalledTimes(1)
+    expect(apiMocks.createChatAttemptId).toHaveBeenCalledTimes(1)
+    expect(chatStore.addMessage).toHaveBeenCalledTimes(1)
+    expect(apiMocks.streamChatCompletion).toHaveBeenCalledTimes(1)
+  })
+
+  it('重试在服务端接纳前失败且无法恢复时回滚 replacement，不替代旧消息', async () => {
+    const conversation: ChatConversation = {
+      id: 'retry-pre-accept-rollback',
+      userId: '7',
+      title: 'Retry rollback',
+      model: 'gpt-5',
+      messages: [
+        {
+          id: 'user-1',
+          role: 'user',
+          content: 'Original question',
+          createdAt: 1,
+          status: 'complete',
+        },
+        {
+          id: 'assistant-1',
+          role: 'assistant',
+          content: '',
+          createdAt: 2,
+          status: 'error',
+          errorCode: 'NETWORK_ERROR',
+        },
+      ],
+      createdAt: 1,
+      updatedAt: 2,
+    }
+    chatStore.userId = '7'
+    chatStore.hydrated = true
+    chatStore.conversations = [conversation]
+    chatStore.activeConversationId = conversation.id
+    chatStore.activeConversation = conversation
+    chatStore.recoverAttempt.mockResolvedValueOnce(null)
+    vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    apiMocks.streamChatCompletion.mockRejectedValueOnce(new ChatAPIError(
+      'Connection lost before acceptance',
+      { code: 'NETWORK_ERROR' },
+    ))
+
+    const view = await mountView()
+    await view.get('[data-test="retry-message"]').trigger('click')
+    await flushPromises()
+    await nextTick()
+
+    expect(chatStore.recoverAttempt).toHaveBeenCalledWith(
+      conversation.id,
+      'generated-message-1',
+    )
+    expect(chatStore.removeMessages).toHaveBeenCalledWith(
+      conversation.id,
+      ['generated-message-1'],
+    )
+    expect(chatStore.updateMessage).not.toHaveBeenCalledWith(
+      conversation.id,
+      'assistant-1',
+      expect.objectContaining({ excludedFromContext: true }),
+    )
+    expect(conversation.messages.map(({ id }) => id)).toEqual(['user-1', 'assistant-1'])
+    expect(conversation.messages[1]).not.toHaveProperty('excludedFromContext')
+    const restoredFailure = view.findAllComponents(ChatMessageItemStub).at(-1)!
+    expect(restoredFailure.props('retryable')).toBe(true)
+    expect(restoredFailure.props('retrying')).toBe(false)
+    expect(restoredFailure.props('announceFailure')).toBe(false)
+  })
+
+  it('重试在服务端接纳前失败但恢复到 attempt 时保留 replacement，并仅此时替代旧消息', async () => {
+    const conversation: ChatConversation = {
+      id: 'retry-pre-accept-recovered',
+      userId: '7',
+      title: 'Recovered retry',
+      model: 'gpt-5',
+      messages: [
+        {
+          id: 'user-1',
+          role: 'user',
+          content: 'Original question',
+          createdAt: 1,
+          status: 'complete',
+        },
+        {
+          id: 'assistant-1',
+          role: 'assistant',
+          content: '',
+          createdAt: 2,
+          status: 'error',
+          errorCode: 'NETWORK_ERROR',
+        },
+      ],
+      createdAt: 1,
+      updatedAt: 2,
+    }
+    const recoveredAttempt: ChatAttempt = {
+      attemptId: 'attempt-generated',
+      conversationId: conversation.id,
+      assistantMessageId: 'generated-message-1',
+      status: 'failed',
+    }
+    chatStore.userId = '7'
+    chatStore.hydrated = true
+    chatStore.conversations = [conversation]
+    chatStore.activeConversationId = conversation.id
+    chatStore.activeConversation = conversation
+    chatStore.recoverAttempt.mockResolvedValueOnce(recoveredAttempt)
+    vi.spyOn(console, 'error').mockImplementation(() => undefined)
+    apiMocks.streamChatCompletion.mockRejectedValueOnce(new ChatAPIError(
+      'Connection lost before acceptance',
+      { code: 'NETWORK_ERROR' },
+    ))
+
+    const view = await mountView()
+    await view.get('[data-test="retry-message"]').trigger('click')
+    await flushPromises()
+    await nextTick()
+
+    expect(chatStore.recoverAttempt).toHaveBeenCalledWith(
+      conversation.id,
+      'generated-message-1',
+    )
+    expect(chatStore.removeMessages).not.toHaveBeenCalledWith(
+      conversation.id,
+      ['generated-message-1'],
+    )
+    expect(chatStore.updateMessage).toHaveBeenCalledWith(
+      conversation.id,
+      'assistant-1',
+      {
+        excludedFromContext: true,
+        supersededByMessageId: 'generated-message-1',
+      },
+    )
+    expect(conversation.messages.map(({ id }) => id)).toEqual([
+      'user-1',
+      'assistant-1',
+      'generated-message-1',
+    ])
+    expect(conversation.messages[1]).toMatchObject({
+      excludedFromContext: true,
+      supersededByMessageId: 'generated-message-1',
+    })
+    const replacement = view.findAllComponents(ChatMessageItemStub).at(-1)!
+    expect(replacement.props('retrying')).toBe(false)
+    expect(replacement.props('announceFailure')).toBe(true)
   })
 
   it('成功流在响应头到达时持久化 receipt，并用最终服务端回执更新消息与余额', async () => {
@@ -1343,7 +3421,7 @@ describe('ChatView catalog and hydration gates', () => {
       }),
     )
     expect(apiMocks.pollChatReceipt).toHaveBeenCalledTimes(1)
-    expect(view.get('.chat-toolbar__balance strong').text()).toBe('0.75')
+    expect(view.find('[data-test="chat-balance-state"]').exists()).toBe(false)
   })
 
   it('响应头后发生断连时保留消息错误，并继续核对已确认的 receipt', async () => {
@@ -1366,6 +3444,7 @@ describe('ChatView catalog and hydration gates', () => {
           content: '',
           createdAt: 2,
           status: 'error',
+          errorCode: 'NETWORK_ERROR',
         },
       ],
       createdAt: 1,
@@ -1376,11 +3455,13 @@ describe('ChatView catalog and hydration gates', () => {
     chatStore.conversations = [conversation]
     chatStore.activeConversationId = conversation.id
     chatStore.activeConversation = conversation
+    const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined)
     apiMocks.streamChatCompletion.mockImplementationOnce(async (
       _request: unknown,
-      handlers: { onReceiptId?: (receiptId: string) => void },
+      handlers: { onAccepted?: () => void; onReceiptId?: (receiptId: string) => void },
     ) => {
       handlers.onReceiptId?.('receipt-disconnect')
+      handlers.onAccepted?.()
       throw new ChatAPIError('Connection lost', { code: 'NETWORK_ERROR' })
     })
     apiMocks.pollChatReceipt.mockResolvedValueOnce({
@@ -1398,8 +3479,19 @@ describe('ChatView catalog and hydration gates', () => {
     expect(chatStore.failStreaming).toHaveBeenCalledWith(
       conversation.id,
       'generated-message-1',
-      'Connection lost',
+      'chat.errors.network',
       'NETWORK_ERROR',
+    )
+    expect(consoleError).toHaveBeenCalledWith(
+      '[Chat] 回答生成失败',
+      expect.objectContaining({
+        conversationId: conversation.id,
+        messageId: 'generated-message-1',
+        code: 'NETWORK_ERROR',
+        rawMessage: 'Connection lost',
+        messageKey: 'chat.errors.network',
+        retryable: true,
+      }),
     )
     expect(apiMocks.pollChatReceipt).toHaveBeenCalledWith(
       'receipt-disconnect',
@@ -1413,6 +3505,72 @@ describe('ChatView catalog and hydration gates', () => {
       balanceAfter: 1.999,
     })
   })
+
+  it.each([
+    [401, 'Unauthorized', 'chat.errors.sessionExpired', 'HTTP_401', false],
+    [403, 'Forbidden', 'chat.errors.permissionDenied', 'HTTP_403', false],
+    [502, 'Bad Gateway', 'chat.errors.serviceUnavailable', 'HTTP_502', true],
+  ] as const)(
+    'HTTP %s 使用安全消息级文案并按类型控制重试',
+    async (status, rawMessage, messageKey, normalizedCode, retryable) => {
+      const conversation: ChatConversation = {
+        id: `http-error-${status}`,
+        userId: '7',
+        title: `HTTP ${status}`,
+        model: 'gpt-5',
+        messages: [{
+          id: 'user-before-error',
+          role: 'user',
+          content: 'Question',
+          createdAt: 1,
+          status: 'complete',
+        }],
+        createdAt: 1,
+        updatedAt: 1,
+      }
+      chatStore.userId = '7'
+      chatStore.hydrated = true
+      chatStore.conversations = [conversation]
+      chatStore.activeConversationId = conversation.id
+      chatStore.activeConversation = conversation
+      const error = new ChatAPIError(rawMessage, {
+        status,
+        code: status,
+        requestId: `request-${status}`,
+      })
+      const consoleError = vi.spyOn(console, 'error').mockImplementation(() => undefined)
+      apiMocks.streamChatCompletion.mockRejectedValueOnce(error)
+
+      const view = await mountView()
+      view.findComponent(ChatComposerStub).vm.$emit('send', `Trigger ${status}`)
+      await flushPromises()
+
+      expect(chatStore.failStreaming).toHaveBeenCalledWith(
+        conversation.id,
+        'generated-message-2',
+        messageKey,
+        normalizedCode,
+      )
+      expect(conversation.messages.at(-1)?.errorMessage).not.toBe(rawMessage)
+      const assistant = conversation.messages.at(-1)!
+      expect(view.findAllComponents(ChatMessageItemStub).at(-1)?.props('retryable')).toBe(retryable)
+      expect(assistant).toMatchObject({
+        status: 'error',
+        errorCode: normalizedCode,
+        errorMessage: messageKey,
+      })
+      expect(consoleError).toHaveBeenCalledWith(
+        '[Chat] 回答生成失败',
+        expect.objectContaining({
+          status,
+          code: normalizedCode,
+          requestId: `request-${status}`,
+          rawMessage,
+        }),
+      )
+      expect(view.find('.chat-catalog-error').exists()).toBe(false)
+    },
+  )
 
   it('恢复历史时自动补查持久化的 pending receipt', async () => {
     const conversation: ChatConversation = {
@@ -1481,6 +3639,7 @@ describe('ChatView catalog and hydration gates', () => {
           content: '',
           createdAt: 2,
           status: 'error',
+          errorCode: 'NETWORK_ERROR',
         },
       ],
       createdAt: 1,
@@ -1577,6 +3736,7 @@ describe('ChatView catalog and hydration gates', () => {
     expect(apiMocks.streamChatCompletion.mock.calls[0]?.[0]).toEqual({
       conversationId: 'context-conversation',
       model: 'gpt-5',
+      reasoningMode: 'standard',
       reasoningEffort: 'high',
       expectedHeadMessageId: 'assistant-current',
       userMessage: {
@@ -1587,16 +3747,86 @@ describe('ChatView catalog and hydration gates', () => {
     })
   })
 
+  it('614px fine-pointer 窄桌面隐藏 docked Sidebar，并用完整 overlay 替代移动抽屉', async () => {
+    vi.stubGlobal('matchMedia', vi.fn((query: string) => ({
+      matches: query === WORKSPACE_NARROW_SIDEBAR_MEDIA_QUERY,
+      media: query,
+      onchange: null,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+    } as unknown as MediaQueryList)))
+    chatStore.userId = '7'
+    chatStore.hydrated = true
+    const view = await mountView()
+    const appStore = useAppStore()
+
+    expect(appStore.workspaceNarrowSidebar).toBe(true)
+    expect(appStore.workspaceMobileDrawer).toBe(false)
+    expect(appStore.workspaceNarrowSidebarOpen).toBe(false)
+    expect(view.get('.chat-workspace__history--desktop').attributes('style')).toContain('display: none')
+    expect(view.find('.chat-workspace__drawer').exists()).toBe(false)
+    expect(view.get('.chat-workspace__main').attributes('inert')).toBeUndefined()
+
+    appStore.setSidebarCollapsed(true)
+    appStore.setWorkspaceNarrowSidebarOpen(true)
+    await nextTick()
+    await flushPromises()
+
+    expect(window.matchMedia).toHaveBeenCalledWith(WORKSPACE_MOBILE_DRAWER_MEDIA_QUERY)
+    expect(window.matchMedia).toHaveBeenCalledWith(WORKSPACE_NARROW_SIDEBAR_MEDIA_QUERY)
+    expect(view.find('.chat-workspace__drawer').exists()).toBe(false)
+    expect(appStore.workspaceNarrowSidebarOpen).toBe(true)
+    expect(appStore.sidebarCollapsed).toBe(true)
+    expect(view.get('.chat-workspace__main').attributes('inert')).toBeDefined()
+    expect(view.get('.chat-workspace__main').attributes('aria-hidden')).toBe('true')
+
+    const layer = document.body.querySelector<HTMLElement>(
+      '[data-testid="workspace-sidebar-overlay-layer"]',
+    )
+    const overlaySidebar = document.getElementById('workspace-chat-sidebar-overlay')
+    const closeButton = document.body.querySelector<HTMLButtonElement>(
+      '.workspace-sidebar-overlay-layer__close',
+    )
+    expect(layer?.classList.contains('workspace-sidebar-overlay-layer--open')).toBe(true)
+    expect(overlaySidebar?.dataset.mobile).toBe('false')
+    expect(overlaySidebar?.dataset.overlay).toBe('true')
+    expect(closeButton?.querySelector('.workspace-responsive-sidebar-icon--close')).not.toBeNull()
+
+    const overlayHistory = view.findAllComponents(ChatHistoryPanelStub)
+      .find(panel => panel.props('overlay') === true)
+    overlayHistory?.vm.$emit('close')
+    await nextTick()
+
+    expect(overlayHistory).toBeDefined()
+    expect(appStore.workspaceNarrowSidebarOpen).toBe(false)
+    expect(appStore.sidebarCollapsed).toBe(true)
+    expect(view.get('.chat-workspace__main').attributes('inert')).toBeUndefined()
+    expect(view.get('.chat-workspace__main').attributes('aria-hidden')).toBeUndefined()
+  })
+
   it('移动历史抽屉隔离 scrim 焦点，并在 Escape 与 Tab 导航中管理焦点', async () => {
+    vi.stubGlobal('matchMedia', vi.fn((query: string) => ({
+      matches: query === WORKSPACE_MOBILE_DRAWER_MEDIA_QUERY,
+      media: query,
+      onchange: null,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+    } as unknown as MediaQueryList)))
     vi.spyOn(HTMLElement.prototype, 'getClientRects').mockReturnValue([
       { width: 1, height: 1 },
     ] as unknown as DOMRectList)
     chatStore.userId = '7'
     chatStore.hydrated = true
     const view = await mountView()
-    const trigger = view.get('.chat-toolbar__history-button').element as HTMLButtonElement
+    const trigger = view.get('.chat-mobile-actions__history-button').element as HTMLButtonElement
 
-    await view.get('.chat-toolbar__history-button').trigger('click')
+    await view.get('.chat-mobile-actions__history-button').trigger('click')
     await nextTick()
 
     const drawer = view.get('.chat-workspace__drawer')
@@ -1620,28 +3850,31 @@ describe('ChatView catalog and hydration gates', () => {
   })
 
   it('历史抽屉打开后切换到桌面断点会解除主区 inert 并恢复焦点', async () => {
+    let mobileMatches = true
     let breakpointListener: ((event: MediaQueryListEvent) => void) | undefined
-    const mediaQuery = {
-      matches: true,
-      media: '(max-width: 1023px)',
+    vi.stubGlobal('matchMedia', vi.fn((query: string) => ({
+      get matches() {
+        return query === WORKSPACE_MOBILE_DRAWER_MEDIA_QUERY && mobileMatches
+      },
+      media: query,
       onchange: null,
       addEventListener: vi.fn((_type: string, listener: (event: MediaQueryListEvent) => void) => {
-        breakpointListener = listener
+        if (query === WORKSPACE_MOBILE_DRAWER_MEDIA_QUERY) breakpointListener = listener
       }),
       removeEventListener: vi.fn(),
       addListener: vi.fn(),
       removeListener: vi.fn(),
       dispatchEvent: vi.fn(),
-    } as unknown as MediaQueryList
-    vi.stubGlobal('matchMedia', vi.fn(() => mediaQuery))
+    } as unknown as MediaQueryList)))
     chatStore.userId = '7'
     chatStore.hydrated = true
     const view = await mountView()
 
-    await view.get('.chat-toolbar__history-button').trigger('click')
+    await view.get('.chat-mobile-actions__history-button').trigger('click')
     await nextTick()
     expect(view.get('.chat-workspace__main').attributes('inert')).toBeDefined()
 
+    mobileMatches = false
     breakpointListener?.({ matches: false } as MediaQueryListEvent)
     await nextTick()
     await nextTick()
@@ -1650,5 +3883,242 @@ describe('ChatView catalog and hydration gates', () => {
     expect(view.get('.chat-workspace__main').element.hasAttribute('inert')).toBe(false)
     expect(view.get('.chat-workspace__main').attributes('aria-hidden')).toBeUndefined()
     expect(document.activeElement).toBe(view.get('.chat-workspace__main').element)
+  })
+
+  it('支持纯附件发送，并将附件同时写入本地消息和 completion 信封', async () => {
+    const conversation: ChatConversation = {
+      id: 'attachment-conversation',
+      userId: '7',
+      title: 'New conversation',
+      model: 'gpt-5.5',
+      messages: [],
+      createdAt: 1,
+      updatedAt: 1,
+    }
+    chatStore.userId = '7'
+    chatStore.hydrated = true
+    chatStore.conversations = [conversation]
+    chatStore.activeConversationId = conversation.id
+    chatStore.activeConversation = conversation
+    attachmentPickerReady.value = [{
+      id: 'attachment-doc-1',
+      name: 'brief.pdf',
+      kind: 'document',
+      mimeType: 'application/pdf',
+      size: 2048,
+      status: 'ready',
+      expiresAt: '2099-01-01T00:00:00Z',
+      pageCount: 3,
+    }]
+
+    const view = await mountView()
+    expect(view.get('[data-test="chat-attachment-picker"]')
+      .attributes('data-supports-vision')).toBe('true')
+
+    const acknowledge = vi.fn()
+    view.findComponent(ChatComposerStub).vm.$emit('send', '', acknowledge)
+    await flushPromises()
+
+    expect(conversation.messages[0]).toMatchObject({
+      role: 'user',
+      content: '',
+      attachments: attachmentPickerReady.value,
+    })
+    expect(apiMocks.streamChatCompletion.mock.calls[0]?.[0]).toMatchObject({
+      conversationId: conversation.id,
+      model: 'gpt-5.5',
+      reasoningEffort: 'low',
+      userMessage: {
+        id: conversation.messages[0]?.id,
+        content: '',
+        attachmentIds: ['attachment-doc-1'],
+      },
+    })
+    expect(attachmentPickerCommitAll).toHaveBeenCalledTimes(1)
+    expect(acknowledge).toHaveBeenCalledWith(true)
+    expect(attachmentPickerCommitAll.mock.invocationCallOrder[0])
+      .toBeLessThan(acknowledge.mock.invocationCallOrder[0]!)
+  })
+
+  it('附件发送遇到目录不可用时保留消息流错误，不回滚已展示的消息', async () => {
+    const conversation: ChatConversation = {
+      id: 'attachment-model-error',
+      userId: '7',
+      title: 'Model error',
+      model: 'gpt-5.6-sol',
+      messages: [],
+      createdAt: 1,
+      updatedAt: 1,
+    }
+    chatStore.userId = '7'
+    chatStore.hydrated = true
+    chatStore.conversations = [conversation]
+    chatStore.activeConversationId = conversation.id
+    chatStore.activeConversation = conversation
+    attachmentPickerReady.value = [{
+      id: 'attachment-model-error-1',
+      name: 'prompt.png',
+      kind: 'image',
+      mimeType: 'image/png',
+      size: 1024,
+      status: 'ready',
+      expiresAt: '2099-01-01T00:00:00Z',
+    }]
+    apiMocks.streamChatCompletion.mockRejectedValueOnce(new ChatAPIError('Unavailable', {
+      status: 503,
+      code: 'CHAT_CATALOG_UNAVAILABLE',
+    }))
+
+    const view = await mountView()
+    view.findComponent(ChatComposerStub).vm.$emit('send', '')
+    await flushPromises()
+
+    expect(chatStore.failStreaming).toHaveBeenCalledWith(
+      conversation.id,
+      expect.any(String),
+      'chat.errors.modelUnavailable',
+      'CHAT_CATALOG_UNAVAILABLE',
+    )
+    expect(chatStore.removeMessages).not.toHaveBeenCalled()
+    expect(conversation.messages).toHaveLength(2)
+    expect(conversation.messages[1]).toMatchObject({
+      role: 'assistant',
+      status: 'error',
+      errorMessage: 'chat.errors.modelUnavailable',
+    })
+    expect(attachmentPickerCommitAll).not.toHaveBeenCalled()
+  })
+
+  it('点击发送瞬间附件过期时整轮拒绝且保留文字草稿', async () => {
+    const conversation: ChatConversation = {
+      id: 'expired-click-conversation',
+      userId: '7',
+      title: 'Expiry boundary',
+      model: 'gpt-5',
+      messages: [],
+      createdAt: 1,
+      updatedAt: 1,
+    }
+    chatStore.userId = '7'
+    chatStore.hydrated = true
+    chatStore.conversations = [conversation]
+    chatStore.activeConversationId = conversation.id
+    chatStore.activeConversation = conversation
+    attachmentPickerReady.value = []
+
+    const view = await mountView()
+    const composer = view.findComponent(ChatComposerStub)
+    const picker = view.findComponent(ChatAttachmentPickerStub)
+    composer.vm.$emit('update:modelValue', '这段文字必须保留')
+    picker.vm.$emit('change', [{
+      key: 'expired-draft',
+      file: new File(['pdf'], 'expired.pdf', { type: 'application/pdf' }),
+      kind: 'document',
+      state: 'ready',
+      progress: 100,
+      attachment: {
+        id: 'expired-attachment',
+        name: 'expired.pdf',
+        kind: 'document',
+        mimeType: 'application/pdf',
+        size: 3,
+        status: 'expired',
+        expiresAt: '2026-08-06T00:00:00Z',
+      },
+    }])
+    await nextTick()
+    const acknowledge = vi.fn()
+
+    composer.vm.$emit('send', '这段文字必须保留', acknowledge)
+    await flushPromises()
+
+    expect(acknowledge).toHaveBeenCalledWith(false)
+    expect(composer.props('modelValue')).toBe('这段文字必须保留')
+    expect(chatStore.addMessage).not.toHaveBeenCalled()
+    expect(apiMocks.streamChatCompletion).not.toHaveBeenCalled()
+    expect(attachmentPickerCommitAll).not.toHaveBeenCalled()
+  })
+
+  it('服务端接纳前无法启动请求时保留附件和草稿并回滚乐观消息', async () => {
+    const conversation: ChatConversation = {
+      id: 'pre-accept-failure',
+      userId: '7',
+      title: 'Pre-accept failure',
+      model: 'gpt-5',
+      messages: [],
+      createdAt: 1,
+      updatedAt: 1,
+    }
+    const readyAttachment: ChatAttachment = {
+      id: 'attachment-pre-accept',
+      name: 'brief.pdf',
+      kind: 'document',
+      mimeType: 'application/pdf',
+      size: 2048,
+      status: 'ready',
+      expiresAt: '2099-01-01T00:00:00Z',
+    }
+    chatStore.userId = '7'
+    chatStore.hydrated = true
+    chatStore.conversations = [conversation]
+    chatStore.activeConversationId = conversation.id
+    chatStore.activeConversation = conversation
+    attachmentPickerReady.value = [readyAttachment]
+    chatStore.startStreaming.mockReturnValueOnce(false)
+
+    const view = await mountView()
+    const composer = view.findComponent(ChatComposerStub)
+    const picker = view.findComponent(ChatAttachmentPickerStub)
+    composer.vm.$emit('update:modelValue', '网络失败也保留')
+    picker.vm.$emit('change', [{
+      key: 'pre-accept-draft',
+      file: new File(['pdf'], 'brief.pdf', { type: 'application/pdf' }),
+      kind: 'document',
+      state: 'ready',
+      progress: 100,
+      attachment: readyAttachment,
+    }])
+    await nextTick()
+    const acknowledge = vi.fn()
+
+    composer.vm.$emit('send', '网络失败也保留', acknowledge)
+    await flushPromises()
+
+    expect(apiMocks.streamChatCompletion).not.toHaveBeenCalled()
+    expect(attachmentPickerCommitAll).not.toHaveBeenCalled()
+    expect(chatStore.removeMessages).toHaveBeenCalledWith(
+      conversation.id,
+      ['generated-message-1', 'generated-message-2'],
+    )
+    expect(conversation.messages).toEqual([])
+    expect(acknowledge).toHaveBeenCalledWith(false)
+    expect(composer.props('modelValue')).toBe('网络失败也保留')
+  })
+
+  it('切换会话时清理尚未绑定的附件', async () => {
+    const first: ChatConversation = {
+      id: 'attachment-context-a',
+      userId: '7',
+      title: 'A',
+      model: 'gpt-5',
+      messages: [],
+      createdAt: 1,
+      updatedAt: 2,
+    }
+    const second = { ...first, id: 'attachment-context-b', title: 'B', updatedAt: 1 }
+    chatStore.userId = '7'
+    chatStore.hydrated = true
+    chatStore.conversations = [first, second]
+    chatStore.activeConversationId = first.id
+    chatStore.activeConversation = first
+
+    await mountView()
+    attachmentPickerDiscardAll.mockClear()
+    chatStore.activeConversationId = second.id
+    chatStore.activeConversation = second
+    await nextTick()
+    await flushPromises()
+
+    expect(attachmentPickerDiscardAll).toHaveBeenCalledTimes(1)
   })
 })

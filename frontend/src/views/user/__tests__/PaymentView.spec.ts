@@ -21,8 +21,8 @@ const routerPush = vi.hoisted(() => vi.fn())
 const routerBack = vi.hoisted(() => vi.fn())
 const routerResolve = vi.hoisted(() => vi.fn(() => ({ href: '/payment/stripe?mock=1' })))
 const createOrder = vi.hoisted(() => vi.fn())
-const refreshUser = vi.hoisted(() => vi.fn())
-const fetchActiveSubscriptions = vi.hoisted(() => vi.fn().mockResolvedValue(undefined))
+const syncAfterUpgrade = vi.hoisted(() => vi.fn().mockResolvedValue(undefined))
+const refreshProfile = vi.hoisted(() => vi.fn().mockResolvedValue(undefined))
 const showError = vi.hoisted(() => vi.fn())
 const showInfo = vi.hoisted(() => vi.fn())
 const showWarning = vi.hoisted(() => vi.fn())
@@ -64,7 +64,6 @@ vi.mock('vue-i18n', async () => {
 vi.mock('@/stores/auth', () => ({
   useAuthStore: () => ({
     user: authUser,
-    refreshUser,
   }),
 }))
 
@@ -75,11 +74,8 @@ vi.mock('@/stores/payment', () => ({
   }),
 }))
 
-vi.mock('@/stores/subscriptions', () => ({
-  useSubscriptionStore: () => ({
-    activeSubscriptions: [],
-    fetchActiveSubscriptions,
-  }),
+vi.mock('@/stores/userProfile', () => ({
+  useUserProfileStore: () => ({ refreshProfile, syncAfterUpgrade }),
 }))
 
 vi.mock('@/stores', () => ({
@@ -234,7 +230,8 @@ describe('PaymentView integrated purchase surface', () => {
     routeState.query = {}
     routeState.hash = ''
     getCheckoutInfo.mockReset().mockResolvedValue(checkoutInfoFixture())
-    fetchActiveSubscriptions.mockReset().mockResolvedValue(undefined)
+    syncAfterUpgrade.mockReset().mockResolvedValue(undefined)
+    refreshProfile.mockReset().mockResolvedValue(undefined)
     showError.mockReset()
   })
 
@@ -358,7 +355,7 @@ describe('PaymentView integrated purchase surface', () => {
     expect(wrapper.text()).not.toContain('redeem.dividerTitle')
   })
 
-  it('uses snowflake credits for balances while keeping recharge amounts in CNY', async () => {
+  it('uses points for balances while keeping recharge amounts in CNY', async () => {
     getCheckoutInfo.mockResolvedValue(checkoutInfoFixture({
       methods: {
         wxpay: {
@@ -470,8 +467,8 @@ async function mountSubscriptionConfirm(options: Parameters<typeof checkoutInfoW
   routerBack.mockReset()
   routerResolve.mockClear()
   createOrder.mockReset()
-  refreshUser.mockReset()
-  fetchActiveSubscriptions.mockReset().mockResolvedValue(undefined)
+  syncAfterUpgrade.mockReset().mockResolvedValue(undefined)
+  refreshProfile.mockReset().mockResolvedValue(undefined)
   showError.mockReset()
   showInfo.mockReset()
   showWarning.mockReset()
@@ -718,8 +715,8 @@ describe('PaymentView payment recovery', () => {
     routerPush.mockReset().mockResolvedValue(undefined)
     routerResolve.mockClear()
     createOrder.mockReset()
-    refreshUser.mockReset()
-    fetchActiveSubscriptions.mockReset().mockResolvedValue(undefined)
+    syncAfterUpgrade.mockReset().mockResolvedValue(undefined)
+    refreshProfile.mockReset().mockResolvedValue(undefined)
     showError.mockReset()
     showInfo.mockReset()
     showWarning.mockReset()
@@ -789,6 +786,51 @@ describe('PaymentView payment recovery', () => {
 
     expect(wrapper.find('[data-test="method-selector"]').text()).toBe('ldc')
   })
+
+  it('synchronizes the shared user profile once after a restored subscription succeeds', async () => {
+    getCheckoutInfo.mockResolvedValue(checkoutInfoFixture())
+    window.localStorage.setItem(PAYMENT_RECOVERY_STORAGE_KEY, JSON.stringify({
+      orderId: 889,
+      amount: 30,
+      qrCode: 'subscription-qr',
+      expiresAt: '2099-01-01T00:10:00.000Z',
+      paymentType: 'wxpay',
+      payUrl: '',
+      outTradeNo: 'sub2_subscription_889',
+      clientSecret: '',
+      intentId: '',
+      currency: 'USD',
+      countryCode: '',
+      paymentEnv: '',
+      payAmount: 30,
+      orderType: 'subscription',
+      paymentMode: 'qrcode',
+      resumeToken: '',
+      createdAt: Date.now(),
+    }))
+
+    const wrapper = shallowMount(PaymentView, {
+      global: {
+        stubs: {
+          AppLayout: {
+            template: '<div><slot /></div>',
+          },
+          PaymentStatusPanel: {
+            template: '<button data-test="payment-success" @click="$emit(\'success\')" />',
+          },
+          Teleport: true,
+          Transition: false,
+        },
+      },
+    })
+    await flushPromises()
+    await flushPromises()
+
+    await wrapper.get('[data-test="payment-success"]').trigger('click')
+    await flushPromises()
+
+    expect(syncAfterUpgrade).toHaveBeenCalledTimes(1)
+  })
 })
 
 describe('PaymentView WeChat JSAPI flow', () => {
@@ -803,8 +845,8 @@ describe('PaymentView WeChat JSAPI flow', () => {
     routerPush.mockReset().mockResolvedValue(undefined)
     routerResolve.mockClear()
     createOrder.mockReset()
-    refreshUser.mockReset()
-    fetchActiveSubscriptions.mockReset().mockResolvedValue(undefined)
+    syncAfterUpgrade.mockReset().mockResolvedValue(undefined)
+    refreshProfile.mockReset().mockResolvedValue(undefined)
     showError.mockReset()
     showInfo.mockReset()
     showWarning.mockReset()

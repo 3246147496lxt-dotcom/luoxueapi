@@ -243,6 +243,7 @@ func TestAPIContracts(t *testing.T) {
 					"rate_limit_5h": 0,
 					"rate_limit_1d": 0,
 					"rate_limit_7d": 0,
+					"service_tier_preference": "standard",
 					"usage_5h": 0,
 					"usage_1d": 0,
 					"usage_7d": 0,
@@ -294,6 +295,7 @@ func TestAPIContracts(t *testing.T) {
 							"rate_limit_5h": 0,
 							"rate_limit_1d": 0,
 							"rate_limit_7d": 0,
+							"service_tier_preference": "standard",
 							"usage_5h": 0,
 							"usage_1d": 0,
 							"usage_7d": 0,
@@ -1544,7 +1546,7 @@ func (r *stubUserRepo) GetFirstAdmin(ctx context.Context) (*service.User, error)
 	return nil, service.ErrUserNotFound
 }
 
-func (r *stubUserRepo) Update(ctx context.Context, user *service.User) error {
+func (r *stubUserRepo) Update(ctx context.Context, user *service.User, fields service.UserUpdateFields) error {
 	return errors.New("not implemented")
 }
 
@@ -2271,7 +2273,7 @@ func (r *stubApiKeyRepo) GetByKeyForAuth(ctx context.Context, key string) (*serv
 	return r.GetByKey(ctx, key)
 }
 
-func (r *stubApiKeyRepo) Update(ctx context.Context, key *service.APIKey) error {
+func (r *stubApiKeyRepo) Update(ctx context.Context, key *service.APIKey, fields service.APIKeyUpdateFields) error {
 	if key == nil {
 		return errors.New("nil key")
 	}

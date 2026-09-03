@@ -92,6 +92,64 @@
         </svg>
       </div>
 
+      <!-- Load error -->
+      <div v-else-if="loadError" data-testid="history-load-error" class="py-8 text-center">
+        <p class="text-sm text-gray-500 dark:text-dark-400">{{ loadErrorMessage }}</p>
+        <button
+          type="button"
+          class="btn btn-secondary mt-3 px-3 py-1.5 text-sm"
+          data-testid="history-load-retry"
+          @click="loadHistory(currentPage)"
+        >
+          {{ t('admin.users.retry') }}
+        </button>
+      </div>
+
+      <!-- Actual subscriptions, not subscription-type redeem-code history -->
+      <div v-else-if="isSubscriptionFilter && subscriptions.length === 0" class="py-8 text-center">
+        <p class="text-sm text-gray-500 dark:text-dark-400">
+          {{ t('admin.subscriptions.noSubscriptionsYet') }}
+        </p>
+      </div>
+
+      <div v-else-if="isSubscriptionFilter" class="max-h-[28rem] space-y-3 overflow-y-auto">
+        <div
+          v-for="subscription in subscriptions"
+          :key="subscription.id"
+          data-testid="subscription-record"
+          class="rounded-xl border border-gray-200 bg-white p-4 dark:border-dark-600 dark:bg-dark-800"
+        >
+          <div class="flex items-start justify-between gap-4">
+            <div class="flex min-w-0 items-start gap-3">
+              <div class="flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg bg-purple-100 dark:bg-purple-900/30">
+                <Icon name="badge" size="sm" class="text-purple-600 dark:text-purple-400" />
+              </div>
+              <div class="min-w-0">
+                <p
+                  class="truncate text-sm font-medium text-gray-900 dark:text-white"
+                  :title="getSubscriptionGroupName(subscription)"
+                >
+                  {{ getSubscriptionGroupName(subscription) }}
+                </p>
+                <p class="mt-0.5 text-xs text-gray-500 dark:text-dark-400">
+                  {{ t('admin.users.subscriptionStartsAt') }}:
+                  {{ formatDateTime(subscription.starts_at) }}
+                </p>
+                <p class="mt-0.5 text-xs text-gray-500 dark:text-dark-400">
+                  {{ t('admin.subscriptions.columns.expires') }}:
+                  {{ subscription.expires_at
+                    ? formatDateTime(subscription.expires_at)
+                    : t('admin.subscriptions.noExpiration') }}
+                </p>
+              </div>
+            </div>
+            <span :class="['badge flex-shrink-0', getSubscriptionStatusClass(subscription.status)]">
+              {{ t(`admin.subscriptions.status.${subscription.status}`) }}
+            </span>
+          </div>
+        </div>
+      </div>
+
       <!-- Empty state -->
       <div v-else-if="history.length === 0" class="py-8 text-center">
         <p class="text-sm text-gray-500">{{ t('admin.users.noBalanceHistory') }}</p>
@@ -113,7 +171,7 @@
                   getIconBg(item)
                 ]"
               >
-                <SnowflakeCreditIcon v-if="isBalanceType(item.type)" size="sm" />
+                <PointsIcon v-if="isBalanceType(item.type)" size="sm" />
                 <Icon v-else :name="getIconName(item)" size="sm" :class="getIconColor(item)" />
               </div>
               <div>
@@ -161,7 +219,7 @@
       </div>
 
       <!-- Pagination -->
-      <div v-if="totalPages > 1" class="flex items-center justify-center gap-2 pt-2">
+      <div v-if="!isSubscriptionFilter && totalPages > 1" class="flex items-center justify-center gap-2 pt-2">
         <button
           :disabled="currentPage <= 1"
           class="btn btn-secondary px-3 py-1 text-sm"
@@ -189,26 +247,36 @@ import { ref, computed, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { adminAPI, type BalanceHistoryItem } from '@/api/admin'
 import { formatDateTime } from '@/utils/format'
-import type { AdminUser } from '@/types'
+import type { AdminUser, UserSubscription } from '@/types'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import CreditAmount from '@/components/common/CreditAmount.vue'
 import Select from '@/components/common/Select.vue'
 import Icon from '@/components/icons/Icon.vue'
-import SnowflakeCreditIcon from '@/components/icons/SnowflakeCreditIcon.vue'
+import PointsIcon from '@/components/icons/PointsIcon.vue'
 
 const props = defineProps<{ show: boolean; user: AdminUser | null; hideActions?: boolean }>()
 const emit = defineEmits(['close', 'deposit', 'withdraw'])
 const { t } = useI18n()
 
 const history = ref<BalanceHistoryItem[]>([])
+const subscriptions = ref<UserSubscription[]>([])
 const loading = ref(false)
+const loadError = ref<'history' | 'subscriptions' | null>(null)
 const currentPage = ref(1)
 const total = ref(0)
 const totalRecharged = ref(0)
 const pageSize = 15
 const typeFilter = ref('')
+let loadRequestId = 0
+let userContextId = 0
 
 const totalPages = computed(() => Math.ceil(total.value / pageSize) || 1)
+const isSubscriptionFilter = computed(() => typeFilter.value === 'subscription')
+const loadErrorMessage = computed(() =>
+  loadError.value === 'subscriptions'
+    ? t('admin.subscriptions.failedToLoad')
+    : t('admin.users.failedToLoadBalanceHistory')
+)
 
 // Type filter options
 const typeOptions = computed(() => [
@@ -221,33 +289,81 @@ const typeOptions = computed(() => [
   { value: 'subscription', label: t('admin.users.typeSubscription') }
 ])
 
-// Watch modal open
-watch(() => props.show, (v) => {
-  if (v && props.user) {
+// Reload when the modal opens or changes to another user while still open.
+watch(() => [props.show, props.user?.id] as const, ([show, userId]) => {
+  loadRequestId += 1
+  userContextId += 1
+  loading.value = false
+  if (show && userId) {
     typeFilter.value = ''
+    history.value = []
+    subscriptions.value = []
+    total.value = 0
+    totalRecharged.value = 0
+    loadError.value = null
     loadHistory(1)
   }
 })
 
 const loadHistory = async (page: number) => {
   if (!props.user) return
+  const userId = props.user.id
+  const contextId = userContextId
+  const requestId = ++loadRequestId
   loading.value = true
+  loadError.value = null
   currentPage.value = page
   try {
+    if (isSubscriptionFilter.value) {
+      const items = await adminAPI.subscriptions.listByUser(userId)
+      if (requestId !== loadRequestId) return
+      subscriptions.value = items
+      history.value = []
+      total.value = items.length
+      return
+    }
+
     const res = await adminAPI.users.getUserBalanceHistory(
-      props.user.id,
+      userId,
       page,
       pageSize,
       typeFilter.value || undefined
     )
+    // Total recharge is user-level summary data. Preserve it even if this history
+    // response became stale only because the user switched filters.
+    if (contextId === userContextId) {
+      totalRecharged.value = res.total_recharged || 0
+    }
+    if (requestId !== loadRequestId) return
     history.value = res.items || []
+    subscriptions.value = []
     total.value = res.total || 0
-    totalRecharged.value = res.total_recharged || 0
   } catch (error) {
-    console.error('Failed to load balance history:', error)
+    if (requestId !== loadRequestId) return
+    console.error(
+      isSubscriptionFilter.value
+        ? 'Failed to load user subscriptions:'
+        : 'Failed to load balance history:',
+      error
+    )
+    history.value = []
+    subscriptions.value = []
+    total.value = 0
+    loadError.value = isSubscriptionFilter.value ? 'subscriptions' : 'history'
   } finally {
-    loading.value = false
+    if (requestId === loadRequestId) loading.value = false
   }
+}
+
+const getSubscriptionGroupName = (subscription: UserSubscription) => {
+  const groupName = subscription.group?.name?.trim()
+  return groupName || `#${subscription.group_id}`
+}
+
+const getSubscriptionStatusClass = (status: UserSubscription['status']) => {
+  if (status === 'active') return 'badge-success'
+  if (status === 'expired' || status === 'suspended') return 'badge-warning'
+  return 'badge-danger'
 }
 
 // Helper: check if admin type
@@ -256,13 +372,9 @@ const isAdminType = (type: string) => type === 'admin_balance' || type === 'admi
 // Helper: check if balance type (includes admin_balance)
 const isBalanceType = (type: string) => type === 'balance' || type === 'admin_balance' || type === 'affiliate_balance'
 
-// Helper: check if subscription type
-const isSubscriptionType = (type: string) => type === 'subscription'
-
 // Icon name based on type
 const getIconName = (item: BalanceHistoryItem) => {
   if (isBalanceType(item.type)) return 'dollar'
-  if (isSubscriptionType(item.type)) return 'badge'
   return 'bolt' // concurrency
 }
 
@@ -273,7 +385,6 @@ const getIconBg = (item: BalanceHistoryItem) => {
       ? 'bg-emerald-100 dark:bg-emerald-900/30'
       : 'bg-red-100 dark:bg-red-900/30'
   }
-  if (isSubscriptionType(item.type)) return 'bg-purple-100 dark:bg-purple-900/30'
   return item.value >= 0
     ? 'bg-blue-100 dark:bg-blue-900/30'
     : 'bg-orange-100 dark:bg-orange-900/30'
@@ -286,7 +397,6 @@ const getIconColor = (item: BalanceHistoryItem) => {
       ? 'text-emerald-600 dark:text-emerald-400'
       : 'text-red-600 dark:text-red-400'
   }
-  if (isSubscriptionType(item.type)) return 'text-purple-600 dark:text-purple-400'
   return item.value >= 0
     ? 'text-blue-600 dark:text-blue-400'
     : 'text-orange-600 dark:text-orange-400'
@@ -299,7 +409,6 @@ const getValueColor = (item: BalanceHistoryItem) => {
       ? 'text-emerald-600 dark:text-emerald-400'
       : 'text-red-600 dark:text-red-400'
   }
-  if (isSubscriptionType(item.type)) return 'text-purple-600 dark:text-purple-400'
   return item.value >= 0
     ? 'text-blue-600 dark:text-blue-400'
     : 'text-orange-600 dark:text-orange-400'
@@ -318,8 +427,6 @@ const getItemTitle = (item: BalanceHistoryItem) => {
       return t('redeem.concurrencyAddedRedeem')
     case 'admin_concurrency':
       return item.value >= 0 ? t('redeem.concurrencyAddedAdmin') : t('redeem.concurrencyReducedAdmin')
-    case 'subscription':
-      return t('redeem.subscriptionAssigned')
     default:
       return t('common.unknown')
   }
@@ -330,11 +437,6 @@ const formatValue = (item: BalanceHistoryItem) => {
   if (isBalanceType(item.type)) {
     const sign = item.value >= 0 ? '+' : ''
     return `${sign}${item.value.toFixed(2)}`
-  }
-  if (isSubscriptionType(item.type)) {
-    const days = item.validity_days || Math.round(item.value)
-    const groupName = item.group?.name || ''
-    return groupName ? `${days}d - ${groupName}` : `${days}d`
   }
   // concurrency types
   const sign = item.value >= 0 ? '+' : ''

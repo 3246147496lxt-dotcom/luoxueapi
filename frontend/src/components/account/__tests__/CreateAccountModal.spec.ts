@@ -190,6 +190,36 @@ describe('CreateAccountModal OpenAI long-context billing', () => {
     expect(createAccountMock.mock.calls[0]?.[0]?.extra?.openai_long_context_billing_enabled).toBe(true)
   })
 
+  it('persists audio transcriptions only after explicit OpenAI API Key opt-in', async () => {
+    const wrapper = mountModal()
+    await selectButtonByText(wrapper, 'OpenAI')
+    await selectButtonByText(wrapper, 'API Key')
+
+    const audioTranscriptions = wrapper.get<HTMLInputElement>(
+      '[data-testid="openai-endpoint-capability-audio_transcriptions"]',
+    )
+    expect(audioTranscriptions.element.checked).toBe(false)
+
+    await audioTranscriptions.setValue(true)
+    await wrapper
+      .get('form#create-account-form input[type="text"]')
+      .setValue('OpenAI STT account')
+    await wrapper
+      .get('form#create-account-form input[type="password"]')
+      .setValue('test-api-key')
+    await wrapper.get('form#create-account-form').trigger('submit.prevent')
+    await flushPromises()
+
+    expect(createAccountMock).toHaveBeenCalledTimes(1)
+    expect(
+      createAccountMock.mock.calls[0]?.[0]?.credentials?.openai_capabilities,
+    ).toEqual([
+      'chat_completions',
+      'embeddings',
+      'audio_transcriptions',
+    ])
+  })
+
   it('omits the OpenAI setting for non-OpenAI account creation', async () => {
     await submitApiKeyAccount('anthropic')
 

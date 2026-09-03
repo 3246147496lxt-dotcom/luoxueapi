@@ -129,7 +129,21 @@ func apiKeyAuthWithSubscription(apiKeyService *service.APIKeyService, subscripti
 		if abortIfAPIKeyGroupNotAllowed(c, apiKey) {
 			return
 		}
+		// Only user-managed keys may opt into the server-side OpenAI default.
+		// Desktop and other internal purposes remain Standard even if a stale
+		// or manually edited database value says otherwise.
+		serviceTierPreference := service.ServiceTierPreferenceStandard
+		if apiKey.Purpose == service.APIKeyPurposeUser {
+			var ok bool
+			serviceTierPreference, ok = service.NormalizeServiceTierPreference(apiKey.ServiceTierPreference)
+			if !ok {
+				// Older/partially migrated records are fail-safe: Standard is the
+				// only value that may reach the gateway as a server default.
+				serviceTierPreference = service.ServiceTierPreferenceStandard
+			}
+		}
 		ctx := context.WithValue(c.Request.Context(), ctxkey.UserID, apiKey.User.ID)
+		ctx = context.WithValue(ctx, ctxkey.OpenAIServiceTierPreference, serviceTierPreference)
 		c.Request = c.Request.WithContext(ctx)
 		billingInfoRequest := c.Request.URL.Path == "/v1/sub2api/billing"
 		// Async image task polling only reads data that already belongs to the
@@ -312,11 +326,25 @@ func GetSubscriptionFromContext(c *gin.Context) (*service.UserSubscription, bool
 // context normally produced by API-key authentication, after JWT chat
 // authorization has resolved an internal web-chat principal.
 func BindChatPrincipalContext(c *gin.Context, apiKey *service.APIKey) bool {
+	return BindChatPrincipalBillingContext(c, apiKey, nil)
+}
+
+// BindChatPrincipalBillingContext binds the trusted Web Chat principal and its
+// selected billing entitlement. Subscription identity is accepted only when it
+// exactly matches the principal's subscription group; wallet principals must
+// never carry subscription context.
+func BindChatPrincipalBillingContext(
+	c *gin.Context,
+	apiKey *service.APIKey,
+	subscription *service.UserSubscription,
+) bool {
 	if c == nil || c.Request == nil || apiKey == nil || apiKey.User == nil || apiKey.Group == nil ||
 		apiKey.Purpose != service.APIKeyPurposeWebChat || !apiKey.IsActive() ||
-		!apiKey.User.IsActive() || !apiKey.User.CanBindGroup(apiKey.Group.ID, apiKey.Group.IsExclusive) ||
+		!apiKey.User.IsActive() ||
+		(!apiKey.Group.IsSubscriptionType() && !apiKey.User.CanBindGroup(apiKey.Group.ID, apiKey.Group.IsExclusive)) ||
 		apiKey.UserID != apiKey.User.ID || apiKey.GroupID == nil || *apiKey.GroupID != apiKey.Group.ID ||
-		!service.IsGroupContextValid(apiKey.Group) {
+		!service.IsGroupContextValid(apiKey.Group) ||
+		!chatPrincipalSubscriptionMatches(apiKey, subscription) {
 		return false
 	}
 	if ingress, _ := c.Request.Context().Value(ctxkey.WebChatIngress).(bool); !ingress {
@@ -324,6 +352,9 @@ func BindChatPrincipalContext(c *gin.Context, apiKey *service.APIKey) bool {
 	}
 
 	ctx := context.WithValue(c.Request.Context(), ctxkey.UserID, apiKey.User.ID)
+	// Internal web-chat principals never participate in the API-key Fast
+	// preference, even if a stale value was attached by an outer middleware.
+	ctx = context.WithValue(ctx, ctxkey.OpenAIServiceTierPreference, service.ServiceTierPreferenceStandard)
 	ctx = context.WithValue(ctx, ctxkey.WebChat, true)
 	c.Request = c.Request.WithContext(ctx)
 	c.Set(string(ContextKeyAPIKey), apiKey)
@@ -332,8 +363,24 @@ func BindChatPrincipalContext(c *gin.Context, apiKey *service.APIKey) bool {
 		Concurrency: apiKey.User.Concurrency,
 	})
 	c.Set(string(ContextKeyUserRole), apiKey.User.Role)
+	if subscription != nil {
+		c.Set(string(ContextKeySubscription), subscription)
+	}
 	setGroupContext(c, apiKey.Group)
 	return true
+}
+
+func chatPrincipalSubscriptionMatches(apiKey *service.APIKey, subscription *service.UserSubscription) bool {
+	if apiKey == nil || apiKey.Group == nil {
+		return false
+	}
+	if !apiKey.Group.IsSubscriptionType() {
+		return subscription == nil
+	}
+	return subscription != nil &&
+		subscription.UserID == apiKey.UserID &&
+		subscription.GroupID == apiKey.Group.ID &&
+		subscription.IsActive()
 }
 
 func setGroupContext(c *gin.Context, group *service.Group) {

@@ -8,7 +8,7 @@
       <div>
         <label class="input-label">{{ operation === 'add' ? t('admin.users.depositAmount') : t('admin.users.withdrawAmount') }}</label>
         <div class="relative flex gap-2">
-          <div class="relative flex-1"><SnowflakeCreditIcon class="absolute left-3 top-1/2 -translate-y-1/2" size="sm" /><input v-model.number="form.amount" type="number" step="any" min="0" required class="input pl-10" /></div>
+          <div class="relative flex-1"><PointsIcon class="absolute left-3 top-1/2 -translate-y-1/2" size="sm" /><input v-model.number="form.amount" type="number" step="any" min="0" required class="input pl-10" /></div>
           <button v-if="operation === 'subtract'" type="button" @click="fillAllBalance" class="btn btn-secondary whitespace-nowrap">{{ t('admin.users.withdrawAll') }}</button>
         </div>
       </div>
@@ -32,7 +32,7 @@ import { adminAPI } from '@/api/admin'
 import type { AdminUser } from '@/types'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import CreditAmount from '@/components/common/CreditAmount.vue'
-import SnowflakeCreditIcon from '@/components/icons/SnowflakeCreditIcon.vue'
+import PointsIcon from '@/components/icons/PointsIcon.vue'
 
 const props = defineProps<{ show: boolean, user: AdminUser | null, operation: 'add' | 'subtract' }>()
 const emit = defineEmits(['close', 'success']); const { t } = useI18n(); const appStore = useAppStore()

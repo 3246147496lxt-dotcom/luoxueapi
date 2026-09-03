@@ -55,6 +55,22 @@ describe("groupDraft codec", () => {
     expect(serializeUpdateGroupDraft(draft, context).fallback_group_id).toBe(0);
   });
 
+  it("keeps profit control off by default and serializes percentages as decimals", () => {
+    const draft = createGroupDraft();
+    expect(draft.profit_control_enabled).toBe(false);
+
+    draft.profit_control_enabled = true;
+    draft.profit_min_margin_percent = 30;
+    draft.profit_safety_buffer_percent = 2.5;
+
+    const payload = serializeCreateGroupDraft(draft, context);
+    expect(payload.profit_control_enabled).toBe(true);
+    expect(payload.profit_min_margin).toBe(0.3);
+    expect(payload.profit_safety_buffer).toBe(0.025);
+    expect(payload).not.toHaveProperty("profit_min_margin_percent");
+    expect(payload).not.toHaveProperty("profit_safety_buffer_percent");
+  });
+
   it("tracks one baseline contract for both editor modes", () => {
     const editor = useGroupEditor();
     editor.capture("create");

@@ -3,18 +3,18 @@
     class="chat-message"
     :class="`chat-message--${message.role}`"
     :aria-label="message.role === 'user' ? t('chat.message.you') : t('chat.message.assistant')"
+    :aria-busy="message.status === 'streaming' ? 'true' : undefined"
   >
-    <div class="chat-message__avatar" aria-hidden="true">
-      <Icon :name="message.role === 'user' ? 'user' : 'sparkles'" size="sm" :stroke-width="1.9" />
-    </div>
-
-    <div class="chat-message__body">
-      <div class="chat-message__meta">
-        <span>{{ message.role === 'user' ? t('chat.message.you') : t('chat.message.assistant') }}</span>
-        <span v-if="message.status === 'streaming'" class="chat-message__streaming">
-          {{ t('chat.message.generating') }}
-        </span>
-        <span v-else-if="message.excludedFromContext" class="chat-message__status">
+    <div
+      class="chat-message__body"
+      :class="{ 'user-message-group': message.role === 'user' }"
+      :data-test="message.role === 'user' ? 'user-message-group' : undefined"
+    >
+      <div
+        v-if="message.excludedFromContext || message.status === 'stopped'"
+        class="chat-message__meta"
+      >
+        <span v-if="message.excludedFromContext" class="chat-message__status">
           {{ t('chat.message.superseded') }}
         </span>
         <span v-else-if="message.status === 'stopped'" class="chat-message__status">
@@ -22,86 +22,75 @@
         </span>
       </div>
 
+      <ChatMessageAttachments
+        v-if="message.attachments?.length"
+        :attachments="message.attachments"
+        :class="{
+          'chat-message-attachments--with-content': hasRenderableContent,
+        }"
+      />
+
       <div
-        v-if="message.role === 'assistant' && message.content && message.status !== 'streaming'"
+        v-if="message.role === 'assistant' && hasRenderableContent"
         class="chat-message__markdown"
+        :class="{ 'chat-message__markdown--streaming': message.status === 'streaming' }"
         v-html="renderedContent"
       ></div>
-      <p v-else-if="message.content" class="chat-message__plain">{{ message.content }}</p>
+      <p v-else-if="hasRenderableContent" class="chat-message__plain">{{ message.content }}</p>
 
-      <div v-if="message.status === 'streaming' && !message.content" class="chat-message__thinking" aria-live="polite">
-        <span></span><span></span><span></span>
-      </div>
-
-      <div v-if="message.status === 'error'" class="chat-message__error" role="alert">
-        <Icon name="exclamationCircle" size="sm" />
-        <span>{{ message.errorMessage || t('chat.errors.requestFailed') }}</span>
-      </div>
-
-      <footer
-        v-if="showReceipt"
-        class="chat-message__receipt"
-        :class="`chat-message__receipt--${settlementStatus}`"
-        data-test="chat-receipt"
+      <div
+        v-else-if="showStreamingIndicator"
+        class="chat-message__streaming-placeholder"
+        aria-hidden="true"
       >
-        <div class="chat-message__receipt-status" :aria-live="settlementStatus === 'pending' ? 'polite' : undefined">
-          <Icon :name="settlementIcon" size="xs" :stroke-width="2" />
-          <span>{{ settlementLabel }}</span>
-        </div>
+        <span class="chat-message__streaming-dot"></span>
+      </div>
 
-        <div v-if="settlementStatus !== 'pending'" class="chat-message__receipt-details">
-          <span v-if="message.actualModel">
-            {{ t('chat.receipt.model', { model: message.actualModel }) }}
-          </span>
-          <span v-if="message.inputTokens !== undefined">
-            {{ t('chat.receipt.inputTokens', { count: formatTokens(message.inputTokens) }) }}
-          </span>
-          <span v-if="message.outputTokens !== undefined">
-            {{ t('chat.receipt.outputTokens', { count: formatTokens(message.outputTokens) }) }}
-          </span>
-          <span v-if="message.cacheCreationTokens !== undefined">
-            {{ t('chat.receipt.cacheCreationTokens', { count: formatTokens(message.cacheCreationTokens) }) }}
-          </span>
-          <span v-if="message.cacheReadTokens !== undefined">
-            {{ t('chat.receipt.cacheReadTokens', { count: formatTokens(message.cacheReadTokens) }) }}
-          </span>
-          <span v-if="message.grossCost !== undefined">
-            {{ t('chat.receipt.grossCost', { amount: formatCurrency(message.grossCost) }) }}
-          </span>
-          <span
-            v-if="message.chargedAmount !== undefined"
-            class="chat-message__receipt-credit chat-message__receipt-charge"
-          >
-            <span>{{ t('chat.receipt.chargedAmount') }}</span>
-            <CreditAmount :value="formatCreditAmount(message.chargedAmount)" icon-size="xs" />
-          </span>
-          <span v-if="hasBalanceRange" class="chat-message__receipt-credit">
-            <span>{{ t('chat.receipt.balanceRange') }}</span>
-            <CreditAmount :value="formatCreditAmount(message.balanceBefore)" icon-size="xs" />
-            <span aria-hidden="true">→</span>
-            <CreditAmount :value="formatCreditAmount(message.balanceAfter)" icon-size="xs" />
-          </span>
-          <span v-else-if="message.balanceAfter !== undefined" class="chat-message__receipt-credit">
-            <span>{{ t('chat.receipt.balanceAfter') }}</span>
-            <CreditAmount :value="formatCreditAmount(message.balanceAfter)" icon-size="xs" />
-          </span>
-        </div>
-
-        <router-link
-          v-if="showLowBalance"
-          class="chat-message__low-balance"
-          to="/purchase"
-          data-test="chat-receipt-recharge"
+      <div
+        v-if="message.status === 'error' && !message.excludedFromContext"
+        class="chat-message__failure"
+        role="group"
+        :aria-label="t('chat.message.failed')"
+      >
+        <div
+          class="chat-message__error"
+          :role="announceFailure ? 'alert' : undefined"
         >
-          <Icon name="wallet" size="xs" />
-          <span>{{ t('chat.receipt.lowBalance') }}</span>
-          <strong>{{ t('chat.balance.recharge') }}</strong>
-        </router-link>
-      </footer>
-
-      <div v-if="message.role === 'assistant' && message.status !== 'streaming'" class="chat-message__actions">
+          <Icon name="exclamationCircle" size="sm" aria-hidden="true" />
+          <span>{{ t(errorPresentation.messageKey) }}</span>
+        </div>
         <button
-          v-if="message.content"
+          v-if="(retryable || retrying) && errorPresentation.retryable"
+          type="button"
+          class="chat-message__retry-button"
+          :disabled="retrying"
+          :aria-busy="retrying ? 'true' : undefined"
+          @click="$emit('retry')"
+        >
+          <Icon name="refresh" size="sm" aria-hidden="true" />
+          <span>{{ t(retrying ? 'chat.actions.retrying' : 'chat.actions.retryFailed') }}</span>
+        </button>
+      </div>
+
+      <div
+        v-if="showActions"
+        class="chat-message__actions"
+      >
+        <button
+          v-if="hasActivities"
+          type="button"
+          class="chat-message__activity-button"
+          :data-chat-activity-message-id="message.id"
+          :aria-label="t('chat.activity.view')"
+          :aria-expanded="activityExpanded"
+          :aria-controls="activityControls"
+          @click="$emit('viewActivity')"
+        >
+          <Icon name="brain" size="sm" aria-hidden="true" />
+          <span>{{ t('chat.activity.view') }}</span>
+        </button>
+        <button
+          v-if="hasRenderableContent"
           type="button"
           class="chat-message__icon-button"
           :title="copied ? t('chat.actions.copied') : t('chat.actions.copy')"
@@ -111,11 +100,13 @@
           <Icon :name="copied ? 'check' : 'copy'" size="sm" />
         </button>
         <button
-          v-if="retryable"
+          v-if="(retryable || retrying) && message.status !== 'error'"
           type="button"
           class="chat-message__icon-button"
-          :title="t('chat.actions.retry')"
-          :aria-label="t('chat.actions.retry')"
+          :title="t(retrying ? 'chat.actions.retrying' : 'chat.actions.retry')"
+          :aria-label="t(retrying ? 'chat.actions.retrying' : 'chat.actions.retry')"
+          :disabled="retrying"
+          :aria-busy="retrying ? 'true' : undefined"
           @click="$emit('retry')"
         >
           <Icon name="refresh" size="sm" />
@@ -129,60 +120,73 @@
 import { computed, onBeforeUnmount, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import DOMPurify from 'dompurify'
-import { marked } from 'marked'
-import CreditAmount from '@/components/common/CreditAmount.vue'
+import { marked, Renderer } from 'marked'
+import ChatMessageAttachments from '@/components/chat/ChatMessageAttachments.vue'
 import Icon from '@/components/icons/Icon.vue'
+import { chatActivityPartHasText } from '@/features/chat/activity'
+import { describeChatMessageError } from '@/features/chat/chatErrorHandler'
 import type { ChatMessage } from '@/types/chat'
-import { formatCurrency } from '@/utils/format'
 
 const props = withDefaults(defineProps<{
   message: ChatMessage
   retryable?: boolean
+  retrying?: boolean
+  announceFailure?: boolean
+  activityExpanded?: boolean
+  activityControls?: string
 }>(), {
   retryable: false,
+  retrying: false,
+  announceFailure: false,
+  activityExpanded: false,
+  activityControls: undefined,
 })
 
 defineEmits<{
   retry: []
+  viewActivity: []
 }>()
 
 const { t } = useI18n()
 const copied = ref(false)
 let copiedTimer: ReturnType<typeof setTimeout> | undefined
-
-const showReceipt = computed(() => (
+const hasRenderableContent = computed(() => props.message.content.trim().length > 0)
+const hasActivities = computed(() => props.message.activities?.some((activity) => (
+  activity.items.some((item) => item.parts.some(chatActivityPartHasText))
+)) === true)
+const showActions = computed(() => (
   props.message.role === 'assistant'
-  && (!!props.message.receiptId || !!props.message.settlementStatus)
+  && (
+    hasActivities.value
+    || (
+      props.message.status !== 'streaming'
+      && (
+        hasRenderableContent.value
+        || ((props.retryable || props.retrying) && props.message.status !== 'error')
+      )
+    )
+  )
 ))
-const settlementStatus = computed(() => props.message.settlementStatus ?? 'pending')
-const settlementIcon = computed<'checkCircle' | 'clock' | 'infoCircle' | 'xCircle'>(() => {
-  if (settlementStatus.value === 'pending') return 'clock'
-  if (settlementStatus.value === 'charged' || settlementStatus.value === 'subscription') {
-    return 'checkCircle'
-  }
-  if (settlementStatus.value === 'failed') return 'xCircle'
-  return 'infoCircle'
-})
-const settlementLabel = computed(() => {
-  if (settlementStatus.value === 'charged') return t('chat.receipt.status.charged')
-  if (settlementStatus.value === 'not_charged') return t('chat.receipt.status.notCharged')
-  if (settlementStatus.value === 'subscription') return t('chat.receipt.status.subscription')
-  if (settlementStatus.value === 'failed') return t('chat.receipt.status.failed')
-  return t('chat.receipt.status.pending')
-})
-const hasBalanceRange = computed(() => (
-  props.message.balanceBefore !== undefined && props.message.balanceAfter !== undefined
+const errorPresentation = computed(() => describeChatMessageError(props.message))
+const showStreamingIndicator = computed(() => (
+  props.message.role === 'assistant'
+  && props.message.status === 'streaming'
+  && !props.message.excludedFromContext
+  && !hasRenderableContent.value
 ))
-const showLowBalance = computed(() => (
-  settlementStatus.value !== 'pending'
-  && props.message.balanceAfter !== undefined
-  && props.message.balanceAfter < 1
-))
+
+const markdownRenderer = new Renderer()
+
+markdownRenderer.code = ({ text, lang }) => {
+  const language = formatCodeLanguage(lang)
+  return `<pre data-language="${escapeHtml(language)}"><code>${escapeHtml(text)}</code></pre>`
+}
 
 const renderedContent = computed(() => {
   const html = marked.parse(props.message.content, {
     breaks: true,
     gfm: true,
+    renderer: markdownRenderer,
   })
 
   return DOMPurify.sanitize(String(html), {
@@ -190,11 +194,54 @@ const renderedContent = computed(() => {
       'a', 'blockquote', 'br', 'code', 'del', 'em', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
       'hr', 'li', 'ol', 'p', 'pre', 'strong', 'table', 'tbody', 'td', 'th', 'thead', 'tr', 'ul',
     ],
-    ALLOWED_ATTR: ['href', 'title'],
+    ALLOWED_ATTR: ['data-language', 'href', 'title'],
     ALLOW_DATA_ATTR: false,
     ALLOW_ARIA_ATTR: false,
   })
 })
+
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;')
+}
+
+function formatCodeLanguage(rawLanguage: string | undefined): string {
+  const normalized = rawLanguage?.trim().split(/\s+/, 1)[0]?.toLowerCase() ?? 'text'
+  const labels: Record<string, string> = {
+    bash: 'Bash',
+    css: 'CSS',
+    go: 'Go',
+    html: 'HTML',
+    js: 'JavaScript',
+    javascript: 'JavaScript',
+    json: 'JSON',
+    jsx: 'JSX',
+    markdown: 'Markdown',
+    md: 'Markdown',
+    plaintext: 'Text',
+    py: 'Python',
+    python: 'Python',
+    rust: 'Rust',
+    sh: 'Shell',
+    shell: 'Shell',
+    sql: 'SQL',
+    text: 'Text',
+    ts: 'TypeScript',
+    tsx: 'TSX',
+    txt: 'Text',
+    vue: 'Vue',
+    yaml: 'YAML',
+    yml: 'YAML',
+  }
+  if (labels[normalized]) return labels[normalized]
+
+  const safeLabel = normalized.match(/^[a-z0-9+#.\-]+/)?.[0]?.slice(0, 24) ?? ''
+  return safeLabel || 'Text'
+}
 
 async function copyMessage() {
   if (!props.message.content || !navigator.clipboard) return
@@ -210,21 +257,6 @@ async function copyMessage() {
   }
 }
 
-function formatTokens(value: number): string {
-  return new Intl.NumberFormat(undefined, { maximumFractionDigits: 0 }).format(value)
-}
-
-function formatCreditAmount(value: number | undefined): string {
-  const safeValue = Number(value)
-  if (!Number.isFinite(safeValue)) return '0.00'
-
-  const fractionDigits = safeValue > 0 && safeValue < 0.01 ? 6 : 2
-  return new Intl.NumberFormat(undefined, {
-    minimumFractionDigits: fractionDigits,
-    maximumFractionDigits: fractionDigits,
-  }).format(safeValue)
-}
-
 onBeforeUnmount(() => {
   if (copiedTimer) clearTimeout(copiedTimer)
 })
@@ -232,72 +264,108 @@ onBeforeUnmount(() => {
 
 <style scoped>
 .chat-message {
-  display: grid;
-  grid-template-columns: 34px minmax(0, 1fr);
-  gap: 12px;
-  width: min(100%, 860px);
+  --chat-message-text: #0d0d0d;
+  --chat-message-user-text: #0d0d0d;
+  --chat-message-user-surface: #f4f4f4;
+  --chat-message-inline-code-surface: #ececec;
+  --chat-message-code-surface: #f4f4f4;
+  --chat-message-code-header: #e8e8e8;
+  --chat-message-divider: rgb(0 0 0 / 0.15);
+  --chat-message-divider-subtle: rgb(0 0 0 / 0.05);
+  --chat-message-action-hover: #ececec;
+  --chat-message-streaming-dot: #0d0d0d;
+
+  display: block;
+  min-width: 0;
+  width: min(100%, 768px);
   margin: 0 auto;
-  padding: 18px 22px;
+  padding: 0;
+  color: var(--chat-message-text);
+  font-size: 16px;
+  font-weight: 400;
+  line-height: 26px;
 }
 
 .chat-message--assistant {
-  border: 1px solid var(--lx-clay-border);
-  border-radius: 8px;
-  background: color-mix(in srgb, var(--lx-clay-surface) 94%, transparent);
-  box-shadow: var(--lx-clay-shadow-flat);
-}
-
-.chat-message__avatar {
-  display: grid;
-  place-items: center;
-  width: 32px;
-  height: 32px;
-  border-radius: 8px;
-  color: var(--lx-clay-accent);
-  background: var(--lx-clay-accent-soft);
-}
-
-.chat-message--user .chat-message__avatar {
-  color: var(--lx-clay-text-secondary);
-  background: var(--lx-clay-recessed);
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
 }
 
 .chat-message__body {
   min-width: 0;
 }
 
+.chat-message--user .chat-message__body {
+  display: flex;
+  width: 100%;
+  flex-direction: column;
+  align-items: flex-end;
+}
+
+.user-message-group {
+  display: flex;
+  width: 100%;
+  max-width: 100%;
+  flex-direction: column;
+  align-items: flex-end;
+  margin-left: auto;
+}
+
+.user-message-group > .chat-message__actions {
+  align-self: flex-end;
+  margin-left: auto;
+}
+
 .chat-message__meta {
   display: flex;
   align-items: center;
   gap: 8px;
-  min-height: 24px;
-  margin-bottom: 5px;
-  color: var(--lx-clay-text);
-  font-size: 13px;
-  font-weight: 800;
+  min-height: 20px;
+  margin-bottom: 8px;
+  color: var(--workspace-text-secondary);
+  font-size: var(--workspace-type-secondary-size);
+  font-weight: var(--workspace-type-secondary-weight);
 }
 
-.chat-message__streaming,
 .chat-message__status {
-  color: var(--lx-clay-text-secondary);
-  font-size: 12px;
-  font-weight: 600;
+  color: var(--workspace-text-secondary);
+  font-size: var(--workspace-type-secondary-size);
+  font-weight: var(--workspace-type-secondary-weight);
 }
 
 .chat-message__plain {
   margin: 0;
-  color: var(--lx-clay-text);
-  font-size: 15px;
-  line-height: 1.75;
+  color: var(--chat-message-text);
+  font-size: 16px;
+  font-weight: 400;
+  line-height: 26px;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
 
+.chat-message--user .chat-message__plain {
+  width: fit-content;
+  max-width: min(70%, 640px);
+  margin-left: auto;
+  border-radius: 22px;
+  padding: 10px 16px;
+  color: var(--chat-message-user-text);
+  background: var(--chat-message-user-surface);
+  line-height: 24px;
+}
+
 .chat-message__markdown {
-  color: var(--lx-clay-text);
-  font-size: 15px;
-  line-height: 1.75;
+  color: var(--chat-message-text);
+  font-size: 16px;
+  font-weight: 400;
+  line-height: 26px;
   overflow-wrap: anywhere;
+}
+
+.chat-message__markdown--streaming {
+  animation: chat-streaming-content-enter 180ms ease-out both;
 }
 
 .chat-message__markdown :deep(> :first-child) {
@@ -308,18 +376,100 @@ onBeforeUnmount(() => {
   margin-bottom: 0;
 }
 
-.chat-message__markdown :deep(p),
-.chat-message__markdown :deep(ul),
-.chat-message__markdown :deep(ol),
-.chat-message__markdown :deep(blockquote),
-.chat-message__markdown :deep(pre),
-.chat-message__markdown :deep(table) {
-  margin: 0 0 12px;
+.chat-message__markdown :deep(p) {
+  margin: 0 0 16px;
+}
+
+.chat-message__markdown :deep(h1),
+.chat-message__markdown :deep(h2),
+.chat-message__markdown :deep(h3),
+.chat-message__markdown :deep(h4),
+.chat-message__markdown :deep(h5),
+.chat-message__markdown :deep(h6) {
+  color: inherit;
+  font-weight: 600;
+  letter-spacing: normal;
+}
+
+.chat-message__markdown :deep(h1) {
+  margin: 28px 0 8px;
+  font-size: 24px;
+  line-height: 32px;
+}
+
+.chat-message__markdown :deep(h2) {
+  margin: 28px 0 8px;
+  font-size: 20px;
+  line-height: 28px;
+}
+
+.chat-message__markdown :deep(h3) {
+  margin: 16px 0 8px;
+  font-size: 18px;
+  line-height: 28px;
+}
+
+.chat-message__markdown :deep(h4),
+.chat-message__markdown :deep(h5),
+.chat-message__markdown :deep(h6) {
+  margin: 16px 0 0;
+  font-size: 16px;
+  line-height: 24px;
 }
 
 .chat-message__markdown :deep(ul),
 .chat-message__markdown :deep(ol) {
-  padding-left: 22px;
+  margin: 16px 0 8px;
+  padding-left: 26px;
+}
+
+.chat-message__markdown :deep(ul) {
+  list-style: disc;
+}
+
+.chat-message__markdown :deep(ol) {
+  list-style: decimal;
+}
+
+.chat-message__markdown :deep(li) {
+  margin: 0;
+  padding-left: 6px;
+  line-height: 26px;
+}
+
+.chat-message__markdown :deep(li::marker) {
+  color: currentColor;
+  font-size: 16px;
+  font-weight: 700;
+}
+
+.chat-message__markdown :deep(li > p) {
+  margin: 0;
+}
+
+.chat-message__markdown :deep(li > p + p) {
+  margin-top: 8px;
+}
+
+.chat-message__markdown :deep(li > ul),
+.chat-message__markdown :deep(li > ol) {
+  margin: 8px 0 0;
+}
+
+.chat-message__markdown :deep(ul ul) {
+  list-style: circle;
+}
+
+.chat-message__markdown :deep(ul ul ul) {
+  list-style: square;
+}
+
+.chat-message__markdown :deep(strong) {
+  font-weight: 600;
+}
+
+.chat-message__markdown :deep(del) {
+  color: var(--workspace-text-secondary);
 }
 
 .chat-message__markdown :deep(a) {
@@ -329,167 +479,254 @@ onBeforeUnmount(() => {
 }
 
 .chat-message__markdown :deep(code) {
-  border-radius: 5px;
+  border-radius: 6px;
   padding: 2px 5px;
-  color: var(--lx-clay-text);
-  background: var(--lx-clay-recessed);
-  font-family: var(--lx-clay-font-mono);
-  font-size: 0.88em;
+  color: var(--chat-message-text);
+  background: var(--chat-message-inline-code-surface);
+  font-family: var(--workspace-font-mono);
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 26px;
 }
 
 .chat-message__markdown :deep(pre) {
+  position: relative;
   max-width: 100%;
+  margin: 8px 0 16px;
   overflow-x: auto;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 8px;
-  padding: 14px 16px;
-  color: #f8f5fc;
-  background: #120f18;
+  border: 0;
+  border-radius: 24px;
+  padding: 0 16px 16px;
+  color: var(--chat-message-text);
+  background: var(--chat-message-code-surface);
+  box-shadow: inset 0 0 0 1px var(--workspace-border);
+  font-size: 14px;
+  font-weight: 400;
+  line-height: 24px;
+  tab-size: 2;
+}
+
+.chat-message__markdown :deep(pre::before) {
+  content: attr(data-language);
+  display: block;
+  min-width: max-content;
+  margin: 0 -16px 14px;
+  border-bottom: 1px solid var(--workspace-divider);
+  padding: 8px 12px;
+  color: var(--workspace-text-secondary);
+  background: var(--chat-message-code-header);
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 24px;
 }
 
 .chat-message__markdown :deep(pre code) {
   padding: 0;
   color: inherit;
   background: transparent;
+  font-size: 12.25px;
+  font-weight: 400;
+  line-height: 20px;
 }
 
 .chat-message__markdown :deep(blockquote) {
-  border: 1px solid var(--lx-clay-border);
-  border-radius: 6px;
-  padding: 9px 12px;
-  color: var(--lx-clay-text-secondary);
-  background: var(--lx-clay-recessed);
+  position: relative;
+  margin: 16px 0 8px;
+  border: 0;
+  padding: 8px 0 8px 24px;
+  color: inherit;
+  background: transparent;
+  line-height: 24px;
+}
+
+.chat-message__markdown :deep(blockquote::after) {
+  content: '';
+  position: absolute;
+  top: 8px;
+  left: 0;
+  width: 4px;
+  height: 28px;
+  border-radius: 999px;
+  background: var(--chat-message-divider);
+}
+
+.chat-message__markdown :deep(blockquote > :last-child) {
+  margin-bottom: 0;
+}
+
+.chat-message__markdown :deep(hr) {
+  height: 1px;
+  margin: 28px 0;
+  border: 0;
+  background: var(--chat-message-divider);
+}
+
+.chat-message__markdown :deep(> hr:last-child) {
+  margin-bottom: 28px;
 }
 
 .chat-message__markdown :deep(table) {
   display: block;
+  width: 100%;
   max-width: 100%;
+  margin: 16px 0 8px;
   overflow-x: auto;
-  border-collapse: collapse;
+  border: 0;
+  border-radius: 0;
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: 14px;
+  font-weight: 400;
+  line-height: 24px;
 }
 
 .chat-message__markdown :deep(th),
 .chat-message__markdown :deep(td) {
-  border: 1px solid var(--lx-clay-border);
-  padding: 7px 10px;
+  min-width: 120px;
+  border: 0;
   text-align: left;
 }
 
-.chat-message__thinking {
+.chat-message__markdown :deep(th) {
+  border-bottom: 1px solid var(--chat-message-divider);
+  padding: 8px 24px 8px 0;
+  background: transparent;
+  font-weight: 600;
+  line-height: 16px;
+  vertical-align: bottom;
+}
+
+.chat-message__markdown :deep(td) {
+  border-bottom: 1px solid var(--chat-message-divider-subtle);
+  padding: 10px 24px 10px 0;
+  line-height: 24px;
+  vertical-align: baseline;
+}
+
+.chat-message__markdown :deep(tr:last-child td) {
+  border-bottom: 0;
+}
+
+.chat-message__markdown :deep(th:last-child),
+.chat-message__markdown :deep(td:last-child) {
+  padding-right: 0;
+}
+
+.chat-message__streaming-placeholder {
   display: flex;
   align-items: center;
-  gap: 4px;
-  height: 24px;
+  justify-content: flex-start;
+  height: 26px;
+  margin: 0;
+  padding: 0;
 }
 
-.chat-message__thinking span {
-  width: 6px;
-  height: 6px;
+.chat-message__streaming-dot {
+  display: block;
+  width: 8px;
+  height: 8px;
   border-radius: 50%;
-  background: var(--lx-clay-accent);
-  animation: chat-thinking 1.15s ease-in-out infinite;
+  background: var(--chat-message-streaming-dot);
+  transform-origin: center;
+  animation: chat-streaming-breathe 1.2s ease-in-out infinite;
 }
 
-.chat-message__thinking span:nth-child(2) { animation-delay: 0.14s; }
-.chat-message__thinking span:nth-child(3) { animation-delay: 0.28s; }
+.chat-message__failure {
+  display: flex;
+  align-items: flex-start;
+  flex-wrap: wrap;
+  gap: 10px 14px;
+  margin-top: 8px;
+}
 
 .chat-message__error {
   display: flex;
   align-items: flex-start;
   gap: 7px;
-  margin-top: 8px;
+  min-width: 0;
   color: var(--lx-clay-danger, #b91c1c);
-  font-size: 13px;
+  font-size: var(--workspace-type-body-size);
+  font-weight: var(--workspace-type-body-weight);
   line-height: 1.5;
 }
 
-.chat-message__receipt {
-  display: flex;
-  align-items: flex-start;
-  gap: 8px 14px;
-  flex-wrap: wrap;
-  margin-top: 13px;
-  border-top: 1px solid var(--lx-clay-border);
-  padding-top: 10px;
-  color: var(--lx-clay-text-muted);
-  font-size: 11px;
-  line-height: 1.55;
+.chat-message__error span {
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
-.chat-message__receipt-status {
+.chat-message__retry-button {
   display: inline-flex;
-  min-height: 22px;
+  min-height: 36px;
   align-items: center;
-  gap: 5px;
-  color: var(--lx-clay-text-secondary);
-  font-weight: 700;
+  justify-content: center;
+  gap: 7px;
+  border: 1px solid var(--workspace-border);
+  border-radius: 10px;
+  padding: 6px 12px;
+  color: var(--workspace-text);
+  background: transparent;
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 20px;
+  transition: color 150ms ease, background-color 150ms ease, border-color 150ms ease;
 }
 
-.chat-message__receipt--charged .chat-message__receipt-status,
-.chat-message__receipt--subscription .chat-message__receipt-status {
-  color: var(--lx-clay-success-text);
+.chat-message__retry-button:hover {
+  border-color: var(--workspace-text-secondary);
+  background: var(--chat-message-action-hover);
 }
 
-.chat-message__receipt--failed .chat-message__receipt-status {
-  color: var(--lx-clay-danger);
+.chat-message__retry-button:disabled,
+.chat-message__icon-button:disabled {
+  cursor: wait;
+  opacity: 0.6;
 }
 
-.chat-message__receipt-details {
-  display: flex;
-  min-width: min(100%, 520px);
-  flex: 1;
-  align-items: center;
-  gap: 3px 12px;
-  flex-wrap: wrap;
-  font-variant-numeric: tabular-nums;
-}
-
-.chat-message__receipt-details > span {
-  white-space: nowrap;
-}
-
-.chat-message__receipt-credit {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-}
-
-.chat-message__receipt-charge {
-  color: var(--lx-clay-text-secondary);
-  font-weight: 700;
-}
-
-.chat-message__low-balance {
-  display: inline-flex;
-  min-height: 28px;
-  align-items: center;
-  gap: 5px;
-  color: var(--lx-clay-warning);
-  text-decoration: none;
-}
-
-.chat-message__low-balance strong {
-  color: var(--lx-clay-accent-deep);
-  font-weight: 800;
-}
-
-.chat-message__low-balance:hover strong {
-  text-decoration: underline;
-  text-underline-offset: 3px;
+.chat-message__retry-button:focus-visible {
+  outline: 2px solid var(--lx-clay-accent);
+  outline-offset: 2px;
 }
 
 .chat-message__actions {
   display: flex;
+  align-items: center;
   gap: 4px;
-  min-height: 30px;
-  margin-top: 8px;
+  min-height: 32px;
+  margin-top: 10px;
+}
+
+.chat-message__activity-button {
+  display: inline-flex;
+  min-height: 32px;
+  align-items: center;
+  gap: 6px;
+  border: 0;
+  border-radius: 7px;
+  padding: 0 8px;
+  color: var(--workspace-text-secondary);
+  background: transparent;
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 20px;
+  transition: color 150ms ease, background-color 150ms ease;
+}
+
+.chat-message__activity-button:hover {
+  color: var(--workspace-text);
+  background: var(--chat-message-action-hover);
+}
+
+.chat-message__activity-button:focus-visible {
+  outline: 2px solid var(--lx-clay-accent);
+  outline-offset: 2px;
 }
 
 .chat-message__icon-button {
   display: grid;
   place-items: center;
-  width: 30px;
-  height: 30px;
+  width: 32px;
+  height: 32px;
   border: 0;
   border-radius: 7px;
   color: var(--lx-clay-text-secondary);
@@ -498,8 +735,21 @@ onBeforeUnmount(() => {
 }
 
 .chat-message__icon-button:hover {
-  color: var(--lx-clay-accent);
-  background: var(--lx-clay-accent-soft);
+  color: var(--workspace-text);
+  background: var(--chat-message-action-hover);
+}
+
+:global(html.dark .chat-message) {
+  --chat-message-text: #ffffff;
+  --chat-message-user-text: #000000;
+  --chat-message-user-surface: #ececec;
+  --chat-message-inline-code-surface: #424242;
+  --chat-message-code-surface: #212121;
+  --chat-message-code-header: #171717;
+  --chat-message-divider: rgb(255 255 255 / 0.15);
+  --chat-message-divider-subtle: rgb(255 255 255 / 0.05);
+  --chat-message-action-hover: #212121;
+  --chat-message-streaming-dot: #ffffff;
 }
 
 .chat-message__icon-button:focus-visible {
@@ -507,21 +757,23 @@ onBeforeUnmount(() => {
   outline-offset: 2px;
 }
 
-@keyframes chat-thinking {
-  0%, 70%, 100% { opacity: 0.35; transform: translateY(0); }
-  35% { opacity: 1; transform: translateY(-3px); }
+@keyframes chat-streaming-breathe {
+  0%, 100% { opacity: 0.35; transform: scale(0.72); }
+  50% { opacity: 1; transform: scale(1); }
+}
+
+@keyframes chat-streaming-content-enter {
+  from { opacity: 0; }
+  to { opacity: 1; }
 }
 
 @media (max-width: 640px) {
   .chat-message {
-    grid-template-columns: 30px minmax(0, 1fr);
-    gap: 9px;
-    padding: 15px 12px;
+    padding: 0 8px;
   }
 
-  .chat-message__avatar {
-    width: 30px;
-    height: 30px;
+  .chat-message--user .chat-message__plain {
+    max-width: 86%;
   }
 
   .chat-message__icon-button {
@@ -529,25 +781,24 @@ onBeforeUnmount(() => {
     height: 44px;
   }
 
-  .chat-message__receipt {
-    gap: 5px 10px;
-  }
+}
 
-  .chat-message__receipt-status,
-  .chat-message__receipt-details,
-  .chat-message__low-balance {
-    width: 100%;
-  }
-
-  .chat-message__receipt-details > span {
-    white-space: normal;
+@media (hover: none) and (pointer: coarse) {
+  .chat-message__retry-button,
+  .chat-message__activity-button {
+    min-height: 44px;
   }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .chat-message__thinking span {
+  .chat-message__markdown--streaming,
+  .chat-message__streaming-dot {
     animation: none;
-    opacity: 0.7;
+  }
+
+  .chat-message__streaming-dot {
+    opacity: 1;
+    transform: none;
   }
 }
 </style>

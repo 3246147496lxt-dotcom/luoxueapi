@@ -138,6 +138,9 @@ const makeGroup = (overrides: Partial<AdminGroup> = {}): AdminGroup => ({
   peak_start: '00:00',
   peak_end: '00:00',
   peak_rate_multiplier: 1,
+  profit_control_enabled: false,
+  profit_min_margin: 0,
+  profit_safety_buffer: 0,
   claude_code_only: false,
   fallback_group_id: null,
   fallback_group_id_on_invalid_request: null,
@@ -285,6 +288,48 @@ describe('admin group editor workspace', () => {
     expect(router.currentRoute.value.params.id).toBe('7')
     expect(router.currentRoute.value.query.section).toBe('general')
     expect(confirm).not.toHaveBeenCalled()
+  })
+
+  it('hydrates profit percentages and submits backend decimal values', async () => {
+    getGroupById.mockResolvedValueOnce(makeGroup({
+      profit_control_enabled: true,
+      profit_min_margin: 0.3,
+      profit_safety_buffer: 0.025,
+    }))
+    const { wrapper } = await mountEditor('/admin/groups/2/edit?section=pricing')
+
+    expect(wrapper.get<HTMLInputElement>('[data-test="profit-control-enabled"]').element.checked).toBe(true)
+    expect(wrapper.get<HTMLInputElement>('[data-test="profit-min-margin"]').element.value).toBe('30')
+    expect(wrapper.get<HTMLInputElement>('[data-test="profit-safety-buffer"]').element.value).toBe('2.5')
+
+    await wrapper.get('[data-test="profit-min-margin"]').setValue('35.5')
+    await wrapper.get('[data-test="profit-safety-buffer"]').setValue('4.5')
+    await wrapper.get('#edit-group-form').trigger('submit')
+    await flushPromises()
+
+    expect(updateGroupRequest).toHaveBeenCalledWith(
+      2,
+      expect.objectContaining({
+        profit_control_enabled: true,
+        profit_min_margin: 0.355,
+        profit_safety_buffer: 0.045,
+      }),
+    )
+  })
+
+  it('blocks an invalid profit threshold before the admin API call', async () => {
+    getGroupById.mockResolvedValueOnce(makeGroup({
+      profit_control_enabled: true,
+      profit_min_margin: 0.6,
+      profit_safety_buffer: 0.4,
+    }))
+    const { wrapper } = await mountEditor('/admin/groups/2/edit?section=pricing')
+
+    await wrapper.get('#edit-group-form').trigger('submit')
+    await flushPromises()
+
+    expect(updateGroupRequest).not.toHaveBeenCalled()
+    expect(showError).toHaveBeenCalledWith('admin.groups.profitControl.sumTooHigh')
   })
 
   it.each([

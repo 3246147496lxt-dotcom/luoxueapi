@@ -25,4 +25,54 @@ func TestUsageStatsCacheKey_StableAndDistinct(t *testing.T) {
 	withUser := base
 	withUser.UserID = 7
 	require.NotEqual(t, k1, usageStatsCacheKey(withUser), "different user must change key")
+
+	matched := false
+	withMatchedAudit := base
+	withMatchedAudit.UpstreamModelMismatch = &matched
+	mismatched := true
+	withMismatchedAudit := base
+	withMismatchedAudit.UpstreamModelMismatch = &mismatched
+	require.NotEqual(t, k1, usageStatsCacheKey(withMatchedAudit), "unobserved and explicit match must not share a key")
+	require.NotEqual(t, k1, usageStatsCacheKey(withMismatchedAudit), "unobserved and explicit mismatch must not share a key")
+	require.NotEqual(t, usageStatsCacheKey(withMatchedAudit), usageStatsCacheKey(withMismatchedAudit), "match and mismatch must not share a key")
+}
+
+func TestDashboardCacheKeysDistinguishUpstreamModelAuditTriState(t *testing.T) {
+	matched := false
+	mismatched := true
+	trendBase := dashboardTrendCacheKey{StartTime: "start", EndTime: "end", Granularity: "hour"}
+	modelBase := dashboardModelGroupCacheKey{StartTime: "start", EndTime: "end", ModelSource: "requested"}
+
+	for _, keys := range [][3]string{
+		{
+			mustMarshalDashboardCacheKey(trendBase),
+			mustMarshalDashboardCacheKey(func() dashboardTrendCacheKey {
+				value := trendBase
+				value.UpstreamModelMismatch = &matched
+				return value
+			}()),
+			mustMarshalDashboardCacheKey(func() dashboardTrendCacheKey {
+				value := trendBase
+				value.UpstreamModelMismatch = &mismatched
+				return value
+			}()),
+		},
+		{
+			mustMarshalDashboardCacheKey(modelBase),
+			mustMarshalDashboardCacheKey(func() dashboardModelGroupCacheKey {
+				value := modelBase
+				value.UpstreamModelMismatch = &matched
+				return value
+			}()),
+			mustMarshalDashboardCacheKey(func() dashboardModelGroupCacheKey {
+				value := modelBase
+				value.UpstreamModelMismatch = &mismatched
+				return value
+			}()),
+		},
+	} {
+		require.NotEqual(t, keys[0], keys[1])
+		require.NotEqual(t, keys[0], keys[2])
+		require.NotEqual(t, keys[1], keys[2])
+	}
 }

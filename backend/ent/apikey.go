@@ -39,6 +39,8 @@ type APIKey struct {
 	Status string `json:"status,omitempty"`
 	// API key purpose: user, web_chat, or desktop
 	Purpose string `json:"purpose,omitempty"`
+	// Default OpenAI service tier preference: standard or priority
+	ServiceTierPreference string `json:"service_tier_preference,omitempty"`
 	// ManagedDeviceID holds the value of the "managed_device_id" field.
 	ManagedDeviceID *int64 `json:"managed_device_id,omitempty"`
 	// Last usage time of this API key
@@ -145,7 +147,7 @@ func (*APIKey) scanValues(columns []string) ([]any, error) {
 			values[i] = new(sql.NullFloat64)
 		case apikey.FieldID, apikey.FieldUserID, apikey.FieldGroupID, apikey.FieldManagedDeviceID:
 			values[i] = new(sql.NullInt64)
-		case apikey.FieldKey, apikey.FieldName, apikey.FieldStatus, apikey.FieldPurpose:
+		case apikey.FieldKey, apikey.FieldName, apikey.FieldStatus, apikey.FieldPurpose, apikey.FieldServiceTierPreference:
 			values[i] = new(sql.NullString)
 		case apikey.FieldCreatedAt, apikey.FieldUpdatedAt, apikey.FieldDeletedAt, apikey.FieldLastUsedAt, apikey.FieldExpiresAt, apikey.FieldWindow5hStart, apikey.FieldWindow1dStart, apikey.FieldWindow7dStart:
 			values[i] = new(sql.NullTime)
@@ -225,6 +227,12 @@ func (_m *APIKey) assignValues(columns []string, values []any) error {
 				return fmt.Errorf("unexpected type %T for field purpose", values[i])
 			} else if value.Valid {
 				_m.Purpose = value.String
+			}
+		case apikey.FieldServiceTierPreference:
+			if value, ok := values[i].(*sql.NullString); !ok {
+				return fmt.Errorf("unexpected type %T for field service_tier_preference", values[i])
+			} else if value.Valid {
+				_m.ServiceTierPreference = value.String
 			}
 		case apikey.FieldManagedDeviceID:
 			if value, ok := values[i].(*sql.NullInt64); !ok {
@@ -418,6 +426,9 @@ func (_m *APIKey) String() string {
 	builder.WriteString(", ")
 	builder.WriteString("purpose=")
 	builder.WriteString(_m.Purpose)
+	builder.WriteString(", ")
+	builder.WriteString("service_tier_preference=")
+	builder.WriteString(_m.ServiceTierPreference)
 	builder.WriteString(", ")
 	if v := _m.ManagedDeviceID; v != nil {
 		builder.WriteString("managed_device_id=")

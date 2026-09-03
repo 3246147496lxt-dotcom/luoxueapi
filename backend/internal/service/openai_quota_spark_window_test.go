@@ -132,6 +132,42 @@ func TestBuildCodexSparkWindowExtraUpdates_ContainsCodexKeys(t *testing.T) {
 	require.InDelta(t, 0.15, updates["codex_7d_used_percent"], 1e-9)
 }
 
+func TestBuildCodexSparkWindowExtraUpdates_SevenDayOnlyUsesAbsoluteResetAt(t *testing.T) {
+	now := time.Date(2026, 8, 4, 12, 0, 0, 0, time.UTC)
+	resetAt := now.Add(36 * time.Hour)
+	usage := &OpenAIQuotaUsage{
+		AdditionalRateLimits: []OpenAIAdditionalRateLimit{
+			{
+				MeteredFeature: "codex_bengalfox",
+				RateLimit: &OpenAIRateLimit{
+					PrimaryWindow: &OpenAIRateLimitWindow{
+						UsedPercent:        38,
+						LimitWindowSeconds: int64((7 * 24 * time.Hour) / time.Second),
+						ResetAt:            resetAt.Unix(),
+					},
+				},
+			},
+		},
+	}
+
+	updates := buildCodexSparkWindowExtraUpdates(usage, now)
+	require.NotNil(t, updates)
+	require.InDelta(t, 38, updates["codex_7d_used_percent"], 1e-9)
+	require.Equal(t, int((36*time.Hour)/time.Second), updates["codex_7d_reset_after_seconds"])
+	require.Equal(t, 7*24*60, updates["codex_7d_window_minutes"])
+	require.Equal(t, resetAt.Format(time.RFC3339), updates["codex_7d_reset_at"])
+
+	for _, key := range []string{
+		"codex_5h_used_percent",
+		"codex_5h_reset_after_seconds",
+		"codex_5h_window_minutes",
+		"codex_5h_reset_at",
+	} {
+		require.Contains(t, updates, key)
+		require.Nil(t, updates[key], "%s should be an explicit tombstone", key)
+	}
+}
+
 // TestBuildCodexSparkWindowExtraUpdates_NilUsage 验证 nil usage 返回 nil。
 func TestBuildCodexSparkWindowExtraUpdates_NilUsage(t *testing.T) {
 	require.Nil(t, buildCodexSparkWindowExtraUpdates(nil, time.Now()))

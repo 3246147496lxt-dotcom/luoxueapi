@@ -36,9 +36,9 @@ const baseQuota: QuotaItem = {
   isCurrentMembership: true,
   state: 'available',
   usedPercent: 68,
-  usedLabel: '已用 ❄136.20',
-  limitLabel: '额度 ❄200.00',
-  remainingLabel: '剩余 ❄63.80',
+  usedLabel: '已用 136.20 积分',
+  limitLabel: '额度 200.00 积分',
+  remainingLabel: '剩余 63.80 积分',
   resetLabel: '2 天 14 小时后重置',
   resetsAt: demoResetsAt,
   monthlyRemainingPercent: 74,
@@ -56,22 +56,22 @@ const quotaStateOverrides: Record<QuotaState, Partial<QuotaItem>> = {
   available: {
     state: 'available',
     usedPercent: 68,
-    usedLabel: '已用 ❄136.20',
-    remainingLabel: '剩余 ❄63.80',
+    usedLabel: '已用 136.20 积分',
+    remainingLabel: '剩余 63.80 积分',
     resetLabel: '2 天 14 小时后重置'
   },
   warning: {
     state: 'warning',
     usedPercent: 92,
-    usedLabel: '已用 ❄184.00',
-    remainingLabel: '剩余 ❄16.00',
+    usedLabel: '已用 184.00 积分',
+    remainingLabel: '剩余 16.00 积分',
     resetLabel: '2 天 14 小时后重置'
   },
   exhausted: {
     state: 'exhausted',
     usedPercent: 100,
-    usedLabel: '已用 ❄200.00',
-    remainingLabel: '剩余 ❄0.00',
+    usedLabel: '已用 200.00 积分',
+    remainingLabel: '剩余 0.00 积分',
     resetLabel: '2 天 14 小时后重置'
   },
   expired: {
@@ -81,8 +81,8 @@ const quotaStateOverrides: Record<QuotaState, Partial<QuotaItem>> = {
     isCurrentMembership: false,
     state: 'expired',
     usedPercent: 100,
-    usedLabel: '已用 ❄136.20',
-    remainingLabel: '剩余 ❄0.00',
+    usedLabel: '已用 136.20 积分',
+    remainingLabel: '剩余 0.00 积分',
     resetLabel: '会员已到期',
     resetsAt: null,
     monthlyRemainingPercent: null,

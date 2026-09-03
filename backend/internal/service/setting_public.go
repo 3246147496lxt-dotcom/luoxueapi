@@ -222,6 +222,7 @@ func (s *SettingService) GetPublicSettings(ctx context.Context) (*PublicSettings
 		SettingKeyChannelMonitorDefaultIntervalSeconds,
 		SettingKeyAvailableChannelsEnabled,
 		SettingKeyPublicModelCatalogEnabled,
+		SettingKeySkillMarketplaceEnabled,
 		SettingKeyAffiliateEnabled,
 		SettingKeyRiskControlEnabled,
 		SettingKeyAllowUserViewErrorRequests,
@@ -338,6 +339,7 @@ func (s *SettingService) GetPublicSettings(ctx context.Context) (*PublicSettings
 
 		AvailableChannelsEnabled:  settings[SettingKeyAvailableChannelsEnabled] == "true",
 		PublicModelCatalogEnabled: settings[SettingKeyPublicModelCatalogEnabled] == "true" && !backendModeEnabled,
+		SkillMarketplaceEnabled:   settings[SettingKeySkillMarketplaceEnabled] == "true" && !backendModeEnabled,
 
 		AffiliateEnabled: settings[SettingKeyAffiliateEnabled] == "true",
 
@@ -565,6 +567,7 @@ type PublicSettingsInjectionPayload struct {
 	ChannelMonitorDefaultIntervalSeconds int  `json:"channel_monitor_default_interval_seconds"`
 	AvailableChannelsEnabled             bool `json:"available_channels_enabled"`
 	PublicModelCatalogEnabled            bool `json:"public_model_catalog_enabled"`
+	SkillMarketplaceEnabled              bool `json:"skill_marketplace_enabled"`
 	AffiliateEnabled                     bool `json:"affiliate_enabled"`
 	RiskControlEnabled                   bool `json:"risk_control_enabled"`
 	AllowUserViewErrorRequests           bool `json:"allow_user_view_error_requests"`
@@ -576,6 +579,16 @@ func (s *SettingService) GetPublicSettingsForInjection(ctx context.Context) (any
 	settings, err := s.GetPublicSettings(ctx)
 	if err != nil {
 		return nil, err
+	}
+
+	// Login agreement documents are only needed on the login/register flows when
+	// the agreement is enabled. Keep the full documents in GetPublicSettings so
+	// the legal page and the authenticated settings API remain unchanged, but do
+	// not embed their (potentially large) Markdown bodies into every SSR HTML
+	// response while the feature is disabled.
+	loginAgreementDocuments := []LoginAgreementDocument{}
+	if settings.LoginAgreementEnabled {
+		loginAgreementDocuments = settings.LoginAgreementDocuments
 	}
 
 	return &PublicSettingsInjectionPayload{
@@ -590,7 +603,7 @@ func (s *SettingService) GetPublicSettingsForInjection(ctx context.Context) (any
 		LoginAgreementMode:               settings.LoginAgreementMode,
 		LoginAgreementUpdatedAt:          settings.LoginAgreementUpdatedAt,
 		LoginAgreementRevision:           settings.LoginAgreementRevision,
-		LoginAgreementDocuments:          settings.LoginAgreementDocuments,
+		LoginAgreementDocuments:          loginAgreementDocuments,
 		TurnstileEnabled:                 settings.TurnstileEnabled,
 		TurnstileSiteKey:                 settings.TurnstileSiteKey,
 		SiteName:                         settings.SiteName,
@@ -632,6 +645,7 @@ func (s *SettingService) GetPublicSettingsForInjection(ctx context.Context) (any
 		ChannelMonitorDefaultIntervalSeconds: settings.ChannelMonitorDefaultIntervalSeconds,
 		AvailableChannelsEnabled:             settings.AvailableChannelsEnabled,
 		PublicModelCatalogEnabled:            settings.PublicModelCatalogEnabled,
+		SkillMarketplaceEnabled:              settings.SkillMarketplaceEnabled,
 		AffiliateEnabled:                     settings.AffiliateEnabled,
 		RiskControlEnabled:                   settings.RiskControlEnabled,
 		AllowUserViewErrorRequests:           settings.AllowUserViewErrorRequests,

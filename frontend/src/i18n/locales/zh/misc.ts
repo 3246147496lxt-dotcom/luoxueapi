@@ -69,6 +69,34 @@ export default {
     notConfiguredDesc: '管理员已开启入口，但尚未配置充值链接，请联系管理员。'
   },
 
+  // Balance and current membership overview. The full plan catalogue remains
+  // on the standalone pricing page.
+  balanceMembership: {
+    balanceTitle: '账户余额',
+    balanceHint: '用于按量使用',
+    pointsUnit: '积分',
+    paygNote: '按量使用，不等同于会员订阅',
+    recharge: '充值余额',
+    redeem: '兑换码',
+    currentMember: '当前会员',
+    monthlyQuota: '本月额度',
+    remaining: '剩余',
+    monthlyQuotaUnavailable: '本月额度暂未设置',
+    remainingLabel: '剩余额度',
+    monthlyResetPending: '等待首次使用',
+    monthlyReset: '{date} 重置',
+    expires: '{date} 到期',
+    renew: '续费会员',
+    upgrade: '升级会员',
+    viewPlans: '查看会员方案',
+    freeTitle: '免费版',
+    freeBadge: '未开通',
+    freeDescription: '当前尚未开通会员',
+    freeHint: '开通会员后可获得每月会员额度',
+    subscribe: '开通会员',
+    memberFallback: '会员'
+  },
+
   pricing: {
     eyebrow: '订阅套餐',
     title: '选择适合你的套餐',
@@ -81,6 +109,23 @@ export default {
     retry: '重新加载',
     emptyTitle: '暂时没有可购买的套餐',
     emptyDescription: '管理员尚未发布订阅套餐，你仍然可以继续使用余额按量计费。',
+    tierSelectorLabel: '方案等级选择',
+    tiers: {
+      low: {
+        name: '轻量级',
+        description: '适合体验 AI、学习和日常轻任务'
+      },
+      mid: {
+        name: '中量级',
+        description: '适合高频办公、内容创作和专业个人用户'
+      },
+      high: {
+        name: '高量级',
+        description: '适合重度 AI 工作流、专业创作者和团队用户'
+      }
+    },
+    recommended: '推荐选择',
+    currentPlan: '当前套餐',
     renewalOption: '续费可选',
     choosePlan: '选择此套餐',
     renewPlan: '选择续费方案',
@@ -90,6 +135,8 @@ export default {
     groupFilter: '正在查看所选分组的可用套餐',
     viewAllPlans: '查看全部套餐',
     includes: '套餐包含',
+    viewQuotaDetails: '查看额度详情',
+    viewQuotaDetailsAccessible: '查看 {plan} 套餐额度详情',
     validityDays: '{days} 天',
     metricLabels: {
       rate: '计费倍率',
@@ -130,7 +177,7 @@ export default {
 
   // Announcements Page
   announcements: {
-    title: '公告',
+    title: '公告通知',
     description: '查看系统公告',
     unreadOnly: '仅显示未读',
     markRead: '标记已读',
@@ -154,15 +201,30 @@ export default {
 
   // User Subscriptions Page
   userSubscriptions: {
-    title: '我的订阅',
-    description: '查看您的订阅计划和用量',
-    noActiveSubscriptions: '暂无有效订阅',
-    noActiveSubscriptionsDesc: '您没有任何有效订阅。请联系管理员获取订阅。',
+    title: '余额与会员',
+    description: '管理账户余额、兑换码与当前会员',
+    loading: '正在加载订阅',
+    emptyWithPlansTitle: '还没有订阅',
+    emptyWithPlansDesc: '查看可用套餐的额度、有效期和计费规则，选择适合您的方案。',
+    noPlansTitle: '暂未上架订阅套餐',
+    noPlansDesc: '当前没有可购买的订阅套餐。已有兑换码可直接兑换；如需开通订阅，请联系管理员。',
+    selfServiceDisabledTitle: '订阅暂未开放自助购买',
+    selfServiceDisabledDesc: '管理员尚未开放在线购买。已有兑换码可直接兑换；如需开通订阅，请联系管理员。',
+    purchaseOptionsUnknownTitle: '暂时无法确认订阅购买状态',
+    purchaseOptionsUnknownDesc: '您仍可充值或兑换，也可以联系管理员了解订阅方式。',
+    payAsYouGoAvailable: '没有订阅也可以继续使用余额按量计费。',
+    viewPlans: '查看订阅套餐',
+    rechargeOrRedeem: '充值 / 兑换',
+    contactAdmin: '联系管理员',
+    viewSubscriptionHelp: '查看订阅帮助',
     failedToLoad: '加载订阅失败',
+    failedToLoadDesc: '暂时无法获取您的订阅信息，请检查网络后重试。',
+    retry: '重新加载',
     status: {
       active: '有效',
       expired: '已过期',
-      revoked: '已撤销'
+      revoked: '已撤销',
+      suspended: '已暂停'
     },
     usage: '用量',
     expires: '到期时间',
@@ -226,7 +288,7 @@ export default {
       groupMultiplier: {
         title: '💰 3. 费率倍数',
         description:
-          '<div style="line-height: 1.7;"><p style="margin-bottom: 12px;">用户实扣雪花额度 = 渠道 USD 基础价 × 分组倍率。</p><div style="padding: 8px 12px; background: #fef3c7; border-left: 3px solid #f59e0b; border-radius: 4px; font-size: 13px; margin-bottom: 12px;"><b>⚙️ 计费规则：</b><ul style="margin: 8px 0 0 16px;"><li>渠道价格仍按 USD 录入</li><li>倍率可同时包含 CNY/USD 汇率和雪花兑换比例</li><li><b>70</b> - 5 USD / MTok × 70 = 350 雪花额度 / MTok</li><li><b>63</b> - 在倍率 70 基础上九折（70 × 0.9）</li></ul></div><p style="font-size: 13px; color: #6b7280;">若 1 CNY = 10 雪花额度且 1 USD = 7 CNY，则基准倍率为 70。</p></div>',
+          '<div style="line-height: 1.7;"><p style="margin-bottom: 12px;">用户实扣积分 = 渠道 USD 基础价 × 分组倍率。</p><div style="padding: 8px 12px; background: #fef3c7; border-left: 3px solid #f59e0b; border-radius: 4px; font-size: 13px; margin-bottom: 12px;"><b>⚙️ 计费规则：</b><ul style="margin: 8px 0 0 16px;"><li>渠道价格仍按 USD 录入</li><li>倍率可同时包含 CNY/USD 汇率和积分兑换比例</li><li><b>70</b> - 5 USD / MTok × 70 = 350 积分 / MTok</li><li><b>63</b> - 在倍率 70 基础上九折（70 × 0.9）</li></ul></div><p style="font-size: 13px; color: #6b7280;">若 1 CNY = 10 积分且 1 USD = 7 CNY，则基准倍率为 70。</p></div>',
         nextBtn: '下一步'
       },
       groupExclusive: {
@@ -475,7 +537,7 @@ export default {
     amountTooLow: '最低金额为 {min}',
     amountTooHigh: '最高金额为 {max}',
     amountNoMethod: '该金额没有可用的支付方式',
-    rechargeRatePreview: '当前倍率：¥1 = {credit} 雪花额度',
+    rechargeRatePreview: '当前倍率：¥1 = {credit} 积分',
     refundReason: '退款原因',
     refundReasonPlaceholder: '请描述您的退款原因',
     stripeLoadFailed: '支付组件加载失败，请刷新页面重试',
@@ -602,6 +664,7 @@ export default {
       refundSuccess: '退款成功',
       refundPending: '退款处理中，待网关确认',
       queryRefundStatus: '查询退款状态',
+      forceRefundConfirm: '退款等待期间余额发生变化。强制结算只会扣除当前可用余额，是否继续？',
       refundInfo: '退款信息',
       refundEnabled: '允许退款',
       allowUserRefund: '允许用户退款',
@@ -610,7 +673,7 @@ export default {
       deductBalanceHint: '从用户余额中扣回充值金额',
       userBalance: '用户余额',
       orderAmount: '订单金额',
-      insufficientBalance: '余额不足，将扣至 0 雪花额度',
+      insufficientBalance: '余额不足，将扣至 0 积分',
       noDeduction: '将不扣除用户余额',
       forceRefund: '强制退款（忽略余额检查）',
       orderCancelled: '订单已取消',

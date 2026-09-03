@@ -481,6 +481,66 @@ func (s *RedeemCodeRepoSuite) TestListByUser_DefaultLimit() {
 	s.Require().Len(codes, 1)
 }
 
+func (s *RedeemCodeRepoSuite) TestListByUserPaginated_DefaultIncludesOnlyBalanceHistoryBeforePagination() {
+	user := s.createUser(uniqueTestValue(s.T(), "history-types") + "@example.com")
+	base := time.Date(2026, 8, 3, 12, 0, 0, 0, time.UTC)
+	testCodes := []struct {
+		code     string
+		codeType string
+	}{
+		{code: "HIST-SUB", codeType: service.RedeemTypeSubscription},
+		{code: "HIST-INV", codeType: service.RedeemTypeInvitation},
+		{code: "HIST-BAL", codeType: service.RedeemTypeBalance},
+		{code: "HIST-CON", codeType: service.RedeemTypeConcurrency},
+	}
+	for index, testCode := range testCodes {
+		_, err := s.client.RedeemCode.Create().
+			SetCode(testCode.code).
+			SetType(testCode.codeType).
+			SetStatus(service.StatusUsed).
+			SetValue(1).
+			SetNotes("").
+			SetValidityDays(30).
+			SetUsedBy(user.ID).
+			SetUsedAt(base.Add(time.Duration(len(testCodes)-index) * time.Hour)).
+			Save(s.ctx)
+		s.Require().NoError(err)
+	}
+
+	firstPage, firstPagination, err := s.repo.ListByUserPaginated(
+		s.ctx,
+		user.ID,
+		pagination.PaginationParams{Page: 1, PageSize: 1},
+		"",
+	)
+	s.Require().NoError(err)
+	s.Require().Equal(int64(2), firstPagination.Total)
+	s.Require().Len(firstPage, 1)
+	s.Require().Equal(service.RedeemTypeBalance, firstPage[0].Type)
+
+	secondPage, secondPagination, err := s.repo.ListByUserPaginated(
+		s.ctx,
+		user.ID,
+		pagination.PaginationParams{Page: 2, PageSize: 1},
+		"",
+	)
+	s.Require().NoError(err)
+	s.Require().Equal(int64(2), secondPagination.Total)
+	s.Require().Len(secondPage, 1)
+	s.Require().Equal(service.RedeemTypeConcurrency, secondPage[0].Type)
+
+	subscriptions, subscriptionPagination, err := s.repo.ListByUserPaginated(
+		s.ctx,
+		user.ID,
+		pagination.PaginationParams{Page: 1, PageSize: 10},
+		service.RedeemTypeSubscription,
+	)
+	s.Require().NoError(err)
+	s.Require().Equal(int64(1), subscriptionPagination.Total)
+	s.Require().Len(subscriptions, 1)
+	s.Require().Equal(service.RedeemTypeSubscription, subscriptions[0].Type)
+}
+
 // --- Combined original test ---
 
 func (s *RedeemCodeRepoSuite) TestCreateBatch_Filters_Use_Idempotency_ListByUser() {

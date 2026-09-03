@@ -86,6 +86,29 @@ func (s *redeemCodeRepoStub) Use(_ context.Context, id, userID int64) error {
 	return ErrRedeemCodeNotFound
 }
 
+func (s *redeemCodeRepoStub) UseInvitation(ctx context.Context, id, userID int64) error {
+	for _, redeemCode := range s.codesByCode {
+		if redeemCode.ID != id || redeemCode.Type != RedeemTypeInvitation || !redeemCode.CanUse() {
+			continue
+		}
+		return s.Use(ctx, id, userID)
+	}
+	return ErrRedeemCodeUsed
+}
+
+func (s *redeemCodeRepoStub) RestoreInvitation(_ context.Context, code string, userID int64) error {
+	redeemCode, ok := s.codesByCode[code]
+	if !ok || redeemCode.Type != RedeemTypeInvitation || redeemCode.Status != StatusUsed || redeemCode.UsedBy == nil || *redeemCode.UsedBy != userID {
+		return nil
+	}
+	redeemCode.Status = StatusUnused
+	redeemCode.UsedBy = nil
+	redeemCode.UsedAt = nil
+	cloned := *redeemCode
+	s.updateCalls = append(s.updateCalls, &cloned)
+	return nil
+}
+
 func (s *redeemCodeRepoStub) List(context.Context, pagination.PaginationParams) ([]RedeemCode, *pagination.PaginationResult, error) {
 	panic("unexpected List call")
 }

@@ -52,6 +52,18 @@ func TestMigrationsRunner_IsIdempotent_AndSchemaIsUpToDate(t *testing.T) {
 	requireColumn(t, tx, "usage_logs", "video_count", "integer", 0, false)
 	requireColumn(t, tx, "usage_logs", "video_resolution", "character varying", 10, true)
 	requireColumn(t, tx, "usage_logs", "video_duration_seconds", "integer", 0, true)
+	requireColumn(t, tx, "usage_logs", "upstream_response_model", "character varying", 200, true)
+	requireColumn(t, tx, "usage_logs", "upstream_model_mismatch", "boolean", 0, true)
+	requireIndexDefinitionContains(
+		t,
+		tx,
+		"usage_logs",
+		"idx_usage_logs_upstream_model_mismatch_created_at",
+		"(created_at DESC, id DESC)",
+		"WHERE (upstream_model_mismatch IS TRUE)",
+	)
+	requireMigrationRecorded(t, tx, "234_add_usage_log_upstream_response_model.sql")
+	requireMigrationRecorded(t, tx, "235_add_usage_log_upstream_model_mismatch_index_notx.sql")
 	requireConstraintDefinitionContains(
 		t,
 		tx,
@@ -161,6 +173,18 @@ func TestMigrationsRunner_IsIdempotent_AndSchemaIsUpToDate(t *testing.T) {
 
 	// user_allowed_groups: created_at should be timestamptz
 	requireColumn(t, tx, "user_allowed_groups", "created_at", "timestamp with time zone", 0, false)
+
+	// projects: project metadata, conversation grouping, and file links.
+	var projectsRegclass sql.NullString
+	require.NoError(t, tx.QueryRowContext(context.Background(), "SELECT to_regclass('public.chat_projects')").Scan(&projectsRegclass))
+	require.True(t, projectsRegclass.Valid, "expected chat_projects table to exist")
+	requireColumn(t, tx, "chat_projects", "public_id", "character varying", 80, false)
+	requireColumn(t, tx, "chat_projects", "user_id", "bigint", 0, false)
+	requireColumn(t, tx, "chat_projects", "memory_mode", "character varying", 32, false)
+	requireColumn(t, tx, "chat_conversations", "project_id", "bigint", 0, true)
+	requireIndex(t, tx, "chat_projects", "idx_chat_projects_user_updated")
+	requireIndex(t, tx, "chat_conversations", "idx_chat_conversations_user_project_updated")
+	requireMigrationRecorded(t, tx, "236_projects.sql")
 }
 
 func TestMigrationsRunner_AuthIdentityAndPaymentSchemaStayAligned(t *testing.T) {

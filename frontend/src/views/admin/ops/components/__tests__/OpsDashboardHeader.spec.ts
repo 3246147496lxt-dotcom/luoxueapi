@@ -9,7 +9,7 @@ const { mockGetGroups, mockGetRealtimeTrafficSummary, mockSetRealtimeEnabled } =
   mockSetRealtimeEnabled: vi.fn()
 }))
 
-vi.mock('@/api', () => ({
+vi.mock('@/api/admin', () => ({
   adminAPI: {
     groups: {
       getAll: (...args: unknown[]) => mockGetGroups(...args)
@@ -23,7 +23,7 @@ vi.mock('@/api/admin/ops', () => ({
   }
 }))
 
-vi.mock('@/stores', () => ({
+vi.mock('@/stores/adminSettings', () => ({
   useAdminSettingsStore: () => ({
     opsRealtimeMonitoringEnabled: true,
     setOpsRealtimeMonitoringEnabledLocal: mockSetRealtimeEnabled
@@ -209,15 +209,14 @@ describe('OpsDashboardHeader', () => {
     await flushPromises()
 
     const toggle = wrapper.get('[data-testid="ops-diagnostic-toggle"]')
-    const details = wrapper.get('[data-testid="ops-diagnostic-details"]')
     expect(toggle.attributes('aria-expanded')).toBe('false')
     expect(toggle.attributes('aria-controls')).toBe('ops-diagnostic-details')
-    expect(details.attributes('id')).toBe('ops-diagnostic-details')
-    expect(details.attributes('style')).toContain('display: none')
+    expect(wrapper.find('[data-testid="ops-diagnostic-details"]').exists()).toBe(false)
 
     await toggle.trigger('click')
+    const details = wrapper.get('[data-testid="ops-diagnostic-details"]')
     expect(toggle.attributes('aria-expanded')).toBe('true')
-    expect(details.attributes('style') ?? '').not.toContain('display: none')
+    expect(details.attributes('id')).toBe('ops-diagnostic-details')
     expect(details.text()).toContain('admin.ops.systemHealth')
   })
 

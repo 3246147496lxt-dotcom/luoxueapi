@@ -182,18 +182,19 @@ type AICredit struct {
 
 // UsageInfo 账号使用量信息
 type UsageInfo struct {
-	Source             string         `json:"source,omitempty"`               // "passive" or "active"
-	UpdatedAt          *time.Time     `json:"updated_at,omitempty"`           // 更新时间
-	FiveHour           *UsageProgress `json:"five_hour"`                      // 5小时窗口
-	SevenDay           *UsageProgress `json:"seven_day,omitempty"`            // 7天窗口
-	SevenDaySonnet     *UsageProgress `json:"seven_day_sonnet,omitempty"`     // 7天Sonnet窗口
-	SevenDayFable      *UsageProgress `json:"seven_day_fable,omitempty"`      // 7天Fable窗口（响应头 7d_oi）
-	GeminiSharedDaily  *UsageProgress `json:"gemini_shared_daily,omitempty"`  // Gemini shared pool RPD (Google One / Code Assist)
-	GeminiProDaily     *UsageProgress `json:"gemini_pro_daily,omitempty"`     // Gemini Pro 日配额
-	GeminiFlashDaily   *UsageProgress `json:"gemini_flash_daily,omitempty"`   // Gemini Flash 日配额
-	GeminiSharedMinute *UsageProgress `json:"gemini_shared_minute,omitempty"` // Gemini shared pool RPM (Google One / Code Assist)
-	GeminiProMinute    *UsageProgress `json:"gemini_pro_minute,omitempty"`    // Gemini Pro RPM
-	GeminiFlashMinute  *UsageProgress `json:"gemini_flash_minute,omitempty"`  // Gemini Flash RPM
+	Source             string                  `json:"source,omitempty"`           // "passive" or "active"
+	UpdatedAt          *time.Time              `json:"updated_at,omitempty"`       // 更新时间
+	FiveHour           *UsageProgress          `json:"five_hour"`                  // 5小时窗口
+	SevenDay           *UsageProgress          `json:"seven_day,omitempty"`        // 7天窗口
+	SevenDaySonnet     *UsageProgress          `json:"seven_day_sonnet,omitempty"` // 7天Sonnet窗口
+	SevenDayFable      *UsageProgress          `json:"seven_day_fable,omitempty"`  // 7天Fable窗口（响应头 7d_oi）
+	OpenAISubscription *OpenAISubscriptionInfo `json:"openai_subscription,omitempty"`
+	GeminiSharedDaily  *UsageProgress          `json:"gemini_shared_daily,omitempty"`  // Gemini shared pool RPD (Google One / Code Assist)
+	GeminiProDaily     *UsageProgress          `json:"gemini_pro_daily,omitempty"`     // Gemini Pro 日配额
+	GeminiFlashDaily   *UsageProgress          `json:"gemini_flash_daily,omitempty"`   // Gemini Flash 日配额
+	GeminiSharedMinute *UsageProgress          `json:"gemini_shared_minute,omitempty"` // Gemini shared pool RPM (Google One / Code Assist)
+	GeminiProMinute    *UsageProgress          `json:"gemini_pro_minute,omitempty"`    // Gemini Pro RPM
+	GeminiFlashMinute  *UsageProgress          `json:"gemini_flash_minute,omitempty"`  // Gemini Flash RPM
 
 	// Antigravity 多模型配额
 	AntigravityQuota map[string]*AntigravityModelQuota `json:"antigravity_quota,omitempty"`
@@ -575,7 +576,10 @@ func (s *AccountUsageService) syncActiveToPassive(ctx context.Context, accountID
 
 func (s *AccountUsageService) getOpenAIUsage(ctx context.Context, account *Account, force bool) (*UsageInfo, error) {
 	now := time.Now()
-	usage := &UsageInfo{UpdatedAt: &now}
+	usage := &UsageInfo{
+		UpdatedAt:          &now,
+		OpenAISubscription: cachedOpenAISubscriptionInfo(account),
+	}
 
 	if account == nil {
 		return usage, nil
@@ -611,26 +615,55 @@ func (s *AccountUsageService) getOpenAIUsage(ctx context.Context, account *Accou
 			}
 		}
 	}
+	if force && s.openAIQuotaService != nil {
+		if subscription, err := s.openAIQuotaService.QuerySubscription(ctx, account.ID); err == nil && subscription != nil {
+			usage.OpenAISubscription = subscription
+		} else if err != nil {
+			slog.Debug("openai_subscription_refresh_failed", "account_id", account.ID, "error", err)
+		}
+	}
 
 	if s.usageLogRepo == nil {
 		return usage, nil
 	}
 
-	if stats, err := s.usageLogRepo.GetAccountWindowStats(ctx, account.ID, codexWindowStatsStart(usage.FiveHour, 5*time.Hour, now)); err == nil {
-		if usage.FiveHour == nil {
-			usage.FiveHour = &UsageProgress{Utilization: 0}
+	if usage.FiveHour != nil {
+		if stats, err := s.usageLogRepo.GetAccountWindowStats(ctx, account.ID, codexWindowStatsStart(usage.FiveHour, 5*time.Hour, now)); err == nil {
+			usage.FiveHour.WindowStats = windowStatsFromAccountStats(stats)
 		}
-		usage.FiveHour.WindowStats = windowStatsFromAccountStats(stats)
 	}
 
-	if stats, err := s.usageLogRepo.GetAccountWindowStats(ctx, account.ID, codexWindowStatsStart(usage.SevenDay, 7*24*time.Hour, now)); err == nil {
-		if usage.SevenDay == nil {
-			usage.SevenDay = &UsageProgress{Utilization: 0}
+	if usage.SevenDay != nil {
+		if stats, err := s.usageLogRepo.GetAccountWindowStats(ctx, account.ID, codexWindowStatsStart(usage.SevenDay, 7*24*time.Hour, now)); err == nil {
+			usage.SevenDay.WindowStats = windowStatsFromAccountStats(stats)
 		}
-		usage.SevenDay.WindowStats = windowStatsFromAccountStats(stats)
 	}
 
 	return usage, nil
+}
+
+func cachedOpenAISubscriptionInfo(account *Account) *OpenAISubscriptionInfo {
+	if account == nil || account.Credentials == nil {
+		return nil
+	}
+	activeUntil := strings.TrimSpace(account.GetCredential("subscription_expires_at"))
+	checkedAt := strings.TrimSpace(account.GetCredential("subscription_checked_at"))
+	var willRenew *bool
+	if raw, ok := account.Credentials["subscription_will_renew"]; ok {
+		if value, ok := raw.(bool); ok {
+			willRenew = &value
+		}
+	}
+	if activeUntil == "" && checkedAt == "" && willRenew == nil {
+		return nil
+	}
+	return &OpenAISubscriptionInfo{
+		PlanType:    strings.TrimSpace(account.GetCredential("plan_type")),
+		ActiveUntil: activeUntil,
+		WillRenew:   willRenew,
+		CheckedAt:   checkedAt,
+		Source:      "cached",
+	}
 }
 
 func shouldRefreshOpenAICodexSnapshot(account *Account, usage *UsageInfo, now time.Time) bool {
@@ -640,7 +673,11 @@ func shouldRefreshOpenAICodexSnapshot(account *Account, usage *UsageInfo, now ti
 	if usage == nil {
 		return true
 	}
-	if usage.FiveHour == nil || usage.SevenDay == nil {
+	// Missing one window can be authoritative. Current Codex plans may expose a
+	// weekly window without the former 5h window (and older plans can do the
+	// inverse), so freshness is determined by the snapshot timestamp once at
+	// least one canonical window exists.
+	if usage.FiveHour == nil && usage.SevenDay == nil {
 		return true
 	}
 	if account.IsRateLimited() {
@@ -809,6 +846,10 @@ func mergeAccountExtra(account *Account, updates map[string]any) {
 		account.Extra = make(map[string]any, len(updates))
 	}
 	for k, v := range updates {
+		if v == nil {
+			delete(account.Extra, k)
+			continue
+		}
 		account.Extra[k] = v
 	}
 }
@@ -820,12 +861,8 @@ func applyExtraToUsage(usage *UsageInfo, extra map[string]any, now time.Time) {
 	if usage == nil {
 		return
 	}
-	if progress := buildCodexUsageProgressFromExtra(extra, "5h", now); progress != nil {
-		usage.FiveHour = progress
-	}
-	if progress := buildCodexUsageProgressFromExtra(extra, "7d", now); progress != nil {
-		usage.SevenDay = progress
-	}
+	usage.FiveHour = buildCodexUsageProgressFromExtra(extra, "5h", now)
+	usage.SevenDay = buildCodexUsageProgressFromExtra(extra, "7d", now)
 }
 
 func (s *AccountUsageService) getGeminiUsage(ctx context.Context, account *Account) (*UsageInfo, error) {
@@ -1355,12 +1392,12 @@ func buildCodexUsageProgressFromExtra(extra map[string]any, window string, now t
 		return nil
 	}
 
-	usedRaw, ok := extra[usedPercentKey]
+	usedPercent, ok := resolveAccountExtraNumber(extra, usedPercentKey)
 	if !ok {
 		return nil
 	}
 
-	progress := &UsageProgress{Utilization: parseExtraFloat64(usedRaw)}
+	progress := &UsageProgress{Utilization: usedPercent}
 	if resetAtRaw, ok := extra[resetAtKey]; ok {
 		if resetAt, err := parseTime(fmt.Sprint(resetAtRaw)); err == nil {
 			progress.ResetsAt = &resetAt

@@ -329,7 +329,7 @@ describe('PersonalSettingsSecurityPanel', () => {
 })
 
 describe('PersonalSettingsNotificationsPanel', () => {
-  it('marks the balance threshold summary as Snow credits', () => {
+  it('marks the balance threshold summary as Points', () => {
     const wrapper = track(shallowMount(PersonalSettingsNotificationsPanel, {
       props: {
         user,

@@ -97,7 +97,7 @@
                 <CreditAmount v-if="hasQuotaLimit" :value="quotaAvailableValue.toFixed(2)" icon-size="xs" />
                 <span v-else>{{ t('keys.unlimitedQuota') }}</span>
               </dd>
-              <p>{{ t('keys.workspaceSnowCreditsUnit') }}</p>
+              <p>{{ t('keys.workspacePointsUnit') }}</p>
             </div>
             <div>
               <dt>{{ t('keys.workspaceTotalLimit') }}</dt>
@@ -182,6 +182,35 @@
             <h3>{{ t('keys.workspaceSecurityHeading') }}</h3>
           </div>
           <dl class="api-key-inspector__security-card">
+            <div
+              v-if="isOpenAiUserKey"
+              class="api-key-inspector__service-tier-row"
+              data-test="api-key-inspector-service-tier"
+            >
+              <div class="api-key-inspector__service-tier-copy">
+                <span class="api-key-inspector__service-tier-label">{{ t('keys.serviceTierPreferenceLabel') }}</span>
+                <span class="api-key-inspector__service-tier-value">
+                  {{ isPriorityEnabled ? t('keys.serviceTierPriority') : t('keys.serviceTierStandard') }}
+                </span>
+                <span :id="serviceTierDescriptionId" class="api-key-inspector__service-tier-hint">
+                  {{ t('keys.serviceTierPreferenceHint') }}
+                </span>
+              </div>
+              <button
+                type="button"
+                role="switch"
+                class="api-key-inspector__switch"
+                :aria-checked="isPriorityEnabled"
+                :aria-busy="serviceTierUpdating"
+                :aria-label="`${apiKey.name} · ${t('keys.serviceTierPreferenceLabel')}`"
+                :aria-describedby="serviceTierDescriptionId"
+                :disabled="serviceTierUpdating"
+                :data-test="`key-inspector-service-tier-switch-${apiKey.id}`"
+                @click="emit('toggle-service-tier', apiKey)"
+              >
+                <span :class="{ 'is-active': isPriorityEnabled }"><span /></span>
+              </button>
+            </div>
             <div v-if="isVisible('expires_at')">
               <dt>{{ t('keys.expiresAt') }}</dt>
               <dd :class="{ 'is-danger': isExpired }">
@@ -256,6 +285,36 @@
                   <span :class="{ 'is-active': isActive }"><span /></span>
                 </button>
               </div>
+            </div>
+
+            <div
+              v-if="isOpenAiUserKey"
+              class="api-key-inspector__service-tier-row"
+              data-test="api-key-inspector-service-tier"
+            >
+              <div class="api-key-inspector__service-tier-copy">
+                <span class="api-key-inspector__service-tier-label">{{ t('keys.serviceTierPreferenceLabel') }}</span>
+                <span class="api-key-inspector__service-tier-value">
+                  {{ isPriorityEnabled ? t('keys.serviceTierPriority') : t('keys.serviceTierStandard') }}
+                </span>
+                <span :id="serviceTierDescriptionId" class="api-key-inspector__service-tier-hint">
+                  {{ t('keys.serviceTierPreferenceHint') }}
+                </span>
+              </div>
+              <button
+                type="button"
+                role="switch"
+                class="api-key-inspector__switch"
+                :aria-checked="isPriorityEnabled"
+                :aria-busy="serviceTierUpdating"
+                :aria-label="`${apiKey.name} · ${t('keys.serviceTierPreferenceLabel')}`"
+                :aria-describedby="serviceTierDescriptionId"
+                :disabled="serviceTierUpdating"
+                :data-test="`key-inspector-service-tier-switch-${apiKey.id}`"
+                @click="emit('toggle-service-tier', apiKey)"
+              >
+                <span :class="{ 'is-active': isPriorityEnabled }"><span /></span>
+              </button>
             </div>
 
             <div class="api-key-inspector__sheet-field" data-test="api-key-inspector-key">
@@ -526,6 +585,7 @@ interface Props {
   publicSettings?: PublicSettings | null
   copied?: boolean
   statusUpdating?: boolean
+  serviceTierUpdating?: boolean
   now?: Date
   showCcsImport?: boolean
   mode?: 'inline' | 'sheet'
@@ -538,6 +598,7 @@ const props = withDefaults(defineProps<Props>(), {
   publicSettings: null,
   copied: false,
   statusUpdating: false,
+  serviceTierUpdating: false,
   now: () => new Date(),
   showCcsImport: true,
   mode: 'inline',
@@ -547,6 +608,7 @@ const props = withDefaults(defineProps<Props>(), {
 const emit = defineEmits<{
   (event: 'copy-key', key: ApiKey): void
   (event: 'toggle-status', key: ApiKey): void
+  (event: 'toggle-service-tier', key: ApiKey): void
   (event: 'change-group', key: ApiKey, mouseEvent: MouseEvent): void
   (event: 'reset-quota', key: ApiKey): void
   (event: 'reset-rate-limit', key: ApiKey): void
@@ -570,6 +632,11 @@ const hasVisibleAuditFields = computed(() =>
 )
 const maskedKey = computed(() => maskApiKey(props.apiKey.key))
 const isActive = computed(() => props.apiKey.status === 'active')
+const isOpenAiUserKey = computed(() => props.apiKey.group?.platform === 'openai')
+const isPriorityEnabled = computed(() => props.apiKey.service_tier_preference === 'priority')
+const serviceTierDescriptionId = computed(() =>
+  `api-key-inspector-service-tier-description-${props.mode}-${props.apiKey.id}`
+)
 const isExpired = computed(() => Boolean(
   props.apiKey.expires_at && new Date(props.apiKey.expires_at).getTime() < props.now.getTime()
 ))
@@ -901,7 +968,7 @@ defineExpose({ focus })
   width: 1rem;
   height: 1rem;
   border-radius: 50%;
-  background: #fff;
+  background: var(--workspace-light-surface);
   box-shadow: 0 1px 3px rgb(25 18 35 / 24%);
   transition: transform 180ms ease;
 }
@@ -1367,8 +1434,8 @@ defineExpose({ focus })
   border: 0;
   border-radius: 0;
   outline: none;
-  color: #332f3a;
-  background: #f9f8fd;
+  color: var(--workspace-text);
+  background: var(--workspace-canvas);
   box-shadow: none;
   font-family: "DM Sans", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
   font-variant-numeric: tabular-nums;
@@ -1383,7 +1450,7 @@ defineExpose({ focus })
   flex: 1 1 0;
   border: 0;
   border-radius: 0;
-  background: #f4f1fa;
+  background: var(--workspace-canvas);
   box-shadow: none;
 }
 
@@ -1399,7 +1466,7 @@ defineExpose({ focus })
   flex-direction: column;
   overflow-y: auto;
   overscroll-behavior: contain;
-  scrollbar-color: rgb(91 80 112 / 0.2) transparent;
+  scrollbar-color: var(--workspace-border-strong) transparent;
   scrollbar-width: thin;
 }
 
@@ -1410,19 +1477,19 @@ defineExpose({ focus })
 
 .api-key-inspector__content::-webkit-scrollbar-thumb {
   border-radius: 10px;
-  background: rgb(91 80 112 / 0.2);
+  background: var(--workspace-border-strong);
 }
 
 .api-key-inspector__content--inline {
   gap: 32px;
   padding: 32px;
-  background: #f9f8fd;
+  background: var(--workspace-canvas);
 }
 
 .api-key-inspector__content--sheet {
   gap: 32px;
   padding: 24px;
-  background: #f4f1fa;
+  background: var(--workspace-canvas);
 }
 
 .api-key-inspector__inline-overview {
@@ -1441,7 +1508,7 @@ defineExpose({ focus })
 .api-key-inspector__title {
   overflow: hidden;
   margin: 0;
-  color: #111827;
+  color: var(--workspace-text);
   font-family: inherit;
   font-size: 24px;
   font-weight: 900;
@@ -1452,7 +1519,7 @@ defineExpose({ focus })
 
 .api-key-inspector__id {
   margin: 8px 0 0;
-  color: #9ca3af;
+  color: var(--workspace-text-muted);
   font-family: inherit;
   font-size: 11px;
   font-weight: 900;
@@ -1466,11 +1533,11 @@ defineExpose({ focus })
   flex: 0 0 auto;
   align-items: center;
   gap: 8px;
-  border: 1px solid #e5e7eb;
+  border: 1px solid var(--workspace-border);
   border-radius: 999px;
   padding: 8px 16px;
-  color: #374151;
-  background: #f3f4f6;
+  color: var(--workspace-text-secondary);
+  background: var(--workspace-surface-subtle);
   font-size: 11px;
   font-weight: 900;
   line-height: 16.5px;
@@ -1481,7 +1548,7 @@ defineExpose({ focus })
   height: 6px;
   flex: 0 0 6px;
   border-radius: 50%;
-  background: #9ca3af;
+  background: var(--workspace-text-muted);
 }
 
 .api-key-inspector__status-pill[data-status='active'] {
@@ -1523,7 +1590,7 @@ defineExpose({ focus })
 .api-key-inspector__field-label {
   display: block;
   margin: 0 0 8px;
-  color: #9ca3af;
+  color: var(--workspace-text-muted);
   font-size: 10px;
   font-weight: 900;
   line-height: 15px;
@@ -1537,10 +1604,10 @@ defineExpose({ focus })
   align-items: center;
   gap: 4px;
   margin: 0;
-  border: 1px solid #f3f4f6;
+  border: 1px solid var(--workspace-border);
   border-radius: 16px;
   padding: 0 20px;
-  background: #fff;
+  background: var(--workspace-card-surface);
   box-shadow: 0 1px 2px 0 rgb(0 0 0 / 0.05);
 }
 
@@ -1548,7 +1615,7 @@ defineExpose({ focus })
   min-width: 0;
   overflow: hidden;
   padding: 0 8px 0 0;
-  color: #374151;
+  color: var(--workspace-text-secondary);
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   font-size: 14px;
   line-height: 20px;
@@ -1566,14 +1633,14 @@ defineExpose({ focus })
   border: 0;
   border-radius: 8px;
   padding: 0;
-  color: #9ca3af;
+  color: var(--workspace-text-muted);
   background: transparent;
   transition: color 150ms ease, background-color 150ms ease;
 }
 
 .api-key-inspector__icon-button:hover {
-  color: #111827;
-  background: #f9fafb;
+  color: var(--workspace-text);
+  background: var(--workspace-hover);
 }
 
 .api-key-inspector__icon-button--copy:hover {
@@ -1594,10 +1661,10 @@ defineExpose({ focus })
 
 .api-key-inspector__endpoint-well {
   min-width: 0;
-  border: 1px solid #f3f4f6;
+  border: 1px solid var(--workspace-border);
   border-radius: 16px;
   padding: 20px;
-  background: #f9f8fd;
+  background: var(--workspace-surface-subtle);
   box-shadow:
     inset 6px 6px 12px rgb(91 80 112 / 0.08),
     inset -6px -6px 12px rgb(255 255 255 / 0.7);
@@ -1616,7 +1683,7 @@ defineExpose({ focus })
 
 .api-key-inspector__empty-endpoint {
   margin: 0;
-  color: #9ca3af;
+  color: var(--workspace-text-muted);
   font-size: 12px;
   font-style: italic;
   line-height: 16px;
@@ -1626,7 +1693,7 @@ defineExpose({ focus })
   width: 100%;
   height: 1px;
   flex: 0 0 1px;
-  background: rgb(229 231 235 / 0.5);
+  background: var(--workspace-border);
 }
 
 .api-key-inspector__section {
@@ -1649,7 +1716,7 @@ defineExpose({ focus })
 .api-key-inspector__section-heading h3,
 .api-key-inspector__sheet-heading {
   margin: 0;
-  color: #6b7280;
+  color: var(--workspace-text-secondary);
   font-size: 11px;
   font-weight: 900;
   line-height: 16.5px;
@@ -1681,7 +1748,7 @@ defineExpose({ focus })
 
 .api-key-inspector__text-button:disabled {
   cursor: not-allowed;
-  color: #9ca3af;
+  color: var(--workspace-text-muted);
   opacity: 0.55;
 }
 
@@ -1695,15 +1762,15 @@ defineExpose({ focus })
 .api-key-inspector__quota-grid > div {
   min-width: 0;
   container-type: inline-size;
-  border: 1px solid #f3f4f6;
+  border: 1px solid var(--workspace-border);
   border-radius: 22px;
   padding: 20px;
-  background: #fff;
+  background: var(--workspace-card-surface);
   box-shadow: 0 1px 2px 0 rgb(0 0 0 / 0.05);
 }
 
 .api-key-inspector__quota-grid dt {
-  color: #9ca3af;
+  color: var(--workspace-text-muted);
   font-size: 10px;
   font-weight: 700;
   line-height: 15px;
@@ -1714,7 +1781,7 @@ defineExpose({ focus })
   min-width: 0;
   overflow: hidden;
   margin: 4px 0 0;
-  color: #111827;
+  color: var(--workspace-text);
   font-size: 24px;
   font-weight: 900;
   line-height: 32px;
@@ -1726,7 +1793,7 @@ defineExpose({ focus })
 
 .api-key-inspector__quota-grid > div > p {
   margin: 6px 0 0;
-  color: #d1d5db;
+  color: var(--workspace-text-muted);
   font-size: 9px;
   font-weight: 900;
   line-height: 13.5px;
@@ -1776,7 +1843,7 @@ defineExpose({ focus })
 
 .api-key-inspector__usage-rows dt,
 .api-key-inspector__usage-card dt {
-  color: #6b7280;
+  color: var(--workspace-text-secondary);
   font-size: 12px;
   font-weight: 700;
   line-height: 16px;
@@ -1787,7 +1854,7 @@ defineExpose({ focus })
 .api-key-inspector__usage-card dd {
   min-width: 0;
   margin: 0;
-  color: #111827;
+  color: var(--workspace-text);
   font-size: 12px;
   font-weight: 700;
   line-height: 16px;
@@ -1821,7 +1888,7 @@ defineExpose({ focus })
 }
 
 .api-key-inspector__rate-topline strong {
-  color: #9ca3af;
+  color: var(--workspace-text-muted);
 }
 
 .api-key-inspector__rate-values {
@@ -1830,7 +1897,7 @@ defineExpose({ focus })
   align-items: center;
   justify-content: flex-end;
   gap: 4px;
-  color: #111827;
+  color: var(--workspace-text);
 }
 
 .api-key-inspector__progress {
@@ -1838,7 +1905,7 @@ defineExpose({ focus })
   overflow: hidden;
   margin: 0;
   border-radius: 999px;
-  background: #f3f4f6;
+  background: var(--workspace-surface-subtle);
 }
 
 .api-key-inspector__meter,
@@ -1853,7 +1920,7 @@ defineExpose({ focus })
 
 .api-key-inspector__reset-time {
   margin: 0;
-  color: #9ca3af;
+  color: var(--workspace-text-muted);
   font-size: 9px;
   line-height: 13.5px;
   text-align: right;
@@ -1863,10 +1930,10 @@ defineExpose({ focus })
   display: grid;
   gap: 20px;
   margin: 0;
-  border: 1px solid #f3f4f6;
+  border: 1px solid var(--workspace-border);
   border-radius: 16px;
   padding: 24px;
-  background: #fff;
+  background: var(--workspace-card-surface);
   box-shadow: 0 1px 2px 0 rgb(0 0 0 / 0.05);
 }
 
@@ -1879,9 +1946,45 @@ defineExpose({ focus })
   gap: 16px;
 }
 
+.api-key-inspector__service-tier-row {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.api-key-inspector__service-tier-copy {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.api-key-inspector__service-tier-label {
+  color: var(--workspace-text-secondary);
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 16px;
+}
+
+.api-key-inspector__service-tier-value {
+  color: var(--workspace-text);
+  font-size: 12px;
+  font-weight: 900;
+  line-height: 16px;
+}
+
+.api-key-inspector__service-tier-hint {
+  max-width: 52ch;
+  color: var(--workspace-text-muted);
+  font-size: 10px;
+  font-weight: 500;
+  line-height: 14px;
+}
+
 .api-key-inspector__security-card dt {
   flex: 0 0 auto;
-  color: #6b7280;
+  color: var(--workspace-text-secondary);
   font-size: 12px;
   font-weight: 700;
   line-height: 16px;
@@ -1892,7 +1995,7 @@ defineExpose({ focus })
   max-width: 64%;
   margin: 0;
   overflow-wrap: anywhere;
-  color: #111827;
+  color: var(--workspace-text);
   font-size: 12px;
   font-weight: 900;
   line-height: 16px;
@@ -1927,7 +2030,7 @@ defineExpose({ focus })
 }
 
 .api-key-inspector__security-divider {
-  border-top: 1px solid #f3f4f6;
+  border-top: 1px solid var(--workspace-border);
   padding-top: 20px;
 }
 
@@ -1946,7 +2049,7 @@ defineExpose({ focus })
 }
 
 .api-key-inspector__sheet-heading {
-  color: #9ca3af;
+  color: var(--workspace-text-muted);
 }
 
 .api-key-inspector__sheet-section-heading .api-key-inspector__text-button {
@@ -1955,15 +2058,19 @@ defineExpose({ focus })
 }
 
 .api-key-inspector__sheet-card {
-  border: 1px solid #f3f4f6;
+  border: 1px solid var(--workspace-border);
   border-radius: 16px;
-  background: #fff;
+  background: var(--workspace-card-surface);
 }
 
 .api-key-inspector__core-card {
   display: grid;
   gap: 20px;
   padding: 20px;
+}
+
+.api-key-inspector--sheet .api-key-inspector__service-tier-row {
+  align-items: center;
 }
 
 .api-key-inspector__sheet-status-row,
@@ -1975,7 +2082,7 @@ defineExpose({ focus })
 .api-key-inspector__sheet-status-row {
   justify-content: space-between;
   gap: 16px;
-  color: #6b7280;
+  color: var(--workspace-text-secondary);
   font-size: 12px;
   font-weight: 700;
   line-height: 16px;
@@ -1986,7 +2093,7 @@ defineExpose({ focus })
 }
 
 .api-key-inspector__sheet-status-control strong {
-  color: #6b7280;
+  color: var(--workspace-text-secondary);
   font-size: 11px;
   font-weight: 900;
   line-height: 16.5px;
@@ -2029,7 +2136,7 @@ defineExpose({ focus })
   width: 40px;
   height: 22px;
   border-radius: 999px;
-  background: #e5e7eb;
+  background: var(--workspace-border-strong);
   transition: background-color 180ms ease;
 }
 
@@ -2044,7 +2151,7 @@ defineExpose({ focus })
   width: 18px;
   height: 18px;
   border-radius: 50%;
-  background: #fff;
+  background: var(--workspace-light-surface);
   box-shadow: 0 1px 2px rgb(0 0 0 / 0.12);
   transition: transform 180ms ease;
 }
@@ -2064,7 +2171,7 @@ defineExpose({ focus })
   border: 0;
   border-radius: 12px;
   padding: 0 16px;
-  background: #f9f8fd;
+  background: var(--workspace-surface-subtle);
   box-shadow:
     inset 6px 6px 12px rgb(91 80 112 / 0.08),
     inset -6px -6px 12px rgb(255 255 255 / 0.7);
@@ -2118,10 +2225,10 @@ defineExpose({ focus })
 }
 
 .api-key-inspector__usage-card {
-  border: 1px solid #f3f4f6;
+  border: 1px solid var(--workspace-border);
   border-radius: 16px;
   padding: 20px;
-  background: #fff;
+  background: var(--workspace-card-surface);
 }
 
 .api-key-inspector--sheet .api-key-inspector__rate-list {
@@ -2161,9 +2268,9 @@ defineExpose({ focus })
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 12px;
   flex: 0 0 auto;
-  border-top: 1px solid #f3f4f6;
+  border-top: 1px solid var(--workspace-border);
   padding: 24px;
-  background: #fff;
+  background: var(--workspace-card-surface);
 }
 
 .api-key-inspector__command {
@@ -2173,11 +2280,11 @@ defineExpose({ focus })
   align-items: center;
   justify-content: center;
   gap: 8px;
-  border: 1px solid #f3f4f6;
+  border: 1px solid var(--workspace-border);
   border-radius: 12px;
   padding: 0 12px;
-  color: #374151;
-  background: #f9fafb;
+  color: var(--workspace-text-secondary);
+  background: var(--workspace-surface-subtle);
   font-size: 14px;
   font-weight: 700;
   line-height: 20px;
@@ -2192,8 +2299,8 @@ defineExpose({ focus })
 }
 
 .api-key-inspector__command:hover {
-  color: #374151;
-  background: #f3f4f6;
+  color: var(--workspace-text);
+  background: var(--workspace-hover);
 }
 
 .api-key-inspector__command--edit {
@@ -2221,8 +2328,8 @@ defineExpose({ focus })
 .api-key-inspector--sheet .api-key-inspector__command {
   border: 0;
   border-radius: 16px;
-  color: #374151;
-  background: #f3f4f6;
+  color: var(--workspace-text-secondary);
+  background: var(--workspace-surface-subtle);
   font-weight: 900;
 }
 
@@ -2249,13 +2356,13 @@ defineExpose({ focus })
 }
 
 :global(.dark) .api-key-inspector {
-  color: #f8f5fc;
+  color: var(--workspace-text);
   background: transparent;
 }
 
 :global(.dark) .api-key-inspector--sheet,
 :global(.dark) .api-key-inspector__content--sheet {
-  background: #17131f;
+  background: var(--workspace-canvas);
 }
 
 :global(.dark) .api-key-inspector__content--inline {
@@ -2268,22 +2375,22 @@ defineExpose({ focus })
 :global(.dark) .api-key-inspector__usage-card dd,
 :global(.dark) .api-key-inspector__rate-values,
 :global(.dark) .api-key-inspector__security-card dd {
-  color: #fff;
+  color: var(--workspace-text);
 }
 
 :global(.dark) .api-key-inspector__key-field,
 :global(.dark) .api-key-inspector__endpoint-well {
-  border-color: rgb(255 255 255 / 0.05);
-  background: #120f18;
+  border-color: var(--workspace-border);
+  background: var(--workspace-surface-subtle);
 }
 
 :global(.dark) .api-key-inspector__key-field code {
-  color: #d1d5db;
+  color: var(--workspace-text-secondary);
 }
 
 :global(.dark) .api-key-inspector__icon-button:hover {
-  color: #fff;
-  background: rgb(255 255 255 / 0.05);
+  color: var(--workspace-text);
+  background: var(--workspace-hover);
 }
 
 :global(.dark) .api-key-inspector__endpoint-well,
@@ -2294,38 +2401,38 @@ defineExpose({ focus })
 }
 
 :global(.dark) .api-key-inspector__divider {
-  background: rgb(255 255 255 / 0.05);
+  background: var(--workspace-border);
 }
 
 :global(.dark) .api-key-inspector__security-divider {
-  border-color: rgb(255 255 255 / 0.05);
+  border-color: var(--workspace-border);
   background: transparent;
 }
 
 :global(.dark) .api-key-inspector__quota-grid > div,
 :global(.dark) .api-key-inspector__sheet-card,
 :global(.dark) .api-key-inspector__usage-card {
-  border-color: rgb(255 255 255 / 0.1);
-  background: #251e2f;
+  border-color: var(--workspace-border);
+  background: var(--workspace-card-surface);
 }
 
 :global(.dark) .api-key-inspector--inline .api-key-inspector__security-card {
-  border-color: rgb(255 255 255 / 0.05);
-  background: #120f18;
+  border-color: var(--workspace-border);
+  background: var(--workspace-surface-subtle);
 }
 
 :global(.dark) .api-key-inspector--sheet .api-key-inspector__core-card,
 :global(.dark) .api-key-inspector--sheet .api-key-inspector__rate-list,
 :global(.dark) .api-key-inspector--sheet .api-key-inspector__usage-card {
-  border-color: rgb(255 255 255 / 0.05);
+  border-color: var(--workspace-border);
 }
 
 :global(.dark) .api-key-inspector--sheet .api-key-inspector__security-card {
-  border-color: rgb(255 255 255 / 0.1);
+  border-color: var(--workspace-border);
 }
 
 :global(.dark) .api-key-inspector--sheet .api-key-inspector__quota-grid > div {
-  border-color: #f3f4f6;
+  border-color: var(--workspace-border);
 }
 
 :global(.dark) .api-key-inspector--sheet .api-key-inspector__quota-grid > div:first-child dd {
@@ -2334,7 +2441,7 @@ defineExpose({ focus })
 
 :global(.dark) .api-key-inspector__progress,
 :global(.dark) .api-key-inspector__switch > span {
-  background: rgb(255 255 255 / 0.05);
+  background: var(--workspace-surface-subtle);
 }
 
 :global(.dark) .api-key-inspector__switch > span.is-active {
@@ -2342,21 +2449,21 @@ defineExpose({ focus })
 }
 
 :global(.dark) .api-key-inspector__footer {
-  border-color: rgb(255 255 255 / 0.1);
-  background: #251e2f;
+  border-color: var(--workspace-border);
+  background: var(--workspace-card-surface);
 }
 
 :global(.dark) .api-key-inspector__command,
 :global(.dark) .api-key-inspector--sheet .api-key-inspector__command {
-  border-color: rgb(255 255 255 / 0.1);
-  color: #d1d5db;
-  background: rgb(255 255 255 / 0.05);
+  border-color: var(--workspace-border);
+  color: var(--workspace-text-secondary);
+  background: var(--workspace-surface-subtle);
 }
 
 :global(.dark) .api-key-inspector__command:hover,
 :global(.dark) .api-key-inspector--sheet .api-key-inspector__command:hover {
-  color: #fff;
-  background: rgb(255 255 255 / 0.1);
+  color: var(--workspace-text);
+  background: var(--workspace-hover);
 }
 
 :global(.dark) .api-key-inspector__command--edit {

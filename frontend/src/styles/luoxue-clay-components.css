@@ -44,7 +44,7 @@
 .btn-primary {
   border-color: color-mix(in srgb, var(--lx-clay-on-accent) 12%, transparent);
   color: var(--lx-clay-on-accent);
-  background: linear-gradient(145deg, var(--lx-clay-accent-gradient-start), var(--lx-clay-accent-deep));
+  background: var(--lx-clay-accent);
   box-shadow: var(--lx-clay-shadow-primary);
 }
 
@@ -62,13 +62,8 @@
 .btn-secondary:hover:not(:disabled),
 .btn-ghost:hover:not(:disabled) {
   border-color: var(--lx-clay-border-strong);
-  color: var(--lx-clay-accent-deep);
-  background: var(--lx-clay-accent-soft);
-}
-
-html.dark .btn-secondary:hover:not(:disabled),
-html.dark .btn-ghost:hover:not(:disabled) {
-  color: var(--lx-clay-accent);
+  color: var(--lx-clay-text);
+  background: var(--lx-clay-hover);
 }
 
 .btn-ghost {
@@ -141,8 +136,8 @@ html.dark .btn-ghost:hover:not(:disabled) {
 
 .input::placeholder,
 .select-dropdown-portal[data-ui-portal="select"] .select-search-input::placeholder {
-  color: var(--lx-clay-text-muted);
-  opacity: 0.9;
+  color: var(--lx-clay-placeholder);
+  opacity: 1;
 }
 
 .input.input-error,
@@ -208,16 +203,14 @@ html.dark .btn-ghost:hover:not(:disabled) {
 }
 
 .select-dropdown-portal[data-ui-portal="select"] .select-option:hover,
-.select-dropdown-portal[data-ui-portal="select"] .select-option-focused,
-.select-dropdown-portal[data-ui-portal="select"] .select-option-selected {
-  color: var(--lx-clay-accent-deep);
-  background: var(--lx-clay-accent-soft);
+.select-dropdown-portal[data-ui-portal="select"] .select-option-focused {
+  color: var(--lx-clay-text);
+  background: var(--lx-clay-hover);
 }
 
-html.dark .select-dropdown-portal[data-ui-portal="select"] .select-option:hover,
-html.dark .select-dropdown-portal[data-ui-portal="select"] .select-option-focused,
-html.dark .select-dropdown-portal[data-ui-portal="select"] .select-option-selected {
-  color: var(--lx-clay-accent);
+.select-dropdown-portal[data-ui-portal="select"] .select-option-selected {
+  color: var(--lx-clay-text);
+  background: var(--lx-clay-selected);
 }
 
 .select-dropdown-portal[data-ui-portal="select"] .select-option-group {
@@ -288,7 +281,7 @@ html.dark .select-dropdown-portal[data-ui-portal="select"] .select-option-select
 
 .card-hover:hover {
   border-color: var(--lx-clay-border-strong);
-  background: color-mix(in srgb, var(--lx-clay-surface) 88%, var(--lx-clay-accent-soft));
+  background: var(--lx-clay-hover);
 }
 
 .card-header,
@@ -328,7 +321,7 @@ html.dark .select-dropdown-portal[data-ui-portal="select"] .select-option-select
 .table tbody tr:hover,
 .data-table.data-table--desktop .data-table-row:hover,
 .data-table.data-table--desktop .data-table-row:hover .sticky-col {
-  background: color-mix(in srgb, var(--lx-clay-surface) 90%, var(--lx-clay-accent-soft));
+  background: var(--lx-clay-hover);
 }
 
 .data-table.data-table--desktop .data-table-row:focus-visible {
@@ -397,20 +390,15 @@ html.dark .select-dropdown-portal[data-ui-portal="select"] .select-option-select
 
 .pagination .pagination-button:hover:not(:disabled):not(.pagination-button--ellipsis) {
   border-color: var(--lx-clay-border-strong);
-  color: var(--lx-clay-accent-deep);
-  background: var(--lx-clay-accent-soft);
+  color: var(--lx-clay-text);
+  background: var(--lx-clay-hover);
 }
 
 .pagination .pagination-button--active {
   z-index: 1;
-  border-color: var(--lx-clay-accent);
-  color: var(--lx-clay-accent-deep);
-  background: var(--lx-clay-accent-soft);
-}
-
-html.dark .pagination .pagination-button:hover:not(:disabled):not(.pagination-button--ellipsis),
-html.dark .pagination .pagination-button--active {
-  color: var(--lx-clay-accent);
+  border-color: var(--lx-clay-border-strong);
+  color: var(--lx-clay-text);
+  background: var(--lx-clay-selected);
 }
 
 .pagination :where(.pagination-summary, .pagination-status, .pagination-page-size-label, .pagination-jump-label) {

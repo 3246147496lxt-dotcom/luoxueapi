@@ -115,6 +115,7 @@ import {
   readPaymentRecoverySnapshot,
 } from '@/components/payment/paymentFlow'
 import { usePaymentStore } from '@/stores/payment'
+import { useUserProfileStore } from '@/stores/userProfile'
 import { paymentAPI } from '@/api/payment'
 import type { PublicOrderVerifyResult } from '@/api/payment'
 import type { OrderStatus, PaymentOrder } from '@/types/payment'
@@ -126,6 +127,7 @@ const { t } = i18n
 const route = useRoute()
 const router = useRouter()
 const paymentStore = usePaymentStore()
+const userProfileStore = useUserProfileStore()
 
 type ResolvedOrder = PaymentOrder | PublicOrderVerifyResult
 
@@ -148,6 +150,7 @@ const STATUS_REFRESH_MAX_ATTEMPTS = 15
 
 let statusRefreshTimer: ReturnType<typeof setTimeout> | null = null
 const refreshAttempts = ref(0)
+let syncedOrderKey = ''
 
 /** 充值金额 = pay_amount / (1 + fee_rate/100)，fee_rate=0 时等于 pay_amount */
 const baseAmount = computed(() => {
@@ -205,6 +208,22 @@ function setResolvedOrder(nextOrder: ResolvedOrder | null): void {
   if (nextOrder && 'currency' in nextOrder && nextOrder.currency) {
     currency.value = normalizePaymentCurrency(nextOrder.currency)
   }
+  syncProfileAfterSuccessfulOrder(nextOrder)
+}
+
+function syncProfileAfterSuccessfulOrder(nextOrder: ResolvedOrder | null): void {
+  if (!nextOrder || !isSuccessStatus(nextOrder.status) || !userProfileStore.profile) return
+
+  const orderKey = hasOrderId(nextOrder)
+    ? String(nextOrder.id)
+    : nextOrder.out_trade_no.trim()
+  if (!orderKey || syncedOrderKey === orderKey) return
+
+  syncedOrderKey = orderKey
+  void userProfileStore.refreshProfile().catch((error) => {
+    if (syncedOrderKey === orderKey) syncedOrderKey = ''
+    console.error('Failed to sync user profile after payment return:', error)
+  })
 }
 
 function hasOrderId(nextOrder: ResolvedOrder | null): nextOrder is PaymentOrder {

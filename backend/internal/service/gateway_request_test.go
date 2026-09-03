@@ -1532,6 +1532,14 @@ func TestNormalizeGLMOpenAIReasoningEffort(t *testing.T) {
 			wantValue:   "max",
 		},
 		{
+			name:        "namespaced SiliconFlow GLM maps to max",
+			model:       "zai-org/GLM-5.2",
+			input:       `{"model":"zai-org/GLM-5.2","reasoning_effort":"xhigh","messages":[]}`,
+			wantApplied: true,
+			wantPath:    "reasoning_effort",
+			wantValue:   "max",
+		},
+		{
 			name:        "flat x-high maps to max",
 			model:       "GLM-5.2",
 			input:       `{"model":"glm-5.2","reasoning_effort":"x-high","messages":[]}`,

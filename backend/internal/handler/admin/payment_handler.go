@@ -1,7 +1,10 @@
 package admin
 
 import (
+	"errors"
+	"io"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/payment"
@@ -230,6 +233,13 @@ type AdminProcessRefundRequest struct {
 	DeductBalance bool    `json:"deduct_balance"`
 }
 
+// AdminQueryRefundRequest controls local settlement of a provider-pending
+// refund.  Force only affects the local balance/subscription deduction; the
+// provider is queried and never charged a second time.
+type AdminQueryRefundRequest struct {
+	Force bool `json:"force"`
+}
+
 // ProcessRefund processes a refund for an order (admin).
 // POST /api/v1/admin/payment/orders/:id/refund
 func (h *PaymentHandler) ProcessRefund(c *gin.Context) {
@@ -270,7 +280,24 @@ func (h *PaymentHandler) QueryAndFinalizeRefund(c *gin.Context) {
 		return
 	}
 
-	result, err := h.paymentService.QueryAndFinalizeRefund(c.Request.Context(), orderID)
+	var req AdminQueryRefundRequest
+	if err := c.ShouldBindJSON(&req); err != nil && !errors.Is(err, io.EOF) {
+		response.BadRequest(c, "Invalid request: "+err.Error())
+		return
+	}
+	// Keep the query-parameter form for operators and older clients that cannot
+	// send a JSON body.  A true value can only enable force; a false value never
+	// weakens an explicit JSON request.
+	if raw := strings.TrimSpace(c.Query("force")); raw != "" {
+		parsed, parseErr := strconv.ParseBool(raw)
+		if parseErr != nil {
+			response.BadRequest(c, "Invalid force value")
+			return
+		}
+		req.Force = req.Force || parsed
+	}
+
+	result, err := h.paymentService.QueryAndFinalizeRefundWithForce(c.Request.Context(), orderID, req.Force)
 	if err != nil {
 		response.ErrorFrom(c, err)
 		return

@@ -4,6 +4,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"github.com/tidwall/gjson"
 )
 
 func TestShouldFlattenOpenAIResponsesNamespaces(t *testing.T) {
@@ -31,4 +32,14 @@ func TestShouldFlattenOpenAIResponsesNamespaces(t *testing.T) {
 			require.Equal(t, tt.want, shouldFlattenOpenAIResponsesNamespaces(tt.account, tt.transport, tt.passthroughEnabled))
 		})
 	}
+}
+
+func TestFlattenOpenAIResponsesNamespacesPreservesLargeNumbers(t *testing.T) {
+	body := []byte(`{"model":"gpt-5","sequence":900719925474099312345,"tools":[{"type":"namespace","name":"collaboration","tools":[{"type":"function","name":"spawn_agent"}]}]}`)
+
+	flattened, err := flattenOpenAIResponsesNamespaces(nil, body)
+
+	require.NoError(t, err)
+	require.Equal(t, "900719925474099312345", gjson.GetBytes(flattened, "sequence").Raw)
+	require.True(t, gjson.GetBytes(flattened, `tools.#(type=="function")`).Exists())
 }

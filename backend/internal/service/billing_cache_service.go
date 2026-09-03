@@ -88,22 +88,45 @@ const (
 	cacheWriteTimeout         = 2 * time.Second // 单个写入操作超时
 	cacheWriteDropLogInterval = 5 * time.Second // 丢弃日志节流间隔
 	balanceLoadTimeout        = 3 * time.Second
+	// A continuously changing balance/rate-limit generation should be rare. A
+	// small bounded retry prevents returning a pre-invalidation snapshot while
+	// also avoiding an unbounded request stall under sustained billing traffic.
+	billingCacheGenerationRetryLimit = 3
 )
 
 // cacheWriteTask 缓存写入任务
 type cacheWriteTask struct {
-	kind             cacheWriteKind
-	userID           int64
-	groupID          int64
-	apiKeyID         int64
-	balance          float64
-	amount           float64
-	subscriptionData *subscriptionCacheData
+	kind     cacheWriteKind
+	userID   int64
+	groupID  int64
+	apiKeyID int64
+	balance  float64
+	amount   float64
+	// balanceGeneration fences a DB read that started before a cache
+	// invalidation. A zero value is the initial generation and is valid.
+	balanceGeneration uint64
+	balanceVersion    uint64
+	balanceVersionSet bool
+	subscriptionData  *subscriptionCacheData
 }
 
 // apiKeyRateLimitLoader defines the interface for loading rate limit data from DB.
 type apiKeyRateLimitLoader interface {
 	GetRateLimitData(ctx context.Context, keyID int64) (*APIKeyRateLimitData, error)
+}
+
+// generationTokenReader is an optional fast path implemented by distributed
+// cache backends.  A generation-qualified read returns a value and token
+// atomically, but another process may invalidate it before this service has
+// evaluated the hit.  Re-reading only the token gives the hit a second
+// linearization point without expanding the existing Versioned* interfaces
+// (which would break alternate cache implementations during rolling upgrades).
+type balanceGenerationTokenReader interface {
+	GetUserBalanceGeneration(ctx context.Context, userID int64) (uint64, error)
+}
+
+type rateLimitGenerationTokenReader interface {
+	GetAPIKeyRateLimitGeneration(ctx context.Context, keyID int64) (uint64, error)
 }
 
 type subscriptionCacheInvalidationPubSub interface {
@@ -132,6 +155,22 @@ type BillingCacheService struct {
 	stopped             atomic.Bool
 	balanceLoadSF       singleflight.Group
 	quotaLoadSF         singleflight.Group
+	// balanceCacheMu serializes balance cache writes with invalidations. The
+	// generation fence prevents a slow DB miss (which observed the old balance)
+	// from repopulating Redis after a committed deduction has invalidated it.
+	balanceCacheMu         sync.Mutex
+	balanceCacheGeneration map[int64]uint64
+	// A failed Redis invalidation leaves the old key potentially readable. Keep
+	// a local dirty fence so this process bypasses that key until an authoritative
+	// DB snapshot has been written successfully (or a later invalidation clears
+	// it). The generation value makes clearing race-safe.
+	balanceCacheDirty map[int64]uint64
+	// apiKeyRateLimitCacheMu provides the same in-process fence for API-key
+	// rate-limit snapshots. The authoritative billing transaction updates the
+	// DB first; a stale miss/reload must never repopulate Redis afterwards.
+	apiKeyRateLimitCacheMu          sync.Mutex
+	apiKeyRateLimitCacheGenerations map[int64]uint64
+	apiKeyRateLimitCacheDirty       map[int64]uint64
 	// subscriptionCacheDirty is an in-process safety fence for Redis/DB
 	// divergence. Once a subscription cache mutation fails, reads bypass Redis
 	// until this process has reloaded the authoritative DB row and successfully
@@ -249,27 +288,23 @@ func (s *BillingCacheService) cacheWriteWorker(ch <-chan cacheWriteTask) {
 		ctx, cancel := context.WithTimeout(context.Background(), cacheWriteTimeout)
 		switch task.kind {
 		case cacheWriteSetBalance:
-			s.setBalanceCache(ctx, task.userID, task.balance)
+			s.setBalanceCacheAtGeneration(ctx, task.userID, task.balance, task.balanceGeneration, task.balanceVersion, task.balanceVersionSet)
 		case cacheWriteSetSubscription:
 			if err := s.setSubscriptionCache(ctx, task.userID, task.groupID, task.subscriptionData); err != nil {
 				logger.LegacyPrintf("service.billing_cache", "Warning: async set subscription cache failed for user %d group %d: %v", task.userID, task.groupID, err)
 			}
 		case cacheWriteUpdateSubscriptionUsage:
 			if s.cache != nil {
-				if err := s.cache.UpdateSubscriptionUsage(ctx, task.userID, task.groupID, task.amount); err != nil {
+				if err := s.UpdateSubscriptionUsage(ctx, task.userID, task.groupID, task.amount); err != nil {
 					logger.LegacyPrintf("service.billing_cache", "Warning: update subscription cache failed for user %d group %d: %v", task.userID, task.groupID, err)
 				}
 			}
 		case cacheWriteDeductBalance:
-			if s.cache != nil {
-				if err := s.cache.DeductUserBalance(ctx, task.userID, task.amount); err != nil {
-					logger.LegacyPrintf("service.billing_cache", "Warning: deduct balance cache failed for user %d: %v", task.userID, err)
-				}
-			}
+			s.deductBalanceCacheAtGeneration(ctx, task.userID, task.amount, task.balanceGeneration)
 		case cacheWriteUpdateRateLimitUsage:
 			if s.cache != nil {
-				if err := s.cache.UpdateAPIKeyRateLimitUsage(ctx, task.apiKeyID, task.amount); err != nil {
-					logger.LegacyPrintf("service.billing_cache", "Warning: update rate limit usage cache failed for api key %d: %v", task.apiKeyID, err)
+				if err := s.InvalidateAPIKeyRateLimit(ctx, task.apiKeyID); err != nil {
+					logger.LegacyPrintf("service.billing_cache", "Warning: invalidate rate limit cache failed for api key %d: %v", task.apiKeyID, err)
 				}
 			}
 		}
@@ -341,19 +376,188 @@ func (s *BillingCacheService) logCacheWriteDrop(task cacheWriteTask, reason stri
 
 // GetUserBalance 获取用户余额（优先从缓存读取）
 func (s *BillingCacheService) GetUserBalance(ctx context.Context, userID int64) (float64, error) {
+	if s == nil {
+		return 0, ErrBillingServiceUnavailable
+	}
 	if s.cache == nil {
 		// Redis不可用，直接查询数据库
 		return s.getUserBalanceFromDB(ctx, userID)
 	}
 
-	// 尝试从缓存读取
-	balance, err := s.cache.GetUserBalance(ctx, userID)
-	if err == nil {
-		return balance, nil
+	for attempt := 0; attempt < billingCacheGenerationRetryLimit; attempt++ {
+		balance, retry, err := s.getUserBalanceOnce(ctx, userID)
+		if err != nil {
+			return 0, err
+		}
+		if !retry {
+			return balance, nil
+		}
+	}
+	return 0, ErrBillingCacheGenerationChanged
+}
+
+// getUserBalanceOnce performs one generation-qualified cache read/reload. The
+// bool result is true when an invalidation raced the read and the caller should
+// retry with a fresh generation.
+func (s *BillingCacheService) getUserBalanceOnce(ctx context.Context, userID int64) (float64, bool, error) {
+	localGeneration, dirtyGeneration := s.balanceCacheState(userID)
+	var (
+		cacheVersion      uint64
+		cacheVersionKnown bool
+	)
+	if dirtyGeneration > 0 {
+		// A failed invalidation leaves the old key potentially readable. Capture
+		// the distributed token, but force an authoritative DB reload.
+		if versioned, ok := s.cache.(VersionedBalanceCache); ok {
+			var readErr error
+			_, cacheVersion, readErr = versioned.GetUserBalanceWithGeneration(ctx, userID)
+			if errors.Is(readErr, ErrBillingCacheGenerationChanged) {
+				// The backend observed a token race while reading the cache. Do not
+				// turn that raced snapshot into a DB-authoritative return; restart
+				// with a fresh distributed generation instead.
+				return 0, true, nil
+			}
+			cacheVersionKnown = readErr == nil || errors.Is(readErr, ErrBillingCacheMiss)
+		}
+		balance, err := s.reloadDirtyBalance(ctx, userID, dirtyGeneration, cacheVersion, cacheVersionKnown)
+		if errors.Is(err, ErrBillingCacheGenerationChanged) {
+			return 0, true, nil
+		}
+		if err == nil {
+			currentGeneration, currentDirty := s.balanceCacheState(userID)
+			// Clearing the observed dirty marker is safe; an advanced generation
+			// means another invalidation completed while the DB snapshot was in
+			// flight and requires a fresh attempt.
+			if currentGeneration != localGeneration || currentDirty > dirtyGeneration {
+				return 0, true, nil
+			}
+		}
+		return balance, false, err
 	}
 
-	// 缓存未命中：singleflight 合并同一 userID 的并发回源请求。
-	value, err, _ := s.balanceLoadSF.Do(strconv.FormatInt(userID, 10), func() (any, error) {
+	// Distributed backends return the generation atomically with the cache read.
+	var (
+		balance float64
+		err     error
+	)
+	if versioned, ok := s.cache.(VersionedBalanceCache); ok {
+		balance, cacheVersion, err = versioned.GetUserBalanceWithGeneration(ctx, userID)
+		cacheVersionKnown = err == nil || errors.Is(err, ErrBillingCacheMiss)
+	} else {
+		balance, err = s.cache.GetUserBalance(ctx, userID)
+	}
+	if errors.Is(err, ErrBillingCacheGenerationChanged) {
+		// A versioned read can detect an invalidation during its legacy fallback
+		// round-trip. Treat that sentinel as a retry signal, never as a generic
+		// cache miss (which would return the potentially stale DB snapshot below).
+		return 0, true, nil
+	}
+	if err == nil {
+		// An in-process invalidation may complete between the generation-qualified
+		// read and this return. Do not hand its stale value to the caller.
+		currentGeneration, currentDirty := s.balanceCacheState(userID)
+		if currentGeneration != localGeneration || currentDirty > 0 {
+			return 0, true, nil
+		}
+		// The local fence cannot observe an invalidation issued by another
+		// process.  If the backend exposes a token-only read, verify the token
+		// immediately before returning the hit.  The second Redis command is the
+		// linearization point for this request; an invalidation that occurs after
+		// it is allowed to win the next request, but never one observed before
+		// this return.
+		if reader, ok := s.cache.(balanceGenerationTokenReader); ok && cacheVersionKnown {
+			latestGeneration, verifyErr := reader.GetUserBalanceGeneration(ctx, userID)
+			if verifyErr != nil {
+				// The value was already observed, but the safety token could not be
+				// be revalidated.  Bypass Redis and use the authoritative row rather
+				// than returning a potentially stale hit (or turning a transient
+				// token-read outage into a hard cache outage).
+				freshBalance, dbErr := s.getUserBalanceFromDB(ctx, userID)
+				if dbErr != nil {
+					return 0, false, dbErr
+				}
+				return freshBalance, false, nil
+			}
+			if latestGeneration != cacheVersion {
+				return 0, true, nil
+			}
+		}
+		return balance, false, nil
+	}
+
+	// If the local fence changed while Redis was being read, do not join a
+	// singleflight started under the old generation.
+	currentGeneration, currentDirty := s.balanceCacheState(userID)
+	if currentGeneration != localGeneration || currentDirty > 0 {
+		return 0, true, nil
+	}
+
+	// Cache miss: singleflight only callers that observed the same local and
+	// distributed generation. A caller arriving after invalidation therefore
+	// cannot receive a value produced by the old flight.
+	loadKey := fmt.Sprintf("%d:%d", userID, localGeneration)
+	if cacheVersionKnown {
+		loadKey += ":" + strconv.FormatUint(cacheVersion, 10)
+	}
+	value, loadErr, _ := s.balanceLoadSF.Do(loadKey, func() (any, error) {
+		generation, dirty := s.balanceCacheState(userID)
+		if generation != localGeneration || dirty > 0 {
+			return nil, ErrBillingCacheGenerationChanged
+		}
+		loadCtx, cancel := context.WithTimeout(context.Background(), balanceLoadTimeout)
+		defer cancel()
+
+		loadedBalance, dbErr := s.getUserBalanceFromDB(loadCtx, userID)
+		if dbErr != nil {
+			return nil, dbErr
+		}
+
+		// This write is intentionally synchronous: an asynchronous conditional
+		// write cannot tell the request that its DB snapshot was rejected by a
+		// concurrent invalidation, and would otherwise return stale state.
+		setErr := s.setBalanceCacheAtGeneration(loadCtx, userID, loadedBalance, generation, cacheVersion, cacheVersionKnown)
+		if errors.Is(setErr, ErrBillingCacheGenerationChanged) {
+			return nil, setErr
+		}
+		if setErr != nil {
+			logger.LegacyPrintf("service.billing_cache", "Warning: set balance cache failed for user %d: %v", userID, setErr)
+		}
+		return loadedBalance, nil
+	})
+	if errors.Is(loadErr, ErrBillingCacheGenerationChanged) {
+		return 0, true, nil
+	}
+	if loadErr != nil {
+		return 0, false, loadErr
+	}
+	loadedBalance, ok := value.(float64)
+	if !ok {
+		return 0, false, fmt.Errorf("unexpected balance type: %T", value)
+	}
+	currentGeneration, currentDirty = s.balanceCacheState(userID)
+	if currentGeneration != localGeneration || currentDirty > 0 {
+		return 0, true, nil
+	}
+	return loadedBalance, false, nil
+}
+
+// reloadDirtyBalance bypasses a possibly stale cache key after an ambiguous
+// invalidation. A successful authoritative write repairs the key and clears
+// only the generation that was observed by this load; a failed write leaves
+// the fence set, so later reads continue to bypass Redis safely.
+func (s *BillingCacheService) reloadDirtyBalance(
+	ctx context.Context,
+	userID int64,
+	observedDirtyGeneration uint64,
+	cacheVersion uint64,
+	cacheVersionKnown bool,
+) (float64, error) {
+	// A generation-qualified key must not join a normal miss that started before
+	// the invalidation. Such a singleflight could return a pre-commit DB snapshot
+	// even though this caller correctly refused the stale Redis value.
+	loadKey := fmt.Sprintf("%d:dirty:%d", userID, observedDirtyGeneration)
+	value, err, _ := s.balanceLoadSF.Do(loadKey, func() (any, error) {
+		generation, dirtyGeneration := s.balanceCacheState(userID)
 		loadCtx, cancel := context.WithTimeout(context.Background(), balanceLoadTimeout)
 		defer cancel()
 
@@ -361,13 +565,22 @@ func (s *BillingCacheService) GetUserBalance(ctx context.Context, userID int64) 
 		if err != nil {
 			return nil, err
 		}
-
-		// 异步建立缓存
-		_ = s.enqueueCacheWrite(cacheWriteTask{
-			kind:    cacheWriteSetBalance,
-			userID:  userID,
-			balance: balance,
-		})
+		setErr := s.setBalanceCacheAtGeneration(loadCtx, userID, balance, generation, cacheVersion, cacheVersionKnown)
+		if errors.Is(setErr, ErrBillingCacheGenerationChanged) {
+			return nil, setErr
+		}
+		if setErr == nil && dirtyGeneration > 0 &&
+			s.balanceGeneration(userID) == generation {
+			s.clearBalanceCacheDirtyIfUnchanged(userID, dirtyGeneration)
+		}
+		currentGeneration, currentDirty := s.balanceCacheState(userID)
+		if currentGeneration != generation || currentDirty > dirtyGeneration {
+			return nil, ErrBillingCacheGenerationChanged
+		}
+		// Cache repair is best effort. The DB value remains safe to return even
+		// when Redis is unavailable; the dirty fence prevents stale reuse. A
+		// generation rejection is not best effort, however: the snapshot was
+		// observed before an invalidation and must be retried by the caller.
 		return balance, nil
 	})
 	if err != nil {
@@ -382,47 +595,181 @@ func (s *BillingCacheService) GetUserBalance(ctx context.Context, userID int64) 
 
 // getUserBalanceFromDB 从数据库获取用户余额
 func (s *BillingCacheService) getUserBalanceFromDB(ctx context.Context, userID int64) (float64, error) {
+	if s == nil || s.userRepo == nil {
+		return 0, fmt.Errorf("get user balance: repository unavailable")
+	}
 	user, err := s.userRepo.GetByID(ctx, userID)
 	if err != nil {
 		return 0, fmt.Errorf("get user balance: %w", err)
+	}
+	if user == nil {
+		return 0, fmt.Errorf("get user balance: user %d not found", userID)
 	}
 	return user.Balance, nil
 }
 
 // setBalanceCache 设置余额缓存
 func (s *BillingCacheService) setBalanceCache(ctx context.Context, userID int64, balance float64) {
-	if s.cache == nil {
+	s.setBalanceCacheAtGeneration(ctx, userID, balance, s.balanceGeneration(userID), 0, false)
+}
+
+func (s *BillingCacheService) balanceGeneration(userID int64) uint64 {
+	if s == nil {
+		return 0
+	}
+	s.balanceCacheMu.Lock()
+	defer s.balanceCacheMu.Unlock()
+	if s.balanceCacheGeneration == nil {
+		s.balanceCacheGeneration = make(map[int64]uint64)
+	}
+	return s.balanceCacheGeneration[userID]
+}
+
+// balanceCacheState snapshots the local generation and dirty fence under one
+// lock. Keeping the two values coherent closes the read-check race where an
+// invalidation could advance the generation between separate helper calls.
+func (s *BillingCacheService) balanceCacheState(userID int64) (generation, dirty uint64) {
+	if s == nil {
+		return 0, 0
+	}
+	s.balanceCacheMu.Lock()
+	defer s.balanceCacheMu.Unlock()
+	if s.balanceCacheGeneration == nil {
+		s.balanceCacheGeneration = make(map[int64]uint64)
+	}
+	return s.balanceCacheGeneration[userID], s.balanceCacheDirty[userID]
+}
+
+func (s *BillingCacheService) balanceCacheDirtyGeneration(userID int64) uint64 {
+	if s == nil {
+		return 0
+	}
+	s.balanceCacheMu.Lock()
+	defer s.balanceCacheMu.Unlock()
+	return s.balanceCacheDirty[userID]
+}
+
+func (s *BillingCacheService) clearBalanceCacheDirtyIfUnchanged(userID int64, generation uint64) {
+	if s == nil || generation == 0 {
 		return
+	}
+	s.balanceCacheMu.Lock()
+	defer s.balanceCacheMu.Unlock()
+	if s.balanceCacheDirty[userID] == generation {
+		delete(s.balanceCacheDirty, userID)
+	}
+}
+
+func (s *BillingCacheService) setBalanceCacheAtGeneration(ctx context.Context, userID int64, balance float64, generation, cacheVersion uint64, cacheVersionKnown bool) error {
+	if s == nil || s.cache == nil {
+		return nil
+	}
+	if versioned, ok := s.cache.(VersionedBalanceCache); ok {
+		if !cacheVersionKnown {
+			// Never downgrade a versioned backend to an unconditional SET after
+			// its generation read failed. Returning the DB value remains safe, but
+			// this snapshot cannot be cached without a token.
+			return errors.New("balance cache generation unavailable")
+		}
+		currentGeneration, _ := s.balanceCacheState(userID)
+		if currentGeneration != generation {
+			return ErrBillingCacheGenerationChanged
+		}
+		// Do not hold the service mutex across Redis I/O. The Redis token fences
+		// cross-process invalidation, and the post-write local check below catches
+		// an invalidation that began after the pre-check.
+		if err := versioned.SetUserBalanceIfGeneration(ctx, userID, balance, cacheVersion); err != nil {
+			logger.LegacyPrintf("service.billing_cache", "Warning: set versioned balance cache failed for user %d: %v", userID, err)
+			return err
+		}
+		currentGeneration, _ = s.balanceCacheState(userID)
+		if currentGeneration != generation {
+			return ErrBillingCacheGenerationChanged
+		}
+		return nil
+	}
+
+	// A legacy backend has no distributed token. Serialize its local SET with
+	// invalidation so DEL cannot complete before a stale SET resurrects the key.
+	s.balanceCacheMu.Lock()
+	defer s.balanceCacheMu.Unlock()
+	if s.balanceCacheGeneration == nil {
+		s.balanceCacheGeneration = make(map[int64]uint64)
+	}
+	if s.balanceCacheGeneration[userID] != generation {
+		return ErrBillingCacheGenerationChanged
 	}
 	if err := s.cache.SetUserBalance(ctx, userID, balance); err != nil {
 		logger.LegacyPrintf("service.billing_cache", "Warning: set balance cache failed for user %d: %v", userID, err)
+		return err
 	}
+	return nil
 }
 
 // DeductBalanceCache 扣减余额缓存（同步调用）
 func (s *BillingCacheService) DeductBalanceCache(ctx context.Context, userID int64, amount float64) error {
-	if s.cache == nil {
+	if s == nil || s.cache == nil {
 		return nil
 	}
-	return s.cache.DeductUserBalance(ctx, userID, amount)
+	return s.deductBalanceCacheAtGeneration(ctx, userID, amount, s.balanceGeneration(userID))
+}
+
+func (s *BillingCacheService) deductBalanceCacheAtGeneration(ctx context.Context, userID int64, amount float64, generation uint64) error {
+	if s == nil || s.cache == nil {
+		return nil
+	}
+	s.balanceCacheMu.Lock()
+	if s.balanceCacheGeneration == nil {
+		s.balanceCacheGeneration = make(map[int64]uint64)
+	}
+	if s.balanceCacheGeneration[userID] != generation {
+		s.balanceCacheMu.Unlock()
+		return nil
+	}
+	s.balanceCacheGeneration[userID]++
+	operationGeneration := s.balanceCacheGeneration[userID]
+	// Never hold the process-wide mutex across Redis/network I/O.  A slow or
+	// unavailable cache must not serialize balance operations for every user.
+	s.balanceCacheMu.Unlock()
+	err := s.cache.DeductUserBalance(ctx, userID, amount)
+	s.balanceCacheMu.Lock()
+	defer s.balanceCacheMu.Unlock()
+	if err != nil {
+		if s.balanceCacheDirty == nil {
+			s.balanceCacheDirty = make(map[int64]uint64)
+		}
+		if s.balanceCacheDirty[userID] < operationGeneration {
+			s.balanceCacheDirty[userID] = operationGeneration
+		}
+		return err
+	}
+	// A successful cache-side deduction already contains the authoritative
+	// delta. It supersedes a dirty marker only when no newer operation has
+	// advanced the local generation in the meantime.
+	if s.balanceCacheDirty != nil && s.balanceCacheDirty[userID] == operationGeneration {
+		delete(s.balanceCacheDirty, userID)
+	}
+	return nil
 }
 
 // QueueDeductBalance 异步扣减余额缓存
 func (s *BillingCacheService) QueueDeductBalance(userID int64, amount float64) {
-	if s.cache == nil {
+	if s == nil || s.cache == nil {
 		return
 	}
 	// 队列满时同步回退，避免关键扣减被静默丢弃。
+	generation := s.balanceGeneration(userID)
 	if s.enqueueCacheWrite(cacheWriteTask{
-		kind:   cacheWriteDeductBalance,
-		userID: userID,
-		amount: amount,
+		kind:              cacheWriteDeductBalance,
+		userID:            userID,
+		amount:            amount,
+		balanceGeneration: generation,
 	}) {
 		return
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), cacheWriteTimeout)
 	defer cancel()
-	if err := s.DeductBalanceCache(ctx, userID, amount); err != nil {
+	if err := s.deductBalanceCacheAtGeneration(ctx, userID, amount, generation); err != nil {
 		logger.LegacyPrintf("service.billing_cache", "Warning: deduct balance cache fallback failed for user %d: %v", userID, err)
 	}
 }
@@ -432,10 +779,23 @@ func (s *BillingCacheService) InvalidateUserBalance(ctx context.Context, userID 
 	if s.cache == nil {
 		return nil
 	}
+	s.balanceCacheMu.Lock()
+	if s.balanceCacheGeneration == nil {
+		s.balanceCacheGeneration = make(map[int64]uint64)
+	}
+	s.balanceCacheGeneration[userID]++
+	generation := s.balanceCacheGeneration[userID]
+	if s.balanceCacheDirty == nil {
+		s.balanceCacheDirty = make(map[int64]uint64)
+	}
+	s.balanceCacheDirty[userID] = generation
+	s.balanceCacheMu.Unlock()
+
 	if err := s.cache.InvalidateUserBalance(ctx, userID); err != nil {
 		logger.LegacyPrintf("service.billing_cache", "Warning: invalidate balance cache failed for user %d: %v", userID, err)
 		return err
 	}
+	s.clearBalanceCacheDirtyIfUnchanged(userID, generation)
 	return nil
 }
 
@@ -643,6 +1003,10 @@ func (s *BillingCacheService) UpdateSubscriptionUsage(ctx context.Context, userI
 	if s.cache == nil {
 		return nil
 	}
+	// Keep the in-process dirty fence in sync with the Redis eviction.  The
+	// legacy cache interface still accepts the cost for compatibility, but an
+	// independent increment can race a DB reload and double-count usage.
+	s.markSubscriptionCacheDirty(userID, groupID)
 	return s.cache.UpdateSubscriptionUsage(ctx, userID, groupID, costUSD)
 }
 
@@ -707,14 +1071,126 @@ func (s *BillingCacheService) SubscribeSubscriptionCacheInvalidation(ctx context
 
 // InvalidateAPIKeyRateLimit invalidates the Redis rate-limit usage cache for an API key.
 func (s *BillingCacheService) InvalidateAPIKeyRateLimit(ctx context.Context, keyID int64) error {
-	if s.cache == nil {
+	if s == nil || s.cache == nil {
 		return nil
 	}
-	if err := s.cache.InvalidateAPIKeyRateLimit(ctx, keyID); err != nil {
+	// Advance the local generation before issuing the backend operation. Even
+	// when Redis is unavailable (or the result is ambiguous), this process will
+	// not accept a previously-started DB reload into its cache. Distributed
+	// backends additionally advance their own token atomically in Lua.
+	s.apiKeyRateLimitCacheMu.Lock()
+	if s.apiKeyRateLimitCacheGenerations == nil {
+		s.apiKeyRateLimitCacheGenerations = make(map[int64]uint64)
+	}
+	s.apiKeyRateLimitCacheGenerations[keyID]++
+	generation := s.apiKeyRateLimitCacheGenerations[keyID]
+	if s.apiKeyRateLimitCacheDirty == nil {
+		s.apiKeyRateLimitCacheDirty = make(map[int64]uint64)
+	}
+	s.apiKeyRateLimitCacheDirty[keyID] = generation
+	s.apiKeyRateLimitCacheMu.Unlock()
+
+	err := s.cache.InvalidateAPIKeyRateLimit(ctx, keyID)
+	if err != nil {
 		logger.LegacyPrintf("service.billing_cache", "Warning: invalidate api key rate limit cache failed for key %d: %v", keyID, err)
 		return err
 	}
+	s.clearAPIKeyRateLimitCacheDirtyIfUnchanged(keyID, generation)
 	return nil
+}
+
+func (s *BillingCacheService) apiKeyRateLimitCacheGeneration(keyID int64) uint64 {
+	if s == nil {
+		return 0
+	}
+	s.apiKeyRateLimitCacheMu.Lock()
+	defer s.apiKeyRateLimitCacheMu.Unlock()
+	if s.apiKeyRateLimitCacheGenerations == nil {
+		s.apiKeyRateLimitCacheGenerations = make(map[int64]uint64)
+	}
+	return s.apiKeyRateLimitCacheGenerations[keyID]
+}
+
+// apiKeyRateLimitCacheState snapshots the local generation and dirty fence
+// under one lock so a read cannot observe a mixed pair while invalidation runs.
+func (s *BillingCacheService) apiKeyRateLimitCacheState(keyID int64) (generation, dirty uint64) {
+	if s == nil {
+		return 0, 0
+	}
+	s.apiKeyRateLimitCacheMu.Lock()
+	defer s.apiKeyRateLimitCacheMu.Unlock()
+	if s.apiKeyRateLimitCacheGenerations == nil {
+		s.apiKeyRateLimitCacheGenerations = make(map[int64]uint64)
+	}
+	return s.apiKeyRateLimitCacheGenerations[keyID], s.apiKeyRateLimitCacheDirty[keyID]
+}
+
+func (s *BillingCacheService) apiKeyRateLimitCacheDirtyGeneration(keyID int64) uint64 {
+	if s == nil {
+		return 0
+	}
+	s.apiKeyRateLimitCacheMu.Lock()
+	defer s.apiKeyRateLimitCacheMu.Unlock()
+	return s.apiKeyRateLimitCacheDirty[keyID]
+}
+
+func (s *BillingCacheService) clearAPIKeyRateLimitCacheDirtyIfUnchanged(keyID int64, generation uint64) {
+	if s == nil || generation == 0 {
+		return
+	}
+	s.apiKeyRateLimitCacheMu.Lock()
+	defer s.apiKeyRateLimitCacheMu.Unlock()
+	if s.apiKeyRateLimitCacheDirty[keyID] == generation {
+		delete(s.apiKeyRateLimitCacheDirty, keyID)
+	}
+}
+
+// setAPIKeyRateLimitCacheAtGeneration writes a DB snapshot only if no local
+// invalidation happened while it was being loaded. Versioned Redis backends
+// perform the corresponding cross-process token check as part of the write.
+func (s *BillingCacheService) setAPIKeyRateLimitCacheAtGeneration(
+	ctx context.Context,
+	keyID int64,
+	data *APIKeyRateLimitCacheData,
+	localGeneration uint64,
+	cacheGeneration uint64,
+	cacheGenerationKnown bool,
+) error {
+	if s == nil || s.cache == nil || data == nil {
+		return nil
+	}
+	if versioned, ok := s.cache.(VersionedAPIKeyRateLimitCache); ok {
+		if !cacheGenerationKnown {
+			return errors.New("api key rate-limit cache generation unavailable")
+		}
+		currentGeneration, _ := s.apiKeyRateLimitCacheState(keyID)
+		if currentGeneration != localGeneration {
+			return ErrBillingCacheGenerationChanged
+		}
+		// The Redis conditional write supplies the cross-process fence. Avoid
+		// holding the process-wide mutex across network I/O, then verify that no
+		// local invalidation began while the command was in flight.
+		if err := versioned.SetAPIKeyRateLimitIfGeneration(ctx, keyID, data, cacheGeneration); err != nil {
+			return err
+		}
+		currentGeneration, _ = s.apiKeyRateLimitCacheState(keyID)
+		if currentGeneration != localGeneration {
+			return ErrBillingCacheGenerationChanged
+		}
+		return nil
+	}
+
+	// Legacy backends have no distributed generation. Keep their local SET and
+	// invalidation ordered under the mutex to prevent stale resurrection.
+	s.apiKeyRateLimitCacheMu.Lock()
+	defer s.apiKeyRateLimitCacheMu.Unlock()
+	if s.apiKeyRateLimitCacheGenerations == nil {
+		s.apiKeyRateLimitCacheGenerations = make(map[int64]uint64)
+	}
+	if s.apiKeyRateLimitCacheGenerations[keyID] != localGeneration {
+		return ErrBillingCacheGenerationChanged
+	}
+	return s.cache.SetAPIKeyRateLimit(ctx, keyID, data)
 }
 
 // ============================================
@@ -726,62 +1202,201 @@ func (s *BillingCacheService) InvalidateAPIKeyRateLimit(ctx context.Context, key
 // resets expired windows in-memory and triggers async DB reset,
 // and returns an error if any window limit is exceeded.
 func (s *BillingCacheService) checkAPIKeyRateLimits(ctx context.Context, apiKey *APIKey) error {
-	if s.cache == nil {
-		// No cache: fall back to reading from DB directly
-		if s.apiKeyRateLimitLoader == nil {
+	if s == nil || apiKey == nil {
+		return nil
+	}
+	for attempt := 0; attempt < billingCacheGenerationRetryLimit; attempt++ {
+		retry, err := s.checkAPIKeyRateLimitsOnce(ctx, apiKey)
+		if err != nil {
+			return err
+		}
+		if !retry {
 			return nil
 		}
-		data, err := s.apiKeyRateLimitLoader.GetRateLimitData(ctx, apiKey.ID)
-		if err != nil {
-			return nil // Don't block requests on DB errors
+	}
+	return ErrBillingCacheGenerationChanged
+}
+
+// checkAPIKeyRateLimitsOnce performs one generation-qualified rate-limit read.
+// The bool result is true when a local or distributed invalidation raced the
+// read-through reload and the caller should retry.
+func (s *BillingCacheService) checkAPIKeyRateLimitsOnce(ctx context.Context, apiKey *APIKey) (bool, error) {
+	if s == nil || apiKey == nil {
+		return false, nil
+	}
+	if s.cache == nil {
+		// No cache: fall back to reading from DB directly.
+		if s.apiKeyRateLimitLoader == nil {
+			return false, nil
 		}
-		return s.evaluateRateLimits(ctx, apiKey, data.Usage5h, data.Usage1d, data.Usage7d,
+		data, err := s.apiKeyRateLimitLoader.GetRateLimitData(ctx, apiKey.ID)
+		if err != nil || data == nil {
+			return false, nil // Don't block requests on DB errors or empty adapters.
+		}
+		return false, s.evaluateRateLimits(ctx, apiKey, data.Usage5h, data.Usage1d, data.Usage7d,
 			data.Window5hStart, data.Window1dStart, data.Window7dStart)
 	}
 
-	cacheData, err := s.cache.GetAPIKeyRateLimit(ctx, apiKey.ID)
-	if err != nil {
-		// Cache miss: load from DB and populate cache
-		if s.apiKeyRateLimitLoader == nil {
-			return nil
+	localGeneration, localDirtyGeneration := s.apiKeyRateLimitCacheState(apiKey.ID)
+	var (
+		cacheData            *APIKeyRateLimitCacheData
+		err                  error
+		cacheGeneration      uint64
+		cacheGenerationKnown bool
+	)
+	if localDirtyGeneration > 0 {
+		// An invalidation failure can leave the old Redis hash readable. Capture
+		// the distributed generation for a conditional repair, but deliberately
+		// ignore the cached usage and force an authoritative DB load.
+		if versioned, ok := s.cache.(VersionedAPIKeyRateLimitCache); ok {
+			_, cacheGeneration, err = versioned.GetAPIKeyRateLimitWithGeneration(ctx, apiKey.ID)
+			if errors.Is(err, ErrBillingCacheGenerationChanged) {
+				// The generation-qualified read saw an invalidation race. Retrying
+				// here is required; treating it as a miss would evaluate a DB row
+				// captured before the invalidation as current.
+				return true, nil
+			}
+			cacheGenerationKnown = err == nil || errors.Is(err, ErrBillingCacheMiss)
 		}
-		dbData, dbErr := s.apiKeyRateLimitLoader.GetRateLimitData(ctx, apiKey.ID)
-		if dbErr != nil {
-			return nil // Don't block requests on DB errors
+		err = ErrBillingCacheMiss
+	} else if versioned, ok := s.cache.(VersionedAPIKeyRateLimitCache); ok {
+		cacheData, cacheGeneration, err = versioned.GetAPIKeyRateLimitWithGeneration(ctx, apiKey.ID)
+		cacheGenerationKnown = err == nil || errors.Is(err, ErrBillingCacheMiss)
+	} else {
+		cacheData, err = s.cache.GetAPIKeyRateLimit(ctx, apiKey.ID)
+	}
+	if errors.Is(err, ErrBillingCacheGenerationChanged) {
+		// Preserve the distributed fence outcome. A generic miss fallback would
+		// otherwise evaluate and return the pre-invalidation DB snapshot.
+		return true, nil
+	}
+	if err == nil && cacheData == nil {
+		// A custom/legacy cache may report a nil payload without an explicit
+		// miss error. Treat that as a miss rather than dereferencing it below.
+		err = ErrBillingCacheMiss
+	}
+	if err == nil {
+		// Do not return a cache hit after an in-process invalidation completed
+		// while the backend read was in flight.
+		currentGeneration, currentDirty := s.apiKeyRateLimitCacheState(apiKey.ID)
+		if currentGeneration != localGeneration || currentDirty > 0 {
+			return true, nil
 		}
-		// Build cache entry from DB data
-		cacheEntry := &APIKeyRateLimitCacheData{
-			Usage5h: dbData.Usage5h,
-			Usage1d: dbData.Usage1d,
-			Usage7d: dbData.Usage7d,
+		// A local generation cannot see an eviction performed by another
+		// process.  Re-read the distributed token just before evaluating the
+		// hit; the token read is the final linearization point for this request.
+		if reader, ok := s.cache.(rateLimitGenerationTokenReader); ok && cacheGenerationKnown {
+			latestGeneration, verifyErr := reader.GetAPIKeyRateLimitGeneration(ctx, apiKey.ID)
+			if verifyErr != nil {
+				// Do not evaluate the unverified hit.  Fall back to the
+				// authoritative API-key row, matching the normal cache-error
+				// behavior while preserving the no-stale-hit guarantee.
+				if s.apiKeyRateLimitLoader == nil {
+					return false, nil
+				}
+				freshData, dbErr := s.apiKeyRateLimitLoader.GetRateLimitData(ctx, apiKey.ID)
+				if dbErr != nil || freshData == nil {
+					return false, nil
+				}
+				return false, s.evaluateRateLimits(ctx, apiKey,
+					freshData.Usage5h,
+					freshData.Usage1d,
+					freshData.Usage7d,
+					freshData.Window5hStart,
+					freshData.Window1dStart,
+					freshData.Window7dStart,
+				)
+			}
+			if latestGeneration != cacheGeneration {
+				return true, nil
+			}
 		}
-		if dbData.Window5hStart != nil {
-			cacheEntry.Window5h = dbData.Window5hStart.Unix()
+		var w5h, w1d, w7d *time.Time
+		if cacheData.Window5h > 0 {
+			t := time.Unix(cacheData.Window5h, 0)
+			w5h = &t
 		}
-		if dbData.Window1dStart != nil {
-			cacheEntry.Window1d = dbData.Window1dStart.Unix()
+		if cacheData.Window1d > 0 {
+			t := time.Unix(cacheData.Window1d, 0)
+			w1d = &t
 		}
-		if dbData.Window7dStart != nil {
-			cacheEntry.Window7d = dbData.Window7dStart.Unix()
+		if cacheData.Window7d > 0 {
+			t := time.Unix(cacheData.Window7d, 0)
+			w7d = &t
 		}
-		_ = s.cache.SetAPIKeyRateLimit(ctx, apiKey.ID, cacheEntry)
-		cacheData = cacheEntry
+		return false, s.evaluateRateLimits(ctx, apiKey, cacheData.Usage5h, cacheData.Usage1d, cacheData.Usage7d, w5h, w1d, w7d)
 	}
 
+	// A local invalidation may have happened after the generation-qualified
+	// read but before the DB load. Do not use the old snapshot/flight.
+	currentGeneration, currentDirty := s.apiKeyRateLimitCacheState(apiKey.ID)
+	// A dirty fence that was already present when this attempt started is the
+	// reason we are doing the DB reload, not evidence of a new race. Only a
+	// newly-created/advanced dirty marker should force another retry here.
+	if currentGeneration != localGeneration ||
+		(localDirtyGeneration == 0 && currentDirty > 0) ||
+		(localDirtyGeneration > 0 && currentDirty > localDirtyGeneration) {
+		return true, nil
+	}
+	if s.apiKeyRateLimitLoader == nil {
+		return false, nil
+	}
+	dbData, dbErr := s.apiKeyRateLimitLoader.GetRateLimitData(ctx, apiKey.ID)
+	if dbErr != nil || dbData == nil {
+		return false, nil // Don't block requests on DB errors or empty adapters.
+	}
+	// Build cache entry from DB data.
+	cacheEntry := &APIKeyRateLimitCacheData{
+		Usage5h: dbData.Usage5h,
+		Usage1d: dbData.Usage1d,
+		Usage7d: dbData.Usage7d,
+	}
+	if dbData.Window5hStart != nil {
+		cacheEntry.Window5h = dbData.Window5hStart.Unix()
+	}
+	if dbData.Window1dStart != nil {
+		cacheEntry.Window1d = dbData.Window1dStart.Unix()
+	}
+	if dbData.Window7dStart != nil {
+		cacheEntry.Window7d = dbData.Window7dStart.Unix()
+	}
+	setErr := s.setAPIKeyRateLimitCacheAtGeneration(
+		ctx,
+		apiKey.ID,
+		cacheEntry,
+		localGeneration,
+		cacheGeneration,
+		cacheGenerationKnown,
+	)
+	if errors.Is(setErr, ErrBillingCacheGenerationChanged) {
+		return true, nil
+	}
+	if setErr != nil {
+		logger.LegacyPrintf("service.billing_cache", "Warning: set api key rate limit cache failed for api key %d: %v", apiKey.ID, setErr)
+	} else if localDirtyGeneration > 0 &&
+		s.apiKeyRateLimitCacheGeneration(apiKey.ID) == localGeneration {
+		s.clearAPIKeyRateLimitCacheDirtyIfUnchanged(apiKey.ID, localDirtyGeneration)
+	}
+	currentGeneration, currentDirty = s.apiKeyRateLimitCacheState(apiKey.ID)
+	if currentGeneration != localGeneration ||
+		(localDirtyGeneration == 0 && currentDirty > 0) ||
+		(localDirtyGeneration > 0 && currentDirty > localDirtyGeneration) {
+		return true, nil
+	}
 	var w5h, w1d, w7d *time.Time
-	if cacheData.Window5h > 0 {
-		t := time.Unix(cacheData.Window5h, 0)
+	if cacheEntry.Window5h > 0 {
+		t := time.Unix(cacheEntry.Window5h, 0)
 		w5h = &t
 	}
-	if cacheData.Window1d > 0 {
-		t := time.Unix(cacheData.Window1d, 0)
+	if cacheEntry.Window1d > 0 {
+		t := time.Unix(cacheEntry.Window1d, 0)
 		w1d = &t
 	}
-	if cacheData.Window7d > 0 {
-		t := time.Unix(cacheData.Window7d, 0)
+	if cacheEntry.Window7d > 0 {
+		t := time.Unix(cacheEntry.Window7d, 0)
 		w7d = &t
 	}
-	return s.evaluateRateLimits(ctx, apiKey, cacheData.Usage5h, cacheData.Usage1d, cacheData.Usage7d, w5h, w1d, w7d)
+	return false, s.evaluateRateLimits(ctx, apiKey, cacheEntry.Usage5h, cacheEntry.Usage1d, cacheEntry.Usage7d, w5h, w1d, w7d)
 }
 
 // evaluateRateLimits checks usage against limits, triggering async resets for expired windows.
@@ -820,7 +1435,7 @@ func (s *BillingCacheService) evaluateRateLimits(ctx context.Context, apiKey *AP
 			}
 			// Invalidate cache so next request loads fresh data
 			if s.cache != nil {
-				if err := s.cache.InvalidateAPIKeyRateLimit(resetCtx, keyID); err != nil {
+				if err := s.InvalidateAPIKeyRateLimit(resetCtx, keyID); err != nil {
 					logger.LegacyPrintf("service.billing_cache", "Warning: invalidate rate limit cache failed for api key %d: %v", keyID, err)
 				}
 			}
@@ -840,16 +1455,23 @@ func (s *BillingCacheService) evaluateRateLimits(ctx context.Context, apiKey *AP
 	return nil
 }
 
-// QueueUpdateAPIKeyRateLimitUsage asynchronously updates rate limit usage in the cache.
+// QueueUpdateAPIKeyRateLimitUsage is retained as a compatibility shim for
+// callers compiled against the old API. The database increment is
+// authoritative, so applying a relative Redis increment here is unsafe: a
+// concurrent cache miss can refill the pre-charge snapshot and the queued
+// increment would then double-count it. Treat the legacy operation as a
+// synchronous invalidation instead. New billing code should call
+// InvalidateAPIKeyRateLimit directly and handle the returned error.
 func (s *BillingCacheService) QueueUpdateAPIKeyRateLimitUsage(apiKeyID int64, cost float64) {
-	if s.cache == nil {
+	if s == nil || s.cache == nil {
 		return
 	}
-	s.enqueueCacheWrite(cacheWriteTask{
-		kind:     cacheWriteUpdateRateLimitUsage,
-		apiKeyID: apiKeyID,
-		amount:   cost,
-	})
+	_ = cost
+	ctx, cancel := context.WithTimeout(context.Background(), cacheWriteTimeout)
+	defer cancel()
+	if err := s.InvalidateAPIKeyRateLimit(ctx, apiKeyID); err != nil {
+		logger.LegacyPrintf("service.billing_cache", "Warning: legacy api key rate-limit invalidation failed for key %d: %v", apiKeyID, err)
+	}
 }
 
 // IncrementUserPlatformQuotaUsage 同步累加 user × platform usage 到 Redis 缓存。
@@ -936,6 +1558,29 @@ func (s *BillingCacheService) PeekWebChatEligibility(ctx context.Context, userID
 	return balance, nil
 }
 
+// PeekWebChatSubscriptionEligibility performs the read-only subscription
+// preflight used while Web Chat selects a billing source. It deliberately
+// excludes API-key rate limits and RPM accounting; the gateway still performs
+// the authoritative, side-effecting admission check immediately before
+// scheduling the upstream request.
+func (s *BillingCacheService) PeekWebChatSubscriptionEligibility(
+	ctx context.Context,
+	userID int64,
+	group *Group,
+	subscription *UserSubscription,
+) error {
+	if s == nil || s.cfg == nil || userID <= 0 || group == nil || subscription == nil {
+		return ErrBillingServiceUnavailable
+	}
+	if !group.IsSubscriptionType() || subscription.UserID != userID || subscription.GroupID != group.ID {
+		return ErrSubscriptionInvalid
+	}
+	if s.circuitBreaker != nil && !s.circuitBreaker.Allow() {
+		return ErrBillingServiceUnavailable
+	}
+	return s.checkSubscriptionEligibility(ctx, userID, group, subscription)
+}
+
 func (s *BillingCacheService) peekUserPlatformQuotaEligibilityStrict(ctx context.Context, userID int64, platform string) error {
 	if strings.TrimSpace(platform) == "" {
 		return nil
@@ -1013,12 +1658,24 @@ func evaluateUserPlatformQuotaEntry(entry *UserPlatformQuotaCacheEntry, now time
 // platform 为请求的目标平台（如 "anthropic"），传空串 "" 时跳过 user × platform quota 检查。
 func (s *BillingCacheService) CheckBillingEligibility(ctx context.Context, user *User, apiKey *APIKey, group *Group, subscription *UserSubscription, platform string) error {
 	// 简易模式保留标准 API 跳过计费检查的既有语义。站内 Web Chat
-	// 仍需在进入调度前做第二次权威正余额复检，但不检查 reserve 或平台额度。
+	// 仍需在进入调度前按已选计费来源做第二次权威复检。
 	if s.cfg.RunMode == config.RunModeSimple {
 		webChat, _ := ctx.Value(ctxkey.WebChat).(bool)
 		if webChat {
 			if user == nil || user.ID <= 0 {
 				return ErrBillingServiceUnavailable
+			}
+			if group != nil && group.IsSubscriptionType() {
+				if apiKey == nil {
+					return ErrBillingServiceUnavailable
+				}
+				if _, err := resolveUsageSubscriptionBilling(apiKey, subscription); err != nil {
+					return ErrBillingServiceUnavailable.WithCause(err)
+				}
+				return s.PeekWebChatSubscriptionEligibility(ctx, user.ID, group, subscription)
+			}
+			if subscription != nil {
+				return ErrBillingServiceUnavailable.WithCause(errors.New("subscription billing context does not match wallet group"))
 			}
 			_, err := s.PeekWebChatEligibility(ctx, user.ID, platform)
 			return err
@@ -1227,9 +1884,7 @@ func (s *BillingCacheService) checkSubscriptionEligibility(ctx context.Context, 
 	// stale row left behind by expiry/reopen or a plan switch.
 	now := time.Now()
 	if !subscriptionCacheMatchesEntitlement(subData, subscription, now) {
-		if s.cache != nil {
-			_ = s.cache.InvalidateSubscriptionCache(ctx, userID, group.ID)
-		}
+		_ = s.InvalidateSubscription(ctx, userID, group.ID)
 		subData, err = s.getSubscriptionFromDB(ctx, userID, group.ID)
 		if err != nil {
 			if s.circuitBreaker != nil {

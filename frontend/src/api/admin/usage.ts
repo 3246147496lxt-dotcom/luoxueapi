@@ -90,6 +90,7 @@ export interface AdminUsageQueryParams extends UsageQueryParams {
   user_id?: number
   exact_total?: boolean
   billing_mode?: string
+  upstream_model_mismatch?: boolean
   sort_by?: string
   sort_order?: 'asc' | 'desc'
   // 错误请求 tab 专属筛选(仅传给错误列表接口;共用同一 filters 对象)
@@ -108,14 +109,20 @@ export interface BillingReceiptTokenSummary {
 
 export interface AdminBillingReceipt {
   id: number | string
+  /** Stable UI identity. Attempts without a persisted receipt use their request ID. */
+  row_key: string
+  /** Empty when the request never produced a persisted billing receipt. */
   receipt_id: string
   request_id?: string | null
   user_id: number
   user?: {
     id?: number
+    username?: string | null
     email?: string
     deleted?: boolean
   } | null
+  username?: string | null
+  user_username?: string | null
   user_email?: string | null
   source?: UsageSource | null
   requested_model?: string | null
@@ -168,19 +175,33 @@ function asFiniteNumber(value: unknown, fallback = 0): number {
   return Number.isFinite(parsed) ? parsed : fallback
 }
 
-function normalizeBillingReceipt(raw: Record<string, any>): AdminBillingReceipt {
+function normalizeBillingReceipt(raw: Record<string, any>, index = 0): AdminBillingReceipt {
   const tokenData = raw.tokens && typeof raw.tokens === 'object' ? raw.tokens : {}
-  const id = raw.id ?? raw.receipt_id ?? raw.request_id ?? ''
-  const receiptId = String(raw.receipt_id ?? raw.request_id ?? id)
+  const id = raw.id ?? raw.receipt_id ?? ''
+  const rawReceiptId = raw.receipt_id ?? id
+  const receiptIdValue = rawReceiptId == null ? '' : String(rawReceiptId).trim()
+  // The backend emits id=0 for request attempts that have no persisted ledger row.
+  // Keep that absence explicit instead of presenting a fictional "receipt 0".
+  const receiptId = receiptIdValue === '0' ? '' : receiptIdValue
+  const requestId = raw.request_id == null ? null : String(raw.request_id)
+  const createdAt = String(raw.created_at ?? '')
+  const rowKey = receiptId
+    ? `receipt:${receiptId}`
+    : requestId
+      ? `request:${requestId}`
+      : `attempt:${asFiniteNumber(raw.user_id ?? raw.user?.id)}:${createdAt}:${index}`
   const requestedModel = raw.requested_model ?? raw.model ?? null
   const actualModel = raw.actual_model ?? raw.upstream_model ?? raw.model ?? requestedModel ?? ''
 
   return {
     id,
+    row_key: rowKey,
     receipt_id: receiptId,
-    request_id: raw.request_id ?? receiptId,
+    request_id: requestId,
     user_id: asFiniteNumber(raw.user_id ?? raw.user?.id),
     user: raw.user ?? null,
+    username: raw.username ?? null,
+    user_username: raw.user_username ?? null,
     user_email: raw.user_email ?? raw.email ?? raw.user?.email ?? null,
     source: raw.source ?? 'web_chat',
     requested_model: requestedModel,
@@ -217,7 +238,7 @@ function normalizeBillingReceipt(raw: Record<string, any>): AdminBillingReceipt 
     overdraft: Boolean(raw.overdraft),
     failure_code: raw.failure_code ?? null,
     failure_reason: raw.failure_reason ?? raw.error_message ?? raw.billing_error ?? null,
-    created_at: String(raw.created_at ?? ''),
+    created_at: createdAt,
   }
 }
 
@@ -253,7 +274,7 @@ export async function listBillingReceipts(
   const total = asFiniteNumber(payload?.total, items.length)
 
   return {
-    items: items.map((item: Record<string, any>) => normalizeBillingReceipt(item)),
+    items: items.map((item: Record<string, any>, index: number) => normalizeBillingReceipt(item, index)),
     total,
     page,
     page_size: pageSize,
@@ -274,6 +295,7 @@ export async function getStats(params: {
   model?: string
   request_type?: UsageRequestType
   stream?: boolean
+  upstream_model_mismatch?: boolean
   period?: string
   start_date?: string
   end_date?: string

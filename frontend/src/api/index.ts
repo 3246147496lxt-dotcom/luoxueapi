@@ -23,9 +23,19 @@ export { default as announcementsAPI } from './announcements'
 export { channelMonitorUserAPI } from './channelMonitor'
 export { requestCustomPageLaunch } from './customPages'
 export { desktopAPI } from './desktop'
-
-// Admin APIs
-export { adminAPI } from './admin'
+export {
+  publicSkillsAPI,
+  getPublicSkill,
+  getPublicSkillVersions,
+  getSkillVersionDownloadURL,
+  listPublicSkills,
+  type PublicSkill,
+  type PublicSkillVersion,
+  type SkillCatalogQuery,
+  type SkillCatalogResponse,
+  type SkillCategory,
+  type SkillFileManifestEntry,
+} from './skills'
 
 // Default export
 export { default } from './client'

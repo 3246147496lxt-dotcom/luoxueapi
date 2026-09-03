@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { useI18n } from 'vue-i18n'
-import { AlertTriangle, ArrowRight, ExternalLink, LoaderCircle, ShieldCheck, Snowflake } from 'lucide-vue-next'
+import { AlertTriangle, ArrowRight, Coins, ExternalLink, LoaderCircle, ShieldCheck } from 'lucide-vue-next'
 import type { PairingState } from '@/types'
 
 defineProps<{ pairing: PairingState; busy: boolean; error?: string }>()
@@ -29,7 +29,7 @@ const { t } = useI18n()
       <template v-if="pairing.status === 'idle' || pairing.status === 'error' || pairing.status === 'expired'">
         <button class="primary-button primary-button--wide" type="button" :disabled="busy" @click="$emit('start')">
           <LoaderCircle v-if="busy" class="spin" :size="18" />
-          <Snowflake v-else :size="18" />
+          <Coins v-else :size="18" />
           <span>{{ t('pairing.start') }}</span>
           <ArrowRight :size="18" />
         </button>

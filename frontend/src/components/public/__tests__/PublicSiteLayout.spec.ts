@@ -21,7 +21,8 @@ const testState = vi.hoisted(() => ({
       site_name: '落雪API',
       site_logo: '',
       doc_url: '/tutorial-docs/',
-      public_model_catalog_enabled: false
+      public_model_catalog_enabled: false,
+      skill_marketplace_enabled: false
     },
     siteName: '落雪API',
     siteLogo: '',
@@ -32,10 +33,7 @@ const testState = vi.hoisted(() => ({
 
 const messages: Record<string, string> = {
   'home.nav.ariaLabel': '首页导航',
-  'home.nav.capabilities': '产品能力',
-  'home.nav.steps': '接入步骤',
-  'home.nav.providers': '模型状态',
-  'home.nav.faq': '常见问题',
+  'home.nav.quickStart': '快速开始',
   'home.nav.tutorial': '使用教程',
   'home.nav.openMenu': '打开菜单',
   'home.nav.closeMenu': '关闭菜单',
@@ -48,7 +46,8 @@ const messages: Record<string, string> = {
   'home.footer.tutorial': '使用教程',
   'home.footer.apiDocs': 'API 文档',
   'home.footer.channelStatus': '渠道状态',
-  'modelCatalog.navLabel': '模型广场'
+  'modelCatalog.navLabel': '模型广场',
+  'skills.navLabel': 'Skill 市场'
 }
 
 vi.mock('vue-i18n', async (importOriginal) => {
@@ -77,7 +76,7 @@ const RouterLinkStub = defineComponent({
   template: '<a v-bind="$attrs" :data-to="typeof to === \'string\' ? to : JSON.stringify(to)"><slot /></a>'
 })
 
-function mountLayout(page: 'home' | 'models' = 'home') {
+function mountLayout(page: 'home' | 'models' | 'skills' = 'home') {
   return mount(PublicSiteLayout, {
     props: { page },
     slots: { default: '<main data-testid="content">Content</main>' },
@@ -101,6 +100,7 @@ beforeEach(() => {
   testState.appStore.cachedPublicSettings.doc_url = '/tutorial-docs/'
   testState.appStore.docUrl = ''
   testState.appStore.cachedPublicSettings.public_model_catalog_enabled = false
+  testState.appStore.cachedPublicSettings.skill_marketplace_enabled = false
   testState.appStore.backendModeEnabled = false
   document.documentElement.classList.remove('dark')
   localStorage.clear()
@@ -146,7 +146,7 @@ describe('PublicSiteLayout', () => {
     expect(homeWrapper.classes()).toContain('public-site-page--home')
     expect(homeWrapper.classes()).not.toContain('public-site-page--models')
     expect(homeWrapper.get('[data-testid="public-site-brand-logo"]').attributes('src'))
-      .toBe('/brand/luoxue-snowpuff-extracted.svg')
+      .toBe('/logo.png')
 
     homeWrapper.unmount()
     const modelsWrapper = mountLayout('models')
@@ -155,7 +155,7 @@ describe('PublicSiteLayout', () => {
     expect(modelsWrapper.classes()).toContain('public-site-page--models')
     expect(modelsWrapper.classes()).not.toContain('public-site-page--home')
     expect(modelsWrapper.get('[data-testid="public-site-brand-logo"]').attributes('src'))
-      .toBe('/brand/luoxue-snowpuff-extracted.svg')
+      .toBe('/logo.png')
     expect(modelsWrapper.find('.public-site-footer-mark').exists()).toBe(true)
     const localeSwitcher = modelsWrapper.get('.public-site-desktop-action locale-switcher-stub')
     expect(localeSwitcher.attributes('icon-variant') ?? localeSwitcher.attributes('iconvariant'))
@@ -189,17 +189,48 @@ describe('PublicSiteLayout', () => {
     expect(customWrapper.find('.public-site-brand-api').exists()).toBe(false)
   })
 
-  it('uses cross-page home anchors and hides the catalog entry while disabled', () => {
+  it('uses one quick-start home anchor and hides the catalog entry while disabled', () => {
     const wrapper = mountLayout()
     const hrefs = wrapper.findAll('.public-site-desktop-nav > a')
       .map((link) => link.attributes('href'))
 
-    expect(hrefs).toContain('/home#capabilities')
     expect(hrefs).toContain('/home#steps')
-    expect(hrefs.slice(0, 2)).toEqual(['/home#steps', '/home#capabilities'])
+    expect(hrefs).not.toContain('/home#capabilities')
+    expect(hrefs).not.toContain('/home#providers')
+    expect(hrefs).not.toContain('/home#faq')
     expect(wrapper.find('[data-to="/models.html"]').exists()).toBe(false)
     expect(wrapper.get('[data-testid="content"]').text()).toBe('Content')
     expect(wrapper.get('.public-site-footer nav').attributes('aria-label')).toBe('页脚导航')
+  })
+
+  it('keeps the four primary destinations consistent across desktop and mobile', async () => {
+    testState.appStore.cachedPublicSettings.public_model_catalog_enabled = true
+    testState.appStore.cachedPublicSettings.skill_marketplace_enabled = true
+    const wrapper = mountLayout()
+
+    const desktopItems = wrapper.findAll('.public-site-desktop-nav > a')
+      .map((link) => ({
+        label: link.text(),
+        target: link.attributes('href') ?? link.attributes('data-to')
+      }))
+    expect(desktopItems).toEqual([
+      { label: '快速开始', target: '/home#steps' },
+      { label: '模型广场', target: '/models.html' },
+      { label: 'Skill 市场', target: '/skills' },
+      {
+        label: '使用教程',
+        target: 'http://127.0.0.1:4179/tutorial-docs/#quick-start'
+      }
+    ])
+
+    await wrapper.get('[data-testid="mobile-menu-toggle"]').trigger('click')
+
+    const mobileItems = wrapper.findAll('.public-site-mobile-inner > a')
+      .map((link) => ({
+        label: link.text(),
+        target: link.attributes('href') ?? link.attributes('data-to')
+      }))
+    expect(mobileItems).toEqual(desktopItems)
   })
 
   it('shows the catalog in desktop, mobile, and footer navigation when enabled', async () => {
@@ -210,6 +241,23 @@ describe('PublicSiteLayout', () => {
     await wrapper.get('[data-testid="mobile-menu-toggle"]').trigger('click')
     expect(wrapper.findAll('[data-to="/models.html"]')).toHaveLength(3)
     expect(wrapper.get('[data-testid="mobile-menu-toggle"]').attributes('aria-expanded')).toBe('true')
+  })
+
+  it('shows the Skill market entry only when its opt-in flag is enabled', async () => {
+    const hiddenWrapper = mountLayout()
+    expect(hiddenWrapper.find('[data-to="/skills"]').exists()).toBe(false)
+    hiddenWrapper.unmount()
+
+    testState.appStore.cachedPublicSettings.skill_marketplace_enabled = true
+    const wrapper = mountLayout('skills')
+
+    expect(wrapper.classes()).toContain('public-site-page--skills')
+    expect(wrapper.findAll('[data-to="/skills"]')).toHaveLength(2)
+    expect(wrapper.findAll('[data-to="/skills"]')
+      .some((link) => link.attributes('aria-current') === 'page')).toBe(true)
+
+    await wrapper.get('[data-testid="mobile-menu-toggle"]').trigger('click')
+    expect(wrapper.findAll('[data-to="/skills"]')).toHaveLength(3)
   })
 
   it('provides a locale switcher in the compact home menu', async () => {
@@ -245,11 +293,13 @@ describe('PublicSiteLayout', () => {
 
   it('hides every catalog entry in backend mode even when the feature is enabled', () => {
     testState.appStore.cachedPublicSettings.public_model_catalog_enabled = true
+    testState.appStore.cachedPublicSettings.skill_marketplace_enabled = true
     testState.appStore.backendModeEnabled = true
 
     const wrapper = mountLayout('models')
 
     expect(wrapper.find('[data-to="/models.html"]').exists()).toBe(false)
+    expect(wrapper.find('[data-to="/skills"]').exists()).toBe(false)
   })
 
   it('keeps the current models page visible and marks its primary navigation entry', () => {

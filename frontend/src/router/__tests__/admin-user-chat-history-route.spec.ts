@@ -3,7 +3,7 @@ import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 
-const source = readFileSync(resolve(dirname(fileURLToPath(import.meta.url)), '../index.ts'), 'utf8')
+const source = readFileSync(resolve(dirname(fileURLToPath(import.meta.url)), '../routes/admin.ts'), 'utf8')
 
 describe('admin user chat history route', () => {
   it('is a dedicated JWT-admin route scoped to a positive user id', () => {

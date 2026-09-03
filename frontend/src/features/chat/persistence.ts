@@ -2,9 +2,13 @@ import type {
   ChatHistoryOutboxMutation,
   ChatLegacyImportDecision,
 } from '@/types/chat'
+import {
+  mergeChatActivities,
+  normalizeChatActivities,
+} from '@/features/chat/activity'
 
 const CHAT_HISTORY_DATABASE_NAME = 'luoxueapi-chat'
-const CHAT_HISTORY_DATABASE_VERSION = 2
+const CHAT_HISTORY_DATABASE_VERSION = 4
 const CHAT_HISTORY_STORE_NAME = 'history'
 const CHAT_HISTORY_MAX_CONVERSATIONS = 50
 const CHAT_HISTORY_MAX_FUTURE_SKEW_MS = 5 * 60 * 1000
@@ -20,6 +24,7 @@ interface MergeableChatHistoryState {
   clearRevision: number
   deletedConversationIds: string[]
   activeConversationId: string | null
+  activeConversationSelectionResolved: boolean
   conversations: Array<Record<string, unknown>>
   serverVersion: number
   outbox: ChatHistoryOutboxMutation[]
@@ -39,6 +44,8 @@ export interface ChatHistoryMutation {
   deletedConversationIds?: string[]
   sanitizeConversations?: Array<{ id: string; expectedUpdatedAt: number }>
   activeConversationChanged?: boolean
+  initializeActiveConversation?: boolean
+  replaceActiveConversationIfId?: string
   clear?: boolean
   enqueueOutboxMutationIds?: string[]
   acknowledgedOutboxMutationIds?: string[]
@@ -90,6 +97,39 @@ function isChatReceiptStatus(value: unknown): boolean {
     || value === 'failed'
 }
 
+function canonicalAttachment(value: unknown): Record<string, unknown> | null {
+  if (!isRecord(value)) return null
+  const id = typeof value.id === 'string' ? value.id.trim() : ''
+  const name = typeof value.name === 'string' ? value.name.trim() : ''
+  const mimeType = typeof value.mimeType === 'string' ? value.mimeType.trim() : ''
+  const expiresAt = typeof value.expiresAt === 'string' ? value.expiresAt.trim() : ''
+  if (
+    !id
+    || !name
+    || !mimeType
+    || !expiresAt
+    || (value.kind !== 'image' && value.kind !== 'document')
+    || (value.status !== 'ready' && value.status !== 'expired')
+    || !isNonNegativeInteger(value.size)
+  ) return null
+
+  const attachment: Record<string, unknown> = {
+    id,
+    name,
+    kind: value.kind,
+    mimeType,
+    size: value.size,
+    status: value.status,
+    expiresAt,
+  }
+  if (isNonNegativeInteger(value.pageCount) && value.pageCount > 0) {
+    attachment.pageCount = value.pageCount
+  }
+  if (isNonNegativeInteger(value.width) && value.width > 0) attachment.width = value.width
+  if (isNonNegativeInteger(value.height) && value.height > 0) attachment.height = value.height
+  return attachment
+}
+
 function copyCanonicalAssistantMetadata(
   target: Record<string, unknown>,
   source: Record<string, unknown>,
@@ -114,6 +154,9 @@ function copyCanonicalAssistantMetadata(
   }
   if (isChatReceiptStatus(source.settlementStatus)) {
     target.settlementStatus = source.settlementStatus
+  }
+  if (isFiniteTimestamp(source.pendingStopRequestedAt)) {
+    target.pendingStopRequestedAt = source.pendingStopRequestedAt
   }
   for (const field of [
     'usageLogId',
@@ -208,7 +251,56 @@ function canonicalMessage(value: unknown): Record<string, unknown> | null {
   if (isFiniteTimestamp(value.updatedAt)) message.updatedAt = value.updatedAt
   if (isNonNegativeInteger(value.position)) message.position = value.position
   copyCanonicalAssistantMetadata(message, value)
+  if (value.role === 'assistant') {
+    const activities = normalizeChatActivities(value.activities, {
+      fallbackStartedAt: value.createdAt,
+    })
+    if (activities.length > 0) message.activities = activities
+  }
+  if (Array.isArray(value.attachments)) {
+    const attachmentIds = new Set<string>()
+    const attachments = value.attachments.reduce<Record<string, unknown>[]>((result, candidate) => {
+      const attachment = canonicalAttachment(candidate)
+      const id = typeof attachment?.id === 'string' ? attachment.id : ''
+      if (attachment && id && !attachmentIds.has(id)) {
+        attachmentIds.add(id)
+        result.push(attachment)
+      }
+      return result
+    }, [])
+    if (attachments.length > 0) message.attachments = attachments
+  }
   return message
+}
+
+function mergeCanonicalConversationActivities(
+  existing: Record<string, unknown>,
+  incoming: Record<string, unknown>,
+): Record<string, unknown> {
+  const existingMessages = Array.isArray(existing.messages) ? existing.messages : []
+  const existingById = new Map(
+    existingMessages
+      .filter(isRecord)
+      .map((message) => [String(message.id ?? ''), message]),
+  )
+  const incomingMessages = Array.isArray(incoming.messages) ? incoming.messages : []
+  return {
+    ...incoming,
+    messages: incomingMessages.map((messageValue) => {
+      if (!isRecord(messageValue) || messageValue.role !== 'assistant') return messageValue
+      const previous = existingById.get(String(messageValue.id ?? ''))
+      if (!previous) return messageValue
+      const previousActivities = normalizeChatActivities(previous.activities, {
+        fallbackStartedAt: Number(previous.createdAt) || 0,
+      })
+      const incomingActivities = normalizeChatActivities(messageValue.activities, {
+        fallbackStartedAt: Number(messageValue.createdAt) || 0,
+      })
+      const activities = mergeChatActivities(previousActivities, incomingActivities)
+      if (activities.length === 0) return messageValue
+      return { ...messageValue, activities }
+    }),
+  }
 }
 
 function canonicalConversation(
@@ -357,13 +449,28 @@ function parseMergeableState(
       : (parsedVersion === 1 ? conversations.map(({ id }) => String(id)) : []),
   )
 
+  const requestedActiveConversationId = typeof value.activeConversationId === 'string'
+    ? value.activeConversationId
+    : null
+  const hasExplicitEmptySelection = Object.prototype.hasOwnProperty.call(
+    value,
+    'activeConversationId',
+  ) && value.activeConversationId === null
+  const activeConversationSelectionResolved =
+    typeof value.activeConversationSelectionResolved === 'boolean'
+      ? value.activeConversationSelectionResolved
+      : requestedActiveConversationId !== null
+        || hasExplicitEmptySelection
+        || normalizeClearRevision(value.clearRevision) > 0
+
   return {
     version: parsedVersion,
     clearRevision: normalizeClearRevision(value.clearRevision),
     deletedConversationIds: [],
-    activeConversationId: typeof value.activeConversationId === 'string'
-      ? value.activeConversationId
+    activeConversationId: activeConversationSelectionResolved
+      ? requestedActiveConversationId
       : null,
+    activeConversationSelectionResolved,
     conversations,
     serverVersion: isNonNegativeInteger(value.serverVersion) ? value.serverVersion : 0,
     outbox,
@@ -387,13 +494,20 @@ function normalizedMergeableState(
   }
   const availableIds = new Set(conversations.map((conversation) => String(conversation.id)))
 
+  const activeConversationId = !state.activeConversationSelectionResolved
+    ? null
+    : state.activeConversationId === null
+      ? null
+      : availableIds.has(state.activeConversationId)
+        ? state.activeConversationId
+        : (String(conversations[0]?.id ?? '') || null)
+
   return {
     version: state.version,
     clearRevision: state.clearRevision,
     deletedConversationIds: [...deleted],
-    activeConversationId: state.activeConversationId && availableIds.has(state.activeConversationId)
-      ? state.activeConversationId
-      : (String(conversations[0]?.id ?? '') || null),
+    activeConversationId,
+    activeConversationSelectionResolved: state.activeConversationSelectionResolved,
     conversations,
     serverVersion: state.serverVersion,
     outbox: state.outbox,
@@ -427,6 +541,7 @@ export function mergeChatHistoryStates(
       clearRevision: next.clearRevision,
       deletedConversationIds: [],
       activeConversationId: null,
+      activeConversationSelectionResolved: false,
       conversations: [],
       serverVersion: 0,
       outbox: [],
@@ -460,11 +575,13 @@ export function mergeChatHistoryStates(
 
   if (mutation.clear) {
     const clearAt = next.clearRevision > 0 ? next.clearRevision : Date.now()
+    const selection = mutation.activeConversationChanged ? next : canonicalCurrent
     return normalizedMergeableState({
       version: next.version,
       clearRevision: Math.max(canonicalCurrent.clearRevision, clearAt),
       deletedConversationIds: [],
-      activeConversationId: canonicalCurrent.activeConversationId,
+      activeConversationId: selection.activeConversationId,
+      activeConversationSelectionResolved: selection.activeConversationSelectionResolved,
       conversations: canonicalCurrent.conversations.filter(
         (conversation) => Number(conversation.createdAt) > clearAt,
       ),
@@ -508,19 +625,36 @@ export function mergeChatHistoryStates(
         continue
       }
     }
-    byId.set(id, conversation)
+    const currentConversation = byId.get(id)
+    byId.set(
+      id,
+      currentConversation
+        ? mergeCanonicalConversationActivities(currentConversation, conversation)
+        : conversation,
+    )
   }
   for (const id of new Set(mutation.deletedConversationIds ?? [])) {
     byId.delete(id)
   }
 
+  const selection = mutation.activeConversationChanged
+    || (
+      mutation.initializeActiveConversation
+      && !canonicalCurrent.activeConversationSelectionResolved
+    )
+    || (
+      mutation.replaceActiveConversationIfId !== undefined
+      && canonicalCurrent.activeConversationId === mutation.replaceActiveConversationIfId
+    )
+    || !current
+    ? next
+    : canonicalCurrent
   return normalizedMergeableState({
     version: next.version,
     clearRevision: canonicalCurrent.clearRevision,
     deletedConversationIds: [],
-    activeConversationId: mutation.activeConversationChanged
-      ? next.activeConversationId
-      : canonicalCurrent.activeConversationId,
+    activeConversationId: selection.activeConversationId,
+    activeConversationSelectionResolved: selection.activeConversationSelectionResolved,
     conversations: [...byId.values()],
     serverVersion,
     outbox: [...outboxById.values()],

@@ -245,6 +245,8 @@ export interface PublicSettings {
   available_channels_enabled: boolean
   /** Public, anonymous model catalog. Optional for older injected __APP_CONFIG__ snapshots. */
   public_model_catalog_enabled?: boolean
+  /** Curated, anonymous Codex Skill marketplace. Opt-in and fail-closed. */
+  skill_marketplace_enabled?: boolean
   service_quota_enabled: boolean
   affiliate_enabled: boolean
   allow_user_view_error_requests?: boolean
@@ -560,6 +562,11 @@ export interface Group {
 }
 
 export interface AdminGroup extends Group {
+  // Profit admission policy (admin-only; decimal fractions, e.g. 0.3 = 30%).
+  profit_control_enabled: boolean
+  profit_min_margin: number
+  profit_safety_buffer: number
+
   // 模型路由配置（仅管理员可见，内部信息）
   model_routing: Record<string, number[]> | null
   model_routing_enabled: boolean
@@ -605,6 +612,8 @@ export interface ApiKey {
   expires_at: string | null // Expiration time (null = never expires)
   created_at: string
   updated_at: string
+  /** Server-side default service tier for OpenAI GPT-5.6 Sol requests. */
+  service_tier_preference?: 'standard' | 'priority'
   current_concurrency: number
   group?: Group
   rate_limit_5h: number
@@ -632,6 +641,7 @@ export interface CreateApiKeyRequest {
   rate_limit_5h?: number
   rate_limit_1d?: number
   rate_limit_7d?: number
+  service_tier_preference?: 'standard' | 'priority'
 }
 
 export interface UpdateApiKeyRequest {
@@ -647,6 +657,7 @@ export interface UpdateApiKeyRequest {
   rate_limit_1d?: number
   rate_limit_7d?: number
   reset_rate_limit_usage?: boolean
+  service_tier_preference?: 'standard' | 'priority'
 }
 
 export interface CreateGroupRequest {
@@ -678,6 +689,9 @@ export interface CreateGroupRequest {
   peak_start?: string
   peak_end?: string
   peak_rate_multiplier?: number
+  profit_control_enabled?: boolean
+  profit_min_margin?: number
+  profit_safety_buffer?: number
   claude_code_only?: boolean
   fallback_group_id?: number | null
   fallback_group_id_on_invalid_request?: number | null
@@ -726,6 +740,9 @@ export interface UpdateGroupRequest {
   peak_start?: string
   peak_end?: string
   peak_rate_multiplier?: number
+  profit_control_enabled?: boolean
+  profit_min_margin?: number
+  profit_safety_buffer?: number
   claude_code_only?: boolean
   fallback_group_id?: number | null
   fallback_group_id_on_invalid_request?: number | null
@@ -1033,6 +1050,7 @@ export interface Account {
   parent_plan_type?: string
   parent_privacy_mode?: string
   parent_subscription_expires_at?: string
+  parent_subscription_will_renew?: boolean
   parent_chatgpt_account_id?: string
 }
 
@@ -1112,6 +1130,13 @@ export interface AccountUsageInfo {
   seven_day: UsageProgress | null
   seven_day_sonnet: UsageProgress | null
   seven_day_fable?: UsageProgress | null
+  openai_subscription?: {
+    plan_type?: string
+    active_until?: string
+    will_renew?: boolean
+    checked_at?: string
+    source?: 'live' | 'cached'
+  } | null
   gemini_shared_daily?: UsageProgress | null
   gemini_pro_daily?: UsageProgress | null
   gemini_flash_daily?: UsageProgress | null
@@ -1183,7 +1208,10 @@ export interface CodexUsageSnapshot {
 
 export type OpenAICompactMode = 'auto' | 'force_on' | 'force_off'
 export type OpenAIResponsesMode = 'auto' | 'force_responses' | 'force_chat_completions'
-export type OpenAIEndpointCapability = 'chat_completions' | 'embeddings'
+export type OpenAIEndpointCapability =
+  | 'chat_completions'
+  | 'embeddings'
+  | 'audio_transcriptions'
 
 export interface OpenAICompactState {
   openai_compact_mode?: OpenAICompactMode
@@ -1481,6 +1509,8 @@ export interface UsageLogAccountSummary {
 
 export interface AdminUsageLog extends UsageLog {
   upstream_model?: string | null
+  upstream_response_model?: string | null
+  upstream_model_mismatch?: boolean | null
   model_mapping_chain?: string | null
 
   // 账号计费倍率（仅管理员可见）
@@ -1703,6 +1733,8 @@ export interface GroupStat {
 export interface UserBreakdownItem {
   user_id: number
   email: string
+  /** Present on current servers; optional keeps rolling upgrades compatible with older responses. */
+  username?: string
   requests: number
   input_tokens: number
   output_tokens: number

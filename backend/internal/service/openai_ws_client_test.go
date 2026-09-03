@@ -108,6 +108,7 @@ func TestCoderOpenAIWSClientDialer_ProxyTransportTLSHandshakeTimeout(t *testing.
 	transport, ok := client.Transport.(*http.Transport)
 	require.True(t, ok)
 	require.NotNil(t, transport)
+	require.NotNil(t, transport.DialContext)
 	require.Equal(t, 10*time.Second, transport.TLSHandshakeTimeout)
 }
 

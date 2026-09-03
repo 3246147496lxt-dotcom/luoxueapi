@@ -1,6 +1,6 @@
 import { mount, type VueWrapper } from '@vue/test-utils'
 import { createPinia, setActivePinia, type Pinia } from 'pinia'
-import { beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { User } from '@/types'
 
 import AppBrand from '../AppBrand.vue'
@@ -27,12 +27,19 @@ function createUser(role: User['role']): User {
 }
 
 function mountBrand(
-  props: { placement?: 'header' | 'sidebar', collapsed?: boolean } = {},
+  props: {
+    placement?: 'header' | 'sidebar'
+    collapsed?: boolean
+    wordmark?: boolean
+    wordmarkOnly?: boolean
+  } = {},
 ): VueWrapper {
   return mount(AppBrand, {
     props: {
       placement: props.placement ?? 'sidebar',
       collapsed: props.collapsed ?? false,
+      wordmark: props.wordmark ?? false,
+      wordmarkOnly: props.wordmarkOnly ?? false,
     },
     global: {
       plugins: [pinia],
@@ -53,7 +60,11 @@ describe('AppBrand', () => {
     useAuthStore().user = createUser('user')
   })
 
-  it('renders the default Luoxue mark as a logo-only link', () => {
+  afterEach(() => {
+    document.querySelector('meta[name="app-entry"]')?.remove()
+  })
+
+  it('renders the canonical default logo as a logo-only link', () => {
     const appStore = useAppStore()
     appStore.siteName = '落雪API'
     appStore.siteLogo = ''
@@ -63,9 +74,9 @@ describe('AppBrand', () => {
     expect(brand.attributes('aria-label')).toBe('落雪API')
     expect(brand.text()).toBe('')
     expect(wrapper.get('[data-testid="sidebar-brand-logo"] img').attributes('src'))
-      .toBe('/brand/luoxue-snowflake-cloud-palette.png')
+      .toBe('/logo.png')
     expect(wrapper.get('[data-testid="sidebar-brand-logo"] img').classes())
-      .toContain('app-brand-logo-image-luoxue')
+      .toContain('app-brand-logo-image-default')
   })
 
   it('renders a configured logo with the configured accessible name', () => {
@@ -77,11 +88,46 @@ describe('AppBrand', () => {
     const brand = wrapper.get('[data-testid="header-brand"]')
     expect(brand.attributes('aria-label')).toBe('Snow Console')
     expect(brand.get('img').attributes('src')).toBe('/brand/custom.svg')
-    expect(brand.get('img').classes()).not.toContain('app-brand-logo-image-luoxue')
+    expect(brand.get('img').classes()).not.toContain('app-brand-logo-image-default')
     expect(brand.text()).toBe('')
   })
 
-  it('does not replace an uploaded Luoxue data-image logo with the legacy snowflake', async () => {
+  it('renders the configured site name as an opt-in wordmark', async () => {
+    const appStore = useAppStore()
+    appStore.siteName = 'Luoxue AI Workspace'
+    const wrapper = mountBrand({ wordmark: true })
+
+    expect(wrapper.get('[data-testid="sidebar-brand-wordmark"]').text())
+      .toBe('Luoxue AI Workspace')
+    expect(wrapper.get('[data-testid="sidebar-brand"]').classes())
+      .toContain('app-brand--wordmark')
+    expect(wrapper.find('[data-testid="sidebar-brand-logo"]').exists()).toBe(true)
+
+    await wrapper.setProps({ collapsed: true })
+
+    expect(wrapper.find('[data-testid="sidebar-brand-wordmark"]').exists()).toBe(false)
+  })
+
+  it('renders a pure text Work wordmark while preserving a collapsed fallback logo', async () => {
+    const appStore = useAppStore()
+    appStore.siteName = '落雪 AI Workspace'
+    const wrapper = mountBrand({ wordmark: true, wordmarkOnly: true })
+
+    expect(wrapper.get('[data-testid="sidebar-brand-wordmark"]').text())
+      .toBe('落雪 AI Workspace')
+    expect(wrapper.get('[data-testid="sidebar-brand"]').classes())
+      .toContain('app-brand--wordmark-only')
+    expect(wrapper.find('[data-testid="sidebar-brand-logo"]').exists()).toBe(false)
+    expect(wrapper.find('img').exists()).toBe(false)
+
+    await wrapper.setProps({ collapsed: true })
+
+    expect(wrapper.find('[data-testid="sidebar-brand-wordmark"]').exists()).toBe(false)
+    expect(wrapper.get('[data-testid="sidebar-brand-logo"] img').attributes('src'))
+      .toBe('/logo.png')
+  })
+
+  it('does not replace an uploaded data-image logo with the canonical default', async () => {
     const appStore = useAppStore()
     appStore.siteName = '落雪API'
     appStore.siteLogo = 'data:image/svg+xml;base64,PHN2Zy8+'
@@ -89,16 +135,16 @@ describe('AppBrand', () => {
     const image = wrapper.get('[data-testid="sidebar-brand-logo"] img')
 
     expect(image.attributes('src')).toBe('data:image/svg+xml;base64,PHN2Zy8+')
-    expect(image.classes()).not.toContain('app-brand-logo-image-luoxue')
+    expect(image.classes()).not.toContain('app-brand-logo-image-default')
 
     appStore.siteLogo = 'data:image/png;base64,iVBORw0KGgo='
     await wrapper.vm.$nextTick()
 
     expect(image.attributes('src')).toBe('data:image/png;base64,iVBORw0KGgo=')
-    expect(image.classes()).not.toContain('app-brand-logo-image-luoxue')
+    expect(image.classes()).not.toContain('app-brand-logo-image-default')
   })
 
-  it('links users and administrators to their respective dashboards', async () => {
+  it('keeps the logo inside the active frontend entry regardless of role', async () => {
     const authStore = useAuthStore()
     const wrapper = mountBrand()
 
@@ -108,6 +154,15 @@ describe('AppBrand', () => {
     await wrapper.vm.$nextTick()
 
     expect(wrapper.get('[data-testid="sidebar-brand"]').attributes('href'))
+      .toBe('/dashboard')
+
+    wrapper.unmount()
+    const entryMeta = document.createElement('meta')
+    entryMeta.name = 'app-entry'
+    entryMeta.content = 'admin'
+    document.head.append(entryMeta)
+
+    expect(mountBrand().get('[data-testid="sidebar-brand"]').attributes('href'))
       .toBe('/admin/dashboard')
   })
 

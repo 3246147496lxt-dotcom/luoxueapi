@@ -1,267 +1,328 @@
 <template>
   <section
-    class="dashboard-metric-grid grid grid-cols-2 gap-3 sm:gap-4 md:grid-cols-2"
-    :class="isSimple ? 'xl:grid-cols-3' : 'xl:grid-cols-4'"
+    class="dashboard-metric-grid"
     data-testid="dashboard-metric-grid"
     :aria-label="t('dashboard.accountMetrics')"
   >
-    <article v-if="!isSimple" class="dashboard-panel dashboard-summary-card min-h-[205px] overflow-hidden">
-      <DashboardCardHeader icon="wallet" :title="t('dashboard.accountData')" />
-      <div class="dashboard-summary-content space-y-4 px-5 py-5">
-        <DashboardMetricRow
-          icon="arrowLeftRight"
-          tone="blue"
-          :label="t('dashboard.currentBalance')"
-          :value="formatBalance(balance)"
-          credit
-        />
-        <DashboardMetricRow
-          icon="chartNoAxesColumn"
-          tone="violet"
-          :label="t('dashboard.lifetimeSpend')"
-          :value="formatCost(stats.total_actual_cost)"
-          credit
-        />
-      </div>
+    <article class="dashboard-metric-card dashboard-metric-card--balance">
+      <h2 class="dashboard-metric-card__title">
+        {{ t('dashboard.workspace.accountBalance') }}
+      </h2>
+      <p class="dashboard-metric-card__value">
+        <strong>{{ formatCredit(balance) }}</strong>
+        <span>{{ t('dashboard.workspace.creditsUnit') }}</span>
+      </p>
+      <RouterLink
+        to="/purchase"
+        class="dashboard-metric-card__action"
+        data-testid="dashboard-balance-recharge"
+      >
+        {{ t('payment.tabTopUp') }}
+      </RouterLink>
     </article>
 
-    <article class="dashboard-panel dashboard-summary-card min-h-[205px] overflow-hidden">
-      <DashboardCardHeader icon="activity" :title="t('dashboard.usageStatistics')" />
-      <div class="dashboard-summary-content space-y-4 px-5 py-5">
-        <DashboardMetricRow
-          icon="send"
-          tone="emerald"
-          :label="t('dashboard.lifetimeRequests')"
-          :value="formatNumber(stats.total_requests)"
-        />
-        <DashboardMetricRow
-          icon="activity"
-          tone="sky"
-          :label="t('dashboard.rangeRequests')"
-          :value="formatNumber(rangeMetrics.requests)"
-          :sparkline-values="sparklineSeries.requests"
-          sparkline-color="#0b8bed"
-        />
+    <article class="dashboard-metric-card dashboard-metric-card--quota">
+      <h2 class="dashboard-metric-card__title">
+        {{ t('dashboard.workspace.planQuota', { plan: planName }) }}
+      </h2>
+      <div v-if="planLoading" class="dashboard-metric-card__loading" aria-live="polite">
+        <span class="skeleton h-8 w-28" aria-hidden="true" />
+        <span class="sr-only">{{ t('dashboard.workspace.planLoading') }}</span>
       </div>
+      <template v-else>
+        <p class="dashboard-metric-card__value">
+          <strong>{{ quotaDisplay }}</strong>
+          <span>{{ t('dashboard.workspace.remaining') }}</span>
+        </p>
+        <div
+          class="dashboard-quota-track"
+          role="progressbar"
+          :aria-label="t('dashboard.workspace.planQuota', { plan: planName })"
+          :aria-valuemin="0"
+          :aria-valuemax="100"
+          :aria-valuenow="quotaRemainingPercent ?? undefined"
+        >
+          <span
+            class="dashboard-quota-track__value"
+            :class="`dashboard-quota-track__value--${quotaTone}`"
+            :style="{ width: `${quotaProgress}%` }"
+          />
+        </div>
+      </template>
     </article>
 
-    <article class="dashboard-panel dashboard-summary-card min-h-[205px] overflow-hidden">
-      <DashboardCardHeader icon="zap" :title="t('dashboard.resourceUsage')" />
-      <div class="dashboard-summary-content space-y-4 px-5 py-5">
-        <DashboardMetricRow
-          icon="coins"
-          tone="amber"
-          :label="t('dashboard.rangeSpend')"
-          :value="formatCost(rangeMetrics.actualCost)"
-          :sparkline-values="sparklineSeries.actualCost"
-          sparkline-color="#f59e0b"
-          credit
-        />
-        <DashboardMetricRow
-          icon="type"
-          tone="rose"
-          :label="t('dashboard.rangeTokens')"
-          :value="formatTokens(rangeMetrics.tokens)"
-          :sparkline-values="sparklineSeries.tokens"
-          sparkline-color="#ec4899"
-        />
-      </div>
+    <article class="dashboard-metric-card">
+      <h2 class="dashboard-metric-card__title">
+        {{ t('dashboard.workspace.cumulativeTokens') }}
+      </h2>
+      <p class="dashboard-metric-card__value">
+        <strong>{{ tokenMagnitude.value }}</strong>
+        <span>{{ tokenMagnitude.unit }} {{ t('dashboard.workspace.tokenUnit') }}</span>
+      </p>
+      <p class="dashboard-metric-card__detail">
+        {{ t('dashboard.workspace.tokenBreakdownHint', {
+          input: formatNumber(cumulativeInputTokens),
+          output: formatNumber(stats.total_output_tokens),
+        }) }}
+      </p>
     </article>
 
-    <article class="dashboard-panel dashboard-summary-card min-h-[205px] overflow-hidden">
-      <DashboardCardHeader icon="gauge" :title="t('dashboard.performance')" />
-      <div class="dashboard-summary-content space-y-4 px-5 py-5">
-        <DashboardMetricRow
-          icon="timer"
-          tone="indigo"
-          :label="t('dashboard.averageRpm')"
-          :value="formatRate(rangeMetrics.averageRpm)"
-          :sparkline-values="sparklineSeries.requests"
-          sparkline-color="#6366f1"
-        />
-        <DashboardMetricRow
-          icon="send"
-          tone="orange"
-          :label="t('dashboard.averageTpm')"
-          :value="formatRate(rangeMetrics.averageTpm)"
-          :sparkline-values="sparklineSeries.tokens"
-          sparkline-color="#f97316"
-        />
-      </div>
+    <article class="dashboard-metric-card">
+      <h2 class="dashboard-metric-card__title">
+        {{ t('dashboard.workspace.cumulativeSpend') }}
+      </h2>
+      <p class="dashboard-metric-card__value">
+        <strong>{{ formatCredit(stats.total_actual_cost) }}</strong>
+        <span>{{ t('dashboard.workspace.creditsUnit') }}</span>
+      </p>
     </article>
   </section>
 </template>
 
 <script setup lang="ts">
-import { computed, defineComponent, h, type PropType } from 'vue'
+import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
-import Icon from '@/components/icons/Icon.vue'
-import CreditAmount from '@/components/common/CreditAmount.vue'
-import DashboardSparkline from '@/components/user/dashboard/DashboardSparkline.vue'
 import type { UserDashboardStats as UserStatsType } from '@/api/usage'
-import type { TrendDataPoint } from '@/types'
-import type { DashboardRangeMetrics } from '@/utils/dashboardMetrics'
-import { buildDashboardSparklineSeries } from '@/utils/dashboardMetrics'
-import {
-  formatCostFixed as formatCost,
-  formatNumberLocaleString as formatNumber,
-  formatTokensK as formatTokens,
-} from '@/utils/format'
 
 const props = defineProps<{
   stats: UserStatsType
   balance: number
-  isSimple: boolean
-  rangeMetrics: DashboardRangeMetrics
-  trend: TrendDataPoint[]
-  startDate: string
-  endDate: string
-  granularity: 'day' | 'hour'
+  planName: string
+  quotaRemainingPercent: number | null
+  planLoading: boolean
 }>()
 
-const { t } = useI18n()
-const sparklineSeries = computed(() => buildDashboardSparklineSeries(
-  props.trend,
-  props.startDate,
-  props.endDate,
-  props.granularity,
+const { t, locale } = useI18n()
+
+const numberLocale = computed(() => locale.value.startsWith('zh') ? 'zh-CN' : 'en-US')
+const cumulativeInputTokens = computed(() => (
+  finiteNumber(props.stats.total_input_tokens)
+  + finiteNumber(props.stats.total_cache_creation_tokens)
+  + finiteNumber(props.stats.total_cache_read_tokens)
 ))
 
-type DashboardIconName =
-  | 'wallet'
-  | 'activity'
-  | 'zap'
-  | 'gauge'
-  | 'arrowLeftRight'
-  | 'chartNoAxesColumn'
-  | 'send'
-  | 'coins'
-  | 'type'
-  | 'timer'
-
-const toneClasses = {
-  blue: 'bg-blue-50 text-blue-500 dark:bg-blue-950/40 dark:text-blue-300',
-  violet: 'bg-violet-50 text-violet-500 dark:bg-violet-950/40 dark:text-violet-300',
-  emerald: 'bg-emerald-50 text-emerald-500 dark:bg-emerald-950/40 dark:text-emerald-300',
-  sky: 'bg-sky-50 text-sky-500 dark:bg-sky-950/40 dark:text-sky-300',
-  amber: 'bg-amber-50 text-amber-500 dark:bg-amber-950/40 dark:text-amber-300',
-  rose: 'bg-pink-50 text-pink-500 dark:bg-pink-950/40 dark:text-pink-300',
-  indigo: 'bg-indigo-50 text-indigo-500 dark:bg-indigo-950/40 dark:text-indigo-300',
-  orange: 'bg-orange-50 text-orange-500 dark:bg-orange-950/40 dark:text-orange-300',
-} as const
-
-const DashboardCardHeader = defineComponent({
-  name: 'DashboardCardHeader',
-  props: {
-    icon: { type: String as PropType<DashboardIconName>, required: true },
-    title: { type: String, required: true },
-  },
-  setup(props) {
-    return () => h('div', {
-      class: 'dashboard-summary-card-header flex h-[61px] items-center gap-2 border-b border-gray-100 px-5 text-sm font-medium text-gray-800 dark:border-dark-700 dark:text-gray-100',
-    }, [
-      h(Icon, { name: props.icon, size: 'sm', strokeWidth: 2 }),
-      h('span', props.title),
-    ])
-  },
+const quotaProgress = computed(() => {
+  if (props.quotaRemainingPercent == null) return 0
+  return Math.min(100, Math.max(0, props.quotaRemainingPercent))
 })
 
-const DashboardMetricRow = defineComponent({
-  name: 'DashboardMetricRow',
-  props: {
-    icon: { type: String as PropType<DashboardIconName>, required: true },
-    tone: { type: String as PropType<keyof typeof toneClasses>, required: true },
-    label: { type: String, required: true },
-    value: { type: String, required: true },
-    credit: { type: Boolean, default: false },
-    sparklineValues: { type: Array as PropType<number[]>, default: () => [] },
-    sparklineColor: { type: String, default: '' },
-  },
-  setup(props) {
-    return () => h('div', { class: 'dashboard-metric-row flex min-w-0 items-center' }, [
-      h('span', {
-        class: `dashboard-metric-row-icon mr-3 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${toneClasses[props.tone]}`,
-      }, [h(Icon, { name: props.icon, size: 'sm', strokeWidth: 2 })]),
-      h('span', { class: 'dashboard-metric-row-copy min-w-0 flex-1' }, [
-        h('span', { class: 'block text-xs leading-4 text-gray-500 dark:text-dark-400' }, props.label),
-        h('strong', {
-          class: 'dashboard-metric-row-value mt-0.5 block truncate text-lg font-semibold leading-6 text-gray-800 dark:text-gray-100',
-          title: props.value,
-        }, props.credit
-          ? [h(CreditAmount, {
-              value: props.value,
-              iconSize: 'md',
-              label: `${props.label} ${props.value}`,
-            })]
-          : props.value),
-      ]),
-      props.sparklineColor
-        ? h(DashboardSparkline, {
-            class: 'ml-3',
-            values: props.sparklineValues,
-            color: props.sparklineColor,
-          })
-        : null,
-    ])
-  },
+const quotaDisplay = computed(() => (
+  props.quotaRemainingPercent == null
+    ? '—'
+    : `${new Intl.NumberFormat(numberLocale.value, { maximumFractionDigits: 1 }).format(quotaProgress.value)}%`
+))
+
+const quotaTone = computed<'healthy' | 'attention' | 'critical' | 'neutral'>(() => {
+  if (props.quotaRemainingPercent == null) return 'neutral'
+  if (quotaProgress.value >= 50) return 'healthy'
+  if (quotaProgress.value >= 20) return 'attention'
+  return 'critical'
 })
 
-function formatRate(value: number): string {
-  if (!Number.isFinite(value)) return '0.000'
-  if (value >= 1000) return formatTokens(value)
-  return value.toFixed(3)
+const tokenMagnitude = computed(() => {
+  const value = finiteNumber(props.stats.total_tokens)
+  if (locale.value.startsWith('zh') && Math.abs(value) >= 10_000) {
+    return {
+      value: new Intl.NumberFormat('zh-CN', { maximumFractionDigits: 1 }).format(value / 10_000),
+      unit: '万',
+    }
+  }
+  if (!locale.value.startsWith('zh') && Math.abs(value) >= 1_000) {
+    return {
+      value: new Intl.NumberFormat('en-US', {
+        notation: 'compact',
+        maximumFractionDigits: 1,
+      }).format(value),
+      unit: '',
+    }
+  }
+  return { value: formatNumber(value), unit: '' }
+})
+
+function finiteNumber(value: number | null | undefined): number {
+  return Number.isFinite(value) ? Number(value) : 0
 }
 
-function formatBalance(value: number): string {
-  if (!Number.isFinite(value)) return '0.00'
-  return new Intl.NumberFormat('en-US', {
-    minimumFractionDigits: 2,
+function formatNumber(value: number | null | undefined): string {
+  return new Intl.NumberFormat(numberLocale.value).format(finiteNumber(value))
+}
+
+function formatCredit(value: number | null | undefined): string {
+  return new Intl.NumberFormat(numberLocale.value, {
+    minimumFractionDigits: 0,
     maximumFractionDigits: 2,
-  }).format(value)
+  }).format(finiteNumber(value))
 }
 </script>
 
 <style scoped>
-.dashboard-panel {
-  border: 1px solid var(--lx-clay-border);
-  border-radius: var(--lx-clay-radius-surface);
-  background: var(--lx-clay-surface);
-  box-shadow: var(--lx-clay-shadow-form);
+.dashboard-metric-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: var(--workspace-space-6);
+}
+
+.dashboard-metric-card {
+  min-width: 0;
+  min-height: 138px;
+  padding: var(--workspace-space-6);
+  border: 1px solid var(--workspace-dashboard-card-border);
+  border-radius: 24px;
+  background: var(--workspace-card-surface);
+  box-shadow: var(--workspace-dashboard-card-shadow);
+}
+
+.dashboard-metric-card--balance {
+  position: relative;
+}
+
+.dashboard-metric-card__action {
+  position: absolute;
+  right: var(--workspace-space-6);
+  bottom: var(--workspace-space-6);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--workspace-space-1) var(--workspace-space-3);
+  border: 1px solid var(--workspace-work-accent-border);
+  border-radius: var(--workspace-radius-compact);
+  color: var(--workspace-work-accent);
+  background: var(--workspace-work-accent-soft);
+  font-size: calc(var(--workspace-type-secondary-size) - 1px);
+  font-weight: 700;
+  line-height: 1rem;
+  text-decoration: none;
+  transition: background-color 140ms ease;
+}
+
+.dashboard-metric-card__action:hover {
+  border-color: var(--workspace-work-accent-border-strong);
+  color: var(--workspace-work-accent-hover);
+  background: var(--workspace-work-accent-soft-hover);
+}
+
+.dashboard-metric-card__action:focus-visible {
+  outline: 2px solid var(--workspace-work-accent);
+  outline-offset: 2px;
+}
+
+.dashboard-metric-card__title {
+  overflow: hidden;
+  color: var(--workspace-dashboard-text-muted);
+  font-size: var(--workspace-type-navigation-size);
+  font-weight: var(--workspace-type-navigation-weight);
+  line-height: 1.25rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dashboard-metric-card__value {
+  display: flex;
+  min-width: 0;
+  min-height: 2rem;
+  align-items: baseline;
+  gap: var(--workspace-space-1);
+  margin-top: var(--workspace-space-4);
+  color: var(--workspace-dashboard-text-strong);
+  white-space: nowrap;
+}
+
+.dashboard-metric-card__value strong {
+  overflow: hidden;
+  font-size: calc(var(--workspace-type-page-title-size) - 0.25rem);
+  font-weight: 700;
+  line-height: 2rem;
+  letter-spacing: -0.025em;
+  text-overflow: ellipsis;
+  font-variant-numeric: tabular-nums;
+}
+
+.dashboard-metric-card__value span {
+  flex: 0 0 auto;
+  color: var(--workspace-dashboard-text-muted);
+  font-size: var(--workspace-type-body-size);
+  font-weight: var(--workspace-type-body-weight);
+  line-height: 1.25rem;
+}
+
+.dashboard-metric-card__detail {
+  overflow: hidden;
+  margin-top: 8px;
+  color: var(--workspace-dashboard-text-subtle);
+  font-size: calc(var(--workspace-type-secondary-size) - 1px);
+  font-weight: var(--workspace-type-secondary-weight);
+  line-height: normal;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.dashboard-metric-card__loading {
+  display: flex;
+  min-height: 2.25rem;
+  align-items: center;
+  margin-top: 18px;
+}
+
+.dashboard-quota-track {
+  width: 100%;
+  height: 6px;
+  overflow: hidden;
+  margin-top: var(--workspace-space-4);
+  border-radius: 999px;
+  background: var(--workspace-dashboard-track);
+}
+
+.dashboard-quota-track__value {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  transition: background-color 180ms ease;
+}
+
+.dashboard-quota-track__value--healthy {
+  background: var(--workspace-dashboard-success);
+}
+
+.dashboard-quota-track__value--attention {
+  background: var(--lx-clay-warning-bright);
+}
+
+.dashboard-quota-track__value--critical {
+  background: var(--lx-clay-danger);
+}
+
+.dashboard-quota-track__value--neutral {
+  background: var(--workspace-work-text-muted);
+}
+
+@media (max-width: 1279px) {
+  .dashboard-metric-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 
 @media (max-width: 639px) {
-  .dashboard-summary-card-header {
-    gap: 0.375rem;
-    padding-right: 0.75rem;
-    padding-left: 0.75rem;
-  }
-
-  .dashboard-summary-content {
-    padding: 0.875rem 0.75rem;
-  }
-
-  .dashboard-metric-row-icon {
-    width: 1.75rem;
-    height: 1.75rem;
-    margin-right: 0.5rem;
-  }
-
-  .dashboard-metric-row-value {
-    font-size: 1rem;
-    line-height: 1.375rem;
-  }
-
-  .dashboard-metric-row :deep(.dashboard-sparkline) {
-    width: 2.375rem;
-    height: 1.75rem;
-    margin-left: 0.25rem;
-    flex-basis: 2.375rem;
-  }
-}
-
-@media (max-width: 359px) {
   .dashboard-metric-grid {
     grid-template-columns: minmax(0, 1fr);
+    gap: 12px;
+  }
+
+  .dashboard-metric-card {
+    min-height: 132px;
+    padding: 17px 18px;
+  }
+
+  .dashboard-metric-card__value {
+    margin-top: 12px;
   }
 }
+
+@media (prefers-reduced-motion: reduce) {
+  .dashboard-metric-card__action,
+  .dashboard-quota-track__value {
+    transition-duration: 0.01ms;
+  }
+}
+
 </style>

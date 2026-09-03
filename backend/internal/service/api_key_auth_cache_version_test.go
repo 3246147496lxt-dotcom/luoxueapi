@@ -1,6 +1,9 @@
 package service
 
-import "testing"
+import (
+	"context"
+	"testing"
+)
 
 func TestAPIKeyService_RejectsV10AuthSnapshotWithoutModelsListConfig(t *testing.T) {
 	groupID := int64(9)
@@ -39,5 +42,115 @@ func TestAPIKeyService_RejectsV10AuthSnapshotWithoutModelsListConfig(t *testing.
 	}
 	if apiKey != nil {
 		t.Fatalf("expected no API key from stale snapshot, got %#v", apiKey)
+	}
+}
+
+func TestAPIKeyService_AuthSnapshotV17CarriesProfitControlAndServiceTierPreference(t *testing.T) {
+	groupID := int64(9)
+	svc := &APIKeyService{}
+	apiKey := &APIKey{
+		ID:                    1,
+		UserID:                2,
+		Key:                   "k-priority",
+		GroupID:               &groupID,
+		Name:                  "priority key",
+		Status:                StatusActive,
+		Purpose:               APIKeyPurposeUser,
+		ServiceTierPreference: ServiceTierPreferencePriority,
+		User:                  &User{ID: 2, Status: StatusActive, Role: RoleUser, Balance: 10},
+		Group: &Group{
+			ID:                   groupID,
+			Platform:             PlatformOpenAI,
+			Status:               StatusActive,
+			SubscriptionType:     SubscriptionTypeStandard,
+			ProfitControlEnabled: true,
+			ProfitMinMargin:      0.25,
+			ProfitSafetyBuffer:   0.05,
+		},
+	}
+
+	snapshot := svc.snapshotFromAPIKey(context.Background(), apiKey)
+	if snapshot == nil {
+		t.Fatal("expected auth snapshot")
+	}
+	if snapshot.Version != 17 {
+		t.Fatalf("expected v17 auth snapshot, got %d", snapshot.Version)
+	}
+	if snapshot.ServiceTierPreference != ServiceTierPreferencePriority {
+		t.Fatalf("expected priority preference in snapshot, got %q", snapshot.ServiceTierPreference)
+	}
+	roundTrip, ok, err := svc.applyAuthCacheEntry(apiKey.Key, &APIKeyAuthCacheEntry{Snapshot: snapshot})
+	if err != nil || !ok {
+		t.Fatalf("expected v17 snapshot to apply, ok=%v err=%v", ok, err)
+	}
+	if roundTrip.ServiceTierPreference != ServiceTierPreferencePriority {
+		t.Fatalf("expected priority preference after round-trip, got %q", roundTrip.ServiceTierPreference)
+	}
+	if roundTrip.Purpose != APIKeyPurposeUser {
+		t.Fatalf("expected user purpose after round-trip, got %q", roundTrip.Purpose)
+	}
+	if roundTrip.Group == nil || !roundTrip.Group.ProfitControlEnabled || roundTrip.Group.ProfitMinMargin != 0.25 || roundTrip.Group.ProfitSafetyBuffer != 0.05 {
+		t.Fatalf("expected profit-control policy after round-trip, got %#v", roundTrip.Group)
+	}
+}
+
+func TestAPIKeyService_AuthSnapshotV16MissesAndReloads(t *testing.T) {
+	svc := &APIKeyService{}
+	apiKey, ok, err := svc.applyAuthCacheEntry("k-v16", &APIKeyAuthCacheEntry{
+		Snapshot: &APIKeyAuthSnapshot{
+			Version:  16,
+			APIKeyID: 1,
+			UserID:   2,
+			Status:   StatusActive,
+			User:     APIKeyAuthUserSnapshot{ID: 2, Status: StatusActive, Role: RoleUser},
+		},
+	})
+	if err != nil || ok || apiKey != nil {
+		t.Fatalf("expected v16 snapshot miss, apiKey=%#v ok=%v err=%v", apiKey, ok, err)
+	}
+}
+
+func TestAPIKeyService_AuthSnapshotForWebChatForcesStandardPreference(t *testing.T) {
+	groupID := int64(9)
+	svc := &APIKeyService{}
+	apiKey := &APIKey{
+		ID:                    2,
+		UserID:                3,
+		Key:                   "k-web-chat",
+		GroupID:               &groupID,
+		Purpose:               APIKeyPurposeWebChat,
+		Status:                StatusActive,
+		ServiceTierPreference: ServiceTierPreferencePriority,
+		User:                  &User{ID: 3, Status: StatusActive, Role: RoleUser},
+	}
+	snapshot := svc.snapshotFromAPIKey(context.Background(), apiKey)
+	if snapshot == nil {
+		t.Fatal("expected auth snapshot")
+	}
+	if snapshot.ServiceTierPreference != ServiceTierPreferenceStandard {
+		t.Fatalf("expected web chat snapshot to force standard, got %q", snapshot.ServiceTierPreference)
+	}
+	got := svc.snapshotToAPIKey(apiKey.Key, snapshot)
+	if got.ServiceTierPreference != ServiceTierPreferenceStandard {
+		t.Fatalf("expected web chat round-trip to force standard, got %q", got.ServiceTierPreference)
+	}
+}
+
+func TestNormalizeServiceTierPreference(t *testing.T) {
+	tests := []struct {
+		input string
+		want  string
+		ok    bool
+	}{
+		{input: "", want: ServiceTierPreferenceStandard, ok: true},
+		{input: " STANDARD ", want: ServiceTierPreferenceStandard, ok: true},
+		{input: "priority", want: ServiceTierPreferencePriority, ok: true},
+		{input: "fast", ok: false},
+	}
+	for _, tt := range tests {
+		got, ok := NormalizeServiceTierPreference(tt.input)
+		if got != tt.want || ok != tt.ok {
+			t.Errorf("NormalizeServiceTierPreference(%q) = (%q, %v), want (%q, %v)", tt.input, got, ok, tt.want, tt.ok)
+		}
 	}
 }

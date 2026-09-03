@@ -3,7 +3,6 @@
 package repository
 
 import (
-	"strings"
 	"testing"
 	"time"
 
@@ -43,7 +42,7 @@ func TestSafeDateFormat(t *testing.T) {
 	}
 }
 
-func TestBuildUsageLogBatchInsertQuery_UsesConflictDoNothing(t *testing.T) {
+func TestBuildUsageLogBatchInsertQuery_PromotesSuccessfulRetry(t *testing.T) {
 	log := &service.UsageLog{
 		UserID:       1,
 		APIKeyID:     2,
@@ -62,6 +61,7 @@ func TestBuildUsageLogBatchInsertQuery_UsesConflictDoNothing(t *testing.T) {
 		usageLogBatchKey(log.RequestID, log.APIKeyID): prepared,
 	})
 
-	require.Contains(t, query, "ON CONFLICT (request_id, api_key_id) DO NOTHING")
-	require.NotContains(t, strings.ToUpper(query), "DO UPDATE")
+	require.Contains(t, query, "ON CONFLICT (request_id, api_key_id) DO UPDATE")
+	require.Contains(t, query, "SET actual_cost = EXCLUDED.actual_cost")
+	require.Contains(t, query, "usage_logs.actual_cost <= 0 AND EXCLUDED.actual_cost > 0")
 }

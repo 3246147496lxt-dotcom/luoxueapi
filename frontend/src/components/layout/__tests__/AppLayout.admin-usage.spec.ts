@@ -121,9 +121,12 @@ function usesHomeClay(element: AstElement): boolean {
   )
 }
 
+const adminComponentUses = collectComponentUses(adminViewsDirectory)
+const userComponentUses = collectComponentUses(userViewsDirectory)
+
 describe('AppLayout route and view-level shell contract', () => {
   it('allows admin views to inherit route metadata or explicitly opt into home-clay', () => {
-    const uses = collectComponentUses(adminViewsDirectory)
+    const uses = adminComponentUses
     const staticUses = uses.filter(({ element }) => element.tag === 'AppLayout')
     const dynamicUses = uses.filter(({ element }) => usesDynamicAppLayout(element))
 
@@ -171,7 +174,7 @@ describe('AppLayout route and view-level shell contract', () => {
   })
 
   it('lets user views inherit the Snow Clay shell without enabling the admin content adapter', () => {
-    const uses = collectComponentUses(userViewsDirectory).filter(
+    const uses = userComponentUses.filter(
       ({ element }) => element.tag === 'AppLayout' || usesDynamicAppLayout(element),
     )
 
@@ -189,7 +192,7 @@ describe('AppLayout route and view-level shell contract', () => {
   })
 
   it('requires every admin page shell to declare its content density', () => {
-    const uses = collectComponentUses(adminViewsDirectory)
+    const uses = adminComponentUses
     const appLayoutFiles = new Set(
       uses
         .filter(({ element }) => element.tag === 'AppLayout' || usesDynamicAppLayout(element))

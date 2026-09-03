@@ -563,12 +563,12 @@ onBeforeUnmount(() => {
 .settings-choice-menu__option:hover,
 .settings-choice-menu__option--focused {
   color: var(--lx-clay-text);
-  background: rgb(0 0 0 / 0.04);
+  background: var(--lx-clay-hover);
 }
 
 .settings-choice-menu__option--selected {
   color: var(--lx-clay-text);
-  background: rgb(0 0 0 / 0.04);
+  background: var(--lx-clay-selected);
 }
 
 .settings-choice-menu__option:disabled {
@@ -600,12 +600,6 @@ onBeforeUnmount(() => {
     0 0 0 1px color-mix(in srgb, var(--lx-clay-text) 14%, transparent),
     0 18px 46px rgb(0 0 0 / 0.42),
     0 3px 12px rgb(0 0 0 / 0.28);
-}
-
-:global(html.dark) .settings-choice-menu__option:hover,
-:global(html.dark) .settings-choice-menu__option--focused,
-:global(html.dark) .settings-choice-menu__option--selected {
-  background: rgb(255 255 255 / 0.07);
 }
 
 .settings-choice-menu-enter-active,

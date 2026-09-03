@@ -1,0 +1,106 @@
+# =============================================================================
+# LuoxueAPI - Optional multi-container Mihomo egress overlay
+#
+# Use together with the main deployment file:
+#   docker compose \
+#     -f docker-compose.local.yml \
+#     -f docker-compose.mihomo.yml \
+#     up -d mihomo-a mihomo-b mihomo-c
+#
+# Runtime configuration and credentials live under mihomo/instances/ and are
+# intentionally ignored by Git. No proxy port is published to the host.
+# =============================================================================
+
+x-mihomo-common: &mihomo-common
+  image: ${MIHOMO_IMAGE:-docker.io/metacubex/mihomo:v1.19.28@sha256:e6acd921addecfd59a8e2d38203f88356d635b54de6c0673db0e015139989312}
+  restart: unless-stopped
+  stop_grace_period: 15s
+  command:
+    - -d
+    - /root/.config/mihomo
+    - -f
+    - /etc/mihomo/config.yaml
+  environment:
+    SAFE_PATHS: /etc/mihomo
+  read_only: true
+  tmpfs:
+    - /tmp:size=16m,mode=1777,nosuid,nodev
+  expose:
+    - "7890"
+  networks:
+    - sub2api-network
+  cpus: ${MIHOMO_CPUS_PER_INSTANCE:-2.0}
+  mem_limit: ${MIHOMO_MEM_LIMIT_PER_INSTANCE:-1g}
+  mem_reservation: ${MIHOMO_MEM_RESERVATION_PER_INSTANCE:-128m}
+  pids_limit: ${MIHOMO_PIDS_LIMIT_PER_INSTANCE:-512}
+  ulimits:
+    nofile:
+      soft: 100000
+      hard: 100000
+  security_opt:
+    - no-new-privileges:true
+  cap_drop:
+    - ALL
+  healthcheck:
+    test: ["CMD", "/bin/busybox", "nc", "-z", "-w", "3", "127.0.0.1", "7890"]
+    interval: 30s
+    timeout: 5s
+    retries: 3
+    start_period: 15s
+  logging:
+    driver: json-file
+    options:
+      max-size: "20m"
+      max-file: "3"
+
+services:
+  mihomo-a:
+    <<: *mihomo-common
+    volumes:
+      - type: bind
+        source: ./mihomo/instances/a/etc
+        target: /etc/mihomo
+        read_only: true
+        bind:
+          create_host_path: false
+          selinux: Z
+      - type: bind
+        source: ./mihomo/instances/a/state
+        target: /root/.config/mihomo
+        bind:
+          create_host_path: false
+          selinux: Z
+
+  mihomo-b:
+    <<: *mihomo-common
+    volumes:
+      - type: bind
+        source: ./mihomo/instances/b/etc
+        target: /etc/mihomo
+        read_only: true
+        bind:
+          create_host_path: false
+          selinux: Z
+      - type: bind
+        source: ./mihomo/instances/b/state
+        target: /root/.config/mihomo
+        bind:
+          create_host_path: false
+          selinux: Z
+
+  mihomo-c:
+    <<: *mihomo-common
+    volumes:
+      - type: bind
+        source: ./mihomo/instances/c/etc
+        target: /etc/mihomo
+        read_only: true
+        bind:
+          create_host_path: false
+          selinux: Z
+      - type: bind
+        source: ./mihomo/instances/c/state
+        target: /root/.config/mihomo
+        bind:
+          create_host_path: false
+          selinux: Z

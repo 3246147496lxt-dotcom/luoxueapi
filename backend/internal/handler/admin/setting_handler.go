@@ -59,6 +59,7 @@ type SettingHandler struct {
 	paymentService           *service.PaymentService
 	userAttributeService     *service.UserAttributeService
 	notificationEmailService *service.NotificationEmailService
+	openAIGatewayService     *service.OpenAIGatewayService
 }
 
 // NewSettingHandler 创建系统设置处理器
@@ -78,6 +79,13 @@ func NewSettingHandler(settingService *service.SettingService, emailService *ser
 // the constructor signature used by existing unit tests.
 func (h *SettingHandler) SetNotificationEmailService(notificationEmailService *service.NotificationEmailService) {
 	h.notificationEmailService = notificationEmailService
+}
+
+// SetOpenAIGatewayService attaches the runtime scheduler used to validate and
+// describe operator-managed Web Chat transcription routes. It remains a setter
+// so direct constructor users and focused handler tests stay source-compatible.
+func (h *SettingHandler) SetOpenAIGatewayService(openAIGatewayService *service.OpenAIGatewayService) {
+	h.openAIGatewayService = openAIGatewayService
 }
 
 // GetSettings 获取所有系统设置

@@ -60,7 +60,7 @@ func TestEmailOAuthAuto_SnapshotsPlatformQuotaDefaults(t *testing.T) {
 		quotaRepo,
 	)
 
-	user, err := svc.createEmailOAuthUser(
+	user, created, err := svc.createEmailOAuthUser(
 		context.Background(),
 		"newoauth@example.com",
 		"newoauth",
@@ -70,6 +70,7 @@ func TestEmailOAuthAuto_SnapshotsPlatformQuotaDefaults(t *testing.T) {
 	)
 	require.NoError(t, err)
 	require.NotNil(t, user)
+	require.True(t, created)
 	require.Equal(t, int64(88), user.ID)
 
 	require.Len(t, quotaRepo.bulkInsertCalls, 1, "createEmailOAuthUser must snapshot platform quotas via BulkInsertInitial")

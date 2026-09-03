@@ -14,6 +14,7 @@ vi.mock('vue-router', () => ({
 const {
   listGroups,
   getAllGroups,
+  getAllIncludingInactive,
   getModelsListCandidates,
   getUsageSummary,
   getCapacitySummary,
@@ -25,6 +26,7 @@ const {
 } = vi.hoisted(() => ({
   listGroups: vi.fn(),
   getAllGroups: vi.fn(),
+  getAllIncludingInactive: vi.fn(),
   getModelsListCandidates: vi.fn(),
   getUsageSummary: vi.fn(),
   getCapacitySummary: vi.fn(),
@@ -37,6 +39,8 @@ const {
 
 const messages: Record<string, string> = {
   'admin.groups.columnSettings': 'Column Settings',
+  'admin.groups.cockpit.displayPreferences': '展示偏好',
+  'admin.groups.sortOrder': 'Sort Order',
   'admin.groups.columns.name': 'Name',
   'admin.groups.columns.id': 'ID',
   'admin.groups.columns.platform': 'Platform',
@@ -55,6 +59,7 @@ vi.mock('@/api/admin', () => ({
     groups: {
       list: listGroups,
       getAll: getAllGroups,
+      getAllIncludingInactive,
       getModelsListCandidates,
       getUsageSummary,
       getCapacitySummary,
@@ -125,6 +130,9 @@ const createGroup = (overrides: Partial<AdminGroup> = {}): AdminGroup => ({
   peak_start: '00:00',
   peak_end: '00:00',
   peak_rate_multiplier: 1,
+  profit_control_enabled: false,
+  profit_min_margin: 0,
+  profit_safety_buffer: 0,
   claude_code_only: false,
   fallback_group_id: null,
   fallback_group_id_on_invalid_request: null,
@@ -226,15 +234,22 @@ const mountView = async () => {
   return wrapper
 }
 
-const columnKeys = (wrapper: ReturnType<typeof mount>) =>
-  wrapper.get('[data-test="columns"]').text().split(',').filter(Boolean)
+const visiblePreferenceKeys = (wrapper: ReturnType<typeof mount>) =>
+  wrapper
+    .get('[data-test="groups-data-table"]')
+    .attributes('data-visible-preferences')
+    ?.split(',')
+    .filter(Boolean) ?? []
 
 const openColumnSettings = async (wrapper: ReturnType<typeof mount>) => {
-  await wrapper.get('button[title="Column Settings"]').trigger('click')
+  const trigger = wrapper.get('[data-test="groups-preferences-toggle"]')
+  expect(trigger.text()).toContain('展示偏好')
+  await trigger.trigger('click')
 }
 
 const clickColumnToggle = async (wrapper: ReturnType<typeof mount>, label: string) => {
   const button = wrapper
+    .get('[data-test="groups-preferences-menu"]')
     .findAll('button')
     .find((item) => item.text().includes(label))
   expect(button, `column toggle ${label}`).toBeTruthy()
@@ -248,6 +263,7 @@ describe('admin GroupsView column settings', () => {
 
     listGroups.mockReset()
     getAllGroups.mockReset()
+    getAllIncludingInactive.mockReset()
     getModelsListCandidates.mockReset()
     getUsageSummary.mockReset()
     getCapacitySummary.mockReset()
@@ -265,6 +281,7 @@ describe('admin GroupsView column settings', () => {
       pages: 1,
     })
     getAllGroups.mockResolvedValue([])
+    getAllIncludingInactive.mockResolvedValue([createGroup()])
     getModelsListCandidates.mockResolvedValue([])
     getUsageSummary.mockResolvedValue([])
     getCapacitySummary.mockResolvedValue([])
@@ -279,8 +296,7 @@ describe('admin GroupsView column settings', () => {
   it('hides the id column by default while keeping other group columns visible', async () => {
     const wrapper = await mountView()
 
-    expect(columnKeys(wrapper)).toEqual([
-      'name',
+    expect(visiblePreferenceKeys(wrapper)).toEqual([
       'platform',
       'billing_type',
       'rate_multiplier',
@@ -289,7 +305,6 @@ describe('admin GroupsView column settings', () => {
       'capacity',
       'usage',
       'status',
-      'actions',
     ])
     expect(localStorage.getItem('group-hidden-columns')).toBe(JSON.stringify(['id']))
     expect(localStorage.getItem('group-column-settings-version')).toBe('2')
@@ -304,8 +319,7 @@ describe('admin GroupsView column settings', () => {
 
     const wrapper = await mountView()
 
-    expect(columnKeys(wrapper)).toEqual([
-      'name',
+    expect(visiblePreferenceKeys(wrapper)).toEqual([
       'id',
       'platform',
       'billing_type',
@@ -313,7 +327,6 @@ describe('admin GroupsView column settings', () => {
       'is_exclusive',
       'account_count',
       'status',
-      'actions',
     ])
   })
 
@@ -323,8 +336,7 @@ describe('admin GroupsView column settings', () => {
 
     const wrapper = await mountView()
 
-    expect(columnKeys(wrapper)).toEqual([
-      'name',
+    expect(visiblePreferenceKeys(wrapper)).toEqual([
       'platform',
       'billing_type',
       'rate_multiplier',
@@ -332,7 +344,6 @@ describe('admin GroupsView column settings', () => {
       'account_count',
       'capacity',
       'status',
-      'actions',
     ])
     expect(JSON.parse(localStorage.getItem('group-hidden-columns')!)).toEqual(
       expect.arrayContaining(['usage', 'id']),
@@ -346,8 +357,7 @@ describe('admin GroupsView column settings', () => {
     await openColumnSettings(wrapper)
     await clickColumnToggle(wrapper, 'Usage')
 
-    expect(columnKeys(wrapper)).toEqual([
-      'name',
+    expect(visiblePreferenceKeys(wrapper)).toEqual([
       'platform',
       'billing_type',
       'rate_multiplier',
@@ -355,7 +365,6 @@ describe('admin GroupsView column settings', () => {
       'account_count',
       'capacity',
       'status',
-      'actions',
     ])
     expect(JSON.parse(localStorage.getItem('group-hidden-columns')!)).toEqual(
       expect.arrayContaining(['id', 'usage']),
@@ -368,8 +377,7 @@ describe('admin GroupsView column settings', () => {
     await openColumnSettings(wrapper)
     await clickColumnToggle(wrapper, 'ID')
 
-    expect(columnKeys(wrapper)).toEqual([
-      'name',
+    expect(visiblePreferenceKeys(wrapper)).toEqual([
       'id',
       'platform',
       'billing_type',
@@ -379,12 +387,11 @@ describe('admin GroupsView column settings', () => {
       'capacity',
       'usage',
       'status',
-      'actions',
     ])
     expect(localStorage.getItem('group-hidden-columns')).toBe(JSON.stringify([]))
   })
 
-  it('skips usage and capacity fetches until consuming columns are shown', async () => {
+  it('loads overview, usage, and capacity KPIs independently of display preferences', async () => {
     localStorage.setItem(
       'group-hidden-columns',
       JSON.stringify(['billing_type', 'usage', 'capacity']),
@@ -392,20 +399,20 @@ describe('admin GroupsView column settings', () => {
 
     const wrapper = await mountView()
 
-    expect(getUsageSummary).not.toHaveBeenCalled()
-    expect(getCapacitySummary).not.toHaveBeenCalled()
+    expect(getAllIncludingInactive).toHaveBeenCalledTimes(1)
+    expect(getUsageSummary).toHaveBeenCalledTimes(1)
+    expect(getCapacitySummary).toHaveBeenCalledTimes(1)
 
     await openColumnSettings(wrapper)
     await clickColumnToggle(wrapper, 'Usage')
     expect(getUsageSummary).toHaveBeenCalledTimes(1)
-    expect(getCapacitySummary).not.toHaveBeenCalled()
 
     await clickColumnToggle(wrapper, 'Capacity')
     expect(getUsageSummary).toHaveBeenCalledTimes(1)
     expect(getCapacitySummary).toHaveBeenCalledTimes(1)
   })
 
-  it('renders subscription limits and actual usage as Snow credits', async () => {
+  it('renders subscription limits and actual usage as Points', async () => {
     listGroups.mockResolvedValue({
       items: [createGroup({
         subscription_type: 'subscription',
@@ -421,11 +428,11 @@ describe('admin GroupsView column settings', () => {
     getUsageSummary.mockResolvedValue([{ group_id: 1, today_cost: 35, total_cost: 70 }])
 
     const wrapper = await mountView()
-    const units = wrapper.get('[data-test="billing-units"]')
+    const cockpit = wrapper.get('[data-test="groups-operations-cockpit"]')
 
-    expect(units.findAll('[data-testid="credit-amount"]')).toHaveLength(7)
-    expect(units.text()).not.toContain('$')
-    expect(units.text()).toContain('35.00')
-    expect(units.text()).toContain('70.00')
+    expect(cockpit.findAll('[data-testid="credit-amount"]')).toHaveLength(5)
+    expect(cockpit.text()).not.toContain('$')
+    expect(cockpit.text()).toContain('35.00')
+    expect(cockpit.text()).toContain('70.00')
   })
 })

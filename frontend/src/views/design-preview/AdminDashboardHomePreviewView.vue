@@ -17,7 +17,7 @@
 
         <button class="brand-lockup" type="button" @click="notifyPreview('首页入口')">
           <span class="brand-mark" aria-hidden="true">
-            <img src="/brand/luoxue-snowpuff-extracted.svg" alt="" />
+            <img src="/logo.png" alt="" />
           </span>
           <span class="brand-copy">
             <strong>洛雪 API</strong>

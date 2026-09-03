@@ -321,7 +321,7 @@ func (s *SubscriptionService) assignOrExtendSubscription(ctx context.Context, in
 		}
 
 		// 失效订阅缓存
-		s.maybeInvalidateAssignmentCaches(input.UserID, input.GroupID, deferCacheInvalidation)
+		s.maybeInvalidateAssignmentCachesWithContext(ctx, input.UserID, input.GroupID, deferCacheInvalidation)
 
 		return updatedSub, true, nil // true 表示是续期
 	}
@@ -333,16 +333,32 @@ func (s *SubscriptionService) assignOrExtendSubscription(ctx context.Context, in
 	}
 
 	// 失效订阅缓存
-	s.maybeInvalidateAssignmentCaches(input.UserID, input.GroupID, deferCacheInvalidation)
+	s.maybeInvalidateAssignmentCachesWithContext(ctx, input.UserID, input.GroupID, deferCacheInvalidation)
 
 	return sub, false, nil // false 表示是新建
 }
 
 func (s *SubscriptionService) maybeInvalidateAssignmentCaches(userID, groupID int64, deferred bool) {
+	s.maybeInvalidateAssignmentCachesWithContext(context.Background(), userID, groupID, deferred)
+}
+
+func (s *SubscriptionService) maybeInvalidateAssignmentCachesWithContext(ctx context.Context, userID, groupID int64, deferred bool) {
 	// Payment fulfillment owns an outer transaction and performs a synchronous
 	// invalidation after commit. Invalidating inside that transaction can reload
 	// the pre-commit subscription into cache.
 	if deferred {
+		return
+	}
+	if dbent.TxFromContext(ctx) != nil {
+		// RunInTransaction and the other transaction owners install a collector
+		// on the context.  If it is present, defer until commit; never let a
+		// transaction-local reader repopulate a stale subscription snapshot.
+		if enqueueDeferredSubscriptionCacheInvalidation(ctx, s, userID, groupID) {
+			return
+		}
+		// An externally-owned transaction that did not install the collector is
+		// responsible for invalidating after commit.  Returning here is safer
+		// than invalidating against an uncommitted snapshot.
 		return
 	}
 

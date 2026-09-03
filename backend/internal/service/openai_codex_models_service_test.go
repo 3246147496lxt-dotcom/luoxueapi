@@ -470,6 +470,91 @@ func TestFetchCodexModelsManifestAPIKeyCustomUpstream(t *testing.T) {
 	}
 }
 
+func TestValidateCodexModelsManifestEnvelope(t *testing.T) {
+	tests := []struct {
+		name    string
+		body    string
+		wantErr bool
+	}{
+		{name: "valid empty manifest", body: `{"models":[]}`},
+		{name: "valid model entries", body: `{"models":[{"slug":"gpt-5.6","service_tiers":[{"id":"priority"}]}]}`},
+		{name: "openai models list", body: `{"object":"list","data":[]}`, wantErr: true},
+		{name: "invalid JSON", body: `{"models":`, wantErr: true},
+		{name: "non-object", body: `[]`, wantErr: true},
+		{name: "null object", body: `null`, wantErr: true},
+		{name: "missing models", body: `{}`, wantErr: true},
+		{name: "models object", body: `{"models":{}}`, wantErr: true},
+		{name: "models null", body: `{"models":null}`, wantErr: true},
+		{name: "models string", body: `{"models":"gpt-5.6"}`, wantErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validateCodexModelsManifestEnvelope([]byte(tt.body))
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("error = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestFetchCodexModelsManifestRejectsInvalidEnvelope(t *testing.T) {
+	upstream := &codexModelsHTTPUpstreamStub{do: func(_ *http.Request, _ string, _ int64, _ int) (*http.Response, error) {
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     make(http.Header),
+			Body:       io.NopCloser(strings.NewReader(`{"object":"list","data":[]}`)),
+		}, nil
+	}}
+
+	s := newCodexModelsAPIKeyTestService(upstream)
+	_, err := s.FetchCodexModelsManifest(
+		context.Background(),
+		newCodexModelsAPIKeyTestAccount("https://upstream.example"),
+		"0.144.0",
+		"",
+	)
+	if err == nil {
+		t.Fatal("expected invalid manifest error, got nil")
+	}
+	if got, want := infraerrors.Reason(err), "OPENAI_CODEX_MODELS_UPSTREAM_INVALID_MANIFEST"; got != want {
+		t.Fatalf("error reason: got %q, want %q", got, want)
+	}
+	if !IsRetryableCodexModelsManifestError(err) {
+		t.Fatal("invalid upstream manifest must be retryable")
+	}
+}
+
+func TestFetchCodexModelsManifestAPIKeyDoesNotCacheInvalidEnvelope(t *testing.T) {
+	var calls atomic.Int32
+	upstream := &codexModelsHTTPUpstreamStub{do: func(_ *http.Request, _ string, _ int64, _ int) (*http.Response, error) {
+		body := `{"object":"list","data":[]}`
+		if calls.Add(1) > 1 {
+			body = `{"models":[{"slug":"gpt-5.6"}]}`
+		}
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     make(http.Header),
+			Body:       io.NopCloser(strings.NewReader(body)),
+		}, nil
+	}}
+
+	s := newCodexModelsAPIKeyTestService(upstream)
+	account := newCodexModelsAPIKeyTestAccount("https://upstream.example")
+	if _, err := s.FetchCodexModelsManifest(context.Background(), account, "0.144.0", ""); err == nil {
+		t.Fatal("expected invalid manifest error on first fetch")
+	}
+	manifest, err := s.FetchCodexModelsManifest(context.Background(), account, "0.144.0", "")
+	if err != nil {
+		t.Fatalf("second fetch returned error: %v", err)
+	}
+	if got, want := string(manifest.Body), `{"models":[{"slug":"gpt-5.6"}]}`; got != want {
+		t.Errorf("body: got %q, want %q", got, want)
+	}
+	if got, want := calls.Load(), int32(2); got != want {
+		t.Errorf("upstream calls: got %d, want %d", got, want)
+	}
+}
+
 func TestFetchCodexModelsManifestAPIKeySharedRefreshSurvivesCallerCancellation(t *testing.T) {
 	const manifestBody = `{"models":[{"slug":"gpt-5.6"}]}`
 	var calls atomic.Int32
@@ -693,7 +778,7 @@ func TestFetchCodexModelsManifestAPIKeyCacheBoundsEntriesAndBodySize(t *testing.
 		calls.Add(1)
 		body := `{"models":[]}`
 		if strings.Contains(req.URL.Host, "large") {
-			body = strings.Repeat("x", (1<<20)+1)
+			body = `{"models":[],"padding":"` + strings.Repeat("x", (1<<20)+1) + `"}`
 		}
 		return &http.Response{
 			StatusCode: http.StatusOK,

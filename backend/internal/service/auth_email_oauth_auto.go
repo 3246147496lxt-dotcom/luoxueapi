@@ -103,11 +103,16 @@ func (s *AuthService) loginOrRegisterVerifiedEmailOAuth(
 		user, err = s.userRepo.GetByEmail(ctx, email)
 		if err != nil {
 			if errors.Is(err, ErrUserNotFound) {
-				user, err = s.createEmailOAuthUser(ctx, email, input.Username, providerType, invitationCode, affiliateCode)
+				var createdNow bool
+				user, createdNow, err = s.createEmailOAuthUser(ctx, email, input.Username, providerType, invitationCode, affiliateCode)
 				if err != nil {
 					return nil, nil, err
 				}
-				created = true
+				// A guarded create can lose a concurrent exact-email race and
+				// return the winner.  Preserve that distinction so signup-only
+				// promo/default side effects are never applied to the existing
+				// account.
+				created = createdNow
 			} else {
 				logger.LegacyPrintf("service.auth", "[Auth] Database error during %s oauth login: %v", providerType, err)
 				return nil, nil, ErrServiceUnavailable
@@ -134,7 +139,7 @@ func (s *AuthService) loginOrRegisterVerifiedEmailOAuth(
 
 	if user.Username == "" && strings.TrimSpace(input.Username) != "" {
 		user.Username = strings.TrimSpace(input.Username)
-		if err := s.userRepo.Update(ctx, user); err != nil {
+		if err := s.userRepo.Update(ctx, user, UserUpdateFields{Username: true}); err != nil {
 			logger.LegacyPrintf("service.auth", "[Auth] Failed to update username after %s oauth login: %v", providerType, err)
 		}
 	}
@@ -154,25 +159,25 @@ func (s *AuthService) loginOrRegisterVerifiedEmailOAuth(
 	return tokenPair, user, nil
 }
 
-func (s *AuthService) createEmailOAuthUser(ctx context.Context, email, username, providerType, invitationCode, affiliateCode string) (*User, error) {
+func (s *AuthService) createEmailOAuthUser(ctx context.Context, email, username, providerType, invitationCode, affiliateCode string) (*User, bool, error) {
 	if s.settingService == nil || !s.settingService.IsRegistrationEnabled(ctx) {
-		return nil, ErrRegDisabled
+		return nil, false, ErrRegDisabled
 	}
 	invitationRedeemCode, err := s.validateOAuthRegistrationInvitation(ctx, invitationCode)
 	if err != nil {
 		if errors.Is(err, ErrInvitationCodeRequired) {
-			return nil, ErrOAuthInvitationRequired
+			return nil, false, ErrOAuthInvitationRequired
 		}
-		return nil, err
+		return nil, false, err
 	}
 
 	randomPassword, err := randomHexString(32)
 	if err != nil {
-		return nil, ErrServiceUnavailable
+		return nil, false, ErrServiceUnavailable
 	}
 	hashedPassword, err := s.HashPassword(randomPassword)
 	if err != nil {
-		return nil, fmt.Errorf("hash password: %w", err)
+		return nil, false, fmt.Errorf("hash password: %w", err)
 	}
 	grantPlan := s.resolveSignupGrantPlan(ctx, providerType)
 	var defaultRPMLimit int
@@ -190,28 +195,36 @@ func (s *AuthService) createEmailOAuthUser(ctx context.Context, email, username,
 		Status:       StatusActive,
 		SignupSource: providerType,
 	}
-	if err := s.userRepo.Create(ctx, user); err != nil {
+	// When an invitation is supplied, create the account and consume the code
+	// in one outer Ent transaction.  This prevents a losing concurrent claimant
+	// from leaving an account behind after the one-time code is consumed by
+	// another request.  The pending OAuth finalize flow intentionally remains
+	// separate; this path is the immediate verified-email signup path only.
+	if err := s.createUserAndClaimInvitation(ctx, user, invitationRedeemCode); err != nil {
 		if errors.Is(err, ErrEmailExists) {
 			existing, loadErr := s.userRepo.GetByEmail(ctx, email)
 			if loadErr != nil {
-				return nil, ErrServiceUnavailable
+				// An alias collision (for example user+tag@gmail.com versus
+				// user@gmail.com) has no exact row to log in to. Do not turn
+				// that race into a 503 or bind the OAuth identity implicitly.
+				if errors.Is(loadErr, ErrUserNotFound) {
+					return nil, false, ErrEmailExists
+				}
+				return nil, false, ErrServiceUnavailable
 			}
-			return existing, nil
+			return existing, false, nil
 		}
-		return nil, ErrServiceUnavailable
+		if errors.Is(err, ErrInvitationCodeInvalid) {
+			return nil, false, ErrInvitationCodeInvalid
+		}
+		return nil, false, ErrServiceUnavailable
 	}
 	s.postAuthUserBootstrap(ctx, user, providerType, false)
 	s.assignSubscriptions(ctx, user.ID, grantPlan.Subscriptions, "auto assigned by signup defaults")
 	// snapshot user × platform quota（fail-open）
 	_ = s.snapshotPlatformQuotaDefaults(ctx, user.ID, &grantPlan)
 	s.bindOAuthAffiliate(ctx, user.ID, affiliateCode)
-	if invitationRedeemCode != nil {
-		if err := s.useOAuthRegistrationInvitation(ctx, invitationRedeemCode.ID, user.ID); err != nil {
-			_ = s.RollbackOAuthEmailAccountCreation(ctx, user.ID, invitationCode)
-			return nil, ErrInvitationCodeInvalid
-		}
-	}
-	return user, nil
+	return user, true, nil
 }
 
 func (s *AuthService) findEmailOAuthIdentityOwner(ctx context.Context, providerType, providerKey, providerSubject string) (*User, error) {

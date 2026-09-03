@@ -1,5 +1,273 @@
 # Luoxue API Snow Clay Design System
 
+## Dashboard GPT Usage Lower Region — Current Design Override
+
+This section is the active authority for the current Superdesign Dashboard iteration. Preserve the existing Work Sidebar, mobile header, account-balance card, Ultra quota card, quota percentage/progress geometry, and all geometry above them exactly. The usage region below those two top cards keeps the measured DeepSeek layout but is customized for the `gpt-5.6-sol` model.
+
+- The entire Dashboard uses one active theme at a time; never alternate a light top region with a dark usage region. Every page, Sidebar, top card, usage control, usage card, chart card, heading, label, axis, grid, and border must consume the existing semantic `--workspace-*` theme aliases.
+- Purple is not part of the authenticated Workspace or Dashboard in either theme. Neutral surfaces stay dominant; one semantic blue ramp owns actions, focus, selection and detail data, orange owns consumption data, and green/amber/red remain truthful status colors.
+- Light mode: page and usage canvas `var(--workspace-canvas)` = `#FCFCFC`; every summary/chart/top card uses `var(--workspace-card-surface)` = `#FFFFFF`; controls use `var(--workspace-surface-subtle)` = `#F7F7F8`; text uses `--workspace-text`, `--workspace-text-secondary`, and `--workspace-text-muted`; borders use `--workspace-border`. The lower region must look like a natural continuation of the original light Dashboard background, not a dark insert.
+- Dark mode under `html.dark`: the same elements automatically resolve to the original Workspace dark tokens: canvas `#000000`, Sidebar canvas `#000000`, cards/surfaces `#171717`, primary text `#ECECEC`, secondary text `#B4B4B4`, muted text `#8A8A8A`, and border/divider `rgb(255 255 255 / 0.1)`. Do not introduce a second custom dark palette.
+- Keep `Inter, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif` for the usage typography while consuming the same active theme colors as the surrounding Workspace.
+- The reproduced inner content width is exactly 920px at desktop. Use 32px vertical rhythm, 12px gaps between sibling cards, no borders, no shadows, and no gradients or glow outside the chart data fills.
+- The usage region starts directly with the exact 36px filter toolbar; do not render a timezone notice or leave reserved space for one. Keep only the time-dimension pill, 18px radius, 14px type, and `0 14px` horizontal padding, plus `清除筛选条件`, the 36px `导出` pill, and the vertical-more action. Remove the API Key filter completely. All control surfaces and text follow the active Workspace theme.
+- Next row contains exactly three equal 102px summary cards with 12px gaps. Card surface is `var(--workspace-card-surface)`, with a 1px `var(--workspace-border)` border in light and dark modes, radius 16px, padding `16px 20px`; labels 14/400/22px, values 29/500/36px. Content: `消费金额 ¥0.45 CNY`, `API 请求次数 79`, and `Tokens 8,445,868`.
+- The main chart is exactly 920px × 341px, surface `var(--workspace-card-surface)`, 1px theme border, radius 16px, padding `20px 20px 12px`. Header text `消费金额（CNY）` is 14/500/22px with adjacent muted `¥0.45`. Do not render the `模型 / API Key` segmented control or any API Key option. Chart axes consume `--workspace-text-muted`; grid lines use the active theme divider; Y labels are 0, 0.3, 0.6, and X labels are 00:00, 08:00, 15:00, 23:00. Use the exact orange series colors `#FF810C`, `#FFA10A`, and `#FFC104`; the visible sample peaks at 22:00–23:00. Its compact inverse tooltip names the model `gpt-5.6-sol`.
+- After a 24px gap, render the exact 16/500/24px model heading `gpt-5.6-sol`. After 16px, render two 454px × 340px chart cards with a 12px gap; each uses `var(--workspace-card-surface)`, a 1px theme border, radius 16px, and padding `23px 20px 12px`.
+- Left detail chart header is `API 请求次数 79`, axes 0/50/100 and 00:00/08:00/15:00/23:00, with the reference blue line/area using `#0C70F3` and `#70B2FE` and a narrow late-evening peak.
+- Right detail chart header is `Tokens 8,445,868`, axes 0/5M/10M and 00:00/08:00/15:00/23:00, with the reference stacked blue bar using `#0C70F3`, `#60B3FE`, and `#A0DCFD` near 23:00.
+- Desktop and mobile may stack responsively, but desktop dimensions, colors, radii, padding, typography, ordering, and chart proportions must match the measured reference exactly. Do not retain the previous light chart component, orange range buttons, model select, empty-state card, legend, or any additional content below the preserved top cards.
+
+## Authenticated Workspace Runtime Token Contract — Implemented
+
+- Chat, Work and Account share one runtime authority: `frontend/src/styles/luoxue-clay-tokens.css`.
+- The only authenticated-workspace namespace is `--workspace-*`. The former `--shell-*`, `--work-*` and `--account-*` namespaces are retired.
+- Runtime consumers reference semantic roles without literal fallbacks or local palette redeclarations. This document describes visual intent; it is not a second source of executable Token values.
+- Shared foundations cover color primitives, one UI typography stack, spacing, radii and Sidebar dimensions. Chat, Work and the teleported Account popover may keep separate semantic color roles where their approved values genuinely differ, but typography does not fork by surface.
+- Token consolidation preserves approved theme values. The Workspace Shell is the explicit exception for geometry: Chat and Work now share one 260px expanded width and one 68px collapsed width.
+
+## Workspace Typography Contract — Active
+
+- Chat, Work and the personal Account surface inherit one runtime entry: `--workspace-font-ui: Inter, "PingFang SC", "Microsoft YaHei", sans-serif`.
+- The role scale is fixed: Brand 18/700, Page Title 28/600, Navigation 14/500, Body 14/400, Secondary 12/400, and Numeric 32/600.
+- Components must inherit the Workspace UI family instead of declaring local UI, navigation, dashboard, account, or composer font stacks. `--workspace-font-mono` remains reserved for API keys, endpoints, identifiers, and code.
+- The personal Workspace body class owns the inherited entry so teleported menus and dialogs remain typographically consistent. Administrator, public, and authentication surfaces keep their existing typography contracts.
+
+## Workspace Shell Component Contract — Implemented
+
+- `WorkspaceSidebarFrame` is the shared structural base for the Work `AppSidebar` and the Chat history rail. It owns expanded/collapsed width, column layout, overflow, border, surface, content padding, and the `header → mode-switch → content → footer` slot order.
+- `WorkspaceSidebarHeader` is the single header structure. Expanded mode keeps the brand left and search/collapse actions right on one 52px row; collapsed mode exposes the same 44px expansion target.
+- `AppModeSwitch` is controlled only by `activeMode` and its `change` event. It owns height, radius, font, active/hover/focus states, and light/dark Token consumption; shell parents must not style it with `:deep()` or local overrides.
+- Desktop collapsed state is controlled by the owning shell adapter, while the shared Frame/Header define identical visual and interaction semantics. Existing Work and Chat mobile drawer breakpoints, modal semantics, and focus traps remain mode-owned.
+
+## Sidebar User Account Menu — Active Isolated Design Override
+
+This is the active authority for the current Superdesign exploration. It overrides conflicting shell/account-dock guidance below **only for the fixed user account area at the bottom of the left Sidebar and its opened account menu**. This is a design-only task; it does not authorize Vue, TypeScript, Tailwind, routing, store, or business-logic changes.
+
+### Frozen scope
+
+- Do not redesign or move the Chat / Work switch, Sidebar brand, main navigation, Dashboard, Chat page, composer, or any other page content.
+- Preserve the real 260px desktop Sidebar, existing route/data contracts, account bindings, responsive behavior, keyboard interaction, focus return, outside-click/Escape close, mobile sheet behavior, and light/dark theme support.
+- Show the target as a standalone User Menu component in its real Sidebar-bottom context. Do not invent a new application shell or marketing composition.
+
+### Closed account entry
+
+- Fixed to the Sidebar bottom; use a compact 52–56px neutral row, not a card.
+- First line: the existing bound circular 32px avatar plus the bound display name. Keep the name concise, 14px, medium/semibold, and ellipsized when needed.
+- Second line: only the bound primary plan label such as `Pro` in 12px muted text.
+- Keep the existing small neutral chevrons-up-down arrow affordance at the far edge. Hover/open state may use only a quiet neutral fill.
+- Do not expose email, numeric balance, frozen balance, quota charts, subscription counts, upgrade text, or any upgrade button in the closed entry.
+
+### Open account menu
+
+- Desktop: one 248px product Account Popover anchored 8px above the entry. Use a 1px neutral hairline, 14px radius, clipped integrated sections, and a restrained floating shadow. This is a popover, not a settings panel and not a stack of cards.
+- First section — identity header: one integrated full-width top region that inherits the popover's top corners; it is not an inset card and, in dark mode, it uses the exact same background as the rest of the popover. Show the bound avatar, bound display name, and bound plan label only. Use a 36px avatar here for a clear but compact identity hierarchy. Do not show balance, email, upgrade, badges, billing copy, a trailing action, or a contrasting header band.
+- Place a full-width hairline divider directly after the identity header.
+- Second section — `常用设置`: show a quiet 11px group label, then exactly these 40px monochrome icon-and-label rows in order: `个性化` with `slidersHorizontal`, `个人资料` with `user`, and `设置` with `cog`.
+- Place a full-width hairline divider between the two action groups.
+- Third section — `辅助功能`: show a quiet 11px group label, then exactly these 40px monochrome icon-and-label rows in order: `帮助` with `questionCircle`, and `退出登录` with `logout`.
+- Rows use an 18px existing line icon, a 14px label, a quiet neutral hover/focus fill, and no trailing chevrons. Keep logout monochrome by default; do not add a red block or promotional treatment.
+- Do not include `我的账户`, `套餐管理`, `余额`, any upgrade action, a plan-management row, numeric balance, or other actions in this design branch.
+
+### Visual tokens and tone
+
+- Product reference: ChatGPT account entry, Claude user menu, and Linear account menu. The tone is professional, quiet, compact, and unmistakably application UI rather than an admin console or store.
+- Light theme roles: review canvas `#F5F5F5`; Sidebar `#FCFCFC`; popover `#FFFFFF`; integrated identity header `#F7F7F8`; row hover/focus `#F3F4F6`; border and dividers `#E5E7EB`; primary text `#111827`; secondary text and icons `#6B7280`; inverse/avatar text `#FFFFFF`; neutral fallback avatar `#111827`.
+- Dark popup roles: page/Sidebar `#0F0F10`; the complete popover container, identity region, both labeled action groups, and every non-hover interior region use one continuous `#353535` surface; popup row hover/focus uses `rgba(255, 255, 255, 0.08)`; popup border uses `rgba(255, 255, 255, 0.10)`; dividers use `rgba(255, 255, 255, 0.12)`; primary text uses `#F5F5F5`; secondary text, plan text, icons, and group labels use `#C7C7CC`; neutral fallback avatar may remain `#262626` with `#F5F5F5` initials because it is identity content rather than a section surface.
+- Dark dock roles remain unchanged and separate from the popup correction: Sidebar `#0F0F10`; dock hover/open surface `#262626`; dock primary text `#F5F5F5`; dock plan text and chevrons `#A1A1AA`.
+- Light popover shadow: `0 12px 30px rgba(0, 0, 0, 0.12), 0 2px 8px rgba(0, 0, 0, 0.06)`.
+- Dark popover shadow: `0 14px 32px rgba(0, 0, 0, 0.38), 0 2px 8px rgba(0, 0, 0, 0.24)`.
+- The popup must read above the Sidebar as one uniform gray card through its single surface, hairline dividers, spacing, typography weight, and shadow—not alternating section fills or a bright edge. Never use `#262626`, `#0F0F10`, black, or another darker surface for any header, body, group, or footer region inside the dark popup. Never add a white rim, glow, pure-black surface, high-contrast outline, or inset highlight.
+- UI font inherits the shared `var(--workspace-font-ui)` stack. Use compact 4px/8px spacing logic.
+- No gradients, broad color fills, purple buttons, purple upgrade treatment, glow, glass, clay/neumorphism, large cards, wallet/store styling, promotional copy, or invented user data contracts.
+- A component-spec presentation may show equivalent light and dark examples side by side for review; these are two theme states of the same component, not alternating sections of a product page.
+
+### Approval gate
+
+- Treat the current Account Popover draft as ground truth and apply this dark-surface correction as a single replace iteration on that same draft; do not open a new design direction.
+- Do not implement the approved result in production code until the user explicitly asks to proceed.
+
+## End-User Work Accent Refinement V4 — Approval Draft
+
+This is the latest authority for the current SuperDesign exploration. It is a **Work-mode-only visual refinement** of the already implemented end-user workspace. It overrides the V3 monochrome rules below only where they conflict with this section. It does not authorize implementation until the user confirms the generated design.
+
+### Frozen scope
+
+- Chat is completely frozen. Do not change the ChatGPT-like layout, 260px history rail, conversation grouping, message presentation, composer, model selector, attachment/voice controls, input styling, spacing, or interaction behavior.
+- Do not pass Chat page/components into this design exploration and do not infer a new Chat palette from the Work proposal.
+- Preserve the current Work information architecture, routes, business data, loading/error/empty states, API contracts, responsive breakpoints, and component hierarchy. This is a local visual refinement, not a product redesign.
+- The Dashboard remains an end-user surface. Never introduce administrator KPIs, gateway health, system monitoring, operations data, server capacity, global incidents, or infrastructure status.
+
+### Work visual ratio and tokens
+
+The Work workspace uses approximately 80% neutral structure and 20% restrained brand accents. White cards, neutral typography, gray borders, and generous whitespace remain dominant. Purple identifies selection, focus, primary action, and important user-owned data; it is not decorative atmosphere.
+
+Work consumes the canonical `--workspace-work-*` roles plus shared `--workspace-radius-*`, `--workspace-space-*`, `--workspace-font-*` and `--workspace-sidebar-*` foundations. Exact runtime values live only in `frontend/src/styles/luoxue-clay-tokens.css`.
+
+- Never remap the shared `--workspace-action` roles to the Work violet roles, because Chat consumes the neutral action roles and must remain visually untouched.
+- No purple gradients, purple page fields, large violet cards, rainbow provider palettes, glow, glass, clay/neumorphism, ornamental AI shapes, or colored marketing surfaces.
+- `#7C3AED` and `#6D28D9` may be used for normal text/icons and focus states. `#8B5CF6` and `#A78BFA` are graph/fill colors only, not small text on white.
+- Focus-visible uses a 2px `#7C3AED` outline with a 2px offset. Selected states also use background, weight, marker, or `aria-current`; never rely on hue alone.
+
+### Work Application Shell
+
+- Keep the desktop sidebar exactly 260px and preserve the real logo, `[ Chat ][ Work ]` switch, navigation order, resources, account dock, mobile drawer, and current density.
+- Navigation remains exactly: 工作台 — 仪表盘, 模型中心, API 密钥, 使用记录; 账户 — 余额, 套餐, 订单; 资源 — 文档, 公告, 设置.
+- Work active navigation uses `#F5F3FF` background, `#6D28D9` text/icon, 600 weight, and an optional 2px `#7C3AED` marker. Hover remains neutral `#F3F4F6` with dark text; brand color is reserved for active/focus.
+- On Work pages, the Work segment may use deep-purple text and a subtle `#DDD6FE` boundary while the segment surface remains white. The Chat-mode appearance is unchanged.
+- The compact account avatar may use deep purple. Upgrade remains a small outlined action with violet text/border and soft hover; do not turn the footer into a purple panel.
+
+### Dashboard visual refinement
+
+- Preserve the current header, four KPI cards, dominant model-usage panel, recent conversations, 2×2 quick actions, API information, and account information in the same order and geometry.
+- Cards remain white with a 1px `#E5E7EB` border, 14px radius, and only the very light card shadow above. Do not add colored card bodies, top stripes, or hover lift.
+- KPI cards use 32–36px soft icon wells: balance violet, today usage soft violet, Token indigo, and current plan neutral with the existing truthful green status dot. Balance may be the only purple primary value; other values remain `#111827`.
+- Remove grayscale treatment from the real balance mark. Use tabular numerals and keep units visually subordinate.
+- Model usage keeps exact labels, values, ranking rows, and bar lengths. Tracks are `#F3F4F6`; the primary bar is `#7C3AED`, with later rows using the same hue at restrained lighter strengths. Data is still conveyed through names, numbers, and length—not color alone.
+- If the existing trend data is visualized, keep it inside the existing model panel: violet primary line, indigo secondary line, neutral grid, no gradient, glow, invented data, or extra card.
+- Recent conversations keep the current structure. Only use a very soft violet hover and violet chevron/icon hover.
+- Quick actions keep the current 2×2 layout and destinations. Use small violet/indigo icon wells; New Chat may receive the only subtly prioritized boundary. Do not create four colored tiles.
+- API endpoint cards stay neutral. The primary endpoint badge may use violet soft/border/text; code areas remain `#F9FAFB`; copy/open buttons become violet only on hover/focus.
+- Account identity may use a deep-purple avatar and a violet API-key icon. Semantic active status remains green.
+- Increase low-contrast 10–11px `#9CA3AF` labels to at least 12px `#6B7280` (or `#4B5563` when compact). Maintain 44px touch targets, 16px mobile gutters, stacked model metrics, and no horizontal overflow at 320px.
+
+### Approval gate
+
+- Generate one current-UI reproduction first, then exactly one branch implementing this restrained Work accent direction.
+- Present the SuperDesign canvas and preview for confirmation. Do not migrate this V4 proposal into production Vue/CSS before explicit user approval.
+
+## End-User AI Workspace V3 — Approved and Implemented
+
+This section is the active authority for the user-confirmed authenticated **end-user** Application Shell, Work Dashboard, and Chat Shell direction, now migrated into the project's Vue/CSS implementation. It overrides every conflicting authenticated-shell, Snow Clay, administrator, operations, monitoring, and violet-primary rule below.
+
+### Product boundary
+
+- This is the paid end-user product workspace, comparable in interaction density to ChatGPT Plus, Claude Pro, OpenAI Console, Linear, and Vercel Dashboard.
+- It is not an administrator dashboard, operations console, global monitoring surface, API gateway health center, or system data center.
+- Preserve the existing user-facing business contracts: AI chat, model usage, API calls, credit balance, subscriptions, orders, account identity, announcements, settings, loading/error/empty states, and current feature visibility.
+- Do not expose global service health, gateway status, system capacity, operational incidents, or administrator KPIs on the user Dashboard.
+
+### Monochrome visual language
+
+- Canvas: `#FFFFFF` or `#FAFAFA`; sidebar may use `#FAFAFA` while primary work surfaces remain white.
+- Card/surface: `#FFFFFF`.
+- Border: `#E5E7EB`; strong neutral border: `#D1D5DB`.
+- Primary text: `#111111`; secondary text: `#374151`; muted text: `#6B7280`.
+- Hover/selected neutral fill: `#F5F5F5` or `#F3F4F6`; primary action: near-black `#111111` with white text.
+- Brand color is permitted only in the real logo, a tiny truthful status dot, or a subtle hover detail. It must not fill page backgrounds, large buttons, active navigation blocks, KPI cards, charts, or decorative regions.
+- No purple gradients, broad colored panels, neon/glow, glass, clay/neumorphism, ornamental AI effects, oversized radii, or decorative floating shapes.
+- Surfaces rely on hairline borders. Optional elevation is limited to `0 1px 2px rgba(0, 0, 0, 0.04)`; overlays alone may use a slightly deeper neutral shadow.
+
+### Geometry and typography
+
+The geometry contract is implemented through the canonical `--workspace-font-*`, `--workspace-space-*`, `--workspace-radius-*`, `--workspace-sidebar-*` and semantic color roles. Exact values live only in `frontend/src/styles/luoxue-clay-tokens.css`.
+
+- Typography: `Inter`, `PingFang SC`, `Microsoft YaHei`, sans-serif; monospace only for API keys, endpoints, identifiers, and code.
+- Use an 8px spacing system. Desktop content gutters are 24–32px; mobile gutters are 16px.
+- Cards use 12–16px radii, buttons 8–10px, inputs 12px. Do not use 20–28px application-card radii.
+- Workspace roles are fixed at Brand 18/700, Page Title 28/600, Navigation 14/500, Body 14/400, Secondary 12/400, and Numeric 32/600. Numeric metrics use tabular numerals.
+- Touch targets are at least 44px on touch layouts; focus-visible uses a 2px neutral/ink outline with sufficient contrast.
+
+### Application Shell
+
+- Desktop sidebar is fixed at `260px`, full height, white or `#FAFAFA`, with one right hairline and no decorative shadow.
+- Order: real brand logo, neutral `[ Chat ][ Work ]` segmented switch, mode-owned navigation, flexible spacer, compact account dock.
+- The mode switch uses a white active segment with black text and a subtle border/shadow; it never uses a purple active fill.
+- Work navigation contains exactly three primary groups in this approval concept:
+  1. 工作台: 仪表盘, 模型中心, API 密钥, 使用记录.
+  2. 账户: 余额, 套餐, 订单.
+  3. 资源: 文档, 公告, 设置.
+- Feature-gated secondary capabilities remain business contracts but are not promoted into the requested primary Work navigation. They may later live behind contextual quick links or a subordinate overflow without changing routes or data.
+- Chat navigation contains only New chat and conversation history. It must not show API, balance, plans, orders, Dashboard, global status, or administrator destinations.
+- Below 1024px each mode has exactly one header/menu trigger and one focus-managed drawer. Never stack a Work sidebar and Chat history rail.
+
+### Work Dashboard hierarchy
+
+- Header: concise personalized greeting, optional supporting line, and low-emphasis date-range/refresh controls.
+- First region: four equal user-owned summary cards — current balance, today's usage, token consumption, current plan. Each card has one dominant value and one concise supporting fact; no admin/system KPI.
+- Second region: model usage (dominant evidence surface), recent conversations, and compact quick entries for Chat, API key, usage, and balance/plan tasks.
+- Third region: API information and account information. Endpoints and IDs use monospace, with copy/open actions. Account information summarizes identity, plan, billing/renewal, or membership state from existing contracts.
+- Announcements may appear as a user resource/compact feed. Global service availability, channel monitor results, gateway uptime, and operations status do not appear on the Dashboard.
+- Charts are monochrome: near-black primary series and neutral grays, with semantic colors only when the data truly represents success/warning/error. Never use a rainbow model palette by default.
+
+### Chat Shell hierarchy
+
+- One 260px history sidebar: logo, neutral mode switch, black/white New chat control, optional search, grouped history, account dock.
+- Main area is edge-to-edge white with a minimal header, centered message stream, generous whitespace, and a fixed/anchored bottom composer.
+- Assistant messages are flat; user messages may use a soft neutral bubble. Composer uses one neutral border, 12–16px radius, model label, attachment, voice, and an ink send control.
+- Preserve existing streaming, model selection, file upload, voice input, retry/copy, history management, drawer focus, Escape close, focus return, and `inert` behavior.
+
+### Implementation status
+
+- The Application Shell, end-user Dashboard, and Chat visual direction are implemented in Vue/CSS.
+- `ChatComposer` and the chat input form remain unchanged, as explicitly requested by the user.
+
+## Authenticated Application Shell V2 — Active Scoped Override
+
+This section is the active authority for the authenticated personal product shell introduced for the Chat / Work redesign. It overrides conflicting Snow Clay guidance below **only inside the personal Application Shell**. Public discovery, focused purchase/auth flows, and administrator surfaces retain their existing systems unless they are explicitly migrated later.
+
+### Product modes
+
+- The personal product has two explicit modes: `Chat` and `Work`. Mode is semantic application state, not a content-density variant.
+- Both modes share brand identity, account access, keyboard/focus behavior, and one compact mode switch. Their navigation and content frames remain distinct.
+- `Chat` is an AI-assistant environment. Its left rail contains only shell identity/mode controls, New chat, conversation search/history, and the account dock. It must never expose API keys, balance, subscriptions, orders, admin, or other Work navigation.
+- `Work` is the developer workspace. Its sidebar groups are exactly Workbench, Account, and Resources, with feature-gated secondary tools preserved in a compact More section when available.
+- Never infer product mode from a layout variant such as `variant="chat"`; mode must be declared explicitly as `shellMode="chat" | "work"` or equivalent route metadata.
+
+### Visual direction
+
+The shell is a quiet, professional enterprise SaaS workspace influenced by ChatGPT, OpenAI Console, Linear, and the restraint of Snow Clay. It is not a marketing page, an AI-tech showcase, or a neumorphic/clay composition. Long-session comfort, scan speed, and focus take priority.
+
+- No large violet fields, purple fog, neon, decorative gradients, glassmorphism, or floating ornamental shapes.
+- Use flat surfaces, hairline boundaries, strong typography, and restrained neutral elevation.
+- Violet is reserved for selected mode/navigation, primary actions, focus, and rare emphasis. Neutral or ink controls are preferred for routine actions.
+
+### Workspace shell tokens
+
+The V2 `--shell-*` namespace is retired. Chat and shared shell chrome consume the canonical `--workspace-*` roles from `frontend/src/styles/luoxue-clay-tokens.css`; Work-specific accents consume `--workspace-work-*` from the same file.
+
+- Use the shared `var(--workspace-font-ui)` stack. Do not use display typography inside the shell.
+- Use the fixed Workspace role scale: Brand 18/700, Page Title 28/600, Navigation 14/500, Body 14/400, Secondary 12/400, and Numeric 32/600. Never introduce intermediate weights such as 450, 550, 650, or 680.
+- Use 4px/8px spacing logic. Desktop shell gutters are 24px–32px. Touch targets are at least 44px on touch layouts.
+
+### Shared application frame
+
+- Desktop viewport reference: 1440×900. Mobile references: 390×844 and 320px minimum width.
+- The shell fills `100dvh`, owns overflow, and has no marketing header or footer.
+- Desktop Sidebar is 260px expanded and 68px collapsed in both Chat and Work. Mobile drawers retain their existing host breakpoints and width formulas through canonical Workspace tokens.
+- One compact mode switch appears near the brand at the shell level. It is not repeated inside page content.
+- Account identity may live in the sidebar footer. Balance and subscription summaries may appear in the account overlay, but never as Chat navigation items.
+- Mobile has exactly one application header and one menu trigger. Avoid nested hamburger controls.
+
+### Chat shell
+
+- One left history rail only; remove the current global Work sidebar plus nested history-sidebar composition.
+- Rail order: brand/mode switch, prominent New chat action, search, grouped conversation history, account footer.
+- Main area is a calm white conversation canvas with a 56px minimal toolbar, large scrollable message region, and bottom composer. Do not wrap the entire chat surface in a card.
+- Keep messages and composer centered at approximately 820px and 780px. Assistant content is flat; user content may use a soft neutral bubble.
+- Empty state is small and centered, with one concise greeting and supporting line; no hero illustration or promotional card grid.
+- Composer uses a 12px–16px restrained radius, one neutral border, subtle floating shadow, attachment entry, visible model label, voice input, and ink send control. Preserve all file, voice, streaming, balance, retry, history, and accessibility behavior.
+- On mobile, history opens as the existing focus-managed drawer. The single Chat toolbar owns the menu trigger and page context.
+
+### Work shell
+
+- Left navigation groups and order:
+  1. Workbench: Dashboard, Model Center, API Keys, Usage, Service Status.
+  2. Account: Balance, Subscriptions, Orders.
+  3. Resources: Documentation, Announcements, Settings.
+- Preserve existing feature flags. Model Center may use the existing catalog destination until an authenticated wrapper exists. Documentation remains a sanitized external destination; Announcements and Settings remain actions rather than fake routes.
+- Preserve valuable feature-gated tools and custom menu items in a visually subordinate `More` group; do not silently remove business capabilities.
+- Main workspace canvas is `#F8FAFC`. Page-owned content uses white 16px cards with hairlines; tables and operational surfaces may use 12px–14px radii and near-flat elevation.
+- Existing pages continue to own their title and task actions. Do not add a redundant global desktop header.
+
+### Interaction, responsive, and accessibility
+
+- Hover uses neutral background or a slight border change; avoid lifting every control. Motion is 140ms–200ms ease-out and disabled under reduced-motion.
+- Focus-visible uses a clear 2px violet outline/ring with offset. Selected states pair color with background, marker, weight, or `aria-current`.
+- Sidebar labels, mode controls, drawer, menus, and dialogs remain keyboard reachable. Preserve focus trap, Escape close, focus return, and `inert` semantics already implemented in Chat.
+- At widths below 1024px, Work sidebar and Chat history become drawers. At 768px and below, use 16px gutters and 44px controls. No horizontal overflow at 320px.
+- Dark theme may remain supported through existing semantic aliases, but this design pass is judged in the light theme and must not introduce a second palette.
+
 ## Status and Authority
 
 Status: **canonical and active**.
@@ -337,7 +605,7 @@ Dark-theme shadows must replace white highlights with low-opacity white and use 
 - Desktop maximum width: 1180px to 1240px.
 - Mobile gutter: 16px. Desktop gutter: 24px to 32px.
 - Hero is an asymmetric split and fits the first viewport with both actions visible.
-- The 3D snowflake or code example is a first-viewport visual signal.
+- The product dashboard or code example is a first-viewport visual signal.
 - Vary section rhythm. Use at least four layout families across the page.
 - Keep the current anchor order and page information architecture.
 - Do not add decorative scroll cues, numbered section eyebrows, weather, location strips, version labels, or fake metrics.
@@ -345,12 +613,12 @@ Dark-theme shadows must replace white highlights with low-opacity white and use 
 
 ## Imagery and Icons
 
-- Brand logo: `frontend/public/brand/luoxue-snowflake-cloud-palette-light.svg`.
-- Hero visual: `frontend/public/brand/luoxue-snowflake-3d.png`.
+- Brand logo: `frontend/public/logo.png`.
+- Hero visual: `frontend/public/brand/home-dashboard.webp`.
 - Product visual: `frontend/public/brand/home-dashboard.webp`.
 - Provider icons: existing `PlatformIcon.vue` paths.
 - UI icons: existing `Icon.vue` paths.
-- Superdesign should use the real logo SVG and recognizable icon shapes. Raster images may be represented as labeled placeholders in drafts.
+- Superdesign should use the canonical logo PNG and recognizable icon shapes. Raster images may be represented as labeled placeholders in drafts.
 
 ## Motion
 

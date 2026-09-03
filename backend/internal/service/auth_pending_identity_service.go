@@ -5,7 +5,6 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
-	"errors"
 	"fmt"
 	"hash/fnv"
 	"sort"
@@ -27,11 +26,16 @@ var (
 	ErrPendingAuthSessionNotFound = infraerrors.NotFound("PENDING_AUTH_SESSION_NOT_FOUND", "pending auth session not found")
 	ErrPendingAuthSessionExpired  = infraerrors.Unauthorized("PENDING_AUTH_SESSION_EXPIRED", "pending auth session has expired")
 	ErrPendingAuthSessionConsumed = infraerrors.Unauthorized("PENDING_AUTH_SESSION_CONSUMED", "pending auth session has already been used")
+	ErrPendingAuthSessionChanged  = infraerrors.Conflict("PENDING_AUTH_SESSION_CHANGED", "pending auth session changed while it was being completed")
 	ErrPendingAuthCodeInvalid     = infraerrors.Unauthorized("PENDING_AUTH_CODE_INVALID", "pending auth completion code is invalid")
 	ErrPendingAuthCodeExpired     = infraerrors.Unauthorized("PENDING_AUTH_CODE_EXPIRED", "pending auth completion code has expired")
 	ErrPendingAuthCodeConsumed    = infraerrors.Unauthorized("PENDING_AUTH_CODE_CONSUMED", "pending auth completion code has already been used")
 	ErrPendingAuthBrowserMismatch = infraerrors.Unauthorized("PENDING_AUTH_BROWSER_MISMATCH", "pending auth completion code does not match this browser session")
 )
+
+func pendingAuthSessionLockKey(sessionID int64) string {
+	return fmt.Sprintf("pending-auth-session:%d", sessionID)
+}
 
 const (
 	defaultPendingAuthTTL           = 15 * time.Minute
@@ -188,6 +192,14 @@ func lockAuthPendingIdentityKeys(ctx context.Context, client *dbent.Client, keys
 	return release, nil
 }
 
+// pendingAuthSupportsSelectForUpdate keeps row locking on PostgreSQL while
+// allowing the SQLite-backed unit/integration harness to exercise the same
+// transaction flow. SQLite serializes these flows through the scoped process
+// locks above and rejects SELECT ... FOR UPDATE outright.
+func pendingAuthSupportsSelectForUpdate(client *dbent.Client) bool {
+	return client != nil && client.Driver().Dialect() == dialect.Postgres
+}
+
 func pendingIdentityAdoptionLockKeys(pendingAuthSessionID int64, identityID *int64) []string {
 	keys := []string{fmt.Sprintf("pending-auth-adoption:pending:%d", pendingAuthSessionID)}
 	if identityID != nil && *identityID > 0 {
@@ -196,8 +208,51 @@ func pendingIdentityAdoptionLockKeys(pendingAuthSessionID int64, identityID *int
 	return keys
 }
 
+// pendingIdentityBindingLockKeys returns stable, sorted-by-helper lock names
+// for the provider identity tuple(s) touched by a pending finalizer.  The
+// database has a unique constraint on the canonical tuple, but a unique error
+// alone is not enough: an existing inactive identity can be reassigned and
+// metadata/channel rows can otherwise be inspected from a stale snapshot.
+func pendingIdentityBindingLockKeys(session *PendingAuthSession) []string {
+	if session == nil {
+		return nil
+	}
+	providerType := strings.ToLower(strings.TrimSpace(session.ProviderType))
+	providerKey := strings.TrimSpace(session.ProviderKey)
+	providerSubject := strings.TrimSpace(session.ProviderSubject)
+	if providerType == "" || providerKey == "" || providerSubject == "" {
+		return nil
+	}
+	keys := []string{fmt.Sprintf("pending-auth-identity:%s:%s:%s", providerType, providerKey, providerSubject)}
+	if providerType == "wechat" {
+		for _, compatibleKey := range pendingWeChatCompatibleProviderKeys(providerKey) {
+			keys = append(keys, fmt.Sprintf("pending-auth-identity:%s:%s:%s", providerType, compatibleKey, providerSubject))
+		}
+		claims := session.UpstreamIdentityClaims
+		channel := pendingIdentityStringValue(claims, "channel")
+		channelAppID := pendingIdentityStringValue(claims, "channel_app_id")
+		channelSubject := pendingIdentityStringValue(claims, "channel_subject")
+		if channel != "" && channelAppID != "" && channelSubject != "" {
+			for _, compatibleKey := range pendingWeChatCompatibleProviderKeys(providerKey) {
+				keys = append(keys, fmt.Sprintf("pending-auth-identity-channel:%s:%s:%s:%s:%s", providerType, compatibleKey, channel, channelAppID, channelSubject))
+			}
+		}
+	}
+	return keys
+}
+
 func NewAuthPendingIdentityService(entClient *dbent.Client) *AuthPendingIdentityService {
 	return &AuthPendingIdentityService{entClient: entClient}
+}
+
+func (s *AuthPendingIdentityService) clientForContext(ctx context.Context) *dbent.Client {
+	if s == nil {
+		return nil
+	}
+	if tx := dbent.TxFromContext(ctx); tx != nil {
+		return tx.Client()
+	}
+	return s.entClient
 }
 
 func (s *AuthPendingIdentityService) CreatePendingSession(ctx context.Context, input CreatePendingAuthSessionInput) (*PendingAuthSession, error) {
@@ -219,7 +274,7 @@ func (s *AuthPendingIdentityService) CreatePendingSession(ctx context.Context, i
 		expiresAt = time.Now().UTC().Add(defaultPendingAuthTTL)
 	}
 
-	create := s.entClient.PendingAuthSession.Create().
+	create := s.clientForContext(ctx).PendingAuthSession.Create().
 		SetSessionToken(sessionToken).
 		SetIntent(strings.TrimSpace(input.Intent)).
 		SetProviderType(strings.TrimSpace(input.Identity.ProviderType)).
@@ -244,7 +299,8 @@ func (s *AuthPendingIdentityService) IssueCompletionCode(ctx context.Context, in
 		return nil, fmt.Errorf("pending auth ent client is not configured")
 	}
 
-	session, err := s.entClient.PendingAuthSession.Get(ctx, input.PendingAuthSessionID)
+	client := s.clientForContext(ctx)
+	session, err := client.PendingAuthSession.Get(ctx, input.PendingAuthSessionID)
 	if err != nil {
 		if dbent.IsNotFound(err) {
 			return nil, ErrPendingAuthSessionNotFound
@@ -262,7 +318,7 @@ func (s *AuthPendingIdentityService) IssueCompletionCode(ctx context.Context, in
 	}
 	expiresAt := time.Now().UTC().Add(ttl)
 
-	update := s.entClient.PendingAuthSession.UpdateOneID(session.ID).
+	update := client.PendingAuthSession.UpdateOneID(session.ID).
 		SetCompletionCodeHash(hashPendingAuthCode(code)).
 		SetCompletionCodeExpiresAt(expiresAt)
 	if strings.TrimSpace(input.BrowserSessionKey) != "" {
@@ -284,7 +340,7 @@ func (s *AuthPendingIdentityService) ConsumeCompletionCode(ctx context.Context, 
 	}
 
 	codeHash := hashPendingAuthCode(strings.TrimSpace(rawCode))
-	session, err := s.entClient.PendingAuthSession.Query().
+	session, err := s.clientForContext(ctx).PendingAuthSession.Query().
 		Where(pendingauthsession.CompletionCodeHashEQ(codeHash)).
 		Only(ctx)
 	if err != nil {
@@ -337,7 +393,7 @@ func (s *AuthPendingIdentityService) getBrowserSession(ctx context.Context, sess
 		return nil, ErrPendingAuthSessionNotFound
 	}
 
-	session, err := s.entClient.PendingAuthSession.Query().
+	session, err := s.clientForContext(ctx).PendingAuthSession.Query().
 		Where(pendingauthsession.SessionTokenEQ(sessionToken)).
 		Only(ctx)
 	if err != nil {
@@ -362,7 +418,7 @@ func (s *AuthPendingIdentityService) consumeSession(
 
 	sanitizedLocalFlowState := sanitizePendingAuthLocalFlowState(session.LocalFlowState)
 	now := time.Now().UTC()
-	update := s.entClient.PendingAuthSession.UpdateOneID(session.ID).
+	update := s.clientForContext(ctx).PendingAuthSession.UpdateOneID(session.ID).
 		Where(
 			pendingauthsession.ConsumedAtIsNil(),
 			pendingauthsession.ExpiresAtGTE(now),
@@ -386,7 +442,7 @@ func (s *AuthPendingIdentityService) consumeSession(
 		return nil, err
 	}
 
-	current, currentErr := s.entClient.PendingAuthSession.Get(ctx, session.ID)
+	current, currentErr := s.clientForContext(ctx).PendingAuthSession.Get(ctx, session.ID)
 	if currentErr != nil {
 		if dbent.IsNotFound(currentErr) {
 			return nil, ErrPendingAuthSessionNotFound
@@ -448,19 +504,23 @@ func (s *AuthPendingIdentityService) UpsertAdoptionDecision(ctx context.Context,
 		return nil, fmt.Errorf("pending auth ent client is not configured")
 	}
 
-	tx, err := s.entClient.Tx(ctx)
-	if err != nil && !errors.Is(err, dbent.ErrTxStarted) {
-		return nil, err
-	}
-
 	client := s.entClient
 	txCtx := ctx
-	if err == nil {
+	var tx *dbent.Tx
+	if existingTx := dbent.TxFromContext(ctx); existingTx != nil {
+		// Ent's Client.Tx does not inspect context, so explicitly reuse the
+		// caller-owned transaction instead of opening a second SQLite/Postgres
+		// transaction that can deadlock or escape the outer rollback.
+		client = existingTx.Client()
+	} else {
+		var err error
+		tx, err = s.entClient.Tx(ctx)
+		if err != nil {
+			return nil, err
+		}
 		defer func() { _ = tx.Rollback() }()
 		client = tx.Client()
 		txCtx = dbent.NewTxContext(ctx, tx)
-	} else if existingTx := dbent.TxFromContext(ctx); existingTx != nil {
-		client = existingTx.Client()
 	}
 
 	releaseLocks, err := lockAuthPendingIdentityKeys(txCtx, client, pendingIdentityAdoptionLockKeys(input.PendingAuthSessionID, input.IdentityID)...)

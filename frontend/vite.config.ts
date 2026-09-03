@@ -34,6 +34,53 @@ function injectPublicSettings(backendUrl: string): Plugin {
   }
 }
 
+/**
+ * Vite's default SPA fallback always resolves unknown paths to the root
+ * index.html. Keep admin deep links on their own HTML entry during local
+ * development; production routing is handled by the embedded Go server.
+ */
+function adminHistoryFallback(): Plugin {
+  const installFallback = (middlewares: {
+    use: (handler: (
+      request: import('http').IncomingMessage,
+      response: import('http').ServerResponse,
+      next: () => void,
+    ) => void) => void
+  }) => {
+    middlewares.use((request, _response, next) => {
+      try {
+        const method = request.method?.toUpperCase()
+        const acceptsHTML = request.headers.accept?.includes('text/html') === true
+        if ((method !== 'GET' && method !== 'HEAD') || !acceptsHTML) {
+          next()
+          return
+        }
+
+        const url = new URL(request.url || '/', 'http://vite.local')
+        const isAdminPath = url.pathname === '/admin' || url.pathname.startsWith('/admin/')
+
+        if (isAdminPath) {
+          request.url = `/admin/index.html${url.search}`
+        }
+      } catch {
+        // Leave malformed URLs to Vite's normal request handling.
+      }
+      next()
+    })
+  }
+
+  return {
+    name: 'admin-history-fallback',
+    apply: 'serve',
+    configureServer(server) {
+      installFallback(server.middlewares)
+    },
+    configurePreviewServer(server) {
+      installFallback(server.middlewares)
+    },
+  }
+}
+
 export default defineConfig(({ mode }) => {
   // 加载环境变量
   const env = loadEnv(mode, process.cwd(), '')
@@ -46,6 +93,7 @@ export default defineConfig(({ mode }) => {
       checker({
         vueTsc: true
       }),
+      adminHistoryFallback(),
       injectPublicSettings(backendUrl)
     ],
   resolve: {
@@ -64,6 +112,10 @@ export default defineConfig(({ mode }) => {
     outDir: '../backend/internal/web/dist',
     emptyOutDir: true,
     rollupOptions: {
+      input: {
+        user: resolve(__dirname, 'index.html'),
+        admin: resolve(__dirname, 'admin/index.html')
+      },
       output: {
         /**
          * 手动分包配置

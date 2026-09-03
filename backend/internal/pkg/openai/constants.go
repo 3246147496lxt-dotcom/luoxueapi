@@ -8,28 +8,63 @@ import (
 
 // Model represents an OpenAI model
 type Model struct {
-	ID          string `json:"id"`
-	Object      string `json:"object"`
-	Created     int64  `json:"created"`
-	OwnedBy     string `json:"owned_by"`
-	Type        string `json:"type"`
-	DisplayName string `json:"display_name"`
+	ID                        string   `json:"id"`
+	Object                    string   `json:"object"`
+	Created                   int64    `json:"created"`
+	OwnedBy                   string   `json:"owned_by"`
+	Type                      string   `json:"type"`
+	DisplayName               string   `json:"display_name"`
+	SupportsResponses         bool     `json:"supports_responses"`
+	SupportsReasoningSummary  bool     `json:"supports_reasoning_summary"`
+	SupportsReasoningProMode  bool     `json:"supports_reasoning_pro_mode"`
+	SupportedReasoningEfforts []string `json:"supported_reasoning_efforts"`
 }
 
 // DefaultModels OpenAI models list
 var DefaultModels = []Model{
-	{ID: "gpt-5.6", Object: "model", Created: 1780876800, OwnedBy: "openai", Type: "model", DisplayName: "GPT-5.6 (Sol)"},
-	{ID: "gpt-5.6-sol", Object: "model", Created: 1780876800, OwnedBy: "openai", Type: "model", DisplayName: "GPT-5.6 Sol"},
-	{ID: "gpt-5.6-terra", Object: "model", Created: 1780876800, OwnedBy: "openai", Type: "model", DisplayName: "GPT-5.6 Terra"},
-	{ID: "gpt-5.6-luna", Object: "model", Created: 1780876800, OwnedBy: "openai", Type: "model", DisplayName: "GPT-5.6 Luna"},
-	{ID: "gpt-5.5", Object: "model", Created: 1776873600, OwnedBy: "openai", Type: "model", DisplayName: "GPT-5.5"},
-	{ID: "gpt-5.4", Object: "model", Created: 1738368000, OwnedBy: "openai", Type: "model", DisplayName: "GPT-5.4"},
-	{ID: "gpt-5.4-mini", Object: "model", Created: 1738368000, OwnedBy: "openai", Type: "model", DisplayName: "GPT-5.4 Mini"},
-	{ID: "gpt-5.3-codex-spark", Object: "model", Created: 1735689600, OwnedBy: "openai", Type: "model", DisplayName: "GPT-5.3 Codex Spark"},
+	{ID: "gpt-5.6", Object: "model", Created: 1780876800, OwnedBy: "openai", Type: "model", DisplayName: "GPT-5.6 (Sol)", SupportsResponses: true, SupportsReasoningSummary: true, SupportsReasoningProMode: true, SupportedReasoningEfforts: []string{"low", "medium", "high", "xhigh"}},
+	{ID: "gpt-5.6-sol", Object: "model", Created: 1780876800, OwnedBy: "openai", Type: "model", DisplayName: "GPT-5.6 Sol", SupportsResponses: true, SupportsReasoningSummary: true, SupportsReasoningProMode: true, SupportedReasoningEfforts: []string{"low", "medium", "high", "xhigh"}},
+	{ID: "gpt-5.6-terra", Object: "model", Created: 1780876800, OwnedBy: "openai", Type: "model", DisplayName: "GPT-5.6 Terra", SupportsResponses: true, SupportsReasoningSummary: true, SupportsReasoningProMode: true, SupportedReasoningEfforts: []string{"low", "medium", "high", "xhigh", "max"}},
+	{ID: "gpt-5.6-luna", Object: "model", Created: 1780876800, OwnedBy: "openai", Type: "model", DisplayName: "GPT-5.6 Luna", SupportsResponses: true, SupportsReasoningSummary: true, SupportsReasoningProMode: true, SupportedReasoningEfforts: []string{"low", "medium", "high", "xhigh", "max"}},
+	{ID: "gpt-5.5", Object: "model", Created: 1776873600, OwnedBy: "openai", Type: "model", DisplayName: "GPT-5.5", SupportsResponses: true, SupportsReasoningSummary: true, SupportedReasoningEfforts: []string{"low", "medium", "high", "xhigh", "max"}},
+	{ID: "gpt-5.4", Object: "model", Created: 1738368000, OwnedBy: "openai", Type: "model", DisplayName: "GPT-5.4", SupportsResponses: true, SupportsReasoningSummary: true, SupportedReasoningEfforts: []string{"low", "medium", "high", "xhigh", "max"}},
+	{ID: "gpt-5.4-mini", Object: "model", Created: 1738368000, OwnedBy: "openai", Type: "model", DisplayName: "GPT-5.4 Mini", SupportsResponses: true, SupportsReasoningSummary: true, SupportedReasoningEfforts: []string{"low", "medium", "high", "xhigh", "max"}},
+	{ID: "gpt-5.3-codex-spark", Object: "model", Created: 1735689600, OwnedBy: "openai", Type: "model", DisplayName: "GPT-5.3 Codex Spark", SupportsResponses: true, SupportsReasoningSummary: true, SupportedReasoningEfforts: []string{"low", "medium", "high", "xhigh", "max"}},
 	{ID: "codex-auto-review", Object: "model", Created: 1776902400, OwnedBy: "openai", Type: "model", DisplayName: "Codex Auto Review"},
 	{ID: "gpt-image-1", Object: "model", Created: 1733875200, OwnedBy: "openai", Type: "model", DisplayName: "GPT Image 1"},
 	{ID: "gpt-image-1.5", Object: "model", Created: 1735689600, OwnedBy: "openai", Type: "model", DisplayName: "GPT Image 1.5"},
 	{ID: "gpt-image-2", Object: "model", Created: 1738368000, OwnedBy: "openai", Type: "model", DisplayName: "GPT Image 2"},
+}
+
+// DefaultModelByID returns capability metadata from the same authoritative
+// table used to publish the built-in OpenAI model catalog. A provider prefix
+// (for example "openai/") is ignored, but unknown or dated model variants are
+// deliberately not guessed so capability-sensitive routing can fail closed.
+func DefaultModelByID(modelID string) (Model, bool) {
+	normalized := strings.ToLower(strings.TrimSpace(modelID))
+	if slash := strings.LastIndex(normalized, "/"); slash >= 0 {
+		normalized = strings.TrimSpace(normalized[slash+1:])
+	}
+	for i := range DefaultModels {
+		if strings.EqualFold(DefaultModels[i].ID, normalized) {
+			model := DefaultModels[i]
+			model.SupportedReasoningEfforts = append([]string(nil), model.SupportedReasoningEfforts...)
+			return model, true
+		}
+	}
+	return Model{}, false
+}
+
+// SupportsReasoningEffort reports whether the model advertises the effort in
+// its catalog capability metadata.
+func (m Model) SupportsReasoningEffort(effort string) bool {
+	effort = strings.ToLower(strings.TrimSpace(effort))
+	for _, supported := range m.SupportedReasoningEfforts {
+		if supported == effort {
+			return true
+		}
+	}
+	return false
 }
 
 // DefaultModelIDs returns the default model ID list

@@ -136,6 +136,52 @@ describe('create-account credential draft builders', () => {
     })
   })
 
+  it('keeps legacy OpenAI capabilities implicit and persists audio opt-ins', () => {
+    const commonInput = {
+      platform: 'openai' as const,
+      baseUrl: '',
+      apiKey: 'sk-openai',
+      enabled: false,
+      retryCount: 3,
+      retryStatusCodesInput: '',
+      customErrorCodesEnabled: false,
+      customErrorCodes: [],
+      interceptWarmupRequests: false,
+    }
+
+    expect(
+      buildAPIKeyCredentials({
+        ...commonInput,
+        openAIEndpointCapabilities: [],
+      }),
+    ).not.toHaveProperty('openai_capabilities')
+
+    expect(
+      buildAPIKeyCredentials({
+        ...commonInput,
+        openAIEndpointCapabilities: [
+          'chat_completions',
+          'embeddings',
+          'audio_transcriptions',
+        ],
+      }).openai_capabilities,
+    ).toEqual([
+      'chat_completions',
+      'embeddings',
+      'audio_transcriptions',
+    ])
+
+    expect(
+      buildAPIKeyCredentials({
+        ...commonInput,
+        openAIEndpointCapabilities: [
+          'chat_completions',
+          'audio_transcriptions',
+        ],
+      }).openai_capabilities,
+    ).toEqual(['chat_completions', 'audio_transcriptions'])
+  })
+
   it('feeds generated credentials through the discriminated payload adapter', () => {
     const credentials = buildAPIKeyCredentials({
       platform: 'openai',

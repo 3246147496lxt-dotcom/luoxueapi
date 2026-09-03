@@ -179,7 +179,7 @@ import { ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import { useI18n } from 'vue-i18n'
 import CreditAmount from '@/components/common/CreditAmount.vue'
 import Icon from '@/components/icons/Icon.vue'
-import { useSubscriptionStore } from '@/stores'
+import { useSubscriptionStore } from '@/stores/subscriptions'
 import type { UserSubscription } from '@/types'
 
 const { t } = useI18n()

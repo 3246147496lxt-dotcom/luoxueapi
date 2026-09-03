@@ -1,6 +1,6 @@
 <template>
   <div class="space-y-6">
-    <h2 id="payment-amount-title" class="amount-section-title text-base font-bold">
+    <h2 id="payment-amount-title" class="amount-section-title">
       {{ t('payment.chooseAmountTitle') }}
     </h2>
 
@@ -27,7 +27,7 @@
         @keydown="handlePresetKeydown($event, index)"
       >
         <span
-          class="amount-preset-value max-w-full text-xl font-black tabular-nums [overflow-wrap:anywhere]"
+          class="amount-preset-value max-w-full tabular-nums [overflow-wrap:anywhere]"
           data-testid="preset-amount-value"
         >
           {{ formatAmount(amt) }}
@@ -236,11 +236,18 @@ watch(
 
 <style scoped>
 .amount-section-title {
-  color: #111827;
+  color: var(--lx-clay-text);
+  font-size: var(--workspace-type-navigation-size);
+  font-weight: var(--workspace-type-navigation-weight);
+}
+
+.amount-preset-value {
+  font-size: var(--workspace-type-numeric-size);
+  font-weight: var(--workspace-type-numeric-weight);
 }
 
 .amount-preset-option {
-  color: #030712;
+  color: var(--lx-clay-text);
   background: var(--lx-clay-surface);
   border-color: var(--lx-clay-border);
   transition:
@@ -250,14 +257,15 @@ watch(
 }
 
 .amount-preset-option:hover {
-  color: #6d28d9;
-  border-color: #c4b5fd;
+  color: var(--lx-clay-text);
+  background: var(--lx-clay-hover);
+  border-color: var(--lx-clay-border-strong);
 }
 
 .amount-preset-option.is-selected {
-  color: #6d28d9;
-  background: color-mix(in srgb, #f5f3ff 30%, var(--lx-clay-surface));
-  border-color: #8b5cf6;
+  color: var(--lx-clay-accent-deep);
+  background: var(--lx-clay-accent-soft);
+  border-color: var(--lx-clay-accent);
 }
 
 .amount-preset-option:focus-visible,
@@ -267,11 +275,11 @@ watch(
 }
 
 .amount-custom-label {
-  color: #6b7280;
+  color: var(--lx-clay-text-secondary);
 }
 
 .amount-currency-symbol {
-  color: #9ca3af;
+  color: var(--lx-clay-text-muted);
 }
 
 .amount-custom-input {
@@ -285,7 +293,7 @@ watch(
 }
 
 .amount-custom-input::placeholder {
-  color: #9ca3af;
+  color: var(--lx-clay-text-muted);
 }
 
 :global(.dark) .amount-section-title,

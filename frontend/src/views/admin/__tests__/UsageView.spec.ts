@@ -36,6 +36,14 @@ const messages: Record<string, string> = {
   'admin.dashboard.day': 'Day',
   'admin.dashboard.hour': 'Hour',
   'admin.usage.failedToLoadUser': 'Failed to load user',
+  'admin.usage.workspace.columns.auditSubject': 'Audit Subject',
+  'admin.usage.workspace.columns.modelMapping': 'Model Mapping (In/Out)',
+  'admin.usage.workspace.columns.tokenPayload': 'Token Payload',
+  'admin.usage.workspace.columns.actualCharge': 'Actual Charge',
+  'admin.usage.workspace.columns.latencyResponse': 'Latency',
+  'admin.usage.workspace.columns.channelAccount': 'Channel Account',
+  'admin.usage.workspace.columns.timeSerial': 'Time / Request ID',
+  'admin.usage.workspace.columns.ipGeo': 'IP Location',
 }
 
 const formatLocalDate = (date: Date): string => {
@@ -106,12 +114,30 @@ beforeEach(() => {
 })
 
 const AppLayoutStub = { template: '<div><slot /></div>' }
-const UsageFiltersStub = { template: '<div><slot name="after-reset" /></div>' }
+const UsageFiltersStub = {
+  name: 'UsageFilters',
+  props: ['layout', 'mode', 'showActions'],
+  template: `
+    <div
+      data-test="usage-filters"
+      :data-layout="layout"
+      :data-mode="mode"
+      :data-show-actions="showActions"
+    >
+      <slot name="after-reset" />
+    </div>
+  `,
+}
 const CreditModeConsumerStub = {
   props: { creditMode: Boolean },
   template: '<div data-test="credit-mode-consumer" :data-credit-mode="String(creditMode)" />',
 }
 const UsageTableStub = {
+  props: {
+    columns: { type: Array, default: () => [] },
+    auditLayout: Boolean,
+    showUpstreamModelAudit: Boolean,
+  },
   emits: ['userClick'],
   template: '<div data-test="usage-table"><button class="user-click" @click="$emit(\'userClick\', 2)">user</button></div>',
 }
@@ -183,7 +209,7 @@ describe('admin UsageView distribution metric toggles', () => {
     vi.useRealTimers()
   })
 
-  it('enables snow-credit mode for every actual-cost consumer on the admin usage page', async () => {
+  it('enables points mode for every actual-cost consumer on the admin usage page', async () => {
     const wrapper = mount(UsageView, {
       global: { stubs: {
         AppLayout: AppLayoutStub,
@@ -213,6 +239,111 @@ describe('admin UsageView distribution metric toggles', () => {
     const consumers = wrapper.findAll('[data-test="credit-mode-consumer"]')
     expect(consumers).toHaveLength(6)
     expect(consumers.every((consumer) => consumer.attributes('data-credit-mode') === 'true')).toBe(true)
+  })
+
+  it('composes the usage workbench as a filter rail and evidence area with ordered analytics', async () => {
+    const wrapper = mount(UsageView, {
+      global: {
+        stubs: {
+          AppLayout: AppLayoutStub,
+          UsageStatsCards: true,
+          UsageFilters: UsageFiltersStub,
+          UsageTable: UsageTableStub,
+          UsageExportProgress: true,
+          UsageCleanupDialog: true,
+          UserBalanceHistoryModal: true,
+          Pagination: true,
+          Select: true,
+          DateRangePicker: true,
+          Icon: true,
+          TokenUsageTrend: true,
+          ModelDistributionChart: true,
+          GroupDistributionChart: true,
+          EndpointDistributionChart: true,
+          UserTokenRanking: true,
+          OpsErrorLogTable: true,
+          OpsErrorDetailModal: true,
+        },
+      },
+    })
+
+    vi.advanceTimersByTime(120)
+    await flushPromises()
+
+    const workbench = wrapper.get('[data-testid="usage-workbench"]')
+    const header = workbench.get('.usage-workbench__header')
+    const body = workbench.get('.usage-workbench__body')
+    const rail = body.get('[data-testid="usage-filter-rail"]')
+    const evidence = body.get('[data-testid="usage-evidence-area"]')
+
+    expect(
+      Array.from(body.element.children).map(element => element.getAttribute('data-testid')),
+    ).toEqual(['usage-filter-rail', 'usage-evidence-area'])
+    expect(rail.element.tagName).toBe('ASIDE')
+    expect(evidence.element.tagName).toBe('SECTION')
+
+    expect(header.find('usage-stats-cards-stub').exists()).toBe(true)
+    expect(body.find('usage-stats-cards-stub').exists()).toBe(false)
+
+    const filters = rail.getComponent(UsageFiltersStub)
+    expect(wrapper.findAllComponents(UsageFiltersStub)).toHaveLength(1)
+    expect(filters.props('layout')).toBe('rail')
+    expect(filters.props('showActions')).toBe(false)
+    expect(evidence.findComponent(UsageFiltersStub).exists()).toBe(false)
+
+    const toolbar = evidence.get('[data-testid="usage-tab-toolbar"]')
+    const tabs = toolbar.findAll('[data-testid="usage-detail-tab"]')
+    expect(tabs).toHaveLength(4)
+    expect(tabs.every(tab => tab.element.tagName === 'BUTTON')).toBe(true)
+    expect(tabs.every(tab => tab.attributes('role') === 'tab')).toBe(true)
+    expect(tabs.map(tab => tab.attributes('aria-controls'))).toEqual([
+      'usage-panel-usage',
+      'usage-panel-errors',
+      'usage-panel-ranking',
+      'usage-panel-billing',
+    ])
+    expect(tabs[0].attributes('aria-current')).toBe('page')
+    expect(tabs[0].attributes('aria-selected')).toBe('true')
+    expect(tabs[0].classes()).toContain('usage-workbench__tab--active')
+    expect(tabs.slice(1).every(tab => tab.attributes('aria-current') === undefined)).toBe(true)
+    expect(tabs.slice(1).every(tab => tab.attributes('aria-selected') === 'false')).toBe(true)
+    expect(tabs.slice(1).every(tab => !tab.classes().includes('usage-workbench__tab--active'))).toBe(true)
+
+    expect(evidence.find('[data-test="usage-table"]').exists()).toBe(true)
+    const usageTable = evidence.getComponent(UsageTableStub)
+    expect(usageTable.props('auditLayout')).toBe(true)
+    expect(usageTable.props('showUpstreamModelAudit')).toBe(true)
+    expect((usageTable.props('columns') as Array<{ key: string }>).map(column => column.key)).toEqual([
+      'user',
+      'model',
+      'tokens',
+      'cost',
+      'latency',
+      'account',
+      'created_at',
+      'ip_address',
+    ])
+    expect((usageTable.props('columns') as Array<{ label: string }>).map(column => column.label)).toEqual([
+      'Audit Subject',
+      'Model Mapping (In/Out)',
+      'Token Payload',
+      'Actual Charge',
+      'Latency',
+      'Channel Account',
+      'Time / Request ID',
+      'IP Location',
+    ])
+    const analytics = evidence.get('[data-testid="usage-analytics"]')
+    const chartGrid = analytics.get('.usage-workbench__chart-grid')
+    expect(chartGrid.attributes('aria-labelledby')).toBe('usage-analytics-heading')
+    expect(
+      Array.from(chartGrid.element.children).map(element => element.tagName.toLowerCase()),
+    ).toEqual([
+      'token-usage-trend-stub',
+      'model-distribution-chart-stub',
+      'group-distribution-chart-stub',
+      'endpoint-distribution-chart-stub',
+    ])
   })
 
   it('keeps previous model stats visible during refresh until new data arrives', async () => {
@@ -300,6 +431,39 @@ describe('admin UsageView distribution metric toggles', () => {
     expect(modelChart.find('.metric').text()).toBe('actual_cost')
     expect(groupChart.find('.metric').text()).toBe('actual_cost')
     expect(getSnapshotV2).toHaveBeenCalledTimes(1)
+  })
+
+  it('forwards the response-model mismatch filter to every supported usage query', async () => {
+    const wrapper = mount(UsageView, {
+      global: { stubs: {
+        AppLayout: AppLayoutStub, UsageStatsCards: true, UsageFilters: UsageFiltersStub,
+        UsageTable: true, UsageExportProgress: true, UsageCleanupDialog: true,
+        UserBalanceHistoryModal: true, Pagination: true, Select: true,
+        DateRangePicker: true, Icon: true, TokenUsageTrend: true,
+        ModelDistributionChart: true, GroupDistributionChart: true,
+        EndpointDistributionChart: true, UserTokenRanking: true,
+      } },
+    })
+
+    vi.advanceTimersByTime(120)
+    await flushPromises()
+    list.mockClear()
+    getStats.mockClear()
+    getModelStats.mockClear()
+    getSnapshotV2.mockClear()
+
+    const vm = wrapper.vm as any
+    vm.filters.upstream_model_mismatch = true
+    vm.applyFilters()
+    await flushPromises()
+
+    expect(list).toHaveBeenCalledWith(
+      expect.objectContaining({ upstream_model_mismatch: true }),
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    )
+    expect(getStats).toHaveBeenCalledWith(expect.objectContaining({ upstream_model_mismatch: true }))
+    expect(getModelStats).toHaveBeenCalledWith(expect.objectContaining({ upstream_model_mismatch: true }))
+    expect(getSnapshotV2).toHaveBeenCalledWith(expect.objectContaining({ upstream_model_mismatch: true }))
   })
 })
 
@@ -409,12 +573,80 @@ describe('admin UsageView errors tab filter forwarding', () => {
     await tabs[1].trigger('click')
     await flushPromises()
 
+    const rail = wrapper.get('[data-testid="usage-filter-rail"]')
+    const evidence = wrapper.get('[data-testid="usage-evidence-area"]')
+    const toolbar = evidence.get('[data-testid="usage-tab-toolbar"]')
+    const activeTabs = toolbar.findAll('[data-testid="usage-detail-tab"]')
+
+    expect(rail.element.tagName).toBe('ASIDE')
+    expect(activeTabs).toHaveLength(4)
+    expect(activeTabs[1].attributes('aria-current')).toBe('page')
+    expect(activeTabs[1].attributes('aria-selected')).toBe('true')
+    expect(activeTabs[1].classes()).toContain('usage-workbench__tab--active')
+    expect(activeTabs[0].attributes('aria-current')).toBeUndefined()
+    expect(activeTabs[0].attributes('aria-selected')).toBe('false')
+    expect(activeTabs[0].classes()).not.toContain('usage-workbench__tab--active')
+    expect(rail.getComponent(UsageFiltersStub).props('layout')).toBe('rail')
+    expect(rail.getComponent(UsageFiltersStub).props('mode')).toBe('errors')
+    expect(wrapper.find('usage-stats-cards-stub').exists()).toBe(false)
+    expect(evidence.find('[data-testid="usage-analytics"]').exists()).toBe(false)
+    expect(evidence.find('ops-error-log-table-stub').exists()).toBe(true)
+
     expect(listErrorLogs).toHaveBeenCalledWith(expect.objectContaining({
       view: 'all',
       model: 'gpt-5.3-codex',
       account_id: 7,
       group_id: 3,
     }))
+  })
+
+  it('only lets the latest error request update rows, total, and loading state', async () => {
+    let resolveOlder: (value: { items: Array<{ id: number }>; total: number; pages: number }) => void = () => {}
+    let resolveLatest: (value: { items: Array<{ id: number }>; total: number; pages: number }) => void = () => {}
+    const olderRequest = new Promise<{ items: Array<{ id: number }>; total: number; pages: number }>((resolve) => {
+      resolveOlder = resolve
+    })
+    const latestRequest = new Promise<{ items: Array<{ id: number }>; total: number; pages: number }>((resolve) => {
+      resolveLatest = resolve
+    })
+    listErrorLogs
+      .mockImplementationOnce(() => olderRequest)
+      .mockImplementationOnce(() => latestRequest)
+
+    const wrapper = mount(UsageView, {
+      global: { stubs: {
+        AppLayout: AppLayoutStub, UsageStatsCards: true, UsageFilters: UsageFiltersStub,
+        UsageTable: true, UsageExportProgress: true, UsageCleanupDialog: true,
+        UserBalanceHistoryModal: true, AuditLogModal: true, Pagination: true, Select: true,
+        DateRangePicker: true, Icon: true, TokenUsageTrend: true,
+        ModelDistributionChart: true, GroupDistributionChart: true, EndpointDistributionChart: true,
+        UserTokenRanking: true, OpsErrorLogTable: true, OpsErrorDetailModal: true,
+      } },
+    })
+    vi.advanceTimersByTime(120)
+    await flushPromises()
+
+    const vm = wrapper.vm as any
+    await wrapper.findAll('[data-testid="usage-detail-tab"]')[1].trigger('click')
+    await flushPromises()
+    expect(vm.errLoading).toBe(true)
+
+    vm.filters.model = 'latest-model'
+    vm.applyFilters()
+    await flushPromises()
+    expect(listErrorLogs).toHaveBeenCalledTimes(2)
+
+    resolveOlder({ items: [{ id: 1 }], total: 1, pages: 1 })
+    await flushPromises()
+    expect(vm.errRows).toEqual([])
+    expect(vm.errTotal).toBe(0)
+    expect(vm.errLoading).toBe(true)
+
+    resolveLatest({ items: [{ id: 2 }], total: 2, pages: 1 })
+    await flushPromises()
+    expect(vm.errRows).toEqual([{ id: 2 }])
+    expect(vm.errTotal).toBe(2)
+    expect(vm.errLoading).toBe(false)
   })
 })
 

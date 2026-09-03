@@ -16,13 +16,15 @@ import (
 )
 
 const (
-	billingBalanceKeyPrefix   = "billing:balance:"
-	billingSubKeyPrefix       = "billing:sub:"
-	billingRateLimitKeyPrefix = "apikey:rate:"
-	subCacheInvalidateChannel = "subscription:cache:invalidate"
-	billingCacheTTL           = 5 * time.Minute
-	billingCacheJitter        = 30 * time.Second
-	rateLimitCacheTTL         = 7 * 24 * time.Hour // 7 days matches the longest window
+	billingBalanceKeyPrefix             = "billing:balance:"
+	billingBalanceGenerationKeyPrefix   = "billing:balance:generation:"
+	billingSubKeyPrefix                 = "billing:sub:"
+	billingRateLimitKeyPrefix           = "apikey:rate:"
+	billingRateLimitGenerationKeyPrefix = "apikey:rate:generation:"
+	subCacheInvalidateChannel           = "subscription:cache:invalidate"
+	billingCacheTTL                     = 5 * time.Minute
+	billingCacheJitter                  = 30 * time.Second
+	rateLimitCacheTTL                   = 7 * 24 * time.Hour // 7 days matches the longest window
 
 	// Rate limit window durations — must match service.RateLimitWindow* constants.
 	rateLimitWindow5h = 5 * time.Hour
@@ -43,6 +45,19 @@ func jitteredTTL() time.Duration {
 // billingBalanceKey generates the Redis key for user balance cache.
 func billingBalanceKey(userID int64) string {
 	return fmt.Sprintf("%s%d", billingBalanceKeyPrefix, userID)
+}
+
+// billingBalanceTaggedKey is the canonical key used by generation-aware
+// operations.  Keep billingBalanceKey above unchanged: it is the key format
+// written by pre-generation binaries and is therefore part of the rolling
+// upgrade contract.  The ID is the hash tag for both the snapshot and its
+// generation token, so every Lua script below is safe on Redis Cluster.
+func billingBalanceTaggedKey(userID int64) string {
+	return fmt.Sprintf("%s{%d}", billingBalanceKeyPrefix, userID)
+}
+
+func billingBalanceGenerationKey(userID int64) string {
+	return fmt.Sprintf("%s{%d}", billingBalanceGenerationKeyPrefix, userID)
 }
 
 // billingSubKey generates the Redis key for subscription cache.
@@ -78,6 +93,17 @@ func billingRateLimitKey(keyID int64) string {
 	return fmt.Sprintf("%s%d", billingRateLimitKeyPrefix, keyID)
 }
 
+// billingRateLimitTaggedKey is the canonical hash-tagged key used by
+// generation-aware rate-limit operations.  billingRateLimitKey remains the
+// legacy spelling for old binaries and is mirrored during the rolling window.
+func billingRateLimitTaggedKey(keyID int64) string {
+	return fmt.Sprintf("%s{%d}", billingRateLimitKeyPrefix, keyID)
+}
+
+func billingRateLimitGenerationKey(keyID int64) string {
+	return fmt.Sprintf("%s{%d}", billingRateLimitGenerationKeyPrefix, keyID)
+}
+
 const (
 	rateLimitFieldUsage5h  = "usage_5h"
 	rateLimitFieldUsage1d  = "usage_1d"
@@ -88,14 +114,121 @@ const (
 )
 
 var (
+	// Read-through balance snapshots carry an invalidation generation. The
+	// generation key is deliberately retained (rather than TTL'd) so an old
+	// snapshot can never become writable again after an idle period.
+	balanceWithGenerationScript = redis.NewScript(`
+		local balance = redis.call('GET', KEYS[1])
+		local generation = redis.call('GET', KEYS[2])
+		if generation == false then
+			generation = '0'
+		end
+		return {balance, generation}
+	`)
+
+	setBalanceIfGenerationScript = redis.NewScript(`
+		local generation = redis.call('GET', KEYS[2])
+		if generation == false then
+			generation = '0'
+		end
+		if tostring(generation) ~= tostring(ARGV[2]) then
+			return 0
+		end
+		redis.call('SET', KEYS[1], ARGV[1], 'EX', ARGV[3])
+		return 1
+	`)
+
+	invalidateBalanceScript = redis.NewScript(`
+		redis.call('INCR', KEYS[2])
+		redis.call('DEL', KEYS[1])
+		return 1
+	`)
+
+	// Rate-limit snapshots are read through from the authoritative api_keys row.
+	// Return the six hash fields and the invalidation generation in one Lua
+	// invocation so a concurrent post-commit eviction cannot be missed between
+	// the cache read and token capture. The first result item is 1 only when the
+	// usage hash exists; an empty/missing hash is a cache miss even when the
+	// generation key itself exists.
+	apiKeyRateLimitWithGenerationScript = redis.NewScript(`
+		local exists = redis.call('HEXISTS', KEYS[1], 'usage_5h')
+		local generation = redis.call('GET', KEYS[2])
+		if generation == false then
+			generation = '0'
+		end
+		if exists == 0 then
+			return {0, '', '', '', '', '', '', generation}
+		end
+		return {
+			1,
+			redis.call('HGET', KEYS[1], 'usage_5h') or '',
+			redis.call('HGET', KEYS[1], 'usage_1d') or '',
+			redis.call('HGET', KEYS[1], 'usage_7d') or '',
+			redis.call('HGET', KEYS[1], 'window_5h') or '',
+			redis.call('HGET', KEYS[1], 'window_1d') or '',
+			redis.call('HGET', KEYS[1], 'window_7d') or '',
+			generation
+		}
+	`)
+
+	// A read-through refill is accepted only when the generation captured by
+	// the reader still matches. This closes the miss -> DB read -> invalidation
+	// -> stale SET race across processes, not just within one process.
+	setAPIKeyRateLimitIfGenerationScript = redis.NewScript(`
+		local generation = redis.call('GET', KEYS[2])
+		if generation == false then
+			generation = '0'
+		end
+		if tostring(generation) ~= tostring(ARGV[7]) then
+			return 0
+		end
+		redis.call('HSET', KEYS[1],
+			'usage_5h', ARGV[1],
+			'usage_1d', ARGV[2],
+			'usage_7d', ARGV[3],
+			'window_5h', ARGV[4],
+			'window_1d', ARGV[5],
+			'window_7d', ARGV[6])
+		redis.call('EXPIRE', KEYS[1], ARGV[8])
+		return 1
+	`)
+
+	// Keep the generation key alive independently of the snapshot TTL. A
+	// generation reset to zero after an idle period would otherwise allow an
+	// old in-flight DB read to write stale usage back into Redis.
+	invalidateAPIKeyRateLimitScript = redis.NewScript(`
+		redis.call('INCR', KEYS[2])
+		redis.call('DEL', KEYS[1])
+		return 1
+	`)
+
 	deductBalanceScript = redis.NewScript(`
 		local current = redis.call('GET', KEYS[1])
+		-- Advance the durable generation before changing the snapshot. If a
+		-- later cache command fails, readers still reject DB reloads that began
+		-- before this deduction.
+		redis.call('INCR', KEYS[2])
 		if current == false then
+			-- Even a miss needs the bump above: another process may already be in
+			-- the miss -> DB reload window with a pre-deduction snapshot.
 			return 0
 		end
 		local newVal = tonumber(current) - tonumber(ARGV[1])
 		redis.call('SET', KEYS[1], newVal)
 		redis.call('EXPIRE', KEYS[1], ARGV[2])
+		return 1
+	`)
+
+	// The legacy snapshot is mirrored for rolling upgrades.  Keep this helper
+	// to one key: unlike the generation-aware script it must remain usable when
+	// the legacy key hashes to a different Redis Cluster slot.
+	legacyDeductBalanceScript = redis.NewScript(`
+		local current = redis.call('GET', KEYS[1])
+		if current == false then
+			return 0
+		end
+		local newVal = tonumber(current) - tonumber(ARGV[1])
+		redis.call('SET', KEYS[1], newVal, 'EX', ARGV[2])
 		return 1
 	`)
 
@@ -147,35 +280,234 @@ func NewBillingCache(rdb *redis.Client) service.BillingCache {
 }
 
 func (c *billingCache) GetUserBalance(ctx context.Context, userID int64) (float64, error) {
-	key := billingBalanceKey(userID)
-	val, err := c.rdb.Get(ctx, key).Result()
+	// Route all reads through the generation-qualified implementation so direct
+	// callers receive the same cross-process stale-hit protection as the billing
+	// service.  (The legacy fallback remains inside that method.)
+	balance, _, err := c.GetUserBalanceWithGeneration(ctx, userID)
+	return balance, err
+}
+
+// GetUserBalanceWithGeneration reads the balance and its invalidation token in
+// one Redis script. On a miss it still returns the token captured at that
+// instant, allowing the caller to reject a stale DB read later.
+func (c *billingCache) GetUserBalanceWithGeneration(ctx context.Context, userID int64) (float64, uint64, error) {
+	result, err := balanceWithGenerationScript.Run(
+		ctx,
+		c.rdb,
+		[]string{billingBalanceTaggedKey(userID), billingBalanceGenerationKey(userID)},
+	).Result()
+	if err != nil {
+		return 0, 0, err
+	}
+	values, ok := result.([]interface{})
+	if !ok || len(values) != 2 {
+		return 0, 0, fmt.Errorf("invalid versioned balance response: %T", result)
+	}
+	generation, err := parseRedisUint64(values[1])
+	if err != nil {
+		return 0, 0, fmt.Errorf("parse balance generation: %w", err)
+	}
+	if values[0] == nil {
+		// Legacy data is trusted only before this generation namespace has ever
+		// been invalidated. Once generation > 0, an old process may have
+		// resurrected the untagged key after a new process evicted the canonical
+		// key; accepting it would reintroduce the stale-read race we are fencing.
+		if generation == 0 {
+			legacy, legacyErr := c.rdb.Get(ctx, billingBalanceKey(userID)).Result()
+			if legacyErr == nil {
+				balance, parseErr := strconv.ParseFloat(legacy, 64)
+				if parseErr != nil {
+					return 0, generation, parseErr
+				}
+				// The legacy fallback necessarily takes a second round trip because
+				// the untagged key may be in another Cluster slot.  Re-check the
+				// canonical token before accepting it so an eviction between the
+				// script and this GET cannot turn into a false hit.
+				latestGeneration, generationErr := c.GetUserBalanceGeneration(ctx, userID)
+				if generationErr != nil {
+					return 0, generation, generationErr
+				}
+				if latestGeneration != generation {
+					return 0, latestGeneration, service.ErrBillingCacheGenerationChanged
+				}
+				return balance, generation, nil
+			}
+			if !errors.Is(legacyErr, redis.Nil) {
+				return 0, generation, legacyErr
+			}
+		}
+		return 0, generation, service.ErrBillingCacheMiss
+	}
+	balanceText, ok := redisValueString(values[0])
+	if !ok {
+		return 0, generation, fmt.Errorf("invalid cached balance type: %T", values[0])
+	}
+	balance, err := strconv.ParseFloat(balanceText, 64)
+	if err != nil {
+		return 0, generation, err
+	}
+	return balance, generation, nil
+}
+
+// GetUserBalanceGeneration performs a cheap second-token read used to close
+// the small window between a generation-qualified cache hit and the service
+// returning it.  A missing token is the initial generation zero.
+func (c *billingCache) GetUserBalanceGeneration(ctx context.Context, userID int64) (uint64, error) {
+	value, err := c.rdb.Get(ctx, billingBalanceGenerationKey(userID)).Result()
 	if errors.Is(err, redis.Nil) {
-		return 0, service.ErrBillingCacheMiss
+		return 0, nil
 	}
 	if err != nil {
 		return 0, err
 	}
-	return strconv.ParseFloat(val, 64)
+	return strconv.ParseUint(value, 10, 64)
 }
 
 func (c *billingCache) SetUserBalance(ctx context.Context, userID int64, balance float64) error {
-	key := billingBalanceKey(userID)
-	return c.rdb.Set(ctx, key, balance, jitteredTTL()).Err()
+	ttl := jitteredTTL()
+	// Mirror the value into both namespaces.  The tagged key is authoritative
+	// for generation-aware readers; the untagged key keeps older binaries
+	// functional until the rolling upgrade is complete.  These are deliberately
+	// separate commands because the two legacy/canonical keys need not share a
+	// Redis Cluster slot.
+	return errors.Join(
+		c.rdb.Set(ctx, billingBalanceTaggedKey(userID), balance, ttl).Err(),
+		c.rdb.Set(ctx, billingBalanceKey(userID), balance, ttl).Err(),
+	)
+}
+
+// SetUserBalanceIfGeneration conditionally writes a read-through value. A
+// concurrent invalidation increments the generation and makes this a no-op;
+// surface that outcome so the caller cannot return the stale DB snapshot.
+func (c *billingCache) SetUserBalanceIfGeneration(ctx context.Context, userID int64, balance float64, generation uint64) error {
+	ttl := jitteredTTL()
+	result, err := setBalanceIfGenerationScript.Run(
+		ctx,
+		c.rdb,
+		[]string{billingBalanceTaggedKey(userID), billingBalanceGenerationKey(userID)},
+		strconv.FormatFloat(balance, 'f', -1, 64),
+		strconv.FormatUint(generation, 10),
+		int(ttl.Seconds()),
+	).Result()
+	if err != nil {
+		return err
+	}
+	accepted, err := redisResultInt64(result)
+	if err != nil {
+		return fmt.Errorf("parse balance generation fence result: %w", err)
+	}
+	if accepted == 0 {
+		return service.ErrBillingCacheGenerationChanged
+	}
+	// Best-effort rolling-upgrade mirror.  The tagged write above is the
+	// generation-fenced source of truth; an error mirroring the legacy key is
+	// surfaced so callers can observe cache degradation, but never invalidates
+	// the accepted canonical snapshot.
+	return c.rdb.Set(ctx, billingBalanceKey(userID), balance, ttl).Err()
 }
 
 func (c *billingCache) DeductUserBalance(ctx context.Context, userID int64, amount float64) error {
-	key := billingBalanceKey(userID)
-	_, err := deductBalanceScript.Run(ctx, c.rdb, []string{key}, amount, int(jitteredTTL().Seconds())).Result()
-	if err != nil && !errors.Is(err, redis.Nil) {
-		log.Printf("Warning: deduct balance cache failed for user %d: %v", userID, err)
-		return err
+	ttl := jitteredTTL()
+	_, canonicalErr := deductBalanceScript.Run(
+		ctx,
+		c.rdb,
+		[]string{billingBalanceTaggedKey(userID), billingBalanceGenerationKey(userID)},
+		amount,
+		int(ttl.Seconds()),
+	).Result()
+	if canonicalErr != nil && !errors.Is(canonicalErr, redis.Nil) {
+		log.Printf("Warning: deduct canonical balance cache failed for user %d: %v", userID, canonicalErr)
+	}
+
+	// Keep the pre-generation key in sync for older processes.  This is a
+	// one-key script so it remains Cluster-safe even though the legacy key is in
+	// a different slot from the canonical pair.  A missing legacy key is a
+	// normal no-op (for example after a fresh canonical-only warmup).
+	_, legacyErr := legacyDeductBalanceScript.Run(
+		ctx,
+		c.rdb,
+		[]string{billingBalanceKey(userID)},
+		amount,
+		int(ttl.Seconds()),
+	).Result()
+	if legacyErr != nil && !errors.Is(legacyErr, redis.Nil) {
+		log.Printf("Warning: deduct legacy balance cache failed for user %d: %v", userID, legacyErr)
+	}
+	if canonicalErr != nil && !errors.Is(canonicalErr, redis.Nil) {
+		return canonicalErr
+	}
+	if legacyErr != nil && !errors.Is(legacyErr, redis.Nil) {
+		return legacyErr
 	}
 	return nil
 }
 
 func (c *billingCache) InvalidateUserBalance(ctx context.Context, userID int64) error {
-	key := billingBalanceKey(userID)
-	return c.rdb.Del(ctx, key).Err()
+	_, canonicalErr := invalidateBalanceScript.Run(
+		ctx,
+		c.rdb,
+		[]string{billingBalanceTaggedKey(userID), billingBalanceGenerationKey(userID)},
+	).Result()
+	legacyErr := c.rdb.Del(ctx, billingBalanceKey(userID)).Err()
+	return errors.Join(canonicalErr, legacyErr)
+}
+
+func redisValueString(value interface{}) (string, bool) {
+	switch typed := value.(type) {
+	case string:
+		return typed, true
+	case []byte:
+		return string(typed), true
+	default:
+		return "", false
+	}
+}
+
+func parseRedisUint64(value interface{}) (uint64, error) {
+	text, ok := redisValueString(value)
+	if !ok {
+		return 0, fmt.Errorf("invalid generation type: %T", value)
+	}
+	return strconv.ParseUint(text, 10, 64)
+}
+
+func redisResultInt64(value interface{}) (int64, error) {
+	switch typed := value.(type) {
+	case int64:
+		return typed, nil
+	case int:
+		return int64(typed), nil
+	case uint64:
+		if typed > math.MaxInt64 {
+			return 0, fmt.Errorf("integer overflow: %d", typed)
+		}
+		return int64(typed), nil
+	case string:
+		return strconv.ParseInt(typed, 10, 64)
+	case []byte:
+		return strconv.ParseInt(string(typed), 10, 64)
+	default:
+		return 0, fmt.Errorf("invalid integer type: %T", value)
+	}
+}
+
+func redisResultInt64AllowEmpty(value interface{}) (int64, error) {
+	text, ok := redisValueString(value)
+	if ok && text == "" {
+		return 0, nil
+	}
+	return redisResultInt64(value)
+}
+
+func redisResultFloat64(value interface{}) (float64, error) {
+	text, ok := redisValueString(value)
+	if ok && text == "" {
+		return 0, nil
+	}
+	if !ok {
+		return 0, fmt.Errorf("invalid float type: %T", value)
+	}
+	return strconv.ParseFloat(text, 64)
 }
 
 func (c *billingCache) GetSubscriptionCache(ctx context.Context, userID, groupID int64) (*service.SubscriptionCacheData, error) {
@@ -484,14 +816,19 @@ func (c *billingCache) SubscribeSubscriptionCacheInvalidation(ctx context.Contex
 }
 
 func (c *billingCache) GetAPIKeyRateLimit(ctx context.Context, keyID int64) (*service.APIKeyRateLimitCacheData, error) {
-	key := billingRateLimitKey(keyID)
-	result, err := c.rdb.HGetAll(ctx, key).Result()
-	if err != nil {
-		return nil, err
-	}
-	if len(result) == 0 {
+	data, _, err := c.GetAPIKeyRateLimitWithGeneration(ctx, keyID)
+	if errors.Is(err, service.ErrBillingCacheMiss) {
+		// Preserve the native miss sentinel expected by legacy callers of this
+		// method while the versioned extension uses service.ErrBillingCacheMiss.
 		return nil, redis.Nil
 	}
+	return data, err
+}
+
+// parseAPIKeyRateLimitHash decodes a legacy/canonical HGETALL result.  The
+// legacy reader historically tolerated malformed individual fields by treating
+// them as zero; retain that behavior for rolling compatibility.
+func parseAPIKeyRateLimitHash(result map[string]string) (*service.APIKeyRateLimitCacheData, uint64, error) {
 	data := &service.APIKeyRateLimitCacheData{}
 	if v, ok := result[rateLimitFieldUsage5h]; ok {
 		data.Usage5h, _ = strconv.ParseFloat(v, 64)
@@ -511,14 +848,177 @@ func (c *billingCache) GetAPIKeyRateLimit(ctx context.Context, keyID int64) (*se
 	if v, ok := result[rateLimitFieldWindow7d]; ok {
 		data.Window7d, _ = strconv.ParseInt(v, 10, 64)
 	}
+	return data, 0, nil
+}
+
+func parseAPIKeyRateLimitFields(values []interface{}) (*service.APIKeyRateLimitCacheData, error) {
+	if len(values) != 6 {
+		return nil, fmt.Errorf("invalid api key rate-limit field count: %d", len(values))
+	}
+	data := &service.APIKeyRateLimitCacheData{}
+	var err error
+	data.Usage5h, err = redisResultFloat64(values[0])
+	if err != nil {
+		return nil, fmt.Errorf("parse usage_5h: %w", err)
+	}
+	data.Usage1d, err = redisResultFloat64(values[1])
+	if err != nil {
+		return nil, fmt.Errorf("parse usage_1d: %w", err)
+	}
+	data.Usage7d, err = redisResultFloat64(values[2])
+	if err != nil {
+		return nil, fmt.Errorf("parse usage_7d: %w", err)
+	}
+	data.Window5h, err = redisResultInt64AllowEmpty(values[3])
+	if err != nil {
+		return nil, fmt.Errorf("parse window_5h: %w", err)
+	}
+	data.Window1d, err = redisResultInt64AllowEmpty(values[4])
+	if err != nil {
+		return nil, fmt.Errorf("parse window_1d: %w", err)
+	}
+	data.Window7d, err = redisResultInt64AllowEmpty(values[5])
+	if err != nil {
+		return nil, fmt.Errorf("parse window_7d: %w", err)
+	}
 	return data, nil
+}
+
+// GetAPIKeyRateLimitWithGeneration reads a rate-limit snapshot and its
+// invalidation generation atomically. The generation is returned even on a
+// cache miss so callers can conditionally refill after loading the DB.
+func (c *billingCache) GetAPIKeyRateLimitWithGeneration(ctx context.Context, keyID int64) (*service.APIKeyRateLimitCacheData, uint64, error) {
+	result, err := apiKeyRateLimitWithGenerationScript.Run(
+		ctx,
+		c.rdb,
+		[]string{billingRateLimitTaggedKey(keyID), billingRateLimitGenerationKey(keyID)},
+	).Result()
+	if err != nil {
+		return nil, 0, err
+	}
+	values, ok := result.([]interface{})
+	if !ok || len(values) != 8 {
+		return nil, 0, fmt.Errorf("invalid versioned api key rate-limit response: %T", result)
+	}
+
+	hit, err := redisResultInt64(values[0])
+	if err != nil {
+		return nil, 0, fmt.Errorf("parse api key rate-limit cache presence: %w", err)
+	}
+	generation, err := parseRedisUint64(values[7])
+	if err != nil {
+		return nil, 0, fmt.Errorf("parse api key rate-limit generation: %w", err)
+	}
+	if hit == 0 {
+		// As with balances, only consult the untagged snapshot while the new
+		// generation namespace is still at zero.  Once an invalidation has
+		// advanced it, an old process may have recreated the legacy hash with a
+		// stale value and must not bypass the fence.
+		if generation == 0 {
+			legacy, legacyErr := c.rdb.HGetAll(ctx, billingRateLimitKey(keyID)).Result()
+			if legacyErr != nil {
+				return nil, generation, legacyErr
+			}
+			if len(legacy) > 0 {
+				data, _, parseErr := parseAPIKeyRateLimitHash(legacy)
+				if parseErr != nil {
+					return nil, generation, parseErr
+				}
+				latestGeneration, generationErr := c.GetAPIKeyRateLimitGeneration(ctx, keyID)
+				if generationErr != nil {
+					return nil, generation, generationErr
+				}
+				if latestGeneration != generation {
+					return nil, latestGeneration, service.ErrBillingCacheGenerationChanged
+				}
+				return data, generation, nil
+			}
+		}
+		return nil, generation, service.ErrBillingCacheMiss
+	}
+
+	data, parseErr := parseAPIKeyRateLimitFields(values[1:7])
+	if parseErr != nil {
+		return nil, generation, parseErr
+	}
+	return data, generation, nil
+}
+
+// GetAPIKeyRateLimitGeneration is the cheap companion token read used to
+// verify a generation-qualified cache hit immediately before evaluation.
+func (c *billingCache) GetAPIKeyRateLimitGeneration(ctx context.Context, keyID int64) (uint64, error) {
+	value, err := c.rdb.Get(ctx, billingRateLimitGenerationKey(keyID)).Result()
+	if errors.Is(err, redis.Nil) {
+		return 0, nil
+	}
+	if err != nil {
+		return 0, err
+	}
+	return strconv.ParseUint(value, 10, 64)
 }
 
 func (c *billingCache) SetAPIKeyRateLimit(ctx context.Context, keyID int64, data *service.APIKeyRateLimitCacheData) error {
 	if data == nil {
 		return nil
 	}
-	key := billingRateLimitKey(keyID)
+	fields := map[string]any{
+		rateLimitFieldUsage5h:  data.Usage5h,
+		rateLimitFieldUsage1d:  data.Usage1d,
+		rateLimitFieldUsage7d:  data.Usage7d,
+		rateLimitFieldWindow5h: data.Window5h,
+		rateLimitFieldWindow1d: data.Window1d,
+		rateLimitFieldWindow7d: data.Window7d,
+	}
+	set := func(key string) error {
+		pipe := c.rdb.Pipeline()
+		pipe.HSet(ctx, key, fields)
+		pipe.Expire(ctx, key, rateLimitCacheTTL)
+		_, err := pipe.Exec(ctx)
+		return err
+	}
+	// Keep both namespaces populated during rolling upgrades.  The tagged hash
+	// is authoritative for generation-aware readers; the legacy hash is for
+	// older binaries and is intentionally written in a separate pipeline so a
+	// Cluster never receives cross-slot KEYS in one script/transaction.
+	return errors.Join(
+		set(billingRateLimitTaggedKey(keyID)),
+		set(billingRateLimitKey(keyID)),
+	)
+}
+
+// SetAPIKeyRateLimitIfGeneration conditionally refills a read-through rate
+// limit snapshot. A return value of zero from the Lua script means an
+// invalidation advanced the generation while the DB read was in flight; surface
+// that result so the service retries instead of evaluating the stale snapshot.
+func (c *billingCache) SetAPIKeyRateLimitIfGeneration(ctx context.Context, keyID int64, data *service.APIKeyRateLimitCacheData, generation uint64) error {
+	if data == nil {
+		return nil
+	}
+	result, err := setAPIKeyRateLimitIfGenerationScript.Run(
+		ctx,
+		c.rdb,
+		[]string{billingRateLimitTaggedKey(keyID), billingRateLimitGenerationKey(keyID)},
+		strconv.FormatFloat(data.Usage5h, 'f', -1, 64),
+		strconv.FormatFloat(data.Usage1d, 'f', -1, 64),
+		strconv.FormatFloat(data.Usage7d, 'f', -1, 64),
+		strconv.FormatInt(data.Window5h, 10),
+		strconv.FormatInt(data.Window1d, 10),
+		strconv.FormatInt(data.Window7d, 10),
+		strconv.FormatUint(generation, 10),
+		int(rateLimitCacheTTL.Seconds()),
+	).Result()
+	if err != nil {
+		return err
+	}
+	accepted, err := redisResultInt64(result)
+	if err != nil {
+		return fmt.Errorf("parse api key rate-limit generation fence result: %w", err)
+	}
+	if accepted == 0 {
+		return service.ErrBillingCacheGenerationChanged
+	}
+	// Mirror after the fenced canonical write for old binaries.  A mirror error
+	// is observable but cannot invalidate the accepted canonical snapshot.
 	fields := map[string]any{
 		rateLimitFieldUsage5h:  data.Usage5h,
 		rateLimitFieldUsage1d:  data.Usage1d,
@@ -528,33 +1028,33 @@ func (c *billingCache) SetAPIKeyRateLimit(ctx context.Context, keyID int64, data
 		rateLimitFieldWindow7d: data.Window7d,
 	}
 	pipe := c.rdb.Pipeline()
-	pipe.HSet(ctx, key, fields)
-	pipe.Expire(ctx, key, rateLimitCacheTTL)
-	_, err := pipe.Exec(ctx)
+	pipe.HSet(ctx, billingRateLimitKey(keyID), fields)
+	pipe.Expire(ctx, billingRateLimitKey(keyID), rateLimitCacheTTL)
+	_, err = pipe.Exec(ctx)
 	return err
 }
 
 func (c *billingCache) UpdateAPIKeyRateLimitUsage(ctx context.Context, keyID int64, cost float64) error {
-	key := billingRateLimitKey(keyID)
-	now := time.Now().Unix()
-	_, err := updateRateLimitUsageScript.Run(ctx, c.rdb, []string{key},
-		cost,
-		int(rateLimitCacheTTL.Seconds()),
-		now,
-		int(rateLimitWindow5h.Seconds()),
-		int(rateLimitWindow1d.Seconds()),
-		int(rateLimitWindow7d.Seconds()),
-	).Result()
-	if err != nil && !errors.Is(err, redis.Nil) {
-		log.Printf("Warning: update rate limit usage cache failed for api key %d: %v", keyID, err)
+	// The api_keys row is the source of truth. A relative Redis increment is
+	// unsafe because a concurrent miss can refill a pre-charge snapshot before
+	// this method runs, causing the same DB charge to be counted twice. Keep the
+	// old method for interface compatibility but make it an eviction.
+	_ = cost
+	if err := c.InvalidateAPIKeyRateLimit(ctx, keyID); err != nil {
+		log.Printf("Warning: invalidate rate limit usage cache failed for api key %d: %v", keyID, err)
 		return err
 	}
 	return nil
 }
 
 func (c *billingCache) InvalidateAPIKeyRateLimit(ctx context.Context, keyID int64) error {
-	key := billingRateLimitKey(keyID)
-	return c.rdb.Del(ctx, key).Err()
+	_, canonicalErr := invalidateAPIKeyRateLimitScript.Run(
+		ctx,
+		c.rdb,
+		[]string{billingRateLimitTaggedKey(keyID), billingRateLimitGenerationKey(keyID)},
+	).Result()
+	legacyErr := c.rdb.Del(ctx, billingRateLimitKey(keyID)).Err()
+	return errors.Join(canonicalErr, legacyErr)
 }
 
 // ============================================

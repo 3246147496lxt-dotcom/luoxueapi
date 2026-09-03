@@ -35,7 +35,7 @@ const emptyState = computed(() => {
     case 'loading':
     case 'connecting':
       return {
-        title: '正在读取额度',
+        title: '正在读取积分',
         copy: '连接账户并同步最新数据，请稍候。',
         loading: true
       }
@@ -53,7 +53,7 @@ const emptyState = computed(() => {
       }
     case 'unavailable':
       return {
-        title: '暂时无法获取额度',
+        title: '暂时无法获取积分',
         copy: '可以重试，或打开完整面板查看原因。',
         loading: false
       }
@@ -66,10 +66,10 @@ const emptyState = computed(() => {
   }
 })
 
-const formatCredit = (amount: string | null | undefined) => {
+const formatPoints = (amount: string | null | undefined) => {
   if (amount == null) return '—'
   const parsed = Number(amount)
-  return Number.isFinite(parsed) ? `❄${parsed.toFixed(2)}` : '—'
+  return Number.isFinite(parsed) ? `${parsed.toFixed(2)} 积分` : '—'
 }
 </script>
 
@@ -77,7 +77,7 @@ const formatCredit = (amount: string | null | undefined) => {
   <section
     class="tray-popover-stage"
     :class="{ 'tray-popover-stage--empty': !overview }"
-    aria-label="落雪额度菜单栏速览"
+    aria-label="落雪积分菜单栏速览"
   >
     <template v-if="overview">
       <section class="tray-balance" aria-labelledby="tray-balance-title">
@@ -113,8 +113,8 @@ const formatCredit = (amount: string | null | undefined) => {
               class="tray-icon-button"
               :class="{ 'tray-icon-button--spinning': refreshing }"
               :disabled="refreshing || status === 'connecting'"
-              aria-label="刷新额度"
-              title="刷新额度"
+              aria-label="刷新积分"
+              title="刷新积分"
               @click="emit('refresh')"
             >
               <RefreshCw :size="14" :stroke-width="2.1" />
@@ -123,17 +123,17 @@ const formatCredit = (amount: string | null | undefined) => {
         </div>
 
         <strong class="tray-balance-value">
-          {{ formatCredit(overview.balance) }}
+          {{ formatPoints(overview.balance) }}
         </strong>
 
         <div class="tray-spend-row">
           <span>
             <small><SunMedium :size="13" aria-hidden="true" />今日消费</small>
-            <strong>{{ formatCredit(overview.todaySpend) }}</strong>
+            <strong>{{ formatPoints(overview.todaySpend) }}</strong>
           </span>
           <span>
             <small><CalendarDays :size="13" aria-hidden="true" />本月消费</small>
-            <strong>{{ formatCredit(overview.monthSpend) }}</strong>
+            <strong>{{ formatPoints(overview.monthSpend) }}</strong>
           </span>
         </div>
       </section>
@@ -165,8 +165,8 @@ const formatCredit = (amount: string | null | undefined) => {
         class="tray-icon-button tray-icon-button--empty"
         :class="{ 'tray-icon-button--spinning': refreshing }"
         :disabled="refreshing || status === 'connecting'"
-        aria-label="刷新额度"
-        title="刷新额度"
+        aria-label="刷新积分"
+        title="刷新积分"
         @click="emit('refresh')"
       >
         <RefreshCw :size="14" :stroke-width="2.1" />

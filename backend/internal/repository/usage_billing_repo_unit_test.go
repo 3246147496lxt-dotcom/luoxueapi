@@ -286,6 +286,7 @@ func TestApplyUsageBillingEffects_FlagsBalanceOverdraft(t *testing.T) {
 	require.NotNil(t, result.NewBalance)
 	require.InDelta(t, -5.0, *result.NewBalance, 0.000001)
 	require.True(t, result.BalanceOverdrafted)
+	require.Equal(t, 10.0, result.BalanceChargedCost)
 	require.NoError(t, tx.Commit())
 	require.NoError(t, mock.ExpectationsWereMet())
 }
@@ -448,5 +449,144 @@ func TestReleaseUsageBillingBatchImageBalance_SkipsWhenHoldNeverReserved(t *test
 	require.Nil(t, result.NewBalance)
 	require.Nil(t, result.FrozenBalance)
 	require.NoError(t, tx.Commit())
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestValidateBatchImageHoldReservation_MatchesJobPrincipalAndClaim(t *testing.T) {
+	ctx := context.Background()
+	db, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	defer func() { _ = db.Close() }()
+
+	mock.ExpectBegin()
+	tx, err := db.BeginTx(ctx, nil)
+	require.NoError(t, err)
+	mock.ExpectQuery(`(?s)SELECT user_id, api_key_id, COALESCE\(hold_amount, estimated_cost, 0\), request_hash\s+FROM batch_image_jobs\s+WHERE batch_id = \$1\s+FOR UPDATE`).
+		WithArgs("imgbatch_valid").
+		WillReturnRows(sqlmock.NewRows([]string{"user_id", "api_key_id", "hold_amount", "request_hash"}).AddRow(42, 7, 1.25, "request-hash"))
+	mock.ExpectQuery(`SELECT user_id\s+FROM api_keys\s+WHERE id = \$1`).
+		WithArgs(int64(7)).
+		WillReturnRows(sqlmock.NewRows([]string{"user_id"}).AddRow(42))
+	mock.ExpectQuery(`(?s)SELECT 1\s+FROM usage_billing_dedup\s+WHERE request_id = \$1 AND api_key_id = \$2\s+FOR UPDATE`).
+		WithArgs(service.BatchImageHoldRequestID("imgbatch_valid"), int64(7)).
+		WillReturnRows(sqlmock.NewRows([]string{"?column?"}).AddRow(1))
+
+	err = validateBatchImageHoldReservation(ctx, tx, &service.BatchImageBalanceHoldCommand{
+		UserID: 42, APIKeyID: 7, BatchID: "imgbatch_valid", HoldAmount: 1.25,
+	})
+	require.NoError(t, err)
+	mock.ExpectRollback()
+	require.NoError(t, tx.Rollback())
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestValidateBatchImageHoldReservation_AllowsZeroValueBatchWithoutReserveClaim(t *testing.T) {
+	ctx := context.Background()
+	db, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	defer func() { _ = db.Close() }()
+
+	mock.ExpectBegin()
+	tx, err := db.BeginTx(ctx, nil)
+	require.NoError(t, err)
+	mock.ExpectQuery(`(?s)SELECT user_id, api_key_id, COALESCE\(hold_amount, estimated_cost, 0\), request_hash\s+FROM batch_image_jobs\s+WHERE batch_id = \$1\s+FOR UPDATE`).
+		WithArgs("imgbatch_free").
+		WillReturnRows(sqlmock.NewRows([]string{"user_id", "api_key_id", "hold_amount", "request_hash"}).AddRow(42, 7, 0, "request-hash"))
+	mock.ExpectQuery(`SELECT user_id\s+FROM api_keys\s+WHERE id = \$1`).
+		WithArgs(int64(7)).
+		WillReturnRows(sqlmock.NewRows([]string{"user_id"}).AddRow(42))
+
+	err = validateBatchImageHoldReservation(ctx, tx, &service.BatchImageBalanceHoldCommand{
+		UserID: 42, APIKeyID: 7, BatchID: "imgbatch_free", HoldAmount: 0, ActualAmount: 0,
+	})
+	require.NoError(t, err)
+	mock.ExpectRollback()
+	require.NoError(t, tx.Rollback())
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestValidateBatchImageHoldReservation_RejectsMismatchedHoldBeforeMutation(t *testing.T) {
+	ctx := context.Background()
+	db, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	defer func() { _ = db.Close() }()
+
+	mock.ExpectBegin()
+	tx, err := db.BeginTx(ctx, nil)
+	require.NoError(t, err)
+	mock.ExpectQuery(`(?s)SELECT user_id, api_key_id, COALESCE\(hold_amount, estimated_cost, 0\), request_hash\s+FROM batch_image_jobs\s+WHERE batch_id = \$1\s+FOR UPDATE`).
+		WithArgs("imgbatch_mismatch").
+		WillReturnRows(sqlmock.NewRows([]string{"user_id", "api_key_id", "hold_amount", "request_hash"}).AddRow(42, 7, 1.25, "request-hash"))
+
+	err = validateBatchImageHoldReservation(ctx, tx, &service.BatchImageBalanceHoldCommand{
+		UserID: 42, APIKeyID: 7, BatchID: "imgbatch_mismatch", HoldAmount: 0.25,
+	})
+	require.ErrorIs(t, err, service.ErrUsageBillingHoldReservationInvalid)
+	mock.ExpectRollback()
+	require.NoError(t, tx.Rollback())
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestValidateBatchImageHoldReservation_RejectsMissingReserveClaim(t *testing.T) {
+	ctx := context.Background()
+	db, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	defer func() { _ = db.Close() }()
+
+	mock.ExpectBegin()
+	tx, err := db.BeginTx(ctx, nil)
+	require.NoError(t, err)
+	mock.ExpectQuery(`(?s)SELECT user_id, api_key_id, COALESCE\(hold_amount, estimated_cost, 0\), request_hash\s+FROM batch_image_jobs\s+WHERE batch_id = \$1\s+FOR UPDATE`).
+		WithArgs("imgbatch_no_claim").
+		WillReturnRows(sqlmock.NewRows([]string{"user_id", "api_key_id", "hold_amount", "request_hash"}).AddRow(42, 7, 1.25, "request-hash"))
+	mock.ExpectQuery(`SELECT user_id\s+FROM api_keys\s+WHERE id = \$1`).
+		WithArgs(int64(7)).
+		WillReturnRows(sqlmock.NewRows([]string{"user_id"}).AddRow(42))
+	mock.ExpectQuery(`(?s)SELECT 1\s+FROM usage_billing_dedup\s+WHERE request_id = \$1 AND api_key_id = \$2\s+FOR UPDATE`).
+		WithArgs(service.BatchImageHoldRequestID("imgbatch_no_claim"), int64(7)).
+		WillReturnError(sql.ErrNoRows)
+	mock.ExpectQuery(`(?s)SELECT 1\s+FROM usage_billing_dedup_archive\s+WHERE request_id = \$1 AND api_key_id = \$2\s+FOR UPDATE`).
+		WithArgs(service.BatchImageHoldRequestID("imgbatch_no_claim"), int64(7)).
+		WillReturnError(sql.ErrNoRows)
+
+	err = validateBatchImageHoldReservation(ctx, tx, &service.BatchImageBalanceHoldCommand{
+		UserID: 42, APIKeyID: 7, BatchID: "imgbatch_no_claim", HoldAmount: 1.25,
+	})
+	require.ErrorIs(t, err, service.ErrUsageBillingHoldReservationInvalid)
+	mock.ExpectRollback()
+	require.NoError(t, tx.Rollback())
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestCaptureBatchImageBalance_RejectsReservationMismatchBeforeBalanceUpdate(t *testing.T) {
+	ctx := context.Background()
+	db, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	defer func() { _ = db.Close() }()
+
+	cmd := &service.BatchImageBalanceHoldCommand{
+		RequestID:          service.BatchImageCaptureRequestID("imgbatch_wrapper_mismatch"),
+		APIKeyID:           7,
+		UserID:             42,
+		BatchID:            "imgbatch_wrapper_mismatch",
+		HoldAmount:         0.25,
+		ActualAmount:       0.10,
+		RequestFingerprint: "capture-fingerprint",
+	}
+	mock.ExpectBegin()
+	mock.ExpectQuery(`(?s)INSERT INTO usage_billing_dedup\s+\(request_id, api_key_id, request_fingerprint\).*RETURNING id`).
+		WithArgs(cmd.RequestID, cmd.APIKeyID, cmd.RequestFingerprint).
+		WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(1))
+	mock.ExpectQuery(`(?s)SELECT request_fingerprint\s+FROM usage_billing_dedup_archive\s+WHERE request_id = \$1 AND api_key_id = \$2`).
+		WithArgs(cmd.RequestID, cmd.APIKeyID).
+		WillReturnError(sql.ErrNoRows)
+	mock.ExpectQuery(`(?s)SELECT user_id, api_key_id, COALESCE\(hold_amount, estimated_cost, 0\), request_hash\s+FROM batch_image_jobs\s+WHERE batch_id = \$1\s+FOR UPDATE`).
+		WithArgs(cmd.BatchID).
+		WillReturnRows(sqlmock.NewRows([]string{"user_id", "api_key_id", "hold_amount", "request_hash"}).AddRow(42, 7, 1.25, "request-hash"))
+	mock.ExpectRollback()
+
+	result, err := (&usageBillingRepository{db: db}).CaptureBatchImageBalance(ctx, cmd)
+	require.Nil(t, result)
+	require.ErrorIs(t, err, service.ErrUsageBillingHoldReservationInvalid)
 	require.NoError(t, mock.ExpectationsWereMet())
 }

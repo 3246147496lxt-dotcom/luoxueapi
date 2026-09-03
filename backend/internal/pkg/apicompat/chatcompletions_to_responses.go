@@ -62,11 +62,17 @@ func ChatCompletionsToResponses(req *ChatCompletionsRequest) (*ResponsesRequest,
 		out.MaxOutputTokens = &v
 	}
 
-	// reasoning_effort → reasoning.effort + reasoning.summary="auto"
-	if req.ReasoningEffort != "" {
+	// ReasoningMode is server-owned trusted Web Chat state and is never decoded
+	// from the public Chat Completions body. Pro is a distinct mode and therefore
+	// intentionally does not carry an effort value upstream; standard mode keeps
+	// the validated effort and the automatic summary contract.
+	if req.ReasoningMode == "pro" || req.ReasoningEffort != "" {
 		out.Reasoning = &ResponsesReasoning{
-			Effort:  req.ReasoningEffort,
+			Mode:    req.ReasoningMode,
 			Summary: "auto",
+		}
+		if req.ReasoningMode != "pro" {
+			out.Reasoning.Effort = req.ReasoningEffort
 		}
 	}
 
@@ -350,7 +356,10 @@ func marshalChatInputContent(content chatMessageContent) (json.RawMessage, error
 	if content.Text != nil {
 		return json.Marshal(*content.Text)
 	}
-	parts := convertChatContentPartsToResponses(content.Parts)
+	parts, err := convertChatContentPartsToResponses(content.Parts)
+	if err != nil {
+		return nil, err
+	}
 	if len(parts) == 0 {
 		// A nil slice marshals to JSON null, which the upstream Responses API
 		// rejects ("expected an array of objects or string, but got null").
@@ -360,7 +369,7 @@ func marshalChatInputContent(content chatMessageContent) (json.RawMessage, error
 	return json.Marshal(parts)
 }
 
-func convertChatContentPartsToResponses(parts []ChatContentPart) []ResponsesContentPart {
+func convertChatContentPartsToResponses(parts []ChatContentPart) ([]ResponsesContentPart, error) {
 	var responseParts []ResponsesContentPart
 	for _, p := range parts {
 		switch p.Type {
@@ -378,9 +387,29 @@ func convertChatContentPartsToResponses(parts []ChatContentPart) []ResponsesCont
 					ImageURL: p.ImageURL.URL,
 				})
 			}
+		case "file":
+			if p.File == nil || (p.File.FileID == "" && (p.File.Filename == "" || p.File.FileData == "")) {
+				filename := ""
+				if p.File != nil {
+					filename = p.File.Filename
+				}
+				return nil, NewProviderFileInvalidError(
+					"openai responses", filename,
+					"file content part requires file_id or both filename and inline file_data",
+				)
+			}
+			if p.File.FileData != "" && isEmptyBase64DataURI(p.File.FileData) {
+				return nil, NewProviderFileInvalidError("openai responses", p.File.Filename, "inline file_data is empty")
+			}
+			responseParts = append(responseParts, ResponsesContentPart{
+				Type:     "input_file",
+				Filename: p.File.Filename,
+				FileData: p.File.FileData,
+				FileID:   p.File.FileID,
+			})
 		}
 	}
-	return responseParts
+	return responseParts, nil
 }
 
 func isEmptyBase64DataURI(raw string) bool {

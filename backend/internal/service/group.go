@@ -89,6 +89,12 @@ type Group struct {
 	// 一旦设置即接管该分组用户的限流（覆盖用户级 rpm_limit），可被 user-group rpm_override 进一步覆盖。
 	RPMLimit int
 
+	// 分组利润控制（支持 token 计费的五个平台可显式启用）。
+	// 调度准入条件：账号倍率 U <= D*(1-margin-buffer)，D 为请求当刻有效下游倍率。
+	ProfitControlEnabled bool
+	ProfitMinMargin      float64
+	ProfitSafetyBuffer   float64
+
 	CreatedAt time.Time
 	UpdatedAt time.Time
 
@@ -374,4 +380,88 @@ func computePeakAwareMultipliers(apiKey *APIKey, base float64, now time.Time) (t
 	}
 	text = base * peak
 	return
+}
+
+func validProfitControlRatio(v float64) bool {
+	return !math.IsNaN(v) && !math.IsInf(v, 0) && v >= 0 && v < 1
+}
+
+const profitControlStorageScale = 10_000
+
+func quantizeProfitControlRatio(v float64) float64 {
+	if !validProfitControlRatio(v) {
+		return v
+	}
+	return math.Round(v*profitControlStorageScale) / profitControlStorageScale
+}
+
+// NormalizeGroupPlatform keeps handler validation aligned with CreateGroup's
+// default platform semantics.
+func NormalizeGroupPlatform(platform string) string {
+	if platform == "" {
+		return PlatformAnthropic
+	}
+	return platform
+}
+
+// ValidateProfitControlConfig is shared by handler and service write paths.
+// Disabled configurations are inert; enabled configurations must retain a
+// positive admission threshold and target a supported token platform.
+func ValidateProfitControlConfig(platform string, enabled bool, minMargin, safetyBuffer float64) error {
+	if !enabled {
+		return nil
+	}
+	if !profitControlPlatformSupported(platform) {
+		return errors.New("利润控制仅支持 openai、anthropic、gemini、grok、antigravity 平台分组")
+	}
+	if !validProfitControlRatio(minMargin) {
+		return fmt.Errorf("profit_min_margin 应为 [0,1) 的小数，got %v", minMargin)
+	}
+	if !validProfitControlRatio(safetyBuffer) {
+		return fmt.Errorf("profit_safety_buffer 应为 [0,1) 的小数，got %v", safetyBuffer)
+	}
+	if minMargin+safetyBuffer >= 1 {
+		return errors.New("profit_min_margin 与 profit_safety_buffer 之和必须小于 1，否则将排除全部账号")
+	}
+	return nil
+}
+
+// NormalizeProfitControlConfig clears the feature on unsupported platforms
+// and sanitizes dormant values without changing behavior while disabled.
+func NormalizeProfitControlConfig(platform string, enabled bool, minMargin, safetyBuffer float64) (bool, float64, float64) {
+	if !profitControlPlatformSupported(platform) {
+		return false, 0, 0
+	}
+	if !enabled {
+		if !validProfitControlRatio(minMargin) {
+			minMargin = 0
+		}
+		if !validProfitControlRatio(safetyBuffer) {
+			safetyBuffer = 0
+		}
+	}
+	// Match NUMERIC(10,4) before validation and before returning the entity.
+	// Otherwise a direct API caller can submit values whose pre-rounding sum is
+	// below one but whose stored sum rounds to one, blacking out all candidates
+	// after the next auth-cache/database reload.
+	minMargin = quantizeProfitControlRatio(minMargin)
+	safetyBuffer = quantizeProfitControlRatio(safetyBuffer)
+	if !enabled {
+		if !validProfitControlRatio(minMargin) {
+			minMargin = 0
+		}
+		if !validProfitControlRatio(safetyBuffer) {
+			safetyBuffer = 0
+		}
+	}
+	return enabled, minMargin, safetyBuffer
+}
+
+func profitControlPlatformSupported(platform string) bool {
+	switch platform {
+	case PlatformOpenAI, PlatformAnthropic, PlatformGemini, PlatformGrok, PlatformAntigravity:
+		return true
+	default:
+		return false
+	}
 }

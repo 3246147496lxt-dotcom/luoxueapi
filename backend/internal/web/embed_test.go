@@ -5,13 +5,18 @@ package web
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"fmt"
 	"io/fs"
+	"mime"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/server/middleware"
 	"github.com/gin-gonic/gin"
@@ -22,6 +27,8 @@ import (
 func init() {
 	gin.SetMode(gin.TestMode)
 }
+
+const adminEntryMarker = `<meta name="app-entry" content="admin" />`
 
 func TestInjectSiteTitle(t *testing.T) {
 	t.Run("replaces_title_with_site_name", func(t *testing.T) {
@@ -181,6 +188,48 @@ func (m *mockSettingsProvider) GetPublicSettingsForInjection(ctx context.Context
 	return m.settings, m.err
 }
 
+type blockingSettingsProvider struct {
+	mu           sync.Mutex
+	first        any
+	current      any
+	calls        int
+	firstStarted chan struct{}
+	releaseFirst chan struct{}
+}
+
+func (p *blockingSettingsProvider) GetPublicSettingsForInjection(ctx context.Context) (any, error) {
+	p.mu.Lock()
+	p.calls++
+	call := p.calls
+	settings := p.current
+	if call == 1 {
+		settings = p.first
+	}
+	p.mu.Unlock()
+
+	if call == 1 {
+		close(p.firstStarted)
+		select {
+		case <-p.releaseFirst:
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
+	return settings, nil
+}
+
+func (p *blockingSettingsProvider) setCurrent(settings any) {
+	p.mu.Lock()
+	p.current = settings
+	p.mu.Unlock()
+}
+
+func (p *blockingSettingsProvider) callCount() int {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.calls
+}
+
 func TestFrontendServer_InjectSettings(t *testing.T) {
 	t.Run("injects_settings_with_nonce_placeholder", func(t *testing.T) {
 		provider := &mockSettingsProvider{
@@ -235,6 +284,21 @@ func TestFrontendServer_InjectSettings(t *testing.T) {
 		assert.Contains(t, string(result), `window.__APP_CONFIG__={"nested":{"array":[1,2,3]},"special":"<>&"};`)
 	})
 
+	t.Run("selects_the_admin_html_entry_for_admin_routes", func(t *testing.T) {
+		provider := &mockSettingsProvider{settings: map[string]string{"site_name": "落雪API"}}
+		server, err := NewFrontendServer(provider)
+		require.NoError(t, err)
+
+		adminResult := server.injectSettingsForPath([]byte(`{"site_name":"落雪API"}`), "/admin/dashboard")
+		userResult := server.injectSettingsForPath([]byte(`{"site_name":"落雪API"}`), "/dashboard")
+
+		assert.Contains(t, string(adminResult), adminEntryMarker)
+		assert.Contains(t, string(adminResult), `window.__APP_CONFIG__={"site_name":"落雪API"};`)
+		assert.Contains(t, string(adminResult), `<meta name="robots" content="noindex, nofollow" />`)
+		assert.Equal(t, 1, strings.Count(string(adminResult), `name="robots"`))
+		assert.NotContains(t, string(userResult), adminEntryMarker)
+	})
+
 	t.Run("injects_route_specific_model_catalog_metadata", func(t *testing.T) {
 		provider := &mockSettingsProvider{settings: map[string]any{
 			"site_name":                    "落雪API",
@@ -260,8 +324,8 @@ func TestFrontendServer_InjectSettings(t *testing.T) {
 		result := server.injectSettingsForPath([]byte(`{"site_name":"落雪API"}`), "/quota-viewer")
 		body := string(result)
 
-		assert.Contains(t, body, "<title>桌面额度查看器 · 落雪API</title>")
-		assert.Contains(t, body, `content="在 macOS 和 Windows 桌面查看周剩余`)
+		assert.Contains(t, body, "<title>桌面积分查看器 · 落雪API</title>")
+		assert.Contains(t, body, `content="在 macOS 和 Windows 桌面查看周剩余积分`)
 		assert.Contains(t, body, `<meta name="robots" content="index, follow`)
 		assert.Contains(t, body, `<link rel="canonical" href="https://luoxueapi.cc/quota-viewer" />`)
 		assert.Contains(t, body, `<meta property="og:url" content="https://luoxueapi.cc/quota-viewer" />`)
@@ -375,6 +439,27 @@ func TestHTMLRouteCacheKey(t *testing.T) {
 	}
 }
 
+func TestFrontendIndexFilePath(t *testing.T) {
+	tests := []struct {
+		requestPath string
+		want        string
+	}{
+		{requestPath: "/", want: userFrontendIndexFilePath},
+		{requestPath: "/dashboard", want: userFrontendIndexFilePath},
+		{requestPath: "/administrator", want: userFrontendIndexFilePath},
+		{requestPath: "/admin", want: adminFrontendIndexFilePath},
+		{requestPath: "/admin/", want: adminFrontendIndexFilePath},
+		{requestPath: "/admin/dashboard", want: adminFrontendIndexFilePath},
+		{requestPath: "/admin/index.html", want: adminFrontendIndexFilePath},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.requestPath, func(t *testing.T) {
+			assert.Equal(t, tt.want, frontendIndexFilePath(tt.requestPath))
+		})
+	}
+}
+
 func TestApplyRouteIndexingHeaders(t *testing.T) {
 	indexable := make(http.Header)
 	applyRouteIndexingHeaders(indexable, homeHTMLCacheKey)
@@ -383,6 +468,34 @@ func TestApplyRouteIndexingHeaders(t *testing.T) {
 	private := make(http.Header)
 	applyRouteIndexingHeaders(private, noIndexHTMLCacheKey)
 	assert.Equal(t, "noindex, nofollow", private.Get("X-Robots-Tag"))
+}
+
+func TestInjectNoIndexMetadata(t *testing.T) {
+	t.Run("adds_noindex_when_missing", func(t *testing.T) {
+		html := []byte(`<html><head><title>Private</title></head><body></body></html>`)
+
+		result := injectNoIndexMetadata(html)
+
+		assert.Contains(t, string(result), `<meta name="robots" content="noindex, nofollow" />`)
+	})
+
+	t.Run("keeps_an_existing_noindex_meta_without_duplication", func(t *testing.T) {
+		html := []byte(`<html><head><META content='nofollow, noindex' NAME='robots'></head><body></body></html>`)
+
+		result := injectNoIndexMetadata(html)
+
+		assert.Equal(t, html, result)
+		assert.Len(t, metaTagPattern.FindAll(result, -1), 1)
+	})
+
+	t.Run("does_not_treat_an_indexable_robots_meta_as_noindex", func(t *testing.T) {
+		html := []byte(`<html><head><meta name="robots" content="index, follow" /></head><body></body></html>`)
+
+		result := injectNoIndexMetadata(html)
+
+		assert.Contains(t, string(result), `<meta name="robots" content="noindex, nofollow" />`)
+		assert.Len(t, metaTagPattern.FindAll(result, -1), 2)
+	})
 }
 
 func TestFrontendServer_ServeIndexHTML(t *testing.T) {
@@ -466,7 +579,7 @@ func TestFrontendServer_ServeIndexHTML(t *testing.T) {
 		assert.True(t, strings.HasSuffix(etag, `"`))
 	})
 
-	t.Run("returns_304_for_matching_etag", func(t *testing.T) {
+	t.Run("returns_fresh_nonce_body_for_matching_etag", func(t *testing.T) {
 		provider := &mockSettingsProvider{
 			settings: map[string]string{"test": "value"},
 		}
@@ -474,10 +587,12 @@ func TestFrontendServer_ServeIndexHTML(t *testing.T) {
 		server, err := NewFrontendServer(provider)
 		require.NoError(t, err)
 
-		// Use a real router for proper 304 handling
+		// Model SecurityHeaders issuing a fresh nonce for every response.
+		nonceSequence := 0
 		router := gin.New()
 		router.Use(func(c *gin.Context) {
-			c.Set(middleware.CSPNonceKey, "test-nonce")
+			nonceSequence++
+			c.Set(middleware.CSPNonceKey, fmt.Sprintf("test-nonce-%d", nonceSequence))
 			c.Next()
 		})
 		router.Use(server.Middleware())
@@ -495,8 +610,11 @@ func TestFrontendServer_ServeIndexHTML(t *testing.T) {
 		req2.Header.Set("If-None-Match", etag)
 		router.ServeHTTP(w2, req2)
 
-		assert.Equal(t, http.StatusNotModified, w2.Code)
-		assert.Empty(t, w2.Body.String())
+		assert.Equal(t, http.StatusOK, w2.Code)
+		assert.Equal(t, etag, w2.Header().Get("ETag"))
+		assert.Equal(t, "no-cache", w2.Header().Get("Cache-Control"))
+		assert.Contains(t, w2.Body.String(), `nonce="test-nonce-2"`)
+		assert.NotContains(t, w2.Body.String(), `nonce="test-nonce-1"`)
 	})
 
 	t.Run("sets_cache_control_header", func(t *testing.T) {
@@ -577,6 +695,32 @@ func TestFrontendServer_ServeIndexHTML(t *testing.T) {
 		assert.Contains(t, homeAgain.Body.String(), `<link rel="canonical" href="https://luoxueapi.cc/home" />`)
 		assert.Equal(t, 4, provider.called)
 	})
+
+	t.Run("isolates_user_and_admin_entry_caches", func(t *testing.T) {
+		provider := &mockSettingsProvider{settings: map[string]string{"site_name": "落雪API"}}
+		server, err := NewFrontendServer(provider)
+		require.NoError(t, err)
+
+		request := func(path, nonce string) *httptest.ResponseRecorder {
+			w := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(w)
+			c.Request = httptest.NewRequest(http.MethodGet, path, nil)
+			c.Set(middleware.CSPNonceKey, nonce)
+			server.serveIndexHTML(c)
+			return w
+		}
+
+		user := request("/dashboard", "user-nonce")
+		admin := request("/admin/dashboard", "admin-nonce")
+		adminAgain := request("/admin/users", "admin-second-nonce")
+
+		assert.NotContains(t, user.Body.String(), adminEntryMarker)
+		assert.Contains(t, admin.Body.String(), adminEntryMarker)
+		assert.Contains(t, admin.Body.String(), `nonce="admin-nonce"`)
+		assert.Contains(t, adminAgain.Body.String(), `nonce="admin-second-nonce"`)
+		assert.NotEqual(t, user.Header().Get("ETag"), admin.Header().Get("ETag"))
+		assert.Equal(t, 2, provider.called)
+	})
 }
 
 func TestFrontendServer_InvalidateCache(t *testing.T) {
@@ -613,6 +757,89 @@ func TestFrontendServer_InvalidateCache(t *testing.T) {
 		assert.Equal(t, 2, provider.called)
 	})
 
+	t.Run("old_etag_is_replaced_after_invalidation", func(t *testing.T) {
+		provider := &mockSettingsProvider{
+			settings: map[string]bool{"skill_marketplace_enabled": true},
+		}
+		server, err := NewFrontendServer(provider)
+		require.NoError(t, err)
+
+		request := func(etag string) *httptest.ResponseRecorder {
+			w := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(w)
+			c.Request = httptest.NewRequest(http.MethodGet, "/", nil)
+			if etag != "" {
+				c.Request.Header.Set("If-None-Match", etag)
+			}
+			c.Set(middleware.CSPNonceKey, "nonce")
+			server.serveIndexHTML(c)
+			return w
+		}
+
+		first := request("")
+		oldETag := first.Header().Get("ETag")
+		require.NotEmpty(t, oldETag)
+		require.Contains(t, first.Body.String(), `"skill_marketplace_enabled":true`)
+
+		provider.settings = map[string]bool{"skill_marketplace_enabled": false}
+		server.InvalidateCache()
+		refreshed := request(oldETag)
+
+		assert.Equal(t, http.StatusOK, refreshed.Code)
+		assert.NotEqual(t, oldETag, refreshed.Header().Get("ETag"))
+		assert.Contains(t, refreshed.Body.String(), `"skill_marketplace_enabled":false`)
+	})
+
+	t.Run("invalidation_rejects_an_inflight_stale_render", func(t *testing.T) {
+		provider := &blockingSettingsProvider{
+			first:        map[string]bool{"skill_marketplace_enabled": true},
+			current:      map[string]bool{"skill_marketplace_enabled": true},
+			firstStarted: make(chan struct{}),
+			releaseFirst: make(chan struct{}),
+		}
+		server, err := NewFrontendServer(provider)
+		require.NoError(t, err)
+
+		firstDone := make(chan *httptest.ResponseRecorder, 1)
+		go func() {
+			w := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(w)
+			c.Request = httptest.NewRequest(http.MethodGet, "/", nil)
+			c.Set(middleware.CSPNonceKey, "nonce-old")
+			server.serveIndexHTML(c)
+			firstDone <- w
+		}()
+
+		select {
+		case <-provider.firstStarted:
+		case <-time.After(time.Second):
+			t.Fatal("first settings read did not start")
+		}
+		provider.setCurrent(map[string]bool{"skill_marketplace_enabled": false})
+		server.InvalidateCache()
+		close(provider.releaseFirst)
+
+		var first *httptest.ResponseRecorder
+		select {
+		case first = <-firstDone:
+		case <-time.After(time.Second):
+			t.Fatal("first settings read did not finish")
+		}
+		require.Contains(t, first.Body.String(), `"skill_marketplace_enabled":true`)
+		assert.Empty(t, first.Header().Get("ETag"))
+		assert.Nil(t, server.cache.GetForKey(homeHTMLCacheKey))
+
+		second := httptest.NewRecorder()
+		secondContext, _ := gin.CreateTestContext(second)
+		secondContext.Request = httptest.NewRequest(http.MethodGet, "/", nil)
+		secondContext.Set(middleware.CSPNonceKey, "nonce-new")
+		server.serveIndexHTML(secondContext)
+
+		assert.Contains(t, second.Body.String(), `"skill_marketplace_enabled":false`)
+		assert.NotEmpty(t, second.Header().Get("ETag"))
+		assert.Equal(t, 2, provider.callCount())
+	})
+
 	t.Run("handles_nil_server", func(t *testing.T) {
 		var server *FrontendServer
 		// Should not panic
@@ -627,6 +854,19 @@ func TestFrontendServer_InvalidateCache(t *testing.T) {
 		assert.NotPanics(t, func() {
 			server.InvalidateCache()
 		})
+	})
+
+	t.Run("invalidates_user_and_admin_caches", func(t *testing.T) {
+		provider := &mockSettingsProvider{settings: map[string]string{"test": "value"}}
+		server, err := NewFrontendServer(provider)
+		require.NoError(t, err)
+
+		server.cache.SetForKey(noIndexHTMLCacheKey, []byte("user"), []byte(`{}`))
+		server.adminCache.SetForKey(noIndexHTMLCacheKey, []byte("admin"), []byte(`{}`))
+		server.InvalidateCache()
+
+		assert.Nil(t, server.cache.GetForKey(noIndexHTMLCacheKey))
+		assert.Nil(t, server.adminCache.GetForKey(noIndexHTMLCacheKey))
 	})
 }
 
@@ -791,6 +1031,44 @@ func TestFrontendServer_Middleware(t *testing.T) {
 		}
 	})
 
+	t.Run("serves_admin_entry_for_admin_roots_and_deep_links", func(t *testing.T) {
+		provider := &mockSettingsProvider{settings: map[string]string{"site_name": "落雪API"}}
+		server, err := NewFrontendServer(provider)
+		require.NoError(t, err)
+
+		router := gin.New()
+		router.Use(func(c *gin.Context) {
+			c.Set(middleware.CSPNonceKey, "admin-route-nonce")
+			c.Next()
+		})
+		router.Use(server.Middleware())
+
+		for _, requestPath := range []string{
+			"/admin",
+			"/admin/",
+			"/admin/index.html",
+			"/admin/dashboard",
+			"/admin/users/123/chat-history",
+		} {
+			t.Run(requestPath, func(t *testing.T) {
+				w := httptest.NewRecorder()
+				req := httptest.NewRequest(http.MethodGet, requestPath, nil)
+				router.ServeHTTP(w, req)
+
+				assert.Equal(t, http.StatusOK, w.Code)
+				assert.Contains(t, w.Header().Get("Content-Type"), "text/html")
+				assert.Equal(t, "no-cache", w.Header().Get("Cache-Control"))
+				assert.Equal(t, "noindex, nofollow", w.Header().Get("X-Robots-Tag"))
+				assert.Contains(t, w.Body.String(), adminEntryMarker)
+				assert.Contains(t, w.Body.String(), `nonce="admin-route-nonce"`)
+			})
+		}
+
+		userWriter := httptest.NewRecorder()
+		router.ServeHTTP(userWriter, httptest.NewRequest(http.MethodGet, "/dashboard", nil))
+		assert.NotContains(t, userWriter.Body.String(), adminEntryMarker)
+	})
+
 	t.Run("serves_documentation_site_and_its_deep_links", func(t *testing.T) {
 		provider := &mockSettingsProvider{
 			settings: map[string]string{"site_name": "Configured main site"},
@@ -943,6 +1221,67 @@ func TestEmbeddedFrontendBypassesBareVideoAPIRoutes(t *testing.T) {
 	}
 }
 
+func TestEmbeddedFrontendServesEveryBuiltAssetExactly(t *testing.T) {
+	provider := &mockSettingsProvider{settings: map[string]string{"site_name": "Asset gate"}}
+	server, err := NewFrontendServer(provider)
+	require.NoError(t, err)
+
+	router := gin.New()
+	router.Use(func(c *gin.Context) {
+		c.Set(middleware.CSPNonceKey, "recursive-asset-gate")
+		c.Next()
+	})
+	router.Use(server.Middleware())
+
+	entrypoints := map[string]bool{
+		"index.html":               true,
+		"admin/index.html":         true,
+		"tutorial-docs/index.html": true,
+	}
+	seenEntrypoints := make(map[string]bool, len(entrypoints))
+	assetCount := 0
+
+	err = fs.WalkDir(server.distFS, ".", func(path string, entry fs.DirEntry, walkErr error) error {
+		require.NoError(t, walkErr)
+		if entry.IsDir() {
+			return nil
+		}
+		require.False(t, strings.HasPrefix(filepath.Base(path), "."),
+			"hidden build metadata must not enter the embedded bundle: %s", path)
+
+		body, readErr := fs.ReadFile(server.distFS, path)
+		require.NoError(t, readErr, path)
+		require.NotEmpty(t, body, path)
+
+		writer := httptest.NewRecorder()
+		request := httptest.NewRequest(http.MethodGet, "/"+path, nil)
+		router.ServeHTTP(writer, request)
+		require.Equal(t, http.StatusOK, writer.Code, path)
+		require.NotEmpty(t, writer.Body.Bytes(), path)
+
+		contentType, _, parseErr := mime.ParseMediaType(writer.Header().Get("Content-Type"))
+		require.NoError(t, parseErr, path)
+		if entrypoints[path] {
+			require.Equal(t, "text/html", contentType, path)
+			seenEntrypoints[path] = true
+			return nil
+		}
+
+		expectedType := mime.TypeByExtension(filepath.Ext(path))
+		require.NotEmpty(t, expectedType, "no MIME mapping for %s", path)
+		expectedType, _, parseErr = mime.ParseMediaType(expectedType)
+		require.NoError(t, parseErr, path)
+		require.NotEqual(t, "text/html", contentType, path)
+		require.Equal(t, expectedType, contentType, path)
+		require.Equal(t, sha256.Sum256(body), sha256.Sum256(writer.Body.Bytes()), path)
+		assetCount++
+		return nil
+	})
+	require.NoError(t, err)
+	require.Equal(t, entrypoints, seenEntrypoints)
+	require.Positive(t, assetCount)
+}
+
 func TestNewFrontendServer(t *testing.T) {
 	t.Run("creates_server_successfully", func(t *testing.T) {
 		provider := &mockSettingsProvider{
@@ -956,7 +1295,9 @@ func TestNewFrontendServer(t *testing.T) {
 		assert.NotNil(t, server.distFS)
 		assert.NotNil(t, server.fileServer)
 		assert.NotNil(t, server.baseHTML)
+		assert.NotNil(t, server.adminBaseHTML)
 		assert.NotNil(t, server.cache)
+		assert.NotNil(t, server.adminCache)
 		assert.Equal(t, provider, server.settings)
 	})
 
@@ -970,6 +1311,8 @@ func TestNewFrontendServer(t *testing.T) {
 
 		assert.NotEmpty(t, server.baseHTML)
 		assert.Contains(t, string(server.baseHTML), "<!doctype html>")
+		assert.NotEmpty(t, server.adminBaseHTML)
+		assert.Contains(t, string(server.adminBaseHTML), adminEntryMarker)
 	})
 }
 
@@ -1027,6 +1370,30 @@ func TestServeEmbeddedFrontend(t *testing.T) {
 
 				assert.Equal(t, http.StatusOK, w.Code)
 				assert.Contains(t, w.Header().Get("Content-Type"), "text/html")
+			})
+		}
+	})
+
+	t.Run("serves_admin_index_for_admin_roots_and_deep_links", func(t *testing.T) {
+		middleware := ServeEmbeddedFrontend()
+		router := gin.New()
+		router.Use(middleware)
+
+		for _, requestPath := range []string{
+			"/admin",
+			"/admin/",
+			"/admin/index.html",
+			"/admin/dashboard",
+			"/admin/users/123/chat-history",
+		} {
+			t.Run(requestPath, func(t *testing.T) {
+				w := httptest.NewRecorder()
+				req := httptest.NewRequest(http.MethodGet, requestPath, nil)
+				router.ServeHTTP(w, req)
+
+				assert.Equal(t, http.StatusOK, w.Code)
+				assert.Contains(t, w.Header().Get("Content-Type"), "text/html")
+				assert.Contains(t, w.Body.String(), adminEntryMarker)
 			})
 		}
 	})
@@ -1121,6 +1488,23 @@ func TestHTMLCache(t *testing.T) {
 		assert.Nil(t, cache.Get())
 	})
 
+	t.Run("invalidate_rejects_write_from_an_older_generation", func(t *testing.T) {
+		cache := NewHTMLCache()
+		cache.SetBaseHTML([]byte("<html></html>"))
+		generation := cache.Generation()
+
+		cache.Invalidate()
+		stored := cache.SetForKeyIfGeneration(
+			homeHTMLCacheKey,
+			[]byte("<html>stale</html>"),
+			[]byte(`{"skill_marketplace_enabled":true}`),
+			generation,
+		)
+
+		assert.False(t, stored)
+		assert.Nil(t, cache.GetForKey(homeHTMLCacheKey))
+	})
+
 	t.Run("etag_changes_with_settings", func(t *testing.T) {
 		cache := NewHTMLCache()
 		cache.SetBaseHTML([]byte("<html></html>"))
@@ -1165,6 +1549,18 @@ func TestHTMLCache(t *testing.T) {
 		assert.Equal(t, []byte("private"), cache.GetForKey(noIndexHTMLCacheKey).Content)
 		assert.NotEqual(t, cache.GetForKey(homeHTMLCacheKey).ETag, cache.GetForKey(modelCatalogHTMLCacheKey).ETag)
 		assert.NotEqual(t, cache.GetForKey(homeHTMLCacheKey).ETag, cache.GetForKey(noIndexHTMLCacheKey).ETag)
+	})
+
+	t.Run("expires_injected_settings_after_bounded_ttl", func(t *testing.T) {
+		cache := NewHTMLCache()
+		cache.SetBaseHTML([]byte("<html></html>"))
+		now := time.Date(2026, time.August, 5, 0, 0, 0, 0, time.UTC)
+		cache.now = func() time.Time { return now }
+		cache.Set([]byte("<html>enabled</html>"), []byte(`{"skill_marketplace_enabled":true}`))
+
+		require.NotNil(t, cache.Get())
+		now = now.Add(injectedHTMLCacheTTL)
+		assert.Nil(t, cache.Get())
 	})
 }
 

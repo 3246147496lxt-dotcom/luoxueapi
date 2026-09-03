@@ -5,6 +5,22 @@ export default {
   theme: {
     extend: {
       colors: {
+        // Neutral ramp for the authenticated product theme. Semantic
+        // workspace roles remain the source of truth for shell surfaces;
+        // this ramp keeps legacy utility-based screens visually consistent.
+        gray: {
+          50: '#f7f7f8',
+          100: '#ececec',
+          200: '#e5e5e5',
+          300: '#d4d4d4',
+          400: '#8e8e8e',
+          500: '#737373',
+          600: '#5d5d5d',
+          700: '#424242',
+          800: '#212121',
+          900: '#0d0d0d',
+          950: '#050505'
+        },
         // Snow Clay primary interaction — violet. Ice blue remains a scoped
         // brand/information role in luoxue-clay-tokens.css.
         primary: {
@@ -34,22 +50,42 @@ export default {
           900: '#0f172a',
           950: '#020617'
         },
-        // 深色模式背景
+        // ChatGPT-like dark neutral ramp for legacy dark-* utilities.
         dark: {
-          50: '#f8fafc',
-          100: '#f1f5f9',
-          200: '#e2e8f0',
-          300: '#cbd5e1',
-          400: '#94a3b8',
-          500: '#64748b',
-          600: '#475569',
-          700: '#334155',
-          800: '#1e293b',
-          900: '#0f172a',
-          950: '#020617'
+          50: '#f7f7f8',
+          100: '#ececec',
+          200: '#d4d4d4',
+          300: '#b4b4b4',
+          400: '#8e8e8e',
+          500: '#737373',
+          600: '#565656',
+          700: '#424242',
+          800: '#2f2f2f',
+          900: '#212121',
+          950: '#171717'
+        },
+        workspace: {
+          canvas: 'var(--workspace-canvas)',
+          sidebar: 'var(--workspace-sidebar-surface)',
+          surface: 'var(--workspace-surface)',
+          card: 'var(--workspace-card-surface)',
+          popup: 'var(--workspace-popup-surface)',
+          subtle: 'var(--workspace-surface-subtle)',
+          hover: 'var(--workspace-hover)',
+          selected: 'var(--workspace-selected)',
+          divider: 'var(--workspace-divider)',
+          border: 'var(--workspace-border)',
+          'border-strong': 'var(--workspace-border-strong)',
+          text: 'var(--workspace-text)',
+          'text-secondary': 'var(--workspace-text-secondary)',
+          muted: 'var(--workspace-text-muted)',
+          action: 'var(--workspace-action)',
+          'action-hover': 'var(--workspace-action-hover)',
+          'action-soft': 'var(--workspace-action-soft)'
         }
       },
       fontFamily: {
+        workspace: ['var(--workspace-font-ui)'],
         sans: [
           'system-ui',
           '-apple-system',
@@ -126,7 +162,10 @@ export default {
         xs: '2px'
       },
       borderRadius: {
-        '4xl': '2rem'
+        '4xl': '2rem',
+        'workspace-card': 'var(--workspace-radius-card)',
+        'workspace-button': 'var(--workspace-radius-button)',
+        'workspace-input': 'var(--workspace-radius-input)'
       }
     }
   },

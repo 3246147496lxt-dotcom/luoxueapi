@@ -58,7 +58,7 @@ func TestExecuteAdminIdempotentJSONFailCloseOnStoreUnavailable(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodPost, "/idempotent", bytes.NewBufferString(`{"a":1}`))
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Idempotency-Key", "test-key-1")
+	req.Header.Set("X-Idempotency-Key", "test-key-1")
 	rec := httptest.NewRecorder()
 	router.ServeHTTP(rec, req)
 

@@ -1946,6 +1946,7 @@ func TestOpenAIGatewayService_OAuthPassthrough_StreamClientDisconnectStillCollec
 	require.NotNil(t, result)
 	require.True(t, result.Stream)
 	require.NotNil(t, result.FirstTokenMs)
+	require.True(t, result.ClientDisconnect)
 	require.Equal(t, 11, result.Usage.InputTokens)
 	require.Equal(t, 7, result.Usage.OutputTokens)
 	require.Equal(t, 3, result.Usage.CacheReadInputTokens)

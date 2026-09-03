@@ -241,16 +241,16 @@ onMounted(async () => {
 
 .desktop-auth-details dt {
   color: var(--lx-clay-text-secondary);
-  font-size: 13px;
-  font-weight: 600;
+  font-size: var(--workspace-type-secondary-size);
+  font-weight: var(--workspace-type-secondary-weight);
 }
 
 .desktop-auth-details dd {
   min-width: 0;
   overflow-wrap: anywhere;
   color: var(--lx-clay-text);
-  font-size: 14px;
-  font-weight: 700;
+  font-size: var(--workspace-type-body-size);
+  font-weight: var(--workspace-type-body-weight);
   text-align: right;
 }
 

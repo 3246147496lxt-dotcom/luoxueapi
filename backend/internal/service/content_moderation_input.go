@@ -296,11 +296,16 @@ func limitContentModerationImages(images []string) []string {
 	if len(images) <= maxContentModerationInputImages {
 		return images
 	}
-	idx, err := rand.Int(rand.Reader, big.NewInt(int64(len(images))))
-	if err != nil {
-		return images[:maxContentModerationInputImages]
+	pool := append([]string(nil), images...)
+	for i := 0; i < maxContentModerationInputImages; i++ {
+		offset, err := rand.Int(rand.Reader, big.NewInt(int64(len(pool)-i)))
+		if err != nil {
+			return images[:maxContentModerationInputImages]
+		}
+		j := i + int(offset.Int64())
+		pool[i], pool[j] = pool[j], pool[i]
 	}
-	return []string{images[int(idx.Int64())]}
+	return pool[:maxContentModerationInputImages]
 }
 
 func addModerationText(parts *[]string, text string) {

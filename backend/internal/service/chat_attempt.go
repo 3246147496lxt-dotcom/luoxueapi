@@ -37,6 +37,10 @@ const (
 	ChatAttemptStatusCompleted   = "completed"
 	ChatAttemptStatusInterrupted = "interrupted"
 	ChatAttemptStatusFailed      = "failed"
+
+	// ChatAttemptFailureCodeSettlement records a post-delivery accounting
+	// failure without changing the independently persisted message delivery.
+	ChatAttemptFailureCodeSettlement = "CHAT_SETTLEMENT_FAILED"
 )
 
 const (

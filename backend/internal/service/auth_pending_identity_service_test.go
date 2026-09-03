@@ -10,6 +10,7 @@ import (
 	"time"
 
 	dbent "github.com/Wei-Shaw/sub2api/ent"
+	"github.com/Wei-Shaw/sub2api/ent/authidentity"
 	"github.com/Wei-Shaw/sub2api/ent/enttest"
 	"github.com/Wei-Shaw/sub2api/ent/identityadoptiondecision"
 	"github.com/stretchr/testify/require"
@@ -523,4 +524,123 @@ func TestAuthPendingIdentityService_ConsumeBrowserSessionScrubsLegacyCompletionT
 	require.NotContains(t, completion, "expires_in")
 	require.NotContains(t, completion, "token_type")
 	require.Equal(t, "/dashboard", completion["redirect"])
+}
+
+func TestAuthPendingIdentityService_ApplyBindingAndConsumeRollsBackReplaySideEffects(t *testing.T) {
+	svc, client := newAuthPendingIdentityServiceTestClient(t)
+	ctx := context.Background()
+
+	user, err := client.User.Create().
+		SetEmail("pending-replay@example.com").
+		SetUsername("original-name").
+		SetPasswordHash("hash").
+		SetRole(RoleUser).
+		SetStatus(StatusActive).
+		Save(ctx)
+	require.NoError(t, err)
+
+	session, err := svc.CreatePendingSession(ctx, CreatePendingAuthSessionInput{
+		Intent: "bind_current_user",
+		Identity: PendingAuthIdentityKey{
+			ProviderType:    "oidc",
+			ProviderKey:     "https://issuer.example",
+			ProviderSubject: "replayed-subject",
+		},
+		TargetUserID:      &user.ID,
+		BrowserSessionKey: "replayed-browser-session",
+		UpstreamIdentityClaims: map[string]any{
+			"suggested_display_name": "Replay Side Effect",
+		},
+	})
+	require.NoError(t, err)
+	decision, err := svc.UpsertAdoptionDecision(ctx, PendingIdentityAdoptionDecisionInput{
+		PendingAuthSessionID: session.ID,
+		AdoptDisplayName:     true,
+	})
+	require.NoError(t, err)
+
+	_, err = svc.ConsumeBrowserSession(ctx, session.SessionToken, session.BrowserSessionKey)
+	require.NoError(t, err)
+
+	err = svc.ApplyBindingAndConsume(ctx, ApplyPendingIdentityBindingInput{
+		Session:        session, // deliberately stale, as in a concurrent replay
+		Decision:       decision,
+		OverrideUserID: &user.ID,
+		ForceBind:      true,
+	})
+	require.ErrorIs(t, err, ErrPendingAuthSessionConsumed)
+
+	reloadedUser, err := client.User.Get(ctx, user.ID)
+	require.NoError(t, err)
+	require.Equal(t, "original-name", reloadedUser.Username, "profile adoption must roll back when consume CAS loses")
+	identityCount, err := client.AuthIdentity.Query().Where(
+		authidentity.ProviderTypeEQ("oidc"),
+		authidentity.ProviderKeyEQ("https://issuer.example"),
+		authidentity.ProviderSubjectEQ("replayed-subject"),
+	).Count(ctx)
+	require.NoError(t, err)
+	require.Zero(t, identityCount, "identity creation must roll back when consume CAS loses")
+	reloadedDecision, err := client.IdentityAdoptionDecision.Get(ctx, decision.ID)
+	require.NoError(t, err)
+	require.Nil(t, reloadedDecision.IdentityID, "decision binding must roll back when consume CAS loses")
+}
+
+func TestAuthPendingIdentityService_ApplyBindingAndConsumeRejectsStaleSessionTuple(t *testing.T) {
+	svc, client := newAuthPendingIdentityServiceTestClient(t)
+	ctx := context.Background()
+
+	firstUser, err := client.User.Create().
+		SetEmail("pending-stale-first@example.com").
+		SetUsername("stale-first").
+		SetPasswordHash("hash").
+		SetRole(RoleUser).
+		SetStatus(StatusActive).
+		Save(ctx)
+	require.NoError(t, err)
+	secondUser, err := client.User.Create().
+		SetEmail("pending-stale-second@example.com").
+		SetUsername("stale-second").
+		SetPasswordHash("hash").
+		SetRole(RoleUser).
+		SetStatus(StatusActive).
+		Save(ctx)
+	require.NoError(t, err)
+
+	session, err := svc.CreatePendingSession(ctx, CreatePendingAuthSessionInput{
+		Intent: "bind_current_user",
+		Identity: PendingAuthIdentityKey{
+			ProviderType:    "oidc",
+			ProviderKey:     "https://issuer.example",
+			ProviderSubject: "stale-session-subject",
+		},
+		TargetUserID:      &firstUser.ID,
+		BrowserSessionKey: "stale-browser",
+	})
+	require.NoError(t, err)
+
+	// Simulate a concurrent completion/choice update after the handler loaded
+	// its transport snapshot. The binding path must reject that stale tuple
+	// before creating an identity for the old target.
+	_, err = svc.UpdateSessionProgress(ctx, UpdatePendingAuthSessionProgressInput{
+		SessionID:          session.ID,
+		Intent:             session.Intent,
+		ResolvedEmail:      session.ResolvedEmail,
+		TargetUserID:       &secondUser.ID,
+		CompletionResponse: map[string]any{"step": "bind_login_required"},
+	})
+	require.NoError(t, err)
+
+	err = svc.ApplyBindingAndConsume(ctx, ApplyPendingIdentityBindingInput{
+		Session:        session,
+		OverrideUserID: &firstUser.ID,
+		ForceBind:      true,
+	})
+	require.ErrorIs(t, err, ErrPendingAuthSessionChanged)
+	identityCount, err := client.AuthIdentity.Query().Where(
+		authidentity.ProviderTypeEQ("oidc"),
+		authidentity.ProviderKeyEQ("https://issuer.example"),
+		authidentity.ProviderSubjectEQ("stale-session-subject"),
+	).Count(ctx)
+	require.NoError(t, err)
+	require.Zero(t, identityCount)
 }

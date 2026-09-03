@@ -619,6 +619,15 @@ func (w *opsCaptureWriter) Header() http.Header {
 	return w.ResponseWriter.Header()
 }
 
+// Unwrap lets http.ResponseController reach connection-level capabilities on
+// Gin's underlying writer (for example SetReadDeadline on bounded uploads).
+func (w *opsCaptureWriter) Unwrap() http.ResponseWriter {
+	if w == nil || w.ResponseWriter == nil {
+		return nil
+	}
+	return w.ResponseWriter
+}
+
 func (w *opsCaptureWriter) WriteHeader(code int) {
 	if w.ResponseWriter == nil {
 		return

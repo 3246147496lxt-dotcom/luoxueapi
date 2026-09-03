@@ -14,10 +14,7 @@ export default {
     login: '登录',
     nav: {
       ariaLabel: '首页导航',
-      capabilities: '产品能力',
-      steps: '接入步骤',
-      providers: '模型状态',
-      faq: '常见问题',
+      quickStart: '快速开始',
       tutorial: '使用教程',
       openMenu: '打开菜单',
       closeMenu: '关闭菜单'
@@ -68,8 +65,8 @@ export default {
           description: '发生调用异常时，结合使用记录与渠道状态缩小排查范围。'
         },
         quotaViewer: {
-          title: '额度留在桌面',
-          description: '查看周剩余、重置倒计时和月到期日，不必反复打开网页。',
+          title: '积分留在桌面',
+          description: '查看周剩余积分、重置倒计时和月到期日，不必反复打开网页。',
           link: '查看桌面版'
         }
       }
@@ -150,20 +147,43 @@ export default {
 
   modelCatalog: {
     navLabel: '模型广场',
+    nav: {
+      pricing: '价格说明',
+      docs: '接入文档',
+      status: '服务状态'
+    },
     title: '模型广场',
-    description: '无需登录即可查看已上架模型的模型 ID、能力范围和公开标准价格。',
-    publicPriceNote: '这里展示所有注册用户可使用的公开标准价，价格单位为雪花额度；不包含专属分组、订阅优惠或用户个性倍率。最终费用以实际调用记录为准。',
+    description: '无需登录即可快速比较已上架模型的输入、输出和缓存价格。',
+    workspaceTitle: '模型中心',
+    workspaceDescription: '快速比较当前可用模型的输入、输出和缓存价格。',
+    publicPriceNote: '公开标准价按 ¥1 = 10 积分换算展示；实际扣费以积分和调用记录为准。',
     modelCount: '{count} 个模型',
     pricingUpdatedAt: '价格更新于 {time}',
     searchLabel: '搜索模型',
-    searchPlaceholder: '搜索模型名称、模型 ID 或能力',
+    searchPlaceholder: '搜索模型名称或能力',
     filters: {
       ariaLabel: '模型筛选',
       provider: '厂商',
       category: '类型',
-      all: '全部'
+      all: '全部',
+      sidebarTitle: '筛选',
+      reset: '重置',
+      close: '关闭筛选',
+      filterButton: '筛选',
+      group: '范围',
+      allModels: '全部模型',
+      pricedModels: '有价格',
+      billing: '定价方式',
+      tags: '标签'
     },
-    resultsTitle: '公开模型',
+    toolbar: {
+      sort: '排序方式',
+      defaultSort: '默认排序',
+      nameAsc: '按名称排序',
+      priceAsc: '价格从低到高',
+      priceDesc: '价格从高到低'
+    },
+    resultsTitle: '模型价格',
     resultCount: '显示 {count} 个结果',
     loading: '正在加载模型',
     featured: '推荐',
@@ -233,6 +253,12 @@ export default {
       pdf: 'PDF',
       web_search: '联网搜索',
       structured_output: '结构化输出',
+      parallel_function_calling: '函数调用',
+      pdf_input: 'PDF',
+      response_schema: '结构化输出',
+      tool_choice: '工具调用',
+      system_messages: '系统消息',
+      computer_use: '电脑操作',
       audio_input: '语音输入',
       audio_output: '语音输出',
       video: '视频'
@@ -240,9 +266,11 @@ export default {
     pricing: {
       publicLabel: '公开标准价',
       details: '价格详情',
+      shortDetails: '详情',
       dialogTitle: '公开价格详情',
-      dialogDescription: '所有价格均以雪花额度展示。Token 模型按每百万 Token 展示；0 表示免费，“—”表示暂未提供该项价格。',
+      dialogDescription: '积分价格已按 ¥1 = 10 积分换算为人民币展示。Token 模型按每百万 Token 展示；0 表示免费，“—”表示暂未提供该项价格。',
       billingMode: '计费方式',
+      usageBased: '按量计费',
       billingModes: {
         token: '按 Token 计费',
         perRequest: '按次计费',
@@ -250,6 +278,7 @@ export default {
       },
       input: '输入',
       output: '输出',
+      cache: '缓存',
       cacheWrite: '缓存写入',
       cacheWrite1h: '缓存写入（1 小时）',
       cacheRead: '缓存读取',
@@ -280,7 +309,7 @@ export default {
     },
     meta: {
       title: '模型广场',
-      description: '查看落雪API已公开上架的模型、能力、上下文窗口和公开标准价格。'
+      description: '查看落雪API已公开上架模型的输入、输出和缓存价格。'
     }
   },
 

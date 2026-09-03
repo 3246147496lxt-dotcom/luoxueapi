@@ -1,0 +1,16 @@
+services:
+  sub2api:
+    environment:
+      BATCH_IMAGE_ENABLED: "false"
+      BATCH_IMAGE_QUEUE_ENABLED: "false"
+      BATCH_IMAGE_VERTEX_ENABLED: "false"
+      BATCH_IMAGE_VERTEX_MANAGED_GCS_BUCKET: ""
+      SKILL_IMPORT_ENABLED: "false"
+      SKILL_IMPORT_WORKER_ENABLED: "false"
+      LIBRARY_STORAGE_DRIVER: local
+      LIBRARY_STORAGE_DIR: /app/data/library-files
+    volumes:
+      - type: bind
+        source: ${CANDIDATE_IDENTITY_FILE:?CANDIDATE_IDENTITY_FILE is required}
+        target: /run/candidate/database-identity.json
+        read_only: true

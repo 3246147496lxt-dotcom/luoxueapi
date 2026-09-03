@@ -147,6 +147,7 @@ func TestPatchGrokResponsesBodyDropsNestedUnsupportedFields(t *testing.T) {
 	body := []byte(`{
 		"model": "grok",
 		"input": "hello",
+		"sequence": 900719925474099312345,
 		"external_web_access": true,
 		"tools": [
 			{"type": "function", "name": "kept_fn", "external_web_access": true, "parameters": {"type": "object", "properties": {"q": {"type": "string", "external_web_access": true}}}}
@@ -158,6 +159,7 @@ func TestPatchGrokResponsesBodyDropsNestedUnsupportedFields(t *testing.T) {
 	require.NoError(t, err)
 	require.True(t, json.Valid(patched))
 	require.False(t, strings.Contains(string(patched), "external_web_access"))
+	require.Equal(t, "900719925474099312345", gjson.GetBytes(patched, "sequence").Raw)
 	require.Equal(t, "kept_fn", gjson.GetBytes(patched, "tools.0.name").String())
 }
 
@@ -1008,6 +1010,8 @@ func TestForwardGrokResponsesStreamingDefaultsEmptyModelTo45AndSnapshots(t *test
 	require.True(t, result.Stream)
 	require.Equal(t, "resp_grok", result.ResponseID)
 	require.Equal(t, "xai-stream-req", result.RequestID)
+	require.Equal(t, "grok-4.3", result.UpstreamResponseModel)
+	require.False(t, result.UpstreamResponseModelConflict)
 	require.Equal(t, 5, result.Usage.InputTokens)
 	require.Equal(t, 3, result.Usage.OutputTokens)
 	require.Equal(t, 2, result.Usage.CacheReadInputTokens)
@@ -1260,6 +1264,8 @@ func TestForwardGrokResponsesNonStreamingUsesCacheIdentityAndCachedUsage(t *test
 	require.NotNil(t, result)
 	require.False(t, result.Stream)
 	require.Equal(t, "resp_grok_non_stream", result.ResponseID)
+	require.Equal(t, "grok-4.3", result.UpstreamResponseModel)
+	require.False(t, result.UpstreamResponseModelConflict)
 	require.Equal(t, 7, result.Usage.InputTokens)
 	require.Equal(t, 2, result.Usage.OutputTokens)
 	require.Equal(t, 4, result.Usage.CacheReadInputTokens)
@@ -2066,6 +2072,8 @@ func TestOpenAIWSHTTPBridgeGrokExhaustedSuccessPersistsRateLimit(t *testing.T) {
 
 	require.NoError(t, err)
 	require.NotNil(t, result)
+	require.Equal(t, "grok-4.3", result.UpstreamResponseModel)
+	require.False(t, result.UpstreamResponseModelConflict)
 	require.Equal(t, 1, repo.rateLimitedCalls)
 	require.WithinDuration(t, resetAt, repo.lastRateLimitResetAt, time.Second)
 	require.True(t, svc.isOpenAIAccountRuntimeBlocked(account))

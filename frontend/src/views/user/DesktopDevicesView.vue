@@ -258,7 +258,8 @@ onMounted(loadDevices)
   padding: 12px 14px;
   color: rgb(185 28 28);
   background: rgb(254 242 242);
-  font-size: 14px;
+  font-size: var(--workspace-type-body-size);
+  font-weight: var(--workspace-type-body-weight);
 }
 
 .desktop-devices-loading,
@@ -294,14 +295,15 @@ onMounted(loadDevices)
 
 .desktop-devices-empty h2 {
   color: var(--lx-clay-text);
-  font-size: 16px;
-  font-weight: 700;
+  font-size: var(--workspace-type-brand-size);
+  font-weight: var(--workspace-type-brand-weight);
 }
 
 .desktop-devices-empty p {
   max-width: 460px;
   margin-top: 4px;
-  font-size: 14px;
+  font-size: var(--workspace-type-body-size);
+  font-weight: var(--workspace-type-body-weight);
   line-height: 1.6;
 }
 
@@ -354,8 +356,8 @@ onMounted(loadDevices)
   min-width: 0;
   overflow-wrap: anywhere;
   color: var(--lx-clay-text);
-  font-size: 15px;
-  font-weight: 700;
+  font-size: var(--workspace-type-navigation-size);
+  font-weight: var(--workspace-type-navigation-weight);
 }
 
 .desktop-device-status {
@@ -366,8 +368,8 @@ onMounted(loadDevices)
   padding: 2px 8px;
   color: rgb(55 65 81);
   background: rgb(243 244 246);
-  font-size: 12px;
-  font-weight: 700;
+  font-size: var(--workspace-type-secondary-size);
+  font-weight: var(--workspace-type-secondary-weight);
 }
 
 .desktop-device-status--active {
@@ -388,8 +390,8 @@ onMounted(loadDevices)
 .desktop-device-card__system {
   margin-top: 5px;
   color: var(--lx-clay-text-secondary);
-  font-size: 13px;
-  font-weight: 600;
+  font-size: var(--workspace-type-secondary-size);
+  font-weight: var(--workspace-type-secondary-weight);
 }
 
 .desktop-device-card__meta {
@@ -397,7 +399,8 @@ onMounted(loadDevices)
   gap: 4px 12px;
   margin-top: 7px;
   color: var(--lx-clay-text-muted);
-  font-size: 12px;
+  font-size: var(--workspace-type-secondary-size);
+  font-weight: var(--workspace-type-secondary-weight);
 }
 
 .desktop-device-card__actions,
@@ -419,8 +422,8 @@ onMounted(loadDevices)
   border-radius: 6px;
   padding: 0 12px;
   color: rgb(185 28 28);
-  font-size: 14px;
-  font-weight: 700;
+  font-size: var(--workspace-type-navigation-size);
+  font-weight: var(--workspace-type-navigation-weight);
 }
 
 .desktop-device-revoke:hover {

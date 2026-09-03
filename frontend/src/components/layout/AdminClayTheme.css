@@ -21,6 +21,147 @@
   color: var(--admin-clay-text);
 }
 
+/* --------------------------------------------------------------------------
+ * Administrator sidebar baseline
+ *
+ * Admin navigation consumes the same typography, spacing, surface, and state
+ * roles as the personal Work sidebar. The admin-only ancestor keeps business
+ * behavior and icon components independent while both rails share one visual
+ * language.
+ * -------------------------------------------------------------------------- */
+
+.app-sidebar.sidebar--admin-workspace {
+  --app-shell-sidebar-bg: var(--workspace-sidebar-surface);
+  --app-shell-sidebar-border: var(--workspace-divider);
+  --app-shell-sidebar-shadow: none;
+  --app-shell-sidebar-backdrop: none;
+  --app-shell-sidebar-decoration: none;
+  --app-shell-sidebar-highlight: none;
+  --app-shell-sidebar-hover-color: var(--workspace-text);
+  --app-shell-sidebar-hover-bg: var(--workspace-hover);
+  --app-shell-sidebar-hover-shadow: none;
+  --app-shell-sidebar-focus: var(--workspace-work-text-muted);
+  --app-shell-sidebar-section-color: var(--workspace-work-text-muted);
+  --app-shell-sidebar-active-color: var(--workspace-text);
+  --app-shell-sidebar-active-icon: var(--workspace-text);
+  --app-shell-sidebar-active-bg: var(--workspace-selected);
+  --app-shell-sidebar-active-marker: none;
+  color: var(--workspace-text);
+  font-family: var(--workspace-font-ui);
+}
+
+html.dark .app-sidebar.sidebar--admin-workspace {
+  --app-shell-sidebar-focus: var(--workspace-text-muted);
+  --app-shell-sidebar-section-color: var(--workspace-text-muted);
+}
+
+.app-sidebar.sidebar--admin-workspace .workspace-sidebar-frame__content {
+  padding: var(--workspace-sidebar-content-padding) !important;
+}
+
+.app-sidebar.sidebar--admin-workspace.workspace-sidebar-frame--collapsed
+  .workspace-sidebar-frame__content {
+  padding: var(--workspace-sidebar-content-padding-collapsed) !important;
+}
+
+html:not(.dark)
+  .app-sidebar.sidebar--admin-workspace
+  .sidebar-section + .sidebar-section {
+  margin-top: var(--workspace-space-1);
+}
+
+.app-sidebar.sidebar--admin-workspace .sidebar-link {
+  font-size: var(--workspace-type-navigation-size);
+  font-weight: var(--workspace-type-navigation-weight);
+}
+
+.app-sidebar.sidebar--admin-workspace .sidebar-search input {
+  font-size: var(--workspace-type-body-size);
+  font-weight: var(--workspace-type-body-weight);
+}
+
+.app-sidebar.sidebar--admin-workspace .sidebar-search-empty,
+.app-sidebar.sidebar--admin-workspace .sidebar-section-title {
+  font-size: var(--workspace-type-secondary-size);
+  font-weight: var(--workspace-type-secondary-weight);
+}
+
+.app-sidebar.sidebar--admin-workspace .workspace-sidebar-frame__footer {
+  border-top: 1px solid var(--workspace-footer-divider);
+  padding-top: var(--workspace-space-2);
+}
+
+.app-sidebar.sidebar--admin-workspace.workspace-sidebar-frame--collapsed
+  .workspace-sidebar-frame__footer {
+  border-top-color: transparent;
+}
+
+.app-sidebar.sidebar--admin-workspace .sidebar-account-dock {
+  padding:
+    0
+    var(--workspace-space-1-5)
+    calc(var(--workspace-space-1-5) + env(safe-area-inset-bottom))
+    var(--workspace-space-2);
+  border-top: 0;
+  background: transparent;
+}
+
+.app-sidebar.sidebar--admin-workspace .sidebar-account-row,
+.app-sidebar.sidebar--admin-workspace .sidebar-account-row:hover,
+.app-sidebar.sidebar--admin-workspace .sidebar-account-row--open {
+  min-height: var(--workspace-sidebar-footer-row-height);
+  padding-right: 0;
+  color: var(--workspace-identity-text);
+}
+
+.app-sidebar.sidebar--admin-workspace
+  .sidebar-account-dock:not(.sidebar-account-dock--collapsed)
+  .sidebar-account-trigger {
+  min-height: var(--workspace-sidebar-footer-row-height);
+  grid-template-columns: 24px minmax(0, 1fr) auto;
+  gap: var(--workspace-space-2);
+  padding: var(--workspace-space-2);
+}
+
+.app-sidebar.sidebar--admin-workspace .sidebar-account-trigger:focus-visible {
+  outline-color: var(--workspace-dock-focus-personal);
+}
+
+.app-sidebar.sidebar--admin-workspace .sidebar-account-trigger__avatar {
+  width: 24px;
+  height: 24px;
+  color: var(--workspace-identity-text);
+  background: var(--workspace-hover);
+  font-size: var(--workspace-type-secondary-size);
+  font-weight: var(--workspace-type-secondary-weight);
+  line-height: 1.125rem;
+}
+
+html.dark
+  .app-sidebar.sidebar--admin-workspace
+  .sidebar-account-trigger__avatar {
+  color: var(--workspace-identity-text);
+  background: var(--workspace-surface-subtle);
+  box-shadow: inset 0 0 0 1px var(--workspace-border-strong);
+}
+
+.app-sidebar.sidebar--admin-workspace .sidebar-account-trigger__chevrons {
+  color: var(--workspace-identity-text-tertiary);
+}
+
+.app-sidebar.sidebar--admin-workspace .sidebar-account-trigger__name {
+  font-size: var(--workspace-type-navigation-size);
+  font-weight: var(--workspace-type-body-weight);
+  line-height: 20px;
+}
+
+.app-sidebar.sidebar--admin-workspace .sidebar-account-trigger__meta {
+  color: var(--workspace-identity-text-tertiary);
+  font-size: var(--workspace-type-secondary-size);
+  font-weight: var(--workspace-type-secondary-weight);
+  line-height: 16px;
+}
+
 /* Page density is explicit. Page roots opt in with data-admin-page-kind. */
 .app-layout--home-clay :where([data-admin-page-kind="overview"]) {
   --admin-clay-page-surface-radius: var(--lx-clay-radius-overview);

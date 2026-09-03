@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/openai_compat"
 	"github.com/stretchr/testify/require"
 )
 
@@ -172,6 +173,59 @@ func TestHasSchedulableChatCompletionsAccountUsesOpenAIRequestEligibility(t *tes
 			require.Equal(t, PlatformOpenAI, repo.lastPlatform)
 		})
 	}
+}
+
+func TestHasSchedulableWebChatReasoningAccountRequiresConfirmedResponsesAndModelMode(t *testing.T) {
+	const model = "gpt-5.6-sol"
+	newService := func(upstreamModel string, extra map[string]any) *OpenAIGatewayService {
+		account := chatSchedulableAccount(1, PlatformOpenAI, map[string]any{upstreamModel: upstreamModel})
+		account.Extra = extra
+		repo := &chatSchedAccountRepo{accounts: []Account{account}}
+		return newChatSchedulabilityService(
+			repo,
+			chatChannelServiceFromCache(BillingModelSourceRequested, false, nil, nil),
+		)
+	}
+
+	standard := WebChatReasoningOptions{Mode: WebChatReasoningModeStandard, Effort: "medium"}
+	pro := WebChatReasoningOptions{Mode: WebChatReasoningModePro, Effort: "medium"}
+
+	unknown := newService(model, nil)
+	got, err := unknown.HasSchedulableWebChatReasoningAccount(context.Background(), 1, model, standard)
+	require.NoError(t, err)
+	require.False(t, got, "unknown Responses support must fail closed for summaries")
+	legacyGot, err := unknown.HasSchedulableChatCompletionsAccount(context.Background(), 1, model)
+	require.NoError(t, err)
+	require.True(t, legacyGot, "the existing Chat Completions admission contract remains unchanged")
+
+	confirmedExtra := map[string]any{openai_compat.ExtraKeyResponsesSupported: true}
+	confirmed := newService(model, confirmedExtra)
+	got, err = confirmed.HasSchedulableWebChatReasoningAccount(context.Background(), 1, model, standard)
+	require.NoError(t, err)
+	require.True(t, got)
+	for _, familyModel := range []string{"gpt-5.6-terra", "gpt-5.6-luna"} {
+		familyService := newService(familyModel, confirmedExtra)
+		got, err = familyService.HasSchedulableWebChatReasoningAccount(context.Background(), 1, familyModel, pro)
+		require.NoError(t, err)
+		require.True(t, got, familyModel)
+	}
+	got, err = confirmed.HasSchedulableWebChatReasoningAccount(context.Background(), 1, model, pro)
+	require.NoError(t, err)
+	require.True(t, got)
+
+	got, err = confirmed.HasSchedulableWebChatReasoningAccount(context.Background(), 1, model, WebChatReasoningOptions{
+		Mode: WebChatReasoningModePro, Effort: "low",
+	})
+	require.NoError(t, err)
+	require.True(t, got, "Pro low must remain low and be scheduled independently")
+
+	forcedChat := newService(model, map[string]any{
+		openai_compat.ExtraKeyResponsesMode:      string(openai_compat.ResponsesSupportModeForceChatCompletions),
+		openai_compat.ExtraKeyResponsesSupported: true,
+	})
+	got, err = forcedChat.HasSchedulableWebChatReasoningAccount(context.Background(), 1, model, pro)
+	require.NoError(t, err)
+	require.False(t, got)
 }
 
 func TestHasSchedulableChatCompletionsAccountRejectsDedicatedCapabilityModels(t *testing.T) {

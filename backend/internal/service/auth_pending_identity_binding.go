@@ -10,6 +10,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/ent/authidentity"
 	"github.com/Wei-Shaw/sub2api/ent/authidentitychannel"
 	"github.com/Wei-Shaw/sub2api/ent/identityadoptiondecision"
+	"github.com/Wei-Shaw/sub2api/ent/pendingauthsession"
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 )
 
@@ -62,20 +63,87 @@ func (s *AuthService) FinalizePendingOAuthAccount(ctx context.Context, input Fin
 	}
 	defer func() { _ = tx.Rollback() }()
 	txCtx := dbent.NewTxContext(ctx, tx)
+	txCtx, deferredInvalidations := withDeferredSubscriptionCacheInvalidations(txCtx)
 	if err := s.finalizePendingOAuthAccountTx(txCtx, tx, input); err != nil {
 		return err
 	}
-	return tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	flushDeferredSubscriptionCacheInvalidations(deferredInvalidations)
+	// This method can also be called directly (without a caller-owned
+	// transaction).  Keep the quota snapshot out of the uncommitted tx in that
+	// case as well; the two HTTP coordinators that own an outer transaction call
+	// the same hook after their commit.
+	s.SnapshotPlatformQuotaDefaultsAfterCommit(ctx, input.User.ID, input.ProviderType)
+	return nil
 }
 
 func (s *AuthService) finalizePendingOAuthAccountTx(ctx context.Context, tx *dbent.Tx, input FinalizePendingOAuthAccountInput) error {
-	if tx == nil {
+	if tx == nil || input.Session == nil {
 		return infraerrors.ServiceUnavailable("PENDING_AUTH_NOT_READY", "pending auth transaction is not ready")
+	}
+	releaseSessionLock, err := lockAuthPendingIdentityKeys(ctx, tx.Client(), pendingAuthSessionLockKey(input.Session.ID))
+	if err != nil {
+		return err
+	}
+	defer releaseSessionLock()
+	// The handler obtains the session/decision before opening this transaction.
+	// Reload and lock both rows so a concurrent finalizer cannot use a stale
+	// target or overwrite a newer adoption choice after the initial read.
+	sessionQuery := tx.Client().PendingAuthSession.Query().Where(
+		pendingauthsession.IDEQ(input.Session.ID),
+	)
+	if pendingAuthSupportsSelectForUpdate(tx.Client()) {
+		sessionQuery = sessionQuery.ForUpdate()
+	}
+	storedSession, err := sessionQuery.Only(ctx)
+	if err != nil {
+		if dbent.IsNotFound(err) {
+			return ErrPendingAuthSessionNotFound
+		}
+		return err
+	}
+	pendingSession := pendingAuthSessionFromEntity(storedSession)
+	if pendingSession == nil {
+		return ErrPendingAuthSessionNotFound
+	}
+	if pendingSession.ConsumedAt != nil {
+		return ErrPendingAuthSessionConsumed
+	}
+	now := time.Now().UTC()
+	if !pendingSession.ExpiresAt.IsZero() && now.After(pendingSession.ExpiresAt) {
+		return ErrPendingAuthSessionExpired
+	}
+	if strings.TrimSpace(pendingSession.BrowserSessionKey) != "" &&
+		strings.TrimSpace(input.Session.BrowserSessionKey) != strings.TrimSpace(pendingSession.BrowserSessionKey) {
+		return ErrPendingAuthBrowserMismatch
+	}
+	if provider := strings.TrimSpace(input.ProviderType); provider != "" &&
+		!strings.EqualFold(provider, strings.TrimSpace(pendingSession.ProviderType)) {
+		return infraerrors.BadRequest("PENDING_AUTH_PROVIDER_MISMATCH", "pending oauth provider does not match the session")
+	}
+	if pendingSession.TargetUserID != nil && *pendingSession.TargetUserID > 0 && *pendingSession.TargetUserID != input.User.ID {
+		return infraerrors.Conflict("PENDING_AUTH_TARGET_USER_MISMATCH", "pending oauth session must be completed by the targeted user")
+	}
+
+	decision := input.Decision
+	decisionQuery := tx.Client().IdentityAdoptionDecision.Query().Where(
+		identityadoptiondecision.PendingAuthSessionIDEQ(pendingSession.ID),
+	)
+	if pendingAuthSupportsSelectForUpdate(tx.Client()) {
+		decisionQuery = decisionQuery.ForUpdate()
+	}
+	storedDecision, decisionErr := decisionQuery.Only(ctx)
+	if decisionErr == nil {
+		decision = pendingIdentityDecisionFromEntity(storedDecision)
+	} else if !dbent.IsNotFound(decisionErr) {
+		return decisionErr
 	}
 	pending := NewAuthPendingIdentityService(s.entClient)
 	if err := pending.applyBindingTx(ctx, tx, ApplyPendingIdentityBindingInput{
-		Session:        input.Session,
-		Decision:       input.Decision,
+		Session:        pendingSession,
+		Decision:       decision,
 		OverrideUserID: &input.User.ID,
 		ForceBind:      true,
 		DefaultApplier: s,
@@ -92,11 +160,11 @@ func (s *AuthService) finalizePendingOAuthAccountTx(ctx context.Context, tx *dbe
 	); err != nil {
 		return err
 	}
-	if err := consumePendingIdentitySessionTx(ctx, tx, input.Session); err != nil {
+	if err := consumePendingIdentitySessionTx(ctx, tx, pendingSession); err != nil {
 		return err
 	}
 	if input.BeforeCommit != nil {
-		if err := input.BeforeCommit(ctx, input.Session); err != nil {
+		if err := input.BeforeCommit(ctx, pendingSession); err != nil {
 			return err
 		}
 	}
@@ -130,6 +198,13 @@ func (s *AuthPendingIdentityService) ApplyBindingAndConsume(ctx context.Context,
 		return infraerrors.BadRequest("PENDING_AUTH_SESSION_INVALID", "pending auth registration context is invalid")
 	}
 	if tx := dbent.TxFromContext(ctx); tx != nil {
+		storedSession, releaseLock, err := reloadPendingIdentityBindingSession(ctx, tx, input.Session)
+		if err != nil {
+			releaseLock()
+			return err
+		}
+		defer releaseLock()
+		input.Session = storedSession
 		if err := s.applyBindingTx(ctx, tx, input); err != nil {
 			return err
 		}
@@ -141,13 +216,108 @@ func (s *AuthPendingIdentityService) ApplyBindingAndConsume(ctx context.Context,
 	}
 	defer func() { _ = tx.Rollback() }()
 	txCtx := dbent.NewTxContext(ctx, tx)
+	txCtx, deferredInvalidations := withDeferredSubscriptionCacheInvalidations(txCtx)
+	storedSession, releaseLock, err := reloadPendingIdentityBindingSession(txCtx, tx, input.Session)
+	if err != nil {
+		releaseLock()
+		return err
+	}
+	defer releaseLock()
+	input.Session = storedSession
 	if err := s.applyBindingTx(txCtx, tx, input); err != nil {
 		return err
 	}
 	if err := consumePendingIdentitySessionTx(txCtx, tx, input.Session); err != nil {
 		return err
 	}
-	return tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	flushDeferredSubscriptionCacheInvalidations(deferredInvalidations)
+	return nil
+}
+
+// reloadPendingIdentityBindingSession makes the database row authoritative
+// before any identity/profile write.  The handler normally passes a snapshot
+// loaded before opening its transaction; UpdateSessionProgress can otherwise
+// change the target/provider tuple between that read and the binding write.
+// Holding the scoped lock also serializes SQLite/unit flows, where SELECT FOR
+// UPDATE is not available.
+func reloadPendingIdentityBindingSession(
+	ctx context.Context,
+	tx *dbent.Tx,
+	candidate *PendingAuthSession,
+) (*PendingAuthSession, func(), error) {
+	if tx == nil || candidate == nil || candidate.ID <= 0 {
+		return nil, func() {}, infraerrors.BadRequest("PENDING_AUTH_SESSION_INVALID", "pending auth session is invalid")
+	}
+	release, err := lockAuthPendingIdentityKeys(ctx, tx.Client(), pendingAuthSessionLockKey(candidate.ID))
+	if err != nil {
+		return nil, func() {}, err
+	}
+	query := tx.Client().PendingAuthSession.Query().Where(pendingauthsession.IDEQ(candidate.ID))
+	if pendingAuthSupportsSelectForUpdate(tx.Client()) {
+		query = query.ForUpdate()
+	}
+	storedEntity, err := query.Only(ctx)
+	if err != nil {
+		if dbent.IsNotFound(err) {
+			return nil, release, ErrPendingAuthSessionNotFound
+		}
+		return nil, release, err
+	}
+	stored := pendingAuthSessionFromEntity(storedEntity)
+	if stored == nil {
+		return nil, release, ErrPendingAuthSessionNotFound
+	}
+	if stored.ConsumedAt != nil {
+		return nil, release, ErrPendingAuthSessionConsumed
+	}
+	now := time.Now().UTC()
+	if !stored.ExpiresAt.IsZero() && now.After(stored.ExpiresAt) {
+		return nil, release, ErrPendingAuthSessionExpired
+	}
+	if strings.TrimSpace(candidate.BrowserSessionKey) != "" &&
+		!strings.EqualFold(strings.TrimSpace(candidate.BrowserSessionKey), strings.TrimSpace(stored.BrowserSessionKey)) {
+		return nil, release, ErrPendingAuthBrowserMismatch
+	}
+	// An ID-only input is supported for service-level callers; once any
+	// snapshot fields are supplied, changes to the binding tuple are rejected
+	// instead of silently applying the stale request to a new flow.
+	hasSnapshot := strings.TrimSpace(candidate.Intent) != "" ||
+		strings.TrimSpace(candidate.ProviderType) != "" ||
+		strings.TrimSpace(candidate.ProviderKey) != "" ||
+		strings.TrimSpace(candidate.ProviderSubject) != "" ||
+		strings.TrimSpace(candidate.ResolvedEmail) != "" ||
+		candidate.TargetUserID != nil
+	if hasSnapshot {
+		if strings.TrimSpace(candidate.Intent) != "" && !strings.EqualFold(strings.TrimSpace(candidate.Intent), strings.TrimSpace(stored.Intent)) {
+			return nil, release, ErrPendingAuthSessionChanged
+		}
+		if strings.TrimSpace(candidate.ProviderType) != "" && !strings.EqualFold(strings.TrimSpace(candidate.ProviderType), strings.TrimSpace(stored.ProviderType)) {
+			return nil, release, ErrPendingAuthSessionChanged
+		}
+		if strings.TrimSpace(candidate.ProviderKey) != "" && strings.TrimSpace(candidate.ProviderKey) != strings.TrimSpace(stored.ProviderKey) {
+			return nil, release, ErrPendingAuthSessionChanged
+		}
+		if strings.TrimSpace(candidate.ProviderSubject) != "" && strings.TrimSpace(candidate.ProviderSubject) != strings.TrimSpace(stored.ProviderSubject) {
+			return nil, release, ErrPendingAuthSessionChanged
+		}
+		if strings.TrimSpace(candidate.ResolvedEmail) != "" && !strings.EqualFold(strings.TrimSpace(candidate.ResolvedEmail), strings.TrimSpace(stored.ResolvedEmail)) {
+			return nil, release, ErrPendingAuthSessionChanged
+		}
+		if pendingAuthTargetUserID(candidate) != pendingAuthTargetUserID(stored) {
+			return nil, release, ErrPendingAuthSessionChanged
+		}
+	}
+	return stored, release, nil
+}
+
+func pendingAuthTargetUserID(session *PendingAuthSession) int64 {
+	if session == nil || session.TargetUserID == nil || *session.TargetUserID <= 0 {
+		return 0
+	}
+	return *session.TargetUserID
 }
 
 func (s *AuthPendingIdentityService) applyBindingTx(ctx context.Context, tx *dbent.Tx, input ApplyPendingIdentityBindingInput) error {
@@ -259,15 +429,32 @@ func resolvePendingIdentityTargetUserID(ctx context.Context, client *dbent.Clien
 }
 
 func ensurePendingIdentityForUser(ctx context.Context, tx *dbent.Tx, session *PendingAuthSession, userID int64) (*dbent.AuthIdentity, error) {
+	if tx == nil || session == nil || userID <= 0 {
+		return nil, infraerrors.BadRequest("PENDING_AUTH_IDENTITY_INVALID", "pending auth identity is invalid")
+	}
+	// The provider tuple is the unique identity key.  Lock it before the
+	// read/decide/create sequence so two finalizers cannot both observe a free
+	// tuple and then race on ownership or metadata updates.  The lock helper
+	// also keeps an in-process fallback for SQLite/unit-test clients.
+	releaseLocks, err := lockAuthPendingIdentityKeys(ctx, tx.Client(), pendingIdentityBindingLockKeys(session)...)
+	if err != nil {
+		return nil, err
+	}
+	defer releaseLocks()
+
 	if strings.EqualFold(strings.TrimSpace(session.ProviderType), "wechat") {
 		return ensurePendingWeChatIdentityForUser(ctx, tx, session, userID)
 	}
 	client := tx.Client()
-	identity, err := client.AuthIdentity.Query().Where(
+	identityQuery := client.AuthIdentity.Query().Where(
 		authidentity.ProviderTypeEQ(strings.TrimSpace(session.ProviderType)),
 		authidentity.ProviderKeyEQ(strings.TrimSpace(session.ProviderKey)),
 		authidentity.ProviderSubjectEQ(strings.TrimSpace(session.ProviderSubject)),
-	).Only(ctx)
+	)
+	if pendingAuthSupportsSelectForUpdate(client) {
+		identityQuery = identityQuery.ForUpdate()
+	}
+	identity, err := identityQuery.Only(ctx)
 	if err != nil && !dbent.IsNotFound(err) {
 		return nil, err
 	}
@@ -307,9 +494,13 @@ func ensurePendingWeChatIdentityForUser(ctx context.Context, tx *dbent.Tx, sessi
 	channelSubject := pendingIdentityStringValue(session.UpstreamIdentityClaims, "channel_subject")
 	metadata := copyPendingMap(session.UpstreamIdentityClaims)
 
-	records, err := client.AuthIdentity.Query().Where(
+	identityQuery := client.AuthIdentity.Query().Where(
 		authidentity.ProviderTypeEQ(providerType), authidentity.ProviderKeyIn(providerKeys...), authidentity.ProviderSubjectEQ(providerSubject),
-	).All(ctx)
+	)
+	if pendingAuthSupportsSelectForUpdate(client) {
+		identityQuery = identityQuery.ForUpdate()
+	}
+	records, err := identityQuery.All(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -319,9 +510,13 @@ func ensurePendingWeChatIdentityForUser(ctx context.Context, tx *dbent.Tx, sessi
 	}
 	var legacy *dbent.AuthIdentity
 	if channelSubject != "" && channelSubject != providerSubject {
-		legacyRecords, err := client.AuthIdentity.Query().Where(
+		legacyQuery := client.AuthIdentity.Query().Where(
 			authidentity.ProviderTypeEQ(providerType), authidentity.ProviderKeyIn(providerKeys...), authidentity.ProviderSubjectEQ(channelSubject),
-		).All(ctx)
+		)
+		if pendingAuthSupportsSelectForUpdate(client) {
+			legacyQuery = legacyQuery.ForUpdate()
+		}
+		legacyRecords, err := legacyQuery.All(ctx)
 		if err != nil {
 			return nil, err
 		}
@@ -364,11 +559,15 @@ func ensurePendingWeChatIdentityForUser(ctx context.Context, tx *dbent.Tx, sessi
 		return identity, err
 	}
 
-	channelRecords, err := client.AuthIdentityChannel.Query().Where(
+	channelQuery := client.AuthIdentityChannel.Query().Where(
 		authidentitychannel.ProviderTypeEQ(providerType), authidentitychannel.ProviderKeyIn(providerKeys...),
 		authidentitychannel.ChannelEQ(channel), authidentitychannel.ChannelAppIDEQ(channelAppID),
 		authidentitychannel.ChannelSubjectEQ(channelSubject),
-	).WithIdentity().All(ctx)
+	).WithIdentity()
+	if pendingAuthSupportsSelectForUpdate(client) {
+		channelQuery = channelQuery.ForUpdate()
+	}
+	channelRecords, err := channelQuery.All(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -477,7 +676,13 @@ func consumePendingIdentitySessionTx(ctx context.Context, tx *dbent.Tx, session 
 	if tx == nil || session == nil {
 		return ErrPendingAuthSessionNotFound
 	}
-	stored, err := tx.Client().PendingAuthSession.Get(ctx, session.ID)
+	storedQuery := tx.Client().PendingAuthSession.Query().Where(
+		pendingauthsession.IDEQ(session.ID),
+	)
+	if pendingAuthSupportsSelectForUpdate(tx.Client()) {
+		storedQuery = storedQuery.ForUpdate()
+	}
+	stored, err := storedQuery.Only(ctx)
 	if dbent.IsNotFound(err) {
 		return ErrPendingAuthSessionNotFound
 	}
@@ -491,12 +696,52 @@ func consumePendingIdentitySessionTx(ctx context.Context, tx *dbent.Tx, session 
 	if !stored.ExpiresAt.IsZero() && now.After(stored.ExpiresAt) {
 		return ErrPendingAuthSessionExpired
 	}
+	if stored.CompletionCodeExpiresAt != nil && now.After(*stored.CompletionCodeExpiresAt) {
+		return ErrPendingAuthSessionExpired
+	}
 	if strings.TrimSpace(stored.BrowserSessionKey) != "" && strings.TrimSpace(stored.BrowserSessionKey) != strings.TrimSpace(session.BrowserSessionKey) {
 		return ErrPendingAuthBrowserMismatch
 	}
-	_, err = tx.Client().PendingAuthSession.UpdateOneID(stored.ID).SetConsumedAt(now).
+	updated, err := tx.Client().PendingAuthSession.UpdateOneID(stored.ID).Where(
+		pendingauthsession.ConsumedAtIsNil(),
+		pendingauthsession.ExpiresAtGTE(now),
+		pendingauthsession.Or(
+			pendingauthsession.CompletionCodeExpiresAtIsNil(),
+			pendingauthsession.CompletionCodeExpiresAtGTE(now),
+		),
+	).SetConsumedAt(now).
+		SetLocalFlowState(sanitizePendingAuthLocalFlowState(stored.LocalFlowState)).
 		SetCompletionCodeHash("").ClearCompletionCodeExpiresAt().Save(ctx)
-	return err
+	if err == nil {
+		_ = updated
+		return nil
+	}
+	if !dbent.IsNotFound(err) {
+		return err
+	}
+	// A caller may have consumed the row through another path that does not
+	// share this transaction.  Re-read only to classify the race; never report
+	// success after a zero-row conditional update.
+	current, currentErr := tx.Client().PendingAuthSession.Get(ctx, stored.ID)
+	if currentErr != nil {
+		if dbent.IsNotFound(currentErr) {
+			return ErrPendingAuthSessionNotFound
+		}
+		return currentErr
+	}
+	if current.ConsumedAt != nil {
+		return ErrPendingAuthSessionConsumed
+	}
+	if !current.ExpiresAt.IsZero() && now.After(current.ExpiresAt) {
+		return ErrPendingAuthSessionExpired
+	}
+	if current.CompletionCodeExpiresAt != nil && now.After(*current.CompletionCodeExpiresAt) {
+		return ErrPendingAuthSessionExpired
+	}
+	if strings.TrimSpace(current.BrowserSessionKey) != "" && strings.TrimSpace(current.BrowserSessionKey) != strings.TrimSpace(session.BrowserSessionKey) {
+		return ErrPendingAuthBrowserMismatch
+	}
+	return ErrPendingAuthSessionConsumed
 }
 
 func shouldBindPendingIdentity(session *PendingAuthSession, decision *PendingIdentityDecision) bool {

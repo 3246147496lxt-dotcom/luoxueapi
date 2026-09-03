@@ -52,7 +52,7 @@ const {
 
 const localeRef = vi.hoisted(() => ({ value: "zh-CN" }));
 
-vi.mock("@/api", () => ({
+vi.mock("@/api/admin", () => ({
   adminAPI: {
     settings: {
       getSettings,
@@ -187,9 +187,9 @@ vi.mock("vue-i18n", async () => {
     "admin.settings.site.uploadImage": "上传图片",
     "admin.settings.site.remove": "移除",
     "admin.settings.platformQuota.platform": "平台",
-    "admin.settings.platformQuota.daily": "日限额（雪花额度）",
-    "admin.settings.platformQuota.weekly": "周限额（雪花额度）",
-    "admin.settings.platformQuota.monthly": "月限额（雪花额度，30天滚动）",
+    "admin.settings.platformQuota.daily": "日限额（积分）",
+    "admin.settings.platformQuota.weekly": "周限额（积分）",
+    "admin.settings.platformQuota.monthly": "月限额（积分，30天滚动）",
     "admin.settings.platformQuota.placeholder": "不限",
     "admin.settings.defaults.defaultPlatformQuotas": "默认平台限额（注册时分配）",
     "admin.settings.defaults.defaultPlatformQuotasHint": "新用户注册时自动写入平台限额记录；已有用户不受影响。留空 = 该平台该窗口不限制。",
@@ -208,6 +208,28 @@ vi.mock("vue-i18n", async () => {
 });
 
 const AppLayoutStub = { template: "<div><slot /></div>" };
+const TranscriptionSettingsPanelStub = defineComponent({
+  props: {
+    active: {
+      type: Boolean,
+      default: false,
+    },
+  },
+  emits: ["dirty-change"],
+  setup(props, { emit }) {
+    return () =>
+      h(
+        "button",
+        {
+          type: "button",
+          class: "transcription-settings-dirty-stub",
+          "data-active": String(props.active),
+          onClick: () => emit("dirty-change", true),
+        },
+        "mark transcription dirty",
+      );
+  },
+});
 const ToggleStub = defineComponent({
   props: {
     modelValue: {
@@ -492,6 +514,7 @@ function mountView() {
         ProxySelector: true,
         ImageUpload: ImageUploadStub,
         BackupSettings: true,
+        TranscriptionSettingsPanel: TranscriptionSettingsPanelStub,
       },
     },
   });
@@ -643,6 +666,30 @@ describe("admin SettingsView payment visible method controls", () => {
       "saved",
     );
     expect(wrapper.get(".settings-save-status-title").text()).toBe("已保存");
+    wrapper.unmount();
+  });
+
+  it("shows an unsaved voice-input state after the child panel becomes dirty", async () => {
+    const wrapper = mountView();
+    await flushPromises();
+
+    expect(wrapper.get(".settings-save-bar").attributes("data-state")).toBe(
+      "saved",
+    );
+
+    await wrapper.get(".transcription-settings-dirty-stub").trigger("click");
+
+    const saveBar = wrapper.get(".settings-save-bar");
+    expect(saveBar.attributes("data-state")).toBe("transcription-dirty");
+    expect(saveBar.get(".settings-save-status-title").text()).toBe(
+      "语音识别有未保存的更改",
+    );
+    expect(saveBar.get(".settings-save-status-detail").text()).toBe(
+      "返回语音识别标签保存后才会生效。",
+    );
+    expect(saveBar.get(".settings-save-status-dot").attributes("aria-hidden")).toBe(
+      "true",
+    );
     wrapper.unmount();
   });
 
@@ -1392,7 +1439,7 @@ describe("admin SettingsView platform quota matrix", () => {
     expect(html).toContain("openai");
     expect(html).toContain("gemini");
     expect(html).toContain("antigravity");
-    expect(wrapper.text()).toContain("日限额（雪花额度）");
+    expect(wrapper.text()).toContain("日限额（积分）");
     expect(wrapper.text()).not.toContain("日限额 (USD)");
   });
 

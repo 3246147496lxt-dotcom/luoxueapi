@@ -249,14 +249,14 @@ describe('admin ModelCatalogView', () => {
     expect(getById).toHaveBeenCalledWith(2)
   })
 
-  it('previews effective catalog prices with Snow credit amounts', async () => {
+  it('previews effective catalog prices with Point amounts', async () => {
     const wrapper = mountView()
     await flushPromises()
 
     await wrapper.get('button[title="admin.modelCatalog.preview"]').trigger('click')
 
     expect(wrapper.findAllComponents(CreditAmount).map((amount) => amount.props('value'))).toEqual(['1', '5'])
-    expect(wrapper.findAll('[data-testid="snowflake-credit-icon"]')).toHaveLength(2)
+    expect(wrapper.findAll('[data-testid="points-icon"]')).toHaveLength(2)
     expect(wrapper.text()).not.toMatch(/[$¥]/)
   })
 

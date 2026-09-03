@@ -33,6 +33,8 @@ const (
 	FieldStatus = "status"
 	// FieldPurpose holds the string denoting the purpose field in the database.
 	FieldPurpose = "purpose"
+	// FieldServiceTierPreference holds the string denoting the service_tier_preference field in the database.
+	FieldServiceTierPreference = "service_tier_preference"
 	// FieldManagedDeviceID holds the string denoting the managed_device_id field in the database.
 	FieldManagedDeviceID = "managed_device_id"
 	// FieldLastUsedAt holds the string denoting the last_used_at field in the database.
@@ -117,6 +119,7 @@ var Columns = []string{
 	FieldGroupID,
 	FieldStatus,
 	FieldPurpose,
+	FieldServiceTierPreference,
 	FieldManagedDeviceID,
 	FieldLastUsedAt,
 	FieldIPWhitelist,
@@ -171,6 +174,10 @@ var (
 	DefaultPurpose string
 	// PurposeValidator is a validator for the "purpose" field. It is called by the builders before save.
 	PurposeValidator func(string) error
+	// DefaultServiceTierPreference holds the default value on creation for the "service_tier_preference" field.
+	DefaultServiceTierPreference string
+	// ServiceTierPreferenceValidator is a validator for the "service_tier_preference" field. It is called by the builders before save.
+	ServiceTierPreferenceValidator func(string) error
 	// DefaultQuota holds the default value on creation for the "quota" field.
 	DefaultQuota float64
 	// DefaultQuotaUsed holds the default value on creation for the "quota_used" field.
@@ -240,6 +247,11 @@ func ByStatus(opts ...sql.OrderTermOption) OrderOption {
 // ByPurpose orders the results by the purpose field.
 func ByPurpose(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldPurpose, opts...).ToFunc()
+}
+
+// ByServiceTierPreference orders the results by the service_tier_preference field.
+func ByServiceTierPreference(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldServiceTierPreference, opts...).ToFunc()
 }
 
 // ByManagedDeviceID orders the results by the managed_device_id field.

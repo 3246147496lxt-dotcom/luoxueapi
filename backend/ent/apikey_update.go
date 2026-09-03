@@ -149,6 +149,20 @@ func (_u *APIKeyUpdate) SetNillablePurpose(v *string) *APIKeyUpdate {
 	return _u
 }
 
+// SetServiceTierPreference sets the "service_tier_preference" field.
+func (_u *APIKeyUpdate) SetServiceTierPreference(v string) *APIKeyUpdate {
+	_u.mutation.SetServiceTierPreference(v)
+	return _u
+}
+
+// SetNillableServiceTierPreference sets the "service_tier_preference" field if the given value is not nil.
+func (_u *APIKeyUpdate) SetNillableServiceTierPreference(v *string) *APIKeyUpdate {
+	if v != nil {
+		_u.SetServiceTierPreference(*v)
+	}
+	return _u
+}
+
 // SetManagedDeviceID sets the "managed_device_id" field.
 func (_u *APIKeyUpdate) SetManagedDeviceID(v int64) *APIKeyUpdate {
 	_u.mutation.SetManagedDeviceID(v)
@@ -611,6 +625,11 @@ func (_u *APIKeyUpdate) check() error {
 			return &ValidationError{Name: "purpose", err: fmt.Errorf(`ent: validator failed for field "APIKey.purpose": %w`, err)}
 		}
 	}
+	if v, ok := _u.mutation.ServiceTierPreference(); ok {
+		if err := apikey.ServiceTierPreferenceValidator(v); err != nil {
+			return &ValidationError{Name: "service_tier_preference", err: fmt.Errorf(`ent: validator failed for field "APIKey.service_tier_preference": %w`, err)}
+		}
+	}
 	if _u.mutation.UserCleared() && len(_u.mutation.UserIDs()) > 0 {
 		return errors.New(`ent: clearing a required unique edge "APIKey.user"`)
 	}
@@ -649,6 +668,9 @@ func (_u *APIKeyUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 	}
 	if value, ok := _u.mutation.Purpose(); ok {
 		_spec.SetField(apikey.FieldPurpose, field.TypeString, value)
+	}
+	if value, ok := _u.mutation.ServiceTierPreference(); ok {
+		_spec.SetField(apikey.FieldServiceTierPreference, field.TypeString, value)
 	}
 	if value, ok := _u.mutation.LastUsedAt(); ok {
 		_spec.SetField(apikey.FieldLastUsedAt, field.TypeTime, value)
@@ -1014,6 +1036,20 @@ func (_u *APIKeyUpdateOne) SetPurpose(v string) *APIKeyUpdateOne {
 func (_u *APIKeyUpdateOne) SetNillablePurpose(v *string) *APIKeyUpdateOne {
 	if v != nil {
 		_u.SetPurpose(*v)
+	}
+	return _u
+}
+
+// SetServiceTierPreference sets the "service_tier_preference" field.
+func (_u *APIKeyUpdateOne) SetServiceTierPreference(v string) *APIKeyUpdateOne {
+	_u.mutation.SetServiceTierPreference(v)
+	return _u
+}
+
+// SetNillableServiceTierPreference sets the "service_tier_preference" field if the given value is not nil.
+func (_u *APIKeyUpdateOne) SetNillableServiceTierPreference(v *string) *APIKeyUpdateOne {
+	if v != nil {
+		_u.SetServiceTierPreference(*v)
 	}
 	return _u
 }
@@ -1493,6 +1529,11 @@ func (_u *APIKeyUpdateOne) check() error {
 			return &ValidationError{Name: "purpose", err: fmt.Errorf(`ent: validator failed for field "APIKey.purpose": %w`, err)}
 		}
 	}
+	if v, ok := _u.mutation.ServiceTierPreference(); ok {
+		if err := apikey.ServiceTierPreferenceValidator(v); err != nil {
+			return &ValidationError{Name: "service_tier_preference", err: fmt.Errorf(`ent: validator failed for field "APIKey.service_tier_preference": %w`, err)}
+		}
+	}
 	if _u.mutation.UserCleared() && len(_u.mutation.UserIDs()) > 0 {
 		return errors.New(`ent: clearing a required unique edge "APIKey.user"`)
 	}
@@ -1548,6 +1589,9 @@ func (_u *APIKeyUpdateOne) sqlSave(ctx context.Context) (_node *APIKey, err erro
 	}
 	if value, ok := _u.mutation.Purpose(); ok {
 		_spec.SetField(apikey.FieldPurpose, field.TypeString, value)
+	}
+	if value, ok := _u.mutation.ServiceTierPreference(); ok {
+		_spec.SetField(apikey.FieldServiceTierPreference, field.TypeString, value)
 	}
 	if value, ok := _u.mutation.LastUsedAt(); ok {
 		_spec.SetField(apikey.FieldLastUsedAt, field.TypeTime, value)

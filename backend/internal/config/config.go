@@ -7,8 +7,11 @@ import (
 	"fmt"
 	"log/slog"
 	"math"
+	"mime"
 	"net/url"
 	"os"
+	"os/exec"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -95,8 +98,126 @@ type Config struct {
 	Update                  UpdateConfig                  `mapstructure:"update"`
 	Idempotency             IdempotencyConfig             `mapstructure:"idempotency"`
 	BatchImage              BatchImageConfig              `mapstructure:"batch_image"`
+	SkillImport             SkillImportConfig             `mapstructure:"skill_import"`
 	ImageStorage            ImageStorageConfig            `mapstructure:"image_storage"`
 	Desktop                 DesktopConfig                 `mapstructure:"desktop"`
+	Transcription           TranscriptionConfig           `mapstructure:"transcription"`
+	ChatAttachments         ChatAttachmentConfig          `mapstructure:"chat_attachments"`
+	Library                 LibraryConfig                 `mapstructure:"library"`
+}
+
+// LibraryConfig controls the durable, private file library exposed by the
+// library API and reusable from Web Chat. SubscriptionGroupStorageBytes is keyed by the
+// existing subscription group ID because user subscriptions in this project
+// are group-based and do not retain a subscription-plan code.
+type LibraryConfig struct {
+	StorageDriver                 string           `mapstructure:"storage_driver"`
+	StorageDir                    string           `mapstructure:"storage_dir"`
+	DefaultStorageBytes           int64            `mapstructure:"default_storage_bytes"`
+	SubscriptionGroupStorageBytes map[string]int64 `mapstructure:"subscription_group_storage_bytes"`
+	MaxFileBytes                  int64            `mapstructure:"max_file_bytes"`
+	BatchDownloadLimit            int              `mapstructure:"batch_download_limit"`
+	BatchDownloadMaxBytes         int64            `mapstructure:"batch_download_max_bytes"`
+	DeletedRetentionDays          int              `mapstructure:"deleted_retention_days"`
+	PendingUploadStaleMinutes     int              `mapstructure:"pending_upload_stale_minutes"`
+	CleanupIntervalMinutes        int              `mapstructure:"cleanup_interval_minutes"`
+	CleanupBatchSize              int              `mapstructure:"cleanup_batch_size"`
+	S3                            LibraryS3Config  `mapstructure:"s3"`
+}
+
+// LibraryS3Config configures a private S3-compatible bucket. Endpoint, region
+// and credentials may reuse image_storage, but Bucket is always explicit so a
+// potentially public image bucket can never receive private library objects.
+type LibraryS3Config struct {
+	Endpoint        string `mapstructure:"endpoint"`
+	Region          string `mapstructure:"region"`
+	Bucket          string `mapstructure:"bucket"`
+	AccessKeyID     string `mapstructure:"access_key_id"`
+	SecretAccessKey string `mapstructure:"secret_access_key"`
+	ForcePathStyle  bool   `mapstructure:"force_path_style"`
+}
+
+func (c LibraryConfig) RequestBodyLimit() int64 {
+	const multipartOverhead = int64(1 << 20)
+	limit := c.MaxFileBytes
+	if limit <= 0 {
+		limit = 20 << 20
+	}
+	if limit > math.MaxInt64-multipartOverhead {
+		return math.MaxInt64
+	}
+	return limit + multipartOverhead
+}
+
+// ChatAttachmentConfig controls Web Chat's private attachment store and the
+// independent limits applied before attachment data reaches model context.
+type ChatAttachmentConfig struct {
+	StorageDir               string `mapstructure:"storage_dir"`
+	RetentionDays            int    `mapstructure:"retention_days"`
+	MaxPerTurn               int    `mapstructure:"max_per_turn"`
+	MaxTurnBytes             int64  `mapstructure:"max_turn_bytes"`
+	MaxImageBytes            int64  `mapstructure:"max_image_bytes"`
+	MaxDocumentBytes         int64  `mapstructure:"max_document_bytes"`
+	ContextImageBytes        int64  `mapstructure:"context_image_bytes"`
+	ContextMaxImages         int    `mapstructure:"context_max_images"`
+	ContextDocumentTextBytes int64  `mapstructure:"context_document_text_bytes"`
+	JanitorIntervalMinutes   int    `mapstructure:"janitor_interval_minutes"`
+	CleanupBatchSize         int    `mapstructure:"cleanup_batch_size"`
+	UploadsPerMinute         int    `mapstructure:"uploads_per_minute"`
+	DailyUploadBytes         int64  `mapstructure:"daily_upload_bytes"`
+	MaxConcurrentGlobal      int    `mapstructure:"max_concurrent_global"`
+	MaxConcurrentPerUser     int    `mapstructure:"max_concurrent_per_user"`
+}
+
+func (c ChatAttachmentConfig) RequestBodyLimit() int64 {
+	const multipartOverhead = int64(1 << 20)
+	limit := c.MaxDocumentBytes
+	if c.MaxImageBytes > limit {
+		limit = c.MaxImageBytes
+	}
+	if limit <= 0 {
+		limit = 20 << 20
+	}
+	if limit > math.MaxInt64-multipartOverhead {
+		return math.MaxInt64
+	}
+	return limit + multipartOverhead
+}
+
+// TranscriptionConfig controls the authenticated Web Chat speech-to-text
+// endpoint. The feature is disabled by default and can only use groups listed
+// explicitly in GroupIDs.
+type TranscriptionConfig struct {
+	Enabled                  bool     `mapstructure:"enabled"`
+	Provider                 string   `mapstructure:"provider"`
+	Model                    string   `mapstructure:"model"`
+	GroupIDs                 []int64  `mapstructure:"group_ids"`
+	MaxUploadBytes           int64    `mapstructure:"max_upload_bytes"`
+	UploadTimeoutSeconds     int      `mapstructure:"upload_timeout_seconds"`
+	MaxDurationSeconds       int      `mapstructure:"max_duration_seconds"`
+	RequestTimeoutSeconds    int      `mapstructure:"request_timeout_seconds"`
+	QueueTimeoutMS           int      `mapstructure:"queue_timeout_ms"`
+	IdempotencyTTLSeconds    int      `mapstructure:"idempotency_ttl_seconds"`
+	MaxConcurrentGlobal      int      `mapstructure:"max_concurrent_global"`
+	MaxConcurrentPerUser     int      `mapstructure:"max_concurrent_per_user"`
+	UserRequestsPerMinute    int      `mapstructure:"user_requests_per_minute"`
+	IPRequestsPerMinute      int      `mapstructure:"ip_requests_per_minute"`
+	UserDailyAudioSeconds    int      `mapstructure:"user_daily_audio_seconds"`
+	AcceptedMIMETypes        []string `mapstructure:"accepted_mime_types"`
+	UpstreamResponseMaxBytes int64    `mapstructure:"upstream_response_max_bytes"`
+	ProbeTimeoutSeconds      int      `mapstructure:"probe_timeout_seconds"`
+	FFprobePath              string   `mapstructure:"ffprobe_path"`
+}
+
+func (c TranscriptionConfig) RequestBodyLimit() int64 {
+	const multipartOverhead = int64(1 << 20)
+	if c.MaxUploadBytes <= 0 {
+		return multipartOverhead
+	}
+	if c.MaxUploadBytes > math.MaxInt64-multipartOverhead {
+		return math.MaxInt64
+	}
+	return c.MaxUploadBytes + multipartOverhead
 }
 
 type LogConfig struct {
@@ -247,6 +368,24 @@ type BatchImageConfig struct {
 	VertexOutputRetentionHours   int    `mapstructure:"vertex_output_retention_hours"`
 	VertexBatchPredictionBaseURL string `mapstructure:"vertex_batch_prediction_base_url"`
 	VertexGCSBaseURL             string `mapstructure:"vertex_gcs_base_url"`
+}
+
+// SkillImportConfig controls the durable Skill marketplace ingestion worker.
+// Sources and schedules remain database-backed; these values only define
+// process-level safety and resource limits shared by every import plan.
+type SkillImportConfig struct {
+	Enabled              bool   `mapstructure:"enabled"`
+	WorkerEnabled        bool   `mapstructure:"worker_enabled"`
+	WorkerConcurrency    int    `mapstructure:"worker_concurrency"`
+	PerHostConcurrency   int    `mapstructure:"per_host_concurrency"`
+	PollIntervalSeconds  int    `mapstructure:"poll_interval_seconds"`
+	LeaseTTLSeconds      int    `mapstructure:"lease_ttl_seconds"`
+	MaxAttempts          int    `mapstructure:"max_attempts"`
+	MaxRunDurationHours  int    `mapstructure:"max_run_duration_hours"`
+	EventsRetentionDays  int    `mapstructure:"events_retention_days"`
+	MaxHTTPResponseBytes int64  `mapstructure:"max_http_response_bytes"`
+	HTTPTimeoutSeconds   int    `mapstructure:"http_timeout_seconds"`
+	GitHubToken          string `mapstructure:"github_token"`
 }
 
 // ImageStorageConfig 配置异步图片任务结果上传的 S3 兼容对象存储。
@@ -1606,6 +1745,7 @@ func load(allowMissingJWTSecret bool) (*Config, error) {
 	}
 
 	cfg.RunMode = NormalizeRunMode(cfg.RunMode)
+	cfg.SkillImport.GitHubToken = strings.TrimSpace(cfg.SkillImport.GitHubToken)
 	cfg.Server.Mode = strings.ToLower(strings.TrimSpace(cfg.Server.Mode))
 	if cfg.Server.Mode == "" {
 		cfg.Server.Mode = "debug"
@@ -1650,6 +1790,18 @@ func load(allowMissingJWTSecret bool) (*Config, error) {
 	cfg.Security.ResponseHeaders.AdditionalAllowed = normalizeStringSlice(cfg.Security.ResponseHeaders.AdditionalAllowed)
 	cfg.Security.ResponseHeaders.ForceRemove = normalizeStringSlice(cfg.Security.ResponseHeaders.ForceRemove)
 	cfg.Security.CSP.Policy = strings.TrimSpace(cfg.Security.CSP.Policy)
+	cfg.Transcription.Provider = strings.ToLower(strings.TrimSpace(cfg.Transcription.Provider))
+	cfg.Transcription.Model = strings.TrimSpace(cfg.Transcription.Model)
+	cfg.Transcription.FFprobePath = strings.TrimSpace(cfg.Transcription.FFprobePath)
+	cfg.Transcription.AcceptedMIMETypes = normalizeStringSlice(cfg.Transcription.AcceptedMIMETypes)
+	cfg.ChatAttachments.StorageDir = strings.TrimSpace(cfg.ChatAttachments.StorageDir)
+	cfg.Library.StorageDriver = strings.ToLower(strings.TrimSpace(cfg.Library.StorageDriver))
+	cfg.Library.StorageDir = strings.TrimSpace(cfg.Library.StorageDir)
+	cfg.Library.S3.Endpoint = strings.TrimSpace(cfg.Library.S3.Endpoint)
+	cfg.Library.S3.Region = strings.TrimSpace(cfg.Library.S3.Region)
+	cfg.Library.S3.Bucket = strings.TrimSpace(cfg.Library.S3.Bucket)
+	cfg.Library.S3.AccessKeyID = strings.TrimSpace(cfg.Library.S3.AccessKeyID)
+	cfg.Library.S3.SecretAccessKey = strings.TrimSpace(cfg.Library.S3.SecretAccessKey)
 	cfg.SetTrustForwardedIPForAPIKeyACL(cfg.Security.TrustForwardedIPForAPIKeyACL)
 	cfg.Log.Level = strings.ToLower(strings.TrimSpace(cfg.Log.Level))
 	cfg.Log.Format = strings.ToLower(strings.TrimSpace(cfg.Log.Format))
@@ -1731,6 +1883,67 @@ func load(allowMissingJWTSecret bool) (*Config, error) {
 func setDefaults() {
 	viper.SetDefault("run_mode", RunModeStandard)
 
+	// Authenticated Web Chat speech-to-text. The feature remains unavailable
+	// until an operator explicitly enables it and whitelists one or more groups.
+	viper.SetDefault("transcription.enabled", false)
+	viper.SetDefault("transcription.provider", "openai_compatible")
+	viper.SetDefault("transcription.model", "gpt-4o-mini-transcribe")
+	viper.SetDefault("transcription.group_ids", []int64{})
+	viper.SetDefault("transcription.max_upload_bytes", int64(10*1024*1024))
+	viper.SetDefault("transcription.upload_timeout_seconds", 30)
+	viper.SetDefault("transcription.max_duration_seconds", 120)
+	viper.SetDefault("transcription.request_timeout_seconds", 45)
+	viper.SetDefault("transcription.queue_timeout_ms", 2000)
+	viper.SetDefault("transcription.idempotency_ttl_seconds", 600)
+	viper.SetDefault("transcription.max_concurrent_global", 16)
+	viper.SetDefault("transcription.max_concurrent_per_user", 1)
+	viper.SetDefault("transcription.user_requests_per_minute", 6)
+	viper.SetDefault("transcription.ip_requests_per_minute", 20)
+	viper.SetDefault("transcription.user_daily_audio_seconds", 1200)
+	viper.SetDefault("transcription.accepted_mime_types", []string{
+		"audio/webm", "video/webm", "audio/wav", "audio/x-wav", "audio/mpeg",
+		"audio/mp4", "video/mp4", "audio/ogg", "application/ogg", "audio/flac",
+	})
+	viper.SetDefault("transcription.upstream_response_max_bytes", int64(1024*1024))
+	viper.SetDefault("transcription.probe_timeout_seconds", 3)
+	viper.SetDefault("transcription.ffprobe_path", "ffprobe")
+
+	// Web Chat attachments are private local files by default. The database
+	// stores only metadata and extracted text.
+	viper.SetDefault("chat_attachments.storage_dir", "./data/chat-attachments")
+	viper.SetDefault("chat_attachments.retention_days", 30)
+	viper.SetDefault("chat_attachments.max_per_turn", 4)
+	viper.SetDefault("chat_attachments.max_turn_bytes", int64(20*1024*1024))
+	viper.SetDefault("chat_attachments.max_image_bytes", int64(10*1024*1024))
+	viper.SetDefault("chat_attachments.max_document_bytes", int64(20*1024*1024))
+	viper.SetDefault("chat_attachments.context_image_bytes", int64(20*1024*1024))
+	viper.SetDefault("chat_attachments.context_max_images", 4)
+	viper.SetDefault("chat_attachments.context_document_text_bytes", int64(256*1024))
+	viper.SetDefault("chat_attachments.janitor_interval_minutes", 60)
+	viper.SetDefault("chat_attachments.cleanup_batch_size", 100)
+	viper.SetDefault("chat_attachments.uploads_per_minute", 10)
+	viper.SetDefault("chat_attachments.daily_upload_bytes", int64(100*1024*1024))
+	viper.SetDefault("chat_attachments.max_concurrent_global", 4)
+	viper.SetDefault("chat_attachments.max_concurrent_per_user", 2)
+
+	// Private persistent file library. A zero storage quota means unlimited;
+	// operators explicitly assign real product entitlements through the global
+	// default and/or subscription-group overrides instead of code guessing them.
+	viper.SetDefault("library.storage_driver", "local")
+	viper.SetDefault("library.storage_dir", "./data/library-files")
+	viper.SetDefault("library.default_storage_bytes", int64(0))
+	viper.SetDefault("library.subscription_group_storage_bytes", map[string]int64{})
+	viper.SetDefault("library.max_file_bytes", int64(20*1024*1024))
+	viper.SetDefault("library.batch_download_limit", 100)
+	viper.SetDefault("library.batch_download_max_bytes", int64(100*1024*1024))
+	viper.SetDefault("library.deleted_retention_days", 30)
+	viper.SetDefault("library.pending_upload_stale_minutes", 60)
+	viper.SetDefault("library.cleanup_interval_minutes", 60)
+	viper.SetDefault("library.cleanup_batch_size", 100)
+	// Empty lets the storage provider reuse image_storage.region when credentials
+	// are shared; the common S3 client otherwise falls back to "auto" for R2.
+	viper.SetDefault("library.s3.region", "")
+
 	// Server
 	viper.SetDefault("server.host", "0.0.0.0")
 	viper.SetDefault("server.port", 8080)
@@ -1741,7 +1954,11 @@ func setDefaults() {
 	viper.SetDefault("server.idle_timeout", 120)       // 120秒空闲超时
 	viper.SetDefault("server.shutdown_grace_seconds", 30)
 	viper.SetDefault("server.shutdown_force_wait_seconds", 10)
-	viper.SetDefault("server.trusted_proxies", []string{})
+	// Trust only loopback reverse proxies by default. The bundled Caddy setup
+	// connects over loopback; without this, every proxied client collapses into
+	// one rate-limit/session-binding identity. Operators using a container or
+	// network proxy must still opt in its exact IP/CIDR explicitly.
+	viper.SetDefault("server.trusted_proxies", []string{"127.0.0.1", "::1"})
 	viper.SetDefault("server.max_request_body_size", int64(256*1024*1024))
 	// H2C 默认配置
 	viper.SetDefault("server.h2c.enabled", false)
@@ -1959,6 +2176,21 @@ func setDefaults() {
 	viper.SetDefault("batch_image.vertex_output_retention_hours", 72)
 	viper.SetDefault("batch_image.vertex_batch_prediction_base_url", "")
 	viper.SetDefault("batch_image.vertex_gcs_base_url", "")
+
+	// Skill marketplace importer. Plans are disabled when created, so keeping
+	// the idle worker available by default does not start outbound collection.
+	viper.SetDefault("skill_import.enabled", true)
+	viper.SetDefault("skill_import.worker_enabled", true)
+	viper.SetDefault("skill_import.worker_concurrency", 2)
+	viper.SetDefault("skill_import.per_host_concurrency", 1)
+	viper.SetDefault("skill_import.poll_interval_seconds", 2)
+	viper.SetDefault("skill_import.lease_ttl_seconds", 300)
+	viper.SetDefault("skill_import.max_attempts", 5)
+	viper.SetDefault("skill_import.max_run_duration_hours", 24)
+	viper.SetDefault("skill_import.events_retention_days", 180)
+	viper.SetDefault("skill_import.max_http_response_bytes", 10485760)
+	viper.SetDefault("skill_import.http_timeout_seconds", 30)
+	viper.SetDefault("skill_import.github_token", "")
 
 	// Image storage (async image task result offload to S3-compatible object storage)
 	viper.SetDefault("image_storage.enabled", false)
@@ -2595,6 +2827,35 @@ func (c *Config) Validate() error {
 	if c.Redis.MinIdleConns > c.Redis.PoolSize {
 		return fmt.Errorf("redis.min_idle_conns cannot exceed redis.pool_size")
 	}
+	if c.SkillImport.Enabled {
+		if c.SkillImport.WorkerConcurrency <= 0 || c.SkillImport.WorkerConcurrency > 16 {
+			return fmt.Errorf("skill_import.worker_concurrency must be between 1 and 16")
+		}
+		if c.SkillImport.PerHostConcurrency <= 0 || c.SkillImport.PerHostConcurrency > c.SkillImport.WorkerConcurrency {
+			return fmt.Errorf("skill_import.per_host_concurrency must be between 1 and worker_concurrency")
+		}
+		if c.SkillImport.PollIntervalSeconds <= 0 {
+			return fmt.Errorf("skill_import.poll_interval_seconds must be positive")
+		}
+		if c.SkillImport.LeaseTTLSeconds < 30 {
+			return fmt.Errorf("skill_import.lease_ttl_seconds must be at least 30")
+		}
+		if c.SkillImport.MaxAttempts <= 0 || c.SkillImport.MaxAttempts > 20 {
+			return fmt.Errorf("skill_import.max_attempts must be between 1 and 20")
+		}
+		if c.SkillImport.MaxRunDurationHours <= 0 {
+			return fmt.Errorf("skill_import.max_run_duration_hours must be positive")
+		}
+		if c.SkillImport.EventsRetentionDays <= 0 {
+			return fmt.Errorf("skill_import.events_retention_days must be positive")
+		}
+		if c.SkillImport.MaxHTTPResponseBytes <= 0 {
+			return fmt.Errorf("skill_import.max_http_response_bytes must be positive")
+		}
+		if c.SkillImport.HTTPTimeoutSeconds <= 0 {
+			return fmt.Errorf("skill_import.http_timeout_seconds must be positive")
+		}
+	}
 	if c.BatchImage.QueueEnabled {
 		if strings.TrimSpace(c.BatchImage.QueueReadyKey) == "" {
 			return fmt.Errorf("batch_image.queue_ready_key must not be empty")
@@ -3199,8 +3460,213 @@ func (c *Config) Validate() error {
 	if c.Concurrency.PingInterval < 5 || c.Concurrency.PingInterval > 30 {
 		return fmt.Errorf("concurrency.ping_interval must be between 5-30 seconds")
 	}
+	if c.RunMode == RunModeSimple && c.Transcription.Enabled {
+		return fmt.Errorf("transcription.enabled is not supported when run_mode=simple")
+	}
+	if err := validateTranscriptionConfig(c.Transcription); err != nil {
+		return err
+	}
+	if c.Transcription.Enabled {
+		transcriptionBodyLimit := c.Transcription.RequestBodyLimit()
+		if c.Gateway.MaxBodySize < transcriptionBodyLimit {
+			return fmt.Errorf("gateway.max_body_size must be at least transcription request body limit (%d bytes)", transcriptionBodyLimit)
+		}
+		globalBodyLimit := c.Server.MaxRequestBodySize
+		if globalBodyLimit <= 0 {
+			globalBodyLimit = c.Gateway.MaxBodySize
+		}
+		if globalBodyLimit < transcriptionBodyLimit {
+			return fmt.Errorf("server.max_request_body_size must be at least transcription request body limit (%d bytes)", transcriptionBodyLimit)
+		}
+	}
+	if err := validateChatAttachmentConfig(c.ChatAttachments); err != nil {
+		return err
+	}
+	if err := validateLibraryConfig(c.Library, c.ImageStorage); err != nil {
+		return err
+	}
+	attachmentBodyLimit := c.ChatAttachments.RequestBodyLimit()
+	if libraryLimit := c.Library.RequestBodyLimit(); libraryLimit > attachmentBodyLimit {
+		attachmentBodyLimit = libraryLimit
+	}
+	if c.Gateway.MaxBodySize < attachmentBodyLimit {
+		return fmt.Errorf("gateway.max_body_size must be at least chat attachment request body limit (%d bytes)", attachmentBodyLimit)
+	}
+	globalBodyLimit := c.Server.MaxRequestBodySize
+	if globalBodyLimit <= 0 {
+		globalBodyLimit = c.Gateway.MaxBodySize
+	}
+	if globalBodyLimit < attachmentBodyLimit {
+		return fmt.Errorf("server.max_request_body_size must be at least chat attachment request body limit (%d bytes)", attachmentBodyLimit)
+	}
 	if err := ValidateDingTalkConfig(c.DingTalk); err != nil {
 		return fmt.Errorf("dingtalk_connect: %w", err)
+	}
+	return nil
+}
+
+func validateChatAttachmentConfig(c ChatAttachmentConfig) error {
+	if strings.TrimSpace(c.StorageDir) == "" {
+		return fmt.Errorf("chat_attachments.storage_dir must not be empty")
+	}
+	if c.RetentionDays != 30 {
+		return fmt.Errorf("chat_attachments.retention_days must be 30")
+	}
+	if c.MaxPerTurn != 4 {
+		return fmt.Errorf("chat_attachments.max_per_turn must be 4")
+	}
+	if c.MaxTurnBytes != 20*1024*1024 {
+		return fmt.Errorf("chat_attachments.max_turn_bytes must be 20MB")
+	}
+	if c.MaxImageBytes != 10*1024*1024 || c.MaxDocumentBytes != 20*1024*1024 {
+		return fmt.Errorf("chat_attachments image/document limits must be 10MB/20MB")
+	}
+	if c.ContextImageBytes <= 0 || c.ContextImageBytes > 40*1024*1024 || c.ContextMaxImages != 4 ||
+		c.ContextDocumentTextBytes <= 0 || c.ContextDocumentTextBytes > 4*1024*1024 {
+		return fmt.Errorf("chat_attachments context budgets are invalid")
+	}
+	if c.JanitorIntervalMinutes <= 0 || c.JanitorIntervalMinutes > 1440 ||
+		c.CleanupBatchSize <= 0 || c.CleanupBatchSize > 1000 {
+		return fmt.Errorf("chat_attachments janitor settings are invalid")
+	}
+	if c.UploadsPerMinute != 10 || c.DailyUploadBytes != 100*1024*1024 {
+		return fmt.Errorf("chat_attachments upload quotas must be 10/minute and 100MB/day")
+	}
+	if c.MaxConcurrentGlobal != 4 ||
+		c.MaxConcurrentPerUser != 2 || c.MaxConcurrentPerUser > c.MaxConcurrentGlobal {
+		return fmt.Errorf("chat_attachments concurrency limits are invalid")
+	}
+	return nil
+}
+
+func validateLibraryConfig(c LibraryConfig, imageStorage ImageStorageConfig) error {
+	switch c.StorageDriver {
+	case "local":
+		if strings.TrimSpace(c.StorageDir) == "" {
+			return fmt.Errorf("library.storage_dir must not be empty for local storage")
+		}
+	case "s3":
+		bucket := strings.TrimSpace(c.S3.Bucket)
+		accessKey := firstNonEmptyString(c.S3.AccessKeyID, imageStorage.AccessKeyID)
+		secretKey := firstNonEmptyString(c.S3.SecretAccessKey, imageStorage.SecretAccessKey)
+		if bucket == "" || accessKey == "" || secretKey == "" {
+			return fmt.Errorf("library.s3 bucket and credentials must be configured for s3 storage")
+		}
+		if strings.TrimSpace(imageStorage.PublicBaseURL) != "" && bucket == strings.TrimSpace(imageStorage.Bucket) {
+			return fmt.Errorf("library.s3.bucket must differ from image_storage.bucket when image_storage.public_base_url is configured")
+		}
+	default:
+		return fmt.Errorf("library.storage_driver must be local or s3")
+	}
+	if c.DefaultStorageBytes < 0 || c.DefaultStorageBytes > 1024*1024*1024*1024 {
+		return fmt.Errorf("library.default_storage_bytes must be zero (unlimited) or no more than 1TB")
+	}
+	for groupID, limit := range c.SubscriptionGroupStorageBytes {
+		parsedGroupID, err := strconv.ParseInt(strings.TrimSpace(groupID), 10, 64)
+		if err != nil || parsedGroupID <= 0 || limit < 0 || limit > 1024*1024*1024*1024 {
+			return fmt.Errorf("library.subscription_group_storage_bytes contains an invalid group or limit")
+		}
+	}
+	if c.MaxFileBytes <= 0 || c.MaxFileBytes > 100*1024*1024 ||
+		(c.DefaultStorageBytes > 0 && c.MaxFileBytes > c.DefaultStorageBytes) {
+		return fmt.Errorf("library.max_file_bytes must be positive, no more than 100MB, and within a finite default storage limit")
+	}
+	if c.BatchDownloadLimit <= 0 || c.BatchDownloadLimit > 100 {
+		return fmt.Errorf("library.batch_download_limit must be between 1 and 100")
+	}
+	if c.BatchDownloadMaxBytes <= 0 || c.BatchDownloadMaxBytes > 100*1024*1024 {
+		return fmt.Errorf("library.batch_download_max_bytes must be positive and no more than 100MB")
+	}
+	if c.DeletedRetentionDays < 0 || c.DeletedRetentionDays > 365 {
+		return fmt.Errorf("library.deleted_retention_days must be between 0 and 365")
+	}
+	if c.PendingUploadStaleMinutes < 15 || c.PendingUploadStaleMinutes > 1440 {
+		return fmt.Errorf("library.pending_upload_stale_minutes must be between 15 and 1440")
+	}
+	if c.CleanupIntervalMinutes <= 0 || c.CleanupIntervalMinutes > 1440 {
+		return fmt.Errorf("library.cleanup_interval_minutes must be between 1 and 1440")
+	}
+	if c.CleanupBatchSize <= 0 || c.CleanupBatchSize > 1000 {
+		return fmt.Errorf("library.cleanup_batch_size must be between 1 and 1000")
+	}
+	return nil
+}
+
+func validateTranscriptionConfig(c TranscriptionConfig) error {
+	if strings.ToLower(strings.TrimSpace(c.Provider)) != "openai_compatible" {
+		return fmt.Errorf("transcription.provider must be openai_compatible")
+	}
+	if strings.TrimSpace(c.Model) == "" {
+		return fmt.Errorf("transcription.model must not be empty")
+	}
+	if c.MaxUploadBytes <= 0 || c.MaxUploadBytes > 100*1024*1024 {
+		return fmt.Errorf("transcription.max_upload_bytes must be between 1 byte and 100MB")
+	}
+	if c.UploadTimeoutSeconds <= 0 || c.UploadTimeoutSeconds > 120 {
+		return fmt.Errorf("transcription.upload_timeout_seconds must be between 1 and 120")
+	}
+	if c.MaxDurationSeconds <= 0 || c.MaxDurationSeconds > 3600 {
+		return fmt.Errorf("transcription.max_duration_seconds must be between 1 and 3600")
+	}
+	if c.RequestTimeoutSeconds <= 0 || c.RequestTimeoutSeconds > 300 {
+		return fmt.Errorf("transcription.request_timeout_seconds must be between 1 and 300")
+	}
+	if c.QueueTimeoutMS <= 0 || c.QueueTimeoutMS > 30000 {
+		return fmt.Errorf("transcription.queue_timeout_ms must be between 1 and 30000")
+	}
+	minimumIdempotencyTTLSeconds := c.UploadTimeoutSeconds + c.ProbeTimeoutSeconds + c.RequestTimeoutSeconds + int(math.Ceil(float64(c.QueueTimeoutMS)/1000)) + 60
+	if c.IdempotencyTTLSeconds < minimumIdempotencyTTLSeconds || c.IdempotencyTTLSeconds > 86400 {
+		return fmt.Errorf("transcription.idempotency_ttl_seconds must be between %d and 86400", minimumIdempotencyTTLSeconds)
+	}
+	if c.MaxConcurrentGlobal <= 0 || c.MaxConcurrentGlobal > 1024 {
+		return fmt.Errorf("transcription.max_concurrent_global must be between 1 and 1024")
+	}
+	if c.MaxConcurrentPerUser <= 0 || c.MaxConcurrentPerUser > c.MaxConcurrentGlobal {
+		return fmt.Errorf("transcription.max_concurrent_per_user must be between 1 and max_concurrent_global")
+	}
+	if c.UserRequestsPerMinute <= 0 || c.IPRequestsPerMinute <= 0 {
+		return fmt.Errorf("transcription request-per-minute limits must be positive")
+	}
+	if c.UserDailyAudioSeconds <= 0 {
+		return fmt.Errorf("transcription.user_daily_audio_seconds must be positive")
+	}
+	if c.UpstreamResponseMaxBytes <= 0 || c.UpstreamResponseMaxBytes > 16*1024*1024 {
+		return fmt.Errorf("transcription.upstream_response_max_bytes must be between 1 byte and 16MB")
+	}
+	if c.ProbeTimeoutSeconds <= 0 || c.ProbeTimeoutSeconds > 30 {
+		return fmt.Errorf("transcription.probe_timeout_seconds must be between 1 and 30")
+	}
+	if len(c.AcceptedMIMETypes) == 0 {
+		return fmt.Errorf("transcription.accepted_mime_types must not be empty")
+	}
+	for _, value := range c.AcceptedMIMETypes {
+		mediaType, _, err := mime.ParseMediaType(value)
+		if err != nil || !strings.Contains(mediaType, "/") {
+			return fmt.Errorf("transcription.accepted_mime_types contains invalid media type %q", value)
+		}
+	}
+	seenGroups := make(map[int64]struct{}, len(c.GroupIDs))
+	for _, groupID := range c.GroupIDs {
+		if groupID <= 0 {
+			return fmt.Errorf("transcription.group_ids must contain only positive IDs")
+		}
+		if _, exists := seenGroups[groupID]; exists {
+			return fmt.Errorf("transcription.group_ids must not contain duplicate ID %d", groupID)
+		}
+		seenGroups[groupID] = struct{}{}
+	}
+	if !c.Enabled {
+		return nil
+	}
+	if len(c.GroupIDs) == 0 {
+		return fmt.Errorf("transcription.group_ids must not be empty when transcription.enabled=true")
+	}
+	ffprobePath := strings.TrimSpace(c.FFprobePath)
+	if ffprobePath == "" {
+		return fmt.Errorf("transcription.ffprobe_path must not be empty when transcription.enabled=true")
+	}
+	if _, err := exec.LookPath(ffprobePath); err != nil {
+		return fmt.Errorf("transcription.ffprobe_path is unavailable: %w", err)
 	}
 	return nil
 }

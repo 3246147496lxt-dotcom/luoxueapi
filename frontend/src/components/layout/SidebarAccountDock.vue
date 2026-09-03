@@ -1,8 +1,12 @@
 <template>
   <div
-    v-if="summary.hasUser.value"
-    class="sidebar-account-dock"
-    :class="{ 'sidebar-account-dock--collapsed': sidebarCollapsed }"
+    v-if="profile"
+    class="sidebar-account-dock sidebar-account-dock--personal"
+    :class="{
+      'sidebar-account-dock--collapsed': sidebarCollapsed,
+      'sidebar-account-dock--chat': context === 'chat',
+      'sidebar-account-dock--work': context === 'work' && !isAdminWorkspace,
+    }"
     data-testid="sidebar-account-dock"
   >
     <div
@@ -14,8 +18,8 @@
         ref="triggerRef"
         type="button"
         class="sidebar-account-trigger"
-        :title="sidebarCollapsed ? summary.displayName.value : undefined"
-        :aria-label="`${t('accountDock.open')} · ${summary.displayName.value}`"
+        :title="sidebarCollapsed ? triggerAriaLabel : undefined"
+        :aria-label="triggerAriaLabel"
         aria-haspopup="dialog"
         aria-controls="sidebar-account-panel"
         :aria-expanded="panelOpen"
@@ -23,55 +27,44 @@
       >
         <span class="sidebar-account-trigger__avatar">
           <img
-            v-if="summary.avatarUrl.value"
-            :src="summary.avatarUrl.value"
-            :alt="summary.displayName.value"
+            v-if="profile.avatarUrl"
+            :src="profile.avatarUrl"
+            :alt="profile.displayName"
           >
-          <span v-else>{{ summary.initials.value }}</span>
-          <span
-            v-if="summary.unreadAnnouncementCount.value > 0"
-            class="sidebar-account-trigger__badge"
-            :aria-label="t('announcements.unread')"
-          ></span>
+          <span v-else>{{ profile.initials }}</span>
         </span>
 
         <span
           class="sidebar-account-trigger__copy"
           :aria-hidden="sidebarCollapsed ? 'true' : undefined"
         >
-          <span class="sidebar-account-trigger__name">{{ summary.displayName.value }}</span>
-          <span class="sidebar-account-trigger__meta">
-            <CreditAmount
-              :value="formatCredit(summary.availableBalance.value)"
-              icon-size="xs"
-              :label="`${t('accountDock.availableBalance')} ${formatCredit(summary.availableBalance.value)}`"
-            />
-            <span aria-hidden="true">·</span>
-            <span class="truncate">{{ subscriptionStatusText }}</span>
+          <span class="sidebar-account-trigger__name">
+            {{ profile.displayName }}
           </span>
+          <span class="sidebar-account-trigger__meta">{{ accountPlanLabel }}</span>
+        </span>
+
+        <span
+          v-if="!sidebarCollapsed"
+          class="sidebar-account-trigger__chevrons"
+          aria-hidden="true"
+        >
+          <Icon name="chevronsUpDown" size="sm" />
         </span>
       </button>
-
-      <RouterLink
-        v-if="upgradeLink && !sidebarCollapsed"
-        data-testid="account-upgrade-link"
-        class="sidebar-account-upgrade"
-        :to="upgradeLink.to"
-        @click="handleUpgradeClick"
-      >
-        {{ upgradeLink.label }}
-      </RouterLink>
     </div>
 
     <SidebarAccountOverlay
       :open="panelOpen"
       :anchor-element="dockRowRef"
       :summary="panelSummary"
-      :purchase-link="purchaseLink"
-      :subscription-link="subscriptionLink"
-      :quota-viewer-link="quotaViewerLink"
-      :resource-links="resourceLinks"
       :show-onboarding="showOnboarding"
+      :context="context"
+      :variant="isAdminWorkspace ? 'admin' : 'personal'"
+      appearance="personal"
+      :plan-label="accountPlanLabel"
+      :help-href="helpHref"
+      :workspace-target="workspaceTarget"
       @close="closePanel"
       @logout="handleLogout"
       @replay="handleReplay"
@@ -82,29 +75,20 @@
 
 <script setup lang="ts">
 import { computed, nextTick, ref, watch } from 'vue'
+import { storeToRefs } from 'pinia'
 import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
-import { useAccountSummary } from '@/composables/useAccountSummary'
+import { useUserMembership } from '@/composables/useUserMembership'
 import { openPersonalSettings } from '@/navigation/personalSettingsRoute'
-import {
-  getShellDestinationSpecs,
-  selectVisibleShellDestinations,
-  toShellCapabilityState,
-  type ShellDestinationSpec,
-} from '@/navigation/shellDestinations'
+import { resolveDocumentationUrl } from '@/utils/documentationUrl'
 import { useAppStore } from '@/stores/app'
 import { useAuthStore } from '@/stores/auth'
 import { useOnboardingStore } from '@/stores/onboarding'
-import { resolveDocumentationUrl } from '@/utils/documentationUrl'
-import { sanitizeUrl } from '@/utils/url'
-import CreditAmount from '@/components/common/CreditAmount.vue'
+import { useUserProfileStore } from '@/stores/userProfile'
+import Icon from '@/components/icons/Icon.vue'
 import SidebarAccountOverlay from './SidebarAccountOverlay.vue'
-import type {
-  AccountPanelIcon,
-  AccountPanelLink,
-  AccountPanelSummary,
-  AccountResourceLink,
-} from './accountPanelTypes'
+import type { PersonalSettingsSection } from '@/navigation/personalSettingsRoute'
+import type { AccountPanelSummary } from './accountPanelTypes'
 
 const { t } = useI18n()
 const route = useRoute()
@@ -112,189 +96,78 @@ const router = useRouter()
 const appStore = useAppStore()
 const authStore = useAuthStore()
 const onboardingStore = useOnboardingStore()
-const summary = useAccountSummary()
+const userProfileStore = useUserProfileStore()
+const props = withDefaults(defineProps<{
+  context?: 'work' | 'chat'
+  collapsed?: boolean
+}>(), {
+  context: 'work',
+  collapsed: false,
+})
+const context = computed(() => props.context)
+const {
+  profile,
+  subscriptionsLoaded,
+  activeSubscriptionCount,
+  primarySubscription,
+} = storeToRefs(userProfileStore)
+const membership = useUserMembership({
+  subscriptionsLoaded,
+  activeSubscriptionCount,
+  primarySubscription,
+})
 
 const panelOpen = ref(false)
 const dockRowRef = ref<HTMLElement | null>(null)
 const triggerRef = ref<HTMLButtonElement | null>(null)
-const sidebarCollapsed = computed(() => appStore.sidebarCollapsed)
-const audience = computed(() => summary.isAdmin.value ? 'admin' as const : 'user' as const)
-const documentationUrl = computed(() => resolveDocumentationUrl(
-  appStore.cachedPublicSettings?.doc_url || appStore.docUrl,
+const isAdminWorkspace = computed(() => (
+  authStore.isAdmin && route.path.startsWith('/admin')
 ))
-const contactUrl = computed(() => {
-  const configuredUrl = sanitizeUrl(
-    appStore.cachedPublicSettings?.contact_info || appStore.contactInfo,
-    { allowRelative: true },
-  )
-  return configuredUrl || `${documentationUrl.value.replace(/#.*$/, '')}#recharge`
-})
+const sidebarCollapsed = computed(() => props.collapsed)
+const settingsAudience = computed(() => (
+  isAdminWorkspace.value ? 'admin' as const : 'user' as const
+))
 const showOnboarding = computed(
-  () => !summary.isSimpleMode.value && summary.isAdmin.value,
+  () => !authStore.isSimpleMode && isAdminWorkspace.value,
 )
-
-const destinationContext = computed(() => ({
-  audience: audience.value,
-  simpleMode: summary.isSimpleMode.value,
-  capabilities: {
-    payment: toShellCapabilityState(
-      appStore.cachedPublicSettings?.payment_enabled,
-    ),
-    'public-model-catalog': toShellCapabilityState(
-      appStore.backendModeEnabled
-        ? false
-        : appStore.cachedPublicSettings?.public_model_catalog_enabled,
-    ),
-  },
-}))
-
-const iconByDestination: Record<string, AccountPanelIcon> = {
-  home: 'destinationHome',
-  models: 'destinationModels',
-  contact: 'destinationContact',
-}
-
-const purchaseLink = computed<AccountPanelLink | null>(() => {
-  const walletSpec = selectVisibleShellDestinations(
-    getShellDestinationSpecs(audience.value),
-    destinationContext.value,
-    'account',
-  )
-    .find((spec) => spec.id === 'wallet' && spec.target.kind === 'route')
-
-  if (!walletSpec || walletSpec.target.kind !== 'route') return null
-
-  return {
-    id: walletSpec.id,
-    label: t('accountDock.recharge'),
-    to: walletSpec.target.path,
-    icon: 'wallet',
-  }
-})
-
-const subscriptionLink = computed<AccountPanelLink | null>(() => {
-  const subscriptionSpec = selectVisibleShellDestinations(
-    getShellDestinationSpecs(audience.value),
-    destinationContext.value,
-    'account',
-  )
-    .find((spec) => spec.id === 'subscriptions' && spec.target.kind === 'route')
-
-  if (!subscriptionSpec || subscriptionSpec.target.kind !== 'route') return null
-
-  return {
-    id: subscriptionSpec.id,
-    label: t(subscriptionSpec.labelKey),
-    to: subscriptionSpec.target.path,
-    icon: 'creditCard',
-  }
-})
-
-const quotaViewerLink = computed<AccountPanelLink | null>(() => {
-  const quotaViewerSpec = selectVisibleShellDestinations(
-    getShellDestinationSpecs(audience.value),
-    destinationContext.value,
-    'account',
-  ).find((spec) => spec.id === 'quotaViewer' && spec.target.kind === 'route')
-
-  if (!quotaViewerSpec || quotaViewerSpec.target.kind !== 'route') return null
-
-  return {
-    id: quotaViewerSpec.id,
-    label: t(quotaViewerSpec.labelKey),
-    to: quotaViewerSpec.target.path,
-    icon: 'download',
-  }
-})
-
-const upgradeLink = computed(() => {
-  const pricingSpec = selectVisibleShellDestinations(
-    getShellDestinationSpecs(audience.value),
-    destinationContext.value,
-    'account',
-  )
-    .find((spec) => spec.id === 'pricing' && spec.target.kind === 'route')
-
-  if (!pricingSpec || pricingSpec.target.kind !== 'route') return null
-
-  return {
-    label: t('accountDock.upgrade'),
-    to: pricingSpec.target.path,
-  }
-})
-
-const settingsTarget = computed(() => {
-  const settingsSpec = selectVisibleShellDestinations(
-    getShellDestinationSpecs(audience.value),
-    destinationContext.value,
-    'account',
-  ).find((spec) => (
-    spec.id === 'settings'
-    && spec.target.kind === 'settings-section'
-  ))
-
-  return settingsSpec?.target.kind === 'settings-section'
-    ? settingsSpec.target
-    : null
-})
-
-function resolveResourceHref(spec: ShellDestinationSpec) {
-  if (spec.target.kind === 'href') return spec.target.href
-  if (spec.target.kind === 'configured-href') {
-    return spec.target.source === 'documentation'
-      ? documentationUrl.value
-      : contactUrl.value
-  }
-  if (spec.target.kind === 'route') return spec.target.path
-  return '#'
-}
-
-const resourceLinks = computed<AccountResourceLink[]>(() => (
-  selectVisibleShellDestinations(
-    getShellDestinationSpecs(audience.value),
-    destinationContext.value,
-    'support',
-  )
-    .map((spec) => ({
-      id: spec.id,
-      label: t(spec.labelKey),
-      href: resolveResourceHref(spec),
-      icon: iconByDestination[spec.id] ?? 'destinationDocument',
-    }))
-))
 
 function formatCredit(value: number) {
   return Number.isFinite(value) ? value.toFixed(2) : '0.00'
 }
 
-const subscriptionStatusText = computed(() => {
-  if (
-    !summary.subscriptionsLoaded.value
-  ) {
-    return t('accountDock.subscriptionLoading')
-  }
-  if (summary.activeSubscriptionCount.value > 0) {
-    return t('accountDock.activeSubscriptions', {
-      count: summary.activeSubscriptionCount.value,
-    })
-  }
-  return t('accountDock.payAsYouGo')
+const accountPlanLabel = computed(() => membership.accountPlanLabel.value)
+
+const triggerAriaLabel = computed(() => [
+  t('accountDock.open'),
+  profile.value?.displayName ?? '',
+  accountPlanLabel.value,
+].filter(Boolean).join(' · '))
+
+const helpHref = computed(() => resolveDocumentationUrl(
+  appStore.cachedPublicSettings?.doc_url || appStore.docUrl,
+))
+
+const workspaceTarget = computed(() => {
+  if (props.context === 'chat' || !authStore.isAdmin) return null
+  return isAdminWorkspace.value
+    ? { href: '/dashboard', label: t('nav.switchToPersonalWorkspace') }
+    : { href: '/admin/dashboard', label: t('nav.switchToAdminWorkspace') }
 })
 
 const panelSummary = computed<AccountPanelSummary>(() => ({
-  displayName: summary.displayName.value,
-  email: summary.email.value,
-  initials: summary.initials.value,
-  avatarUrl: summary.avatarUrl.value,
-  frozenBalance: summary.frozenBalance.value,
-  formattedAvailableBalance: formatCredit(summary.availableBalance.value),
-  formattedFrozenBalance: formatCredit(summary.frozenBalance.value),
-  activeSubscriptionCount: summary.activeSubscriptionCount.value,
-  subscriptionsLoaded: summary.subscriptionsLoaded.value,
+  displayName: profile.value?.displayName ?? '',
+  email: profile.value?.email ?? '',
+  initials: profile.value?.initials ?? '',
+  avatarUrl: profile.value?.avatarUrl ?? '',
+  frozenBalance: profile.value?.frozenBalance ?? 0,
+  formattedAvailableBalance: formatCredit(profile.value?.availableBalance ?? 0),
+  formattedFrozenBalance: formatCredit(profile.value?.frozenBalance ?? 0),
+  activeSubscriptionCount: activeSubscriptionCount.value,
+  subscriptionsLoaded: subscriptionsLoaded.value,
 }))
 
 function isMobileViewport() {
-  return typeof window !== 'undefined' && window.matchMedia('(max-width: 1023px)').matches
+  return appStore.workspaceMobileDrawer
 }
 
 function togglePanel() {
@@ -304,13 +177,13 @@ function togglePanel() {
   }
 
   panelOpen.value = true
-  if (isMobileViewport()) {
+  if (isMobileViewport() && isAdminWorkspace.value) {
     appStore.setMobileOpen(false)
   }
 }
 
 function focusReturnTarget() {
-  const target = isMobileViewport()
+  const target = isMobileViewport() && props.context !== 'chat'
     ? document.querySelector<HTMLButtonElement>('[data-testid="mobile-header-menu"]')
     : triggerRef.value
   target?.focus({ preventScroll: true })
@@ -339,22 +212,14 @@ function handleReplay() {
   onboardingStore.replay()
 }
 
-function handleUpgradeClick() {
-  closePanel(false)
-  if (isMobileViewport()) {
-    appStore.setMobileOpen(false)
-  }
-}
-
-async function handleOpenSettings() {
-  if (!settingsTarget.value) return
+async function handleOpenSettings(section: PersonalSettingsSection) {
   closePanel(false)
   await nextTick()
   await openPersonalSettings(
     router,
     route,
-    audience.value,
-    settingsTarget.value.section,
+    settingsAudience.value,
+    section,
   )
 }
 
@@ -364,6 +229,22 @@ watch(
 )
 
 watch(sidebarCollapsed, () => closePanel(false))
+
+watch(
+  () => appStore.mobileOpen,
+  (mobileOpen) => {
+    if (!mobileOpen && props.context === 'work' && !isAdminWorkspace.value) {
+      closePanel(false)
+    }
+  },
+)
+
+watch(
+  () => appStore.workspaceNarrowSidebarOpen,
+  (open) => {
+    if (!open && appStore.workspaceNarrowSidebar) closePanel(false)
+  },
+)
 </script>
 
 <style scoped>
@@ -372,60 +253,89 @@ watch(sidebarCollapsed, () => closePanel(false))
   z-index: 2;
   width: 100%;
   flex: 0 0 auto;
-  padding: 0 6px calc(6px + env(safe-area-inset-bottom)) 8px;
+  padding:
+    0
+    var(--workspace-space-1-5)
+    calc(var(--workspace-space-1-5) + env(safe-area-inset-bottom))
+    var(--workspace-space-2);
 }
 
 .sidebar-account-row {
   display: grid;
   width: 100%;
-  min-height: 52px;
+  min-height: var(--workspace-sidebar-footer-row-height);
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: stretch;
-  padding-right: 6px;
+  padding-right: var(--workspace-space-1-5);
   overflow: hidden;
-  border-radius: 10px;
-  color: rgb(30 41 59);
+  border-radius: var(--workspace-radius-button);
+  color: var(--workspace-dock-text);
   transition:
+    width var(--workspace-sidebar-transition-duration) var(--workspace-sidebar-transition-easing),
     color 150ms ease,
     background-color 150ms ease;
 }
 
 .sidebar-account-row:hover,
 .sidebar-account-row--open {
-  color: rgb(15 23 42);
-  background: rgb(15 23 42 / 0.055);
+  color: var(--workspace-dock-text-strong);
+  background: var(--workspace-dock-hover);
+}
+
+.sidebar-account-dock--personal .sidebar-account-row,
+.sidebar-account-dock--personal .sidebar-account-row:hover,
+.sidebar-account-dock--personal .sidebar-account-row--open {
+  color: var(--workspace-identity-text);
+}
+
+.sidebar-account-dock--personal .sidebar-account-row {
+  padding-right: 0;
 }
 
 .sidebar-account-trigger {
   display: grid;
   min-width: 0;
-  min-height: 52px;
-  grid-template-columns: 32px minmax(0, 1fr);
+  min-height: var(--workspace-sidebar-footer-row-height);
+  grid-template-columns: var(--workspace-sidebar-touch-target) minmax(0, 1fr) auto;
   align-items: center;
-  gap: 10px;
-  padding: 6px 4px 6px 8px;
+  gap: var(--workspace-space-2-5);
+  padding:
+    var(--workspace-space-1-5)
+    var(--workspace-space-1)
+    var(--workspace-space-1-5)
+    0;
   border-radius: inherit;
   color: inherit;
   text-align: left;
 }
 
-.sidebar-account-trigger:focus-visible,
-.sidebar-account-upgrade:focus-visible {
-  outline: 2px solid var(--app-shell-sidebar-focus, rgb(0 132 255 / 0.5));
+.sidebar-account-trigger:focus-visible {
+  outline: 2px solid var(--workspace-dock-focus);
   outline-offset: -2px;
+}
+
+.sidebar-account-dock--personal .sidebar-account-trigger:focus-visible {
+  outline-color: var(--workspace-dock-focus-personal);
+}
+
+.sidebar-account-dock--personal .sidebar-account-trigger {
+  grid-template-columns: 24px minmax(0, 1fr) 36px;
+  gap: var(--workspace-space-2);
+  padding: var(--workspace-space-2);
 }
 
 .sidebar-account-trigger__avatar {
   position: relative;
   display: flex;
-  width: 32px;
-  height: 32px;
+  width: var(--workspace-avatar-size-md);
+  height: var(--workspace-avatar-size-md);
   align-items: center;
   justify-content: center;
+  justify-self: center;
   overflow: visible;
-  border-radius: 999px;
-  color: #1c1f23;
-  background: #fce865;
+  border-radius: var(--workspace-radius-pill);
+  color: var(--workspace-identity-avatar-text);
+  background: var(--workspace-identity-avatar-surface);
   font-size: 0.75rem;
   font-weight: 700;
 }
@@ -438,22 +348,33 @@ watch(sidebarCollapsed, () => closePanel(false))
   object-fit: cover;
 }
 
-.sidebar-account-trigger__badge {
-  position: absolute;
-  right: -2px;
-  top: -2px;
-  width: 9px;
-  height: 9px;
-  border: 2px solid var(--app-shell-sidebar-bg, #fff);
-  border-radius: 999px;
-  background: rgb(239 68 68);
+.sidebar-account-dock--personal .sidebar-account-trigger__avatar {
+  width: 24px;
+  height: 24px;
+  border-radius: var(--workspace-radius-pill);
+  color: var(--workspace-identity-text);
+  background: var(--workspace-hover);
+  font-size: var(--workspace-type-secondary-size);
+  font-weight: var(--workspace-type-secondary-weight);
+}
+
+:global(html.dark .sidebar-account-dock--personal .sidebar-account-trigger__avatar) {
+  color: var(--workspace-identity-text);
+  background: var(--workspace-surface-subtle);
+  box-shadow: inset 0 0 0 1px var(--workspace-border-strong);
 }
 
 .sidebar-account-trigger__copy {
   display: flex;
   min-width: 0;
+  max-width: 12rem;
   flex-direction: column;
-  gap: 1px;
+  gap: var(--workspace-space-0-25);
+  overflow: hidden;
+  opacity: 1;
+  transition:
+    max-width 0.2s ease,
+    opacity 0.12s ease;
 }
 
 .sidebar-account-trigger__name,
@@ -461,6 +382,20 @@ watch(sidebarCollapsed, () => closePanel(false))
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.sidebar-account-trigger__chevrons {
+  display: grid;
+  width: 36px;
+  height: 36px;
+  place-items: center;
+  flex: 0 0 36px;
+  border-radius: var(--workspace-radius-compact);
+  color: var(--workspace-dock-chevron);
+}
+
+.sidebar-account-dock--personal .sidebar-account-trigger__chevrons {
+  color: var(--workspace-identity-text-tertiary);
 }
 
 .sidebar-account-trigger__name {
@@ -474,91 +409,55 @@ watch(sidebarCollapsed, () => closePanel(false))
   display: flex;
   min-width: 0;
   align-items: center;
-  gap: 3px;
-  color: rgb(100 116 139);
+  gap: var(--workspace-space-0-75);
+  color: var(--workspace-dock-text-muted);
   font-size: 0.6875rem;
   font-weight: 400;
   line-height: 1rem;
 }
 
-.sidebar-account-upgrade {
-  display: inline-flex;
-  min-width: 0;
-  min-height: 32px;
-  align-self: center;
-  align-items: center;
-  justify-content: center;
-  padding: 0 11px;
-  border: 1px solid rgb(15 23 42 / 0.15);
-  border-radius: 999px;
-  color: rgb(15 23 42);
-  background: rgb(255 255 255 / 0.9);
-  font-size: 0.8125rem;
-  font-weight: 500;
-  line-height: 1;
-  text-decoration: none;
-  white-space: nowrap;
-  transition:
-    border-color 150ms ease,
-    background-color 150ms ease;
+.sidebar-account-dock--personal .sidebar-account-trigger__name {
+  font-size: 14px;
+  font-weight: 400;
+  line-height: 20px;
 }
 
-.sidebar-account-upgrade:hover {
-  border-color: rgb(15 23 42 / 0.24);
-  background: #fff;
-}
-
-.sidebar-account-dock--collapsed {
-  padding-right: 7px;
-  padding-left: 7px;
+.sidebar-account-dock--personal .sidebar-account-trigger__meta {
+  color: var(--workspace-identity-text-tertiary);
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 16px;
 }
 
 .sidebar-account-dock--collapsed .sidebar-account-row {
-  display: block;
+  width: var(--workspace-sidebar-touch-target);
   padding-right: 0;
 }
 
 .sidebar-account-dock--collapsed .sidebar-account-trigger {
-  width: 100%;
-  min-height: 52px;
-  grid-template-columns: 32px;
-  justify-content: center;
+  width: var(--workspace-sidebar-touch-target);
+  min-height: var(--workspace-sidebar-footer-row-height);
+  grid-template-columns: var(--workspace-sidebar-touch-target) minmax(0, 0) 0;
+  justify-content: start;
+  gap: 0;
+  padding: 0;
+}
+
+.sidebar-account-dock--personal.sidebar-account-dock--collapsed .sidebar-account-trigger {
+  grid-template-columns: var(--workspace-sidebar-touch-target) minmax(0, 0) 0;
   gap: 0;
   padding: 0;
 }
 
 .sidebar-account-dock--collapsed .sidebar-account-trigger__copy {
-  display: none;
-}
-
-:global(html.dark .sidebar-account-row) {
-  color: rgb(226 232 240);
-}
-
-:global(html.dark .sidebar-account-row:hover),
-:global(html.dark .sidebar-account-row--open) {
-  color: #fff;
-  background: rgb(255 255 255 / 0.08);
-}
-
-:global(html.dark .sidebar-account-trigger__meta) {
-  color: rgb(148 163 184);
-}
-
-:global(html.dark .sidebar-account-upgrade) {
-  border-color: rgb(255 255 255 / 0.16);
-  color: rgb(248 250 252);
-  background: rgb(255 255 255 / 0.08);
-}
-
-:global(html.dark .sidebar-account-upgrade:hover) {
-  border-color: rgb(255 255 255 / 0.28);
-  background: rgb(255 255 255 / 0.12);
+  max-width: 0;
+  opacity: 0;
+  pointer-events: none;
 }
 
 @media (prefers-reduced-motion: reduce) {
   .sidebar-account-row,
-  .sidebar-account-upgrade {
+  .sidebar-account-trigger__copy {
     transition-duration: 0.01ms;
   }
 }

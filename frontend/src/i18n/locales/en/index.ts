@@ -7,6 +7,8 @@ import chat from './chat'
 import personalSettings from './personalSettings'
 import desktop from './desktop'
 import quotaViewerLanding from './quotaViewerLanding'
+import skills from './skills'
+import library from './library'
 
 export default {
   ...landing,
@@ -18,4 +20,6 @@ export default {
   ...personalSettings,
   ...desktop,
   ...quotaViewerLanding,
+  ...skills,
+  ...library,
 }

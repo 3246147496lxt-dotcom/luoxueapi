@@ -13,7 +13,9 @@ import (
 	"github.com/Wei-Shaw/sub2api/ent/authidentity"
 	"github.com/Wei-Shaw/sub2api/ent/redeemcode"
 	dbuser "github.com/Wei-Shaw/sub2api/ent/user"
+	"github.com/Wei-Shaw/sub2api/ent/userplatformquota"
 	"github.com/Wei-Shaw/sub2api/internal/config"
+	"github.com/Wei-Shaw/sub2api/internal/repository"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
@@ -232,10 +234,14 @@ func TestCompleteEmailOAuthRegistrationUsesAffiliateCodeFromPendingSession(t *te
 	handler, client := newOAuthPendingFlowTestHandlerWithDependencies(t, oauthPendingFlowTestHandlerOptions{
 		invitationEnabled: true,
 		settingValues: map[string]string{
-			service.SettingKeyAffiliateEnabled: "true",
+			service.SettingKeyAffiliateEnabled:      "true",
+			service.SettingKeyDefaultPlatformQuotas: `{"anthropic":{"daily":7}}`,
 		},
 		affiliateFactory: func(_ *dbent.Client, settingSvc *service.SettingService) *service.AffiliateService {
 			return service.NewAffiliateService(affiliateRepo, settingSvc, nil, nil)
+		},
+		quotaRepoFactory: func(client *dbent.Client) service.UserPlatformQuotaRepository {
+			return repository.NewUserPlatformQuotaServiceAdapter(repository.NewUserPlatformQuotaRepository(client))
 		},
 	})
 	ctx := context.Background()
@@ -296,6 +302,14 @@ func TestCompleteEmailOAuthRegistrationUsesAffiliateCodeFromPendingSession(t *te
 	require.NoError(t, err)
 	require.NotNil(t, storedInvitation.UsedBy)
 	require.Equal(t, user.ID, *storedInvitation.UsedBy)
+	quota, err := client.UserPlatformQuota.Query().Where(
+		userplatformquota.UserIDEQ(user.ID),
+		userplatformquota.PlatformEQ("anthropic"),
+		userplatformquota.DeletedAtIsNil(),
+	).Only(ctx)
+	require.NoError(t, err, "quota defaults must be inserted after email OAuth registration commits")
+	require.NotNil(t, quota.DailyLimitUsd)
+	require.InDelta(t, 7.0, *quota.DailyLimitUsd, 0.0001)
 }
 
 func TestCompleteEmailOAuthRegistrationRequiresPassword(t *testing.T) {

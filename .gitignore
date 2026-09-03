@@ -146,6 +146,7 @@ deploy/docker-compose.override.yml
 .gocache/
 vite.config.js
 docs/*
+!docs/SKILL_IMPORTER.md
 !docs/PAYMENT.md
 !docs/PAYMENT_CN.md
 !docs/ADMIN_PAYMENT_INTEGRATION_API.md
@@ -154,6 +155,13 @@ docs/*
 !docs/legal/*.md
 .serena/
 .codex/
+/.codex-local/
 frontend/coverage/
 aicodex
 output/
+
+# 根目录运行时数据（定价缓存、聊天附件等）
+/data/
+
+# 本地管理端 UI 预览数据夹具
+/backend/scripts/sql/seed_admin_usage_demo.sql

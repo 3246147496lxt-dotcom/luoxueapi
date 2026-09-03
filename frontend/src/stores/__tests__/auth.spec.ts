@@ -11,7 +11,7 @@ const mockGetCurrentUser = vi.fn()
 const mockRegister = vi.fn()
 const mockRefreshToken = vi.fn()
 
-vi.mock('@/api', () => ({
+vi.mock('@/api/auth', () => ({
   authAPI: {
     login: (...args: any[]) => mockLogin(...args),
     login2FA: (...args: any[]) => mockLogin2FA(...args),
@@ -292,6 +292,16 @@ describe('useAuthStore', () => {
       expect(store.isAuthenticated).toBe(false)
     })
 
+    it('does not poll user profile data after authentication', async () => {
+      mockLogin.mockResolvedValue(fakeAuthResponse)
+      const store = useAuthStore()
+
+      await store.login({ email: 'test@example.com', password: '123456' })
+      await vi.advanceTimersByTimeAsync(10 * 60 * 1000)
+
+      expect(mockGetCurrentUser).not.toHaveBeenCalled()
+    })
+
     it('localStorage 中用户数据损坏时清除状态', () => {
       localStorage.setItem('auth_token', 'saved-token')
       localStorage.setItem('auth_user', 'invalid-json{{{')
@@ -500,6 +510,24 @@ describe('useAuthStore', () => {
     it('未认证时抛出错误', async () => {
       const store = useAuthStore()
       await expect(store.refreshUser()).rejects.toThrow('Not authenticated')
+    })
+
+    it('deduplicates concurrent refreshes for the same authenticated session', async () => {
+      mockLogin.mockResolvedValue(fakeAuthResponse)
+      const store = useAuthStore()
+      await store.login({ email: 'test@example.com', password: '123456' })
+
+      let resolveUser!: (value: { data: typeof fakeUser }) => void
+      mockGetCurrentUser.mockReturnValue(new Promise((resolve) => {
+        resolveUser = resolve
+      }))
+
+      const first = store.refreshUser()
+      const second = store.refreshUser()
+      expect(mockGetCurrentUser).toHaveBeenCalledOnce()
+
+      resolveUser({ data: fakeUser })
+      await expect(Promise.all([first, second])).resolves.toEqual([fakeUser, fakeUser])
     })
 
     it('401-shaped AUTH_SESSION_CHANGED does not clear the current family', async () => {

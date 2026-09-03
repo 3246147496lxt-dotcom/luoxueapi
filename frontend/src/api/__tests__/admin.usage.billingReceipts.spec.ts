@@ -17,28 +17,28 @@ describe('admin usage billing receipts API', () => {
     get.mockReset()
   })
 
-  it('requests the read-only receipt endpoint and normalizes nested receipt fields', async () => {
+  it('keeps the real billing ledger id and request id as separate identifiers', async () => {
     get.mockResolvedValue({
       data: {
         data: {
-          receipts: [
+          items: [
             {
               id: 17,
-              receipt_id: 'rcpt-chat-17',
-              request_id: 'req-chat-17',
-              user: { id: 9, email: 'user@example.com' },
+              request_id: 'client:11111111-1111-4111-8111-111111111111',
+              source: 'web_chat',
+              user_id: 9,
+              user_email: 'user@example.com',
               requested_model: 'gpt-5.5',
-              upstream_model: 'gpt-5.5-2026-07-01',
-              tokens: {
-                input: 120,
-                output: 42,
-                cache: 18,
-              },
+              model: 'gpt-5.5-2026-07-01',
+              input_tokens: 120,
+              output_tokens: 42,
+              cache_creation_tokens: 6,
+              cache_read_tokens: 12,
               gross_amount: '0.012345',
-              actual_cost: '0.010000',
+              charged_amount: '0.010000',
               balance_before: '10.000000',
               balance_after: '9.990000',
-              billing_status: 'charged',
+              status: 'charged',
               created_at: '2026-07-25T01:02:03Z',
             },
           ],
@@ -57,7 +57,7 @@ describe('admin usage billing receipts API', () => {
       source: 'web_chat',
       user_id: 9,
       model: 'gpt-5.5',
-      receipt_id: 'rcpt-chat-17',
+      receipt_id: '11111111-1111-4111-8111-111111111111',
       status: 'charged',
       start_date: '2026-07-24',
       end_date: '2026-07-25',
@@ -69,7 +69,7 @@ describe('admin usage billing receipts API', () => {
       params: expect.objectContaining({
         source: 'web_chat',
         user_id: 9,
-        receipt_id: 'rcpt-chat-17',
+        receipt_id: '11111111-1111-4111-8111-111111111111',
         status: 'charged',
       }),
       signal: controller.signal,
@@ -78,8 +78,9 @@ describe('admin usage billing receipts API', () => {
       items: [
         expect.objectContaining({
           id: 17,
-          receipt_id: 'rcpt-chat-17',
-          request_id: 'req-chat-17',
+          row_key: 'receipt:17',
+          receipt_id: '17',
+          request_id: 'client:11111111-1111-4111-8111-111111111111',
           user_id: 9,
           user_email: 'user@example.com',
           source: 'web_chat',
@@ -102,6 +103,72 @@ describe('admin usage billing receipts API', () => {
       page_size: 20,
       pages: 1,
     })
+    expect(result.items[0]?.user).toBeNull()
+    expect(result.items[0]?.username).toBeNull()
+  })
+
+  it('prefers a future explicit receipt id without conflating the request id', async () => {
+    get.mockResolvedValue({
+      data: {
+        items: [{
+          id: 18,
+          receipt_id: 'rcpt-chat-18',
+          request_id: 'req-chat-18',
+          user_id: 10,
+        }],
+      },
+    })
+
+    const result = await listBillingReceipts({ page: 1, page_size: 20 })
+
+    expect(result.items[0]).toEqual(expect.objectContaining({
+      id: 18,
+      row_key: 'receipt:rcpt-chat-18',
+      receipt_id: 'rcpt-chat-18',
+      request_id: 'req-chat-18',
+    }))
+  })
+
+  it('keeps unpersisted request attempts distinct without inventing receipt ID 0', async () => {
+    get.mockResolvedValue({
+      data: {
+        items: [
+          {
+            id: 0,
+            request_id: 'client:attempt-one',
+            user_id: 10,
+            status: 'failed',
+            created_at: '2026-07-25T01:02:03Z',
+          },
+          {
+            id: 0,
+            request_id: 'client:attempt-two',
+            user_id: 10,
+            status: 'pending',
+            created_at: '2026-07-25T01:03:03Z',
+          },
+        ],
+      },
+    })
+
+    const result = await listBillingReceipts({ page: 1, page_size: 20 })
+
+    expect(result.items.map(({ receipt_id, row_key, request_id }) => ({
+      receipt_id,
+      row_key,
+      request_id,
+    }))).toEqual([
+      {
+        receipt_id: '',
+        row_key: 'request:client:attempt-one',
+        request_id: 'client:attempt-one',
+      },
+      {
+        receipt_id: '',
+        row_key: 'request:client:attempt-two',
+        request_id: 'client:attempt-two',
+      },
+    ])
   })
 
   it('accepts the standard items payload without requiring a second data wrapper', async () => {

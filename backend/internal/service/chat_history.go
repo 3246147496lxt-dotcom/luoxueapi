@@ -10,6 +10,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/Wei-Shaw/sub2api/internal/config"
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 )
 
@@ -34,6 +35,23 @@ const (
 	ChatMessageDeliveryStopped     = "stopped"
 	ChatMessageDeliveryInterrupted = "interrupted"
 	ChatMessageDeliveryError       = "error"
+)
+
+const (
+	ChatMessageActivitySourceOpenAIResponses = "openai_responses"
+	ChatMessageActivityTypeReasoningSummary  = "reasoning_summary"
+
+	ChatMessageActivityStatusInProgress   = "in_progress"
+	ChatMessageActivityStatusCompleted    = "completed"
+	ChatMessageActivityStatusIncomplete   = "incomplete"
+	ChatMessageActivityStatusFailed       = "failed"
+	ChatMessageActivityStatusInterrupted  = "interrupted"
+	ChatMessageActivityStatusStopped      = "stopped"
+	ChatMessageActivityStatusDisconnected = "disconnected"
+
+	maxChatMessageActivitiesPerSnapshot = 256
+	maxChatMessageActivityTextBytes     = 2 << 20
+	maxChatMessageActivityMetadataBytes = 16 << 10
 )
 
 var (
@@ -85,23 +103,50 @@ type ChatHistoryConversation struct {
 }
 
 type ChatHistoryMessage struct {
-	ID                    string     `json:"id"`
-	Position              int64      `json:"position"`
-	Role                  string     `json:"role"`
-	Content               string     `json:"content"`
-	Status                string     `json:"status"`
-	RequestedModel        string     `json:"requested_model,omitempty"`
-	FinishReason          *string    `json:"finish_reason,omitempty"`
-	ErrorCode             *string    `json:"error_code,omitempty"`
-	ErrorMessage          *string    `json:"error_message,omitempty"`
-	AttemptID             *string    `json:"attempt_id,omitempty"`
-	ReceiptID             *string    `json:"receipt_id,omitempty"`
-	ExcludedFromContext   bool       `json:"excluded_from_context,omitempty"`
-	SupersededByMessageID *string    `json:"superseded_by_message_id,omitempty"`
-	CheckpointSeq         int64      `json:"checkpoint_seq,omitempty"`
-	CreatedAt             time.Time  `json:"created_at"`
-	UpdatedAt             time.Time  `json:"updated_at"`
-	TerminalAt            *time.Time `json:"terminal_at,omitempty"`
+	ID                    string                `json:"id"`
+	Position              int64                 `json:"position"`
+	Role                  string                `json:"role"`
+	Content               string                `json:"content"`
+	Status                string                `json:"status"`
+	RequestedModel        string                `json:"requested_model,omitempty"`
+	FinishReason          *string               `json:"finish_reason,omitempty"`
+	ErrorCode             *string               `json:"error_code,omitempty"`
+	ErrorMessage          *string               `json:"error_message,omitempty"`
+	AttemptID             *string               `json:"attempt_id,omitempty"`
+	ReceiptID             *string               `json:"receipt_id,omitempty"`
+	ExcludedFromContext   bool                  `json:"excluded_from_context,omitempty"`
+	SupersededByMessageID *string               `json:"superseded_by_message_id,omitempty"`
+	CheckpointSeq         int64                 `json:"checkpoint_seq,omitempty"`
+	CreatedAt             time.Time             `json:"created_at"`
+	UpdatedAt             time.Time             `json:"updated_at"`
+	TerminalAt            *time.Time            `json:"terminal_at,omitempty"`
+	Attachments           []ChatAttachment      `json:"attachments,omitempty"`
+	Activities            []ChatMessageActivity `json:"activities,omitempty"`
+}
+
+// ChatMessageActivity is a durable, snapshot-upserted reasoning-summary part
+// associated with one assistant message. SequenceStart/SequenceEnd refer to
+// upstream Responses event ordering, while SortOrder is the stable UI order.
+type ChatMessageActivity struct {
+	ID              int64           `json:"id,omitempty"`
+	ResponseID      string          `json:"response_id,omitempty"`
+	Source          string          `json:"source"`
+	ActivityType    string          `json:"activity_type"`
+	ItemID          string          `json:"item_id"`
+	OutputIndex     int             `json:"output_index"`
+	SummaryIndex    int             `json:"summary_index"`
+	SortOrder       int64           `json:"sort_order"`
+	Status          string          `json:"status"`
+	Text            string          `json:"text"`
+	SequenceStart   int64           `json:"sequence_start"`
+	SequenceEnd     int64           `json:"sequence_end"`
+	ReasoningMode   string          `json:"reasoning_mode,omitempty"`
+	ReasoningEffort string          `json:"reasoning_effort,omitempty"`
+	StartedAt       time.Time       `json:"started_at"`
+	CompletedAt     *time.Time      `json:"completed_at,omitempty"`
+	Metadata        json.RawMessage `json:"metadata,omitempty"`
+	CreatedAt       time.Time       `json:"created_at,omitempty"`
+	UpdatedAt       time.Time       `json:"updated_at,omitempty"`
 }
 
 type ChatHistoryImportedMessage struct {
@@ -169,14 +214,25 @@ type ChatHistoryAttempt struct {
 	UpdatedAt          time.Time           `json:"updated_at"`
 }
 
+type StopChatCompletionResult struct {
+	AttemptID      string     `json:"attempt_id"`
+	Accepted       bool       `json:"accepted"`
+	AttemptStatus  string     `json:"attempt_status"`
+	DeliveryStatus string     `json:"delivery_status,omitempty"`
+	StoppedAt      *time.Time `json:"stopped_at,omitempty"`
+}
+
 type ChatCompletionHistoryUserMessage struct {
-	ID      string
-	Content string
+	ID            string
+	Content       string
+	AttachmentIDs []string
+	Attachments   []ChatAttachment
 }
 
 type PrepareChatCompletionInput struct {
 	ConversationID        string
 	Model                 string
+	ReasoningMode         string
 	ReasoningEffort       string
 	ExpectedHeadMessageID *string
 	UserMessage           *ChatCompletionHistoryUserMessage
@@ -189,8 +245,9 @@ type PrepareChatCompletionInput struct {
 }
 
 type ChatCompletionContextMessage struct {
-	Role    string
-	Content string
+	Role        string
+	Content     string
+	Attachments []ChatAttachment
 }
 
 type PreparedChatCompletion struct {
@@ -213,6 +270,7 @@ type FinalizeChatCompletionInput struct {
 	FinishReason       string
 	ErrorCode          string
 	ErrorMessage       string
+	Activities         []ChatMessageActivity
 }
 
 type CheckpointChatCompletionInput struct {
@@ -220,6 +278,7 @@ type CheckpointChatCompletionInput struct {
 	AssistantMessageID string
 	Content            string
 	CheckpointSeq      int64
+	Activities         []ChatMessageActivity
 }
 
 type ChatHistoryRepository interface {
@@ -236,12 +295,27 @@ type ChatHistoryRepository interface {
 	FinalizeCompletion(ctx context.Context, userID int64, input *FinalizeChatCompletionInput) error
 }
 
+type chatHistoryStopRepository interface {
+	StopCompletion(ctx context.Context, userID int64, attemptID string) (*StopChatCompletionResult, error)
+}
+
 type ChatHistoryService struct {
-	repo ChatHistoryRepository
+	repo             ChatHistoryRepository
+	attachments      ChatAttachmentRepository
+	attachmentConfig config.ChatAttachmentConfig
 }
 
 func NewChatHistoryService(repo ChatHistoryRepository) *ChatHistoryService {
 	return &ChatHistoryService{repo: repo}
+}
+
+func ProvideChatHistoryService(repo ChatHistoryRepository, attachments ChatAttachmentRepository, cfg *config.Config) *ChatHistoryService {
+	service := NewChatHistoryService(repo)
+	service.attachments = attachments
+	if cfg != nil {
+		service.attachmentConfig = cfg.ChatAttachments
+	}
+	return service
 }
 
 func (s *ChatHistoryService) CreateConversation(
@@ -406,6 +480,25 @@ func (s *ChatHistoryService) GetAttempt(
 	return s.repo.GetAttempt(ctx, userID, attemptID)
 }
 
+func (s *ChatHistoryService) StopCompletion(
+	ctx context.Context,
+	userID int64,
+	attemptID string,
+) (*StopChatCompletionResult, error) {
+	if s == nil || s.repo == nil || userID <= 0 {
+		return nil, ErrChatHistoryUnavailable
+	}
+	attemptID = strings.TrimSpace(attemptID)
+	if !validChatAttemptID(attemptID) {
+		return nil, ErrChatAttemptIDInvalid
+	}
+	repo, ok := s.repo.(chatHistoryStopRepository)
+	if !ok || repo == nil {
+		return nil, ErrChatHistoryUnavailable
+	}
+	return repo.StopCompletion(ctx, userID, attemptID)
+}
+
 func (s *ChatHistoryService) PrepareCompletion(
 	ctx context.Context,
 	userID int64,
@@ -420,6 +513,7 @@ func (s *ChatHistoryService) PrepareCompletion(
 	normalized := *input
 	normalized.ConversationID = strings.TrimSpace(normalized.ConversationID)
 	normalized.Model = strings.TrimSpace(normalized.Model)
+	normalized.ReasoningMode = strings.ToLower(strings.TrimSpace(normalized.ReasoningMode))
 	normalized.ReasoningEffort = strings.TrimSpace(normalized.ReasoningEffort)
 	normalized.AssistantMessageID = strings.TrimSpace(normalized.AssistantMessageID)
 	normalized.RetryOfMessageID = strings.TrimSpace(normalized.RetryOfMessageID)
@@ -453,32 +547,75 @@ func (s *ChatHistoryService) PrepareCompletion(
 	if hasUserMessage {
 		message := *normalized.UserMessage
 		message.ID = strings.TrimSpace(message.ID)
+		message.AttachmentIDs = append([]string(nil), message.AttachmentIDs...)
 		if !validChatHistoryPublicID(message.ID) ||
-			strings.TrimSpace(message.Content) == "" ||
+			(strings.TrimSpace(message.Content) == "" && len(message.AttachmentIDs) == 0) ||
 			len(message.Content) > maxChatCompletionContentBytes {
 			return nil, ErrChatHistoryInvalid
+		}
+		if len(message.AttachmentIDs) > 0 {
+			if s.attachments == nil {
+				return nil, ErrChatAttachmentUnavailable
+			}
+			for i := range message.AttachmentIDs {
+				message.AttachmentIDs[i] = strings.TrimSpace(message.AttachmentIDs[i])
+				if !validChatHistoryPublicID(message.AttachmentIDs[i]) {
+					return nil, ErrChatAttachmentInvalid
+				}
+			}
+			attachments, resolveErr := s.attachments.ResolveForCompletion(ctx, userID, message.AttachmentIDs)
+			if resolveErr != nil {
+				return nil, resolveErr
+			}
+			if validateErr := ValidateAttachmentSelection(attachments, s.attachmentConfig); validateErr != nil {
+				return nil, validateErr
+			}
+			message.Attachments = attachments
 		}
 		normalized.UserMessage = &message
 	} else if !validChatHistoryPublicID(normalized.RetryOfMessageID) {
 		return nil, ErrChatHistoryInvalid
 	}
 
+	type hashAttachment struct {
+		ID     string `json:"id"`
+		Digest string `json:"digest"`
+	}
+	type hashUserMessage struct {
+		ID      string `json:"id"`
+		Content string `json:"content"`
+	}
+	var hashAttachments []hashAttachment
+	var hashUser *hashUserMessage
+	if normalized.UserMessage != nil {
+		hashUser = &hashUserMessage{ID: normalized.UserMessage.ID, Content: normalized.UserMessage.Content}
+		for i := range normalized.UserMessage.Attachments {
+			hashAttachments = append(hashAttachments, hashAttachment{
+				ID:     normalized.UserMessage.Attachments[i].ID,
+				Digest: normalized.UserMessage.Attachments[i].Digest,
+			})
+		}
+	}
 	hashPayload := struct {
-		ConversationID        string                            `json:"conversation_id"`
-		Model                 string                            `json:"model"`
-		ReasoningEffort       string                            `json:"reasoning_effort,omitempty"`
-		ExpectedHeadMessageID *string                           `json:"expected_head_message_id"`
-		UserMessage           *ChatCompletionHistoryUserMessage `json:"user_message,omitempty"`
-		RetryOfMessageID      string                            `json:"retry_of_message_id,omitempty"`
-		AssistantMessageID    string                            `json:"assistant_message_id"`
+		ConversationID        string           `json:"conversation_id"`
+		Model                 string           `json:"model"`
+		ReasoningMode         string           `json:"reasoning_mode,omitempty"`
+		ReasoningEffort       string           `json:"reasoning_effort,omitempty"`
+		ExpectedHeadMessageID *string          `json:"expected_head_message_id"`
+		UserMessage           *hashUserMessage `json:"user_message,omitempty"`
+		RetryOfMessageID      string           `json:"retry_of_message_id,omitempty"`
+		AssistantMessageID    string           `json:"assistant_message_id"`
+		Attachments           []hashAttachment `json:"attachments,omitempty"`
 	}{
 		ConversationID:        normalized.ConversationID,
 		Model:                 normalized.Model,
+		ReasoningMode:         normalized.ReasoningMode,
 		ReasoningEffort:       normalized.ReasoningEffort,
 		ExpectedHeadMessageID: normalized.ExpectedHeadMessageID,
-		UserMessage:           normalized.UserMessage,
+		UserMessage:           hashUser,
 		RetryOfMessageID:      normalized.RetryOfMessageID,
 		AssistantMessageID:    normalized.AssistantMessageID,
+		Attachments:           hashAttachments,
 	}
 	payload, err := json.Marshal(hashPayload)
 	if err != nil {
@@ -521,6 +658,11 @@ func (s *ChatHistoryService) FinalizeCompletion(
 	normalized.FinishReason = strings.TrimSpace(normalized.FinishReason)
 	normalized.ErrorCode = strings.TrimSpace(normalized.ErrorCode)
 	normalized.ErrorMessage = strings.TrimSpace(normalized.ErrorMessage)
+	activities, activitiesErr := normalizeChatMessageActivities(normalized.Activities)
+	if activitiesErr != nil {
+		return activitiesErr
+	}
+	normalized.Activities = activities
 	if !validChatAttemptID(normalized.AttemptID) ||
 		!validChatHistoryPublicID(normalized.AssistantMessageID) ||
 		normalized.CheckpointSeq <= 0 ||
@@ -533,7 +675,9 @@ func (s *ChatHistoryService) FinalizeCompletion(
 	validTerminalState := false
 	switch normalized.DeliveryStatus {
 	case ChatMessageDeliveryCompleted:
-		validTerminalState = normalized.AttemptStatus == ChatAttemptStatusCompleted
+		validTerminalState = normalized.AttemptStatus == ChatAttemptStatusCompleted ||
+			(normalized.AttemptStatus == ChatAttemptStatusFailed &&
+				normalized.ErrorCode == ChatAttemptFailureCodeSettlement)
 	case ChatMessageDeliveryPartial, ChatMessageDeliveryInterrupted, ChatMessageDeliveryStopped:
 		validTerminalState = normalized.AttemptStatus == ChatAttemptStatusInterrupted
 	case ChatMessageDeliveryError:
@@ -556,12 +700,147 @@ func (s *ChatHistoryService) CheckpointCompletion(
 	normalized := *input
 	normalized.AttemptID = strings.TrimSpace(normalized.AttemptID)
 	normalized.AssistantMessageID = strings.TrimSpace(normalized.AssistantMessageID)
+	activities, activitiesErr := normalizeChatMessageActivities(normalized.Activities)
+	if activitiesErr != nil {
+		return activitiesErr
+	}
+	normalized.Activities = activities
 	if !validChatAttemptID(normalized.AttemptID) ||
 		!validChatHistoryPublicID(normalized.AssistantMessageID) ||
 		normalized.CheckpointSeq <= 0 {
 		return ErrChatHistoryInvalid
 	}
 	return s.repo.CheckpointCompletion(ctx, userID, &normalized)
+}
+
+func normalizeChatMessageActivities(input []ChatMessageActivity) ([]ChatMessageActivity, error) {
+	if len(input) == 0 {
+		return nil, nil
+	}
+	if len(input) > maxChatMessageActivitiesPerSnapshot {
+		return nil, ErrChatHistoryInvalid
+	}
+	normalized := make([]ChatMessageActivity, len(input))
+	seen := make(map[string]struct{}, len(input))
+	totalTextBytes := 0
+	for i := range input {
+		activity := input[i]
+		activity.ResponseID = strings.TrimSpace(activity.ResponseID)
+		activity.Source = strings.TrimSpace(activity.Source)
+		activity.ActivityType = strings.TrimSpace(activity.ActivityType)
+		activity.ItemID = strings.TrimSpace(activity.ItemID)
+		activity.Status = strings.TrimSpace(activity.Status)
+		activity.ReasoningMode = strings.TrimSpace(activity.ReasoningMode)
+		activity.ReasoningEffort = strings.TrimSpace(activity.ReasoningEffort)
+		if activity.Source != ChatMessageActivitySourceOpenAIResponses ||
+			activity.ActivityType != ChatMessageActivityTypeReasoningSummary ||
+			activity.ItemID == "" ||
+			len(activity.ResponseID) > 128 ||
+			len(activity.ItemID) > 128 ||
+			activity.OutputIndex < 0 ||
+			activity.SummaryIndex < 0 ||
+			activity.SortOrder <= 0 ||
+			activity.SequenceStart < 0 ||
+			activity.SequenceEnd < activity.SequenceStart ||
+			len(activity.ReasoningMode) > 32 ||
+			len(activity.ReasoningEffort) > 32 ||
+			!validChatMessageActivityStatus(activity.Status) {
+			return nil, ErrChatHistoryInvalid
+		}
+		totalTextBytes += len(activity.Text)
+		if totalTextBytes > maxChatMessageActivityTextBytes {
+			return nil, ErrChatHistoryInvalid
+		}
+		if activity.StartedAt.IsZero() {
+			activity.StartedAt = time.Now().UTC()
+		} else {
+			activity.StartedAt = activity.StartedAt.UTC()
+		}
+		if activity.CompletedAt != nil {
+			completedAt := activity.CompletedAt.UTC()
+			if completedAt.Before(activity.StartedAt) {
+				return nil, ErrChatHistoryInvalid
+			}
+			activity.CompletedAt = &completedAt
+		}
+		if len(activity.Metadata) == 0 || string(activity.Metadata) == "null" {
+			activity.Metadata = json.RawMessage(`{}`)
+		} else if len(activity.Metadata) > maxChatMessageActivityMetadataBytes ||
+			!json.Valid(activity.Metadata) ||
+			strings.TrimSpace(string(activity.Metadata))[0] != '{' {
+			return nil, ErrChatHistoryInvalid
+		} else {
+			activity.Metadata = append(json.RawMessage(nil), activity.Metadata...)
+		}
+		key := strings.Join([]string{
+			activity.ResponseID,
+			activity.ItemID,
+			strconv.Itoa(activity.OutputIndex),
+			strconv.Itoa(activity.SummaryIndex),
+		}, "\x00")
+		if _, exists := seen[key]; exists {
+			return nil, ErrChatHistoryInvalid
+		}
+		seen[key] = struct{}{}
+		normalized[i] = activity
+	}
+	return normalized, nil
+}
+
+func validChatMessageActivityStatus(status string) bool {
+	switch status {
+	case ChatMessageActivityStatusInProgress,
+		ChatMessageActivityStatusCompleted,
+		ChatMessageActivityStatusIncomplete,
+		ChatMessageActivityStatusFailed,
+		ChatMessageActivityStatusInterrupted,
+		ChatMessageActivityStatusStopped,
+		ChatMessageActivityStatusDisconnected:
+		return true
+	default:
+		return false
+	}
+}
+
+// TerminalizeChatMessageActivities returns a detached authoritative terminal
+// snapshot without changing summary text or stable coordinates.
+func TerminalizeChatMessageActivities(
+	input []ChatMessageActivity,
+	status string,
+	lastEvent string,
+	completedAt time.Time,
+) []ChatMessageActivity {
+	if len(input) == 0 || status == ChatMessageActivityStatusInProgress || !validChatMessageActivityStatus(status) {
+		return append([]ChatMessageActivity(nil), input...)
+	}
+	if completedAt.IsZero() {
+		completedAt = time.Now().UTC()
+	} else {
+		completedAt = completedAt.UTC()
+	}
+	result := make([]ChatMessageActivity, len(input))
+	for i := range input {
+		activity := input[i]
+		activity.Status = status
+		if activity.CompletedAt == nil {
+			value := completedAt
+			activity.CompletedAt = &value
+		}
+		metadata := make(map[string]any)
+		if len(activity.Metadata) > 0 {
+			_ = json.Unmarshal(activity.Metadata, &metadata)
+		}
+		if lastEvent != "" {
+			metadata["last_event"] = lastEvent
+		}
+		encoded, err := json.Marshal(metadata)
+		if err != nil {
+			encoded = []byte(`{}`)
+		}
+		activity.Metadata = encoded
+		result[i] = activity
+	}
+	return result
 }
 
 func normalizeCreateChatHistoryInput(
@@ -633,7 +912,9 @@ func normalizeImportedChatMessageStatus(value string) string {
 	switch strings.ToLower(strings.TrimSpace(value)) {
 	case "complete", "completed":
 		return ChatMessageDeliveryCompleted
-	case "streaming", "stopped", "interrupted", "error":
+	case "stopped":
+		return ChatMessageDeliveryStopped
+	case "streaming", "interrupted", "error":
 		return ChatMessageDeliveryInterrupted
 	default:
 		return ""

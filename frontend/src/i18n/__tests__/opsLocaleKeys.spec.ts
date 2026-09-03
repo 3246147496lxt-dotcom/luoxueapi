@@ -1,4 +1,6 @@
 import { describe, expect, it } from 'vitest'
+import { readFileSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
 import en from '@/i18n/locales/en'
 import zh from '@/i18n/locales/zh'
 
@@ -13,6 +15,35 @@ function flattenKeys(obj: Record<string, any>, prefix = ''): string[] {
     }
   }
   return keys
+}
+
+function valueAtPath(source: Record<string, any>, path: string): unknown {
+  return path.split('.').reduce<unknown>((value, segment) => {
+    if (!value || typeof value !== 'object') return undefined
+    return (value as Record<string, unknown>)[segment]
+  }, source)
+}
+
+const opsSchemeBFiles = [
+  '../../views/admin/ops/OpsDashboard.vue',
+  '../../views/admin/ops/components/OpsAlertEventsCard.vue',
+  '../../views/admin/ops/components/OpsDashboardHeader.vue',
+  '../../views/admin/ops/components/OpsRequestDetailsModal.vue',
+  '../../views/admin/ops/components/OpsSystemLogTable.vue',
+  '../../views/admin/ops/components/OpsTrafficInvestigationRail.vue',
+  '../../views/admin/ops/components/OpsWorkbenchShell.vue',
+  '../../views/admin/ops/components/OpsWorkspaceNav.vue',
+] as const
+
+function collectStaticLocaleKeys(): string[] {
+  const keys = new Set<string>()
+  for (const relativePath of opsSchemeBFiles) {
+    const source = readFileSync(fileURLToPath(new URL(relativePath, import.meta.url)), 'utf8')
+    for (const match of source.matchAll(/\bt\(\s*['"]((?:admin\.ops|common)\.[^'"]+)['"]/g)) {
+      keys.add(match[1])
+    }
+  }
+  return [...keys].sort()
 }
 
 describe('ops locale key completeness', () => {
@@ -35,6 +66,21 @@ describe('ops locale key completeness', () => {
     const zhResourceHealth = (zh as Record<string, any>).admin.ops.resourceHealth as Record<string, any>
 
     expect(flattenKeys(enResourceHealth).sort()).toEqual(flattenKeys(zhResourceHealth).sort())
+  })
+
+  it('keeps the complete ops namespace symmetric between English and Chinese', () => {
+    const enOps = (en as Record<string, any>).admin.ops as Record<string, any>
+    const zhOps = (zh as Record<string, any>).admin.ops as Record<string, any>
+
+    expect(flattenKeys(enOps).sort()).toEqual(flattenKeys(zhOps).sort())
+  })
+
+  it('resolves every static Scheme B locale key in both locales', () => {
+    const keys = collectStaticLocaleKeys()
+    const missingEn = keys.filter((key) => typeof valueAtPath(en as Record<string, any>, key) !== 'string')
+    const missingZh = keys.filter((key) => typeof valueAtPath(zh as Record<string, any>, key) !== 'string')
+
+    expect({ missingEn, missingZh }).toEqual({ missingEn: [], missingZh: [] })
   })
 })
 

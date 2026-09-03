@@ -125,6 +125,35 @@ describe('API Client', () => {
       expect(config.params?.timezone).toBeUndefined()
     })
 
+    it('显式清除 JSON 默认头时保留 FormData 供浏览器生成 multipart boundary', async () => {
+      const adapter = vi.fn().mockResolvedValue({
+        status: 200,
+        data: { code: 0, data: {} },
+        headers: {},
+        config: {},
+        statusText: 'OK',
+      })
+      apiClient.defaults.adapter = adapter
+      const formData = new FormData()
+      formData.append('file', new Blob(['voice'], { type: 'audio/webm' }), 'voice.webm')
+
+      await apiClient.post('/chat/transcriptions', formData, {
+        headers: {
+          'Content-Type': undefined,
+          'Idempotency-Key': '11111111-2222-4333-8444-555555555555',
+        },
+      })
+
+      const config = adapter.mock.calls[0][0]
+      expect(config.data).toBe(formData)
+      // Axios applies its generic POST fallback before invoking a custom test
+      // adapter. The real browser adapter clears that fallback for FormData;
+      // retaining the FormData object here proves JSON serialization did not
+      // happen before that browser-specific boundary step.
+      expect(config.headers.get('Idempotency-Key'))
+        .toBe('11111111-2222-4333-8444-555555555555')
+    })
+
     it('请求默认带 withCredentials 以支持跨域 cookie', async () => {
       const adapter = vi.fn().mockResolvedValue({
         status: 200,

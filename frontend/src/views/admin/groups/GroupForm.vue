@@ -757,6 +757,75 @@
       </div>
     </div>
 
+    <div
+      v-if="isProfitControlPlatform(form.platform)"
+      class="border-t pt-4"
+      data-test="group-profit-control"
+    >
+      <label class="flex items-center gap-2 text-sm font-medium text-gray-700 dark:text-gray-300">
+        <input
+          v-model="form.profit_control_enabled"
+          type="checkbox"
+          class="rounded border-gray-300 text-primary-600 focus:ring-primary-500"
+          data-test="profit-control-enabled"
+        />
+        <span>{{ t("admin.groups.profitControl.enable") }}</span>
+      </label>
+      <p class="mb-3 mt-1.5 text-xs leading-relaxed text-gray-500 dark:text-gray-400">
+        {{
+          form.profit_control_enabled
+            ? t("admin.groups.profitControl.enabledHint")
+            : t("admin.groups.profitControl.disabledHint")
+        }}
+      </p>
+      <div
+        v-if="form.profit_control_enabled"
+        class="grid grid-cols-1 gap-3 sm:grid-cols-2"
+        data-test="profit-control-thresholds"
+      >
+        <div>
+          <label
+            :for="`${formId}-profit-min-margin`"
+            class="input-label"
+          >
+            {{ t("admin.groups.profitControl.minMargin") }}
+          </label>
+          <input
+            :id="`${formId}-profit-min-margin`"
+            v-model.number="form.profit_min_margin_percent"
+            type="number"
+            step="0.01"
+            min="0"
+            max="99.99"
+            class="input"
+            placeholder="0"
+            :title="t('admin.groups.profitControl.minMarginHint')"
+            data-test="profit-min-margin"
+          />
+        </div>
+        <div>
+          <label
+            :for="`${formId}-profit-safety-buffer`"
+            class="input-label"
+          >
+            {{ t("admin.groups.profitControl.safetyBuffer") }}
+          </label>
+          <input
+            :id="`${formId}-profit-safety-buffer`"
+            v-model.number="form.profit_safety_buffer_percent"
+            type="number"
+            step="0.01"
+            min="0"
+            max="99.99"
+            class="input"
+            placeholder="0"
+            :title="t('admin.groups.profitControl.safetyBufferHint')"
+            data-test="profit-safety-buffer"
+          />
+        </div>
+      </div>
+    </div>
+
     </section>
     <section
       v-if="activeEditorSection === 'routing'"
@@ -1571,6 +1640,7 @@ import {
   supportsVideoPricingPlatform,
   videoPricingI18nKey,
 } from "../groupsImagePricing";
+import { isProfitControlPlatform } from "../groupsProfitControl";
 import type { GroupDraft } from "./groupDraft";
 import type { GroupEditorSectionId } from "./groupEditorRoute";
 import type {

@@ -483,6 +483,27 @@ func TestAccountSupportsOpenAIEndpointCapability(t *testing.T) {
 
 		require.True(t, account.SupportsOpenAIEndpointCapability(OpenAIEndpointCapabilityChatCompletions))
 		require.True(t, account.SupportsOpenAIEndpointCapability(OpenAIEndpointCapabilityEmbeddings))
+		require.False(t, account.SupportsOpenAIEndpointCapability(OpenAIEndpointCapabilityAudioTranscriptions))
+	})
+
+	t.Run("audio transcriptions 仅允许 APIKey 显式启用", func(t *testing.T) {
+		apiKey := &Account{
+			Platform: PlatformOpenAI,
+			Type:     AccountTypeAPIKey,
+			Credentials: map[string]any{
+				"openai_capabilities": []any{"audio_transcriptions"},
+			},
+		}
+		oauth := &Account{
+			Platform: PlatformOpenAI,
+			Type:     AccountTypeOAuth,
+			Credentials: map[string]any{
+				"openai_capabilities": []any{"audio_transcriptions"},
+			},
+		}
+
+		require.True(t, apiKey.SupportsOpenAIEndpointCapability(OpenAIEndpointCapabilityAudioTranscriptions))
+		require.False(t, oauth.SupportsOpenAIEndpointCapability(OpenAIEndpointCapabilityAudioTranscriptions))
 	})
 
 	t.Run("OpenAI OAuth 默认仅兼容 chat", func(t *testing.T) {

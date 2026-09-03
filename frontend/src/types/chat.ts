@@ -2,6 +2,103 @@ export type ChatMessageRole = 'user' | 'assistant'
 
 export type ChatMessageStatus = 'complete' | 'streaming' | 'stopped' | 'error'
 
+export type ReasoningMode = 'standard' | 'pro'
+export type ChatReasoningMode = ReasoningMode
+
+export type ChatActivityStatus =
+  | 'pending'
+  | 'streaming'
+  | 'completed'
+  | 'incomplete'
+  | 'failed'
+  | 'stopped'
+  | 'disconnected'
+
+export interface ChatActivityError {
+  code?: string
+  message?: string
+}
+
+export interface ChatActivitySummaryPart {
+  key: string
+  itemId: string
+  outputIndex: number
+  summaryIndex: number
+  /**
+   * Canonical text from part/text done or persisted history. During a live
+   * stream, bounded notification batches are appended as immutable chunks so
+   * the growing summary is not recopied in full on every UI update.
+   */
+  text: string
+  streamingTextChunks?: string[]
+  status: ChatActivityStatus
+  startedAt: number
+  updatedAt: number
+  completedAt?: number
+  lastSequenceNumber?: number
+}
+
+export interface ChatActivityItem {
+  key: string
+  itemId: string
+  outputIndex: number
+  status: ChatActivityStatus
+  parts: ChatActivitySummaryPart[]
+  startedAt: number
+  updatedAt: number
+  completedAt?: number
+  lastSequenceNumber?: number
+}
+
+export interface ChatActivity {
+  key: string
+  responseId: string
+  status: ChatActivityStatus
+  reasoningMode?: ReasoningMode
+  reasoningEffort?: ChatReasoningEffort
+  items: ChatActivityItem[]
+  startedAt: number
+  updatedAt: number
+  completedAt?: number
+  error?: ChatActivityError
+  lastSequenceNumber?: number
+}
+
+export type ChatActivityEventType =
+  | 'response.created'
+  | 'response.output_item.added'
+  | 'response.output_item.done'
+  | 'response.reasoning_summary_part.added'
+  | 'response.reasoning_summary_text.delta'
+  | 'response.reasoning_summary_text.done'
+  | 'response.reasoning_summary_part.done'
+  | 'response.completed'
+  | 'response.incomplete'
+  | 'response.failed'
+
+export interface ChatActivityEvent {
+  source: 'openai_responses'
+  eventType: ChatActivityEventType
+  payload: unknown
+}
+
+export type ChatAttachmentKind = 'image' | 'document'
+
+export type ChatAttachmentStatus = 'ready' | 'expired'
+
+export interface ChatAttachment {
+  id: string
+  name: string
+  kind: ChatAttachmentKind
+  mimeType: string
+  size: number
+  status: ChatAttachmentStatus
+  expiresAt: string
+  pageCount?: number
+  width?: number
+  height?: number
+}
+
 export type ChatReceiptStatus =
   | 'pending'
   | 'charged'
@@ -39,6 +136,8 @@ export interface ChatMessage {
   errorCode?: string
   errorMessage?: string
   attemptId?: string
+  /** Local durable intent awaiting acknowledgement from the stop endpoint. */
+  pendingStopRequestedAt?: number
   receiptId?: string
   settlementStatus?: ChatReceiptStatus
   usageLogId?: number
@@ -57,6 +156,8 @@ export interface ChatMessage {
   receiptCreatedAt?: string
   excludedFromContext?: boolean
   supersededByMessageId?: string
+  attachments?: ChatAttachment[]
+  activities?: ChatActivity[]
 }
 
 export interface ChatConversation {
@@ -93,15 +194,51 @@ export interface ChatModel {
   input_price?: number | null
   output_price?: number | null
   pricing?: ChatModelPricing
+  supports_vision?: boolean
+  supports_reasoning_slider?: boolean
+  supports_responses?: boolean
+  supports_reasoning_summary?: boolean
+  supports_reasoning_pro_mode?: boolean
+  supported_reasoning_efforts?: ChatReasoningEffort[]
 }
 
 export interface ChatCatalog {
   models: ChatModel[]
   balance: number
+  transcription?: ChatTranscriptionCapability
+}
+
+export interface ChatCapabilities {
+  transcription?: ChatTranscriptionCapability
+}
+
+export interface ChatTranscriptionCapability {
+  enabled: boolean
+  billing_mode?: string
+  max_upload_bytes?: number
+  max_duration_seconds?: number
+  accepted_mime_types?: string[]
+}
+
+export interface ChatTranscriptionResult {
+  text: string
 }
 
 export type ChatCompletionMessageRole = 'system' | 'developer' | ChatMessageRole
-export type ChatReasoningEffort = '' | 'low' | 'medium' | 'high' | 'xhigh'
+export type ChatReasoningEffort = 'low' | 'medium' | 'high' | 'xhigh'
+
+/** Canonical Responses-shaped reasoning payload sent by Web Chat. */
+export type ChatReasoningPayload =
+  | {
+      mode: 'standard'
+      effort: ChatReasoningEffort
+      summary: 'auto'
+    }
+  | {
+      mode: 'pro'
+      effort?: never
+      summary: 'auto'
+    }
 
 export interface ChatCompletionMessage {
   role: ChatCompletionMessageRole
@@ -111,12 +248,20 @@ export interface ChatCompletionMessage {
 export interface ChatCompletionUserMessage {
   id: string
   content: string
+  attachmentIds?: string[]
+  attachments?: ChatCompletionLibraryAttachment[]
+}
+
+export interface ChatCompletionLibraryAttachment {
+  source: 'library'
+  fileId: string
 }
 
 interface ChatCompletionHistoryRequestBase {
   conversationId: string
   model: string
-  reasoningEffort?: Exclude<ChatReasoningEffort, ''>
+  reasoningMode?: ReasoningMode
+  reasoningEffort?: ChatReasoningEffort
   expectedHeadMessageId: string | null
   assistantMessageId: string
 }
@@ -170,9 +315,12 @@ export interface ChatCompletionStreamResult {
 }
 
 export interface ChatCompletionStreamHandlers {
+  onAccepted?: () => void
   onChunk?: (chunk: ChatCompletionChunk) => void
   onContent?: (content: string, chunk: ChatCompletionChunk) => void
   onReasoningContent?: (content: string, chunk: ChatCompletionChunk) => void
+  onActivityEvent?: (event: ChatActivityEvent) => void
+  onActivity?: (activity: ChatActivity) => void
   onFinish?: (finishReason: string, chunk: ChatCompletionChunk) => void
   onUsage?: (usage: ChatCompletionUsage, chunk: ChatCompletionChunk) => void
   onReceiptId?: (receiptId: string) => void
@@ -183,6 +331,8 @@ export interface ChatCompletionStreamOptions {
   signal?: AbortSignal
   requestId?: string
   attemptId?: string
+  reasoningMode?: ReasoningMode
+  reasoningEffort?: ChatReasoningEffort
 }
 
 export interface ChatReceiptPollOptions {
@@ -280,6 +430,14 @@ export interface ChatAttempt {
   failureCode?: string
   failureReason?: string
   updatedAt?: number
+}
+
+export interface ChatStopAttemptResult {
+  attemptId: string
+  accepted: boolean
+  attemptStatus: 'accepted' | 'processing' | 'interrupted' | 'completed' | 'failed'
+  deliveryStatus: 'stopped' | 'completed' | 'error'
+  stoppedAt?: number
 }
 
 export type ChatHistoryMutationType = 'create' | 'patch' | 'delete'

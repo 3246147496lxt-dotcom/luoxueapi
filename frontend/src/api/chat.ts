@@ -1,20 +1,30 @@
-import axios from 'axios'
+import axios, { type AxiosProgressEvent } from 'axios'
 import {
   authSession,
   isAuthSessionChangedError,
   type AuthSessionInvalidationExpectation,
 } from '@/auth/authSession'
 import { refreshAuthSession } from '@/auth/authRefresh'
+import {
+  ChatActivityStateMachine,
+  isChatActivityEventType,
+  normalizeChatActivities,
+} from '@/features/chat/activity'
+import { isSettlementFailureWithCompletedDelivery } from '@/features/chat/settlementDelivery'
 import { getLocale } from '@/i18n'
 import type {
+  ChatActivityEvent,
   ChatCompletionChunk,
   ChatCompletionRequest,
   ChatCompletionStreamHandlers,
   ChatCompletionStreamOptions,
   ChatCompletionStreamResult,
+  ChatCapabilities,
   ChatCatalog,
+  ChatAttachment,
   ChatAttempt,
   ChatAttemptStatus,
+  ChatStopAttemptResult,
   ChatConversationPage,
   ChatMessage,
   ChatMessagePage,
@@ -22,10 +32,13 @@ import type {
   ChatReceipt,
   ChatReceiptPollOptions,
   ChatReceiptStatus,
+  ChatReasoningPayload,
   ChatServerConversation,
   ChatServerMessage,
   ChatSyncChange,
   ChatSyncPage,
+  ChatTranscriptionCapability,
+  ChatTranscriptionResult,
   CreateChatConversationRequest,
   DeleteChatConversationRequest,
   PatchChatConversationRequest,
@@ -143,6 +156,27 @@ export function createChatAttemptId(): string {
   return createChatRequestId()
 }
 
+export function createChatIdempotencyKey(): string {
+  try {
+    if (typeof globalThis.crypto?.randomUUID === 'function') {
+      return globalThis.crypto.randomUUID()
+    }
+    if (typeof globalThis.crypto?.getRandomValues === 'function') {
+      const bytes = globalThis.crypto.getRandomValues(new Uint8Array(16))
+      bytes[6] = ((bytes[6] ?? 0) & 0x0f) | 0x40
+      bytes[8] = ((bytes[8] ?? 0) & 0x3f) | 0x80
+      const hex = Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('')
+      return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`
+    }
+  } catch {
+    // The fallback remains a UUID-shaped idempotency token, not a credential.
+  }
+  const seed = `${Date.now().toString(16).padStart(12, '0')}${(++fallbackRequestIdCounter)
+    .toString(16)
+    .padStart(20, '0')}`
+  return `${seed.slice(0, 8)}-${seed.slice(8, 12)}-4${seed.slice(13, 16)}-8${seed.slice(17, 20)}-${seed.slice(20, 32)}`
+}
+
 export function isAbortError(error: unknown): boolean {
   return axios.isCancel(error)
     || (
@@ -209,6 +243,7 @@ function dispatchSSEEvent(
   event: SSEEventState,
   handlers: ChatCompletionStreamHandlers,
   result: ChatCompletionStreamResult,
+  activityMachine: ChatActivityStateMachine,
 ): boolean {
   const eventName = event.name || 'message'
   const data = event.data.join('\n')
@@ -222,13 +257,35 @@ function dispatchSSEEvent(
   }
   if (!data.trim()) return false
   if (data.trim() === '[DONE]') {
+    activityMachine.flush()
     result.receivedDone = true
     return true
   }
 
   const payload = parseJSON(data)
   const record = asRecord(payload)
-  if (eventName === 'error' || record?.error !== undefined) {
+  if (eventName === 'error') {
+    throw createErrorFromPayload(payload, 'The chat stream reported an error.', {
+      code: 'STREAM_ERROR',
+    })
+  }
+  if (record?.source === 'openai_responses') {
+    const eventType = record.eventType
+    if (
+      isChatActivityEventType(eventType)
+      && Object.prototype.hasOwnProperty.call(record, 'payload')
+    ) {
+      const activityEvent: ChatActivityEvent = {
+        source: 'openai_responses',
+        eventType,
+        payload: record.payload,
+      }
+      handlers.onActivityEvent?.(activityEvent)
+      activityMachine.consume(activityEvent)
+    }
+    return false
+  }
+  if (record?.error !== undefined) {
     throw createErrorFromPayload(payload, 'The chat stream reported an error.', {
       code: 'STREAM_ERROR',
     })
@@ -266,10 +323,15 @@ export async function parseChatCompletionSSE(
     usage: null,
     receiptId: null,
   }
+  const activityMachine = new ChatActivityStateMachine({
+    onActivity: handlers.onActivity,
+    reasoningMode: options.reasoningMode,
+    reasoningEffort: options.reasoningEffort,
+  })
   let buffer = ''
 
   const processLine = (line: string): boolean => {
-    if (line === '') return dispatchSSEEvent(event, handlers, result)
+    if (line === '') return dispatchSSEEvent(event, handlers, result, activityMachine)
     if (line.startsWith(':')) return false
 
     const separator = line.indexOf(':')
@@ -338,7 +400,7 @@ export async function parseChatCompletionSSE(
         buffer += decoder.decode()
         stopped = consumeLines(true)
         if (!stopped && (event.data.length > 0 || event.name === 'error')) {
-          dispatchSSEEvent(event, handlers, result)
+          dispatchSSEEvent(event, handlers, result, activityMachine)
         }
         break
       }
@@ -351,13 +413,23 @@ export async function parseChatCompletionSSE(
       await cancelReader()
     }
 
+    if (result.receivedDone) activityMachine.flush()
+    else activityMachine.disconnect()
     handlers.onDone?.(result)
     return result
   } catch (error) {
+    try {
+      if (signal?.aborted) activityMachine.stop()
+      else if (!result.receivedDone) activityMachine.disconnect()
+      else activityMachine.flush()
+    } catch {
+      // Preserve the original stream or callback error.
+    }
     await cancelReader()
     if (signal?.aborted) throw abortError()
     throw error
   } finally {
+    activityMachine.dispose()
     signal?.removeEventListener('abort', cancelOnAbort)
     try {
       reader.releaseLock()
@@ -377,7 +449,47 @@ function normalizeChatModel(value: unknown): ChatModel | null {
   const candidate = asRecord(value)
   const id = nonEmptyString(candidate?.id)
   if (!candidate || !id) return null
-  return { ...candidate, id } as unknown as ChatModel
+  const model = { ...candidate, id } as unknown as ChatModel
+  const supportsVision = candidate.supports_vision ?? candidate.supportsVision
+  if (typeof supportsVision === 'boolean') model.supports_vision = supportsVision
+  const supportsReasoningSlider = candidate.supports_reasoning_slider
+    ?? candidate.supportsReasoningSlider
+  delete (model as ChatModel & { supportsReasoningSlider?: unknown }).supportsReasoningSlider
+  if (typeof supportsReasoningSlider === 'boolean') {
+    model.supports_reasoning_slider = supportsReasoningSlider
+  } else {
+    delete model.supports_reasoning_slider
+  }
+  const modelCapabilities = model as unknown as Record<string, unknown>
+  for (const [snakeCase, camelCase] of [
+    ['supports_responses', 'supportsResponses'],
+    ['supports_reasoning_summary', 'supportsReasoningSummary'],
+    ['supports_reasoning_pro_mode', 'supportsReasoningProMode'],
+  ] as const) {
+    const capability = candidate[snakeCase] ?? candidate[camelCase]
+    delete modelCapabilities[camelCase]
+    if (typeof capability === 'boolean') {
+      modelCapabilities[snakeCase] = capability
+    } else {
+      delete modelCapabilities[snakeCase]
+    }
+  }
+  const supportedReasoningEfforts = candidate.supported_reasoning_efforts
+    ?? candidate.supportedReasoningEfforts
+  delete modelCapabilities.supportedReasoningEfforts
+  if (Array.isArray(supportedReasoningEfforts)) {
+    model.supported_reasoning_efforts = supportedReasoningEfforts.filter(
+      (effort): effort is 'low' | 'medium' | 'high' | 'xhigh' => (
+        effort === 'low'
+        || effort === 'medium'
+        || effort === 'high'
+        || effort === 'xhigh'
+      ),
+    )
+  } else {
+    delete model.supported_reasoning_efforts
+  }
+  return model
 }
 
 function normalizeRequestError(error: unknown, fallbackMessage: string): ChatAPIError {
@@ -395,22 +507,301 @@ function normalizeRequestError(error: unknown, fallbackMessage: string): ChatAPI
   })
 }
 
-export async function getChatModels(): Promise<ChatCatalog> {
+export async function getChatModels(signal?: AbortSignal): Promise<ChatCatalog> {
   try {
-    const { data } = await apiClient.get<unknown>('/chat/models')
+    const { data } = signal
+      ? await apiClient.get<unknown>('/chat/models', { signal })
+      : await apiClient.get<unknown>('/chat/models')
+    const response = asRecord(data)
     const items = modelList(data)
-    const balance = asRecord(data)?.balance
+    const balance = response?.balance
     if (!items || typeof balance !== 'number' || !Number.isFinite(balance)) {
       throw new ChatAPIError('The chat model list returned an invalid response.', {
         code: 'INVALID_MODELS_RESPONSE',
       })
     }
-    return {
+    const catalog: ChatCatalog = {
       models: items.map(normalizeChatModel).filter((model): model is ChatModel => model !== null),
       balance,
     }
+    const transcription = normalizeTranscriptionCapability(response?.transcription)
+    if (transcription) catalog.transcription = transcription
+    return catalog
   } catch (error) {
+    if (signal?.aborted || isAbortError(error)) throw error
     throw normalizeRequestError(error, 'Unable to load the chat model list.')
+  }
+}
+
+export async function getChatCapabilities(signal?: AbortSignal): Promise<ChatCapabilities> {
+  try {
+    const { data } = await apiClient.get<unknown>('/chat/capabilities', { signal })
+    const response = asRecord(data)
+    if (!response) {
+      throw new ChatAPIError('The chat capabilities endpoint returned an invalid response.', {
+        code: 'INVALID_CHAT_CAPABILITIES_RESPONSE',
+      })
+    }
+    const capabilities: ChatCapabilities = {}
+    const transcription = normalizeTranscriptionCapability(response.transcription)
+    if (transcription) capabilities.transcription = transcription
+    return capabilities
+  } catch (error) {
+    if (signal?.aborted || isAbortError(error)) throw error
+    throw normalizeRequestError(error, 'Unable to load chat capabilities.')
+  }
+}
+
+export interface ChatTranscriptionOptions {
+  signal?: AbortSignal
+  timeoutMs?: number
+  idempotencyKey?: string
+}
+
+function normalizePositiveInteger(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value > 0
+    ? value
+    : undefined
+}
+
+function normalizeNonNegativeInteger(value: unknown): number | undefined {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0
+    ? value
+    : undefined
+}
+
+export function normalizeChatAttachment(value: unknown): ChatAttachment | null {
+  const candidate = asRecord(value)
+  if (!candidate) return null
+
+  const id = nonEmptyString(candidate.id)
+  const name = nonEmptyString(candidate.name)
+  const kind = candidate.kind
+  const mimeType = nonEmptyString(candidate.mime_type ?? candidate.mimeType)
+  const size = normalizeNonNegativeInteger(candidate.size)
+  const status = candidate.status
+  const rawExpiresAt = candidate.expires_at ?? candidate.expiresAt
+  const expiresAt = typeof rawExpiresAt === 'string' ? rawExpiresAt.trim() : null
+
+  if (
+    !id
+    || !name
+    || (kind !== 'image' && kind !== 'document')
+    || !mimeType
+    || size === undefined
+    || (status !== 'ready' && status !== 'expired')
+    || expiresAt === null
+  ) return null
+
+  const attachment: ChatAttachment = {
+    id,
+    name,
+    kind,
+    mimeType,
+    size,
+    status,
+    expiresAt,
+  }
+  const pageCount = normalizePositiveInteger(candidate.page_count ?? candidate.pageCount)
+  const width = normalizePositiveInteger(candidate.width)
+  const height = normalizePositiveInteger(candidate.height)
+  if (pageCount !== undefined) attachment.pageCount = pageCount
+  if (width !== undefined) attachment.width = width
+  if (height !== undefined) attachment.height = height
+  return attachment
+}
+
+export interface ChatAttachmentUploadOptions {
+  signal?: AbortSignal
+  onProgress?: (progress: number) => void
+}
+
+function attachmentUploadFile(file: File): File {
+  if (file.type.trim()) return file
+  const extension = file.name.split('.').pop()?.toLowerCase() ?? ''
+  const canonicalMimeType: Record<string, string> = {
+    jpg: 'image/jpeg',
+    jpeg: 'image/jpeg',
+    png: 'image/png',
+    webp: 'image/webp',
+    docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  }
+  const mimeType = canonicalMimeType[extension]
+  return mimeType
+    ? new File([file], file.name, { type: mimeType, lastModified: file.lastModified })
+    : file
+}
+
+export async function uploadChatAttachment(
+  file: File,
+  options: ChatAttachmentUploadOptions = {},
+): Promise<ChatAttachment> {
+  throwIfAborted(options.signal)
+  if (!(file instanceof File) || file.size <= 0) {
+    throw new ChatAPIError('A non-empty attachment is required.', {
+      code: 'EMPTY_ATTACHMENT',
+    })
+  }
+
+  const formData = new FormData()
+  formData.append('file', attachmentUploadFile(file), file.name)
+
+  try {
+    const { data } = await apiClient.post<unknown>('/chat/attachments', formData, {
+      signal: options.signal,
+      timeout: 0,
+      headers: { 'Content-Type': undefined },
+      onUploadProgress: (event: AxiosProgressEvent) => {
+        const total = event.total && event.total > 0 ? event.total : file.size
+        const progress = total > 0 ? Math.round((event.loaded / total) * 100) : 0
+        options.onProgress?.(Math.max(0, Math.min(100, progress)))
+      },
+    })
+    throwIfAborted(options.signal)
+    const payload = asRecord(data)?.attachment ?? data
+    const attachment = normalizeChatAttachment(payload)
+    if (!attachment) {
+      throw new ChatAPIError('The attachment upload returned an invalid response.', {
+        code: 'INVALID_ATTACHMENT_RESPONSE',
+      })
+    }
+    return attachment
+  } catch (error) {
+    if (options.signal?.aborted || isAbortError(error)) throw abortError()
+    throw normalizeRequestError(error, 'Unable to upload the attachment.')
+  }
+}
+
+export async function deleteChatAttachment(id: string, signal?: AbortSignal): Promise<void> {
+  const normalizedId = id.trim()
+  if (!normalizedId) {
+    throw new ChatAPIError('An attachment ID is required.', {
+      code: 'ATTACHMENT_ID_REQUIRED',
+    })
+  }
+  throwIfAborted(signal)
+  try {
+    await apiClient.delete(`/chat/attachments/${encodeURIComponent(normalizedId)}`, { signal })
+    throwIfAborted(signal)
+  } catch (error) {
+    if (signal?.aborted || isAbortError(error)) throw abortError()
+    throw normalizeRequestError(error, 'Unable to delete the attachment.')
+  }
+}
+
+export async function getChatAttachmentContent(
+  id: string,
+  signal?: AbortSignal,
+): Promise<Blob> {
+  const normalizedId = id.trim()
+  if (!normalizedId) {
+    throw new ChatAPIError('An attachment ID is required.', {
+      code: 'ATTACHMENT_ID_REQUIRED',
+    })
+  }
+  throwIfAborted(signal)
+  try {
+    const { data } = await apiClient.get<Blob>(
+      `/chat/attachments/${encodeURIComponent(normalizedId)}/content`,
+      { signal, responseType: 'blob' },
+    )
+    throwIfAborted(signal)
+    if (!(data instanceof Blob)) {
+      throw new ChatAPIError('The attachment content response was invalid.', {
+        code: 'INVALID_ATTACHMENT_CONTENT_RESPONSE',
+      })
+    }
+    return data
+  } catch (error) {
+    if (signal?.aborted || isAbortError(error)) throw abortError()
+    throw normalizeRequestError(error, 'Unable to load the attachment.')
+  }
+}
+
+function normalizeTranscriptionCapability(value: unknown): ChatTranscriptionCapability | undefined {
+  const candidate = asRecord(value)
+  if (!candidate || typeof candidate.enabled !== 'boolean') return undefined
+  const capability: ChatTranscriptionCapability = {
+    enabled: candidate.enabled,
+  }
+  const billingMode = nonEmptyString(candidate.billing_mode ?? candidate.billingMode)
+  const maxUploadBytes = normalizePositiveInteger(
+    candidate.max_upload_bytes ?? candidate.maxUploadBytes,
+  )
+  const maxDurationSeconds = normalizePositiveInteger(
+    candidate.max_duration_seconds ?? candidate.maxDurationSeconds,
+  )
+  const rawMimeTypes = candidate.accepted_mime_types ?? candidate.acceptedMimeTypes
+  const acceptedMimeTypes = Array.isArray(rawMimeTypes)
+    ? rawMimeTypes
+        .map((mimeType) => nonEmptyString(mimeType))
+        .filter((mimeType): mimeType is string => mimeType !== null)
+    : []
+  if (billingMode) capability.billing_mode = billingMode
+  if (maxUploadBytes !== undefined) capability.max_upload_bytes = maxUploadBytes
+  if (maxDurationSeconds !== undefined) capability.max_duration_seconds = maxDurationSeconds
+  if (acceptedMimeTypes.length > 0) capability.accepted_mime_types = acceptedMimeTypes
+  return capability
+}
+
+function audioFileExtension(mimeType: string): string {
+  const normalized = mimeType.toLowerCase()
+  if (normalized.includes('mp4') || normalized.includes('m4a')) return 'm4a'
+  if (normalized.includes('ogg')) return 'ogg'
+  return 'webm'
+}
+
+export async function transcribeChatAudio(
+  audio: Blob,
+  options: ChatTranscriptionOptions = {},
+): Promise<ChatTranscriptionResult> {
+  const {
+    signal,
+    // Upload and provider deadlines are enforced by the server and may be
+    // configured above 90 seconds. Axios 0 disables its shorter client timer;
+    // callers can still cancel immediately through AbortSignal.
+    timeoutMs = 0,
+    idempotencyKey = createChatIdempotencyKey(),
+  } = options
+  throwIfAborted(signal)
+
+  if (audio.size <= 0) {
+    throw new ChatAPIError('A non-empty audio recording is required.', {
+      code: 'EMPTY_AUDIO',
+    })
+  }
+
+  const formData = new FormData()
+  const extension = audioFileExtension(audio.type)
+  formData.append('file', audio, `chat-recording.${extension}`)
+
+  try {
+    const { data } = await apiClient.post<unknown>(
+      '/chat/transcriptions',
+      formData,
+      {
+        signal,
+        timeout: timeoutMs,
+        // Clear the instance-wide JSON default before Axios transforms the
+        // body. The browser adapter will then add multipart/form-data with its
+        // generated boundary.
+        headers: {
+          'Content-Type': undefined,
+          'Idempotency-Key': idempotencyKey,
+        },
+      },
+    )
+    throwIfAborted(signal)
+    const text = nonEmptyString(asRecord(data)?.text)
+    if (!text) {
+      throw new ChatAPIError('The transcription response did not include text.', {
+        code: 'INVALID_TRANSCRIPTION_RESPONSE',
+      })
+    }
+    return { text }
+  } catch (error) {
+    if (signal?.aborted || isAbortError(error)) throw abortError()
+    throw normalizeRequestError(error, 'Unable to transcribe the audio recording.')
   }
 }
 
@@ -422,6 +813,7 @@ const CHAT_RECEIPT_STATUSES = new Set<ChatReceiptStatus>([
   'failed',
 ])
 const DEFAULT_CHAT_RECEIPT_POLL_DELAYS = [150, 300, 600, 1200, 2400] as const
+const DEFAULT_CHAT_STOP_RETRY_DELAYS = [0, 250, 1000] as const
 
 function optionalFiniteNumber(value: unknown): number | undefined {
   if (typeof value === 'number' && Number.isFinite(value)) return value
@@ -624,6 +1016,19 @@ function normalizeServerMessage(value: unknown): ChatServerMessage | null {
     createdAt,
     status: acceptedStatus,
   }
+  if (Array.isArray(candidate.attachments)) {
+    const attachments = candidate.attachments
+      .map(normalizeChatAttachment)
+      .filter((attachment): attachment is ChatAttachment => attachment !== null)
+    if (attachments.length > 0) message.attachments = attachments
+  }
+  const activities = normalizeChatActivities(candidate.activities, {
+    fallbackStartedAt: createdAt,
+    markDisconnected: rawStatus === 'streaming'
+      || rawStatus === 'processing'
+      || rawStatus === 'interrupted',
+  })
+  if (activities.length > 0) message.activities = activities
   if (
     rawStatus === 'streaming'
     || rawStatus === 'processing'
@@ -699,6 +1104,19 @@ function normalizeServerMessage(value: unknown): ChatServerMessage | null {
     billingSource.created_at ?? billingSource.createdAt,
   )
 
+  const isLegacySettlementOnlyError = isSettlementFailureWithCompletedDelivery({
+    role,
+    status: message.status,
+    content,
+    finishReason: message.finishReason,
+    errorCode: errorCodeValue,
+  })
+
+  // Older servers persisted a post-delivery billing failure as a generation
+  // failure. Only repair records that also carry terminal delivery evidence;
+  // interrupted or genuinely failed streams keep their original error state.
+  if (isLegacySettlementOnlyError) message.status = 'complete'
+
   if (updatedAt !== undefined) message.updatedAt = updatedAt
   if (position !== undefined) message.position = position
   if (attemptId) message.attemptId = attemptId
@@ -708,8 +1126,8 @@ function normalizeServerMessage(value: unknown): ChatServerMessage | null {
   }
   if (requestedModel) message.requestedModel = requestedModel
   if (actualModel) message.actualModel = actualModel
-  if (errorCodeValue) message.errorCode = errorCodeValue
-  if (errorMessageValue) message.errorMessage = errorMessageValue
+  if (errorCodeValue && !isLegacySettlementOnlyError) message.errorCode = errorCodeValue
+  if (errorMessageValue && !isLegacySettlementOnlyError) message.errorMessage = errorMessageValue
   if (supersededByMessageId) message.supersededByMessageId = supersededByMessageId
   if (optionalBoolean(candidate.excluded_from_context ?? candidate.excludedFromContext) !== undefined) {
     message.excludedFromContext = Boolean(
@@ -731,6 +1149,17 @@ function normalizeServerMessage(value: unknown): ChatServerMessage | null {
   return message
 }
 
+function sortServerMessages(messages: ChatServerMessage[]): ChatServerMessage[] {
+  const hasCanonicalPositions = messages.every(({ position }) => position !== undefined)
+  return messages.sort((left, right) => {
+    if (hasCanonicalPositions) {
+      return (left.position ?? 0) - (right.position ?? 0)
+        || left.createdAt - right.createdAt
+    }
+    return left.createdAt - right.createdAt
+  })
+}
+
 function normalizeServerConversation(value: unknown): ChatServerConversation | null {
   const candidate = asRecord(value)
   const id = nonEmptyString(candidate?.id ?? candidate?.conversation_id)
@@ -739,15 +1168,11 @@ function normalizeServerConversation(value: unknown): ChatServerConversation | n
   if (!candidate || !id || !title || !model) return null
 
   const messagesValue = Array.isArray(candidate.messages) ? candidate.messages : []
-  const messages = messagesValue
-    .map(normalizeServerMessage)
-    .filter((message): message is ChatServerMessage => message !== null)
-    .sort((left, right) => {
-      if (left.position !== undefined && right.position !== undefined) {
-        return left.position - right.position
-      }
-      return left.createdAt - right.createdAt || left.id.localeCompare(right.id)
-    })
+  const messages = sortServerMessages(
+    messagesValue
+      .map(normalizeServerMessage)
+      .filter((message): message is ChatServerMessage => message !== null),
+  )
   const revision = optionalNonNegativeInteger(candidate.revision) ?? 0
   const version = optionalNonNegativeInteger(candidate.version) ?? revision
   const createdAt = optionalTimestamp(candidate.created_at ?? candidate.createdAt) ?? Date.now()
@@ -898,9 +1323,11 @@ export async function getChatConversationMessages(
         code: 'INVALID_MESSAGE_LIST_RESPONSE',
       })
     }
-    const items = rawItems
-      .map(normalizeServerMessage)
-      .filter((message): message is ChatServerMessage => message !== null)
+    const items = sortServerMessages(
+      rawItems
+        .map(normalizeServerMessage)
+        .filter((message): message is ChatServerMessage => message !== null),
+    )
     const nextBeforePosition = optionalNonNegativeInteger(
       candidate?.next_before_position ?? candidate?.nextBeforePosition,
     ) ?? null
@@ -1079,21 +1506,98 @@ export async function getChatAttempt(
     const failureCode = nonEmptyString(candidate.failure_code ?? candidate.failureCode)
     const failureReason = nonEmptyString(candidate.failure_reason ?? candidate.failureReason)
     const updatedAt = optionalTimestamp(candidate.updated_at ?? candidate.updatedAt)
+    const isSettlementOnlyAttempt = status === 'failed'
+      && assistantMessage !== null
+      && isSettlementFailureWithCompletedDelivery({
+        role: assistantMessage.role,
+        status: assistantMessage.status,
+        content: assistantMessage.content,
+        finishReason: assistantMessage.finishReason,
+        errorCode: failureCode,
+      })
     return {
       attemptId: normalizedAttemptId,
       conversationId,
       assistantMessageId,
-      status,
+      status: isSettlementOnlyAttempt ? 'completed' : status,
       ...(assistantMessage ? { assistantMessage } : {}),
       ...(receiptId ? { receiptId } : {}),
-      ...(failureCode ? { failureCode } : {}),
-      ...(failureReason ? { failureReason } : {}),
+      ...(failureCode && !isSettlementOnlyAttempt ? { failureCode } : {}),
+      ...(failureReason && !isSettlementOnlyAttempt ? { failureReason } : {}),
       ...(updatedAt !== undefined ? { updatedAt } : {}),
     }
   } catch (error) {
     if (signal?.aborted || isAbortError(error)) throw abortError()
     throw normalizeRequestError(error, 'Unable to restore the chat attempt.')
   }
+}
+
+// Record an authenticated, explicit user stop separately from a transport
+// disconnect. The backend makes this intent idempotent and gives it precedence
+// over the streaming request's cancellation/finalization race.
+export async function stopChatAttempt(
+  attemptId: string,
+  options: { delays?: readonly number[] } = {},
+): Promise<ChatStopAttemptResult> {
+  const normalizedAttemptId = attemptId.trim()
+  if (!normalizedAttemptId) {
+    throw new ChatAPIError('A chat attempt ID is required.', {
+      code: 'INVALID_CHAT_ATTEMPT_ID',
+    })
+  }
+  const delays = options.delays ?? DEFAULT_CHAT_STOP_RETRY_DELAYS
+  let lastError: ChatAPIError | null = null
+  for (let attempt = 0; attempt <= delays.length; attempt += 1) {
+    try {
+      const { data } = await apiClient.post<unknown>(
+        `/chat/attempts/${encodeURIComponent(normalizedAttemptId)}/stop`,
+      )
+      const candidate = asRecord(data)
+      const resultAttemptId = nonEmptyString(candidate?.attempt_id ?? candidate?.attemptId)
+      const accepted = optionalBoolean(candidate?.accepted)
+      const rawAttemptStatus = nonEmptyString(
+        candidate?.attempt_status ?? candidate?.attemptStatus,
+      )
+      const attemptStatus = rawAttemptStatus === 'accepted'
+        || rawAttemptStatus === 'processing'
+        || rawAttemptStatus === 'interrupted'
+        || rawAttemptStatus === 'completed'
+        || rawAttemptStatus === 'failed'
+        ? rawAttemptStatus
+        : null
+      const rawDeliveryStatus = nonEmptyString(
+        candidate?.delivery_status ?? candidate?.deliveryStatus,
+      )
+      const deliveryStatus = rawDeliveryStatus === 'stopped'
+        || rawDeliveryStatus === 'completed'
+        || rawDeliveryStatus === 'error'
+        ? rawDeliveryStatus
+        : null
+      if (!candidate || !resultAttemptId || accepted === undefined || !attemptStatus || !deliveryStatus) {
+        throw new ChatAPIError('The stop attempt endpoint returned an invalid response.', {
+          code: 'INVALID_CHAT_STOP_RESPONSE',
+        })
+      }
+      const stoppedAt = optionalTimestamp(candidate.stopped_at ?? candidate.stoppedAt)
+      return {
+        attemptId: resultAttemptId,
+        accepted,
+        attemptStatus,
+        deliveryStatus,
+        ...(stoppedAt !== undefined ? { stoppedAt } : {}),
+      }
+    } catch (error) {
+      lastError = normalizeRequestError(error, 'Unable to stop the chat attempt.')
+      const retryable = lastError.status === 0
+        || lastError.status === 408
+        || lastError.status === 425
+        || lastError.status === 429
+        || lastError.status >= 500
+      if (!retryable || attempt >= delays.length) throw lastError
+      await waitForReceiptPoll(delays[attempt] ?? 0)
+    }
+  }
+  throw lastError ?? new ChatAPIError('Unable to stop the chat attempt.')
 }
 
 async function responseError(response: Response): Promise<ChatAPIError> {
@@ -1122,6 +1626,20 @@ async function responseError(response: Response): Promise<ChatAPIError> {
   )
 }
 
+export function buildChatReasoningPayload(
+  request: Pick<ChatCompletionRequest, 'reasoningMode' | 'reasoningEffort'>,
+): ChatReasoningPayload | undefined {
+  if (request.reasoningMode === 'pro') {
+    return { mode: 'pro', summary: 'auto' }
+  }
+  if (!request.reasoningEffort) return undefined
+  return {
+    mode: 'standard',
+    effort: request.reasoningEffort,
+    summary: 'auto',
+  }
+}
+
 async function postCompletion(
   request: ChatCompletionRequest,
   accessToken: string,
@@ -1129,6 +1647,10 @@ async function postCompletion(
   attemptId: string,
   signal?: AbortSignal,
 ): Promise<Response> {
+  // Web Chat uses the Responses reasoning shape at the request boundary. Pro
+  // is a mode, not an effort value, so it deliberately omits `effort` while
+  // retaining the required automatic summary contract.
+  const reasoning = buildChatReasoningPayload(request)
   return fetch(buildApiUrl('/chat/completions'), {
     method: 'POST',
     credentials: 'include',
@@ -1143,15 +1665,24 @@ async function postCompletion(
     body: JSON.stringify({
       conversation_id: request.conversationId,
       model: request.model.trim(),
-      ...(request.reasoningEffort
-        ? { reasoning_effort: request.reasoningEffort }
-        : {}),
+      ...(reasoning ? { reasoning } : {}),
       expected_head_message_id: request.expectedHeadMessageId,
       ...(request.userMessage
         ? {
             user_message: {
               id: request.userMessage.id,
               content: request.userMessage.content,
+              ...(request.userMessage.attachmentIds?.length
+                ? { attachment_ids: request.userMessage.attachmentIds }
+                : {}),
+              ...(request.userMessage.attachments?.length
+                ? {
+                    attachments: request.userMessage.attachments.map((attachment) => ({
+                      source: attachment.source,
+                      file_id: attachment.fileId,
+                    })),
+                  }
+                : {}),
             },
           }
         : {}),
@@ -1244,7 +1775,12 @@ export async function streamChatCompletion(
     })
   }
   const hasUserMessage = Boolean(
-    request.userMessage?.id.trim() && request.userMessage.content.trim(),
+    request.userMessage?.id.trim()
+    && (
+      request.userMessage.content.trim()
+      || request.userMessage.attachmentIds?.some((id) => id.trim())
+      || request.userMessage.attachments?.some(({ fileId }) => fileId.trim())
+    ),
   )
   const hasRetryMessage = Boolean(request.retryOfMessageId?.trim())
   if (hasUserMessage === hasRetryMessage) {
@@ -1328,17 +1864,30 @@ export async function streamChatCompletion(
       }
     }
 
+    // X-Client-Request-ID is present on every response for request tracing,
+    // including validation failures that happen before a chat attempt exists.
+    // Only the dedicated receipt header proves that the server persisted (or
+    // replayed) the attempt and that attachment drafts may be committed.
+    const receiptId = nonEmptyString(response.headers.get('X-Chat-Receipt-ID'))
+    if (receiptId) {
+      handlers.onReceiptId?.(receiptId)
+      handlers.onAccepted?.()
+    }
     if (!response.ok) throw await responseError(response)
-    const receiptId = nonEmptyString(response.headers.get('X-Client-Request-ID'))
-    if (receiptId) handlers.onReceiptId?.(receiptId)
+    if (!receiptId) handlers.onAccepted?.()
     if (!response.body) {
       throw new ChatAPIError('The chat response did not include a stream.', {
         status: response.status,
         code: 'EMPTY_STREAM',
       })
     }
-
-    const result = await parseChatCompletionSSE(response.body, handlers, options)
+    const result = await parseChatCompletionSSE(response.body, handlers, {
+      ...options,
+      reasoningMode: request.reasoningMode,
+      reasoningEffort: request.reasoningMode === 'pro'
+        ? undefined
+        : request.reasoningEffort,
+    })
     result.receiptId = receiptId
     if (!result.receivedDone) {
       throw new ChatAPIError('The chat stream ended before it completed.', {

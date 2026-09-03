@@ -14,10 +14,7 @@ export default {
     login: 'Sign in',
     nav: {
       ariaLabel: 'Home navigation',
-      capabilities: 'Capabilities',
-      steps: 'Get started',
-      providers: 'Model status',
-      faq: 'FAQ',
+      quickStart: 'Get started',
       tutorial: 'Tutorial',
       openMenu: 'Open menu',
       closeMenu: 'Close menu'
@@ -71,8 +68,8 @@ export default {
             'Use request records and channel status to narrow down the cause of failed calls.'
         },
         quotaViewer: {
-          title: 'Keep quota on your desktop',
-          description: 'See weekly remaining, reset countdowns, and monthly expiry without repeatedly opening the web app.',
+          title: 'Keep points on your desktop',
+          description: 'See weekly points remaining, reset countdowns, and monthly expiry without repeatedly opening the web app.',
           link: 'View the desktop app'
         }
       }
@@ -156,20 +153,43 @@ export default {
 
   modelCatalog: {
     navLabel: 'Models',
+    nav: {
+      pricing: 'Pricing',
+      docs: 'Integration docs',
+      status: 'Service status'
+    },
     title: 'Model Catalog',
-    description: 'Browse published model IDs, capabilities, and public standard pricing without signing in.',
-    publicPriceNote: 'Prices shown here are public standard rates in Snow credits. Exclusive groups, subscription discounts, and user-specific multipliers are not included. Actual usage records are authoritative.',
+    description: 'Compare input, output, and cache prices for published models without signing in.',
+    workspaceTitle: 'Model Center',
+    workspaceDescription: 'Compare input, output, and cache prices for available models.',
+    publicPriceNote: 'Public standard rates are converted at ¥1 = 10 Points; actual charges follow Points usage records.',
     modelCount: '{count} models',
     pricingUpdatedAt: 'Pricing updated {time}',
     searchLabel: 'Search models',
-    searchPlaceholder: 'Search by name, model ID, or capability',
+    searchPlaceholder: 'Search by model name or capability',
     filters: {
       ariaLabel: 'Model filters',
       provider: 'Provider',
       category: 'Type',
-      all: 'All'
+      all: 'All',
+      sidebarTitle: 'Filters',
+      reset: 'Reset',
+      close: 'Close filters',
+      filterButton: 'Filters',
+      group: 'Scope',
+      allModels: 'All models',
+      pricedModels: 'With pricing',
+      billing: 'Pricing model',
+      tags: 'Tags'
     },
-    resultsTitle: 'Public models',
+    toolbar: {
+      sort: 'Sort models',
+      defaultSort: 'Default order',
+      nameAsc: 'Name A–Z',
+      priceAsc: 'Price: low to high',
+      priceDesc: 'Price: high to low'
+    },
+    resultsTitle: 'Model pricing',
     resultCount: '{count} results',
     loading: 'Loading models',
     featured: 'Featured',
@@ -239,6 +259,12 @@ export default {
       pdf: 'PDF',
       web_search: 'Web search',
       structured_output: 'Structured output',
+      parallel_function_calling: 'Function calling',
+      pdf_input: 'PDF input',
+      response_schema: 'Structured output',
+      tool_choice: 'Tool choice',
+      system_messages: 'System messages',
+      computer_use: 'Computer use',
       audio_input: 'Audio input',
       audio_output: 'Audio output',
       video: 'Video'
@@ -246,9 +272,11 @@ export default {
     pricing: {
       publicLabel: 'Public standard price',
       details: 'Pricing details',
+      shortDetails: 'Details',
       dialogTitle: 'Public pricing details',
-      dialogDescription: 'All prices are shown in Snow credits. Token-based models are shown per million tokens. 0 means free; “—” means that price is not available.',
+      dialogDescription: 'Points prices are converted to CNY at ¥1 = 10 Points. Token-based models are shown per million tokens. 0 means free; “—” means that price is not available.',
       billingMode: 'Billing mode',
+      usageBased: 'Usage based',
       billingModes: {
         token: 'Per token',
         perRequest: 'Per request',
@@ -256,6 +284,7 @@ export default {
       },
       input: 'Input',
       output: 'Output',
+      cache: 'Cache',
       cacheWrite: 'Cache write',
       cacheWrite1h: 'Cache write (1 hour)',
       cacheRead: 'Cache read',
@@ -286,7 +315,7 @@ export default {
     },
     meta: {
       title: 'Model Catalog',
-      description: 'Browse published Luoxue API models, capabilities, context windows, and public standard pricing.'
+      description: 'Compare input, output, and cache prices for published Luoxue API models.'
     }
   },
 

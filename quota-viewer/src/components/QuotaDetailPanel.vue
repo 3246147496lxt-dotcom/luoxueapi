@@ -128,7 +128,7 @@ const segmentHeight = (point: DailyUsagePoint, value: number) => {
       <div>
         <strong id="detail-lifecycle-title">{{ inactiveHeading }}</strong>
         <p>{{ quota.statusDetailLabel }}</p>
-        <small>当前没有可用的周期额度和用量统计。</small>
+        <small>当前没有可用的周期积分和用量统计。</small>
       </div>
     </section>
 
@@ -190,7 +190,7 @@ const segmentHeight = (point: DailyUsagePoint, value: number) => {
       <div v-else class="detail-chart-empty" role="status">
         <TrendingUp :size="24" :stroke-width="1.8" aria-hidden="true" />
         <strong>本周期用量暂时无法获取</strong>
-        <p>不影响余额和会员额度判断。</p>
+        <p>不影响余额和会员积分判断。</p>
       </div>
     </section>
   </section>

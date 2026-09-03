@@ -118,6 +118,8 @@ class ReleaseWorkflowSecurityTest(unittest.TestCase):
             "compose-contract",
             "release-contract",
             "test",
+            "postgresql18-integration",
+            "deployment-script-regression",
             "frontend",
             "quota-viewer",
             "quota-viewer-windows",
@@ -125,6 +127,8 @@ class ReleaseWorkflowSecurityTest(unittest.TestCase):
             "embedded-web",
             "compose-smoke",
             "golangci-lint",
+            "candidate-image",
+            "candidate-image-validation",
         ]:
             self.assertRegex(BACKEND_CI, rf"(?m)^  {re.escape(job)}:$")
         for job in ["backend-security", "frontend-security"]:
@@ -143,6 +147,46 @@ class ReleaseWorkflowSecurityTest(unittest.TestCase):
         self.assertIn('.services.sub2api.build == null', BACKEND_CI)
         self.assertIn('.services.sub2api.pull_policy == "never"', BACKEND_CI)
         self.assertGreaterEqual(BACKEND_CI.count("if-no-files-found: error"), 4)
+
+    def test_branch_candidate_image_is_immutable_and_quality_gated(self) -> None:
+        candidate_job = BACKEND_CI.split("  candidate-image:", 1)[1]
+        self.assertIn("github.event_name == 'push'", candidate_job)
+        self.assertIn("refs/heads/codex/quota-viewer-macos-dmg", candidate_job)
+        self.assertIn("packages: write", candidate_job)
+        self.assertIn("./tools/build_candidate_image.sh", candidate_job)
+        self.assertIn("steps.build.outputs.immutable_image", candidate_job)
+        self.assertIn("candidate-forward-schema-test.sh", candidate_job)
+        self.assertIn("candidate-migration-manifest.json", candidate_job)
+        self.assertIn("clean_archive_forbidden_entries=0", candidate_job)
+        self.assertNotIn(":latest", candidate_job)
+
+        for dependency in [
+            "test",
+            "postgresql18-integration",
+            "deployment-script-regression",
+            "frontend",
+            "embedded-web",
+            "compose-smoke",
+            "golangci-lint",
+        ]:
+            with self.subTest(dependency=dependency):
+                self.assertRegex(candidate_job, rf"(?m)^      - {re.escape(dependency)}$")
+
+        validation_job = BACKEND_CI.split("  candidate-image-validation:", 1)[1]
+        self.assertIn("needs: candidate-image", validation_job)
+        self.assertIn("needs.candidate-image.outputs.immutable_image", validation_job)
+        self.assertIn("docker pull --platform linux/amd64", validation_job)
+        self.assertIn("backend/scripts/e2e-test.sh", validation_job)
+        self.assertIn("candidate-forward-schema-test.sh", validation_job)
+
+    def test_deployment_regression_uses_preinstalled_shellcheck(self) -> None:
+        deployment_job = BACKEND_CI.split(
+            "  deployment-script-regression:", 1
+        )[1].split("  frontend:", 1)[0]
+        self.assertIn("command -v shellcheck", deployment_job)
+        self.assertIn("shellcheck --version", deployment_job)
+        self.assertNotIn("apt-get", deployment_job)
+        self.assertNotIn("sudo ", deployment_job)
 
     def test_only_release_job_has_write_permissions(self) -> None:
         self.assertEqual(RELEASE.count("contents: write"), 1)

@@ -1,0 +1,1204 @@
+<template>
+  <div
+    :class="[
+      flat ? '' : 'card overflow-hidden',
+      { 'usage-table--audit': auditLayout }
+    ]"
+  >
+    <div
+      v-if="showIpGeoToolbar"
+      class="flex items-center justify-end gap-2 border-b border-gray-200 px-4 py-2 dark:border-dark-700"
+    >
+      <span v-if="pendingIpCount > 0" class="text-xs text-gray-500 dark:text-gray-400">
+        {{ t('usage.ipGeo.pending', { count: pendingIpCount }) }}
+      </span>
+      <button
+        type="button"
+        class="inline-flex items-center gap-1 rounded px-2 py-1 text-xs font-medium text-primary-600 transition-colors hover:bg-primary-50 disabled:cursor-not-allowed disabled:opacity-50 dark:text-primary-400 dark:hover:bg-primary-900/30"
+        :disabled="ipGeoBatchLoading || pendingIpCount === 0"
+        @click="handleBatchFetchIpGeo"
+      >
+        {{ ipGeoBatchLoading ? t('usage.ipGeo.batchFetching') : t('usage.ipGeo.batchFetch') }}
+      </button>
+    </div>
+    <div class="overflow-auto">
+      <DataTable
+        :columns="columns"
+        :data="data"
+        :loading="loading"
+        :server-side-sort="serverSideSort"
+        :default-sort-key="defaultSortKey"
+        :default-sort-order="defaultSortOrder"
+        @sort="(key, order) => $emit('sort', key, order)"
+      >
+        <template #cell-user="{ row }">
+          <div
+            v-if="auditLayout"
+            class="usage-audit-subject"
+            data-testid="audit-subject"
+            :title="getAuditUserTitle(row)"
+          >
+            <div class="usage-audit-subject__heading">
+              <button
+                v-if="row.user?.email || getUserDisplayName(row)"
+                type="button"
+                class="usage-audit-subject__primary"
+                data-testid="audit-subject-primary"
+                :title="t('admin.usage.clickToViewBalance')"
+                @click="$emit('userClick', row.user_id, row.user?.email)"
+              >
+                {{ getUserDisplayName(row) || row.user?.email }}
+              </button>
+              <span v-else class="usage-audit-subject__fallback">#{{ row.user_id }}</span>
+              <span
+                v-if="row.user?.deleted_at"
+                class="usage-audit-subject__deactivated"
+                data-testid="audit-subject-deactivated"
+              >
+                {{ t('admin.usage.workspace.table.deactivated') }}
+              </span>
+            </div>
+            <div class="usage-audit-subject__meta" data-testid="audit-subject-meta">
+              <template v-if="getUserDisplayName(row) && row.user?.email">
+                <span>{{ row.user.email }}</span>
+                <span aria-hidden="true"> · </span>
+              </template>
+              <span>#{{ row.user_id }}</span>
+            </div>
+          </div>
+          <div v-else class="min-w-[180px] text-sm">
+            <button
+              v-if="row.user?.email || getUserDisplayName(row)"
+              class="block max-w-[240px] text-left text-primary-700 transition-colors hover:text-primary-800 dark:text-primary-300 dark:hover:text-primary-200"
+              @click="$emit('userClick', row.user_id, row.user?.email)"
+              :title="t('admin.usage.clickToViewBalance')"
+            >
+              <span class="block truncate font-semibold">
+                {{ getUserDisplayName(row) || row.user?.email }}
+              </span>
+              <span
+                v-if="getUserDisplayName(row) && row.user?.email"
+                class="mt-0.5 block truncate text-xs font-normal text-gray-500 dark:text-gray-400"
+              >
+                {{ row.user.email }}
+              </span>
+            </button>
+            <span v-else class="font-medium text-gray-900 dark:text-white">#{{ row.user_id }}</span>
+            <div v-if="row.user" class="mt-1 flex flex-wrap items-center gap-1.5 text-xs text-gray-500 dark:text-gray-400">
+              <span>#{{ row.user_id }}</span>
+              <span v-if="row.user.deleted_at" class="inline-flex items-center rounded px-1.5 py-px text-[10px] font-semibold leading-tight bg-rose-100 text-rose-700 ring-1 ring-inset ring-rose-200 dark:bg-rose-500/20 dark:text-rose-300 dark:ring-rose-500/30">
+                {{ t('admin.usage.userDeletedBadge') }}
+              </span>
+            </div>
+          </div>
+        </template>
+
+        <template #cell-api_key="{ row }">
+          <span class="text-sm text-gray-900 dark:text-white">{{ row.api_key?.name || '-' }}</span>
+        </template>
+
+        <template #cell-source="{ row }">
+          <span
+            v-if="row.source"
+            class="inline-flex items-center rounded px-2 py-0.5 text-xs font-medium"
+            :class="getSourceBadgeClass(row.source)"
+          >
+            {{ getSourceLabel(row.source) }}
+          </span>
+          <span v-else class="text-sm text-gray-400 dark:text-gray-500">-</span>
+        </template>
+
+        <template #cell-request_id="{ row }">
+          <code
+            v-if="row.request_id"
+            class="block max-w-[220px] truncate text-xs text-gray-700 dark:text-gray-300"
+            :title="row.request_id"
+          >{{ row.request_id }}</code>
+          <span v-else class="text-sm text-gray-400 dark:text-gray-500">-</span>
+        </template>
+
+        <template #cell-account="{ row }">
+          <span
+            v-if="auditLayout"
+            class="usage-audit-account"
+            data-testid="audit-account"
+            :title="row.account?.name || undefined"
+          >{{ row.account?.name || '-' }}</span>
+          <span v-else class="text-sm text-gray-900 dark:text-white">{{ row.account?.name || '-' }}</span>
+        </template>
+
+        <template #cell-model="{ row }">
+          <div class="space-y-0.5 text-xs">
+            <div v-if="auditLayout" class="usage-audit-model" data-testid="audit-model">
+              <span class="usage-audit-model__requested">{{ getRequestedModel(row) }}</span>
+              <span v-if="getAuditMappedModel(row)" class="usage-audit-model__mapped">
+                <span aria-hidden="true">↳ </span>{{ getAuditMappedModel(row) }}
+              </span>
+            </div>
+            <div v-else-if="row.model_mapping_chain && row.model_mapping_chain.includes('→')" class="space-y-0.5">
+              <div v-for="(step, i) in row.model_mapping_chain.split('→')" :key="i"
+                   class="break-all"
+                   :class="i === 0 ? 'font-medium text-gray-900 dark:text-white' : 'text-gray-500 dark:text-gray-400'"
+                   :style="i > 0 ? `padding-left: ${i * 0.75}rem` : ''">
+                <span v-if="i > 0" class="mr-0.5">↳</span>{{ step }}
+              </div>
+            </div>
+            <div
+              v-else-if="getActualModel(row) && getActualModel(row) !== getRequestedModel(row)"
+              class="space-y-0.5"
+            >
+              <div class="break-all font-medium text-gray-900 dark:text-white">
+                {{ getRequestedModel(row) }}
+              </div>
+              <div class="break-all text-gray-500 dark:text-gray-400">
+                <span class="mr-0.5">↳</span>{{ getActualModel(row) }}
+              </div>
+            </div>
+            <span v-else class="font-medium text-gray-900 dark:text-white">{{ getRequestedModel(row) }}</span>
+            <div
+              v-if="showUpstreamModelAudit && row.upstream_model_mismatch === true && row.upstream_response_model"
+              class="break-all pl-3 text-[11px]"
+              :class="isLikelyModelVariant(row) ? 'text-amber-600 dark:text-amber-400' : 'text-orange-600 dark:text-orange-400'"
+              :title="modelAuditTitle(row)"
+              data-testid="upstream-response-model-audit"
+            >
+              <span class="mr-1">↳ {{ t('usage.upstreamResponseModel') }}:</span>{{ row.upstream_response_model }}
+              <span
+                class="ml-1 inline-flex rounded px-1 py-px text-[10px] font-medium ring-1 ring-inset"
+                :class="isLikelyModelVariant(row)
+                  ? 'bg-amber-50 text-amber-700 ring-amber-200 dark:bg-amber-500/10 dark:text-amber-300 dark:ring-amber-500/30'
+                  : 'bg-orange-50 text-orange-700 ring-orange-200 dark:bg-orange-500/10 dark:text-orange-300 dark:ring-orange-500/30'"
+              >
+                {{ isLikelyModelVariant(row) ? t('usage.modelVariant') : t('usage.modelMismatch') }}
+              </span>
+            </div>
+          </div>
+        </template>
+
+        <template #cell-reasoning_effort="{ row }">
+          <span class="text-sm text-gray-900 dark:text-white">
+            {{ formatReasoningEffort(row.reasoning_effort) }}
+          </span>
+        </template>
+
+        <template #cell-endpoint="{ row }">
+          <div class="max-w-[320px] space-y-1 text-xs">
+            <div class="break-all text-gray-700 dark:text-gray-300">
+              <span class="font-medium text-gray-500 dark:text-gray-400">{{ t('usage.inbound') }}:</span>
+              <span class="ml-1">{{ row.inbound_endpoint?.trim() || '-' }}</span>
+            </div>
+            <div v-if="showUpstreamEndpoint" class="break-all text-gray-700 dark:text-gray-300">
+              <span class="font-medium text-gray-500 dark:text-gray-400">{{ t('usage.upstream') }}:</span>
+              <span class="ml-1">{{ row.upstream_endpoint?.trim() || '-' }}</span>
+            </div>
+          </div>
+        </template>
+
+        <template #cell-group="{ row }">
+          <span v-if="row.group" class="inline-flex items-center rounded px-2 py-0.5 text-xs font-medium bg-indigo-100 text-indigo-800 dark:bg-indigo-900 dark:text-indigo-200">
+            {{ row.group.name }}
+          </span>
+          <span v-else class="text-sm text-gray-400 dark:text-gray-500">-</span>
+        </template>
+
+        <template #cell-stream="{ row }">
+          <span class="inline-flex items-center rounded px-2 py-0.5 text-xs font-medium" :class="getRequestTypeBadgeClass(row)">
+            {{ getRequestTypeLabel(row) }}
+          </span>
+        </template>
+
+        <template #cell-billing_mode="{ row }">
+          <span class="inline-flex items-center rounded px-2 py-0.5 text-xs font-medium" :class="getBillingModeBadgeClass(getDisplayBillingMode(row))">
+            {{ getBillingModeLabel(getDisplayBillingMode(row), t) }}
+          </span>
+        </template>
+
+        <template #cell-tokens="{ row }">
+          <div v-if="auditLayout" class="usage-audit-tokens" data-testid="audit-tokens">
+            <div class="usage-audit-tokens__line usage-audit-tokens__line--input">
+              <span>{{ row.input_tokens?.toLocaleString() || 0 }}</span>
+              <span class="usage-audit-tokens__label">{{ t('admin.usage.workspace.table.input') }}</span>
+            </div>
+            <div class="usage-audit-tokens__line usage-audit-tokens__line--output">
+              <span>{{ row.output_tokens?.toLocaleString() || 0 }}</span>
+              <span class="usage-audit-tokens__label">{{ t('admin.usage.workspace.table.output') }}</span>
+            </div>
+          </div>
+          <!-- 图片生成请求（仅按次计费时显示图片格式） -->
+          <div v-else-if="isImageUsage(row)" class="flex items-center gap-1.5">
+            <svg class="h-4 w-4 text-indigo-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+            </svg>
+            <span class="font-medium text-gray-900 dark:text-white">{{ row.image_count }}{{ t('usage.imageUnit') }}</span>
+            <span class="text-gray-400">({{ formatImageBillingSize(row, t) }})</span>
+          </div>
+          <!-- Token 请求 -->
+          <div v-else class="flex items-center gap-1.5">
+            <div class="space-y-1 text-sm">
+              <div class="flex items-center gap-2">
+                <div class="inline-flex items-center gap-1">
+                  <Icon name="arrowDown" size="sm" class="h-3.5 w-3.5 text-emerald-500" />
+                  <span class="font-medium text-gray-900 dark:text-white">{{ row.input_tokens?.toLocaleString() || 0 }}</span>
+                </div>
+                <div class="inline-flex items-center gap-1">
+                  <Icon name="arrowUp" size="sm" class="h-3.5 w-3.5 text-violet-500" />
+                  <span class="font-medium text-gray-900 dark:text-white">{{ row.output_tokens?.toLocaleString() || 0 }}</span>
+                </div>
+              </div>
+              <div v-if="row.cache_read_tokens > 0 || row.cache_creation_tokens > 0" class="flex items-center gap-2">
+                <div v-if="row.cache_read_tokens > 0" class="inline-flex items-center gap-1">
+                  <svg class="h-3.5 w-3.5 text-sky-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4" /></svg>
+                  <span class="font-medium text-sky-600 dark:text-sky-400">{{ formatCacheTokens(row.cache_read_tokens) }}</span>
+                </div>
+                <div v-if="row.cache_creation_tokens > 0" class="inline-flex items-center gap-1">
+                  <svg class="h-3.5 w-3.5 text-amber-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" /></svg>
+                  <span class="font-medium text-amber-600 dark:text-amber-400">{{ formatCacheTokens(row.cache_creation_tokens) }}</span>
+                  <span v-if="row.cache_creation_1h_tokens > 0" class="inline-flex items-center rounded px-1 py-px text-[10px] font-medium leading-tight bg-orange-100 text-orange-600 ring-1 ring-inset ring-orange-200 dark:bg-orange-500/20 dark:text-orange-400 dark:ring-orange-500/30">1h</span>
+                  <span v-if="row.cache_ttl_overridden" :title="t('usage.cacheTtlOverriddenHint')" class="inline-flex items-center rounded px-1 py-px text-[10px] font-medium leading-tight bg-rose-100 text-rose-600 ring-1 ring-inset ring-rose-200 dark:bg-rose-500/20 dark:text-rose-400 dark:ring-rose-500/30 cursor-help">R</span>
+                </div>
+              </div>
+              <div v-if="hasImageInputTokens(row)" class="flex items-center gap-2">
+                <div class="inline-flex items-center gap-1">
+                  <svg class="h-3.5 w-3.5 text-fuchsia-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
+                  <span class="font-medium text-fuchsia-600 dark:text-fuchsia-400">{{ row.image_input_tokens.toLocaleString() }}</span>
+                </div>
+              </div>
+              <div v-if="hasImageOutputTokens(row)" class="flex items-center gap-2">
+                <div class="inline-flex items-center gap-1">
+                  <svg class="h-3.5 w-3.5 text-pink-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" /></svg>
+                  <span class="font-medium text-pink-600 dark:text-pink-400">{{ row.image_output_tokens.toLocaleString() }}</span>
+                </div>
+              </div>
+            </div>
+            <!-- Token Detail Tooltip -->
+            <div
+              class="group relative"
+              @mouseenter="showTokenTooltip($event, row)"
+              @mouseleave="hideTokenTooltip"
+            >
+              <div class="flex h-4 w-4 cursor-help items-center justify-center rounded-full bg-gray-100 transition-colors group-hover:bg-blue-100 dark:bg-gray-700 dark:group-hover:bg-blue-900/50">
+                <Icon name="infoCircle" size="xs" class="text-gray-400 group-hover:text-blue-500 dark:text-gray-500 dark:group-hover:text-blue-400" />
+              </div>
+            </div>
+          </div>
+        </template>
+
+        <template #cell-cost="{ row }">
+          <div v-if="auditLayout" class="usage-audit-cost" data-testid="audit-cost">
+            <div class="usage-audit-cost__charged">
+              <CreditAmount
+                v-if="creditMode"
+                :value="getChargedAmount(row).toFixed(6)"
+                icon-size="xs"
+                :label="`${t('usage.chargedAmount')} ${getChargedAmount(row).toFixed(6)}`"
+              />
+              <span v-else>${{ getChargedAmount(row).toFixed(6) }}</span>
+            </div>
+            <div class="usage-audit-cost__base" data-testid="audit-cost-base">
+              {{ t('admin.usage.workspace.table.cost') }}: ${{ getGrossCost(row).toFixed(4) }}
+            </div>
+          </div>
+          <div v-else class="text-sm">
+            <div class="flex items-center gap-1.5">
+              <CreditAmount
+                v-if="creditMode"
+                class="font-medium text-green-600 dark:text-green-400"
+                :value="getChargedAmount(row).toFixed(6)"
+                icon-size="xs"
+                :label="`${t('usage.chargedAmount')} ${getChargedAmount(row).toFixed(6)}`"
+              />
+              <span v-else class="font-medium text-green-600 dark:text-green-400">${{ getChargedAmount(row).toFixed(6) }}</span>
+              <span
+                v-if="row.long_context_billing_applied"
+                data-testid="long-context-billing-marker"
+                class="inline-flex items-center rounded px-1 py-px text-[10px] font-semibold leading-tight bg-amber-100 text-amber-700 ring-1 ring-inset ring-amber-200 dark:bg-amber-500/20 dark:text-amber-300 dark:ring-amber-500/30"
+              >x2</span>
+              <!-- Cost Detail Tooltip -->
+              <div
+                class="group relative"
+                @mouseenter="showTooltip($event, row)"
+                @mouseleave="hideTooltip"
+              >
+                <div class="flex h-4 w-4 cursor-help items-center justify-center rounded-full bg-gray-100 transition-colors group-hover:bg-blue-100 dark:bg-gray-700 dark:group-hover:bg-blue-900/50">
+                  <Icon name="infoCircle" size="xs" class="text-gray-400 group-hover:text-blue-500 dark:text-gray-500 dark:group-hover:text-blue-400" />
+                </div>
+              </div>
+            </div>
+            <div v-if="showAccountBilling && row.account_rate_multiplier != null" class="mt-0.5 text-[11px] text-orange-500 dark:text-orange-400">
+              A ${{ accountBilled(row).toFixed(6) }}
+            </div>
+          </div>
+        </template>
+
+        <!-- 合并首字/总耗时的健康度列：左侧色条上端随首字档、下端随总耗时档，中段(40%-60%)短渐变过渡，便于纵向扫视整体健康状况 -->
+        <template #cell-latency="{ row }">
+          <div v-if="auditLayout" class="usage-audit-latency" data-testid="audit-latency">
+            <span
+              class="usage-audit-latency__badge"
+              :class="getAuditLatencyBadgeClass(row.first_token_ms)"
+              data-testid="audit-latency-badge"
+            >{{ formatDuration(row.first_token_ms) }}</span>
+            <span class="usage-audit-latency__total">
+              {{ t('admin.usage.workspace.table.total') }}: {{ formatDuration(row.duration_ms) }}
+            </span>
+          </div>
+          <div v-else class="flex items-stretch gap-2">
+            <span
+              class="w-1 shrink-0 rounded-full"
+              :class="row.first_token_ms != null
+                ? ['bg-gradient-to-b from-40% to-60%', LATENCY_BAR_FROM_CLASSES[firstTokenSeverity(row.first_token_ms)], LATENCY_BAR_TO_CLASSES[durationSeverity(row.duration_ms ?? 0)]]
+                : LATENCY_BAR_CLASSES[durationSeverity(row.duration_ms ?? 0)]"
+              aria-hidden="true"
+            ></span>
+            <div class="grid grid-cols-[max-content_max-content] items-baseline gap-x-2 gap-y-0.5 text-xs">
+              <span class="text-gray-400 dark:text-gray-500">{{ t('usage.latencyFirstToken') }}</span>
+              <span v-if="row.first_token_ms != null" class="font-medium tabular-nums" :class="LATENCY_TEXT_CLASSES[firstTokenSeverity(row.first_token_ms)]">{{ formatDuration(row.first_token_ms) }}</span>
+              <span v-else class="text-gray-400 dark:text-gray-500">-</span>
+              <span class="text-gray-400 dark:text-gray-500">{{ t('usage.latencyDuration') }}</span>
+              <span class="font-medium tabular-nums" :class="LATENCY_TEXT_CLASSES[durationSeverity(row.duration_ms ?? 0)]">{{ formatDuration(row.duration_ms) }}</span>
+            </div>
+          </div>
+        </template>
+
+        <template #cell-created_at="{ value, row }">
+          <div v-if="auditLayout" class="usage-audit-time" data-testid="audit-time">
+            <span class="usage-audit-time__date">{{ formatAuditDateTime(value) }}</span>
+            <code
+              class="usage-audit-time__request"
+              :title="row.request_id || undefined"
+            >{{ row.request_id || '-' }}</code>
+          </div>
+          <span v-else class="text-sm text-gray-600 dark:text-gray-400">{{ formatDateTime(value) }}</span>
+        </template>
+
+        <template #cell-user_agent="{ row }">
+          <span v-if="row.user_agent" class="text-sm text-gray-600 dark:text-gray-400 block max-w-[320px] truncate" :title="row.user_agent">{{ formatUserAgent(row.user_agent) }}</span>
+          <span v-else class="text-sm text-gray-400 dark:text-gray-500">-</span>
+        </template>
+
+        <template #cell-ip_address="{ row }">
+          <div v-if="auditLayout && row.ip_address" class="usage-audit-ip" data-testid="audit-ip">
+            <span class="usage-audit-ip__address">{{ row.ip_address }}</span>
+            <div class="usage-audit-ip__geo">
+              <IpGeoCell :ip="row.ip_address" />
+            </div>
+          </div>
+          <span v-else-if="auditLayout" class="usage-audit-ip__empty">-</span>
+          <div v-else-if="row.ip_address">
+            <span class="text-sm font-mono text-gray-600 dark:text-gray-400">{{ row.ip_address }}</span>
+            <IpGeoCell :ip="row.ip_address" />
+          </div>
+          <span v-else class="text-sm text-gray-400 dark:text-gray-500">-</span>
+        </template>
+
+        <template #empty><EmptyState :message="t('usage.noRecords')" /></template>
+      </DataTable>
+    </div>
+  </div>
+
+  <!-- Token Tooltip Portal -->
+  <Teleport to="body">
+    <div
+      v-if="tokenTooltipVisible"
+      class="fixed z-[9999] pointer-events-none -translate-y-1/2"
+      :style="{
+        left: tokenTooltipPosition.x + 'px',
+        top: tokenTooltipPosition.y + 'px'
+      }"
+    >
+      <div class="whitespace-nowrap rounded-lg border border-gray-700 bg-gray-900 px-3 py-2.5 text-xs text-white shadow-xl dark:border-gray-600 dark:bg-gray-800">
+        <div class="space-y-1.5">
+          <div>
+            <div class="text-xs font-semibold text-gray-300 mb-1">{{ t('usage.tokenDetails') }}</div>
+            <div v-if="tokenTooltipData && tokenTooltipData.input_tokens > 0 && !hasImageInputTokens(tokenTooltipData)" class="flex items-center justify-between gap-4">
+              <span class="text-gray-400">{{ t('admin.usage.inputTokens') }}</span>
+              <span class="font-medium text-white">{{ tokenTooltipData.input_tokens.toLocaleString() }}</span>
+            </div>
+            <div v-if="tokenTooltipData && hasImageInputTokens(tokenTooltipData) && textInputTokens(tokenTooltipData) > 0" class="flex items-center justify-between gap-4">
+              <span class="text-gray-400">{{ t('admin.usage.inputTokens') }}</span>
+              <span class="font-medium text-white">{{ textInputTokens(tokenTooltipData).toLocaleString() }}</span>
+            </div>
+            <div v-if="tokenTooltipData && hasImageInputTokens(tokenTooltipData)" class="flex items-center justify-between gap-4">
+              <span class="text-gray-400">{{ t('usage.imageInputTokens') }}</span>
+              <span class="font-medium text-fuchsia-300">{{ tokenTooltipData.image_input_tokens.toLocaleString() }}</span>
+            </div>
+            <div v-if="tokenTooltipData && tokenTooltipData.output_tokens > 0 && !hasImageOutputTokens(tokenTooltipData)" class="flex items-center justify-between gap-4">
+              <span class="text-gray-400">{{ t('admin.usage.outputTokens') }}</span>
+              <span class="font-medium text-white">{{ tokenTooltipData.output_tokens.toLocaleString() }}</span>
+            </div>
+            <div v-if="tokenTooltipData && hasImageOutputTokens(tokenTooltipData) && textOutputTokens(tokenTooltipData) > 0" class="flex items-center justify-between gap-4">
+              <span class="text-gray-400">{{ t('admin.usage.outputTokens') }}</span>
+              <span class="font-medium text-white">{{ textOutputTokens(tokenTooltipData).toLocaleString() }}</span>
+            </div>
+            <div v-if="tokenTooltipData && hasImageOutputTokens(tokenTooltipData)" class="flex items-center justify-between gap-4">
+              <span class="text-gray-400">{{ t('usage.imageOutputTokens') }}</span>
+              <span class="font-medium text-pink-300">{{ tokenTooltipData.image_output_tokens.toLocaleString() }}</span>
+            </div>
+            <div v-if="tokenTooltipData && tokenTooltipData.cache_creation_tokens > 0">
+              <!-- 有 5m/1h 明细时，展开显示 -->
+              <template v-if="tokenTooltipData.cache_creation_5m_tokens > 0 || tokenTooltipData.cache_creation_1h_tokens > 0">
+                <div v-if="tokenTooltipData.cache_creation_5m_tokens > 0" class="flex items-center justify-between gap-4">
+                  <span class="text-gray-400 flex items-center gap-1.5">
+                    {{ t('admin.usage.cacheCreation5mTokens') }}
+                    <span class="inline-flex items-center rounded px-1 py-px text-[10px] font-medium leading-tight bg-amber-500/20 text-amber-400 ring-1 ring-inset ring-amber-500/30">5m</span>
+                  </span>
+                  <span class="font-medium text-white">{{ tokenTooltipData.cache_creation_5m_tokens.toLocaleString() }}</span>
+                </div>
+                <div v-if="tokenTooltipData.cache_creation_1h_tokens > 0" class="flex items-center justify-between gap-4">
+                  <span class="text-gray-400 flex items-center gap-1.5">
+                    {{ t('admin.usage.cacheCreation1hTokens') }}
+                    <span class="inline-flex items-center rounded px-1 py-px text-[10px] font-medium leading-tight bg-orange-500/20 text-orange-400 ring-1 ring-inset ring-orange-500/30">1h</span>
+                  </span>
+                  <span class="font-medium text-white">{{ tokenTooltipData.cache_creation_1h_tokens.toLocaleString() }}</span>
+                </div>
+              </template>
+              <!-- 无明细时，只显示聚合值 -->
+              <div v-else class="flex items-center justify-between gap-4">
+                <span class="text-gray-400">{{ t('admin.usage.cacheCreationTokens') }}</span>
+                <span class="font-medium text-white">{{ tokenTooltipData.cache_creation_tokens.toLocaleString() }}</span>
+              </div>
+            </div>
+            <div v-if="tokenTooltipData && tokenTooltipData.cache_ttl_overridden" class="flex items-center justify-between gap-4">
+              <span class="text-gray-400 flex items-center gap-1.5">
+                {{ t('usage.cacheTtlOverriddenLabel') }}
+                <span class="inline-flex items-center rounded px-1 py-px text-[10px] font-medium leading-tight bg-rose-500/20 text-rose-400 ring-1 ring-inset ring-rose-500/30">R-{{ tokenTooltipData.cache_creation_1h_tokens > 0 ? '5m' : '1H' }}</span>
+              </span>
+              <span class="font-medium text-rose-400">{{ tokenTooltipData.cache_creation_1h_tokens > 0 ? t('usage.cacheTtlOverridden1h') : t('usage.cacheTtlOverridden5m') }}</span>
+            </div>
+            <div v-if="tokenTooltipData && tokenTooltipData.cache_read_tokens > 0" class="flex items-center justify-between gap-4">
+              <span class="text-gray-400">{{ t('admin.usage.cacheReadTokens') }}</span>
+              <span class="font-medium text-white">{{ tokenTooltipData.cache_read_tokens.toLocaleString() }}</span>
+            </div>
+          </div>
+          <div class="flex items-center justify-between gap-6 border-t border-gray-700 pt-1.5">
+            <span class="text-gray-400">{{ t('usage.totalTokens') }}</span>
+            <span class="font-semibold text-blue-400">{{ ((tokenTooltipData?.input_tokens || 0) + (tokenTooltipData?.output_tokens || 0) + (tokenTooltipData?.cache_creation_tokens || 0) + (tokenTooltipData?.cache_read_tokens || 0)).toLocaleString() }}</span>
+          </div>
+        </div>
+        <div class="absolute right-full top-1/2 h-0 w-0 -translate-y-1/2 border-b-[6px] border-r-[6px] border-t-[6px] border-b-transparent border-r-gray-900 border-t-transparent dark:border-r-gray-800"></div>
+      </div>
+    </div>
+  </Teleport>
+
+  <!-- Cost Tooltip Portal -->
+  <Teleport to="body">
+    <div
+      v-if="tooltipVisible"
+      class="fixed z-[9999] pointer-events-none -translate-y-1/2"
+      :style="{
+        left: tooltipPosition.x + 'px',
+        top: tooltipPosition.y + 'px'
+      }"
+    >
+      <div class="whitespace-nowrap rounded-lg border border-gray-700 bg-gray-900 px-3 py-2.5 text-xs text-white shadow-xl dark:border-gray-600 dark:bg-gray-800">
+        <div class="space-y-1.5">
+          <!-- Cost Breakdown -->
+          <div class="mb-2 border-b border-gray-700 pb-1.5">
+            <div class="text-xs font-semibold text-gray-300 mb-1">{{ t('usage.costDetails') }}</div>
+            <div v-if="tooltipData && tooltipData.input_cost > 0" class="flex items-center justify-between gap-4">
+              <span class="text-gray-400">{{ t('admin.usage.inputCost') }}</span>
+              <span class="font-medium text-white">${{ tooltipData.input_cost.toFixed(6) }}</span>
+            </div>
+            <div v-if="tooltipData && hasImageInputCost(tooltipData)" class="flex items-center justify-between gap-4">
+              <span class="text-gray-400">{{ t('usage.imageInputCost') }}</span>
+              <span class="font-medium text-fuchsia-300">${{ tooltipData.image_input_cost.toFixed(6) }}</span>
+            </div>
+            <div v-if="tooltipData && tooltipData.output_cost > 0" class="flex items-center justify-between gap-4">
+              <span class="text-gray-400">{{ t('admin.usage.outputCost') }}</span>
+              <span class="font-medium text-white">${{ tooltipData.output_cost.toFixed(6) }}</span>
+            </div>
+            <div v-if="tooltipData && hasImageOutputCost(tooltipData)" class="flex items-center justify-between gap-4">
+              <span class="text-gray-400">{{ t('usage.imageOutputCost') }}</span>
+              <span class="font-medium text-pink-300">${{ tooltipData.image_output_cost.toFixed(6) }}</span>
+            </div>
+            <!-- Token billing: show unit prices per 1M tokens -->
+            <template v-if="tooltipData && !isImageUsage(tooltipData) && (!tooltipData.billing_mode || tooltipData.billing_mode === BILLING_MODE_TOKEN)">
+              <div v-if="tooltipData && textInputTokens(tooltipData) > 0" class="flex items-center justify-between gap-4">
+                <span class="text-gray-400">{{ t('usage.inputTokenPrice') }}</span>
+                <span class="font-medium text-sky-300">{{ formatTokenPricePerMillion(tooltipData.input_cost, textInputTokens(tooltipData)) }} {{ t('usage.perMillionTokens') }}</span>
+              </div>
+              <div v-if="tooltipData && hasImageInputTokens(tooltipData)" class="flex items-center justify-between gap-4">
+                <span class="text-gray-400">{{ t('usage.imageInputTokenPrice') }}</span>
+                <span class="font-medium text-fuchsia-300">{{ formatTokenPricePerMillion(tooltipData.image_input_cost ?? 0, tooltipData.image_input_tokens) }} {{ t('usage.perMillionTokens') }}</span>
+              </div>
+              <div v-if="tooltipData && tooltipData.output_cost > 0 && textOutputTokens(tooltipData) > 0" class="flex items-center justify-between gap-4">
+                <span class="text-gray-400">{{ t('usage.outputTokenPrice') }}</span>
+                <span class="font-medium text-violet-300">{{ formatTokenPricePerMillion(tooltipData.output_cost, textOutputTokens(tooltipData)) }} {{ t('usage.perMillionTokens') }}</span>
+              </div>
+              <div v-if="tooltipData && hasImageOutputTokens(tooltipData)" class="flex items-center justify-between gap-4">
+                <span class="text-gray-400">{{ t('usage.imageOutputTokenPrice') }}</span>
+                <span class="font-medium text-pink-300">{{ formatTokenPricePerMillion(tooltipData.image_output_cost ?? 0, tooltipData.image_output_tokens) }} {{ t('usage.perMillionTokens') }}</span>
+              </div>
+            </template>
+            <template v-else-if="tooltipData && isImageUsage(tooltipData)">
+              <div class="flex items-center justify-between gap-4">
+                <span class="text-gray-400">{{ t('usage.imageCount') }}</span>
+                <span class="font-medium text-white">{{ tooltipData.image_count }}{{ t('usage.imageUnit') }}</span>
+              </div>
+              <div class="flex items-center justify-between gap-4">
+                <span class="text-gray-400">{{ t('usage.imageBillingSize') }}</span>
+                <span class="font-medium text-white">{{ formatImageBillingSize(tooltipData, t) }}</span>
+              </div>
+              <div class="flex items-center justify-between gap-4">
+                <span class="text-gray-400">{{ t('usage.imageSizeSource') }}</span>
+                <span class="font-medium text-white">{{ formatImageSizeSource(tooltipData, t) }}</span>
+              </div>
+              <div class="flex items-center justify-between gap-4">
+                <span class="text-gray-400">{{ t('usage.imageInputSize') }}</span>
+                <span class="font-medium text-white">{{ formatImageInputSize(tooltipData, t) }}</span>
+              </div>
+              <div class="flex items-center justify-between gap-4">
+                <span class="text-gray-400">{{ t('usage.imageOutputSize') }}</span>
+                <span class="font-medium text-white">{{ formatImageOutputSize(tooltipData, t) }}</span>
+              </div>
+              <div v-if="formatImageSizeBreakdown(tooltipData)" class="flex items-center justify-between gap-4">
+                <span class="text-gray-400">{{ t('usage.imageSizeBreakdown') }}</span>
+                <span class="font-medium text-white">{{ formatImageSizeBreakdown(tooltipData) }}</span>
+              </div>
+              <div class="flex items-center justify-between gap-4">
+                <span class="text-gray-400">{{ t('usage.imageUnitPrice') }}</span>
+                <span class="font-medium text-sky-300">${{ imageUnitPrice(tooltipData).toFixed(6) }}</span>
+              </div>
+              <div class="flex items-center justify-between gap-4">
+                <span class="text-gray-400">{{ t('usage.imageTotalPrice') }}</span>
+                <span class="font-medium text-white">${{ tooltipData.total_cost?.toFixed(6) || '0.000000' }}</span>
+              </div>
+            </template>
+            <div v-else class="flex items-center justify-between gap-4">
+              <span class="text-gray-400">{{ t('usage.unitPrice') }}</span>
+              <span class="font-medium text-sky-300">${{ tooltipData?.total_cost?.toFixed(6) || '0.000000' }}</span>
+            </div>
+            <div v-if="tooltipData && tooltipData.cache_creation_cost > 0" class="flex items-center justify-between gap-4">
+              <span class="text-gray-400">{{ t('admin.usage.cacheCreationCost') }}</span>
+              <span class="font-medium text-white">${{ tooltipData.cache_creation_cost.toFixed(6) }}</span>
+            </div>
+            <div v-if="tooltipData && tooltipData.cache_read_cost > 0" class="flex items-center justify-between gap-4">
+              <span class="text-gray-400">{{ t('admin.usage.cacheReadCost') }}</span>
+              <span class="font-medium text-white">${{ tooltipData.cache_read_cost.toFixed(6) }}</span>
+            </div>
+          </div>
+          <!-- Rate and Summary -->
+          <div class="flex items-center justify-between gap-6">
+            <span class="text-gray-400">{{ t('usage.serviceTier') }}</span>
+            <span class="font-semibold text-sky-300">{{ getUsageServiceTierLabel(tooltipData?.service_tier, t) }}</span>
+          </div>
+          <div class="flex items-center justify-between gap-6">
+            <span class="text-gray-400">{{ t('usage.rate') }}</span>
+            <span class="font-semibold text-blue-400">{{ formatMultiplier(tooltipData?.rate_multiplier || 1) }}x</span>
+          </div>
+          <div class="flex items-center justify-between gap-6">
+            <span class="text-gray-400">{{ t('usage.original') }}</span>
+            <span class="font-medium text-white">${{ getGrossCost(tooltipData).toFixed(6) }}</span>
+          </div>
+          <div class="flex items-center justify-between gap-6">
+            <span class="text-gray-400">{{ t('usage.chargedAmount') }}</span>
+            <CreditAmount
+              v-if="creditMode"
+              class="font-semibold text-green-400"
+              :value="getChargedAmount(tooltipData).toFixed(6)"
+              icon-size="xs"
+              :label="`${t('usage.chargedAmount')} ${getChargedAmount(tooltipData).toFixed(6)}`"
+            />
+            <span v-else class="font-semibold text-green-400">${{ getChargedAmount(tooltipData).toFixed(6) }}</span>
+          </div>
+          <!-- Account billing (separated from user billing) -->
+          <template v-if="showAccountBilling">
+            <div class="flex items-center justify-between gap-6 border-t border-gray-700 pt-1.5">
+              <span class="text-gray-400">{{ t('usage.accountMultiplier') }}</span>
+              <span class="font-semibold text-blue-400">{{ formatMultiplier(tooltipData?.account_rate_multiplier ?? 1) }}x</span>
+            </div>
+            <div class="flex items-center justify-between gap-6">
+              <span class="text-gray-400">{{ t('usage.accountBilled') }}</span>
+              <span class="font-semibold text-green-400">
+                ${{ accountBilled({
+                  total_cost: tooltipData?.total_cost,
+                  account_stats_cost: tooltipData?.account_stats_cost,
+                  account_rate_multiplier: tooltipData?.account_rate_multiplier,
+                }).toFixed(6) }}
+              </span>
+            </div>
+          </template>
+        </div>
+        <div class="absolute right-full top-1/2 h-0 w-0 -translate-y-1/2 border-b-[6px] border-r-[6px] border-t-[6px] border-b-transparent border-r-gray-900 border-t-transparent dark:border-r-gray-800"></div>
+      </div>
+    </div>
+  </Teleport>
+</template>
+
+<script setup lang="ts">
+import { computed, ref } from 'vue'
+import { useI18n } from 'vue-i18n'
+import { formatDateTime, formatReasoningEffort } from '@/utils/format'
+import { formatCacheTokens, formatMultiplier } from '@/utils/formatters'
+import { formatTokenPricePerMillion } from '@/utils/usagePricing'
+import { getUsageServiceTierLabel } from '@/utils/usageServiceTier'
+import { resolveUsageRequestType } from '@/utils/usageRequestType'
+import {
+  LATENCY_BAR_CLASSES,
+  LATENCY_BAR_FROM_CLASSES,
+  LATENCY_BAR_TO_CLASSES,
+  LATENCY_TEXT_CLASSES,
+  durationSeverity,
+  firstTokenSeverity,
+} from '@/utils/latencyHealth'
+import {
+  BILLING_MODE_TOKEN,
+  getBillingModeLabel,
+  getBillingModeBadgeClass,
+  isImageUsage,
+  getDisplayBillingMode,
+  imageUnitPrice,
+} from '@/utils/billingMode'
+import {
+  formatImageBillingSize,
+  formatImageInputSize,
+  formatImageOutputSize,
+  formatImageSizeBreakdown,
+  formatImageSizeSource,
+  hasImageOutputTokens,
+  textOutputTokens,
+  hasImageOutputCost,
+  hasImageInputTokens,
+  textInputTokens,
+  hasImageInputCost,
+} from '@/utils/imageUsage'
+
+/** Compute the account-billed cost for display: (account_stats_cost ?? total_cost) * rate_multiplier */
+function accountBilled(row: { total_cost?: number | null; account_stats_cost?: number | null; account_rate_multiplier?: number | null }): number {
+  const base = row.account_stats_cost != null ? row.account_stats_cost : (row.total_cost ?? 0)
+  const result = base * (row.account_rate_multiplier ?? 1)
+  return Number.isNaN(result) ? 0 : result
+}
+
+
+import DataTable from '@/components/common/DataTable.vue'
+import CreditAmount from '@/components/common/CreditAmount.vue'
+import EmptyState from '@/components/common/EmptyState.vue'
+import IpGeoCell from '@/components/common/IpGeoCell.vue'
+import Icon from '@/components/icons/Icon.vue'
+import { fetchBatch, getEntry } from '@/utils/ipGeoLookup'
+import type { UsageLog, UsageLogAccountSummary } from '@/types'
+import type { Column } from '@/components/common/types'
+
+interface UsageTableRow extends UsageLog {
+  upstream_model?: string | null
+  upstream_response_model?: string | null
+  upstream_model_mismatch?: boolean | null
+  model_mapping_chain?: string | null
+  account_rate_multiplier?: number | null
+  account_stats_cost?: number | null
+  account?: UsageLogAccountSummary
+}
+
+interface Props {
+  data: UsageTableRow[]
+  loading?: boolean
+  columns: Column[]
+  serverSideSort?: boolean
+  defaultSortKey?: string
+  defaultSortOrder?: 'asc' | 'desc'
+  showAccountBilling?: boolean
+  showUpstreamEndpoint?: boolean
+  /** Admin-only response-model audit evidence. Keep disabled for user-facing tables. */
+  showUpstreamModelAudit?: boolean
+  creditMode?: boolean
+  /** Superdesign 用量审计台账的紧凑八列复合单元格 */
+  auditLayout?: boolean
+  /** 嵌入统一卡片内使用：去掉自身卡片外观 */
+  flat?: boolean
+}
+
+const props = withDefaults(defineProps<Props>(), {
+  loading: false,
+  serverSideSort: false,
+  defaultSortKey: '',
+  defaultSortOrder: 'asc',
+  showAccountBilling: true,
+  showUpstreamEndpoint: true,
+  showUpstreamModelAudit: false,
+  creditMode: false,
+  auditLayout: false,
+  flat: false
+})
+const emit = defineEmits<{
+  userClick: [userID: number, email?: string]
+  sort: [key: string, order: 'asc' | 'desc']
+  ipGeoBatchFailed: []
+}>()
+const { t } = useI18n()
+const showAccountBilling = props.showAccountBilling
+const showUpstreamEndpoint = props.showUpstreamEndpoint
+const showUpstreamModelAudit = props.showUpstreamModelAudit
+const creditMode = props.creditMode
+const ipGeoBatchLoading = ref(false)
+
+const getUserDisplayName = (row: UsageTableRow): string => {
+  const username = row.user?.username?.trim() || ''
+  const email = row.user?.email?.trim() || ''
+  return username && username.toLocaleLowerCase() !== email.toLocaleLowerCase() ? username : ''
+}
+
+const getAuditUserTitle = (row: UsageTableRow): string => {
+  const displayName = getUserDisplayName(row)
+  const email = row.user?.email?.trim() || ''
+  return [displayName, email, `#${row.user_id}`].filter(Boolean).join(' · ')
+}
+
+const showIpGeoToolbar = computed(() => props.columns.some((col) => col.key === 'ip_address'))
+
+const currentPageIps = computed(() =>
+  Array.from(new Set(props.data.map((row) => row.ip_address).filter((ip): ip is string => Boolean(ip))))
+)
+
+const pendingIpCount = computed(() => {
+  if (!showIpGeoToolbar.value) return 0
+  return currentPageIps.value.filter((ip) => {
+    const status = getEntry(ip).status
+    return status === 'idle' || status === 'error'
+  }).length
+})
+
+const handleBatchFetchIpGeo = async () => {
+  ipGeoBatchLoading.value = true
+  try {
+    const ok = await fetchBatch(currentPageIps.value)
+    if (!ok) emit('ipGeoBatchFailed')
+  } finally {
+    ipGeoBatchLoading.value = false
+  }
+}
+
+// Tooltip state - cost
+const tooltipVisible = ref(false)
+const tooltipPosition = ref({ x: 0, y: 0 })
+const tooltipData = ref<UsageTableRow | null>(null)
+
+// Tooltip state - token
+const tokenTooltipVisible = ref(false)
+const tokenTooltipPosition = ref({ x: 0, y: 0 })
+const tokenTooltipData = ref<UsageTableRow | null>(null)
+
+const getRequestTypeLabel = (row: UsageTableRow): string => {
+  const requestType = resolveUsageRequestType(row)
+  if (requestType === 'cyber') return t('usage.cyber')
+  if (requestType === 'ws_v2') return t('usage.ws')
+  if (requestType === 'stream') return t('usage.stream')
+  if (requestType === 'sync') return t('usage.sync')
+  return t('usage.unknown')
+}
+
+const getRequestTypeBadgeClass = (row: UsageTableRow): string => {
+  const requestType = resolveUsageRequestType(row)
+  if (requestType === 'cyber') return 'bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200'
+  if (requestType === 'ws_v2') return 'bg-violet-100 text-violet-800 dark:bg-violet-900 dark:text-violet-200'
+  if (requestType === 'stream') return 'bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200'
+  if (requestType === 'sync') return 'bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-200'
+  return 'bg-amber-100 text-amber-800 dark:bg-amber-900 dark:text-amber-200'
+}
+
+const getRequestedModel = (row: UsageTableRow): string =>
+  row.model || '-'
+
+const getActualModel = (row: UsageTableRow): string =>
+  row.upstream_model?.trim() || row.model || '-'
+
+const sentUpstreamModel = (row: UsageTableRow): string =>
+  row.upstream_model?.trim() || row.model?.trim() || ''
+
+const normalizeModelVariant = (model: string): string => model
+  .trim()
+  .toLowerCase()
+  .replace(/-latest$/, '')
+  .replace(/-\d{4}-\d{2}-\d{2}$/, '')
+  .replace(/-\d{8}$/, '')
+
+const isLikelyModelVariant = (row: UsageTableRow): boolean => {
+  const sent = sentUpstreamModel(row)
+  const response = row.upstream_response_model?.trim() || ''
+  return sent !== '' && response !== '' && normalizeModelVariant(sent) === normalizeModelVariant(response)
+}
+
+const modelAuditTitle = (row: UsageTableRow): string => [
+  `${t('usage.requestedModel')}: ${row.model || '-'}`,
+  `${t('usage.sentUpstreamModel')}: ${sentUpstreamModel(row) || '-'}`,
+  `${t('usage.upstreamResponseModel')}: ${row.upstream_response_model || '-'}`,
+].join('\n')
+
+const getAuditMappedModel = (row: UsageTableRow): string => {
+  const requested = getRequestedModel(row)
+  const mappingSteps = row.model_mapping_chain
+    ?.split('→')
+    .map((step) => step.trim())
+    .filter(Boolean)
+
+  const mapped = mappingSteps && mappingSteps.length > 1
+    ? mappingSteps[mappingSteps.length - 1]
+    : getActualModel(row)
+
+  return mapped && mapped !== requested ? mapped : ''
+}
+
+const getChargedAmount = (row: UsageTableRow | null | undefined): number => {
+  const value = row?.actual_cost ?? 0
+  return Number.isFinite(value) ? value : 0
+}
+
+const getGrossCost = (row: UsageTableRow | null | undefined): number => {
+  const value = row?.total_cost ?? getChargedAmount(row)
+  return Number.isFinite(value) ? value : 0
+}
+
+const getSourceLabel = (source: string): string => {
+  if (source === 'web_chat') return t('usage.sourceWebChat')
+  if (source === 'api') return t('usage.sourceApi')
+  return source
+}
+
+const getSourceBadgeClass = (source: string): string => {
+  if (source === 'web_chat') {
+    return 'bg-violet-100 text-violet-800 dark:bg-violet-900/40 dark:text-violet-200'
+  }
+  return 'bg-gray-100 text-gray-700 dark:bg-dark-700 dark:text-gray-300'
+}
+
+const formatUserAgent = (ua: string): string => {
+  return ua
+}
+
+// 超过 1 分钟简化为 "Xm Ys"，免去人工换算（超过 1 小时再进位为 "Xh Ym"）
+const formatDuration = (ms: number | null | undefined): string => {
+  if (ms == null) return '-'
+  if (ms < 1000) return `${ms}ms`
+  if (ms < 60_000) return `${(ms / 1000).toFixed(2)}s`
+  const totalSec = Math.round(ms / 1000)
+  if (totalSec < 3600) return `${Math.floor(totalSec / 60)}m ${totalSec % 60}s`
+  return `${Math.floor(totalSec / 3600)}h ${Math.floor((totalSec % 3600) / 60)}m`
+}
+
+const formatAuditDateTime = (value: string | Date | null | undefined): string =>
+  formatDateTime(value, undefined, 'sv-SE')
+
+const getAuditLatencyBadgeClass = (ms: number | null | undefined): string => {
+  if (ms == null) return 'usage-audit-latency__badge--muted'
+  return `usage-audit-latency__badge--${firstTokenSeverity(ms)}`
+}
+
+// Cost tooltip functions
+const showTooltip = (event: MouseEvent, row: UsageTableRow) => {
+  const target = event.currentTarget as HTMLElement
+  const rect = target.getBoundingClientRect()
+  tooltipData.value = row
+  tooltipPosition.value.x = rect.right + 8
+  tooltipPosition.value.y = rect.top + rect.height / 2
+  tooltipVisible.value = true
+}
+
+const hideTooltip = () => {
+  tooltipVisible.value = false
+  tooltipData.value = null
+}
+
+// Token tooltip functions
+const showTokenTooltip = (event: MouseEvent, row: UsageTableRow) => {
+  const target = event.currentTarget as HTMLElement
+  const rect = target.getBoundingClientRect()
+  tokenTooltipData.value = row
+  tokenTooltipPosition.value.x = rect.right + 8
+  tokenTooltipPosition.value.y = rect.top + rect.height / 2
+  tokenTooltipVisible.value = true
+}
+
+const hideTokenTooltip = () => {
+  tokenTooltipVisible.value = false
+  tokenTooltipData.value = null
+}
+</script>
+
+<style scoped>
+.usage-table--audit {
+  color: var(--lx-clay-text, #332f3a);
+}
+
+.usage-audit-subject {
+  min-width: 220px;
+  max-width: 240px;
+  overflow: hidden;
+}
+
+.usage-audit-subject__heading {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 6px;
+}
+
+.usage-audit-subject__primary,
+.usage-audit-subject__fallback {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--lx-clay-accent, #7c3aed);
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 20px;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.usage-audit-subject__primary {
+  display: block;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  transition: color 150ms ease;
+}
+
+.usage-audit-subject__primary:hover {
+  color: #6d28d9;
+}
+
+.usage-audit-subject__deactivated {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  padding: 1px 4px;
+  border-radius: 3px;
+  background: #ffe4e6;
+  box-shadow: inset 0 0 0 1px #fecdd3;
+  color: #e11d48;
+  font-size: 10px;
+  font-weight: 500;
+  line-height: 12px;
+}
+
+.usage-audit-subject__meta {
+  overflow: hidden;
+  margin-top: 1px;
+  color: #9ca3af;
+  font-size: 10px;
+  font-weight: 400;
+  line-height: 14px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.usage-audit-model {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+}
+
+.usage-audit-model__requested {
+  overflow-wrap: anywhere;
+  color: var(--lx-clay-text, #332f3a);
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 16px;
+}
+
+.usage-audit-model__mapped {
+  overflow-wrap: anywhere;
+  color: #9ca3af;
+  font-size: 10px;
+  font-weight: 400;
+  line-height: 14px;
+}
+
+.usage-audit-tokens,
+.usage-audit-cost,
+.usage-audit-latency {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+}
+
+.usage-audit-tokens__line {
+  display: flex;
+  align-items: baseline;
+  justify-content: flex-end;
+  gap: 4px;
+  color: var(--lx-clay-text, #332f3a);
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 18px;
+  white-space: nowrap;
+}
+
+.usage-audit-tokens__line--output {
+  color: #8b5cf6;
+}
+
+.usage-audit-tokens__label {
+  color: #9ca3af;
+  font-size: 10px;
+  font-weight: 400;
+  line-height: 14px;
+}
+
+.usage-audit-cost__charged {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 4px;
+  color: #059669;
+  font-size: 13px;
+  font-weight: 900;
+  line-height: 18px;
+  white-space: nowrap;
+}
+
+.usage-audit-cost__base {
+  margin-top: 1px;
+  color: #fb923c;
+  font-size: 10px;
+  font-weight: 400;
+  line-height: 14px;
+  white-space: nowrap;
+}
+
+.usage-audit-latency__badge {
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 14px;
+  white-space: nowrap;
+}
+
+.usage-audit-latency__badge--good {
+  background: #d1fae5;
+  color: #047857;
+}
+
+.usage-audit-latency__badge--warn {
+  background: #fef3c7;
+  color: #b45309;
+}
+
+.usage-audit-latency__badge--slow {
+  background: #ffedd5;
+  color: #c2410c;
+}
+
+.usage-audit-latency__badge--critical {
+  background: #fee2e2;
+  color: #b91c1c;
+}
+
+.usage-audit-latency__badge--muted {
+  background: #f3f4f6;
+  color: #9ca3af;
+}
+
+.usage-audit-latency__total {
+  margin-top: 4px;
+  color: #9ca3af;
+  font-size: 10px;
+  font-weight: 400;
+  line-height: 14px;
+  white-space: nowrap;
+}
+
+.usage-audit-account {
+  display: block;
+  max-width: 120px;
+  overflow: hidden;
+  color: #4b5563;
+  font-size: 13px;
+  font-weight: 400;
+  line-height: 18px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.usage-audit-time {
+  display: flex;
+  min-width: 140px;
+  flex-direction: column;
+}
+
+.usage-audit-time__date {
+  color: #6b7280;
+  font-size: 11px;
+  font-weight: 400;
+  line-height: 16px;
+  white-space: nowrap;
+}
+
+.usage-audit-time__request {
+  display: block;
+  max-width: 160px;
+  overflow: hidden;
+  color: #9ca3af;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 9px;
+  font-weight: 400;
+  line-height: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.usage-audit-ip {
+  min-width: 120px;
+  color: var(--lx-clay-text, #332f3a);
+  font-size: 11px;
+  font-weight: 400;
+  line-height: 16px;
+}
+
+.usage-audit-ip__address {
+  white-space: nowrap;
+}
+
+.usage-audit-ip__geo {
+  color: #9ca3af;
+}
+
+.usage-audit-ip__geo :deep(div) {
+  margin-top: 1px;
+  color: #9ca3af;
+  font-size: 11px;
+  line-height: 14px;
+}
+
+.usage-audit-ip__geo :deep(button) {
+  color: #9ca3af;
+  font-size: 11px;
+  text-decoration-color: transparent;
+}
+
+.usage-audit-ip__empty {
+  color: #9ca3af;
+  font-size: 11px;
+}
+
+.dark .usage-audit-subject__primary,
+.dark .usage-audit-subject__fallback {
+  color: #a78bfa;
+}
+
+.dark .usage-audit-subject__primary:hover {
+  color: #c4b5fd;
+}
+
+.dark .usage-audit-subject__deactivated {
+  background: rgb(244 63 94 / 20%);
+  box-shadow: inset 0 0 0 1px rgb(244 63 94 / 30%);
+  color: #fda4af;
+}
+
+.dark .usage-audit-model__requested,
+.dark .usage-audit-tokens__line--input,
+.dark .usage-audit-ip {
+  color: var(--lx-clay-text, #f8f5fc);
+}
+
+.dark .usage-audit-tokens__line--output {
+  color: #a78bfa;
+}
+
+.dark .usage-audit-account,
+.dark .usage-audit-time__date {
+  color: #c5bccf;
+}
+</style>

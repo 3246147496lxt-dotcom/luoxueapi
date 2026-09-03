@@ -3,8 +3,9 @@
  *
  * This is the only source of truth for shared product colors, typography,
  * radii and elevation. The legacy teal primary palette (#14b8a6 / #0f766e)
- * is not part of the active design language. Ice blue remains a scoped
- * Luoxue brand/information color; violet owns primary interaction.
+ * is not part of the active design language. The authenticated Workspace
+ * uses one blue interaction/data ramp in both themes; status colors remain
+ * semantic and public Snow Clay surfaces keep their own scoped palette.
  */
 
 @font-face {
@@ -24,6 +25,414 @@
 }
 
 :root {
+  /* Authenticated Workspace foundation.
+     Chat, Work and Account share these roles. Components may keep private
+     component tokens, but must not shadow the shared roles declared here. */
+
+  /* Typography */
+  --workspace-font-ui: Inter, "PingFang SC", "Microsoft YaHei", sans-serif;
+  --workspace-font-mono: var(--lx-clay-font-mono);
+  --workspace-type-brand-size: 18px;
+  --workspace-type-brand-weight: 700;
+  --workspace-type-page-title-size: 28px;
+  --workspace-type-page-title-weight: 600;
+  --workspace-type-navigation-size: 14px;
+  --workspace-type-navigation-weight: 500;
+  --workspace-type-body-size: 14px;
+  --workspace-type-body-weight: 400;
+  --workspace-type-secondary-size: 12px;
+  --workspace-type-secondary-weight: 400;
+  --workspace-type-numeric-size: 32px;
+  --workspace-type-numeric-weight: 600;
+  --workspace-sidebar-group-label-size: 14px;
+  --workspace-sidebar-group-label-weight: 500;
+  --workspace-sidebar-group-label-line-height: 20px;
+
+  /* Spacing */
+  --workspace-space-0-25: 1px;
+  --workspace-space-0-5: 2px;
+  --workspace-space-0-75: 3px;
+  --workspace-space-mode-switch-inset: 3px;
+  --workspace-space-1: 4px;
+  --workspace-space-1-5: 6px;
+  --workspace-space-1-75: 7px;
+  --workspace-space-2: 8px;
+  --workspace-space-2-5: 10px;
+  --workspace-space-2-75: 11px;
+  --workspace-space-3: 12px;
+  --workspace-space-4: 16px;
+  --workspace-space-4-5: 18px;
+  --workspace-space-5: 20px;
+  --workspace-space-5-5: 22px;
+  --workspace-space-6: 24px;
+  --workspace-space-7: 28px;
+  --workspace-space-8: 32px;
+  --workspace-space-10: 40px;
+  --workspace-space-12: 48px;
+
+  /* Shape and shell dimensions */
+  --workspace-radius-compact: 8px;
+  --workspace-radius-mode-switch-option: 7px;
+  --workspace-radius-work-button: 9px;
+  --workspace-radius-control-sm: var(--workspace-radius-work-button);
+  --workspace-radius-button: 10px;
+  --workspace-radius-input: 12px;
+  --workspace-radius-work-card: 14px;
+  --workspace-radius-control-lg: var(--workspace-radius-work-card);
+  --workspace-radius-card: 16px;
+  --workspace-radius-popover: 20px;
+  --workspace-radius-mobile-sheet: 22px;
+  --workspace-radius-pill: 999px;
+  --workspace-sidebar-width: 260px;
+  --workspace-sidebar-width-collapsed: 68px;
+  --workspace-sidebar-width-mobile: min(84vw, 288px);
+  --workspace-sidebar-width-mobile-chat: min(288px, calc(100vw - 40px));
+  --workspace-popover-width: 248px;
+  --workspace-avatar-size-sm: var(--workspace-space-6);
+  --workspace-avatar-size-md: var(--workspace-space-8);
+  --workspace-avatar-size-sheet: 42px;
+  --workspace-menu-row-height: 36px;
+  --workspace-menu-row-height-touch: 44px;
+  --workspace-menu-identity-height: var(--workspace-space-12);
+  --workspace-popover-identity-height: 51px;
+  --workspace-sheet-identity-height: 58px;
+  --workspace-sheet-handle-width: 36px;
+  --workspace-sheet-handle-height: var(--workspace-space-1);
+  --workspace-sidebar-header-height: 52px;
+  --workspace-sidebar-footer-row-height: var(--workspace-sidebar-header-height);
+  --workspace-sidebar-header-padding-inline: var(--workspace-space-3);
+  --workspace-sidebar-header-actions-inset-end: var(--workspace-space-1-75);
+  --workspace-sidebar-action-size: 36px;
+  --workspace-sidebar-touch-target: 44px;
+  --workspace-sidebar-transition-duration: 300ms;
+  --workspace-sidebar-transition-easing: ease-out;
+  --workspace-layer-account-overlay: 80;
+  --workspace-layer-sidebar-overlay: 50;
+  --workspace-sidebar-content-padding: var(--workspace-space-1) var(--workspace-space-2)
+    var(--workspace-space-2);
+  --workspace-sidebar-content-padding-collapsed: var(--workspace-space-2);
+  --workspace-sidebar-content-padding-admin: var(--workspace-space-3)
+    var(--workspace-space-2) var(--workspace-space-2);
+  --workspace-mode-switch-height: 46px;
+  --workspace-mode-switch-height-mobile: 60px;
+
+  /* Stable light primitives */
+  --workspace-light-canvas: #f8fafc;
+  --workspace-light-sidebar-surface: #ffffff;
+  --workspace-light-surface: #ffffff;
+  --workspace-light-popup-surface: #ffffff;
+  --workspace-light-surface-subtle: #f7f7f8;
+  --workspace-light-mode-switch-track: #f7f7f8;
+  --workspace-light-popover-identity: #f7f7f8;
+  --workspace-light-hover: #ececec;
+  --workspace-light-selected: #e5e5e5;
+  --workspace-light-divider: rgb(0 0 0 / 0.05);
+  --workspace-light-footer-divider: rgb(0 0 0 / 0.05);
+  --workspace-light-border: #e5e5e5;
+  --workspace-light-border-strong: #d4d4d4;
+  --workspace-light-text: #0d0d0d;
+  --workspace-light-identity-text: #0d0d0d;
+  --workspace-light-identity-text-tertiary: #8f8f8f;
+  --workspace-light-work-text: #0d0d0d;
+  --workspace-light-text-secondary: #5d5d5d;
+  --workspace-light-work-text-secondary: #5d5d5d;
+  --workspace-light-text-muted: #8e8e8e;
+  --workspace-light-sidebar-group-label: #8f8f8f;
+  --workspace-light-selection-background: color-mix(in oklab, #cdcdcd 40%, transparent);
+  --workspace-light-sidebar-overlay-icon: #5d5d5d;
+  --workspace-light-sidebar-overlay-backdrop: rgb(249 250 251 / 0.5);
+  --workspace-light-sidebar-overlay-shadow: 0 0 64px rgb(0 0 0 / 0.07);
+  --workspace-light-confirm-surface: #ffffff;
+  --workspace-light-confirm-text: #0d0d0d;
+  --workspace-light-confirm-text-secondary: #8f8f8f;
+  --workspace-light-confirm-cancel-border: rgb(0 0 0 / 0.15);
+  --workspace-light-confirm-cancel-hover: #ececec;
+  --workspace-light-confirm-danger: #ff002a;
+  --workspace-light-confirm-danger-hover: #911e1b;
+  --workspace-light-confirm-backdrop: rgb(227 227 227 / 0.5);
+  --workspace-light-confirm-shadow:
+    0 8px 12px rgb(0 0 0 / 0.08),
+    0 0 1px rgb(0 0 0 / 0.62);
+  --workspace-light-action-hover: #2b2b2b;
+  --workspace-light-work-accent: #2563eb;
+  --workspace-light-work-accent-hover: #1d4ed8;
+  --workspace-light-work-accent-deep: #1e40af;
+  --workspace-light-work-accent-soft: #eff6ff;
+  --workspace-light-work-accent-soft-hover: #dbeafe;
+  --workspace-light-work-accent-border: #dbeafe;
+  --workspace-light-work-accent-border-strong: #93c5fd;
+  --workspace-light-work-on-accent: #ffffff;
+  --workspace-light-work-info: #2563eb;
+  --workspace-light-work-info-soft: #eff6ff;
+  --workspace-light-work-success: #16a34a;
+  --workspace-light-work-track: #ececec;
+  --workspace-light-work-chart-cost: #ea580c;
+  --workspace-light-work-chart-cost-fill-strong: rgb(234 88 12 / 0.18);
+  --workspace-light-work-chart-cost-fill-soft: rgb(234 88 12 / 0.06);
+  --workspace-light-work-chart-cost-fill-transparent: rgb(234 88 12 / 0);
+  --workspace-light-work-chart-primary: #2563eb;
+  --workspace-light-work-chart-primary-fill-strong: rgb(37 99 235 / 0.18);
+  --workspace-light-work-chart-primary-fill-soft: rgb(37 99 235 / 0.06);
+  --workspace-light-work-chart-primary-fill-transparent: rgb(37 99 235 / 0);
+  --workspace-light-work-chart-secondary: #60a5fa;
+  --workspace-light-dashboard-card-border: #f1f5f9;
+  --workspace-light-dashboard-card-shadow:
+    0 1px 3px 0 rgb(0 0 0 / 0.05),
+    0 1px 2px 0 rgb(0 0 0 / 0.03);
+  --workspace-light-dashboard-text-strong: #0f172a;
+  --workspace-light-dashboard-text-heading: #475569;
+  --workspace-light-dashboard-text-muted: #64748b;
+  --workspace-light-dashboard-text-subtle: #64748b;
+  --workspace-light-dashboard-period-text: #334155;
+  --workspace-light-dashboard-divider: #f8fafc;
+  --workspace-light-dashboard-track: #f1f5f9;
+  --workspace-light-dashboard-success: #16a34a;
+  --workspace-light-dashboard-hover: rgb(248 250 252 / 0.5);
+  --workspace-light-dashboard-notification-hover: var(--workspace-light-work-accent);
+  --workspace-light-dashboard-tooltip-surface: #0f172a;
+  --workspace-light-dashboard-tooltip-text: #f8fafc;
+  --workspace-light-dashboard-tooltip-title: #cbd5e1;
+  --workspace-light-dashboard-tooltip-border: rgb(255 255 255 / 0.1);
+  --workspace-light-mode-switch-border: var(--workspace-light-border);
+  --workspace-light-mode-switch-shadow: 0 1px 2px rgb(0 0 0 / 0.06);
+  --workspace-light-shadow-mode-switch: 0 1px 2px rgb(17 17 17 / 0.08);
+  --workspace-light-shadow-float: 0 12px 32px rgba(17, 24, 39, 0.08);
+  --workspace-light-shadow-card: 0 1px 2px rgb(17 24 39 / 0.03);
+  --workspace-light-shadow-surface: 0 1px 2px rgb(17 24 39 / 0.04);
+  --workspace-light-shadow-popover:
+    0 12px 30px rgb(0 0 0 / 0.12),
+    0 2px 8px rgb(0 0 0 / 0.06);
+
+  /* Stable dark primitives */
+  --workspace-dark-canvas: #000000;
+  --workspace-dark-sidebar-surface: var(--workspace-dark-canvas);
+  --workspace-dark-surface: #171717;
+  --workspace-dark-popup-surface: #171717;
+  --workspace-dark-surface-subtle: #171717;
+  --workspace-dark-mode-switch-active: #212121;
+  --workspace-dark-popover-surface: var(--workspace-dark-popup-surface);
+  --workspace-dark-popover-avatar: #212121;
+  --workspace-dark-divider: rgb(255 255 255 / 0.1);
+  --workspace-dark-footer-divider: rgb(255 255 255 / 0.06);
+  --workspace-dark-border: rgb(255 255 255 / 0.1);
+  --workspace-dark-border-strong: rgb(255 255 255 / 0.16);
+  --workspace-dark-popover-border: var(--workspace-dark-border);
+  --workspace-dark-popover-divider: var(--workspace-dark-divider);
+  --workspace-dark-text: #ececec;
+  --workspace-dark-identity-text: #ffffff;
+  --workspace-dark-identity-text-tertiary: #afafaf;
+  --workspace-dark-text-secondary: #b4b4b4;
+  --workspace-dark-text-muted: #8a8a8a;
+  --workspace-dark-sidebar-group-label: #8f8f8f;
+  --workspace-dark-selection-background: color-mix(in oklab, #cdcdcd 40%, transparent);
+  --workspace-dark-sidebar-overlay-icon: #cdcdcd;
+  --workspace-dark-sidebar-overlay-backdrop: rgb(0 0 0 / 0.5);
+  --workspace-dark-sidebar-overlay-shadow: none;
+  --workspace-dark-confirm-surface: #212121;
+  --workspace-dark-confirm-text: #ffffff;
+  --workspace-dark-confirm-text-secondary: #afafaf;
+  --workspace-dark-confirm-cancel-border: rgb(255 255 255 / 0.15);
+  --workspace-dark-confirm-cancel-hover: #424242;
+  --workspace-dark-confirm-danger: #ff002a;
+  --workspace-dark-confirm-danger-hover: #911e1b;
+  --workspace-dark-confirm-backdrop: rgb(0 0 0 / 0.5);
+  --workspace-dark-confirm-shadow:
+    0 8px 16px rgb(0 0 0 / 0.32),
+    inset 0 0 1px rgb(255 255 255 / 0.2),
+    0 0 1px rgb(0 0 0 / 0.62);
+  --workspace-dark-popover-text: #ececec;
+  --workspace-dark-popover-text-secondary: #b4b4b4;
+  --workspace-dark-hover: #212121;
+  --workspace-dark-active: #212121;
+  --workspace-dark-action-hover: #ffffff;
+  --workspace-dark-work-accent: #60a5fa;
+  --workspace-dark-work-accent-hover: #93c5fd;
+  --workspace-dark-work-accent-deep: #3b82f6;
+  --workspace-dark-work-accent-soft: #172554;
+  --workspace-dark-work-accent-soft-hover: #1e3a8a;
+  --workspace-dark-work-accent-border: rgb(96 165 250 / 0.35);
+  --workspace-dark-work-accent-border-strong: rgb(147 197 253 / 0.55);
+  --workspace-dark-work-on-accent: #0d0d0d;
+  --workspace-dark-work-info: #60a5fa;
+  --workspace-dark-work-info-soft: #172554;
+  --workspace-dark-work-success: #22c55e;
+  --workspace-dark-work-chart-cost: #fb923c;
+  --workspace-dark-work-chart-cost-fill-strong: rgb(251 146 60 / 0.18);
+  --workspace-dark-work-chart-cost-fill-soft: rgb(251 146 60 / 0.06);
+  --workspace-dark-work-chart-cost-fill-transparent: rgb(251 146 60 / 0);
+  --workspace-dark-work-chart-primary: #60a5fa;
+  --workspace-dark-work-chart-primary-fill-strong: rgb(96 165 250 / 0.18);
+  --workspace-dark-work-chart-primary-fill-soft: rgb(96 165 250 / 0.06);
+  --workspace-dark-work-chart-primary-fill-transparent: rgb(96 165 250 / 0);
+  --workspace-dark-work-chart-secondary: #93c5fd;
+  --workspace-dark-work-shadow-card: none;
+  --workspace-dark-shadow-float: 0 16px 40px rgba(0, 0, 0, 0.28);
+  --workspace-dark-shadow-mode-switch: 0 1px 2px rgb(0 0 0 / 0.28);
+  --workspace-dark-shadow-popover: inset 0 0 1px rgb(255 255 255 / 0.2);
+  --workspace-dark-dashboard-card-border: var(--workspace-dark-border);
+  --workspace-dark-dashboard-card-shadow: none;
+  --workspace-dark-dashboard-text-strong: var(--workspace-dark-text);
+  --workspace-dark-dashboard-text-heading: var(--workspace-dark-text-secondary);
+  --workspace-dark-dashboard-text-muted: var(--workspace-dark-text-muted);
+  --workspace-dark-dashboard-text-subtle: var(--workspace-dark-text-muted);
+  --workspace-dark-dashboard-period-text: var(--workspace-dark-text);
+  --workspace-dark-dashboard-divider: var(--workspace-dark-divider);
+  --workspace-dark-dashboard-track: var(--workspace-dark-border);
+  --workspace-dark-dashboard-success: #22c55e;
+  --workspace-dark-dashboard-hover: var(--workspace-dark-hover);
+  --workspace-dark-dashboard-notification-hover: var(--workspace-dark-work-accent);
+  --workspace-dark-dashboard-tooltip-surface: #212121;
+  --workspace-dark-dashboard-tooltip-text: #ececec;
+  --workspace-dark-dashboard-tooltip-title: #b4b4b4;
+  --workspace-dark-dashboard-tooltip-border: rgb(255 255 255 / 0.16);
+
+  /* Active Workspace shell roles. Chat and Work consume this same canvas. */
+  --workspace-canvas: var(--workspace-light-canvas);
+  --workspace-sidebar-surface: var(--workspace-light-sidebar-surface);
+  --workspace-surface: var(--workspace-light-surface);
+  --workspace-card-surface: var(--workspace-light-surface);
+  --workspace-popup-surface: var(--workspace-light-popup-surface);
+  --workspace-surface-subtle: var(--workspace-light-surface-subtle);
+  --workspace-hover: var(--workspace-light-hover);
+  --workspace-selected: var(--workspace-light-selected);
+  --workspace-divider: var(--workspace-light-divider);
+  --workspace-footer-divider: var(--workspace-light-footer-divider);
+  --workspace-border: var(--workspace-light-border);
+  --workspace-border-strong: var(--workspace-light-border-strong);
+  --workspace-text: var(--workspace-light-text);
+  --workspace-identity-text: var(--workspace-light-identity-text);
+  --workspace-identity-text-tertiary: var(--workspace-light-identity-text-tertiary);
+  --workspace-text-secondary: var(--workspace-light-text-secondary);
+  --workspace-text-muted: var(--workspace-light-text-muted);
+  --workspace-sidebar-group-label: var(--workspace-light-sidebar-group-label);
+  --workspace-selection-background: var(--workspace-light-selection-background);
+  --workspace-sidebar-overlay-icon: var(--workspace-light-sidebar-overlay-icon);
+  --workspace-sidebar-header-action: var(--workspace-identity-text-tertiary);
+  --workspace-sidebar-overlay-backdrop: var(--workspace-light-sidebar-overlay-backdrop);
+  --workspace-sidebar-overlay-shadow: var(--workspace-light-sidebar-overlay-shadow);
+  --workspace-confirm-surface: var(--workspace-light-confirm-surface);
+  --workspace-confirm-text: var(--workspace-light-confirm-text);
+  --workspace-confirm-text-secondary: var(--workspace-light-confirm-text-secondary);
+  --workspace-confirm-cancel-border: var(--workspace-light-confirm-cancel-border);
+  --workspace-confirm-cancel-hover: var(--workspace-light-confirm-cancel-hover);
+  --workspace-confirm-danger: var(--workspace-light-confirm-danger);
+  --workspace-confirm-danger-hover: var(--workspace-light-confirm-danger-hover);
+  --workspace-confirm-backdrop: var(--workspace-light-confirm-backdrop);
+  --workspace-confirm-shadow: var(--workspace-light-confirm-shadow);
+  --workspace-action: var(--workspace-light-text);
+  --workspace-action-hover: var(--workspace-light-action-hover);
+  --workspace-action-soft: var(--workspace-light-surface-subtle);
+  --workspace-shadow-float: var(--workspace-light-shadow-float);
+  --workspace-shadow-surface: var(--workspace-light-shadow-surface);
+
+  /* Work keeps product accents and data roles only. Neutral backgrounds,
+     borders and dividers always consume the shared Workspace roles above. */
+  --workspace-work-text: var(--workspace-text);
+  --workspace-work-text-secondary: var(--workspace-text-secondary);
+  /* Dense Work labels stay on the AA-safe secondary role; muted remains
+     available for non-text decoration and low-priority icons. */
+  --workspace-work-text-muted: var(--workspace-text-secondary);
+  --workspace-work-accent: var(--workspace-light-work-accent);
+  --workspace-work-accent-hover: var(--workspace-light-work-accent-hover);
+  --workspace-work-accent-deep: var(--workspace-light-work-accent-deep);
+  --workspace-work-accent-soft: var(--workspace-light-work-accent-soft);
+  --workspace-work-accent-soft-hover: var(--workspace-light-work-accent-soft-hover);
+  --workspace-work-accent-border: var(--workspace-light-work-accent-border);
+  --workspace-work-accent-border-strong: var(--workspace-light-work-accent-border-strong);
+  --workspace-work-on-accent: var(--workspace-light-work-on-accent);
+  --workspace-work-info: var(--workspace-light-work-info);
+  --workspace-work-info-soft: var(--workspace-light-work-info-soft);
+  --workspace-work-success: var(--workspace-light-work-success);
+  --workspace-work-track: var(--workspace-hover);
+  --workspace-work-chart-cost: var(--workspace-light-work-chart-cost);
+  --workspace-work-chart-cost-fill-strong: var(--workspace-light-work-chart-cost-fill-strong);
+  --workspace-work-chart-cost-fill-soft: var(--workspace-light-work-chart-cost-fill-soft);
+  --workspace-work-chart-cost-fill-transparent: var(--workspace-light-work-chart-cost-fill-transparent);
+  --workspace-work-chart-primary: var(--workspace-light-work-chart-primary);
+  --workspace-work-chart-primary-fill-strong: var(--workspace-light-work-chart-primary-fill-strong);
+  --workspace-work-chart-primary-fill-soft: var(--workspace-light-work-chart-primary-fill-soft);
+  --workspace-work-chart-primary-fill-transparent: var(--workspace-light-work-chart-primary-fill-transparent);
+  --workspace-work-chart-secondary: var(--workspace-light-work-chart-secondary);
+  --workspace-work-shadow-card: var(--workspace-light-shadow-card);
+
+  /* Dashboard faithfully follows the approved Superdesign surface while
+     keeping its denser slate hierarchy scoped away from the shared shell. */
+  --workspace-dashboard-card-border: var(--workspace-light-dashboard-card-border);
+  --workspace-dashboard-card-shadow: var(--workspace-light-dashboard-card-shadow);
+  --workspace-dashboard-text-strong: var(--workspace-light-dashboard-text-strong);
+  --workspace-dashboard-text-heading: var(--workspace-light-dashboard-text-heading);
+  --workspace-dashboard-text-muted: var(--workspace-light-dashboard-text-muted);
+  --workspace-dashboard-text-subtle: var(--workspace-light-dashboard-text-subtle);
+  --workspace-dashboard-period-text: var(--workspace-light-dashboard-period-text);
+  --workspace-dashboard-divider: var(--workspace-light-dashboard-divider);
+  --workspace-dashboard-track: var(--workspace-light-dashboard-track);
+  --workspace-dashboard-success: var(--workspace-light-dashboard-success);
+  --workspace-dashboard-hover: var(--workspace-light-dashboard-hover);
+  --workspace-dashboard-notification-hover: var(--workspace-light-dashboard-notification-hover);
+  --workspace-dashboard-tooltip-surface: var(--workspace-light-dashboard-tooltip-surface);
+  --workspace-dashboard-tooltip-text: var(--workspace-light-dashboard-tooltip-text);
+  --workspace-dashboard-tooltip-title: var(--workspace-light-dashboard-tooltip-title);
+  --workspace-dashboard-tooltip-border: var(--workspace-light-dashboard-tooltip-border);
+
+  /* Shared mode switch and Account popover roles */
+  --workspace-mode-switch-track: var(--workspace-surface-subtle);
+  --workspace-mode-switch-border: var(--workspace-light-mode-switch-border);
+  --workspace-mode-switch-active: var(--workspace-light-surface);
+  --workspace-mode-switch-hover: var(--workspace-hover);
+  --workspace-mode-switch-divider: var(--workspace-divider);
+  --workspace-mode-switch-text: var(--workspace-text);
+  --workspace-mode-switch-text-muted: var(--workspace-text-secondary);
+  --workspace-mode-switch-active-shadow: var(--workspace-light-mode-switch-shadow);
+  --workspace-mode-switch-radius: var(--workspace-radius-input);
+  --workspace-mode-switch-option-radius: var(--workspace-radius-work-button);
+  --workspace-popover-surface: var(--workspace-popup-surface);
+  --workspace-popover-identity-surface: var(--workspace-light-popover-identity);
+  --workspace-popover-border: var(--workspace-border);
+  --workspace-popover-divider: var(--workspace-divider);
+  --workspace-popover-text: var(--workspace-text);
+  --workspace-popover-text-secondary: var(--workspace-text-secondary);
+  --workspace-popover-hover: var(--workspace-hover);
+  --workspace-popover-focus: var(--workspace-text-secondary);
+  --workspace-popover-avatar-surface: var(--workspace-text);
+  --workspace-popover-avatar-text: #ffffff;
+  --workspace-popover-shadow: var(--workspace-light-shadow-popover);
+
+  /* Shared Sidebar dock and product menu roles. Account consumes these roles
+     without owning a private palette or shadow source. */
+  --workspace-overlay-backdrop: rgb(15 23 42 / 0.32);
+  --workspace-identity-avatar-text: #1c1f23;
+  --workspace-identity-avatar-surface: #fce865;
+  --workspace-dock-text: var(--workspace-text-secondary);
+  --workspace-dock-text-strong: var(--workspace-text);
+  --workspace-dock-text-muted: var(--workspace-text-secondary);
+  --workspace-dock-chevron: var(--workspace-text-muted);
+  --workspace-dock-hover: var(--workspace-hover);
+  --workspace-dock-focus: color-mix(in srgb, var(--workspace-work-accent) 44%, transparent);
+  --workspace-dock-focus-personal: var(--workspace-light-text-muted);
+  --workspace-dock-cta-border: var(--workspace-border);
+  --workspace-dock-cta-border-hover: var(--workspace-border-strong);
+  --workspace-dock-cta-text: var(--workspace-text);
+  --workspace-dock-cta-surface: var(--workspace-card-surface);
+  --workspace-dock-cta-surface-hover: var(--workspace-hover);
+  --workspace-menu-surface: var(--workspace-popup-surface);
+  --workspace-menu-sheet-border: var(--workspace-border);
+  --workspace-menu-divider: var(--workspace-divider);
+  --workspace-menu-text: var(--workspace-text-secondary);
+  --workspace-menu-row-text: var(--workspace-text-secondary);
+  --workspace-menu-text-strong: var(--workspace-text);
+  --workspace-menu-text-muted: var(--workspace-text-secondary);
+  --workspace-menu-hover: var(--workspace-hover);
+  --workspace-menu-close-hover: var(--workspace-hover);
+  --workspace-menu-focus: color-mix(in srgb, var(--workspace-work-accent) 44%, transparent);
+  --workspace-menu-handle: color-mix(in srgb, var(--workspace-text-muted) 55%, transparent);
+  --workspace-menu-frozen: rgb(180 83 9);
+  --workspace-menu-danger: rgb(220 38 38);
+  --workspace-menu-danger-hover: rgb(185 28 28);
+  --workspace-menu-danger-surface: rgb(254 226 226 / 0.72);
+  --workspace-menu-shadow:
+    0 8px 12px rgb(0 0 0 / 0.08),
+    0 0 1px rgb(0 0 0 / 0.62);
+
   /* Typography */
   --lx-clay-font-ui: "DM Sans", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
   --lx-clay-font-display: Nunito, "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
@@ -41,21 +450,23 @@
   --lx-clay-radius-overlay: 22px;
 
   /* Stable light and dark ramps. Components with their own theme switch can use these directly. */
-  --lx-clay-light-canvas: #f4f1fa;
+  --lx-clay-light-canvas: #ffffff;
   --lx-clay-light-surface: #ffffff;
-  --lx-clay-light-surface-soft: rgba(255, 255, 255, 0.66);
-  --lx-clay-light-surface-subtle: rgba(255, 255, 255, 0.58);
-  --lx-clay-light-surface-elevated: rgba(255, 255, 255, 0.76);
-  --lx-clay-light-overlay-surface-soft: rgba(255, 255, 255, 0.74);
-  --lx-clay-light-sidebar: rgba(255, 255, 255, 0.82);
-  --lx-clay-light-recessed: #efebf5;
-  --lx-clay-light-recessed-strong: #e8e2f0;
-  --lx-clay-light-text: #332f3a;
-  --lx-clay-light-text-secondary: #635f69;
-  --lx-clay-light-text-muted: #756e80;
-  --lx-clay-light-text-subtle: #8b8494;
-  --lx-clay-light-border: rgba(91, 80, 112, 0.14);
-  --lx-clay-light-border-strong: rgba(91, 80, 112, 0.23);
+  --lx-clay-light-surface-soft: #f7f7f8;
+  --lx-clay-light-surface-subtle: #f7f7f8;
+  --lx-clay-light-surface-elevated: #ffffff;
+  --lx-clay-light-overlay-surface-soft: #ffffff;
+  --lx-clay-light-sidebar: #f7f7f8;
+  --lx-clay-light-recessed: #f7f7f8;
+  --lx-clay-light-recessed-strong: #e5e5e5;
+  --lx-clay-light-text: #0d0d0d;
+  --lx-clay-light-text-secondary: #5d5d5d;
+  --lx-clay-light-text-muted: #8e8e8e;
+  --lx-clay-light-text-subtle: #8e8e8e;
+  --lx-clay-light-border: #e5e5e5;
+  --lx-clay-light-border-strong: #d4d4d4;
+  --lx-clay-light-hover: #ececec;
+  --lx-clay-light-selected: #e5e5e5;
   --lx-clay-light-accent: #7c3aed;
   --lx-clay-light-accent-deep: #5b21b6;
   --lx-clay-light-accent-highlight: #a78bfa;
@@ -76,21 +487,23 @@
   --lx-clay-light-danger-soft: rgba(220, 76, 100, 0.11);
   --lx-clay-light-pink: #db2777;
 
-  --lx-clay-dark-canvas: #17131f;
-  --lx-clay-dark-surface: #251e2f;
-  --lx-clay-dark-surface-soft: rgba(255, 255, 255, 0.045);
-  --lx-clay-dark-surface-subtle: rgba(255, 255, 255, 0.035);
-  --lx-clay-dark-surface-elevated: rgba(39, 31, 50, 0.84);
-  --lx-clay-dark-overlay-surface-soft: rgba(255, 255, 255, 0.045);
-  --lx-clay-dark-sidebar: rgba(39, 31, 50, 0.88);
-  --lx-clay-dark-recessed: #120f18;
-  --lx-clay-dark-recessed-strong: #30263b;
-  --lx-clay-dark-text: #f8f5fc;
-  --lx-clay-dark-text-secondary: #c5bccf;
-  --lx-clay-dark-text-muted: #a89daf;
-  --lx-clay-dark-text-subtle: #94899f;
-  --lx-clay-dark-border: rgba(255, 255, 255, 0.11);
-  --lx-clay-dark-border-strong: rgba(255, 255, 255, 0.18);
+  --lx-clay-dark-canvas: #212121;
+  --lx-clay-dark-surface: #2f2f2f;
+  --lx-clay-dark-surface-soft: #2a2a2a;
+  --lx-clay-dark-surface-subtle: #2a2a2a;
+  --lx-clay-dark-surface-elevated: #2f2f2f;
+  --lx-clay-dark-overlay-surface-soft: #2f2f2f;
+  --lx-clay-dark-sidebar: #171717;
+  --lx-clay-dark-recessed: #212121;
+  --lx-clay-dark-recessed-strong: #343434;
+  --lx-clay-dark-text: #ececec;
+  --lx-clay-dark-text-secondary: #b4b4b4;
+  --lx-clay-dark-text-muted: #8e8e8e;
+  --lx-clay-dark-text-subtle: #8e8e8e;
+  --lx-clay-dark-border: #424242;
+  --lx-clay-dark-border-strong: #565656;
+  --lx-clay-dark-hover: #2a2a2a;
+  --lx-clay-dark-selected: #343434;
   --lx-clay-dark-accent: #a78bfa;
   --lx-clay-dark-accent-deep: #7c3aed;
   --lx-clay-dark-accent-highlight: #c4b5fd;
@@ -196,8 +609,11 @@
   --lx-clay-text-secondary: var(--lx-clay-light-text-secondary);
   --lx-clay-text-muted: var(--lx-clay-light-text-muted);
   --lx-clay-text-subtle: var(--lx-clay-light-text-subtle);
+  --lx-clay-placeholder: var(--lx-clay-light-text-secondary);
   --lx-clay-border: var(--lx-clay-light-border);
   --lx-clay-border-strong: var(--lx-clay-light-border-strong);
+  --lx-clay-hover: var(--lx-clay-light-hover);
+  --lx-clay-selected: var(--lx-clay-light-selected);
   --lx-clay-accent: var(--lx-clay-light-accent);
   --lx-clay-accent-deep: var(--lx-clay-light-accent-deep);
   --lx-clay-accent-highlight: var(--lx-clay-light-accent-highlight);
@@ -236,6 +652,125 @@
 }
 
 html.dark {
+  --workspace-canvas: var(--workspace-dark-canvas);
+  --workspace-sidebar-surface: var(--workspace-dark-sidebar-surface);
+  --workspace-surface: var(--workspace-dark-surface);
+  --workspace-card-surface: var(--workspace-dark-surface);
+  --workspace-popup-surface: var(--workspace-dark-popup-surface);
+  --workspace-surface-subtle: var(--workspace-dark-surface-subtle);
+  --workspace-hover: var(--workspace-dark-hover);
+  --workspace-selected: var(--workspace-dark-active);
+  --workspace-divider: var(--workspace-dark-divider);
+  --workspace-footer-divider: var(--workspace-dark-footer-divider);
+  --workspace-border: var(--workspace-dark-border);
+  --workspace-border-strong: var(--workspace-dark-border-strong);
+  --workspace-text: var(--workspace-dark-text);
+  --workspace-identity-text: var(--workspace-dark-identity-text);
+  --workspace-identity-text-tertiary: var(--workspace-dark-identity-text-tertiary);
+  --workspace-text-secondary: var(--workspace-dark-text-secondary);
+  --workspace-text-muted: var(--workspace-dark-text-muted);
+  --workspace-sidebar-group-label: var(--workspace-dark-sidebar-group-label);
+  --workspace-selection-background: var(--workspace-dark-selection-background);
+  --workspace-sidebar-overlay-icon: var(--workspace-dark-sidebar-overlay-icon);
+  --workspace-sidebar-overlay-backdrop: var(--workspace-dark-sidebar-overlay-backdrop);
+  --workspace-sidebar-overlay-shadow: var(--workspace-dark-sidebar-overlay-shadow);
+  --workspace-confirm-surface: var(--workspace-dark-confirm-surface);
+  --workspace-confirm-text: var(--workspace-dark-confirm-text);
+  --workspace-confirm-text-secondary: var(--workspace-dark-confirm-text-secondary);
+  --workspace-confirm-cancel-border: var(--workspace-dark-confirm-cancel-border);
+  --workspace-confirm-cancel-hover: var(--workspace-dark-confirm-cancel-hover);
+  --workspace-confirm-danger: var(--workspace-dark-confirm-danger);
+  --workspace-confirm-danger-hover: var(--workspace-dark-confirm-danger-hover);
+  --workspace-confirm-backdrop: var(--workspace-dark-confirm-backdrop);
+  --workspace-confirm-shadow: var(--workspace-dark-confirm-shadow);
+  --workspace-action: var(--workspace-dark-text);
+  --workspace-action-hover: var(--workspace-dark-action-hover);
+  --workspace-action-soft: var(--workspace-dark-active);
+  --workspace-shadow-float: var(--workspace-dark-shadow-float);
+  --workspace-work-accent: var(--workspace-dark-work-accent);
+  --workspace-work-accent-hover: var(--workspace-dark-work-accent-hover);
+  --workspace-work-accent-deep: var(--workspace-dark-work-accent-deep);
+  --workspace-work-accent-soft: var(--workspace-dark-work-accent-soft);
+  --workspace-work-accent-soft-hover: var(--workspace-dark-work-accent-soft-hover);
+  --workspace-work-accent-border: var(--workspace-dark-work-accent-border);
+  --workspace-work-accent-border-strong: var(--workspace-dark-work-accent-border-strong);
+  --workspace-work-on-accent: var(--workspace-dark-work-on-accent);
+  --workspace-work-info: var(--workspace-dark-work-info);
+  --workspace-work-info-soft: var(--workspace-dark-work-info-soft);
+  --workspace-work-success: var(--workspace-dark-work-success);
+  --workspace-work-chart-cost: var(--workspace-dark-work-chart-cost);
+  --workspace-work-chart-cost-fill-strong: var(--workspace-dark-work-chart-cost-fill-strong);
+  --workspace-work-chart-cost-fill-soft: var(--workspace-dark-work-chart-cost-fill-soft);
+  --workspace-work-chart-cost-fill-transparent: var(--workspace-dark-work-chart-cost-fill-transparent);
+  --workspace-work-chart-primary: var(--workspace-dark-work-chart-primary);
+  --workspace-work-chart-primary-fill-strong: var(--workspace-dark-work-chart-primary-fill-strong);
+  --workspace-work-chart-primary-fill-soft: var(--workspace-dark-work-chart-primary-fill-soft);
+  --workspace-work-chart-primary-fill-transparent: var(--workspace-dark-work-chart-primary-fill-transparent);
+  --workspace-work-chart-secondary: var(--workspace-dark-work-chart-secondary);
+  --workspace-work-shadow-card: var(--workspace-dark-work-shadow-card);
+  --workspace-dashboard-card-border: var(--workspace-dark-dashboard-card-border);
+  --workspace-dashboard-card-shadow: var(--workspace-dark-dashboard-card-shadow);
+  --workspace-dashboard-text-strong: var(--workspace-dark-dashboard-text-strong);
+  --workspace-dashboard-text-heading: var(--workspace-dark-dashboard-text-heading);
+  --workspace-dashboard-text-muted: var(--workspace-dark-dashboard-text-muted);
+  --workspace-dashboard-text-subtle: var(--workspace-dark-dashboard-text-subtle);
+  --workspace-dashboard-period-text: var(--workspace-dark-dashboard-period-text);
+  --workspace-dashboard-divider: var(--workspace-dark-dashboard-divider);
+  --workspace-dashboard-track: var(--workspace-dark-dashboard-track);
+  --workspace-dashboard-success: var(--workspace-dark-dashboard-success);
+  --workspace-dashboard-hover: var(--workspace-dark-dashboard-hover);
+  --workspace-dashboard-notification-hover: var(--workspace-dark-dashboard-notification-hover);
+  --workspace-dashboard-tooltip-surface: var(--workspace-dark-dashboard-tooltip-surface);
+  --workspace-dashboard-tooltip-text: var(--workspace-dark-dashboard-tooltip-text);
+  --workspace-dashboard-tooltip-title: var(--workspace-dark-dashboard-tooltip-title);
+  --workspace-dashboard-tooltip-border: var(--workspace-dark-dashboard-tooltip-border);
+  --workspace-mode-switch-track: var(--workspace-surface-subtle);
+  --workspace-mode-switch-border: var(--workspace-dark-border);
+  --workspace-mode-switch-active: var(--workspace-dark-mode-switch-active);
+  --workspace-mode-switch-hover: var(--workspace-hover);
+  --workspace-mode-switch-divider: var(--workspace-divider);
+  --workspace-mode-switch-text: var(--workspace-text);
+  --workspace-mode-switch-text-muted: var(--workspace-text-secondary);
+  --workspace-mode-switch-active-shadow: var(--workspace-dark-shadow-mode-switch);
+  --workspace-popover-surface: var(--workspace-popup-surface);
+  --workspace-popover-identity-surface: var(--workspace-popup-surface);
+  --workspace-popover-border: var(--workspace-border);
+  --workspace-popover-divider: var(--workspace-divider);
+  --workspace-popover-text: var(--workspace-text);
+  --workspace-popover-text-secondary: var(--workspace-text-secondary);
+  --workspace-popover-hover: var(--workspace-hover);
+  --workspace-popover-focus: var(--workspace-text-secondary);
+  --workspace-popover-avatar-surface: var(--workspace-dark-popover-avatar);
+  --workspace-popover-avatar-text: var(--workspace-dark-popover-text);
+  --workspace-popover-shadow: var(--workspace-dark-shadow-popover);
+  --workspace-dock-text: var(--workspace-text-secondary);
+  --workspace-dock-text-strong: var(--workspace-text);
+  --workspace-dock-text-muted: var(--workspace-text-secondary);
+  --workspace-dock-hover: var(--workspace-hover);
+  --workspace-dock-focus: color-mix(in srgb, var(--workspace-work-accent) 44%, transparent);
+  --workspace-dock-focus-personal: var(--workspace-dark-text-muted);
+  --workspace-dock-cta-border: var(--workspace-border);
+  --workspace-dock-cta-border-hover: var(--workspace-border-strong);
+  --workspace-dock-cta-text: var(--workspace-text);
+  --workspace-dock-cta-surface: var(--workspace-card-surface);
+  --workspace-dock-cta-surface-hover: var(--workspace-hover);
+  --workspace-menu-surface: var(--workspace-popup-surface);
+  --workspace-menu-sheet-border: var(--workspace-border);
+  --workspace-menu-divider: var(--workspace-divider);
+  --workspace-menu-text: var(--workspace-text-secondary);
+  --workspace-menu-row-text: var(--workspace-text-secondary);
+  --workspace-menu-text-strong: var(--workspace-text);
+  --workspace-menu-text-muted: var(--workspace-text-secondary);
+  --workspace-menu-hover: var(--workspace-hover);
+  --workspace-menu-close-hover: var(--workspace-hover);
+  --workspace-menu-focus: color-mix(in srgb, var(--workspace-work-accent) 44%, transparent);
+  --workspace-menu-danger: rgb(248 113 113);
+  --workspace-menu-danger-hover: rgb(254 202 202);
+  --workspace-menu-danger-surface: rgb(127 29 29 / 0.28);
+  --workspace-menu-shadow:
+    0 12px 32px rgb(0 0 0 / 0.42),
+    0 2px 8px rgb(0 0 0 / 0.24);
+
   --lx-clay-canvas: var(--lx-clay-dark-canvas);
   --lx-clay-surface: var(--lx-clay-dark-surface);
   --lx-clay-surface-soft: var(--lx-clay-dark-surface-soft);
@@ -249,8 +784,11 @@ html.dark {
   --lx-clay-text-secondary: var(--lx-clay-dark-text-secondary);
   --lx-clay-text-muted: var(--lx-clay-dark-text-muted);
   --lx-clay-text-subtle: var(--lx-clay-dark-text-subtle);
+  --lx-clay-placeholder: var(--lx-clay-dark-text-secondary);
   --lx-clay-border: var(--lx-clay-dark-border);
   --lx-clay-border-strong: var(--lx-clay-dark-border-strong);
+  --lx-clay-hover: var(--lx-clay-dark-hover);
+  --lx-clay-selected: var(--lx-clay-dark-selected);
   --lx-clay-accent: var(--lx-clay-dark-accent);
   --lx-clay-accent-deep: var(--lx-clay-dark-accent-deep);
   --lx-clay-accent-highlight: var(--lx-clay-dark-accent-highlight);
@@ -283,4 +821,32 @@ html.dark {
   --lx-clay-shadow-action: var(--lx-clay-dark-shadow-action);
   --lx-clay-shadow-action-hover: var(--lx-clay-dark-shadow-action-hover);
   --lx-clay-shadow-recessed-deep: var(--lx-clay-dark-shadow-recessed-deep);
+}
+
+/* Chat keeps its approved compact ModeSwitch treatment. Work consumes the
+   root roles above; both modes share one component and differ only by Token. */
+html:not(.dark) .app-mode-switch[data-active-mode='chat'] {
+  --workspace-mode-switch-track: var(--workspace-light-surface-subtle);
+  --workspace-mode-switch-border: var(--workspace-light-border);
+  --workspace-mode-switch-active: var(--workspace-light-surface);
+  --workspace-mode-switch-hover: var(--workspace-light-hover);
+  --workspace-mode-switch-divider: transparent;
+  --workspace-mode-switch-text: var(--workspace-light-text);
+  --workspace-mode-switch-text-muted: var(--workspace-light-text-muted);
+  --workspace-mode-switch-active-shadow: var(--workspace-light-shadow-mode-switch);
+  --workspace-mode-switch-radius: var(--workspace-radius-button);
+  --workspace-mode-switch-option-radius: var(--workspace-radius-mode-switch-option);
+}
+
+html.dark .app-mode-switch[data-active-mode='chat'] {
+  --workspace-mode-switch-track: var(--workspace-dark-surface-subtle);
+  --workspace-mode-switch-border: var(--workspace-dark-border);
+  --workspace-mode-switch-active: var(--workspace-dark-surface);
+  --workspace-mode-switch-hover: var(--workspace-dark-hover);
+  --workspace-mode-switch-divider: transparent;
+  --workspace-mode-switch-text: var(--workspace-dark-text);
+  --workspace-mode-switch-text-muted: var(--workspace-dark-text-muted);
+  --workspace-mode-switch-active-shadow: var(--workspace-dark-shadow-mode-switch);
+  --workspace-mode-switch-radius: var(--workspace-radius-button);
+  --workspace-mode-switch-option-radius: var(--workspace-radius-mode-switch-option);
 }

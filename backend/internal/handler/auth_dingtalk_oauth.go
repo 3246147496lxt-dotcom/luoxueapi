@@ -762,21 +762,20 @@ func (h *AuthHandler) CompleteDingTalkOAuthRegistration(c *gin.Context) {
 		response.ErrorFrom(c, err)
 		return
 	}
-	tokenPair, user, err := h.authService.LoginOrRegisterOAuthWithTokenPairAndPromoCode(
+	tokenPair, user, _, err := h.completePendingOAuthLoginOrRegistration(
 		c.Request.Context(),
+		session,
+		decision,
 		email,
 		username,
 		req.InvitationCode,
 		req.AffCode,
 		pendingOAuthPromoCode(session),
 		"dingtalk",
+		false,
 	)
 	if err != nil {
 		response.ErrorFrom(c, err)
-		return
-	}
-	if err := h.applyPendingIdentityBindingAndConsume(c.Request.Context(), session, decision, user.ID); err != nil {
-		respondPendingOAuthBindingApplyError(c, err)
 		return
 	}
 	// 新用户注册完成后执行身份同步（user_id 现在已知）。

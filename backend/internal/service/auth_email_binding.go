@@ -56,12 +56,8 @@ func (s *AuthService) BindEmailIdentity(
 		return nil, ErrPasswordIncorrect
 	}
 
-	existingUser, err := s.userRepo.GetByEmail(ctx, normalizedEmail)
-	switch {
-	case err == nil && existingUser != nil && existingUser.ID != userID:
-		return nil, ErrEmailExists
-	case err != nil && !errors.Is(err, ErrUserNotFound):
-		return nil, ErrServiceUnavailable
+	if err := s.ensureEmailIdentityAvailableForUser(ctx, currentUser, normalizedEmail); err != nil {
+		return nil, err
 	}
 
 	hashedPassword, err := s.HashPassword(password)
@@ -77,14 +73,22 @@ func (s *AuthService) BindEmailIdentity(
 		return currentUser, nil
 	}
 
-	currentUser.Email = normalizedEmail
-	currentUser.PasswordHash = hashedPassword
-	if err := s.userRepo.Update(ctx, currentUser); err != nil {
+	// A repository-only adapter cannot safely implement the read/check/write
+	// sequence above under concurrency. Require the narrow guarded write even
+	// in the compatibility path instead of falling back to a broad stale-snapshot
+	// update that can overwrite another request's email.
+	guard, ok := s.userRepo.(emailIdentityAliasGuardRepository)
+	if !ok {
+		return nil, ErrServiceUnavailable
+	}
+	if err := guard.UpdateEmailWithAliasGuard(ctx, currentUser.ID, normalizedEmail, hashedPassword); err != nil {
 		if errors.Is(err, ErrEmailExists) {
 			return nil, ErrEmailExists
 		}
 		return nil, ErrServiceUnavailable
 	}
+	currentUser.Email = normalizedEmail
+	currentUser.PasswordHash = hashedPassword
 
 	if firstRealEmailBind {
 		if err := s.ApplyProviderDefaultSettingsOnFirstBind(ctx, userID, "email"); err != nil {
@@ -115,19 +119,16 @@ func (s *AuthService) SendEmailIdentityBindCode(ctx context.Context, userID int6
 	if s.emailService == nil {
 		return ErrServiceUnavailable
 	}
-	if _, err := s.userRepo.GetByID(ctx, userID); err != nil {
+	currentUser, err := s.userRepo.GetByID(ctx, userID)
+	if err != nil {
 		if errors.Is(err, ErrUserNotFound) {
 			return ErrUserNotFound
 		}
 		return ErrServiceUnavailable
 	}
 
-	existingUser, err := s.userRepo.GetByEmail(ctx, normalizedEmail)
-	switch {
-	case err == nil && existingUser != nil && existingUser.ID != userID:
-		return ErrEmailExists
-	case err != nil && !errors.Is(err, ErrUserNotFound):
-		return ErrServiceUnavailable
+	if err := s.ensureEmailIdentityAvailableForUser(ctx, currentUser, normalizedEmail); err != nil {
+		return err
 	}
 
 	siteName := defaultSiteName
@@ -135,6 +136,38 @@ func (s *AuthService) SendEmailIdentityBindCode(ctx context.Context, userID int6
 		siteName = s.settingService.GetSiteName(ctx)
 	}
 	return s.emailService.SendVerifyCode(ctx, normalizedEmail, siteName, firstEmailLocale(locale))
+}
+
+// ensureEmailIdentityAvailableForUser performs a quick exact/alias check for
+// bind flows. The repository transaction guard remains authoritative for the
+// write, and the current user's own inbox identity is allowed.
+func (s *AuthService) ensureEmailIdentityAvailableForUser(ctx context.Context, currentUser *User, email string) error {
+	if currentUser == nil {
+		return ErrUserNotFound
+	}
+	existing, err := s.userRepo.GetByEmail(ctx, email)
+	if err == nil {
+		if existing != nil && existing.ID != currentUser.ID {
+			return ErrEmailExists
+		}
+	} else if !errors.Is(err, ErrUserNotFound) {
+		return ErrServiceUnavailable
+	}
+	if NormalizeEmailForAliasDedup(currentUser.Email) == NormalizeEmailForAliasDedup(email) {
+		return nil
+	}
+	aliasRepo, ok := s.userRepo.(emailAliasLookupRepository)
+	if !ok {
+		return ErrServiceUnavailable
+	}
+	aliasExists, err := aliasRepo.ExistsByEmailAlias(ctx, email)
+	if err != nil {
+		return ErrServiceUnavailable
+	}
+	if aliasExists {
+		return ErrEmailExists
+	}
+	return nil
 }
 
 func normalizeEmailForIdentityBinding(email string) (string, error) {
@@ -171,12 +204,14 @@ func (s *AuthService) updateBoundEmailIdentityTx(
 	defer func() { _ = tx.Rollback() }()
 
 	txCtx := dbent.NewTxContext(ctx, tx)
+	txCtx, deferredInvalidations := withDeferredSubscriptionCacheInvalidations(txCtx)
 	if err := s.updateBoundEmailIdentityWithClient(txCtx, tx.Client(), currentUser, email, hashedPassword, applyFirstBindDefaults); err != nil {
 		return err
 	}
 	if err := tx.Commit(); err != nil {
 		return ErrServiceUnavailable
 	}
+	flushDeferredSubscriptionCacheInvalidations(deferredInvalidations)
 	return nil
 }
 
@@ -192,16 +227,14 @@ func (s *AuthService) updateBoundEmailIdentityWithClient(
 		return ErrServiceUnavailable
 	}
 
-	oldEmail := currentUser.Email
-	if _, err := client.User.UpdateOneID(currentUser.ID).
-		SetEmail(email).
-		SetPasswordHash(hashedPassword).
-		Save(ctx); err != nil {
-		if dbent.IsConstraintError(err) {
-			return ErrEmailExists
-		}
+	guard, ok := s.userRepo.(emailIdentityAliasGuardRepository)
+	if !ok {
 		return ErrServiceUnavailable
 	}
+	if err := guard.UpdateEmailWithAliasGuard(ctx, currentUser.ID, email, hashedPassword); err != nil {
+		return err
+	}
+	oldEmail := currentUser.Email
 
 	if err := replaceBoundEmailAuthIdentityWithClient(ctx, client, currentUser.ID, oldEmail, email, "auth_service_email_bind"); err != nil {
 		if errors.Is(err, ErrEmailExists) {
@@ -247,19 +280,20 @@ func replaceBoundEmailAuthIdentityWithClient(
 		return err
 	}
 
-	oldSubject := normalizeBoundEmailAuthIdentitySubject(oldEmail)
-	if oldSubject == "" || oldSubject == newSubject {
-		return nil
+	// currentUser may be a stale snapshot when two requests rebind the same
+	// account concurrently. Remove every prior email identity except the newly
+	// selected primary subject; relying only on oldEmail can leave both targets
+	// as login identities after the second update wins.
+	_ = oldEmail
+	deleteQuery := client.AuthIdentity.Delete().Where(
+		authidentity.UserIDEQ(userID),
+		authidentity.ProviderTypeEQ("email"),
+		authidentity.ProviderKeyEQ("email"),
+	)
+	if newSubject != "" {
+		deleteQuery = deleteQuery.Where(authidentity.ProviderSubjectNEQ(newSubject))
 	}
-
-	_, err := client.AuthIdentity.Delete().
-		Where(
-			authidentity.UserIDEQ(userID),
-			authidentity.ProviderTypeEQ("email"),
-			authidentity.ProviderKeyEQ("email"),
-			authidentity.ProviderSubjectEQ(oldSubject),
-		).
-		Exec(ctx)
+	_, err := deleteQuery.Exec(ctx)
 	return err
 }
 

@@ -484,16 +484,15 @@ func (h *AuthHandler) Login2FA(c *gin.Context) {
 			response.ErrorFrom(c, err)
 			return
 		}
-		if err := h.applyPendingIdentityBinding(c.Request.Context(), pendingSession, decision, &user.ID, true, true); err != nil {
-			response.ErrorFrom(c, infraerrors.InternalServer("PENDING_AUTH_BIND_APPLY_FAILED", "failed to bind pending oauth identity").WithCause(err))
-			return
-		}
-		if _, err := pendingSvc.ConsumeBrowserSession(
+		if err := h.applyPendingIdentityBindingAndConsumeWithOptions(
 			c.Request.Context(),
-			pendingSession.SessionToken,
-			pendingSession.BrowserSessionKey,
+			pendingSession,
+			decision,
+			user.ID,
+			true,
+			true,
 		); err != nil {
-			response.ErrorFrom(c, err)
+			response.ErrorFrom(c, infraerrors.InternalServer("PENDING_AUTH_BIND_APPLY_FAILED", "failed to bind pending oauth identity").WithCause(err))
 			return
 		}
 

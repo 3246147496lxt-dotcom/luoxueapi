@@ -122,6 +122,12 @@ func TestCatalogBillingSourceUsesActualBillableModel(t *testing.T) {
 	require.Equal(t, "target-model", model)
 	require.Equal(t, &mappedPrice, pricing.InputPrice)
 
+	channel.BillingModelSource = BillingModelSourceResponse
+	model, pricing, ok = catalogBillingModelAndPricing(channel, supported)
+	require.True(t, ok, "response_model has a deterministic mapped upper-bound price")
+	require.Equal(t, "target-model", model)
+	require.Equal(t, &mappedPrice, pricing.InputPrice)
+
 	channel.BillingModelSource = BillingModelSourceRequested
 	model, pricing, ok = catalogBillingModelAndPricing(channel, supported)
 	require.True(t, ok)

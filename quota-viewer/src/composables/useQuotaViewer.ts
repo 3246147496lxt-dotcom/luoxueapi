@@ -38,7 +38,7 @@ const normalizeError = (error: unknown) => {
   const commandError = error as DesktopCommandError
   return {
     code: commandError?.code ?? 'QUOTA_VIEWER_ERROR',
-    message: commandError?.message ?? '暂时无法获取额度，请稍后重试。'
+    message: commandError?.message ?? '暂时无法获取积分，请稍后重试。'
   }
 }
 

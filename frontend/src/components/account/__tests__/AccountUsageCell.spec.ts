@@ -17,13 +17,34 @@ vi.mock('@/api/admin', () => ({
 
 vi.mock('vue-i18n', async () => {
   const actual = await vi.importActual<typeof import('vue-i18n')>('vue-i18n')
+  const keysWithRenderedParams = new Set([
+    'admin.accounts.workbench.quotaResetsAt',
+    'admin.accounts.workbench.quotaResetPendingAt',
+    'admin.accounts.workbench.membershipCurrentPeriodUntil',
+    'admin.accounts.workbench.membershipExpiresAt',
+    'admin.accounts.workbench.membershipExpiredAt',
+    'admin.accounts.workbench.membershipLastRecordedUntil',
+    'admin.accounts.workbench.workspaceEntitlementUntil'
+  ])
   return {
     ...actual,
     useI18n: () => ({
-      t: (key: string) => key
+      t: (key: string, params?: Record<string, unknown>) =>
+        params && keysWithRenderedParams.has(key) ? `${key}:${JSON.stringify(params)}` : key
     })
   }
 })
+
+vi.mock('@/i18n', () => ({
+  i18n: {
+    global: {
+      te: () => false,
+      t: (key: string, params?: Record<string, unknown>) =>
+        params ? `${key}:${JSON.stringify(params)}` : key
+    }
+  },
+  getLocale: () => 'en-US'
+}))
 
 function makeAccount(overrides: Partial<Account>): Account {
   return {
@@ -1365,7 +1386,7 @@ describe('AccountUsageCell', () => {
       .toContain('width: 100%')
   })
 
-  it('overview 模式只显示主 5h / 7d 额度、双进度和精确重置提示', async () => {
+  it('overview 模式显示主 5h / 7d 额度、双进度和各自的精确重置提示', async () => {
     getUsage.mockResolvedValue({
       five_hour: {
         utilization: 35,
@@ -1404,15 +1425,135 @@ describe('AccountUsageCell', () => {
     const rows = overview.findAll('.account-usage-overview__row')
     expect(rows).toHaveLength(2)
     expect(rows[0].text()).toContain('admin.accounts.workbench.fiveHourRollingWindow')
-    expect(rows[0].text()).toContain('admin.accounts.workbench.quotaResetCountdown')
+    expect(rows[0].text()).toContain('admin.accounts.workbench.quotaResetsAt')
+    expect(rows[0].text()).toContain('"date":')
+    expect(rows[0].text()).toContain('"time":')
     expect(rows[0].get('.account-usage-overview__track > span').attributes('style'))
       .toContain('width: 35%')
     expect(rows[1].text()).toContain('admin.accounts.workbench.sevenDayTotalQuota')
+    expect(rows[1].text()).toContain('admin.accounts.workbench.quotaResetsAt')
+    expect(rows[1].text()).toContain('"date":')
+    expect(rows[1].text()).toContain('"time":')
     expect(rows[1].get('.account-usage-overview__track > span').attributes('style'))
       .toContain('width: 12%')
     expect(wrapper.text()).not.toContain('4200')
     expect(wrapper.text()).not.toContain('1.25')
     expect(wrapper.find('button').exists()).toBe(false)
+
+    wrapper.unmount()
+  })
+
+  it('overview 仅有 7d 窗口时隐藏 5h 并显示 7d 的绝对日期与倒计时', async () => {
+    getUsage.mockResolvedValue({
+      five_hour: null,
+      seven_day: {
+        utilization: 38,
+        resets_at: '2099-08-01T12:00:00Z',
+        remaining_seconds: 3600
+      }
+    })
+
+    const wrapper = mount(AccountUsageCell, {
+      props: {
+        account: makeAccount({
+          id: 9916,
+          platform: 'openai',
+          type: 'oauth',
+          extra: {}
+        }),
+        displayMode: 'overview'
+      }
+    })
+    await flushPromises()
+
+    const rows = wrapper.findAll('.account-usage-overview__row')
+    expect(rows).toHaveLength(1)
+    expect(rows[0].text()).toContain('admin.accounts.workbench.sevenDayTotalQuota')
+    expect(rows[0].text()).not.toContain('admin.accounts.workbench.fiveHourRollingWindow')
+    expect(rows[0].text()).toContain('admin.accounts.workbench.quotaResetsAt')
+    expect(rows[0].text()).toContain('"date":')
+    expect(rows[0].text()).toContain('"time":')
+    const subscription = wrapper.get('[data-testid="account-usage-overview-subscription"]')
+    expect(subscription.attributes('data-state')).toBe('unknown')
+    expect(subscription.text()).toContain('admin.accounts.workbench.membershipUnavailable')
+    expect(subscription.text()).toContain('admin.accounts.workbench.membershipQueryHint')
+
+    wrapper.unmount()
+  })
+
+  it.each([
+    [true, 'active', 'admin.accounts.workbench.membershipCurrentPeriodUntil', 'admin.accounts.workbench.membershipAutoRenewOn'],
+    [false, 'ending', 'admin.accounts.workbench.membershipExpiresAt', 'admin.accounts.workbench.membershipAutoRenewOff'],
+    [undefined, 'active', 'admin.accounts.workbench.membershipCurrentPeriodUntil', 'admin.accounts.workbench.membershipRenewUnknown']
+  ])(
+    'overview 按 will_renew=%s 显示会员周期三态',
+    async (willRenew, state, valueKey, detailKey) => {
+      getUsage.mockResolvedValue({
+        five_hour: null,
+        seven_day: null,
+        openai_subscription: {
+          source: 'live',
+          plan_type: 'plus',
+          active_until: '2099-08-20T12:00:00Z',
+          ...(willRenew === undefined ? {} : { will_renew: willRenew })
+        }
+      })
+
+      const wrapper = mount(AccountUsageCell, {
+        props: {
+          account: makeAccount({
+            id: willRenew === true ? 9917 : willRenew === false ? 9918 : 9919,
+            platform: 'openai',
+            type: 'oauth',
+            credentials: { plan_type: 'plus' },
+            extra: {}
+          }),
+          displayMode: 'overview'
+        }
+      })
+      await flushPromises()
+
+      const subscription = wrapper.get('[data-testid="account-usage-overview-subscription"]')
+      expect(subscription.attributes('data-state')).toBe(state)
+      expect(subscription.text()).toContain('admin.accounts.workbench.membershipCycle')
+      expect(subscription.text()).toContain(valueKey)
+      expect(subscription.text()).toContain('"date":')
+      expect(subscription.text()).toContain(detailKey)
+
+      wrapper.unmount()
+    }
+  )
+
+  it('overview 将已过期的自动续费缓存标记为待刷新，不冒充实时到期状态', async () => {
+    getUsage.mockResolvedValue({
+      five_hour: null,
+      seven_day: null,
+      openai_subscription: null
+    })
+
+    const wrapper = mount(AccountUsageCell, {
+      props: {
+        account: makeAccount({
+          id: 9920,
+          platform: 'openai',
+          type: 'oauth',
+          credentials: {
+            plan_type: 'plus',
+            subscription_expires_at: '2020-08-20T12:00:00Z',
+            subscription_will_renew: true
+          },
+          extra: {}
+        }),
+        displayMode: 'overview'
+      }
+    })
+    await flushPromises()
+
+    const subscription = wrapper.get('[data-testid="account-usage-overview-subscription"]')
+    expect(subscription.attributes('data-state')).toBe('stale')
+    expect(subscription.text()).toContain('admin.accounts.workbench.membershipRefreshNeeded')
+    expect(subscription.text()).toContain('admin.accounts.workbench.membershipLastRecordedUntil')
+    expect(subscription.text()).not.toContain('admin.accounts.workbench.membershipExpiredAt')
 
     wrapper.unmount()
   })

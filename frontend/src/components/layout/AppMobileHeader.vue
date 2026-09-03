@@ -1,7 +1,7 @@
 <template>
   <header
     data-testid="app-mobile-header"
-    class="app-mobile-header lg:hidden"
+    class="app-mobile-header"
   >
     <div class="app-mobile-header__content">
       <button
@@ -43,24 +43,22 @@ const { pageTitle } = usePageContext()
 const mobileOpen = computed(() => appStore.mobileOpen)
 
 function toggleMobileSidebar() {
-  if (!mobileOpen.value) {
-    appStore.setSidebarCollapsed(false)
-  }
   appStore.toggleMobileSidebar()
 }
 </script>
 
 <style scoped>
 .app-mobile-header {
+  display: none;
   position: fixed;
   inset: 0 0 auto;
   z-index: 50;
   height: var(--app-shell-top-offset);
   padding-top: env(safe-area-inset-top);
-  border-bottom: 1px solid var(--app-shell-sidebar-border, rgb(229 231 235));
-  color: var(--lx-clay-text);
-  background: color-mix(in srgb, var(--app-shell-canvas, #fff) 94%, transparent);
-  box-shadow: 0 1px 0 rgb(15 23 42 / 0.025);
+  border-bottom: 1px solid var(--app-shell-sidebar-border, var(--workspace-divider));
+  color: var(--workspace-text);
+  background: var(--app-shell-sidebar-bg, var(--workspace-sidebar-surface));
+  box-shadow: 0 1px 0 var(--workspace-divider);
   backdrop-filter: blur(18px) saturate(1.25);
   -webkit-backdrop-filter: blur(18px) saturate(1.25);
 }
@@ -81,19 +79,19 @@ function toggleMobileSidebar() {
   align-items: center;
   justify-content: center;
   border-radius: 12px;
-  color: rgb(71 85 105);
+  color: var(--workspace-text-secondary);
   transition:
     color 160ms ease,
     background-color 160ms ease;
 }
 
 .app-mobile-header__menu:hover {
-  color: rgb(15 23 42);
-  background: rgb(15 23 42 / 0.055);
+  color: var(--workspace-text);
+  background: var(--workspace-hover);
 }
 
 .app-mobile-header__menu:focus-visible {
-  outline: 2px solid var(--app-shell-sidebar-focus, rgb(0 132 255 / 0.5));
+  outline: 2px solid var(--app-shell-sidebar-focus, var(--lx-clay-accent));
   outline-offset: 1px;
 }
 
@@ -110,29 +108,18 @@ function toggleMobileSidebar() {
 .app-mobile-header__title {
   min-width: 0;
   overflow: hidden;
-  color: rgb(17 24 39);
-  font-size: 0.9375rem;
-  font-weight: 650;
+  color: var(--workspace-text);
+  font-size: var(--workspace-type-navigation-size);
+  font-weight: var(--workspace-type-navigation-weight);
   line-height: 1.25rem;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-:global(html.dark .app-mobile-header) {
-  background: rgb(11 15 26 / 0.92);
-}
-
-:global(html.dark .app-mobile-header__menu) {
-  color: rgb(203 213 225);
-}
-
-:global(html.dark .app-mobile-header__menu:hover) {
-  color: #fff;
-  background: rgb(255 255 255 / 0.08);
-}
-
-:global(html.dark .app-mobile-header__title) {
-  color: rgb(248 250 252);
+@media (max-width: 767px) and (hover: none) and (pointer: coarse) {
+  .app-mobile-header {
+    display: block;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {

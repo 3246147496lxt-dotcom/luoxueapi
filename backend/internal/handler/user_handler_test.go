@@ -26,6 +26,17 @@ type userHandlerRepoStub struct {
 }
 
 func (s *userHandlerRepoStub) Create(context.Context, *service.User) error { return nil }
+func (s *userHandlerRepoStub) CreateWithEmailAliasGuard(context.Context, *service.User) error {
+	return nil
+}
+func (s *userHandlerRepoStub) UpdateEmailWithAliasGuard(_ context.Context, userID int64, email, passwordHash string) error {
+	if s.user == nil || s.user.ID != userID {
+		return service.ErrUserNotFound
+	}
+	s.user.Email = email
+	s.user.PasswordHash = passwordHash
+	return nil
+}
 func (s *userHandlerRepoStub) GetByID(context.Context, int64) (*service.User, error) {
 	cloned := *s.user
 	return &cloned, nil
@@ -38,7 +49,7 @@ func (s *userHandlerRepoStub) GetFirstAdmin(context.Context) (*service.User, err
 	cloned := *s.user
 	return &cloned, nil
 }
-func (s *userHandlerRepoStub) Update(_ context.Context, user *service.User) error {
+func (s *userHandlerRepoStub) Update(_ context.Context, user *service.User, _ service.UserUpdateFields) error {
 	cloned := *user
 	s.user = &cloned
 	return nil
@@ -94,6 +105,9 @@ func (s *userHandlerRepoStub) BatchAddConcurrency(context.Context, []int64, int)
 	return 0, nil
 }
 func (s *userHandlerRepoStub) ExistsByEmail(context.Context, string) (bool, error) { return false, nil }
+func (s *userHandlerRepoStub) ExistsByEmailAlias(context.Context, string) (bool, error) {
+	return false, nil
+}
 func (s *userHandlerRepoStub) RemoveGroupFromAllowedGroups(context.Context, int64) (int64, error) {
 	return 0, nil
 }

@@ -16,7 +16,7 @@ type balanceUserRepoStub struct {
 	updated   []*User
 }
 
-func (s *balanceUserRepoStub) Update(ctx context.Context, user *User) error {
+func (s *balanceUserRepoStub) Update(ctx context.Context, user *User, _ UserUpdateFields) error {
 	if s.updateErr != nil {
 		return s.updateErr
 	}
@@ -29,6 +29,29 @@ func (s *balanceUserRepoStub) Update(ctx context.Context, user *User) error {
 		s.userRepoStub.user = &clone
 	}
 	return nil
+}
+
+func (s *balanceUserRepoStub) AdjustBalance(_ context.Context, _ int64, delta float64) (BalanceChange, error) {
+	if s.userRepoStub == nil || s.userRepoStub.user == nil {
+		return BalanceChange{}, ErrUserNotFound
+	}
+	old := s.userRepoStub.user.Balance
+	if old+delta < 0 {
+		return BalanceChange{Old: old, New: old + delta}, ErrBalanceNegative
+	}
+	s.userRepoStub.user.Balance = old + delta
+	return BalanceChange{Old: old, New: old + delta}, nil
+}
+func (s *balanceUserRepoStub) SetBalance(_ context.Context, _ int64, value float64) (BalanceChange, error) {
+	if s.userRepoStub == nil || s.userRepoStub.user == nil {
+		return BalanceChange{}, ErrUserNotFound
+	}
+	old := s.userRepoStub.user.Balance
+	if value < 0 {
+		return BalanceChange{Old: old, New: value}, ErrBalanceNegative
+	}
+	s.userRepoStub.user.Balance = value
+	return BalanceChange{Old: old, New: value}, nil
 }
 
 type balanceRedeemRepoStub struct {

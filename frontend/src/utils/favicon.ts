@@ -1,7 +1,7 @@
 import { sanitizeUrl } from './url'
 
-export const DEFAULT_FAVICON = '/brand/luoxue-snowpuff-extracted.svg'
-export const DEFAULT_APPLE_TOUCH_ICON = '/brand/luoxue-snowpuff-extracted-touch-180.png'
+export const DEFAULT_FAVICON = '/logo.png'
+export const DEFAULT_APPLE_TOUCH_ICON = '/logo.png'
 
 function resolveFaviconMimeType(url: string): string {
   if (/\.svg(?:[?#].*)?$/i.test(url) || url.startsWith('data:image/svg+xml')) {

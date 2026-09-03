@@ -365,6 +365,43 @@ func TestAuthService_Register_EmailExists(t *testing.T) {
 	require.ErrorIs(t, err, ErrEmailExists)
 }
 
+func TestAuthService_Register_AliasDuplicateRejected(t *testing.T) {
+	repo := &userRepoStub{aliasExists: true}
+	svc := newAuthService(repo, map[string]string{
+		SettingKeyRegistrationEnabled: "true",
+	}, nil, nil)
+
+	_, _, err := svc.Register(context.Background(), "some.one+bulk294@gmail.com", "password")
+	require.ErrorIs(t, err, ErrEmailExists)
+	require.Empty(t, repo.created)
+}
+
+func TestAuthService_Register_InvitationModeWithoutRedeemRepositoryFailsClosed(t *testing.T) {
+	repo := &userRepoStub{nextID: 99}
+	svc := newAuthService(repo, map[string]string{
+		SettingKeyRegistrationEnabled:   "true",
+		SettingKeyInvitationCodeEnabled: "true",
+	}, nil, nil)
+
+	_, _, err := svc.RegisterWithVerification(
+		context.Background(), "misconfigured@example.com", "password", "", "", "INVITE-001", "",
+	)
+	require.ErrorIs(t, err, ErrServiceUnavailable)
+	require.Empty(t, repo.created, "missing redeem repository must not create an account")
+}
+
+func TestAuthService_Register_UsesAliasGuardedCreate(t *testing.T) {
+	repo := &userRepoStub{nextID: 91}
+	svc := newAuthService(repo, map[string]string{
+		SettingKeyRegistrationEnabled: "true",
+	}, nil, nil)
+
+	_, user, err := svc.Register(context.Background(), "newuser@gmail.com", "password")
+	require.NoError(t, err)
+	require.NotNil(t, user)
+	require.Equal(t, 1, repo.guardedCreates)
+}
+
 func TestAuthService_Register_CheckEmailError(t *testing.T) {
 	repo := &userRepoStub{existsErr: errors.New("db down")}
 	service := newAuthService(repo, map[string]string{

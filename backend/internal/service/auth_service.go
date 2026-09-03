@@ -92,6 +92,18 @@ type signupGrantPlan struct {
 	PlatformQuotas map[string]*DefaultPlatformQuotaSetting
 }
 
+// oauthPendingTransactionState is carried only by the pending OAuth
+// completion coordinator.  Those handlers own the surrounding Ent
+// transaction, so token/cache side effects and quota snapshots must be
+// deferred until after commit.  A pointer is stored in context so the
+// transaction-aware helper can report whether it actually created a user
+// without changing the long-standing public login method signature.
+type oauthPendingTransactionState struct {
+	Created bool
+}
+
+type oauthPendingTransactionStateKey struct{}
+
 // NewAuthService 创建认证服务实例
 func NewAuthService(
 	entClient *dbent.Client,
@@ -135,6 +147,38 @@ func (s *AuthService) PendingIdentityUseCases() *AuthPendingIdentityService {
 	return NewAuthPendingIdentityService(s.entClient)
 }
 
+// RunInTransaction executes fn with one caller-owned Ent transaction. Ent's
+// Client.Tx does not inspect a transaction carried in context, so callers
+// must explicitly reuse TxFromContext or a nested write can escape an outer
+// rollback (and deadlock SQLite). Repository-only adapters execute directly
+// for compatibility; production services provide entClient.
+func (s *AuthService) RunInTransaction(ctx context.Context, fn func(context.Context) error) error {
+	if s == nil || fn == nil {
+		return ErrServiceUnavailable
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if dbent.TxFromContext(ctx) != nil || s.entClient == nil {
+		return fn(ctx)
+	}
+	tx, err := s.entClient.Tx(ctx)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tx.Rollback() }()
+	txCtx := dbent.NewTxContext(ctx, tx)
+	txCtx, deferredInvalidations := withDeferredSubscriptionCacheInvalidations(txCtx)
+	if err := fn(txCtx); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	flushDeferredSubscriptionCacheInvalidations(deferredInvalidations)
+	return nil
+}
+
 // Register 用户注册，返回token和用户
 func (s *AuthService) Register(ctx context.Context, email, password string) (string, *User, error) {
 	return s.RegisterWithVerification(ctx, email, password, "", "", "", "")
@@ -158,21 +202,19 @@ func (s *AuthService) RegisterWithVerification(ctx context.Context, email, passw
 	// 检查是否需要邀请码
 	var invitationRedeemCode *RedeemCode
 	if s.settingService != nil && s.settingService.IsInvitationCodeEnabled(ctx) {
-		if invitationCode == "" {
-			return "", nil, ErrInvitationCodeRequired
+		// Use the same fail-closed validator as the OAuth registration paths.
+		// The old direct redeemRepo.GetByCode call could panic when invitation
+		// mode was enabled but the repository was not wired, and it could read
+		// through a different client than the subsequent atomic claim.
+		var invitationErr error
+		invitationRedeemCode, invitationErr = s.validateOAuthRegistrationInvitation(ctx, invitationCode)
+		if invitationErr != nil {
+			if errors.Is(invitationErr, ErrInvitationCodeRequired) {
+				return "", nil, ErrInvitationCodeRequired
+			}
+			logger.LegacyPrintf("service.auth", "[Auth] Invalid invitation code: %s, error: %v", invitationCode, invitationErr)
+			return "", nil, invitationErr
 		}
-		// 验证邀请码
-		redeemCode, err := s.redeemRepo.GetByCode(ctx, invitationCode)
-		if err != nil {
-			logger.LegacyPrintf("service.auth", "[Auth] Invalid invitation code: %s, error: %v", invitationCode, err)
-			return "", nil, ErrInvitationCodeInvalid
-		}
-		// 检查类型和状态
-		if redeemCode.Type != RedeemTypeInvitation || !redeemCode.CanUse() {
-			logger.LegacyPrintf("service.auth", "[Auth] Invitation code invalid: type=%s, status=%s", redeemCode.Type, redeemCode.Status)
-			return "", nil, ErrInvitationCodeInvalid
-		}
-		invitationRedeemCode = redeemCode
 	}
 
 	// 检查是否需要邮件验证
@@ -193,7 +235,7 @@ func (s *AuthService) RegisterWithVerification(ctx context.Context, email, passw
 	}
 
 	// 检查邮箱是否已存在
-	existsEmail, err := s.userRepo.ExistsByEmail(ctx, email)
+	existsEmail, err := s.existsByEmailOrAlias(ctx, email)
 	if err != nil {
 		logger.LegacyPrintf("service.auth", "[Auth] Database error checking email exists: %v", err)
 		return "", nil, ErrServiceUnavailable
@@ -227,10 +269,13 @@ func (s *AuthService) RegisterWithVerification(ctx context.Context, email, passw
 		Status:       StatusActive,
 	}
 
-	if err := s.userRepo.Create(ctx, user); err != nil {
+	if err := s.createUserAndClaimInvitation(ctx, user, invitationRedeemCode); err != nil {
 		// 优先检查邮箱冲突错误（竞态条件下可能发生）
 		if errors.Is(err, ErrEmailExists) {
 			return "", nil, ErrEmailExists
+		}
+		if errors.Is(err, ErrInvitationCodeInvalid) {
+			return "", nil, ErrInvitationCodeInvalid
 		}
 		logger.LegacyPrintf("service.auth", "[Auth] Database error creating user: %v", err)
 		return "", nil, ErrServiceUnavailable
@@ -251,13 +296,7 @@ func (s *AuthService) RegisterWithVerification(ctx context.Context, email, passw
 		}
 	}
 
-	// 标记邀请码为已使用（如果使用了邀请码）
-	if invitationRedeemCode != nil {
-		if err := s.redeemRepo.Use(ctx, invitationRedeemCode.ID, user.ID); err != nil {
-			// 邀请码标记失败不影响注册，只记录日志
-			logger.LegacyPrintf("service.auth", "[Auth] Failed to mark invitation code as used for user %d: %v", user.ID, err)
-		}
-	}
+	// Invitation claim is committed atomically with user creation above.
 	// 应用优惠码（如果提供且功能已启用）
 	if promoCode != "" && s.promoService != nil && s.settingService != nil && s.settingService.IsPromoCodeEnabled(ctx) {
 		if err := s.promoService.ApplyPromoCode(ctx, user.ID, promoCode); err != nil {
@@ -300,7 +339,7 @@ func (s *AuthService) SendVerifyCode(ctx context.Context, email string, locale .
 	}
 
 	// 检查邮箱是否已存在
-	existsEmail, err := s.userRepo.ExistsByEmail(ctx, email)
+	existsEmail, err := s.existsByEmailOrAlias(ctx, email)
 	if err != nil {
 		logger.LegacyPrintf("service.auth", "[Auth] Database error checking email exists: %v", err)
 		return ErrServiceUnavailable
@@ -341,7 +380,7 @@ func (s *AuthService) SendVerifyCodeAsync(ctx context.Context, email string, loc
 	}
 
 	// 检查邮箱是否已存在
-	existsEmail, err := s.userRepo.ExistsByEmail(ctx, email)
+	existsEmail, err := s.existsByEmailOrAlias(ctx, email)
 	if err != nil {
 		logger.LegacyPrintf("service.auth", "[Auth] Database error checking email exists: %v", err)
 		return nil, ErrServiceUnavailable
@@ -532,11 +571,17 @@ func (s *AuthService) LoginOrRegisterOAuth(ctx context.Context, email, username 
 				SignupSource: signupSource,
 			}
 
-			if err := s.userRepo.Create(ctx, newUser); err != nil {
+			if err := s.createUserWithEmailAliasGuard(ctx, newUser); err != nil {
 				if errors.Is(err, ErrEmailExists) {
-					// 并发场景：GetByEmail 与 Create 之间用户被创建。
+					// 并发场景：GetByEmail 与 guarded create 之间用户被创建。
+					// 若只是别名冲突（例如 user+tag@gmail.com 与
+					// user@gmail.com），精确邮箱查询会返回 not found；
+					// 不得把该业务冲突误报成数据库故障，也不得绑定到别名用户。
 					user, err = s.userRepo.GetByEmail(ctx, email)
 					if err != nil {
+						if errors.Is(err, ErrUserNotFound) {
+							return "", nil, ErrEmailExists
+						}
 						logger.LegacyPrintf("service.auth", "[Auth] Database error getting user after conflict: %v", err)
 						return "", nil, ErrServiceUnavailable
 					}
@@ -564,7 +609,7 @@ func (s *AuthService) LoginOrRegisterOAuth(ctx context.Context, email, username 
 	// 尽力补全：当用户名为空时，使用第三方返回的用户名回填。
 	if user.Username == "" && username != "" {
 		user.Username = username
-		if err := s.userRepo.Update(ctx, user); err != nil {
+		if err := s.userRepo.Update(ctx, user, UserUpdateFields{Username: true}); err != nil {
 			logger.LegacyPrintf("service.auth", "[Auth] Failed to update username after oauth login: %v", err)
 		}
 	}
@@ -604,9 +649,32 @@ func (s *AuthService) LoginOrRegisterOAuthWithTokenPairAndPromoCode(ctx context.
 	return s.loginOrRegisterOAuthWithTokenPair(ctx, email, username, invitationCode, affiliateCode, promoCode, signupSource)
 }
 
+// LoginOrRegisterOAuthForPendingTransaction performs the database portion of
+// OAuth login/registration for a pending browser session.  It deliberately
+// returns no token: the caller must bind and consume the pending session in
+// the same transaction, commit, then mint/cache tokens afterwards.  The bool
+// reports whether this invocation created the user so post-commit signup
+// effects (promo/quota snapshots) can be applied exactly once.
+func (s *AuthService) LoginOrRegisterOAuthForPendingTransaction(
+	ctx context.Context,
+	email, username, invitationCode, affiliateCode, promoCode, signupSource string,
+) (*User, bool, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	state := &oauthPendingTransactionState{}
+	ctx = context.WithValue(ctx, oauthPendingTransactionStateKey{}, state)
+	_, user, err := s.loginOrRegisterOAuthWithTokenPair(ctx, email, username, invitationCode, affiliateCode, promoCode, signupSource)
+	return user, state.Created, err
+}
+
 func (s *AuthService) loginOrRegisterOAuthWithTokenPair(ctx context.Context, email, username, invitationCode, affiliateCode, promoCode, signupSource string) (*TokenPair, *User, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	pendingState, _ := ctx.Value(oauthPendingTransactionStateKey{}).(*oauthPendingTransactionState)
 	// 检查 refreshTokenCache 是否可用
-	if s.refreshTokenCache == nil {
+	if s.refreshTokenCache == nil && pendingState == nil {
 		return nil, nil, errors.New("refresh token cache not configured")
 	}
 
@@ -632,20 +700,17 @@ func (s *AuthService) loginOrRegisterOAuthWithTokenPair(ctx context.Context, ema
 				return nil, nil, ErrRegDisabled
 			}
 
-			// 检查是否需要邀请码
+			// 检查是否需要邀请码。统一走 OAuth 注册邀请码校验，避免
+			// redeemRepo 未配置时 panic，并让后续原子 claim 复用同一口径。
 			var invitationRedeemCode *RedeemCode
 			if s.settingService != nil && s.settingService.IsInvitationCodeEnabled(ctx) {
-				if invitationCode == "" {
-					return nil, nil, ErrOAuthInvitationRequired
-				}
-				redeemCode, err := s.redeemRepo.GetByCode(ctx, invitationCode)
+				invitationRedeemCode, err = s.validateOAuthRegistrationInvitation(ctx, invitationCode)
 				if err != nil {
-					return nil, nil, ErrInvitationCodeInvalid
+					if errors.Is(err, ErrInvitationCodeRequired) {
+						return nil, nil, ErrOAuthInvitationRequired
+					}
+					return nil, nil, err
 				}
-				if redeemCode.Type != RedeemTypeInvitation || !redeemCode.CanUse() {
-					return nil, nil, ErrInvitationCodeInvalid
-				}
-				invitationRedeemCode = redeemCode
 			}
 
 			randomPassword, err := randomHexString(32)
@@ -681,68 +746,42 @@ func (s *AuthService) loginOrRegisterOAuthWithTokenPair(ctx context.Context, ema
 				SignupSource: signupSource,
 			}
 
-			if s.entClient != nil && invitationRedeemCode != nil {
-				tx, err := s.entClient.Tx(ctx)
-				if err != nil {
-					logger.LegacyPrintf("service.auth", "[Auth] Failed to begin transaction for oauth registration: %v", err)
+			// Create and claim the one-time invitation through the common helper.
+			// It joins an existing caller transaction and otherwise owns the
+			// transaction, so a failed claim cannot leave an orphan account.
+			if err := s.createUserAndClaimInvitation(ctx, newUser, invitationRedeemCode); err != nil {
+				if errors.Is(err, ErrEmailExists) {
+					// Exact lookup may miss when the conflict is an alias variant.
+					user, err = s.userRepo.GetByEmail(ctx, email)
+					if err != nil {
+						if errors.Is(err, ErrUserNotFound) {
+							return nil, nil, ErrEmailExists
+						}
+						logger.LegacyPrintf("service.auth", "[Auth] Database error getting user after conflict: %v", err)
+						return nil, nil, ErrServiceUnavailable
+					}
+				} else if errors.Is(err, ErrInvitationCodeInvalid) {
+					return nil, nil, ErrInvitationCodeInvalid
+				} else {
+					logger.LegacyPrintf("service.auth", "[Auth] Database error creating oauth user: %v", err)
 					return nil, nil, ErrServiceUnavailable
 				}
-				defer func() { _ = tx.Rollback() }()
-				txCtx := dbent.NewTxContext(ctx, tx)
-
-				if err := s.userRepo.Create(txCtx, newUser); err != nil {
-					if errors.Is(err, ErrEmailExists) {
-						user, err = s.userRepo.GetByEmail(ctx, email)
-						if err != nil {
-							logger.LegacyPrintf("service.auth", "[Auth] Database error getting user after conflict: %v", err)
-							return nil, nil, ErrServiceUnavailable
-						}
-					} else {
-						logger.LegacyPrintf("service.auth", "[Auth] Database error creating oauth user: %v", err)
-						return nil, nil, ErrServiceUnavailable
-					}
-				} else {
-					if err := s.redeemRepo.Use(txCtx, invitationRedeemCode.ID, newUser.ID); err != nil {
-						return nil, nil, ErrInvitationCodeInvalid
-					}
-					if err := tx.Commit(); err != nil {
-						logger.LegacyPrintf("service.auth", "[Auth] Failed to commit oauth registration transaction: %v", err)
-						return nil, nil, ErrServiceUnavailable
-					}
-					user = newUser
-					created = true
-					s.postAuthUserBootstrap(ctx, user, signupSource, false)
-					s.assignSubscriptions(ctx, user.ID, grantPlan.Subscriptions, "auto assigned by signup defaults")
-					// snapshot user × platform quota（fail-open）
-					_ = s.snapshotPlatformQuotaDefaults(ctx, user.ID, &grantPlan)
-					s.bindOAuthAffiliate(ctx, user.ID, affiliateCode)
-				}
 			} else {
-				if err := s.userRepo.Create(ctx, newUser); err != nil {
-					if errors.Is(err, ErrEmailExists) {
-						user, err = s.userRepo.GetByEmail(ctx, email)
-						if err != nil {
-							logger.LegacyPrintf("service.auth", "[Auth] Database error getting user after conflict: %v", err)
-							return nil, nil, ErrServiceUnavailable
-						}
-					} else {
-						logger.LegacyPrintf("service.auth", "[Auth] Database error creating oauth user: %v", err)
-						return nil, nil, ErrServiceUnavailable
-					}
-				} else {
-					user = newUser
-					created = true
-					s.postAuthUserBootstrap(ctx, user, signupSource, false)
-					s.assignSubscriptions(ctx, user.ID, grantPlan.Subscriptions, "auto assigned by signup defaults")
-					// snapshot user × platform quota（fail-open）
-					_ = s.snapshotPlatformQuotaDefaults(ctx, user.ID, &grantPlan)
-					s.bindOAuthAffiliate(ctx, user.ID, affiliateCode)
-					if invitationRedeemCode != nil {
-						if err := s.redeemRepo.Use(ctx, invitationRedeemCode.ID, user.ID); err != nil {
-							return nil, nil, ErrInvitationCodeInvalid
-						}
-					}
+				user = newUser
+				created = true
+				if pendingState != nil {
+					pendingState.Created = true
 				}
+				s.postAuthUserBootstrap(ctx, user, signupSource, false)
+				s.assignSubscriptions(ctx, user.ID, grantPlan.Subscriptions, "auto assigned by signup defaults")
+				// A pending coordinator owns the outer transaction.  The quota
+				// snapshot uses a detached/base client and therefore must wait until
+				// that transaction commits; the coordinator invokes the post-commit
+				// hook when pendingState is non-nil.
+				if dbent.TxFromContext(ctx) == nil {
+					_ = s.snapshotPlatformQuotaDefaults(ctx, user.ID, &grantPlan)
+				}
+				s.bindOAuthAffiliate(ctx, user.ID, affiliateCode)
 			}
 		} else {
 			logger.LegacyPrintf("service.auth", "[Auth] Database error during oauth login: %v", err)
@@ -756,12 +795,18 @@ func (s *AuthService) loginOrRegisterOAuthWithTokenPair(ctx context.Context, ema
 
 	if user.Username == "" && username != "" {
 		user.Username = username
-		if err := s.userRepo.Update(ctx, user); err != nil {
+		if err := s.userRepo.Update(ctx, user, UserUpdateFields{Username: true}); err != nil {
 			logger.LegacyPrintf("service.auth", "[Auth] Failed to update username after oauth login: %v", err)
 		}
 	}
-	if created {
+	if created && pendingState == nil {
 		user = s.applyOAuthSignupPromoCode(ctx, user, promoCode)
+	}
+	if pendingState != nil {
+		// Token generation writes to the refresh-token cache, which has no
+		// rollback semantics.  Keep it after the caller commits the binding and
+		// consumed_at CAS.
+		return nil, user, nil
 	}
 	tokenPair, err := s.GenerateTokenPair(ctx, user, "")
 	if err != nil {
@@ -921,7 +966,11 @@ func (s *AuthService) updateUserSignupSource(ctx context.Context, userID int64, 
 	if strings.TrimSpace(signupSource) == "" {
 		return
 	}
-	if err := s.entClient.User.UpdateOneID(userID).
+	client := s.entClient
+	if tx := dbent.TxFromContext(ctx); tx != nil {
+		client = tx.Client()
+	}
+	if err := client.User.UpdateOneID(userID).
 		SetSignupSource(signupSource).
 		Exec(ctx); err != nil {
 		logger.LegacyPrintf("service.auth", "[Auth] Failed to update signup source: user_id=%d source=%s err=%v", userID, signupSource, err)
@@ -933,7 +982,11 @@ func (s *AuthService) touchUserLogin(ctx context.Context, userID int64) {
 		return
 	}
 	now := time.Now().UTC()
-	if err := s.entClient.User.UpdateOneID(userID).
+	client := s.entClient
+	if tx := dbent.TxFromContext(ctx); tx != nil {
+		client = tx.Client()
+	}
+	if err := client.User.UpdateOneID(userID).
 		SetLastLoginAt(now).
 		SetLastActiveAt(now).
 		Exec(ctx); err != nil {
@@ -1102,6 +1155,51 @@ func inferLegacySignupSource(email string) string {
 	default:
 		return "email"
 	}
+}
+
+// createUserAndClaimInvitation atomically creates a registration user and
+// consumes a one-time invitation. The redeem repository's conditional update
+// makes concurrent claimers lose; reusing the outer ent transaction ensures a
+// losing user insert is rolled back as well.
+func (s *AuthService) createUserAndClaimInvitation(ctx context.Context, user *User, invitation *RedeemCode) error {
+	if s == nil || s.userRepo == nil || user == nil {
+		return ErrServiceUnavailable
+	}
+	// An invitation-backed registration must have one transaction owner.  A
+	// repository-only service cannot make the user insert and the conditional
+	// invitation claim atomic, so fail closed before creating anything.
+	if invitation != nil && dbent.TxFromContext(ctx) == nil && s.entClient == nil {
+		return ErrServiceUnavailable
+	}
+	commit := func(execCtx context.Context) error {
+		if err := s.createUserWithEmailAliasGuard(execCtx, user); err != nil {
+			return err
+		}
+		if invitation == nil {
+			return nil
+		}
+		if err := s.useOAuthRegistrationInvitation(execCtx, invitation.ID, user.ID); err != nil {
+			logger.LegacyPrintf("service.auth", "[Auth] invitation %s already claimed: %v", invitation.Code, err)
+			return ErrInvitationCodeInvalid
+		}
+		return nil
+	}
+	if invitation == nil || dbent.TxFromContext(ctx) != nil {
+		// A caller-owned transaction must remain the owner of commit/rollback.
+		return commit(ctx)
+	}
+	tx, err := s.entClient.Tx(ctx)
+	if err != nil {
+		return ErrServiceUnavailable
+	}
+	defer func() { _ = tx.Rollback() }()
+	if err := commit(dbent.NewTxContext(ctx, tx)); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return ErrServiceUnavailable
+	}
+	return nil
 }
 
 func (s *AuthService) validateRegistrationEmailPolicy(ctx context.Context, email string) error {
@@ -1438,7 +1536,7 @@ func (s *AuthService) ResetPassword(ctx context.Context, email, token, newPasswo
 	user.PasswordHash = hashedPassword
 	user.TokenVersion++ // Invalidate all existing tokens
 
-	if err := s.userRepo.Update(ctx, user); err != nil {
+	if err := s.userRepo.Update(ctx, user, UserUpdateFields{PasswordHash: true}); err != nil {
 		logger.LegacyPrintf("service.auth", "[Auth] Database error updating password for user %d: %v", user.ID, err)
 		return ErrServiceUnavailable
 	}
@@ -1680,16 +1778,13 @@ func (s *AuthService) RevokeAllUserSessions(ctx context.Context, userID int64) e
 // Access/refresh token verification both depend on TokenVersion, so bumping it provides
 // immediate revocation even if refresh-token cache cleanup later fails.
 func (s *AuthService) RevokeAllUserTokens(ctx context.Context, userID int64) error {
-	user, err := s.userRepo.GetByID(ctx, userID)
-	if err != nil {
-		return fmt.Errorf("get user: %w", err)
+	// TokenVersion is retained on the service model for legacy in-memory callers;
+	// the SQL repository treats an empty update mask as a no-op because users has
+	// no token_version column.
+	if user, err := s.userRepo.GetByID(ctx, userID); err == nil {
+		user.TokenVersion++
+		_ = s.userRepo.Update(ctx, user, UserUpdateFields{})
 	}
-
-	user.TokenVersion++
-	if err := s.userRepo.Update(ctx, user); err != nil {
-		return fmt.Errorf("update user: %w", err)
-	}
-
 	if err := s.RevokeAllUserSessions(ctx, userID); err != nil {
 		logger.LegacyPrintf("service.auth", "[Auth] Failed to revoke refresh sessions after token invalidation for user %d: %v", userID, err)
 	}
@@ -1745,4 +1840,26 @@ func (s *AuthService) snapshotPlatformQuotaDefaults(ctx context.Context, userID 
 		return nil // fail-open：返回 nil，让调用方继续
 	}
 	return nil
+}
+
+// SnapshotPlatformQuotaDefaultsAfterCommit snapshots the defaults for an OAuth
+// signup after the account's owning transaction has committed.  The snapshot
+// itself remains fail-open and uses snapshotPlatformQuotaDefaults' detached
+// context so a bad/unknown platform cannot poison a login transaction.  This
+// method intentionally accepts the signup source rather than a grant plan: the
+// plan is resolved only after commit, when the newly-created users row is
+// visible to the base database client used by BulkInsertInitial.
+func (s *AuthService) SnapshotPlatformQuotaDefaultsAfterCommit(ctx context.Context, userID int64, signupSource string) {
+	if s == nil || userID <= 0 {
+		return
+	}
+	if dbent.TxFromContext(ctx) != nil {
+		// Calling this from an active transaction would recreate the original
+		// visibility bug.  The caller must invoke it with the post-commit
+		// request context (or another context without TxFromContext).
+		logger.LegacyPrintf("service.auth", "[Auth] Warning: skipped post-commit quota snapshot inside active transaction user=%d", userID)
+		return
+	}
+	plan := s.resolveSignupGrantPlan(ctx, signupSource)
+	_ = s.snapshotPlatformQuotaDefaults(ctx, userID, &plan)
 }

@@ -3,14 +3,27 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/ctxkey"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/timezone"
 	"github.com/stretchr/testify/require"
 )
+
+func frozenPeakPricingWindowOutsideRecordTime() (time.Time, string, string) {
+	location := timezone.Location()
+	now := timezone.Now().In(location)
+	targetHour := (now.Hour() + 12) % 24
+	if targetHour == 23 {
+		targetHour = 22
+	}
+	pricingAt := time.Date(now.Year(), now.Month(), now.Day(), targetHour, 30, 0, 0, location)
+	return pricingAt, fmt.Sprintf("%02d:00", targetHour), fmt.Sprintf("%02d:00", targetHour+1)
+}
 
 type openAIRecordUsageLogRepoStub struct {
 	UsageLogRepository
@@ -101,6 +114,29 @@ func TestRecordCyberPolicyUsageLog_BillsRealUpstreamTokens(t *testing.T) {
 	require.InDelta(t, expected.ActualCost, usageRepo.lastLog.ActualCost, 1e-12)
 	require.Equal(t, 1, userRepo.deductCalls, "按真实 token 扣费，与 WS/正常请求一致")
 	require.InDelta(t, expected.ActualCost, userRepo.lastAmount, 1e-12)
+}
+
+func TestOpenAIRecordUsageInputFromCyberPolicy_PreservesFrozenPricingAt(t *testing.T) {
+	pricingAt := time.Date(2026, time.August, 26, 9, 17, 0, 0, time.FixedZone("test", 8*60*60))
+	apiKey := &APIKey{ID: 2, User: &User{ID: 1}}
+	account := &Account{ID: 3}
+
+	got := openAIRecordUsageInputFromCyberPolicy(CyberPolicyUsageInput{
+		APIKey:       apiKey,
+		Account:      account,
+		PricingAt:    pricingAt,
+		RequestID:    "rid-cyber-pricing-at",
+		Model:        "gpt-5.1",
+		InputTokens:  12,
+		OutputTokens: 3,
+	})
+
+	require.Equal(t, pricingAt, got.PricingAt)
+	require.Same(t, apiKey, got.APIKey)
+	require.Same(t, account, got.Account)
+	require.True(t, got.CyberBlocked)
+	require.Equal(t, 12, got.Result.Usage.InputTokens)
+	require.Equal(t, 3, got.Result.Usage.OutputTokens)
 }
 
 func TestRecordCyberPolicyUsageLog_NonStreamZeroTokensZeroCost(t *testing.T) {
@@ -440,6 +476,7 @@ func TestOpenAIGatewayServiceRecordUsage_PeakRateAffectsTokenModeImageOutputToke
 		OutputTokens:      600,
 		ImageOutputTokens: 100,
 	}
+	pricingAt, peakStart, peakEnd := frozenPeakPricingWindowOutsideRecordTime()
 
 	usageRepo := &openAIRecordUsageLogRepoStub{inserted: true}
 	userRepo := &openAIRecordUsageUserRepoStub{}
@@ -465,13 +502,14 @@ func TestOpenAIGatewayServiceRecordUsage_PeakRateAffectsTokenModeImageOutputToke
 				Hydrated:           true,
 				SubscriptionType:   SubscriptionTypeSubscription,
 				PeakRateEnabled:    true,
-				PeakStart:          "00:00",
-				PeakEnd:            "23:59",
+				PeakStart:          peakStart,
+				PeakEnd:            peakEnd,
 				PeakRateMultiplier: 3.0,
 			},
 		},
-		User:    &User{ID: 2004},
-		Account: &Account{ID: 3004},
+		User:      &User{ID: 2004},
+		Account:   &Account{ID: 3004},
+		PricingAt: pricingAt,
 		Subscription: &UserSubscription{
 			ID:       subscriptionID,
 			UserID:   2004,
@@ -949,9 +987,10 @@ func TestOpenAIGatewayServiceRecordUsage_GeneratesRequestIDWhenAllSourcesMissing
 	require.Equal(t, billingRepo.lastCmd.RequestID, usageRepo.lastLog.RequestID)
 }
 
-func TestOpenAIGatewayServiceRecordUsage_BillingErrorSkipsUsageLogWrite(t *testing.T) {
+func TestOpenAIGatewayServiceRecordUsage_BillingErrorWritesUnsettledUsageLog(t *testing.T) {
 	usageRepo := &openAIRecordUsageLogRepoStub{}
-	billingRepo := &openAIRecordUsageBillingRepoStub{err: errors.New("billing tx failed")}
+	billingErr := errors.New("billing tx failed")
+	billingRepo := &openAIRecordUsageBillingRepoStub{err: billingErr}
 	userRepo := &openAIRecordUsageUserRepoStub{}
 	subRepo := &openAIRecordUsageSubRepoStub{}
 	svc := newOpenAIRecordUsageServiceWithBillingRepoForTest(usageRepo, billingRepo, userRepo, subRepo, nil)
@@ -971,9 +1010,14 @@ func TestOpenAIGatewayServiceRecordUsage_BillingErrorSkipsUsageLogWrite(t *testi
 		Account: &Account{ID: 30048},
 	})
 
-	require.Error(t, err)
+	require.ErrorIs(t, err, billingErr)
 	require.Equal(t, 1, billingRepo.calls)
-	require.Equal(t, 0, usageRepo.calls)
+	require.Equal(t, 1, usageRepo.calls)
+	require.NotNil(t, usageRepo.lastLog)
+	require.Equal(t, 8, usageRepo.lastLog.InputTokens)
+	require.Equal(t, 4, usageRepo.lastLog.OutputTokens)
+	require.Greater(t, usageRepo.lastLog.TotalCost, 0.0)
+	require.Zero(t, usageRepo.lastLog.ActualCost)
 }
 
 func TestOpenAIGatewayServiceRecordUsage_UpdatesAPIKeyQuotaWhenConfigured(t *testing.T) {
@@ -1389,7 +1433,10 @@ func TestOpenAIGatewayServiceRecordUsage_BillsMappedRequestsUsingRequestedModel(
 	require.Equal(t, "gpt-5.1", usageRepo.lastLog.Model)
 	require.Equal(t, expectedCost.ActualCost, usageRepo.lastLog.ActualCost)
 	require.Equal(t, expectedCost.TotalCost, usageRepo.lastLog.TotalCost)
-	require.Equal(t, expectedCost.ActualCost, userRepo.lastAmount)
+	// Monetary side effects are persisted/charged at NUMERIC(20,8) precision;
+	// CalculateCost intentionally retains the pre-quantization float for the
+	// usage-log detail assertions above.
+	require.Equal(t, QuantizeUsageBillingAmount(expectedCost.ActualCost), userRepo.lastAmount)
 }
 
 func TestOpenAIGatewayServiceRecordUsage_ChannelMappedDoesNotOverrideBillingModelWhenUnmapped(t *testing.T) {
@@ -1749,6 +1796,40 @@ func TestOpenAIGatewayServiceRecordUsage_SimpleModeWebChatWritesCanonicalNoCharg
 	require.Zero(t, billingRepo.lastCmd.AccountQuotaCost)
 	require.Greater(t, billingRepo.lastCmd.GrossCost, 0.0)
 	require.Equal(t, 1, usageRepo.calls)
+}
+
+func TestOpenAIGatewayServiceRecordUsage_SimpleModeWebChatBillingErrorStillWritesUsageLog(t *testing.T) {
+	usageRepo := &openAIRecordUsageLogRepoStub{inserted: true}
+	billingErr := errors.New("simple openai web chat receipt failed")
+	billingRepo := &openAIRecordUsageBillingRepoStub{err: billingErr}
+	svc := newOpenAIRecordUsageServiceWithBillingRepoForTest(
+		usageRepo,
+		billingRepo,
+		&openAIRecordUsageUserRepoStub{},
+		&openAIRecordUsageSubRepoStub{},
+		nil,
+	)
+	svc.cfg.RunMode = config.RunModeSimple
+
+	ctx := context.WithValue(context.Background(), ctxkey.ClientRequestID, "openai-simple-web-chat-fail")
+	ctx = context.WithValue(ctx, ctxkey.WebChat, true)
+	err := svc.RecordUsage(ctx, &OpenAIRecordUsageInput{
+		Result: &OpenAIForwardResult{
+			RequestID: "openai-simple-web-chat-fail-upstream",
+			Usage:     OpenAIUsage{InputTokens: 8, OutputTokens: 4},
+			Model:     "gpt-5.1",
+			Duration:  time.Second,
+		},
+		APIKey:  &APIKey{ID: 1003},
+		User:    &User{ID: 2003},
+		Account: &Account{ID: 3003},
+	})
+
+	require.ErrorIs(t, err, billingErr)
+	require.Equal(t, 1, billingRepo.calls)
+	require.Equal(t, 1, usageRepo.calls)
+	require.NotNil(t, usageRepo.lastLog)
+	require.Zero(t, usageRepo.lastLog.ActualCost)
 }
 
 func TestOpenAIGatewayServiceRecordUsage_SettlementClosedSkipsLateUsageLog(t *testing.T) {

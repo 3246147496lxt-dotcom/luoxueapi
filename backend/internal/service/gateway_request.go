@@ -1294,7 +1294,7 @@ func ApplyThinkingEnabledFallback(effort *string, body []byte, mappedModel strin
 // reasoning_effort values to the GLM native scale used by z.ai: high/max.
 // It only applies to glm-* mapped models and leaves all other providers untouched.
 func NormalizeGLMOpenAIReasoningEffort(body []byte, mappedModel string) ([]byte, bool) {
-	if !strings.HasPrefix(strings.ToLower(strings.TrimSpace(mappedModel)), "glm-") {
+	if !strings.HasPrefix(strings.ToLower(lastOpenAIModelSegment(mappedModel)), "glm-") {
 		return body, false
 	}
 

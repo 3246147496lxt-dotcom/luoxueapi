@@ -35,23 +35,23 @@ const stateCopy: Record<
 > = {
   disconnected: {
     title: '连接落雪账户',
-    description: '通过系统浏览器完成只读授权。查看器不会读取密码，也不能消费额度。'
+    description: '通过系统浏览器完成只读授权。查看器不会读取密码，也不能消费积分。'
   },
   connecting: {
     title: '等待浏览器确认',
-    description: '完成只读授权后，这里会自动加载会员周额度。'
+    description: '完成只读授权后，这里会自动加载会员周积分。'
   },
   loading: {
-    title: '正在获取额度',
-    description: '正在读取会员套餐与本周剩余额度。'
+    title: '正在获取积分',
+    description: '正在读取会员套餐与本周剩余积分。'
   },
   unavailable: {
-    title: '暂时无法获取额度',
+    title: '暂时无法获取积分',
     description: '未取得可安全展示的数据，请稍后重新获取。'
   },
   'auth-invalid': {
     title: '需要重新连接',
-    description: '只读授权已失效。重新连接后才能获取最新额度。'
+    description: '只读授权已失效。重新连接后才能获取最新积分。'
   },
   'pairing-expired': {
     title: '授权已超时',
@@ -69,7 +69,7 @@ const visibleStatus = computed(() =>
 <template>
   <section
     class="monitor-panel monitor-panel--main connection-panel window-drag-region"
-    aria-label="落雪额度"
+    aria-label="落雪积分"
     @mousedown="startQuotaViewerDrag"
   >
     <header class="panel-header">
@@ -77,7 +77,7 @@ const visibleStatus = computed(() =>
         <button
           type="button"
           class="icon-button icon-button--hide-panel"
-          aria-label="隐藏额度面板"
+          aria-label="隐藏积分面板"
           title="隐藏"
           @click="emit('close')"
         >
@@ -143,7 +143,7 @@ const visibleStatus = computed(() =>
 
     <footer class="connection-assurance">
       <ShieldCheck :size="13" aria-hidden="true" />
-      <span>仅授予额度读取权限，无法发起 API 请求或修改账户。</span>
+      <span>仅授予积分读取权限，无法发起 API 请求或修改账户。</span>
     </footer>
   </section>
 </template>

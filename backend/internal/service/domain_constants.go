@@ -469,6 +469,8 @@ const (
 
 	// SettingKeyBackendModeEnabled Backend 模式：禁用用户注册和自助服务，仅管理员可登录
 	SettingKeyBackendModeEnabled = "backend_mode_enabled"
+	// SettingKeySkillMarketplaceEnabled Skill 市场公开访问开关（默认 false，仅显式 true 开启）。
+	SettingKeySkillMarketplaceEnabled = "skill_marketplace_enabled"
 
 	// Gateway Forwarding Behavior
 	// SettingKeyEnableFingerprintUnification 是否统一 OAuth 账号的 X-Stainless-* 指纹头（默认 true）
@@ -508,7 +510,7 @@ const (
 
 	// 余额不足提醒
 	SettingKeyBalanceLowNotifyEnabled     = "balance_low_notify_enabled"      // 全局开关
-	SettingKeyBalanceLowNotifyThreshold   = "balance_low_notify_threshold"    // 默认阈值（雪花额度）
+	SettingKeyBalanceLowNotifyThreshold   = "balance_low_notify_threshold"    // 默认阈值（积分）
 	SettingKeyBalanceLowNotifyRechargeURL = "balance_low_notify_recharge_url" // 充值页面 URL
 
 	// 订阅到期提醒
@@ -520,6 +522,10 @@ const (
 
 	// Web Search Emulation
 	SettingKeyWebSearchEmulationConfig = "web_search_emulation_config" // JSON 配置
+	// SettingKeyWebChatTranscriptionSettings stores the operator-managed
+	// Web Chat speech-to-text switch, model and eligible group IDs. Upload,
+	// timeout and concurrency limits remain deployment-owned config.
+	SettingKeyWebChatTranscriptionSettings = "web_chat_transcription_settings"
 )
 
 // SettingKeyDefaultPlatformQuotas —— 系统全局：每用户 × 平台日/周/月 USD 上限（JSON）。

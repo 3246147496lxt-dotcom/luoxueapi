@@ -17,6 +17,27 @@ func TestResponsesInputToChatMessages_DeveloperRoleMapsToSystem(t *testing.T) {
 	assert.JSONEq(t, `"follow project instructions"`, string(messages[0].Content))
 }
 
+func TestResponsesInputToChatMessages_InputFileMapsToChatFile(t *testing.T) {
+	messages, err := responsesInputToChatMessages("", json.RawMessage(`[{
+		"role":"user",
+		"content":[{
+			"type":"input_file",
+			"filename":"notes.txt",
+			"file_data":"data:text/plain;base64,aGVsbG8="
+		}]
+	}]`))
+	require.NoError(t, err)
+	require.Len(t, messages, 1)
+
+	var parts []ChatContentPart
+	require.NoError(t, json.Unmarshal(messages[0].Content, &parts))
+	require.Len(t, parts, 1)
+	require.NotNil(t, parts[0].File)
+	assert.Equal(t, "file", parts[0].Type)
+	assert.Equal(t, "notes.txt", parts[0].File.Filename)
+	assert.Equal(t, "data:text/plain;base64,aGVsbG8=", parts[0].File.FileData)
+}
+
 func TestResponsesInputToChatMessages_KeepsChatCompletionRoles(t *testing.T) {
 	input := json.RawMessage(`[
 		{"role":"system","content":"system message"},

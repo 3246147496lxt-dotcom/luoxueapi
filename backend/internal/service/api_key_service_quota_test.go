@@ -95,7 +95,7 @@ func (s *quotaBaseAPIKeyRepoStub) GetByKey(context.Context, string) (*APIKey, er
 func (s *quotaBaseAPIKeyRepoStub) GetByKeyForAuth(context.Context, string) (*APIKey, error) {
 	panic("unexpected GetByKeyForAuth call")
 }
-func (s *quotaBaseAPIKeyRepoStub) Update(context.Context, *APIKey) error {
+func (s *quotaBaseAPIKeyRepoStub) Update(context.Context, *APIKey, APIKeyUpdateFields) error {
 	panic("unexpected Update call")
 }
 func (s *quotaBaseAPIKeyRepoStub) Delete(context.Context, int64) error {
@@ -197,4 +197,58 @@ func TestAPIKeyService_Update_ReactivatesQuotaExhaustedWhenQuotaUnlimited(t *tes
 	require.Len(t, repo.updatedKeys, 1)
 	require.Equal(t, StatusActive, repo.updatedKeys[0].Status)
 	require.Equal(t, 0.0, repo.updatedKeys[0].Quota)
+}
+
+func TestAPIKeyService_UpdateServiceTierPreferencePreservesOmittedIPRules(t *testing.T) {
+	repo := &apiKeyRepoStub{
+		apiKey: &APIKey{
+			ID:                    10,
+			UserID:                7,
+			Key:                   "sk-test-tier-acl",
+			Status:                StatusActive,
+			Purpose:               APIKeyPurposeUser,
+			ServiceTierPreference: ServiceTierPreferenceStandard,
+			IPWhitelist:           []string{"192.0.2.10"},
+			IPBlacklist:           []string{"198.51.100.0/24"},
+		},
+	}
+	svc := &APIKeyService{apiKeyRepo: repo}
+	priority := ServiceTierPreferencePriority
+
+	updated, err := svc.Update(context.Background(), 10, 7, UpdateAPIKeyRequest{
+		ServiceTierPreference: &priority,
+	})
+
+	require.NoError(t, err)
+	require.Equal(t, ServiceTierPreferencePriority, updated.ServiceTierPreference)
+	require.Equal(t, []string{"192.0.2.10"}, updated.IPWhitelist)
+	require.Equal(t, []string{"198.51.100.0/24"}, updated.IPBlacklist)
+	require.Len(t, repo.updatedKeys, 1)
+	require.Equal(t, updated.IPWhitelist, repo.updatedKeys[0].IPWhitelist)
+	require.Equal(t, updated.IPBlacklist, repo.updatedKeys[0].IPBlacklist)
+}
+
+func TestAPIKeyService_UpdateExplicitEmptyIPRulesClearsThem(t *testing.T) {
+	repo := &apiKeyRepoStub{
+		apiKey: &APIKey{
+			ID:          10,
+			UserID:      7,
+			Key:         "sk-test-clear-acl",
+			Status:      StatusActive,
+			Purpose:     APIKeyPurposeUser,
+			IPWhitelist: []string{"192.0.2.10"},
+			IPBlacklist: []string{"198.51.100.0/24"},
+		},
+	}
+	svc := &APIKeyService{apiKeyRepo: repo}
+	empty := []string{}
+
+	updated, err := svc.Update(context.Background(), 10, 7, UpdateAPIKeyRequest{
+		IPWhitelist: &empty,
+		IPBlacklist: &empty,
+	})
+
+	require.NoError(t, err)
+	require.Empty(t, updated.IPWhitelist)
+	require.Empty(t, updated.IPBlacklist)
 }
