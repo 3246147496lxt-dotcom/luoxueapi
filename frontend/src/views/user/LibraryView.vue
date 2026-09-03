@@ -673,6 +673,7 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   disposed = true
+  chatStore.invalidateHistorySearch()
   if (searchTimer) clearTimeout(searchTimer)
   if (historySearchTimer) clearTimeout(historySearchTimer)
   document.removeEventListener('pointerdown', onDocumentPointerDown, true)
@@ -869,6 +870,7 @@ async function applyFileDelete(): Promise<void> {
 }
 
 function updateHistorySearch(value: string): void {
+  chatStore.invalidateHistorySearch()
   historySearchQuery.value = value
   if (historySearchTimer) clearTimeout(historySearchTimer)
   historySearchTimer = setTimeout(() => {

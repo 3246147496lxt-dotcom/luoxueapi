@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -95,5 +96,61 @@ func TestSkillMarketRepositoryInsertVersionUsesExactlyFourteenArguments(t *testi
 	require.NoError(t, repo.InsertVersion(context.Background(), version))
 	require.EqualValues(t, 88, version.ID)
 	require.Equal(t, createdAt, version.CreatedAt)
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestBuildSkillMarketWhereSearchesLocalizedAndUpstreamCopy(t *testing.T) {
+	where, args := buildSkillMarketWhere(service.SkillListFilter{
+		Search: "浏览器",
+	}, true, true, []any{"zh-CN"})
+
+	require.Contains(t, where, "s.display_name ILIKE $2")
+	require.Contains(t, where, "catalog_copy.display_name ILIKE $2")
+	require.Contains(t, where, "catalog_copy.summary ILIKE $2")
+	require.Contains(t, where, "catalog_copy.description ILIKE $2")
+	require.Equal(t, []any{"zh-CN", "%浏览器%"}, args)
+}
+
+func TestBuildSkillMarketWhereKeepsAdminSearchOnUpstreamCopy(t *testing.T) {
+	where, args := buildSkillMarketWhere(service.SkillListFilter{
+		Search: "browser",
+	}, false, false, nil)
+
+	require.Contains(t, where, "s.display_name ILIKE $1")
+	require.NotContains(t, where, "catalog_copy")
+	require.Equal(t, []any{"%browser%"}, args)
+}
+
+func TestSkillMarketRepositoryPublicListJoinsRequestedCatalogLocale(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = db.Close() })
+
+	sentinel := errors.New("stop after inspecting localized count query")
+	mock.ExpectQuery(`(?s)SELECT COUNT\(\*\).*LEFT JOIN skill_catalog_localizations catalog_copy.*catalog_copy\.locale=\$1.*catalog_copy\.display_name ILIKE \$2`).
+		WithArgs("zh-CN", "%浏览器%").
+		WillReturnError(sentinel)
+
+	repo := &skillMarketRepository{db: db}
+	_, _, err = repo.ListPublished(context.Background(), service.SkillListFilter{
+		Locale: "zh-CN", Search: "浏览器", Page: 1, PageSize: 12,
+	})
+	require.ErrorIs(t, err, sentinel)
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestSkillMarketRepositoryPublicDetailJoinsRequestedCatalogLocale(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = db.Close() })
+
+	sentinel := errors.New("stop after inspecting localized detail query")
+	mock.ExpectQuery(`(?s)LEFT JOIN skill_catalog_localizations catalog_copy.*catalog_copy\.locale=\$2.*WHERE s\.slug=\$1`).
+		WithArgs("find-skills", "zh-CN").
+		WillReturnError(sentinel)
+
+	repo := &skillMarketRepository{db: db}
+	_, err = repo.GetPublishedBySlugLocalized(context.Background(), "find-skills", "zh-CN")
+	require.ErrorIs(t, err, sentinel)
 	require.NoError(t, mock.ExpectationsWereMet())
 }

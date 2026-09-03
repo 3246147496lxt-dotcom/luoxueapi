@@ -169,7 +169,7 @@ describe('shellDestinations', () => {
         context,
         'support',
       ).map(({ id }) => id),
-    ).toEqual(['documentation', 'models', 'contact'])
+    ).toEqual(['webChat', 'documentation', 'models', 'contact'])
 
     const adminProfile = findSpec(ADMIN_SHELL_DESTINATION_SPECS, 'profile')
     expect(isShellDestinationVisible(adminProfile, context)).toBe(false)

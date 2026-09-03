@@ -97,12 +97,12 @@
             <div v-else-if="!hasData" class="dashboard-chart__state dashboard-chart__empty">
               {{ t('dashboard.workspace.noUsageData') }}
             </div>
-            <Bar
+            <Line
               v-else
               :key="`tokens-${period}-${themeRevision}`"
               :data="tokensChartData"
               :options="tokensChartOptions"
-              :plugins="barChartPlugins"
+              :plugins="lineChartPlugins"
               role="img"
               :aria-label="`${t('dashboard.workspace.token')} ${formattedTokensTotal}`"
             />
@@ -232,16 +232,32 @@ const isDark = computed(() => {
   return typeof document !== 'undefined' && document.documentElement.classList.contains('dark')
 })
 
+function readThemeColor(token: string, lightFallback: string, darkFallback = lightFallback): string {
+  themeRevision.value
+  const fallback = isDark.value ? darkFallback : lightFallback
+  if (typeof window === 'undefined') return fallback
+  return window.getComputedStyle(document.documentElement).getPropertyValue(token).trim() || fallback
+}
+
 const chartTheme = computed(() => ({
-  text: isDark.value ? 'rgba(203, 213, 225, 0.72)' : 'rgba(100, 116, 139, 0.60)',
-  grid: isDark.value ? 'rgba(148, 163, 184, 0.18)' : 'rgba(226, 232, 240, 0.70)',
-  guide: isDark.value ? 'rgba(226, 232, 240, 0.38)' : 'rgba(148, 163, 184, 0.70)',
-  tooltip: isDark.value ? '#020617' : '#0f172a',
-  tooltipText: '#f8fafc',
-  tooltipTitle: '#94a3b8',
-  orange: '#FF8A00',
-  token: '#8B5CF6',
-  request: '#A78BFA',
+  text: readThemeColor('--workspace-dashboard-text-muted', '#64748b', '#8a8a8a'),
+  grid: readThemeColor('--workspace-dashboard-card-border', '#f1f5f9', 'rgb(255 255 255 / 0.1)'),
+  guide: readThemeColor('--workspace-dashboard-text-subtle', '#64748b', '#8a8a8a'),
+  tooltip: readThemeColor('--workspace-dashboard-tooltip-surface', '#0f172a', '#212121'),
+  tooltipText: readThemeColor('--workspace-dashboard-tooltip-text', '#f8fafc', '#ececec'),
+  tooltipTitle: readThemeColor('--workspace-dashboard-tooltip-title', '#cbd5e1', '#b4b4b4'),
+  tooltipBorder: readThemeColor('--workspace-dashboard-tooltip-border', 'rgb(255 255 255 / 0.1)', 'rgb(255 255 255 / 0.16)'),
+  point: readThemeColor('--workspace-card-surface', '#ffffff', '#171717'),
+  cost: readThemeColor('--workspace-work-chart-cost', '#ea580c', '#fb923c'),
+  costFillStrong: readThemeColor('--workspace-work-chart-cost-fill-strong', 'rgb(234 88 12 / 0.18)', 'rgb(251 146 60 / 0.18)'),
+  costFillSoft: readThemeColor('--workspace-work-chart-cost-fill-soft', 'rgb(234 88 12 / 0.06)', 'rgb(251 146 60 / 0.06)'),
+  costFillTransparent: readThemeColor('--workspace-work-chart-cost-fill-transparent', 'rgb(234 88 12 / 0)', 'rgb(251 146 60 / 0)'),
+  token: readThemeColor('--workspace-work-chart-primary', '#2563eb', '#60a5fa'),
+  tokenFillStrong: readThemeColor('--workspace-work-chart-primary-fill-strong', 'rgb(37 99 235 / 0.18)', 'rgb(96 165 250 / 0.18)'),
+  tokenFillSoft: readThemeColor('--workspace-work-chart-primary-fill-soft', 'rgb(37 99 235 / 0.06)', 'rgb(96 165 250 / 0.06)'),
+  tokenFillTransparent: readThemeColor('--workspace-work-chart-primary-fill-transparent', 'rgb(37 99 235 / 0)', 'rgb(96 165 250 / 0)'),
+  request: readThemeColor('--workspace-work-chart-secondary', '#60a5fa', '#93c5fd'),
+  requestHover: readThemeColor('--workspace-work-accent', '#2563eb', '#60a5fa'),
 }))
 
 const creditsTotal = computed(() => usagePoints.value.reduce((sum, point) => sum + point.credits, 0))
@@ -252,22 +268,34 @@ const formattedTokensTotal = computed(() => formatInteger(tokensTotal.value))
 const formattedRequestsTotal = computed(() => formatInteger(requestsTotal.value))
 const chartLabels = computed(() => usagePoints.value.map((point) => axisLabel(point.date)))
 
+function createAreaGradient(
+  context: any,
+  strong: string,
+  soft: string,
+  transparent: string,
+): string | CanvasGradient {
+  const chart = context.chart
+  const area = chart.chartArea
+  if (!area) return strong
+  const gradient = chart.ctx.createLinearGradient(0, area.top, 0, area.bottom)
+  gradient.addColorStop(0, strong)
+  gradient.addColorStop(0.62, soft)
+  gradient.addColorStop(1, transparent)
+  return gradient
+}
+
 const creditsChartData = computed<ChartData<'line'>>(() => ({
   labels: chartLabels.value,
   datasets: [{
     label: t('dashboard.workspace.creditsTrend'),
     data: usagePoints.value.map((point) => point.credits),
-    borderColor: chartTheme.value.orange,
-    backgroundColor: (context: any) => {
-      const chart = context.chart
-      const area = chart.chartArea
-      if (!area) return 'rgba(255, 138, 0, 0.12)'
-      const gradient = chart.ctx.createLinearGradient(0, area.top, 0, area.bottom)
-      gradient.addColorStop(0, 'rgba(255, 138, 0, 0.18)')
-      gradient.addColorStop(0.62, 'rgba(255, 138, 0, 0.06)')
-      gradient.addColorStop(1, 'rgba(255, 138, 0, 0)')
-      return gradient
-    },
+    borderColor: chartTheme.value.cost,
+    backgroundColor: (context: any) => createAreaGradient(
+      context,
+      chartTheme.value.costFillStrong,
+      chartTheme.value.costFillSoft,
+      chartTheme.value.costFillTransparent,
+    ),
     borderWidth: 2,
     fill: true,
     tension: 0.36,
@@ -275,23 +303,34 @@ const creditsChartData = computed<ChartData<'line'>>(() => ({
     pointRadius: 0,
     pointHoverRadius: 4,
     pointHitRadius: 12,
-    pointHoverBackgroundColor: '#ffffff',
-    pointHoverBorderColor: chartTheme.value.orange,
+    pointHoverBackgroundColor: chartTheme.value.point,
+    pointHoverBorderColor: chartTheme.value.cost,
     pointHoverBorderWidth: 2,
   }],
 }))
 
-const tokensChartData = computed<ChartData<'bar'>>(() => ({
+const tokensChartData = computed<ChartData<'line'>>(() => ({
   labels: chartLabels.value,
   datasets: [{
     label: t('dashboard.workspace.token'),
     data: usagePoints.value.map((point) => point.totalTokens),
-    backgroundColor: chartTheme.value.token,
-    hoverBackgroundColor: '#7C3AED',
-    borderRadius: 4,
-    borderSkipped: false,
-    barPercentage: 0.64,
-    categoryPercentage: 0.72,
+    borderColor: chartTheme.value.token,
+    backgroundColor: (context: any) => createAreaGradient(
+      context,
+      chartTheme.value.tokenFillStrong,
+      chartTheme.value.tokenFillSoft,
+      chartTheme.value.tokenFillTransparent,
+    ),
+    borderWidth: 2,
+    fill: true,
+    tension: 0.36,
+    cubicInterpolationMode: 'monotone',
+    pointRadius: 0,
+    pointHoverRadius: 4,
+    pointHitRadius: 12,
+    pointHoverBackgroundColor: chartTheme.value.point,
+    pointHoverBorderColor: chartTheme.value.token,
+    pointHoverBorderWidth: 2,
   }],
 }))
 
@@ -301,7 +340,7 @@ const requestsChartData = computed<ChartData<'bar'>>(() => ({
     label: t('dashboard.workspace.requestCount'),
     data: usagePoints.value.map((point) => point.requests),
     backgroundColor: chartTheme.value.request,
-    hoverBackgroundColor: '#8B5CF6',
+    hoverBackgroundColor: chartTheme.value.requestHover,
     borderRadius: 3,
     borderSkipped: false,
     barPercentage: 0.64,
@@ -319,8 +358,8 @@ const creditsChartOptions = computed<ChartOptions<'line'>>(() => ({
   },
 }))
 
-const tokensChartOptions = computed<ChartOptions<'bar'>>(() => ({
-  ...baseOptions<'bar'>(usagePoints.value.map((point) => point.totalTokens), formatAxisNumber, 9),
+const tokensChartOptions = computed<ChartOptions<'line'>>(() => ({
+  ...baseOptions<'line'>(usagePoints.value.map((point) => point.totalTokens), formatAxisNumber, 9),
   plugins: {
     legend: { display: false },
     tooltip: tooltipOptions((index) => {
@@ -426,7 +465,7 @@ function tooltipOptions(lines: (index: number) => string[]) {
     backgroundColor: chartTheme.value.tooltip,
     titleColor: chartTheme.value.tooltipTitle,
     bodyColor: chartTheme.value.tooltipText,
-    borderColor: 'rgba(255, 255, 255, 0.10)',
+    borderColor: chartTheme.value.tooltipBorder,
     borderWidth: 1,
     cornerRadius: 12,
     padding: 12,
@@ -827,36 +866,4 @@ onBeforeUnmount(() => {
   }
 }
 
-:global(html.dark) .dashboard-chart-card,
-:global(html.dark) .dashboard-period-select__menu {
-  border-color: var(--workspace-dashboard-card-border);
-  background: var(--workspace-card-surface);
-  box-shadow: var(--workspace-dashboard-card-shadow);
-}
-
-:global(html.dark) .dashboard-usage__header h2,
-:global(html.dark) .dashboard-period-select__value {
-  color: var(--workspace-dashboard-text-strong);
-}
-
-:global(html.dark) .dashboard-chart-card__heading h3 {
-  color: var(--workspace-dashboard-text-heading);
-}
-
-:global(html.dark) .dashboard-chart-card__heading > span {
-  color: var(--workspace-dashboard-text-subtle);
-}
-
-:global(html.dark) .dashboard-chart__empty {
-  color: var(--workspace-dashboard-text-subtle);
-}
-
-:global(html.dark) .dashboard-period-select__trigger {
-  color: var(--workspace-dashboard-period-text);
-  background: var(--workspace-canvas);
-}
-
-:global(html.dark) .dashboard-period-select__option {
-  color: var(--workspace-dashboard-text-heading);
-}
 </style>

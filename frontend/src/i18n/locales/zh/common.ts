@@ -152,6 +152,7 @@ export default {
     home: '首页',
     dashboard: '仪表盘',
     gptChat: 'GPT 聊天',
+    webChat: '网页版对话',
     adminDashboard: '数据看板',
     adminWorkspace: '管理后台',
     personalWorkspace: '我的工作台',

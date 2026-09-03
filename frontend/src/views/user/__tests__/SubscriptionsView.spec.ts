@@ -1,3 +1,6 @@
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
+
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, shallowMount } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
@@ -7,6 +10,11 @@ import SubscriptionsView from '../SubscriptionsView.vue'
 import subscriptionsAPI from '@/api/subscriptions'
 import { useAuthStore } from '@/stores/auth'
 import type { User, UserSubscription } from '@/types'
+
+const subscriptionsViewSource = readFileSync(
+  resolve(process.cwd(), 'src/views/user/SubscriptionsView.vue'),
+  'utf8',
+)
 
 vi.mock('vue-i18n', async () => {
   const actual = await vi.importActual<typeof import('vue-i18n')>('vue-i18n')
@@ -152,14 +160,26 @@ describe('SubscriptionsView balance and membership overview', () => {
     vi.mocked(subscriptionsAPI.getMySubscriptions).mockReset()
   })
 
+  it('uses one tokenized card surface without membership-tier color auras', () => {
+    expect(subscriptionsViewSource).toContain('background: var(--workspace-card-surface);')
+    expect(subscriptionsViewSource).toContain('border: 1px solid var(--workspace-border);')
+    expect(subscriptionsViewSource).toContain('box-shadow: var(--workspace-work-shadow-card);')
+    expect(subscriptionsViewSource).not.toContain('membership-overview-card--')
+    expect(subscriptionsViewSource).not.toContain('radial-gradient')
+    expect(subscriptionsViewSource).not.toContain(':global(.dark)')
+  })
+
   it('renders the concise overview without an embedded plan catalogue', async () => {
     const { wrapper } = await mountOverview()
 
     expect(wrapper.get('h1').text()).toBe('userSubscriptions.title')
     expect(wrapper.get('header p').text()).toBe('userSubscriptions.description')
     expect(wrapper.findAll('[data-testid="balance-membership-overview"]')).toHaveLength(1)
-    expect(wrapper.get('[data-testid="balance-card"]').text()).toContain('balanceMembership.balanceTitle')
-    expect(wrapper.get('[data-testid="balance-card"]').text()).toContain('balanceMembership.recharge')
+    const balanceCard = wrapper.get('[data-testid="balance-card"]')
+    expect(balanceCard.classes()).toContain('balance-membership-card')
+    expect(balanceCard.text()).toContain('balanceMembership.balanceTitle')
+    expect(balanceCard.text()).toContain('balanceMembership.recharge')
+    expect(wrapper.get('[data-testid="free-member-card"]').classes()).toContain('balance-membership-card')
     expect(wrapper.findAll('[data-testid="pricing-section"]')).toHaveLength(0)
     expect(wrapper.text()).not.toContain('Try')
     expect(wrapper.text()).not.toContain('Standard')
@@ -197,6 +217,7 @@ describe('SubscriptionsView balance and membership overview', () => {
     const { router, wrapper } = await mountOverview([subscriptionFixture()])
 
     const card = wrapper.get('[data-testid="current-member-card"]')
+    expect(card.classes()).toContain('balance-membership-card')
     expect(card.text()).toContain('Ultra')
     expect(card.text()).toContain('72.8')
     expect(card.get('[role="progressbar"]').attributes('aria-valuenow')).toBe('72.8')
@@ -209,6 +230,26 @@ describe('SubscriptionsView balance and membership overview', () => {
       mode: 'renew',
       tier: 'high',
       plan: 'Ultra',
+      group: '3',
+    })
+  })
+
+  it('recognizes branded high-tier names without adding a visual tier class', async () => {
+    const base = subscriptionFixture()
+    const { router, wrapper } = await mountOverview([
+      subscriptionFixture({ group: { ...base.group!, name: 'Ultra Preview' } }),
+    ])
+    const card = wrapper.get('[data-testid="current-member-card"]')
+
+    expect(card.classes()).toContain('balance-membership-card')
+    expect(card.classes().some(className => className.startsWith('membership-overview-card--')))
+      .toBe(false)
+
+    await card.get('[data-testid="member-upgrade"]').trigger('click')
+    await flushPromises()
+    expect(router.currentRoute.value.query).toEqual({
+      tier: 'high',
+      plan: 'Ultra Preview',
       group: '3',
     })
   })
@@ -268,6 +309,8 @@ describe('SubscriptionsView balance and membership overview', () => {
 
     const { wrapper } = await mountOverview()
     expect(wrapper.findAll('[data-testid="subscriptions-load-error"]')).toHaveLength(1)
+    expect(wrapper.get('[data-testid="subscriptions-load-error"]').classes())
+      .toContain('balance-membership-card')
     expect(wrapper.findAll('[data-testid="current-member-card"]')).toHaveLength(0)
 
     await wrapper.get('[data-testid="subscriptions-load-error"] button').trigger('click')

@@ -62,6 +62,12 @@ declare module 'vue-router' {
     requiresPublicModelCatalog?: boolean
 
     /**
+     * Whether the Skill marketplace feature flag must be enabled.
+     * @default false
+     */
+    requiresSkillMarketplace?: boolean
+
+    /**
      * i18n key for the page title
      */
     titleKey?: string

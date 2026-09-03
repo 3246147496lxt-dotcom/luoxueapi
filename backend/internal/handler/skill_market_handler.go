@@ -56,7 +56,7 @@ func (h *SkillMarketHandler) List(c *gin.Context) {
 	}
 	filter := service.SkillListFilter{
 		Search: c.Query("search"), Category: c.Query("category"),
-		Page: page, PageSize: pageSize,
+		Locale: skillMarketRequestLocale(c), Page: page, PageSize: pageSize,
 	}
 	if raw := strings.TrimSpace(c.Query("featured")); raw != "" {
 		value, err := strconv.ParseBool(raw)
@@ -71,6 +71,7 @@ func (h *SkillMarketHandler) List(c *gin.Context) {
 		return
 	}
 	c.Header("Cache-Control", "private, no-store")
+	c.Writer.Header().Add("Vary", "Accept-Language")
 	response.Success(c, result)
 }
 
@@ -78,12 +79,20 @@ func (h *SkillMarketHandler) Get(c *gin.Context) {
 	if !h.ensureEnabled(c) {
 		return
 	}
-	item, err := h.service.GetPublic(c.Request.Context(), c.Param("slug"))
+	item, err := h.service.GetPublic(c.Request.Context(), c.Param("slug"), skillMarketRequestLocale(c))
 	if response.ErrorFrom(c, err) {
 		return
 	}
 	c.Header("Cache-Control", "private, no-store")
+	c.Writer.Header().Add("Vary", "Accept-Language")
 	response.Success(c, item)
+}
+
+func skillMarketRequestLocale(c *gin.Context) string {
+	if locale := strings.TrimSpace(c.Query("lang")); locale != "" {
+		return locale
+	}
+	return c.GetHeader("Accept-Language")
 }
 
 func (h *SkillMarketHandler) Versions(c *gin.Context) {

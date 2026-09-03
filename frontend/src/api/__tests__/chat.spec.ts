@@ -942,6 +942,95 @@ describe('chatAPI', () => {
     )
   })
 
+  it('repairs legacy settlement-only errors when delivery already terminated', async () => {
+    mocks.apiGet.mockResolvedValueOnce({
+      data: {
+        items: [{
+          id: 'assistant-settlement-only',
+          role: 'assistant',
+          content: 'The complete delivered answer.',
+          status: 'error',
+          finish_reason: 'stop',
+          error_code: 'CHAT_SETTLEMENT_FAILED',
+          error_message: 'Chat usage settlement could not be completed',
+          settlement_status: 'failed',
+          position: 1,
+          created_at: '2026-08-09T08:00:00Z',
+        }],
+        next_before_position: null,
+        has_more: false,
+      },
+    })
+
+    const page = await getChatConversationMessages('conversation-settlement-only')
+
+    expect(page.items[0]).toMatchObject({
+      id: 'assistant-settlement-only',
+      content: 'The complete delivered answer.',
+      status: 'complete',
+      finishReason: 'stop',
+      settlementStatus: 'failed',
+    })
+    expect(page.items[0]?.errorCode).toBeUndefined()
+    expect(page.items[0]?.errorMessage).toBeUndefined()
+  })
+
+  it('keeps legacy settlement errors when the stream has no terminal delivery evidence', async () => {
+    mocks.apiGet.mockResolvedValueOnce({
+      data: {
+        items: [{
+          id: 'assistant-settlement-interrupted',
+          role: 'assistant',
+          content: 'Only a partial answer',
+          status: 'error',
+          finish_reason: 'disconnected',
+          error_code: 'CHAT_SETTLEMENT_FAILED',
+          error_message: 'Chat usage settlement could not be completed',
+          position: 1,
+          created_at: '2026-08-09T08:00:00Z',
+        }],
+        next_before_position: null,
+        has_more: false,
+      },
+    })
+
+    const page = await getChatConversationMessages('conversation-settlement-interrupted')
+
+    expect(page.items[0]).toMatchObject({
+      status: 'error',
+      finishReason: 'disconnected',
+      errorCode: 'CHAT_SETTLEMENT_FAILED',
+    })
+  })
+
+  it('keeps genuine generation errors even when they include content and a finish reason', async () => {
+    mocks.apiGet.mockResolvedValueOnce({
+      data: {
+        items: [{
+          id: 'assistant-upstream-error',
+          role: 'assistant',
+          content: 'Visible partial output',
+          status: 'error',
+          finish_reason: 'stop',
+          error_code: 'UPSTREAM_ERROR',
+          error_message: 'The upstream request failed',
+          position: 1,
+          created_at: '2026-08-09T08:00:00Z',
+        }],
+        next_before_position: null,
+        has_more: false,
+      },
+    })
+
+    const page = await getChatConversationMessages('conversation-upstream-error')
+
+    expect(page.items[0]).toMatchObject({
+      status: 'error',
+      finishReason: 'stop',
+      errorCode: 'UPSTREAM_ERROR',
+    })
+  })
+
   it('normalizes snake_case reasoning activities from server history messages', async () => {
     mocks.apiGet.mockResolvedValueOnce({
       data: {
@@ -1069,6 +1158,39 @@ describe('chatAPI', () => {
         finishReason: 'interrupted',
       },
     })
+  })
+
+  it('trusts an authoritative completed message for a settlement-only failed attempt', async () => {
+    mocks.apiGet.mockResolvedValueOnce({
+      data: {
+        attempt_id: 'attempt-settlement-only',
+        conversation_id: 'conversation-settlement-only',
+        assistant_message_id: 'assistant-settlement-only',
+        status: 'failed',
+        failure_code: 'CHAT_SETTLEMENT_FAILED',
+        failure_reason: 'Chat usage settlement could not be completed',
+        assistant_message: {
+          id: 'assistant-settlement-only',
+          role: 'assistant',
+          content: '',
+          status: 'completed',
+          created_at: '2026-08-09T08:00:00Z',
+        },
+      },
+    })
+
+    const attempt = await getChatAttempt('attempt-settlement-only')
+
+    expect(attempt).toMatchObject({
+      status: 'completed',
+      assistantMessage: {
+        status: 'complete',
+        content: '',
+      },
+    })
+    expect(attempt.failureCode).toBeUndefined()
+    expect(attempt.failureReason).toBeUndefined()
+    expect(attempt.assistantMessage?.errorCode).toBeUndefined()
   })
 
   it('records an explicit stop against the authenticated attempt endpoint', async () => {

@@ -110,9 +110,10 @@ shows identity and balance details, personal profile and preferences, theme,
 language, onboarding, and logout.
 
 Task destinations such as subscriptions, wallet, orders, and quota tools belong to
-the workspace navigation. Documentation is a low-frequency external link below the
-account destinations; announcements remain in the dashboard and global notification
-surfaces rather than as a Work sidebar row.
+the workspace navigation. Web Chat and documentation are low-frequency links below
+the account destinations; Web Chat opens the authenticated `/chat` surface in a new
+tab. Announcements remain in the dashboard and global notification surfaces rather
+than as a Work sidebar row.
 
 The overlay is anchored to the dock on desktop and becomes a modal bottom sheet on
 mobile. It handles focus return, Escape dismissal, outside-click dismissal, and

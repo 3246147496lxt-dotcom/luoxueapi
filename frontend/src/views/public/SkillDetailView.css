@@ -1,12 +1,18 @@
 .skill-detail-page {
-  --skill-detail-ink: var(--lx-clay-text);
-  --skill-detail-copy: var(--lx-clay-text-secondary);
-  --skill-detail-muted: var(--lx-clay-text-muted);
+  --app-shell-canvas: #fff;
+  --lx-clay-accent: #0d0d0d;
+  --lx-clay-accent-deep: #0d0d0d;
+  --lx-clay-accent-soft: #f7f7f8;
+  --skill-detail-ink: #0d0d0d;
+  --skill-detail-copy: #5d5d5d;
+  --skill-detail-muted: #6f6f6f;
   min-height: 100vh;
+  background: #fff;
 }
 
 .skill-detail-shell {
-  width: min(1192px, calc(100% - 48px));
+  width: 100%;
+  max-width: 1192px;
   margin-inline: auto;
 }
 
@@ -15,7 +21,7 @@
 }
 
 .skill-detail-hero {
-  padding: 70px 0 22px;
+  padding: 4px 0 22px;
 }
 
 .skill-detail-breadcrumb {
@@ -124,7 +130,7 @@
 .skill-detail-info {
   grid-area: info;
   position: sticky;
-  top: 126px;
+  top: 32px;
   min-width: 0;
   border: 1px solid color-mix(in srgb, var(--lx-clay-border) 76%, transparent);
   border-radius: 16px;
@@ -302,8 +308,8 @@
 }
 
 .skill-detail-loading {
-  min-height: 800px;
-  padding-top: 160px;
+  min-height: 680px;
+  padding-top: 64px;
 }
 
 .skill-detail-loading__hero span,
@@ -333,12 +339,12 @@
 }
 
 .skill-detail-state {
-  min-height: 650px;
+  min-height: min(650px, calc(100vh - 96px));
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  padding-top: 118px;
+  padding-top: 24px;
   text-align: center;
 }
 
@@ -425,11 +431,11 @@
 
 @media (max-width: 767px) {
   .skill-detail-shell {
-    width: min(100% - 32px, 1192px);
+    width: 100%;
   }
 
   .skill-detail-hero {
-    padding: 46px 0 34px;
+    padding: 2px 0 30px;
   }
 
   .skill-detail-hero__copy {
@@ -458,6 +464,12 @@
 @media (max-width: 430px) {
   .skill-detail-source__heading {
     align-items: flex-start;
+  }
+}
+
+@media (max-width: 767px) and (hover: hover) and (pointer: fine) {
+  .skill-detail-main {
+    padding-top: 36px;
   }
 }
 

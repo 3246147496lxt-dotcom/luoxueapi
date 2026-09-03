@@ -26,12 +26,6 @@ const overlayLayerSource = read('../WorkspaceSidebarOverlayLayer.vue')
 const workspaceTokens = read('../../../styles/luoxue-clay-tokens.css')
 const globalStyleSource = read('../../../style.css')
 
-function componentAttributes(source: string, component: string): string {
-  const match = source.match(new RegExp(`<${component}([\\s\\S]*?)\\/>`))
-  if (!match?.[1]) throw new Error(`Expected a self-closing ${component}`)
-  return match[1].replace(/\s+/g, ' ').trim()
-}
-
 describe('shared Workspace shell contract', () => {
   it('composes both Work and Chat hosts from WorkspaceSidebarFrame and WorkspaceSidebarHeader', () => {
     expect(appSidebarSource).toContain("import WorkspaceSidebarFrame from './WorkspaceSidebarFrame.vue'")
@@ -200,13 +194,13 @@ describe('shared Workspace shell contract', () => {
     expect(responsiveIconSource).toContain("type WorkspaceResponsiveSidebarIconName = 'open' | 'close' | 'search'")
   })
 
-  it('keeps AppModeSwitch limited to activeMode and change at both host boundaries', () => {
-    expect(componentAttributes(appSidebarSource, 'AppModeSwitch')).toBe(
-      'active-mode="work" @change="handleModeChange"',
-    )
-    expect(componentAttributes(chatHistorySource, 'AppModeSwitch')).toBe(
-      'v-if="shell" active-mode="chat" @change="handleModeChange"',
-    )
+  it('keeps the Chat and Work shell hosts free of the retired mode switch', () => {
+    expect(appSidebarSource).not.toContain('<AppModeSwitch')
+    expect(appSidebarSource).not.toContain("import AppModeSwitch")
+    expect(appSidebarSource).not.toContain('handleModeChange')
+    expect(chatHistorySource).not.toContain('<AppModeSwitch')
+    expect(chatHistorySource).not.toContain("import AppModeSwitch")
+    expect(chatHistorySource).not.toContain('handleModeChange')
 
     expect(modeSwitchSource).toMatch(/defineProps<\{\s*activeMode: AppShellMode\s*\}>\(\)/)
     expect(modeSwitchSource).toMatch(/defineEmits<\{\s*change: \[mode: AppShellMode\]\s*\}>\(\)/)

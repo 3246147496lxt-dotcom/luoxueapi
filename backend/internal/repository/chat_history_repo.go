@@ -1371,20 +1371,32 @@ func (r *chatHistoryRepository) StopCompletion(
 	}
 
 	var (
-		currentStatus     string
-		assistantInternal sql.NullInt64
-		stopRequestedAt   sql.NullTime
+		currentStatus           string
+		assistantInternal       sql.NullInt64
+		stopRequestedAt         sql.NullTime
+		failureCode             sql.NullString
+		assistantDeliveryStatus sql.NullString
 	)
 	err = tx.QueryRowContext(ctx, `
-		SELECT status, assistant_message_id, stop_requested_at
-		FROM chat_request_attempts
-		WHERE user_id = $1
-		  AND attempt_id = $2
-		FOR UPDATE
+		SELECT
+			attempt.status,
+			attempt.assistant_message_id,
+			attempt.stop_requested_at,
+			attempt.failure_code,
+			message.delivery_status
+		FROM chat_request_attempts attempt
+		LEFT JOIN chat_messages message
+		  ON message.id = attempt.assistant_message_id
+		 AND message.user_id = attempt.user_id
+		WHERE attempt.user_id = $1
+		  AND attempt.attempt_id = $2
+		FOR UPDATE OF attempt
 	`, userID, attemptID).Scan(
 		&currentStatus,
 		&assistantInternal,
 		&stopRequestedAt,
+		&failureCode,
+		&assistantDeliveryStatus,
 	)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, service.ErrChatAttemptNotFound
@@ -1406,6 +1418,10 @@ func (r *chatHistoryRepository) StopCompletion(
 		return result, nil
 	case service.ChatAttemptStatusFailed:
 		result.DeliveryStatus = service.ChatMessageDeliveryError
+		if strings.TrimSpace(failureCode.String) == service.ChatAttemptFailureCodeSettlement &&
+			strings.TrimSpace(assistantDeliveryStatus.String) == service.ChatMessageDeliveryCompleted {
+			result.DeliveryStatus = service.ChatMessageDeliveryCompleted
+		}
 		if err = tx.Commit(); err != nil {
 			return nil, err
 		}
@@ -1578,7 +1594,9 @@ func (r *chatHistoryRepository) FinalizeCompletion(
 	case service.ChatAttemptStatusCompleted, service.ChatAttemptStatusFailed:
 		terminalStatus := service.ChatMessageActivityStatusCompleted
 		lastEvent := "server_completed"
-		if currentStatus == service.ChatAttemptStatusFailed {
+		if currentStatus == service.ChatAttemptStatusFailed &&
+			!(input.DeliveryStatus == service.ChatMessageDeliveryCompleted &&
+				input.ErrorCode == service.ChatAttemptFailureCodeSettlement) {
 			terminalStatus = service.ChatMessageActivityStatusFailed
 			lastEvent = "server_failed"
 		}
@@ -1675,8 +1693,8 @@ func (r *chatHistoryRepository) FinalizeCompletion(
 		SET content = $3,
 		    delivery_status = $4,
 		    finish_reason = NULLIF($5, ''),
-		    error_code = NULLIF($6, ''),
-		    error_message = NULLIF($7, ''),
+		    error_code = CASE WHEN $4 = 'error' THEN NULLIF($6, '') ELSE NULL END,
+		    error_message = CASE WHEN $4 = 'error' THEN NULLIF($7, '') ELSE NULL END,
 		    checkpoint_seq = $8,
 		    updated_at = $9,
 		    terminal_at = $9

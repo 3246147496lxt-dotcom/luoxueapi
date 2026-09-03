@@ -35,8 +35,8 @@ vi.mock('vue-i18n', async (importOriginal) => {
     ...actual,
     useI18n: () => ({
       locale: { value: 'zh-CN' },
-      t: (key: string) => key,
-      te: () => false,
+      t: (key: string) => key === 'skills.categories.design-ui' ? '设计与 UI' : key,
+      te: (key: string) => key === 'skills.categories.design-ui',
     }),
   }
 })
@@ -71,7 +71,7 @@ function skill(overrides: Partial<PublicSkill> = {}): PublicSkill {
   const current = version()
   return {
     slug: 'frontend-design',
-    display_name: 'frontend-design',
+    display_name: '前端界面设计',
     summary: '创建具有鲜明辨识度与高设计品质的生产级前端界面。',
     description: '这是 Anthropic frontend-design 指引 Skill。',
     category: 'design-ui',
@@ -93,7 +93,7 @@ function mountView() {
   return mount(SkillDetailView, {
     global: {
       stubs: {
-        PublicSiteLayout: { template: '<div><slot /></div>' },
+        AppLayout: { template: '<div class="app-layout-stub"><slot /></div>' },
         SafeMarkdown: { props: ['content'], template: '<div class="safe-markdown-stub">{{ content }}</div>' },
         SkillInstallPanel: {
           props: ['version', 'sha256'],
@@ -118,7 +118,8 @@ describe('SkillDetailView', () => {
     const wrapper = mountView()
     await flushPromises()
 
-    expect(wrapper.get('h1').text()).toBe('frontend-design')
+    expect(wrapper.find('.app-layout-stub').exists()).toBe(true)
+    expect(wrapper.get('h1').text()).toBe('前端界面设计')
     expect(wrapper.text()).toContain('创建具有鲜明辨识度与高设计品质的生产级前端界面。')
     expect(wrapper.find('.skill-detail-hero__mark').exists()).toBe(false)
     expect(wrapper.find('.skill-detail-meta').exists()).toBe(false)
@@ -221,7 +222,7 @@ describe('SkillDetailView', () => {
     await flushPromises()
 
     expect(wrapper.find('.skill-detail-info__source').exists()).toBe(false)
-    expect(wrapper.get('.skill-detail-info__category').text()).toContain('design-ui')
+    expect(wrapper.get('.skill-detail-info__category').text()).toContain('设计与 UI')
   })
 
   it('does not render a non-GitHub HTTPS URL as GitHub provenance', async () => {

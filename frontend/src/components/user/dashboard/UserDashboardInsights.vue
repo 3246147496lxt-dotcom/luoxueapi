@@ -71,12 +71,12 @@
         </div>
         <label class="dashboard-channel-select">
           <span class="sr-only">{{ t('dashboard.workspace.channelSelector') }}</span>
-          <select v-model="selectedProvider" :disabled="channelLoading || !providerOptions.length">
-            <option v-if="!providerOptions.length" value="">
+          <select v-model="selectedMonitorId" :disabled="channelLoading || !channelMonitors.length">
+            <option v-if="!channelMonitors.length" value="">
               {{ t('dashboard.workspace.noChannels') }}
             </option>
-            <option v-for="provider in providerOptions" :key="provider" :value="provider">
-              {{ providerLabel(provider) }}
+            <option v-for="monitor in channelMonitors" :key="monitor.id" :value="monitor.id">
+              {{ monitor.name }}
             </option>
           </select>
         </label>
@@ -141,7 +141,6 @@ import {
   channelMonitorUserAPI,
   type UserMonitorView,
   type MonitorTimelinePoint,
-  type Provider,
 } from '@/api/channelMonitor'
 import ModelIcon from '@/components/common/ModelIcon.vue'
 import MonitorDetailDialog from '@/components/user/MonitorDetailDialog.vue'
@@ -158,7 +157,7 @@ const modelError = ref(false)
 const channelMonitors = ref<UserMonitorView[]>([])
 const channelLoading = ref(false)
 const channelError = ref(false)
-const selectedProvider = ref<Provider | ''>('')
+const selectedMonitorId = ref<number | null>(null)
 const showDetail = ref(false)
 let modelRequestId = 0
 let channelAbortController: AbortController | null = null
@@ -183,19 +182,9 @@ const modelRows = computed(() => {
     }))
 })
 
-const providerOptions = computed<Provider[]>(() => {
-  const unique = new Set<Provider>()
-  for (const item of channelMonitors.value) unique.add(item.provider)
-  return [...unique]
-})
-
-const selectedMonitors = computed(() => (
-  selectedProvider.value
-    ? channelMonitors.value.filter(item => item.provider === selectedProvider.value)
-    : []
+const selectedMonitor = computed(() => (
+  channelMonitors.value.find(item => item.id === selectedMonitorId.value) ?? null
 ))
-
-const selectedMonitor = computed(() => selectedMonitors.value[0] ?? null)
 
 interface ChannelHealth {
   rate: number | null
@@ -203,17 +192,18 @@ interface ChannelHealth {
 }
 
 const channelHealth = computed<ChannelHealth>(() => {
+  const monitor = selectedMonitor.value
+  if (!monitor) return { rate: null, status: 'unknown' }
+
   const cutoff = Date.now() - 24 * 60 * 60 * 1000
-  const points = selectedMonitors.value.flatMap(item => (
-    (item.timeline || []).filter(point => {
-      const timestamp = Date.parse(point.checked_at)
-      return Number.isFinite(timestamp) && timestamp >= cutoff
-    })
-  ))
+  const points = (monitor.timeline || []).filter(point => {
+    const timestamp = Date.parse(point.checked_at)
+    return Number.isFinite(timestamp) && timestamp >= cutoff
+  })
   if (!points.length) return { rate: null, status: 'unknown' }
 
   const available = points.filter(point => point.status === 'operational' || point.status === 'degraded').length
-  const latestStatus = latestStatusFor(selectedMonitors.value)
+  const latestStatus = latestStatusFor([monitor])
   return {
     rate: (available / points.length) * 100,
     status: latestStatus,
@@ -274,8 +264,10 @@ async function loadChannels(): Promise<void> {
     const result = await channelMonitorUserAPI.list({ signal: controller.signal })
     if (controller.signal.aborted || channelAbortController !== controller) return
     channelMonitors.value = result.items || []
-    if (!selectedProvider.value || !providerOptions.value.includes(selectedProvider.value)) {
-      selectedProvider.value = providerOptions.value.includes('openai') ? 'openai' : (providerOptions.value[0] || '')
+    if (!channelMonitors.value.some(item => item.id === selectedMonitorId.value)) {
+      const preferredMonitor = channelMonitors.value.find(item => item.provider === 'openai')
+        ?? channelMonitors.value[0]
+      selectedMonitorId.value = preferredMonitor?.id ?? null
     }
   } catch (error) {
     const candidate = error as { name?: string; code?: string }
@@ -290,16 +282,6 @@ async function loadChannels(): Promise<void> {
       channelAbortController = null
     }
   }
-}
-
-function providerLabel(provider: Provider): string {
-  const labels: Record<Provider, string> = {
-    openai: 'GPT',
-    anthropic: 'Claude',
-    gemini: 'Gemini',
-    grok: 'Grok',
-  }
-  return labels[provider]
 }
 
 function latestStatusFor(items: UserMonitorView[]): ChannelHealth['status'] {
@@ -557,7 +539,9 @@ onBeforeUnmount(() => {
 }
 
 .dashboard-channel-select select {
-  max-width: 7rem;
+  width: min(14rem, 48%);
+  max-width: 14rem;
+  min-width: 0;
   min-height: 32px;
   padding: 0 24px 0 8px;
   border: 1px solid var(--workspace-dashboard-card-border);
@@ -664,15 +648,11 @@ onBeforeUnmount(() => {
   }
 }
 
-:global(html.dark) .dashboard-insights-card,
-:global(html.dark) .dashboard-channel-select select,
-:global(html.dark) .dashboard-channel-card__details {
-  border-color: var(--workspace-dashboard-card-border);
+:global(html.dark .dashboard-insights .dashboard-channel-select select) {
   background: var(--workspace-card-surface);
-  box-shadow: var(--workspace-dashboard-card-shadow);
 }
 
-:global(html.dark) .dashboard-model-row__icon--openai :deep(svg) {
+:global(html.dark .dashboard-insights .dashboard-model-row__icon--openai .model-icon) {
   filter: invert(1);
 }
 </style>

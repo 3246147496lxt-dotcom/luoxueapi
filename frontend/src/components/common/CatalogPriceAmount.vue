@@ -1,9 +1,18 @@
 <template>
   <CreditAmount
-    v-if="isCredit && hasValue"
+    v-if="isCredit && hasValue && !displayCreditAsCny"
     :value="formattedValue"
     :icon-size="iconSize"
   />
+  <span
+    v-else-if="displayCreditAsCny && hasValue"
+    class="inline-flex min-w-0 items-center whitespace-nowrap tabular-nums"
+    role="group"
+    :aria-label="`CNY ${formattedValue}`"
+    data-testid="catalog-price-cny"
+  >
+    <span aria-hidden="true">¥{{ formattedValue }}</span>
+  </span>
   <span v-else>{{ displayValue }}</span>
 </template>
 
@@ -12,6 +21,9 @@ import { computed } from 'vue'
 import CreditAmount from '@/components/common/CreditAmount.vue'
 
 type PointsIconSize = 'xs' | 'sm' | 'md' | 'lg' | 'xl'
+type CreditDisplay = 'points' | 'cny'
+
+const POINTS_PER_CNY = 10
 
 const props = withDefaults(defineProps<{
   value: number | null | undefined
@@ -19,22 +31,35 @@ const props = withDefaults(defineProps<{
   scale?: number
   emptyText?: string
   iconSize?: PointsIconSize
+  creditDisplay?: CreditDisplay
 }>(), {
   currency: '',
   scale: 1,
   emptyText: '-',
   iconSize: 'sm',
+  creditDisplay: 'points',
 })
 
 const normalizedCurrency = computed(() => props.currency.trim().toUpperCase())
 const hasValue = computed(() => typeof props.value === 'number' && Number.isFinite(props.value))
 const isCredit = computed(() => normalizedCurrency.value === 'CREDIT')
+const displayCreditAsCny = computed(() => isCredit.value && props.creditDisplay === 'cny')
+
+function trimInsignificantZeros(value: number): string {
+  const [coefficient, exponent] = value.toPrecision(10).split('e')
+  const trimmedCoefficient = coefficient.includes('.')
+    ? coefficient.replace(/0+$/, '').replace(/\.$/, '')
+    : coefficient
+  return exponent == null ? trimmedCoefficient : `${trimmedCoefficient}e${exponent}`
+}
 
 const formattedValue = computed(() => {
   if (!hasValue.value) return props.emptyText
-  return ((props.value as number) * props.scale)
-    .toPrecision(10)
-    .replace(/\.?0+$/, '')
+  const scaledValue = (props.value as number) * props.scale
+  const displayValue = displayCreditAsCny.value
+    ? scaledValue / POINTS_PER_CNY
+    : scaledValue
+  return trimInsignificantZeros(displayValue)
 })
 
 const displayValue = computed(() => {

@@ -2,9 +2,10 @@
 
 ## Dashboard GPT Usage Lower Region — Current Design Override
 
-This section is the active authority for the current Superdesign Dashboard iteration. Preserve the existing Work Sidebar, mobile header, account-balance card, Ultra quota card, purple quota percentage/progress bar, and all geometry above them exactly. The usage region below those two top cards keeps the measured DeepSeek layout but is customized for the `gpt-5.6-sol` model.
+This section is the active authority for the current Superdesign Dashboard iteration. Preserve the existing Work Sidebar, mobile header, account-balance card, Ultra quota card, quota percentage/progress geometry, and all geometry above them exactly. The usage region below those two top cards keeps the measured DeepSeek layout but is customized for the `gpt-5.6-sol` model.
 
 - The entire Dashboard uses one active theme at a time; never alternate a light top region with a dark usage region. Every page, Sidebar, top card, usage control, usage card, chart card, heading, label, axis, grid, and border must consume the existing semantic `--workspace-*` theme aliases.
+- Purple is not part of the authenticated Workspace or Dashboard in either theme. Neutral surfaces stay dominant; one semantic blue ramp owns actions, focus, selection and detail data, orange owns consumption data, and green/amber/red remain truthful status colors.
 - Light mode: page and usage canvas `var(--workspace-canvas)` = `#FCFCFC`; every summary/chart/top card uses `var(--workspace-card-surface)` = `#FFFFFF`; controls use `var(--workspace-surface-subtle)` = `#F7F7F8`; text uses `--workspace-text`, `--workspace-text-secondary`, and `--workspace-text-muted`; borders use `--workspace-border`. The lower region must look like a natural continuation of the original light Dashboard background, not a dark insert.
 - Dark mode under `html.dark`: the same elements automatically resolve to the original Workspace dark tokens: canvas `#000000`, Sidebar canvas `#000000`, cards/surfaces `#171717`, primary text `#ECECEC`, secondary text `#B4B4B4`, muted text `#8A8A8A`, and border/divider `rgb(255 255 255 / 0.1)`. Do not introduce a second custom dark palette.
 - Keep `Inter, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif` for the usage typography while consuming the same active theme colors as the surrounding Workspace.

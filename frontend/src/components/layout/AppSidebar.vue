@@ -20,6 +20,7 @@
       class="app-sidebar"
       :class="{
         'sidebar-mobile-hidden': mobileViewport && !mobileOpen,
+        'sidebar--admin-workspace': isAdminWorkspace,
         'sidebar--personal-work': isPersonalWorkWorkspace,
       }"
     >
@@ -31,7 +32,7 @@
         :collapsed="sidebarCollapsed"
         :mobile="mobileViewport"
         :overlay="personalNarrowViewport"
-        :show-search="true"
+        :show-search="false"
         :show-close="personalNarrowViewport"
         :search-expanded="sidebarSearchOpen"
         :search-controls="sidebarSearchPanelId"
@@ -60,10 +61,6 @@
           />
         </template>
       </WorkspaceSidebarHeader>
-    </template>
-
-    <template v-if="!isAdminWorkspace && !appStore.backendModeEnabled" #mode-switch>
-      <AppModeSwitch active-mode="work" @change="handleModeChange" />
     </template>
 
     <form
@@ -314,10 +311,15 @@
           :key="item.id"
           :href="item.href"
           class="sidebar-link sidebar-support-link mb-1"
-          :class="{ 'sidebar-link-collapsed': sidebarCollapsed }"
+          :class="{
+            'sidebar-link-collapsed': sidebarCollapsed,
+            'sidebar-web-chat-link': item.id === 'webChat',
+          }"
           :title="sidebarCollapsed ? item.label : undefined"
           :data-testid="
-            item.id === 'documentation'
+            item.id === 'webChat'
+              ? 'sidebar-web-chat'
+              : item.id === 'documentation'
               ? 'sidebar-docs-tutorial'
               : item.id === 'contact'
                 ? 'sidebar-contact-us'
@@ -385,7 +387,6 @@ import {
 import { useBatchImageAccess } from '@/composables/useBatchImageAccess'
 import { Icon } from '@/components/icons'
 import AppBrand from './AppBrand.vue'
-import AppModeSwitch from './AppModeSwitch.vue'
 import UserAccountCard from './UserAccountCard.vue'
 import WorkspaceSidebarBrand from './WorkspaceSidebarBrand.vue'
 import WorkspaceSidebarFrame from './WorkspaceSidebarFrame.vue'
@@ -459,7 +460,6 @@ const personalNarrowViewport = computed(() => (
   isPersonalWorkWorkspace.value && narrowViewport.value
 ))
 const narrowSidebarOpen = computed(() => appStore.workspaceNarrowSidebarOpen)
-const isOpsOptionB = computed(() => route.path.startsWith('/admin/ops'))
 const documentationUrl = computed(() => resolveDocumentationUrl(
   appStore.cachedPublicSettings?.doc_url || appStore.docUrl,
 ))
@@ -729,21 +729,6 @@ const OrderIcon = {
     )
 }
 
-const OrderListIcon = {
-  render: () =>
-    h(
-      'svg',
-      { fill: 'none', viewBox: '0 0 24 24', stroke: 'currentColor', 'stroke-width': '1.5' },
-      [
-        h('path', {
-          'stroke-linecap': 'round',
-          'stroke-linejoin': 'round',
-          d: 'M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z'
-        })
-      ]
-    )
-}
-
 const SignalIcon = {
   render: () =>
     h(
@@ -848,6 +833,7 @@ const ModelIcon = {
 }
 
 const supportIconByDestination: Record<string, SidebarSupportIcon> = {
+  webChat: 'chat',
   models: 'destinationModels',
   contact: 'destinationContact',
   documentation: 'destinationDocument',
@@ -897,20 +883,14 @@ const sidebarSupportLinks = computed<SidebarSupportLink[]>(() => {
     }]
   })
 
-  if (route.path.startsWith('/admin/ops')) {
-    const documentation = links.find((link) => link.id === 'documentation')
-    return [
-      {
-        id: 'home',
-        label: t('admin.ops.sidebar.backHome'),
-        href: '/',
-        icon: 'home',
-      },
-      ...(documentation ? [{ ...documentation, icon: 'document' as const }] : []),
-    ]
-  }
-
-  return links.filter((link) => link.id === 'documentation')
+  // Keep the low-frequency support area focused: the web-chat entry is the
+  // primary cross-shell handoff when the user-facing shell is available, while
+  // documentation remains available in backend-only mode and stays the final
+  // link immediately above the account footer.
+  return links.filter((link) => (
+    link.id === 'documentation'
+    || (link.id === 'webChat' && !appStore.backendModeEnabled)
+  ))
 })
 
 const userNavigationIcons: UserNavigationIcons = {
@@ -924,7 +904,9 @@ const userNavigationIcons: UserNavigationIcons = {
   quotaViewer: QuotaViewerIcon,
   rechargeSubscription: RechargeSubscriptionIcon,
   creditCard: CreditCardIcon,
-  orderList: OrderListIcon,
+  // Use the checklist/receipt glyph for personal orders so it stays
+  // visually distinct from the folded-document glyph used by documentation.
+  orderList: OrderIcon,
   users: UsersIcon,
   user: UserIcon,
 }
@@ -1017,7 +999,6 @@ const adminNavItems = computed((): NavItem[] => (
   adminNavigationDefinition.value?.buildItems({
     t: (key) => t(key),
     simpleMode: authStore.isSimpleMode,
-    isOpsShell: isOpsOptionB.value,
     opsMonitoringEnabled: () => adminSettingsStore.value?.opsMonitoringEnabled,
     adminPaymentEnabled: () => adminSettingsStore.value?.paymentEnabled,
     customMenuItems: adminSettingsStore.value?.customMenuItems ?? [],
@@ -1055,7 +1036,6 @@ const adminNavSections = computed(() => (
   adminNavigationDefinition.value?.buildSections(
     adminNavItems.value,
     (key) => t(key),
-    isOpsOptionB.value,
   ) ?? []
 ))
 
@@ -1101,13 +1081,6 @@ async function closeSidebarSearch() {
   sidebarSearchOpen.value = false
   await nextTick()
   sidebarHeaderRef.value?.focusSearch()
-}
-
-async function handleModeChange(mode: 'chat' | 'work') {
-  if (mode !== 'chat') return
-  if (mobileViewport.value) closeMobile()
-  if (personalNarrowViewport.value) closeNarrowSidebar()
-  await router.push('/chat')
 }
 
 function handleMenuItemClick(itemPath: string) {

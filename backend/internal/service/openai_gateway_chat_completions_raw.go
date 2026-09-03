@@ -353,6 +353,8 @@ func (s *OpenAIGatewayService) streamRawChatCompletions(
 
 	sawDone := false
 	sawTerminalUsage := false
+	sawTerminalFinishReason := false
+	webChatStream := isWebChatContext(c.Request.Context())
 	for scanner.Scan() {
 		line := scanner.Text()
 		refusalDetector.ObserveSSELine(line)
@@ -363,6 +365,7 @@ func (s *OpenAIGatewayService) streamRawChatCompletions(
 			} else {
 				observer.ObserveOpenAI([]byte(payload), strings.TrimSpace(gjson.Get(payload, "type").String()))
 				usageOnlyChunk := isOpenAIChatUsageOnlyStreamChunk(payload)
+				sawTerminalFinishReason = sawTerminalFinishReason || hasOpenAIChatTerminalFinishReason(payload)
 				if u := extractCCStreamUsage(payload); u != nil {
 					usage = *u
 					sawTerminalUsage = sawTerminalUsage || usageOnlyChunk
@@ -387,6 +390,20 @@ func (s *OpenAIGatewayService) streamRawChatCompletions(
 			break
 		}
 		if line == "" {
+			if webChatStream && sawTerminalUsage && sawTerminalFinishReason {
+				// OpenAI-compatible providers do not always send the optional
+				// [DONE] sentinel after a finish_reason followed by their final
+				// usage-only chunk. Both terminal signals are present, so close
+				// the downstream SSE contract explicitly instead of making strict
+				// clients misclassify the delivered answer as interrupted.
+				writeLine("data: [DONE]")
+				writeLine("")
+				sawDone = true
+				if !clientDisconnected && clientOutputStarted {
+					c.Writer.Flush()
+				}
+				break
+			}
 			if !clientDisconnected && clientOutputStarted {
 				c.Writer.Flush()
 			}
@@ -401,6 +418,24 @@ func (s *OpenAIGatewayService) streamRawChatCompletions(
 	}
 
 	scanErr := scanner.Err()
+	if scanErr == nil &&
+		webChatStream &&
+		!sawDone &&
+		sawTerminalFinishReason &&
+		!clientDisconnected {
+		// A clean upstream EOF after finish_reason is also authoritative
+		// delivery evidence, even when a compatible provider ignored the
+		// forced include_usage option. Terminate the last event and synthesize
+		// the same downstream sentinel as the normal event-boundary path above;
+		// settlement remains an independent concern for the caller.
+		writeLine("")
+		writeLine("data: [DONE]")
+		writeLine("")
+		sawDone = true
+		if !clientDisconnected && clientOutputStarted {
+			c.Writer.Flush()
+		}
+	}
 	if scanErr != nil {
 		if !errors.Is(scanErr, context.Canceled) && !errors.Is(scanErr, context.DeadlineExceeded) {
 			logger.L().Warn("openai chat_completions raw: stream read error",
@@ -477,6 +512,19 @@ func isOpenAIChatUsageOnlyStreamChunk(payload string) bool {
 	}
 	choices := gjson.Get(payload, "choices")
 	return choices.Exists() && choices.IsArray() && len(choices.Array()) == 0
+}
+
+func hasOpenAIChatTerminalFinishReason(payload string) bool {
+	choices := gjson.Get(payload, "choices")
+	if !choices.Exists() || !choices.IsArray() {
+		return false
+	}
+	for _, choice := range choices.Array() {
+		if strings.TrimSpace(choice.Get("finish_reason").String()) != "" {
+			return true
+		}
+	}
+	return false
 }
 
 // extractCCStreamUsage 从单个 CC 流式 chunk 的 payload 中提取 usage 字段。

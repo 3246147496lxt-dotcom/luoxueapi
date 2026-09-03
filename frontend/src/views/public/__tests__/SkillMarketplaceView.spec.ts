@@ -1,4 +1,4 @@
-import { defineComponent } from 'vue'
+import { defineComponent, nextTick, ref } from 'vue'
 import { flushPromises, mount } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -10,10 +10,11 @@ const testState = vi.hoisted(() => ({
 }))
 
 const messages: Record<string, string> = {
-  'skills.market.title': 'Skill是Agent 的可复用能力',
-  'skills.market.description': '说出你想完成的工作，找到官方 Skill。',
+  'skills.market.title': 'Skill 市场',
+  'skills.market.description': 'Skill 是 Agent 的可复用能力',
+  'skills.market.countBadge': '{count} 个 Skill',
   'skills.market.searchLabel': '搜索 Skill',
-  'skills.market.searchPlaceholder': '搜索skill',
+  'skills.market.searchPlaceholder': '搜索 skill',
   'skills.market.trustLabel': '市场说明',
   'skills.market.officialOnly': '仅管理员发布',
   'skills.market.localCodex': '安装到本地 Codex',
@@ -25,6 +26,9 @@ const messages: Record<string, string> = {
   'skills.market.categoriesTitle': '按任务缩小范围',
   'skills.market.resultCount': '共 {count} 个 Skill',
   'skills.market.resultsTitle': '搜索结果',
+  'skills.market.resultsDescription': '以下结果来自当前关键词与任务分类。',
+  'skills.market.allTitle': '全部 Skill',
+  'skills.market.allDescription': '选择一个 Skill，查看能力与安装方式。',
   'skills.market.latestTitle': '最新上架',
   'skills.market.loading': '正在加载 Skill',
   'skills.market.unavailableTitle': 'Skill 市场暂未开放',
@@ -45,12 +49,14 @@ const messages: Record<string, string> = {
   'skills.categories.all': '全部任务',
   'skills.categories.design-ui': '设计与 UI',
 }
+const testLocale = ref('zh-CN')
 
 vi.mock('vue-i18n', async (importOriginal) => {
   const actual = await importOriginal<typeof import('vue-i18n')>()
   return {
     ...actual,
     useI18n: () => ({
+      locale: testLocale,
       te: (key: string) => key in messages,
       t: (key: string, params?: Record<string, string | number>) => Object.entries(params ?? {}).reduce(
         (message, [name, value]) => message.replace(`{${name}}`, String(value)),
@@ -68,14 +74,8 @@ vi.mock('@/api/skills', async (importOriginal) => {
   }
 })
 
-const PublicSiteLayoutStub = defineComponent({
-  props: {
-    page: {
-      type: String,
-      required: true,
-    },
-  },
-  template: '<div class="public-site-layout-stub" :data-page="page"><slot /></div>',
+const AppLayoutStub = defineComponent({
+  template: '<div class="app-layout-stub"><slot /></div>',
 })
 
 const SkillCardStub = defineComponent({
@@ -89,14 +89,14 @@ const SkillCardStub = defineComponent({
       default: '',
     },
   },
-  template: '<article class="skill-card-stub" :data-category="categoryName">{{ skill.display_name }}</article>',
+  template: '<article class="skill-card-stub" :data-category="categoryName"><h3>{{ skill.display_name }}</h3><p>{{ skill.summary }}</p></article>',
 })
 
 function skill(): PublicSkill {
   return {
     slug: 'frontend-design',
-    display_name: 'Frontend Design 前端设计',
-    summary: '',
+    display_name: '前端界面设计',
+    summary: '创建具有鲜明辨识度与高设计品质的生产级前端界面。',
     description: '',
     category: 'design-ui',
     tags: ['html/css', 'ui/ux'],
@@ -113,6 +113,7 @@ function skill(): PublicSkill {
 }
 
 beforeEach(() => {
+  testLocale.value = 'zh-CN'
   testState.listPublicSkills.mockReset().mockResolvedValue({
     items: [skill()],
     total: 1,
@@ -123,11 +124,11 @@ beforeEach(() => {
 })
 
 describe('SkillMarketplaceView', () => {
-  it('renders the approved compact hero without the removed explanation or featured rail', async () => {
+  it('renders the approved embedded marketplace with a compact header and card grid', async () => {
     const wrapper = mount(SkillMarketplaceView, {
       global: {
         stubs: {
-          PublicSiteLayout: PublicSiteLayoutStub,
+          AppLayout: AppLayoutStub,
           SkillCard: SkillCardStub,
           Icon: true,
         },
@@ -135,23 +136,26 @@ describe('SkillMarketplaceView', () => {
     })
     await flushPromises()
 
-    expect(wrapper.get('[data-page="skills"]').attributes('data-page')).toBe('skills')
-    expect(wrapper.get('#skill-market-title').text()).toBe('Skill是Agent 的可复用能力')
-    expect(wrapper.get('#skill-market-search-input').attributes('placeholder')).toBe('搜索skill')
+    expect(wrapper.find('.app-layout-stub').exists()).toBe(true)
+    expect(wrapper.get('#skill-market-title').text()).toBe('Skill 市场')
+    expect(wrapper.get('.skill-market-hero__copy > p').text()).toBe('Skill 是 Agent 的可复用能力')
+    expect(wrapper.get('.skill-market-count-badge').text()).toBe('1 个 Skill')
+    expect(wrapper.get('#skill-market-search-input').attributes('placeholder')).toBe('搜索 skill')
     expect(wrapper.find('.skill-market-search button').exists()).toBe(false)
-    expect(wrapper.find('.skill-market-hero__copy > p').exists()).toBe(false)
     expect(wrapper.find('.skill-market-trust').exists()).toBe(false)
     expect(wrapper.find('.skill-market-proof').exists()).toBe(false)
     expect(wrapper.find('.skill-market-proof__route').exists()).toBe(false)
     expect(wrapper.find('.skill-market-featured').exists()).toBe(false)
+    expect(wrapper.get('#skill-results-title').text()).toBe('全部 Skill')
+    expect(wrapper.get('.skill-market-results-heading > p').text()).toBe('选择一个 Skill，查看能力与安装方式。')
 
-    expect(wrapper.text()).not.toContain('说出你想完成的工作，找到官方 Skill。')
     expect(wrapper.text()).not.toContain('找到适合任务的 Skill')
     expect(wrapper.text()).not.toContain('复制指令给 Codex')
     expect(wrapper.text()).not.toContain('验证本地安装结果')
     expect(wrapper.text()).not.toContain('值得先看的官方精选')
 
-    expect(wrapper.get('.skill-card-stub').text()).toBe('Frontend Design 前端设计')
+    expect(wrapper.get('.skill-card-stub h3').text()).toBe('前端界面设计')
+    expect(wrapper.get('.skill-card-stub p').text()).toBe('创建具有鲜明辨识度与高设计品质的生产级前端界面。')
     expect(wrapper.get('.skill-card-stub').attributes('data-category')).toBe('设计与 UI')
     expect(testState.listPublicSkills).toHaveBeenCalledOnce()
     expect(testState.listPublicSkills).toHaveBeenCalledWith(
@@ -164,6 +168,27 @@ describe('SkillMarketplaceView', () => {
       { signal: expect.any(AbortSignal) },
     )
 
+    wrapper.unmount()
+  })
+
+  it('reloads localized catalog metadata when the interface language changes', async () => {
+    const wrapper = mount(SkillMarketplaceView, {
+      global: {
+        stubs: {
+          AppLayout: AppLayoutStub,
+          SkillCard: SkillCardStub,
+          Icon: true,
+        },
+      },
+    })
+    await flushPromises()
+    expect(testState.listPublicSkills).toHaveBeenCalledOnce()
+
+    testLocale.value = 'en'
+    await nextTick()
+    await flushPromises()
+
+    expect(testState.listPublicSkills).toHaveBeenCalledTimes(2)
     wrapper.unmount()
   })
 })

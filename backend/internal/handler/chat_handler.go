@@ -23,7 +23,6 @@ import (
 const (
 	maxChatRequestBytes              = 2 << 20
 	chatReceiptIDHeader              = "X-Chat-Receipt-ID"
-	chatSettlementFailureCode        = "CHAT_SETTLEMENT_FAILED"
 	chatSettlementFailureReason      = "Chat usage settlement could not be completed"
 	chatSettlementReceiptReadTimeout = 5 * time.Second
 	transcriptionForcedCloseKey      = "web_chat_transcription_forced_connection_close"
@@ -639,12 +638,18 @@ func (h *ChatHandler) Completions(c *gin.Context) {
 				"error", usageErr,
 			)
 		case webChatSettlementNoBilling:
-			streamSnapshot.ErrorCode = chatSettlementFailureCode
-			streamSnapshot.ErrorMessage = chatSettlementFailureReason
+			// Keep the settlement failure on the attempt/receipt axis while the
+			// independently observed stream still determines message delivery.
+			if deliveredChatStreamCompletedSuccessfully(streamSnapshot) &&
+				streamSnapshot.ErrorCode == "" {
+				streamSnapshot.ErrorCode = service.ChatAttemptFailureCodeSettlement
+				streamSnapshot.ErrorMessage = chatSettlementFailureReason
+			}
 			slog.Error("web chat usage settlement failed without billing evidence",
 				"user_id", subject.UserID,
 				"attempt_id", attemptID,
 				"receipt_id", strings.TrimSpace(prepared.ClientRequestID),
+				"delivery_done", streamSnapshot.Done,
 				"producer_count", usageResult.ProducerCount,
 				"error", usageErr,
 			)
@@ -734,6 +739,15 @@ func (h *ChatHandler) finalizeChatCompletion(
 		Activities:         stream.Activities,
 	}
 	switch {
+	case statusCode < http.StatusBadRequest &&
+		deliveredChatStreamCompletedSuccessfully(stream) &&
+		stream.ErrorCode == service.ChatAttemptFailureCodeSettlement:
+		// The answer was delivered successfully. Keep the message completed,
+		// while the failed attempt retains settlement evidence for its receipt.
+		input.DeliveryStatus = service.ChatMessageDeliveryCompleted
+		input.AttemptStatus = service.ChatAttemptStatusFailed
+		input.ErrorCode = stream.ErrorCode
+		input.ErrorMessage = stream.ErrorMessage
 	case statusCode >= http.StatusBadRequest || stream.ErrorCode != "":
 		input.DeliveryStatus = service.ChatMessageDeliveryError
 		input.AttemptStatus = service.ChatAttemptStatusFailed
@@ -790,6 +804,14 @@ func (h *ChatHandler) finalizeChatCompletion(
 			"error", err,
 		)
 	}
+}
+
+func deliveredChatStreamCompletedSuccessfully(stream deliveredChatStreamSnapshot) bool {
+	if !stream.Done {
+		return false
+	}
+	return !stream.ResponsesTerminalSeen ||
+		stream.ResponsesTerminalStatus == service.ChatMessageActivityStatusCompleted
 }
 
 type webChatCompletionRequest struct {

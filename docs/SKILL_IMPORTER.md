@@ -13,6 +13,8 @@ Skill 收录器是部署在现有后端中的持久任务系统，用来把外�
 
 来源消失只记录 `last_seen`，默认不会自动归档市场中的 Skill。
 
+公开目录的审核后翻译保存在独立的 `skill_catalog_localizations` 中，以市场 slug 和 locale 标识。收录器继续刷新 `skills` 中的上游原文，不会覆盖翻译；公开 API 按请求语言读取翻译，缺少对应语言时回退上游原文。`SKILL.md`、ZIP 和版本摘要保持上游内容，不属于目录展示文案翻译范围。
+
 ## 内置适配器
 
 - `skills_sh`：读取排行榜；GitHub 来源默认优先走共享的 GitHub 仓库快照缓存，skills.sh download 仅作为每小时最多 60 次的回退。download 返回的 `hash` 只作为上游快照版本标识，不冒充内容摘要，因此该回退通道的产物会进入人工复核；非 GitHub 来源必须同时配置 `source_base_urls` 并加入 `allowed_source_hosts`。

@@ -209,7 +209,7 @@ describe('admin UsageView distribution metric toggles', () => {
     vi.useRealTimers()
   })
 
-  it('enables snow-credit mode for every actual-cost consumer on the admin usage page', async () => {
+  it('enables points mode for every actual-cost consumer on the admin usage page', async () => {
     const wrapper = mount(UsageView, {
       global: { stubs: {
         AppLayout: AppLayoutStub,

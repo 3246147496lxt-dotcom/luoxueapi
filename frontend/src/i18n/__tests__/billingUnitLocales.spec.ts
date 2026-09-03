@@ -96,16 +96,14 @@ describe('billing unit locale contract', () => {
     expect(zhCommon.auth.promoCodeValid).not.toMatch(currencyMarkers)
   })
 
-  it('labels effective public catalog prices as Points', () => {
-    expectPointsCopy([
-      enLanding.modelCatalog.publicPriceNote,
-      enLanding.modelCatalog.pricing.dialogDescription,
-    ], /Points?/)
+  it('explains that public catalog prices are converted from Points to CNY', () => {
+    expect(enLanding.modelCatalog.publicPriceNote).toContain('¥1 = 10 Points')
+    expect(enLanding.modelCatalog.publicPriceNote).toContain('converted to CNY')
+    expect(enLanding.modelCatalog.pricing.dialogDescription).toContain('¥1 = 10 Points')
 
-    expectPointsCopy([
-      zhLanding.modelCatalog.publicPriceNote,
-      zhLanding.modelCatalog.pricing.dialogDescription,
-    ], /积分/)
+    expect(zhLanding.modelCatalog.publicPriceNote).toContain('¥1 = 10 积分')
+    expect(zhLanding.modelCatalog.publicPriceNote).toContain('人民币')
+    expect(zhLanding.modelCatalog.pricing.dialogDescription).toContain('¥1 = 10 积分')
   })
 
   it('keeps USD where it is the source price, conversion input, or upstream limit', () => {

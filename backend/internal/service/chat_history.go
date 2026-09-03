@@ -675,7 +675,9 @@ func (s *ChatHistoryService) FinalizeCompletion(
 	validTerminalState := false
 	switch normalized.DeliveryStatus {
 	case ChatMessageDeliveryCompleted:
-		validTerminalState = normalized.AttemptStatus == ChatAttemptStatusCompleted
+		validTerminalState = normalized.AttemptStatus == ChatAttemptStatusCompleted ||
+			(normalized.AttemptStatus == ChatAttemptStatusFailed &&
+				normalized.ErrorCode == ChatAttemptFailureCodeSettlement)
 	case ChatMessageDeliveryPartial, ChatMessageDeliveryInterrupted, ChatMessageDeliveryStopped:
 		validTerminalState = normalized.AttemptStatus == ChatAttemptStatusInterrupted
 	case ChatMessageDeliveryError:

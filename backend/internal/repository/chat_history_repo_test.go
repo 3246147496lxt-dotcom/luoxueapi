@@ -320,11 +320,11 @@ func TestChatHistoryStopCompletionPersistsAuthenticatedIntentAndPartialActivity(
 	mock.ExpectQuery(regexp.QuoteMeta("SELECT version")).
 		WithArgs(int64(42)).
 		WillReturnRows(sqlmock.NewRows([]string{"version"}).AddRow(9))
-	mock.ExpectQuery("SELECT status, assistant_message_id, stop_requested_at").
+	mock.ExpectQuery("SELECT\\s+attempt.status").
 		WithArgs(int64(42), "attempt-12345678").
 		WillReturnRows(sqlmock.NewRows([]string{
-			"status", "assistant_message_id", "stop_requested_at",
-		}).AddRow(service.ChatAttemptStatusProcessing, int64(77), nil))
+			"status", "assistant_message_id", "stop_requested_at", "failure_code", "delivery_status",
+		}).AddRow(service.ChatAttemptStatusProcessing, int64(77), nil, nil, service.ChatMessageDeliveryStreaming))
 	mock.ExpectExec("UPDATE chat_request_attempts").
 		WithArgs(int64(42), "attempt-12345678", sqlmock.AnyArg()).
 		WillReturnResult(sqlmock.NewResult(0, 1))
@@ -374,11 +374,11 @@ func TestChatHistoryStopCompletionDoesNotOverrideCompletedAttempt(t *testing.T) 
 	mock.ExpectQuery(regexp.QuoteMeta("SELECT version")).
 		WithArgs(int64(42)).
 		WillReturnRows(sqlmock.NewRows([]string{"version"}).AddRow(9))
-	mock.ExpectQuery("SELECT status, assistant_message_id, stop_requested_at").
+	mock.ExpectQuery("SELECT\\s+attempt.status").
 		WithArgs(int64(42), "attempt-12345678").
 		WillReturnRows(sqlmock.NewRows([]string{
-			"status", "assistant_message_id", "stop_requested_at",
-		}).AddRow(service.ChatAttemptStatusCompleted, int64(77), nil))
+			"status", "assistant_message_id", "stop_requested_at", "failure_code", "delivery_status",
+		}).AddRow(service.ChatAttemptStatusCompleted, int64(77), nil, nil, service.ChatMessageDeliveryCompleted))
 	mock.ExpectCommit()
 
 	repo, ok := NewChatHistoryRepository(db).(*chatHistoryRepository)
@@ -390,6 +390,102 @@ func TestChatHistoryStopCompletionDoesNotOverrideCompletedAttempt(t *testing.T) 
 	require.Equal(t, service.ChatAttemptStatusCompleted, result.AttemptStatus)
 	require.Equal(t, service.ChatMessageDeliveryCompleted, result.DeliveryStatus)
 	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestChatHistoryStopCompletionReportsCompletedDeliveryForSettlementFailedAttempt(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	defer func() { _ = db.Close() }()
+
+	mock.ExpectBegin()
+	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO chat_history_sync_states")).
+		WithArgs(int64(42)).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT version")).
+		WithArgs(int64(42)).
+		WillReturnRows(sqlmock.NewRows([]string{"version"}).AddRow(9))
+	mock.ExpectQuery("SELECT\\s+attempt.status").
+		WithArgs(int64(42), "attempt-12345678").
+		WillReturnRows(sqlmock.NewRows([]string{
+			"status", "assistant_message_id", "stop_requested_at", "failure_code", "delivery_status",
+		}).AddRow(
+			service.ChatAttemptStatusFailed,
+			int64(77),
+			nil,
+			service.ChatAttemptFailureCodeSettlement,
+			service.ChatMessageDeliveryCompleted,
+		))
+	mock.ExpectCommit()
+
+	repo, ok := NewChatHistoryRepository(db).(*chatHistoryRepository)
+	require.True(t, ok)
+	result, err := repo.StopCompletion(context.Background(), 42, "attempt-12345678")
+
+	require.NoError(t, err)
+	require.False(t, result.Accepted)
+	require.Equal(t, service.ChatAttemptStatusFailed, result.AttemptStatus)
+	require.Equal(t, service.ChatMessageDeliveryCompleted, result.DeliveryStatus)
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestChatHistoryStopCompletionKeepsGenuineFailedAttemptAsDeliveryError(t *testing.T) {
+	for _, tt := range []struct {
+		name                  string
+		failureCode           string
+		messageDeliveryStatus string
+	}{
+		{
+			name:                  "upstream failure with error delivery",
+			failureCode:           "UPSTREAM_ERROR",
+			messageDeliveryStatus: service.ChatMessageDeliveryError,
+		},
+		{
+			name:                  "settlement code without completed delivery",
+			failureCode:           service.ChatAttemptFailureCodeSettlement,
+			messageDeliveryStatus: service.ChatMessageDeliveryError,
+		},
+		{
+			name:                  "completed delivery without settlement code",
+			failureCode:           "UPSTREAM_ERROR",
+			messageDeliveryStatus: service.ChatMessageDeliveryCompleted,
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			db, mock, err := sqlmock.New()
+			require.NoError(t, err)
+			defer func() { _ = db.Close() }()
+
+			mock.ExpectBegin()
+			mock.ExpectExec(regexp.QuoteMeta("INSERT INTO chat_history_sync_states")).
+				WithArgs(int64(42)).
+				WillReturnResult(sqlmock.NewResult(0, 1))
+			mock.ExpectQuery(regexp.QuoteMeta("SELECT version")).
+				WithArgs(int64(42)).
+				WillReturnRows(sqlmock.NewRows([]string{"version"}).AddRow(9))
+			mock.ExpectQuery("SELECT\\s+attempt.status").
+				WithArgs(int64(42), "attempt-12345678").
+				WillReturnRows(sqlmock.NewRows([]string{
+					"status", "assistant_message_id", "stop_requested_at", "failure_code", "delivery_status",
+				}).AddRow(
+					service.ChatAttemptStatusFailed,
+					int64(77),
+					nil,
+					tt.failureCode,
+					tt.messageDeliveryStatus,
+				))
+			mock.ExpectCommit()
+
+			repo, ok := NewChatHistoryRepository(db).(*chatHistoryRepository)
+			require.True(t, ok)
+			result, err := repo.StopCompletion(context.Background(), 42, "attempt-12345678")
+
+			require.NoError(t, err)
+			require.False(t, result.Accepted)
+			require.Equal(t, service.ChatAttemptStatusFailed, result.AttemptStatus)
+			require.Equal(t, service.ChatMessageDeliveryError, result.DeliveryStatus)
+			require.NoError(t, mock.ExpectationsWereMet())
+		})
+	}
 }
 
 func TestChatHistoryStopCompletionCorrectsPriorDisconnectedFinalize(t *testing.T) {
@@ -404,11 +500,11 @@ func TestChatHistoryStopCompletionCorrectsPriorDisconnectedFinalize(t *testing.T
 	mock.ExpectQuery(regexp.QuoteMeta("SELECT version")).
 		WithArgs(int64(42)).
 		WillReturnRows(sqlmock.NewRows([]string{"version"}).AddRow(9))
-	mock.ExpectQuery("SELECT status, assistant_message_id, stop_requested_at").
+	mock.ExpectQuery("SELECT\\s+attempt.status").
 		WithArgs(int64(42), "attempt-12345678").
 		WillReturnRows(sqlmock.NewRows([]string{
-			"status", "assistant_message_id", "stop_requested_at",
-		}).AddRow(service.ChatAttemptStatusInterrupted, int64(77), nil))
+			"status", "assistant_message_id", "stop_requested_at", "failure_code", "delivery_status",
+		}).AddRow(service.ChatAttemptStatusInterrupted, int64(77), nil, nil, service.ChatMessageDeliveryInterrupted))
 	mock.ExpectExec("UPDATE chat_request_attempts").
 		WithArgs(int64(42), "attempt-12345678", sqlmock.AnyArg()).
 		WillReturnResult(sqlmock.NewResult(0, 1))
@@ -761,6 +857,101 @@ func TestChatHistoryFinalizeAfterDeleteOnlyTerminatesAttempt(t *testing.T) {
 			DeliveryStatus:     service.ChatMessageDeliveryInterrupted,
 			AttemptStatus:      service.ChatAttemptStatusInterrupted,
 			HTTPStatus:         http.StatusOK,
+		},
+	)
+
+	require.NoError(t, err)
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
+func TestChatHistoryFinalizeSettlementFailureKeepsMessageCompleted(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	defer func() { _ = db.Close() }()
+
+	mock.ExpectBegin()
+	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO chat_history_sync_states")).
+		WithArgs(int64(42)).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectQuery(regexp.QuoteMeta("SELECT version")).
+		WithArgs(int64(42)).
+		WillReturnRows(sqlmock.NewRows([]string{"version"}).AddRow(9))
+	mock.ExpectQuery("SELECT status, assistant_message_id, assistant_message_public_id").
+		WithArgs(int64(42), "attempt-12345678").
+		WillReturnRows(sqlmock.NewRows([]string{
+			"status",
+			"assistant_message_id",
+			"assistant_message_public_id",
+			"stop_requested_at",
+		}).AddRow(
+			service.ChatAttemptStatusProcessing,
+			int64(77),
+			"message-assistant-12345678",
+			nil,
+		))
+	mock.ExpectQuery(`SELECT\s+m\.conversation_id`).
+		WithArgs(int64(77), int64(42)).
+		WillReturnRows(sqlmock.NewRows([]string{
+			"conversation_id",
+			"conversation_public_id",
+			"message_public_id",
+			"checkpoint_seq",
+		}).AddRow(
+			int64(9),
+			"conversation-12345678",
+			"message-assistant-12345678",
+			int64(2),
+		))
+	mock.ExpectExec(`(?s)UPDATE chat_messages.*error_code = CASE WHEN \$4 = 'error'`).
+		WithArgs(
+			int64(77),
+			int64(42),
+			"complete answer",
+			service.ChatMessageDeliveryCompleted,
+			"stop",
+			service.ChatAttemptFailureCodeSettlement,
+			"Chat usage settlement could not be completed",
+			int64(3),
+			sqlmock.AnyArg(),
+		).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectQuery("UPDATE chat_history_sync_states").
+		WithArgs(int64(42)).
+		WillReturnRows(sqlmock.NewRows([]string{"version"}).AddRow(10))
+	mock.ExpectExec("UPDATE chat_conversations").
+		WithArgs(int64(42), int64(9), int64(10), sqlmock.AnyArg()).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec("INSERT INTO chat_history_changes").
+		WithArgs(int64(42), int64(10), "upsert", int64(9), "conversation-12345678", nil).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec("UPDATE chat_request_attempts").
+		WithArgs(
+			int64(42),
+			"attempt-12345678",
+			service.ChatAttemptStatusFailed,
+			http.StatusOK,
+			service.ChatAttemptFailureCodeSettlement,
+			"Chat usage settlement could not be completed",
+			sqlmock.AnyArg(),
+		).
+		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectCommit()
+
+	repo := NewChatHistoryRepository(db)
+	err = repo.FinalizeCompletion(
+		context.Background(),
+		42,
+		&service.FinalizeChatCompletionInput{
+			AttemptID:          "attempt-12345678",
+			AssistantMessageID: "message-assistant-12345678",
+			Content:            "complete answer",
+			CheckpointSeq:      3,
+			DeliveryStatus:     service.ChatMessageDeliveryCompleted,
+			AttemptStatus:      service.ChatAttemptStatusFailed,
+			HTTPStatus:         http.StatusOK,
+			FinishReason:       "stop",
+			ErrorCode:          service.ChatAttemptFailureCodeSettlement,
+			ErrorMessage:       "Chat usage settlement could not be completed",
 		},
 	)
 

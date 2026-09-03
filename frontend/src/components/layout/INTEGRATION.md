@@ -82,10 +82,11 @@ preserve role, capability, simple-mode, and feature-flag visibility checks.
 Account and support destinations are declared in
 `frontend/src/navigation/shellDestinations.ts`. Use that registry when adding or
 removing links for subscriptions, wallet, orders, profile, home, model catalog,
-contact, or documentation so the sidebar and account panel share one visibility
-policy. In the personal workspace, documentation is the low-frequency external link
-below account destinations; announcements remain in dashboard/global notification
-surfaces. The administrator workspace omits that end-user documentation link while
+contact, web chat, or documentation so the sidebar and account panel share one
+visibility policy. In the personal workspace, Web Chat and documentation are the
+low-frequency links below account destinations; Web Chat opens the authenticated
+`/chat` surface in a new tab. Announcements remain in dashboard/global notification
+surfaces. The administrator workspace omits those end-user support links while
 announcement and documentation management remain in its administrator task sections.
 
 On mobile, the menu button in `AppMobileHeader` controls

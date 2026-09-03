@@ -209,6 +209,17 @@ export function installAppRouterGuards(
       return
     }
 
+    if (to.meta.requiresSkillMarketplace) {
+      const refreshedSettings = await appStore.fetchPublicSettings(true)
+      if (
+        refreshedSettings?.skill_marketplace_enabled !== true
+        || appStore.backendModeEnabled
+      ) {
+        next('/dashboard')
+        return
+      }
+    }
+
     if (requiresAdmin && !authStore.isAdmin) {
       next('/dashboard')
       return

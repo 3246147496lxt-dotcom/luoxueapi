@@ -168,6 +168,7 @@ beforeEach(() => {
     syncHistory: vi.fn().mockResolvedValue(undefined),
     loadConversationPage: vi.fn().mockResolvedValue(undefined),
     searchHistory: vi.fn().mockResolvedValue(undefined),
+    invalidateHistorySearch: vi.fn(),
     selectConversation: vi.fn(),
     renameConversation: vi.fn(),
     deleteConversation: vi.fn(),

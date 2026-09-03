@@ -166,6 +166,49 @@ func TestSettingService_GetPublicSettingsForInjectionSanitizesCustomMenuURLs(t *
 	require.Equal(t, rawMenuItems, repo.values[SettingKeyCustomMenuItems], "public serialization must not mutate stored settings")
 }
 
+func TestSettingService_GetPublicSettingsForInjectionOmitsDisabledLoginAgreementDocuments(t *testing.T) {
+	rawDocuments := `[{"id":"terms","title":"Terms","content_md":"A long agreement body"}]`
+
+	t.Run("disabled keeps documents in public API but not SSR payload", func(t *testing.T) {
+		repo := &settingPublicRepoStub{values: map[string]string{
+			SettingKeyLoginAgreementEnabled:   "false",
+			SettingKeyLoginAgreementDocuments: rawDocuments,
+		}}
+		svc := NewSettingService(repo, &config.Config{})
+
+		publicSettings, err := svc.GetPublicSettings(context.Background())
+		require.NoError(t, err)
+		require.False(t, publicSettings.LoginAgreementEnabled)
+		require.Len(t, publicSettings.LoginAgreementDocuments, 1)
+
+		injected, err := svc.GetPublicSettingsForInjection(context.Background())
+		require.NoError(t, err)
+		payload, ok := injected.(*PublicSettingsInjectionPayload)
+		require.True(t, ok)
+		require.Empty(t, payload.LoginAgreementDocuments)
+
+		encoded, err := json.Marshal(payload)
+		require.NoError(t, err)
+		require.Contains(t, string(encoded), `"login_agreement_documents":[]`)
+	})
+
+	t.Run("enabled keeps documents in SSR payload", func(t *testing.T) {
+		repo := &settingPublicRepoStub{values: map[string]string{
+			SettingKeyLoginAgreementEnabled:   "true",
+			SettingKeyLoginAgreementDocuments: rawDocuments,
+		}}
+		svc := NewSettingService(repo, &config.Config{})
+
+		injected, err := svc.GetPublicSettingsForInjection(context.Background())
+		require.NoError(t, err)
+		payload, ok := injected.(*PublicSettingsInjectionPayload)
+		require.True(t, ok)
+		require.True(t, payload.LoginAgreementEnabled)
+		require.Len(t, payload.LoginAgreementDocuments, 1)
+		require.Equal(t, "A long agreement body", payload.LoginAgreementDocuments[0].ContentMD)
+	})
+}
+
 func TestSettingService_GetPublicSettings_HidesCatalogInBackendMode(t *testing.T) {
 	svc := NewSettingService(&settingPublicRepoStub{values: map[string]string{
 		SettingKeyPublicModelCatalogEnabled: "true",

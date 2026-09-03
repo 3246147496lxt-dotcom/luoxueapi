@@ -3,8 +3,9 @@
  *
  * This is the only source of truth for shared product colors, typography,
  * radii and elevation. The legacy teal primary palette (#14b8a6 / #0f766e)
- * is not part of the active design language. Ice blue remains a scoped
- * Luoxue brand/information color; violet owns primary interaction.
+ * is not part of the active design language. The authenticated Workspace
+ * uses one blue interaction/data ramp in both themes; status colors remain
+ * semantic and public Snow Clay surfaces keep their own scoped palette.
  */
 
 @font-face {
@@ -153,18 +154,27 @@
     0 8px 12px rgb(0 0 0 / 0.08),
     0 0 1px rgb(0 0 0 / 0.62);
   --workspace-light-action-hover: #2b2b2b;
-  --workspace-light-work-accent: #7c3aed;
-  --workspace-light-work-accent-hover: #6d28d9;
-  --workspace-light-work-accent-deep: #5b21b6;
-  --workspace-light-work-accent-soft: #f5f3ff;
-  --workspace-light-work-accent-border: #ddd6fe;
-  --workspace-light-work-accent-border-strong: #c4b5fd;
-  --workspace-light-work-info: #4f46e5;
-  --workspace-light-work-info-soft: #eef2ff;
+  --workspace-light-work-accent: #2563eb;
+  --workspace-light-work-accent-hover: #1d4ed8;
+  --workspace-light-work-accent-deep: #1e40af;
+  --workspace-light-work-accent-soft: #eff6ff;
+  --workspace-light-work-accent-soft-hover: #dbeafe;
+  --workspace-light-work-accent-border: #dbeafe;
+  --workspace-light-work-accent-border-strong: #93c5fd;
+  --workspace-light-work-on-accent: #ffffff;
+  --workspace-light-work-info: #2563eb;
+  --workspace-light-work-info-soft: #eff6ff;
   --workspace-light-work-success: #16a34a;
   --workspace-light-work-track: #ececec;
-  --workspace-light-work-chart-primary: #8b5cf6;
-  --workspace-light-work-chart-secondary: #a78bfa;
+  --workspace-light-work-chart-cost: #ea580c;
+  --workspace-light-work-chart-cost-fill-strong: rgb(234 88 12 / 0.18);
+  --workspace-light-work-chart-cost-fill-soft: rgb(234 88 12 / 0.06);
+  --workspace-light-work-chart-cost-fill-transparent: rgb(234 88 12 / 0);
+  --workspace-light-work-chart-primary: #2563eb;
+  --workspace-light-work-chart-primary-fill-strong: rgb(37 99 235 / 0.18);
+  --workspace-light-work-chart-primary-fill-soft: rgb(37 99 235 / 0.06);
+  --workspace-light-work-chart-primary-fill-transparent: rgb(37 99 235 / 0);
+  --workspace-light-work-chart-secondary: #60a5fa;
   --workspace-light-dashboard-card-border: #f1f5f9;
   --workspace-light-dashboard-card-shadow:
     0 1px 3px 0 rgb(0 0 0 / 0.05),
@@ -172,13 +182,17 @@
   --workspace-light-dashboard-text-strong: #0f172a;
   --workspace-light-dashboard-text-heading: #475569;
   --workspace-light-dashboard-text-muted: #64748b;
-  --workspace-light-dashboard-text-subtle: #94a3b8;
+  --workspace-light-dashboard-text-subtle: #64748b;
   --workspace-light-dashboard-period-text: #334155;
   --workspace-light-dashboard-divider: #f8fafc;
   --workspace-light-dashboard-track: #f1f5f9;
-  --workspace-light-dashboard-success: #22c55e;
+  --workspace-light-dashboard-success: #16a34a;
   --workspace-light-dashboard-hover: rgb(248 250 252 / 0.5);
-  --workspace-light-dashboard-notification-hover: #2563eb;
+  --workspace-light-dashboard-notification-hover: var(--workspace-light-work-accent);
+  --workspace-light-dashboard-tooltip-surface: #0f172a;
+  --workspace-light-dashboard-tooltip-text: #f8fafc;
+  --workspace-light-dashboard-tooltip-title: #cbd5e1;
+  --workspace-light-dashboard-tooltip-border: rgb(255 255 255 / 0.1);
   --workspace-light-mode-switch-border: var(--workspace-light-border);
   --workspace-light-mode-switch-shadow: 0 1px 2px rgb(0 0 0 / 0.06);
   --workspace-light-shadow-mode-switch: 0 1px 2px rgb(17 17 17 / 0.08);
@@ -231,6 +245,27 @@
   --workspace-dark-hover: #212121;
   --workspace-dark-active: #212121;
   --workspace-dark-action-hover: #ffffff;
+  --workspace-dark-work-accent: #60a5fa;
+  --workspace-dark-work-accent-hover: #93c5fd;
+  --workspace-dark-work-accent-deep: #3b82f6;
+  --workspace-dark-work-accent-soft: #172554;
+  --workspace-dark-work-accent-soft-hover: #1e3a8a;
+  --workspace-dark-work-accent-border: rgb(96 165 250 / 0.35);
+  --workspace-dark-work-accent-border-strong: rgb(147 197 253 / 0.55);
+  --workspace-dark-work-on-accent: #0d0d0d;
+  --workspace-dark-work-info: #60a5fa;
+  --workspace-dark-work-info-soft: #172554;
+  --workspace-dark-work-success: #22c55e;
+  --workspace-dark-work-chart-cost: #fb923c;
+  --workspace-dark-work-chart-cost-fill-strong: rgb(251 146 60 / 0.18);
+  --workspace-dark-work-chart-cost-fill-soft: rgb(251 146 60 / 0.06);
+  --workspace-dark-work-chart-cost-fill-transparent: rgb(251 146 60 / 0);
+  --workspace-dark-work-chart-primary: #60a5fa;
+  --workspace-dark-work-chart-primary-fill-strong: rgb(96 165 250 / 0.18);
+  --workspace-dark-work-chart-primary-fill-soft: rgb(96 165 250 / 0.06);
+  --workspace-dark-work-chart-primary-fill-transparent: rgb(96 165 250 / 0);
+  --workspace-dark-work-chart-secondary: #93c5fd;
+  --workspace-dark-work-shadow-card: none;
   --workspace-dark-shadow-float: 0 16px 40px rgba(0, 0, 0, 0.28);
   --workspace-dark-shadow-mode-switch: 0 1px 2px rgb(0 0 0 / 0.28);
   --workspace-dark-shadow-popover: inset 0 0 1px rgb(255 255 255 / 0.2);
@@ -245,7 +280,11 @@
   --workspace-dark-dashboard-track: var(--workspace-dark-border);
   --workspace-dark-dashboard-success: #22c55e;
   --workspace-dark-dashboard-hover: var(--workspace-dark-hover);
-  --workspace-dark-dashboard-notification-hover: var(--workspace-dark-text);
+  --workspace-dark-dashboard-notification-hover: var(--workspace-dark-work-accent);
+  --workspace-dark-dashboard-tooltip-surface: #212121;
+  --workspace-dark-dashboard-tooltip-text: #ececec;
+  --workspace-dark-dashboard-tooltip-title: #b4b4b4;
+  --workspace-dark-dashboard-tooltip-border: rgb(255 255 255 / 0.16);
 
   /* Active Workspace shell roles. Chat and Work consume this same canvas. */
   --workspace-canvas: var(--workspace-light-canvas);
@@ -297,13 +336,22 @@
   --workspace-work-accent-hover: var(--workspace-light-work-accent-hover);
   --workspace-work-accent-deep: var(--workspace-light-work-accent-deep);
   --workspace-work-accent-soft: var(--workspace-light-work-accent-soft);
+  --workspace-work-accent-soft-hover: var(--workspace-light-work-accent-soft-hover);
   --workspace-work-accent-border: var(--workspace-light-work-accent-border);
   --workspace-work-accent-border-strong: var(--workspace-light-work-accent-border-strong);
+  --workspace-work-on-accent: var(--workspace-light-work-on-accent);
   --workspace-work-info: var(--workspace-light-work-info);
   --workspace-work-info-soft: var(--workspace-light-work-info-soft);
   --workspace-work-success: var(--workspace-light-work-success);
   --workspace-work-track: var(--workspace-hover);
+  --workspace-work-chart-cost: var(--workspace-light-work-chart-cost);
+  --workspace-work-chart-cost-fill-strong: var(--workspace-light-work-chart-cost-fill-strong);
+  --workspace-work-chart-cost-fill-soft: var(--workspace-light-work-chart-cost-fill-soft);
+  --workspace-work-chart-cost-fill-transparent: var(--workspace-light-work-chart-cost-fill-transparent);
   --workspace-work-chart-primary: var(--workspace-light-work-chart-primary);
+  --workspace-work-chart-primary-fill-strong: var(--workspace-light-work-chart-primary-fill-strong);
+  --workspace-work-chart-primary-fill-soft: var(--workspace-light-work-chart-primary-fill-soft);
+  --workspace-work-chart-primary-fill-transparent: var(--workspace-light-work-chart-primary-fill-transparent);
   --workspace-work-chart-secondary: var(--workspace-light-work-chart-secondary);
   --workspace-work-shadow-card: var(--workspace-light-shadow-card);
 
@@ -321,6 +369,10 @@
   --workspace-dashboard-success: var(--workspace-light-dashboard-success);
   --workspace-dashboard-hover: var(--workspace-light-dashboard-hover);
   --workspace-dashboard-notification-hover: var(--workspace-light-dashboard-notification-hover);
+  --workspace-dashboard-tooltip-surface: var(--workspace-light-dashboard-tooltip-surface);
+  --workspace-dashboard-tooltip-text: var(--workspace-light-dashboard-tooltip-text);
+  --workspace-dashboard-tooltip-title: var(--workspace-light-dashboard-tooltip-title);
+  --workspace-dashboard-tooltip-border: var(--workspace-light-dashboard-tooltip-border);
 
   /* Shared mode switch and Account popover roles */
   --workspace-mode-switch-track: var(--workspace-surface-subtle);
@@ -355,7 +407,7 @@
   --workspace-dock-text-muted: var(--workspace-text-secondary);
   --workspace-dock-chevron: var(--workspace-text-muted);
   --workspace-dock-hover: var(--workspace-hover);
-  --workspace-dock-focus: color-mix(in srgb, var(--lx-clay-accent) 44%, transparent);
+  --workspace-dock-focus: color-mix(in srgb, var(--workspace-work-accent) 44%, transparent);
   --workspace-dock-focus-personal: var(--workspace-light-text-muted);
   --workspace-dock-cta-border: var(--workspace-border);
   --workspace-dock-cta-border-hover: var(--workspace-border-strong);
@@ -371,7 +423,7 @@
   --workspace-menu-text-muted: var(--workspace-text-secondary);
   --workspace-menu-hover: var(--workspace-hover);
   --workspace-menu-close-hover: var(--workspace-hover);
-  --workspace-menu-focus: color-mix(in srgb, var(--lx-clay-accent) 44%, transparent);
+  --workspace-menu-focus: color-mix(in srgb, var(--workspace-work-accent) 44%, transparent);
   --workspace-menu-handle: color-mix(in srgb, var(--workspace-text-muted) 55%, transparent);
   --workspace-menu-frozen: rgb(180 83 9);
   --workspace-menu-danger: rgb(220 38 38);
@@ -635,6 +687,27 @@ html.dark {
   --workspace-action-hover: var(--workspace-dark-action-hover);
   --workspace-action-soft: var(--workspace-dark-active);
   --workspace-shadow-float: var(--workspace-dark-shadow-float);
+  --workspace-work-accent: var(--workspace-dark-work-accent);
+  --workspace-work-accent-hover: var(--workspace-dark-work-accent-hover);
+  --workspace-work-accent-deep: var(--workspace-dark-work-accent-deep);
+  --workspace-work-accent-soft: var(--workspace-dark-work-accent-soft);
+  --workspace-work-accent-soft-hover: var(--workspace-dark-work-accent-soft-hover);
+  --workspace-work-accent-border: var(--workspace-dark-work-accent-border);
+  --workspace-work-accent-border-strong: var(--workspace-dark-work-accent-border-strong);
+  --workspace-work-on-accent: var(--workspace-dark-work-on-accent);
+  --workspace-work-info: var(--workspace-dark-work-info);
+  --workspace-work-info-soft: var(--workspace-dark-work-info-soft);
+  --workspace-work-success: var(--workspace-dark-work-success);
+  --workspace-work-chart-cost: var(--workspace-dark-work-chart-cost);
+  --workspace-work-chart-cost-fill-strong: var(--workspace-dark-work-chart-cost-fill-strong);
+  --workspace-work-chart-cost-fill-soft: var(--workspace-dark-work-chart-cost-fill-soft);
+  --workspace-work-chart-cost-fill-transparent: var(--workspace-dark-work-chart-cost-fill-transparent);
+  --workspace-work-chart-primary: var(--workspace-dark-work-chart-primary);
+  --workspace-work-chart-primary-fill-strong: var(--workspace-dark-work-chart-primary-fill-strong);
+  --workspace-work-chart-primary-fill-soft: var(--workspace-dark-work-chart-primary-fill-soft);
+  --workspace-work-chart-primary-fill-transparent: var(--workspace-dark-work-chart-primary-fill-transparent);
+  --workspace-work-chart-secondary: var(--workspace-dark-work-chart-secondary);
+  --workspace-work-shadow-card: var(--workspace-dark-work-shadow-card);
   --workspace-dashboard-card-border: var(--workspace-dark-dashboard-card-border);
   --workspace-dashboard-card-shadow: var(--workspace-dark-dashboard-card-shadow);
   --workspace-dashboard-text-strong: var(--workspace-dark-dashboard-text-strong);
@@ -647,6 +720,10 @@ html.dark {
   --workspace-dashboard-success: var(--workspace-dark-dashboard-success);
   --workspace-dashboard-hover: var(--workspace-dark-dashboard-hover);
   --workspace-dashboard-notification-hover: var(--workspace-dark-dashboard-notification-hover);
+  --workspace-dashboard-tooltip-surface: var(--workspace-dark-dashboard-tooltip-surface);
+  --workspace-dashboard-tooltip-text: var(--workspace-dark-dashboard-tooltip-text);
+  --workspace-dashboard-tooltip-title: var(--workspace-dark-dashboard-tooltip-title);
+  --workspace-dashboard-tooltip-border: var(--workspace-dark-dashboard-tooltip-border);
   --workspace-mode-switch-track: var(--workspace-surface-subtle);
   --workspace-mode-switch-border: var(--workspace-dark-border);
   --workspace-mode-switch-active: var(--workspace-dark-mode-switch-active);
@@ -670,7 +747,7 @@ html.dark {
   --workspace-dock-text-strong: var(--workspace-text);
   --workspace-dock-text-muted: var(--workspace-text-secondary);
   --workspace-dock-hover: var(--workspace-hover);
-  --workspace-dock-focus: color-mix(in srgb, var(--lx-clay-accent) 44%, transparent);
+  --workspace-dock-focus: color-mix(in srgb, var(--workspace-work-accent) 44%, transparent);
   --workspace-dock-focus-personal: var(--workspace-dark-text-muted);
   --workspace-dock-cta-border: var(--workspace-border);
   --workspace-dock-cta-border-hover: var(--workspace-border-strong);
@@ -686,7 +763,7 @@ html.dark {
   --workspace-menu-text-muted: var(--workspace-text-secondary);
   --workspace-menu-hover: var(--workspace-hover);
   --workspace-menu-close-hover: var(--workspace-hover);
-  --workspace-menu-focus: color-mix(in srgb, var(--lx-clay-accent) 44%, transparent);
+  --workspace-menu-focus: color-mix(in srgb, var(--workspace-work-accent) 44%, transparent);
   --workspace-menu-danger: rgb(248 113 113);
   --workspace-menu-danger-hover: rgb(254 202 202);
   --workspace-menu-danger-surface: rgb(127 29 29 / 0.28);

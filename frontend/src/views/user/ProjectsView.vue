@@ -1,378 +1,688 @@
 <template>
   <AppLayout variant="chat" shell-mode="chat">
-    <div class="projects-shell">
+    <div class="projects-workspace">
       <ChatHistoryPanel
+        v-show="!mobileHistoryLayout && !narrowSidebar"
         shell
         active-section="projects"
-        class="projects-shell__history"
+        class="projects-workspace__history projects-workspace__history--desktop"
         :conversations="historyConversations"
         :projects="projectsStore.projects"
         :active-id="chatStore.activeConversationId"
+        :search-query="historySearchQuery"
+        :searching="chatStore.searchingHistory"
+        :has-more="chatStore.conversationsHaveMore"
+        :loading-more="chatStore.loadingConversationPage"
         @new="startNewChat"
         @select="openConversation"
+        @rename="chatStore.renameConversation"
+        @delete="confirmHistoryDelete"
+        @clear="confirmHistoryClear"
+        @update:search-query="updateHistorySearch"
+        @search="runHistorySearch"
+        @load-more="chatStore.loadConversationPage()"
       />
 
-      <main class="projects-content" tabindex="-1">
-        <header class="projects-topbar">
-          <div class="projects-breadcrumbs">
-            <button
-              v-if="selectedProject"
-              type="button"
-              class="projects-back"
-              @click="goBack"
-            >
-              <Icon name="arrowLeft" size="sm" aria-hidden="true" />
-              <span>{{ t('projects.allProjects') }}</span>
-            </button>
-            <span v-else class="projects-kicker">{{ t('projects.eyebrow') }}</span>
-          </div>
-          <div class="projects-topbar__actions">
-            <button class="projects-button projects-button--primary" type="button" @click="openCreate">
-              <Icon name="plus" size="sm" aria-hidden="true" />
-              <span>{{ t('projects.newProject') }}</span>
-            </button>
-          </div>
-        </header>
-
-        <div v-if="projectsStore.error" class="projects-notice" role="alert">
-          <Icon name="exclamationTriangle" size="sm" aria-hidden="true" />
-          <span>{{ projectsStore.error }}</span>
-          <button type="button" @click="retryLoad">{{ t('projects.retry') }}</button>
+      <Transition name="projects-drawer">
+        <div
+          v-if="historyOpen && mobileHistoryLayout"
+          ref="historyDrawerRef"
+          class="projects-workspace__drawer"
+          role="dialog"
+          aria-modal="true"
+          :aria-label="t('chat.history.title')"
+          tabindex="-1"
+          @keydown="onHistoryDrawerKeydown"
+        >
+          <button
+            type="button"
+            class="projects-workspace__scrim"
+            :aria-label="t('chat.actions.closeHistory')"
+            tabindex="-1"
+            @click="closeHistory()"
+          ></button>
+          <ChatHistoryPanel
+            shell
+            mobile
+            active-section="projects"
+            :conversations="historyConversations"
+            :projects="projectsStore.projects"
+            :active-id="chatStore.activeConversationId"
+            :search-query="historySearchQuery"
+            :searching="chatStore.searchingHistory"
+            :has-more="chatStore.conversationsHaveMore"
+            :loading-more="chatStore.loadingConversationPage"
+            @new="startNewChat"
+            @close="closeHistory"
+            @select="openConversation"
+            @rename="chatStore.renameConversation"
+            @delete="confirmHistoryDelete"
+            @clear="confirmHistoryClear"
+            @update:search-query="updateHistorySearch"
+            @search="runHistorySearch"
+            @load-more="chatStore.loadConversationPage()"
+          />
         </div>
+      </Transition>
 
-        <div v-if="projectsStore.loading && !projectsStore.initialized" class="projects-loading" aria-live="polite">
-          <span v-for="index in 3" :key="index" class="projects-skeleton-card" aria-hidden="true" />
-          <span class="sr-only">{{ t('projects.loading') }}</span>
-        </div>
+      <WorkspaceSidebarOverlayLayer
+        v-if="narrowSidebar"
+        active
+        :open="narrowSidebarOpen"
+        :label="t('chat.history.title')"
+        return-focus-id="workspace-sidebar-overlay-trigger"
+        @close="closeHistory()"
+      >
+        <ChatHistoryPanel
+          shell
+          overlay
+          active-section="projects"
+          sidebar-id="workspace-chat-sidebar-overlay"
+          :conversations="historyConversations"
+          :projects="projectsStore.projects"
+          :active-id="chatStore.activeConversationId"
+          :search-query="historySearchQuery"
+          :searching="chatStore.searchingHistory"
+          :has-more="chatStore.conversationsHaveMore"
+          :loading-more="chatStore.loadingConversationPage"
+          @new="startNewChat"
+          @close="closeHistory"
+          @select="openConversation"
+          @rename="chatStore.renameConversation"
+          @delete="confirmHistoryDelete"
+          @clear="confirmHistoryClear"
+          @update:search-query="updateHistorySearch"
+          @search="runHistorySearch"
+          @load-more="chatStore.loadConversationPage()"
+        />
+      </WorkspaceSidebarOverlayLayer>
 
-        <template v-else-if="selectedProject">
-          <section class="project-hero" :style="{ '--project-accent': projectAccent(selectedProject) }">
-            <div class="project-hero__identity">
-              <span class="project-hero__icon" aria-hidden="true">{{ selectedProject.icon }}</span>
-              <div>
-                <p class="projects-kicker">{{ t('projects.projectLabel') }}</p>
-                <h1>{{ selectedProject.name }}</h1>
-                <p class="project-hero__meta">
-                  {{ projectConversations.length }} {{ t('projects.chats') }}
-                  <span aria-hidden="true">·</span>
-                  {{ selectedProject.files.length }} {{ t('projects.files') }}
-                </p>
-              </div>
-            </div>
-            <div class="project-hero__actions">
-              <button type="button" class="projects-button projects-button--quiet" @click="openEdit(selectedProject)">
-                <Icon name="edit" size="sm" aria-hidden="true" /> {{ t('projects.edit') }}
-              </button>
-              <button type="button" class="projects-button projects-button--primary" @click="startProjectChat">
-                <Icon name="plus" size="sm" aria-hidden="true" /> {{ t('projects.newChat') }}
-              </button>
-            </div>
-          </section>
+      <main
+        ref="mainRef"
+        class="projects-main"
+        :class="{ 'projects-main--detail': routeHasProject }"
+        :aria-hidden="historyModalActive || editorOpen ? 'true' : undefined"
+        :inert="historyModalActive || editorOpen ? true : undefined"
+        tabindex="-1"
+      >
+        <button
+          ref="historyTriggerRef"
+          type="button"
+          class="projects-mobile-navigation"
+          :aria-label="t('chat.history.title')"
+          :title="t('chat.history.title')"
+          @click="openHistory"
+        >
+          <Icon name="menu" size="sm" aria-hidden="true" />
+        </button>
 
-          <div class="project-layout">
-            <section class="project-surface project-surface--chats">
-              <div class="project-surface__heading">
-                <div>
-                  <p class="projects-kicker">{{ t('projects.activityLabel') }}</p>
-                  <h2>{{ t('projects.chats') }}</h2>
-                </div>
-                <button type="button" class="projects-button projects-button--quiet" @click="showChatPicker = !showChatPicker">
-                  <Icon name="plus" size="sm" aria-hidden="true" /> {{ t('projects.addChat') }}
-                </button>
-              </div>
-              <div v-if="showChatPicker" class="project-picker" role="listbox" :aria-label="t('projects.addChat')">
-                <button
-                  v-for="conversation in availableConversations"
-                  :key="conversation.id"
-                  type="button"
-                  role="option"
-                  @click="addConversation(conversation.id)"
-                >
-                  <span>{{ conversation.title }}</span>
-                  <Icon name="plus" size="sm" aria-hidden="true" />
-                </button>
-                <p v-if="availableConversations.length === 0" class="project-empty-inline">{{ t('projects.noAvailableChats') }}</p>
-              </div>
-              <ul v-if="projectConversations.length" class="project-chat-list">
-                <li v-for="conversation in projectConversations" :key="conversation.id">
-                  <button type="button" class="project-chat-list__open" @click="openConversation(conversation.id)">
-                    <span class="project-chat-list__avatar" aria-hidden="true">✦</span>
-                    <span class="project-chat-list__copy">
-                      <strong>{{ conversation.title }}</strong>
-                      <small>{{ formatConversationDate(conversation.updatedAt) }}</small>
-                    </span>
-                  </button>
-                  <button
-                    type="button"
-                    class="project-icon-button"
-                    :aria-label="t('projects.removeChat')"
-                    :title="t('projects.removeChat')"
-                    @click="removeConversation(conversation.id)"
-                  >
-                    <Icon name="x" size="sm" aria-hidden="true" />
-                  </button>
-                </li>
-              </ul>
-              <div v-else class="project-empty-state">
-                <span class="project-empty-state__mark" aria-hidden="true">☼</span>
-                <p>{{ t('projects.noChats') }}</p>
-                <button type="button" class="projects-button projects-button--quiet" @click="startProjectChat">
-                  {{ t('projects.newChat') }}
-                </button>
-              </div>
-            </section>
+        <div class="projects-page">
+          <div v-if="showProjectsNotice" class="projects-notice" role="alert">
+            <Icon name="exclamationTriangle" size="sm" aria-hidden="true" />
+            <span>{{ projectsStore.error }}</span>
+            <button type="button" @click="retryLoad">{{ t('projects.retry') }}</button>
+          </div>
 
-            <aside class="project-layout__aside">
-              <section class="project-surface">
-                <div class="project-surface__heading project-surface__heading--compact">
-                  <div>
-                    <p class="projects-kicker">{{ t('projects.settingsLabel') }}</p>
-                    <h2>{{ t('projects.instructions') }}</h2>
-                  </div>
-                  <span class="project-status-dot" :class="{ 'project-status-dot--set': instructionsDraft.trim() }" aria-hidden="true" />
-                </div>
-                <textarea
-                  v-model="instructionsDraft"
-                  class="project-instructions"
-                  :placeholder="t('projects.instructionsPlaceholder')"
-                  :aria-label="t('projects.instructions')"
-                  @blur="saveInstructions"
+          <template v-if="routeHasProject">
+            <template v-if="selectedProject">
+              <ProjectDetailHeader
+                v-model:active-tab="activeTab"
+                v-model:prompt="projectPrompt"
+                :project="selectedProject"
+                @submit="startProjectChat"
+                @add-chat="showChatPicker = !showChatPicker"
+                @settings="openEdit(selectedProject)"
+                @share="shareProject"
+                @delete="removeProject(selectedProject.id)"
+                @back="goBack"
+                @work="goToWork"
+              />
+
+              <section
+                class="projects-detail-content"
+                :class="{ 'projects-detail-content--sources': activeTab === 'sources' }"
+                :aria-live="projectsStore.loading ? 'polite' : undefined"
+              >
+                <ProjectChatsPanel
+                  v-if="activeTab === 'chats'"
+                  :conversations="projectConversations"
+                  :available-conversations="availableConversations"
+                  :picker-open="showChatPicker"
+                  @open="openConversation"
+                  @remove="removeConversation"
+                  @add="addConversation"
+                  @update:picker-open="showChatPicker = $event"
                 />
-                <p class="project-help">{{ t('projects.instructionsHelp') }}</p>
+                <ProjectSourcesPanel
+                  v-else
+                  :files="selectedProject.files"
+                  :uploading="uploadingSources"
+                  @add-files="addFiles"
+                  @remove="removeFile"
+                />
               </section>
+            </template>
 
-              <section class="project-surface">
-                <div class="project-surface__heading project-surface__heading--compact">
-                  <div>
-                    <p class="projects-kicker">{{ t('projects.settingsLabel') }}</p>
-                    <h2>{{ t('projects.memory') }}</h2>
-                  </div>
-                </div>
-                <p class="project-help project-help--top">{{ t('projects.memoryDescription') }}</p>
-                <label class="project-select-label">
-                  <span class="sr-only">{{ t('projects.memory') }}</span>
-                  <select :value="selectedProject.memoryMode" @change="changeMemory">
-                    <option value="default">{{ t('projects.memoryDefault') }}</option>
-                    <option value="project-only">{{ t('projects.memoryProjectOnly') }}</option>
-                  </select>
-                </label>
-              </section>
-
-              <section class="project-surface">
-                <div class="project-surface__heading project-surface__heading--compact">
-                  <div>
-                    <p class="projects-kicker">{{ t('projects.sourcesLabel') }}</p>
-                    <h2>{{ t('projects.files') }}</h2>
-                  </div>
-                  <span class="project-count">{{ selectedProject.files.length }}</span>
-                </div>
-                <ul v-if="selectedProject.files.length" class="project-file-list">
-                  <li v-for="file in selectedProject.files" :key="file.id">
-                    <span class="project-file-list__icon" aria-hidden="true">↗</span>
-                    <span class="project-file-list__name" :title="file.name">{{ file.name }}</span>
-                    <button type="button" class="project-icon-button" :aria-label="t('projects.removeFile')" @click="removeFile(file.id)">
-                      <Icon name="x" size="sm" aria-hidden="true" />
-                    </button>
-                  </li>
-                </ul>
-                <p v-else class="project-help">{{ t('projects.noFiles') }}</p>
-                <label class="projects-button projects-button--quiet project-upload">
-                  <Icon name="paperclip" size="sm" aria-hidden="true" /> {{ t('projects.addFiles') }}
-                  <input type="file" multiple @change="addFiles" />
-                </label>
-                <p class="project-help">{{ t('projects.sourcesHelp') }}</p>
-              </section>
-            </aside>
-          </div>
-        </template>
-
-        <template v-else>
-          <section class="projects-intro">
-            <div>
-              <p class="projects-kicker">{{ t('projects.eyebrow') }}</p>
-              <h1>{{ t('projects.title') }}</h1>
-              <p>{{ t('projects.subtitle') }}</p>
+            <div v-else-if="projectsStore.loading || !projectsStore.initialized" class="projects-detail-loading" aria-live="polite">
+              <span class="projects-detail-loading__title" aria-hidden="true"></span>
+              <span class="projects-detail-loading__composer" aria-hidden="true"></span>
+              <span class="sr-only">{{ t('projects.loading') }}</span>
             </div>
-            <span class="projects-intro__glyph" aria-hidden="true">⌘</span>
-          </section>
-          <section v-if="projectsStore.projects.length" class="projects-grid" :aria-label="t('projects.title')">
-            <article
-              v-for="project in projectsStore.projects"
-              :key="project.id"
-              class="project-card"
-              :style="{ '--project-accent': projectAccent(project) }"
-            >
-              <button type="button" class="project-card__open" @click="openProject(project.id)">
-                <span class="project-card__topline">
-                  <span class="project-card__icon" aria-hidden="true">{{ project.icon }}</span>
-                  <span class="project-card__arrow" aria-hidden="true">↗</span>
-                </span>
-                <span class="project-card__name">{{ project.name }}</span>
-                <span class="project-card__meta">
-                  {{ project.conversationIds.length }} {{ t('projects.chats') }}
-                  <span aria-hidden="true">·</span>
-                  {{ project.files.length }} {{ t('projects.files') }}
-                </span>
-              </button>
-              <div class="project-card__actions">
-                <button type="button" :aria-label="t('projects.rename')" @click="openEdit(project)">
-                  <Icon name="edit" size="sm" aria-hidden="true" />
-                </button>
-                <button type="button" :aria-label="t('projects.delete')" @click="removeProject(project.id)">
-                  <Icon name="trash" size="sm" aria-hidden="true" />
-                </button>
-              </div>
-            </article>
-          </section>
-          <section v-else class="projects-empty">
-            <span class="projects-empty__icon" aria-hidden="true">✦</span>
-            <h2>{{ t('projects.emptyTitle') }}</h2>
-            <p>{{ t('projects.emptyDescription') }}</p>
-            <button class="projects-button projects-button--primary" type="button" @click="openCreate">
-              <Icon name="plus" size="sm" aria-hidden="true" /> {{ t('projects.createFirst') }}
-            </button>
-          </section>
-        </template>
+
+            <section v-else class="projects-missing">
+              <span aria-hidden="true">📁</span>
+              <h1>{{ t('projects.projectNotFound') }}</h1>
+              <p>{{ t('projects.projectNotFoundDescription') }}</p>
+              <button type="button" @click="goBack">{{ t('projects.allProjects') }}</button>
+            </section>
+          </template>
+
+          <ProjectsDirectory
+            v-else
+            v-model:search="projectSearch"
+            v-model:filter="projectFilter"
+            :projects="projectsStore.projects"
+            :loading="projectsStore.loading && !projectsStore.initialized"
+            @create="openCreate"
+            @open="openProject"
+            @edit="openEdit"
+            @delete="removeProject"
+          />
+        </div>
       </main>
 
-      <div v-if="editorOpen" class="projects-modal" role="dialog" aria-modal="true" @click.self="closeEditor">
-        <form class="projects-dialog" @submit.prevent="saveProject">
-          <div class="projects-dialog__header">
-            <div>
-              <p class="projects-kicker">{{ editingId ? t('projects.editProject') : t('projects.newProject') }}</p>
-              <h2>{{ editingId ? t('projects.editProject') : t('projects.newProject') }}</h2>
+      <BaseDialog
+        :show="editorOpen"
+        :title="editingId ? t('projects.projectSettings') : t('projects.createProject')"
+        width="normal"
+        :variant="editingId ? 'default' : 'project-create'"
+        :close-button-label="t('common.close')"
+        :close-on-click-outside="!saving"
+        :close-on-escape="!saving"
+        :show-close-button="!saving"
+        @close="closeEditor"
+      >
+        <form
+          id="project-editor-form"
+          class="projects-editor"
+          :class="{ 'projects-create-editor': !editingId }"
+          @submit.prevent="saveProject"
+        >
+          <template v-if="!editingId">
+            <label class="projects-create-field">
+              <span>{{ t('projects.projectName') }}</span>
+              <span class="projects-create-input-wrap">
+                <button
+                  type="button"
+                  class="projects-create-icon-trigger"
+                  :aria-label="projectIconTriggerLabel"
+                  aria-haspopup="menu"
+                  :aria-expanded="iconMenuOpen"
+                  @click="toggleIconMenu"
+                >
+                  <Icon
+                    v-if="usesDefaultDraftIcon"
+                    name="projectDefault"
+                    size="md"
+                    aria-hidden="true"
+                  />
+                  <span v-else aria-hidden="true">{{ draft.icon }}</span>
+                </button>
+                <input
+                  v-model="draft.name"
+                  required
+                  maxlength="200"
+                  autocomplete="off"
+                  :placeholder="t('projects.projectNamePlaceholder')"
+                />
+
+                <div
+                  v-if="iconMenuOpen"
+                  class="projects-create-icon-menu"
+                  role="menu"
+                  :aria-label="t('projects.iconMenuLabel')"
+                  @click.stop
+                >
+                  <div class="projects-create-color-grid" role="group" :aria-label="t('projects.color')">
+                    <button
+                      v-for="color in projectColors"
+                      :key="color.value"
+                      type="button"
+                      class="projects-create-color-swatch"
+                      :class="{ 'is-selected': draft.color === color.value }"
+                      role="menuitemradio"
+                      :aria-label="t(color.labelKey)"
+                      :aria-checked="draft.color === color.value"
+                      :style="{ '--swatch-color': color.value }"
+                      @click="selectProjectColor(color.value)"
+                    ></button>
+                  </div>
+                  <button
+                    type="button"
+                    class="projects-create-custom-color"
+                    @click="openCustomColorPicker"
+                  >
+                    <span class="projects-create-custom-color__wheel" aria-hidden="true"></span>
+                    {{ t('projects.customColor') }}
+                  </button>
+                  <input
+                    ref="customColorInput"
+                    class="projects-create-visually-hidden"
+                    type="color"
+                    :value="draft.color"
+                    :aria-label="t('projects.customColor')"
+                    @input="applyCustomColor"
+                  >
+                  <div class="projects-create-icon-divider" aria-hidden="true"></div>
+                  <div class="projects-create-icon-grid" role="group" :aria-label="t('projects.iconMenuLabel')">
+                    <button
+                      v-for="icon in projectIconOptions"
+                      :key="icon.value"
+                      type="button"
+                      class="projects-create-icon-option"
+                      :class="{ 'is-selected': draft.icon === icon.value }"
+                      role="menuitemradio"
+                      :aria-label="t(icon.labelKey)"
+                      :aria-checked="draft.icon === icon.value"
+                      @click="selectProjectIcon(icon.value)"
+                    >
+                      <span aria-hidden="true">{{ icon.glyph }}</span>
+                    </button>
+                  </div>
+                </div>
+              </span>
+            </label>
+
+            <aside class="projects-create-info">
+              <Icon name="lightbulb" size="md" aria-hidden="true" />
+              <p>{{ t('projects.createInfo') }}</p>
+            </aside>
+          </template>
+
+          <template v-else>
+            <label class="projects-field">
+              <span>{{ t('projects.name') }}</span>
+              <input v-model="draft.name" required maxlength="200" autocomplete="off" />
+            </label>
+
+            <div class="projects-field-row">
+              <label class="projects-field projects-field--icon">
+                <span>{{ t('projects.icon') }}</span>
+                <input v-model="draft.icon" maxlength="4" inputmode="text" />
+              </label>
+              <label class="projects-field projects-field--color">
+                <span>{{ t('projects.color') }}</span>
+                <span class="projects-color-control">
+                  <input v-model="draft.color" type="color" />
+                  <span>{{ draft.color }}</span>
+                </span>
+              </label>
             </div>
-            <button type="button" class="project-icon-button" :aria-label="t('common.cancel')" @click="closeEditor">
-              <Icon name="x" size="sm" aria-hidden="true" />
+
+            <label class="projects-field">
+              <span>{{ t('projects.instructions') }}</span>
+              <textarea
+                v-model="draft.instructions"
+                :placeholder="t('projects.instructionsPlaceholder')"
+                rows="5"
+              ></textarea>
+              <small>{{ t('projects.instructionsHelp') }}</small>
+            </label>
+
+            <label class="projects-field">
+              <span>{{ t('projects.memory') }}</span>
+              <select v-model="draft.memoryMode">
+                <option value="default">{{ t('projects.memoryDefault') }}</option>
+                <option value="project-only">{{ t('projects.memoryProjectOnly') }}</option>
+              </select>
+              <small>{{ t('projects.memoryDescription') }}</small>
+            </label>
+          </template>
+        </form>
+
+        <template #footer>
+          <template v-if="!editingId">
+            <div class="projects-create-footer">
+              <div class="projects-create-memory-wrap">
+                <button
+                  type="button"
+                  class="projects-create-memory-trigger"
+                  aria-haspopup="menu"
+                  :aria-expanded="memoryMenuOpen"
+                  @click="toggleMemoryMenu"
+                >
+                  <span>{{ memoryModeLabel }}</span>
+                  <Icon name="chevronDown" size="sm" aria-hidden="true" />
+                </button>
+                <div
+                  v-if="memoryMenuOpen"
+                  class="projects-create-memory-menu"
+                  role="menu"
+                  :aria-label="t('projects.memoryRangeLabel')"
+                  @click.stop
+                >
+                  <button
+                    v-for="option in memoryOptions"
+                    :key="option.value"
+                    type="button"
+                    class="projects-create-memory-option"
+                    :class="{ 'is-selected': draft.memoryMode === option.value }"
+                    role="menuitemradio"
+                    :aria-checked="draft.memoryMode === option.value"
+                    @click="selectMemoryMode(option.value)"
+                  >
+                    <span class="projects-create-memory-copy">
+                      <strong>{{ option.label }}</strong>
+                      <small>{{ option.description }}</small>
+                    </span>
+                    <span v-if="draft.memoryMode === option.value" class="projects-create-memory-check" aria-hidden="true">✓</span>
+                  </button>
+                </div>
+              </div>
+              <button
+                type="submit"
+                form="project-editor-form"
+                class="projects-create-submit"
+                :disabled="saving || !draft.name.trim()"
+              >
+                {{ saving ? t('projects.saving') : t('projects.createProject') }}
+              </button>
+            </div>
+          </template>
+          <template v-else>
+            <button type="button" class="projects-dialog-button" :disabled="saving" @click="closeEditor">
+              {{ t('common.cancel') }}
             </button>
-          </div>
-          <label class="projects-field">
-            <span>{{ t('projects.name') }}</span>
-            <input v-model="draft.name" required maxlength="200" autocomplete="off" autofocus />
-          </label>
-          <div class="projects-field-row">
-            <label class="projects-field">
-              <span>{{ t('projects.icon') }}</span>
-              <input v-model="draft.icon" maxlength="4" inputmode="text" />
-            </label>
-            <label class="projects-field">
-              <span>{{ t('projects.color') }}</span>
-              <input v-model="draft.color" type="color" />
-            </label>
-          </div>
-          <label class="projects-field">
-            <span>{{ t('projects.instructions') }}</span>
-            <textarea v-model="draft.instructions" :placeholder="t('projects.instructionsPlaceholder')" rows="4" />
-          </label>
-          <label class="projects-field">
-            <span>{{ t('projects.memory') }}</span>
-            <select v-model="draft.memoryMode">
-              <option value="default">{{ t('projects.memoryDefault') }}</option>
-              <option value="project-only">{{ t('projects.memoryProjectOnly') }}</option>
-            </select>
-          </label>
-          <div class="projects-dialog__actions">
-            <button type="button" class="projects-button projects-button--quiet" @click="closeEditor">{{ t('common.cancel') }}</button>
-            <button type="submit" class="projects-button projects-button--primary" :disabled="saving">
+            <button
+              type="submit"
+              form="project-editor-form"
+              class="projects-dialog-button projects-dialog-button--primary"
+              :disabled="saving || !draft.name.trim()"
+            >
               {{ saving ? t('projects.saving') : t('common.save') }}
             </button>
-          </div>
-        </form>
-      </div>
+          </template>
+        </template>
+      </BaseDialog>
     </div>
   </AppLayout>
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
-import AppLayout from '@/components/layout/AppLayout.vue'
+import BaseDialog from '@/components/common/BaseDialog.vue'
 import ChatHistoryPanel from '@/components/chat/ChatHistoryPanel.vue'
 import Icon from '@/components/icons/Icon.vue'
+import AppLayout from '@/components/layout/AppLayout.vue'
+import WorkspaceSidebarOverlayLayer from '@/components/layout/WorkspaceSidebarOverlayLayer.vue'
+import { useWorkspaceResponsiveState } from '@/components/layout/workspaceResponsive'
+import ProjectChatsPanel from '@/components/projects/ProjectChatsPanel.vue'
+import ProjectDetailHeader from '@/components/projects/ProjectDetailHeader.vue'
+import ProjectSourcesPanel from '@/components/projects/ProjectSourcesPanel.vue'
+import ProjectsDirectory from '@/components/projects/ProjectsDirectory.vue'
+import { useAppStore } from '@/stores/app'
+import { useAuthStore } from '@/stores/auth'
 import { useChatStore } from '@/stores/chat'
 import { useLibraryStore } from '@/stores/library'
 import { useProjectsStore } from '@/stores/projects'
 import type { Project, ProjectConversation, ProjectMemoryMode } from '@/types/projects'
 
+type ProjectTab = 'chats' | 'sources'
+type ProjectFilter = 'all' | 'mine' | 'shared'
+
 const { t } = useI18n()
-const router = useRouter()
 const route = useRoute()
+const router = useRouter()
+const appStore = useAppStore()
+const authStore = useAuthStore()
 const chatStore = useChatStore()
 const libraryStore = useLibraryStore()
 const projectsStore = useProjectsStore()
+const { mobileDrawer: mobileHistoryLayout, narrowSidebar } = useWorkspaceResponsiveState()
 
-const selectedProjectId = ref<string | null>(typeof route.params.projectId === 'string' ? route.params.projectId : null)
+const mainRef = ref<HTMLElement | null>(null)
+const historyDrawerRef = ref<HTMLElement | null>(null)
+const historyTriggerRef = ref<HTMLButtonElement | null>(null)
+const selectedProjectId = ref<string | null>(routeProjectId())
+const activeTab = ref<ProjectTab>('chats')
+const projectPrompt = ref('')
+const projectSearch = ref('')
+const projectFilter = ref<ProjectFilter>('all')
 const editorOpen = ref(false)
 const editingId = ref<string | null>(null)
 const saving = ref(false)
 const showChatPicker = ref(false)
-const instructionsDraft = ref('')
+const uploadingSources = ref(false)
+const historyOpen = ref(false)
+const historySearchQuery = ref('')
 const draft = ref({
   name: '',
   icon: '📁',
-  color: '#7c3aed',
+  color: '#0d0d0d',
   instructions: '',
   memoryMode: 'default' as ProjectMemoryMode,
 })
 
+const iconMenuOpen = ref(false)
+const memoryMenuOpen = ref(false)
+const customColorInput = ref<HTMLInputElement | null>(null)
+
+const projectColors = [
+  { value: '#0d0d0d', labelKey: 'projects.colorDefault' },
+  { value: '#ef4444', labelKey: 'projects.colorRed' },
+  { value: '#f97316', labelKey: 'projects.colorOrange' },
+  { value: '#eab308', labelKey: 'projects.colorYellow' },
+  { value: '#22c55e', labelKey: 'projects.colorGreen' },
+  { value: '#3b82f6', labelKey: 'projects.colorBlue' },
+  { value: '#8b5cf6', labelKey: 'projects.colorPurple' },
+  { value: '#ec4899', labelKey: 'projects.colorPink' },
+] as const
+
+const projectIconOptions = [
+  { value: '📁', glyph: '▱', labelKey: 'projects.iconFolder' },
+  { value: '💵', glyph: '$', labelKey: 'projects.iconMoney' },
+  { value: '📚', glyph: '▤', labelKey: 'projects.iconBooks' },
+  { value: '✏️', glyph: '✎', labelKey: 'projects.iconPencil' },
+  { value: '📝', glyph: '▧', labelKey: 'projects.iconWriting' },
+  { value: '</>', glyph: '</>', labelKey: 'projects.iconCode' },
+  { value: '⌘', glyph: '⌘', labelKey: 'projects.iconTerminal' },
+  { value: '🎵', glyph: '♫', labelKey: 'projects.iconMusic' },
+  { value: '🍿', glyph: '◉', labelKey: 'projects.iconPopcorn' },
+  { value: '🩺', glyph: '+', labelKey: 'projects.iconHealth' },
+  { value: '✈️', glyph: '✈', labelKey: 'projects.iconPlane' },
+  { value: '🌐', glyph: '◎', labelKey: 'projects.iconGlobe' },
+  { value: '🔧', glyph: '⌕', labelKey: 'projects.iconTool' },
+  { value: '🧪', glyph: '◇', labelKey: 'projects.iconFlask' },
+  { value: '♥️', glyph: '♥', labelKey: 'projects.iconHeart' },
+  { value: '🌱', glyph: '❧', labelKey: 'projects.iconPlant' },
+  { value: '✓', glyph: '✓', labelKey: 'projects.iconCheck' },
+] as const
+
+const memoryOptions = computed(() => [
+  {
+    value: 'default' as const,
+    label: t('projects.memoryDefault'),
+    description: t('projects.memoryDefaultDescription'),
+  },
+  {
+    value: 'project-only' as const,
+    label: t('projects.memoryProjectOnly'),
+    description: t('projects.memoryProjectOnlyDescription'),
+  },
+])
+
+let historySearchTimer: ReturnType<typeof setTimeout> | null = null
+let loadSequence = 0
+let disposed = false
+
+const routeHasProject = computed(() => selectedProjectId.value !== null)
+const showProjectsNotice = computed(() => (
+  Boolean(projectsStore.error)
+  && (
+    routeHasProject.value
+    || projectsStore.projects.length > 0
+    || projectSearch.value.trim() !== ''
+    || projectFilter.value !== 'all'
+  )
+))
+const usesDefaultDraftIcon = computed(() => (
+  !draft.value.icon || draft.value.icon === 'folder' || draft.value.icon === '📁'
+))
+const memoryModeLabel = computed(() => (
+  memoryOptions.value.find(({ value }) => value === draft.value.memoryMode)?.label
+  ?? t('projects.memoryDefault')
+))
+const projectColorLabel = computed(() => (
+  draft.value.color === '#0d0d0d'
+    ? t('projects.defaultColorLabel')
+    : (() => {
+        const color = projectColors.find(({ value }) => value === draft.value.color)
+        return color ? t(color.labelKey) : draft.value.color
+      })()
+))
+const projectIconTriggerLabel = computed(() => (
+  t('projects.iconTrigger', {
+    icon: usesDefaultDraftIcon.value ? t('projects.defaultFolderIcon') : draft.value.icon,
+    color: projectColorLabel.value,
+  })
+))
 const selectedProject = computed(() => (
   projectsStore.projects.find(({ id }) => id === selectedProjectId.value) ?? null
 ))
-const historyConversations = computed(() => chatStore.conversations)
+const historyConversations = computed(() => (
+  historySearchQuery.value.trim() ? chatStore.searchResults : chatStore.conversations
+))
+const narrowSidebarOpen = computed(() => appStore.workspaceNarrowSidebarOpen)
+const historyModalActive = computed(() => (
+  (historyOpen.value && mobileHistoryLayout.value)
+  || (narrowSidebar.value && narrowSidebarOpen.value)
+))
 const projectConversations = computed<ProjectConversation[]>(() => {
   if (!selectedProject.value) return []
   const localById = new Map(chatStore.conversations.map((conversation) => [conversation.id, conversation]))
-  const result: ProjectConversation[] = []
+  const merged = new Map<string, ProjectConversation>()
+
   for (const conversation of selectedProject.value.conversations) {
     const local = localById.get(conversation.id)
-    result.push(local ? {
-      id: local.id,
-      title: local.title,
-      model: local.model,
-      updatedAt: new Date(local.updatedAt).toISOString(),
-    } : conversation)
+    merged.set(conversation.id, local ? toProjectConversation(local) : conversation)
   }
-  for (const conversation of chatStore.conversations) {
-    if (selectedProject.value.conversationIds.includes(conversation.id) && !result.some(({ id }) => id === conversation.id)) {
-      result.push({ id: conversation.id, title: conversation.title, model: conversation.model, updatedAt: new Date(conversation.updatedAt).toISOString() })
-    }
+  for (const id of selectedProject.value.conversationIds) {
+    const local = localById.get(id)
+    if (local) merged.set(id, toProjectConversation(local))
   }
-  return result
-})
-const availableConversations = computed(() => chatStore.conversations.filter((conversation) => (
-  !selectedProject.value?.conversationIds.includes(conversation.id)
-)))
 
-watch(selectedProject, (project) => {
-  instructionsDraft.value = project?.instructions ?? ''
+  return [...merged.values()].sort((left, right) => (
+    dateTimestamp(right.updatedAt) - dateTimestamp(left.updatedAt)
+  ))
+})
+const availableConversations = computed<ProjectConversation[]>(() => {
+  const selectedIds = new Set(selectedProject.value?.conversationIds ?? [])
+  return chatStore.conversations
+    .filter(({ id }) => !selectedIds.has(id))
+    .map(toProjectConversation)
+    .sort((left, right) => dateTimestamp(right.updatedAt) - dateTimestamp(left.updatedAt))
+})
+
+watch(() => route.params.projectId, async () => {
+  const id = routeProjectId()
+  selectedProjectId.value = id
+  projectsStore.select(id)
+  activeTab.value = 'chats'
+  projectPrompt.value = ''
   showChatPicker.value = false
-}, { immediate: true })
-
-watch(() => route.params.projectId, (value) => {
-  selectedProjectId.value = typeof value === 'string' ? value : null
-  if (selectedProjectId.value) void projectsStore.get(selectedProjectId.value)
+  if (id && projectsStore.initialized) await projectsStore.get(id)
 })
 
-onMounted(async () => {
-  await projectsStore.load()
-  if (selectedProjectId.value) await projectsStore.get(selectedProjectId.value)
+watch(selectedProject, () => {
+  showChatPicker.value = false
 })
 
-function projectAccent(project: Project): string {
-  return /^#[\da-f]{3,8}$/i.test(project.color) ? project.color : '#7c3aed'
+watch(mobileHistoryLayout, (mobile) => {
+  if (!mobile && historyOpen.value) void closeHistory(mainRef.value)
+})
+
+watch(() => authStore.user?.id, async (userId) => {
+  const sequence = ++loadSequence
+  await Promise.all([
+    projectsStore.load(),
+    chatStore.hydrate(userId),
+  ])
+  if (disposed || sequence !== loadSequence) return
+
+  if (userId !== null && userId !== undefined) {
+    await chatStore.syncHistory()
+    if (disposed || sequence !== loadSequence) return
+    await chatStore.loadConversationPage(true)
+  }
+  if (disposed || sequence !== loadSequence) return
+
+  const id = selectedProjectId.value
+  projectsStore.select(id)
+  if (id) await projectsStore.get(id)
+}, { immediate: true, flush: 'sync' })
+
+onBeforeUnmount(() => {
+  disposed = true
+  if (historySearchTimer) clearTimeout(historySearchTimer)
+  document.removeEventListener('pointerdown', handleProjectEditorPointerdown, true)
+  document.removeEventListener('keydown', handleProjectEditorEscape)
+})
+
+onMounted(() => {
+  document.addEventListener('pointerdown', handleProjectEditorPointerdown, true)
+  document.addEventListener('keydown', handleProjectEditorEscape)
+})
+
+function routeProjectId(): string | null {
+  return typeof route.params.projectId === 'string' && route.params.projectId.trim()
+    ? route.params.projectId
+    : null
 }
 
-function formatConversationDate(value?: string): string {
-  if (!value) return t('projects.recentlyUpdated')
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return t('projects.recentlyUpdated')
-  return new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric' }).format(date)
+function dateTimestamp(value?: string): number {
+  if (!value) return 0
+  const timestamp = new Date(value).getTime()
+  return Number.isFinite(timestamp) ? timestamp : 0
+}
+
+function toProjectConversation(conversation: {
+  id: string
+  title: string
+  model?: string
+  updatedAt: string | number | Date
+}): ProjectConversation {
+  const updatedAt = new Date(conversation.updatedAt)
+  return {
+    id: conversation.id,
+    title: conversation.title,
+    model: conversation.model,
+    updatedAt: Number.isNaN(updatedAt.getTime()) ? undefined : updatedAt.toISOString(),
+  }
+}
+
+function projectAccent(project: Project): string {
+  if (/^#[\da-f]{3,8}$/i.test(project.color)) return project.color
+  const namedColors: Record<string, string> = {
+    gray: '#0d0d0d',
+    black: '#0d0d0d',
+    red: '#ef4444',
+    orange: '#f97316',
+    yellow: '#eab308',
+    green: '#22c55e',
+    blue: '#3b82f6',
+    purple: '#8b5cf6',
+    pink: '#ec4899',
+  }
+  return namedColors[project.color.trim().toLowerCase()] ?? '#0d0d0d'
 }
 
 function openCreate(): void {
   editingId.value = null
-  draft.value = { name: '', icon: '📁', color: '#7c3aed', instructions: '', memoryMode: 'default' }
+  draft.value = { name: '', icon: '📁', color: '#0d0d0d', instructions: '', memoryMode: 'default' }
+  iconMenuOpen.value = false
+  memoryMenuOpen.value = false
   editorOpen.value = true
 }
 
@@ -385,21 +695,84 @@ function openEdit(project: Project): void {
     instructions: project.instructions,
     memoryMode: project.memoryMode,
   }
+  iconMenuOpen.value = false
+  memoryMenuOpen.value = false
   editorOpen.value = true
 }
 
 function closeEditor(): void {
-  if (!saving.value) editorOpen.value = false
+  if (!saving.value) {
+    iconMenuOpen.value = false
+    memoryMenuOpen.value = false
+    editorOpen.value = false
+  }
+}
+
+function toggleIconMenu(): void {
+  if (saving.value) return
+  iconMenuOpen.value = !iconMenuOpen.value
+  if (iconMenuOpen.value) memoryMenuOpen.value = false
+}
+
+function selectProjectIcon(value: string): void {
+  draft.value.icon = value
+  iconMenuOpen.value = false
+}
+
+function selectProjectColor(value: string): void {
+  draft.value.color = value
+}
+
+function openCustomColorPicker(): void {
+  customColorInput.value?.click()
+}
+
+function applyCustomColor(event: Event): void {
+  const input = event.target
+  if (input instanceof HTMLInputElement && input.value) draft.value.color = input.value
+}
+
+function toggleMemoryMenu(): void {
+  if (saving.value) return
+  memoryMenuOpen.value = !memoryMenuOpen.value
+  if (memoryMenuOpen.value) iconMenuOpen.value = false
+}
+
+function selectMemoryMode(value: ProjectMemoryMode): void {
+  draft.value.memoryMode = value
+  memoryMenuOpen.value = false
+}
+
+function handleProjectEditorPointerdown(event: PointerEvent): void {
+  if (!iconMenuOpen.value && !memoryMenuOpen.value) return
+  const target = event.target
+  if (!(target instanceof Node)) return
+  if ((target as Element).closest('.projects-create-input-wrap, .projects-create-memory-wrap')) return
+  iconMenuOpen.value = false
+  memoryMenuOpen.value = false
+}
+
+function handleProjectEditorEscape(event: KeyboardEvent): void {
+  if (event.key !== 'Escape') return
+  if (iconMenuOpen.value || memoryMenuOpen.value) {
+    event.preventDefault()
+    // BaseDialog also listens on document. Stop listeners registered after
+    // this project-level handler so the first Escape only closes the menu;
+    // a second Escape can then dismiss the dialog itself.
+    event.stopImmediatePropagation()
+    iconMenuOpen.value = false
+    memoryMenuOpen.value = false
+  }
 }
 
 async function saveProject(): Promise<void> {
+  if (saving.value || !draft.value.name.trim()) return
   saving.value = true
   try {
     if (editingId.value) {
-      await projectsStore.update(editingId.value, draft.value)
+      await projectsStore.update(editingId.value, { ...draft.value, name: draft.value.name.trim() })
     } else {
-      const project = await projectsStore.create(draft.value)
-      selectedProjectId.value = project.id
+      const project = await projectsStore.create({ ...draft.value, name: draft.value.name.trim() })
       await router.push(`/projects/${encodeURIComponent(project.id)}`)
     }
     editorOpen.value = false
@@ -409,58 +782,63 @@ async function saveProject(): Promise<void> {
 }
 
 async function removeProject(id: string): Promise<void> {
-  if (typeof window !== 'undefined' && window.confirm(t('projects.deleteConfirm'))) {
-    const removed = await projectsStore.remove(id)
-    if (removed && selectedProjectId.value === id) await goBack()
-  }
+  if (typeof window !== 'undefined' && !window.confirm(t('projects.deleteConfirm'))) return
+  const removed = await projectsStore.remove(id)
+  if (removed && selectedProjectId.value === id) await goBack()
 }
 
 async function openProject(id: string): Promise<void> {
-  selectedProjectId.value = id
   await router.push(`/projects/${encodeURIComponent(id)}`)
-  await projectsStore.get(id)
 }
 
 async function goBack(): Promise<void> {
   selectedProjectId.value = null
+  projectsStore.select(null)
   await router.push('/projects')
+  await nextTick()
+  mainRef.value?.focus({ preventScroll: true })
 }
 
-function startNewChat(): void {
-  void router.push({ path: '/chat', query: { conversation: 'new' } })
+async function goToWork(): Promise<void> {
+  await router.push('/dashboard')
 }
 
-function startProjectChat(): void {
+async function startNewChat(): Promise<void> {
+  chatStore.selectConversation(null)
+  await closeHistory(null)
+  await router.push({ path: '/chat', query: { conversation: 'new' } })
+}
+
+async function startProjectChat(prompt = projectPrompt.value): Promise<void> {
   if (!selectedProject.value) return startNewChat()
-  void router.push({ path: '/chat', query: { conversation: 'new', project: selectedProject.value.id } })
+  const normalizedPrompt = prompt.trim()
+  chatStore.selectConversation(null)
+  await closeHistory(null)
+  await router.push({
+    path: '/chat',
+    query: {
+      conversation: 'new',
+      project: selectedProject.value.id,
+      ...(normalizedPrompt ? { prompt: normalizedPrompt } : {}),
+    },
+  })
 }
 
-function openConversation(id: string): void {
-  void router.push({ path: '/chat', query: { conversation: id } })
-}
-
-async function saveInstructions(): Promise<void> {
-  if (selectedProject.value && instructionsDraft.value !== selectedProject.value.instructions) {
-    await projectsStore.update(selectedProject.value.id, { instructions: instructionsDraft.value })
-  }
-}
-
-async function changeMemory(event: Event): Promise<void> {
-  const value = (event.target as HTMLSelectElement).value as ProjectMemoryMode
-  if (selectedProject.value && value !== selectedProject.value.memoryMode) {
-    await projectsStore.setMemoryMode(selectedProject.value.id, value)
-  }
+async function openConversation(id: string): Promise<void> {
+  chatStore.selectConversation(id)
+  await closeHistory(null)
+  await router.push({ path: '/chat', query: { conversation: id } })
 }
 
 async function addConversation(id: string): Promise<void> {
   if (!selectedProject.value) return
   const conversation = chatStore.conversations.find(({ id: conversationId }) => conversationId === id)
-  if (await projectsStore.addConversation(selectedProject.value.id, id, conversation ? {
-    id: conversation.id,
-    title: conversation.title,
-    model: conversation.model,
-    updatedAt: new Date(conversation.updatedAt).toISOString(),
-  } : undefined)) showChatPicker.value = false
+  const added = await projectsStore.addConversation(
+    selectedProject.value.id,
+    id,
+    conversation ? toProjectConversation(conversation) : undefined,
+  )
+  if (added) showChatPicker.value = false
 }
 
 async function removeConversation(id: string): Promise<void> {
@@ -471,135 +849,515 @@ async function addFiles(event: Event): Promise<void> {
   const input = event.target as HTMLInputElement
   const files = Array.from(input.files ?? [])
   input.value = ''
-  if (!selectedProject.value || files.length === 0) return
-  const uploaded = await libraryStore.uploadFiles(files)
-  await projectsStore.addFiles(selectedProject.value.id, uploaded.map((file) => ({
-    id: file.id,
-    name: file.name,
-    size: file.size,
-    mimeType: file.mimeType,
-    createdAt: file.createdAt,
-  })))
+  if (!selectedProject.value || files.length === 0 || uploadingSources.value) return
+  uploadingSources.value = true
+  try {
+    const uploaded = await libraryStore.uploadFiles(files)
+    await projectsStore.addFiles(selectedProject.value.id, uploaded.map((file) => ({
+      id: file.id,
+      name: file.name,
+      size: file.size,
+      mimeType: file.mimeType,
+      createdAt: file.createdAt,
+    })))
+  } finally {
+    uploadingSources.value = false
+  }
 }
 
 async function removeFile(id: string): Promise<void> {
   if (selectedProject.value) await projectsStore.removeFile(selectedProject.value.id, id)
 }
 
+async function shareProject(): Promise<void> {
+  if (!selectedProject.value || typeof window === 'undefined') return
+
+  const shareData = {
+    title: selectedProject.value.name,
+    url: window.location.href,
+  }
+
+  try {
+    if (typeof navigator.share === 'function') {
+      await navigator.share(shareData)
+      return
+    }
+    if (!navigator.clipboard?.writeText) throw new Error('Clipboard unavailable')
+    await navigator.clipboard.writeText(shareData.url)
+    appStore.showSuccess(t('projects.shareCopied'))
+  } catch (error) {
+    if (error instanceof DOMException && error.name === 'AbortError') return
+    appStore.showError(t('projects.shareFailed'))
+  }
+}
+
 async function retryLoad(): Promise<void> {
   await projectsStore.load()
   if (selectedProjectId.value) await projectsStore.get(selectedProjectId.value)
 }
+
+function updateHistorySearch(value: string): void {
+  historySearchQuery.value = value
+  if (historySearchTimer) clearTimeout(historySearchTimer)
+  historySearchTimer = setTimeout(() => {
+    historySearchTimer = null
+    void runHistorySearch()
+  }, 250)
+}
+
+async function runHistorySearch(): Promise<void> {
+  if (historySearchTimer) clearTimeout(historySearchTimer)
+  historySearchTimer = null
+  await chatStore.searchHistory(historySearchQuery.value)
+}
+
+async function openHistory(): Promise<void> {
+  if (mobileHistoryLayout.value) {
+    historyOpen.value = true
+    await nextTick()
+    const first = historyDrawerRef.value?.querySelector<HTMLElement>(
+      'a[href], button:not([disabled]), input:not([disabled]), [tabindex]:not([tabindex="-1"])',
+    )
+    ;(first ?? historyDrawerRef.value)?.focus({ preventScroll: true })
+    return
+  }
+  if (narrowSidebar.value) appStore.setWorkspaceNarrowSidebarOpen(true)
+}
+
+async function closeHistory(focusTarget: HTMLElement | null = historyTriggerRef.value): Promise<void> {
+  const mobileWasOpen = historyOpen.value
+  if (mobileWasOpen) historyOpen.value = false
+  if (narrowSidebarOpen.value) appStore.setWorkspaceNarrowSidebarOpen(false)
+  await nextTick()
+  if (mobileWasOpen) focusTarget?.focus({ preventScroll: true })
+}
+
+function onHistoryDrawerKeydown(event: KeyboardEvent): void {
+  if (event.key === 'Escape') {
+    event.preventDefault()
+    void closeHistory()
+    return
+  }
+  if (event.key !== 'Tab') return
+  const controls = Array.from(historyDrawerRef.value?.querySelectorAll<HTMLElement>(
+    'a[href]:not([tabindex="-1"]), button:not([disabled]):not([tabindex="-1"]), input:not([disabled]), [tabindex]:not([tabindex="-1"])',
+  ) ?? []).filter((element) => element.getClientRects().length > 0)
+  if (controls.length === 0) return
+  const first = controls[0]
+  const last = controls[controls.length - 1]
+  if (event.shiftKey && document.activeElement === first) {
+    event.preventDefault()
+    last?.focus({ preventScroll: true })
+  } else if (!event.shiftKey && document.activeElement === last) {
+    event.preventDefault()
+    first?.focus({ preventScroll: true })
+  }
+}
+
+function confirmHistoryDelete(id: string): void {
+  const conversation = historyConversations.value.find((item) => item.id === id)
+  const title = conversation?.title.trim() || t('chat.actions.newChat')
+  if (typeof window === 'undefined' || window.confirm(
+    `${t('chat.confirm.deleteDescriptionPrefix')}${title}${t('chat.confirm.deleteDescriptionSuffix')}`,
+  )) chatStore.deleteConversation(id)
+}
+
+function confirmHistoryClear(): void {
+  if (typeof window === 'undefined' || window.confirm(t('chat.confirm.clearDescription'))) {
+    chatStore.clearConversations()
+  }
+}
 </script>
 
 <style scoped>
-.projects-shell {
-  --projects-ink: #202022;
-  --projects-muted: #78777c;
-  --projects-line: rgba(32, 32, 34, .11);
-  --projects-panel: rgba(255, 255, 255, .86);
+.projects-workspace {
+  --projects-page: #fff;
+  --projects-surface: #f4f4f4;
+  --projects-surface-hover: #ececec;
+  --projects-text: #0d0d0d;
+  --projects-text-secondary: #5d5d5d;
+  --projects-text-muted: #7d7d7d;
+  --projects-border: rgba(0, 0, 0, 0.1);
+  --projects-border-strong: rgba(0, 0, 0, 0.14);
+  --projects-popover: #fff;
+  --projects-danger: #d00e17;
   display: flex;
-  min-height: calc(100vh - 26px);
+  width: 100%;
+  height: 100%;
+  min-height: 0;
   overflow: hidden;
-  border-radius: 18px;
-  background:
-    radial-gradient(circle at 90% 0%, rgba(124, 58, 237, .08), transparent 28rem),
-    #f7f7f8;
-  color: var(--projects-ink);
+  color: var(--projects-text);
+  background: var(--projects-page);
 }
-.projects-shell__history { flex: 0 0 260px; }
-.projects-content { flex: 1; min-width: 0; max-width: 1240px; margin: 0 auto; padding: 30px clamp(20px, 4vw, 62px) 64px; outline: none; }
-.projects-topbar { display: flex; align-items: center; justify-content: space-between; gap: 20px; min-height: 44px; }
-.projects-breadcrumbs { display: flex; align-items: center; min-height: 40px; }
-.projects-kicker { margin: 0; color: var(--projects-muted); font-size: 11px; font-weight: 700; letter-spacing: .12em; line-height: 1.2; text-transform: uppercase; }
-.projects-back { display: inline-flex; align-items: center; gap: 7px; padding: 8px 0; border: 0; background: transparent; color: var(--projects-muted); cursor: pointer; font-size: 13px; }
-.projects-back:hover { color: var(--projects-ink); }
-.projects-topbar__actions, .project-hero__actions { display: flex; align-items: center; gap: 8px; }
-.projects-button { display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: 38px; padding: 8px 13px; border: 1px solid transparent; border-radius: 9px; cursor: pointer; font: inherit; font-size: 13px; font-weight: 650; transition: background .16s ease, border-color .16s ease, transform .16s ease; }
-.projects-button:hover:not(:disabled) { transform: translateY(-1px); }
-.projects-button:focus-visible, .project-icon-button:focus-visible, .project-card__open:focus-visible, .project-chat-list__open:focus-visible, .project-picker button:focus-visible, .projects-field input:focus-visible, .projects-field textarea:focus-visible, .projects-field select:focus-visible { outline: 2px solid #7c3aed; outline-offset: 2px; }
-.projects-button:disabled { cursor: wait; opacity: .55; }
-.projects-button--primary { background: #242326; color: #fff; box-shadow: 0 4px 12px rgba(35, 33, 39, .14); }
-.projects-button--primary:hover:not(:disabled) { background: #111014; }
-.projects-button--quiet { border-color: var(--projects-line); background: rgba(255, 255, 255, .5); color: #4e4d53; }
-.projects-button--quiet:hover:not(:disabled) { border-color: rgba(32, 32, 34, .2); background: #fff; }
-.projects-notice { display: flex; align-items: center; gap: 9px; margin-top: 18px; padding: 10px 13px; border: 1px solid rgba(180, 125, 0, .2); border-radius: 10px; background: #fff8e3; color: #735500; font-size: 13px; }
-.projects-notice button { margin-left: auto; border: 0; background: transparent; color: inherit; cursor: pointer; font-weight: 700; text-decoration: underline; }
-.projects-loading { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 17px; margin-top: 46px; }
-.projects-skeleton-card { height: 158px; border-radius: 14px; background: linear-gradient(90deg, #eeeef0 25%, #f8f8f9 40%, #eeeef0 60%); background-size: 220% 100%; animation: projects-shimmer 1.25s linear infinite; }
-@keyframes projects-shimmer { to { background-position: -220% 0; } }
-.projects-intro { display: flex; align-items: flex-end; justify-content: space-between; gap: 30px; margin: 48px 0 30px; }
-.projects-intro h1, .project-hero h1 { margin: 8px 0 0; color: var(--projects-ink); font-size: clamp(28px, 4vw, 42px); font-weight: 680; letter-spacing: -.045em; line-height: 1.05; }
-.projects-intro p:not(.projects-kicker) { max-width: 570px; margin: 12px 0 0; color: var(--projects-muted); font-size: 15px; line-height: 1.55; }
-.projects-intro__glyph { display: grid; place-items: center; width: 74px; height: 74px; border: 1px solid rgba(124, 58, 237, .2); border-radius: 22px; background: rgba(124, 58, 237, .08); color: #7c3aed; font-size: 32px; transform: rotate(-8deg); }
-.projects-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(228px, 1fr)); gap: 17px; }
-.project-card { position: relative; min-height: 158px; overflow: hidden; border: 1px solid var(--projects-line); border-top: 3px solid var(--project-accent); border-radius: 14px; background: var(--projects-panel); box-shadow: 0 8px 26px rgba(26, 24, 31, .035); transition: box-shadow .18s ease, transform .18s ease; }
-.project-card:hover { box-shadow: 0 14px 32px rgba(26, 24, 31, .08); transform: translateY(-2px); }
-.project-card__open { display: flex; flex-direction: column; width: 100%; height: 100%; min-height: 158px; padding: 18px; border: 0; background: transparent; color: inherit; cursor: pointer; text-align: left; }
-.project-card__topline { display: flex; align-items: center; justify-content: space-between; }
-.project-card__icon { font-size: 28px; line-height: 1; }
-.project-card__arrow { color: var(--projects-muted); font-size: 18px; opacity: .65; }
-.project-card__name { margin-top: 23px; overflow: hidden; font-size: 16px; font-weight: 680; text-overflow: ellipsis; white-space: nowrap; }
-.project-card__meta, .project-hero__meta { display: flex; align-items: center; gap: 7px; margin-top: 7px; color: var(--projects-muted); font-size: 12px; }
-.project-card__actions { position: absolute; right: 10px; bottom: 10px; display: flex; gap: 2px; opacity: 0; transition: opacity .16s ease; }
-.project-card:hover .project-card__actions, .project-card:focus-within .project-card__actions { opacity: 1; }
-.project-card__actions button, .project-icon-button { display: inline-grid; place-items: center; width: 32px; height: 32px; padding: 0; border: 0; border-radius: 8px; background: transparent; color: var(--projects-muted); cursor: pointer; }
-.project-card__actions button:hover, .project-icon-button:hover { background: rgba(32, 32, 34, .07); color: var(--projects-ink); }
-.projects-empty { display: grid; justify-items: center; margin: 70px auto 0; padding: 70px 20px; border: 1px dashed rgba(32, 32, 34, .18); border-radius: 16px; text-align: center; }
-.projects-empty__icon { display: grid; place-items: center; width: 58px; height: 58px; border-radius: 18px; background: rgba(124, 58, 237, .09); color: #7c3aed; font-size: 28px; }
-.projects-empty h2 { margin: 19px 0 0; font-size: 20px; letter-spacing: -.02em; }
-.projects-empty p { max-width: 360px; margin: 9px 0 20px; color: var(--projects-muted); font-size: 14px; line-height: 1.5; }
-.project-hero { display: flex; align-items: center; justify-content: space-between; gap: 22px; margin: 42px 0 28px; padding: 24px 26px; border: 1px solid rgba(32, 32, 34, .09); border-radius: 18px; background: linear-gradient(110deg, rgba(255,255,255,.92), rgba(255,255,255,.65)); box-shadow: inset 0 3px 0 var(--project-accent), 0 10px 28px rgba(26, 24, 31, .04); }
-.project-hero__identity { display: flex; align-items: center; gap: 16px; min-width: 0; }
-.project-hero__icon { display: grid; flex: 0 0 auto; place-items: center; width: 58px; height: 58px; border-radius: 17px; background: color-mix(in srgb, var(--project-accent) 12%, white); font-size: 28px; }
-.project-hero__meta { margin-top: 9px; }
-.project-layout { display: grid; grid-template-columns: minmax(0, 1.45fr) minmax(300px, .8fr); gap: 17px; align-items: start; }
-.project-layout__aside { display: grid; gap: 17px; }
-.project-surface { min-width: 0; padding: 20px; border: 1px solid var(--projects-line); border-radius: 14px; background: var(--projects-panel); box-shadow: 0 8px 26px rgba(26, 24, 31, .035); }
-.project-surface--chats { min-height: 420px; }
-.project-surface__heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 15px; margin-bottom: 18px; }
-.project-surface__heading--compact { margin-bottom: 14px; }
-.project-surface h2 { margin: 6px 0 0; font-size: 18px; letter-spacing: -.025em; }
-.project-status-dot { display: block; width: 8px; height: 8px; margin-top: 8px; border-radius: 50%; background: #d8d8da; }
-.project-status-dot--set { background: #7c3aed; box-shadow: 0 0 0 4px rgba(124, 58, 237, .1); }
-.project-count { display: inline-grid; place-items: center; min-width: 26px; height: 26px; padding: 0 7px; border-radius: 99px; background: rgba(32, 32, 34, .06); color: var(--projects-muted); font-size: 12px; }
-.project-chat-list, .project-file-list { list-style: none; margin: 0; padding: 0; }
-.project-chat-list li { display: flex; align-items: center; gap: 8px; border-top: 1px solid var(--projects-line); }
-.project-chat-list__open { display: flex; align-items: center; flex: 1; min-width: 0; gap: 11px; padding: 13px 6px; border: 0; background: transparent; color: inherit; cursor: pointer; text-align: left; }
-.project-chat-list__avatar { display: grid; flex: 0 0 auto; place-items: center; width: 30px; height: 30px; border-radius: 9px; background: rgba(124, 58, 237, .1); color: #7c3aed; font-size: 13px; }
-.project-chat-list__copy { display: grid; min-width: 0; gap: 4px; }
-.project-chat-list__copy strong { overflow: hidden; font-size: 14px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
-.project-chat-list__copy small { color: var(--projects-muted); font-size: 11px; }
-.project-picker { display: grid; gap: 6px; margin: -4px 0 14px; padding: 8px; border: 1px solid var(--projects-line); border-radius: 10px; background: rgba(247, 247, 248, .8); }
-.project-picker button { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 9px 10px; border: 0; border-radius: 7px; background: transparent; color: inherit; cursor: pointer; font: inherit; font-size: 13px; text-align: left; }
-.project-picker button:hover { background: rgba(124, 58, 237, .08); }
-.project-empty-inline { margin: 4px; color: var(--projects-muted); font-size: 12px; }
-.project-empty-state { display: grid; justify-items: center; padding: 78px 20px 42px; color: var(--projects-muted); text-align: center; }
-.project-empty-state__mark { color: #7c3aed; font-size: 28px; }
-.project-empty-state p { margin: 9px 0 14px; font-size: 13px; }
-.project-instructions { display: block; width: 100%; min-height: 118px; resize: vertical; padding: 11px 12px; border: 1px solid var(--projects-line); border-radius: 9px; background: rgba(255, 255, 255, .62); color: var(--projects-ink); font: inherit; font-size: 13px; line-height: 1.5; }
-.project-help { margin: 9px 0 0; color: var(--projects-muted); font-size: 11px; line-height: 1.45; }
-.project-help--top { margin: 0 0 12px; }
-.project-select-label select { width: 100%; padding: 10px 11px; border: 1px solid var(--projects-line); border-radius: 9px; background: rgba(255, 255, 255, .62); color: var(--projects-ink); font: inherit; font-size: 13px; }
-.project-file-list { margin-bottom: 13px; }
-.project-file-list li { display: flex; align-items: center; gap: 8px; min-width: 0; padding: 8px 0; border-top: 1px solid var(--projects-line); }
-.project-file-list__icon { color: #7c3aed; font-size: 13px; }
-.project-file-list__name { flex: 1; min-width: 0; overflow: hidden; color: #454449; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
-.project-upload { width: 100%; }
-.project-upload input { display: none; }
-.projects-modal { position: fixed; z-index: 70; inset: 0; display: grid; place-items: center; padding: 20px; background: rgba(16, 14, 20, .48); backdrop-filter: blur(4px); }
-.projects-dialog { width: min(480px, 100%); max-height: min(720px, calc(100vh - 40px)); overflow: auto; padding: 25px; border: 1px solid rgba(255, 255, 255, .25); border-radius: 18px; background: #fff; box-shadow: 0 24px 80px rgba(13, 11, 17, .25); }
-.projects-dialog__header { display: flex; align-items: flex-start; justify-content: space-between; gap: 15px; margin-bottom: 23px; }
-.projects-dialog h2 { margin: 7px 0 0; font-size: 23px; letter-spacing: -.035em; }
-.projects-field { display: grid; gap: 7px; margin-top: 15px; color: #4b4a50; font-size: 12px; font-weight: 650; }
-.projects-field input, .projects-field textarea, .projects-field select { width: 100%; padding: 10px 11px; border: 1px solid #dedde1; border-radius: 9px; background: #fff; color: #202022; font: inherit; font-size: 13px; font-weight: 400; }
-.projects-field input[type='color'] { height: 40px; padding: 4px; cursor: pointer; }
-.projects-field textarea { min-height: 92px; resize: vertical; line-height: 1.45; }
-.projects-field-row { display: grid; grid-template-columns: 1fr 110px; gap: 13px; }
-.projects-dialog__actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 25px; }
-@media (prefers-reduced-motion: reduce) { .projects-button, .project-card, .project-card__actions { transition: none; } .projects-skeleton-card { animation: none; } }
-@media (prefers-color-scheme: dark) { .projects-shell { --projects-ink: #f0eff2; --projects-muted: #a3a0aa; --projects-line: rgba(255,255,255,.12); --projects-panel: rgba(35,33,39,.86); background: radial-gradient(circle at 90% 0%, rgba(124,58,237,.18), transparent 28rem), #19181c; } .projects-intro h1, .project-hero h1 { color: var(--projects-ink); } .project-hero { background: linear-gradient(110deg, rgba(40,38,45,.95), rgba(34,32,39,.75)); border-color: var(--projects-line); } .project-card__name, .project-file-list__name { color: var(--projects-ink); } .project-instructions, .project-select-label select { background: rgba(19,18,22,.45); color: var(--projects-ink); } .projects-empty { border-color: var(--projects-line); } .projects-dialog { background: #29272d; } .projects-dialog h2, .projects-field, .projects-field input, .projects-field textarea, .projects-field select { color: #f0eff2; } .projects-field input, .projects-field textarea, .projects-field select { border-color: rgba(255,255,255,.16); background: #211f24; } }
-@media (max-width: 980px) { .projects-layout { grid-template-columns: 1fr; } .project-layout { grid-template-columns: 1fr; } .project-layout__aside { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
-@media (max-width: 800px) { .projects-shell { min-height: 100vh; border-radius: 0; } .projects-shell__history { display: none; } .projects-content { padding: 22px 17px 44px; } .projects-intro { margin-top: 34px; } .projects-intro__glyph { width: 56px; height: 56px; border-radius: 17px; font-size: 24px; } .project-hero { align-items: flex-start; flex-direction: column; padding: 20px; } .project-hero__actions { width: 100%; } .project-hero__actions .projects-button { flex: 1; } .project-layout__aside { grid-template-columns: 1fr; } .projects-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 11px; } .project-card, .project-card__open { min-height: 145px; } .project-card__open { padding: 14px; } .project-card__actions { opacity: 1; } .projects-field-row { grid-template-columns: 1fr 90px; } }
-@media (max-width: 450px) { .projects-grid { grid-template-columns: 1fr; } .projects-topbar__actions .projects-button span { display: none; } .projects-topbar__actions .projects-button { width: 38px; padding: 0; } .projects-intro { align-items: flex-start; } .projects-intro__glyph { display: none; } }
+:global(html.dark .projects-workspace) {
+  --projects-page: #000;
+  --projects-surface: #212121;
+  --projects-surface-hover: #2f2f2f;
+  --projects-text: #f2f2f2;
+  --projects-text-secondary: #b4b4b4;
+  --projects-text-muted: #8f8f8f;
+  --projects-border: rgba(255, 255, 255, 0.1);
+  --projects-border-strong: rgba(255, 255, 255, 0.15);
+  --projects-popover: #2f2f2f;
+  --projects-danger: #ff6767;
+}
+.projects-workspace__history { flex: 0 0 auto; }
+.projects-workspace__history :deep(.app-mode-switch) { display: none; }
+.projects-main { position: relative; flex: 1; min-width: 0; min-height: 0; overflow-x: hidden; overflow-y: auto; color: var(--projects-text); background: var(--projects-page); outline: none; }
+.projects-page { width: min(100%, 800px); min-height: 100%; margin: 0 auto; padding: 116px 16px 72px; }
+.projects-main--detail .projects-page { width: 100%; max-width: none; padding: 0 0 96px; }
+.projects-mobile-navigation { display: none; }
+.projects-notice { display: flex; min-height: 42px; align-items: center; gap: 9px; margin-bottom: 18px; border: 1px solid color-mix(in srgb, #b7791f 32%, transparent); border-radius: 12px; padding: 8px 12px; color: var(--projects-text); background: color-mix(in srgb, #f6ad55 13%, var(--projects-page)); font-size: 13px; }
+.projects-notice span { min-width: 0; flex: 1; }
+.projects-notice button { border: 0; padding: 5px; color: inherit; background: transparent; font: inherit; font-weight: 600; cursor: pointer; }
+.projects-detail-content { width: min(100%, 800px); margin: 18px auto 0; padding: 0 16px; }
+.projects-detail-loading { display: grid; gap: 24px; padding-top: 72px; }
+.projects-detail-loading span { display: block; overflow: hidden; background: var(--projects-surface); }
+.projects-detail-loading__title { width: 280px; height: 36px; border-radius: 10px; }
+.projects-detail-loading__composer { width: 100%; height: 52px; border-radius: 28px; }
+.projects-missing { display: grid; min-height: 520px; place-items: center; align-content: center; text-align: center; }
+.projects-missing > span { font-size: 34px; filter: grayscale(1); }
+.projects-missing h1 { margin: 18px 0 0; font-size: 22px; font-weight: 600; }
+.projects-missing p { margin: 8px 0 20px; color: var(--projects-text-secondary); font-size: 14px; }
+.projects-missing button,
+.projects-dialog-button { min-height: 38px; border: 1px solid var(--projects-border-strong); border-radius: 999px; padding: 0 16px; color: var(--projects-text); background: transparent; font: inherit; font-size: 14px; font-weight: 500; cursor: pointer; }
+.projects-missing button:hover,
+.projects-dialog-button:hover:not(:disabled) { background: var(--projects-surface-hover); }
+.projects-editor { display: grid; gap: 18px; color: var(--projects-text); }
+.projects-create-editor {
+  display: block;
+  position: relative;
+  color: #0d0d0d;
+}
+.projects-create-field {
+  display: block;
+  color: #0d0d0d;
+  font-size: 14px;
+  font-weight: 400;
+  line-height: 20px;
+}
+.projects-create-input-wrap {
+  position: relative;
+  display: block;
+  height: 36px;
+  margin-top: 8px;
+}
+.projects-create-input-wrap > input {
+  box-sizing: border-box;
+  display: block;
+  width: 100%;
+  height: 36px;
+  border: 1px solid #0d0d0d;
+  border-radius: 8px;
+  padding: 8px 12px 8px 36px;
+  color: #0d0d0d;
+  background: #fff;
+  font: inherit;
+  font-size: 14px;
+  line-height: 20px;
+  outline: none;
+}
+.projects-create-input-wrap > input::placeholder { color: #8f8f8f; opacity: 1; }
+.projects-create-input-wrap > input:focus-visible {
+  outline: none;
+}
+.projects-create-icon-trigger {
+  position: absolute;
+  z-index: 2;
+  top: 0;
+  left: 0;
+  display: grid;
+  width: 36px;
+  height: 36px;
+  place-items: center;
+  border: 0;
+  border-radius: 8px 0 0 8px;
+  padding: 0;
+  color: #8f8f8f;
+  background: transparent;
+  cursor: pointer;
+}
+.projects-create-icon-trigger:hover,
+.projects-create-icon-trigger[aria-expanded='true'] { color: #0d0d0d; background: #f3f3f3; }
+.projects-create-icon-trigger:focus { outline: none; }
+.projects-create-icon-trigger:focus-visible { outline: 2px solid #0d0d0d; outline-offset: 1px; }
+.projects-create-icon-trigger > span:not(.projects-create-color-dot) {
+  display: grid;
+  min-width: 20px;
+  place-items: center;
+  font-size: 18px;
+  line-height: 20px;
+}
+.projects-create-icon-trigger svg { width: 20px; height: 20px; stroke-width: 1.6; }
+.projects-create-info {
+  display: flex;
+  min-height: 56px;
+  box-sizing: border-box;
+  align-items: center;
+  gap: 12px;
+  margin-top: 16px;
+  border-radius: 12px;
+  padding: 12px;
+  color: #5d5d5d;
+  background: #f3f3f3;
+}
+.projects-create-info svg { width: 20px; height: 24px; flex: 0 0 20px; stroke-width: 1.5; }
+.projects-create-info p {
+  min-width: 0;
+  margin: 0;
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 16px;
+}
+.projects-create-footer {
+  position: relative;
+  display: flex;
+  width: 100%;
+  align-items: center;
+  justify-content: space-between;
+}
+.projects-create-memory-wrap { position: relative; flex: 0 0 auto; }
+.projects-create-memory-trigger {
+  display: inline-flex;
+  width: 104px;
+  height: 36px;
+  align-items: center;
+  justify-content: space-between;
+  border: 0;
+  border-radius: 8px;
+  padding: 0 12px;
+  color: #0d0d0d;
+  background: transparent;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 400;
+  line-height: 20px;
+  cursor: pointer;
+}
+.projects-create-memory-trigger:hover,
+.projects-create-memory-trigger[aria-expanded='true'] { background: #f3f3f3; }
+.projects-create-memory-trigger:focus { outline: none; }
+.projects-create-memory-trigger:focus-visible { outline: 2px solid #0d0d0d; outline-offset: 1px; }
+.projects-create-memory-trigger svg { width: 16px; height: 16px; stroke-width: 1.8; }
+.projects-create-submit {
+  display: inline-flex;
+  min-width: 82px;
+  height: 36px;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 999px;
+  padding: 0 12px;
+  color: #fff;
+  background: #0d0d0d;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 20px;
+  cursor: pointer;
+}
+.projects-create-submit:hover:not(:disabled) { background: #2f2f2f; }
+.projects-create-submit:disabled { color: #fff; background: #c4c4c4; opacity: 1; cursor: not-allowed; }
+.projects-create-icon-menu,
+.projects-create-memory-menu {
+  position: absolute;
+  z-index: 80;
+  border: 1px solid rgb(0 0 0 / 0.08);
+  border-radius: 16px;
+  color: #0d0d0d;
+  background: #fff;
+  box-shadow: 0 8px 12px rgb(0 0 0 / 0.08), 0 0 1px rgb(0 0 0 / 0.62);
+}
+.projects-create-icon-menu {
+  top: 40px;
+  left: -4px;
+  display: grid;
+  width: 260px;
+  box-sizing: border-box;
+  height: 418px;
+  overflow-y: auto;
+  padding: 12px;
+}
+.projects-create-color-grid {
+  display: grid;
+  grid-template-columns: repeat(8, 20px);
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 28px;
+}
+.projects-create-color-swatch {
+  display: grid;
+  width: 20px;
+  height: 20px;
+  place-items: center;
+  border: 0;
+  border-radius: 50%;
+  padding: 0;
+  background: var(--swatch-color);
+  box-shadow: inset 0 0 0 1px rgb(0 0 0 / 0.14);
+  cursor: pointer;
+}
+.projects-create-color-swatch.is-selected { outline: 2px solid #0d0d0d; outline-offset: 2px; }
+.projects-create-custom-color {
+  display: flex;
+  min-height: 40px;
+  align-items: center;
+  gap: 10px;
+  margin-top: 8px;
+  border: 0;
+  border-radius: 8px;
+  padding: 0 4px;
+  color: #5d5d5d;
+  background: transparent;
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+.projects-create-custom-color:hover { background: #f3f3f3; color: #0d0d0d; }
+.projects-create-custom-color__wheel {
+  width: 20px;
+  height: 20px;
+  border: 1px solid rgb(0 0 0 / 0.18);
+  border-radius: 50%;
+  background: conic-gradient(#ef4444, #eab308, #22c55e, #3b82f6, #8b5cf6, #ec4899, #ef4444);
+}
+.projects-create-icon-divider { height: 1px; margin: 4px 0 8px; background: rgb(0 0 0 / 0.1); }
+.projects-create-icon-grid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(36px, 1fr));
+  gap: 4px;
+}
+.projects-create-icon-option {
+  display: grid;
+  width: 36px;
+  height: 36px;
+  place-items: center;
+  border: 0;
+  border-radius: 8px;
+  padding: 0;
+  color: #5d5d5d;
+  background: transparent;
+  font: inherit;
+  font-size: 17px;
+  cursor: pointer;
+}
+.projects-create-icon-option:hover,
+.projects-create-icon-option.is-selected { color: #0d0d0d; background: #f3f3f3; }
+.projects-create-memory-menu {
+  top: calc(100% + 6px);
+  left: -4px;
+  display: grid;
+  width: 320px;
+  box-sizing: border-box;
+  padding: 6px 0;
+}
+.projects-create-memory-option {
+  display: flex;
+  min-height: 52px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin: 0 6px;
+  border: 0;
+  border-radius: 10px;
+  padding: 8px 10px;
+  color: #0d0d0d;
+  background: transparent;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.projects-create-memory-option:last-child { min-height: 68px; }
+.projects-create-memory-option:hover,
+.projects-create-memory-option.is-selected { background: #f3f3f3; }
+.projects-create-memory-copy { display: grid; min-width: 0; gap: 2px; }
+.projects-create-memory-copy strong { font-size: 14px; font-weight: 400; line-height: 20px; }
+.projects-create-memory-copy small { color: #5d5d5d; font-size: 12px; font-weight: 400; line-height: 16px; }
+.projects-create-memory-check { flex: 0 0 auto; font-size: 16px; }
+.projects-create-visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+.projects-field { display: grid; gap: 7px; color: var(--projects-text); font-size: 13px; font-weight: 600; }
+.projects-field small { color: var(--projects-text-secondary); font-size: 12px; font-weight: 400; line-height: 1.45; }
+.projects-field-row { display: grid; grid-template-columns: 112px minmax(0, 1fr); gap: 14px; }
+.projects-field input,
+.projects-field textarea,
+.projects-field select { width: 100%; border: 1px solid var(--projects-border-strong); border-radius: 10px; padding: 10px 12px; color: var(--projects-text); background: var(--projects-page); font: inherit; font-size: 14px; font-weight: 400; line-height: 1.45; }
+.projects-field textarea { min-height: 112px; resize: vertical; }
+.projects-field select { min-height: 42px; }
+.projects-field--icon input { text-align: center; font-size: 22px; }
+.projects-color-control { display: flex; min-width: 0; align-items: center; gap: 10px; }
+.projects-color-control input { width: 42px; height: 42px; flex: 0 0 42px; padding: 4px; cursor: pointer; }
+.projects-color-control span { overflow: hidden; color: var(--projects-text-secondary); font-size: 12px; font-weight: 400; text-overflow: ellipsis; }
+.projects-dialog-button { min-width: 82px; }
+.projects-dialog-button--primary { border-color: var(--projects-text); color: var(--projects-page); background: var(--projects-text); }
+.projects-dialog-button--primary:hover:not(:disabled) { opacity: 0.88; background: var(--projects-text); }
+.projects-dialog-button:disabled { opacity: 0.5; cursor: wait; }
+:global(html.dark) .projects-create-editor,
+:global(html.dark) .projects-create-field { color: #fff; }
+:global(html.dark) .projects-create-input-wrap > input { border-color: #fff; color: #fff; background: #212121; }
+:global(html.dark) .projects-create-input-wrap > input::placeholder { color: #afafaf; }
+:global(html.dark) .projects-create-info { color: #b4b4b4; background: #2f2f2f; }
+:global(html.dark) .projects-create-memory-trigger,
+:global(html.dark) .projects-create-memory-option,
+:global(html.dark) .projects-create-icon-menu,
+:global(html.dark) .projects-create-memory-menu { color: #fff; background: #353535; }
+:global(html.dark) .projects-create-icon-menu,
+:global(html.dark) .projects-create-memory-menu { border-color: rgb(255 255 255 / 0.12); }
+:global(html.dark) .projects-create-memory-trigger:hover,
+:global(html.dark) .projects-create-memory-trigger[aria-expanded='true'],
+:global(html.dark) .projects-create-memory-option:hover,
+:global(html.dark) .projects-create-memory-option.is-selected,
+:global(html.dark) .projects-create-icon-option:hover,
+:global(html.dark) .projects-create-icon-option.is-selected,
+:global(html.dark) .projects-create-icon-trigger:hover,
+:global(html.dark) .projects-create-icon-trigger[aria-expanded='true'] { background: #424242; }
+:global(html.dark) .projects-create-memory-copy small { color: #b4b4b4; }
+:global(html.dark) .projects-create-custom-color,
+:global(html.dark) .projects-create-icon-option { color: #b4b4b4; }
+:global(html.dark) .projects-create-custom-color:hover,
+:global(html.dark) .projects-create-icon-option:hover,
+:global(html.dark) .projects-create-icon-option.is-selected {
+  color: #fff;
+  background: #424242;
+}
+:global(html.dark) .projects-create-submit:disabled { color: #f2f2f2; background: #4a4a4a; }
+.projects-workspace__drawer { position: fixed; z-index: 45; inset: 0; display: flex; }
+.projects-workspace__scrim { position: absolute; inset: 0; border: 0; background: rgb(0 0 0 / 0.45); backdrop-filter: blur(2px); }
+.projects-workspace__drawer :deep(.chat-history) { position: relative; z-index: 1; box-shadow: 18px 0 40px rgb(0 0 0 / 0.22); }
+.projects-drawer-enter-active,
+.projects-drawer-leave-active { transition: opacity 180ms ease; }
+.projects-drawer-enter-from,
+.projects-drawer-leave-to { opacity: 0; }
+.projects-main :deep(button:focus-visible),
+.projects-main :deep(input:focus-visible),
+.projects-main :deep(textarea:focus-visible),
+.projects-main :deep(select:focus-visible),
+.projects-editor :is(input, textarea, select):focus-visible,
+.projects-dialog-button:focus-visible { outline: 2px solid var(--projects-text-muted); outline-offset: 2px; }
+@media (max-width: 767px) {
+  .projects-main { overflow-y: scroll; }
+  .projects-page { width: 100%; padding: 16px 16px 80px; }
+  .projects-main--detail .projects-page { padding-bottom: 152px; }
+  .projects-main--detail .projects-detail-content { margin-top: 10px; }
+  .projects-main--detail .projects-detail-content--sources { margin-top: 18px; }
+  .projects-main:not(.projects-main--detail) :deep(.projects-directory h1) { padding-left: 36px; }
+  .projects-field-row { grid-template-columns: 92px minmax(0, 1fr); }
+}
+@media (max-width: 767px) and (hover: none) and (pointer: coarse) {
+  .projects-mobile-navigation { position: absolute; z-index: 12; top: 8px; left: 8px; display: grid; width: 40px; height: 40px; place-items: center; border: 0; border-radius: 10px; padding: 0; color: var(--projects-text); background: transparent; cursor: pointer; }
+  .projects-mobile-navigation:hover { background: var(--projects-surface-hover); }
+  .projects-workspace__history--desktop { display: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .projects-drawer-enter-active,
+  .projects-drawer-leave-active { transition: none; }
+}
 </style>

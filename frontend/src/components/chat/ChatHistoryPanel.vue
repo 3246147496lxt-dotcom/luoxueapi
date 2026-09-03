@@ -42,14 +42,6 @@
       </WorkspaceSidebarHeader>
     </template>
 
-    <template #mode-switch>
-      <AppModeSwitch
-        v-if="shell"
-        active-mode="chat"
-        @change="handleModeChange"
-      />
-    </template>
-
     <div
       v-if="!sidebarCollapsed || shell"
       class="chat-history__header"
@@ -229,11 +221,6 @@
         </nav>
       </section>
 
-      <div v-if="conversations.length === 0" class="chat-history__empty">
-        <Icon name="chat" size="lg" />
-        <span>{{ t('chat.history.empty') }}</span>
-      </div>
-
       <section v-if="conversations.length > 0" class="chat-history__group">
         <h2>{{ t('chat.history.recent') }}</h2>
         <ul>
@@ -355,7 +342,6 @@ import { inject, nextTick, onBeforeUnmount, ref, toRef, useId, watch } from 'vue
 import { useI18n } from 'vue-i18n'
 import { routerKey } from 'vue-router'
 import Icon from '@/components/icons/Icon.vue'
-import AppModeSwitch from '@/components/layout/AppModeSwitch.vue'
 import UserAccountCard from '@/components/layout/UserAccountCard.vue'
 import WorkspaceSidebarFrame from '@/components/layout/WorkspaceSidebarFrame.vue'
 import WorkspaceSidebarHeader from '@/components/layout/WorkspaceSidebarHeader.vue'
@@ -581,12 +567,6 @@ async function closeSearch() {
   await nextTick()
   if (props.shell) sidebarHeaderRef.value?.focusSearch()
   else searchTriggerRef.value?.focus()
-}
-
-async function handleModeChange(mode: 'chat' | 'work') {
-  if (mode !== 'work') return
-  if (props.mobile || props.overlay) emit('close')
-  await router?.push('/dashboard')
 }
 
 function setConversationSelectRef(id: string, element: unknown) {
@@ -1257,20 +1237,6 @@ onBeforeUnmount(() => {
 
 .chat-history__load-more:disabled {
   opacity: 0.6;
-}
-
-.chat-history__empty {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 10px;
-  min-height: 180px;
-  padding: 24px;
-  color: var(--lx-clay-text-muted);
-  font-size: var(--workspace-type-secondary-size);
-  font-weight: var(--workspace-type-secondary-weight);
-  text-align: center;
 }
 
 .chat-history__group h2 {

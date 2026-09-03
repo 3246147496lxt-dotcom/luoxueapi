@@ -25,10 +25,18 @@ vi.mock('vue-i18n', async () => {
     'nav.adminSections.business': '用户与资源',
     'nav.adminSections.operations': '计费与运营',
     'nav.adminSections.system': '系统与审计',
+    'nav.adminDashboard': '数据看板',
+    'nav.ops': '运维监控',
     'nav.userSections.workbench': '工作台',
     'nav.userSections.api': 'API',
     'nav.userSections.account': '账户',
     'nav.adminUsage': '全站用量',
+    'admin.ops.sidebar.dashboard': '管理仪表盘',
+    'admin.ops.sidebar.usage': '用量明细',
+    'admin.ops.sidebar.sections.overview': '概览',
+    'admin.ops.sidebar.sections.business': '业务资源',
+    'admin.ops.sidebar.sections.operations': '运营管理',
+    'admin.ops.sidebar.sections.system': '系统安全',
     'nav.announcementManagement': '公告管理',
     'nav.systemSettings': '系统设置',
     'nav.support': '支持',
@@ -36,6 +44,7 @@ vi.mock('vue-i18n', async () => {
     'nav.modelCatalog': '模型广场',
     'nav.contactUs': '联系我们',
     'nav.docsTutorial': '文档教程',
+    'nav.webChat': '网页版对话',
     'nav.rechargeAndRedeem': '充值/兑换',
     'nav.modelCenter': '模型中心',
     'nav.balance': '余额',
@@ -46,7 +55,7 @@ vi.mock('vue-i18n', async () => {
     'nav.affiliate': '邀请返利',
     'nav.serviceStatusNav': '服务状态',
     'nav.helpAndResources': '帮助与资源',
-    'quotaViewerLanding.meta.title': '桌面额度查看器',
+    'quotaViewerLanding.meta.title': '桌面积分查看器',
   }
   return {
     ...actual,
@@ -68,6 +77,7 @@ vi.mock('@/composables/useBatchImageAccess', async () => {
 
 import AppSidebar from '../AppSidebar.vue'
 import { adminNavigationDefinition } from '../sidebar/adminNavigation'
+import type { AdminNavigationIcons } from '../sidebar/types'
 import {
   useAppStore,
   useAuthStore,
@@ -194,19 +204,20 @@ describe('AppSidebar grouped admin navigation', () => {
     }) as MediaQueryList)
   })
 
-  it('renders admin navigation directly without the operations wrapper', () => {
+  it('renders the shared operations-baseline icons without an operations wrapper', () => {
     const wrapper = mountSidebar()
     const navigation = wrapper.get('nav.workspace-sidebar-navigation')
-    const dashboardIcon = navigation.get('a[href="/admin/dashboard"] .sidebar-svg-icon svg')
+    const dashboardIcon = navigation.get('a[href="/admin/dashboard"] .sidebar-nav-icon')
     const accountPoolIcon = navigation.get('a[href="/admin/accounts"] .sidebar-svg-icon svg')
     const auditLogIcon = navigation.get('a[href="/admin/audit-logs"] .sidebar-svg-icon svg')
     const modelMarketplaceIcon = navigation.get('a[href="/admin/model-catalog"] .sidebar-svg-icon svg')
 
     expect(wrapper.find('#sidebar-admin-operations-toggle').exists()).toBe(false)
     expect(wrapper.find('#sidebar-admin-operations').exists()).toBe(false)
-    expect(navigation.get('a[href="/admin/dashboard"]').text()).toContain('nav.adminDashboard')
-    expect(dashboardIcon.attributes('viewBox')).toBe('0 0 1024 1024')
-    expect(dashboardIcon.get('path').attributes('fill')).toBe('currentColor')
+    expect(navigation.get('a[href="/admin/dashboard"]').text()).toContain('数据看板')
+    expect(dashboardIcon.attributes('viewBox')).toBe('0 0 24 24')
+    expect(dashboardIcon.attributes('stroke')).toBe('currentColor')
+    expect(dashboardIcon.attributes('stroke-width')).toBe('1.5')
     expect(accountPoolIcon.attributes('viewBox')).toBe('-112 -112 1248 1248')
     expect(accountPoolIcon.get('path').attributes('fill')).toBe('currentColor')
     expect(auditLogIcon.attributes('viewBox')).toBe('-32 -32 1088 1088')
@@ -216,6 +227,87 @@ describe('AppSidebar grouped admin navigation', () => {
     expect(modelMarketplaceIcon.attributes('fill')).toBe('currentColor')
     expect(modelMarketplaceIcon.findAll('path')).toHaveLength(3)
     expect(wrapper.text()).not.toContain('nav.operationsManagement')
+  })
+
+  it('keeps the three overview icon shapes fixed in the shared navigation definition', () => {
+    const icons = {
+      dashboard: Symbol('dashboard'),
+      chart: Symbol('chart'),
+      opsChart: Symbol('ops-chart'),
+      usageChart: Symbol('usage-chart'),
+      users: Symbol('users'),
+      folder: Symbol('folder'),
+      server: Symbol('server'),
+      channel: Symbol('channel'),
+      priceTag: Symbol('price-tag'),
+      signal: Symbol('signal'),
+      skillMarket: Symbol('skill-market'),
+      creditCard: Symbol('credit-card'),
+      order: Symbol('order'),
+      ticket: Symbol('ticket'),
+      gift: Symbol('gift'),
+      shield: Symbol('shield'),
+      diagnostics: Symbol('diagnostics'),
+      book: Symbol('book'),
+      cog: Symbol('cog'),
+    } as unknown as AdminNavigationIcons
+    const items = adminNavigationDefinition.buildItems({
+      t: (key: string) => key,
+      simpleMode: false,
+      opsMonitoringEnabled: () => true,
+      adminPaymentEnabled: () => true,
+      customMenuItems: [],
+      icons,
+    })
+
+    expect(items.find(item => item.path === '/admin/dashboard')?.icon).toBe(icons.dashboard)
+    expect(items.find(item => item.path === '/admin/ops')?.icon).toBe(icons.opsChart)
+    expect(items.find(item => item.path === '/admin/usage')?.icon).toBe(icons.usageChart)
+    expect(items.slice(0, 3).every(item => item.iconSvg === undefined)).toBe(true)
+  })
+
+  it('keeps every administrator label unchanged when entering operations monitoring', () => {
+    enableAllAdminNavigation()
+
+    const readSidebarCopy = (path: string) => {
+      routeState.path = path
+      const wrapper = mountSidebar('admin')
+      const navigation = wrapper.get('nav.workspace-sidebar-navigation')
+      const copy = {
+        sections: wrapper
+          .findAll('[data-testid^="sidebar-admin-"] .sidebar-section-title')
+          .map(section => section.text()),
+        overview: [
+          '/admin/dashboard',
+          '/admin/ops',
+          '/admin/usage',
+        ].map(href => navigation.get(`a[href="${href}"]`).text().trim()),
+        allItems: navigation
+          .findAll('.sidebar-link')
+          .map(item => item.text().trim()),
+      }
+      wrapper.unmount()
+      return copy
+    }
+
+    const dashboardCopy = readSidebarCopy('/admin/dashboard')
+    const operationsCopy = readSidebarCopy('/admin/ops')
+
+    expect(operationsCopy).toEqual(dashboardCopy)
+    expect(operationsCopy.sections).toEqual([
+      '概览',
+      '用户与资源',
+      '计费与运营',
+      '系统与审计',
+    ])
+    expect(operationsCopy.overview).toEqual(['数据看板', '运维监控', '全站用量'])
+    expect(operationsCopy.allItems).toEqual(expect.not.arrayContaining([
+      '管理仪表盘',
+      '用量明细',
+      '业务资源',
+      '运营管理',
+      '系统安全',
+    ]))
   })
 
   it('keeps the full-height sidebar widths aligned with the application shell', () => {
@@ -931,7 +1023,7 @@ describe('AppSidebar grouped admin navigation', () => {
     expect(wrapper.find('a[href="/admin/dashboard"]').exists()).toBe(false)
   })
 
-  it('keeps only simple-mode account actions in the regular-user rail', async () => {
+  it('keeps only simple-mode account actions in the regular-user rail without a mode switch', () => {
     useAuthStore()
     const rawAuthState = toRaw(pinia.state.value.auth) as unknown as {
       runMode: Ref<'standard' | 'simple'>
@@ -940,12 +1032,11 @@ describe('AppSidebar grouped admin navigation', () => {
 
     const wrapper = mountSidebar('user')
 
-    expect(wrapper.find('nav a[href="/chat"]').exists()).toBe(false)
-    const modeSwitch = wrapper.get('[data-testid="app-mode-switch"]')
-    expect(modeSwitch.attributes('data-active-mode')).toBe('work')
-    expect(modeSwitch.findAll('button')).toHaveLength(2)
-    await modeSwitch.findAll('button')[0]!.trigger('click')
-    expect(routerPush).toHaveBeenCalledWith('/chat')
+    const webChatLink = wrapper.get('[data-testid="sidebar-web-chat"]')
+    expect(webChatLink.attributes('href')).toBe('/chat')
+    expect(webChatLink.attributes('target')).toBe('_blank')
+    expect(webChatLink.attributes('rel')).toBe('noopener noreferrer')
+    expect(wrapper.find('[data-testid="app-mode-switch"]').exists()).toBe(false)
     expect(wrapper.get('[data-testid="sidebar-docs-tutorial"]').attributes('href')).toBe('/docs/')
     expect(wrapper.find('a[href="/quota-viewer"]').exists()).toBe(false)
     expect(wrapper.find('a[href="/subscriptions"]').exists()).toBe(true)
@@ -958,6 +1049,7 @@ describe('AppSidebar grouped admin navigation', () => {
   it('groups the Work workspace into workbench, API, and account IA', () => {
     enableUserNavigation()
     const wrapper = mountSidebar('user')
+    expect(wrapper.find('[data-testid="app-mode-switch"]').exists()).toBe(false)
     const workbenchSection = wrapper.get('[data-testid="sidebar-user-workbench-section"]')
     const apiSection = wrapper.get('[data-testid="sidebar-user-api-section"]')
     const accountSection = wrapper.get('[data-testid="sidebar-user-account-section"]')
@@ -983,6 +1075,13 @@ describe('AppSidebar grouped admin navigation', () => {
     expect(accountSection.get('a[href="/subscriptions"]').text()).toContain('余额与会员')
     expect(accountSection.get('a[href="/pricing"]').text()).toContain('会员订阅')
     expect(accountSection.get('a[href="/affiliate"]').text()).toContain('邀请返利')
+    const orderIconPath = accountSection.get('a[href="/orders"] .sidebar-nav-icon path')
+      .attributes('d')
+    const documentationIconPath = wrapper
+      .get('[data-testid="sidebar-docs-tutorial"] .sidebar-nav-icon path')
+      .attributes('d')
+    expect(orderIconPath).toContain('M9 12h3.75')
+    expect(orderIconPath).not.toBe(documentationIconPath)
     const skillIcon = workbenchSection.get('a[href="/skills"] .sidebar-svg-icon svg')
     expect(skillIcon.attributes('viewBox')).toBe('0 0 1024 1024')
     expect(skillIcon.attributes('fill')).toBe('currentColor')
@@ -996,7 +1095,10 @@ describe('AppSidebar grouped admin navigation', () => {
       .classes()).toContain('sidebar-support-section--bottom')
     expect(wrapper.find('[data-testid="sidebar-announcements"]').exists()).toBe(false)
     expect(wrapper.find('[data-testid="sidebar-settings"]').exists()).toBe(false)
-    expect(wrapper.find('nav a[href="/chat"]').exists()).toBe(false)
+    const webChatLink = wrapper.get('[data-testid="sidebar-web-chat"]')
+    expect(webChatLink.attributes('href')).toBe('/chat')
+    expect(webChatLink.attributes('target')).toBe('_blank')
+    expect(webChatLink.attributes('rel')).toBe('noopener noreferrer')
     expect(wrapper.find('nav a[href="/profile"]').exists()).toBe(false)
     expect(wrapper.find('[data-testid="sidebar-account-dock-stub"]').exists()).toBe(true)
   })
@@ -1024,12 +1126,17 @@ describe('AppSidebar grouped admin navigation', () => {
     wrapper.unmount()
   })
 
-  it('keeps documentation as a low-frequency external link below account navigation', () => {
+  it('keeps web chat and documentation as low-frequency external links below account navigation', () => {
     const wrapper = mountSidebar('user')
     const navigation = wrapper.get('nav.workspace-sidebar-navigation')
     const supportSection = navigation.get('[data-testid="sidebar-support-section"]')
+    const webChatLink = navigation.get('[data-testid="sidebar-web-chat"]')
     const docsLink = navigation.get('[data-testid="sidebar-docs-tutorial"]')
 
+    expect(webChatLink.text()).toContain('网页版对话')
+    expect(webChatLink.attributes('href')).toBe('/chat')
+    expect(webChatLink.attributes('target')).toBe('_blank')
+    expect(webChatLink.attributes('rel')).toBe('noopener noreferrer')
     expect(docsLink.text()).toContain('文档教程')
     expect(docsLink.attributes('href')).toBe('/docs/')
     expect(docsLink.attributes('target')).toBe('_blank')
@@ -1045,6 +1152,7 @@ describe('AppSidebar grouped admin navigation', () => {
     expect(supportSection.find('[data-testid="sidebar-help-resources"]').exists()).toBe(false)
     expect(supportSection.find('a[href="/home"]').exists()).toBe(false)
     expect(wrapper.findAll('[data-testid="sidebar-docs-tutorial"]')).toHaveLength(1)
+    expect(wrapper.findAll('[data-testid="sidebar-web-chat"]')).toHaveLength(1)
     expect(wrapper.get('[data-testid="sidebar-account-dock-stub"]').element.contains(
       supportSection.element,
     )).toBe(false)
@@ -1061,18 +1169,19 @@ describe('AppSidebar grouped admin navigation', () => {
     expect(wrapper.find('a[href="/admin/documentation"]').exists()).toBe(true)
   })
 
-  it('keeps only documentation in an administrator personal workspace', () => {
+  it('keeps web chat and documentation in an administrator personal workspace', () => {
     routeState.path = '/dashboard'
     const wrapper = mountSidebar('admin')
 
     expect(wrapper.find('[data-testid="sidebar-support-section"]').exists()).toBe(true)
     expect(wrapper.find('[data-testid="sidebar-announcements"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="sidebar-web-chat"]').exists()).toBe(true)
     expect(wrapper.find('[data-testid="sidebar-docs-tutorial"]').exists()).toBe(true)
     expect(wrapper.find('[data-testid="sidebar-contact-us"]').exists()).toBe(false)
     expect(wrapper.find('[data-testid="sidebar-settings"]').exists()).toBe(false)
   })
 
-  it('keeps the configured model catalog in Workbench and documentation as the only auxiliary link', () => {
+  it('keeps the configured model catalog in Workbench and web chat/documentation as auxiliary links', () => {
     const appStore = useAppStore()
     appStore.cachedPublicSettings = {
       public_model_catalog_enabled: true,
@@ -1086,7 +1195,7 @@ describe('AppSidebar grouped admin navigation', () => {
 
     expect(supportSection.findAll('.sidebar-support-link').map((link) => (
       link.attributes('href')
-    ))).toEqual(['/docs/'])
+    ))).toEqual(['/chat', '/docs/'])
     expect(supportSection.findAll('.sidebar-support-link').every((link) => (
       link.attributes('target') === '_blank'
       && link.attributes('rel') === 'noopener noreferrer'
@@ -1139,6 +1248,7 @@ describe('AppSidebar grouped admin navigation', () => {
 
     expect(wrapper.find('[data-testid="sidebar-user-workbench-section"]').exists()).toBe(false)
     expect(wrapper.get('[data-testid="sidebar-docs-tutorial"]').attributes('href')).toBe('/docs/')
+    expect(wrapper.find('[data-testid="sidebar-web-chat"]').exists()).toBe(false)
     expect(wrapper.find('a[href="/models"]').exists()).toBe(false)
   })
 

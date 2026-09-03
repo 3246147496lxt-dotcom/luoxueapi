@@ -18,6 +18,7 @@ vi.mock('vue-i18n', async (importOriginal) => {
           'skills.card.noSummary': '管理员暂未提供简介。',
           'skills.card.tags': 'Skill 标签',
           'skills.card.downloads': '{count} 次下载',
+          'skills.card.view': '查看',
         }
         return Object.entries(params ?? {}).reduce(
           (message, [name, value]) => message.replace(`{${name}}`, String(value)),
@@ -71,8 +72,8 @@ function skill(): PublicSkill {
   const currentVersion = version()
   return {
     slug: 'frontend-design',
-    display_name: 'Frontend Design 前端设计',
-    summary: '这段摘要不应出现在精简卡片中。',
+    display_name: '前端界面设计',
+    summary: '创建具有鲜明辨识度与高设计品质的生产级前端界面。',
     description: '',
     category: 'design-ui',
     tags: ['anthropic', 'codex', 'html/css', 'accessibility', 'ui/ux'],
@@ -89,7 +90,7 @@ function skill(): PublicSkill {
 }
 
 describe('SkillCard', () => {
-  it('keeps the whole compact card linked while showing only two useful tags', () => {
+  it('keeps one whole-card link with the summary, category at bottom-left, and View at bottom-right', () => {
     const wrapper = mount(SkillCard, {
       props: {
         skill: skill(),
@@ -109,18 +110,24 @@ describe('SkillCard', () => {
     expect(link.attributes('data-to')).toBe('/skills/frontend-design')
     expect(link.element.parentElement).toBe(card.element)
 
-    const category = link.get('.skill-card__category')
     const title = link.get('h3')
+    const summary = link.get('.skill-card__body p')
+    const footer = link.get('.skill-card__footer')
+    const category = footer.get('.skill-card__category')
+    const action = footer.get('.skill-card__action')
+    expect(title.text()).toBe('前端界面设计')
+    expect(summary.text()).toBe('创建具有鲜明辨识度与高设计品质的生产级前端界面。')
     expect(category.text()).toBe('设计与 UI')
-    expect(title.text()).toBe('Frontend Design 前端设计')
+    expect(action.text()).toBe('查看')
+    expect(action.attributes('aria-hidden')).toBe('true')
     expect(
-      category.element.compareDocumentPosition(title.element) & Node.DOCUMENT_POSITION_FOLLOWING,
+      title.element.compareDocumentPosition(summary.element) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy()
+    expect(
+      category.element.compareDocumentPosition(action.element) & Node.DOCUMENT_POSITION_FOLLOWING,
     ).toBeTruthy()
 
-    expect(link.get('.skill-card__tags').findAll('li').map((tag) => tag.text())).toEqual([
-      'html/css',
-      'ui/ux',
-    ])
+    expect(link.find('.skill-card__tags').exists()).toBe(false)
     expect(link.text()).not.toContain('anthropic')
     expect(link.text()).not.toContain('codex')
     expect(link.text()).not.toContain('accessibility')
@@ -128,12 +135,22 @@ describe('SkillCard', () => {
 
     expect(link.find('img').exists()).toBe(false)
     expect(link.find('.skill-card__mark').exists()).toBe(false)
-    expect(link.text()).not.toContain('这段摘要不应出现在精简卡片中。')
     expect(link.text()).not.toContain('v1.0.0')
     expect(link.text()).not.toContain('8月5日')
     expect(link.text()).not.toContain('1.2万 次下载')
-    expect(link.text()).not.toContain('查看详情')
     expect(link.find('[data-icon-name="arrowRight"]').exists()).toBe(false)
     expect(link.find('[data-icon-name="chevronRight"]').exists()).toBe(false)
+  })
+
+  it('uses the fallback summary when the catalog item has no summary', () => {
+    const item = skill()
+    item.summary = ''
+    const wrapper = mount(SkillCard, {
+      props: { skill: item },
+      global: { stubs: { RouterLink: RouterLinkStub } },
+    })
+
+    expect(wrapper.get('.skill-card__body p').text()).toBe('管理员暂未提供简介。')
+    expect(wrapper.get('.skill-card__category').text()).toBe('design-ui')
   })
 })

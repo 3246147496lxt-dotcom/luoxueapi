@@ -2,14 +2,13 @@
   <article class="skill-card">
     <RouterLink :to="`/skills/${encodeURIComponent(skill.slug)}`" class="skill-card__link">
       <div class="skill-card__body">
-        <span class="skill-card__category">{{ categoryLabel }}</span>
         <h3>{{ skill.display_name }}</h3>
+        <p>{{ skill.summary || t('skills.card.noSummary') }}</p>
       </div>
 
-      <div v-if="visibleTags.length" class="skill-card__meta">
-        <ul class="skill-card__tags" :aria-label="t('skills.card.tags')">
-          <li v-for="tag in visibleTags" :key="tag">{{ tag }}</li>
-        </ul>
+      <div class="skill-card__footer">
+        <span class="skill-card__category">{{ categoryLabel }}</span>
+        <span class="skill-card__action" aria-hidden="true">{{ t('skills.card.view') }}</span>
       </div>
     </RouterLink>
   </article>
@@ -28,157 +27,133 @@ const props = withDefaults(defineProps<{
 })
 
 const { t } = useI18n()
-const hiddenMarketplaceTags = new Set(['anthropic', 'codex'])
-const preferredMarketplaceTags = ['html/css', 'ui/ux']
 
 const categoryLabel = computed(() => (
   props.categoryName || props.skill.category || t('skills.labels.uncategorized')
 ))
-const visibleTags = computed(() => {
-  const candidates = props.skill.tags.filter(
-    (tag) => !hiddenMarketplaceTags.has(tag.trim().toLowerCase()),
-  )
-  const byNormalizedTag = new Map(
-    candidates.map((tag) => [tag.trim().toLowerCase(), tag] as const),
-  )
-  const preferred = preferredMarketplaceTags
-    .map((tag) => byNormalizedTag.get(tag))
-    .filter((tag): tag is string => Boolean(tag))
-  const remaining = candidates.filter(
-    (tag) => !preferredMarketplaceTags.includes(tag.trim().toLowerCase()),
-  )
-  return [...preferred, ...remaining].slice(0, 2)
-})
 </script>
 
 <style scoped>
 .skill-card {
   min-width: 0;
-  overflow: visible;
-  border: 1px solid var(--lx-clay-border);
-  border-radius: 14px;
-  background: var(--lx-clay-surface-elevated);
+  height: 210px;
+  min-height: 210px;
+  overflow: hidden;
+  border: 1px solid var(--skill-border, var(--workspace-border));
+  border-radius: 16px;
+  background: var(--skill-surface, var(--workspace-card-surface));
   box-shadow: none;
   transition: border-color 180ms ease, box-shadow 180ms ease, transform 180ms ease;
 }
 
 .skill-card:hover {
-  border-color: color-mix(in srgb, var(--lx-clay-accent-deep) 35%, var(--lx-clay-border));
-  box-shadow: 0 10px 26px color-mix(in srgb, var(--lx-clay-accent-deep) 8%, transparent);
+  border-color: var(--skill-border-strong, var(--workspace-border-strong));
+  box-shadow: 0 4px 12px rgb(0 0 0 / 0.02);
   transform: translateY(-1px);
 }
 
 .skill-card__link {
-  min-height: 89.5px;
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(130px, auto);
-  align-items: center;
-  gap: 40px;
-  border-radius: 13px;
-  padding: 18px 24px;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  border-radius: 15px;
+  padding: 20px;
   color: inherit;
   text-decoration: none;
 }
 
 .skill-card__link:focus-visible {
-  outline: 3px solid color-mix(in srgb, var(--lx-clay-accent-deep) 65%, transparent);
-  outline-offset: 3px;
+  outline: 2px solid var(--skill-ink, var(--workspace-text));
+  outline-offset: -3px;
 }
 
 .skill-card__body {
   min-width: 0;
 }
 
-.skill-card__category {
-  display: block;
-  overflow: hidden;
-  margin-bottom: 6px;
-  color: var(--lx-clay-text-muted);
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.02em;
-  line-height: 1.25;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
 .skill-card__body h3 {
-  overflow: hidden;
   margin: 0;
-  color: var(--lx-clay-text);
-  font-family: var(--lx-clay-font-display);
-  font-size: 18px;
-  font-weight: 900;
-  letter-spacing: -0.015em;
-  line-height: 1.3;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow: hidden;
+  color: var(--skill-ink, var(--workspace-text));
+  font-family: var(--workspace-font-ui);
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 1.25;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
 }
 
-.skill-card__meta {
-  min-width: 130px;
+.skill-card__body p {
+  margin: 8px 0 0;
+  overflow: hidden;
+  color: var(--skill-copy, var(--workspace-text-secondary));
+  font-family: var(--workspace-font-ui);
+  font-size: 13px;
+  line-height: 1.625;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.skill-card__footer {
+  min-width: 0;
   display: flex;
   align-items: center;
-  justify-content: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+  margin-top: auto;
 }
 
-.skill-card__tags {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: flex-end;
-  gap: 6px;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-.skill-card__tags li {
+.skill-card__category {
+  min-width: 0;
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  overflow: hidden;
+  border: 1px solid var(--skill-border, var(--workspace-border));
   border-radius: 6px;
-  padding: 3px 8px;
-  background: var(--lx-clay-recessed);
-  color: var(--lx-clay-text-muted);
+  padding: 0 8px;
+  background: var(--skill-surface-subtle, var(--workspace-surface-subtle));
+  color: var(--skill-copy, var(--workspace-text-secondary));
   font-size: 11px;
-  font-weight: 750;
-  line-height: 1.3;
+  font-weight: 500;
+  line-height: 1;
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-@media (max-width: 1023px) {
-  .skill-card__link {
-    min-height: 157px;
-    grid-template-columns: minmax(0, 1fr);
-    align-content: center;
-    gap: 29px;
-    padding: 24px;
-  }
-
-  .skill-card__meta {
-    min-width: 0;
-    justify-content: flex-start;
-    border-top: 1px solid var(--lx-clay-border);
-    padding-top: 16px;
-  }
-
-  .skill-card__tags {
-    justify-content: flex-start;
-  }
+.skill-card__action {
+  width: 72px;
+  height: 36px;
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--skill-action, #0b8bed);
+  border-radius: 999px;
+  background: var(--skill-action, #0b8bed);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1;
+  transition: background-color 160ms ease, border-color 160ms ease;
 }
 
-@media (max-width: 767px) {
-  .skill-card__link {
-    min-height: 141px;
-    gap: 30.5px;
-    padding: 16px;
-  }
-
-  .skill-card__meta {
-    padding-top: 14px;
-  }
+.skill-card:hover .skill-card__action,
+.skill-card__link:focus-visible .skill-card__action {
+  border-color: var(--skill-action-hover, #075985);
+  background: var(--skill-action-hover, #075985);
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .skill-card {
+  .skill-card,
+  .skill-card__action {
     transition-duration: 0.01ms;
+  }
+
+  .skill-card:hover {
+    transform: none;
   }
 }
 </style>

@@ -152,6 +152,7 @@ export default {
     home: 'Home',
     dashboard: 'Dashboard',
     gptChat: 'GPT Chat',
+    webChat: 'Web Chat',
     adminDashboard: 'Data Dashboard',
     adminWorkspace: 'Admin Workspace',
     personalWorkspace: 'My Workspace',

@@ -36,22 +36,31 @@
         </a>
 
         <div class="public-site-desktop-nav">
-          <a href="/home#steps">{{ t('home.nav.quickStart') }}</a>
-          <router-link
-            v-if="catalogEntryVisible"
-            to="/models.html"
-            :aria-current="page === 'models' ? 'page' : undefined"
-          >
-            {{ t('modelCatalog.navLabel') }}
-          </router-link>
-          <router-link
-            v-if="skillMarketEntryVisible"
-            to="/skills"
-            :aria-current="page === 'skills' ? 'page' : undefined"
-          >
-            {{ t('skills.navLabel') }}
-          </router-link>
-          <a v-if="tutorialUrl" :href="tutorialUrl">{{ t('home.nav.tutorial') }}</a>
+          <template v-if="page === 'models' && catalogEntryVisible">
+            <router-link to="/models.html" aria-current="page">
+              {{ t('modelCatalog.navLabel') }}
+            </router-link>
+            <a href="#catalog-pricing-note">{{ t('modelCatalog.nav.pricing') }}</a>
+            <a :href="docUrl || '/home#steps'">{{ t('modelCatalog.nav.docs') }}</a>
+            <router-link to="/monitor">{{ t('modelCatalog.nav.status') }}</router-link>
+          </template>
+          <template v-else>
+            <a href="/home#steps">{{ t('home.nav.quickStart') }}</a>
+            <router-link
+              v-if="catalogEntryVisible"
+              to="/models.html"
+            >
+              {{ t('modelCatalog.navLabel') }}
+            </router-link>
+            <router-link
+              v-if="skillMarketEntryVisible"
+              to="/skills"
+              :aria-current="page === 'skills' ? 'page' : undefined"
+            >
+              {{ t('skills.navLabel') }}
+            </router-link>
+            <a v-if="tutorialUrl" :href="tutorialUrl">{{ t('home.nav.tutorial') }}</a>
+          </template>
         </div>
 
         <div class="public-site-actions">
@@ -98,31 +107,46 @@
       <transition name="public-site-mobile-menu">
         <div v-if="mobileMenuOpen" id="public-site-mobile-menu" class="public-site-mobile-panel">
           <div class="public-site-mobile-inner">
-            <a
-              href="/home#steps"
-              @click="closeMobileMenu()"
-            >
-              {{ t('home.nav.quickStart') }}
-            </a>
-            <router-link
-              v-if="catalogEntryVisible"
-              to="/models.html"
-              :aria-current="page === 'models' ? 'page' : undefined"
-              @click="closeMobileMenu()"
-            >
-              {{ t('modelCatalog.navLabel') }}
-            </router-link>
-            <router-link
-              v-if="skillMarketEntryVisible"
-              to="/skills"
-              :aria-current="page === 'skills' ? 'page' : undefined"
-              @click="closeMobileMenu()"
-            >
-              {{ t('skills.navLabel') }}
-            </router-link>
-            <a v-if="tutorialUrl" :href="tutorialUrl" @click="closeMobileMenu()">
-              {{ t('home.nav.tutorial') }}
-            </a>
+            <template v-if="page === 'models' && catalogEntryVisible">
+              <router-link to="/models.html" aria-current="page" @click="closeMobileMenu()">
+                {{ t('modelCatalog.navLabel') }}
+              </router-link>
+              <a href="#catalog-pricing-note" @click="closeMobileMenu()">
+                {{ t('modelCatalog.nav.pricing') }}
+              </a>
+              <a :href="docUrl || '/home#steps'" @click="closeMobileMenu()">
+                {{ t('modelCatalog.nav.docs') }}
+              </a>
+              <router-link to="/monitor" @click="closeMobileMenu()">
+                {{ t('modelCatalog.nav.status') }}
+              </router-link>
+            </template>
+            <template v-else>
+              <a
+                href="/home#steps"
+                @click="closeMobileMenu()"
+              >
+                {{ t('home.nav.quickStart') }}
+              </a>
+              <router-link
+                v-if="catalogEntryVisible"
+                to="/models.html"
+                @click="closeMobileMenu()"
+              >
+                {{ t('modelCatalog.navLabel') }}
+              </router-link>
+              <router-link
+                v-if="skillMarketEntryVisible"
+                to="/skills"
+                :aria-current="page === 'skills' ? 'page' : undefined"
+                @click="closeMobileMenu()"
+              >
+                {{ t('skills.navLabel') }}
+              </router-link>
+              <a v-if="tutorialUrl" :href="tutorialUrl" @click="closeMobileMenu()">
+                {{ t('home.nav.tutorial') }}
+              </a>
+            </template>
             <div class="public-site-mobile-footer">
               <LocaleSwitcher
                 data-testid="mobile-locale-switcher"
@@ -1019,6 +1043,240 @@ onBeforeUnmount(() => {
 
   .public-site-page--snow .public-site-mobile-footer > a {
     display: none;
+  }
+}
+
+/* The model catalog is a price directory, so it uses a quiet, flat shell.
+   Keep the expressive Snow Clay treatment on home and skills pages. */
+.public-site-page--snow.public-site-page--models {
+  --page: #f8fafc;
+  --surface: #ffffff;
+  --surface-soft: #f7f7f8;
+  --surface-accent: #f7f7f8;
+  --ink: #111827;
+  --copy: #4b5563;
+  --muted: #6b7280;
+  --border: #e5e7eb;
+  --accent: #374151;
+  --accent-strong: #1f2937;
+  --accent-ink: #374151;
+  --surface-elevated: #ffffff;
+  --primary-violet: #374151;
+  --action-violet-start: #111827;
+  --action-violet-end: #111827;
+  background-color: var(--page);
+  background-image: none;
+}
+
+.public-site-page--snow.public-site-page--models .public-site-header,
+.public-site-page--snow.public-site-page--models .public-site-header--elevated {
+  top: 0;
+  background: var(--page);
+  border-bottom: 1px solid var(--border);
+  box-shadow: none;
+}
+
+.public-site-page--snow.public-site-page--models .public-site-nav,
+.public-site-page--snow.public-site-page--models .public-site-header--elevated .public-site-nav {
+  width: min(1240px, calc(100% - 40px));
+  min-height: 68px;
+  height: 68px;
+  padding: 0;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
+.public-site-page--snow.public-site-page--models .public-site-brand-mark {
+  width: 36px;
+  height: 36px;
+}
+
+.public-site-page--snow.public-site-page--models .public-site-brand-name {
+  color: var(--ink);
+  font-family: var(--lx-clay-font-ui);
+  font-size: 18px;
+  font-weight: 720;
+}
+
+.public-site-page--snow.public-site-page--models .public-site-brand-api {
+  color: var(--copy);
+}
+
+.public-site-page--snow.public-site-page--models .public-site-desktop-nav {
+  gap: 24px;
+}
+
+.public-site-page--snow.public-site-page--models .public-site-desktop-nav a,
+.public-site-page--snow.public-site-page--models .public-site-footer a {
+  color: var(--copy);
+}
+
+.public-site-page--snow.public-site-page--models .public-site-desktop-nav a:hover,
+.public-site-page--snow.public-site-page--models .public-site-desktop-nav a[aria-current="page"],
+.public-site-page--snow.public-site-page--models .public-site-footer a:hover {
+  color: var(--ink);
+}
+
+.public-site-page--snow.public-site-page--models .public-site-icon-button,
+.public-site-page--snow.public-site-page--models .public-site-desktop-action :deep(button[aria-haspopup="menu"]) {
+  width: 44px;
+  min-width: 44px;
+  height: 44px;
+  min-height: 44px;
+  border: 1px solid var(--border);
+  border-radius: 50%;
+  background: var(--surface);
+  box-shadow: none;
+  color: var(--copy) !important;
+}
+
+.public-site-page--snow.public-site-page--models .public-site-icon-button:hover,
+.public-site-page--snow.public-site-page--models .public-site-desktop-action :deep(button[aria-haspopup="menu"]):hover {
+  border-color: color-mix(in srgb, var(--border) 60%, var(--ink));
+  background: var(--surface-soft);
+  color: var(--ink) !important;
+}
+
+.public-site-page--snow.public-site-page--models .public-site-account-link {
+  min-height: 40px;
+  height: 40px;
+  border: 1px solid var(--ink);
+  border-radius: 999px;
+  background: var(--ink);
+  box-shadow: none;
+  color: var(--page);
+  padding-inline: 16px;
+  font-size: 13px;
+  transition: background-color 150ms ease, color 150ms ease, border-color 150ms ease;
+}
+
+.public-site-page--snow.public-site-page--models .public-site-account-link:hover {
+  transform: none;
+  border-color: var(--accent-strong);
+  background: var(--accent-strong);
+  box-shadow: none;
+}
+
+.public-site-page--snow.public-site-page--models .public-site-footer {
+  padding-block: 28px;
+  background: transparent;
+}
+
+.public-site-page--snow.public-site-page--models .public-site-footer p {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.public-site-page--snow.public-site-page--models .public-site-footer nav {
+  gap: 20px;
+}
+
+.public-site-page--snow.public-site-page--models .public-site-footer-mark {
+  width: 32px;
+  height: 32px;
+}
+
+.public-site-page--snow.public-site-page--models.public-site-page--dark {
+  --page: #111111;
+  --surface: #171717;
+  --surface-soft: #212121;
+  --surface-accent: #212121;
+  --ink: #ececec;
+  --copy: #b4b4b4;
+  --muted: #8a8a8a;
+  --border: rgb(255 255 255 / 0.1);
+  --accent: #ececec;
+  --accent-strong: #ffffff;
+  --accent-ink: #ececec;
+  --surface-elevated: #171717;
+  background-color: var(--page);
+  background-image: none;
+}
+
+.public-site-page--snow.public-site-page--models.public-site-page--dark .public-site-account-link {
+  background: var(--ink);
+  color: var(--page);
+}
+
+@media (max-width: 1023px) {
+  .public-site-page--snow.public-site-page--models .public-site-header,
+  .public-site-page--snow.public-site-page--models .public-site-header--elevated {
+    top: 0;
+  }
+
+  .public-site-page--snow.public-site-page--models .public-site-nav,
+  .public-site-page--snow.public-site-page--models .public-site-header--elevated .public-site-nav {
+    width: calc(100% - 32px);
+    min-height: 64px;
+    height: 64px;
+    padding-inline: 0;
+  }
+
+  .public-site-page--snow.public-site-page--models .public-site-mobile-panel {
+    top: 100%;
+    right: 0;
+    left: 0;
+    border: 0;
+    border-bottom: 1px solid var(--border);
+    border-radius: 0;
+    background: var(--surface);
+    box-shadow: 0 10px 24px rgb(15 23 42 / 0.08);
+    backdrop-filter: none;
+  }
+
+  .public-site-page--snow.public-site-page--models .public-site-mobile-inner {
+    width: min(100% - 32px, 1120px);
+    margin-inline: auto;
+    padding: 8px 0 16px;
+  }
+
+  .public-site-page--snow.public-site-page--models .public-site-mobile-inner > a {
+    border-radius: 8px;
+    color: var(--copy);
+  }
+
+  .public-site-page--snow.public-site-page--models .public-site-mobile-inner > a:hover {
+    background: var(--surface-soft);
+    color: var(--ink);
+  }
+
+  .public-site-page--snow.public-site-page--models.public-site-page--dark .public-site-mobile-panel {
+    box-shadow: 0 10px 24px rgb(0 0 0 / 0.28);
+  }
+}
+
+@media (max-width: 767px) {
+  .public-site-page--snow.public-site-page--models .public-site-nav,
+  .public-site-page--snow.public-site-page--models .public-site-header--elevated .public-site-nav {
+    width: calc(100% - 32px);
+    min-height: 60px;
+    height: 60px;
+  }
+
+  .public-site-page--snow.public-site-page--models .public-site-brand-mark {
+    width: 34px;
+    height: 34px;
+  }
+
+  .public-site-page--snow.public-site-page--models .public-site-icon-button,
+  .public-site-page--snow.public-site-page--models .public-site-desktop-action :deep(button[aria-haspopup="menu"]) {
+    width: 44px;
+    min-width: 44px;
+    height: 44px;
+    min-height: 44px;
+  }
+
+  .public-site-page--snow.public-site-page--models .public-site-footer {
+    padding-block: 28px;
+  }
+
+  .public-site-page--snow.public-site-page--models .public-site-footer-layout {
+    gap: 18px;
   }
 }
 </style>

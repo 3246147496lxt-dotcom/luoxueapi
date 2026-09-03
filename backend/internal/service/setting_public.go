@@ -581,6 +581,16 @@ func (s *SettingService) GetPublicSettingsForInjection(ctx context.Context) (any
 		return nil, err
 	}
 
+	// Login agreement documents are only needed on the login/register flows when
+	// the agreement is enabled. Keep the full documents in GetPublicSettings so
+	// the legal page and the authenticated settings API remain unchanged, but do
+	// not embed their (potentially large) Markdown bodies into every SSR HTML
+	// response while the feature is disabled.
+	loginAgreementDocuments := []LoginAgreementDocument{}
+	if settings.LoginAgreementEnabled {
+		loginAgreementDocuments = settings.LoginAgreementDocuments
+	}
+
 	return &PublicSettingsInjectionPayload{
 		RegistrationEnabled:              settings.RegistrationEnabled,
 		EmailVerifyEnabled:               settings.EmailVerifyEnabled,
@@ -593,7 +603,7 @@ func (s *SettingService) GetPublicSettingsForInjection(ctx context.Context) (any
 		LoginAgreementMode:               settings.LoginAgreementMode,
 		LoginAgreementUpdatedAt:          settings.LoginAgreementUpdatedAt,
 		LoginAgreementRevision:           settings.LoginAgreementRevision,
-		LoginAgreementDocuments:          settings.LoginAgreementDocuments,
+		LoginAgreementDocuments:          loginAgreementDocuments,
 		TurnstileEnabled:                 settings.TurnstileEnabled,
 		TurnstileSiteKey:                 settings.TurnstileSiteKey,
 		SiteName:                         settings.SiteName,

@@ -16,7 +16,7 @@
         :aria-pressed="activeMode === 'chat'"
         @click="requestMode('chat')"
       >
-        {{ t('nav.chatMode') }}
+        {{ chatLabel || t('nav.chatMode') }}
       </button>
       <button
         type="button"
@@ -25,20 +25,30 @@
         :aria-pressed="activeMode === 'work'"
         @click="requestMode('work')"
       >
-        {{ t('nav.workMode') }}
+        {{ workLabel || t('nav.workMode') }}
       </button>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
+import { computed, useAttrs } from 'vue'
 import { useI18n } from 'vue-i18n'
 
 export type AppShellMode = 'chat' | 'work'
 
-const props = defineProps<{
-  activeMode: AppShellMode
-}>()
+defineOptions({ inheritAttrs: false })
+
+const props = defineProps<{ activeMode: AppShellMode }>()
+const attrs = useAttrs()
+const chatLabel = computed(() => {
+  const value = attrs.chatLabel ?? attrs['chat-label']
+  return typeof value === 'string' ? value : ''
+})
+const workLabel = computed(() => {
+  const value = attrs.workLabel ?? attrs['work-label']
+  return typeof value === 'string' ? value : ''
+})
 
 const emit = defineEmits<{
   change: [mode: AppShellMode]

@@ -1,29 +1,37 @@
 <template>
-  <PublicSiteLayout class="skill-market-page" page="skills">
+  <AppLayout class="skill-market-page">
     <main id="top" class="skill-market-main">
       <section class="skill-market-hero" aria-labelledby="skill-market-title">
         <div class="skill-market-shell">
           <div class="skill-market-hero__copy">
-            <h1 id="skill-market-title">{{ t('skills.market.title') }}</h1>
-
-            <form class="skill-market-search" role="search" @submit.prevent="applySearchNow">
-              <label class="skill-market-sr-only" for="skill-market-search-input">
-                {{ t('skills.market.searchLabel') }}
-              </label>
-              <Icon name="search" size="md" aria-hidden="true" />
-              <input
-                id="skill-market-search-input"
-                v-model="searchInput"
-                type="search"
-                autocomplete="off"
-                :placeholder="t('skills.market.searchPlaceholder')"
-              />
-            </form>
+            <div class="skill-market-title-line">
+              <h1 id="skill-market-title">{{ t('skills.market.title') }}</h1>
+              <span v-if="!loading && !errorState" class="skill-market-count-badge">
+                {{ t('skills.market.countBadge', { count: catalogTotal }) }}
+              </span>
+            </div>
+            <p>{{ t('skills.market.description') }}</p>
           </div>
         </div>
       </section>
 
-      <section class="skill-market-shell" :aria-label="t('skills.market.categoriesTitle')">
+      <section class="skill-market-shell skill-market-search-section">
+        <form class="skill-market-search" role="search" @submit.prevent="applySearchNow">
+          <label class="skill-market-sr-only" for="skill-market-search-input">
+            {{ t('skills.market.searchLabel') }}
+          </label>
+          <Icon name="search" size="md" aria-hidden="true" />
+          <input
+            id="skill-market-search-input"
+            v-model="searchInput"
+            type="search"
+            autocomplete="off"
+            :placeholder="t('skills.market.searchPlaceholder')"
+          />
+        </form>
+      </section>
+
+      <section class="skill-market-shell skill-market-filter" :aria-label="t('skills.market.categoriesTitle')">
         <div class="skill-market-toolbar">
           <div
             class="skill-market-categories"
@@ -64,12 +72,17 @@
       </section>
 
       <section class="skill-market-shell skill-market-results" aria-labelledby="skill-results-title">
-        <h2 id="skill-results-title" class="skill-market-sr-only">
-          {{ t(hasFilters ? 'skills.market.resultsTitle' : 'skills.market.latestTitle') }}
-        </h2>
+        <div class="skill-market-results-heading">
+          <h2 id="skill-results-title">
+            {{ t(hasFilters ? 'skills.market.resultsTitle' : 'skills.market.allTitle') }}
+          </h2>
+          <p>
+            {{ t(hasFilters ? 'skills.market.resultsDescription' : 'skills.market.allDescription') }}
+          </p>
+        </div>
 
         <div v-if="loading" class="skill-market-list" aria-busy="true" :aria-label="t('skills.market.loading')">
-          <article v-for="index in 3" :key="index" class="skill-market-skeleton" aria-hidden="true">
+          <article v-for="index in 6" :key="index" class="skill-market-skeleton" aria-hidden="true">
             <span></span><span></span><span></span>
           </article>
         </div>
@@ -115,13 +128,13 @@
         </nav>
       </section>
     </main>
-  </PublicSiteLayout>
+  </AppLayout>
 </template>
 
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import PublicSiteLayout from '@/components/public/PublicSiteLayout.vue'
+import AppLayout from '@/components/layout/AppLayout.vue'
 import Icon from '@/components/icons/Icon.vue'
 import SkillCard from '@/components/skills/SkillCard.vue'
 import {
@@ -132,7 +145,7 @@ import {
 
 const PAGE_SIZE = 12
 
-const { t, te } = useI18n()
+const { t, te, locale } = useI18n()
 const searchInput = ref('')
 const appliedSearch = ref('')
 const selectedCategory = ref('')
@@ -156,7 +169,7 @@ watch(searchInput, () => {
   }, 320)
 })
 
-watch([appliedSearch, selectedCategory, page], loadCatalog)
+watch([appliedSearch, selectedCategory, page, () => locale.value], loadCatalog)
 
 function applySearchNow() {
   if (searchTimer) clearTimeout(searchTimer)

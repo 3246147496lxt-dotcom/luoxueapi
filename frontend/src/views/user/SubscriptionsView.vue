@@ -12,12 +12,12 @@
       >
         <!-- The balance surface is deliberately neutral: it is not a membership quota. -->
         <article
-          class="flex h-full min-h-[220px] flex-col rounded-2xl border border-gray-200 bg-white p-6 shadow-sm dark:border-dark-700 dark:bg-dark-800"
+          class="balance-membership-card flex h-full min-h-[220px] flex-col p-6"
           data-testid="balance-card"
         >
           <div class="flex items-center gap-3">
             <span
-              class="flex h-10 w-10 items-center justify-center rounded-xl bg-gray-100 text-gray-600 dark:bg-dark-700 dark:text-gray-300"
+              class="balance-membership-icon flex h-10 w-10 items-center justify-center rounded-xl"
               aria-hidden="true"
             >
               <Icon name="creditCard" size="md" />
@@ -69,20 +69,20 @@
 
         <article
           v-if="loading"
-          class="flex h-full min-h-[220px] flex-col justify-center rounded-2xl border border-gray-200 bg-white p-6 shadow-sm dark:border-dark-700 dark:bg-dark-800"
+          class="balance-membership-card flex h-full min-h-[220px] flex-col justify-center p-6"
           data-testid="member-loading-card"
           role="status"
           :aria-label="t('userSubscriptions.loading')"
         >
           <div class="flex items-center gap-3 text-sm text-gray-500 dark:text-dark-300">
-            <span class="h-5 w-5 animate-spin rounded-full border-2 border-primary-500 border-t-transparent" aria-hidden="true"></span>
+            <span class="balance-membership-spinner h-5 w-5 animate-spin rounded-full border-2" aria-hidden="true"></span>
             {{ t('userSubscriptions.loading') }}
           </div>
         </article>
 
         <article
           v-else-if="loadFailed"
-          class="flex h-full min-h-[220px] flex-col justify-center rounded-2xl border border-red-200 bg-white p-6 shadow-sm dark:border-red-900/60 dark:bg-dark-800"
+          class="balance-membership-card balance-membership-card--error flex h-full min-h-[220px] flex-col justify-center p-6"
           data-testid="subscriptions-load-error"
           role="alert"
         >
@@ -111,8 +111,7 @@
         <!-- Only the current membership belongs here; the catalogue lives at /pricing. -->
         <article
           v-else-if="currentSubscription"
-          class="membership-overview-card flex h-full min-h-[220px] flex-col overflow-hidden rounded-2xl border p-6 shadow-sm"
-          :class="memberCardClass"
+          class="balance-membership-card flex h-full min-h-[220px] flex-col overflow-hidden p-6"
           data-testid="current-member-card"
         >
           <div class="flex items-start justify-between gap-4">
@@ -151,7 +150,7 @@
 
             <div
               v-if="monthlyQuotaPercent !== null"
-              class="mt-3 h-2.5 overflow-hidden rounded-full bg-black/10 dark:bg-white/10"
+              class="balance-membership-track mt-3 h-2.5 overflow-hidden rounded-full"
               role="progressbar"
               :aria-valuenow="monthlyQuotaPercent"
               aria-valuemin="0"
@@ -203,7 +202,7 @@
 
         <article
           v-else
-          class="flex h-full min-h-[220px] flex-col rounded-2xl border border-gray-200 bg-white p-6 shadow-sm dark:border-dark-700 dark:bg-dark-800"
+          class="balance-membership-card flex h-full min-h-[220px] flex-col p-6"
           data-testid="free-member-card"
         >
           <div>
@@ -275,14 +274,17 @@ const currentMemberName = computed(() => currentSubscription.value?.group?.name?
 
 function tierForName(name: string | null | undefined): MembershipTier {
   const normalized = name?.trim().toLocaleLowerCase('en-US') ?? ''
-  if (['ultra', 'high', 'heavy', '高量级', '高量'].includes(normalized)) return 'high'
-  if (['plus', 'pro', 'max', 'mid', 'medium', '中量级', '中量'].includes(normalized)) return 'mid'
-  if (['try', 'basic', 'standard', 'low', 'light', 'lightweight', '轻量级', '轻量'].includes(normalized)) return 'low'
+  const nameParts = normalized.split(/[\s/_-]+/).filter(Boolean)
+  const matchesTier = (aliases: string[]) => aliases.some(alias => (
+    normalized === alias || nameParts.includes(alias)
+  ))
+  if (matchesTier(['ultra', 'high', 'heavy', '高量级', '高量'])) return 'high'
+  if (matchesTier(['plus', 'pro', 'max', 'mid', 'medium', '中量级', '中量'])) return 'mid'
+  if (matchesTier(['try', 'basic', 'standard', 'low', 'light', 'lightweight', '轻量级', '轻量'])) return 'low'
   return 'unknown'
 }
 
 const currentTier = computed(() => tierForName(currentSubscription.value?.group?.name))
-const memberCardClass = computed(() => `membership-overview-card--${currentTier.value}`)
 const secondaryMemberMode = computed<MembershipMode | null>(() => (
   currentTier.value === 'low' || currentTier.value === 'mid' ? 'upgrade' : null
 ))
@@ -407,68 +409,39 @@ onMounted(() => {
 </script>
 
 <style scoped>
-.membership-overview-card {
-  border-color: rgb(229 231 235 / 90%);
-  background-color: #fff;
+.balance-membership-card {
+  border: 1px solid var(--workspace-border);
+  border-radius: var(--workspace-radius-work-card);
+  color: var(--workspace-text);
+  background: var(--workspace-card-surface);
+  box-shadow: var(--workspace-work-shadow-card);
 }
 
-.membership-overview-card--low {
-  border-color: rgb(125 196 255 / 28%);
-  background:
-    radial-gradient(circle at 92% 8%, rgb(125 196 255 / 18%), transparent 48%),
-    #f8fbff;
+.balance-membership-card--error {
+  border-color: color-mix(in srgb, var(--lx-clay-danger) 36%, var(--workspace-border));
 }
 
-.membership-overview-card--mid {
-  border-color: rgb(124 58 237 / 24%);
-  background:
-    radial-gradient(circle at 92% 8%, rgb(124 58 237 / 13%), transparent 48%),
-    #f7f5ff;
+.balance-membership-icon {
+  border: 1px solid var(--workspace-border);
+  color: var(--workspace-text-secondary);
+  background: var(--workspace-hover);
 }
 
-.membership-overview-card--high {
-  border-color: rgb(219 39 119 / 22%);
-  background:
-    radial-gradient(circle at 92% 8%, rgb(219 39 119 / 11%), rgb(245 158 11 / 8%) 36%, transparent 64%),
-    #fffaf5;
+.balance-membership-spinner {
+  border-color: var(--workspace-border-strong);
+  border-top-color: var(--workspace-work-accent);
 }
 
-.membership-overview-card--unknown {
-  background: #fff;
+.balance-membership-track {
+  background: var(--workspace-work-track);
 }
 
 .membership-status-badge {
   border-radius: 999px;
   padding: 3px 9px;
-  color: #047857;
-  background: rgb(209 250 229 / 80%);
+  color: var(--workspace-work-success);
+  background: color-mix(in srgb, var(--workspace-work-success) 14%, transparent);
   font-size: 11px;
   font-weight: 600;
-}
-
-/* The app theme is class-driven; keep the local tier aura in sync when the
- * user switches themes without changing the neutral balance surface. */
-:global(.dark) .membership-overview-card--unknown,
-:global(.dark) .membership-overview-card {
-  border-color: rgb(75 85 99 / 80%);
-  background: rgb(31 41 55 / 90%);
-}
-
-:global(.dark) .membership-overview-card--low {
-  background:
-    radial-gradient(circle at 92% 8%, rgb(96 165 250 / 20%), transparent 48%),
-    rgb(17 34 52 / 92%);
-}
-
-:global(.dark) .membership-overview-card--mid {
-  background:
-    radial-gradient(circle at 92% 8%, rgb(139 92 246 / 20%), transparent 48%),
-    rgb(34 27 60 / 92%);
-}
-
-:global(.dark) .membership-overview-card--high {
-  background:
-    radial-gradient(circle at 92% 8%, rgb(236 72 153 / 18%), rgb(245 158 11 / 12%) 36%, transparent 64%),
-    rgb(61 35 27 / 92%);
 }
 </style>

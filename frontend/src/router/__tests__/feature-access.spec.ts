@@ -232,6 +232,23 @@ describe('feature route guard', () => {
     expect(next).toHaveBeenCalledWith('/home')
   })
 
+  it('revalidates the Skill marketplace flag inside the authenticated Work shell', async () => {
+    appStore.publicSettingsLoaded = true
+    appStore.cachedPublicSettings = { skill_marketplace_enabled: true }
+    appStore.fetchPublicSettings.mockResolvedValue({ skill_marketplace_enabled: false })
+
+    const { navigation, next } = runGuard(
+      { requiresAuth: true, requiresSkillMarketplace: true },
+      '/skills',
+    )
+    await navigation
+
+    expect(appStore.fetchPublicSettings).toHaveBeenCalledOnce()
+    expect(appStore.fetchPublicSettings).toHaveBeenCalledWith(true)
+    expect(next).toHaveBeenCalledOnce()
+    expect(next).toHaveBeenCalledWith('/dashboard')
+  })
+
   it('waits for public settings before opening a fresh subscription plan bridge', async () => {
     const deferred = createDeferred<{ payment_enabled: boolean }>()
     appStore.fetchPublicSettings.mockImplementation(async () => {

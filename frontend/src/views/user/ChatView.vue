@@ -249,7 +249,7 @@
 
         <div class="chat-composer-region">
           <p
-            v-if="chatReady && !selectedModelReasoningReady"
+            v-if="chatReady && hasExplicitSelectedModel && !selectedModelReasoningReady"
             class="chat-composer-region__capability"
             role="status"
             data-test="chat-reasoning-capability-state"
@@ -513,6 +513,7 @@ const ACTIVITY_DRAWER_MEDIA_QUERY = '(max-width: 1023px)'
 const NEW_CHAT_QUERY_KEY = 'conversation'
 const NEW_CHAT_QUERY_VALUE = 'new'
 const PROJECT_QUERY_KEY = 'project'
+const PROJECT_PROMPT_QUERY_KEY = 'prompt'
 
 const { t } = useI18n()
 const appStore = useAppStore()
@@ -577,6 +578,36 @@ function setProjectRouteIntent(projectId: string | null): void {
   }
 }
 
+function projectPromptRouteIntent(): string | null {
+  if (!hasNewChatRouteIntent() || !projectRouteIntent() || typeof window === 'undefined') {
+    return null
+  }
+  try {
+    const prompt = new URL(window.location.href).searchParams
+      .get(PROJECT_PROMPT_QUERY_KEY)
+      ?.trim()
+    return prompt || null
+  } catch {
+    return null
+  }
+}
+
+function clearProjectPromptRouteIntent(): void {
+  if (typeof window === 'undefined') return
+  try {
+    const url = new URL(window.location.href)
+    if (!url.searchParams.has(PROJECT_PROMPT_QUERY_KEY)) return
+    url.searchParams.delete(PROJECT_PROMPT_QUERY_KEY)
+    window.history.replaceState(
+      window.history.state,
+      '',
+      `${url.pathname}${url.search}${url.hash}`,
+    )
+  } catch {
+    // A failed URL cleanup must not block the ordinary Chat submission path.
+  }
+}
+
 const modelCapabilityCatalog = ref<ReadonlyMap<string, ChatModel>>(new Map())
 const modelCapabilityState = ref<'loading' | 'ready' | 'unavailable'>('loading')
 const models = computed<readonly ChatModel[]>(() => CHAT_PRODUCT_MODELS.map((productModel) => {
@@ -633,12 +664,15 @@ const shouldFollowStream = ref(true)
 const isAwayFromLatest = ref(false)
 const retryPendingMessageId = ref<string | null>(null)
 const liveFailureMessageId = ref<string | null>(null)
+const pendingProjectPrompt = projectPromptRouteIntent()
+if (pendingProjectPrompt) clearProjectPromptRouteIntent()
 let scrollFrame = 0
 let historySearchTimer: ReturnType<typeof setTimeout> | null = null
 let lastMessageScrollTop = 0
 let lastMessageTouchY: number | null = null
 let observedAuthUserId: string | undefined
 let viewDisposed = false
+let projectPromptRouteConsumed = false
 let attachmentContextChangeOwnedBySend = false
 let pageFileDragDepth = 0
 let messageResizeObserver: ResizeObserver | null = null
@@ -745,6 +779,11 @@ const selectedModel = computed<string>({
 const selectedModelAvailable = computed(() => (
   selectedModel.value.trim().length > 0
 ))
+// A new-chat draft uses the default model internally, but no model is
+// explicitly selected until a conversation exists.
+const hasExplicitSelectedModel = computed(() => (
+  Boolean(activeConversation.value?.model?.trim())
+))
 const selectedModelCapability = computed(() => (
   models.value.find((model) => model.id === selectedModel.value)
   ?? modelCapabilityCatalog.value.get(selectedModel.value)
@@ -843,7 +882,6 @@ watch(
         && normalizedUserId
         && normalizedUserId === currentAuthUserId()
       ) {
-        resumePendingReceipts(normalizedUserId)
         void initializeServerHistory(normalizedUserId)
       }
     })
@@ -890,6 +928,25 @@ watch(
   ],
   () => reconcileSelectedModel(),
   { flush: 'sync' },
+)
+
+watch(
+  [chatReady, completionAvailable],
+  ([ready, completionReady]) => {
+    if (
+      !ready
+      || !completionReady
+      || !pendingProjectPrompt
+      || projectPromptRouteConsumed
+    ) return
+
+    // The prompt was removed from the URL as soon as setup captured it. Keep
+    // only the conversation/project route intent so the existing first-message
+    // flow can associate the newly-created conversation.
+    projectPromptRouteConsumed = true
+    void sendMessage(pendingProjectPrompt)
+  },
+  { immediate: true, flush: 'post' },
 )
 
 watch(emptyComposerReady, (ready) => {
@@ -972,6 +1029,7 @@ onBeforeUnmount(() => {
   void discardPendingAttachments()
   cancelPendingMessageScroll()
   abortReceiptPolls()
+  chatStore.invalidateHistorySearch()
   if (historySearchTimer !== null) clearTimeout(historySearchTimer)
   window.removeEventListener('online', syncServerHistory)
   window.removeEventListener('dragenter', onPageFileDragEnter, true)
@@ -1299,6 +1357,9 @@ async function initializeServerHistory(expectedUserId: string): Promise<boolean>
   if (viewDisposed || expectedUserId !== currentAuthUserId()) return false
   if (chatStore.syncStatus !== 'idle' || chatStore.serverHistoryAvailable !== true) return false
   await recoverInterruptedAttempts(expectedUserId)
+  // Start receipt reconciliation only after the initial history merge. If it
+  // runs while history is still hydrating, asynchronous responses can make
+  // the sidebar order depend on network completion timing.
   resumePendingReceipts(expectedUserId)
   return true
 }
@@ -1324,6 +1385,7 @@ async function retryServerHistory() {
 }
 
 function updateHistorySearch(value: string) {
+  chatStore.invalidateHistorySearch()
   historySearchQuery.value = value
   if (historySearchTimer !== null) clearTimeout(historySearchTimer)
   historySearchTimer = setTimeout(() => {

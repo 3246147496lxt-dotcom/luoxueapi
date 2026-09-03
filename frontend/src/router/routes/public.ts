@@ -35,30 +35,6 @@ export const publicRoutes: RouteRecordRaw[] = [
     }
   },
   {
-    path: '/skills',
-    name: 'SkillMarket',
-    component: () => import('@/views/public/SkillMarketplaceView.vue'),
-    meta: {
-      requiresAuth: false,
-      requiresSkillMarketplace: true,
-      title: 'Skill Market',
-      titleKey: 'skills.meta.title',
-      descriptionKey: 'skills.meta.description'
-    }
-  },
-  {
-    path: '/skills/:slug',
-    name: 'SkillDetail',
-    component: () => import('@/views/public/SkillDetailView.vue'),
-    meta: {
-      requiresAuth: false,
-      requiresSkillMarketplace: true,
-      title: 'Skill Detail',
-      titleKey: 'skills.meta.title',
-      descriptionKey: 'skills.meta.description'
-    }
-  },
-  {
     path: '/quota-viewer',
     name: 'QuotaViewerLanding',
     component: () => import('@/views/public/QuotaViewerLandingView.vue'),

@@ -302,7 +302,12 @@ defineExpose({ replayTour })
   --lx-clay-selected: var(--workspace-selected);
   --lx-clay-accent: var(--workspace-work-accent);
   --lx-clay-accent-deep: var(--workspace-work-accent-hover);
+  --lx-clay-accent-deepest: var(--workspace-work-accent-deep);
+  --lx-clay-accent-highlight: var(--workspace-work-accent-hover);
+  --lx-clay-accent-gradient-start: var(--workspace-work-accent);
+  --lx-clay-accent-gradient-transparent: transparent;
   --lx-clay-accent-soft: var(--workspace-work-accent-soft);
+  --lx-clay-on-accent: var(--workspace-work-on-accent);
   --lx-clay-radius-overview: var(--workspace-radius-card);
   --lx-clay-radius-surface: var(--workspace-radius-card);
   --lx-clay-radius-form: var(--workspace-radius-card);
@@ -311,6 +316,7 @@ defineExpose({ replayTour })
   --lx-clay-shadow-surface: var(--workspace-shadow-surface);
   --lx-clay-shadow-flat: none;
   --lx-clay-shadow-form: none;
+  --lx-clay-shadow-primary: var(--workspace-work-shadow-card);
 }
 
 :global(html:not(.dark) .app-layout--snow-shell.app-layout--personal-work-shell) {
@@ -369,6 +375,15 @@ defineExpose({ replayTour })
   --lx-clay-border-strong: var(--workspace-border-strong);
   --lx-clay-hover: var(--workspace-hover);
   --lx-clay-selected: var(--workspace-selected);
+  --lx-clay-accent: var(--workspace-work-accent);
+  --lx-clay-accent-deep: var(--workspace-work-accent-hover);
+  --lx-clay-accent-deepest: var(--workspace-work-accent-deep);
+  --lx-clay-accent-highlight: var(--workspace-work-accent-hover);
+  --lx-clay-accent-gradient-start: var(--workspace-work-accent);
+  --lx-clay-accent-gradient-transparent: transparent;
+  --lx-clay-accent-soft: var(--workspace-work-accent-soft);
+  --lx-clay-on-accent: var(--workspace-work-on-accent);
+  --lx-clay-shadow-primary: var(--workspace-work-shadow-card);
   background: var(--workspace-canvas);
   color: var(--workspace-text);
 }

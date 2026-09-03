@@ -111,6 +111,7 @@ vi.mock('@/stores/chat', async () => {
     syncHistory: vi.fn(),
     loadConversationPage: vi.fn(),
     searchHistory: vi.fn(),
+    invalidateHistorySearch: vi.fn(),
     loadConversationDetail: vi.fn(),
     loadOlderConversationMessages: vi.fn(),
     recoverAttempt: vi.fn(),
@@ -138,6 +139,16 @@ vi.mock('@/stores/chat', async () => {
   return { useChatStore: () => store }
 })
 
+vi.mock('@/stores/projects', async () => {
+  const { reactive } = await vi.importActual<typeof import('vue')>('vue')
+  const store = reactive({
+    projects: [],
+    load: vi.fn(),
+    addConversation: vi.fn(),
+  })
+  return { useProjectsStore: () => store }
+})
+
 vi.mock('vue-i18n', async () => {
   const actual = await vi.importActual<typeof import('vue-i18n')>('vue-i18n')
   const syncMessages: Record<string, string> = {
@@ -157,6 +168,7 @@ vi.mock('vue-i18n', async () => {
 import { useAuthStore } from '@/stores/auth'
 import { useAppStore } from '@/stores/app'
 import { useChatStore } from '@/stores/chat'
+import { useProjectsStore } from '@/stores/projects'
 import { ChatAPIError } from '@/api/chat'
 import ChatView from '../ChatView.vue'
 
@@ -475,6 +487,7 @@ interface ChatStoreHarness {
   syncHistory: ReturnType<typeof vi.fn>
   loadConversationPage: ReturnType<typeof vi.fn>
   searchHistory: ReturnType<typeof vi.fn>
+  invalidateHistorySearch: ReturnType<typeof vi.fn>
   loadConversationDetail: ReturnType<typeof vi.fn>
   loadOlderConversationMessages: ReturnType<typeof vi.fn>
   recoverAttempt: ReturnType<typeof vi.fn>
@@ -500,8 +513,15 @@ interface ChatStoreHarness {
   stopStreaming: ReturnType<typeof vi.fn>
 }
 
+interface ProjectsStoreHarness {
+  projects: unknown[]
+  load: ReturnType<typeof vi.fn>
+  addConversation: ReturnType<typeof vi.fn>
+}
+
 const authStore = useAuthStore() as unknown as AuthStoreHarness
 const chatStore = useChatStore() as unknown as ChatStoreHarness
+const projectsStore = useProjectsStore() as unknown as ProjectsStoreHarness
 let wrapper: VueWrapper | undefined
 let generatedMessageId = 0
 
@@ -913,6 +933,9 @@ describe('ChatView catalog and hydration gates', () => {
       return true
     })
     chatStore.stopStreaming.mockReturnValue(false)
+    projectsStore.projects = []
+    projectsStore.load.mockResolvedValue(undefined)
+    projectsStore.addConversation.mockResolvedValue(true)
     authStore.refreshUser.mockResolvedValue(authStore.user)
     apiMocks.isAbortError.mockImplementation((error: unknown) => (
       !!error && typeof error === 'object' && (error as { name?: unknown }).name === 'AbortError'
@@ -1147,6 +1170,99 @@ describe('ChatView catalog and hydration gates', () => {
     expect(chatStore.activeConversationId).toBe('first-message-conversation')
     expect(new URL(window.location.href).searchParams.has('conversation')).toBe(false)
     await flushPromises()
+  })
+
+  it('一次性消费项目首条消息意图，清除 prompt 并沿用现有发送与项目关联流程', async () => {
+    window.history.replaceState(
+      null,
+      '',
+      '/chat?conversation=new&project=project-apollo&prompt=Draft%20the%20launch%20plan',
+    )
+    chatStore.createConversation.mockImplementation((model: string, title: string) => {
+      const conversation: ChatConversation = {
+        id: 'project-first-message',
+        userId: '7',
+        title,
+        model,
+        messages: [],
+        createdAt: 1,
+        updatedAt: 1,
+      }
+      chatStore.conversations = [conversation]
+      chatStore.activeConversationId = conversation.id
+      chatStore.activeConversation = conversation
+      return conversation
+    })
+
+    await mountView()
+    expect(new URL(window.location.href).searchParams.has('prompt')).toBe(false)
+    expect(chatStore.createConversation).not.toHaveBeenCalled()
+
+    chatStore.userId = '7'
+    chatStore.hydrated = true
+    await flushPromises()
+
+    expect(chatStore.createConversation).toHaveBeenCalledTimes(1)
+    expect(chatStore.addMessage).toHaveBeenCalledWith(
+      'project-first-message',
+      expect.objectContaining({
+        role: 'user',
+        content: 'Draft the launch plan',
+      }),
+    )
+    expect(apiMocks.streamChatCompletion).toHaveBeenCalledTimes(1)
+    expect(projectsStore.addConversation).toHaveBeenCalledWith(
+      'project-apollo',
+      'project-first-message',
+      expect.objectContaining({
+        id: 'project-first-message',
+        title: 'Draft the launch plan',
+      }),
+    )
+
+    const url = new URL(window.location.href)
+    expect(url.searchParams.get('project')).toBe('project-apollo')
+
+    chatStore.hydrated = false
+    await nextTick()
+    chatStore.hydrated = true
+    await flushPromises()
+
+    expect(chatStore.createConversation).toHaveBeenCalledTimes(1)
+    expect(apiMocks.streamChatCompletion).toHaveBeenCalledTimes(1)
+  })
+
+  it('项目首条消息 prompt 为空时保持普通新聊天空态且不发送', async () => {
+    window.history.replaceState(
+      null,
+      '',
+      '/chat?conversation=new&project=project-apollo&prompt=%20%20',
+    )
+    chatStore.userId = '7'
+    chatStore.hydrated = true
+
+    const view = await mountView()
+
+    expect(view.find('[data-test="chat-new-chat-hero"]').exists()).toBe(true)
+    expect(chatStore.createConversation).not.toHaveBeenCalled()
+    expect(chatStore.addMessage).not.toHaveBeenCalled()
+    expect(apiMocks.streamChatCompletion).not.toHaveBeenCalled()
+  })
+
+  it.each([
+    ['/chat?conversation=new&prompt=Projectless%20prompt'],
+    ['/chat?conversation=existing&project=project-apollo&prompt=Existing%20chat%20prompt'],
+  ])('非 project/new 组合不会消费或自动发送 prompt：%s', async (path) => {
+    window.history.replaceState(null, '', path)
+    chatStore.userId = '7'
+    chatStore.hydrated = true
+
+    await mountView()
+
+    expect(chatStore.createConversation).not.toHaveBeenCalled()
+    expect(chatStore.addMessage).not.toHaveBeenCalled()
+    expect(apiMocks.streamChatCompletion).not.toHaveBeenCalled()
+    expect(new URL(window.location.href).searchParams.has('prompt')).toBe(true)
   })
 
   it('历史摘要尚未加载消息详情时不会误显示新聊天首页', async () => {
@@ -2011,6 +2127,17 @@ describe('ChatView catalog and hydration gates', () => {
     expect(view.get('[data-test="chat-model-settings"]').attributes('data-reasoning-slider'))
       .toBe('false')
     expect(view.get('[data-test="chat-composer"]').attributes('data-disabled')).toBe('true')
+    expect(view.find('[data-test="chat-reasoning-capability-state"]').exists()).toBe(false)
+  })
+
+  it('新聊天没有明确模型时不显示 reasoning 能力提示', async () => {
+    chatStore.userId = '7'
+    chatStore.hydrated = true
+    apiMocks.getChatModels.mockResolvedValueOnce({ models: [], balance: 10 })
+
+    const view = await mountView()
+
+    expect(view.find('[data-test="chat-reasoning-capability-state"]').exists()).toBe(false)
   })
 
   it('capabilities 异常不阻断固定模型与文本聊天', async () => {

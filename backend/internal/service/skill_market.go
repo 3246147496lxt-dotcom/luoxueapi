@@ -150,6 +150,7 @@ type SkillListFilter struct {
 	Search   string
 	Category string
 	Status   string
+	Locale   string
 	Featured *bool
 	Page     int
 	PageSize int
@@ -242,6 +243,7 @@ type SkillMarketRepository interface {
 	Update(ctx context.Context, skill *Skill, previousSlug string) error
 	GetByID(ctx context.Context, id int64) (*Skill, error)
 	GetPublishedBySlug(ctx context.Context, slug string) (*Skill, error)
+	GetPublishedBySlugLocalized(ctx context.Context, slug, locale string) (*Skill, error)
 	ListAdmin(ctx context.Context, filter SkillListFilter) ([]Skill, int64, error)
 	ListPublished(ctx context.Context, filter SkillListFilter) ([]Skill, int64, error)
 	ListPublishedCategories(ctx context.Context) ([]string, error)
@@ -723,6 +725,7 @@ func (s *SkillMarketService) ListPublic(ctx context.Context, filter SkillListFil
 	if err != nil {
 		return nil, err
 	}
+	filter.Locale = normalizeSkillCatalogLocale(filter.Locale)
 	items, total, err := s.repo.ListPublished(ctx, filter)
 	if err != nil {
 		return nil, err
@@ -741,9 +744,9 @@ func (s *SkillMarketService) ListPublic(ctx context.Context, filter SkillListFil
 	return &PublicSkillListResult{Items: out, Total: total, Page: filter.Page, PageSize: filter.PageSize, Pages: pageCount(total, filter.PageSize), Categories: categories}, nil
 }
 
-func (s *SkillMarketService) GetPublic(ctx context.Context, slug string) (*PublicSkill, error) {
+func (s *SkillMarketService) GetPublic(ctx context.Context, slug, locale string) (*PublicSkill, error) {
 	slug = strings.ToLower(strings.TrimSpace(slug))
-	skill, err := s.repo.GetPublishedBySlug(ctx, slug)
+	skill, err := s.repo.GetPublishedBySlugLocalized(ctx, slug, normalizeSkillCatalogLocale(locale))
 	if err != nil {
 		return nil, err
 	}
@@ -758,6 +761,14 @@ func (s *SkillMarketService) GetPublic(ctx context.Context, slug string) (*Publi
 	setCurrentVersionFromList(skill)
 	result := publicSkillFromModel(skill, true)
 	return &result, nil
+}
+
+func normalizeSkillCatalogLocale(locale string) string {
+	locale = strings.ToLower(strings.TrimSpace(locale))
+	if strings.HasPrefix(locale, "en") {
+		return "en"
+	}
+	return "zh-CN"
 }
 
 func (s *SkillMarketService) ListPublicVersions(ctx context.Context, slug string) ([]PublicSkillVersion, error) {

@@ -1,5 +1,5 @@
 <template>
-  <PublicSiteLayout class="skill-detail-page" page="skills">
+  <AppLayout class="skill-detail-page">
     <main id="top" class="skill-detail-main">
       <div v-if="loading" class="skill-detail-shell skill-detail-loading" aria-busy="true" :aria-label="t('skills.detail.loading')">
         <div class="skill-detail-loading__hero"><span></span><span></span><span></span></div>
@@ -63,7 +63,7 @@
 
             <div v-if="skill.category" class="skill-detail-info__category">
               <span>{{ t('skills.detail.categoryLabel') }}</span>
-              <strong>{{ skill.category }}</strong>
+              <strong>{{ categoryLabel }}</strong>
             </div>
 
             <ul v-if="skill.tags.length" class="skill-detail-info__tags" :aria-label="t('skills.card.tags')">
@@ -115,14 +115,14 @@
 
       </template>
     </main>
-  </PublicSiteLayout>
+  </AppLayout>
 </template>
 
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
-import PublicSiteLayout from '@/components/public/PublicSiteLayout.vue'
+import AppLayout from '@/components/layout/AppLayout.vue'
 import Icon from '@/components/icons/Icon.vue'
 import GitHubMark from '@/components/auth/GitHubMark.vue'
 import SafeMarkdown from '@/components/skills/SafeMarkdown.vue'
@@ -141,7 +141,7 @@ interface SkillSourceMeta {
 }
 
 const route = useRoute()
-const { t } = useI18n()
+const { t, te, locale } = useI18n()
 const { copyToClipboard } = useClipboard()
 const skill = ref<PublicSkill | null>(null)
 const loading = ref(true)
@@ -177,8 +177,14 @@ const sourceMeta = computed<SkillSourceMeta | null>(() => {
 const hasSupportingInfo = computed(() => Boolean(
   skill.value?.category || skill.value?.tags.length || sourceMeta.value,
 ))
+const categoryLabel = computed(() => {
+  const category = skill.value?.category.trim() || ''
+  if (!category) return ''
+  const key = `skills.categories.${category}`
+  return te(key) ? t(key) : category
+})
 
-watch(slug, loadSkill, { immediate: true })
+watch([slug, () => locale.value], loadSkill, { immediate: true })
 
 function formatNumber(value: number) {
   return new Intl.NumberFormat('en-US', { notation: 'compact', maximumFractionDigits: 1 })

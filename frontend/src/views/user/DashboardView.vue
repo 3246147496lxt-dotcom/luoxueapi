@@ -355,7 +355,7 @@ onBeforeUnmount(() => {
   padding: 0 14px;
   border: 1px solid var(--workspace-work-accent);
   border-radius: var(--workspace-radius-work-button);
-  color: var(--workspace-light-surface);
+  color: var(--workspace-work-on-accent);
   background: var(--workspace-work-accent);
   font-size: var(--workspace-type-navigation-size);
   font-weight: var(--workspace-type-navigation-weight);
@@ -407,22 +407,6 @@ onBeforeUnmount(() => {
   .dashboard-primary-button {
     transition-duration: 0.01ms;
   }
-}
-
-:global(html.dark) .yunwu-dashboard,
-:global(html.dark) .dashboard-page-header h1,
-:global(html.dark) .dashboard-error h2 {
-  color: var(--workspace-dashboard-text-strong);
-}
-
-:global(html.dark) .dashboard-panel {
-  border-color: var(--workspace-dashboard-card-border);
-  background: var(--workspace-card-surface);
-  box-shadow: var(--workspace-dashboard-card-shadow);
-}
-
-:global(html.dark) .dashboard-error p {
-  color: var(--workspace-dashboard-text-muted);
 }
 
 </style>

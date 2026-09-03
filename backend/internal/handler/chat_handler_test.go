@@ -1118,6 +1118,7 @@ func TestChatCompletionsUsageProducerFailureSettlementContract(t *testing.T) {
 	producerErr := errors.New("usage database unavailable")
 	for _, tt := range []struct {
 		name               string
+		response           string
 		receipt            *service.BillingReceipt
 		receiptErr         error
 		wantFinalize       bool
@@ -1136,14 +1137,35 @@ func TestChatCompletionsUsageProducerFailureSettlementContract(t *testing.T) {
 			wantDeliveryStatus: service.ChatMessageDeliveryCompleted,
 		},
 		{
-			name: "confirmed no billing finalizes settlement failure",
+			name: "confirmed no billing preserves delivery and records settlement failure",
 			receipt: &service.BillingReceipt{
 				Status: service.BillingReceiptStatusPending,
 			},
 			wantFinalize:       true,
 			wantAttemptStatus:  service.ChatAttemptStatusFailed,
-			wantFailureCode:    chatSettlementFailureCode,
+			wantFailureCode:    service.ChatAttemptFailureCodeSettlement,
+			wantDeliveryStatus: service.ChatMessageDeliveryCompleted,
+		},
+		{
+			name:     "settlement failure does not replace a generation error",
+			response: "data: {\"error\":{\"code\":\"upstream_error\",\"message\":\"failed\"}}\n\n",
+			receipt: &service.BillingReceipt{
+				Status: service.BillingReceiptStatusPending,
+			},
+			wantFinalize:       true,
+			wantAttemptStatus:  service.ChatAttemptStatusFailed,
+			wantFailureCode:    "upstream_error",
 			wantDeliveryStatus: service.ChatMessageDeliveryError,
+		},
+		{
+			name:     "settlement failure does not turn an interrupted stream into an error",
+			response: "data: {\"choices\":[{\"delta\":{\"content\":\"partial\"},\"finish_reason\":null}]}\n\n",
+			receipt: &service.BillingReceipt{
+				Status: service.BillingReceiptStatusPending,
+			},
+			wantFinalize:       true,
+			wantAttemptStatus:  service.ChatAttemptStatusInterrupted,
+			wantDeliveryStatus: service.ChatMessageDeliveryInterrupted,
 		},
 		{
 			name:         "unqueryable receipt leaves attempt processing",
@@ -1157,9 +1179,13 @@ func TestChatCompletionsUsageProducerFailureSettlementContract(t *testing.T) {
 			)
 			history := &chatCompletionHistoryRepositoryStub{}
 			lease := &chatAttemptLeaseManagerStub{}
+			response := tt.response
+			if response == "" {
+				response = "data: {\"choices\":[{\"delta\":{\"content\":\"hello\"},\"finish_reason\":\"stop\"}]}\n\n" +
+					"data: [DONE]\n\n"
+			}
 			gateway := &chatCompletionDelegatorStub{
-				response: "data: {\"choices\":[{\"delta\":{\"content\":\"hello\"},\"finish_reason\":\"stop\"}]}\n\n" +
-					"data: [DONE]\n\n",
+				response: response,
 				hook: func(c *gin.Context) {
 					barrier := webChatUsageBarrierFromContext(c.Request.Context())
 					require.NotNil(t, barrier)

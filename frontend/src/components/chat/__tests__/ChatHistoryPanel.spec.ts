@@ -37,11 +37,6 @@ const WorkspaceSidebarBrandStub = {
 const shellStubs = {
   Icon: IconStub,
   WorkspaceSidebarBrand: WorkspaceSidebarBrandStub,
-  AppModeSwitch: {
-    props: ['activeMode'],
-    emits: ['change'],
-    template: '<div data-testid="mode-stub" :data-active-mode="activeMode" />',
-  },
   RouterLink: RouterLinkStub,
   SidebarCollapseIcon: { template: '<svg />' },
   UserAccountCard: {
@@ -70,6 +65,16 @@ afterEach(() => {
 })
 
 describe('ChatHistoryPanel focus management', () => {
+  it('不显示空的对话记录提示', () => {
+    wrapper = mount(ChatHistoryPanel, {
+      props: { conversations: [] },
+      global: { stubs: { Icon: IconStub, RouterLink: RouterLinkStub } },
+    })
+
+    expect(wrapper.find('.chat-history__empty').exists()).toBe(false)
+    expect(wrapper.text()).not.toContain('chat.history.empty')
+  })
+
   it('uses the same compact visual title as the delete confirmation while keeping the full accessible name', () => {
     const conversation: ChatConversation = {
       id: 'long-title',
@@ -326,7 +331,7 @@ describe('ChatHistoryPanel focus management', () => {
     const collapsedToggle = wrapper.get('[data-testid="chat-sidebar-collapse-toggle"]')
     expect(collapsedToggle.attributes('aria-expanded')).toBe('false')
     expect(wrapper.find('[data-testid="brand-stub"]').exists()).toBe(false)
-    expect(wrapper.find('[data-testid="mode-stub"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="app-mode-switch"]').exists()).toBe(false)
     expect(wrapper.get('.chat-history__list').isVisible()).toBe(false)
     expect(document.activeElement).toBe(collapsedToggle.element)
     expect(wrapper.get('.chat-history__new').element).toBe(newChatButton.element)
@@ -350,7 +355,7 @@ describe('ChatHistoryPanel focus management', () => {
     await nextTick()
 
     expect(aside.classes()).not.toContain('chat-history--collapsed')
-    expect(wrapper.get('[data-testid="mode-stub"]').attributes('data-active-mode')).toBe('chat')
+    expect(wrapper.find('[data-testid="app-mode-switch"]').exists()).toBe(false)
     expect(wrapper.find('.chat-history__search').exists()).toBe(true)
     expect(document.activeElement).toBe(wrapper.get('.chat-history__search input').element)
   })
@@ -418,7 +423,7 @@ describe('ChatHistoryPanel focus management', () => {
       'chat.history.searchLabel',
       'chat.actions.closeHistory',
     ])
-    expect(wrapper.get('[data-testid="mode-stub"]').attributes('data-active-mode')).toBe('chat')
+    expect(wrapper.find('[data-testid="app-mode-switch"]').exists()).toBe(false)
     expect(wrapper.get('[data-testid="account-stub"]').attributes('data-collapsed')).toBe('false')
 
     await wrapper.get('.workspace-sidebar-header__close').trigger('click')
@@ -486,7 +491,7 @@ describe('ChatHistoryPanel focus management', () => {
     expect(appStore.sidebarCollapsed).toBe(true)
     expect(wrapper.get('.chat-history').classes()).not.toContain('chat-history--collapsed')
     expect(wrapper.find('[data-testid="chat-sidebar-collapse-toggle"]').exists()).toBe(false)
-    expect(wrapper.get('[data-testid="mode-stub"]').attributes('data-active-mode')).toBe('chat')
+    expect(wrapper.find('[data-testid="app-mode-switch"]').exists()).toBe(false)
     expect(wrapper.get('[data-testid="account-stub"]').attributes('data-collapsed')).toBe('false')
 
     await wrapper.setProps({ searchQuery: 'SMTP' })

@@ -53,3 +53,16 @@ func TestSkillMarketSourceMigrationSimplifiesMetadataAndAddsSnapshot(t *testing.
 	require.NotContains(t, publishConstraint, "RISK_NOTES")
 	require.NotContains(t, publishConstraint, "EXAMPLE_PROMPTS")
 }
+
+func TestSkillCatalogLocalizationMigrationKeepsUpstreamCopySeparate(t *testing.T) {
+	content, err := FS.ReadFile("237_skill_catalog_localizations.sql")
+	require.NoError(t, err)
+
+	sql := strings.ToUpper(strings.Join(strings.Fields(string(content)), " "))
+	require.Contains(t, sql, "CREATE TABLE IF NOT EXISTS SKILL_CATALOG_LOCALIZATIONS")
+	require.Contains(t, sql, "PRIMARY KEY (SLUG, LOCALE)")
+	require.Contains(t, sql, "DISPLAY_NAME VARCHAR(120) NOT NULL")
+	require.Contains(t, sql, "SUMMARY VARCHAR(280) NOT NULL")
+	require.Contains(t, sql, "DESCRIPTION TEXT NOT NULL")
+	require.NotContains(t, sql, "ALTER TABLE SKILLS", "catalog translations must not be overwritten by importer refreshes")
+}

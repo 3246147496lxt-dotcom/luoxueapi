@@ -25,6 +25,22 @@ function isProductionSource(path: string): boolean {
 }
 
 const retiredTeal = /#(?:f0fdfa|ccfbf1|99f6e4|5eead4|2dd4bf|14b8a6|0d9488|0f766e|115e59|134e4a|042f2e|ecfeff|cffafe|a5f3fc|67e8f9|22d3ee|06b6d4|0891b2|0e7490|155e75|164e63|083344)|rgba?\((?:20,?\s+184,?\s+166|6,?\s+182,?\s+212)|rgb\(15\s+118\s+110/i
+const workspaceViolet = /#(?:f5f3ff|eef2ff|ddd6fe|c4b5fd|a78bfa|8b5cf6|7c3aed|6d28d9|5b21b6|4f46e5|6366f1)|rgba?\((?:124[,\s]+58[,\s]+237|139[,\s]+92[,\s]+246)/i
+
+function relativeLuminance(hex: string): number {
+  const channels = hex.match(/[a-f\d]{2}/gi)?.map(channel => Number.parseInt(channel, 16) / 255) || []
+  const linear = channels.map(channel => (
+    channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4
+  ))
+  return 0.2126 * linear[0] + 0.7152 * linear[1] + 0.0722 * linear[2]
+}
+
+function contrastRatio(foreground: string, background: string): number {
+  const foregroundLuminance = relativeLuminance(foreground)
+  const backgroundLuminance = relativeLuminance(background)
+  return (Math.max(foregroundLuminance, backgroundLuminance) + 0.05)
+    / (Math.min(foregroundLuminance, backgroundLuminance) + 0.05)
+}
 
 describe('Snow Clay palette contract', () => {
   it('maps every legacy primary utility to the canonical violet ramp', () => {
@@ -63,6 +79,44 @@ describe('Snow Clay palette contract', () => {
     expect(legacyComponents).toContain('@apply bg-[#635bff] text-white')
     expect(legacyComponents).toContain('@apply bg-[#00AEEF] text-white')
     expect(legacyComponents).toContain('@apply bg-[#2BB741] text-white')
+  })
+
+  it('keeps the authenticated Workspace and Dashboard on one violet-free blue ramp', () => {
+    const tokenSource = readFileSync(workspaceTokenSourcePath, 'utf8')
+    const appLayout = readFrontendFile('src/components/layout/AppLayout.vue')
+    const legacyComponents = readFrontendFile('src/style.css')
+    const dashboardSources = [
+      'src/views/user/DashboardView.vue',
+      'src/views/user/SubscriptionsView.vue',
+      'src/components/user/dashboard/DashboardNotificationPopover.vue',
+      'src/components/user/dashboard/UserDashboardStats.vue',
+      'src/components/user/dashboard/UserDashboardCharts.vue',
+      'src/components/user/dashboard/UserDashboardInsights.vue',
+    ].map(readFrontendFile).join('\n')
+    const modelIcon = readFrontendFile('src/components/common/ModelIcon.vue')
+    const modelIconStyle = modelIcon.slice(modelIcon.indexOf('<style scoped>'))
+    const workspaceWorkPrimitives = [...tokenSource.matchAll(
+      /--workspace-(?:light|dark)-work-[a-z0-9-]+:\s*[^;]+;/g,
+    )].map(match => match[0]).join('\n')
+
+    expect(workspaceWorkPrimitives).not.toMatch(workspaceViolet)
+    expect(`${dashboardSources}\n${modelIconStyle}`).not.toMatch(workspaceViolet)
+    expect(appLayout).toContain('--lx-clay-accent: var(--workspace-work-accent);')
+    expect(appLayout).toContain('--lx-clay-on-accent: var(--workspace-work-on-accent);')
+    expect(appLayout).toContain('--lx-clay-shadow-primary: var(--workspace-work-shadow-card);')
+    expect(appLayout).toMatch(
+      /body\.app-flat-workspace-active[^}]+--lx-clay-accent:\s*var\(--workspace-work-accent\);/s,
+    )
+    expect(legacyComponents).not.toMatch(
+      /\.btn-primary\s*\{[^}]*(?:dark:bg-primary|dark:hover:bg-primary)/s,
+    )
+    expect(legacyComponents).not.toMatch(/\.btn-secondary\s*\{[^}]*dark:/s)
+    expect(contrastRatio('#2563eb', '#eff6ff')).toBeGreaterThanOrEqual(4.5)
+    expect(contrastRatio('#60a5fa', '#172554')).toBeGreaterThanOrEqual(4.5)
+    expect(contrastRatio('#ffffff', '#2563eb')).toBeGreaterThanOrEqual(4.5)
+    expect(contrastRatio('#0d0d0d', '#60a5fa')).toBeGreaterThanOrEqual(4.5)
+    expect(contrastRatio('#64748b', '#ffffff')).toBeGreaterThanOrEqual(4.5)
+    expect(contrastRatio('#8a8a8a', '#171717')).toBeGreaterThanOrEqual(4.5)
   })
 
   it('does not reintroduce retired teal values or teal/cyan utility roles at runtime', () => {
@@ -132,16 +186,21 @@ describe('Snow Clay palette contract', () => {
       ['--workspace-light-selection-background', 'color-mix(in oklab, #cdcdcd 40%, transparent)'],
       ['--workspace-light-sidebar-overlay-backdrop', 'rgb(249 250 251 / 0.5)'],
       ['--workspace-light-sidebar-overlay-shadow', '0 0 64px rgb(0 0 0 / 0.07)'],
-      ['--workspace-light-work-accent', '#7c3aed'],
+      ['--workspace-light-work-accent', '#2563eb'],
+      ['--workspace-light-work-accent-hover', '#1d4ed8'],
+      ['--workspace-light-work-on-accent', '#ffffff'],
+      ['--workspace-light-work-chart-cost', '#ea580c'],
+      ['--workspace-light-work-chart-primary', '#2563eb'],
+      ['--workspace-light-work-chart-secondary', '#60a5fa'],
       ['--workspace-light-dashboard-card-border', '#f1f5f9'],
       ['--workspace-light-dashboard-text-strong', '#0f172a'],
       ['--workspace-light-dashboard-text-heading', '#475569'],
       ['--workspace-light-dashboard-text-muted', '#64748b'],
-      ['--workspace-light-dashboard-text-subtle', '#94a3b8'],
+      ['--workspace-light-dashboard-text-subtle', '#64748b'],
       ['--workspace-light-dashboard-period-text', '#334155'],
       ['--workspace-light-dashboard-divider', '#f8fafc'],
       ['--workspace-light-dashboard-track', '#f1f5f9'],
-      ['--workspace-light-dashboard-success', '#22c55e'],
+      ['--workspace-light-dashboard-success', '#16a34a'],
       ['--workspace-dark-canvas', '#000000'],
       ['--workspace-dark-sidebar-surface', 'var(--workspace-dark-canvas)'],
       ['--workspace-dark-surface', '#171717'],
@@ -163,6 +222,12 @@ describe('Snow Clay palette contract', () => {
       ['--workspace-dark-sidebar-overlay-shadow', 'none'],
       ['--workspace-dark-hover', '#212121'],
       ['--workspace-dark-active', '#212121'],
+      ['--workspace-dark-work-accent', '#60a5fa'],
+      ['--workspace-dark-work-accent-hover', '#93c5fd'],
+      ['--workspace-dark-work-on-accent', '#0d0d0d'],
+      ['--workspace-dark-work-chart-cost', '#fb923c'],
+      ['--workspace-dark-work-chart-primary', '#60a5fa'],
+      ['--workspace-dark-work-chart-secondary', '#93c5fd'],
       ['--workspace-dark-dashboard-card-border', 'var(--workspace-dark-border)'],
       ['--workspace-dark-dashboard-card-shadow', 'none'],
       ['--workspace-dark-dashboard-text-strong', 'var(--workspace-dark-text)'],

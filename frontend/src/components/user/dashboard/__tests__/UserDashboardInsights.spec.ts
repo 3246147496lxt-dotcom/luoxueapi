@@ -71,22 +71,54 @@ describe('UserDashboardInsights', () => {
       ],
     })
     listChannelMonitors.mockResolvedValue({
-      items: [{
-        id: 7,
-        name: 'GPT primary',
-        provider: 'openai',
-        group_name: 'default',
-        primary_model: 'gpt-5.6',
-        primary_status: 'operational',
-        primary_latency_ms: 300,
-        primary_ping_latency_ms: 40,
-        availability_7d: 99,
-        extra_models: [],
-        timeline: [
-          { status: 'operational', latency_ms: 300, ping_latency_ms: 40, checked_at: new Date().toISOString() },
-          { status: 'degraded', latency_ms: 500, ping_latency_ms: 60, checked_at: new Date(Date.now() - 60_000).toISOString() },
-        ],
-      }],
+      items: [
+        {
+          id: 7,
+          name: 'GPT纯血账号',
+          provider: 'openai',
+          group_name: 'default',
+          primary_model: 'gpt-5.6',
+          primary_status: 'operational',
+          primary_latency_ms: 300,
+          primary_ping_latency_ms: 40,
+          availability_7d: 99,
+          extra_models: [],
+          timeline: [
+            { status: 'operational', latency_ms: 300, ping_latency_ms: 40, checked_at: new Date().toISOString() },
+            { status: 'degraded', latency_ms: 500, ping_latency_ms: 60, checked_at: new Date(Date.now() - 60_000).toISOString() },
+          ],
+        },
+        {
+          id: 8,
+          name: 'ULTREA会员渠道',
+          provider: 'openai',
+          group_name: 'default',
+          primary_model: 'gpt-5.6',
+          primary_status: 'operational',
+          primary_latency_ms: 220,
+          primary_ping_latency_ms: 30,
+          availability_7d: 100,
+          extra_models: [],
+          timeline: [
+            { status: 'operational', latency_ms: 220, ping_latency_ms: 30, checked_at: new Date().toISOString() },
+          ],
+        },
+        {
+          id: 9,
+          name: 'Claude纯血',
+          provider: 'anthropic',
+          group_name: 'default',
+          primary_model: 'sonnet-4.6',
+          primary_status: 'failed',
+          primary_latency_ms: 5000,
+          primary_ping_latency_ms: 80,
+          availability_7d: 0,
+          extra_models: [],
+          timeline: [
+            { status: 'failed', latency_ms: 5000, ping_latency_ms: 80, checked_at: new Date().toISOString() },
+          ],
+        },
+      ],
     })
   })
 
@@ -122,14 +154,26 @@ describe('UserDashboardInsights', () => {
     expect(wrapper.findAll('[role="row"]')[1].text()).toContain('50.0%')
   })
 
-  it('builds the provider selector from real monitor data and shows no-data-safe health', async () => {
+  it('builds one channel option per monitor and keeps each monitor health independent', async () => {
     const wrapper = mountInsights()
     await flushPromises()
 
     expect(wrapper.get('.dashboard-channel-card__title-group h2').text()).toBe('渠道状态')
-    expect(wrapper.get('.dashboard-channel-select select').text()).toContain('GPT')
+    expect(wrapper.get('.dashboard-channel-select select').findAll('option').map(option => option.text())).toEqual([
+      'GPT纯血账号',
+      'ULTREA会员渠道',
+      'Claude纯血',
+    ])
     expect(wrapper.get('.dashboard-channel-card__value').text()).toBe('100.0%')
     expect(wrapper.get('.dashboard-channel-card__details').attributes('disabled')).toBeUndefined()
+
+    await wrapper.get('.dashboard-channel-select select').setValue('8')
+    expect(wrapper.get('.dashboard-channel-card__value').text()).toBe('100.0%')
+    expect(wrapper.get('[data-testid="monitor-dialog"]').attributes('monitor-id')).toBe('8')
+
+    await wrapper.get('.dashboard-channel-select select').setValue('9')
+    expect(wrapper.get('.dashboard-channel-card__value').text()).toBe('0.0%')
+    expect(wrapper.get('[data-testid="monitor-dialog"]').attributes('monitor-id')).toBe('9')
 
     listChannelMonitors.mockResolvedValueOnce({ items: [] })
     const emptyWrapper = mountInsights()

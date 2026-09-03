@@ -52,6 +52,7 @@ type OverlayProps = {
   showOnboarding: boolean
   context: 'work' | 'chat'
   variant: 'personal' | 'admin'
+  appearance?: 'personal' | 'admin'
   planLabel: string
   helpHref: string
   workspaceTarget: { href: string; label: string } | null
@@ -218,6 +219,50 @@ describe('SidebarAccountOverlay', () => {
     )
     expect(panel?.textContent).toContain('accountDock.balanceShort')
     expect(amounts.map((amount) => amount.dataset.value)).toEqual(['12.50', '3.50'])
+  })
+
+  it('applies the personal visual language without removing administrator actions', async () => {
+    mountOverlay(false, {
+      variant: 'admin',
+      appearance: 'personal',
+      showOnboarding: true,
+      workspaceTarget: {
+        href: '/dashboard',
+        label: 'nav.switchToPersonalWorkspace',
+      },
+      summary: {
+        ...summary,
+        frozenBalance: 3.5,
+        formattedFrozenBalance: '3.50',
+      },
+    })
+    await nextTick()
+
+    const panel = document.body.querySelector<HTMLElement>('[data-testid="sidebar-account-panel"]')
+    const actionIds = Array.from(
+      panel?.querySelectorAll<HTMLElement>('[data-testid]') ?? [],
+    ).map(element => element.dataset.testid)
+    const icons = Array.from(
+      panel?.querySelectorAll<HTMLElement>('[data-account-menu-icon]') ?? [],
+    ).map(icon => icon.dataset.accountMenuIcon)
+
+    expect(panel?.classList.contains('account-panel--personal')).toBe(true)
+    expect(panel?.textContent).toContain('Riley Quinn')
+    expect(panel?.textContent).toContain('Pro')
+    expect(panel?.textContent).not.toContain('accountDock.balanceShort')
+    expect(panel?.querySelectorAll('[data-testid="credit-amount"]')).toHaveLength(0)
+    expect(panel?.querySelectorAll('.account-panel__divider')).toHaveLength(2)
+    expect(actionIds).toEqual([
+      'account-open-profile',
+      'account-open-preferences',
+      'account-admin-guide',
+      'account-switch-workspace',
+      'account-logout',
+    ])
+    expect(icons).toEqual(['chevronRight', 'avatar', 'settings', 'help', 'exit'])
+    expect(panel?.querySelector('[data-testid="account-switch-workspace"]')?.getAttribute('href'))
+      .toBe('/dashboard')
+    expect(panel?.textContent).toContain('nav.switchToPersonalWorkspace')
   })
 
   it('offers administrators an explicit cross-workspace return path', async () => {
@@ -503,7 +548,10 @@ describe('SidebarAccountOverlay', () => {
   })
 
   it('retains the administrator bottom sheet and restores its background lock on unmount', async () => {
-    const { shell, wrapper } = mountOverlay(true, { variant: 'admin' })
+    const { shell, wrapper } = mountOverlay(true, {
+      variant: 'admin',
+      appearance: 'personal',
+    })
     await nextTick()
     await nextTick()
 
@@ -512,6 +560,7 @@ describe('SidebarAccountOverlay', () => {
 
     expect(panel?.getAttribute('aria-modal')).toBe('true')
     expect(panel?.classList.contains('account-panel--mobile')).toBe(true)
+    expect(panel?.classList.contains('account-panel--personal')).toBe(true)
     expect(backdrop).not.toBeNull()
     expect(shell.getAttribute('aria-hidden')).toBe('true')
     expect(shell.inert).toBe(true)
@@ -611,7 +660,7 @@ describe('SidebarAccountOverlay', () => {
       () => ([{} as DOMRect] as unknown as DOMRectList),
     )
 
-    mountOverlay(true, { variant: 'admin' })
+    mountOverlay(true, { variant: 'admin', appearance: 'personal' })
     await nextTick()
     await nextTick()
 

@@ -5,7 +5,10 @@
         v-if="show"
         ref="dialogRef"
         class="modal-overlay"
-        :class="{ 'modal-overlay--workspace-confirm': variant === 'workspace-confirm' }"
+        :class="{
+          'modal-overlay--workspace-confirm': variant === 'workspace-confirm',
+          'modal-overlay--project-create': variant === 'project-create',
+        }"
         :style="zIndexStyle"
         :aria-labelledby="dialogId"
         :aria-describedby="descriptionId || undefined"
@@ -19,7 +22,10 @@
           class="modal-content"
           :class="[
             widthClasses,
-            { 'modal-content--workspace-confirm': variant === 'workspace-confirm' },
+            {
+              'modal-content--workspace-confirm': variant === 'workspace-confirm',
+              'modal-content--project-create': variant === 'project-create',
+            },
           ]"
           @click.stop
         >
@@ -32,7 +38,7 @@
               v-if="showCloseButton"
               @click="emit('close')"
               class="-mr-2 rounded-xl p-2 text-[var(--lx-clay-text-muted)] transition-colors hover:bg-[var(--lx-clay-hover)] hover:text-[var(--lx-clay-text)] focus:outline-none focus-visible:ring-2 focus-visible:ring-primary-500/30 focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--lx-clay-surface-elevated)]"
-              aria-label="Close modal"
+              :aria-label="closeButtonLabel"
             >
               <Icon name="x" size="md" />
             </button>
@@ -77,6 +83,7 @@ let modalActive = false
 
 type DialogWidth = 'narrow' | 'normal' | 'wide' | 'extra-wide' | 'full'
 type DialogVariant = 'default' | 'workspace-confirm'
+type SupportedDialogVariant = DialogVariant | 'project-create'
 
 interface Props {
   show: boolean
@@ -86,8 +93,9 @@ interface Props {
   closeOnClickOutside?: boolean
   showCloseButton?: boolean
   zIndex?: number
-  variant?: DialogVariant
+  variant?: SupportedDialogVariant
   descriptionId?: string
+  closeButtonLabel?: string
 }
 
 interface Emits {
@@ -102,6 +110,7 @@ const props = withDefaults(defineProps<Props>(), {
   zIndex: 50,
   variant: 'default',
   descriptionId: '',
+  closeButtonLabel: 'Close modal',
 })
 
 const emit = defineEmits<Emits>()
@@ -187,7 +196,10 @@ async function activateModal() {
   await nextTick()
   const dialog = dialogRef.value
   if (!modalActive || !dialog) return
-  const firstFocusable = getVisibleFocusableElements(dialog)[0]
+  const firstFocusable = props.variant === 'project-create'
+    ? dialog.querySelector<HTMLElement>('input:not([disabled]), textarea:not([disabled]), select:not([disabled])')
+      ?? getVisibleFocusableElements(dialog)[0]
+    : getVisibleFocusableElements(dialog)[0]
   ;(firstFocusable ?? dialog).focus({ preventScroll: true })
 }
 
@@ -265,6 +277,84 @@ onUnmounted(() => {
   padding: var(--workspace-space-4);
   gap: var(--workspace-space-3);
   border: 0;
+}
+
+/*
+ * The Projects create flow follows ChatGPT's compact editor rather than the
+ * application's clay-style default dialog. Keep this opt-in so existing
+ * dialogs retain their measured geometry and behavior.
+ */
+.modal-overlay--project-create {
+  box-sizing: border-box;
+  padding: 0;
+  background: rgb(227 227 227 / 0.5);
+  backdrop-filter: blur(1px);
+  overflow: auto;
+}
+
+.modal-content--project-create {
+  width: min(512px, 100%);
+  max-width: 512px;
+  max-height: none;
+  overflow: visible;
+  border: 0;
+  border-radius: 16px;
+  color: #0d0d0d;
+  background: #fff;
+  box-shadow: 0 8px 12px rgb(0 0 0 / 0.08), 0 0 1px rgb(0 0 0 / 0.62);
+}
+
+.modal-content--project-create .modal-header {
+  box-sizing: border-box;
+  height: 52px;
+  align-items: flex-start;
+  padding: 8px 8px 8px 16px;
+  border: 0;
+}
+
+.modal-content--project-create .modal-header > button {
+  color: #0d0d0d;
+}
+
+.modal-content--project-create .modal-title {
+  color: #0d0d0d;
+  font-size: 18px;
+  font-weight: 400;
+  line-height: 28px;
+}
+
+.modal-content--project-create .modal-body {
+  box-sizing: border-box;
+  flex: none;
+  overflow: visible;
+  padding: 8px 16px 0;
+}
+
+.modal-content--project-create .modal-footer {
+  box-sizing: border-box;
+  min-height: 68px;
+  align-items: center;
+  gap: 12px;
+  padding: 16px;
+  border: 0;
+}
+
+:global(html.dark) .modal-overlay--project-create {
+  background: rgb(0 0 0 / 0.5);
+}
+
+:global(html.dark) .modal-content--project-create {
+  color: #fff;
+  background: #212121;
+  box-shadow: 0 8px 12px rgb(0 0 0 / 0.24), 0 0 1px rgb(255 255 255 / 0.24);
+}
+
+:global(html.dark) .modal-content--project-create .modal-title {
+  color: #fff;
+}
+
+:global(html.dark) .modal-content--project-create .modal-header > button {
+  color: #fff;
 }
 
 @media (max-height: 360px) {

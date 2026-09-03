@@ -303,36 +303,7 @@ onBeforeUnmount(() => {
   }
 }
 
-:global(html.dark) .dashboard-notifications__trigger {
-  color: var(--workspace-dashboard-text-muted);
-}
-
-:global(html.dark) .dashboard-notifications__trigger:hover {
-  color: var(--workspace-dashboard-notification-hover);
-}
-
-:global(html.dark) .dashboard-notifications__panel {
-  border-color: var(--workspace-dashboard-card-border);
-  background: var(--workspace-card-surface);
+:global(html.dark .dashboard-notifications .dashboard-notifications__panel) {
   box-shadow: 0 16px 40px rgb(0 0 0 / 0.28);
-}
-
-:global(html.dark) .dashboard-notifications__header,
-:global(html.dark) .dashboard-notifications__item,
-:global(html.dark) .dashboard-notifications__view-all {
-  border-color: var(--workspace-dashboard-divider);
-}
-
-:global(html.dark) .dashboard-notifications__header h2,
-:global(html.dark) .dashboard-notifications__item-head strong {
-  color: var(--workspace-dashboard-text-strong);
-}
-
-:global(html.dark) .dashboard-notifications__header button,
-:global(html.dark) .dashboard-notifications__view-all,
-:global(html.dark) .dashboard-notifications__item,
-:global(html.dark) .dashboard-notifications__item-head time,
-:global(html.dark) .dashboard-notifications__state {
-  color: var(--workspace-dashboard-text-muted);
 }
 </style>

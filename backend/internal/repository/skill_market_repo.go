@@ -30,6 +30,19 @@ s.current_version_id, s.published_at, s.archived_at, s.created_by, s.updated_by,
 s.created_at, s.updated_at,
 COALESCE((SELECT SUM(v.download_count) FROM skill_versions v WHERE v.skill_id = s.id), 0)`
 
+const skillMarketLocalizedSelectColumns = `
+s.id, s.slug,
+COALESCE(NULLIF(catalog_copy.display_name, ''), s.display_name),
+COALESCE(NULLIF(catalog_copy.summary, ''), s.summary),
+COALESCE(NULLIF(catalog_copy.description, ''), s.description),
+s.category, s.tags,
+s.icon, s.example_prompts, s.risk_notes, s.origin_url, s.source_url, s.source_repository,
+s.repository_stars, s.repository_stars_fetched_at, s.repository_stars_refresh_after,
+s.status, s.featured, s.sort_order, s.catalog_source_priority, s.catalog_source_rank,
+s.current_version_id, s.published_at, s.archived_at, s.created_by, s.updated_by,
+s.created_at, s.updated_at,
+COALESCE((SELECT SUM(v.download_count) FROM skill_versions v WHERE v.skill_id = s.id), 0)`
+
 func scanSkillMarket(scanner skillMarketScanner) (*service.Skill, error) {
 	var (
 		skill                   service.Skill
@@ -257,9 +270,29 @@ WHERE s.slug=$1 AND s.status='published'
 	return skill, nil
 }
 
-func buildSkillMarketWhere(filter service.SkillListFilter, public bool) (string, []any) {
+func (r *skillMarketRepository) GetPublishedBySlugLocalized(ctx context.Context, slug, locale string) (*service.Skill, error) {
+	if strings.TrimSpace(locale) == "" {
+		locale = "zh-CN"
+	}
+	skill, err := scanSkillMarket(r.db.QueryRowContext(ctx, `
+SELECT `+skillMarketLocalizedSelectColumns+`
+FROM skills s
+LEFT JOIN skill_catalog_localizations catalog_copy
+  ON catalog_copy.slug=s.slug AND catalog_copy.locale=$2
+JOIN skill_versions current_version ON current_version.id=s.current_version_id
+WHERE s.slug=$1 AND s.status='published'
+  AND current_version.released_at IS NOT NULL AND current_version.yanked_at IS NULL`, slug, locale))
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, service.ErrSkillNotFound
+		}
+		return nil, fmt.Errorf("get localized published skill: %w", err)
+	}
+	return skill, nil
+}
+
+func buildSkillMarketWhere(filter service.SkillListFilter, public, localized bool, args []any) (string, []any) {
 	conditions := make([]string, 0, 5)
-	args := make([]any, 0, 5)
 	add := func(condition string, value any) {
 		args = append(args, value)
 		conditions = append(conditions, fmt.Sprintf(condition, len(args)))
@@ -277,10 +310,17 @@ func buildSkillMarketWhere(filter service.SkillListFilter, public bool) (string,
 	if filter.Search != "" {
 		args = append(args, "%"+filter.Search+"%")
 		n := len(args)
-		conditions = append(conditions, fmt.Sprintf(
-			"(s.slug ILIKE $%d OR s.display_name ILIKE $%d OR s.summary ILIKE $%d OR s.description ILIKE $%d OR s.tags::text ILIKE $%d)",
+		searchCondition := fmt.Sprintf(
+			"(s.slug ILIKE $%d OR s.display_name ILIKE $%d OR s.summary ILIKE $%d OR s.description ILIKE $%d OR s.tags::text ILIKE $%d",
 			n, n, n, n, n,
-		))
+		)
+		if localized {
+			searchCondition += fmt.Sprintf(
+				" OR catalog_copy.display_name ILIKE $%d OR catalog_copy.summary ILIKE $%d OR catalog_copy.description ILIKE $%d",
+				n, n, n,
+			)
+		}
+		conditions = append(conditions, searchCondition+")")
 	}
 	if filter.Category != "" {
 		add("s.category=$%d", filter.Category)
@@ -295,13 +335,28 @@ func buildSkillMarketWhere(filter service.SkillListFilter, public bool) (string,
 }
 
 func (r *skillMarketRepository) list(ctx context.Context, filter service.SkillListFilter, public bool) ([]service.Skill, int64, error) {
-	where, args := buildSkillMarketWhere(filter, public)
+	selectColumns := skillMarketSelectColumns
+	fromClause := " FROM skills s"
+	args := make([]any, 0, 7)
+	localized := false
+	if public {
+		locale := strings.TrimSpace(filter.Locale)
+		if locale == "" {
+			locale = "zh-CN"
+		}
+		args = append(args, locale)
+		localized = true
+		selectColumns = skillMarketLocalizedSelectColumns
+		fromClause += ` LEFT JOIN skill_catalog_localizations catalog_copy
+  ON catalog_copy.slug=s.slug AND catalog_copy.locale=$1`
+	}
+	where, args := buildSkillMarketWhere(filter, public, localized, args)
 	var total int64
-	if err := r.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM skills s"+where, args...).Scan(&total); err != nil {
+	if err := r.db.QueryRowContext(ctx, "SELECT COUNT(*)"+fromClause+where, args...).Scan(&total); err != nil {
 		return nil, 0, fmt.Errorf("count skills: %w", err)
 	}
 	args = append(args, filter.PageSize, (filter.Page-1)*filter.PageSize)
-	query := `SELECT ` + skillMarketSelectColumns + ` FROM skills s` + where +
+	query := `SELECT ` + selectColumns + fromClause + where +
 		fmt.Sprintf(" ORDER BY s.featured DESC, s.catalog_source_priority ASC, s.catalog_source_rank ASC NULLS LAST, s.sort_order ASC, s.id ASC LIMIT $%d OFFSET $%d", len(args)-1, len(args))
 	rows, err := r.db.QueryContext(ctx, query, args...)
 	if err != nil {

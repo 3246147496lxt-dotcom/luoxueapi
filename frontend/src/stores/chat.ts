@@ -22,6 +22,7 @@ import {
 } from '@/features/chat/activity'
 import { chatHistoryPersistence } from '@/features/chat/persistence'
 import type { ChatHistoryMutation } from '@/features/chat/persistence'
+import { isSettlementFailureWithCompletedDelivery } from '@/features/chat/settlementDelivery'
 import type {
   ChatAttempt,
   ChatActivity,
@@ -391,6 +392,11 @@ function sanitizeMessage(value: unknown): ChatMessage | null {
   }
   if (typeof value.errorCode === 'string') message.errorCode = value.errorCode
   if (typeof value.errorMessage === 'string') message.errorMessage = value.errorMessage
+  if (isSettlementFailureWithCompletedDelivery(message)) {
+    message.status = 'complete'
+    delete message.errorCode
+    delete message.errorMessage
+  }
   copyAssistantMetadata(message, value)
   const attachments = sanitizedAttachments(value.attachments)
   if (attachments.length > 0) message.attachments = attachments
@@ -572,6 +578,7 @@ export const useChatStore = defineStore('chat', () => {
   let syncPromise: Promise<void> | null = null
   let syncController: AbortController | null = null
   let completionPreparationController: AbortController | null = null
+  let searchRequestSequence = 0
   let clearRevision = 0
   let activeConversationSelectionResolved = false
   let activeConversationSelectionRevision = 0
@@ -628,6 +635,7 @@ export const useChatStore = defineStore('chat', () => {
     syncPromise = null
     completionPreparationController?.abort()
     completionPreparationController = null
+    searchRequestSequence += 1
     userId.value = null
     conversations.value = []
     activeConversationId.value = null
@@ -1196,6 +1204,7 @@ export const useChatStore = defineStore('chat', () => {
     const index = conversations.value.findIndex((conversation) => conversation.id === conversationId)
     if (index < 0) return false
 
+    invalidateHistorySearch()
     if (streamingConversationId.value === conversationId) clearStreamingRuntime(true)
     const mutationId = queueConversationDelete(conversations.value[index]!)
     conversations.value.splice(index, 1)
@@ -1222,6 +1231,7 @@ export const useChatStore = defineStore('chat', () => {
   }
 
   function clearConversations(): void {
+    invalidateHistorySearch()
     if (!userId.value) return
     const deleteMutationIds = conversations.value
       .map(queueConversationDelete)
@@ -1355,7 +1365,12 @@ export const useChatStore = defineStore('chat', () => {
       else delete message.activities
     }
 
-    moveConversationToFront(conversation)
+    // Message patches are also used for asynchronous receipt/billing
+    // reconciliation. Those callbacks can arrive for any old conversation
+    // and must not change the conversation's recency (or reorder the history
+    // sidebar based on network completion order). Real conversation activity
+    // already updates recency through add/start/finish/stop and explicit
+    // conversation mutations.
     persist({ upsertConversationIds: [conversationId] })
     return true
   }
@@ -1375,11 +1390,16 @@ export const useChatStore = defineStore('chat', () => {
       clearStreamingRuntime(true)
     }
     conversation.messages = nextMessages
-    moveConversationToFront(conversation)
+    // This is currently used to remove optimistic messages after a failed or
+    // cancelled request. A late cleanup must not make an old conversation
+    // jump to the top of the history sidebar.
     persist({ upsertConversationIds: [conversationId] })
     return true
   }
 
+  // Activity and stream deltas are high-frequency progress updates. The turn
+  // lifecycle touches conversation recency once; individual deltas must not
+  // reorder the history sidebar.
   function upsertMessageActivity(
     conversationId: string,
     messageId: string,
@@ -1403,7 +1423,6 @@ export const useChatStore = defineStore('chat', () => {
       }
     }
     message.activities = mergeChatActivities(message.activities, normalized)
-    moveConversationToFront(conversation)
     if (isTerminalChatActivityStatus(normalized[0]!.status)) {
       persist({ upsertConversationIds: [conversationId] })
     } else {
@@ -1452,7 +1471,6 @@ export const useChatStore = defineStore('chat', () => {
     target.item.updatedAt = now
     target.activity.status = 'streaming'
     target.activity.updatedAt = now
-    moveConversationToFront(conversation, now)
     schedulePersist(conversationId)
     return true
   }
@@ -1479,7 +1497,6 @@ export const useChatStore = defineStore('chat', () => {
     target.item.updatedAt = now
     target.activity.status = 'streaming'
     target.activity.updatedAt = now
-    moveConversationToFront(conversation, now)
     schedulePersist(conversationId)
     return true
   }
@@ -1520,7 +1537,6 @@ export const useChatStore = defineStore('chat', () => {
     const activity = message?.activities?.find((candidate) => candidate.key === activityKey)
     if (!conversation || !message || message.role !== 'assistant' || !activity) return false
     applyActivityTerminal(activity, status, error)
-    moveConversationToFront(conversation)
     persist({ upsertConversationIds: [conversationId] })
     return true
   }
@@ -1547,7 +1563,6 @@ export const useChatStore = defineStore('chat', () => {
     const message = findMessage(conversationId, messageId)
     if (!conversation || !message || message.role !== 'assistant') return false
     if (!applyOpenMessageActivities(message, status, error)) return false
-    moveConversationToFront(conversation)
     persist({ upsertConversationIds: [conversationId] })
     return true
   }
@@ -1586,7 +1601,6 @@ export const useChatStore = defineStore('chat', () => {
     if (!conversation || !message || message.status !== 'streaming') return false
 
     message.content += chunk
-    moveConversationToFront(conversation)
     schedulePersist(conversationId)
     return true
   }
@@ -1753,6 +1767,10 @@ export const useChatStore = defineStore('chat', () => {
       })
     } else if (existing?.activities?.length) {
       merged.activities = existing.activities.map(cloneChatActivity)
+    }
+    if (!protectsCurrentStream && incoming.status === 'complete') {
+      delete merged.errorCode
+      delete merged.errorMessage
     }
     if (protectsCurrentStream && existing) {
       merged.status = 'streaming'
@@ -2191,22 +2209,32 @@ export const useChatStore = defineStore('chat', () => {
   }
 
   async function searchHistory(query: string): Promise<void> {
+    const requestSequence = ++searchRequestSequence
+    const context = capturePersistenceContext()
     const normalized = query.trim()
     if (!normalized) {
-      searchResults.value = []
+      if (requestSequence === searchRequestSequence && isCurrentPersistenceContext(context)) {
+        searchResults.value = []
+        searchingHistory.value = false
+      }
       return
     }
     if (!browserIsOnline() || serverHistoryAvailable.value === false) {
-      searchResults.value = localConversationSearch(normalized)
+      if (requestSequence === searchRequestSequence && isCurrentPersistenceContext(context)) {
+        searchResults.value = localConversationSearch(normalized)
+        searchingHistory.value = false
+      }
       return
     }
     searchingHistory.value = true
     try {
       const page = await searchChatConversations({ query: normalized, limit: 50 })
+      if (requestSequence !== searchRequestSequence || !isCurrentPersistenceContext(context)) return
       serverHistoryAvailable.value = true
       const resultIds: string[] = []
       const upserted: string[] = []
       for (const remote of page.items) {
+        if (requestSequence !== searchRequestSequence) return
         const id = applyServerConversation(remote)
         if (id) {
           upserted.push(id)
@@ -2218,11 +2246,22 @@ export const useChatStore = defineStore('chat', () => {
         .map((id) => findConversation(id))
         .filter((conversation): conversation is ChatConversation => Boolean(conversation))
     } catch (error) {
+      if (requestSequence !== searchRequestSequence || !isCurrentPersistenceContext(context)) return
       searchResults.value = localConversationSearch(normalized)
       if (isHistoryUnavailableError(error)) serverHistoryAvailable.value = false
     } finally {
-      searchingHistory.value = false
+      if (requestSequence === searchRequestSequence && isCurrentPersistenceContext(context)) {
+        searchingHistory.value = false
+      }
     }
+  }
+
+  // Invalidate an in-flight search as soon as its input changes. The view
+  // debounces the next request, so waiting for searchHistory() itself would
+  // leave a window where an old response could still reorder the sidebar.
+  function invalidateHistorySearch(): void {
+    searchRequestSequence += 1
+    searchingHistory.value = false
   }
 
   async function loadConversationDetail(conversationId: string): Promise<boolean> {
@@ -2419,6 +2458,7 @@ export const useChatStore = defineStore('chat', () => {
     markCompletionAccepted,
     loadConversationPage,
     searchHistory,
+    invalidateHistorySearch,
     loadConversationDetail,
     loadOlderConversationMessages,
     recoverAttempt,

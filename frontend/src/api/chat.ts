@@ -10,6 +10,7 @@ import {
   isChatActivityEventType,
   normalizeChatActivities,
 } from '@/features/chat/activity'
+import { isSettlementFailureWithCompletedDelivery } from '@/features/chat/settlementDelivery'
 import { getLocale } from '@/i18n'
 import type {
   ChatActivityEvent,
@@ -1103,6 +1104,19 @@ function normalizeServerMessage(value: unknown): ChatServerMessage | null {
     billingSource.created_at ?? billingSource.createdAt,
   )
 
+  const isLegacySettlementOnlyError = isSettlementFailureWithCompletedDelivery({
+    role,
+    status: message.status,
+    content,
+    finishReason: message.finishReason,
+    errorCode: errorCodeValue,
+  })
+
+  // Older servers persisted a post-delivery billing failure as a generation
+  // failure. Only repair records that also carry terminal delivery evidence;
+  // interrupted or genuinely failed streams keep their original error state.
+  if (isLegacySettlementOnlyError) message.status = 'complete'
+
   if (updatedAt !== undefined) message.updatedAt = updatedAt
   if (position !== undefined) message.position = position
   if (attemptId) message.attemptId = attemptId
@@ -1112,8 +1126,8 @@ function normalizeServerMessage(value: unknown): ChatServerMessage | null {
   }
   if (requestedModel) message.requestedModel = requestedModel
   if (actualModel) message.actualModel = actualModel
-  if (errorCodeValue) message.errorCode = errorCodeValue
-  if (errorMessageValue) message.errorMessage = errorMessageValue
+  if (errorCodeValue && !isLegacySettlementOnlyError) message.errorCode = errorCodeValue
+  if (errorMessageValue && !isLegacySettlementOnlyError) message.errorMessage = errorMessageValue
   if (supersededByMessageId) message.supersededByMessageId = supersededByMessageId
   if (optionalBoolean(candidate.excluded_from_context ?? candidate.excludedFromContext) !== undefined) {
     message.excludedFromContext = Boolean(
@@ -1492,15 +1506,24 @@ export async function getChatAttempt(
     const failureCode = nonEmptyString(candidate.failure_code ?? candidate.failureCode)
     const failureReason = nonEmptyString(candidate.failure_reason ?? candidate.failureReason)
     const updatedAt = optionalTimestamp(candidate.updated_at ?? candidate.updatedAt)
+    const isSettlementOnlyAttempt = status === 'failed'
+      && assistantMessage !== null
+      && isSettlementFailureWithCompletedDelivery({
+        role: assistantMessage.role,
+        status: assistantMessage.status,
+        content: assistantMessage.content,
+        finishReason: assistantMessage.finishReason,
+        errorCode: failureCode,
+      })
     return {
       attemptId: normalizedAttemptId,
       conversationId,
       assistantMessageId,
-      status,
+      status: isSettlementOnlyAttempt ? 'completed' : status,
       ...(assistantMessage ? { assistantMessage } : {}),
       ...(receiptId ? { receiptId } : {}),
-      ...(failureCode ? { failureCode } : {}),
-      ...(failureReason ? { failureReason } : {}),
+      ...(failureCode && !isSettlementOnlyAttempt ? { failureCode } : {}),
+      ...(failureReason && !isSettlementOnlyAttempt ? { failureReason } : {}),
       ...(updatedAt !== undefined ? { updatedAt } : {}),
     }
   } catch (error) {

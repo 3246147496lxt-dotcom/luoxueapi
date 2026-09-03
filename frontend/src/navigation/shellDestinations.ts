@@ -35,7 +35,7 @@ export type ShellCapabilityState = 'enabled' | 'disabled' | 'unknown'
 export type ShellUnknownCapabilityPolicy = 'allow' | 'deny'
 export type ShellCapabilityKey = 'payment' | 'public-model-catalog'
 export type ShellConfiguredHrefSource = 'contact' | 'documentation'
-export type ShellSupportDestinationId = 'models' | 'contact' | 'documentation'
+export type ShellSupportDestinationId = 'webChat' | 'models' | 'contact' | 'documentation'
 export type ShellSettingsDestinationId = 'settings'
 export type ShellDestinationId =
   | AccountDestinationId
@@ -189,6 +189,16 @@ export const ACCOUNT_DESTINATION_DEFINITIONS = [
 ] as const satisfies readonly ShellDestinationDefinition[]
 
 export const SUPPORT_DESTINATION_DEFINITIONS = [
+  {
+    id: 'webChat',
+    labelKey: 'nav.webChat',
+    placement: 'support',
+    target: {
+      kind: 'route',
+      path: '/chat',
+    },
+    simpleMode: VISIBLE_IN_SIMPLE_MODE,
+  },
   {
     id: 'documentation',
     labelKey: 'nav.docsTutorial',

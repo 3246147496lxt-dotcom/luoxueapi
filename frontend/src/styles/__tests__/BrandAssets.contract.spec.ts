@@ -134,7 +134,7 @@ describe('canonical brand asset contract', () => {
     expect({ width: png.width, height: png.height }).toEqual({ width: 512, height: 512 })
     expect(statSync(canonicalLogoPath).size).toBeLessThan(300 * 1024)
     expect(createHash('sha256').update(bytes).digest('hex')).toBe(
-      '3799edf2239bb719e9d56ade9367374c6afc06d543e6a966813ea2a68e49a615',
+      '95fab1ff815329f29a552e1af3166752159928279a0f536aa333b2b579cfc86a',
     )
     expect([
       alphaAt(png, 0, 0),

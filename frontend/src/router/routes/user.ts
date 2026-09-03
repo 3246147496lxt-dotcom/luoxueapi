@@ -34,6 +34,32 @@ export const userRoutes: RouteRecordRaw[] = [
     }
   },
   {
+    path: '/skills',
+    name: 'SkillMarket',
+    component: () => import('@/views/public/SkillMarketplaceView.vue'),
+    meta: {
+      requiresAuth: true,
+      requiresAdmin: false,
+      requiresSkillMarketplace: true,
+      title: 'Skill 市场',
+      titleKey: 'skills.meta.title',
+      descriptionKey: 'skills.meta.description'
+    }
+  },
+  {
+    path: '/skills/:slug',
+    name: 'SkillDetail',
+    component: () => import('@/views/public/SkillDetailView.vue'),
+    meta: {
+      requiresAuth: true,
+      requiresAdmin: false,
+      requiresSkillMarketplace: true,
+      title: 'Skill 详情',
+      titleKey: 'skills.meta.title',
+      descriptionKey: 'skills.meta.description'
+    }
+  },
+  {
     path: '/desktop/authorize',
     name: 'DesktopAuthorize',
     component: () => import('@/views/user/DesktopAuthorizeView.vue'),

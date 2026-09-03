@@ -377,6 +377,35 @@ func TestChatHistoryCompletionWritesRequireMonotonicSequence(t *testing.T) {
 	require.ErrorIs(t, err, ErrChatHistoryInvalid)
 }
 
+func TestChatHistoryCompletionAllowsSettlementFailureAfterDeliveredMessage(t *testing.T) {
+	t.Parallel()
+	repo := &chatHistoryRepositoryStub{}
+	svc := NewChatHistoryService(repo)
+
+	err := svc.FinalizeCompletion(
+		context.Background(),
+		42,
+		&FinalizeChatCompletionInput{
+			AttemptID:          "attempt-12345678",
+			AssistantMessageID: "message-assistant-12345678",
+			Content:            "complete answer",
+			CheckpointSeq:      3,
+			DeliveryStatus:     ChatMessageDeliveryCompleted,
+			AttemptStatus:      ChatAttemptStatusFailed,
+			HTTPStatus:         200,
+			FinishReason:       "stop",
+			ErrorCode:          ChatAttemptFailureCodeSettlement,
+			ErrorMessage:       "Chat usage settlement could not be completed",
+		},
+	)
+
+	require.NoError(t, err)
+	require.NotNil(t, repo.finalizeInput)
+	require.Equal(t, ChatMessageDeliveryCompleted, repo.finalizeInput.DeliveryStatus)
+	require.Equal(t, ChatAttemptStatusFailed, repo.finalizeInput.AttemptStatus)
+	require.Equal(t, ChatAttemptFailureCodeSettlement, repo.finalizeInput.ErrorCode)
+}
+
 func TestChatHistoryCheckpointNormalizesActivitySnapshot(t *testing.T) {
 	t.Parallel()
 	repo := &chatHistoryRepositoryStub{}
