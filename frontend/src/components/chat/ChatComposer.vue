@@ -245,7 +245,7 @@ function maximizedInputHeight(): number {
 
 function narrowComposerLayout(): boolean {
   return typeof window !== 'undefined'
-    && window.matchMedia?.('(max-width: 720px)').matches
+    && window.matchMedia?.('(max-width: 639px)').matches
 }
 
 function outerWidth(element: Element | null): number {
@@ -563,7 +563,17 @@ defineExpose({ focus, insertText, cancelSubmission })
 <style scoped>
 .chat-composer-wrap {
   width: min(100%, 768px);
+  max-width: 640px;
   margin: 0 auto;
+}
+
+/* ChatGPT keeps the composer at 640px until the main column has room for the
+ * large 768px variant. The named container follows the chat column rather
+ * than the browser viewport, so the history rail is accounted for. */
+@container chat-main (min-width: 856px) {
+  .chat-composer-wrap {
+    max-width: 768px;
+  }
 }
 
 .chat-composer__balance {
@@ -871,7 +881,7 @@ defineExpose({ focus, insertText, cancelSubmission })
   align-self: center;
 }
 
-@media (max-width: 720px) {
+@media (max-width: 639px) {
   .chat-composer__balance {
     align-items: flex-start;
   }
@@ -881,12 +891,16 @@ defineExpose({ focus, insertText, cancelSubmission })
     grid-template-areas:
       "composer-input composer-input composer-input composer-input"
       "composer-leading . composer-trailing composer-action";
-    grid-template-rows: minmax(36px, auto) 36px;
+    grid-template-rows: minmax(38px, auto) 36px;
     align-items: center;
+    /* Keep the compact fallback before the target's mobile inset. */
     min-height: 84px;
     row-gap: 0;
     border-radius: 28px;
     padding: 6px 8px;
+    min-height: 87px;
+    border-radius: 26px;
+    padding: 5px 8px 8px;
   }
 
   .chat-composer--has-attachments {
@@ -914,6 +928,15 @@ defineExpose({ focus, insertText, cancelSubmission })
 
   .chat-composer--expanded {
     padding: 6px 8px;
+    padding: 5px 8px 8px;
+  }
+}
+
+/* The target keeps the input typography at 16px through the tablet range;
+ * layout itself switches to the stacked treatment only below 640px. */
+@media (max-width: 720px) {
+  .chat-composer__input {
+    font-size: 16px;
   }
 }
 

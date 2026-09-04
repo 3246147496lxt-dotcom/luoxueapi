@@ -2323,6 +2323,8 @@ function scheduleScrollToBottom() {
   min-height: 0;
   flex: 1;
   flex-direction: column;
+  container-name: chat-main;
+  container-type: inline-size;
   background: var(--workspace-canvas);
 }
 
@@ -2434,6 +2436,8 @@ function scheduleScrollToBottom() {
   overflow-x: hidden;
   overflow-y: auto;
   overscroll-behavior: contain;
+  /* Keep the composer aligned when the message column gains a scrollbar. */
+  scrollbar-gutter: stable;
   animation: chat-new-chat-enter 400ms cubic-bezier(0, 0, 0.2, 1) both;
 }
 
@@ -2548,7 +2552,7 @@ function scheduleScrollToBottom() {
 
 .chat-composer-region {
   flex: 0 0 auto;
-  padding: 12px 24px 20px;
+  padding: 12px 16px 20px;
   background: transparent;
 }
 
@@ -2576,7 +2580,18 @@ function scheduleScrollToBottom() {
 }
 
 .chat-conversation-flow--new-chat .chat-composer-region {
-  padding: 0 24px 48px;
+  padding: 0 16px 24px;
+}
+
+@container chat-main (min-width: 640px) {
+  .chat-conversation-flow--new-chat {
+    scrollbar-gutter: stable both-edges;
+  }
+
+  .chat-composer-region,
+  .chat-conversation-flow--new-chat .chat-composer-region {
+    padding-inline: 24px;
+  }
 }
 
 @keyframes chat-new-chat-enter {
@@ -2720,8 +2735,11 @@ function scheduleScrollToBottom() {
 
   .chat-scroll-to-latest { bottom: 8px; }
 
+  /* Preserve the compact footer rhythm for existing conversations while the
+   * new-chat flow gets its dedicated reference spacing below. */
   .chat-composer-region {
-    padding: 8px 16px max(7px, env(safe-area-inset-bottom));
+    padding-top: 8px;
+    padding-bottom: max(7px, env(safe-area-inset-bottom));
   }
 
   .chat-conversation-flow--new-chat .chat-messages-region {
@@ -2731,10 +2749,6 @@ function scheduleScrollToBottom() {
 
   .chat-conversation-flow--new-chat .chat-empty-state {
     padding: 20px 16px 22px;
-  }
-
-  .chat-conversation-flow--new-chat .chat-composer-region {
-    padding: 0 16px max(24px, env(safe-area-inset-bottom));
   }
 
   .chat-catalog-error {
@@ -2757,6 +2771,32 @@ function scheduleScrollToBottom() {
   }
 
   .chat-sync-notice .btn span { display: none; }
+}
+
+@media (max-width: 639px) {
+  .chat-conversation-flow--new-chat .chat-messages-region {
+    min-height: 0;
+    flex: 1 1 auto;
+  }
+
+  .chat-composer-region {
+    padding: 8px 16px max(7px, env(safe-area-inset-bottom));
+  }
+
+  .chat-conversation-flow--new-chat .chat-composer-region {
+    padding: 0 16px max(24px, env(safe-area-inset-bottom));
+  }
+}
+
+@media (min-width: 640px) and (max-width: 767px) {
+  .chat-conversation-flow--new-chat .chat-messages-region {
+    min-height: 232px;
+    flex: 0 0 max(232px, 42svh);
+  }
+
+  .chat-conversation-flow--new-chat .chat-composer-region {
+    padding-top: 16px;
+  }
 }
 
 .chat-drawer-enter-active,
