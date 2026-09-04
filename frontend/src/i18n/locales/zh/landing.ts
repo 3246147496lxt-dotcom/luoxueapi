@@ -20,13 +20,13 @@ export default {
       closeMenu: '关闭菜单'
     },
     hero: {
-      status: 'GPT 已支持 · 其他模型暂不支持',
-      title: '稳定接入 GPT API，按量计费',
+      status: '全球模型直连',
+      title: '专用于生产环境的，统一大模型网关',
       description:
         '创建 API 密钥并选择分组，即可接入兼容 OpenAI 的客户端；调用记录、Token 和费用可在控制台查询。',
       register: '注册并开始',
       login: '登录控制台',
-      createKey: '创建 API 密钥',
+      createKey: '获取 API Key',
       tutorial: '查看新手教程'
     },
     codeExample: {

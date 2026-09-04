@@ -35,11 +35,11 @@ const testState = vi.hoisted(() => ({
 
 const messages: Record<string, string> = {
   'home.nav.ariaLabel': '首页导航',
-  'home.hero.status': 'GPT 已支持 · 其他模型暂不支持',
-  'home.hero.title': '稳定接入 GPT API，按量计费',
+  'home.hero.status': '全球模型直连',
+  'home.hero.title': '专用于生产环境的，统一大模型网关',
   'home.hero.register': '注册并开始',
   'home.hero.login': '登录控制台',
-  'home.hero.createKey': '创建 API 密钥',
+  'home.hero.createKey': '获取 API Key',
   'home.codeExample.tabs.curl': 'cURL',
   'home.codeExample.tabs.python': 'Python',
   'home.codeExample.description': '接口地址来自当前站点配置；API 密钥和模型名以控制台显示为准。',
@@ -133,92 +133,41 @@ beforeEach(() => {
   document.documentElement.classList.remove('dark')
 })
 
-describe('HomeView provider availability', () => {
-  it('uses the matching Lucide fact icons from the tutorial design', () => {
-    const wrapper = mountHomeView()
-    const icons = wrapper.findAll('.fact-rail icon-stub')
-
-    expect(icons.map((icon) => icon.attributes('name'))).toEqual([
-      'lucideCheckCircle',
-      'lucideBarChart3',
-      'lucideShieldCheck'
-    ])
-    expect(icons.every((icon) => icon.attributes('size') === 'lg')).toBe(true)
-    expect(icons.every((icon) => icon.attributes('strokewidth') === '2')).toBe(true)
-  })
-
-  it('shows GPT as the only supported provider', () => {
-    const wrapper = mountHomeView()
-    const supportedProviders = wrapper.findAll('[data-provider-status="supported"]')
-
-    expect(supportedProviders).toHaveLength(1)
-    expect(supportedProviders[0].attributes('data-provider')).toBe('gpt')
-    expect(supportedProviders[0].text()).toContain('已支持')
-  })
-
-  it.each(['claude', 'gemini', 'antigravity'])('marks %s as readable but unsupported', (provider) => {
-    const wrapper = mountHomeView()
-    const providerCard = wrapper.get(`[data-provider="${provider}"]`)
-
-    expect(providerCard.attributes('data-provider-status')).toBe('unsupported')
-    expect(providerCard.text()).toContain('暂不支持')
-    expect(providerCard.attributes('aria-label')).toContain('暂不支持')
-    expect(providerCard.classes().some((className) => className.startsWith('opacity-'))).toBe(false)
-  })
-})
-
 describe('HomeView clay composition', () => {
-  it('omits the hero status and decorative image while keeping product imagery', () => {
+  it('keeps the hero visual self-contained without decorative image assets', () => {
     const wrapper = mountHomeView()
-    const dashboard = wrapper.get('.dashboard-figure img')
 
     expect(wrapper.find('.status-badge').exists()).toBe(false)
-    expect(wrapper.find('.status-dot').exists()).toBe(false)
+    expect(wrapper.find('.status-dot').exists()).toBe(true)
     expect(wrapper.find('[data-testid="hero-snowflake"]').exists()).toBe(false)
     expect(wrapper.find('.hero-stage img').exists()).toBe(false)
-    expect(dashboard.attributes()).toMatchObject({
-      src: '/brand/home-dashboard.webp',
-      width: '1600',
-      height: '757',
-      loading: 'lazy'
-    })
-    expect(wrapper.get('.dashboard-image--dark').attributes('src'))
-      .toBe('/brand/home-dashboard-dark.png')
+    expect(wrapper.find('.hero-visual-frame').exists()).toBe(false)
+    expect(wrapper.get('.bezier-svg').attributes('viewBox')).toBe('0 0 1320 340')
+    expect(wrapper.findAll('.route-base')).toHaveLength(7)
+    expect(wrapper.find('.reference-background-wash').exists()).toBe(true)
+    expect(wrapper.find('.blue-mesh').exists()).toBe(true)
+    expect(wrapper.find('.pixel-grid').exists()).toBe(true)
   })
 
-  it('keeps one page heading and all navigation anchor targets labeled', () => {
+  it('renders only the full-screen hero on the default route', () => {
     const wrapper = mountHomeView()
 
     expect(wrapper.findAll('h1')).toHaveLength(1)
-    for (const id of ['capabilities', 'steps', 'providers', 'faq']) {
-      const section = wrapper.get(`#${id}`)
-      const headingId = section.attributes('aria-labelledby')
-
-      expect(headingId).toBeTruthy()
-      expect(wrapper.find(`#${headingId}`).exists()).toBe(true)
+    expect(wrapper.findAll('main > section')).toHaveLength(1)
+    const hero = wrapper.get('main > section')
+    expect(hero.classes()).toContain('reference-hero-shell')
+    expect(hero.attributes('id')).toBe('steps')
+    for (const selector of ['.fact-section', '#capabilities', '#providers', '#faq', '.final-cta-section']) {
+      expect(wrapper.find(selector).exists()).toBe(false)
     }
-  })
-
-  it('puts the onboarding path before product proof and flattens repeated cards', () => {
-    const wrapper = mountHomeView()
-    const sectionIds = wrapper.findAll('main > section').map((section) => section.attributes('id'))
-
-    expect(sectionIds.indexOf('steps')).toBeLessThan(sectionIds.indexOf('capabilities'))
-    expect(wrapper.get('.steps-list').classes()).toContain('clay-card')
-    expect(wrapper.get('.capability-list').classes()).toContain('clay-card')
-    expect(wrapper.get('.faq-list').classes()).toContain('clay-card')
-    expect(wrapper.findAll('.steps-list > .clay-card')).toHaveLength(0)
-    expect(wrapper.findAll('.capability-list > .clay-card')).toHaveLength(0)
-    expect(wrapper.findAll('.faq-list > .clay-card')).toHaveLength(0)
-    expect(wrapper.findAll('.home-page .clay-card')).toHaveLength(7)
   })
 })
 
 describe('HomeView primary actions', () => {
   it.each([
-    { registration: true, authenticated: false, path: '/register', label: '注册并开始' },
-    { registration: false, authenticated: false, path: '/login', label: '登录控制台' },
-    { registration: true, authenticated: true, path: '/keys', label: '创建 API 密钥' }
+    { registration: true, authenticated: false, path: '/register', label: '获取 API Key' },
+    { registration: false, authenticated: false, path: '/login', label: '获取 API Key' },
+    { registration: true, authenticated: true, path: '/keys', label: '获取 API Key' }
   ])('uses the correct CTA for the current account state', ({ registration, authenticated, path, label }) => {
     testState.appStore.cachedPublicSettings.registration_enabled = registration
     testState.authStore.isAuthenticated = authenticated
@@ -226,12 +175,10 @@ describe('HomeView primary actions', () => {
 
     const wrapper = mountHomeView()
     const heroCta = wrapper.get('[data-testid="hero-primary-cta"]')
-    const finalCta = wrapper.get('[data-testid="final-primary-cta"]')
 
     expect(heroCta.attributes('data-to')).toBe(path)
     expect(heroCta.text()).toContain(label)
-    expect(heroCta.get('icon-stub').attributes('name')).toBe('lucideSparkles')
-    expect(finalCta.attributes('data-to')).toBe(path)
+    expect(heroCta.get('icon-stub').attributes('name')).toBe('key')
   })
 
   it('does not repeat app-level authentication or settings initialization', () => {
@@ -243,75 +190,34 @@ describe('HomeView primary actions', () => {
   })
 })
 
-describe('HomeView code examples', () => {
-  it('explains where the endpoint, key, and model values come from', () => {
-    const wrapper = mountHomeView()
-
-    expect(wrapper.get('.code-helper').text())
-      .toBe('接口地址来自当前站点配置；API 密钥和模型名以控制台显示为准。')
-  })
-
-  it('keeps both tabs connected to one focusable code panel', () => {
-    const wrapper = mountHomeView()
-    const panel = wrapper.get('#code-example-panel')
-
-    expect(wrapper.get('#code-tab-curl').attributes('aria-controls')).toBe('code-example-panel')
-    expect(wrapper.get('#code-tab-python').attributes('aria-controls')).toBe('code-example-panel')
-    expect(panel.attributes('role')).toBe('tabpanel')
-    expect(panel.attributes('tabindex')).toBe('0')
-    expect(panel.attributes('aria-labelledby')).toBe('code-tab-curl')
-  })
-
+describe('HomeView API endpoint control', () => {
   it.each([
-    ['https://api.example.com', 'https://api.example.com/v1/chat/completions'],
-    ['https://api.example.com/', 'https://api.example.com/v1/chat/completions'],
-    ['https://api.example.com/v1', 'https://api.example.com/v1/chat/completions'],
-    ['https://api.example.com/v1/', 'https://api.example.com/v1/chat/completions'],
-    ['  https://api.example.com/proxy/v1/  ', 'https://api.example.com/proxy/v1/chat/completions']
+    ['https://api.example.com', 'https://api.example.com/v1'],
+    ['https://api.example.com/', 'https://api.example.com/v1'],
+    ['https://api.example.com/v1', 'https://api.example.com/v1'],
+    ['https://api.example.com/v1/', 'https://api.example.com/v1'],
+    ['  https://api.example.com/proxy/v1/  ', 'https://api.example.com/proxy/v1']
   ])('normalizes the configured API base URL', (configuredBase, expectedEndpoint) => {
     testState.appStore.cachedPublicSettings.api_base_url = configuredBase
     const wrapper = mountHomeView()
-    const snippet = wrapper.get('[data-testid="active-code-example"]').text()
+    const endpoint = wrapper.get('.api-url').text()
 
-    expect(snippet).toContain(expectedEndpoint)
-    expect(snippet).toContain('<YOUR_API_KEY>')
-    expect(snippet).toContain('<YOUR_MODEL>')
-    expect(snippet).not.toContain('/v1/v1')
+    expect(endpoint).toBe(expectedEndpoint)
+    expect(endpoint).not.toContain('/v1/v1')
   })
 
-  it('copies the active example and shows success feedback', async () => {
+  it('copies the API endpoint and exposes success feedback', async () => {
     const wrapper = mountHomeView()
-    const snippet = wrapper.get('[data-testid="active-code-example"]').text()
-    const copyButton = wrapper.get('[data-testid="copy-code-button"]')
+    const copyButton = wrapper.get('[data-testid="copy-api-url-button"]')
 
-    expect(copyButton.get('icon-stub').attributes()).toMatchObject({
-      name: 'lucideCopy',
-      size: 'xs'
-    })
+    expect(copyButton.attributes('aria-label')).toBe('复制 API 地址')
 
     await copyButton.trigger('click')
 
-    expect(testState.clipboard.copyToClipboard).toHaveBeenCalledWith(snippet, '已复制')
-    expect(copyButton.text()).toContain('已复制')
-  })
-
-  it('supports arrow, Home, and End keys in the code tab list', async () => {
-    const wrapper = mountHomeView()
-    const curlTab = wrapper.get('#code-tab-curl')
-
-    await curlTab.trigger('keydown', { key: 'ArrowRight' })
-    expect(wrapper.get('#code-tab-python').attributes('aria-selected')).toBe('true')
-    expect(wrapper.get('#code-example-panel').attributes('aria-labelledby')).toBe('code-tab-python')
-    expect(wrapper.get('[data-testid="active-code-example"]').text()).toContain('from openai import OpenAI')
-
-    await wrapper.get('#code-tab-python').trigger('keydown', { key: 'Home' })
-    expect(wrapper.get('#code-tab-curl').attributes('aria-selected')).toBe('true')
-
-    await wrapper.get('#code-tab-curl').trigger('keydown', { key: 'End' })
-    expect(wrapper.get('#code-tab-python').attributes('aria-selected')).toBe('true')
-
-    await wrapper.get('#code-tab-python').trigger('keydown', { key: 'ArrowLeft' })
-    expect(wrapper.get('#code-tab-curl').attributes('aria-selected')).toBe('true')
+    expect(testState.clipboard.copyToClipboard).toHaveBeenCalledWith(
+      'https://api.example.com/v1',
+      'API 地址已复制'
+    )
   })
 })
 

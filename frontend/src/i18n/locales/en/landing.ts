@@ -20,13 +20,13 @@ export default {
       closeMenu: 'Close menu'
     },
     hero: {
-      status: 'GPT supported · Other models not supported yet',
-      title: 'Reliable GPT API access with usage-based billing',
+      status: 'Global model routing',
+      title: 'Built for production, a unified model gateway',
       description:
         'Create an API key and choose a group to connect OpenAI-compatible clients. View request logs, token usage, and costs in the dashboard.',
       register: 'Sign up to start',
       login: 'Sign in to dashboard',
-      createKey: 'Create an API key',
+      createKey: 'Get an API key',
       tutorial: 'View the beginner tutorial'
     },
     codeExample: {
