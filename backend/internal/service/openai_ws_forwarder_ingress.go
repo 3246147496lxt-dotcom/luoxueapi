@@ -288,7 +288,8 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClientSession(
 			}
 			normalized = next
 		}
-		if account.IsOpenAI() && isOpenAIResponsesLiteWebSocketPayload(normalized) {
+		responsesLite := account.IsOpenAI() && isOpenAIResponsesLiteWebSocketPayload(normalized)
+		if responsesLite {
 			litePayload, _, liteErr := normalizeOpenAIResponsesLitePayloadForAccount(normalized, account)
 			if liteErr != nil {
 				return openAIWSClientPayload{}, NewOpenAIWSClientCloseError(
@@ -300,7 +301,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClientSession(
 			normalized = litePayload
 		}
 		if account.IsOpenAIApiKey() {
-			parallelPayload, parallelChanged, parallelErr := normalizeOpenAIParallelToolCallsWithoutTools(normalized)
+			parallelPayload, parallelChanged, parallelErr := normalizeOpenAIParallelToolCallsWithoutTools(normalized, responsesLite)
 			if parallelErr != nil {
 				return openAIWSClientPayload{}, NewOpenAIWSClientCloseError(
 					coderws.StatusPolicyViolation,
@@ -319,7 +320,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClientSession(
 			codexImageGenerationExplicitToolPolicy = account.CodexImageGenerationExplicitToolPolicy()
 		}
 		codexBridgeEnabled := isCodexCLI &&
-			!isOpenAIResponsesLiteWebSocketPayload(normalized) &&
+			!responsesLite &&
 			imageGenerationAllowed &&
 			codexImageGenerationExplicitToolPolicy != codexImageGenerationExplicitToolPolicyStrip &&
 			s.isCodexImageGenerationBridgeEnabled(ctx, account, apiKey)

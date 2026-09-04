@@ -186,7 +186,8 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 	if err != nil {
 		return nil, fmt.Errorf("prepare http bridge body: %w", err)
 	}
-	if account.Platform != PlatformGrok && isOpenAIResponsesLiteWebSocketPayload(payload) {
+	responsesLite := account.IsOpenAI() && isOpenAIResponsesLiteWebSocketPayload(payload)
+	if account.Platform != PlatformGrok && responsesLite {
 		liteBody, liteChanged, liteErr := normalizeOpenAIResponsesLitePayloadForAccount(body, account)
 		if liteErr != nil {
 			return nil, fmt.Errorf("normalize responses Lite payload: %w", liteErr)
@@ -196,7 +197,7 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 		}
 	}
 	if account.IsOpenAIApiKey() {
-		normalized, parallelChanged, parallelErr := normalizeOpenAIParallelToolCallsWithoutTools(body)
+		normalized, parallelChanged, parallelErr := normalizeOpenAIParallelToolCallsWithoutTools(body, responsesLite)
 		if parallelErr != nil {
 			return nil, fmt.Errorf("normalize parallel tool calls: %w", parallelErr)
 		}
@@ -228,7 +229,7 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 	if err != nil {
 		return nil, err
 	}
-	if account.Platform != PlatformGrok && isOpenAIResponsesLiteWebSocketPayload(payload) {
+	if account.Platform != PlatformGrok && responsesLite {
 		upstreamReq.Header.Set(responsesLiteHeader, "true")
 	}
 

@@ -45,7 +45,8 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 	if normalized {
 		body = normalizedBody
 	}
-	if account.IsOpenAI() && isOpenAIResponsesLiteHeader(c.GetHeader(responsesLiteHeader)) {
+	responsesLite := account.IsOpenAI() && isOpenAIResponsesLiteHeader(c.GetHeader(responsesLiteHeader))
+	if responsesLite {
 		liteBody, changed, liteErr := normalizeOpenAIResponsesLitePayloadForAccount(body, account)
 		if liteErr != nil {
 			param := "tools"
@@ -78,7 +79,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		}
 	}
 	if account.IsOpenAIApiKey() {
-		normalized, changed, normalizeErr := normalizeOpenAIParallelToolCallsWithoutTools(body)
+		normalized, changed, normalizeErr := normalizeOpenAIParallelToolCallsWithoutTools(body, responsesLite)
 		if normalizeErr != nil {
 			return nil, normalizeErr
 		}
@@ -794,6 +795,19 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		return nil, wsErr
 	}
 
+	// Later policy/model transforms can rebuild the JSON body after ingress
+	// normalization. Re-pin the Lite wire contract immediately before the direct
+	// HTTP path so the upstream always receives an explicit false value.
+	if responsesLite {
+		liteBody, liteChanged, liteErr := normalizeOpenAIResponsesLiteParallelToolCallsPayload(body)
+		if liteErr != nil {
+			return nil, fmt.Errorf("normalize final Responses Lite payload: %w", liteErr)
+		}
+		if liteChanged {
+			body = liteBody
+		}
+	}
+
 	reasoningEffort := extractOpenAIReasoningEffortFromBody(body, upstreamModel, billingModel, originalModel)
 	// 国产模型默认 effort 补充：此处 reqModel 已被 mapping 重写为 billingModel。
 	reasoningEffort = ApplyThinkingEnabledFallback(reasoningEffort, body, reqModel)
@@ -1110,6 +1124,19 @@ func (s *OpenAIGatewayService) buildUpstreamRequest(ctx context.Context, c *gin.
 		targetURL = openaiPlatformAPIURL
 	}
 	targetURL = appendOpenAIResponsesRequestPathSuffix(targetURL, openAIResponsesRequestPathSuffix(c))
+	// Compatibility bridges may rebuild the body after the ingress pass. Keep
+	// the Responses Lite contract pinned at the final HTTP request boundary.
+	if account != nil && account.IsOpenAI() &&
+		(isOpenAIResponsesLiteWebSocketPayload(body) ||
+			(c != nil && isOpenAIResponsesLiteHeader(c.GetHeader(responsesLiteHeader)))) {
+		liteBody, liteChanged, liteErr := normalizeOpenAIResponsesLiteParallelToolCallsPayload(body)
+		if liteErr != nil {
+			return nil, fmt.Errorf("normalize final Responses Lite parallel_tool_calls: %w", liteErr)
+		}
+		if liteChanged {
+			body = liteBody
+		}
+	}
 
 	req, err := http.NewRequestWithContext(ctx, "POST", targetURL, bytes.NewReader(body))
 	if err != nil {

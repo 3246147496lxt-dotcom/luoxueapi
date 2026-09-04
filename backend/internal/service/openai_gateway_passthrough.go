@@ -428,6 +428,25 @@ func (s *OpenAIGatewayService) buildUpstreamRequestOpenAIPassthrough(
 		}
 	}
 	targetURL = appendOpenAIResponsesRequestPathSuffix(targetURL, openAIResponsesRequestPathSuffix(c))
+	// Passthrough can rebuild the body after ingress normalization. Responses
+	// Lite requires an explicit false value even without tools, so re-pin it at
+	// the final request boundary.
+	responsesLite := false
+	if account != nil && account.IsOpenAI() {
+		responsesLite = isOpenAIResponsesLiteWebSocketPayload(body)
+		if c != nil && isOpenAIResponsesLiteHeader(c.GetHeader(responsesLiteHeader)) {
+			responsesLite = true
+		}
+	}
+	if responsesLite {
+		liteBody, liteChanged, liteErr := normalizeOpenAIResponsesLiteParallelToolCallsPayload(body)
+		if liteErr != nil {
+			return nil, fmt.Errorf("normalize final Responses Lite parallel_tool_calls: %w", liteErr)
+		}
+		if liteChanged {
+			body = liteBody
+		}
+	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, targetURL, bytes.NewReader(body))
 	if err != nil {

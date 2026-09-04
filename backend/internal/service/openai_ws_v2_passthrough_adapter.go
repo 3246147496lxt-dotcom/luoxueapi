@@ -202,7 +202,8 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 	if err := validateOpenAIWSBearerToken(account, token); err != nil {
 		return err
 	}
-	if account.IsOpenAI() && isOpenAIResponsesLiteWebSocketPayload(firstClientMessage) {
+	firstMessageResponsesLite := account.IsOpenAI() && isOpenAIResponsesLiteWebSocketPayload(firstClientMessage)
+	if firstMessageResponsesLite {
 		liteFirstMessage, _, liteErr := normalizeOpenAIResponsesLitePayloadForAccount(firstClientMessage, account)
 		if liteErr != nil {
 			return NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, liteErr.Error(), liteErr)
@@ -210,7 +211,7 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 		firstClientMessage = liteFirstMessage
 	}
 	if account.IsOpenAIApiKey() {
-		parallelMessage, parallelChanged, parallelErr := normalizeOpenAIParallelToolCallsWithoutTools(firstClientMessage)
+		parallelMessage, parallelChanged, parallelErr := normalizeOpenAIParallelToolCallsWithoutTools(firstClientMessage, firstMessageResponsesLite)
 		if parallelErr != nil {
 			return NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, parallelErr.Error(), parallelErr)
 		}
@@ -473,7 +474,8 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 					)
 				}
 				payload = normalizedPayload
-				if account.IsOpenAI() && isOpenAIResponsesLiteWebSocketPayload(payload) {
+				responsesLite := account.IsOpenAI() && isOpenAIResponsesLiteWebSocketPayload(payload)
+				if responsesLite {
 					litePayload, _, liteErr := normalizeOpenAIResponsesLitePayloadForAccount(payload, account)
 					if liteErr != nil {
 						return payload, nil, NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, liteErr.Error(), liteErr)
@@ -481,7 +483,7 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 					payload = litePayload
 				}
 				if account.IsOpenAIApiKey() {
-					parallelPayload, parallelChanged, parallelErr := normalizeOpenAIParallelToolCallsWithoutTools(payload)
+					parallelPayload, parallelChanged, parallelErr := normalizeOpenAIParallelToolCallsWithoutTools(payload, responsesLite)
 					if parallelErr != nil {
 						return payload, nil, NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, parallelErr.Error(), parallelErr)
 					}

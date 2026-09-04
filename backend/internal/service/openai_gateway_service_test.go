@@ -2549,6 +2549,39 @@ func TestOpenAIBuildUpstreamRequestPreservesCompactPathForAPIKeyBaseURL(t *testi
 	require.Equal(t, "https://example.com/v1/responses/compact", req.URL.String())
 }
 
+func TestOpenAIBuildUpstreamRequestPinsResponsesLiteParallelToolCallsAtLastMile(t *testing.T) {
+	setGinTestMode()
+	tests := []struct {
+		name  string
+		value string
+	}{
+		{name: "missing", value: `{"model":"gpt-5.6-sol"}`},
+		{name: "true", value: `{"model":"gpt-5.6-sol","parallel_tool_calls":true}`},
+		{name: "false", value: `{"model":"gpt-5.6-sol","parallel_tool_calls":false}`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rec := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(rec)
+			c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader([]byte(tt.value)))
+			c.Request.Header.Set(responsesLiteHeader, "true")
+
+			svc := &OpenAIGatewayService{cfg: &config.Config{
+				Security: config.SecurityConfig{
+					URLAllowlist: config.URLAllowlistConfig{Enabled: false},
+				},
+			}}
+			account := &Account{Type: AccountTypeAPIKey, Platform: PlatformOpenAI}
+			req, err := svc.buildUpstreamRequest(c.Request.Context(), c, account, []byte(tt.value), "token", true, "", false)
+			require.NoError(t, err)
+			wireBody, err := io.ReadAll(req.Body)
+			require.NoError(t, err)
+			require.True(t, gjson.GetBytes(wireBody, "parallel_tool_calls").Exists())
+			require.False(t, gjson.GetBytes(wireBody, "parallel_tool_calls").Bool())
+		})
+	}
+}
+
 func TestOpenAIBuildUpstreamRequestOAuthOfficialClientOriginatorCompatibility(t *testing.T) {
 	setGinTestMode()
 

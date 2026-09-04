@@ -201,7 +201,7 @@ func normalizeOpenAICompactRequestBody(body []byte) ([]byte, bool, error) {
 		}
 		normalized = next
 	}
-	if next, removed, err := normalizeOpenAIParallelToolCallsWithoutTools(normalized); err != nil {
+	if next, removed, err := normalizeOpenAIParallelToolCallsWithoutTools(normalized, false); err != nil {
 		return body, false, err
 	} else if removed {
 		normalized = next
@@ -217,7 +217,13 @@ func normalizeOpenAICompactRequestBody(body []byte) ([]byte, bool, error) {
 // only accepts when at least one tool is declared. Responses Lite namespace
 // tools are carried in input[].additional_tools after migration, so the
 // detector must inspect both the top-level and carrier forms.
-func normalizeOpenAIParallelToolCallsWithoutTools(body []byte) ([]byte, bool, error) {
+func normalizeOpenAIParallelToolCallsWithoutTools(body []byte, responsesLite bool) ([]byte, bool, error) {
+	// Responses Lite requires this field explicitly, even when no tools are
+	// present. Its dedicated normalizer pins the value to false; do not remove it
+	// in the generic public-Responses cleanup below.
+	if responsesLite {
+		return body, false, nil
+	}
 	parallel := gjson.GetBytes(body, "parallel_tool_calls")
 	if !parallel.Exists() {
 		return body, false, nil

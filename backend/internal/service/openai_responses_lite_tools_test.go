@@ -188,9 +188,8 @@ func TestNormalizeOpenAIResponsesLiteTools_EnsuresReasoningContext(t *testing.T)
 
 func TestNormalizeOpenAIResponsesLiteTools_EnforcesParallelToolCallsAcrossOAuthShapes(t *testing.T) {
 	tests := []struct {
-		name       string
-		reqBody    map[string]any
-		wantExists bool
+		name    string
+		reqBody map[string]any
 	}{
 		{
 			name: "top-level function tool",
@@ -198,7 +197,6 @@ func TestNormalizeOpenAIResponsesLiteTools_EnforcesParallelToolCallsAcrossOAuthS
 				"tools":               []any{map[string]any{"type": "function", "name": "lookup"}},
 				"parallel_tool_calls": true,
 			},
-			wantExists: true,
 		},
 		{
 			name: "namespace tool moved to additional_tools",
@@ -206,14 +204,12 @@ func TestNormalizeOpenAIResponsesLiteTools_EnforcesParallelToolCallsAcrossOAuthS
 				"tools":               []any{map[string]any{"type": "namespace", "name": "collaboration"}},
 				"parallel_tool_calls": true,
 			},
-			wantExists: true,
 		},
 		{
 			name: "tool-less request",
 			reqBody: map[string]any{
 				"parallel_tool_calls": true,
 			},
-			wantExists: false,
 		},
 	}
 
@@ -223,12 +219,8 @@ func TestNormalizeOpenAIResponsesLiteTools_EnforcesParallelToolCallsAcrossOAuthS
 
 			require.NoError(t, err)
 			require.True(t, changed)
-			if tt.wantExists {
-				require.Contains(t, tt.reqBody, "parallel_tool_calls")
-				require.Equal(t, false, tt.reqBody["parallel_tool_calls"])
-			} else {
-				require.NotContains(t, tt.reqBody, "parallel_tool_calls")
-			}
+			require.Contains(t, tt.reqBody, "parallel_tool_calls")
+			require.Equal(t, false, tt.reqBody["parallel_tool_calls"])
 		})
 	}
 }
@@ -276,26 +268,78 @@ func TestNormalizeOpenAIResponsesLiteParallelToolCalls(t *testing.T) {
 	require.Equal(t, false, reqBody["parallel_tool_calls"])
 }
 
-func TestNormalizeOpenAIResponsesLiteParallelToolCallsRemovesWithoutTools(t *testing.T) {
-	reqBody := map[string]any{"parallel_tool_calls": false}
-	changed, err := ensureOpenAIResponsesLiteParallelToolCalls(reqBody, false)
-	require.NoError(t, err)
-	require.True(t, changed)
-	require.NotContains(t, reqBody, "parallel_tool_calls")
+func TestNormalizeOpenAIResponsesLiteParallelToolCallsPinsWithoutTools(t *testing.T) {
+	tests := []struct {
+		name        string
+		value       any
+		include     bool
+		wantChanged bool
+	}{
+		{name: "missing", wantChanged: true},
+		{name: "true", value: true, include: true, wantChanged: true},
+		{name: "false", value: false, include: true, wantChanged: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			reqBody := map[string]any{}
+			if tt.include {
+				reqBody["parallel_tool_calls"] = tt.value
+			}
+			changed, err := ensureOpenAIResponsesLiteParallelToolCalls(reqBody, false)
+			require.NoError(t, err)
+			require.Equal(t, tt.wantChanged, changed)
+			require.Contains(t, reqBody, "parallel_tool_calls")
+			require.Equal(t, false, reqBody["parallel_tool_calls"])
+		})
+	}
 }
 
 func TestNormalizeOpenAIParallelToolCallsWithoutToolsRecognizesAdditionalTools(t *testing.T) {
 	withAdditionalTools := []byte(`{"input":[{"type":"additional_tools","tools":[{"type":"function","name":"spawn_agent"}]}],"parallel_tool_calls":false}`)
-	normalized, changed, err := normalizeOpenAIParallelToolCallsWithoutTools(withAdditionalTools)
+	normalized, changed, err := normalizeOpenAIParallelToolCallsWithoutTools(withAdditionalTools, false)
 	require.NoError(t, err)
 	require.False(t, changed)
 	require.Equal(t, string(withAdditionalTools), string(normalized))
 
 	withoutTools := []byte(`{"input":[{"type":"additional_tools","tools":[]}],"parallel_tool_calls":true}`)
-	normalized, changed, err = normalizeOpenAIParallelToolCallsWithoutTools(withoutTools)
+	normalized, changed, err = normalizeOpenAIParallelToolCallsWithoutTools(withoutTools, false)
 	require.NoError(t, err)
 	require.True(t, changed)
 	require.False(t, gjson.GetBytes(normalized, "parallel_tool_calls").Exists())
+}
+
+func TestNormalizeOpenAIParallelToolCallsWithoutToolsSkipsResponsesLite(t *testing.T) {
+	body := []byte(`{"parallel_tool_calls":false}`)
+	normalized, changed, err := normalizeOpenAIParallelToolCallsWithoutTools(body, true)
+	require.NoError(t, err)
+	require.False(t, changed)
+	require.Equal(t, string(body), string(normalized))
+}
+
+func TestNormalizeOpenAIResponsesLiteParallelToolCallsPayloadPinsWithoutTools(t *testing.T) {
+	tests := []struct {
+		name        string
+		value       string
+		include     bool
+		wantChanged bool
+	}{
+		{name: "missing", wantChanged: true},
+		{name: "true", value: "true", include: true, wantChanged: true},
+		{name: "false", value: "false", include: true, wantChanged: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			body := []byte(`{"model":"gpt-5.6-sol"}`)
+			if tt.include {
+				body = []byte(`{"model":"gpt-5.6-sol","parallel_tool_calls":` + tt.value + `}`)
+			}
+			updated, changed, err := normalizeOpenAIResponsesLiteParallelToolCallsPayload(body)
+			require.NoError(t, err)
+			require.Equal(t, tt.wantChanged, changed)
+			require.True(t, gjson.GetBytes(updated, "parallel_tool_calls").Exists())
+			require.False(t, gjson.GetBytes(updated, "parallel_tool_calls").Bool())
+		})
+	}
 }
 
 func TestNormalizeOpenAIResponsesLiteValidationErrorCarriesParameter(t *testing.T) {
@@ -470,4 +514,55 @@ func TestOpenAIGatewayServiceForward_NormalizesResponsesLiteParallelToolCallsFor
 	require.NotNil(t, upstream.lastReq)
 	require.Equal(t, "true", upstream.lastReq.Header.Get(responsesLiteHeader))
 	require.False(t, gjson.GetBytes(upstream.lastBody, "parallel_tool_calls").Bool())
+}
+
+func TestOpenAIGatewayServiceForward_PinsResponsesLiteParallelToolCallsWithoutTools(t *testing.T) {
+	setGinTestMode()
+	for _, accountType := range []string{AccountTypeOAuth, AccountTypeAPIKey} {
+		for _, passthrough := range []bool{false, true} {
+			name := accountType
+			if passthrough {
+				name += "-passthrough"
+			}
+			t.Run(name, func(t *testing.T) {
+				upstream := &httpUpstreamRecorder{resp: &http.Response{
+					StatusCode: http.StatusOK,
+					Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+					Body: io.NopCloser(strings.NewReader(
+						"data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_lite_no_tools\",\"usage\":{\"input_tokens\":1,\"output_tokens\":1}}}\n\n" +
+							"data: [DONE]\n\n",
+					)),
+				}}
+				rec := httptest.NewRecorder()
+				c, _ := gin.CreateTestContext(rec)
+				c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(nil))
+				c.Request.Header.Set(responsesLiteHeader, "true")
+				svc := &OpenAIGatewayService{cfg: &config.Config{}, httpUpstream: upstream}
+				account := &Account{
+					ID: 505, Name: "responses-lite-no-tools", Platform: PlatformOpenAI, Type: accountType,
+					Concurrency: 1, Status: StatusActive, Schedulable: true, RateMultiplier: f64p(1),
+					Credentials: map[string]any{},
+					Extra: map[string]any{
+						openai_compat.ExtraKeyResponsesSupported: true,
+						"openai_passthrough":                     passthrough,
+					},
+				}
+				if accountType == AccountTypeOAuth {
+					account.Credentials["access_token"] = "oauth-token"
+					account.Credentials["chatgpt_account_id"] = "chatgpt-account"
+				} else {
+					account.Credentials["api_key"] = "sk-test"
+				}
+
+				body := []byte(`{"model":"gpt-5.6-terra","stream":true,"input":[{"type":"message","role":"user","content":"hello"}]}`)
+				result, err := svc.Forward(context.Background(), c, account, body)
+				require.NoError(t, err)
+				require.NotNil(t, result)
+				require.NotNil(t, upstream.lastReq)
+				require.Equal(t, "true", upstream.lastReq.Header.Get(responsesLiteHeader))
+				require.True(t, gjson.GetBytes(upstream.lastBody, "parallel_tool_calls").Exists())
+				require.False(t, gjson.GetBytes(upstream.lastBody, "parallel_tool_calls").Bool())
+			})
+		}
+	}
 }
