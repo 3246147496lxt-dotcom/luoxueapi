@@ -85,7 +85,7 @@
                 v-if="row.group"
                 :platform="row.group.platform"
                 size="xs"
-                class="sr-only"
+                class="workspace-group-icon"
                 aria-hidden="true"
               />
               <span class="workspace-group-label">
@@ -435,6 +435,9 @@ const formatTableDate = (value: string | null | undefined): string => {
 }
 
 .workspace-group-button {
+  --group-chip-border: var(--workspace-border);
+  --group-chip-text: var(--workspace-text-secondary);
+  --group-chip-surface: var(--workspace-surface-subtle);
   display: inline-flex;
   min-width: 0;
   max-width: 100%;
@@ -442,11 +445,11 @@ const formatTableDate = (value: string | null | undefined): string => {
   min-height: 24px;
   align-items: center;
   gap: 5px;
-  border: 1px solid var(--workspace-border);
+  border: 1px solid var(--group-chip-border);
   border-radius: 999px;
   padding: 0 8px;
-  color: var(--workspace-text-secondary);
-  background: var(--workspace-surface-subtle);
+  color: var(--group-chip-text);
+  background: var(--group-chip-surface);
   font-size: 0.6875rem;
   font-weight: 500;
   line-height: 1rem;
@@ -457,34 +460,169 @@ const formatTableDate = (value: string | null | undefined): string => {
 }
 
 .workspace-group-button:hover {
-  border-color: var(--workspace-border-strong);
-  color: var(--workspace-text);
-  background: var(--workspace-hover);
+  --group-chip-border: var(--workspace-border-strong);
+  --group-chip-text: var(--workspace-text);
+  --group-chip-surface: var(--workspace-hover);
 }
 
-/* Platform modifier classes remain for callers/tests, but the chip stays neutral. */
+/* Keep provider identity visible without making the table visually noisy. */
 .workspace-group-button--assigned,
-.workspace-group-button--unassigned,
-.workspace-group-button--openai,
-.workspace-group-button--anthropic,
-.workspace-group-button--gemini,
-.workspace-group-button--antigravity,
+.workspace-group-button--unassigned {
+  --group-chip-border: var(--workspace-border);
+  --group-chip-text: var(--workspace-text-secondary);
+  --group-chip-surface: var(--workspace-surface-subtle);
+}
+
+.workspace-group-button--openai {
+  --group-chip-border: #bbf7d0;
+  --group-chip-text: #15803d;
+  --group-chip-surface: #f0fdf4;
+}
+
+.workspace-group-button--anthropic {
+  --group-chip-border: #fed7aa;
+  --group-chip-text: #c2410c;
+  --group-chip-surface: #fff7ed;
+}
+
+.workspace-group-button--gemini {
+  --group-chip-border: #bfdbfe;
+  --group-chip-text: #1d4ed8;
+  --group-chip-surface: #eff6ff;
+}
+
+.workspace-group-button--antigravity {
+  --group-chip-border: #e9d5ff;
+  --group-chip-text: #7e22ce;
+  --group-chip-surface: #faf5ff;
+}
+
 .workspace-group-button--grok {
-  border-color: var(--workspace-border);
-  color: var(--workspace-text-secondary);
-  background: var(--workspace-surface-subtle);
+  --group-chip-border: #d4d4d8;
+  --group-chip-text: #3f3f46;
+  --group-chip-surface: #f4f4f5;
+}
+
+.workspace-group-button--deepseek {
+  --group-chip-border: #bae6fd;
+  --group-chip-text: #0369a1;
+  --group-chip-surface: #f0f9ff;
+}
+
+/* The provider tone remains legible in the dark workspace theme. */
+:global(html.dark .workspace-group-button--openai) {
+  --group-chip-border: rgb(74 222 128 / 0.34);
+  --group-chip-text: #86efac;
+  --group-chip-surface: rgb(20 83 45 / 0.34);
+}
+
+:global(html.dark .workspace-group-button--anthropic) {
+  --group-chip-border: rgb(251 146 60 / 0.34);
+  --group-chip-text: #fdba74;
+  --group-chip-surface: rgb(124 45 18 / 0.32);
+}
+
+:global(html.dark .workspace-group-button--gemini) {
+  --group-chip-border: rgb(96 165 250 / 0.34);
+  --group-chip-text: #93c5fd;
+  --group-chip-surface: rgb(30 58 138 / 0.34);
+}
+
+:global(html.dark .workspace-group-button--antigravity) {
+  --group-chip-border: rgb(192 132 252 / 0.34);
+  --group-chip-text: #d8b4fe;
+  --group-chip-surface: rgb(88 28 135 / 0.34);
+}
+
+:global(html.dark .workspace-group-button--grok) {
+  --group-chip-border: rgb(161 161 170 / 0.34);
+  --group-chip-text: #d4d4d8;
+  --group-chip-surface: rgb(63 63 70 / 0.48);
+}
+
+:global(html.dark .workspace-group-button--deepseek) {
+  --group-chip-border: rgb(56 189 248 / 0.34);
+  --group-chip-text: #7dd3fc;
+  --group-chip-surface: rgb(8 47 73 / 0.38);
 }
 
 .workspace-group-button--assigned:hover,
-.workspace-group-button--unassigned:hover,
-.workspace-group-button--openai:hover,
-.workspace-group-button--anthropic:hover,
-.workspace-group-button--gemini:hover,
-.workspace-group-button--antigravity:hover,
+.workspace-group-button--unassigned:hover {
+  --group-chip-border: var(--workspace-border-strong);
+  --group-chip-text: var(--workspace-text);
+  --group-chip-surface: var(--workspace-hover);
+}
+
+.workspace-group-button--openai:hover {
+  --group-chip-border: #86efac;
+  --group-chip-text: #166534;
+  --group-chip-surface: #dcfce7;
+}
+
+.workspace-group-button--anthropic:hover {
+  --group-chip-border: #fdba74;
+  --group-chip-text: #9a3412;
+  --group-chip-surface: #ffedd5;
+}
+
+.workspace-group-button--gemini:hover {
+  --group-chip-border: #93c5fd;
+  --group-chip-text: #1e40af;
+  --group-chip-surface: #dbeafe;
+}
+
+.workspace-group-button--antigravity:hover {
+  --group-chip-border: #d8b4fe;
+  --group-chip-text: #6b21a8;
+  --group-chip-surface: #f3e8ff;
+}
+
 .workspace-group-button--grok:hover {
-  border-color: var(--workspace-border-strong);
-  color: var(--workspace-text);
-  background: var(--workspace-hover);
+  --group-chip-border: #a1a1aa;
+  --group-chip-text: #27272a;
+  --group-chip-surface: #e4e4e7;
+}
+
+.workspace-group-button--deepseek:hover {
+  --group-chip-border: #7dd3fc;
+  --group-chip-text: #075985;
+  --group-chip-surface: #e0f2fe;
+}
+
+:global(html.dark .workspace-group-button--openai:hover) {
+  --group-chip-border: rgb(134 239 172 / 0.52);
+  --group-chip-text: #bbf7d0;
+  --group-chip-surface: rgb(22 101 52 / 0.5);
+}
+
+:global(html.dark .workspace-group-button--anthropic:hover) {
+  --group-chip-border: rgb(253 186 116 / 0.52);
+  --group-chip-text: #fed7aa;
+  --group-chip-surface: rgb(154 52 18 / 0.5);
+}
+
+:global(html.dark .workspace-group-button--gemini:hover) {
+  --group-chip-border: rgb(147 197 253 / 0.52);
+  --group-chip-text: #bfdbfe;
+  --group-chip-surface: rgb(30 64 175 / 0.5);
+}
+
+:global(html.dark .workspace-group-button--antigravity:hover) {
+  --group-chip-border: rgb(216 180 254 / 0.52);
+  --group-chip-text: #e9d5ff;
+  --group-chip-surface: rgb(107 33 168 / 0.5);
+}
+
+:global(html.dark .workspace-group-button--grok:hover) {
+  --group-chip-border: rgb(212 212 216 / 0.52);
+  --group-chip-text: #f4f4f5;
+  --group-chip-surface: rgb(82 82 91 / 0.64);
+}
+
+:global(html.dark .workspace-group-button--deepseek:hover) {
+  --group-chip-border: rgb(125 211 252 / 0.52);
+  --group-chip-text: #bae6fd;
+  --group-chip-surface: rgb(7 89 133 / 0.5);
 }
 
 .workspace-group-label {

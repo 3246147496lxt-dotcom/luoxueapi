@@ -71,7 +71,7 @@ const mountSummary = (platform?: GroupPlatform) => mount(ApiKeySummaryCard, {
 })
 
 describe('API key group presentation', () => {
-  it.each<GroupPlatform>(['openai', 'anthropic', 'gemini', 'antigravity', 'grok'])(
+  it.each<GroupPlatform>(['openai', 'anthropic', 'gemini', 'antigravity', 'grok', 'deepseek'])(
     'uses the %s platform icon and tone on desktop and mobile',
     (platform) => {
       const workspace = mountWorkspace(platform)
@@ -81,11 +81,13 @@ describe('API key group presentation', () => {
       expect(workspaceButton.classes()).toContain(`workspace-group-button--${platform}`)
       expect(workspaceButton.attributes('data-platform')).toBe(platform)
       expect(workspace.getComponent(PlatformIcon).props()).toMatchObject({ platform, size: 'xs' })
+      expect(workspace.getComponent(PlatformIcon).classes()).not.toContain('sr-only')
 
       const summaryButton = summary.get('.api-key-summary-card__group--assigned')
       expect(summaryButton.classes()).toContain(`api-key-summary-card__group--${platform}`)
       expect(summaryButton.attributes('data-platform')).toBe(platform)
       expect(summary.getComponent(PlatformIcon).props()).toMatchObject({ platform, size: 'md' })
+      expect(summary.getComponent(PlatformIcon).classes()).not.toContain('sr-only')
 
       expect(workspace.findAllComponents(KeysLucideIcon).map((icon) => icon.props('name')))
         .not.toContain('sparkles')

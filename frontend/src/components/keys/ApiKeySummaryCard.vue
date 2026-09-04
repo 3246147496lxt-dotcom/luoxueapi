@@ -97,7 +97,7 @@
           v-if="apiKey.group"
           :platform="apiKey.group.platform"
           size="md"
-          class="sr-only"
+          class="api-key-summary-card__group-icon"
           aria-hidden="true"
         />
         <span class="api-key-summary-card__group-name">
@@ -328,6 +328,9 @@ const formatKeyDate = (value: string | null | undefined): string => {
 }
 
 .api-key-summary-card__group {
+  --group-chip-border: var(--workspace-border);
+  --group-chip-text: var(--workspace-text-secondary);
+  --group-chip-surface: var(--workspace-surface-subtle);
   width: max-content;
   min-width: 0;
   min-height: 36px;
@@ -338,19 +341,19 @@ const formatKeyDate = (value: string | null | undefined): string => {
   justify-content: center;
   gap: 8px;
   padding: 0 10px;
-  border: 1px solid var(--workspace-border);
+  border: 1px solid var(--group-chip-border);
   border-radius: 999px;
-  color: var(--workspace-text-secondary);
-  background: var(--workspace-surface-subtle);
+  color: var(--group-chip-text);
+  background: var(--group-chip-surface);
   text-align: left;
   outline: none;
   transition: color 150ms ease, border-color 150ms ease, background-color 150ms ease;
 }
 
 .api-key-summary-card__group:hover {
-  border-color: var(--workspace-border-strong);
-  color: var(--workspace-text);
-  background: var(--workspace-hover);
+  --group-chip-border: var(--workspace-border-strong);
+  --group-chip-text: var(--workspace-text);
+  --group-chip-surface: var(--workspace-hover);
 }
 
 .api-key-summary-card__group-name {
@@ -362,18 +365,163 @@ const formatKeyDate = (value: string | null | undefined): string => {
   white-space: nowrap;
 }
 
-/* Provider-specific classes are retained for callers while the chip remains
-   neutral in the redesigned surface. */
+/* Provider-specific tones make the group immediately scannable on mobile. */
 .api-key-summary-card__group--assigned,
-.api-key-summary-card__group--unassigned,
-.api-key-summary-card__group--openai,
-.api-key-summary-card__group--anthropic,
-.api-key-summary-card__group--gemini,
-.api-key-summary-card__group--antigravity,
+.api-key-summary-card__group--unassigned {
+  --group-chip-border: var(--workspace-border);
+  --group-chip-text: var(--workspace-text-secondary);
+  --group-chip-surface: var(--workspace-surface-subtle);
+}
+
+.api-key-summary-card__group--openai {
+  --group-chip-border: #bbf7d0;
+  --group-chip-text: #15803d;
+  --group-chip-surface: #f0fdf4;
+}
+
+.api-key-summary-card__group--anthropic {
+  --group-chip-border: #fed7aa;
+  --group-chip-text: #c2410c;
+  --group-chip-surface: #fff7ed;
+}
+
+.api-key-summary-card__group--gemini {
+  --group-chip-border: #bfdbfe;
+  --group-chip-text: #1d4ed8;
+  --group-chip-surface: #eff6ff;
+}
+
+.api-key-summary-card__group--antigravity {
+  --group-chip-border: #e9d5ff;
+  --group-chip-text: #7e22ce;
+  --group-chip-surface: #faf5ff;
+}
+
 .api-key-summary-card__group--grok {
-  border-color: var(--workspace-border);
-  color: var(--workspace-text-secondary);
-  background: var(--workspace-surface-subtle);
+  --group-chip-border: #d4d4d8;
+  --group-chip-text: #3f3f46;
+  --group-chip-surface: #f4f4f5;
+}
+
+.api-key-summary-card__group--deepseek {
+  --group-chip-border: #bae6fd;
+  --group-chip-text: #0369a1;
+  --group-chip-surface: #f0f9ff;
+}
+
+:global(html.dark .api-key-summary-card__group--openai) {
+  --group-chip-border: rgb(74 222 128 / 0.34);
+  --group-chip-text: #86efac;
+  --group-chip-surface: rgb(20 83 45 / 0.34);
+}
+
+:global(html.dark .api-key-summary-card__group--anthropic) {
+  --group-chip-border: rgb(251 146 60 / 0.34);
+  --group-chip-text: #fdba74;
+  --group-chip-surface: rgb(124 45 18 / 0.32);
+}
+
+:global(html.dark .api-key-summary-card__group--gemini) {
+  --group-chip-border: rgb(96 165 250 / 0.34);
+  --group-chip-text: #93c5fd;
+  --group-chip-surface: rgb(30 58 138 / 0.34);
+}
+
+:global(html.dark .api-key-summary-card__group--antigravity) {
+  --group-chip-border: rgb(192 132 252 / 0.34);
+  --group-chip-text: #d8b4fe;
+  --group-chip-surface: rgb(88 28 135 / 0.34);
+}
+
+:global(html.dark .api-key-summary-card__group--grok) {
+  --group-chip-border: rgb(161 161 170 / 0.34);
+  --group-chip-text: #d4d4d8;
+  --group-chip-surface: rgb(63 63 70 / 0.48);
+}
+
+:global(html.dark .api-key-summary-card__group--deepseek) {
+  --group-chip-border: rgb(56 189 248 / 0.34);
+  --group-chip-text: #7dd3fc;
+  --group-chip-surface: rgb(8 47 73 / 0.38);
+}
+
+.api-key-summary-card__group--assigned:hover,
+.api-key-summary-card__group--unassigned:hover {
+  --group-chip-border: var(--workspace-border-strong);
+  --group-chip-text: var(--workspace-text);
+  --group-chip-surface: var(--workspace-hover);
+}
+
+.api-key-summary-card__group--openai:hover {
+  --group-chip-border: #86efac;
+  --group-chip-text: #166534;
+  --group-chip-surface: #dcfce7;
+}
+
+.api-key-summary-card__group--anthropic:hover {
+  --group-chip-border: #fdba74;
+  --group-chip-text: #9a3412;
+  --group-chip-surface: #ffedd5;
+}
+
+.api-key-summary-card__group--gemini:hover {
+  --group-chip-border: #93c5fd;
+  --group-chip-text: #1e40af;
+  --group-chip-surface: #dbeafe;
+}
+
+.api-key-summary-card__group--antigravity:hover {
+  --group-chip-border: #d8b4fe;
+  --group-chip-text: #6b21a8;
+  --group-chip-surface: #f3e8ff;
+}
+
+.api-key-summary-card__group--grok:hover {
+  --group-chip-border: #a1a1aa;
+  --group-chip-text: #27272a;
+  --group-chip-surface: #e4e4e7;
+}
+
+.api-key-summary-card__group--deepseek:hover {
+  --group-chip-border: #7dd3fc;
+  --group-chip-text: #075985;
+  --group-chip-surface: #e0f2fe;
+}
+
+:global(html.dark .api-key-summary-card__group--openai:hover) {
+  --group-chip-border: rgb(134 239 172 / 0.52);
+  --group-chip-text: #bbf7d0;
+  --group-chip-surface: rgb(22 101 52 / 0.5);
+}
+
+:global(html.dark .api-key-summary-card__group--anthropic:hover) {
+  --group-chip-border: rgb(253 186 116 / 0.52);
+  --group-chip-text: #fed7aa;
+  --group-chip-surface: rgb(154 52 18 / 0.5);
+}
+
+:global(html.dark .api-key-summary-card__group--gemini:hover) {
+  --group-chip-border: rgb(147 197 253 / 0.52);
+  --group-chip-text: #bfdbfe;
+  --group-chip-surface: rgb(30 64 175 / 0.5);
+}
+
+:global(html.dark .api-key-summary-card__group--antigravity:hover) {
+  --group-chip-border: rgb(216 180 254 / 0.52);
+  --group-chip-text: #e9d5ff;
+  --group-chip-surface: rgb(107 33 168 / 0.5);
+}
+
+:global(html.dark .api-key-summary-card__group--grok:hover) {
+  --group-chip-border: rgb(212 212 216 / 0.52);
+  --group-chip-text: #f4f4f5;
+  --group-chip-surface: rgb(82 82 91 / 0.64);
+}
+
+:global(html.dark .api-key-summary-card__group--deepseek:hover) {
+  --group-chip-border: rgb(125 211 252 / 0.52);
+  --group-chip-text: #bae6fd;
+  --group-chip-surface: rgb(7 89 133 / 0.5);
 }
 
 .api-key-summary-card__time-grid {
