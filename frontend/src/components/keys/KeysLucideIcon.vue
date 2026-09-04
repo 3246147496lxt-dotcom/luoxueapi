@@ -21,6 +21,7 @@
 import { computed } from 'vue'
 
 type IconName =
+  | 'activity'
   | 'check'
   | 'chevronDown'
   | 'chevronLeft'
@@ -30,6 +31,7 @@ type IconName =
   | 'eyeOff'
   | 'info'
   | 'key'
+  | 'loaderCircle'
   | 'penLine'
   | 'plus'
   | 'refreshCw'
@@ -57,6 +59,9 @@ const props = withDefaults(defineProps<{
 
 // Nodes mirror the Lucide 0.562 icon set used by the approved Superdesign draft.
 const icons: Record<IconName, SvgNode[]> = {
+  activity: [
+    { tag: 'path', attrs: { d: 'M22 12h-4l-3 9L9 3l-3 9H2' } },
+  ],
   check: [
     { tag: 'path', attrs: { d: 'M20 6 9 17l-5-5' } },
   ],
@@ -92,6 +97,9 @@ const icons: Record<IconName, SvgNode[]> = {
     { tag: 'path', attrs: { d: 'm15.5 7.5 2.3 2.3a1 1 0 0 0 1.4 0l2.1-2.1a1 1 0 0 0 0-1.4L19 4' } },
     { tag: 'path', attrs: { d: 'm21 2-9.6 9.6' } },
     { tag: 'circle', attrs: { cx: 7.5, cy: 15.5, r: 5.5 } },
+  ],
+  loaderCircle: [
+    { tag: 'path', attrs: { d: 'M21 12a9 9 0 1 1-6.219-8.56' } },
   ],
   penLine: [
     { tag: 'path', attrs: { d: 'M13 21h8' } },

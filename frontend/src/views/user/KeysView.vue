@@ -1,271 +1,131 @@
 <template>
   <AppLayout variant="chat">
-    <section
-      class="keys-workspace"
-      data-test="keys-workspace"
-    >
-      <header class="keys-mobile-header md:hidden">
-        <div class="keys-mobile-title">
-          <KeysLucideIcon name="key" :size="20" aria-hidden="true" />
-          <span>{{ t('keys.title') }}</span>
-        </div>
-        <div class="keys-mobile-actions">
-          <button
-            type="button"
-            class="keys-mobile-refresh"
-            :disabled="loading"
-            :title="t('common.refresh')"
-            :aria-label="t('common.refresh')"
-            data-test="key-refresh-mobile"
-            @click="loadApiKeys"
-          >
-            <KeysLucideIcon name="refreshCw" :size="18" :class="loading && 'animate-spin'" />
-          </button>
-          <button
-            type="button"
-            class="keys-mobile-create"
-            :class="{ 'key-header-create--empty': !loading && apiKeys.length === 0 }"
-            data-tour="keys-create-btn"
-            data-test="key-create-header-mobile"
-            @click="showCreateModal = true"
-          >
-            <KeysLucideIcon name="plus" :size="16" aria-hidden="true" />
-            <span>{{ t('common.create') }}</span>
-          </button>
-        </div>
+    <section class="keys-workspace" data-test="keys-workspace">
+      <header class="keys-page-header">
+        <h1>{{ t('keys.title') }}</h1>
       </header>
 
-      <header class="keys-desktop-header hidden md:flex">
-        <div class="keys-desktop-title-wrap">
-          <div class="keys-desktop-title-icon">
-            <KeysLucideIcon name="key" :size="24" aria-hidden="true" />
-          </div>
-          <div class="keys-desktop-title-copy">
-            <h1>{{ t('keys.title') }}</h1>
-            <p>{{ t('keys.workspaceSubtitle') }}</p>
-          </div>
+      <section class="keys-endpoint-card" aria-labelledby="keys-endpoint-title">
+        <div class="keys-endpoint-label">
+          <h2 id="keys-endpoint-title">{{ t('keys.endpoints.title') }}</h2>
         </div>
-        <div class="keys-desktop-actions">
+        <div class="keys-endpoint-field">
+          <code :title="apiEndpoint">{{ apiEndpoint }}</code>
           <button
             type="button"
-            class="keys-desktop-refresh"
-            :disabled="loading"
-            :title="t('common.refresh')"
-            :aria-label="t('common.refresh')"
-            data-test="key-refresh"
-            @click="loadApiKeys"
+            class="keys-icon-button"
+            :title="endpointCopied ? t('keys.endpoints.copied') : t('keys.endpoints.clickToCopy')"
+            :aria-label="endpointCopied ? t('keys.endpoints.copied') : t('keys.endpoints.clickToCopy')"
+            data-test="endpoint-copy"
+            @click="copyEndpoint"
           >
-            <KeysLucideIcon name="refreshCw" :size="20" :class="loading && 'animate-spin'" />
+            <KeysLucideIcon :name="endpointCopied ? 'check' : 'copy'" :size="17" aria-hidden="true" />
           </button>
           <button
             type="button"
-            class="key-header-create keys-desktop-create"
-            :class="{ 'key-header-create--empty': !loading && apiKeys.length === 0 }"
+            class="keys-icon-button"
+            :class="`keys-endpoint-test--${endpointTestState}`"
+            :disabled="endpointTestState === 'testing'"
+            :title="endpointTestLabel"
+            :aria-label="endpointTestLabel"
+            data-test="endpoint-test"
+            @click="testEndpoint"
+          >
+            <KeysLucideIcon
+              :name="endpointTestState === 'testing' ? 'loaderCircle' : endpointTestState === 'ready' ? 'check' : endpointTestState === 'failed' ? 'refreshCw' : 'activity'"
+              :size="17"
+              :class="endpointTestState === 'testing' && 'animate-spin'"
+              aria-hidden="true"
+            />
+          </button>
+          <span
+            v-if="endpointTestState !== 'idle'"
+            class="keys-endpoint-status"
+            :class="`is-${endpointTestState}`"
+            aria-live="polite"
+          >
+            {{ endpointTestMessage }}
+          </span>
+        </div>
+        <div class="keys-endpoint-actions">
+          <button
+            type="button"
+            role="switch"
+            class="keys-fast-mode"
+            :aria-checked="gptFastMode"
+            :title="t('keys.gptFastModeHint')"
+            :aria-label="t('keys.gptFastMode')"
+            data-test="gpt-fast-mode"
+            @click="toggleGptFastMode"
+          >
+            <span>{{ t('keys.gptFastMode') }}</span>
+            <span class="keys-fast-mode-track" aria-hidden="true"><span /></span>
+          </button>
+          <button
+            type="button"
+            class="keys-create-button"
             data-tour="keys-create-btn"
             data-test="key-create-header"
             @click="showCreateModal = true"
           >
-            <KeysLucideIcon name="plus" :size="20" aria-hidden="true" />
+            <KeysLucideIcon name="plus" :size="17" aria-hidden="true" />
             <span>{{ t('keys.createKey') }}</span>
           </button>
         </div>
-      </header>
+      </section>
 
-      <div class="keys-filter-toolbar">
-        <div class="keys-filter-grid">
-          <SearchInput
-            v-model="filterSearch"
-            class="key-filter-search"
-            :placeholder="t('keys.searchPlaceholder')"
-            data-test="key-filter-search"
-            @search="onFilterChange"
-          />
-          <Select
-            class="key-secondary-filter"
-            :model-value="filterGroupId"
-            :options="groupFilterOptions"
-            data-test="key-filter-group"
-            @update:model-value="onGroupFilterChange"
-          />
-          <Select
-            class="key-secondary-filter"
-            :model-value="filterStatus"
-            :options="statusFilterOptions"
-            data-test="key-filter-status"
-            @update:model-value="onStatusFilterChange"
-          />
-          <Select
-            class="key-secondary-filter key-sort-filter"
-            :model-value="sortSelection"
-            :options="sortOptions"
-            data-test="key-sort"
-            @update:model-value="onSortChange"
-          />
-
-          <div class="keys-filter-actions">
-            <div ref="columnDropdownRef" class="relative min-w-0">
-              <button
-                type="button"
-                class="keys-detail-settings-button"
-                :title="t('keys.detailSettings')"
-                :aria-expanded="showColumnDropdown"
-                aria-controls="key-detail-menu"
-                aria-haspopup="menu"
-                data-test="key-detail-settings"
-                @click="showColumnDropdown = !showColumnDropdown"
-              >
-                <KeysLucideIcon class="keys-settings-icon keys-settings-icon--mobile" name="slidersHorizontal" :size="18" aria-hidden="true" />
-                <KeysLucideIcon class="keys-settings-icon keys-settings-icon--desktop" name="settings2" :size="18" aria-hidden="true" />
-                <span>{{ t('keys.detailSettings') }}</span>
-              </button>
-              <div
-                v-if="showColumnDropdown"
-                id="key-detail-menu"
-                role="menu"
-                :aria-label="t('keys.detailSettings')"
-                class="keys-detail-menu"
-                data-test="key-detail-menu"
-              >
-                <button
-                  v-for="col in toggleableColumns"
-                  :key="col.key"
-                  type="button"
-                  role="menuitemcheckbox"
-                  :aria-checked="isColumnVisible(col.key)"
-                  class="keys-detail-menu-item"
-                  @click="toggleColumn(col.key)"
-                >
-                  <span>{{ col.label }}</span>
-                  <KeysLucideIcon v-if="isColumnVisible(col.key)" name="check" :size="16" class="text-primary-600 dark:text-primary-400" />
-                </button>
-              </div>
-            </div>
-
-            <button
-              type="button"
-              class="keys-density-button"
-              :aria-pressed="compactTable"
-              data-test="key-density-toggle"
-              @click="compactTable = !compactTable"
-            >
-              <span>{{ compactTable ? t('keys.compactList') : t('keys.comfortableList') }}</span>
-            </button>
-          </div>
+      <div v-if="loading" class="keys-loading-state" aria-live="polite" :aria-label="t('common.loading')">
+        <div class="keys-loading-table">
+          <div v-for="index in 5" :key="index" class="keys-loading-row" />
+        </div>
+        <div class="keys-loading-cards">
+          <div v-for="index in 2" :key="index" class="keys-loading-card" />
         </div>
       </div>
 
-      <div v-if="loading" class="min-h-0 flex-1 overflow-hidden" aria-live="polite" :aria-label="t('common.loading')">
-        <div class="hidden h-full grid-cols-[minmax(0,3fr)_minmax(0,2fr)] md:grid">
-          <div class="keys-loading-master animate-pulse" />
-          <div class="keys-loading-detail animate-pulse border-l" />
-        </div>
-        <div class="keys-loading-mobile h-full space-y-4 overflow-hidden p-4 md:hidden">
-          <div v-for="index in 2" :key="index" class="keys-loading-card h-[360px] animate-pulse rounded-lg border" />
-        </div>
+      <div
+        v-else-if="loadError && apiKeys.length === 0"
+        class="keys-error-state"
+        role="alert"
+      >
+        <p>{{ t('keys.failedToLoad') }}</p>
+        <button type="button" class="keys-error-retry" @click="loadApiKeys">
+          <KeysLucideIcon name="refreshCw" :size="15" aria-hidden="true" />
+          <span>{{ t('keys.retryLoad') }}</span>
+        </button>
       </div>
 
-      <div v-else-if="apiKeys.length > 0" class="keys-content">
-        <div class="keys-master-pane">
-          <div class="min-h-0 flex-1 overflow-hidden">
-            <ApiKeyWorkspaceList
-              class="hidden h-full md:block"
-              :api-keys="apiKeys"
-              :usage-stats="usageStats"
-              :user-group-rates="userGroupRates"
-              :selected-key-id="inspectedKeyId"
-              :compact="compactTable"
-              :copied-key-id="copiedKeyId"
-              :status-updating-ids="statusUpdatingIds"
-              :now="now"
-              @select="openKeyDetails"
-              @copy-key="copyKey"
-              @toggle-status="toggleKeyStatus"
-              @change-group="openGroupSelector"
-            />
+      <div v-else-if="apiKeys.length > 0" class="keys-list-region">
+        <ApiKeyWorkspaceList
+          class="keys-desktop-table"
+          :api-keys="apiKeys"
+          :copied-key-id="copiedKeyId"
+          :now="now"
+          :show-ccs-import="!publicSettings?.hide_ccs_import_button"
+          @copy-key="copyKey"
+          @change-group="openGroupSelector"
+          @use-key="openUseKeyModal"
+          @edit="editKey"
+          @import-ccs="importToCcswitch"
+          @delete="confirmDelete"
+        />
 
-            <div class="keys-mobile-list md:hidden" data-test="api-key-mobile-list">
-              <ApiKeySummaryCard
-                v-for="row in apiKeys"
-                :key="row.id"
-                :api-key="row"
-                :usage="usageStats[row.id]"
-                :user-group-rate="row.group ? userGroupRates[row.group.id] : null"
-                :copied="copiedKeyId === row.id"
-                :status-updating="statusUpdatingKeyIds.has(row.id)"
-                :now="now"
-                :visible-columns="visibleColumnKeys"
-                @open-details="openKeyDetails"
-                @copy-key="copyKey"
-                @toggle-status="toggleKeyStatus"
-                @change-group="openGroupSelector"
-              />
-
-              <div v-if="pagination.total > 0" class="keys-mobile-pagination">
-                <p>{{ t('keys.workspacePageOf', { page: pagination.page, total: totalPageCount }) }}</p>
-                <div>
-                  <button
-                    type="button"
-                    :disabled="pagination.page <= 1"
-                    :aria-label="t('pagination.previous')"
-                    @click="handlePageChange(pagination.page - 1)"
-                  >
-                    <KeysLucideIcon name="chevronLeft" :size="16" />
-                  </button>
-                  <button
-                    type="button"
-                    :disabled="pagination.page >= totalPageCount"
-                    :aria-label="t('pagination.next')"
-                    @click="handlePageChange(pagination.page + 1)"
-                  >
-                    <KeysLucideIcon name="chevronRight" :size="16" />
-                  </button>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <div v-if="pagination.total > 0" class="keys-desktop-pagination hidden md:block">
-            <Pagination
-              :page="pagination.page"
-              :total="pagination.total"
-              :page-size="pagination.page_size"
-              :show-page-size-selector="false"
-              @update:page="handlePageChange"
-              @update:pageSize="handlePageSizeChange"
-            />
-          </div>
-        </div>
-
-        <aside
-          class="keys-detail-pane hidden md:flex"
-          data-test="key-inline-inspector"
-        >
-          <ApiKeyInspector
-            v-if="inspectedKey"
-            class="h-full w-full"
-            mode="inline"
-            :api-key="inspectedKey"
-            :usage="inspectedUsage"
-            :user-group-rate="inspectedUserGroupRate"
-            :public-settings="publicSettings"
-            :copied="copiedKeyId === inspectedKey.id"
-            :status-updating="statusUpdatingKeyIds.has(inspectedKey.id)"
-            :service-tier-updating="serviceTierUpdatingKeyIds.has(inspectedKey.id)"
+        <div class="keys-mobile-list" data-test="api-key-mobile-list">
+          <ApiKeySummaryCard
+            v-for="row in apiKeys"
+            :key="row.id"
+            :api-key="row"
+            :copied="copiedKeyId === row.id"
             :now="now"
             :show-ccs-import="!publicSettings?.hide_ccs_import_button"
-            :visible-columns="visibleColumnKeys"
             @copy-key="copyKey"
-            @toggle-status="toggleKeyStatus"
-            @toggle-service-tier="toggleServiceTierPreference"
             @change-group="openGroupSelector"
-            @reset-quota="confirmResetQuotaFromInspector"
-            @reset-rate-limit="confirmResetRateLimitFromTable"
-            @use-key="openUseKeyFromInspector"
-            @import-ccs="importFromInspector"
-            @edit="editKeyFromInspector"
-            @delete="deleteKeyFromInspector"
+            @use-key="openUseKeyModal"
+            @edit="editKey"
+            @import-ccs="importToCcswitch"
+            @delete="confirmDelete"
           />
-        </aside>
+        </div>
       </div>
 
       <div v-else class="keys-empty-state">
@@ -279,38 +139,6 @@
         </EmptyState>
       </div>
     </section>
-
-    <ApiKeyDetailSheet
-      :show="showKeyDetailSheet && Boolean(inspectedKey)"
-      :title="t('keys.detailTitle')"
-      :subtitle="inspectedKey ? `#${inspectedKey.id} · ${inspectedKey.name}` : ''"
-      @close="closeKeyDetails"
-    >
-      <ApiKeyInspector
-        v-if="inspectedKey"
-        mode="sheet"
-        :api-key="inspectedKey"
-        :usage="inspectedUsage"
-        :user-group-rate="inspectedUserGroupRate"
-        :public-settings="publicSettings"
-        :copied="copiedKeyId === inspectedKey.id"
-        :status-updating="statusUpdatingKeyIds.has(inspectedKey.id)"
-        :service-tier-updating="serviceTierUpdatingKeyIds.has(inspectedKey.id)"
-        :now="now"
-        :show-ccs-import="!publicSettings?.hide_ccs_import_button"
-        :visible-columns="visibleColumnKeys"
-        @copy-key="copyKey"
-        @toggle-status="toggleKeyStatus"
-        @toggle-service-tier="toggleServiceTierPreference"
-        @change-group="openGroupSelector"
-        @reset-quota="confirmResetQuotaFromInspector"
-        @reset-rate-limit="confirmResetRateLimitFromTable"
-        @use-key="openUseKeyFromInspector"
-        @import-ccs="importFromInspector"
-        @edit="editKeyFromInspector"
-        @delete="deleteKeyFromInspector"
-      />
-    </ApiKeyDetailSheet>
 
     <!-- Create/Edit Modal -->
     <BaseDialog
@@ -872,22 +700,11 @@
       @cancel="showResetRateLimitDialog = false"
     />
 
-    <!-- Fast mode cost confirmation -->
-    <ConfirmDialog
-      :show="showServiceTierConfirmDialog"
-      :title="t('keys.serviceTierEnableTitle')"
-      :message="t('keys.serviceTierEnableConfirmMessage')"
-      :confirm-text="t('keys.serviceTierEnableConfirm')"
-      :cancel-text="t('common.cancel')"
-      @confirm="confirmServiceTierEnable"
-      @cancel="cancelServiceTierEnable"
-    />
-
     <!-- Use Key Modal -->
     <UseKeyModal
       :show="showUseKeyModal"
       :api-key="selectedKey?.key || ''"
-      :base-url="publicSettings?.api_base_url || ''"
+      :base-url="apiEndpoint"
       :platform="selectedKey?.group?.platform || null"
       :allow-messages-dispatch="selectedKey?.group?.allow_messages_dispatch || false"
       @close="closeUseKeyModal"
@@ -1018,32 +835,25 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, onUnmounted, reactive, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 
-import { authAPI, keysAPI, usageAPI, userGroupsAPI } from '@/api'
-import type { BatchApiKeyUsageStats } from '@/api/usage'
+import { authAPI, keysAPI, userGroupsAPI } from '@/api'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
 import CreditAmount from '@/components/common/CreditAmount.vue'
 import EmptyState from '@/components/common/EmptyState.vue'
 import GroupBadge from '@/components/common/GroupBadge.vue'
 import GroupOptionItem from '@/components/common/GroupOptionItem.vue'
-import Pagination from '@/components/common/Pagination.vue'
-import SearchInput from '@/components/common/SearchInput.vue'
 import Select from '@/components/common/Select.vue'
-import type { Column } from '@/components/common/types'
 import Icon from '@/components/icons/Icon.vue'
 import KeysLucideIcon from '@/components/keys/KeysLucideIcon.vue'
 import PointsIcon from '@/components/icons/PointsIcon.vue'
-import ApiKeyDetailSheet from '@/components/keys/ApiKeyDetailSheet.vue'
-import ApiKeyInspector from '@/components/keys/ApiKeyInspector.vue'
 import ApiKeySummaryCard from '@/components/keys/ApiKeySummaryCard.vue'
 import ApiKeyWorkspaceList from '@/components/keys/ApiKeyWorkspaceList.vue'
 import UseKeyModal from '@/components/keys/UseKeyModal.vue'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import { useClipboard } from '@/composables/useClipboard'
-import { getPersistedPageSize } from '@/composables/usePersistedPageSize'
 import { useAppStore } from '@/stores/app'
 import { useOnboardingStore } from '@/stores/onboarding'
 import type { ApiKey, Group, GroupPlatform, PublicSettings, SubscriptionType, UpdateApiKeyRequest } from '@/types'
@@ -1080,155 +890,44 @@ const appStore = useAppStore()
 const onboardingStore = useOnboardingStore()
 const { copyToClipboard: clipboardCopy } = useClipboard()
 
-const allColumns = computed<Column[]>(() => [
-  { key: 'name', label: t('common.name'), sortable: true },
-  { key: 'id', label: t('keys.id'), sortable: true },
-  { key: 'key', label: t('keys.apiKey'), sortable: false },
-  { key: 'group', label: t('keys.group'), sortable: false },
-  { key: 'current_concurrency', label: t('keys.currentConcurrency'), sortable: true },
-  { key: 'usage', label: t('keys.usage'), sortable: false },
-  { key: 'rate_limit', label: t('keys.rateLimitColumn'), sortable: false },
-  { key: 'expires_at', label: t('keys.expiresAt'), sortable: true },
-  { key: 'status', label: t('common.status'), sortable: true },
-  { key: 'last_used_at', label: t('keys.lastUsedAt'), sortable: true },
-  { key: 'last_used_ip', label: t('keys.lastUsedIP'), sortable: false },
-  { key: 'created_at', label: t('keys.created'), sortable: true },
-  { key: 'actions', label: t('common.actions'), sortable: false }
-])
-
-const ALWAYS_VISIBLE_COLUMNS = new Set(['name', 'id', 'status', 'usage', 'group', 'key', 'actions'])
-const DEFAULT_HIDDEN_COLUMNS: string[] = []
-const HIDDEN_COLUMNS_KEY = 'api-key-hidden-columns'
-const COLUMN_SETTINGS_VERSION_KEY = 'api-key-column-settings-version'
-const COLUMN_SETTINGS_VERSION = 4
-const VERSION_NEW_HIDDEN_COLUMNS: Record<number, string[]> = {
-  2: ['last_used_ip'],
-  3: ['id']
-}
-const VERSION_NEW_VISIBLE_COLUMNS: Record<number, string[]> = {
-  4: ['id', 'rate_limit', 'last_used_at', 'last_used_ip']
-}
-
-const toggleableColumns = computed(() =>
-  allColumns.value.filter((col) => !ALWAYS_VISIBLE_COLUMNS.has(col.key))
-)
-
-const hiddenColumns = reactive<Set<string>>(new Set())
-
-const saveColumnsToStorage = () => {
-  try {
-    localStorage.setItem(HIDDEN_COLUMNS_KEY, JSON.stringify([...hiddenColumns]))
-    localStorage.setItem(COLUMN_SETTINGS_VERSION_KEY, String(COLUMN_SETTINGS_VERSION))
-  } catch (error) {
-    console.error('Failed to save API key table columns:', error)
-  }
-}
-
-const loadSavedColumns = () => {
-  hiddenColumns.clear()
-  try {
-    const saved = localStorage.getItem(HIDDEN_COLUMNS_KEY)
-    if (saved) {
-      const parsed = JSON.parse(saved) as string[]
-      const validColumnKeys = new Set(allColumns.value.map((col) => col.key))
-      parsed
-        .filter((key) =>
-          typeof key === 'string' &&
-          validColumnKeys.has(key) &&
-          !ALWAYS_VISIBLE_COLUMNS.has(key)
-        )
-        .forEach((key) => hiddenColumns.add(key))
-      const storedVersion = Number(localStorage.getItem(COLUMN_SETTINGS_VERSION_KEY) ?? '1')
-      if (storedVersion < COLUMN_SETTINGS_VERSION) {
-        for (let v = storedVersion + 1; v <= COLUMN_SETTINGS_VERSION; v++) {
-          for (const key of VERSION_NEW_HIDDEN_COLUMNS[v] ?? []) {
-            if (validColumnKeys.has(key) && !ALWAYS_VISIBLE_COLUMNS.has(key)) {
-              hiddenColumns.add(key)
-            }
-          }
-          for (const key of VERSION_NEW_VISIBLE_COLUMNS[v] ?? []) {
-            hiddenColumns.delete(key)
-          }
-        }
-        saveColumnsToStorage()
-      } else {
-        localStorage.setItem(COLUMN_SETTINGS_VERSION_KEY, String(COLUMN_SETTINGS_VERSION))
-      }
-    } else {
-      DEFAULT_HIDDEN_COLUMNS.forEach((key) => hiddenColumns.add(key))
-      localStorage.setItem(COLUMN_SETTINGS_VERSION_KEY, String(COLUMN_SETTINGS_VERSION))
-    }
-  } catch (error) {
-    console.error('Failed to load API key table columns:', error)
-    DEFAULT_HIDDEN_COLUMNS.forEach((key) => hiddenColumns.add(key))
-  }
-}
-
-const toggleColumn = (key: string) => {
-  if (ALWAYS_VISIBLE_COLUMNS.has(key)) return
-  if (hiddenColumns.has(key)) {
-    hiddenColumns.delete(key)
-  } else {
-    hiddenColumns.add(key)
-  }
-  saveColumnsToStorage()
-}
-
-const isColumnVisible = (key: string) => !hiddenColumns.has(key)
-
-const visibleColumnKeys = computed(() =>
-  allColumns.value
-    .filter((column) => isColumnVisible(column.key))
-    .map((column) => column.key)
-)
-
 const apiKeys = ref<ApiKey[]>([])
 const groups = ref<Group[]>([])
 const loading = ref(false)
+const loadError = ref(false)
 const submitting = ref(false)
 const now = ref(new Date())
 let resetTimer: ReturnType<typeof setInterval> | null = null
-const usageStats = ref<Record<string, BatchApiKeyUsageStats>>({})
 const userGroupRates = ref<Record<number, number>>({})
+const publicSettings = ref<PublicSettings | null>(null)
 
-const pagination = ref({
-  page: 1,
-  page_size: getPersistedPageSize(),
-  total: 0,
-  pages: 0
+// The endpoint is intentionally shown in the page-level control so it is easy
+// to copy before configuring a client. Public settings remain the source of
+// truth when configured; the product default keeps the page useful in a fresh
+// installation.
+const DEFAULT_API_ENDPOINT = 'https://luoxueapi.cc'
+const apiEndpoint = computed(() => {
+  const configured = publicSettings.value?.api_base_url?.trim().replace(/\/+$/, '')
+  return configured || DEFAULT_API_ENDPOINT
 })
-const totalPageCount = computed(() => Math.max(
-  1,
-  pagination.value.pages || Math.ceil(pagination.value.total / pagination.value.page_size)
-))
-const sortState = ref({
-  sort_by: 'created_at',
-  sort_order: 'desc' as 'asc' | 'desc'
-})
-
-const sortSelection = computed(() => `${sortState.value.sort_by}:${sortState.value.sort_order}`)
-
-const sortOptions = computed(() => [
-  { value: 'created_at:desc', label: t('keys.sortCreatedDesc') },
-  { value: 'created_at:asc', label: t('keys.sortCreatedAsc') },
-  { value: 'id:desc', label: t('keys.sortIdDesc') },
-  { value: 'id:asc', label: t('keys.sortIdAsc') },
-  { value: 'name:asc', label: t('keys.sortNameAsc') },
-  { value: 'name:desc', label: t('keys.sortNameDesc') },
-  { value: 'status:asc', label: t('keys.sortStatusAsc') },
-  { value: 'status:desc', label: t('keys.sortStatusDesc') },
-  { value: 'expires_at:asc', label: t('keys.sortExpirationAsc') },
-  { value: 'expires_at:desc', label: t('keys.sortExpirationDesc') },
-  { value: 'last_used_at:desc', label: t('keys.sortLastUsedDesc') },
-  { value: 'last_used_at:asc', label: t('keys.sortLastUsedAsc') },
-  { value: 'current_concurrency:desc', label: t('keys.sortConcurrencyDesc') },
-  { value: 'current_concurrency:asc', label: t('keys.sortConcurrencyAsc') }
-])
-
-// Filter state
-const filterSearch = ref('')
-const filterStatus = ref('')
-const filterGroupId = ref<string | number>('')
+// Public settings may already contain the API version suffix. Keep the
+// displayed endpoint intact, but use a root form when probing `/v1/*` routes
+// or generating a CCS usage URL so we never produce `/v1/v1/...`.
+const apiEndpointRoot = computed(() => apiEndpoint.value.replace(/\/v1\/?$/i, ''))
+const endpointCopied = ref(false)
+type EndpointTestState = 'idle' | 'testing' | 'ready' | 'failed'
+const endpointTestState = ref<EndpointTestState>('idle')
+const endpointTestLatency = ref<number | null>(null)
+const GPT_FAST_MODE_STORAGE_KEY = 'api-keys-gpt-fast-mode'
+const readGptFastMode = () => {
+  if (typeof window === 'undefined') return true
+  try {
+    const stored = window.localStorage.getItem(GPT_FAST_MODE_STORAGE_KEY)
+    return stored === null ? true : stored === 'true'
+  } catch {
+    return true
+  }
+}
+const gptFastMode = ref(readGptFastMode())
 
 const showCreateModal = ref(false)
 const showEditModal = ref(false)
@@ -1237,41 +936,13 @@ const showResetQuotaDialog = ref(false)
 const showResetRateLimitDialog = ref(false)
 const showUseKeyModal = ref(false)
 const showCcsClientSelect = ref(false)
-const showColumnDropdown = ref(false)
-const compactTable = ref(false)
-const statusUpdatingKeyIds = reactive(new Set<number>())
-const statusUpdatingIds = computed(() => Array.from(statusUpdatingKeyIds))
-const serviceTierUpdatingKeyIds = reactive(new Set<number>())
-const showServiceTierConfirmDialog = ref(false)
-const pendingServiceTierKey = ref<ApiKey | null>(null)
 const pendingCcsRow = ref<ApiKey | null>(null)
 const selectedKey = ref<ApiKey | null>(null)
-const inspectedKeyId = ref<number | null>(null)
-const showKeyDetailSheet = ref(false)
-const hasInlineInspector = ref(true)
 const copiedKeyId = ref<number | null>(null)
 const groupSelectorKeyId = ref<number | null>(null)
-const publicSettings = ref<PublicSettings | null>(null)
 const dropdownRef = ref<HTMLElement | null>(null)
-const columnDropdownRef = ref<HTMLElement | null>(null)
 const dropdownPosition = ref<{ top?: number; bottom?: number; left: number } | null>(null)
 let abortController: AbortController | null = null
-let inlineInspectorMediaQuery: MediaQueryList | null = null
-
-const inspectedKey = computed(() => {
-  if (inspectedKeyId.value === null) return null
-  return apiKeys.value.find((key) => key.id === inspectedKeyId.value) ?? null
-})
-
-const inspectedUsage = computed(() => {
-  if (!inspectedKey.value) return undefined
-  return usageStats.value[String(inspectedKey.value.id)]
-})
-
-const inspectedUserGroupRate = computed(() => {
-  const groupId = inspectedKey.value?.group?.id
-  return groupId === undefined ? null : userGroupRates.value[groupId] ?? null
-})
 
 // Get the currently selected key for group change
 const selectedKeyForGroup = computed(() => {
@@ -1329,43 +1000,6 @@ const shouldSubmitEditStatus = (key: ApiKey, status: 'active' | 'inactive') => {
   return true
 }
 
-// Filter dropdown options
-const groupFilterOptions = computed(() => [
-  { value: '', label: t('keys.allGroups') },
-  { value: 0, label: t('keys.noGroup') },
-  ...groups.value.map((g) => ({ value: g.id, label: g.name }))
-])
-
-const statusFilterOptions = computed(() => [
-  { value: '', label: t('keys.allStatus') },
-  { value: 'active', label: t('keys.status.active') },
-  { value: 'inactive', label: t('keys.status.inactive') },
-  { value: 'quota_exhausted', label: t('keys.status.quota_exhausted') },
-  { value: 'expired', label: t('keys.status.expired') }
-])
-
-const onFilterChange = () => {
-  pagination.value.page = 1
-  loadApiKeys()
-}
-
-const onGroupFilterChange = (value: string | number | boolean | null) => {
-  filterGroupId.value = value as string | number
-  onFilterChange()
-}
-
-const onStatusFilterChange = (value: string | number | boolean | null) => {
-  filterStatus.value = value as string
-  onFilterChange()
-}
-
-const onSortChange = (value: string | number | boolean | null) => {
-  if (typeof value !== 'string') return
-  const [sortBy, sortOrder] = value.split(':')
-  if (!sortBy || (sortOrder !== 'asc' && sortOrder !== 'desc')) return
-  handleSort(sortBy, sortOrder)
-}
-
 // Convert groups to Select options format with rate multiplier and subscription type
 const groupOptions = computed(() =>
   groups.value.map((group) => ({
@@ -1406,45 +1040,84 @@ const copyToClipboard = async (text: string, keyId: number) => {
 
 const copyKey = (key: ApiKey) => copyToClipboard(key.key, key.id)
 
-const closeKeyDetails = () => {
-  showKeyDetailSheet.value = false
-  closeGroupSelectorMenu()
-}
-
-const openKeyDetails = (key: ApiKey) => {
-  inspectedKeyId.value = key.id
-  if (!hasInlineInspector.value) {
-    showKeyDetailSheet.value = true
-  }
-}
-
-const syncInspectedKey = (items: ApiKey[]) => {
-  if (items.length === 0) {
-    inspectedKeyId.value = null
-    showKeyDetailSheet.value = false
-    return
-  }
-
-  const currentId = inspectedKeyId.value
-  if (currentId !== null && items.some((key) => key.id === currentId)) return
-
-  inspectedKeyId.value = items[0].id
-  if (currentId !== null) {
-    showKeyDetailSheet.value = false
-  }
-}
-
-const handleInlineInspectorChange = (event: MediaQueryListEvent) => {
-  hasInlineInspector.value = event.matches
-  if (event.matches) {
-    showKeyDetailSheet.value = false
-  }
-}
-
 const isAbortError = (error: unknown) => {
   if (!error || typeof error !== 'object') return false
   const { name, code } = error as { name?: string; code?: string }
   return name === 'AbortError' || code === 'ERR_CANCELED'
+}
+
+const endpointTestLabel = computed(() => {
+  if (endpointTestState.value === 'testing') return t('keys.endpoints.testing')
+  if (endpointTestState.value === 'ready') {
+    return endpointTestLatency.value === null
+      ? t('keys.endpoints.connected')
+      : t('keys.endpoints.connectedWithLatency', { latency: endpointTestLatency.value })
+  }
+  if (endpointTestState.value === 'failed') return t('keys.endpoints.retry')
+  return t('keys.endpoints.speedTest')
+})
+
+const endpointTestMessage = computed(() => {
+  if (endpointTestState.value === 'testing') return t('keys.endpoints.testing')
+  if (endpointTestState.value === 'ready') {
+    return endpointTestLatency.value === null
+      ? t('keys.endpoints.connected')
+      : t('keys.endpoints.connectedWithLatency', { latency: endpointTestLatency.value })
+  }
+  return t('keys.endpoints.failed')
+})
+
+const copyEndpoint = async () => {
+  const success = await clipboardCopy(apiEndpoint.value, t('keys.endpoints.copied'))
+  if (!success) return
+  endpointCopied.value = true
+  window.setTimeout(() => {
+    endpointCopied.value = false
+  }, 1200)
+}
+
+/**
+ * Probe the configured endpoint without requiring an API key. A 401/403 is
+ * still a healthy network response, while transport errors are reported as a
+ * failed probe. The control is intentionally compact so it never competes
+ * with the primary copy action.
+ */
+const testEndpoint = async () => {
+  if (endpointTestState.value === 'testing') return
+  endpointTestState.value = 'testing'
+  endpointTestLatency.value = null
+  const startedAt = typeof performance !== 'undefined' ? performance.now() : Date.now()
+  const controller = new AbortController()
+  const timeout = window.setTimeout(() => controller.abort(), 5000)
+  try {
+    const response = await fetch(`${apiEndpointRoot.value}/v1/models`, {
+      method: 'GET',
+      mode: 'cors',
+      signal: controller.signal,
+      headers: { Accept: 'application/json' }
+    })
+    if (!response.ok && ![401, 403, 404, 405].includes(response.status)) {
+      throw new Error(`Endpoint probe returned ${response.status}`)
+    }
+    endpointTestLatency.value = Math.max(1, Math.round(
+      (typeof performance !== 'undefined' ? performance.now() : Date.now()) - startedAt
+    ))
+    endpointTestState.value = 'ready'
+  } catch {
+    endpointTestState.value = 'failed'
+  } finally {
+    window.clearTimeout(timeout)
+  }
+}
+
+const toggleGptFastMode = () => {
+  gptFastMode.value = !gptFastMode.value
+  try {
+    window.localStorage.setItem(GPT_FAST_MODE_STORAGE_KEY, String(gptFastMode.value))
+  } catch {
+    // A locked-down browser can reject localStorage; the in-memory switch
+    // remains usable for the current page.
+  }
 }
 
 const loadApiKeys = async () => {
@@ -1453,48 +1126,31 @@ const loadApiKeys = async () => {
   abortController = controller
   const { signal } = controller
   loading.value = true
+  loadError.value = false
   try {
-    // Build filters
-    const filters: {
-      search?: string
-      status?: string
-      group_id?: number | string
-      sort_by?: string
-      sort_order?: 'asc' | 'desc'
-    } = {}
-    if (filterSearch.value) filters.search = filterSearch.value
-    if (filterStatus.value) filters.status = filterStatus.value
-    if (filterGroupId.value !== '') filters.group_id = filterGroupId.value
-    filters.sort_by = sortState.value.sort_by
-    filters.sort_order = sortState.value.sort_order
-
-    const response = await keysAPI.list(pagination.value.page, pagination.value.page_size, filters, {
-      signal
-    })
+    const filters = { sort_by: 'created_at', sort_order: 'desc' as const }
+    const pageSize = 1000
+    const firstPage = await keysAPI.list(1, pageSize, filters, { signal })
     if (signal.aborted) return
-    apiKeys.value = response.items
-    syncInspectedKey(response.items)
-    pagination.value.total = response.total
-    pagination.value.pages = response.pages
-    usageStats.value = {}
-
-    // Load usage stats for all API keys in the list
-    if (response.items.length > 0) {
-      const keyIds = response.items.map((k) => k.id)
-      try {
-        const usageResponse = await usageAPI.getDashboardApiKeysUsage(keyIds, { signal })
-        if (signal.aborted) return
-        usageStats.value = usageResponse.stats
-      } catch (e) {
-        if (!isAbortError(e)) {
-          console.error('Failed to load usage stats:', e)
-        }
-      }
+    const items = [...firstPage.items]
+    const totalPages = Math.max(
+      firstPage.pages || 1,
+      Math.ceil(firstPage.total / Math.max(firstPage.page_size || pageSize, 1))
+    )
+    // The endpoint caps a page at 1000 items. Fetch additional pages only for
+    // unusually large accounts so the UI can remain intentionally pagination-
+    // free without silently hiding keys.
+    for (let page = 2; page <= totalPages && items.length < firstPage.total; page += 1) {
+      const nextPage = await keysAPI.list(page, pageSize, filters, { signal })
+      if (signal.aborted) return
+      items.push(...nextPage.items)
     }
+    apiKeys.value = items
   } catch (error) {
     if (isAbortError(error)) {
       return
     }
+    loadError.value = true
     appStore.showError(t('keys.failedToLoad'))
   } finally {
     if (abortController === controller) {
@@ -1537,50 +1193,6 @@ const closeUseKeyModal = () => {
   selectedKey.value = null
 }
 
-const openUseKeyFromInspector = (key: ApiKey) => {
-  showKeyDetailSheet.value = false
-  openUseKeyModal(key)
-}
-
-const editKeyFromInspector = (key: ApiKey) => {
-  showKeyDetailSheet.value = false
-  editKey(key)
-}
-
-const deleteKeyFromInspector = (key: ApiKey) => {
-  showKeyDetailSheet.value = false
-  confirmDelete(key)
-}
-
-const importFromInspector = (key: ApiKey) => {
-  showKeyDetailSheet.value = false
-  importToCcswitch(key)
-}
-
-const confirmResetQuotaFromInspector = (key: ApiKey) => {
-  showKeyDetailSheet.value = false
-  selectedKey.value = key
-  showResetQuotaDialog.value = true
-}
-
-const handlePageChange = (page: number) => {
-  pagination.value.page = page
-  loadApiKeys()
-}
-
-const handlePageSizeChange = (pageSize: number) => {
-  pagination.value.page_size = pageSize
-  pagination.value.page = 1
-  loadApiKeys()
-}
-
-const handleSort = (key: string, order: 'asc' | 'desc') => {
-  sortState.value.sort_by = key
-  sortState.value.sort_order = order
-  pagination.value.page = 1
-  loadApiKeys()
-}
-
 const editKey = (key: ApiKey) => {
   selectedKey.value = key
   const hasIPRestriction = (key.ip_whitelist?.length > 0) || (key.ip_blacklist?.length > 0)
@@ -1605,73 +1217,6 @@ const editKey = (key: ApiKey) => {
     expiration_date: key.expires_at ? formatDateTimeLocal(key.expires_at) : ''
   }
   showEditModal.value = true
-}
-
-const toggleKeyStatus = async (key: ApiKey) => {
-  if (statusUpdatingKeyIds.has(key.id)) return
-  const newStatus = key.status === 'active' ? 'inactive' : 'active'
-  statusUpdatingKeyIds.add(key.id)
-  try {
-    await keysAPI.toggleStatus(key.id, newStatus)
-    appStore.showSuccess(
-      newStatus === 'active' ? t('keys.keyEnabledSuccess') : t('keys.keyDisabledSuccess')
-    )
-    await loadApiKeys()
-  } catch (error) {
-    appStore.showError(t('keys.failedToUpdateStatus'))
-  } finally {
-    statusUpdatingKeyIds.delete(key.id)
-  }
-}
-
-const updateServiceTierPreference = async (key: ApiKey, preference: 'standard' | 'priority') => {
-  if (serviceTierUpdatingKeyIds.has(key.id)) return
-  serviceTierUpdatingKeyIds.add(key.id)
-  try {
-    const updatedKey = await keysAPI.update(key.id, {
-      service_tier_preference: preference
-    })
-    const localIndex = apiKeys.value.findIndex((item) => item.id === key.id)
-    if (localIndex >= 0 && updatedKey) {
-      // Keep list-only relations/usage fields if the update response is compact.
-      apiKeys.value[localIndex] = { ...apiKeys.value[localIndex], ...updatedKey }
-    }
-    appStore.showSuccess(
-      preference === 'priority'
-        ? t('keys.serviceTierEnabledSuccess')
-        : t('keys.serviceTierDisabledSuccess')
-    )
-    await loadApiKeys()
-  } catch (error) {
-    // Keep the previous value in place so a failed request naturally rolls back.
-    appStore.showError(t('keys.serviceTierUpdateFailed'))
-  } finally {
-    serviceTierUpdatingKeyIds.delete(key.id)
-  }
-}
-
-const toggleServiceTierPreference = (key: ApiKey) => {
-  if (key.group?.platform !== 'openai' || serviceTierUpdatingKeyIds.has(key.id)) return
-  const isPriority = key.service_tier_preference === 'priority'
-  if (isPriority) {
-    void updateServiceTierPreference(key, 'standard')
-    return
-  }
-  pendingServiceTierKey.value = key
-  showServiceTierConfirmDialog.value = true
-}
-
-const cancelServiceTierEnable = () => {
-  showServiceTierConfirmDialog.value = false
-  pendingServiceTierKey.value = null
-}
-
-const confirmServiceTierEnable = () => {
-  const key = pendingServiceTierKey.value
-  cancelServiceTierEnable()
-  if (key) {
-    void updateServiceTierPreference(key, 'priority')
-  }
 }
 
 const openGroupSelector = (key: ApiKey, event: MouseEvent) => {
@@ -1741,19 +1286,22 @@ const closeGroupSelectorMenu = () => {
 const closeGroupSelector = (event: MouseEvent) => {
   const target = event.target as HTMLElement
   // Check if click is inside the dropdown or the trigger button
-  if (!target.closest('.group\\/dropdown') && !dropdownRef.value?.contains(target)) {
+  // The v31 list uses semantic class names instead of the legacy Tailwind
+  // `group/dropdown` token, so keep all trigger variants inside the popup
+  // boundary. Otherwise the document listener would close the menu
+  // immediately after a group chip is clicked.
+  const isGroupTrigger = target.closest(
+    '.group\\/dropdown, .workspace-group-button, .api-key-summary-card__group'
+  )
+  if (!isGroupTrigger && !dropdownRef.value?.contains(target)) {
     groupSelectorKeyId.value = null
     dropdownPosition.value = null
-  }
-  if (columnDropdownRef.value && !columnDropdownRef.value.contains(target)) {
-    showColumnDropdown.value = false
   }
 }
 
 const handleEscapeKey = (event: KeyboardEvent) => {
   if (event.key !== 'Escape') return
   closeGroupSelectorMenu()
-  showColumnDropdown.value = false
 }
 
 const confirmDelete = (key: ApiKey) => {
@@ -1943,13 +1491,6 @@ const confirmResetRateLimit = () => {
   showResetRateLimitDialog.value = true
 }
 
-// Show reset rate limit confirmation dialog (from table row)
-const confirmResetRateLimitFromTable = (row: ApiKey) => {
-  showKeyDetailSheet.value = false
-  selectedKey.value = row
-  showResetRateLimitDialog.value = true
-}
-
 // Reset rate limit usage for an API key
 const resetRateLimitUsage = async () => {
   if (!selectedKey.value) return
@@ -1985,7 +1526,7 @@ const importToCcswitch = (row: ApiKey) => {
 }
 
 const executeCcsImport = (row: ApiKey, clientType: CcSwitchClientType) => {
-  const baseUrl = publicSettings.value?.api_base_url || window.location.origin
+  const baseUrl = apiEndpointRoot.value
   const platform = row.group?.platform || 'anthropic'
 
   const usageScript = `({
@@ -2043,12 +1584,6 @@ const closeCcsClientSelect = () => {
 }
 
 onMounted(() => {
-  loadSavedColumns()
-  if (typeof window !== 'undefined' && typeof window.matchMedia === 'function') {
-    inlineInspectorMediaQuery = window.matchMedia('(min-width: 768px)')
-    hasInlineInspector.value = inlineInspectorMediaQuery.matches
-    inlineInspectorMediaQuery.addEventListener('change', handleInlineInspectorChange)
-  }
   loadApiKeys()
   loadGroups()
   loadUserGroupRates()
@@ -2062,8 +1597,6 @@ onUnmounted(() => {
   abortController?.abort()
   document.removeEventListener('click', closeGroupSelector)
   document.removeEventListener('keydown', handleEscapeKey)
-  inlineInspectorMediaQuery?.removeEventListener('change', handleInlineInspectorChange)
-  inlineInspectorMediaQuery = null
   if (resetTimer) clearInterval(resetTimer)
 })
 </script>
@@ -2644,8 +2177,10 @@ onUnmounted(() => {
 :global(.app-layout--snow-shell:has(.keys-workspace) .app-main-shell.app-layout--chat) {
   position: relative;
   z-index: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
   background: var(--workspace-canvas) !important;
-  box-shadow: 0 25px 50px -12px rgb(0 0 0 / 0.25);
+  box-shadow: none;
 }
 
 :global(.app-layout--snow-shell:has(.keys-workspace) .app-main-shell.app-layout--chat .app-main-content) {
@@ -2859,5 +2394,515 @@ onUnmounted(() => {
   .keys-density-button {
     transition: none;
   }
+}
+
+/* --------------------------------------------------------------------------
+ * API keys v31 workspace
+ *
+ * The page intentionally uses one calm content column. The shared AppLayout
+ * and sidebar remain untouched; these rules only shape the slotted right-hand
+ * workspace shown above.
+ * -------------------------------------------------------------------------- */
+.keys-workspace {
+  display: block;
+  width: 100%;
+  height: auto;
+  min-height: calc(100dvh - 24px);
+  overflow: visible;
+  padding: 0 0 32px;
+  color: var(--workspace-text);
+  background: var(--workspace-canvas);
+}
+
+.keys-page-header {
+  width: min(calc(100% - 64px), 1280px);
+  margin: 0 auto;
+  padding: 52px 0 30px;
+}
+
+.keys-page-header h1 {
+  margin: 0;
+  color: var(--workspace-text);
+  font-size: 32px;
+  font-weight: 600;
+  letter-spacing: -0.03em;
+  line-height: 1.15;
+}
+
+.keys-endpoint-card {
+  display: grid;
+  width: min(calc(100% - 64px), 1280px);
+  min-height: 82px;
+  grid-template-columns: minmax(150px, 180px) minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 18px;
+  margin: 0 auto;
+  border: 1px solid var(--workspace-border);
+  border-radius: 18px;
+  padding: 18px 20px;
+  background: var(--workspace-card-surface);
+  box-shadow: 0 1px 2px rgb(15 23 42 / 3%);
+}
+
+.keys-endpoint-label h2 {
+  margin: 0;
+  color: var(--workspace-text);
+  font-size: 18px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  line-height: 1.2;
+}
+
+.keys-endpoint-field {
+  display: flex;
+  min-width: 0;
+  min-height: 46px;
+  align-items: center;
+  gap: 4px;
+  border: 1px solid var(--workspace-border);
+  border-radius: var(--workspace-radius-pill);
+  padding: 0 6px 0 16px;
+  background: var(--workspace-surface-subtle);
+}
+
+.keys-endpoint-field code {
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+  color: var(--workspace-text-secondary);
+  font-family: var(--workspace-font-mono);
+  font-size: 13px;
+  line-height: 20px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.keys-icon-button {
+  display: inline-grid;
+  width: 34px;
+  height: 34px;
+  flex: 0 0 34px;
+  place-items: center;
+  border: 0;
+  border-radius: 50%;
+  color: var(--workspace-text-muted);
+  background: transparent;
+  outline: none;
+  transition: color 150ms ease, background-color 150ms ease;
+}
+
+.keys-icon-button:hover,
+.keys-icon-button:focus-visible {
+  color: var(--workspace-work-accent);
+  background: var(--workspace-hover);
+}
+
+.keys-icon-button:focus-visible,
+.keys-fast-mode:focus-visible,
+.keys-create-button:focus-visible {
+  outline: 2px solid var(--workspace-work-accent);
+  outline-offset: 2px;
+}
+
+.keys-icon-button:disabled {
+  cursor: wait;
+  opacity: 0.72;
+}
+
+.keys-endpoint-test--ready {
+  color: var(--workspace-work-success);
+}
+
+.keys-endpoint-test--failed {
+  color: var(--workspace-text-secondary);
+}
+
+.keys-endpoint-status {
+  display: inline-flex;
+  min-width: max-content;
+  align-items: center;
+  margin-left: 2px;
+  border-left: 1px solid var(--workspace-border);
+  padding-left: 10px;
+  color: var(--workspace-text-muted);
+  font-size: 11px;
+  line-height: 18px;
+  white-space: nowrap;
+}
+
+.keys-endpoint-status.is-testing {
+  color: var(--workspace-work-accent);
+}
+
+.keys-endpoint-status.is-ready {
+  color: var(--workspace-work-success);
+}
+
+.keys-endpoint-status.is-failed {
+  color: var(--workspace-text-secondary);
+}
+
+.keys-endpoint-actions {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.keys-fast-mode,
+.keys-create-button {
+  display: inline-flex;
+  min-height: 44px;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--workspace-radius-pill);
+  outline: none;
+  font-size: 13px;
+  font-weight: 500;
+  white-space: nowrap;
+  transition: border-color 150ms ease, color 150ms ease, background-color 150ms ease;
+}
+
+.keys-fast-mode {
+  gap: 9px;
+  border: 1px solid var(--workspace-border);
+  padding: 0 12px 0 15px;
+  color: var(--workspace-text-secondary);
+  background: var(--workspace-card-surface);
+}
+
+.keys-fast-mode:hover {
+  border-color: var(--workspace-border-strong);
+  background: var(--workspace-hover);
+}
+
+.keys-fast-mode[aria-checked="true"] {
+  border-color: var(--workspace-work-accent-border);
+  color: var(--workspace-work-accent);
+  background: color-mix(in srgb, var(--workspace-work-accent-soft) 35%, var(--workspace-card-surface));
+}
+
+.keys-fast-mode-track {
+  position: relative;
+  display: inline-flex;
+  width: 34px;
+  height: 20px;
+  flex: 0 0 34px;
+  border-radius: var(--workspace-radius-pill);
+  background: var(--workspace-border-strong);
+  transition: background-color 150ms ease;
+}
+
+.keys-fast-mode-track > span {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--workspace-card-surface);
+  box-shadow: 0 1px 2px rgb(15 23 42 / 18%);
+  transition: transform 150ms ease;
+}
+
+.keys-fast-mode[aria-checked="true"] .keys-fast-mode-track {
+  background: var(--workspace-work-accent);
+}
+
+.keys-fast-mode[aria-checked="true"] .keys-fast-mode-track > span {
+  transform: translateX(14px);
+}
+
+.keys-create-button {
+  gap: 7px;
+  border: 1px solid var(--workspace-work-accent);
+  padding: 0 18px;
+  color: var(--workspace-work-on-accent);
+  background: var(--workspace-work-accent);
+}
+
+.keys-create-button:hover {
+  border-color: var(--workspace-work-accent-hover);
+  background: var(--workspace-work-accent-hover);
+}
+
+.keys-list-region {
+  width: min(calc(100% - 64px), 1280px);
+  min-width: 0;
+  margin: 28px auto 32px;
+}
+
+.keys-desktop-table {
+  display: block !important;
+  width: 100%;
+  min-width: 0;
+  height: auto !important;
+}
+
+.keys-desktop-table :deep(.key-workspace-list) {
+  height: auto;
+  max-height: none;
+  overflow: auto;
+}
+
+.keys-mobile-list {
+  display: none !important;
+  height: auto;
+  min-width: 0;
+  overflow: visible;
+  padding: 0;
+}
+
+.keys-loading-state {
+  width: min(calc(100% - 64px), 1280px);
+  margin: 28px auto 32px;
+}
+
+.keys-loading-table {
+  overflow: hidden;
+  border: 1px solid var(--workspace-border);
+  border-radius: 16px;
+  background: var(--workspace-card-surface);
+}
+
+.keys-loading-row {
+  height: 64px;
+  border-bottom: 1px solid var(--workspace-border);
+  background: linear-gradient(90deg, var(--workspace-surface-subtle), var(--workspace-card-surface), var(--workspace-surface-subtle));
+  background-size: 240% 100%;
+  animation: keys-loading-shimmer 1.4s ease-in-out infinite;
+}
+
+.keys-loading-row:last-child {
+  border-bottom: 0;
+}
+
+.keys-loading-cards {
+  display: none;
+}
+
+.keys-empty-state {
+  min-height: 300px;
+  padding: 48px 24px;
+}
+
+.keys-error-state {
+  display: flex;
+  width: min(calc(100% - 64px), 1280px);
+  min-height: 260px;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  gap: 12px;
+  margin: 28px auto 32px;
+  padding: 48px 24px;
+  color: var(--workspace-text-muted);
+  text-align: center;
+}
+
+.keys-error-state p {
+  margin: 0;
+  font-size: 13px;
+}
+
+.keys-error-retry {
+  display: inline-flex;
+  min-height: 36px;
+  align-items: center;
+  gap: 7px;
+  border: 1px solid var(--workspace-border);
+  border-radius: var(--workspace-radius-pill);
+  padding: 0 13px;
+  color: var(--workspace-text-secondary);
+  background: var(--workspace-card-surface);
+  font-size: 12px;
+  font-weight: 500;
+  transition: border-color 150ms ease, color 150ms ease, background-color 150ms ease;
+}
+
+.keys-error-retry:hover,
+.keys-error-retry:focus-visible {
+  border-color: var(--workspace-border-strong);
+  color: var(--workspace-text);
+  background: var(--workspace-hover);
+}
+
+.keys-error-retry:focus-visible {
+  outline: 2px solid var(--workspace-work-accent);
+  outline-offset: 2px;
+}
+
+.keys-group-selector {
+  border-color: var(--workspace-border);
+  color: var(--workspace-text);
+  background: var(--workspace-popup-surface);
+}
+
+.keys-group-selector-header,
+.keys-group-option {
+  border-color: var(--workspace-border);
+}
+
+.keys-group-search {
+  border-color: var(--workspace-border);
+  color: var(--workspace-text);
+  background: var(--workspace-surface-subtle);
+}
+
+@keyframes keys-loading-shimmer {
+  0% { background-position: 100% 0; }
+  100% { background-position: -100% 0; }
+}
+
+@media (max-width: 1100px) and (min-width: 961px) {
+  .keys-page-header,
+  .keys-endpoint-card,
+  .keys-list-region,
+  .keys-loading-state,
+  .keys-error-state {
+    width: calc(100% - 48px);
+  }
+
+  .keys-endpoint-card {
+    grid-template-columns: minmax(130px, 160px) minmax(0, 1fr) auto;
+    gap: 14px;
+  }
+}
+
+@media (max-width: 960px) {
+  .keys-workspace {
+    min-height: 100dvh;
+    padding-bottom: 24px;
+  }
+
+  .keys-page-header {
+    width: auto;
+    margin: 0;
+    padding: 30px 16px 24px;
+  }
+
+  .keys-page-header h1 {
+    font-size: 28px;
+  }
+
+  .keys-endpoint-card {
+    display: block;
+    width: calc(100% - 32px);
+    min-height: 0;
+    margin: 0 16px;
+    border-radius: 16px;
+    padding: 16px;
+  }
+
+  .keys-endpoint-label {
+    margin-bottom: 12px;
+  }
+
+  .keys-endpoint-label h2 {
+    font-size: 19px;
+  }
+
+  .keys-endpoint-field {
+    width: 100%;
+  }
+
+  .keys-endpoint-actions {
+    width: 100%;
+    justify-content: flex-start;
+    margin-top: 12px;
+  }
+
+  .keys-fast-mode,
+  .keys-create-button {
+    flex: 1 1 auto;
+  }
+
+  .keys-endpoint-status {
+    order: 3;
+    width: 100%;
+    min-height: 18px;
+    margin: 2px 0 0;
+    border-left: 0;
+    padding-left: 0;
+  }
+
+  .keys-list-region,
+  .keys-loading-state,
+  .keys-error-state {
+    width: calc(100% - 32px);
+    margin: 20px 16px 24px;
+  }
+
+  .keys-desktop-table {
+    display: none !important;
+  }
+
+  .keys-mobile-list {
+    display: flex !important;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .keys-mobile-list > * + * {
+    margin-top: 0;
+  }
+
+  .keys-loading-table {
+    display: none;
+  }
+
+  .keys-loading-cards {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .keys-loading-card {
+    height: 226px;
+    border: 1px solid var(--workspace-border);
+    border-radius: 12px;
+    background: linear-gradient(90deg, var(--workspace-surface-subtle), var(--workspace-card-surface), var(--workspace-surface-subtle));
+    background-size: 240% 100%;
+    animation: keys-loading-shimmer 1.4s ease-in-out infinite;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .keys-icon-button,
+  .keys-fast-mode,
+  .keys-fast-mode-track,
+  .keys-fast-mode-track > span,
+  .keys-create-button,
+  .keys-error-retry,
+  .keys-loading-row,
+  .keys-loading-card {
+    animation: none;
+    transition: none;
+  }
+}
+
+:global(.dark) .keys-endpoint-card,
+:global(.dark) .keys-loading-table,
+:global(.dark) .keys-loading-card {
+  border-color: var(--workspace-border);
+  background-color: var(--workspace-card-surface);
+}
+
+:global(.dark) .keys-endpoint-field {
+  background: var(--workspace-surface-subtle);
+}
+
+:global(.dark) .keys-fast-mode[aria-checked="true"] {
+  background: color-mix(in srgb, var(--workspace-work-accent-soft) 28%, var(--workspace-card-surface));
+}
+
+/* The chat shell normally clips its content to keep conversation panes fixed.
+   This page is a document-style, pagination-free list, so let the right pane
+   scroll vertically as the number of keys grows while leaving the sidebar
+   untouched. */
+:global(.app-layout--snow-shell:has(.keys-workspace) .app-main-shell.app-layout--chat) {
+  overflow-x: hidden;
+  overflow-y: auto;
+  box-shadow: none;
 }
 </style>
