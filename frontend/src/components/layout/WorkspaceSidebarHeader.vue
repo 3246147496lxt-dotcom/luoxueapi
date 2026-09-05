@@ -264,6 +264,28 @@ defineExpose({
   gap: 0;
 }
 
+/*
+ * ChatGPT's expanded desktop rail keeps a 245px content column inside the
+ * 260px shell.  The two 36px controls are flush-right with an 8px inset;
+ * keeping this as an opt-in modifier leaves the Work/Account sidebars alone.
+ */
+@media (min-width: 768px) {
+  .workspace-sidebar-header--chatgpt:not(.workspace-sidebar-header--collapsed) {
+    width: 245px;
+    box-sizing: border-box;
+    grid-template-columns: minmax(0, 1fr) calc(var(--workspace-sidebar-action-size) * 2);
+    gap: 0;
+    padding: 8px;
+  }
+
+  .workspace-sidebar-header--chatgpt:not(.workspace-sidebar-header--collapsed)
+    .workspace-sidebar-header__actions {
+    width: calc(var(--workspace-sidebar-action-size) * 2);
+    grid-column: 2;
+    gap: 0;
+  }
+}
+
 .workspace-sidebar-header__action {
   display: grid;
   width: var(--workspace-sidebar-action-size);
@@ -281,15 +303,6 @@ defineExpose({
 }
 
 .workspace-sidebar-header__action:hover {
-  color: var(--workspace-text);
-  background: var(--workspace-hover);
-}
-
-/* Keep the search affordance visibly active while its inline field is open.
- * The chat rail uses the same neutral hover token for this persistent state,
- * matching the target shell's #ececec search button without introducing a
- * second accent color or changing the shared header contract. */
-.workspace-sidebar-header__search[aria-expanded='true'] {
   color: var(--workspace-text);
   background: var(--workspace-hover);
 }

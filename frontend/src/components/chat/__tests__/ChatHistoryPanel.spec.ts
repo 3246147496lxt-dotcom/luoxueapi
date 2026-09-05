@@ -128,7 +128,7 @@ describe('ChatHistoryPanel focus management', () => {
     expect(document.activeElement).toBe(trigger.element)
   })
 
-  it('在 Chat shell 点击搜索后于新聊天下方展开内联搜索，而不是打开弹窗', async () => {
+  it('在 Chat shell 点击搜索后打开居中的全局搜索弹层', async () => {
     wrapper = mount(ChatHistoryPanel, {
       attachTo: document.body,
       props: { conversations: [], shell: true },
@@ -142,14 +142,14 @@ describe('ChatHistoryPanel focus management', () => {
     await trigger.trigger('click')
     await nextTick()
 
-    const search = wrapper.get('.chat-history__search')
-    expect(search.element.parentElement?.querySelector('.chat-history__list'))
-      .toBeTruthy()
-    expect(wrapper.find('[role="dialog"]').exists()).toBe(false)
+    const search = wrapper.get('.chat-history__search--modal')
+    expect(wrapper.get('.chat-history__search-layer').exists()).toBe(true)
+    expect(wrapper.get('[role="dialog"]').exists()).toBe(true)
+    expect(wrapper.get('.chat-history__search-modal-panel').isVisible()).toBe(true)
     expect(trigger.attributes('aria-expanded')).toBe('true')
     expect(document.activeElement).toBe(search.get('input').element)
 
-    await trigger.trigger('click')
+    await wrapper.get('.chat-history__search-modal-close').trigger('click')
     await nextTick()
     expect(wrapper.find('.chat-history__search').exists()).toBe(false)
     expect(document.activeElement).toBe(trigger.element)
@@ -248,7 +248,7 @@ describe('ChatHistoryPanel focus management', () => {
     expect(wrapper.get(`#${listId}`).attributes('style')).not.toContain('display: none')
   })
 
-  it('在会话悬停操作区提供编辑入口，并保留更多操作菜单', async () => {
+  it('在会话更多菜单中提供重命名入口，并保留更多操作菜单', async () => {
     const conversation: ChatConversation = {
       id: 'edit-action',
       userId: '7',
@@ -264,11 +264,13 @@ describe('ChatHistoryPanel focus management', () => {
       global: { stubs: shellStubs },
     })
 
-    const edit = wrapper.get('.chat-history__edit-action')
-    expect(edit.attributes('aria-label')).toBe('chat.actions.rename')
     expect(wrapper.get('.chat-history__more-action').attributes('aria-haspopup')).toBe('menu')
 
-    await edit.trigger('click')
+    const menu = await openConversationActions(wrapper)
+    const rename = menu.get('[data-action="rename"]')
+    expect(rename.attributes('aria-disabled')).toBeUndefined()
+
+    await rename.trigger('click')
     await nextTick()
     expect(wrapper.get('input[aria-label="chat.history.renameLabel"]').element)
       .toHaveProperty('value', conversation.title)

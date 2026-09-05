@@ -18,11 +18,13 @@
       <WorkspaceSidebarHeader
         v-if="shell"
         ref="sidebarHeaderRef"
+        class="workspace-sidebar-header--chatgpt"
         :controls="resolvedSidebarId"
         :collapsed="sidebarCollapsed"
         :mobile="mobile"
         :overlay="overlay"
         :show-search="true"
+        search-glyph="chatgpt"
         :search-expanded="searchOpen"
         :search-controls="searchPanelId"
         :search-label="t('chat.history.searchLabel')"
@@ -61,7 +63,7 @@
           :title="sidebarCollapsed ? t('chat.actions.newChat') : undefined"
           @click="$emit('new')"
         >
-          <Icon name="chatSidebarCompose" size="md" aria-hidden="true" />
+          <Icon name="chatSidebarCompose" size="md" variant="chatgpt" aria-hidden="true" />
           <span :aria-hidden="sidebarCollapsed ? 'true' : undefined">
             {{ t('chat.actions.newChat') }}
           </span>
@@ -104,11 +106,15 @@
         class="chat-history__collapsed-nav-action"
         :aria-label="t('chat.history.searchLabel')"
         :title="t('chat.history.searchLabel')"
-        :aria-expanded="searchOpen && !sidebarCollapsed"
+        aria-expanded="false"
         :aria-controls="searchPanelId"
         @click="toggleSearch"
       >
-        <Icon name="search" size="sm" aria-hidden="true" />
+        <WorkspaceResponsiveSidebarIcon
+          name="search"
+          variant="chatgpt"
+          aria-hidden="true"
+        />
       </button>
       <RouterLink
         to="/chat"
@@ -117,7 +123,7 @@
         :title="t('nav.chatMode')"
         :aria-current="activeSection === 'chat' ? 'page' : undefined"
       >
-        <Icon name="chat" size="sm" aria-hidden="true" />
+        <Icon name="chatHistorySearch" size="md" aria-hidden="true" />
       </RouterLink>
       <RouterLink
         to="/library"
@@ -126,7 +132,7 @@
         :title="t('chat.navigation.fileLibrary')"
         :aria-current="activeSection === 'library' ? 'page' : undefined"
       >
-        <Icon name="chatSidebarLibrary" size="sm" aria-hidden="true" />
+        <Icon name="chatSidebarLibrary" size="sm" variant="chatgpt" aria-hidden="true" />
       </RouterLink>
       <RouterLink
         to="/projects"
@@ -135,12 +141,12 @@
         :title="t('chat.navigation.projects')"
         :aria-current="activeSection === 'projects' ? 'page' : undefined"
       >
-        <Icon name="chatSidebarProjects" size="sm" aria-hidden="true" />
+        <Icon name="chatSidebarProjects" size="sm" variant="chatgpt" aria-hidden="true" />
       </RouterLink>
     </nav>
 
     <form
-      v-if="searchOpen && !sidebarCollapsed"
+      v-if="searchOpen && !sidebarCollapsed && !shell"
       :id="searchPanelId"
       class="chat-history__search"
       role="search"
@@ -183,10 +189,30 @@
           :title="item.available ? t(item.labelKey) : t('chat.navigation.unavailable', { name: t(item.labelKey) })"
           @click="activatePrimaryNavigation(item)"
         >
-          <Icon :name="item.icon" size="md" aria-hidden="true" />
+          <Icon :name="item.icon" size="md" variant="chatgpt" aria-hidden="true" />
           <span>{{ t(item.labelKey) }}</span>
         </button>
       </nav>
+
+      <div
+        v-if="shell && !sidebarCollapsed"
+        class="chat-history__more-section"
+        :aria-label="t('chat.navigation.more')"
+      >
+        <div
+          class="chat-history__more-row"
+          tabindex="0"
+          role="button"
+          aria-haspopup="menu"
+          aria-expanded="false"
+          @click="showUnavailableNavigation('chat.navigation.more')"
+          @keydown.enter.prevent="showUnavailableNavigation('chat.navigation.more')"
+          @keydown.space.prevent="showUnavailableNavigation('chat.navigation.more')"
+        >
+          <Icon name="chatHistoryMore" size="md" variant="chatgpt" aria-hidden="true" />
+          <span>{{ t('chat.navigation.more') }}</span>
+        </div>
+      </div>
 
       <section
         v-if="shell && !sidebarCollapsed && projects.length > 0"
@@ -229,15 +255,37 @@
             data-testid="chat-history-recent-toggle"
             :aria-expanded="recentExpanded"
             :aria-controls="conversations.length > 0 ? recentListId : undefined"
-            :class="{ 'chat-history__recent-heading--collapsed': !recentExpanded }"
             @click="recentExpanded = !recentExpanded"
           >
             <h2>{{ t('chat.history.recent') }}</h2>
             <Icon name="chatHistoryChevronDown" size="xs" aria-hidden="true" />
           </button>
+          <div class="chat-history__recent-actions">
+            <button
+              type="button"
+              class="chat-history__recent-action"
+              :aria-label="t('chat.actions.newChat')"
+              :title="t('chat.actions.newChat')"
+              @click="$emit('new')"
+            >
+              <Icon name="chatSidebarCompose" size="sm" variant="chatgpt" aria-hidden="true" />
+            </button>
+            <button
+              type="button"
+              class="chat-history__recent-action"
+              :aria-label="t('chat.actions.organizeHistory')"
+              :title="t('chat.actions.organizeHistory')"
+              @click="showUnavailableConversationAction('chat.actions.organizeHistory')"
+            >
+              <Icon name="chatHistoryMore" size="sm" variant="chatgpt" aria-hidden="true" />
+            </button>
+          </div>
         </div>
         <h2 v-else>{{ t('chat.history.recent') }}</h2>
-        <ul :id="recentListId" v-show="!shell || recentExpanded || Boolean(searchQuery)">
+        <ul
+          :id="recentListId"
+          v-show="!shell || recentExpanded"
+        >
           <li v-for="conversation in conversations" :key="conversation.id">
             <div
               class="chat-history__item"
@@ -273,13 +321,14 @@
 
               <div v-if="renamingId !== conversation.id" class="chat-history__actions">
                 <button
+                  v-if="!shell"
                   type="button"
                   class="chat-history__edit-action"
                   :aria-label="t('chat.actions.rename')"
                   :title="t('chat.actions.rename')"
                   @click.stop="startRename(conversation)"
                 >
-                  <Icon name="chatHistoryRename" size="sm" aria-hidden="true" />
+                  <Icon name="chatHistoryRename" size="sm" variant="chatgpt" aria-hidden="true" />
                 </button>
                 <button
                   type="button"
@@ -288,7 +337,7 @@
                   :aria-label="t('chat.actions.pinConversation', { title: conversation.title })"
                   @click.stop="showUnavailableConversationAction('chat.actions.pin')"
                 >
-                  <Icon name="chatHistoryPinSmall" size="sm" aria-hidden="true" />
+                  <Icon name="chatHistoryPinSmall" size="sm" variant="chatgpt" aria-hidden="true" />
                 </button>
                 <button
                   :ref="(element) => setConversationActionRef(conversation.id, element)"
@@ -303,7 +352,7 @@
                   @click.stop="toggleConversationMenu(conversation)"
                   @keydown="handleConversationTriggerKeydown($event, conversation)"
                 >
-                  <Icon name="chatHistoryMore" size="sm" aria-hidden="true" />
+                  <Icon name="chatHistoryMore" size="sm" variant="chatgpt" aria-hidden="true" />
                 </button>
               </div>
 
@@ -319,27 +368,73 @@
                 :style="conversationMenuStyle"
                 @keydown="handleConversationMenuKeydown"
               >
-                <button
-                  v-for="action in conversationMenuActions"
-                  :key="action.id"
-                  type="button"
-                  role="menuitem"
-                  tabindex="-1"
-                  class="chat-history__conversation-menu-item"
+                <div
+                  v-for="(group, groupIndex) in conversationMenuGroups"
+                  :key="`conversation-menu-group-${groupIndex}`"
+                  class="chat-history__conversation-menu-group"
                   :class="{
-                    'chat-history__conversation-menu-item--danger': action.id === 'delete',
+                    'chat-history__conversation-menu-group--separated': groupIndex > 0,
                   }"
-                  :aria-disabled="action.available ? undefined : 'true'"
-                  :data-action="action.id"
-                  @click="activateConversationAction($event, conversation, action.id)"
                 >
-                  <Icon :name="action.icon" size="md" aria-hidden="true" />
-                  <span>{{ t(action.labelKey) }}</span>
-                </button>
+                  <button
+                    v-for="action in group"
+                    :key="action.id"
+                    type="button"
+                    role="menuitem"
+                    tabindex="-1"
+                    class="chat-history__conversation-menu-item"
+                    :class="{
+                      'chat-history__conversation-menu-item--danger': action.id === 'delete',
+                    }"
+                    :aria-disabled="action.available ? undefined : 'true'"
+                    :data-action="action.id"
+                    @click="activateConversationAction($event, conversation, action.id)"
+                  >
+                    <Icon :name="action.icon" size="md" variant="chatgpt" aria-hidden="true" />
+                    <span>{{ t(action.labelKey) }}</span>
+                  </button>
+                </div>
               </div>
             </div>
           </li>
         </ul>
+      </section>
+
+      <section
+        v-else-if="shell && !sidebarCollapsed"
+        class="chat-history__group"
+      >
+        <div class="chat-history__recent-header">
+          <button
+            type="button"
+            class="chat-history__recent-heading"
+            :aria-expanded="recentExpanded"
+            @click="recentExpanded = !recentExpanded"
+          >
+            <h2>{{ t('chat.history.recent') }}</h2>
+            <Icon name="chatHistoryChevronDown" size="xs" aria-hidden="true" />
+          </button>
+          <div class="chat-history__recent-actions">
+            <button
+              type="button"
+              class="chat-history__recent-action"
+              :aria-label="t('chat.actions.newChat')"
+              :title="t('chat.actions.newChat')"
+              @click="$emit('new')"
+            >
+            <Icon name="chatSidebarCompose" size="sm" variant="chatgpt" aria-hidden="true" />
+            </button>
+            <button
+              type="button"
+              class="chat-history__recent-action"
+              :aria-label="t('chat.actions.organizeHistory')"
+              :title="t('chat.actions.organizeHistory')"
+              @click="showUnavailableConversationAction('chat.actions.organizeHistory')"
+            >
+            <Icon name="chatHistoryMore" size="sm" variant="chatgpt" aria-hidden="true" />
+            </button>
+          </div>
+        </div>
       </section>
 
       <button
@@ -359,6 +454,66 @@
     </template>
   </WorkspaceSidebarFrame>
 
+  <div
+    v-if="searchOpen && !sidebarCollapsed && shell"
+    class="chat-history chat-history--shell chat-history__search-layer"
+    role="dialog"
+    aria-modal="true"
+    :aria-labelledby="`${searchPanelId}-title`"
+    @pointerdown.self="closeSearch"
+  >
+    <form
+      :id="searchPanelId"
+      class="chat-history__search chat-history__search--modal"
+      role="search"
+      @submit.prevent="$emit('search')"
+    >
+      <div class="chat-history__search-modal-panel">
+        <h2 :id="`${searchPanelId}-title`" class="sr-only">{{ t('chat.history.globalSearch') }}</h2>
+        <div class="chat-history__search-modal-header">
+          <input
+            ref="searchInputRef"
+            type="text"
+            :value="searchQuery"
+            :placeholder="t('chat.history.globalSearchPlaceholder')"
+            :aria-label="t('chat.history.searchLabel')"
+            autocomplete="off"
+            @input="updateSearchQuery"
+            @keydown.esc.prevent.stop="closeSearch"
+          />
+          <button
+            type="button"
+            class="chat-history__search-modal-close"
+            :aria-label="t('chat.history.closeSearch')"
+            :title="t('chat.history.closeSearch')"
+            @click="closeSearch"
+          >
+            <Icon name="chatHistoryClose" size="md" aria-hidden="true" />
+          </button>
+        </div>
+        <div class="chat-history__search-results">
+          <h3>{{ t('chat.history.searchRecent') }}</h3>
+          <ul>
+            <li v-for="conversation in conversations" :key="`search-${conversation.id}`">
+              <button
+                type="button"
+                class="chat-history__search-result"
+                :aria-label="conversation.title"
+                @click="selectSearchResult(conversation.id)"
+              >
+                <span class="chat-history__search-result-icon" aria-hidden="true">
+                  <Icon name="chatHistorySearch" size="md" />
+                </span>
+                <span class="chat-history__search-result-title">
+                  {{ toChatConversationTitlePreview(conversation.title) }}
+                </span>
+              </button>
+            </li>
+          </ul>
+        </div>
+      </div>
+    </form>
+  </div>
 </template>
 
 <script setup lang="ts">
@@ -370,6 +525,7 @@ import UserAccountCard from '@/components/layout/UserAccountCard.vue'
 import WorkspaceSidebarFrame from '@/components/layout/WorkspaceSidebarFrame.vue'
 import WorkspaceSidebarHeader from '@/components/layout/WorkspaceSidebarHeader.vue'
 import WorkspaceSidebarBrand from '@/components/layout/WorkspaceSidebarBrand.vue'
+import WorkspaceResponsiveSidebarIcon from '@/components/layout/WorkspaceResponsiveSidebarIcon.vue'
 import { useWorkspaceSidebarCollapse } from '@/components/layout/useWorkspaceSidebarCollapse'
 import { toChatConversationTitlePreview } from '@/features/chat/conversationTitle'
 import { useAppStore } from '@/stores/app'
@@ -498,6 +654,10 @@ const conversationMenuActions = [
     available: true,
   },
 ] as const
+const conversationMenuGroups = [
+  conversationMenuActions.slice(0, 2),
+  conversationMenuActions.slice(2),
+] as const
 type ConversationActionId = (typeof conversationMenuActions)[number]['id']
 type MenuFocusEdge = 'first' | 'last'
 type PopoverElement = HTMLElement & {
@@ -506,9 +666,9 @@ type PopoverElement = HTMLElement & {
 }
 
 const CONVERSATION_MENU_WIDTH = 144
-const CONVERSATION_MENU_HEIGHT = 200
+const CONVERSATION_MENU_HEIGHT = 217
 const CONVERSATION_MENU_VIEWPORT_PADDING = 12
-const CONVERSATION_MENU_INLINE_OFFSET = -8
+const CONVERSATION_MENU_INLINE_OFFSET = -14
 const CONVERSATION_MENU_BLOCK_OVERLAP = 4
 let conversationMenuListenersAttached = false
 const {
@@ -529,6 +689,11 @@ function setRenameInput(element: unknown) {
 function updateSearchQuery(event: Event) {
   const target = event.target
   emit('update:searchQuery', target instanceof HTMLInputElement ? target.value : '')
+}
+
+function selectSearchResult(id: string) {
+  emit('select', id)
+  void closeSearch()
 }
 
 function projectAccent(value: string): string {
@@ -834,7 +999,6 @@ async function activateConversationAction(
 }
 
 async function startRename(conversation: ChatConversation) {
-  if (menuConversationId.value) await closeConversationMenu(false)
   renamingId.value = conversation.id
   renameDraft.value = conversation.title
   await nextTick()
@@ -896,12 +1060,19 @@ onBeforeUnmount(() => {
   --chat-history-menu-surface: var(--lx-clay-surface-elevated);
   --chat-history-menu-text: var(--workspace-text);
   --chat-history-menu-hover: rgb(0 0 0 / 0.04);
+  --chat-history-menu-divider: rgb(0 0 0 / 0.1);
   --chat-history-menu-danger: #ff002a;
   --chat-history-menu-danger-hover: rgb(250 66 62 / 0.16);
   --chat-history-menu-shadow:
     0 0 0 1px rgb(0 0 0 / 0.04),
     0 2px 8px rgb(0 0 0 / 0.04),
     0 4px 80px 8px rgb(0 0 0 / 0.024);
+  --chat-history-search-surface: var(--workspace-surface);
+  --chat-history-search-border: var(--workspace-border);
+  --chat-history-search-text: var(--workspace-text);
+  --chat-history-search-secondary: var(--workspace-text-secondary);
+  --chat-history-search-hover: var(--workspace-hover);
+  --chat-history-search-scrollbar: rgb(0 0 0 / 0.1);
 }
 
 :global(html.dark .chat-history) {
@@ -911,9 +1082,16 @@ onBeforeUnmount(() => {
   --chat-history-menu-surface: #353535;
   --chat-history-menu-text: #ffffff;
   --chat-history-menu-hover: rgb(255 255 255 / 0.1);
+  --chat-history-menu-divider: rgb(255 255 255 / 0.15);
   --chat-history-menu-danger: #fa423e;
   --chat-history-menu-danger-hover: rgb(250 66 62 / 0.16);
   --chat-history-menu-shadow: inset 0 0 1px rgb(255 255 255 / 0.2);
+  --chat-history-search-surface: #212121;
+  --chat-history-search-border: rgb(255 255 255 / 0.15);
+  --chat-history-search-text: #ffffff;
+  --chat-history-search-secondary: #cdcdcd;
+  --chat-history-search-hover: #2f2f2f;
+  --chat-history-search-scrollbar: rgb(255 255 255 / 0.1);
 }
 
 .chat-history--shell {
@@ -966,7 +1144,7 @@ onBeforeUnmount(() => {
   flex: 0 0 auto;
   flex-direction: column;
   align-items: flex-start;
-  gap: 4px;
+  gap: 0;
   padding: 0;
 }
 
@@ -1035,9 +1213,84 @@ onBeforeUnmount(() => {
   margin-inline: -2px;
 }
 
+/* The reference rail has an 8px top inset and a 233px menu-item column
+ * inside its 245px scroll surface. */
+.chat-history--shell:not(.chat-history--collapsed)
+  :deep(.workspace-sidebar-frame__content) {
+  padding: 8px;
+}
+
+.chat-history--shell:not(.chat-history--collapsed)
+  .chat-history__header
+  .chat-history__primary-nav,
+.chat-history--shell:not(.chat-history--collapsed)
+  .chat-history__primary-nav--scrolling {
+  width: 233px;
+  flex: 0 0 233px;
+}
+
+.chat-history__more-section {
+  width: 245px;
+  flex: 0 0 48px;
+  margin-right: 6px;
+  margin-left: -8px;
+  padding-bottom: 12px;
+}
+
+.chat-history__more-row {
+  display: flex;
+  width: 233px;
+  height: 36px;
+  min-height: 36px;
+  align-items: center;
+  gap: 6px;
+  margin: 0 6px;
+  border-radius: 10px;
+  padding: 6px 32px 6px 10px;
+  color: var(--workspace-text);
+  background: transparent;
+  font-size: 14px;
+  font-weight: 400;
+  line-height: 20px;
+  cursor: pointer;
+  transition: color 150ms cubic-bezier(0.4, 0, 0.2, 1),
+    background-color 150ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
 .chat-history--shell .chat-history__new,
-.chat-history--shell .chat-history__primary-action {
+.chat-history--shell .chat-history__primary-action,
+.chat-history--shell .chat-history__more-row {
   color: var(--chat-history-shell-row-text);
+}
+
+@media (min-width: 768px) {
+  /* The reference wordmark is content-sized inside a 10px horizontal inset;
+   * the shared brand component normally stretches to fill the first grid
+   * column for Work/Account sidebars. */
+  .chat-history--shell
+    .workspace-sidebar-header--chatgpt
+    :deep(.workspace-sidebar-brand) {
+    width: max-content;
+    padding-inline: 10px;
+  }
+
+  .chat-history--shell
+    .workspace-sidebar-header--chatgpt
+    :deep(.workspace-sidebar-brand__copy) {
+    width: max-content;
+  }
+}
+
+.chat-history__more-row > svg {
+  width: 20px;
+  height: 20px;
+  flex: 0 0 20px;
+}
+
+.chat-history__more-row:hover,
+.chat-history__more-row:focus-visible {
+  outline: 0;
+  background: var(--workspace-hover);
 }
 
 .chat-history__primary-nav--scrolling {
@@ -1225,7 +1478,9 @@ onBeforeUnmount(() => {
 }
 
 .chat-history--shell .chat-history__new:hover,
-.chat-history--shell .chat-history__primary-action:hover {
+.chat-history--shell .chat-history__primary-action:hover,
+.chat-history--shell .chat-history__more-row:hover,
+.chat-history--shell .chat-history__more-row:focus-visible {
   background: var(--chat-history-row-interaction);
 }
 
@@ -1279,6 +1534,228 @@ onBeforeUnmount(() => {
   box-shadow: none;
 }
 
+/* ChatGPT's desktop search is a fixed, centered dialog rather than an
+ * inline field.  Keep the non-shell form below untouched for embedded/mobile
+ * history panels. */
+.chat-history__search-layer {
+  z-index: 50;
+  grid-template-rows: minmax(10px, 1fr) auto minmax(10px, 1fr);
+  grid-template-columns: 10px 1fr 10px;
+  display: grid;
+  position: fixed;
+  inset: 0;
+  overflow-y: auto;
+  color: var(--chat-history-search-text);
+  font-family: var(--chat-history-font-family);
+}
+
+@media (min-width: 768px) {
+  .chat-history__search-layer {
+    grid-template-rows: minmax(20px, 0.8fr) auto minmax(20px, 1fr);
+  }
+}
+
+.chat-history__search--modal {
+  grid-area: 2 / 2;
+  position: relative;
+  inset-inline-start: 50%;
+  width: calc(100vw - 32px);
+  max-width: 720px;
+  height: 462px;
+  min-width: 0;
+  margin: 0;
+  border: 1px solid var(--chat-history-search-border);
+  border-radius: 16px;
+  padding: 0;
+  color: var(--chat-history-search-text);
+  background: var(--chat-history-search-surface);
+  background-clip: padding-box;
+  box-shadow: 0 14px 62px 0 rgb(0 0 0 / 0.25);
+  transform: translateX(-50%);
+  overflow: visible;
+}
+
+.chat-history__search-modal-panel {
+  display: flex;
+  width: 100%;
+  height: 460px;
+  min-width: 0;
+  flex-direction: column;
+  overflow: hidden;
+  border-radius: 16px;
+  background: var(--chat-history-search-surface);
+}
+
+.chat-history__search-modal-header {
+  display: flex;
+  height: 64px;
+  min-height: 64px;
+  flex: 0 0 64px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0;
+  border-bottom: 1px solid transparent;
+  padding: 20px 16px 20px 24px;
+  overflow: hidden;
+}
+
+.chat-history__search-modal-header input {
+  min-width: 0;
+  height: 24px;
+  flex: 1 1 auto;
+  border: 0;
+  border-radius: 0;
+  padding: 0;
+  color: inherit;
+  background: transparent;
+  font-family: var(--chat-history-font-family);
+  font-size: 16px;
+  font-weight: 400;
+  line-height: 24px;
+  letter-spacing: -0.32px;
+  outline: none;
+  box-shadow: none;
+}
+
+.chat-history__search-modal-header input:focus {
+  outline: none;
+  box-shadow: none;
+}
+
+.chat-history__search-modal-header input::placeholder {
+  color: var(--chat-history-search-secondary);
+  opacity: 1;
+}
+
+.chat-history__search-modal-close {
+  display: flex;
+  width: 36px;
+  height: 36px;
+  min-height: 36px;
+  flex: 0 0 36px;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: 999px;
+  padding: 0;
+  color: var(--chat-history-search-secondary);
+  background: transparent;
+  transition: color 150ms ease, background-color 150ms ease;
+}
+
+.chat-history__search-modal-close:hover,
+.chat-history__search-modal-close:focus-visible {
+  color: var(--chat-history-search-text);
+  background: var(--chat-history-search-hover);
+  outline: none;
+}
+
+.chat-history__search-modal-close > svg {
+  width: 20px;
+  height: 20px;
+  flex: 0 0 20px;
+}
+
+.chat-history__search-results {
+  min-width: 0;
+  min-height: 0;
+  flex: 1 1 0%;
+  padding-bottom: 12px;
+  overflow: hidden auto;
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;
+  scrollbar-color: var(--chat-history-search-scrollbar) transparent;
+}
+
+.chat-history__search-results::-webkit-scrollbar {
+  width: 11px;
+}
+
+.chat-history__search-results::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.chat-history__search-results::-webkit-scrollbar-thumb {
+  min-height: 40px;
+  border: 4px solid transparent;
+  border-radius: 999px;
+  background-color: var(--chat-history-search-scrollbar);
+  background-clip: content-box;
+}
+
+.chat-history__search-results h3 {
+  min-height: 36px;
+  margin: 0;
+  padding: 8px 24px;
+  color: var(--chat-history-search-secondary);
+  font-family: var(--chat-history-font-family);
+  font-size: 14px;
+  font-weight: 400;
+  line-height: 20px;
+}
+
+.chat-history__search-results ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.chat-history__search-result {
+  display: flex;
+  width: calc(100% - 24px);
+  min-width: 0;
+  min-height: 48px;
+  align-items: center;
+  gap: 12px;
+  margin: 0 12px;
+  border: 0;
+  border-radius: 12px;
+  padding: 8px 12px;
+  color: var(--chat-history-search-text);
+  background: transparent;
+  font-family: var(--chat-history-font-family);
+  font-size: 16px;
+  font-weight: 400;
+  line-height: 24px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.chat-history__search-result:hover,
+.chat-history__search-result:focus-visible {
+  outline: none;
+  background: var(--chat-history-search-hover);
+}
+
+.chat-history__search-result-icon {
+  display: flex;
+  width: 32px;
+  height: 32px;
+  min-width: 32px;
+  flex: 0 0 32px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 8px;
+  color: var(--chat-history-search-text);
+  background: transparent;
+}
+
+.chat-history__search-result-icon > svg {
+  width: 20px;
+  height: 20px;
+  flex: 0 0 20px;
+}
+
+.chat-history__search-result-title {
+  min-width: 0;
+  overflow: hidden;
+  font-size: 14px;
+  font-weight: 400;
+  line-height: 20px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .chat-history__search:focus-within {
   border-color: var(--workspace-border-strong);
   box-shadow: 0 0 0 2px color-mix(in srgb, var(--workspace-text) 6%, transparent);
@@ -1295,6 +1772,23 @@ onBeforeUnmount(() => {
   font-size: var(--workspace-type-body-size);
   font-weight: var(--workspace-type-body-weight);
   outline: none;
+}
+
+/* The modal header intentionally uses the larger global-search field metrics
+ * even though the embedded history form stays at the compact 36px height. */
+.chat-history__search--modal:focus-within {
+  border-color: var(--chat-history-search-border);
+  box-shadow: 0 14px 62px 0 rgb(0 0 0 / 0.25);
+}
+
+.chat-history__search--modal .chat-history__search-modal-header input {
+  height: 24px;
+  font-family: var(--chat-history-font-family);
+  font-size: 16px;
+  font-weight: 400;
+  line-height: 24px;
+  letter-spacing: -0.32px;
+  color: var(--chat-history-search-text);
 }
 
 .chat-history__searching {
@@ -1344,33 +1838,32 @@ onBeforeUnmount(() => {
 
 .chat-history__recent-header {
   display: flex;
-  width: 100%;
-  height: 20px;
-  min-height: 20px;
+  width: 245px;
+  height: 32px;
+  min-height: 32px;
   align-items: center;
-  justify-content: flex-start;
-  margin: 16px 0 5px;
+  justify-content: space-between;
+  padding-right: 6px;
 }
 
 .chat-history__recent-heading {
   display: flex;
-  min-width: 0;
-  height: 20px;
-  min-height: 20px;
-  flex: 1 1 auto;
+  width: 181px;
+  height: 32px;
+  min-height: 32px;
+  flex: 0 0 181px;
   align-items: center;
   justify-content: flex-start;
   gap: 2px;
   border: 0;
   border-radius: 0;
-  padding: 0 8px;
+  padding: 6px 16px;
   color: var(--chat-history-shell-section-label);
   background: transparent;
   font-size: 16px;
   font-weight: 400;
   line-height: 24px;
   text-align: left;
-  cursor: pointer;
 }
 
 .chat-history__recent-heading h2 {
@@ -1385,18 +1878,61 @@ onBeforeUnmount(() => {
   width: 12px;
   height: 12px;
   flex: 0 0 12px;
-  opacity: 0.72;
-  transform: rotate(0deg);
-  transition: opacity 150ms ease, transform 150ms ease;
+  visibility: hidden;
+  transition: visibility 150ms cubic-bezier(0.4, 0, 0.2, 1);
 }
 
-.chat-history__recent-heading--collapsed > svg {
-  transform: rotate(-90deg);
-}
-
-.chat-history__recent-heading:hover > svg,
+.chat-history__recent-header:hover .chat-history__recent-heading > svg,
 .chat-history__recent-heading:focus-visible > svg {
+  visibility: visible;
+}
+
+.chat-history__recent-actions {
+  display: flex;
+  width: 58px;
+  height: 20px;
+  align-items: center;
+  gap: 8px;
+  padding-right: 10px;
+}
+
+.chat-history__recent-action {
+  position: relative;
+  display: flex;
+  width: 34px;
+  height: 36px;
+  min-height: 36px;
+  flex: 0 0 34px;
+  align-items: center;
+  justify-content: center;
+  margin: -8px -10px -8px -4px;
+  border: 0;
+  border-radius: 0 10px 10px 0;
+  padding: 0 6px 0 4px;
+  color: var(--chat-history-action-color);
+  background: transparent;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 150ms cubic-bezier(0.4, 0, 0.2, 1),
+    color 150ms ease,
+    background-color 150ms ease;
+}
+
+.chat-history__recent-header:hover .chat-history__recent-action,
+.chat-history__recent-action:focus-visible {
   opacity: 1;
+  pointer-events: auto;
+}
+
+.chat-history__recent-action:hover {
+  color: var(--chat-history-row-text);
+  background: transparent;
+}
+
+.chat-history__recent-action > svg {
+  width: 16px;
+  height: 16px;
+  flex: 0 0 16px;
 }
 
 .chat-history__group ul {
@@ -1456,6 +1992,7 @@ onBeforeUnmount(() => {
  * shell rows (including the fixed New chat row and history entries). */
 .chat-history--shell .chat-history__new,
 .chat-history--shell .chat-history__primary-action,
+.chat-history--shell .chat-history__more-row,
 .chat-history--shell .chat-history__select {
   border-bottom: 1px solid transparent;
 }
@@ -1482,14 +2019,6 @@ onBeforeUnmount(() => {
   padding-right: 62px;
 }
 
-/* Keep the inline rename affordance beside the existing operation menu. It
- * follows the same hover/focus reveal as the other row actions, so pointer
- * users see it when they move over a conversation and keyboard users can
- * reach it through the row. */
-.chat-history__edit-action {
-  order: -1;
-}
-
 .chat-history__actions button {
   display: flex;
   width: 34px;
@@ -1501,18 +2030,6 @@ onBeforeUnmount(() => {
   padding: 0;
   color: var(--chat-history-action-color);
   background: transparent;
-}
-
-.chat-history__actions .chat-history__edit-action {
-  border-radius: 10px 0 0 10px;
-}
-
-.chat-history__actions .chat-history__pin-action {
-  border-radius: 0;
-}
-
-.chat-history__actions .chat-history__more-action {
-  border-radius: 0 10px 10px 0;
 }
 
 .chat-history__rename button {
@@ -1535,9 +2052,9 @@ onBeforeUnmount(() => {
   margin-left: -10px;
 }
 
-.chat-history .chat-history__item:hover .chat-history__select,
-.chat-history .chat-history__item:focus-within .chat-history__select {
-  padding-right: 96px;
+.chat-history--shell .chat-history__actions button {
+  margin: -8px -10px -8px -4px;
+  padding: 0 6px 0 4px;
 }
 
 .chat-history__conversation-menu[popover] {
@@ -1562,6 +2079,18 @@ onBeforeUnmount(() => {
 
 .chat-history__conversation-menu::backdrop {
   background: transparent;
+}
+
+.chat-history__conversation-menu-group {
+  display: block;
+}
+
+.chat-history__conversation-menu-group--separated::before {
+  display: block;
+  height: 1px;
+  margin: 8px 16px;
+  background: var(--chat-history-menu-divider);
+  content: '';
 }
 
 .chat-history__conversation-menu-item {
@@ -1641,6 +2170,126 @@ onBeforeUnmount(() => {
   outline-offset: 2px;
 }
 
+/* ChatGPT uses a 52px desktop tiny rail. Keep the shared 68px/44px
+ * collapsed primitives intact for Work and other shells, then opt the chat
+ * history rail into the reference geometry only when it is the desktop
+ * sidebar host. */
+@media (min-width: 768px) {
+  .chat-history--shell:not(.chat-history--collapsed)
+    :deep([data-testid="sidebar-account-dock"]) {
+    /* ChatGPT keeps a six-pixel inset on both sides of the expanded account
+     * row; the shared dock defaults to a wider eight-pixel leading inset. */
+    padding-left: 6px;
+    padding-right: 6px;
+  }
+
+  .chat-history--shell.chat-history--collapsed {
+    width: 52px;
+    min-width: 52px;
+    flex-basis: 52px;
+  }
+
+  .chat-history--shell.chat-history--collapsed
+    :deep(.workspace-sidebar-header--collapsed) {
+    width: 52px;
+    box-sizing: border-box;
+    grid-template-columns: 36px;
+    padding: 8px;
+  }
+
+  .chat-history--shell.chat-history--collapsed
+    :deep(.workspace-sidebar-header__toggle--collapsed) {
+    width: 36px;
+    height: 36px;
+    flex-basis: 36px;
+  }
+
+  .chat-history--shell.chat-history--collapsed
+    :deep(.workspace-sidebar-header__collapsed-brand-mark),
+  .chat-history--shell.chat-history--collapsed
+    :deep(.workspace-sidebar-header__collapsed-brand-image) {
+    width: 20px;
+    height: 20px;
+  }
+
+  .chat-history--shell.chat-history--collapsed
+    :deep(.workspace-sidebar-header__collapsed-brand-image--default) {
+    transform: none;
+  }
+
+  .chat-history--shell.chat-history--collapsed
+    :deep(.workspace-sidebar-header__toggle-icon) {
+    width: 20px;
+    height: 20px;
+  }
+
+  .chat-history--shell.chat-history--collapsed
+    :deep(.workspace-sidebar-frame__content) {
+    padding: 8px 0;
+  }
+
+  .chat-history--shell.chat-history--collapsed .chat-history__header {
+    width: 52px;
+    flex: 0 0 36px;
+  }
+
+  .chat-history--shell.chat-history--collapsed .chat-history__header .chat-history__primary-nav {
+    width: 36px;
+    flex: 0 0 36px;
+    margin: 0 0 0 8px;
+  }
+
+  .chat-history--shell.chat-history--collapsed .chat-history__new--collapsed {
+    width: 36px;
+    height: 36px;
+    min-height: 36px;
+    flex-basis: 36px;
+    border-radius: 10px;
+  }
+
+  .chat-history--shell.chat-history--collapsed .chat-history__collapsed-nav {
+    width: 40px;
+    margin-left: 6px;
+  }
+
+  .chat-history--shell.chat-history--collapsed .chat-history__collapsed-nav-action {
+    width: 40px;
+    height: 36px;
+    min-height: 36px;
+    flex-basis: 36px;
+    box-sizing: border-box;
+    border-radius: 10px;
+    padding: 6px 10px;
+  }
+
+  /* The target tiny rail exposes only Search and Recent. The legacy Chat,
+   * Library and Projects links remain in the DOM for existing keyboard and
+   * contract coverage, but are not painted in this shell-specific rail. */
+  .chat-history--shell.chat-history--collapsed .chat-history__library-entry,
+  .chat-history--shell.chat-history--collapsed .chat-history__projects-entry {
+    display: none;
+  }
+
+  .chat-history--shell.chat-history--collapsed
+    :deep([data-testid="sidebar-account-dock"]) {
+    padding: 0 6px 12px;
+  }
+
+  .chat-history--shell.chat-history--collapsed
+    :deep([data-testid="sidebar-account-dock"].sidebar-account-dock--collapsed .sidebar-account-row),
+  .chat-history--shell.chat-history--collapsed
+    :deep([data-testid="sidebar-account-dock"].sidebar-account-dock--collapsed .sidebar-account-trigger) {
+    width: 40px;
+    height: 40px;
+    min-height: 40px;
+  }
+
+  .chat-history--shell.chat-history--collapsed
+    :deep([data-testid="sidebar-account-dock"].sidebar-account-dock--collapsed .sidebar-account-trigger) {
+    grid-template-columns: 40px minmax(0, 0) 0;
+  }
+}
+
 @media (max-width: 767px) {
   .chat-history {
     border-right: 0;
@@ -1674,11 +2323,35 @@ onBeforeUnmount(() => {
     padding-right: 88px;
   }
 
-  .chat-history .chat-history__item:hover .chat-history__select,
-  .chat-history .chat-history__item:focus-within .chat-history__select {
-    padding-right: 128px;
+  .chat-history__item:hover .chat-history__select,
+  .chat-history__item:focus-within .chat-history__select {
+    padding-right: 88px;
   }
 
+  .chat-history__search-layer {
+    z-index: 60;
+    grid-template-rows: 1fr;
+    grid-template-columns: 1fr;
+    overflow: hidden;
+  }
+
+  .chat-history__search--modal {
+    inset-inline-start: auto;
+    grid-area: 1 / 1;
+    width: 100%;
+    max-width: none;
+    height: 100%;
+    border-width: 0;
+    border-radius: 0;
+    box-shadow: none;
+    transform: none;
+  }
+
+  .chat-history__search-modal-panel {
+    height: 100%;
+    min-height: 100dvh;
+    border-radius: 0;
+  }
 }
 
 @media (hover: none) and (pointer: coarse) {
@@ -1687,19 +2360,15 @@ onBeforeUnmount(() => {
     pointer-events: auto;
   }
 
-  .chat-history .chat-history__select {
-    padding-right: 128px;
+  .chat-history__recent-action {
+    opacity: 1;
+    pointer-events: auto;
   }
-
 }
 
 @media (min-width: 768px) and (hover: none) and (pointer: coarse) {
   .chat-history__select {
     padding-right: 62px;
-  }
-
-  .chat-history .chat-history__select {
-    padding-right: 96px;
   }
 }
 
@@ -1719,7 +2388,9 @@ onBeforeUnmount(() => {
     transition: none;
   }
 
-  .chat-history__recent-heading > svg {
+  .chat-history__recent-action,
+  .chat-history__recent-heading > svg,
+  .chat-history__search-modal-close {
     transition: none;
   }
 }
