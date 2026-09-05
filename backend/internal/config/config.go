@@ -1068,6 +1068,38 @@ type GatewayConfig struct {
 	// UserMessageQueue: 用户消息串行队列配置
 	// 对 role:"user" 的真实用户消息实施账号级串行化 + RPM 自适应延迟
 	UserMessageQueue UserMessageQueueConfig `mapstructure:"user_message_queue"`
+
+	// DeepSeekBalance controls the optional pay-as-you-go balance checker.
+	// It is intentionally separate from the generic CN-provider settings used
+	// by newer upstream builds: this branch currently supports DeepSeek only.
+	DeepSeekBalance GatewayDeepSeekBalanceConfig `mapstructure:"deepseek_balance"`
+
+	// CNProviders controls shared balance/quota handling for first-class
+	// Chinese OpenAI-compatible providers such as Zhipu/GLM.  The fields are
+	// intentionally independent from the DeepSeek-specific checker above so
+	// existing deployments can opt into periodic probes without changing their
+	// current DeepSeek behavior.
+	CNProviders GatewayCNProvidersConfig `mapstructure:"cn_providers"`
+}
+
+// GatewayDeepSeekBalanceConfig configures periodic DeepSeek pay-as-you-go
+// balance probes.  The checker is disabled by default so adding the provider
+// cannot unexpectedly pause existing accounts after an upgrade.
+type GatewayDeepSeekBalanceConfig struct {
+	Enabled         bool    `mapstructure:"enabled"`
+	Threshold       float64 `mapstructure:"threshold"`
+	IntervalMinutes int     `mapstructure:"interval_minutes"`
+}
+
+// GatewayCNProvidersConfig configures the shared low-balance cooldown used by
+// reactive CN-provider handling.  A positive interval gives the next probe a
+// chance to observe recovery; setting BalanceCheckEnabled to false disables
+// periodic checks in components that provide them, while reactive handling
+// remains fail-safe.
+type GatewayCNProvidersConfig struct {
+	BalanceCheckEnabled         bool    `mapstructure:"balance_check_enabled"`
+	BalanceThreshold            float64 `mapstructure:"balance_threshold"`
+	BalanceCheckIntervalMinutes int     `mapstructure:"balance_check_interval_minutes"`
 }
 
 // GatewayOpenAIHTTP2Config OpenAI HTTP 上游协议配置。
@@ -1995,9 +2027,11 @@ func setDefaults() {
 	viper.SetDefault("security.url_allowlist.enabled", false)
 	viper.SetDefault("security.url_allowlist.upstream_hosts", []string{
 		"api.openai.com",
+		"api.deepseek.com",
 		"api.anthropic.com",
 		"api.kimi.com",
 		"open.bigmodel.cn",
+		"api.z.ai",
 		"api.minimaxi.com",
 		"generativelanguage.googleapis.com",
 		"cloudcode-pa.googleapis.com",
@@ -2448,6 +2482,17 @@ func setDefaults() {
 	viper.SetDefault("gateway.usage_record.auto_scale_cooldown_seconds", 10)
 	viper.SetDefault("gateway.user_group_rate_cache_ttl_seconds", 30)
 	viper.SetDefault("gateway.models_list_cache_ttl_seconds", 15)
+	// DeepSeek pay-as-you-go balance checker. Keep automatic scheduling
+	// changes opt-in; manual /admin/accounts/:id/balance remains available.
+	viper.SetDefault("gateway.deepseek_balance.enabled", false)
+	viper.SetDefault("gateway.deepseek_balance.threshold", 0.5)
+	viper.SetDefault("gateway.deepseek_balance.interval_minutes", 10)
+	// Shared CN-provider low-balance handling.  Zhipu Coding Plan quota probes
+	// use the same interval for their temporary cooldown; keep the defaults
+	// conservative and backwards-compatible for existing installations.
+	viper.SetDefault("gateway.cn_providers.balance_check_enabled", true)
+	viper.SetDefault("gateway.cn_providers.balance_threshold", 0.5)
+	viper.SetDefault("gateway.cn_providers.balance_check_interval_minutes", 10)
 	// TLS指纹伪装配置（默认关闭，需要账号级别单独启用）
 	// 用户消息串行队列默认值
 	viper.SetDefault("gateway.user_message_queue.enabled", false)
@@ -3067,6 +3112,28 @@ func (c *Config) Validate() error {
 	if c.Gateway.OpenAIHighEffortFirstOutputTimeoutSeconds < 0 || c.Gateway.OpenAIHighEffortFirstOutputTimeoutSeconds > 1800 ||
 		(c.Gateway.OpenAIHighEffortFirstOutputTimeoutSeconds > 0 && c.Gateway.OpenAIHighEffortFirstOutputTimeoutSeconds < 30) {
 		return fmt.Errorf("gateway.openai_high_effort_first_output_timeout_seconds must be 0 or between 30-1800 seconds")
+	}
+	if c.Gateway.DeepSeekBalance.Threshold < 0 ||
+		math.IsNaN(c.Gateway.DeepSeekBalance.Threshold) ||
+		math.IsInf(c.Gateway.DeepSeekBalance.Threshold, 0) {
+		return fmt.Errorf("gateway.deepseek_balance.threshold must be a finite non-negative number")
+	}
+	if c.Gateway.DeepSeekBalance.IntervalMinutes < 0 || c.Gateway.DeepSeekBalance.IntervalMinutes > 24*60 {
+		return fmt.Errorf("gateway.deepseek_balance.interval_minutes must be between 0-1440 minutes")
+	}
+	if c.Gateway.DeepSeekBalance.Enabled && c.Gateway.DeepSeekBalance.IntervalMinutes <= 0 {
+		return fmt.Errorf("gateway.deepseek_balance.interval_minutes must be positive when enabled")
+	}
+	if c.Gateway.CNProviders.BalanceThreshold < 0 ||
+		math.IsNaN(c.Gateway.CNProviders.BalanceThreshold) ||
+		math.IsInf(c.Gateway.CNProviders.BalanceThreshold, 0) {
+		return fmt.Errorf("gateway.cn_providers.balance_threshold must be a finite non-negative number")
+	}
+	if c.Gateway.CNProviders.BalanceCheckIntervalMinutes < 0 || c.Gateway.CNProviders.BalanceCheckIntervalMinutes > 24*60 {
+		return fmt.Errorf("gateway.cn_providers.balance_check_interval_minutes must be between 0-1440 minutes")
+	}
+	if c.Gateway.CNProviders.BalanceCheckEnabled && c.Gateway.CNProviders.BalanceCheckIntervalMinutes <= 0 {
+		return fmt.Errorf("gateway.cn_providers.balance_check_interval_minutes must be positive when enabled")
 	}
 	if strings.TrimSpace(c.Gateway.ConnectionPoolIsolation) != "" {
 		switch c.Gateway.ConnectionPoolIsolation {

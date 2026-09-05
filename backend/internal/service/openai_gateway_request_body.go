@@ -45,6 +45,108 @@ func buildOpenAIResponsesURL(base string) string {
 	return buildOpenAIEndpointURL(base, "/v1/responses")
 }
 
+// buildOpenAIResponsesURLForPlatform 组装平台感知的 Responses 端点。
+// DeepSeek 官方端点是 /responses（根域名下不带 /v1）；如果管理员显式把
+// base_url 配成 /v1 或其他版本路径，buildOpenAIEndpointURL 仍会保留该前缀。
+// 其他平台继续使用历史上的 /v1/responses 规则。
+func buildOpenAIResponsesURLForPlatform(platform string, base string) string {
+	return buildOpenAIEndpointURLForPlatform(platform, base, "/v1/responses")
+}
+
+// normalizeDeepSeekResponsesRequestBody adapts a DeepSeek Responses request to
+// the provider's stateless endpoint.  DeepSeek rejects server-side state
+// controls, so store is always false and previous_response_id is omitted.
+//
+// The helper is intentionally account-aware rather than blindly rewriting all
+// Responses requests: an OpenAI-compatible relay may use the same gateway but
+// still implement the standard stateful Responses contract.  Protocol metadata
+// is read from credentials for compatibility with the first-class CN provider
+// account schema.  Missing/invalid metadata retains DeepSeek's Chat
+// Completions default and therefore opts out; only explicit Responses or
+// adaptive mode uses the native stateless endpoint.
+func normalizeDeepSeekResponsesRequestBody(account *Account, body []byte) []byte {
+	if !isDeepSeekResponsesAccount(account) || len(body) == 0 {
+		return body
+	}
+	// sjson can recover a prefix from malformed input (for example turning
+	// `{"store":true` into a syntactically different document).  Keep malformed
+	// payloads byte-for-byte intact so the upstream's normal JSON error response
+	// remains authoritative.
+	if !json.Valid(body) || !gjson.ParseBytes(body).IsObject() {
+		return body
+	}
+
+	normalized, err := sjson.SetBytes(body, "store", false)
+	if err != nil {
+		// Preserve the original payload on malformed JSON; the normal upstream
+		// request validation/error path should remain responsible for reporting it.
+		return body
+	}
+	if stripped, err := sjson.DeleteBytes(normalized, "previous_response_id"); err == nil {
+		normalized = stripped
+	}
+	return normalized
+}
+
+// isDeepSeekResponsesAccount reports whether an account should receive the
+// stateless Responses normalization.  DeepSeek accounts default to Chat
+// Completions when credentials.api_protocol is absent, so only explicit
+// responses/adaptive values opt in.
+func isDeepSeekResponsesAccount(account *Account) bool {
+	if account == nil || !isDeepSeekPlatform(account.Platform) {
+		return false
+	}
+	// Account owns protocol validation (including future aliases and platform
+	// capability checks); keep this helper focused on the DeepSeek-specific
+	// stateless contract.
+	return account.UsesNativeCNResponses()
+}
+
+// normalizeDeepSeekChatCompletionsRequestBody adapts fields that are valid in
+// the OpenAI gateway contract but rejected by DeepSeek's Chat API. In
+// particular, DeepSeek does not accept the newer `developer` message role;
+// mapping it to `system` preserves the instruction semantics and matches the
+// provider's documented compatibility behavior. `max_completion_tokens` is
+// similarly folded into the legacy `max_tokens` field when the latter is not
+// already present.
+func normalizeDeepSeekChatCompletionsRequestBody(body []byte) ([]byte, bool, error) {
+	if len(body) == 0 || !json.Valid(body) {
+		return body, false, nil
+	}
+	var request map[string]any
+	if err := json.Unmarshal(body, &request); err != nil {
+		return body, false, err
+	}
+	changed := false
+	if messages, ok := request["messages"].([]any); ok {
+		for _, raw := range messages {
+			message, ok := raw.(map[string]any)
+			if !ok {
+				continue
+			}
+			if role, ok := message["role"].(string); ok && strings.EqualFold(strings.TrimSpace(role), "developer") {
+				message["role"] = "system"
+				changed = true
+			}
+		}
+	}
+	if value, ok := request["max_completion_tokens"]; ok {
+		if _, hasLegacy := request["max_tokens"]; !hasLegacy {
+			request["max_tokens"] = value
+		}
+		delete(request, "max_completion_tokens")
+		changed = true
+	}
+	if !changed {
+		return body, false, nil
+	}
+	normalized, err := json.Marshal(request)
+	if err != nil {
+		return body, false, err
+	}
+	return normalized, true, nil
+}
+
 func trimOpenAIEncryptedReasoningItems(reqBody map[string]any) bool {
 	if len(reqBody) == 0 {
 		return false
@@ -218,9 +320,11 @@ func normalizeOpenAICompactRequestBody(body []byte) ([]byte, bool, error) {
 // tools are carried in input[].additional_tools after migration, so the
 // detector must inspect both the top-level and carrier forms.
 func normalizeOpenAIParallelToolCallsWithoutTools(body []byte, responsesLite bool) ([]byte, bool, error) {
-	// Responses Lite requires this field explicitly, even when no tools are
-	// present. Its dedicated normalizer pins the value to false; do not remove it
-	// in the generic public-Responses cleanup below.
+	// The public Responses API rejects this field when no tools are present,
+	// which is why the generic path below removes it. Responses Lite is the
+	// deliberate exception: its upstream contract requires an explicit
+	// `parallel_tool_calls: false`, including tool-less requests. The Lite
+	// normalizer pins the value; never undo that pin here.
 	if responsesLite {
 		return body, false, nil
 	}

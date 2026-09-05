@@ -245,6 +245,13 @@ const defaultClientTab = computed(() => {
   switch (props.platform) {
     case 'openai':
       return 'codex'
+    case 'deepseek':
+      // DeepSeek exposes an OpenAI-compatible API.  Keep the Codex setup as
+      // the default instead of falling through to the Claude/Anthropic
+      // snippets below.
+      return 'codex'
+    case 'zhipu':
+      return 'codex'
     case 'grok':
       return 'grok'
     case 'gemini':
@@ -368,6 +375,16 @@ const clientTabs = computed((): TabConfig[] => {
         { id: 'codex', label: t('keys.useKeyModal.cliTabs.codexCli'), icon: TerminalIcon },
         { id: 'opencode', label: t('keys.useKeyModal.cliTabs.opencode'), icon: TerminalIcon }
       ]
+    case 'deepseek':
+      return [
+        { id: 'codex', label: t('keys.useKeyModal.cliTabs.codexCli'), icon: TerminalIcon },
+        { id: 'opencode', label: t('keys.useKeyModal.cliTabs.opencode'), icon: TerminalIcon }
+      ]
+    case 'zhipu':
+      return [
+        { id: 'codex', label: t('keys.useKeyModal.cliTabs.codexCli'), icon: TerminalIcon },
+        { id: 'opencode', label: t('keys.useKeyModal.cliTabs.opencode'), icon: TerminalIcon }
+      ]
     default:
       return [
         { id: 'claude', label: t('keys.useKeyModal.cliTabs.claudeCode'), icon: TerminalIcon },
@@ -423,6 +440,10 @@ const platformDescription = computed(() => {
         return t('keys.useKeyModal.grok.codexDescription')
       }
       return t('keys.useKeyModal.grok.description')
+    case 'deepseek':
+      return t('keys.useKeyModal.deepseek.description')
+    case 'zhipu':
+      return t('keys.useKeyModal.zhipu.description')
     default:
       return t('keys.useKeyModal.description')
   }
@@ -455,6 +476,14 @@ const platformNote = computed(() => {
       return activeTab.value === 'windows'
         ? t('keys.useKeyModal.grok.noteWindows')
         : t('keys.useKeyModal.grok.note')
+    case 'deepseek':
+      return activeTab.value === 'windows'
+        ? t('keys.useKeyModal.deepseek.noteWindows')
+        : t('keys.useKeyModal.deepseek.note')
+    case 'zhipu':
+      return activeTab.value === 'windows'
+        ? t('keys.useKeyModal.zhipu.noteWindows')
+        : t('keys.useKeyModal.zhipu.note')
     default:
       return t('keys.useKeyModal.note')
   }
@@ -514,6 +543,10 @@ const currentFiles = computed((): FileConfig[] => {
         ]
       case 'grok':
         return [generateOpenCodeConfig('grok', apiBase, apiKey)]
+      case 'deepseek':
+        return [generateOpenCodeConfig('deepseek', apiBase, apiKey)]
+      case 'zhipu':
+        return [generateOpenCodeConfig('zhipu', apiBase, apiKey)]
       default:
         return [generateOpenCodeConfig('openai', apiBase, apiKey)]
     }
@@ -543,6 +576,12 @@ const currentFiles = computed((): FileConfig[] => {
         return generateGrokCodexFiles(apiBase, apiKey)
       }
       return generateGrokFiles(apiBase, apiKey)
+    case 'deepseek':
+      // DeepSeek is OpenAI-compatible; never emit Claude's ANTHROPIC_*
+      // variables for this platform.
+      return generateDeepSeekFiles(baseUrl, apiKey)
+    case 'zhipu':
+      return generateZhipuFiles(baseUrl, apiKey)
     default:
       return generateAnthropicFiles(baseUrl, apiKey)
   }
@@ -727,6 +766,63 @@ ${generateCodexProviderAuthConfig(apiKey)}
 [features]
 goals = true`
 
+  return buildOpenAICodexFileConfigs(configDir, configContent, apiKey)
+}
+
+/**
+ * Generate a Codex provider configuration for a DeepSeek group.
+ *
+ * DeepSeek's public endpoint speaks the OpenAI Chat Completions dialect.  The
+ * gateway accepts Codex Responses traffic and bridges it to Chat Completions,
+ * so the client still needs the Responses wire mode here.  Keep this separate
+ * from the OpenAI snippet so the default model/provider names are valid for
+ * DeepSeek and so future OpenAI-only options do not leak into this config.
+ */
+function generateDeepSeekFiles(baseUrl: string, apiKey: string): FileConfig[] {
+  const isWindows = activeTab.value === 'windows'
+  const configDir = isWindows ? '%userprofile%\\.codex' : '~/.codex'
+  const configContent = `model_provider = "DeepSeek"
+model = "deepseek-v4-flash"
+review_model = "deepseek-v4-flash"
+disable_response_storage = true
+network_access = "enabled"
+windows_wsl_setup_acknowledged = true
+
+[model_providers.DeepSeek]
+name = "DeepSeek"
+base_url = "${baseUrl}"
+wire_api = "responses"
+${generateCodexProviderAuthConfig(apiKey)}
+
+[features]
+goals = true`
+
+  return buildOpenAICodexFileConfigs(
+    configDir,
+    configContent,
+    apiKey
+  )
+}
+
+/** Generate Codex/OpenCode snippets for a Zhipu GLM group. */
+function generateZhipuFiles(baseUrl: string, apiKey: string): FileConfig[] {
+  const isWindows = activeTab.value === 'windows'
+  const configDir = isWindows ? '%userprofile%\\.codex' : '~/.codex'
+  const configContent = `model_provider = "Zhipu"
+model = "glm-4.5-air"
+review_model = "glm-4.5-air"
+disable_response_storage = true
+network_access = "enabled"
+windows_wsl_setup_acknowledged = true
+
+[model_providers.Zhipu]
+name = "Zhipu GLM"
+base_url = "${baseUrl}"
+wire_api = "responses"
+${generateCodexProviderAuthConfig(apiKey)}
+
+[features]
+goals = true`
   return buildOpenAICodexFileConfigs(configDir, configContent, apiKey)
 }
 
@@ -1316,6 +1412,83 @@ function generateOpenCodeConfig(platform: string, baseUrl: string, apiKey: strin
       limit: { context: 500000, output: 128000 }
     }
   }
+  const deepseekModels = {
+    'deepseek-v4-flash': {
+      name: 'DeepSeek V4 Flash',
+      limit: { context: 1000000, output: 128000 },
+      options: {
+        store: false
+      },
+      variants: {
+        low: {},
+        medium: {},
+        high: {},
+        xhigh: {},
+        max: {}
+      }
+    },
+    'deepseek-v4-pro': {
+      name: 'DeepSeek V4 Pro',
+      limit: { context: 1000000, output: 128000 },
+      options: {
+        store: false
+      },
+      variants: {
+        low: {},
+        medium: {},
+        high: {},
+        xhigh: {},
+        max: {}
+      }
+    },
+    'deepseek-v4-flash-vision-exp': {
+      name: 'DeepSeek V4 Flash Vision',
+      limit: { context: 1000000, output: 128000 },
+      modalities: {
+        input: ['text', 'image'],
+        output: ['text']
+      },
+      options: {
+        store: false
+      },
+      variants: {
+        low: {},
+        medium: {},
+        high: {},
+        xhigh: {},
+        max: {}
+      }
+    },
+    'deepseek-chat': {
+      name: 'DeepSeek Chat',
+      limit: { context: 1000000, output: 128000 },
+      options: {
+        store: false
+      }
+    },
+    'deepseek-reasoner': {
+      name: 'DeepSeek Reasoner',
+      limit: { context: 1000000, output: 128000 },
+      options: {
+        store: false
+      },
+      variants: {
+        low: {},
+        medium: {},
+        high: {},
+        xhigh: {},
+        max: {}
+      }
+    }
+  }
+  const zhipuModels = {
+    'glm-5': { name: 'GLM-5', limit: { context: 200000, output: 128000 } },
+    'glm-4.7': { name: 'GLM-4.7', limit: { context: 200000, output: 128000 } },
+    'glm-4.6': { name: 'GLM-4.6', limit: { context: 200000, output: 128000 } },
+    'glm-4.5': { name: 'GLM-4.5', limit: { context: 128000, output: 64000 } },
+    'glm-4.5-air': { name: 'GLM-4.5 Air', limit: { context: 128000, output: 64000 } },
+    'glm-4.5-flash': { name: 'GLM-4.5 Flash', limit: { context: 128000, output: 64000 } },
+  }
 
   if (platform === 'gemini') {
     provider[platform].npm = '@ai-sdk/google'
@@ -1336,6 +1509,14 @@ function generateOpenCodeConfig(platform: string, baseUrl: string, apiKey: strin
     provider[platform].npm = '@ai-sdk/openai'
     provider[platform].name = 'Grok'
     provider[platform].models = grokModels
+  } else if (platform === 'deepseek') {
+    provider[platform].npm = '@ai-sdk/openai'
+    provider[platform].name = 'DeepSeek'
+    provider[platform].models = deepseekModels
+  } else if (platform === 'zhipu') {
+    provider[platform].npm = '@ai-sdk/openai'
+    provider[platform].name = 'Zhipu GLM'
+    provider[platform].models = zhipuModels
   }
 
   const agent =

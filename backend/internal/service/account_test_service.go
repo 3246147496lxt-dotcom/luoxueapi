@@ -22,7 +22,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/pkg/claude"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/geminicli"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
-	"github.com/Wei-Shaw/sub2api/internal/pkg/openai_compat"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/tlsfingerprint"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/xai"
 	"github.com/Wei-Shaw/sub2api/internal/util/urlvalidator"
 	"github.com/gin-gonic/gin"
@@ -69,6 +69,10 @@ const (
 	defaultGeminiTextTestPrompt  = "hi"
 	defaultGeminiImageTestPrompt = "Generate a cute orange cat astronaut sticker on a clean pastel background."
 	defaultOpenAIImageTestPrompt = "Generate a cute orange cat astronaut sticker on a clean pastel background."
+	// DeepSeek's current public catalog is V4. Keep the account test useful
+	// when the administrator leaves the model field empty instead of sending
+	// OpenAI's gpt-* probe model to a DeepSeek endpoint.
+	defaultDeepSeekTestModel = "deepseek-v4-flash"
 )
 
 // isOpenAIImageModel checks if the model is an OpenAI image generation model (e.g. gpt-image-2).
@@ -200,6 +204,20 @@ func (s *AccountTestService) TestAccountConnection(c *gin.Context, accountID int
 	}
 
 	// Route to platform-specific test method
+	if account.IsDeepseek() || account.IsZhipu() {
+		if normalizeAccountTestMode(mode) == AccountTestModeCompact {
+			return s.sendErrorAndEnd(c, fmt.Sprintf("%s does not support the Responses compact endpoint", cnAnthropicProviderLabel(account.Platform)))
+		}
+		// CN providers are API-key based and speak the OpenAI-compatible gateway by
+		// default. Explicit Anthropic protocol accounts need the native
+		// /v1/messages probe; Responses/adaptive/chat modes can reuse the
+		// protocol-aware OpenAI tester below.
+		if account.IsAnthropicProtocol() {
+			return s.testCNAnthropicAccountConnection(c, account, modelID)
+		}
+		return s.testOpenAIAccountConnection(c, account, modelID, prompt, normalizeAccountTestMode(mode))
+	}
+
 	if account.IsOpenAI() {
 		return s.testOpenAIAccountConnection(c, account, modelID, prompt, normalizeAccountTestMode(mode))
 	}
@@ -513,6 +531,99 @@ func (s *AccountTestService) testBedrockAccountConnection(c *gin.Context, ctx co
 	return nil
 }
 
+// testCNAnthropicAccountConnection probes a CN provider's native Anthropic
+// facade for accounts explicitly configured with api_protocol=anthropic.
+// Keeping this separate from testClaudeAccountConnection is important: the
+// latter defaults to api.anthropic.com and adds provider-specific beta
+// semantics that do not apply to GLM/DeepSeek facades.
+func (s *AccountTestService) testCNAnthropicAccountConnection(c *gin.Context, account *Account, modelID string) error {
+	ctx := c.Request.Context()
+	providerLabel := cnAnthropicProviderLabel(account.Platform)
+	testModelID := strings.TrimSpace(modelID)
+	if testModelID == "" {
+		if account.IsZhipu() {
+			testModelID = "glm-4.5-air"
+		} else {
+			testModelID = defaultDeepSeekTestModel
+		}
+	}
+	testModelID = account.GetMappedModel(testModelID)
+	apiKey := strings.TrimSpace(account.GetOpenAIProtocolAPIKey())
+	if apiKey == "" {
+		return s.sendErrorAndEnd(c, "No API key available")
+	}
+
+	baseURL, err := s.validateUpstreamBaseURL(account.GetAnthropicProtocolBaseURL())
+	if err != nil {
+		return s.sendErrorAndEnd(c, fmt.Sprintf("Invalid %s Anthropic base URL: %s", providerLabel, err.Error()))
+	}
+	apiURL := buildOpenAIEndpointURL(baseURL, "/v1/messages")
+
+	c.Writer.Header().Set("Content-Type", "text/event-stream")
+	c.Writer.Header().Set("Cache-Control", "no-cache")
+	c.Writer.Header().Set("Connection", "keep-alive")
+	c.Writer.Header().Set("X-Accel-Buffering", "no")
+	c.Writer.Flush()
+	s.sendEvent(c, TestEvent{Type: "test_start", Model: testModelID})
+	s.sendEvent(c, TestEvent{Type: "status", Text: fmt.Sprintf("正在通过 %s 原生 Anthropic /v1/messages 测试连接", providerLabel)})
+
+	// Keep the probe deliberately minimal. The provider's Anthropic facade accepts
+	// the standard Messages fields, while optional beta/cache fields vary by
+	// relay and should not make a valid API key look broken.
+	payload := map[string]any{
+		"model":      testModelID,
+		"max_tokens": 64,
+		"stream":     true,
+		"messages": []map[string]any{{
+			"role":    "user",
+			"content": "hi",
+		}},
+	}
+	payloadBytes, _ := json.Marshal(payload)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, apiURL, bytes.NewReader(payloadBytes))
+	if err != nil {
+		return s.sendErrorAndEnd(c, fmt.Sprintf("Failed to create %s Anthropic request", providerLabel))
+	}
+	// Keep the probe on the same upstream profile as the OpenAI-compatible
+	// gateway paths so proxy/TLS instrumentation and request accounting see a
+	// native DeepSeek Anthropic request as an OpenAI-family upstream call.
+	req = req.WithContext(WithHTTPUpstreamProfile(req.Context(), HTTPUpstreamProfileOpenAI))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Accept", "text/event-stream")
+	req.Header.Set("anthropic-version", "2023-06-01")
+	setAnthropicAPIKeyAuthHeader(req.Header, account, apiKey)
+	account.ApplyHeaderOverrides(req.Header)
+
+	proxyURL := ""
+	if account.ProxyID != nil && account.Proxy != nil {
+		proxyURL = account.Proxy.URL()
+	}
+	var tlsProfile *tlsfingerprint.Profile
+	if s.tlsFPProfileService != nil {
+		tlsProfile = s.tlsFPProfileService.ResolveTLSProfile(account)
+	}
+	resp, err := s.httpUpstream.DoWithTLS(req, proxyURL, account.ID, account.Concurrency, tlsProfile)
+	if err != nil {
+		return s.sendErrorAndEnd(c, fmt.Sprintf("%s Anthropic request failed: %s", providerLabel, err.Error()))
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, openAITestErrorBodyMaxBytes))
+		errMsg := fmt.Sprintf("%s Anthropic API returned %d: %s", providerLabel, resp.StatusCode, string(body))
+		if (resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden) && s.accountRepo != nil {
+			_ = s.accountRepo.SetError(ctx, account.ID, errMsg)
+		}
+		return s.sendErrorAndEnd(c, errMsg)
+	}
+	return s.processClaudeStream(c, resp.Body)
+}
+
+// testDeepSeekAnthropicAccountConnection preserves the historical helper name
+// for focused tests and integrations.
+func (s *AccountTestService) testDeepSeekAnthropicAccountConnection(c *gin.Context, account *Account, modelID string) error {
+	return s.testCNAnthropicAccountConnection(c, account, modelID)
+}
+
 // testOpenAIAccountConnection tests an OpenAI account's connection
 func (s *AccountTestService) testOpenAIAccountConnection(c *gin.Context, account *Account, modelID string, prompt string, mode string) error {
 	ctx := c.Request.Context()
@@ -521,7 +632,13 @@ func (s *AccountTestService) testOpenAIAccountConnection(c *gin.Context, account
 	// Default to openai.DefaultTestModel for OpenAI testing
 	testModelID := modelID
 	if testModelID == "" {
-		testModelID = openai.DefaultTestModel
+		if account.IsDeepseek() {
+			testModelID = defaultDeepSeekTestModel
+		} else if account.IsZhipu() {
+			testModelID = "glm-4.5-air"
+		} else {
+			testModelID = openai.DefaultTestModel
+		}
 	}
 
 	// Align test routing with gateway behavior: OpenAI accounts apply normal
@@ -572,12 +689,15 @@ func (s *AccountTestService) testOpenAIAccountConnection(c *gin.Context, account
 		apiURL = chatgptCodexAPIURL
 	} else if credentialAccount.Type == "apikey" {
 		// API Key - use Platform API
-		authToken = credentialAccount.GetOpenAIApiKey()
+		authToken = credentialAccount.GetOpenAIProtocolAPIKey()
 		if authToken == "" {
 			return s.sendErrorAndEnd(c, "No API key available")
 		}
 
 		baseURL := credentialAccount.GetOpenAIBaseURL()
+		if credentialAccount.UsesNativeCNResponses() && credentialAccount.IsAdaptiveAPIProtocol() {
+			baseURL = credentialAccount.GetCNProtocolBaseURL(APIProtocolResponses)
+		}
 		if baseURL == "" {
 			baseURL = "https://api.openai.com"
 		}
@@ -585,10 +705,10 @@ func (s *AccountTestService) testOpenAIAccountConnection(c *gin.Context, account
 		if err != nil {
 			return s.sendErrorAndEnd(c, fmt.Sprintf("Invalid base URL: %s", err.Error()))
 		}
-		if !openai_compat.ShouldUseResponsesAPI(account.Extra) {
+		if shouldForwardOpenAIResponsesViaRawChatCompletions(credentialAccount) {
 			return s.testOpenAIChatCompletionsConnection(c, account, testModelID, prompt, normalizedBaseURL, authToken)
 		}
-		apiURL = buildOpenAIResponsesURL(normalizedBaseURL)
+		apiURL = buildOpenAIResponsesURLForPlatform(credentialAccount.Platform, normalizedBaseURL)
 	} else {
 		return s.sendErrorAndEnd(c, fmt.Sprintf("Unsupported account type: %s", account.Type))
 	}
@@ -608,6 +728,10 @@ func (s *AccountTestService) testOpenAIAccountConnection(c *gin.Context, account
 	}
 	payload := createOpenAITestPayload(upstreamTestModelID, isOAuth)
 	payloadBytes, _ := json.Marshal(payload)
+	// DeepSeek's native Responses endpoint is stateless and rejects the
+	// server-side response state controls accepted by OpenAI. Keep the account
+	// connection probe aligned with the real forwarding path.
+	payloadBytes = normalizeDeepSeekResponsesRequestBody(credentialAccount, payloadBytes)
 
 	// Send test_start event once. A task-invalid Agent Identity response may
 	// restart this probe after registering a replacement task.
@@ -825,7 +949,7 @@ func (s *AccountTestService) testOpenAIChatCompletionsConnection(
 	authToken string,
 ) error {
 	ctx := c.Request.Context()
-	apiURL := buildOpenAIChatCompletionsURL(normalizedBaseURL)
+	apiURL := buildOpenAIChatCompletionsURLForPlatform(account.Platform, normalizedBaseURL)
 
 	c.Writer.Header().Set("Content-Type", "text/event-stream")
 	c.Writer.Header().Set("Cache-Control", "no-cache")
@@ -908,7 +1032,7 @@ func (s *AccountTestService) testOpenAICompactConnection(c *gin.Context, account
 		}
 		apiURL = chatgptCodexAPIURL + "/compact"
 	case account.Type == AccountTypeAPIKey:
-		authToken = account.GetOpenAIApiKey()
+		authToken = account.GetOpenAIProtocolAPIKey()
 		if authToken == "" {
 			return s.sendErrorAndEnd(c, "No API key available")
 		}
@@ -920,7 +1044,7 @@ func (s *AccountTestService) testOpenAICompactConnection(c *gin.Context, account
 		if err != nil {
 			return s.sendErrorAndEnd(c, fmt.Sprintf("Invalid base URL: %s", err.Error()))
 		}
-		apiURL = appendOpenAIResponsesRequestPathSuffix(buildOpenAIResponsesURL(normalizedBaseURL), "/compact")
+		apiURL = appendOpenAIResponsesRequestPathSuffix(buildOpenAIResponsesURLForPlatform(account.Platform, normalizedBaseURL), "/compact")
 	default:
 		return s.sendErrorAndEnd(c, fmt.Sprintf("Unsupported account type: %s", account.Type))
 	}
@@ -1990,7 +2114,7 @@ func (s *AccountTestService) processOpenAIStream(c *gin.Context, body io.Reader)
 
 // testOpenAIImageAPIKey tests OpenAI image generation using an API Key account.
 func (s *AccountTestService) testOpenAIImageAPIKey(c *gin.Context, ctx context.Context, account *Account, modelID, prompt string) error {
-	authToken := account.GetOpenAIApiKey()
+	authToken := account.GetOpenAIProtocolAPIKey()
 	if authToken == "" {
 		return s.sendErrorAndEnd(c, "No API key available")
 	}

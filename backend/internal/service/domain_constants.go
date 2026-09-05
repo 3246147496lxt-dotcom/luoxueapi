@@ -43,7 +43,43 @@ const (
 	PlatformGemini      = domain.PlatformGemini
 	PlatformAntigravity = domain.PlatformAntigravity
 	PlatformGrok        = domain.PlatformGrok
+	PlatformZhipu       = domain.PlatformZhipu
+	PlatformDeepseek    = domain.PlatformDeepseek
+	// PlatformDeepSeek is an alias retained for callers that use the provider's
+	// conventional camel-case spelling.  Persisted values remain "deepseek".
+	PlatformDeepSeek = domain.PlatformDeepseek
 )
+
+// 国产 OpenAI 兼容供应商的账号接入模式与上游协议。DeepSeek 目前支持
+// Chat Completions、Responses 以及 Anthropic 兼容端点；这些字段存放在
+// credentials 中，缺失时保持 Chat Completions 兼容的默认行为。
+const (
+	AccountModePayG   = domain.AccountModePayG
+	AccountModeCoding = domain.AccountModeCoding
+
+	APIProtocolChatCompletions = domain.APIProtocolChatCompletions
+	APIProtocolAnthropic       = domain.APIProtocolAnthropic
+	APIProtocolResponses       = domain.APIProtocolResponses
+	APIProtocolAdaptive        = domain.APIProtocolAdaptive
+
+	DefaultDeepseekBaseURL          = "https://api.deepseek.com"
+	DefaultDeepseekAnthropicBaseURL = "https://api.deepseek.com/anthropic"
+	DefaultZhipuPayGBaseURL         = "https://open.bigmodel.cn/api/paas/v4"
+	DefaultZhipuCodingBaseURL       = "https://open.bigmodel.cn/api/coding/paas/v4"
+	DefaultZhipuAnthropicBaseURL    = "https://open.bigmodel.cn/api/anthropic"
+)
+
+// IsCNProvider reports whether a platform is one of the first-class Chinese
+// OpenAI-compatible providers. Keep this helper narrow until additional
+// providers are actually wired through the gateway.
+func IsCNProvider(platform string) bool {
+	switch platform {
+	case PlatformZhipu, PlatformDeepseek:
+		return true
+	default:
+		return false
+	}
+}
 
 // AllowedQuotaPlatforms 是允许设置 user × platform quota 的平台列表（单一权威来源）。
 // ent/schema/user_platform_quota.go 的 Validate 函数独立维护（构建期约束），
@@ -54,6 +90,42 @@ var AllowedQuotaPlatforms = []string{
 	PlatformGemini,
 	PlatformAntigravity,
 	PlatformGrok,
+	PlatformZhipu,
+	PlatformDeepseek,
+}
+
+// AllowedSchedulingThresholdPlatforms lists providers whose upstream usage
+// snapshots expose a resettable utilization window that can safely gate
+// account scheduling.  Pay-as-you-go providers use balance checks instead;
+// DeepSeek is therefore intentionally excluded from this percentage list.
+var AllowedSchedulingThresholdPlatforms = []string{
+	PlatformOpenAI,
+	PlatformAnthropic,
+	PlatformGrok,
+	PlatformZhipu,
+}
+
+// DefaultZhipuModelIDs is the stable GLM catalog shown before an account has
+// successfully synchronized its upstream /models response. Keep legacy IDs
+// here as well: existing mappings may still target them even when the current
+// catalog has moved on to GLM-5.x.
+func DefaultZhipuModelIDs() []string {
+	return []string{
+		"glm-5.2",
+		"glm-5.1",
+		"glm-5",
+		"glm-5-turbo",
+		"glm-4.7",
+		"glm-4.7-flash",
+		"glm-4.7-flashx",
+		"glm-4.6",
+		"glm-4.5",
+		"glm-4.5-air",
+		"glm-4.5-x",
+		"glm-4.5-airx",
+		"glm-4.5-flash",
+		"glm-4-32b-0414-128k",
+	}
 }
 
 // IsAllowedQuotaPlatform 报告 s 是否为合法的 quota platform 标识。
@@ -531,6 +603,11 @@ const (
 // SettingKeyDefaultPlatformQuotas —— 系统全局：每用户 × 平台日/周/月 USD 上限（JSON）。
 // 值为 map[platform]{daily,weekly,monthly}，null/缺省 = 不限制；0 = 禁用；>0 = USD 上限。
 const SettingKeyDefaultPlatformQuotas = "default_platform_quotas"
+
+// SettingKeyAccountSchedulingThresholds stores per-platform utilization
+// thresholds (1..100) used by the scheduler. A value of 100 disables the
+// automatic pause for that platform.
+const SettingKeyAccountSchedulingThresholds = "account_scheduling_thresholds"
 
 // SettingKeyAuthSourcePlatformQuotas 返回某 auth source 的 platform quota JSON key。
 // 形如 auth_source_default_{source}_platform_quotas

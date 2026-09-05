@@ -156,7 +156,7 @@ export default {
     description: '无需登录即可快速比较已上架模型的输入、输出和缓存价格。',
     workspaceTitle: '模型中心',
     workspaceDescription: '快速比较当前可用模型的输入、输出和缓存价格。',
-    publicPriceNote: '公开标准价按 ¥1 = 10 积分换算展示；实际扣费以积分和调用记录为准。',
+    publicPriceNote: '公开标准价按 ¥1 = 10 积分换算为人民币展示；实际扣费以积分和调用记录为准。',
     modelCount: '{count} 个模型',
     pricingUpdatedAt: '价格更新于 {time}',
     searchLabel: '搜索模型',

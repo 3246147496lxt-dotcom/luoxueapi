@@ -320,6 +320,18 @@ func buildChatMessagesFromItems(messages []ChatMessage, rawItems []json.RawMessa
 			continue
 		case "function_call_output", "custom_tool_call_output", "tool_search_output":
 			outputRaw := bytesTrimSpace(item["output"])
+			// Newer Codex clients encode a successful tool search discovery in a
+			// top-level `tools` member instead of the legacy `output` member. A
+			// Chat Completions tool message has only one content field, so retain
+			// the discovery payload as its JSON string rather than silently
+			// forwarding an empty result (which prevents the client from loading
+			// the discovered tools on the next turn). An explicitly present
+			// `output` value keeps precedence for backwards compatibility.
+			if itemType == "tool_search_output" {
+				if _, hasOutput := item["output"]; !hasOutput {
+					outputRaw = bytesTrimSpace(item["tools"])
+				}
+			}
 			outputText := rawString(outputRaw)
 			if outputText == "" && len(outputRaw) > 0 && string(outputRaw) != "null" && string(outputRaw) != `""` {
 				// 对象/数组形式的输出（如 tool_search 的结果列表）整体字符串化。

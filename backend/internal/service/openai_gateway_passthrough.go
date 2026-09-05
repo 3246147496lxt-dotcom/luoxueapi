@@ -419,18 +419,24 @@ func (s *OpenAIGatewayService) buildUpstreamRequestOpenAIPassthrough(
 		targetURL = chatgptCodexURL
 	case AccountTypeAPIKey:
 		baseURL := account.GetOpenAIBaseURL()
+		if account.UsesNativeCNResponses() && account.IsAdaptiveAPIProtocol() {
+			baseURL = account.GetCNProtocolBaseURL(APIProtocolResponses)
+		}
 		if baseURL != "" {
 			validatedURL, err := s.validateUpstreamBaseURL(baseURL)
 			if err != nil {
 				return nil, err
 			}
-			targetURL = buildOpenAIResponsesURL(validatedURL)
+			targetURL = buildOpenAIResponsesURLForPlatform(account.Platform, validatedURL)
 		}
 	}
 	targetURL = appendOpenAIResponsesRequestPathSuffix(targetURL, openAIResponsesRequestPathSuffix(c))
-	// Passthrough can rebuild the body after ingress normalization. Responses
-	// Lite requires an explicit false value even without tools, so re-pin it at
-	// the final request boundary.
+	// Passthrough can rebuild the body after the normal ingress pass (policy,
+	// image sanitization, or OAuth compatibility rewrites). Responses Lite has
+	// a stricter wire contract than the public Responses API: the field must be
+	// present and false even when no tools are declared. Re-pin only that field
+	// here so the final passthrough request cannot regress to the upstream
+	// default of true.
 	responsesLite := false
 	if account != nil && account.IsOpenAI() {
 		responsesLite = isOpenAIResponsesLiteWebSocketPayload(body)
@@ -447,6 +453,10 @@ func (s *OpenAIGatewayService) buildUpstreamRequestOpenAIPassthrough(
 			body = liteBody
 		}
 	}
+	// DeepSeek's native Responses endpoint is stateless and rejects server-side
+	// state controls.  Apply the normalization after any passthrough body
+	// rewrites so the final payload is what gets sanitized.
+	body = normalizeDeepSeekResponsesRequestBody(account, body)
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, targetURL, bytes.NewReader(body))
 	if err != nil {

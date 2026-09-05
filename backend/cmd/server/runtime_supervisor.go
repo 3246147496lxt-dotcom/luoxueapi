@@ -81,6 +81,8 @@ func buildApplicationSupervisor(
 	paymentOrderExpiry *service.PaymentOrderExpiryService,
 	channelMonitorRunner *service.ChannelMonitorRunner,
 	upstreamBillingProbe *service.UpstreamBillingProbeService,
+	deepSeekBalanceCheck *service.DeepSeekBalanceCheckService,
+	cnProviderBalanceCheck *service.CNProviderBalanceCheckService,
 	redisClient *redis.Client,
 	cfg *config.Config,
 ) *lifecycle.Supervisor {
@@ -302,6 +304,8 @@ func buildApplicationSupervisor(
 		applicationVoidLifecycleComponent("payment-order-expiry", paymentOrderExpiry.Start, paymentOrderExpiry.Stop),
 		applicationVoidLifecycleComponent("channel-monitor", channelMonitorRunner.Start, channelMonitorRunner.Stop),
 		applicationVoidLifecycleComponent("upstream-billing-probe", upstreamBillingProbe.Start, upstreamBillingProbe.Stop),
+		applicationVoidLifecycleComponent("deepseek-balance-check", deepSeekBalanceCheck.Start, deepSeekBalanceCheck.Stop),
+		applicationVoidLifecycleComponent("cn-provider-quota-check", cnProviderBalanceCheck.Start, cnProviderBalanceCheck.Stop),
 		lifecycle.ComponentFuncs{
 			ComponentName: "skill-market-github-stars",
 			StartFunc:     skillMarket.Start,

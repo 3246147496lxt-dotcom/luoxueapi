@@ -97,6 +97,22 @@ func (s *OpenAIGatewayService) forwardResponsesViaRawChatCompletions(
 		}
 		return nil, err
 	}
+	// Responses → Chat conversion can carry newer OpenAI field names that the
+	// DeepSeek Chat endpoint does not accept.  Normalize only after the policy
+	// pass so the request sent upstream is the final, billable body.
+	if account.IsDeepseek() {
+		if normalized, changed, normalizeErr := normalizeDeepSeekChatCompletionsRequestBody(chatBody); normalizeErr != nil {
+			return nil, fmt.Errorf("normalize DeepSeek chat fallback request: %w", normalizeErr)
+		} else if changed {
+			chatBody = normalized
+		}
+	}
+	if normalizedBody, normalized := NormalizeGLMOpenAIReasoningEffort(chatBody, upstreamModel); normalized {
+		chatBody = normalizedBody
+	}
+	reasoningEffort = reconcileGLMOpenAIReasoningEffort(
+		reasoningEffort, chatBody, upstreamModel, billingModel, originalModel,
+	)
 	// Billing reflects the final body after both the API-key default and admin
 	// policy have run (including any filtering/blocking rewrite).
 	serviceTier := extractOpenAIServiceTierFromBody(chatBody)
@@ -114,6 +130,11 @@ func (s *OpenAIGatewayService) forwardResponsesViaRawChatCompletions(
 	if err != nil {
 		return nil, err
 	}
+	// The inbound /responses route is being served by the raw Chat
+	// Completions endpoint. Record the concrete provider path so usage logs do
+	// not infer the stale /responses path after this bridge is selected.
+	actualEndpoint := rawChatCompletionsEndpointForPlatform(account.Platform)
+	SetActualOpenAIUpstreamEndpoint(c, actualEndpoint)
 	resp, err := s.sendCCUpstreamRequest(ctx, c, account, targetURL, chatBody, clientStream, apiKey, account.GetOpenAIUserAgent(), "")
 	if err != nil {
 		return nil, err
@@ -165,6 +186,7 @@ func (s *OpenAIGatewayService) bufferChatCompletionsAsResponses(
 		Model:                         originalModel,
 		BillingModel:                  billingModel,
 		UpstreamModel:                 upstreamModel,
+		UpstreamEndpoint:              GetActualOpenAIUpstreamEndpoint(c),
 		UpstreamResponseModel:         observedUpstreamResponseModel(c),
 		UpstreamResponseModelConflict: observedUpstreamResponseModelConflict(c),
 		ReasoningEffort:               reasoningEffort,
@@ -233,6 +255,7 @@ func (s *OpenAIGatewayService) streamChatCompletionsAsResponses(
 			Model:                         originalModel,
 			BillingModel:                  billingModel,
 			UpstreamModel:                 upstreamModel,
+			UpstreamEndpoint:              GetActualOpenAIUpstreamEndpoint(c),
 			UpstreamResponseModel:         observedUpstreamResponseModel(c),
 			UpstreamResponseModelConflict: observedUpstreamResponseModelConflict(c),
 			ReasoningEffort:               reasoningEffort,
@@ -263,6 +286,7 @@ func (s *OpenAIGatewayService) streamChatCompletionsAsResponses(
 		Model:                         originalModel,
 		BillingModel:                  billingModel,
 		UpstreamModel:                 upstreamModel,
+		UpstreamEndpoint:              GetActualOpenAIUpstreamEndpoint(c),
 		UpstreamResponseModel:         observedUpstreamResponseModel(c),
 		UpstreamResponseModelConflict: observedUpstreamResponseModelConflict(c),
 		ReasoningEffort:               reasoningEffort,

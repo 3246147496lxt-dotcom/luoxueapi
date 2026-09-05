@@ -2172,6 +2172,16 @@ func (s *OpenAIGatewayService) isOpenAIAccountTransportCompatible(account *Accou
 		if s.cfg == nil || !s.cfg.Gateway.OpenAIWS.ModeRouterV2Enabled {
 			return s.getOpenAIWSProtocolResolver().Resolve(account).Transport == OpenAIUpstreamTransportResponsesWebsocketV2
 		}
+		// The ingress transport is an OpenAI Responses WebSocket contract. In
+		// mode-router v2, HTTP-bridge mode is intentionally accepted for
+		// OpenAI accounts because the ingress layer knows how to bridge those
+		// accounts. Other OpenAI-compatible providers (for example DeepSeek)
+		// do not implement this WS ingress contract; allowing them through based
+		// only on a valid mode would select the account and fail later when the
+		// forwarder resolves its HTTP-only transport.
+		if !account.IsOpenAI() {
+			return false
+		}
 		mode := account.ResolveOpenAIResponsesWebSocketV2Mode(s.cfg.Gateway.OpenAIWS.IngressModeDefault)
 		switch mode {
 		case OpenAIWSIngressModeCtxPool, OpenAIWSIngressModePassthrough, OpenAIWSIngressModeHTTPBridge, OpenAIWSIngressModeShared, OpenAIWSIngressModeDedicated:

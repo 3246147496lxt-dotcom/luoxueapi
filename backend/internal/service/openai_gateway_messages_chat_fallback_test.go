@@ -27,6 +27,91 @@ func forceChatMessagesFallbackAccount() *Account {
 	return account
 }
 
+func zhipuChatMessagesFallbackTestAccount() *Account {
+	return &Account{
+		ID:          303,
+		Name:        "zhipu-chat-apikey",
+		Platform:    PlatformZhipu,
+		Type:        AccountTypeAPIKey,
+		Concurrency: 1,
+		Credentials: map[string]any{
+			"api_key":      "zhipu-test-key",
+			"base_url":     "http://upstream.example",
+			"api_protocol": APIProtocolChatCompletions,
+		},
+	}
+}
+
+func TestForwardAsAnthropic_ZhipuChatReasoningDefaultsAreExplicit(t *testing.T) {
+	setGinTestMode()
+
+	tests := []struct {
+		name       string
+		extra      string
+		wantField  bool
+		wantEffort string
+	}{
+		{
+			name:      "no thinking omits bridge default",
+			wantField: false,
+		},
+		{
+			name:      "disabled thinking omits bridge default",
+			extra:     `,"thinking":{"type":"disabled"}`,
+			wantField: false,
+		},
+		{
+			name:       "enabled thinking maps medium to GLM high",
+			extra:      `,"thinking":{"type":"enabled"}`,
+			wantField:  true,
+			wantEffort: "high",
+		},
+		{
+			name:       "explicit low maps to GLM high",
+			extra:      `,"output_config":{"effort":"low"}`,
+			wantField:  true,
+			wantEffort: "high",
+		},
+		{
+			name:       "explicit max maps to GLM max",
+			extra:      `,"output_config":{"effort":"max"}`,
+			wantField:  true,
+			wantEffort: "max",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rec := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(rec)
+			body := []byte(`{"model":"glm-5.2","max_tokens":32,"messages":[{"role":"user","content":"hello"}]` + tt.extra + `,"stream":false}`)
+			c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages", bytes.NewReader(body))
+			c.Request.Header.Set("Content-Type", "application/json")
+
+			upstream := &httpUpstreamRecorder{resp: &http.Response{
+				StatusCode: http.StatusOK,
+				Header:     http.Header{"Content-Type": []string{"application/json"}},
+				Body: io.NopCloser(strings.NewReader(
+					`{"id":"chatcmpl_zhipu_effort","object":"chat.completion","model":"glm-5.2","choices":[{"index":0,"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}],"usage":{"prompt_tokens":3,"completion_tokens":2,"total_tokens":5}}`,
+				)),
+			}}
+			svc := &OpenAIGatewayService{cfg: rawChatCompletionsTestConfig(), httpUpstream: upstream}
+
+			result, err := svc.ForwardAsAnthropic(context.Background(), c, zhipuChatMessagesFallbackTestAccount(), body, "", "")
+			require.NoError(t, err)
+			require.NotNil(t, result)
+			require.Equal(t, tt.wantField, gjson.GetBytes(upstream.lastBody, "reasoning_effort").Exists())
+			if tt.wantField {
+				require.Equal(t, tt.wantEffort, gjson.GetBytes(upstream.lastBody, "reasoning_effort").String())
+				require.NotNil(t, result.ReasoningEffort)
+				require.Equal(t, tt.wantEffort, *result.ReasoningEffort)
+			} else {
+				require.Nil(t, result.ReasoningEffort)
+			}
+		})
+	}
+}
+
 // errTailReader yields the given data, then returns err instead of io.EOF,
 // simulating an upstream connection that breaks mid-stream.
 type errTailReader struct {

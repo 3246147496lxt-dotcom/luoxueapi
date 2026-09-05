@@ -10,7 +10,7 @@ repo_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 
 old_commit="${OLD_APPLICATION_COMMIT:-d7d138bb776a3608aea0c04634c01ff32e002f36}"
 expected_old_migrations="${EXPECTED_OLD_MIGRATIONS:-246}"
-expected_candidate_migrations="${EXPECTED_CANDIDATE_MIGRATIONS:-256}"
+expected_candidate_migrations="${EXPECTED_CANDIDATE_MIGRATIONS:-269}"
 temp_root="${TMPDIR:-/tmp}"
 temp_root="${temp_root%/}"
 temp_dir=""
@@ -185,6 +185,18 @@ assert_projects_schema() {
   [[ "$project_constraint_count" == "5" ]] || die "project migration constraints are incomplete"
 }
 
+assert_deepseek_schema() {
+  for constraint_spec in \
+    "user_platform_quotas:user_platform_quotas_platform_check" \
+    "channel_monitors:channel_monitors_provider_check" \
+    "channel_monitor_request_templates:channel_monitor_request_templates_provider_check"; do
+    table_name="${constraint_spec%%:*}"
+    constraint_name="${constraint_spec#*:}"
+    constraint_definition="$(db_scalar "SELECT pg_get_constraintdef(c.oid) FROM pg_constraint AS c JOIN pg_class AS table_state ON table_state.oid = c.conrelid JOIN pg_namespace AS namespace_state ON namespace_state.oid = table_state.relnamespace WHERE namespace_state.nspname = 'public' AND table_state.relname = '$table_name' AND c.conname = '$constraint_name'")"
+    [[ "$constraint_definition" == *deepseek* ]] || die "DeepSeek is missing from $constraint_name"
+  done
+}
+
 wait_ready
 [[ "$(db_scalar 'SELECT COUNT(*) FROM schema_migrations')" == "$expected_old_migrations" ]] || die "old baseline is not $expected_old_migrations migrations"
 "${compose[@]}" stop -t 30 sub2api
@@ -222,10 +234,11 @@ for replay in first second; do
   [[ "$(db_scalar 'SELECT COUNT(*) FROM schema_migrations')" == "$expected_candidate_migrations" ]] || die "candidate migrate-only $replay did not reach $expected_candidate_migrations"
 done
 
-candidate_tail="$(db_scalar "SELECT string_agg(filename || '=' || checksum, ',' ORDER BY filename) FROM schema_migrations WHERE filename IN ('201_library_files.sql','201a_library_alias_unique_index_notx.sql','201b_library_alias_constraints.sql','202_chat_message_activities.sql','231_add_users_email_alias_dedup_index_notx.sql','232_add_users_email_normalized_index_notx.sql','233_group_profit_control.sql','234_add_usage_log_upstream_response_model.sql','235_add_usage_log_upstream_model_mismatch_index_notx.sql','236_projects.sql')")"
-expected_tail="201_library_files.sql=03f6a53d92e93fbfee37b9e5dd78dc11cae49dd921812253d0425154f1a9c23e,201a_library_alias_unique_index_notx.sql=ba15a71ce63180c21f8addda85351b13171a0e6c22f7427bcb4b8c955499e564,201b_library_alias_constraints.sql=f52ac96a80583b4e7a3c7c5f9923eee5d95a47c4a2b2d9844c864f31abe83833,202_chat_message_activities.sql=e2ee8b4480af916327f132d378eb70b2291c85efba0ced4555452147b56fdb8f,231_add_users_email_alias_dedup_index_notx.sql=fd103466b72b14919fc7a0b02135f019f9fe7a409a434726467c3649551321e4,232_add_users_email_normalized_index_notx.sql=052a61bf4bdc89a5215970059a61096f4eaea5c244b6781f3ec42d6ac8e8bb5d,233_group_profit_control.sql=b39b90d72d8869dc46beeb426f5db112ff04235c89ddb6d0ecee61a9bea95381,234_add_usage_log_upstream_response_model.sql=cad520cbfcf7af7ea9acae92e5bcbe27501fd9e3ad5b02e306f4f97be4410a82,235_add_usage_log_upstream_model_mismatch_index_notx.sql=692f2a75f0c62670b4d68986912bf24eb92f6377ec904d3806ff7d62b0da8355,236_projects.sql=050ad388c07995c4167ebd5ef52211f5cc2f04dfb74d6ab6655403d03f9936ce"
+candidate_tail="$(db_scalar "SELECT string_agg(filename || '=' || checksum, ',' ORDER BY filename) FROM schema_migrations WHERE filename = ANY (ARRAY['201_library_files.sql','201a_library_alias_unique_index_notx.sql','201b_library_alias_constraints.sql','202_chat_message_activities.sql','231_add_users_email_alias_dedup_index_notx.sql','232_add_users_email_normalized_index_notx.sql','233_group_profit_control.sql','234_add_usage_log_upstream_response_model.sql','235_add_usage_log_upstream_model_mismatch_index_notx.sql','236_projects.sql','237_skill_catalog_localizations.sql','238_skill_catalog_zh_001_167.sql','239_skill_catalog_zh_168_334.sql','240_skill_catalog_zh_335_500.sql','241_skill_catalog_zh_batch_1.sql','242_skill_catalog_zh_batch_2.sql','243_skill_catalog_zh_batch_3.sql','244_skill_catalog_zh_batch_4.sql','245_skill_catalog_zh_batch_5.sql','246_skill_catalog_zh_batch_6.sql','247_user_platform_quotas_add_deepseek.sql','248_channel_monitor_deepseek_provider.sql','249_zhipu_provider.sql']::text[])")"
+expected_tail="201_library_files.sql=03f6a53d92e93fbfee37b9e5dd78dc11cae49dd921812253d0425154f1a9c23e,201a_library_alias_unique_index_notx.sql=ba15a71ce63180c21f8addda85351b13171a0e6c22f7427bcb4b8c955499e564,201b_library_alias_constraints.sql=f52ac96a80583b4e7a3c7c5f9923eee5d95a47c4a2b2d9844c864f31abe83833,202_chat_message_activities.sql=e2ee8b4480af916327f132d378eb70b2291c85efba0ced4555452147b56fdb8f,231_add_users_email_alias_dedup_index_notx.sql=dca6d92a4567ab9fabc3550062acbec57ba89e4e452a1d7e2f17c3cf97e2d556,232_add_users_email_normalized_index_notx.sql=052a61bf4bdc89a5215970059a61096f4eaea5c244b6781f3ec42d6ac8e8bb5d,233_group_profit_control.sql=b39b90d72d8869dc46beeb426f5db112ff04235c89ddb6d0ecee61a9bea95381,234_add_usage_log_upstream_response_model.sql=cad520cbfcf7af7ea9acae92e5bcbe27501fd9e3ad5b02e306f4f97be4410a82,235_add_usage_log_upstream_model_mismatch_index_notx.sql=692f2a75f0c62670b4d68986912bf24eb92f6377ec904d3806ff7d62b0da8355,236_projects.sql=050ad388c07995c4167ebd5ef52211f5cc2f04dfb74d6ab6655403d03f9936ce,237_skill_catalog_localizations.sql=89f58ab9526f6eb21175f22ab44d073fada7c4601dc62060687f83f93c8ac1d3,238_skill_catalog_zh_001_167.sql=13f8328f3a4da795351cf742908b761cc406cfc6a102eee4a6291ca984d47a91,239_skill_catalog_zh_168_334.sql=b5de647a5ad20292ab538a556df71ad57c4932d070293f6804272d894f15a62d,240_skill_catalog_zh_335_500.sql=05a8f15c65ce5e2f81c58fdeb3c270ebb7d1519e05209bc3f9c3e242bb0e33f1,241_skill_catalog_zh_batch_1.sql=ee1d129d4f2ec009ca9a751b1db3f90e944269670a812926fc2b827fc0834401,242_skill_catalog_zh_batch_2.sql=b4f3f4210bc2ce171ce4cd682bf739520f83d4e691475162c08f9454f2d882db,243_skill_catalog_zh_batch_3.sql=ac5b08667cd780ea2c87de7f4ac0c8aa0de4aa2367aa8a81d4a38f1a18633cd6,244_skill_catalog_zh_batch_4.sql=54635128c55355fed279ef97fefa51a9d71e07670567fca60abb156a1f2b9e57,245_skill_catalog_zh_batch_5.sql=1a4fe1650914b06427e66f64654b8aae4f2dadebafc80db65663e46a77517ad1,246_skill_catalog_zh_batch_6.sql=26af86008459fffc6aca2a3d73224c74b930b074fd3519e8df211898a0c36d97,247_user_platform_quotas_add_deepseek.sql=6c6816fadf6ea30f2cfd0fabfc7852ddf2270c6da4dd49691f1764f16019d8c4,248_channel_monitor_deepseek_provider.sql=03f90a36eec0e53e524d32479bfe8a377302afd259900516a12aee93dbaa10b7,249_zhipu_provider.sql=3091d6c40ceaa24be39f94c81235d743e751727780f0cd4c8b0fb818860182e4"
 [[ "$candidate_tail" == "$expected_tail" ]] || die "candidate migration tail differs"
 assert_projects_schema
+assert_deepseek_schema
 
 "${compose[@]}" up --no-build --detach --wait --wait-timeout 180 sub2api
 wait_ready

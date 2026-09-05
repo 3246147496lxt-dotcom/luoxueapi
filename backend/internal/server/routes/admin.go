@@ -57,6 +57,13 @@ func RegisterAdminRoutes(
 		// Grok OAuth
 		registerGrokOAuthRoutes(admin, h)
 
+		// DeepSeek pay-as-you-go balance (manual API-key refresh). Keep the
+		// provider-oriented alias compatible with the upstream project while the
+		// optional periodic checker reuses the same account-handler probe service.
+		admin.GET("/cn-providers/accounts/:id/balance", h.Admin.Account.QueryCNProviderBalance)
+		// Zhipu GLM Coding Plan rolling-window quota probe.
+		admin.GET("/cn-providers/accounts/:id/quota", h.Admin.Account.QueryCNProviderQuota)
+
 		// 代理管理
 		registerProxyRoutes(admin, h, stepUpAuth)
 
@@ -430,6 +437,7 @@ func registerAccountRoutes(admin *gin.RouterGroup, h *handler.Handlers, stepUpAu
 		accounts.POST("/:id/upstream-billing-probe", h.Admin.Account.ProbeUpstreamBilling)
 		accounts.DELETE("/:id", h.Admin.Account.Delete)
 		accounts.POST("/:id/test", h.Admin.Account.Test)
+		accounts.GET("/:id/balance", h.Admin.Account.QueryDeepSeekBalance)
 		accounts.POST("/:id/recover-state", h.Admin.Account.RecoverState)
 		accounts.POST("/:id/refresh", h.Admin.Account.Refresh)
 		accounts.POST("/:id/apply-oauth-credentials", h.Admin.Account.ApplyOAuthCredentials)

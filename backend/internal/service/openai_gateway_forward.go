@@ -97,7 +97,39 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		return s.forwardGrokResponses(ctx, c, account, body, originalModel, reqStream, startTime)
 	}
 
-	if account.Type == AccountTypeAPIKey && !openai_compat.ShouldUseResponsesAPI(account.Extra) {
+	// A CN provider's explicit Anthropic protocol exposes /v1/messages rather
+	// than OpenAI Responses. Convert this Responses request at the boundary and
+	// never let it fall through to the raw Chat/Responses bridges. The exact
+	// protocol check preserves all existing default/adaptive behavior.
+	if account != nil && account.IsCNProvider() && account.IsAnthropicProtocol() {
+		return s.forwardResponsesViaNativeAnthropic(ctx, c, account, body, "")
+	}
+
+	// DeepSeek defaults to the guaranteed Chat Completions API.  Only an
+	// explicit Responses/adaptive protocol uses the native /responses endpoint;
+	// compact requests are always bridged because DeepSeek has no compaction
+	// subresource.  Generic OpenAI API-key accounts retain the existing
+	// capability-probe behavior.
+	if account.IsDeepseek() {
+		if !shouldUseNativeDeepSeekResponses(account, isOpenAIResponsesCompactPath(c)) {
+			return s.forwardResponsesViaRawChatCompletions(ctx, c, account, body)
+		}
+		// DeepSeek's native Responses API accepts ordinary function/web-search
+		// tools and the built-in apply_patch custom tool, but not Codex's other
+		// client-only tool shapes (tool_search, namespaces, or arbitrary custom
+		// tools).  Reuse the existing reversible Responses→Chat bridge for those
+		// requests so tool calls remain executable instead of being silently
+		// ignored by the provider.
+		if deepSeekResponsesNeedsChatFallback(body) {
+			return s.forwardResponsesViaRawChatCompletions(ctx, c, account, body)
+		}
+	} else if account.IsCNProvider() {
+		// GLM (and any future CN provider without a native Responses endpoint)
+		// exposes Chat Completions as its data plane.  Bridge /v1/responses at
+		// the gateway boundary instead of sending an OpenAI Responses payload to
+		// a provider that only understands /chat/completions.
+		return s.forwardResponsesViaRawChatCompletions(ctx, c, account, body)
+	} else if account.Type == AccountTypeAPIKey && !openai_compat.ShouldUseResponsesAPI(account.Extra) {
 		return s.forwardResponsesViaRawChatCompletions(ctx, c, account, body)
 	}
 
@@ -406,7 +438,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		maxOutputTokens := gjson.GetBytes(body, "max_output_tokens")
 		if maxOutputTokens.Exists() {
 			switch account.Platform {
-			case PlatformOpenAI:
+			case PlatformOpenAI, PlatformDeepseek:
 				// Preserve Responses-native output limits unless the selected upstream
 				// explicitly rejects the field in the bounded HTTP retry loop below.
 			case PlatformAnthropic:
@@ -795,10 +827,17 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		return nil, wsErr
 	}
 
-	// Later policy/model transforms can rebuild the JSON body after ingress
-	// normalization. Re-pin the Lite wire contract immediately before the direct
-	// HTTP path so the upstream always receives an explicit false value.
+	// Body transforms above (policy, model/tool normalization, and field
+	// filtering) may rebuild the JSON after the ingress Lite normalization. Pin
+	// the Lite contract once more immediately before the direct HTTP Responses
+	// path so no later transform can leave the upstream with an omitted/true
+	// parallel_tool_calls value. Non-Lite requests retain the public API rule
+	// handled by normalizeOpenAIParallelToolCallsWithoutTools.
 	if responsesLite {
+		// Only the parallel-tool contract is needed at this late stage. The full
+		// OAuth Lite tools migration already ran at ingress; keeping this pass
+		// lightweight avoids rejecting tool shapes introduced by a later bridge
+		// rewrite (for example the image-generation path).
 		liteBody, liteChanged, liteErr := normalizeOpenAIResponsesLiteParallelToolCallsPayload(body)
 		if liteErr != nil {
 			return nil, fmt.Errorf("normalize final Responses Lite payload: %w", liteErr)
@@ -1111,6 +1150,12 @@ func (s *OpenAIGatewayService) buildUpstreamRequest(ctx context.Context, c *gin.
 	case AccountTypeAPIKey:
 		// API Key accounts use Platform API or custom base URL
 		baseURL := account.GetOpenAIBaseURL()
+		// Adaptive DeepSeek accounts may advertise distinct endpoints per
+		// protocol.  Responses traffic must use the Responses-specific base
+		// rather than the legacy Chat Completions URL.
+		if account.UsesNativeCNResponses() && account.IsAdaptiveAPIProtocol() {
+			baseURL = account.GetCNProtocolBaseURL(APIProtocolResponses)
+		}
 		if baseURL == "" {
 			targetURL = openaiPlatformAPIURL
 		} else {
@@ -1118,14 +1163,20 @@ func (s *OpenAIGatewayService) buildUpstreamRequest(ctx context.Context, c *gin.
 			if err != nil {
 				return nil, err
 			}
-			targetURL = buildOpenAIResponsesURL(validatedURL)
+			targetURL = buildOpenAIResponsesURLForPlatform(account.Platform, validatedURL)
 		}
 	default:
 		targetURL = openaiPlatformAPIURL
 	}
 	targetURL = appendOpenAIResponsesRequestPathSuffix(targetURL, openAIResponsesRequestPathSuffix(c))
-	// Compatibility bridges may rebuild the body after the ingress pass. Keep
-	// the Responses Lite contract pinned at the final HTTP request boundary.
+	// buildUpstreamRequest is also the last hop for the Chat/Anthropic
+	// compatibility bridges and the OAuth image Responses path. Those paths can
+	// create or rebuild the Responses body after Forward's ingress normalizer.
+	// Re-apply only the Lite parallel-tool contract here so the final wire body
+	// always carries `parallel_tool_calls:false`. Keep this lightweight (rather
+	// than re-running the OAuth tools migration) because image-generation bodies
+	// legitimately contain tool types that the general Lite tools normalizer
+	// does not handle.
 	if account != nil && account.IsOpenAI() &&
 		(isOpenAIResponsesLiteWebSocketPayload(body) ||
 			(c != nil && isOpenAIResponsesLiteHeader(c.GetHeader(responsesLiteHeader)))) {
@@ -1137,6 +1188,10 @@ func (s *OpenAIGatewayService) buildUpstreamRequest(ctx context.Context, c *gin.
 			body = liteBody
 		}
 	}
+	// DeepSeek's native Responses endpoint is stateless.  Normalize only this
+	// platform's payload immediately before forwarding, after all model/body
+	// transforms have completed.
+	body = normalizeDeepSeekResponsesRequestBody(account, body)
 
 	req, err := http.NewRequestWithContext(ctx, "POST", targetURL, bytes.NewReader(body))
 	if err != nil {

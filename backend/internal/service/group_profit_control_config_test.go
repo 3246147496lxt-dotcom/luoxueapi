@@ -39,6 +39,7 @@ func TestValidateProfitControlConfigBoundaries(t *testing.T) {
 		{name: "sum below one", platform: PlatformAnthropic, minMargin: 0.75, safetyBuffer: 0.2499},
 		{name: "gemini", platform: PlatformGemini, minMargin: 0.2, safetyBuffer: 0.1},
 		{name: "grok", platform: PlatformGrok, minMargin: 0.2, safetyBuffer: 0.1},
+		{name: "deepseek", platform: PlatformDeepseek, minMargin: 0.2, safetyBuffer: 0.1},
 		{name: "antigravity", platform: PlatformAntigravity, minMargin: 0.2, safetyBuffer: 0.1},
 	}
 	for _, tc := range valid {

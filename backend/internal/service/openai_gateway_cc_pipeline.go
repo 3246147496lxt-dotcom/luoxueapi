@@ -150,13 +150,13 @@ func (s *OpenAIGatewayService) openAIChatCompletionsTargetURL(account *Account) 
 	if err != nil {
 		return "", fmt.Errorf("invalid base_url: %w", err)
 	}
-	return buildOpenAIChatCompletionsURL(validatedURL), nil
+	return buildOpenAIChatCompletionsURLForPlatform(account.Platform, validatedURL), nil
 }
 
 // resolveCCFallbackTarget 解析两条 CC 回退路径共用的账号凭证与上游端点
 // （回退路径仅面向 APIKey 账号，凭证恒为 openai api_key）。
 func (s *OpenAIGatewayService) resolveCCFallbackTarget(account *Account) (apiKey string, targetURL string, err error) {
-	apiKey = account.GetOpenAIApiKey()
+	apiKey = account.GetOpenAIProtocolAPIKey()
 	if apiKey == "" {
 		return "", "", fmt.Errorf("account %d missing api_key", account.ID)
 	}

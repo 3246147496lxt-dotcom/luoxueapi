@@ -700,6 +700,8 @@ const platformFilterOptions = computed(() => [
   { value: 'gemini', label: 'Gemini' },
   { value: 'antigravity', label: 'Antigravity' },
   { value: 'grok', label: 'Grok' },
+  { value: 'zhipu', label: 'Zhipu GLM' },
+  { value: 'deepseek', label: 'DeepSeek' },
 ])
 
 const categoryOptions = computed(() => [
@@ -1095,6 +1097,8 @@ function platformLabel(platform: string): string {
     gemini: 'Gemini',
     antigravity: 'Antigravity',
     grok: 'Grok',
+    zhipu: 'Zhipu GLM',
+    deepseek: 'DeepSeek',
   }
   return labels[platform] || platform
 }

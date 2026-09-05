@@ -37,6 +37,55 @@ func (r *countTokensRuntimeStateRepo) SetError(_ context.Context, _ int64, _ str
 	return nil
 }
 
+func TestOpenAIGatewayService_ForwardCountTokensAsAnthropic_DeepSeekUsesLocalEstimate(t *testing.T) {
+	setGinTestMode()
+
+	body := []byte(`{"model":"deepseek-chat","system":"You are helpful.","messages":[{"role":"user","content":"hello DeepSeek"}]}`)
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages/count_tokens", bytes.NewReader(body))
+	c.Request.Header.Set("Content-Type", "application/json")
+
+	// A DeepSeek count_tokens request must not reach an upstream transport. If
+	// the implementation regresses to the OpenAI input_tokens bridge, this
+	// recorder returns an error and the test fails on the status/body assertions.
+	upstream := &httpUpstreamRecorder{err: fmt.Errorf("unexpected DeepSeek upstream request")}
+	svc := &OpenAIGatewayService{httpUpstream: upstream}
+	account := &Account{
+		ID:          707,
+		Name:        "deepseek-apikey",
+		Platform:    PlatformDeepseek,
+		Type:        AccountTypeAPIKey,
+		Concurrency: 1,
+		Credentials: map[string]any{"api_key": "sk-deepseek"},
+		Status:      StatusActive,
+		Schedulable: true,
+	}
+
+	expected, err := estimateAnthropicCountTokensLocally(body)
+	require.NoError(t, err)
+	require.NoError(t, svc.ForwardCountTokensAsAnthropic(context.Background(), c, account, body, ""))
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.JSONEq(t, fmt.Sprintf(`{"input_tokens":%d}`, expected), rec.Body.String())
+	require.Empty(t, upstream.requests, "DeepSeek count_tokens must be estimated locally")
+}
+
+func TestOpenAIGatewayService_ForwardCountTokensAsAnthropic_DeepSeekInvalidBody(t *testing.T) {
+	setGinTestMode()
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	invalidBody := []byte(`{"model":"deepseek-chat"`)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/messages/count_tokens", bytes.NewReader(invalidBody))
+
+	svc := &OpenAIGatewayService{httpUpstream: &httpUpstreamRecorder{err: fmt.Errorf("unexpected DeepSeek upstream request")}}
+	account := &Account{Platform: PlatformDeepseek, Type: AccountTypeAPIKey}
+
+	err := svc.ForwardCountTokensAsAnthropic(context.Background(), c, account, invalidBody, "")
+	require.Error(t, err)
+	require.Equal(t, http.StatusBadRequest, rec.Code)
+	require.Contains(t, rec.Body.String(), "invalid_request_error")
+}
+
 func TestOpenAIGatewayService_ForwardCountTokensAsAnthropic_APIKeyUsesResponsesInputTokens(t *testing.T) {
 	setGinTestMode()
 

@@ -35,6 +35,9 @@ func (s *OpenAIGatewayService) buildOpenAIResponsesWSURL(account *Account) (stri
 		targetURL = chatgptCodexURL
 	case AccountTypeAPIKey:
 		baseURL := account.GetOpenAIBaseURL()
+		if account.UsesNativeCNResponses() && account.IsAdaptiveAPIProtocol() {
+			baseURL = account.GetCNProtocolBaseURL(APIProtocolResponses)
+		}
 		if baseURL == "" {
 			targetURL = openaiPlatformAPIURL
 		} else {
@@ -42,7 +45,7 @@ func (s *OpenAIGatewayService) buildOpenAIResponsesWSURL(account *Account) (stri
 			if err != nil {
 				return "", err
 			}
-			targetURL = buildOpenAIResponsesURL(validatedURL)
+			targetURL = buildOpenAIResponsesURLForPlatform(account.Platform, validatedURL)
 		}
 	default:
 		targetURL = openaiPlatformAPIURL
@@ -174,6 +177,13 @@ func (s *OpenAIGatewayService) buildOpenAIWSCreatePayload(reqBody map[string]any
 	// OAuth 默认保持 store=false，避免误依赖服务端历史。
 	if account != nil && account.Type == AccountTypeOAuth && !s.isOpenAIWSStoreRecoveryAllowed(account) {
 		payload["store"] = false
+	}
+	// DeepSeek's native Responses endpoint is stateless and rejects both the
+	// server-side store flag and continuation IDs.  Keep the WS payload aligned
+	// with the HTTP normalization path.
+	if isDeepSeekResponsesAccount(account) {
+		payload["store"] = false
+		delete(payload, "previous_response_id")
 	}
 	return payload
 }

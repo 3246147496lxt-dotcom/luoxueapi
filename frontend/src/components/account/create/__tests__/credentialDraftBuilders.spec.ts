@@ -15,11 +15,20 @@ import {
   buildOpenAIExtra,
   buildTempUnschedulableRules,
   buildVertexServiceAccountCredentials,
+  DEEPSEEK_BASE_URL_PRESETS,
+  ZHIPU_BASE_URL_PRESETS,
   defaultAPIKeyBaseURL,
+  defaultZhipuBaseURL,
+  inferZhipuRoutingFromBaseURL,
+  isManagedZhipuBaseURL,
+  zhipuBaseURLForRouting,
+  normalizeZhipuAccountMode,
+  normalizeZhipuApiProtocol,
   normalizePoolModeRetryCount,
   parsePoolModeRetryStatusCodes,
   parseVertexServiceAccountJSON,
 } from '../credentialDraftBuilders'
+import { buildZhipuAccountPayload } from '../platforms/zhipu'
 
 const base: AccountBaseDraft = {
   name: 'Account',
@@ -42,6 +51,78 @@ describe('create-account credential draft builders', () => {
       'https://generativelanguage.googleapis.com',
     )
     expect(defaultAPIKeyBaseURL('grok')).toBe('https://api.x.ai/v1')
+    expect(defaultAPIKeyBaseURL('deepseek')).toBe('https://api.deepseek.com')
+    expect(DEEPSEEK_BASE_URL_PRESETS).toEqual([
+      { label: 'DeepSeek API', url: 'https://api.deepseek.com' },
+    ])
+    expect(ZHIPU_BASE_URL_PRESETS).toEqual([
+      { label: 'GLM API（按量）', url: 'https://open.bigmodel.cn/api/paas/v4' },
+      { label: 'GLM Coding Plan', url: 'https://open.bigmodel.cn/api/coding/paas/v4' },
+      { label: 'GLM Anthropic', url: 'https://open.bigmodel.cn/api/anthropic' },
+    ])
+    expect(defaultZhipuBaseURL('payg', 'chat_completions')).toBe(
+      'https://open.bigmodel.cn/api/paas/v4',
+    )
+    expect(defaultZhipuBaseURL('coding', 'chat_completions')).toBe(
+      'https://open.bigmodel.cn/api/coding/paas/v4',
+    )
+    expect(defaultZhipuBaseURL('coding', 'anthropic')).toBe(
+      'https://open.bigmodel.cn/api/anthropic',
+    )
+  })
+
+  it('infers GLM mode/protocol only from exact official endpoints', () => {
+    expect(inferZhipuRoutingFromBaseURL('https://open.bigmodel.cn/api/paas/v4/')).toEqual({
+      mode: 'payg',
+      protocol: 'chat_completions',
+    })
+    expect(inferZhipuRoutingFromBaseURL('https://api.z.ai/api/coding/paas/v4')).toEqual({
+      mode: 'coding',
+      protocol: 'chat_completions',
+    })
+    // Anthropic is shared by payg and Coding Plan, so mode is intentionally
+    // left unspecified for callers to retain their explicit selection.
+    expect(inferZhipuRoutingFromBaseURL('https://open.bigmodel.cn/api/anthropic')).toEqual({
+      protocol: 'anthropic',
+    })
+    expect(inferZhipuRoutingFromBaseURL('https://relay.example/api/coding/paas/v4')).toBeNull()
+    expect(inferZhipuRoutingFromBaseURL('https://evil.example/?next=api.z.ai')).toBeNull()
+    expect(inferZhipuRoutingFromBaseURL('https://open.bigmodel.cn:8443/api/paas/v4')).toBeNull()
+    expect(isManagedZhipuBaseURL('https://open.bigmodel.cn/api/paas/v4')).toBe(true)
+    expect(isManagedZhipuBaseURL('https://relay.example/api/paas/v4')).toBe(false)
+  })
+
+  it('preserves the selected international GLM host when routing changes', () => {
+    expect(
+      zhipuBaseURLForRouting(
+        'coding',
+        'chat_completions',
+        'https://api.z.ai/api/paas/v4',
+      ),
+    ).toBe('https://api.z.ai/api/coding/paas/v4')
+    expect(
+      zhipuBaseURLForRouting(
+        'payg',
+        'anthropic',
+        'https://open.bigmodel.cn/api/coding/paas/v4',
+      ),
+    ).toBe('https://open.bigmodel.cn/api/anthropic')
+    expect(
+      zhipuBaseURLForRouting(
+        'coding',
+        'chat_completions',
+        'https://relay.example/glm/v1',
+      ),
+    ).toBe('https://open.bigmodel.cn/api/coding/paas/v4')
+  })
+
+  it('normalizes persisted GLM routing values defensively', () => {
+    expect(normalizeZhipuAccountMode(' CODING ')).toBe('coding')
+    expect(normalizeZhipuAccountMode('payg')).toBe('payg')
+    expect(normalizeZhipuAccountMode('responses')).toBeUndefined()
+    expect(normalizeZhipuApiProtocol(' ANTHROPIC ')).toBe('anthropic')
+    expect(normalizeZhipuApiProtocol('chat_completions')).toBe('chat_completions')
+    expect(normalizeZhipuApiProtocol('responses')).toBeUndefined()
   })
 
   it('normalizes pool-mode retry input without changing the payload contract', () => {
@@ -134,6 +215,23 @@ describe('create-account credential draft builders', () => {
       api_key: 'gemini-key',
       tier_id: 'aistudio_paid',
     })
+
+    expect(
+      buildAPIKeyCredentials({
+        platform: 'deepseek',
+        baseUrl: '',
+        apiKey: ' sk-deepseek ',
+        enabled: false,
+        retryCount: 3,
+        retryStatusCodesInput: '',
+        customErrorCodesEnabled: false,
+        customErrorCodes: [],
+        interceptWarmupRequests: false,
+      }),
+    ).toEqual({
+      base_url: 'https://api.deepseek.com',
+      api_key: 'sk-deepseek',
+    })
   })
 
   it('keeps legacy OpenAI capabilities implicit and persists audio opt-ins', () => {
@@ -225,6 +323,60 @@ describe('create-account credential draft builders', () => {
       group_ids: [3],
       expires_at: null,
       auto_pause_on_expired: true,
+    })
+
+    const deepseekCredentials = buildAPIKeyCredentials({
+      platform: 'deepseek',
+      baseUrl: ' https://api.deepseek.com ',
+      apiKey: ' sk-deepseek ',
+      modelMapping: { 'deepseek-chat': 'deepseek-v4-flash' },
+      enabled: false,
+      retryCount: 3,
+      retryStatusCodesInput: '',
+      customErrorCodesEnabled: false,
+      customErrorCodes: [],
+      interceptWarmupRequests: false,
+    })
+    expect(
+      buildAccountCreatePayload(
+        base,
+        toAccountCredentialDraft('deepseek', 'apikey', deepseekCredentials),
+      ),
+    ).toMatchObject({
+      platform: 'deepseek',
+      type: 'apikey',
+      credentials: {
+        base_url: 'https://api.deepseek.com',
+        api_key: 'sk-deepseek',
+        model_mapping: { 'deepseek-chat': 'deepseek-v4-flash' },
+      },
+    })
+  })
+
+  it('keeps typed GLM routing metadata while preserving legacy options', () => {
+    const payload = buildZhipuAccountPayload(base, {
+      platform: 'zhipu',
+      kind: 'apikey',
+      baseUrl: ' https://api.z.ai/api/coding/paas/v4 ',
+      apiKey: ' sk-glm ',
+      accountMode: 'coding',
+      apiProtocol: 'anthropic',
+      zhipuOrganization: ' org-demo ',
+      zhipuProject: ' project-demo ',
+      credentialOptions: {
+        api_protocol: 'chat_completions',
+        model_mapping: { 'glm-*': 'glm-5' },
+      },
+    })
+
+    expect(payload.credentials).toEqual({
+      base_url: 'https://api.z.ai/api/coding/paas/v4',
+      api_key: 'sk-glm',
+      api_protocol: 'anthropic',
+      account_mode: 'coding',
+      zhipu_organization: 'org-demo',
+      zhipu_project: 'project-demo',
+      model_mapping: { 'glm-*': 'glm-5' },
     })
   })
 

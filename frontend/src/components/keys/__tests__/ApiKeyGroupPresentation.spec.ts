@@ -71,7 +71,7 @@ const mountSummary = (platform?: GroupPlatform) => mount(ApiKeySummaryCard, {
 })
 
 describe('API key group presentation', () => {
-  it.each<GroupPlatform>(['openai', 'anthropic', 'gemini', 'antigravity', 'grok', 'deepseek'])(
+  it.each<GroupPlatform>(['openai', 'anthropic', 'gemini', 'antigravity', 'grok', 'zhipu', 'deepseek'])(
     'uses the %s platform icon and tone on desktop and mobile',
     (platform) => {
       const workspace = mountWorkspace(platform)

@@ -18,6 +18,7 @@ import usageAPI from './usage'
 import geminiAPI from './gemini'
 import antigravityAPI from './antigravity'
 import grokAPI from './grok'
+import cnProvidersAPI from './cnProviders'
 import userAttributesAPI from './userAttributes'
 import opsAPI from './ops'
 import errorPassthroughAPI from './errorPassthrough'
@@ -60,6 +61,7 @@ export const adminAPI = {
   gemini: geminiAPI,
   antigravity: antigravityAPI,
   grok: grokAPI,
+  cnProviders: cnProvidersAPI,
   userAttributes: userAttributesAPI,
   ops: opsAPI,
   errorPassthrough: errorPassthroughAPI,
@@ -100,6 +102,7 @@ export {
   geminiAPI,
   antigravityAPI,
   grokAPI,
+  cnProvidersAPI,
   userAttributesAPI,
   opsAPI,
   errorPassthroughAPI,
@@ -129,6 +132,12 @@ export default adminAPI
 // Re-export types used by components
 export type { AuditLog, AuditLogQuery, AuditLogListResponse } from './audit'
 export type { BalanceHistoryItem } from './users'
+export type {
+  CNQuotaTier,
+  CNProviderQuotaProbeResult,
+  CNProviderBalanceEntry,
+  CNProviderBalanceResult,
+} from './cnProviders'
 export type { ErrorPassthroughRule, CreateRuleRequest, UpdateRuleRequest } from './errorPassthrough'
 export type { BackupAgentHealth, DataManagementConfig } from './dataManagement'
 export type { TLSFingerprintProfile, CreateProfileRequest, UpdateProfileRequest } from './tlsFingerprintProfile'

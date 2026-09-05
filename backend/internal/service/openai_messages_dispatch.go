@@ -75,6 +75,14 @@ func (g *Group) ResolveMessagesDispatchModel(requestedModel string) string {
 		return ""
 	}
 
+	// CN provider groups are routed through their account-level model mapping
+	// and/or native protocol bridge.  The OpenAI Messages defaults below map
+	// Claude families to gpt-5.x, which is invalid for GLM/DeepSeek upstreams
+	// and can make an otherwise valid group impossible to schedule.
+	if IsCNProvider(g.Platform) {
+		return ""
+	}
+
 	cfg := normalizeOpenAIMessagesDispatchModelConfig(g.MessagesDispatchModelConfig)
 	if mappedModel := strings.TrimSpace(cfg.ExactModelMappings[requestedModel]); mappedModel != "" {
 		return mappedModel

@@ -109,7 +109,11 @@ import { useI18n } from 'vue-i18n'
 import type { APIMode, BodyOverrideMode, Provider } from '@/api/admin/channelMonitor'
 import {
   API_MODE_RESPONSES,
+  DEFAULT_DEEPSEEK_MODEL,
+  DEFAULT_ZHIPU_MODEL,
+  PROVIDER_ZHIPU,
   DEFAULT_GROK_MODEL,
+  PROVIDER_DEEPSEEK,
   PROVIDER_GROK,
   PROVIDER_OPENAI,
 } from '@/constants/channelMonitor'
@@ -307,11 +311,17 @@ const bodyPlaceholder = computed(() => {
     }
     return '{\n  "model": "gpt-4o-mini",\n  "instructions": "You are a health check endpoint. Reply briefly.",\n  "input": "Reply with exactly: ok",\n  "max_output_tokens": 20,\n  "stream": false\n}'
   }
-  if (props.provider === PROVIDER_OPENAI || props.provider === PROVIDER_GROK) {
+  if (props.provider === PROVIDER_OPENAI || props.provider === PROVIDER_GROK || props.provider === PROVIDER_ZHIPU || props.provider === PROVIDER_DEEPSEEK) {
     if (props.bodyOverrideMode === 'merge') {
       return '{\n  "max_tokens": 20\n}'
     }
-    const model = props.provider === PROVIDER_GROK ? DEFAULT_GROK_MODEL : 'gpt-4o-mini'
+    const model = props.provider === PROVIDER_GROK
+      ? DEFAULT_GROK_MODEL
+      : props.provider === PROVIDER_ZHIPU
+        ? DEFAULT_ZHIPU_MODEL
+        : props.provider === PROVIDER_DEEPSEEK
+        ? DEFAULT_DEEPSEEK_MODEL
+        : 'gpt-4o-mini'
     return `{\n  "model": "${model}",\n  "messages": [{"role":"user","content":"Reply with exactly: ok"}],\n  "max_tokens": 20,\n  "stream": false\n}`
   }
   if (props.bodyOverrideMode === 'merge') {

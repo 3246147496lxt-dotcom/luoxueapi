@@ -13,7 +13,7 @@
 
       <div>
         <label class="input-label">{{ t('admin.channelMonitor.form.provider') }} <span class="text-red-500">*</span></label>
-        <div class="grid grid-cols-2 gap-3 sm:grid-cols-4">
+        <div class="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
           <button
             v-for="opt in providerOptions"
             :key="opt.value"
@@ -216,10 +216,16 @@ import {
   PROVIDER_ANTHROPIC,
   PROVIDER_GEMINI,
   PROVIDER_GROK,
+  PROVIDER_ZHIPU,
+  PROVIDER_DEEPSEEK,
   API_MODE_CHAT_COMPLETIONS,
   API_MODE_RESPONSES,
   DEFAULT_GROK_ENDPOINT,
   DEFAULT_GROK_MODEL,
+  DEFAULT_DEEPSEEK_ENDPOINT,
+  DEFAULT_DEEPSEEK_MODEL,
+  DEFAULT_ZHIPU_ENDPOINT,
+  DEFAULT_ZHIPU_MODEL,
   DEFAULT_INTERVAL_SECONDS,
 } from '@/constants/channelMonitor'
 
@@ -402,6 +408,8 @@ const providerOptions = computed<ProviderOption[]>(() => [
   { value: PROVIDER_OPENAI, label: t('monitorCommon.providers.openai') },
   { value: PROVIDER_GEMINI, label: t('monitorCommon.providers.gemini') },
   { value: PROVIDER_GROK, label: t('monitorCommon.providers.grok') },
+  { value: PROVIDER_ZHIPU, label: t('monitorCommon.providers.zhipu') },
+  { value: PROVIDER_DEEPSEEK, label: t('monitorCommon.providers.deepseek') },
 ])
 
 function selectProvider(provider: Provider) {
@@ -415,6 +423,16 @@ function selectProvider(provider: Provider) {
   if (provider === PROVIDER_GROK) {
     if (!form.endpoint.trim()) form.endpoint = DEFAULT_GROK_ENDPOINT
     if (!form.primary_model.trim()) form.primary_model = DEFAULT_GROK_MODEL
+    return
+  }
+  if (provider === PROVIDER_DEEPSEEK) {
+    if (!form.endpoint.trim()) form.endpoint = DEFAULT_DEEPSEEK_ENDPOINT
+    if (!form.primary_model.trim()) form.primary_model = DEFAULT_DEEPSEEK_MODEL
+    return
+  }
+  if (provider === PROVIDER_ZHIPU) {
+    if (!form.endpoint.trim()) form.endpoint = DEFAULT_ZHIPU_ENDPOINT
+    if (!form.primary_model.trim()) form.primary_model = DEFAULT_ZHIPU_MODEL
     return
   }
   if (clearGrokEndpoint) form.endpoint = ''

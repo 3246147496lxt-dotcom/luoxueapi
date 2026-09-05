@@ -279,6 +279,23 @@ function buildGrokAPIKeyAccount() {
   } as any
 }
 
+function buildZhipuAccount(
+  baseUrl = 'https://open.bigmodel.cn/api/paas/v4',
+  credentials: Record<string, unknown> = {},
+) {
+  return {
+    ...buildAccount(),
+    id: 7,
+    name: 'GLM API Key',
+    platform: 'zhipu',
+    credentials: {
+      api_key: 'sk-zhipu-test',
+      base_url: baseUrl,
+      ...credentials,
+    },
+  } as any
+}
+
 function buildOpenAISetupTokenAccount() {
   return {
     ...buildAccount(),
@@ -539,6 +556,121 @@ describe('EditAccountModal', () => {
 
     expect(updateAccountMock).toHaveBeenCalledTimes(1)
     expect(updateAccountMock.mock.calls[0]?.[1]?.credentials?.base_url).toBe('https://api.x.ai/v1')
+  })
+
+  it('rehydrates legacy GLM routing metadata from the official Coding endpoint', async () => {
+    const account = buildZhipuAccount('https://open.bigmodel.cn/api/coding/paas/v4')
+    updateAccountMock.mockReset()
+    checkMixedChannelRiskMock.mockReset()
+    checkMixedChannelRiskMock.mockResolvedValue({ has_risk: false })
+    updateAccountMock.mockResolvedValue(account)
+
+    const wrapper = mountModal(account)
+    const selects = wrapper.findAll('select')
+    expect(selects[0]?.element.value).toBe('coding')
+    expect(selects[1]?.element.value).toBe('chat_completions')
+    expect((wrapper.get('input[placeholder="https://open.bigmodel.cn/api/paas/v4"]').element as HTMLInputElement).value)
+      .toBe('https://open.bigmodel.cn/api/coding/paas/v4')
+
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+
+    expect(updateAccountMock).toHaveBeenCalledTimes(1)
+    expect(updateAccountMock.mock.calls[0]?.[1]?.credentials).toMatchObject({
+      base_url: 'https://open.bigmodel.cn/api/coding/paas/v4',
+      account_mode: 'coding',
+      api_protocol: 'chat_completions',
+    })
+  })
+
+  it('rehydrates the shared GLM Anthropic endpoint without inventing a mode', async () => {
+    const account = buildZhipuAccount('https://open.bigmodel.cn/api/anthropic')
+    updateAccountMock.mockReset()
+    checkMixedChannelRiskMock.mockReset()
+    checkMixedChannelRiskMock.mockResolvedValue({ has_risk: false })
+    updateAccountMock.mockResolvedValue(account)
+
+    const wrapper = mountModal(account)
+    const selects = wrapper.findAll('select')
+    expect(selects[0]?.element.value).toBe('payg')
+    expect(selects[1]?.element.value).toBe('anthropic')
+
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+
+    expect(updateAccountMock.mock.calls[0]?.[1]?.credentials).toMatchObject({
+      base_url: 'https://open.bigmodel.cn/api/anthropic',
+      account_mode: 'payg',
+      api_protocol: 'anthropic',
+    })
+  })
+
+  it('updates an official GLM endpoint when the mode selector changes', async () => {
+    const account = buildZhipuAccount()
+    updateAccountMock.mockReset()
+    checkMixedChannelRiskMock.mockReset()
+    checkMixedChannelRiskMock.mockResolvedValue({ has_risk: false })
+    updateAccountMock.mockResolvedValue(account)
+
+    const wrapper = mountModal(account)
+    const modeSelect = wrapper.findAll('select')[0]
+    expect(modeSelect).toBeTruthy()
+    await modeSelect!.setValue('coding')
+
+    expect((wrapper.get('input[placeholder="https://open.bigmodel.cn/api/paas/v4"]').element as HTMLInputElement).value)
+      .toBe('https://open.bigmodel.cn/api/coding/paas/v4')
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+
+    expect(updateAccountMock.mock.calls[0]?.[1]?.credentials).toMatchObject({
+      base_url: 'https://open.bigmodel.cn/api/coding/paas/v4',
+      account_mode: 'coding',
+    })
+  })
+
+  it('repairs a persisted GLM mode/endpoint mismatch without changing the host variant', async () => {
+    const account = buildZhipuAccount(
+      'https://api.z.ai/api/paas/v4',
+      { account_mode: 'coding', api_protocol: 'chat_completions' },
+    )
+    updateAccountMock.mockReset()
+    checkMixedChannelRiskMock.mockReset()
+    checkMixedChannelRiskMock.mockResolvedValue({ has_risk: false })
+    updateAccountMock.mockResolvedValue(account)
+
+    const wrapper = mountModal(account)
+    const baseUrlInput = wrapper.get<HTMLInputElement>(
+      'input[placeholder="https://open.bigmodel.cn/api/paas/v4"]',
+    )
+    expect(baseUrlInput.element.value).toBe(
+      'https://api.z.ai/api/coding/paas/v4',
+    )
+
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+
+    expect(updateAccountMock.mock.calls[0]?.[1]?.credentials).toMatchObject({
+      base_url: 'https://api.z.ai/api/coding/paas/v4',
+      account_mode: 'coding',
+      api_protocol: 'chat_completions',
+    })
+  })
+
+  it('preserves a custom GLM relay while changing the account mode', async () => {
+    const account = buildZhipuAccount('https://relay.example/glm/v1')
+    updateAccountMock.mockReset()
+    checkMixedChannelRiskMock.mockReset()
+    checkMixedChannelRiskMock.mockResolvedValue({ has_risk: false })
+    updateAccountMock.mockResolvedValue(account)
+
+    const wrapper = mountModal(account)
+    const modeSelect = wrapper.findAll('select')[0]
+    await modeSelect!.setValue('coding')
+
+    expect((wrapper.get('input[placeholder="https://open.bigmodel.cn/api/paas/v4"]').element as HTMLInputElement).value)
+      .toBe('https://relay.example/glm/v1')
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+
+    expect(updateAccountMock.mock.calls[0]?.[1]?.credentials).toMatchObject({
+      base_url: 'https://relay.example/glm/v1',
+      account_mode: 'coding',
+    })
   })
 
   it('only submits model mapping credentials when saving an OpenAI spark shadow account', async () => {

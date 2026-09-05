@@ -101,3 +101,50 @@ func openAIReasoningEffortToClaudeOutputEffort(effort string) string {
 		return ""
 	}
 }
+
+// openAICompatAnthropicReasoningEffort resolves the effort emitted by the
+// Anthropic bridge after the final upstream model is known. Anthropic's max is
+// normally translated to OpenAI xhigh, but GPT-5.6 accepts the original max
+// value on Responses and Chat Completions.
+func openAICompatAnthropicReasoningEffort(req *apicompat.AnthropicRequest, upstreamModel, convertedEffort string) string {
+	if req == nil || req.OutputConfig == nil || !strings.EqualFold(strings.TrimSpace(req.OutputConfig.Effort), "max") {
+		return convertedEffort
+	}
+	if normalized := normalizeOpenAIReasoningEffortForModel(req.OutputConfig.Effort, upstreamModel); normalized != "" {
+		return normalized
+	}
+	return convertedEffort
+}
+
+// normalizeAnthropicCompatReasoningEffort applies the provider-specific
+// reasoning contract after Anthropic → Chat conversion.  The generic bridge
+// intentionally defaults output_config.effort to "medium" for parity with
+// the Responses bridge, but GLM's OpenAI-compatible endpoint interprets every
+// known level as an enabled thinking mode (medium is rewritten to high).
+// Therefore a GLM request with neither an explicit effort nor an enabled
+// thinking block must omit reasoning_effort instead of accidentally enabling
+// costly reasoning. Explicit output_config.effort always wins, including when
+// a client also sends thinking.type=disabled.
+func normalizeAnthropicCompatReasoningEffort(req *apicompat.AnthropicRequest, upstreamModel, convertedEffort string) string {
+	effort := openAICompatAnthropicReasoningEffort(req, upstreamModel, convertedEffort)
+	if !isGLMOpenAICompatModel(upstreamModel) || req == nil {
+		return effort
+	}
+
+	if req.OutputConfig != nil && strings.TrimSpace(req.OutputConfig.Effort) != "" {
+		return effort
+	}
+	if req.Thinking == nil {
+		return ""
+	}
+	switch strings.ToLower(strings.TrimSpace(req.Thinking.Type)) {
+	case "enabled", "adaptive":
+		return effort
+	default:
+		return ""
+	}
+}
+
+func isGLMOpenAICompatModel(model string) bool {
+	return strings.HasPrefix(strings.ToLower(lastOpenAIModelSegment(model)), "glm-")
+}

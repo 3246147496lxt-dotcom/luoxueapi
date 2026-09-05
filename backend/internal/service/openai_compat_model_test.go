@@ -124,6 +124,66 @@ func TestApplyOpenAICompatModelNormalization(t *testing.T) {
 	})
 }
 
+func TestNormalizeAnthropicCompatReasoningEffort(t *testing.T) {
+	t.Parallel()
+
+	medium := "medium"
+	low := "low"
+	tests := []struct {
+		name      string
+		req       *apicompat.AnthropicRequest
+		model     string
+		converted string
+		want      string
+	}{
+		{
+			name:      "GLM without thinking omits bridge default",
+			req:       &apicompat.AnthropicRequest{Model: "glm-5.2"},
+			model:     "glm-5.2",
+			converted: medium,
+			want:      "",
+		},
+		{
+			name:      "GLM disabled thinking omits bridge default",
+			req:       &apicompat.AnthropicRequest{Model: "glm-5.2", Thinking: &apicompat.AnthropicThinking{Type: "disabled"}},
+			model:     "glm-5.2",
+			converted: medium,
+			want:      "",
+		},
+		{
+			name:      "GLM enabled thinking keeps converted effort",
+			req:       &apicompat.AnthropicRequest{Model: "glm-5.2", Thinking: &apicompat.AnthropicThinking{Type: "enabled"}},
+			model:     "glm-5.2",
+			converted: medium,
+			want:      medium,
+		},
+		{
+			name: "explicit effort wins over disabled thinking",
+			req: &apicompat.AnthropicRequest{
+				Model:        "glm-5.2",
+				Thinking:     &apicompat.AnthropicThinking{Type: "disabled"},
+				OutputConfig: &apicompat.AnthropicOutputConfig{Effort: "low"},
+			},
+			model:     "glm-5.2",
+			converted: low,
+			want:      low,
+		},
+		{
+			name:      "GPT56 max remains max",
+			req:       &apicompat.AnthropicRequest{Model: "gpt-5.6-sol", OutputConfig: &apicompat.AnthropicOutputConfig{Effort: "max"}},
+			model:     "gpt-5.6-sol",
+			converted: "xhigh",
+			want:      "max",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			require.Equal(t, tt.want, normalizeAnthropicCompatReasoningEffort(tt.req, tt.model, tt.converted))
+		})
+	}
+}
+
 func TestForwardAsAnthropic_UsesExactFableMessagesDispatchModel(t *testing.T) {
 	t.Parallel()
 	setGinTestMode()

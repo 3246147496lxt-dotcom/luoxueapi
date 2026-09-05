@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  DEEPSEEK_CC_SWITCH_CODEX_MODEL,
   OPENAI_CC_SWITCH_CODEX_MODEL,
   buildCcSwitchImportDeeplink
 } from '@/utils/ccswitchImport'
@@ -36,6 +37,20 @@ describe('ccswitchImport utils', () => {
     expect(params.get('endpoint')).toBe(baseInput.baseUrl)
     expect(params.get('model')).toBe(OPENAI_CC_SWITCH_CODEX_MODEL)
     expect(atob(params.get('usageScript') || '')).toBe(baseInput.usageScript)
+  })
+
+  it('adds the DeepSeek Codex model for DeepSeek imports', () => {
+    const params = paramsFromDeeplink(
+      buildCcSwitchImportDeeplink({
+        ...baseInput,
+        platform: 'deepseek',
+        clientType: 'claude'
+      })
+    )
+
+    expect(params.get('app')).toBe('codex')
+    expect(params.get('endpoint')).toBe(baseInput.baseUrl)
+    expect(params.get('model')).toBe(DEEPSEEK_CC_SWITCH_CODEX_MODEL)
   })
 
   it.each([

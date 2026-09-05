@@ -129,6 +129,17 @@ func openAIUsagePricingAt(input *OpenAIRecordUsageInput) time.Time {
 	return timezone.Now()
 }
 
+// pricingAtValue keeps the legacy helper signatures source-compatible while
+// allowing callers that already captured the admission timestamp to thread it
+// through cost resolution. A zero/omitted value intentionally falls back to
+// the current timezone-aware clock, matching the pre-freeze behaviour.
+func pricingAtValue(values []time.Time) time.Time {
+	if len(values) > 0 && !values[0].IsZero() {
+		return values[0]
+	}
+	return timezone.Now()
+}
+
 // RecordUsage records usage and deducts balance
 func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRecordUsageInput) error {
 	if input == nil {
@@ -178,7 +189,8 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 	// token 倍率叠加高峰因子（token 计费含图片 token，图片按次倍率不受影响）。高峰因子按请求时刻现算，
 	// 不并入上面的 Resolve，以免污染 user:group 倍率缓存。
 	baseMultiplier := multiplier
-	multiplier, imageMultiplier := computePeakAwareMultipliers(apiKey, baseMultiplier, openAIUsagePricingAt(input))
+	pricingAt := openAIUsagePricingAt(input)
+	multiplier, imageMultiplier := computePeakAwareMultipliers(apiKey, baseMultiplier, pricingAt)
 	videoMultiplier := resolveVideoRateMultiplier(apiKey, baseMultiplier)
 
 	var cost *CostBreakdown
@@ -205,6 +217,12 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 		result.UpstreamModel,
 		result.Model,
 	)
+	// A CN provider may receive a Claude-shaped client model while the account
+	// maps it to a GLM/DeepSeek SKU upstream.  Never let the generic Claude
+	// fallback price silently charge that request at Claude rates; retain a
+	// Claude candidate only when an operator explicitly configured channel
+	// pricing for it.
+	billingModels = s.filterCNProviderBillingModelCandidates(ctx, account, apiKey, billingModels)
 	serviceTier := ""
 	if result.ServiceTier != nil {
 		serviceTier = strings.TrimSpace(*result.ServiceTier)
@@ -215,6 +233,15 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 		if err != nil {
 			return err
 		}
+	}
+	// DeepSeek's OpenAI/Responses and Anthropic-compatible APIs explicitly
+	// ignore service_tier.  Keep the raw value on UsageLog for observability,
+	// but never let the OpenAI-only priority/flex billing multipliers alter the
+	// amount charged for a DeepSeek request (especially during peak windows).
+	// Resolve the credential account first so a shadow account inherits the
+	// provider's billing semantics as well.
+	if billingAccount != nil && billingAccount.IsDeepseek() {
+		serviceTier = ""
 	}
 	longContextBillingEnabled := billingAccount.IsOpenAILongContextBillingEnabled()
 	baselineResolution = s.calculateOpenAIRecordUsageCostResolved(
@@ -229,6 +256,7 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 		tokens,
 		serviceTier,
 		longContextBillingEnabled,
+		pricingAt,
 	)
 	cost, err = baselineResolution.Cost, baselineResolution.Err
 	if err != nil {
@@ -260,10 +288,11 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 		result.ImageCount > 0 || result.VideoCount > 0 || result.WebSearchCalls > 0,
 	); responseModel != "" {
 		if !strings.EqualFold(responseModel, baselineBillingModel) {
-			responseModels := usageBillingModelCandidates(responseModel)
+			responseModels := s.filterCNProviderBillingModelCandidates(ctx, account, apiKey, usageBillingModelCandidates(responseModel))
 			responseResolution := s.calculateOpenAIRecordUsageCostResolved(
 				ctx, result, apiKey, responseModels, multiplier, imageMultiplier,
 				videoMultiplier, baseMultiplier, tokens, serviceTier, longContextBillingEnabled,
+				pricingAt,
 			)
 			if responseResolution.Err == nil && responseResolution.Cost != nil &&
 				responseModelPricingIdentified(responseResolution) &&
@@ -414,9 +443,9 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 
 	// 计算账号统计定价费用（使用最终上游模型匹配自定义规则）
 	if apiKey.GroupID != nil {
-		applyAccountStatsCost(ctx, usageLog, s.channelService, s.billingService,
+		applyAccountStatsCostWithServiceTier(ctx, usageLog, s.channelService, s.billingService,
 			account.ID, *apiKey.GroupID, result.UpstreamModel, result.Model,
-			tokens, cost.TotalCost,
+			tokens, cost.TotalCost, serviceTier, pricingAt,
 		)
 	}
 
@@ -513,10 +542,12 @@ func (s *OpenAIGatewayService) calculateOpenAIRecordUsageCost(
 	tokens UsageTokens,
 	serviceTier string,
 	longContextBillingEnabled bool,
+	pricingAt ...time.Time,
 ) (*CostBreakdown, error) {
 	resolution := s.calculateOpenAIRecordUsageCostResolved(
 		ctx, result, apiKey, billingModels, multiplier, imageMultiplier,
 		videoMultiplier, webSearchMultiplier, tokens, serviceTier, longContextBillingEnabled,
+		pricingAtValue(pricingAt),
 	)
 	return resolution.Cost, resolution.Err
 }
@@ -535,7 +566,9 @@ func (s *OpenAIGatewayService) calculateOpenAIRecordUsageCostResolved(
 	tokens UsageTokens,
 	serviceTier string,
 	longContextBillingEnabled bool,
+	pricingAt ...time.Time,
 ) responseBillingCostResolution {
+	requestPricingAt := pricingAtValue(pricingAt)
 	billingModel := firstUsageBillingModel(billingModels)
 	if result != nil && result.WebSearchCalls > 0 {
 		// Codex alpha/search 网页搜索按次计费：上游不返回 usage/token 字段，单价只取
@@ -576,7 +609,7 @@ func (s *OpenAIGatewayService) calculateOpenAIRecordUsageCostResolved(
 		}
 	}
 	if len(billingModels) == 0 || billingModel == "" {
-		return responseBillingCostResolution{Err: errors.New("openai usage billing model is empty")}
+		return responseBillingCostResolution{Err: fmt.Errorf("%w: openai usage billing model is empty", ErrModelPricingUnavailable)}
 	}
 	var lastErr error
 	sawChannelPricing := false
@@ -593,6 +626,7 @@ func (s *OpenAIGatewayService) calculateOpenAIRecordUsageCostResolved(
 			tokens,
 			serviceTier,
 			longContextBillingEnabled,
+			requestPricingAt,
 		)
 		sawChannelPricing = sawChannelPricing || resolution.channelPriced()
 		if resolution.Err == nil {
@@ -601,7 +635,7 @@ func (s *OpenAIGatewayService) calculateOpenAIRecordUsageCostResolved(
 		lastErr = resolution.Err
 	}
 	if lastErr == nil {
-		lastErr = errors.New("no non-empty billing model candidates")
+		lastErr = fmt.Errorf("%w: no non-empty billing model candidates", ErrModelPricingUnavailable)
 	}
 	source := PricingSourceFallback
 	if sawChannelPricing {
@@ -643,6 +677,30 @@ func isUsagePricingUnavailableError(err error) bool {
 	return strings.Contains(msg, "no pricing available") || strings.Contains(msg, "pricing not found")
 }
 
+// filterCNProviderBillingModelCandidates prevents a client-facing Claude
+// alias from falling through to the generic Claude/Sonnet fallback prices for
+// GLM or DeepSeek accounts.  Explicit channel pricing remains authoritative;
+// all other Claude-shaped candidates are removed and the caller records a
+// zero-cost usage row with an actionable warning.
+func (s *OpenAIGatewayService) filterCNProviderBillingModelCandidates(ctx context.Context, account *Account, apiKey *APIKey, candidates []string) []string {
+	if account == nil || !account.IsCNProvider() {
+		return candidates
+	}
+	out := make([]string, 0, len(candidates))
+	for _, candidate := range candidates {
+		trimmed := strings.TrimSpace(candidate)
+		if trimmed == "" {
+			continue
+		}
+		if strings.Contains(strings.ToLower(trimmed), "claude") &&
+			s.resolveOpenAIChannelPricing(ctx, trimmed, apiKey) == nil {
+			continue
+		}
+		out = append(out, candidate)
+	}
+	return out
+}
+
 func (s *OpenAIGatewayService) calculateOpenAIRecordUsageTokenCost(
 	ctx context.Context,
 	apiKey *APIKey,
@@ -651,9 +709,11 @@ func (s *OpenAIGatewayService) calculateOpenAIRecordUsageTokenCost(
 	tokens UsageTokens,
 	serviceTier string,
 	longContextBillingEnabled bool,
+	pricingAt ...time.Time,
 ) (*CostBreakdown, error) {
 	resolution := s.calculateOpenAIRecordUsageTokenCostResolved(
 		ctx, apiKey, billingModel, multiplier, tokens, serviceTier, longContextBillingEnabled,
+		pricingAtValue(pricingAt),
 	)
 	return resolution.Cost, resolution.Err
 }
@@ -666,7 +726,9 @@ func (s *OpenAIGatewayService) calculateOpenAIRecordUsageTokenCostResolved(
 	tokens UsageTokens,
 	serviceTier string,
 	longContextBillingEnabled bool,
+	pricingAt ...time.Time,
 ) responseBillingCostResolution {
+	requestPricingAt := pricingAtValue(pricingAt)
 	if s.resolver != nil && apiKey != nil && apiKey.Group != nil {
 		gid := apiKey.Group.ID
 		resolved := s.resolver.Resolve(ctx, PricingInput{Model: billingModel, GroupID: &gid})
@@ -677,6 +739,7 @@ func (s *OpenAIGatewayService) calculateOpenAIRecordUsageTokenCostResolved(
 			Tokens:                    tokens,
 			RequestCount:              1,
 			RateMultiplier:            multiplier,
+			PricingAt:                 requestPricingAt,
 			ServiceTier:               serviceTier,
 			Resolver:                  s.resolver,
 			Resolved:                  resolved,
@@ -694,6 +757,7 @@ func (s *OpenAIGatewayService) calculateOpenAIRecordUsageTokenCostResolved(
 	var cost *CostBreakdown
 	if err == nil {
 		cost = s.billingService.computeTokenBreakdown(pricing, tokens, multiplier, serviceTier, longContextBillingEnabled)
+		cost = applyDeepSeekPeakMultiplierToBreakdown(billingModel, cost, requestPricingAt)
 	}
 	return responseBillingCostResolution{
 		Cost:          cost,

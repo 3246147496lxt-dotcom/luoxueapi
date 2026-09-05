@@ -128,6 +128,33 @@ describe('ChatHistoryPanel focus management', () => {
     expect(document.activeElement).toBe(trigger.element)
   })
 
+  it('在 Chat shell 点击搜索后于新聊天下方展开内联搜索，而不是打开弹窗', async () => {
+    wrapper = mount(ChatHistoryPanel, {
+      attachTo: document.body,
+      props: { conversations: [], shell: true },
+      global: { stubs: shellStubs },
+    })
+
+    const trigger = wrapper.get('.workspace-sidebar-header__search')
+    expect(wrapper.find('.chat-history__search').exists()).toBe(false)
+    expect(wrapper.find('[role="dialog"]').exists()).toBe(false)
+
+    await trigger.trigger('click')
+    await nextTick()
+
+    const search = wrapper.get('.chat-history__search')
+    expect(search.element.parentElement?.querySelector('.chat-history__list'))
+      .toBeTruthy()
+    expect(wrapper.find('[role="dialog"]').exists()).toBe(false)
+    expect(trigger.attributes('aria-expanded')).toBe('true')
+    expect(document.activeElement).toBe(search.get('input').element)
+
+    await trigger.trigger('click')
+    await nextTick()
+    expect(wrapper.find('.chat-history__search').exists()).toBe(false)
+    expect(document.activeElement).toBe(trigger.element)
+  })
+
   it('为并存的桌面与移动搜索入口生成不同控制目标', async () => {
     const pair = mount({
       components: { ChatHistoryPanel },
@@ -187,6 +214,65 @@ describe('ChatHistoryPanel focus management', () => {
     expect(wrapper.text()).not.toContain('chat.history.previousDays')
     expect(wrapper.text()).not.toContain('chat.history.older')
     expect(wrapper.find('.chat-history__clear').exists()).toBe(false)
+  })
+
+  it('允许展开和收起最近分组，并同步 aria-expanded 与列表可见性', async () => {
+    const conversation: ChatConversation = {
+      id: 'recent-toggle',
+      userId: '7',
+      title: 'Recent conversation',
+      model: 'gpt-5',
+      messages: [],
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    }
+    wrapper = mount(ChatHistoryPanel, {
+      props: { conversations: [conversation], shell: true },
+      global: { stubs: shellStubs },
+    })
+
+    const toggle = wrapper.get('[data-testid="chat-history-recent-toggle"]')
+    const listId = toggle.attributes('aria-controls')
+    expect(listId).toBeTruthy()
+    expect(toggle.attributes('aria-expanded')).toBe('true')
+    expect(wrapper.get(`#${listId}`).isVisible()).toBe(true)
+
+    await toggle.trigger('click')
+    await nextTick()
+    expect(toggle.attributes('aria-expanded')).toBe('false')
+    expect(wrapper.get(`#${listId}`).attributes('style')).toContain('display: none')
+
+    await toggle.trigger('click')
+    await nextTick()
+    expect(toggle.attributes('aria-expanded')).toBe('true')
+    expect(wrapper.get(`#${listId}`).attributes('style')).not.toContain('display: none')
+  })
+
+  it('在会话悬停操作区提供编辑入口，并保留更多操作菜单', async () => {
+    const conversation: ChatConversation = {
+      id: 'edit-action',
+      userId: '7',
+      title: 'Editable conversation',
+      model: 'gpt-5',
+      messages: [],
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    }
+    wrapper = mount(ChatHistoryPanel, {
+      attachTo: document.body,
+      props: { conversations: [conversation], activeId: conversation.id, shell: true },
+      global: { stubs: shellStubs },
+    })
+
+    const edit = wrapper.get('.chat-history__edit-action')
+    expect(edit.attributes('aria-label')).toBe('chat.actions.rename')
+    expect(wrapper.get('.chat-history__more-action').attributes('aria-haspopup')).toBe('menu')
+
+    await edit.trigger('click')
+    await nextTick()
+    expect(wrapper.get('input[aria-label="chat.history.renameLabel"]').element)
+      .toHaveProperty('value', conversation.title)
+    expect(wrapper.emitted('select')).toBeUndefined()
   })
 
   it('按官方顺序呈现五项一级导航，并让未接入入口只显示提示而不伪造路由', async () => {

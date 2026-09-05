@@ -47,8 +47,8 @@ func TestGatewayProfitControlRequiresTokenPricingMarker(t *testing.T) {
 	require.Equal(t, PlatformAnthropic, gate.platform)
 }
 
-func TestGatewayProfitControlSupportsFiveTokenPlatforms(t *testing.T) {
-	platforms := []string{PlatformOpenAI, PlatformAnthropic, PlatformGemini, PlatformGrok, PlatformAntigravity}
+func TestGatewayProfitControlSupportsSixTokenPlatforms(t *testing.T) {
+	platforms := []string{PlatformOpenAI, PlatformAnthropic, PlatformGemini, PlatformGrok, PlatformDeepseek, PlatformAntigravity}
 	for i, platform := range platforms {
 		t.Run(platform, func(t *testing.T) {
 			group := newProfitControlTestGroup(int64(100+i), platform)

@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"strings"
+	"time"
 )
 
 // resolveAccountStatsCost 计算账号统计定价费用。
@@ -26,6 +27,32 @@ func resolveAccountStatsCost(
 	tokens UsageTokens,
 	requestCount int,
 	totalCost float64,
+	serviceTier ...string,
+) *float64 {
+	tier := ""
+	if len(serviceTier) > 0 {
+		tier = serviceTier[0]
+	}
+	return resolveAccountStatsCostAt(ctx, channelService, billingService, accountID, groupID,
+		upstreamModel, tokens, requestCount, totalCost, tier, time.Time{})
+}
+
+// resolveAccountStatsCostAt is the timestamp-aware implementation used by
+// usage recording. Keeping the public-in-package helper above variadic
+// preserves source compatibility for existing tests/callers while allowing
+// production billing to reuse the admission-time DeepSeek peak window.
+func resolveAccountStatsCostAt(
+	ctx context.Context,
+	channelService *ChannelService,
+	billingService *BillingService,
+	accountID int64,
+	groupID int64,
+	upstreamModel string,
+	tokens UsageTokens,
+	requestCount int,
+	totalCost float64,
+	serviceTier string,
+	pricingAt time.Time,
 ) *float64 {
 	if channelService == nil || upstreamModel == "" {
 		return nil
@@ -53,34 +80,62 @@ func resolveAccountStatsCost(
 
 	// 优先级 3：模型定价文件（LiteLLM）默认价格
 	if billingService != nil {
-		return tryModelFilePricing(billingService, upstreamModel, tokens)
+		return tryModelFilePricingAt(billingService, upstreamModel, tokens, serviceTier, pricingAt)
 	}
 
 	return nil
 }
 
 // tryModelFilePricing 使用模型定价文件（LiteLLM/fallback）中的标准价格计算费用。
-func tryModelFilePricing(billingService *BillingService, model string, tokens UsageTokens) *float64 {
+func tryModelFilePricing(billingService *BillingService, model string, tokens UsageTokens, serviceTier ...string) *float64 {
+	tier := ""
+	if len(serviceTier) > 0 {
+		tier = serviceTier[0]
+	}
+	return tryModelFilePricingAt(billingService, model, tokens, tier, time.Time{})
+}
+
+func tryModelFilePricingAt(billingService *BillingService, model string, tokens UsageTokens, serviceTier string, pricingAt time.Time) *float64 {
+	if billingService == nil {
+		return nil
+	}
 	pricing, err := billingService.GetModelPricing(model)
 	if err != nil || pricing == nil {
 		return nil
 	}
-	if billingService.shouldApplySessionLongContextPricing(tokens, pricing) {
-		breakdown, err := billingService.CalculateCost(model, tokens, 1)
-		if err != nil || breakdown == nil || breakdown.TotalCost <= 0 {
+	// Keep the historical helper semantics for callers that do not provide a
+	// request timestamp or service tier.  In that compatibility path
+	// ImageOutputTokens is an additive field (the original account-statistics
+	// formula treated OutputTokens and image output as separate counters).
+	// Request billing passes a frozen timestamp below, so it uses the unified
+	// breakdown and the newer mutually-exclusive image-token accounting.
+	if pricingAt.IsZero() && strings.TrimSpace(serviceTier) == "" &&
+		!billingService.shouldApplySessionLongContextPricing(tokens, pricing) {
+		cost := float64(tokens.InputTokens)*pricing.InputPricePerToken +
+			float64(tokens.OutputTokens)*pricing.OutputPricePerToken +
+			float64(tokens.CacheCreationTokens)*pricing.CacheCreationPricePerToken +
+			float64(tokens.CacheReadTokens)*pricing.CacheReadPricePerToken +
+			float64(tokens.ImageOutputTokens)*pricing.ImageOutputPricePerToken
+		if cost <= 0 {
 			return nil
 		}
-		return &breakdown.TotalCost
+		return &cost
 	}
-	cost := float64(tokens.InputTokens)*pricing.InputPricePerToken +
-		float64(tokens.OutputTokens)*pricing.OutputPricePerToken +
-		float64(tokens.CacheCreationTokens)*pricing.CacheCreationPricePerToken +
-		float64(tokens.CacheReadTokens)*pricing.CacheReadPricePerToken +
-		float64(tokens.ImageOutputTokens)*pricing.ImageOutputPricePerToken
-	if cost <= 0 {
+	breakdown, err := billingService.CalculateCostWithServiceTier(model, tokens, 1, normalizeBillingServiceTier(serviceTier))
+	if err != nil || breakdown == nil {
 		return nil
 	}
-	return &cost
+	// Account-stats model-file pricing must follow the same provider policy as
+	// user billing. Apply the peak multiplier only when the caller supplied a
+	// frozen timestamp; legacy direct callers retain their historical low-peak
+	// result and avoid a wall-clock-dependent test/preview value.
+	if !pricingAt.IsZero() {
+		breakdown = applyDeepSeekPeakMultiplierToBreakdown(model, breakdown, pricingAt)
+	}
+	if breakdown.TotalCost <= 0 {
+		return nil
+	}
+	return &breakdown.TotalCost
 }
 
 // tryCustomRules 遍历自定义规则，按数组顺序先命中为准。
@@ -193,14 +248,19 @@ func calculatePerRequestStatsCost(pricing *ChannelModelPricing, requestCount int
 func calculateTokenStatsCost(pricing *ChannelModelPricing, tokens UsageTokens) *float64 {
 	p := pricing
 	if len(pricing.Intervals) > 0 {
+		// InputTokens is the provider-reported aggregate and already includes
+		// image input tokens when ImageInputTokens is present.  Do not add the
+		// image subset a second time when selecting an interval.
 		totalTokens := tokens.InputTokens + tokens.OutputTokens + tokens.CacheCreationTokens + tokens.CacheReadTokens
 		if iv := FindMatchingInterval(pricing.Intervals, totalTokens); iv != nil {
 			p = &ChannelModelPricing{
-				InputPrice:      iv.InputPrice,
-				OutputPrice:     iv.OutputPrice,
-				CacheWritePrice: iv.CacheWritePrice,
-				CacheReadPrice:  iv.CacheReadPrice,
-				PerRequestPrice: iv.PerRequestPrice,
+				InputPrice:       iv.InputPrice,
+				ImageInputPrice:  pricing.ImageInputPrice,
+				OutputPrice:      iv.OutputPrice,
+				CacheWritePrice:  iv.CacheWritePrice,
+				CacheReadPrice:   iv.CacheReadPrice,
+				PerRequestPrice:  iv.PerRequestPrice,
+				ImageOutputPrice: pricing.ImageOutputPrice,
 			}
 		}
 	}
@@ -210,7 +270,22 @@ func calculateTokenStatsCost(pricing *ChannelModelPricing, tokens UsageTokens) *
 		}
 		return *ptr
 	}
-	cost := float64(tokens.InputTokens)*deref(p.InputPrice) +
+	inputPrice := deref(p.InputPrice)
+	imageInputPrice := deref(p.ImageInputPrice)
+	if imageInputPrice == 0 {
+		imageInputPrice = inputPrice
+	}
+	imageInputTokens := tokens.ImageInputTokens
+	textInputTokens := tokens.InputTokens - imageInputTokens
+	if imageInputTokens < 0 {
+		imageInputTokens = 0
+	}
+	if textInputTokens < 0 {
+		textInputTokens = 0
+		imageInputTokens = tokens.InputTokens
+	}
+	cost := float64(textInputTokens)*inputPrice +
+		float64(imageInputTokens)*imageInputPrice +
 		float64(tokens.OutputTokens)*deref(p.OutputPrice) +
 		float64(tokens.CacheCreationTokens)*deref(p.CacheWritePrice) +
 		float64(tokens.CacheReadTokens)*deref(p.CacheReadPrice) +
@@ -232,6 +307,35 @@ func applyAccountStatsCost(
 	upstreamModel, requestedModel string,
 	tokens UsageTokens,
 	totalCost float64,
+	pricingAt ...time.Time,
+) {
+	serviceTier := ""
+	if usageLog != nil && usageLog.ServiceTier != nil {
+		serviceTier = *usageLog.ServiceTier
+	}
+	applyAccountStatsCostWithServiceTier(
+		ctx, usageLog, cs, bs, accountID, groupID, upstreamModel, requestedModel,
+		tokens, totalCost, serviceTier, pricingAt...,
+	)
+}
+
+// applyAccountStatsCostWithServiceTier is the request-path variant that lets
+// callers pass the effective tier used for pricing separately from the raw
+// tier retained on UsageLog for observability.  This matters for providers
+// such as DeepSeek whose Anthropic/OpenAI-compatible APIs ignore
+// service_tier: the log may still show the client-declared value, while
+// account-statistics model-file pricing must use the same (empty) tier as the
+// customer bill.
+func applyAccountStatsCostWithServiceTier(
+	ctx context.Context,
+	usageLog *UsageLog,
+	cs *ChannelService, bs *BillingService,
+	accountID int64, groupID int64,
+	upstreamModel, requestedModel string,
+	tokens UsageTokens,
+	totalCost float64,
+	effectiveServiceTier string,
+	pricingAt ...time.Time,
 ) {
 	model := upstreamModel
 	if model == "" {
@@ -241,7 +345,12 @@ func applyAccountStatsCost(
 	if usageLog != nil && usageLog.ImageCount > 0 {
 		requestCount = usageLog.ImageCount
 	}
-	usageLog.AccountStatsCost = resolveAccountStatsCost(
+	at := time.Time{}
+	if len(pricingAt) > 0 {
+		at = pricingAt[0]
+	}
+	usageLog.AccountStatsCost = resolveAccountStatsCostAt(
 		ctx, cs, bs, accountID, groupID, model, tokens, requestCount, totalCost,
+		effectiveServiceTier, at,
 	)
 }

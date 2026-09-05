@@ -1,7 +1,10 @@
 <template>
   <svg
     class="workspace-responsive-sidebar-icon"
-    :class="`workspace-responsive-sidebar-icon--${name}`"
+    :class="[
+      `workspace-responsive-sidebar-icon--${name}`,
+      variant === 'chatgpt' ? 'workspace-responsive-sidebar-icon--chatgpt' : undefined,
+    ]"
     :viewBox="definition.viewBox"
     fill="currentColor"
     aria-hidden="true"
@@ -18,6 +21,7 @@ type WorkspaceResponsiveSidebarIconName = 'open' | 'close' | 'search'
 
 const props = defineProps<{
   name: WorkspaceResponsiveSidebarIconName
+  variant?: 'default' | 'chatgpt'
 }>()
 
 const definitions = {
@@ -35,7 +39,15 @@ const definitions = {
   },
 } as const
 
-const definition = computed(() => definitions[props.name])
+const definition = computed(() => {
+  if (props.name === 'search' && props.variant === 'chatgpt') {
+    return {
+      viewBox: '0 0 20 20',
+      path: 'M9.161 2.379a6.707 6.707 0 0 1 5.157 10.993l3.242 3.243a.665.665 0 1 1-.94.94l-3.252-3.25A6.707 6.707 0 1 1 9.161 2.379m0 1.33a5.377 5.377 0 1 0 0 10.754 5.377 5.377 0 0 0 0-10.754',
+    }
+  }
+  return definitions[props.name]
+})
 </script>
 
 <style scoped>
@@ -48,6 +60,11 @@ const definition = computed(() => definitions[props.name])
 .workspace-responsive-sidebar-icon--search {
   width: var(--workspace-space-6);
   height: var(--workspace-space-6);
+}
+
+.workspace-responsive-sidebar-icon--chatgpt.workspace-responsive-sidebar-icon--search {
+  width: var(--workspace-space-5);
+  height: var(--workspace-space-5);
 }
 
 .workspace-responsive-sidebar-icon--close {

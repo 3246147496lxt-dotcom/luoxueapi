@@ -204,6 +204,8 @@ export default {
         gemini: 'Gemini',
         antigravity: 'Antigravity',
         grok: 'Grok',
+        zhipu: 'Zhipu GLM',
+        deepseek: 'DeepSeek',
       },
       types: {
         oauth: 'OAuth',
@@ -629,6 +631,56 @@ export default {
       grok: {
         baseUrlHint: 'Grok OAuth accounts forward to the official xAI API base URL.',
         apiKeyHint: 'Grok subscription support uses OAuth refresh tokens; API keys are out of scope for this account type.'
+      },
+      deepseek: {
+        baseUrlHint: 'Leave default for the official DeepSeek API.',
+        apiKeyHint: 'Your DeepSeek API key.'
+      },
+      zhipu: {
+        baseUrlHint: 'Use the official GLM endpoint or a compatible relay URL.',
+        apiKeyHint: 'Your Zhipu API key.'
+      },
+      cnProviders: {
+        probe: 'Query',
+        probeTooltip: 'Refresh Coding Plan usage',
+        balanceProbeTooltip: 'Query the provider balance endpoint for the account balance',
+        window5h: '5h',
+        windowWeekly: '7d',
+        resetSoon: 'soon',
+        balance: 'Balance',
+        balanceLow: 'Low balance',
+        noBalanceEndpoint: 'Zhipu pay-as-you-go accounts do not expose a public balance endpoint.',
+        accountMode: {
+          title: 'Account plan',
+          payg: 'Pay-as-you-go',
+          paygDesc: 'Standard GLM API quota and billing.',
+          coding: 'Coding Plan',
+          codingDesc: 'Use the GLM Coding Plan endpoint and quota.'
+        },
+        apiProtocol: {
+          title: 'API protocol',
+          chatCompletions: 'Chat Completions',
+          chatCompletionsDesc: 'OpenAI-compatible /chat/completions.',
+          anthropic: 'Anthropic Messages',
+          anthropicDesc: 'Anthropic-compatible /v1/messages facade.'
+        },
+        protocolHint: 'The selected protocol controls request translation. You can still enter a custom compatible base URL.',
+        zhipuTeam: {
+          title: 'Team Coding Plan (optional)',
+          organization: 'Organization (optional)',
+          organizationPlaceholder: 'bigmodel-organization',
+          project: 'Project (optional)',
+          projectPlaceholder: 'bigmodel-project',
+          hint: 'Provide organization/project IDs for team GLM Coding Plan quota queries.',
+          help: {
+            title: 'Finding team IDs',
+            step1: 'Open the GLM team console.',
+            step2: 'Open browser developer tools and the Network tab.',
+            step3: 'Find the organization request and copy the org-/proj_ values.',
+            step4: 'Paste them into the fields above.',
+            example: 'Example: org-... and proj_...'
+          }
+        }
       },
       anthropic: {
         apiKeyPassthrough: 'Auto passthrough (auth only)',

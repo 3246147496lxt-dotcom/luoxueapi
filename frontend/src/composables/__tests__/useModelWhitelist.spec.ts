@@ -72,6 +72,21 @@ describe('useModelWhitelist', () => {
     expect(models).toContain('grok-build-latest')
   })
 
+  it('DeepSeek 模型列表包含 V4 官方模型与迁移别名', () => {
+    const models = getModelsByPlatform('deepseek')
+
+    expect(models.slice(0, 3)).toEqual([
+      'deepseek-v4-pro',
+      'deepseek-v4-flash',
+      'deepseek-v4-flash-vision-exp'
+    ])
+    expect(models).toContain('deepseek-chat')
+    expect(models).toContain('deepseek-reasoner')
+    expect(getPresetMappingsByPlatform('deepseek')).toContainEqual(
+      expect.objectContaining({ from: 'deepseek-chat', to: 'deepseek-v4-flash' })
+    )
+  })
+
   it('combined 模式支持 Grok 4.5 官方别名映射', () => {
     const mapping = buildModelMappingObject(
       'combined',

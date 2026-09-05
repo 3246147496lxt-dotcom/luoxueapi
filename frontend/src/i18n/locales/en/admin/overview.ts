@@ -547,6 +547,8 @@ export default {
         usageOpenAI: 'Usage (OpenAI)',
         usageGemini: 'Usage (Gemini)',
         usageAntigravity: 'Usage (Antigravity)',
+        usageZhipu: 'Usage (Zhipu GLM)',
+        usageDeepSeek: 'Usage (DeepSeek)',
         concurrency: 'Concurrency',
         status: 'Status',
         lastActive: 'Last Active',
@@ -1076,6 +1078,8 @@ export default {
         gemini: 'Gemini',
         antigravity: 'Antigravity',
         grok: 'Grok',
+        deepseek: 'DeepSeek',
+        zhipu: 'Zhipu GLM',
       },
       deleteConfirm:
         "Are you sure you want to delete '{name}'? All associated API keys will no longer belong to any group.",

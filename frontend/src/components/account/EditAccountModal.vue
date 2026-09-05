@@ -26,6 +26,36 @@
         <p class="input-hint">{{ t('admin.accounts.notesHint') }}</p>
       </div>
 
+      <!-- 智谱 GLM routing metadata (kept in credentials for backward-compatible edits). -->
+      <div v-if="account.platform === 'zhipu' && account.type === 'apikey'" class="space-y-3 rounded-lg border border-indigo-200 bg-indigo-50/50 p-3 dark:border-indigo-900 dark:bg-indigo-950/20">
+        <div class="grid gap-3 sm:grid-cols-2">
+          <div>
+            <label class="input-label">{{ t('admin.accounts.cnProviders.accountMode.title') }}</label>
+            <select v-model="accountMode" class="input" @change="handleZhipuRoutingChange">
+              <option value="payg">{{ t('admin.accounts.cnProviders.accountMode.payg') }}</option>
+              <option value="coding">{{ t('admin.accounts.cnProviders.accountMode.coding') }}</option>
+            </select>
+          </div>
+          <div>
+            <label class="input-label">{{ t('admin.accounts.cnProviders.apiProtocol.title') }}</label>
+            <select v-model="apiProtocol" class="input" @change="handleZhipuRoutingChange">
+              <option value="chat_completions">{{ t('admin.accounts.cnProviders.apiProtocol.chatCompletions') }}</option>
+              <option value="anthropic">{{ t('admin.accounts.cnProviders.apiProtocol.anthropic') }}</option>
+            </select>
+          </div>
+        </div>
+        <div v-if="accountMode === 'coding'" class="grid gap-3 sm:grid-cols-2">
+          <div>
+            <label class="input-label">{{ t('admin.accounts.cnProviders.zhipuTeam.organization') }}</label>
+            <input v-model="zhipuOrganization" type="text" class="input" :placeholder="t('admin.accounts.cnProviders.zhipuTeam.organizationPlaceholder')" />
+          </div>
+          <div>
+            <label class="input-label">{{ t('admin.accounts.cnProviders.zhipuTeam.project') }}</label>
+            <input v-model="zhipuProject" type="text" class="input" :placeholder="t('admin.accounts.cnProviders.zhipuTeam.projectPlaceholder')" />
+          </div>
+        </div>
+      </div>
+
       <!-- API Key fields (only for apikey type) -->
       <div v-if="account.type === 'apikey'" class="space-y-4">
         <div>
@@ -43,7 +73,11 @@
                     ? 'https://cloudcode-pa.googleapis.com'
                     : account.platform === 'grok'
                       ? 'https://api.x.ai/v1'
-                      : 'https://api.anthropic.com'
+                      : account.platform === 'zhipu'
+                        ? 'https://open.bigmodel.cn/api/paas/v4'
+                        : account.platform === 'deepseek'
+                        ? 'https://api.deepseek.com'
+                        : 'https://api.anthropic.com'
             "
           />
           <p v-if="baseUrlHint" class="input-hint">{{ baseUrlHint }}</p>
@@ -67,7 +101,11 @@
                     ? 'sk-...'
                     : account.platform === 'grok'
                       ? 'xai-...'
-                      : 'sk-ant-...'
+                      : account.platform === 'zhipu'
+                        ? 'sk-...'
+                        : account.platform === 'deepseek'
+                        ? 'sk-...'
+                        : 'sk-ant-...'
             "
           />
           <p class="input-hint">{{ t('admin.accounts.leaveEmptyToKeep') }}</p>
@@ -2626,6 +2664,16 @@ import {
   splitModelMappingObject,
   isValidWildcardPattern
 } from '@/composables/useModelWhitelist'
+import {
+  defaultZhipuBaseURL,
+  inferZhipuRoutingFromBaseURL,
+  isManagedZhipuBaseURL,
+  normalizeZhipuAccountMode,
+  normalizeZhipuApiProtocol,
+  zhipuBaseURLForRouting,
+  type CnAccountMode,
+  type CnApiProtocol,
+} from './create/credentialDraftBuilders'
 
 interface Props {
   show: boolean
@@ -2654,6 +2702,8 @@ const baseUrlHint = computed(() => {
   if (props.account.platform === 'openai') return t('admin.accounts.openai.baseUrlHint')
   if (props.account.platform === 'gemini') return t('admin.accounts.gemini.baseUrlHint')
   if (props.account.platform === 'grok') return ''
+  if (props.account.platform === 'zhipu') return t('admin.accounts.zhipu.baseUrlHint')
+  if (props.account.platform === 'deepseek') return t('admin.accounts.deepseek.baseUrlHint')
   return t('admin.accounts.baseUrlHint')
 })
 
@@ -2677,6 +2727,10 @@ interface TempUnschedRuleForm {
 const submitting = ref(false)
 const editBaseUrl = ref('https://api.anthropic.com')
 const editApiKey = ref('')
+const accountMode = ref<CnAccountMode>('payg')
+const apiProtocol = ref<CnApiProtocol>('chat_completions')
+const zhipuOrganization = ref('')
+const zhipuProject = ref('')
 // Bedrock credentials
 const editBedrockAccessKeyId = ref('')
 const editBedrockSecretAccessKey = ref('')
@@ -3079,8 +3133,24 @@ const defaultBaseUrl = computed(() => {
   if (props.account?.platform === 'openai') return 'https://api.openai.com'
   if (props.account?.platform === 'gemini') return 'https://generativelanguage.googleapis.com'
   if (props.account?.platform === 'grok') return 'https://api.x.ai/v1'
+  if (props.account?.platform === 'zhipu') return defaultZhipuBaseURL(accountMode.value, apiProtocol.value)
+  if (props.account?.platform === 'deepseek') return 'https://api.deepseek.com'
   return 'https://api.anthropic.com'
 })
+
+const handleZhipuRoutingChange = () => {
+  if (props.account?.platform !== 'zhipu') return
+  const current = editBaseUrl.value.trim().toLowerCase()
+  // Keep custom relays intact; update only official GLM endpoints (or an
+  // empty value) when the mode/protocol selector changes.
+  if (!current || isManagedZhipuBaseURL(current)) {
+    editBaseUrl.value = zhipuBaseURLForRouting(
+      accountMode.value,
+      apiProtocol.value,
+      editBaseUrl.value,
+    )
+  }
+}
 
 const mixedChannelWarningMessageText = computed(() => {
   if (mixedChannelWarningDetails.value) {
@@ -3194,6 +3264,26 @@ const syncFormFromAccount = (newAccount: Account | null) => {
 
   // Load intercept warmup requests setting (applies to all account types)
   const credentials = newAccount.credentials as Record<string, unknown> | undefined
+  // Older GLM accounts may predate account_mode/api_protocol metadata.  When
+  // that happens, recover the routing from the official base URL so opening
+  // and saving the editor cannot silently turn a Coding/Anthropic endpoint
+  // into a pay-as-you-go Chat account.  Explicit, valid metadata remains the
+  // source of truth (custom relay URLs stay untouched).
+  const storedZhipuMode = normalizeZhipuAccountMode(credentials?.account_mode)
+  const storedZhipuProtocol = normalizeZhipuApiProtocol(credentials?.api_protocol)
+  const inferredZhipuRouting =
+    newAccount.platform === 'zhipu'
+      ? inferZhipuRoutingFromBaseURL(credentials?.base_url)
+      : null
+  accountMode.value = storedZhipuMode ?? inferredZhipuRouting?.mode ?? 'payg'
+  apiProtocol.value =
+    storedZhipuProtocol ?? inferredZhipuRouting?.protocol ?? 'chat_completions'
+  zhipuOrganization.value = typeof credentials?.zhipu_organization === 'string'
+    ? credentials.zhipu_organization.trim()
+    : ''
+  zhipuProject.value = typeof credentials?.zhipu_project === 'string'
+    ? credentials.zhipu_project.trim()
+    : ''
   interceptWarmupRequests.value = credentials?.intercept_warmup_requests === true
   autoPauseOnExpired.value = newAccount.auto_pause_on_expired === true
   editVertexProjectId.value = ''
@@ -3396,6 +3486,8 @@ const syncFormFromAccount = (newAccount: Account | null) => {
   // Initialize API Key fields for apikey type
   if (newAccount.type === 'apikey' && newAccount.credentials) {
     const credentials = newAccount.credentials as Record<string, unknown>
+    const storedBaseUrl =
+      typeof credentials.base_url === 'string' ? credentials.base_url.trim() : ''
     const platformDefaultUrl =
       newAccount.platform === 'openai'
         ? 'https://api.openai.com'
@@ -3403,8 +3495,33 @@ const syncFormFromAccount = (newAccount: Account | null) => {
           ? 'https://generativelanguage.googleapis.com'
           : newAccount.platform === 'grok'
             ? 'https://api.x.ai/v1'
-            : 'https://api.anthropic.com'
-    editBaseUrl.value = (credentials.base_url as string) || platformDefaultUrl
+            : newAccount.platform === 'zhipu'
+              ? defaultZhipuBaseURL(accountMode.value, apiProtocol.value)
+            : newAccount.platform === 'deepseek'
+              ? 'https://api.deepseek.com'
+              : 'https://api.anthropic.com'
+    editBaseUrl.value = storedBaseUrl || platformDefaultUrl
+
+    // If both fields were persisted, metadata is authoritative.  Repair an
+    // old account whose official URL points at a different mode/protocol so a
+    // no-op edit does not save a mismatched pair.  For custom relays, preserve
+    // the URL and let the explicit selectors describe the intended routing.
+    if (newAccount.platform === 'zhipu' && storedBaseUrl) {
+      const inferred = inferZhipuRoutingFromBaseURL(storedBaseUrl)
+      const modeMismatch = Boolean(
+        inferred?.mode && storedZhipuMode && inferred.mode !== storedZhipuMode,
+      )
+      const protocolMismatch = Boolean(
+        inferred?.protocol && storedZhipuProtocol && inferred.protocol !== storedZhipuProtocol,
+      )
+      if (modeMismatch || protocolMismatch) {
+        editBaseUrl.value = zhipuBaseURLForRouting(
+          accountMode.value,
+          apiProtocol.value,
+          storedBaseUrl,
+        )
+      }
+    }
 
     // Load model mappings and detect mode
     loadModelRestrictionFromMapping(credentials.model_mapping as Record<string, unknown> | undefined)
@@ -3474,7 +3591,11 @@ const syncFormFromAccount = (newAccount: Account | null) => {
           ? 'https://generativelanguage.googleapis.com'
           : newAccount.platform === 'grok'
             ? 'https://api.x.ai/v1'
-            : 'https://api.anthropic.com'
+            : newAccount.platform === 'zhipu'
+              ? defaultZhipuBaseURL(accountMode.value, apiProtocol.value)
+            : newAccount.platform === 'deepseek'
+              ? 'https://api.deepseek.com'
+              : 'https://api.anthropic.com'
     editBaseUrl.value = platformDefaultUrl
 
     // Load model mappings for OpenAI/Grok OAuth accounts
@@ -4000,6 +4121,17 @@ const handleSubmit = async () => {
       const newCredentials: Record<string, unknown> = {
         ...currentCredentials,
         base_url: newBaseUrl
+      }
+
+      if (props.account.platform === 'zhipu') {
+        newCredentials.account_mode = accountMode.value
+        newCredentials.api_protocol = apiProtocol.value
+        const organization = zhipuOrganization.value.trim()
+        const project = zhipuProject.value.trim()
+        if (organization) newCredentials.zhipu_organization = organization
+        else delete newCredentials.zhipu_organization
+        if (project) newCredentials.zhipu_project = project
+        else delete newCredentials.zhipu_project
       }
 
       // Handle API key

@@ -71,6 +71,15 @@ func TestOpenAIProfitControlDefaultOffAndScope(t *testing.T) {
 		require.Equal(t, PlatformGrok, gate.platform)
 	})
 
+	t.Run("OpenAI service also supports DeepSeek", func(t *testing.T) {
+		group := newProfitControlTestGroup(6, PlatformDeepseek)
+		id := group.ID
+		ctx, _ := svc.WithOpenAIRequestPricingContext(profitControlTestContext(group), &id)
+		gate, ok := profitControlGateFromContext(ctx)
+		require.True(t, ok)
+		require.Equal(t, PlatformDeepseek, gate.platform)
+	})
+
 	t.Run("other platforms use the shared gateway", func(t *testing.T) {
 		group := newProfitControlTestGroup(3, PlatformAnthropic)
 		id := group.ID

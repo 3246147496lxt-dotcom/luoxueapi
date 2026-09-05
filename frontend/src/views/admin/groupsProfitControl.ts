@@ -29,6 +29,8 @@ const PROFIT_CONTROL_PLATFORMS = new Set([
   "anthropic",
   "gemini",
   "grok",
+  "zhipu",
+  "deepseek",
   "antigravity",
 ]);
 

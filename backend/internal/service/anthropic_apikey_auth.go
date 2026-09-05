@@ -13,10 +13,15 @@ const (
 )
 
 // GetAnthropicAPIKeyAuthScheme returns the upstream authentication scheme for
-// Anthropic API-key accounts. Missing or invalid values keep the historical
-// x-api-key behavior.
+// Anthropic API-key accounts and first-class CN providers using a native
+// Anthropic facade. Missing or invalid values keep the historical x-api-key
+// behavior; Zhipu deployments that require bearer auth can opt in through the
+// same account extra field.
 func (a *Account) GetAnthropicAPIKeyAuthScheme() string {
-	if a == nil || a.Platform != PlatformAnthropic || a.Type != AccountTypeAPIKey {
+	if a == nil || a.Type != AccountTypeAPIKey {
+		return AnthropicAPIKeyAuthSchemeXAPIKey
+	}
+	if a.Platform != PlatformAnthropic && !a.IsCNProvider() {
 		return AnthropicAPIKeyAuthSchemeXAPIKey
 	}
 

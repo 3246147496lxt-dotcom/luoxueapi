@@ -1,4 +1,4 @@
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import type { AccountPlatform } from '@/types'
 import {
   useAccountOAuth,
@@ -40,6 +40,30 @@ export function useCreateAccountOAuthDrivers(
   const geminiOAuth = useGeminiOAuth()
   const antigravityOAuth = useAntigravityOAuth()
   const grokOAuth = useGrokOAuth()
+
+  // DeepSeek accounts are API-key based and do not have an OAuth flow.  Keep
+  // a inert driver in the registry so the discriminated AccountPlatform map
+  // remains total without accidentally reusing another provider's OAuth
+  // state when the modal switches platforms.
+  const deepseekOAuth = {
+    authUrl: ref(''),
+    sessionId: ref(''),
+    loading: ref(false),
+    error: ref(''),
+    generateAuthorization: async () => undefined,
+    exchangeAuthorizationCode: options.exchangeAuthorizationCode.deepseek,
+    reset: () => undefined,
+  }
+
+  const zhipuOAuth = {
+    authUrl: ref(''),
+    sessionId: ref(''),
+    loading: ref(false),
+    error: ref(''),
+    generateAuthorization: async () => undefined,
+    exchangeAuthorizationCode: options.exchangeAuthorizationCode.zhipu,
+    reset: () => undefined,
+  }
 
   const registry = new OAuthDriverRegistry({
     anthropic: {
@@ -112,6 +136,8 @@ export function useCreateAccountOAuthDrivers(
       validateRefreshToken: options.validateRefreshToken?.grok,
       reset: () => grokOAuth.resetState(),
     },
+    deepseek: deepseekOAuth,
+    zhipu: zhipuOAuth,
   })
 
   const currentDriver = computed(() => registry.get(options.platform()))
@@ -135,6 +161,8 @@ export function useCreateAccountOAuthDrivers(
     geminiOAuth,
     antigravityOAuth,
     grokOAuth,
+    deepseekOAuth,
+    zhipuOAuth,
     registry,
     currentAuthUrl,
     currentSessionId,

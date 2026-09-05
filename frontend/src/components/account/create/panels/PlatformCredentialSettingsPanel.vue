@@ -1,6 +1,59 @@
 <template>
       <!-- API Key input (only for apikey type, excluding Antigravity which has its own fields) -->
       <div v-if="accountType === 'apikey' && platform !== 'antigravity'" class="space-y-4">
+        <!-- 智谱 GLM account mode/protocol and optional team metadata. -->
+        <div v-if="platform === 'zhipu'" class="space-y-4 rounded-lg border border-indigo-200 bg-indigo-50/50 p-3 dark:border-indigo-900 dark:bg-indigo-950/20">
+          <div>
+            <label class="input-label">{{ t('admin.accounts.cnProviders.accountMode.title') }}</label>
+            <div class="mt-2 grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                class="rounded-md border px-3 py-2 text-left text-sm transition-colors"
+                :class="accountMode === 'payg' ? 'border-indigo-500 bg-indigo-100 text-indigo-800 dark:bg-indigo-900/40 dark:text-indigo-200' : 'border-gray-200 bg-white text-gray-600 dark:border-dark-600 dark:bg-dark-700 dark:text-gray-300'"
+                @click="accountMode = 'payg'"
+              >
+                <span class="block font-medium">{{ t('admin.accounts.cnProviders.accountMode.payg') }}</span>
+                <span class="mt-0.5 block text-xs opacity-75">{{ t('admin.accounts.cnProviders.accountMode.paygDesc') }}</span>
+              </button>
+              <button
+                type="button"
+                class="rounded-md border px-3 py-2 text-left text-sm transition-colors"
+                :class="accountMode === 'coding' ? 'border-indigo-500 bg-indigo-100 text-indigo-800 dark:bg-indigo-900/40 dark:text-indigo-200' : 'border-gray-200 bg-white text-gray-600 dark:border-dark-600 dark:bg-dark-700 dark:text-gray-300'"
+                @click="accountMode = 'coding'"
+              >
+                <span class="block font-medium">{{ t('admin.accounts.cnProviders.accountMode.coding') }}</span>
+                <span class="mt-0.5 block text-xs opacity-75">{{ t('admin.accounts.cnProviders.accountMode.codingDesc') }}</span>
+              </button>
+            </div>
+          </div>
+          <div>
+            <label class="input-label">{{ t('admin.accounts.cnProviders.apiProtocol.title') }}</label>
+            <div class="mt-2 grid grid-cols-2 gap-2">
+              <button
+                v-for="option in zhipuProtocolOptions"
+                :key="option.value"
+                type="button"
+                class="rounded-md border px-3 py-2 text-left text-sm transition-colors"
+                :class="apiProtocol === option.value ? 'border-indigo-500 bg-indigo-100 text-indigo-800 dark:bg-indigo-900/40 dark:text-indigo-200' : 'border-gray-200 bg-white text-gray-600 dark:border-dark-600 dark:bg-dark-700 dark:text-gray-300'"
+                @click="apiProtocol = option.value"
+              >
+                <span class="block font-medium">{{ t(`admin.accounts.cnProviders.apiProtocol.${option.key}`) }}</span>
+                <span class="mt-0.5 block text-xs opacity-75">{{ t(`admin.accounts.cnProviders.apiProtocol.${option.key}Desc`) }}</span>
+              </button>
+            </div>
+          </div>
+          <div v-if="accountMode === 'coding'" class="grid gap-3 sm:grid-cols-2">
+            <div>
+              <label class="input-label">{{ t('admin.accounts.cnProviders.zhipuTeam.organization') }}</label>
+              <input v-model="zhipuOrganization" type="text" class="input" :placeholder="t('admin.accounts.cnProviders.zhipuTeam.organizationPlaceholder')" />
+            </div>
+            <div>
+              <label class="input-label">{{ t('admin.accounts.cnProviders.zhipuTeam.project') }}</label>
+              <input v-model="zhipuProject" type="text" class="input" :placeholder="t('admin.accounts.cnProviders.zhipuTeam.projectPlaceholder')" />
+            </div>
+          </div>
+          <p class="text-xs text-indigo-700 dark:text-indigo-300">{{ t('admin.accounts.cnProviders.protocolHint') }}</p>
+        </div>
         <div>
           <label class="input-label">{{ t('admin.accounts.baseUrl') }}</label>
           <input
@@ -14,10 +67,25 @@
                   ? 'https://generativelanguage.googleapis.com'
                   : platform === 'grok'
                     ? 'https://api.x.ai/v1'
-                    : 'https://api.anthropic.com'
+                    : platform === 'zhipu'
+                      ? 'https://open.bigmodel.cn/api/paas/v4'
+                      : platform === 'deepseek'
+                      ? 'https://api.deepseek.com'
+                      : 'https://api.anthropic.com'
             "
           />
           <p v-if="baseUrlHint" class="input-hint">{{ baseUrlHint }}</p>
+          <div v-if="platform === 'deepseek' || platform === 'zhipu'" class="mt-2 flex flex-wrap gap-2">
+            <button
+              v-for="preset in platform === 'zhipu' ? zhipuBaseUrlPresets : deepseekBaseUrlPresets"
+              :key="preset.url"
+              type="button"
+              class="rounded-md border border-sky-200 px-2.5 py-1 text-xs text-sky-700 transition-colors hover:bg-sky-50 dark:border-sky-800 dark:text-sky-300 dark:hover:bg-sky-900/30"
+              @click="platform === 'zhipu' ? selectZhipuPreset(preset.url) : (apiKeyBaseUrl = preset.url)"
+            >
+              {{ preset.label }}
+            </button>
+          </div>
         </div>
         <div>
           <label class="input-label">{{ t('admin.accounts.apiKeyRequired') }}</label>
@@ -33,7 +101,11 @@
                   ? 'AIza...'
                   : platform === 'grok'
                     ? 'xai-...'
-                    : 'sk-ant-...'
+                    : platform === 'zhipu'
+                      ? 'sk-...'
+                      : platform === 'deepseek'
+                      ? 'sk-...'
+                      : 'sk-ant-...'
             "
           />
           <p v-if="apiKeyHint" class="input-hint">{{ apiKeyHint }}</p>
@@ -488,6 +560,9 @@ import {
   DEFAULT_POOL_MODE_RETRY_COUNT,
   DEFAULT_POOL_MODE_RETRY_STATUS_CODES,
   MAX_POOL_MODE_RETRY_COUNT,
+  DEEPSEEK_BASE_URL_PRESETS,
+  ZHIPU_BASE_URL_PRESETS,
+  inferZhipuRoutingFromBaseURL,
 } from '../credentialDraftBuilders'
 import { apiKeyBaseURLHintKey, apiKeyValueHintKey } from '../platformFormPolicy'
 import type {
@@ -497,6 +572,7 @@ import type {
   GeminiAIStudioTier,
   ModelRestrictionMode,
 } from '../formDraft'
+import type { CnApiProtocol, CnAccountMode } from '../credentialDraftBuilders'
 
 interface Props {
   platform: AccountPlatform
@@ -523,6 +599,10 @@ const selectedErrorCodes = defineModel<number[]>('selectedErrorCodes', { require
 const customErrorCodeInput = defineModel<number | null>('customErrorCodeInput', { required: true })
 const headerOverrideEnabled = defineModel<boolean>('headerOverrideEnabled', { required: true })
 const headerOverrideRows = defineModel<HeaderOverrideRow[]>('headerOverrideRows', { required: true })
+const accountMode = defineModel<CnAccountMode>('accountMode', { default: 'payg' })
+const apiProtocol = defineModel<CnApiProtocol>('apiProtocol', { default: 'chat_completions' })
+const zhipuOrganization = defineModel<string>('zhipuOrganization', { default: '' })
+const zhipuProject = defineModel<string>('zhipuProject', { default: '' })
 const bedrockAuthMode = defineModel<BedrockAuthMode>('bedrockAuthMode', { required: true })
 const bedrockAccessKeyId = defineModel<string>('bedrockAccessKeyId', { required: true })
 const bedrockSecretAccessKey = defineModel<string>('bedrockSecretAccessKey', { required: true })
@@ -539,6 +619,22 @@ const apiKeyHint = computed(() => {
   const key = apiKeyValueHintKey(props.platform)
   return key ? t(key) : ''
 })
+const deepseekBaseUrlPresets = DEEPSEEK_BASE_URL_PRESETS
+const zhipuBaseUrlPresets = ZHIPU_BASE_URL_PRESETS
+const zhipuProtocolOptions = [
+  { value: 'chat_completions' as const, key: 'chatCompletions' },
+  { value: 'anthropic' as const, key: 'anthropic' },
+]
+
+// A URL preset represents a complete routing choice, not just a text snippet.
+// Keep the mode/protocol models in sync so selecting "Coding" or "Anthropic"
+// cannot submit a mismatched account_mode/api_protocol pair.
+const selectZhipuPreset = (url: string) => {
+  apiKeyBaseUrl.value = url
+  const routing = inferZhipuRoutingFromBaseURL(url)
+  if (routing?.protocol) apiProtocol.value = routing.protocol
+  if (routing?.mode) accountMode.value = routing.mode
+}
 const syncPreviewCredentials = computed(() =>
   apiKeyValue.value
     ? {
@@ -546,6 +642,14 @@ const syncPreviewCredentials = computed(() =>
         type: props.accountType,
         base_url: apiKeyBaseUrl.value || undefined,
         api_key: apiKeyValue.value,
+        ...(props.platform === 'zhipu'
+          ? {
+              account_mode: accountMode.value,
+              api_protocol: apiProtocol.value,
+              zhipu_organization: zhipuOrganization.value || undefined,
+              zhipu_project: zhipuProject.value || undefined,
+            }
+          : {}),
       }
     : undefined,
 )

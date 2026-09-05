@@ -158,17 +158,19 @@ func TestGetModelPricing_FallbackWarnPerModelNotGlobal(t *testing.T) {
 	require.Equal(t, 0, strings.Count(out, "model: GLM-5.2"), out) // 大写经 ToLower 归一,不应单独成行
 }
 
-// 回归:glm-5.2 仍解析到 glm-5 兜底价(计费金额不变,防止日志改动掩盖未来计费回归)。
-func TestGetModelPricing_GLM52FallsBackToGLM5Price(t *testing.T) {
+// 回归:glm-5.2 必须命中自己的兜底价,不能被 strings.Contains("glm-5") 抢成 glm-5 价。
+// 历史 bug:兜底表缺 glm-5.2 条目,使用记录按 $1.00/$3.20 计费,比官方 $1.40/$4.40 少收约 27%。
+func TestGetModelPricing_GLM52UsesOwnPrice(t *testing.T) {
 	svc := newTestBillingService()
 
 	got, err := svc.GetModelPricing("glm-5.2")
 	require.NoError(t, err)
 	require.NotNil(t, got)
 
-	// glm-5 base：Input 1e-6 / Output 3.2e-6(见 TestGetFallbackPricing_FamilyMatching)。
-	require.InDelta(t, 1e-6, got.InputPricePerToken, 1e-12)
-	require.InDelta(t, 3.2e-6, got.OutputPricePerToken, 1e-12)
+	// 官方 z.ai 口径:与 glm-5.1 同价(见 TestGetFallbackPricing_FamilyMatching)。
+	require.InDelta(t, 1.4e-6, got.InputPricePerToken, 1e-12)
+	require.InDelta(t, 4.4e-6, got.OutputPricePerToken, 1e-12)
+	require.InDelta(t, 0.26e-6, got.CacheReadPricePerToken, 1e-12)
 }
 
 func TestGetModelPricing_UnknownClaudeModelFallsBackToSonnet(t *testing.T) {
@@ -462,33 +464,40 @@ func TestGetFallbackPricing_FamilyMatching(t *testing.T) {
 		{
 			name:              "deepseek v4 pro",
 			model:             "deepseek-v4-pro",
-			expectedInput:     4.35e-7,
-			expectedOutput:    floatPtr(8.7e-7),
-			expectedCacheRead: floatPtr(3.625e-9),
+			expectedInput:     6.6e-7,
+			expectedOutput:    floatPtr(1.98e-6),
+			expectedCacheRead: floatPtr(2.2e-8),
 		},
 		{
 			name:              "deepseek v4 flash",
 			model:             "deepseek-v4-flash",
-			expectedInput:     1.4e-7,
-			expectedOutput:    floatPtr(2.8e-7),
-			expectedCacheRead: floatPtr(2.8e-9),
+			expectedInput:     2.2e-7,
+			expectedOutput:    floatPtr(6.6e-7),
+			expectedCacheRead: floatPtr(7e-9),
 		},
 		{
 			name:              "deepseek chat alias → flash",
 			model:             "deepseek-chat",
-			expectedInput:     1.4e-7,
-			expectedOutput:    floatPtr(2.8e-7),
-			expectedCacheRead: floatPtr(2.8e-9),
+			expectedInput:     2.2e-7,
+			expectedOutput:    floatPtr(6.6e-7),
+			expectedCacheRead: floatPtr(7e-9),
 		},
 		{
 			name:              "deepseek reasoner alias → flash",
 			model:             "deepseek-reasoner",
-			expectedInput:     1.4e-7,
-			expectedOutput:    floatPtr(2.8e-7),
-			expectedCacheRead: floatPtr(2.8e-9),
+			expectedInput:     2.2e-7,
+			expectedOutput:    floatPtr(6.6e-7),
+			expectedCacheRead: floatPtr(7e-9),
 		},
 
 		// ---- 智谱 GLM（z.ai USD 口径）----
+		{
+			name:              "glm 5.2 flagship",
+			model:             "glm-5.2",
+			expectedInput:     1.4e-6,
+			expectedOutput:    floatPtr(4.4e-6),
+			expectedCacheRead: floatPtr(0.26e-6),
+		},
 		{
 			name:              "glm 5.1 flagship",
 			model:             "glm-5.1",
@@ -572,11 +581,18 @@ func TestGetFallbackPricing_FamilyMatching(t *testing.T) {
 			expectedInput:  0.1e-6,
 			expectedOutput: floatPtr(0.1e-6),
 		},
-		// 关键：5.1 必须先于 5 匹配（避免被 glm-5 抢走）
+		// 关键：5.1 / 5.2 必须先于 5 匹配（避免被 glm-5 抢走）
 		{
 			name:              "glm 5.1 vs glm 5 ordering (verbatim 5.1)",
 			model:             "glm-5.1",
 			expectedInput:     1.4e-6, // = glm-5.1 价格
+			expectedOutput:    floatPtr(4.4e-6),
+			expectedCacheRead: floatPtr(0.26e-6),
+		},
+		{
+			name:              "glm 5.2 vs glm 5 ordering (verbatim 5.2)",
+			model:             "glm-5.2",
+			expectedInput:     1.4e-6, // = glm-5.2 价格（不是 glm-5 的 1e-6）
 			expectedOutput:    floatPtr(4.4e-6),
 			expectedCacheRead: floatPtr(0.26e-6),
 		},
@@ -1004,6 +1020,8 @@ func TestIsModelSupported(t *testing.T) {
 	require.True(t, svc.IsModelSupported("claude-sonnet-4"))
 	require.True(t, svc.IsModelSupported("Claude-Opus-4.5"))
 	require.True(t, svc.IsModelSupported("claude-3-haiku"))
+	require.True(t, svc.IsModelSupported("deepseek-v4-pro"))
+	require.True(t, svc.IsModelSupported("DeepSeek-v4-flash"))
 	require.False(t, svc.IsModelSupported("gpt-4o"))
 	require.False(t, svc.IsModelSupported("gemini-pro"))
 }

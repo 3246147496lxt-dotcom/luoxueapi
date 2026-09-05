@@ -33,7 +33,7 @@ func RegisterGatewayRoutes(
 
 	isOpenAIResponsesCompatibleGatewayPlatform := func(c *gin.Context) bool {
 		switch getGroupPlatform(c) {
-		case service.PlatformOpenAI, service.PlatformGrok:
+		case service.PlatformOpenAI, service.PlatformGrok, service.PlatformZhipu, service.PlatformDeepseek:
 			return true
 		default:
 			return false
@@ -41,6 +41,28 @@ func RegisterGatewayRoutes(
 	}
 	isOpenAIGatewayPlatform := func(c *gin.Context) bool {
 		return getGroupPlatform(c) == service.PlatformOpenAI
+	}
+	// count_tokens is an Anthropic-shaped compatibility endpoint. OpenAI and
+	// CN provider accounts use the OpenAI gateway implementation (which performs a
+	// local estimate for providers without an upstream token-count endpoint),
+	// while Grok keeps its historical unsupported response and all other
+	// platforms continue through the legacy Anthropic gateway.
+	countTokensHandler := func(c *gin.Context) {
+		switch getGroupPlatform(c) {
+		case service.PlatformOpenAI, service.PlatformZhipu, service.PlatformDeepseek:
+			h.OpenAIGateway.CountTokens(c)
+		case service.PlatformGrok:
+			service.MarkOpsClientBusinessLimited(c, service.OpsClientBusinessLimitedReasonLocalFeatureGate)
+			c.JSON(http.StatusNotFound, gin.H{
+				"type": "error",
+				"error": gin.H{
+					"type":    "not_found_error",
+					"message": "Token counting is not supported for this platform",
+				},
+			})
+		default:
+			h.Gateway.CountTokens(c)
+		}
 	}
 	modelsHandler := func(c *gin.Context) {
 		if isOpenAIGatewayPlatform(c) && c.Query("client_version") != "" {
@@ -143,26 +165,8 @@ func RegisterGatewayRoutes(
 			}
 			h.Gateway.Messages(c)
 		})
-		// /v1/messages/count_tokens: OpenAI uses Anthropic-compat bridge; other
-		// OpenAI-compatible platforms keep the prior unsupported response.
-		gateway.POST("/messages/count_tokens", func(c *gin.Context) {
-			if isOpenAIGatewayPlatform(c) {
-				h.OpenAIGateway.CountTokens(c)
-				return
-			}
-			if isOpenAIResponsesCompatibleGatewayPlatform(c) {
-				service.MarkOpsClientBusinessLimited(c, service.OpsClientBusinessLimitedReasonLocalFeatureGate)
-				c.JSON(http.StatusNotFound, gin.H{
-					"type": "error",
-					"error": gin.H{
-						"type":    "not_found_error",
-						"message": "Token counting is not supported for this platform",
-					},
-				})
-				return
-			}
-			h.Gateway.CountTokens(c)
-		})
+		// /v1/messages/count_tokens: dispatch by the selected group platform.
+		gateway.POST("/messages/count_tokens", countTokensHandler)
 		// Codex CLI / Codex app refresh their model picker from the provider's
 		// /models endpoint with a client_version query and expect the ChatGPT
 		// Codex manifest format; other clients keep the OpenAI-style list.
@@ -259,6 +263,11 @@ func RegisterGatewayRoutes(
 		h.OpenAIGateway.ResponsesWebSocket(c)
 	})
 	r.GET("/models", bodyLimit, clientRequestID, opsErrorLogger, endpointNorm, gin.HandlerFunc(apiKeyAuth), requireGroupAnthropic, modelsHandler)
+	// Anthropic clients normally call /v1/messages/count_tokens, but a few
+	// SDKs strip the /v1 prefix when constructing the compatibility endpoint.
+	// Keep the alias in sync with the grouped route so DeepSeek's local token
+	// estimator is reachable through either spelling.
+	r.POST("/messages/count_tokens", bodyLimit, clientRequestID, opsErrorLogger, endpointNorm, gin.HandlerFunc(apiKeyAuth), requireGroupAnthropic, countTokensHandler)
 	codexDirect := r.Group("/backend-api/codex")
 	codexDirect.Use(bodyLimit, clientRequestID, opsErrorLogger, endpointNorm, gin.HandlerFunc(apiKeyAuth), requireGroupAnthropic)
 	{

@@ -95,7 +95,9 @@ const PLATFORM_LABELS: Record<string, string> = {
   anthropic: 'Claude',
   openai: 'OpenAI',
   gemini: 'Gemini',
-  antigravity: 'Antigravity'
+  antigravity: 'Antigravity',
+  zhipu: 'Zhipu GLM',
+  deepseek: 'DeepSeek'
 }
 
 function platformLabel(platform: string): string {

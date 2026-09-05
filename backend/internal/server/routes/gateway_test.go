@@ -279,3 +279,14 @@ func TestGatewayRoutesOpenAICountTokensPathIsRegistered(t *testing.T) {
 	router.ServeHTTP(w, req)
 	require.NotEqual(t, http.StatusNotFound, w.Code)
 }
+
+func TestGatewayRoutesDeepSeekCountTokensAliasesAreRegistered(t *testing.T) {
+	router := newGatewayRoutesTestRouter(service.PlatformDeepseek)
+	registered := make(map[string]bool)
+	for _, route := range router.Routes() {
+		registered[route.Method+" "+route.Path] = true
+	}
+
+	require.True(t, registered["POST /v1/messages/count_tokens"])
+	require.True(t, registered["POST /messages/count_tokens"])
+}

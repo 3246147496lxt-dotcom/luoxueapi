@@ -7,6 +7,7 @@ import (
 	"testing/fstest"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/migrations"
 	sqlmock "github.com/DATA-DOG/go-sqlmock"
 	"github.com/stretchr/testify/require"
 )
@@ -47,6 +48,14 @@ func TestValidateMigrationExecutionMode(t *testing.T) {
 CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_a ON t(a);
 DROP INDEX CONCURRENTLY IF EXISTS idx_b;
 `)
+		require.True(t, nonTx)
+		require.NoError(t, err)
+	})
+
+	t.Run("embedded email alias migration validates", func(t *testing.T) {
+		content, err := migrations.FS.ReadFile("231_add_users_email_alias_dedup_index_notx.sql")
+		require.NoError(t, err)
+		nonTx, err := validateMigrationExecutionMode("231_add_users_email_alias_dedup_index_notx.sql", string(content))
 		require.True(t, nonTx)
 		require.NoError(t, err)
 	})

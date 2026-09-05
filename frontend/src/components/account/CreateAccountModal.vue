@@ -67,101 +67,7 @@
         <p class="input-hint">{{ t('admin.accounts.notesHint') }}</p>
       </div>
 
-      <!-- Platform Selection - Segmented Control Style -->
-      <div>
-        <label class="input-label">{{ t('admin.accounts.platform') }}</label>
-        <div class="mt-2 flex flex-wrap rounded-lg bg-gray-100 p-1 dark:bg-dark-700" data-tour="account-form-platform">
-          <button
-            type="button"
-            @click="form.platform = 'anthropic'"
-            :class="[
-              'flex flex-1 items-center justify-center gap-2 rounded-md px-4 py-2.5 text-sm font-medium transition-all',
-              form.platform === 'anthropic'
-                ? 'bg-white text-orange-600 shadow-sm dark:bg-dark-600 dark:text-orange-400'
-                : 'text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-200'
-            ]"
-          >
-            <Icon name="sparkles" size="sm" />
-            Anthropic
-          </button>
-          <button
-            type="button"
-            @click="form.platform = 'openai'"
-            :class="[
-              'flex flex-1 items-center justify-center gap-2 rounded-md px-4 py-2.5 text-sm font-medium transition-all',
-              form.platform === 'openai'
-                ? 'bg-white text-green-600 shadow-sm dark:bg-dark-600 dark:text-green-400'
-                : 'text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-200'
-            ]"
-          >
-            <svg
-              class="h-4 w-4"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-              stroke-width="1.5"
-            >
-              <path
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                d="M3.75 13.5l10.5-11.25L12 10.5h8.25L9.75 21.75 12 13.5H3.75z"
-              />
-            </svg>
-            OpenAI
-          </button>
-          <button
-            type="button"
-            @click="form.platform = 'gemini'"
-            :class="[
-              'flex flex-1 items-center justify-center gap-2 rounded-md px-4 py-2.5 text-sm font-medium transition-all',
-              form.platform === 'gemini'
-                ? 'bg-white text-blue-600 shadow-sm dark:bg-dark-600 dark:text-blue-400'
-                : 'text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-200'
-            ]"
-          >
-            <svg
-              class="h-4 w-4"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-              stroke-width="1.5"
-            >
-              <path
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                d="M12 2l1.5 6.5L20 10l-6.5 1.5L12 18l-1.5-6.5L4 10l6.5-1.5L12 2z"
-              />
-            </svg>
-            Gemini
-          </button>
-          <button
-            type="button"
-            @click="form.platform = 'antigravity'"
-            :class="[
-              'flex flex-1 items-center justify-center gap-2 rounded-md px-4 py-2.5 text-sm font-medium transition-all',
-              form.platform === 'antigravity'
-                ? 'bg-white text-purple-600 shadow-sm dark:bg-dark-600 dark:text-purple-400'
-                : 'text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-200'
-            ]"
-          >
-            <Icon name="cloud" size="sm" />
-            Antigravity
-          </button>
-          <button
-            type="button"
-            @click="form.platform = 'grok'"
-            :class="[
-              'flex flex-1 items-center justify-center gap-2 rounded-md px-4 py-2.5 text-sm font-medium transition-all',
-              form.platform === 'grok'
-                ? 'bg-white text-zinc-900 shadow-sm dark:bg-dark-600 dark:text-zinc-100'
-                : 'text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-gray-200'
-            ]"
-          >
-            <PlatformIcon platform="grok" size="sm" />
-            Grok
-          </button>
-        </div>
-      </div>
+      <AccountPlatformSelector :platform="form.platform" @select="handlePlatformSelect" />
 
       <AnthropicAccountTypePanel
         v-if="form.platform === 'anthropic'"
@@ -262,6 +168,10 @@
         v-model:custom-error-code-input="customErrorCodeInput"
         v-model:header-override-enabled="headerOverrideEnabled"
         v-model:header-override-rows="headerOverrideRows"
+        v-model:account-mode="accountMode"
+        v-model:api-protocol="apiProtocol"
+        v-model:zhipu-organization="zhipuOrganization"
+        v-model:zhipu-project="zhipuProject"
         v-model:bedrock-auth-mode="bedrockAuthMode"
         v-model:bedrock-access-key-id="bedrockAccessKeyId"
         v-model:bedrock-secret-access-key="bedrockSecretAccessKey"
@@ -957,8 +867,6 @@ import {
 } from '@/components/account/openAIEndpointCapabilities'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
-import PlatformIcon from '@/components/common/PlatformIcon.vue'
-import Icon from '@/components/icons/Icon.vue'
 import ModelWhitelistSelector from '@/components/account/ModelWhitelistSelector.vue'
 import QuotaLimitCard from '@/components/account/QuotaLimitCard.vue'
 import {
@@ -976,6 +884,7 @@ import {
 import OAuthAuthorizationFlow from './OAuthAuthorizationFlow.vue'
 import AntigravityAccountTypePanel from './create/panels/AntigravityAccountTypePanel.vue'
 import AntigravityModelMappingPanel from './create/panels/AntigravityModelMappingPanel.vue'
+import AccountPlatformSelector from './create/panels/AccountPlatformSelector.vue'
 import AccountBehaviorSettingsPanel from './create/panels/AccountBehaviorSettingsPanel.vue'
 import AccountRuntimeSettingsPanel from './create/panels/AccountRuntimeSettingsPanel.vue'
 import AnthropicAccountTypePanel from './create/panels/AnthropicAccountTypePanel.vue'
@@ -1016,10 +925,14 @@ import {
   buildTempUnschedulableRules,
   buildVertexServiceAccountCredentials,
   defaultAPIKeyBaseURL,
+  defaultZhipuBaseURL,
+  isManagedZhipuBaseURL,
+  zhipuBaseURLForRouting,
   parseVertexServiceAccountJSON,
   type AnthropicAPIKeyAuthScheme,
   type TempUnschedRuleForm,
 } from './create/credentialDraftBuilders'
+import type { CnAccountMode, CnApiProtocol } from './create/credentialDraftBuilders'
 import {
   oauthStepTitleKey,
   resolveCreateAccountType,
@@ -1093,6 +1006,8 @@ const {
     gemini: (code) => handleGeminiExchange(code),
     antigravity: (code) => handleAntigravityExchange(code),
     grok: (code) => handleGrokExchange(code),
+    zhipu: async () => undefined,
+    deepseek: async () => undefined,
   },
   validateRefreshToken: {
     openai: async (refreshToken) => handleOpenAIValidateRT(refreshToken),
@@ -1114,6 +1029,10 @@ const accountCategory = ref<CreateAccountCategory>('oauth-based') // UI selectio
 const addMethod = ref<AddMethod>('oauth') // For oauth-based: 'oauth' or 'setup-token'
 const apiKeyBaseUrl = ref('https://api.anthropic.com')
 const apiKeyValue = ref('')
+const accountMode = ref<CnAccountMode>('payg')
+const apiProtocol = ref<CnApiProtocol>('chat_completions')
+const zhipuOrganization = ref('')
+const zhipuProject = ref('')
 
 const syncPreviewCredentials = computed(() => {
   if (!apiKeyValue.value) return undefined
@@ -1121,7 +1040,15 @@ const syncPreviewCredentials = computed(() => {
     platform: form.platform,
     type: form.type,
     base_url: apiKeyBaseUrl.value || undefined,
-    api_key: apiKeyValue.value
+    api_key: apiKeyValue.value,
+    ...(form.platform === 'zhipu'
+      ? {
+          account_mode: accountMode.value,
+          api_protocol: apiProtocol.value,
+          zhipu_organization: zhipuOrganization.value || undefined,
+          zhipu_project: zhipuProject.value || undefined,
+        }
+      : {}),
   }
 })
 
@@ -1450,6 +1377,17 @@ watch(
   () => form.platform,
   (newPlatform) => {
     apiKeyBaseUrl.value = defaultAPIKeyBaseURL(newPlatform)
+    if (newPlatform === 'deepseek' || newPlatform === 'zhipu') {
+      accountCategory.value = 'apikey'
+      apiProtocol.value = 'chat_completions'
+      apiKeyBaseUrl.value = newPlatform === 'zhipu'
+        ? defaultZhipuBaseURL(accountMode.value, apiProtocol.value)
+        : defaultAPIKeyBaseURL(newPlatform)
+    }
+    if (newPlatform !== 'zhipu') {
+      zhipuOrganization.value = ''
+      zhipuProject.value = ''
+    }
     // Clear model-related settings
     allowedModels.value = []
     modelMappings.value = []
@@ -1520,6 +1458,21 @@ watch(
     oauthDrivers.resetAll()
   }
 )
+
+watch([accountMode, apiProtocol], ([mode, protocol]) => {
+  // Preserve a custom relay URL while still keeping the official presets linked
+  // to the selected mode/protocol.
+  if (
+    form.platform === 'zhipu' &&
+    (!apiKeyBaseUrl.value.trim() || isManagedZhipuBaseURL(apiKeyBaseUrl.value))
+  ) {
+    apiKeyBaseUrl.value = zhipuBaseURLForRouting(
+      mode,
+      protocol,
+      apiKeyBaseUrl.value,
+    )
+  }
+})
 
 // Reset options that are only valid for one platform/category.
 watch(
@@ -1700,9 +1653,35 @@ const resetForm = () => {
   geminiTierGoogleOne.value = 'google_one_free'
   geminiTierGcp.value = 'gcp_standard'
   geminiTierAIStudio.value = 'aistudio_free'
+  accountMode.value = 'payg'
+  apiProtocol.value = 'chat_completions'
+  zhipuOrganization.value = ''
+  zhipuProject.value = ''
   oauthDrivers.resetAll()
   oauthFlowRef.value?.reset()
   resetCreateFlowConfirmation()
+}
+
+const selectDeepSeekPlatform = () => { form.platform = 'deepseek'; accountCategory.value = 'apikey'; form.type = 'apikey'; apiKeyBaseUrl.value = defaultAPIKeyBaseURL('deepseek') }
+const selectZhipuPlatform = () => {
+  form.platform = 'zhipu'
+  accountCategory.value = 'apikey'
+  form.type = 'apikey'
+  accountMode.value = 'payg'
+  apiProtocol.value = 'chat_completions'
+  apiKeyBaseUrl.value = defaultZhipuBaseURL(accountMode.value, apiProtocol.value)
+}
+
+const handlePlatformSelect = (platform: AccountPlatform) => {
+  if (platform === 'deepseek') {
+    selectDeepSeekPlatform()
+    return
+  }
+  if (platform === 'zhipu') {
+    selectZhipuPlatform()
+    return
+  }
+  form.platform = platform
 }
 
 const handleClose = () => {
@@ -1942,6 +1921,10 @@ const handleSubmit = async () => {
     platform: form.platform,
     baseUrl: apiKeyBaseUrl.value,
     apiKey: apiKeyValue.value,
+    accountMode: form.platform === 'zhipu' ? accountMode.value : undefined,
+    apiProtocol: form.platform === 'zhipu' ? apiProtocol.value : undefined,
+    zhipuOrganization: form.platform === 'zhipu' ? zhipuOrganization.value : undefined,
+    zhipuProject: form.platform === 'zhipu' ? zhipuProject.value : undefined,
     geminiTierId: geminiTierAIStudio.value,
     modelMapping,
     compactModelMapping: buildOpenAICompactModelMapping(),

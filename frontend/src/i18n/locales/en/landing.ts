@@ -162,7 +162,7 @@ export default {
     description: 'Compare input, output, and cache prices for published models without signing in.',
     workspaceTitle: 'Model Center',
     workspaceDescription: 'Compare input, output, and cache prices for available models.',
-    publicPriceNote: 'Public standard rates are converted at ¥1 = 10 Points; actual charges follow Points usage records.',
+    publicPriceNote: 'Public standard rates are converted to CNY at ¥1 = 10 Points; actual charges follow Points usage records.',
     modelCount: '{count} models',
     pricingUpdatedAt: 'Pricing updated {time}',
     searchLabel: 'Search models',

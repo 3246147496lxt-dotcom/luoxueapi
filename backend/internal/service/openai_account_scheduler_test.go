@@ -3244,6 +3244,23 @@ func TestDefaultOpenAIAccountScheduler_IsAccountTransportCompatible_Branches(t *
 
 	account.Extra["openai_apikey_responses_websockets_v2_mode"] = OpenAIWSIngressModeOff
 	require.False(t, scheduler.isAccountTransportCompatible(account, OpenAIUpstreamTransportResponsesWebsocketV2Ingress))
+
+	// The ingress selector must not treat an HTTP-only first-class provider as
+	// compatible merely because it has a valid v2 mode. DeepSeek is selected by
+	// the normal HTTP gateway and must be rejected before the WS forwarder.
+	deepSeek := &Account{
+		ID:          8802,
+		Platform:    PlatformDeepseek,
+		Type:        AccountTypeAPIKey,
+		Status:      StatusActive,
+		Schedulable: true,
+		Concurrency: 1,
+		Credentials: map[string]any{"api_key": "sk-test"},
+	}
+	deepSeek.Extra = map[string]any{
+		"openai_apikey_responses_websockets_v2_mode": OpenAIWSIngressModeCtxPool,
+	}
+	require.False(t, scheduler.isAccountTransportCompatible(deepSeek, OpenAIUpstreamTransportResponsesWebsocketV2Ingress))
 }
 
 func int64PtrForTest(v int64) *int64 {

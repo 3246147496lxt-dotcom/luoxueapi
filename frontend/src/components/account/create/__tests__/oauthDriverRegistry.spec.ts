@@ -28,6 +28,8 @@ describe('OAuthDriverRegistry', () => {
       gemini: driver(),
       antigravity: driver(),
       grok: driver(),
+      deepseek: driver(),
+      zhipu: driver(),
     } satisfies Record<AccountPlatform, OAuthDriver>
     const registry = new OAuthDriverRegistry(drivers)
 
@@ -45,6 +47,8 @@ describe('OAuthDriverRegistry', () => {
       gemini: driver(),
       antigravity: driver(),
       grok: driver(),
+      deepseek: driver(),
+      zhipu: driver(),
     } satisfies Record<AccountPlatform, OAuthDriver>
     const registry = new OAuthDriverRegistry(drivers)
 

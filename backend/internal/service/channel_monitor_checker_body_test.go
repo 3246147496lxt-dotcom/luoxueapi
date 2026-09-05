@@ -242,6 +242,41 @@ func TestRunCheckForModel_Grok_DefaultChatRequest(t *testing.T) {
 	}
 }
 
+func TestRunCheckForModel_DeepSeek_DefaultChatRequest(t *testing.T) {
+	h := &openAICaptureHandler{}
+	endpoint := setupFakeOpenAI(t, h)
+
+	res := runCheckForModel(context.Background(), MonitorProviderDeepSeek, endpoint, "sk-deepseek", "deepseek-chat", nil)
+
+	if res.Status != MonitorStatusOperational {
+		t.Fatalf("DeepSeek request should pass challenge, got status=%s message=%q", res.Status, res.Message)
+	}
+	if h.lastPath != providerDeepSeekPath {
+		t.Fatalf("expected DeepSeek chat completions path %q, got %q", providerDeepSeekPath, h.lastPath)
+	}
+	if h.lastBody["model"] != "deepseek-chat" {
+		t.Errorf("DeepSeek body should contain model=deepseek-chat, got %v", h.lastBody["model"])
+	}
+	if h.lastHeaders.Get("Authorization") != "Bearer sk-deepseek" {
+		t.Errorf("expected DeepSeek bearer auth header, got %q", h.lastHeaders.Get("Authorization"))
+	}
+}
+
+func TestDeepSeekMonitorConfiguration(t *testing.T) {
+	if err := validateProvider(MonitorProviderDeepSeek); err != nil {
+		t.Fatalf("DeepSeek provider should be supported: %v", err)
+	}
+	if err := validateAPIMode(MonitorProviderDeepSeek, MonitorAPIModeChatCompletions); err != nil {
+		t.Fatalf("DeepSeek chat_completions mode should be valid: %v", err)
+	}
+	if err := validateAPIMode(MonitorProviderDeepSeek, MonitorAPIModeResponses); err == nil {
+		t.Fatal("DeepSeek responses mode should be rejected by channel monitoring")
+	}
+	if err := validateReplaceRequestBody(MonitorProviderDeepSeek, MonitorAPIModeChatCompletions, map[string]any{}); err == nil {
+		t.Fatal("DeepSeek replace-mode body should require messages")
+	}
+}
+
 func TestRunCheckForModel_Grok_UpstreamFailure(t *testing.T) {
 	h := &openAICaptureHandler{status: http.StatusTooManyRequests}
 	endpoint := setupFakeOpenAI(t, h)

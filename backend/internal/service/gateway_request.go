@@ -1320,6 +1320,29 @@ func NormalizeGLMOpenAIReasoningEffort(body []byte, mappedModel string) ([]byte,
 	return modified, true
 }
 
+// reconcileGLMOpenAIReasoningEffort re-reads the final Chat Completions body
+// after provider/policy rewrites and keeps usage metadata on the same native
+// scale as the value sent upstream.  The routing paths intentionally extract
+// effort early (before model mapping and body policy), so without this final
+// pass a client value such as "medium" could be billed/recorded as medium
+// while GLM actually receives "high".
+func reconcileGLMOpenAIReasoningEffort(effort *string, body []byte, modelCandidates ...string) *string {
+	if !strings.HasPrefix(strings.ToLower(lastOpenAIModelSegment(firstNonEmpty(modelCandidates...))), "glm-") {
+		return effort
+	}
+	if final := extractOpenAIReasoningEffortFromBody(body, modelCandidates...); final != nil {
+		if normalized := normalizeGLMOpenAIReasoningEffort(*final); normalized != "" {
+			return &normalized
+		}
+	}
+	if effort != nil {
+		if normalized := normalizeGLMOpenAIReasoningEffort(*effort); normalized != "" {
+			return &normalized
+		}
+	}
+	return nil
+}
+
 func normalizeGLMOpenAIReasoningEffort(raw string) string {
 	value := strings.ToLower(strings.TrimSpace(raw))
 	if value == "" {

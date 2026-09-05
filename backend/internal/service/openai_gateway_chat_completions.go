@@ -86,9 +86,29 @@ func (s *OpenAIGatewayService) ForwardAsChatCompletions(
 		return s.forwardAsRawChatCompletions(ctx, c, account, body, defaultMappedModel)
 	}
 
+	// First-class CN providers may expose a native Anthropic facade (GLM and
+	// DeepSeek today). Convert Chat Completions at this boundary so the request
+	// cannot accidentally fall through to the provider's Chat endpoint. Keep the
+	// condition exact: default/adaptive/Responses accounts retain their normal
+	// routing below.
+	if account != nil && account.IsCNProvider() && account.IsAnthropicProtocol() {
+		return s.forwardChatCompletionsViaNativeAnthropic(ctx, c, account, body, defaultMappedModel)
+	}
+
+	// DeepSeek's safe default is native Chat Completions.  An adaptive account
+	// keeps a Responses-shaped request on the native Responses conversion path,
+	// while ordinary Chat Completions input is sent through the raw bridge.
+	if account.IsDeepseek() {
+		responsesShape := !gjson.GetBytes(body, "messages").Exists() && gjson.GetBytes(body, "input").Exists()
+		protocol := account.GetAPIProtocol()
+		if protocol != APIProtocolResponses && !(protocol == APIProtocolAdaptive && responsesShape) {
+			return s.forwardAsRawChatCompletions(ctx, c, account, body, defaultMappedModel)
+		}
+	}
+
 	// 入口分流：APIKey 账号 + 强制或已探测确认上游不支持 Responses，走 CC 直转。
 	// 自动模式下标记缺失（未探测）按"现状即证据"原则继续走下方原 Responses 转换路径。
-	if account.Type == AccountTypeAPIKey && !openai_compat.ShouldUseResponsesAPI(account.Extra) {
+	if shouldForwardOpenAIResponsesViaRawChatCompletions(account) {
 		return s.forwardAsRawChatCompletions(ctx, c, account, body, defaultMappedModel)
 	}
 

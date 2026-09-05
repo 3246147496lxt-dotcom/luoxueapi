@@ -23,6 +23,20 @@
         <span :style="{ width: compactUsageWidth }"></span>
       </div>
     </template>
+
+    <!--
+      Coding Plan accounts keep the compact bar in the table, but still need
+      an explicit query affordance.  Disable the child auto-probe here: a
+      paginated account table can contain many rows and the persisted snapshot
+      above is sufficient until an administrator asks for a fresh result.
+    -->
+    <CNProviderQuotaCell
+      v-if="cnQuotaCellVisible"
+      compact
+      :auto-probe="false"
+      :account="account"
+      @probed="handleCNQuotaProbed"
+    />
   </div>
 
   <div
@@ -31,8 +45,23 @@
     class="account-usage-overview"
     data-testid="account-usage-overview"
   >
+    <!--
+      CN provider usage has a provider-specific probe contract.  Keep the
+      probe cell in the overview branch (the branch used by the account
+      inspector) so Coding Plan rows are visible there as well as in the
+      detailed cell.  The generic overview rows below intentionally remain
+      unchanged for the other platforms.
+    -->
+    <div v-if="cnProviderUsageVisible" class="account-usage-overview__cn-provider">
+      <CNProviderQuotaCell
+        v-if="cnQuotaCellVisible"
+        :account="account"
+        @probed="handleCNQuotaProbed"
+      />
+      <CNProviderBalanceCell v-if="cnBalanceCellVisible" :account="account" />
+    </div>
     <div
-      v-if="loading && overviewUsageRows.length === 0"
+      v-else-if="loading && overviewUsageRows.length === 0"
       class="account-usage-overview__skeleton"
       aria-hidden="true"
     >
@@ -520,6 +549,19 @@
       <div v-else class="text-xs text-gray-400">-</div>
     </template>
 
+    <!-- Zhipu/DeepSeek: Coding Plan rolling windows or pay-as-you-go balance -->
+    <template v-else-if="account.platform === 'zhipu' || account.platform === 'deepseek'">
+      <div class="space-y-1">
+        <div
+          v-if="!cnQuotaCellVisible && !cnBalanceCellVisible"
+          class="text-xs text-gray-400"
+          :title="t('admin.accounts.cnProviders.noBalanceEndpoint')"
+        >-</div>
+        <CNProviderQuotaCell :account="account" />
+        <CNProviderBalanceCell :account="account" />
+      </div>
+    </template>
+
     <!-- Gemini platform: show quota + local usage window -->
     <template v-else-if="account.platform === 'gemini'">
       <!-- Auth Type + Tier Badge (first line) -->
@@ -728,6 +770,10 @@ import UsageProgressBar from './UsageProgressBar.vue'
 import AccountQuotaInfo from './AccountQuotaInfo.vue'
 import OpenAIQuotaResetCell from './OpenAIQuotaResetCell.vue'
 import GrokQuotaProbeCell from './GrokQuotaProbeCell.vue'
+import CNProviderQuotaCell from './CNProviderQuotaCell.vue'
+import CNProviderBalanceCell from './CNProviderBalanceCell.vue'
+import { cnQuotaCellVisible as cnQuotaCellVisibleFn, cnBalanceCellVisible as cnBalanceCellVisibleFn } from './credentialsBuilder'
+import type { CNProviderQuotaProbeResult } from '@/api/admin/cnProviders'
 
 const USAGE_CACHE_TTL = 5 * 60 * 1000 // 5 minutes
 // xAI Free billing exposes a window without usage_percent, so estimate it from local tokens.
@@ -779,8 +825,20 @@ let localUsageRequestVersion = 0
 const showUsageWindows = computed(() => {
   // Gemini: we can always compute local usage windows from DB logs (simulated quotas).
   if (props.account.platform === 'gemini') return true
+  // Chinese OpenAI-compatible providers expose either Coding Plan windows or
+  // a pay-as-you-go balance probe. The child cells decide which one applies.
+  if (props.account.platform === 'zhipu' || props.account.platform === 'deepseek') return true
   return props.account.type === 'oauth' || props.account.type === 'setup-token'
 })
+
+const cnAccountMode = computed(() => {
+  const mode = props.account.credentials?.account_mode
+  return typeof mode === 'string' ? mode : ''
+})
+const cnQuotaCellVisible = computed(() => cnQuotaCellVisibleFn(props.account.platform, cnAccountMode.value))
+const cnBalanceCellVisible = computed(() => cnBalanceCellVisibleFn(props.account.platform, cnAccountMode.value))
+const cnProviderUsageVisible = computed(() => cnQuotaCellVisible.value || cnBalanceCellVisible.value)
+const cnQuotaProbe = ref<CNProviderQuotaProbeResult | null>(null)
 
 const shouldFetchUsage = computed(() => {
   if (props.account.platform === 'anthropic') {
@@ -1502,6 +1560,10 @@ const handleGrokProbed = (result: GrokQuotaProbeResult) => {
   publishAccountUsage(props.account.id, merged, { authoritative: true })
 }
 
+const handleCNQuotaProbed = (result: CNProviderQuotaProbeResult) => {
+  if (result.success) cnQuotaProbe.value = result
+}
+
 // ===== API Key quota progress bars =====
 
 interface QuotaBarInfo {
@@ -1567,6 +1629,22 @@ const quotaTotalBar = computed((): QuotaBarInfo | null => {
   return makeQuotaBar(props.account.quota_used ?? 0, limit)
 })
 
+// Coding Plan probes persist provider-prefixed percentages in account.extra.
+// Account list responses deserialize JSON numbers as number, but accepting a
+// numeric string here keeps the compact cell compatible with older/imported
+// snapshots that may have been written before the field type was normalized.
+const readCNQuotaSnapshot = (suffix: '5h_used_percent' | 'weekly_used_percent'): number | null => {
+  const window = suffix === '5h_used_percent' ? '5h' : 'weekly'
+  const probed = cnQuotaProbe.value?.tiers?.find((tier) => tier.window === window)?.used_percent
+  if (typeof probed === 'number' && Number.isFinite(probed)) return probed
+
+  const raw = props.account.extra?.[`${props.account.platform}_${suffix}`]
+  if (typeof raw === 'number') return Number.isFinite(raw) ? raw : null
+  if (typeof raw !== 'string' || raw.trim() === '') return null
+  const parsed = Number(raw)
+  return Number.isFinite(parsed) ? parsed : null
+}
+
 interface CompactUsageSummary {
   label: string
   utilization: number
@@ -1619,6 +1697,15 @@ const compactUsageSummary = computed((): CompactUsageSummary | null => {
     t('admin.accounts.workbench.totalQuotaLabel'),
     quotaTotalBar.value?.utilization
   )
+
+  // Coding Plan snapshots are persisted in account.extra by the CN provider
+  // quota probe.  The compact workbench cell deliberately does not auto-probe
+  // on mount, so include the snapshot here to keep the list view useful
+  // without issuing one upstream request per row.
+  if (cnQuotaCellVisible.value) {
+    addCandidate('5h', readCNQuotaSnapshot('5h_used_percent'))
+    addCandidate('7d', readCNQuotaSnapshot('weekly_used_percent'))
+  }
 
   return candidates.reduce<CompactUsageSummary | null>(
     (highest, candidate) =>
@@ -1993,6 +2080,15 @@ watch(openAIUsageRefreshKey, (nextKey, prevKey) => {
 
   requestAutoLoad(undefined, true)
 })
+
+watch(
+  [() => props.account.id, () => props.account.platform, cnAccountMode],
+  () => {
+    // Account rows are reused by the virtualized table; never carry a live
+    // probe result from a previous account/platform into the newly assigned row.
+    cnQuotaProbe.value = null
+  }
+)
 
 watch(
   () => props.manualRefreshToken,

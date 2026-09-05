@@ -349,6 +349,8 @@ export default {
         gemini: 'Gemini',
         antigravity: 'Antigravity',
         grok: 'Grok',
+        zhipu: '智谱 GLM',
+        deepseek: 'DeepSeek',
       },
       types: {
         oauth: 'OAuth',
@@ -727,6 +729,56 @@ export default {
       grok: {
         baseUrlHint: 'Grok OAuth 账号会转发到官方 xAI API Base URL。',
         apiKeyHint: 'Grok 订阅支持使用 OAuth refresh token；API Key 账号不在本次范围内。'
+      },
+      deepseek: {
+        baseUrlHint: '留空使用官方 DeepSeek API。',
+        apiKeyHint: '您的 DeepSeek API Key。'
+      },
+      zhipu: {
+        baseUrlHint: '使用官方 GLM 接口，或填写兼容的中转地址。',
+        apiKeyHint: '您的智谱 API Key。'
+      },
+      cnProviders: {
+        probe: '查询',
+        probeTooltip: '刷新 Coding Plan 用量',
+        balanceProbeTooltip: '请求供应商余额端点，查询账户余额',
+        window5h: '5 小时',
+        windowWeekly: '每周',
+        resetSoon: '即将重置',
+        balance: '余额',
+        balanceLow: '余额不足',
+        noBalanceEndpoint: '智谱按量付费账号没有公开余额查询接口。',
+        accountMode: {
+          title: '账号套餐',
+          payg: '按量付费',
+          paygDesc: '使用标准 GLM API 配额与计费。',
+          coding: 'Coding Plan',
+          codingDesc: '使用 GLM Coding Plan 接口与额度。'
+        },
+        apiProtocol: {
+          title: 'API 协议',
+          chatCompletions: 'Chat Completions',
+          chatCompletionsDesc: '兼容 OpenAI 的 /chat/completions。',
+          anthropic: 'Anthropic Messages',
+          anthropicDesc: '兼容 Anthropic 的 /v1/messages。'
+        },
+        protocolHint: '协议选择决定请求转换方式；仍可手动填写兼容的自定义 Base URL。',
+        zhipuTeam: {
+          title: '团队 Coding Plan（可选）',
+          organization: '组织（可选）',
+          organizationPlaceholder: 'bigmodel-organization',
+          project: '项目（可选）',
+          projectPlaceholder: 'bigmodel-project',
+          hint: '团队版 GLM Coding Plan 用量查询需要填写组织/项目 ID。',
+          help: {
+            title: '如何获取团队 ID',
+            step1: '打开 GLM 团队控制台。',
+            step2: '打开浏览器开发者工具的 Network 面板。',
+            step3: '找到组织请求，复制其中的 org-/proj_ 值。',
+            step4: '粘贴到上面的字段。',
+            example: '示例：org-... 和 proj_...'
+          }
+        }
       },
       anthropic: {
         apiKeyPassthrough: '自动透传（仅替换认证）',

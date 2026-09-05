@@ -23,6 +23,28 @@ const (
 	PlatformGemini      = "gemini"
 	PlatformAntigravity = "antigravity"
 	PlatformGrok        = "grok"
+	// Zhipu AI / GLM (智谱) OpenAI-compatible provider.
+	PlatformZhipu    = "zhipu"
+	PlatformDeepseek = "deepseek"
+)
+
+// Account mode constants distinguish pay-as-you-go accounts from Coding Plan
+// accounts for Chinese OpenAI-compatible providers. They are persisted in
+// credentials["account_mode"].
+const (
+	AccountModePayG   = "payg"
+	AccountModeCoding = "coding"
+)
+
+// API protocol constants select the upstream wire protocol for a Chinese
+// provider account. Chat Completions is the safe default; Anthropic is
+// supported by providers exposing a native /v1/messages facade, while
+// Responses is currently provider-specific (DeepSeek).
+const (
+	APIProtocolChatCompletions = "chat_completions"
+	APIProtocolAnthropic       = "anthropic"
+	APIProtocolResponses       = "responses"
+	APIProtocolAdaptive        = "adaptive"
 )
 
 // Account type constants

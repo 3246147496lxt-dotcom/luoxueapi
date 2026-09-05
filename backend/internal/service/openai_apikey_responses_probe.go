@@ -114,7 +114,8 @@ func (s *AccountTestService) ProbeOpenAIAPIKeyResponsesSupport(ctx context.Conte
 		return
 	}
 	if account.Platform != PlatformOpenAI || account.Type != AccountTypeAPIKey {
-		// 仅 OpenAI APIKey 账号需要探测；其他账号类型无能力差异。
+		// 仅 OpenAI APIKey 账号需要探测；其他平台的协议能力由各自的
+		// provider 配置决定，不能被 generic OpenAI 标记覆盖。
 		return
 	}
 

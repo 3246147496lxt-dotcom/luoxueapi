@@ -1081,7 +1081,7 @@ func (h *GatewayHandler) Models(c *gin.Context) {
 	}
 
 	if len(availableModels) > 0 {
-		writeModelsList(c, availableModels)
+		writeModelsList(c, platform, availableModels)
 		return
 	}
 
@@ -1102,13 +1102,31 @@ func (h *GatewayHandler) Models(c *gin.Context) {
 		return
 	}
 
+	if platform == service.PlatformZhipu || platform == service.PlatformDeepseek {
+		writeModelsList(c, platform, defaultModelIDsForPlatform(platform))
+		return
+	}
+
 	c.JSON(http.StatusOK, gin.H{
 		"object": "list",
 		"data":   claude.DefaultModels,
 	})
 }
 
-func writeModelsList(c *gin.Context, modelIDs []string) {
+// writeModelsList serializes model IDs using the wire shape expected by the
+// selected provider.  Historically every non-OpenAI model used the Claude
+// `created_at` shape; DeepSeek is OpenAI-compatible and must expose
+// `created`/`owned_by` instead so OpenAI clients can consume /v1/models.
+func writeModelsList(c *gin.Context, platform string, modelIDs []string) {
+	if platform == service.PlatformOpenAI {
+		writeOpenAIModelsList(c, modelIDs)
+		return
+	}
+	if platform == service.PlatformZhipu || platform == service.PlatformDeepseek {
+		writeCNProviderModelsList(c, platform, modelIDs)
+		return
+	}
+
 	models := make([]claude.Model, 0, len(modelIDs))
 	for _, modelID := range modelIDs {
 		models = append(models, claude.Model{
@@ -1125,11 +1143,31 @@ func writeModelsList(c *gin.Context, modelIDs []string) {
 }
 
 func writeCustomModelsList(c *gin.Context, platform string, modelIDs []string) {
-	if platform == service.PlatformOpenAI {
-		writeOpenAIModelsList(c, modelIDs)
-		return
+	writeModelsList(c, platform, modelIDs)
+}
+
+// DeepSeek does not publish creation timestamps in its OpenAI-compatible
+// model catalog.  Keep a stable non-zero timestamp for clients that require
+// the field while preserving the standard OpenAI response shape.
+const deepSeekModelCreatedAt int64 = 1704067200 // 2024-01-01T00:00:00Z
+
+func writeCNProviderModelsList(c *gin.Context, platform string, modelIDs []string) {
+	ownedBy := platform
+	models := make([]openai.Model, 0, len(modelIDs))
+	for _, modelID := range modelIDs {
+		models = append(models, openai.Model{
+			ID:          modelID,
+			Object:      "model",
+			Created:     deepSeekModelCreatedAt,
+			OwnedBy:     ownedBy,
+			Type:        "model",
+			DisplayName: modelID,
+		})
 	}
-	writeModelsList(c, modelIDs)
+	c.JSON(http.StatusOK, gin.H{
+		"object": "list",
+		"data":   models,
+	})
 }
 
 func writeOpenAIModelsList(c *gin.Context, modelIDs []string) {
@@ -1221,6 +1259,15 @@ func defaultModelIDsForPlatform(platform string) []string {
 	switch platform {
 	case service.PlatformOpenAI:
 		return openai.DefaultModelIDs()
+	case service.PlatformDeepseek:
+		// Newly-created DeepSeek groups may not have a synchronized account
+		// model mapping yet. Keep the stable provider models visible until the
+		// first successful model sync; explicit mappings still take precedence.
+		return []string{"deepseek-v4-pro", "deepseek-v4-flash", "deepseek-v4-flash-vision-exp"}
+	case service.PlatformZhipu:
+		// Keep the stable GLM catalog visible before the first successful model
+		// sync.
+		return service.DefaultZhipuModelIDs()
 	case service.PlatformGemini:
 		ids := make([]string, 0, len(geminicli.DefaultModels))
 		for _, model := range geminicli.DefaultModels {

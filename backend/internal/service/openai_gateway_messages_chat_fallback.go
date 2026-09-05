@@ -62,12 +62,27 @@ func (s *OpenAIGatewayService) forwardAnthropicViaRawChatCompletions(
 	billingModel := resolveOpenAIForwardModel(account, anthropicReq.Model, defaultMappedModel)
 	upstreamModel := normalizeOpenAIModelForUpstream(account, billingModel)
 	chatReq.Model = upstreamModel
+	chatReq.ReasoningEffort = normalizeAnthropicCompatReasoningEffort(&anthropicReq, upstreamModel, chatReq.ReasoningEffort)
 	chatReq.Stream = clientStream
 	if clientStream {
 		chatReq.StreamOptions = &apicompat.ChatStreamOptions{IncludeUsage: true}
 	}
 
-	reasoningEffort := extractOpenAIReasoningEffortFromBody(body, upstreamModel, billingModel, originalModel)
+	// Keep usage metadata aligned with the final field sent upstream. The
+	// Anthropic bridge defaults to medium; GLM normalizes that to high, while a
+	// GLM request without thinking/output_config deliberately omits the field.
+	convertedEffort := chatReq.ReasoningEffort
+	if isGLMOpenAICompatModel(upstreamModel) {
+		if normalized := normalizeGLMOpenAIReasoningEffort(convertedEffort); normalized != "" {
+			convertedEffort = normalized
+		}
+	}
+	var reasoningEffort *string
+	if strings.TrimSpace(convertedEffort) != "" {
+		reasoningEffort = &convertedEffort
+	} else if !isGLMOpenAICompatModel(upstreamModel) {
+		reasoningEffort = extractOpenAIReasoningEffortFromBody(body, upstreamModel, billingModel, originalModel)
+	}
 	reasoningEffort = ApplyThinkingEnabledFallback(reasoningEffort, body, billingModel)
 	chatBody, err := json.Marshal(chatReq)
 	if err != nil {
@@ -103,6 +118,24 @@ func (s *OpenAIGatewayService) forwardAnthropicViaRawChatCompletions(
 		}
 		return nil, policyErr
 	}
+	// Anthropic → Chat conversion serializes the OpenAI-style
+	// max_completion_tokens field.  DeepSeek's Chat endpoint follows the
+	// legacy max_tokens spelling and rejects developer-role messages, so apply
+	// the same provider normalization used by the direct Chat path after all
+	// policy/body rewrites are complete.
+	if account.IsDeepseek() {
+		if normalized, changed, normalizeErr := normalizeDeepSeekChatCompletionsRequestBody(chatBody); normalizeErr != nil {
+			return nil, fmt.Errorf("normalize DeepSeek chat fallback request: %w", normalizeErr)
+		} else if changed {
+			chatBody = normalized
+		}
+	}
+	if normalizedBody, normalized := NormalizeGLMOpenAIReasoningEffort(chatBody, upstreamModel); normalized {
+		chatBody = normalizedBody
+	}
+	reasoningEffort = reconcileGLMOpenAIReasoningEffort(
+		reasoningEffort, chatBody, upstreamModel, billingModel, originalModel,
+	)
 	serviceTier := extractOpenAIServiceTierFromBody(chatBody)
 
 	logger.L().Debug("openai messages: forwarding via raw chat completions",
@@ -118,6 +151,11 @@ func (s *OpenAIGatewayService) forwardAnthropicViaRawChatCompletions(
 	if err != nil {
 		return nil, err
 	}
+	// The inbound /messages route is served by the raw Chat Completions
+	// endpoint on this fallback path. Preserve that concrete path for usage
+	// records instead of inferring /v1/messages from the inbound protocol.
+	actualEndpoint := rawChatCompletionsEndpointForPlatform(account.Platform)
+	SetActualOpenAIUpstreamEndpoint(c, actualEndpoint)
 	resp, err := s.sendCCUpstreamRequest(ctx, c, account, targetURL, chatBody, clientStream, apiKey, account.GetOpenAIUserAgent(), "")
 	if err != nil {
 		return nil, err
@@ -173,6 +211,7 @@ func (s *OpenAIGatewayService) bufferChatCompletionsAsAnthropic(
 		Model:                         originalModel,
 		BillingModel:                  billingModel,
 		UpstreamModel:                 upstreamModel,
+		UpstreamEndpoint:              GetActualOpenAIUpstreamEndpoint(c),
 		UpstreamResponseModel:         observedUpstreamResponseModel(c),
 		UpstreamResponseModelConflict: observedUpstreamResponseModelConflict(c),
 		ReasoningEffort:               reasoningEffort,
@@ -235,6 +274,7 @@ func (s *OpenAIGatewayService) streamChatCompletionsAsAnthropic(
 			Model:                         originalModel,
 			BillingModel:                  billingModel,
 			UpstreamModel:                 upstreamModel,
+			UpstreamEndpoint:              GetActualOpenAIUpstreamEndpoint(c),
 			UpstreamResponseModel:         observedUpstreamResponseModel(c),
 			UpstreamResponseModelConflict: observedUpstreamResponseModelConflict(c),
 			ReasoningEffort:               reasoningEffort,
@@ -272,6 +312,7 @@ func (s *OpenAIGatewayService) streamChatCompletionsAsAnthropic(
 		Model:                         originalModel,
 		BillingModel:                  billingModel,
 		UpstreamModel:                 upstreamModel,
+		UpstreamEndpoint:              GetActualOpenAIUpstreamEndpoint(c),
 		UpstreamResponseModel:         observedUpstreamResponseModel(c),
 		UpstreamResponseModelConflict: observedUpstreamResponseModelConflict(c),
 		ReasoningEffort:               reasoningEffort,

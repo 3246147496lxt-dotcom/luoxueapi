@@ -484,6 +484,16 @@ export default {
         codexNote: '将 config.toml 保存到 ~/.codex，并在启动 Codex 前设置 SUB2API_API_KEY。',
         codexNoteWindows: '将 config.toml 保存到 %USERPROFILE%\\.codex，并在 PowerShell 中设置 SUB2API_API_KEY 后启动 Codex。'
       },
+      deepseek: {
+        description: '配置 Codex 或 OpenCode，让 OpenAI 兼容请求通过当前落雪API DeepSeek 分组发送。',
+        note: '请确保 Codex 配置目录存在，将 config.toml 保存到 ~/.codex，并妥善保管生成的 auth.json。',
+        noteWindows: '请确保 Codex 配置目录存在，将 config.toml 保存到 %USERPROFILE%\\.codex，并妥善保管生成的 auth.json。'
+      },
+      zhipu: {
+        description: '配置 Codex 或 OpenCode，让 OpenAI 兼容的 GLM 请求通过当前落雪API 智谱分组发送。',
+        note: '请确保 Codex 配置目录存在，将 config.toml 保存到 ~/.codex，并妥善保管生成的 auth.json。',
+        noteWindows: '请确保 Codex 配置目录存在，将 config.toml 保存到 %USERPROFILE%\\.codex，并妥善保管生成的 auth.json。'
+      },
       opencode: {
         title: 'OpenCode 配置示例',
         subtitle: 'opencode.json',
@@ -736,7 +746,9 @@ export default {
       openai: 'OpenAI',
       anthropic: 'Anthropic',
       gemini: 'Gemini',
-      grok: 'Grok'
+      grok: 'Grok',
+      zhipu: '智谱 GLM',
+      deepseek: 'DeepSeek'
     },
     extraModelsHeader: '附加模型',
     extraModelsEmpty: '无附加模型',

@@ -25,7 +25,7 @@ export function applyAntigravityProjectID(
   }
 }
 
-// ========== 请求头覆写（anthropic/openai 的 api_key 账号 + grok 的 api_key/oauth 账号） ==========
+// ========== 请求头覆写（API-key 平台 + grok 的 api_key/oauth 账号） ==========
 
 export const HEADER_OVERRIDE_ENABLED_CREDENTIAL_KEY = 'header_override_enabled'
 export const HEADER_OVERRIDES_CREDENTIAL_KEY = 'header_overrides'
@@ -37,7 +37,7 @@ export interface HeaderOverrideRow {
 
 /** 请求头覆写资格（与后端 IsHeaderOverrideEligible 保持一致） */
 export function isHeaderOverrideCapable(platform: string, type: string): boolean {
-  if (platform === 'anthropic' || platform === 'openai') {
+  if (platform === 'anthropic' || platform === 'openai' || platform === 'zhipu' || platform === 'deepseek') {
     return type === 'apikey'
   }
   if (platform === 'grok') {
@@ -236,6 +236,17 @@ export function applyHeaderOverride(
     delete credentials[HEADER_OVERRIDE_ENABLED_CREDENTIAL_KEY]
     delete credentials[HEADER_OVERRIDES_CREDENTIAL_KEY]
   }
+}
+
+// ===== 国产供应商用量单元格可见性 =====
+// Coding Plan 账号展示滚动窗口额度；DeepSeek 的 pay-as-you-go 账号展示
+// 余额。智谱 pay-as-you-go 没有公开余额端点，因此保持空占位而不发起无效探测。
+export function cnQuotaCellVisible(platform: string, accountMode: string): boolean {
+  return platform === 'zhipu' && accountMode.trim().toLowerCase() === 'coding'
+}
+
+export function cnBalanceCellVisible(platform: string, accountMode: string): boolean {
+  return platform === 'deepseek' && accountMode.trim().toLowerCase() !== 'coding'
 }
 
 // ===== OpenAI plan_type (ChatGPT 订阅档位) 手动覆盖 =====

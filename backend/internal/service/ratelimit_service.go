@@ -138,6 +138,79 @@ func (s *RateLimitService) notifyAccountSchedulingBlockCleared(accountID int64) 
 	s.runtimeBlocker.ClearAccountSchedulingBlock(accountID)
 }
 
+// ApplyAccountSchedulingThreshold evaluates the configured utilization
+// threshold for one account and parks it until the winning upstream window
+// resets. It is deliberately safe to call repeatedly from scheduler workers:
+// an existing pause with the same reason/reset is treated as already handled.
+func (s *RateLimitService) ApplyAccountSchedulingThreshold(ctx context.Context, account *Account) bool {
+	if s == nil || s.settingService == nil || s.accountRepo == nil || account == nil || account.ID <= 0 {
+		return false
+	}
+	if !account.IsActive() || !account.Schedulable {
+		return false
+	}
+	now := time.Now().UTC()
+	decision := EvaluateAccountSchedulingThreshold(account, s.settingService.GetAccountSchedulingThresholds(ctx), now)
+	if !decision.ShouldPause || decision.Until == nil || !decision.Until.After(now) {
+		return false
+	}
+	reason := BuildDetailedAccountSchedulingThresholdReason(AccountSchedulingThresholdReasonInput{
+		Platform:         decision.Platform,
+		Window:           decision.Window,
+		Scope:            decision.Scope,
+		ThresholdPercent: decision.ThresholdPercent,
+		UsedPercent:      decision.UsedPercent,
+		Until:            *decision.Until,
+		Now:              now,
+	})
+	if accountHasSameSchedulingThresholdPause(account, *decision.Until, reason) {
+		return true
+	}
+	if !account.IsSchedulable() {
+		return false
+	}
+	account.TempUnschedulableUntil = cloneTimePtr(decision.Until)
+	account.TempUnschedulableReason = reason
+	s.notifyAccountSchedulingBlocked(account, *decision.Until, AccountSchedulingThresholdReasonSource)
+	if err := s.accountRepo.SetTempUnschedulable(ctx, account.ID, *decision.Until, reason); err != nil {
+		slog.Warn("account_scheduling_threshold_set_temp_unsched_failed", "account_id", account.ID, "error", err)
+	} else if s.tempUnschedCache != nil {
+		if state := tempUnschedStateFromStoredReason(reason, decision.Until.Unix()); state != nil {
+			if err := s.tempUnschedCache.SetTempUnsched(ctx, account.ID, state); err != nil {
+				slog.Warn("account_scheduling_threshold_cache_set_failed", "account_id", account.ID, "error", err)
+			}
+		}
+	}
+	return true
+}
+
+func accountHasSameSchedulingThresholdPause(account *Account, until time.Time, reason string) bool {
+	if account == nil || account.TempUnschedulableUntil == nil {
+		return false
+	}
+	// Persisted timestamps are second-granularity in the account record. Compare
+	// Unix seconds rather than time.Time's location/monotonic components.
+	if account.TempUnschedulableUntil.UTC().Unix() != until.UTC().Unix() {
+		return false
+	}
+
+	// The detailed reason includes TriggeredAtUnix, which intentionally changes
+	// on every evaluation. Compare the semantic payload while ignoring that
+	// diagnostic field so scheduler hot paths do not issue a DB write every time
+	// they revisit an already-paused account.
+	existing, ok := parseTempUnschedReasonPayload(account.TempUnschedulableReason)
+	if !ok || existing.Source != AccountSchedulingThresholdReasonSource {
+		return false
+	}
+	next, ok := parseTempUnschedReasonPayload(reason)
+	if !ok || next.Source != AccountSchedulingThresholdReasonSource {
+		return false
+	}
+	existing.TriggeredAtUnix = 0
+	next.TriggeredAtUnix = 0
+	return existing == next
+}
+
 // ErrorPolicyResult 表示错误策略检查的结果
 type ErrorPolicyResult int
 
@@ -334,6 +407,14 @@ func (s *RateLimitService) HandleUpstreamError(ctx context.Context, account *Acc
 			shouldDisable = true
 		}
 	case 402:
+		// Chinese OpenAI-compatible providers report exhausted pay-as-you-go
+		// credit with HTTP 402.  This is recoverable (充值/下一次额度探测后可
+		// 恢复), so do not permanently mark a valid API key as error.
+		if account.IsCNProvider() {
+			s.handleCNProviderInsufficientBalance(ctx, account, upstreamMsg)
+			shouldDisable = true // fail over this request; account remains active
+			break
+		}
 		// OpenAI: deactivated_workspace 表示工作区已停用，直接标记 error
 		if account.Platform == PlatformOpenAI && gjson.GetBytes(responseBody, "detail.code").String() == "deactivated_workspace" {
 			msg := "Workspace deactivated (402): workspace has been deactivated"
@@ -797,7 +878,7 @@ func (s *RateLimitService) handle403(ctx context.Context, account *Account, upst
 	if account.Platform == PlatformAntigravity {
 		return s.handleAntigravity403(ctx, account, upstreamMsg, responseBody)
 	}
-	if account.Platform == PlatformOpenAI {
+	if account.Platform == PlatformOpenAI || account.IsCNProvider() {
 		return s.handleOpenAI403(ctx, account, upstreamMsg, responseBody)
 	}
 	// 非 Antigravity 平台：保持原有行为
@@ -812,6 +893,15 @@ func (s *RateLimitService) handle403(ctx context.Context, account *Account, upst
 }
 
 func (s *RateLimitService) handleOpenAI403(ctx context.Context, account *Account, upstreamMsg string, responseBody []byte) (shouldDisable bool) {
+	// CDN/proxy HTML pages do not prove that the credential is invalid.  Keep
+	// the request failover behavior, but skip the account-level 403 penalty.
+	if isHTMLResponse(responseBody) {
+		slog.Warn("openai_403_html_body_skips_account_penalty",
+			"account_id", account.ID,
+			"upstream_message", upstreamMsg,
+		)
+		return false
+	}
 	msg := buildForbiddenErrorMessage(
 		"Access forbidden (403):",
 		upstreamMsg,
@@ -922,6 +1012,12 @@ func (s *RateLimitService) handle429(ctx context.Context, account *Account, head
 	// 单影子场景直接变成无可用账号(外审第8轮 P1)。整段跳过;影子的 codex_* 仅由 account_usage 的
 	// QueryUsage→persistOpenAICodexProbeSnapshot 维护,枯竭由调度守卫处理。
 	if account.IsShadow() {
+		return
+	}
+	// Chinese OpenAI-compatible providers expose recoverable balance/quota
+	// signals in the response body and (for Coding Plans) in persisted reset
+	// snapshots. Handle those before the generic short 429 fallback.
+	if account.IsCNProvider() && s.applyCNProviderReactive429(ctx, account, headers, responseBody) {
 		return
 	}
 	// 1. OpenAI 平台：优先尝试解析 x-codex-* 响应头（用于 rate_limit_exceeded）

@@ -2,8 +2,8 @@
  * Luoxue Snow Clay — canonical runtime design tokens.
  *
  * This is the only source of truth for shared product colors, typography,
- * radii and elevation. The legacy teal primary palette (#14b8a6 / #0f766e)
- * is not part of the active design language. The authenticated Workspace
+ * radii and elevation. The legacy green-teal primary palette is not part of
+ * the active design language. The authenticated Workspace
  * uses one blue interaction/data ramp in both themes; status colors remain
  * semantic and public Snow Clay surfaces keep their own scoped palette.
  */

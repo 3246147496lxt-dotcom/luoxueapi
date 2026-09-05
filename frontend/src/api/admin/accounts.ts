@@ -541,6 +541,11 @@ export interface SyncUpstreamPreviewParams {
   type: string
   base_url?: string
   api_key: string
+  /** Optional GLM/Zhipu routing metadata used by the model-list preview. */
+  account_mode?: string
+  api_protocol?: string
+  zhipu_organization?: string
+  zhipu_project?: string
 }
 
 /**

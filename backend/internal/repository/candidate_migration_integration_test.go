@@ -13,26 +13,40 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestCandidateMigrationsUpgradeProduction246To256AndReplay(t *testing.T) {
+func TestCandidateMigrationsUpgradeProduction246To269AndReplay(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	defer cancel()
 
 	files, err := collectValidatedMigrationFiles(migrationfs.FS)
 	require.NoError(t, err)
 	const productionBaselineCount = 246
-	require.Len(t, files, productionBaselineCount+10, "candidate binary must embed the reviewed 256-file manifest")
+	const candidateMigrationCount = 269
+	require.Len(t, files, candidateMigrationCount, "candidate binary must embed the reviewed 269-file manifest")
 
 	wantTail := []MigrationManifestEntry{
 		{Filename: "201_library_files.sql", SHA256: "03f6a53d92e93fbfee37b9e5dd78dc11cae49dd921812253d0425154f1a9c23e"},
 		{Filename: "201a_library_alias_unique_index_notx.sql", SHA256: "ba15a71ce63180c21f8addda85351b13171a0e6c22f7427bcb4b8c955499e564"},
 		{Filename: "201b_library_alias_constraints.sql", SHA256: "f52ac96a80583b4e7a3c7c5f9923eee5d95a47c4a2b2d9844c864f31abe83833"},
 		{Filename: "202_chat_message_activities.sql", SHA256: "e2ee8b4480af916327f132d378eb70b2291c85efba0ced4555452147b56fdb8f"},
-		{Filename: "231_add_users_email_alias_dedup_index_notx.sql", SHA256: "fd103466b72b14919fc7a0b02135f019f9fe7a409a434726467c3649551321e4"},
+		{Filename: "231_add_users_email_alias_dedup_index_notx.sql", SHA256: "dca6d92a4567ab9fabc3550062acbec57ba89e4e452a1d7e2f17c3cf97e2d556"},
 		{Filename: "232_add_users_email_normalized_index_notx.sql", SHA256: "052a61bf4bdc89a5215970059a61096f4eaea5c244b6781f3ec42d6ac8e8bb5d"},
 		{Filename: "233_group_profit_control.sql", SHA256: "b39b90d72d8869dc46beeb426f5db112ff04235c89ddb6d0ecee61a9bea95381"},
 		{Filename: "234_add_usage_log_upstream_response_model.sql", SHA256: "cad520cbfcf7af7ea9acae92e5bcbe27501fd9e3ad5b02e306f4f97be4410a82"},
 		{Filename: "235_add_usage_log_upstream_model_mismatch_index_notx.sql", SHA256: "692f2a75f0c62670b4d68986912bf24eb92f6377ec904d3806ff7d62b0da8355"},
 		{Filename: "236_projects.sql", SHA256: "050ad388c07995c4167ebd5ef52211f5cc2f04dfb74d6ab6655403d03f9936ce"},
+		{Filename: "237_skill_catalog_localizations.sql", SHA256: "89f58ab9526f6eb21175f22ab44d073fada7c4601dc62060687f83f93c8ac1d3"},
+		{Filename: "238_skill_catalog_zh_001_167.sql", SHA256: "13f8328f3a4da795351cf742908b761cc406cfc6a102eee4a6291ca984d47a91"},
+		{Filename: "239_skill_catalog_zh_168_334.sql", SHA256: "b5de647a5ad20292ab538a556df71ad57c4932d070293f6804272d894f15a62d"},
+		{Filename: "240_skill_catalog_zh_335_500.sql", SHA256: "05a8f15c65ce5e2f81c58fdeb3c270ebb7d1519e05209bc3f9c3e242bb0e33f1"},
+		{Filename: "241_skill_catalog_zh_batch_1.sql", SHA256: "ee1d129d4f2ec009ca9a751b1db3f90e944269670a812926fc2b827fc0834401"},
+		{Filename: "242_skill_catalog_zh_batch_2.sql", SHA256: "b4f3f4210bc2ce171ce4cd682bf739520f83d4e691475162c08f9454f2d882db"},
+		{Filename: "243_skill_catalog_zh_batch_3.sql", SHA256: "ac5b08667cd780ea2c87de7f4ac0c8aa0de4aa2367aa8a81d4a38f1a18633cd6"},
+		{Filename: "244_skill_catalog_zh_batch_4.sql", SHA256: "54635128c55355fed279ef97fefa51a9d71e07670567fca60abb156a1f2b9e57"},
+		{Filename: "245_skill_catalog_zh_batch_5.sql", SHA256: "1a4fe1650914b06427e66f64654b8aae4f2dadebafc80db65663e46a77517ad1"},
+		{Filename: "246_skill_catalog_zh_batch_6.sql", SHA256: "26af86008459fffc6aca2a3d73224c74b930b074fd3519e8df211898a0c36d97"},
+		{Filename: "247_user_platform_quotas_add_deepseek.sql", SHA256: "6c6816fadf6ea30f2cfd0fabfc7852ddf2270c6da4dd49691f1764f16019d8c4"},
+		{Filename: "248_channel_monitor_deepseek_provider.sql", SHA256: "03f90a36eec0e53e524d32479bfe8a377302afd259900516a12aee93dbaa10b7"},
+		{Filename: "249_zhipu_provider.sql", SHA256: "3091d6c40ceaa24be39f94c81235d743e751727780f0cd4c8b0fb818860182e4"},
 	}
 	require.Len(t, files, productionBaselineCount+len(wantTail))
 	for index, want := range wantTail {
@@ -46,7 +60,7 @@ func TestCandidateMigrationsUpgradeProduction246To256AndReplay(t *testing.T) {
 		productionBaseline[file.name] = &fstest.MapFile{Data: []byte(file.content)}
 	}
 
-	db := openIsolatedMigrationIntegrationDB(t, "sub2api_candidate_246_to_256")
+	db := openIsolatedMigrationIntegrationDB(t, "sub2api_candidate_246_to_269")
 	require.NoError(t, applyMigrationsFSWithPolicy(
 		ctx,
 		db,
@@ -70,6 +84,7 @@ func TestCandidateMigrationsUpgradeProduction246To256AndReplay(t *testing.T) {
 	requireCandidateProfitControlSchema(t, ctx, db)
 	requireCandidateUpstreamResponseModelSchema(t, ctx, db)
 	requireCandidateProjectsSchema(t, ctx, db)
+	requireCandidateDeepSeekSchema(t, ctx, db)
 
 	beforeReplay := schemaMigrationsFingerprint(t, ctx, db)
 	require.NoError(t, applyMigrationsFSWithExpectedDatabaseIdentity(
@@ -236,6 +251,31 @@ WHERE constrained_namespace.nspname = 'public'
 	require.Equal(t, 5, constraintCount, "236 project constraints must be present")
 }
 
+func requireCandidateDeepSeekSchema(t *testing.T, ctx context.Context, db *sql.DB) {
+	t.Helper()
+
+	for _, tableAndConstraint := range []struct {
+		table      string
+		constraint string
+	}{
+		{table: "user_platform_quotas", constraint: "user_platform_quotas_platform_check"},
+		{table: "channel_monitors", constraint: "channel_monitors_provider_check"},
+		{table: "channel_monitor_request_templates", constraint: "channel_monitor_request_templates_provider_check"},
+	} {
+		var definition string
+		require.NoError(t, db.QueryRowContext(ctx, `
+SELECT pg_get_constraintdef(c.oid)
+FROM pg_constraint AS c
+JOIN pg_class AS table_state ON table_state.oid = c.conrelid
+JOIN pg_namespace AS namespace_state ON namespace_state.oid = table_state.relnamespace
+WHERE namespace_state.nspname = 'public'
+  AND table_state.relname = $1
+  AND c.conname = $2`, tableAndConstraint.table, tableAndConstraint.constraint).Scan(&definition))
+		require.Containsf(t, definition, "deepseek", "%s must allow DeepSeek", tableAndConstraint.constraint)
+		require.Containsf(t, definition, "zhipu", "%s must allow Zhipu", tableAndConstraint.constraint)
+	}
+}
+
 func requireCandidateMigrationRows(
 	t *testing.T,
 	ctx context.Context,
@@ -256,7 +296,20 @@ WHERE filename IN (
   '233_group_profit_control.sql',
   '234_add_usage_log_upstream_response_model.sql',
   '235_add_usage_log_upstream_model_mismatch_index_notx.sql',
-  '236_projects.sql'
+  '236_projects.sql',
+  '237_skill_catalog_localizations.sql',
+  '238_skill_catalog_zh_001_167.sql',
+  '239_skill_catalog_zh_168_334.sql',
+  '240_skill_catalog_zh_335_500.sql',
+  '241_skill_catalog_zh_batch_1.sql',
+  '242_skill_catalog_zh_batch_2.sql',
+  '243_skill_catalog_zh_batch_3.sql',
+  '244_skill_catalog_zh_batch_4.sql',
+  '245_skill_catalog_zh_batch_5.sql',
+  '246_skill_catalog_zh_batch_6.sql',
+  '247_user_platform_quotas_add_deepseek.sql',
+  '248_channel_monitor_deepseek_provider.sql',
+  '249_zhipu_provider.sql'
 )
 ORDER BY filename`)
 	require.NoError(t, err)

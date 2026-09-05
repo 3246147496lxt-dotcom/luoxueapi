@@ -119,13 +119,13 @@ class CandidateDeliveryContractTest(unittest.TestCase):
         second = build_manifest(ROOT)
         self.assertEqual(first, second)
         self.assertEqual(first["contract"], "sub2api-migration-manifest/v1")
-        self.assertEqual(len(first["migrations"]), 256)
+        self.assertEqual(len(first["migrations"]), 269)
         self.assertEqual(
             first["set_sha256"],
-            "34552e5dd1f16783654893774b6fe389d857eb10256032a76d15658aa39870f4",
+            "49acdb5ff514eb8729bf6d84dd4c3e7d9d03400521b2361413a6ff12e1597e6d",
         )
         self.assertEqual(
-            first["migrations"][-10:],
+            first["migrations"][-22:],
             [
                 {
                     "filename": "201_library_files.sql",
@@ -145,7 +145,7 @@ class CandidateDeliveryContractTest(unittest.TestCase):
                 },
                 {
                     "filename": "231_add_users_email_alias_dedup_index_notx.sql",
-                    "sha256": "fd103466b72b14919fc7a0b02135f019f9fe7a409a434726467c3649551321e4",
+                    "sha256": "dca6d92a4567ab9fabc3550062acbec57ba89e4e452a1d7e2f17c3cf97e2d556",
                 },
                 {
                     "filename": "232_add_users_email_normalized_index_notx.sql",
@@ -166,6 +166,58 @@ class CandidateDeliveryContractTest(unittest.TestCase):
                 {
                     "filename": "236_projects.sql",
                     "sha256": "050ad388c07995c4167ebd5ef52211f5cc2f04dfb74d6ab6655403d03f9936ce",
+                },
+                {
+                    "filename": "237_skill_catalog_localizations.sql",
+                    "sha256": "89f58ab9526f6eb21175f22ab44d073fada7c4601dc62060687f83f93c8ac1d3",
+                },
+                {
+                    "filename": "238_skill_catalog_zh_001_167.sql",
+                    "sha256": "13f8328f3a4da795351cf742908b761cc406cfc6a102eee4a6291ca984d47a91",
+                },
+                {
+                    "filename": "239_skill_catalog_zh_168_334.sql",
+                    "sha256": "b5de647a5ad20292ab538a556df71ad57c4932d070293f6804272d894f15a62d",
+                },
+                {
+                    "filename": "240_skill_catalog_zh_335_500.sql",
+                    "sha256": "05a8f15c65ce5e2f81c58fdeb3c270ebb7d1519e05209bc3f9c3e242bb0e33f1",
+                },
+                {
+                    "filename": "241_skill_catalog_zh_batch_1.sql",
+                    "sha256": "ee1d129d4f2ec009ca9a751b1db3f90e944269670a812926fc2b827fc0834401",
+                },
+                {
+                    "filename": "242_skill_catalog_zh_batch_2.sql",
+                    "sha256": "b4f3f4210bc2ce171ce4cd682bf739520f83d4e691475162c08f9454f2d882db",
+                },
+                {
+                    "filename": "243_skill_catalog_zh_batch_3.sql",
+                    "sha256": "ac5b08667cd780ea2c87de7f4ac0c8aa0de4aa2367aa8a81d4a38f1a18633cd6",
+                },
+                {
+                    "filename": "244_skill_catalog_zh_batch_4.sql",
+                    "sha256": "54635128c55355fed279ef97fefa51a9d71e07670567fca60abb156a1f2b9e57",
+                },
+                {
+                    "filename": "245_skill_catalog_zh_batch_5.sql",
+                    "sha256": "1a4fe1650914b06427e66f64654b8aae4f2dadebafc80db65663e46a77517ad1",
+                },
+                {
+                    "filename": "246_skill_catalog_zh_batch_6.sql",
+                    "sha256": "26af86008459fffc6aca2a3d73224c74b930b074fd3519e8df211898a0c36d97",
+                },
+                {
+                    "filename": "247_user_platform_quotas_add_deepseek.sql",
+                    "sha256": "6c6816fadf6ea30f2cfd0fabfc7852ddf2270c6da4dd49691f1764f16019d8c4",
+                },
+                {
+                    "filename": "248_channel_monitor_deepseek_provider.sql",
+                    "sha256": "03f90a36eec0e53e524d32479bfe8a377302afd259900516a12aee93dbaa10b7",
+                },
+                {
+                    "filename": "249_zhipu_provider.sql",
+                    "sha256": "3091d6c40ceaa24be39f94c81235d743e751727780f0cd4c8b0fb818860182e4",
                 },
             ],
         )
@@ -207,7 +259,7 @@ class CandidateDeliveryContractTest(unittest.TestCase):
         compose = CANDIDATE_COMPOSE.read_text(encoding="utf-8")
         self.assertIn("@sha256:", script)
         self.assertIn("EXPECTED_OLD_MIGRATIONS:-246", script)
-        self.assertIn("EXPECTED_CANDIDATE_MIGRATIONS:-256", script)
+        self.assertIn("EXPECTED_CANDIDATE_MIGRATIONS:-269", script)
         self.assertIn("--migrate-only", script)
         self.assertIn("for replay in first second", script)
         self.assertIn("--volumes --remove-orphans", script)

@@ -46,6 +46,8 @@ describe("validateProfitControlFormState", () => {
       "anthropic",
       "gemini",
       "grok",
+      "zhipu",
+      "deepseek",
       "antigravity",
     ]) {
       expect(validateProfitControlFormState(formState({ platform }))).toBeNull();

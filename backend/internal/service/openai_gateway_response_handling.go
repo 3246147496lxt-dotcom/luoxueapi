@@ -793,6 +793,11 @@ type openAICompatSSEFrameParser struct {
 }
 
 func (p *openAICompatSSEFrameParser) AddLine(line string) (openAICompatSSEFrame, bool) {
+	// bufio.Scanner strips the LF delimiter but retains CR when an upstream
+	// emits standards-compliant CRLF SSE lines.  Normalize that delimiter here
+	// so a blank line still dispatches the frame and `data:` JSON is not handed
+	// to downstream parsers with a trailing carriage return.
+	line = strings.TrimSuffix(line, "\r")
 	if line == "" {
 		return p.dispatch()
 	}
@@ -1028,6 +1033,15 @@ func openAIUsageFromGJSON(value gjson.Result) (OpenAIUsage, bool) {
 	if inputTokens == 0 {
 		inputTokens = value.Get("prompt_tokens").Int()
 	}
+	// DeepSeek Chat Completions reports KV-cache usage as
+	// prompt_cache_hit_tokens/prompt_cache_miss_tokens.  Keep InputTokens at
+	// the provider's total prompt_tokens value and expose the hit bucket
+	// separately; usage billing subtracts cache-read/write buckets once when it
+	// derives billable text input.  A few relay versions omit prompt_tokens, so
+	// reconstruct the total from the two explicit buckets in that case.
+	if inputTokens == 0 {
+		inputTokens = int64(openAIPromptCacheHitTokensFromUsage(value) + openAIPromptCacheMissTokensFromUsage(value))
+	}
 	outputTokens := value.Get("output_tokens").Int()
 	if outputTokens == 0 {
 		outputTokens = value.Get("completion_tokens").Int()
@@ -1064,12 +1078,29 @@ func openAICacheReadTokensFromUsage(value gjson.Result) int {
 			return max(int(nested.Int()), 0)
 		}
 	}
+	if hit := value.Get("prompt_cache_hit_tokens"); hit.Exists() {
+		return max(int(hit.Int()), 0)
+	}
 
 	return firstPositiveGJSONInt(
 		value.Get("cache_read_input_tokens"),
 		value.Get("cache_read_tokens"),
 		value.Get("cached_tokens"),
 	)
+}
+
+func openAIPromptCacheHitTokensFromUsage(value gjson.Result) int {
+	if hit := value.Get("prompt_cache_hit_tokens"); hit.Exists() {
+		return max(int(hit.Int()), 0)
+	}
+	return 0
+}
+
+func openAIPromptCacheMissTokensFromUsage(value gjson.Result) int {
+	if miss := value.Get("prompt_cache_miss_tokens"); miss.Exists() {
+		return max(int(miss.Int()), 0)
+	}
+	return 0
 }
 
 func openAICacheCreationTokensFromUsage(value gjson.Result) int {

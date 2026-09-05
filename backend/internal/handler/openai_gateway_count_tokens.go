@@ -36,7 +36,11 @@ func (h *OpenAIGatewayHandler) CountTokens(c *gin.Context) {
 		zap.Any("group_id", apiKey.GroupID),
 	)
 
-	if apiKey.Group != nil && !apiKey.Group.AllowMessagesDispatch {
+	// DeepSeek is a first-class OpenAI-compatible platform.  Its
+	// Anthropic-shaped count_tokens compatibility route is intentionally
+	// available even though the legacy OpenAI-only flag is sanitized off for
+	// non-OpenAI groups.  Keep this gate in sync with Messages.
+	if !allowOpenAICompatibleMessagesDispatch(apiKey) {
 		h.anthropicErrorResponse(c, http.StatusForbidden, "permission_error",
 			"This group does not allow /v1/messages dispatch")
 		return

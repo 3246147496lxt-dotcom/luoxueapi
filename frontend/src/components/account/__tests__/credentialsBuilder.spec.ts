@@ -101,6 +101,7 @@ describe('isHeaderOverrideCapable', () => {
   it('anthropic/openai only support apikey accounts', () => {
     expect(isHeaderOverrideCapable('anthropic', 'apikey')).toBe(true)
     expect(isHeaderOverrideCapable('openai', 'apikey')).toBe(true)
+    expect(isHeaderOverrideCapable('deepseek', 'apikey')).toBe(true)
     expect(isHeaderOverrideCapable('anthropic', 'oauth')).toBe(false)
     expect(isHeaderOverrideCapable('openai', 'oauth')).toBe(false)
   })
@@ -439,4 +440,3 @@ describe('plan_type helpers', () => {
     })
   })
 })
-

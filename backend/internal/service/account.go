@@ -6,6 +6,7 @@ import (
 	"errors"
 	"hash/fnv"
 	"log/slog"
+	"net/url"
 	"reflect"
 	"sort"
 	"strconv"
@@ -239,11 +240,33 @@ func (a *Account) IsPrivacySet() bool {
 }
 
 func (a *Account) IsGemini() bool {
-	return a.Platform == PlatformGemini
+	return a != nil && a.Platform == PlatformGemini
 }
 
 func (a *Account) IsGrok() bool {
-	return a.Platform == PlatformGrok
+	return a != nil && a.Platform == PlatformGrok
+}
+
+// IsZhipu reports whether this is a first-class Zhipu AI / GLM account.
+func (a *Account) IsZhipu() bool {
+	return a != nil && a.Platform == PlatformZhipu
+}
+
+// IsDeepseek reports whether this is a DeepSeek account.  DeepSeek accounts
+// use the OpenAI-compatible gateway and are API-key based; keeping the helper
+// on Account makes platform checks consistent across routing and billing.
+func (a *Account) IsDeepseek() bool {
+	return a != nil && a.Platform == PlatformDeepseek
+}
+
+// IsDeepSeek is a spelling alias for integrations that use the provider's
+// conventional camel-case name.
+func (a *Account) IsDeepSeek() bool { return a.IsDeepseek() }
+
+// IsCNProvider reports whether this account belongs to a first-class Chinese
+// OpenAI-compatible provider.
+func (a *Account) IsCNProvider() bool {
+	return a != nil && IsCNProvider(a.Platform)
 }
 
 func (a *Account) IsGrokOAuth() bool {
@@ -251,7 +274,8 @@ func (a *Account) IsGrokOAuth() bool {
 }
 
 func (a *Account) IsOpenAICompatible() bool {
-	return a != nil && (a.Platform == PlatformOpenAI || a.Platform == PlatformGrok)
+	return a != nil && (a.Platform == PlatformOpenAI || a.Platform == PlatformGrok ||
+		a.Platform == PlatformZhipu || a.Platform == PlatformDeepseek)
 }
 
 func (a *Account) GeminiOAuthType() string {
@@ -1202,7 +1226,7 @@ func (a *Account) IsAPIKeyOrBedrock() bool {
 }
 
 func (a *Account) IsOpenAI() bool {
-	return a.Platform == PlatformOpenAI
+	return a != nil && a.Platform == PlatformOpenAI
 }
 
 func (a *Account) IsOpenAILongContextBillingEnabled() bool {
@@ -1245,17 +1269,411 @@ func (a *Account) IsOpenAIApiKey() bool {
 	return a.IsOpenAI() && a.Type == AccountTypeAPIKey
 }
 
-func (a *Account) GetOpenAIBaseURL() string {
-	if !a.IsOpenAI() {
+// GetAccountMode returns the optional access mode stored with a
+// first-class OpenAI-compatible provider account. DeepSeek currently uses
+// pay-as-you-go, but accepting the shared field keeps imported credentials
+// forward-compatible.
+func (a *Account) GetAccountMode() string {
+	if a == nil || !a.IsCNProvider() {
 		return ""
 	}
-	if a.Type == AccountTypeAPIKey {
-		baseURL := a.GetCredential("base_url")
-		if baseURL != "" {
+	switch mode := strings.ToLower(strings.TrimSpace(a.GetCredential("account_mode"))); mode {
+	case AccountModePayG, AccountModeCoding:
+		return mode
+	default:
+		return ""
+	}
+}
+
+// IsCodingPlan reports whether this account uses a provider Coding Plan.
+func (a *Account) IsCodingPlan() bool {
+	return a != nil && a.IsCNProvider() && a.GetAccountMode() == AccountModeCoding
+}
+
+// GetAPIProtocol returns the upstream protocol selected for a first-class
+// OpenAI-compatible provider. DeepSeek defaults to Chat Completions; optional
+// Responses/Anthropic and adaptive modes are explicit credentials.
+func (a *Account) GetAPIProtocol() string {
+	if a == nil || !a.IsCNProvider() {
+		return APIProtocolChatCompletions
+	}
+	switch strings.ToLower(strings.TrimSpace(a.GetCredential("api_protocol"))) {
+	case APIProtocolChatCompletions:
+		return APIProtocolChatCompletions
+	case APIProtocolAnthropic:
+		return APIProtocolAnthropic
+	case APIProtocolResponses:
+		if a.SupportsNativeCNResponses() {
+			return APIProtocolResponses
+		}
+	case APIProtocolAdaptive:
+		if a.SupportsNativeCNResponses() {
+			return APIProtocolAdaptive
+		}
+	}
+	return APIProtocolChatCompletions
+}
+
+// SupportsNativeCNResponses reports whether this provider exposes a native
+// Responses endpoint. DeepSeek's public endpoint is /responses at the root
+// host, without OpenAI's synthetic /v1 prefix.
+func (a *Account) SupportsNativeCNResponses() bool {
+	return a != nil && isDeepSeekPlatform(a.Platform)
+}
+
+// UsesNativeCNResponses reports whether this account is configured to use the
+// provider-native Responses protocol rather than the Chat Completions bridge.
+func (a *Account) UsesNativeCNResponses() bool {
+	if a == nil || !a.SupportsNativeCNResponses() {
+		return false
+	}
+	switch a.GetAPIProtocol() {
+	case APIProtocolResponses, APIProtocolAdaptive:
+		return true
+	default:
+		return false
+	}
+}
+
+func (a *Account) IsAdaptiveAPIProtocol() bool {
+	return a.GetAPIProtocol() == APIProtocolAdaptive
+}
+
+func (a *Account) IsAnthropicProtocol() bool {
+	return a.GetAPIProtocol() == APIProtocolAnthropic
+}
+
+// protocolBaseURL reads the optional per-protocol URL map used by adaptive
+// credentials. JSON decoding can produce either map[string]any or
+// map[string]string depending on the persistence path.
+func (a *Account) protocolBaseURL(protocol string) string {
+	if a == nil || a.Credentials == nil {
+		return ""
+	}
+	var value any
+	switch values := a.Credentials["api_base_urls"].(type) {
+	case map[string]any:
+		value = values[protocol]
+	case map[string]string:
+		value = values[protocol]
+	}
+	if text, ok := value.(string); ok {
+		return strings.TrimSpace(text)
+	}
+	return ""
+}
+
+// GetCNProtocolBaseURL resolves an adaptive provider's URL for a concrete
+// protocol. The legacy base_url remains the Chat Completions URL.
+func (a *Account) GetCNProtocolBaseURL(protocol string) string {
+	if a == nil || !a.IsCNProvider() {
+		return ""
+	}
+	if a.IsAdaptiveAPIProtocol() {
+		if base := a.protocolBaseURL(protocol); base != "" {
+			if protocol == APIProtocolAnthropic {
+				return normalizeCNAnthropicBaseURL(a, base)
+			}
+			return base
+		}
+		if protocol == APIProtocolChatCompletions {
+			if base := strings.TrimSpace(a.GetCredential("base_url")); base != "" {
+				return base
+			}
+		}
+	}
+	if protocol == APIProtocolAnthropic {
+		if base := strings.TrimSpace(a.GetCredential("base_url")); base != "" {
+			return normalizeCNAnthropicBaseURL(a, base)
+		}
+		return defaultCNAnthropicBaseURL(a)
+	}
+	if base := strings.TrimSpace(a.GetCredential("base_url")); base != "" {
+		return base
+	}
+	return defaultCNOpenAIBaseURL(a)
+}
+
+// GetAnthropicProtocolBaseURL returns DeepSeek's native Anthropic-compatible
+// base URL when the corresponding protocol is enabled.
+func (a *Account) GetAnthropicProtocolBaseURL() string {
+	if a == nil || !a.IsCNProvider() || (!a.IsAnthropicProtocol() && !a.IsAdaptiveAPIProtocol()) {
+		return ""
+	}
+	if a.IsAdaptiveAPIProtocol() {
+		if base := a.protocolBaseURL(APIProtocolAnthropic); base != "" {
+			return normalizeCNAnthropicBaseURL(a, base)
+		}
+	}
+	if a.IsAnthropicProtocol() {
+		if base := strings.TrimSpace(a.GetCredential("base_url")); base != "" {
+			return normalizeCNAnthropicBaseURL(a, base)
+		}
+	}
+	return defaultCNAnthropicBaseURL(a)
+}
+
+func defaultCNOpenAIBaseURL(a *Account) string {
+	if a == nil {
+		return ""
+	}
+	switch a.Platform {
+	case PlatformZhipu:
+		if a.GetAccountMode() == AccountModeCoding {
+			return DefaultZhipuCodingBaseURL
+		}
+		return DefaultZhipuPayGBaseURL
+	case PlatformDeepseek:
+		return DefaultDeepseekBaseURL
+	default:
+		return ""
+	}
+}
+
+func defaultCNAnthropicBaseURL(a *Account) string {
+	if a == nil {
+		return ""
+	}
+	switch a.Platform {
+	case PlatformZhipu:
+		return DefaultZhipuAnthropicBaseURL
+	case PlatformDeepseek:
+		return DefaultDeepseekAnthropicBaseURL
+	default:
+		return ""
+	}
+}
+
+func normalizeCNAnthropicBaseURL(a *Account, base string) string {
+	if a == nil {
+		return strings.TrimRight(strings.TrimSpace(base), "/")
+	}
+	if a.IsDeepseek() {
+		return normalizeDeepseekAnthropicBaseURL(base)
+	}
+	if a.IsZhipu() {
+		return normalizeZhipuAnthropicBaseURL(base)
+	}
+	return normalizeDeepseekProtocolBaseURL(base)
+}
+
+// normalizeZhipuAnthropicBaseURL maps an accidentally persisted official
+// OpenAI-format GLM endpoint to the provider's Anthropic facade.  Keep the
+// official host variant (mainland open.bigmodel.cn vs international api.z.ai)
+// so a model/account configured for one region is not silently moved to the
+// other.  Custom relay URLs remain opaque and are only normalized for a copied
+// /v1/messages suffix, just like the DeepSeek path above.
+func normalizeZhipuAnthropicBaseURL(base string) string {
+	normalized := normalizeDeepseekProtocolBaseURL(base)
+	parsed, err := url.Parse(normalized)
+	if err != nil || parsed.Scheme == "" || parsed.Host == "" || parsed.Port() != "" {
+		return normalized
+	}
+	host := strings.ToLower(strings.TrimSpace(parsed.Hostname()))
+	if host != "open.bigmodel.cn" && host != "api.z.ai" {
+		return normalized
+	}
+	path := strings.TrimRight(parsed.Path, "/")
+	switch strings.ToLower(path) {
+	case "/api/paas/v4", "/api/coding/paas/v4":
+		parsed.Path = "/api/anthropic"
+		parsed.RawPath = ""
+		parsed.Fragment = ""
+		return parsed.String()
+	default:
+		return normalized
+	}
+}
+
+// normalizeDeepseekAnthropicBaseURL keeps the legacy DeepSeek base_url field
+// usable when an account is switched to api_protocol=anthropic.  The account
+// form historically stores the OpenAI-compatible root (https://api.deepseek.com)
+// there; DeepSeek's Anthropic facade lives below /anthropic.  Only that exact
+// official root is rewritten so custom relay URLs and path prefixes remain
+// untouched.
+func normalizeDeepseekAnthropicBaseURL(base string) string {
+	trimmed := normalizeDeepseekProtocolBaseURL(base)
+	if strings.EqualFold(strings.TrimRight(trimmed, "/"), strings.TrimRight(DefaultDeepseekBaseURL, "/")) {
+		return DefaultDeepseekAnthropicBaseURL
+	}
+	return trimmed
+}
+
+// normalizeDeepseekProtocolBaseURL removes a fully-qualified Messages endpoint
+// that is occasionally copied into base_url by relay configurations.  A bare
+// /v1 suffix is intentionally preserved: the shared endpoint builder treats it
+// as a version prefix and appends /messages or /models below it.  This keeps
+// custom relays that explicitly require /v1 intact while preventing
+// /v1/messages/v1/messages duplication.
+func normalizeDeepseekProtocolBaseURL(base string) string {
+	trimmed := strings.TrimSpace(base)
+	if trimmed == "" {
+		return ""
+	}
+	parsed, err := url.Parse(trimmed)
+	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
+		return strings.TrimRight(trimmed, "/")
+	}
+	path := strings.TrimRight(parsed.Path, "/")
+	lowerPath := strings.ToLower(path)
+	for _, suffix := range []string{"/v1/messages"} {
+		if strings.HasSuffix(lowerPath, suffix) {
+			path = strings.TrimRight(path[:len(path)-len(suffix)], "/")
+			break
+		}
+	}
+	parsed.Path = path
+	parsed.RawPath = ""
+	parsed.Fragment = ""
+	// Trim only the URL path above. Trimming the serialized URL would also
+	// remove a legitimate trailing slash in a query value (for example
+	// `?redirect=/`) and silently alter a custom relay configuration.
+	return parsed.String()
+}
+
+// normalizeDeepseekOpenAIFormatBaseURL removes the official DeepSeek
+// Anthropic facade path when a caller needs an OpenAI-format endpoint such as
+// /models or /user/balance.  The native Anthropic path is deliberately kept in
+// normalizeDeepseekAnthropicBaseURL; only the official host is collapsed here
+// so custom relay namespaces (for example /proxy/anthropic) remain intact.
+func normalizeDeepseekOpenAIFormatBaseURL(base string) string {
+	normalized := normalizeDeepseekProtocolBaseURL(base)
+	parsed, err := url.Parse(normalized)
+	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
+		return normalized
+	}
+	if !strings.EqualFold(strings.TrimSpace(parsed.Hostname()), "api.deepseek.com") {
+		return normalized
+	}
+	path := strings.TrimRight(parsed.Path, "/")
+	switch strings.ToLower(path) {
+	case "/anthropic", "/anthropic/v1", "/anthropic/v1/messages":
+		parsed.Path = ""
+		parsed.RawPath = ""
+		parsed.Fragment = ""
+		return parsed.String()
+	default:
+		return normalized
+	}
+}
+
+// GetOpenAIFormatBaseURL returns a base suitable for OpenAI-style paths. An
+// official DeepSeek Anthropic protocol base may point at /anthropic (or its
+// /v1/messages endpoint), so use the normal API root for protocol-agnostic
+// operations while preserving custom relay path prefixes.
+func (a *Account) GetOpenAIFormatBaseURL() string {
+	if a == nil {
+		return ""
+	}
+	if a.IsDeepseek() && a.IsAnthropicProtocol() {
+		if base := strings.TrimSpace(a.GetCredential("base_url")); base != "" {
+			return normalizeDeepseekOpenAIFormatBaseURL(base)
+		}
+		return DefaultDeepseekBaseURL
+	}
+	if a.IsZhipu() && a.IsAnthropicProtocol() {
+		// A Zhipu Anthropic credential points at /api/anthropic, which cannot be
+		// reused for OpenAI-format endpoints such as /models. Use the matching
+		// payg/coding data-plane base instead, preserving the official host variant
+		// when the credential was configured against api.z.ai. For a custom relay
+		// there is no trustworthy way to infer a second protocol namespace, so
+		// preserve the relay rather than silently sending its key to Zhipu.
+		if base := strings.TrimSpace(a.GetCredential("base_url")); base != "" {
+			if derived := zhipuOpenAIFormatBaseURL(base, a.GetAccountMode()); derived != "" {
+				return derived
+			}
+			return normalizeDeepseekProtocolBaseURL(base)
+		}
+		return defaultCNOpenAIBaseURL(a)
+	}
+	return a.GetOpenAIBaseURL()
+}
+
+// zhipuOpenAIFormatBaseURL derives the OpenAI-compatible data-plane URL from
+// an official Zhipu endpoint while retaining its scheme/host.  It returns an
+// empty string for custom relays because there is no reliable way to infer the
+// relay's corresponding Chat Completions namespace.
+func zhipuOpenAIFormatBaseURL(base, mode string) string {
+	normalized := normalizeDeepseekProtocolBaseURL(base)
+	parsed, err := url.Parse(normalized)
+	if err != nil || parsed.Scheme == "" || parsed.Host == "" || parsed.Port() != "" {
+		return ""
+	}
+	host := strings.ToLower(strings.TrimSpace(parsed.Hostname()))
+	if host != "open.bigmodel.cn" && host != "api.z.ai" {
+		return ""
+	}
+	path := strings.TrimRight(parsed.Path, "/")
+	var targetPath string
+	switch strings.ToLower(path) {
+	case "/api/anthropic", "/api/paas/v4", "/api/coding/paas/v4":
+		if strings.EqualFold(strings.TrimSpace(mode), AccountModeCoding) {
+			targetPath = "/api/coding/paas/v4"
+		} else {
+			targetPath = "/api/paas/v4"
+		}
+	default:
+		return ""
+	}
+	parsed.Path = targetPath
+	parsed.RawPath = ""
+	parsed.Fragment = ""
+	return parsed.String()
+}
+
+func (a *Account) GetOpenAIBaseURL() string {
+	if a == nil || (!a.IsOpenAI() && !a.IsCNProvider()) {
+		return ""
+	}
+	if a.IsCNProvider() && a.IsAdaptiveAPIProtocol() {
+		if base := a.protocolBaseURL(APIProtocolChatCompletions); base != "" {
+			return base
+		}
+	}
+	if a.Type == AccountTypeAPIKey || a.Type == AccountTypeUpstream {
+		if baseURL := strings.TrimSpace(a.GetCredential("base_url")); baseURL != "" {
 			return baseURL
 		}
 	}
+	if a.IsCNProvider() {
+		return defaultCNOpenAIBaseURL(a)
+	}
 	return "https://api.openai.com"
+}
+
+// GetCodingPlanProvider identifies the supported Coding Plan quota API from
+// the account's configured data-plane base URL. Custom relay hosts are not
+// guessed, preventing a quota probe from sending the API key to an unrelated
+// endpoint.
+func (a *Account) GetCodingPlanProvider() string {
+	if a == nil || !a.IsCodingPlan() {
+		return ""
+	}
+	baseURL := strings.TrimSpace(a.GetOpenAIBaseURL())
+	switch {
+	case a.IsZhipu() && isOfficialZhipuBaseURL(baseURL):
+		return PlatformZhipu
+	default:
+		return ""
+	}
+}
+
+// isOfficialZhipuBaseURL performs an exact host check for URLs that may carry
+// a live API key. Substring matching is unsafe here: a custom relay such as
+// `https://relay.example/forward/api.z.ai` must not be mistaken for the
+// provider's official quota service. Explicit ports are rejected as well so a
+// caller cannot redirect quota traffic to an arbitrary listener on an official
+// looking hostname.
+func isOfficialZhipuBaseURL(raw string) bool {
+	parsed, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil || parsed.Scheme == "" || parsed.Host == "" || parsed.Port() != "" {
+		return false
+	}
+	if !strings.EqualFold(parsed.Scheme, "https") && !strings.EqualFold(parsed.Scheme, "http") {
+		return false
+	}
+	host := strings.TrimSpace(parsed.Hostname())
+	return strings.EqualFold(host, "open.bigmodel.cn") || strings.EqualFold(host, "api.z.ai")
 }
 
 func (a *Account) GetOpenAIAccessToken() string {
@@ -1338,8 +1756,26 @@ func (a *Account) GetOpenAIApiKey() string {
 	return a.GetCredential("api_key")
 }
 
+// GetOpenAIProtocolAPIKey returns the static key for any API-key account that
+// uses the OpenAI protocol family (including DeepSeek). The historical
+// GetOpenAIApiKey intentionally remains OpenAI-platform-only.
+func (a *Account) GetOpenAIProtocolAPIKey() string {
+	if a == nil || a.Type != AccountTypeAPIKey || !a.IsOpenAICompatible() {
+		return ""
+	}
+	return a.GetCredential("api_key")
+}
+
+// GetCNAPIKey is a concise provider-specific alias for the static API key.
+func (a *Account) GetCNAPIKey() string {
+	if a == nil || !a.IsCNProvider() || a.Type != AccountTypeAPIKey {
+		return ""
+	}
+	return a.GetCredential("api_key")
+}
+
 func (a *Account) GetOpenAIUserAgent() string {
-	if !a.IsOpenAI() {
+	if a == nil || (!a.IsOpenAI() && !a.IsCNProvider()) {
 		return ""
 	}
 	return a.GetCredential("user_agent")
@@ -1406,6 +1842,16 @@ func (a *Account) SupportsOpenAIEndpointCapability(capability OpenAIEndpointCapa
 	}
 	if a.IsGrok() {
 		return capability == OpenAIEndpointCapabilityChatCompletions
+	}
+	// First-class CN providers are not generic OpenAI relay accounts. Their
+	// protocol selection lives in credentials["api_protocol"], while the
+	// legacy openai_capabilities/openai_responses_supported markers describe
+	// only OpenAI API-key accounts. Do not let stale imported OpenAI markers
+	// make a valid GLM/DeepSeek account disappear from scheduling. Responses is
+	// safe because a provider without a native endpoint bridges it to Chat
+	// Completions (or to its configured Anthropic facade).
+	if a.IsCNProvider() {
+		return capability == OpenAIEndpointCapabilityChatCompletions || capability == OpenAIEndpointCapabilityResponses
 	}
 	switch capability {
 	case OpenAIEndpointCapabilityChatCompletions:

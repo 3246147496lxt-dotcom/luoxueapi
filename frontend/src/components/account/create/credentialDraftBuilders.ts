@@ -52,7 +52,142 @@ const DEFAULT_API_KEY_BASE_URL: Record<AccountPlatform, string> = {
   gemini: 'https://generativelanguage.googleapis.com',
   antigravity: 'https://api.anthropic.com',
   grok: 'https://api.x.ai/v1',
+  zhipu: 'https://open.bigmodel.cn/api/paas/v4',
+  deepseek: 'https://api.deepseek.com',
 }
+
+/** Official 智谱 GLM endpoints.  The account mode/protocol selectors in the
+ * account form choose among these presets; custom relay URLs remain allowed. */
+export const ZHIPU_BASE_URL_PRESETS = [
+  { label: 'GLM API（按量）', url: 'https://open.bigmodel.cn/api/paas/v4' },
+  { label: 'GLM Coding Plan', url: 'https://open.bigmodel.cn/api/coding/paas/v4' },
+  { label: 'GLM Anthropic', url: 'https://open.bigmodel.cn/api/anthropic' },
+] as const
+
+export type CnAccountMode = 'payg' | 'coding'
+export type CnApiProtocol = 'chat_completions' | 'anthropic' | 'responses' | 'adaptive'
+
+/**
+ * The GLM form only exposes the two protocols that the Zhipu adapter can
+ * route directly.  Keep this narrower than `CnApiProtocol`: DeepSeek also
+ * uses the shared type for its native Responses mode, while a Zhipu base URL
+ * can only identify Chat Completions or Anthropic here.
+ */
+export type ZhipuApiProtocol = Extract<CnApiProtocol, 'chat_completions' | 'anthropic'>
+
+export interface ZhipuBaseURLRouting {
+  mode?: CnAccountMode
+  protocol?: ZhipuApiProtocol
+}
+
+/** Normalize persisted GLM routing values using the same case/whitespace
+ * tolerance as the backend. Invalid values return undefined so callers can
+ * safely fall back to endpoint inference or the documented defaults. */
+export function normalizeZhipuAccountMode(value: unknown): CnAccountMode | undefined {
+  if (typeof value !== 'string') return undefined
+  const normalized = value.trim().toLowerCase()
+  return normalized === 'payg' || normalized === 'coding' ? normalized : undefined
+}
+
+export function normalizeZhipuApiProtocol(value: unknown): ZhipuApiProtocol | undefined {
+  if (typeof value !== 'string') return undefined
+  const normalized = value.trim().toLowerCase()
+  return normalized === 'chat_completions' || normalized === 'anthropic'
+    ? normalized
+    : undefined
+}
+
+/**
+ * Infer the routing represented by an official GLM endpoint.
+ *
+ * This is deliberately strict: custom relay URLs must remain opaque and must
+ * never be reclassified just because their query/path happens to contain an
+ * official host name.  Returning a partial result for `/api/anthropic` is
+ * intentional because that endpoint is shared by pay-as-you-go and Coding
+ * Plan accounts; the caller should retain an explicitly selected mode.
+ */
+export function inferZhipuRoutingFromBaseURL(
+  value: unknown,
+): ZhipuBaseURLRouting | null {
+  if (typeof value !== 'string' || !value.trim()) return null
+
+  let parsed: URL
+  try {
+    parsed = new URL(value.trim())
+  } catch {
+    return null
+  }
+  if (
+    (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') ||
+    parsed.port !== ''
+  ) {
+    return null
+  }
+
+  const host = parsed.hostname.toLowerCase()
+  if (host !== 'open.bigmodel.cn' && host !== 'api.z.ai') return null
+
+  const path = parsed.pathname.replace(/\/+$/, '').toLowerCase()
+  if (path === '/api/anthropic') {
+    return { protocol: 'anthropic' }
+  }
+  if (path === '/api/coding/paas/v4') {
+    return { mode: 'coding', protocol: 'chat_completions' }
+  }
+  if (path === '/api/paas/v4') {
+    return { mode: 'payg', protocol: 'chat_completions' }
+  }
+  return null
+}
+
+/** Return true when a URL is one of the managed official GLM endpoints. */
+export function isManagedZhipuBaseURL(value: unknown): boolean {
+  return inferZhipuRoutingFromBaseURL(value) !== null
+}
+
+/** Resolve the official GLM endpoint for the selected mode/protocol. */
+export function defaultZhipuBaseURL(
+  mode: CnAccountMode = 'payg',
+  protocol: CnApiProtocol = 'chat_completions',
+): string {
+  if (protocol === 'anthropic') return 'https://open.bigmodel.cn/api/anthropic'
+  if (mode === 'coding') return 'https://open.bigmodel.cn/api/coding/paas/v4'
+  return 'https://open.bigmodel.cn/api/paas/v4'
+}
+
+/**
+ * Resolve a managed GLM endpoint for a new mode/protocol while retaining the
+ * official host variant already selected by the user (`open.bigmodel.cn` or
+ * `api.z.ai`). Custom relays intentionally fall back to the normal mainland
+ * preset because their protocol namespace cannot be inferred safely.
+ */
+export function zhipuBaseURLForRouting(
+  mode: CnAccountMode = 'payg',
+  protocol: CnApiProtocol = 'chat_completions',
+  current?: unknown,
+): string {
+  const fallback = defaultZhipuBaseURL(mode, protocol)
+  if (!isManagedZhipuBaseURL(current)) return fallback
+  try {
+    const source = new URL(String(current).trim())
+    const target = new URL(fallback)
+    target.protocol = source.protocol
+    target.hostname = source.hostname
+    return target.toString().replace(/\/$/, '')
+  } catch {
+    return fallback
+  }
+}
+
+/** Official DeepSeek API endpoint shown as a quick-fill option in the account
+ * form. The current account form creates the default OpenAI-compatible Chat
+ * Completions account; the native Anthropic-compatible endpoint is not yet a
+ * selectable protocol here, so do not advertise its `/anthropic` base URL.
+ * Users may still enter any compatible relay URL manually.
+ */
+export const DEEPSEEK_BASE_URL_PRESETS = [
+  { label: 'DeepSeek API', url: 'https://api.deepseek.com' },
+] as const
 
 export function defaultAPIKeyBaseURL(platform: AccountPlatform): string {
   return DEFAULT_API_KEY_BASE_URL[platform]
@@ -205,6 +340,11 @@ export interface APIKeyCredentialInput extends PoolModeInput {
   platform: AccountPlatform
   baseUrl: string
   apiKey: string
+  /** Optional native CN-provider routing metadata. */
+  accountMode?: 'payg' | 'coding'
+  apiProtocol?: 'chat_completions' | 'anthropic' | 'responses' | 'adaptive'
+  zhipuOrganization?: string
+  zhipuProject?: string
   geminiTierId?: string
   modelMapping?: Record<string, string> | null
   compactModelMapping?: Record<string, string> | null
@@ -223,6 +363,16 @@ export function buildAPIKeyCredentials(
   }
   if (input.platform === 'gemini') {
     credentials.tier_id = input.geminiTierId
+  }
+  if (input.platform === 'zhipu' || input.platform === 'deepseek') {
+    if (input.accountMode) credentials.account_mode = input.accountMode
+    if (input.apiProtocol) credentials.api_protocol = input.apiProtocol
+  }
+  if (input.platform === 'zhipu') {
+    const organization = input.zhipuOrganization?.trim()
+    const project = input.zhipuProject?.trim()
+    if (organization) credentials.zhipu_organization = organization
+    if (project) credentials.zhipu_project = project
   }
   if (input.modelMapping) credentials.model_mapping = input.modelMapping
   if (input.platform === 'openai') {

@@ -38,11 +38,13 @@ func setupAvailableModelsRouter(adminSvc service.AdminService) *gin.Engine {
 }
 
 type syncUpstreamHTTPUpstream struct {
-	resp *http.Response
-	err  error
+	resp    *http.Response
+	err     error
+	lastReq *http.Request
 }
 
 func (u *syncUpstreamHTTPUpstream) Do(req *http.Request, proxyURL string, accountID int64, accountConcurrency int) (*http.Response, error) {
+	u.lastReq = req
 	if u.err != nil {
 		return nil, u.err
 	}
@@ -69,6 +71,32 @@ func setupSyncUpstreamModelsRouter(adminSvc service.AdminService, upstream servi
 	handler := NewAccountHandler(adminSvc, nil, nil, nil, nil, nil, nil, nil, accountTestSvc, nil, nil, nil, nil, nil)
 	router.POST("/api/v1/admin/accounts/:id/models/sync-upstream", handler.SyncUpstreamModels)
 	return router
+}
+
+func setupSyncUpstreamModelsPreviewRouter(upstream service.HTTPUpstream) *gin.Engine {
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	accountTestSvc := service.NewAccountTestService(
+		nil,
+		nil,
+		nil,
+		nil,
+		nil,
+		upstream,
+		&config.Config{Security: config.SecurityConfig{URLAllowlist: config.URLAllowlistConfig{Enabled: false}}},
+		nil,
+	)
+	handler := NewAccountHandler(newStubAdminService(), nil, nil, nil, nil, nil, nil, nil, accountTestSvc, nil, nil, nil, nil, nil)
+	router.POST("/api/v1/admin/accounts/models/sync-upstream-preview", handler.SyncUpstreamModelsPreview)
+	return router
+}
+
+func zhipuPreviewResponse() *http.Response {
+	return &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"application/json"}},
+		Body:       io.NopCloser(strings.NewReader(`{"data":[{"id":"glm-4.7"}]}`)),
+	}
 }
 
 func TestAccountHandlerGetAvailableModels_GrokUsesXAIModels(t *testing.T) {
@@ -140,6 +168,98 @@ func TestAccountHandlerGetAvailableModels_GrokDefaultsToXAIModelsWithoutMapping(
 	}
 	require.Contains(t, ids, "grok-4.3")
 	require.Contains(t, ids, "grok-build-0.1")
+}
+
+func TestAccountHandlerGetAvailableModels_DeepSeekDefaultsToV4Models(t *testing.T) {
+	svc := &availableModelsAdminService{
+		stubAdminService: newStubAdminService(),
+		account: service.Account{
+			ID:       46,
+			Name:     "deepseek-apikey-defaults",
+			Platform: service.PlatformDeepseek,
+			Type:     service.AccountTypeAPIKey,
+			Status:   service.StatusActive,
+		},
+	}
+	router := setupAvailableModelsRouter(svc)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/accounts/46/models", nil)
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+
+	var resp struct {
+		Data []struct {
+			ID          string `json:"id"`
+			Object      string `json:"object"`
+			Created     int64  `json:"created"`
+			OwnedBy     string `json:"owned_by"`
+			Type        string `json:"type"`
+			DisplayName string `json:"display_name"`
+			CreatedAt   string `json:"created_at"`
+		} `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+	require.Len(t, resp.Data, 3)
+	require.Equal(t, []string{
+		"deepseek-v4-pro",
+		"deepseek-v4-flash",
+		"deepseek-v4-flash-vision-exp",
+	}, []string{resp.Data[0].ID, resp.Data[1].ID, resp.Data[2].ID})
+	for _, model := range resp.Data {
+		require.Equal(t, "model", model.Object)
+		require.NotZero(t, model.Created)
+		require.Equal(t, "model", model.Type)
+		require.Equal(t, "deepseek", model.OwnedBy)
+		require.NotEmpty(t, model.DisplayName)
+		require.Empty(t, model.CreatedAt)
+	}
+}
+
+func TestAccountHandlerGetAvailableModels_ZhipuDefaultsToGLMModels(t *testing.T) {
+	svc := &availableModelsAdminService{
+		stubAdminService: newStubAdminService(),
+		account: service.Account{
+			ID:       47,
+			Name:     "zhipu-apikey-defaults",
+			Platform: service.PlatformZhipu,
+			Type:     service.AccountTypeAPIKey,
+			Status:   service.StatusActive,
+		},
+	}
+	router := setupAvailableModelsRouter(svc)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/accounts/47/models", nil)
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+
+	var resp struct {
+		Data []struct {
+			ID          string `json:"id"`
+			Object      string `json:"object"`
+			Created     int64  `json:"created"`
+			OwnedBy     string `json:"owned_by"`
+			Type        string `json:"type"`
+			DisplayName string `json:"display_name"`
+		} `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &resp))
+	require.NotEmpty(t, resp.Data)
+	ids := make([]string, 0, len(resp.Data))
+	for _, model := range resp.Data {
+		ids = append(ids, model.ID)
+		require.Equal(t, "model", model.Object)
+		require.NotZero(t, model.Created)
+		require.Equal(t, "zhipu", model.OwnedBy)
+		require.Equal(t, "model", model.Type)
+		require.NotEmpty(t, model.DisplayName)
+	}
+	require.Contains(t, ids, "glm-5.1")
+	require.Contains(t, ids, "glm-5.2")
+	require.Contains(t, ids, "glm-4.7")
 }
 
 func TestAccountHandlerGetAvailableModels_OpenAIOAuthUsesExplicitModelMapping(t *testing.T) {
@@ -308,4 +428,49 @@ func TestAccountHandlerSyncUpstreamModels_UpstreamErrorDoesNotExposeBody(t *test
 	require.Equal(t, http.StatusBadGateway, rec.Code)
 	require.Contains(t, rec.Body.String(), "Upstream model list request failed with HTTP 502")
 	require.NotContains(t, rec.Body.String(), "SECRET_TOKEN")
+}
+
+func TestAccountHandlerSyncUpstreamModelsPreview_ZhipuAnthropicPreservesCodingMode(t *testing.T) {
+	upstream := &syncUpstreamHTTPUpstream{resp: zhipuPreviewResponse()}
+	router := setupSyncUpstreamModelsPreviewRouter(upstream)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/accounts/models/sync-upstream-preview", strings.NewReader(`{
+		"platform":"zhipu",
+		"type":"apikey",
+		"base_url":"https://open.bigmodel.cn/api/anthropic",
+		"api_key":"sk-zhipu-test",
+		"account_mode":"coding",
+		"api_protocol":"anthropic",
+		"zhipu_organization":"org-test",
+		"zhipu_project":"project-test"
+	}`))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.NotNil(t, upstream.lastReq)
+	require.Equal(t, "https://open.bigmodel.cn/api/coding/paas/v4/models", upstream.lastReq.URL.String())
+	require.Equal(t, "Bearer sk-zhipu-test", upstream.lastReq.Header.Get("Authorization"))
+}
+
+func TestAccountHandlerSyncUpstreamModelsPreview_ZhipuCodingDefaultsToCodingEndpoint(t *testing.T) {
+	upstream := &syncUpstreamHTTPUpstream{resp: zhipuPreviewResponse()}
+	router := setupSyncUpstreamModelsPreviewRouter(upstream)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/accounts/models/sync-upstream-preview", strings.NewReader(`{
+		"platform":"zhipu",
+		"type":"apikey",
+		"api_key":"sk-zhipu-test",
+		"account_mode":"coding",
+		"api_protocol":"chat_completions"
+	}`))
+	req.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusOK, rec.Code)
+	require.NotNil(t, upstream.lastReq)
+	require.Equal(t, "https://open.bigmodel.cn/api/coding/paas/v4/models", upstream.lastReq.URL.String())
+	require.Equal(t, "Bearer sk-zhipu-test", upstream.lastReq.Header.Get("Authorization"))
 }

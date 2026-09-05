@@ -147,7 +147,9 @@ const pOpts = computed<FilterOption[]>(() => [
   { value: 'openai', label: 'OpenAI' },
   { value: 'gemini', label: 'Gemini' },
   { value: 'antigravity', label: 'Antigravity' },
-  { value: 'grok', label: 'Grok' }
+  { value: 'grok', label: 'Grok' },
+  { value: 'zhipu', label: 'Zhipu GLM' },
+  { value: 'deepseek', label: 'DeepSeek' }
 ])
 const tOpts = computed<FilterOption[]>(() => [
   { value: '', label: t('admin.accounts.allTypes') },
@@ -234,6 +236,8 @@ const filterChipClass = (chip: FilterChip): string => {
   if (chip.value === 'anthropic') return 'account-filter-chip--anthropic'
   if (chip.value === 'gemini') return 'account-filter-chip--gemini'
   if (chip.value === 'antigravity') return 'account-filter-chip--antigravity'
+  if (chip.value === 'zhipu') return 'account-filter-chip--zhipu'
+  if (chip.value === 'deepseek') return 'account-filter-chip--deepseek'
   return 'account-filter-chip--grok'
 }
 
@@ -357,6 +361,18 @@ onUnmounted(() => {
   border-color: rgb(221 214 254);
   color: rgb(109 40 217);
   background: rgb(245 243 255);
+}
+
+.account-filter-chip--deepseek {
+  border-color: color-mix(in srgb, var(--lx-clay-info) 24%, var(--lx-clay-border));
+  color: var(--lx-clay-info-deep);
+  background: var(--lx-clay-info-soft);
+}
+
+.account-filter-chip--zhipu {
+  border-color: rgb(199 210 254);
+  color: rgb(67 56 202);
+  background: rgb(238 242 255);
 }
 
 .account-filter-chip--grok,

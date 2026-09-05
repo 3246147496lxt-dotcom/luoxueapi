@@ -39,8 +39,43 @@ type openAIInputTokensCountPrepared struct {
 	UpstreamModel   string
 }
 
+// estimateAnthropicCountTokensLocally converts an Anthropic-shaped
+// count_tokens request to the Responses representation used by the existing
+// estimator.  DeepSeek does not expose a compatible count_tokens endpoint, so
+// this path deliberately performs no credential lookup or upstream request.
+func estimateAnthropicCountTokensLocally(body []byte) (int, error) {
+	var anthropicReq apicompat.AnthropicRequest
+	if err := json.Unmarshal(body, &anthropicReq); err != nil {
+		return 0, fmt.Errorf("parse anthropic count_tokens request: %w", err)
+	}
+	if strings.TrimSpace(anthropicReq.Model) == "" {
+		return 0, fmt.Errorf("parse anthropic count_tokens request: model is required")
+	}
+
+	responsesReq, err := apicompat.AnthropicToResponses(&anthropicReq)
+	if err != nil {
+		return 0, fmt.Errorf("convert anthropic request to responses: %w", err)
+	}
+
+	estimated, err := estimateOpenAIInputTokens(openAIInputTokensCountRequest{
+		Model:        anthropicReq.Model,
+		Instructions: responsesReq.Instructions,
+		Input:        responsesReq.Input,
+		Tools:        responsesReq.Tools,
+		ToolChoice:   responsesReq.ToolChoice,
+	})
+	if err != nil {
+		return 0, fmt.Errorf("estimate input tokens: %w", err)
+	}
+	if estimated < openAIInputTokensFallbackMinimum {
+		estimated = openAIInputTokensFallbackMinimum
+	}
+	return estimated, nil
+}
+
 // ForwardCountTokensAsAnthropic bridges Anthropic /v1/messages/count_tokens to
-// OpenAI POST /v1/responses/input_tokens and returns Anthropic-compatible output.
+// OpenAI POST /v1/responses/input_tokens (or a local estimate for providers
+// without a token-counting endpoint) and returns Anthropic-compatible output.
 func (s *OpenAIGatewayService) ForwardCountTokensAsAnthropic(
 	ctx context.Context,
 	c *gin.Context,
@@ -51,6 +86,27 @@ func (s *OpenAIGatewayService) ForwardCountTokensAsAnthropic(
 	if account == nil {
 		writeAnthropicCountTokensError(c, http.StatusServiceUnavailable, "api_error", "No available OpenAI accounts")
 		return fmt.Errorf("count_tokens: missing account")
+	}
+
+	// DeepSeek's Anthropic-compatible facade does not implement
+	// /v1/messages/count_tokens (and its OpenAI-compatible API does not expose
+	// /responses/input_tokens).  Estimate locally for every DeepSeek protocol
+	// instead of issuing a request that is guaranteed to fail and potentially
+	// penalizing an otherwise healthy account for the resulting 404.
+	if account.IsCNProvider() {
+		estimated, err := estimateAnthropicCountTokensLocally(body)
+		if err != nil {
+			writeAnthropicCountTokensError(c, http.StatusBadRequest, "invalid_request_error", "Failed to parse request body")
+			return fmt.Errorf("count_tokens: estimate cn provider input tokens: %w", err)
+		}
+		logger.L().Debug("openai count_tokens: cn provider local estimate",
+			zap.Int64("account_id", account.ID),
+			zap.Int("estimated_input_tokens", estimated),
+		)
+		c.JSON(http.StatusOK, gin.H{
+			"input_tokens": estimated,
+		})
+		return nil
 	}
 
 	prepared, err := prepareOpenAIInputTokensCountRequest(body, account, defaultMappedModel)
@@ -320,6 +376,15 @@ func isOpenAIOAuthInputTokensUnsupported(statusCode int, body []byte) bool {
 		(strings.Contains(msg, "not found") ||
 			strings.Contains(msg, "not supported") ||
 			strings.Contains(msg, "unsupported"))
+}
+
+// isHTMLResponse identifies the common CDN/proxy block page shape.  A plain
+// HTML 403 is an endpoint/network failure rather than evidence that an API
+// credential is invalid, so callers can avoid mutating account health state.
+func isHTMLResponse(body []byte) bool {
+	trimmed := strings.TrimSpace(strings.ToLower(string(body)))
+	return strings.HasPrefix(trimmed, "<!doctype html") ||
+		strings.HasPrefix(trimmed, "<html")
 }
 
 func estimateOpenAIInputTokens(req openAIInputTokensCountRequest) (int, error) {

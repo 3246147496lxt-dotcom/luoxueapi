@@ -36,7 +36,8 @@ var openaiCCRawAllowedHeaders = map[string]bool{
 }
 
 // forwardAsRawChatCompletions 直转客户端的 Chat Completions 请求到上游
-// `{base_url}/v1/chat/completions`，**不**做 CC↔Responses 协议转换。
+// `{base_url}/v1/chat/completions`（DeepSeek 根域名则为
+// `{base_url}/chat/completions`），**不**做 CC↔Responses 协议转换。
 //
 // 适用场景：account.platform=openai && account.type=apikey && 上游已被探测确认
 // 不支持 /v1/responses 端点（如 DeepSeek/Kimi/GLM/Qwen 等第三方 OpenAI 兼容上游）。
@@ -44,7 +45,7 @@ var openaiCCRawAllowedHeaders = map[string]bool{
 // 与 ForwardAsChatCompletions 的关键差异：
 //
 //   - 不调用 apicompat.ChatCompletionsToResponses，body 仅做模型 ID 改写
-//   - 上游 URL 拼到 /v1/chat/completions 而非 /v1/responses
+//   - 上游 URL 按平台拼接 Chat Completions（DeepSeek 不强制 /v1）而非 /v1/responses
 //   - 流式响应 SSE 直接透传给客户端（上游 chunk 已是 CC 格式）
 //   - 非流式响应 JSON 直接透传，仅按需提取 usage
 //   - 不应用 codex OAuth transform（APIKey 路径无 OAuth）
@@ -98,6 +99,13 @@ func (s *OpenAIGatewayService) forwardAsRawChatCompletions(
 	if upstreamModel != originalModel {
 		upstreamBody = ReplaceModelInBody(body, upstreamModel)
 	}
+	if account.IsDeepseek() {
+		if normalized, changed, normalizeErr := normalizeDeepSeekChatCompletionsRequestBody(upstreamBody); normalizeErr != nil {
+			return nil, fmt.Errorf("normalize DeepSeek chat request: %w", normalizeErr)
+		} else if changed {
+			upstreamBody = normalized
+		}
+	}
 	if normalizedBody, normalized := NormalizeGLMOpenAIReasoningEffort(upstreamBody, upstreamModel); normalized {
 		upstreamBody = normalizedBody
 	}
@@ -128,6 +136,12 @@ func (s *OpenAIGatewayService) forwardAsRawChatCompletions(
 		return nil, policyErr
 	}
 	upstreamBody = updatedBody
+	// Normalize metadata from the final body as well as the wire payload. GLM
+	// accepts only high/max semantics, so an early "medium" extraction must not
+	// remain in usage logs after it was rewritten to "high" above.
+	reasoningEffort = reconcileGLMOpenAIReasoningEffort(
+		reasoningEffort, upstreamBody, upstreamModel, billingModel, originalModel,
+	)
 	serviceTier := extractOpenAIServiceTierFromBody(upstreamBody)
 
 	// Grok Composer does not accept image_url parts directly, but Grok Build
@@ -183,7 +197,8 @@ func (s *OpenAIGatewayService) forwardAsRawChatCompletions(
 	if err != nil {
 		return nil, err
 	}
-	SetActualOpenAIUpstreamEndpoint(c, grokChatRawEndpoint)
+	actualEndpoint := rawChatCompletionsEndpointForPlatform(account.Platform)
+	SetActualOpenAIUpstreamEndpoint(c, actualEndpoint)
 	customUA := account.GetOpenAIUserAgent()
 	if customUA == "" && account.IsGrokOAuth() {
 		customUA = "sub2api-grok/1.0"
@@ -204,7 +219,7 @@ func (s *OpenAIGatewayService) forwardAsRawChatCompletions(
 				Stream:           clientStream,
 				Duration:         time.Since(startTime),
 				ClientDisconnect: true,
-				UpstreamEndpoint: grokChatRawEndpoint,
+				UpstreamEndpoint: actualEndpoint,
 			}, errWebChatUpstreamDrainTimeout
 		}
 		if webChatClientDisconnected(ctx) {
@@ -262,7 +277,7 @@ func (s *OpenAIGatewayService) forwardAsRawChatCompletions(
 	}
 	if result != nil {
 		addOpenAIUsage(&result.Usage, bridgeUsage)
-		result.UpstreamEndpoint = grokChatRawEndpoint
+		result.UpstreamEndpoint = actualEndpoint
 	}
 	return result, forwardErr
 }
@@ -609,4 +624,19 @@ func (s *OpenAIGatewayService) bufferRawChatCompletions(
 // 与 buildOpenAIResponsesURL 是姐妹函数。
 func buildOpenAIChatCompletionsURL(base string) string {
 	return buildOpenAIEndpointURL(base, "/v1/chat/completions")
+}
+
+// buildOpenAIChatCompletionsURLForPlatform builds the raw Chat Completions
+// endpoint using the selected provider's path convention.  DeepSeek's public
+// API exposes /chat/completions at the root host (without a synthetic /v1);
+// an explicitly versioned base URL still keeps its version segment.
+func buildOpenAIChatCompletionsURLForPlatform(platform string, base string) string {
+	return buildOpenAIEndpointURLForPlatform(platform, base, "/v1/chat/completions")
+}
+
+func rawChatCompletionsEndpointForPlatform(platform string) string {
+	if isDeepSeekPlatform(platform) {
+		return "/chat/completions"
+	}
+	return grokChatRawEndpoint
 }

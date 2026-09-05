@@ -33,6 +33,17 @@ import (
 	"golang.org/x/sync/errgroup"
 )
 
+// DeepSeek's /models metadata follows the OpenAI-compatible wire shape.  The
+// provider does not expose a stable creation timestamp for these aliases, so
+// use the same historical baseline as other synthesized model entries.
+const deepSeekAccountModelCreatedAt int64 = 1704067200 // 2024-01-01T00:00:00Z
+
+// Zhipu's GLM catalog is exposed through an OpenAI-compatible endpoint, but
+// the admin model picker still needs a useful list before the first upstream
+// sync succeeds. Keep this timestamp stable for synthesized entries (the
+// provider does not publish a creation timestamp for these aliases).
+const zhipuAccountModelCreatedAt int64 = deepSeekAccountModelCreatedAt
+
 // OAuthHandler handles OAuth-related operations for accounts
 type OAuthHandler struct {
 	oauthService *service.OAuthService
@@ -63,11 +74,33 @@ type AccountHandler struct {
 	tokenCacheInvalidator   service.TokenCacheInvalidator
 	grokImportProber        grokUsageProber
 	upstreamBillingProbe    *service.UpstreamBillingProbeService
+	deepSeekBalanceService  *service.DeepSeekBalanceService
+	cnProviderQuotaService  *service.CNProviderQuotaService
 }
 
 // SetUpstreamBillingProbeService attaches the optional remote billing probe service.
 func (h *AccountHandler) SetUpstreamBillingProbeService(probe *service.UpstreamBillingProbeService) {
 	h.upstreamBillingProbe = probe
+}
+
+// SetDeepSeekBalanceService attaches the optional manual DeepSeek balance
+// probe.  Keeping it as a setter preserves the lightweight constructor used by
+// focused account-handler tests and older integrations.
+func (h *AccountHandler) SetDeepSeekBalanceService(probe *service.DeepSeekBalanceService) {
+	if h == nil {
+		return
+	}
+	h.deepSeekBalanceService = probe
+}
+
+// SetCNProviderQuotaService attaches the optional Coding Plan quota probe.
+// Keeping this dependency behind a setter preserves the lightweight account
+// handler constructor used by focused tests and older integrations.
+func (h *AccountHandler) SetCNProviderQuotaService(probe *service.CNProviderQuotaService) {
+	if h == nil {
+		return
+	}
+	h.cnProviderQuotaService = probe
 }
 
 // NewAccountHandler creates a new admin account handler
@@ -973,7 +1006,8 @@ func (h *AccountHandler) Update(c *gin.Context) {
 		return
 	}
 
-	// OpenAI APIKey: credentials 修改后重新探测上游能力（base_url/api_key 可能变更）。
+	// OpenAI-compatible APIKey: credentials 修改后重新探测上游能力
+	// （base_url/api_key 可能变更）。
 	// 异步执行，探测失败不影响账号更新响应。
 	if len(req.Credentials) > 0 {
 		h.scheduleOpenAIResponsesProbe(account)
@@ -982,14 +1016,14 @@ func (h *AccountHandler) Update(c *gin.Context) {
 	response.Success(c, h.buildAccountResponseWithRuntime(c.Request.Context(), account))
 }
 
-// scheduleOpenAIResponsesProbe 异步触发 OpenAI APIKey 账号的 Responses API 能力探测。
-//
-// 仅对 platform=openai && type=apikey 账号生效；其他账号无操作。
-// 探测本身在 goroutine 中执行（会发一次 HTTP 请求到上游），不会阻塞
-// 当前请求。探测错误仅记录日志，不向上下文传播：探测失败时标记保持缺失，
+// scheduleOpenAIResponsesProbe 异步触发 OpenAI APIKey 账号的 Responses
+// API 能力探测。DeepSeek 的协议由 credentials.api_protocol 显式选择，且
+// 不应为每次账号保存额外发送一次工具探测请求，因此不走这个通用探测器。
+// 探测本身在 goroutine 中执行（会发一次 HTTP 请求到上游），不会阻塞当前
+// 请求。探测错误仅记录日志，不向上下文传播：探测失败时标记保持缺失，
 // 网关会按"现状即证据"默认走 Responses。
 func (h *AccountHandler) scheduleOpenAIResponsesProbe(account *service.Account) {
-	if account == nil || account.Platform != service.PlatformOpenAI || account.Type != service.AccountTypeAPIKey {
+	if account == nil || account.Type != service.AccountTypeAPIKey || account.Platform != service.PlatformOpenAI {
 		return
 	}
 	if h.accountTestService == nil {
@@ -2377,6 +2411,109 @@ func (h *AccountHandler) GetAvailableModels(c *gin.Context) {
 		return
 	}
 
+	// Handle DeepSeek accounts.  DeepSeek exposes an OpenAI-compatible model
+	// shape, so keep the response consistent with the OpenAI branch above while
+	// using the current V4 catalog instead of falling through to Claude models.
+	if account.IsDeepseek() {
+		defaultModels := []openai.Model{
+			{ID: "deepseek-v4-pro", Object: "model", Created: deepSeekAccountModelCreatedAt, OwnedBy: "deepseek", Type: "model", DisplayName: "DeepSeek V4 Pro"},
+			{ID: "deepseek-v4-flash", Object: "model", Created: deepSeekAccountModelCreatedAt, OwnedBy: "deepseek", Type: "model", DisplayName: "DeepSeek V4 Flash"},
+			{ID: "deepseek-v4-flash-vision-exp", Object: "model", Created: deepSeekAccountModelCreatedAt, OwnedBy: "deepseek", Type: "model", DisplayName: "DeepSeek V4 Flash Vision"},
+		}
+
+		mapping := account.GetModelMapping()
+		if len(mapping) == 0 {
+			response.Success(c, defaultModels)
+			return
+		}
+
+		defaultByID := make(map[string]openai.Model, len(defaultModels))
+		for _, model := range defaultModels {
+			defaultByID[model.ID] = model
+		}
+
+		requestedModels := make([]string, 0, len(mapping))
+		for requestedModel := range mapping {
+			requestedModels = append(requestedModels, requestedModel)
+		}
+		sort.Strings(requestedModels)
+
+		models := make([]openai.Model, 0, len(requestedModels))
+		for _, requestedModel := range requestedModels {
+			if defaultModel, found := defaultByID[requestedModel]; found {
+				models = append(models, defaultModel)
+				continue
+			}
+			models = append(models, openai.Model{
+				ID:          requestedModel,
+				Object:      "model",
+				Created:     deepSeekAccountModelCreatedAt,
+				OwnedBy:     "deepseek",
+				Type:        "model",
+				DisplayName: requestedModel,
+			})
+		}
+		response.Success(c, models)
+		return
+	}
+
+	// Handle Zhipu/GLM accounts. The provider exposes the same OpenAI-shaped
+	// model objects as DeepSeek, so preserve explicit model mappings while
+	// returning the current GLM catalog when no mapping has been saved yet.
+	if account.IsZhipu() {
+		defaultModels := []openai.Model{
+			{ID: "glm-5.2", Object: "model", Created: zhipuAccountModelCreatedAt, OwnedBy: "zhipu", Type: "model", DisplayName: "GLM-5.2"},
+			{ID: "glm-5.1", Object: "model", Created: zhipuAccountModelCreatedAt, OwnedBy: "zhipu", Type: "model", DisplayName: "GLM-5.1"},
+			{ID: "glm-5", Object: "model", Created: zhipuAccountModelCreatedAt, OwnedBy: "zhipu", Type: "model", DisplayName: "GLM-5"},
+			{ID: "glm-5-turbo", Object: "model", Created: zhipuAccountModelCreatedAt, OwnedBy: "zhipu", Type: "model", DisplayName: "GLM-5 Turbo"},
+			{ID: "glm-4.7", Object: "model", Created: zhipuAccountModelCreatedAt, OwnedBy: "zhipu", Type: "model", DisplayName: "GLM-4.7"},
+			{ID: "glm-4.7-flash", Object: "model", Created: zhipuAccountModelCreatedAt, OwnedBy: "zhipu", Type: "model", DisplayName: "GLM-4.7 Flash"},
+			{ID: "glm-4.7-flashx", Object: "model", Created: zhipuAccountModelCreatedAt, OwnedBy: "zhipu", Type: "model", DisplayName: "GLM-4.7 FlashX"},
+			{ID: "glm-4.6", Object: "model", Created: zhipuAccountModelCreatedAt, OwnedBy: "zhipu", Type: "model", DisplayName: "GLM-4.6"},
+			{ID: "glm-4.5", Object: "model", Created: zhipuAccountModelCreatedAt, OwnedBy: "zhipu", Type: "model", DisplayName: "GLM-4.5"},
+			{ID: "glm-4.5-air", Object: "model", Created: zhipuAccountModelCreatedAt, OwnedBy: "zhipu", Type: "model", DisplayName: "GLM-4.5 Air"},
+			{ID: "glm-4.5-x", Object: "model", Created: zhipuAccountModelCreatedAt, OwnedBy: "zhipu", Type: "model", DisplayName: "GLM-4.5 X"},
+			{ID: "glm-4.5-airx", Object: "model", Created: zhipuAccountModelCreatedAt, OwnedBy: "zhipu", Type: "model", DisplayName: "GLM-4.5 AirX"},
+			{ID: "glm-4.5-flash", Object: "model", Created: zhipuAccountModelCreatedAt, OwnedBy: "zhipu", Type: "model", DisplayName: "GLM-4.5 Flash"},
+			{ID: "glm-4-32b-0414-128k", Object: "model", Created: zhipuAccountModelCreatedAt, OwnedBy: "zhipu", Type: "model", DisplayName: "GLM-4 32B"},
+		}
+
+		mapping := account.GetModelMapping()
+		if len(mapping) == 0 {
+			response.Success(c, defaultModels)
+			return
+		}
+
+		defaultByID := make(map[string]openai.Model, len(defaultModels))
+		for _, model := range defaultModels {
+			defaultByID[model.ID] = model
+		}
+
+		requestedModels := make([]string, 0, len(mapping))
+		for requestedModel := range mapping {
+			requestedModels = append(requestedModels, requestedModel)
+		}
+		sort.Strings(requestedModels)
+
+		models := make([]openai.Model, 0, len(requestedModels))
+		for _, requestedModel := range requestedModels {
+			if defaultModel, found := defaultByID[requestedModel]; found {
+				models = append(models, defaultModel)
+				continue
+			}
+			models = append(models, openai.Model{
+				ID:          requestedModel,
+				Object:      "model",
+				Created:     zhipuAccountModelCreatedAt,
+				OwnedBy:     "zhipu",
+				Type:        "model",
+				DisplayName: requestedModel,
+			})
+		}
+		response.Success(c, models)
+		return
+	}
+
 	// Handle Gemini accounts
 	if account.IsGemini() {
 		// For OAuth accounts: return default Gemini models
@@ -2559,23 +2696,47 @@ func (h *AccountHandler) SyncUpstreamModels(c *gin.Context) {
 // POST /api/v1/admin/accounts/models/sync-upstream-preview
 func (h *AccountHandler) SyncUpstreamModelsPreview(c *gin.Context) {
 	var req struct {
-		Platform string `json:"platform" binding:"required"`
-		Type     string `json:"type" binding:"required"`
-		BaseURL  string `json:"base_url"`
-		APIKey   string `json:"api_key" binding:"required"`
+		Platform          string `json:"platform" binding:"required"`
+		Type              string `json:"type" binding:"required"`
+		BaseURL           string `json:"base_url"`
+		APIKey            string `json:"api_key" binding:"required"`
+		AccountMode       string `json:"account_mode"`
+		APIProtocol       string `json:"api_protocol"`
+		ZhipuOrganization string `json:"zhipu_organization"`
+		ZhipuProject      string `json:"zhipu_project"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		response.BadRequest(c, "Invalid request: "+err.Error())
 		return
 	}
 
+	credentials := map[string]any{
+		"api_key":  req.APIKey,
+		"base_url": req.BaseURL,
+	}
+	// GLM's model-list endpoint depends on the account mode even when the
+	// create-flow credential points at its Anthropic facade. Preserve the
+	// optional provider metadata on the temporary account used for preview;
+	// older callers that omit these fields retain the historical defaults.
+	if req.Platform == service.PlatformZhipu {
+		if value := strings.TrimSpace(req.AccountMode); value != "" {
+			credentials["account_mode"] = value
+		}
+		if value := strings.TrimSpace(req.APIProtocol); value != "" {
+			credentials["api_protocol"] = value
+		}
+		if value := strings.TrimSpace(req.ZhipuOrganization); value != "" {
+			credentials["zhipu_organization"] = value
+		}
+		if value := strings.TrimSpace(req.ZhipuProject); value != "" {
+			credentials["zhipu_project"] = value
+		}
+	}
+
 	tempAccount := &service.Account{
-		Platform: req.Platform,
-		Type:     req.Type,
-		Credentials: map[string]any{
-			"api_key":  req.APIKey,
-			"base_url": req.BaseURL,
-		},
+		Platform:    req.Platform,
+		Type:        req.Type,
+		Credentials: credentials,
 	}
 
 	if h.accountTestService == nil {

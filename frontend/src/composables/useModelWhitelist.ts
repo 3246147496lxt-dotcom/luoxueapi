@@ -84,9 +84,15 @@ const antigravityModels = [
 
 // 智谱 GLM
 const zhipuModels = [
+  'glm-5', 'glm-5.1', 'glm-5.2', 'glm-5-turbo',
+  'glm-4.7', 'glm-4.7-flash', 'glm-4.7-flashx', 'glm-4.6',
   'glm-4', 'glm-4v', 'glm-4-plus', 'glm-4-0520',
   'glm-4-air', 'glm-4-airx', 'glm-4-long', 'glm-4-flash',
-  'glm-4v-plus', 'glm-4.5', 'glm-4.6',
+  'glm-4v-plus',
+  // GLM-4.5 family (including the Coding Plan variants) and the legacy
+  // 32B endpoint exposed by the OpenAI-compatible API.
+  'glm-4.5', 'glm-4.5-air', 'glm-4.5-x', 'glm-4.5-airx', 'glm-4.5-flash',
+  'glm-4-32b-0414-128k',
   'glm-3-turbo', 'glm-4-alltools',
   'chatglm_turbo', 'chatglm_pro', 'chatglm_std', 'chatglm_lite',
   'cogview-3', 'cogvideo'
@@ -105,11 +111,20 @@ const qwenModels = [
 
 // DeepSeek
 const deepseekModels = [
+  // DeepSeek V4 (current official API model IDs)
+  'deepseek-v4-pro', 'deepseek-v4-flash', 'deepseek-v4-flash-vision-exp',
+  // Legacy/compatibility IDs retained for existing mappings
   'deepseek-chat', 'deepseek-coder', 'deepseek-reasoner',
   'deepseek-v3', 'deepseek-v3-0324',
   'deepseek-r1', 'deepseek-r1-0528',
   'deepseek-r1-distill-qwen-32b', 'deepseek-r1-distill-qwen-14b', 'deepseek-r1-distill-qwen-7b',
   'deepseek-r1-distill-llama-70b', 'deepseek-r1-distill-llama-8b'
+]
+
+const zhipuPresetMappings = [
+  { label: 'GLM-5', from: 'glm-5', to: 'glm-5', color: 'bg-indigo-100 text-indigo-700 hover:bg-indigo-200 dark:bg-indigo-900/30 dark:text-indigo-400' },
+  { label: 'GLM-4.7', from: 'glm-4.7', to: 'glm-4.7', color: 'bg-indigo-100 text-indigo-700 hover:bg-indigo-200 dark:bg-indigo-900/30 dark:text-indigo-400' },
+  { label: 'GLM-4.5 Air', from: 'glm-4.5-air', to: 'glm-4.5-air', color: 'bg-indigo-100 text-indigo-700 hover:bg-indigo-200 dark:bg-indigo-900/30 dark:text-indigo-400' },
 ]
 
 // Mistral
@@ -287,6 +302,16 @@ const openaiPresetMappings = [
   { label: 'Sonnet→5.4', from: 'claude-sonnet-4-6', to: 'gpt-5.4', color: 'bg-blue-100 text-blue-700 hover:bg-blue-200 dark:bg-blue-900/30 dark:text-blue-400' }
 ]
 
+// DeepSeek V4 preset mappings. Keep legacy aliases available so existing
+// clients can migrate without having to hand-write a mapping.
+const deepseekPresetMappings = [
+  { label: 'V4 Pro', from: 'deepseek-v4-pro', to: 'deepseek-v4-pro', color: 'bg-sky-100 text-sky-700 hover:bg-sky-200 dark:bg-sky-900/30 dark:text-sky-400' },
+  { label: 'V4 Flash', from: 'deepseek-v4-flash', to: 'deepseek-v4-flash', color: 'bg-blue-100 text-blue-700 hover:bg-blue-200 dark:bg-blue-900/30 dark:text-blue-400' },
+  { label: 'V4 Flash Vision', from: 'deepseek-v4-flash-vision-exp', to: 'deepseek-v4-flash-vision-exp', color: 'bg-sky-100 text-sky-700 hover:bg-sky-200 dark:bg-sky-900/30 dark:text-sky-400' },
+  { label: 'Chat→V4 Flash', from: 'deepseek-chat', to: 'deepseek-v4-flash', color: 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200 dark:bg-emerald-900/30 dark:text-emerald-400' },
+  { label: 'Reasoner→V4 Pro', from: 'deepseek-reasoner', to: 'deepseek-v4-pro', color: 'bg-violet-100 text-violet-700 hover:bg-violet-200 dark:bg-violet-900/30 dark:text-violet-400' }
+]
+
 const geminiPresetMappings = [
   { label: 'Flash 2.0', from: 'gemini-2.0-flash', to: 'gemini-2.0-flash', color: 'bg-blue-100 text-blue-700 hover:bg-blue-200 dark:bg-blue-900/30 dark:text-blue-400' },
   { label: '2.5 Flash', from: 'gemini-2.5-flash', to: 'gemini-2.5-flash', color: 'bg-indigo-100 text-indigo-700 hover:bg-indigo-200 dark:bg-indigo-900/30 dark:text-indigo-400' },
@@ -432,6 +457,8 @@ export function getModelsByPlatform(platform: string): string[] {
 // 按平台获取预设映射
 export function getPresetMappingsByPlatform(platform: string) {
   if (platform === 'openai') return openaiPresetMappings
+  if (platform === 'zhipu') return zhipuPresetMappings
+  if (platform === 'deepseek') return deepseekPresetMappings
   if (platform === 'gemini') return geminiPresetMappings
   if (platform === 'grok' || platform === 'xai') return grokPresetMappings
   if (platform === 'antigravity') return antigravityPresetMappings

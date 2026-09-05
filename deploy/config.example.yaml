@@ -194,6 +194,7 @@ security:
       - "api.anthropic.com"
       - "api.kimi.com"
       - "open.bigmodel.cn"
+      - "api.z.ai"
       - "api.minimaxi.com"
       - "generativelanguage.googleapis.com"
       - "cloudcode-pa.googleapis.com"
@@ -261,6 +262,24 @@ gateway:
   openai_first_output_timeout_seconds: 0
   # Optional high/xhigh/max override (seconds, 0=use the standard timeout)
   openai_high_effort_first_output_timeout_seconds: 0
+
+  # Optional DeepSeek pay-as-you-go balance monitor. The monitor is disabled
+  # by default; when enabled, accounts below the threshold are temporarily
+  # removed from scheduling and automatically recovered after a healthy probe.
+  # DeepSeek API-key accounts only (coding/OAuth accounts are ignored).
+  deepseek_balance:
+    enabled: false
+    threshold: 0.5
+    interval_minutes: 10
+
+  # Shared Chinese-provider balance/quota settings. Coding Plan quota
+  # snapshots (including GLM/Zhipu) use the interval for reactive cooldowns;
+  # pay-as-you-go probes can use the threshold when a checker is enabled.
+  cn_providers:
+    balance_check_enabled: true
+    balance_threshold: 0.5
+    balance_check_interval_minutes: 10
+
   # Max request body size in bytes (default: 256MB)
   # 请求体最大字节数（默认 256MB）
   max_body_size: 268435456

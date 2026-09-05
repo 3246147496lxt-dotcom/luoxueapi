@@ -183,6 +183,8 @@ func ProvideAccountHandler(
 	rpmCache service.RPMCache,
 	tokenCacheInvalidator service.TokenCacheInvalidator,
 	grokQuotaService *service.GrokQuotaService,
+	deepSeekBalanceService *service.DeepSeekBalanceService,
+	cnProviderQuotaService *service.CNProviderQuotaService,
 ) *AccountHandler {
 	handler := NewAccountHandler(
 		adminService,
@@ -201,5 +203,7 @@ func ProvideAccountHandler(
 		tokenCacheInvalidator,
 	)
 	handler.grokImportProber = grokQuotaService
+	handler.SetDeepSeekBalanceService(deepSeekBalanceService)
+	handler.SetCNProviderQuotaService(cnProviderQuotaService)
 	return handler
 }

@@ -270,6 +270,56 @@ describe('UseKeyModal', () => {
     expect(wrapper.text()).toContain('auth.json')
   })
 
+  it('renders OpenAI-compatible DeepSeek Codex and OpenCode setup', async () => {
+    const wrapper = mount(UseKeyModal, {
+      props: {
+        show: true,
+        apiKey: 'sk-deepseek-test',
+        baseUrl: 'https://example.com/v1',
+        platform: 'deepseek'
+      },
+      global: {
+        stubs: {
+          BaseDialog: {
+            template: '<div><slot /><slot name="footer" /></div>'
+          },
+          Icon: {
+            template: '<span />'
+          }
+        }
+      }
+    })
+
+    // DeepSeek must default to Codex and never emit Claude's environment
+    // variables.
+    const codeBlocks = wrapper.findAll('pre code').map((code) => code.text())
+    const configToml = codeBlocks.find((content) => content.includes('model_provider = "DeepSeek"'))
+    expect(configToml).toBeDefined()
+    expect(configToml).toContain('model = "deepseek-v4-flash"')
+    expect(configToml).toContain('base_url = "https://example.com/v1"')
+    expect(configToml).toContain('wire_api = "responses"')
+    expect(codeBlocks).toContain(`{
+  "OPENAI_API_KEY": "sk-deepseek-test"
+}`)
+    expect(codeBlocks.join('\n')).not.toContain('ANTHROPIC_BASE_URL')
+
+    const opencodeTab = wrapper.findAll('button').find((button) =>
+      button.text().includes('keys.useKeyModal.cliTabs.opencode')
+    )
+    expect(opencodeTab).toBeDefined()
+    await opencodeTab!.trigger('click')
+    await nextTick()
+
+    const parsed = JSON.parse(wrapper.find('pre code').text())
+    expect(parsed.provider.deepseek.npm).toBe('@ai-sdk/openai')
+    expect(parsed.provider.deepseek.options).toEqual({
+      baseURL: 'https://example.com/v1',
+      apiKey: 'sk-deepseek-test'
+    })
+    expect(parsed.provider.deepseek.models['deepseek-v4-flash']).toBeDefined()
+    expect(parsed.provider.deepseek.models['deepseek-v4-pro']).toBeDefined()
+  })
+
   it('renders API Key Mode authorization in OpenAI Codex config', async () => {
     const wrapper = mount(UseKeyModal, {
       props: {

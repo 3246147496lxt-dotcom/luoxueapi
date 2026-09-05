@@ -81,6 +81,13 @@ type SettingService struct {
 	// instance owns its own cache, no shared package-level state.
 	openAIQuotaAutoPauseSettingsCache atomic.Value // *cachedOpenAIQuotaAutoPauseSettings
 	openAIQuotaAutoPauseSettingsSF    singleflight.Group
+
+	// accountSchedulingThresholdsCache keeps the percentage thresholds used by
+	// the provider scheduler off the request hot path. The cache is per service
+	// instance (like the OpenAI quota settings cache), which also keeps tests and
+	// multiple application instances isolated.
+	accountSchedulingThresholdsCache atomic.Value // *cachedAccountSchedulingThresholds
+	accountSchedulingThresholdsSF    singleflight.Group
 }
 
 // DefaultPlatformQuotaSetting 单 platform 三档限额（nil = 沿用上层；0 = 显式禁用；>0 = 上限）

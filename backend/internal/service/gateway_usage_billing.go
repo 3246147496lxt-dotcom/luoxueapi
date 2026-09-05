@@ -889,6 +889,49 @@ type recordUsageOpts struct {
 	// 长上下文计费（仅 Gemini 路径需要）
 	LongContextThreshold  int
 	LongContextMultiplier float64
+	// PricingAt freezes provider time-based pricing for the whole usage
+	// calculation. recordUsageCore populates this once from the request
+	// snapshot so every fallback/resolver path observes the same instant.
+	PricingAt time.Time
+}
+
+func recordUsagePricingAt(opts *recordUsageOpts) time.Time {
+	if opts != nil && !opts.PricingAt.IsZero() {
+		return opts.PricingAt
+	}
+	return timezone.Now()
+}
+
+// applyDeepSeekPeakMultiplierToBreakdown applies the provider's official
+// peak factor to a cost that was calculated through the legacy no-resolver
+// path. Callers must only invoke this for global/fallback pricing; channel
+// prices are intentionally left untouched by the provider factor.
+func applyDeepSeekPeakMultiplierToBreakdown(model string, cost *CostBreakdown, pricingAt time.Time) *CostBreakdown {
+	if cost == nil || !isOfficialDeepSeekModel(model) {
+		return cost
+	}
+	if pricingAt.IsZero() {
+		pricingAt = timezone.Now()
+	}
+	multiplier := deepseekPeakMultiplierAt(pricingAt)
+	if multiplier <= 1 {
+		return cost
+	}
+
+	cloned := *cost
+	baseTotal := cloned.TotalCost
+	cloned.InputCost *= multiplier
+	cloned.ImageInputCost *= multiplier
+	cloned.OutputCost *= multiplier
+	cloned.CacheReadCost *= multiplier
+	cloned.TotalCost = cloned.InputCost + cloned.ImageInputCost + cloned.OutputCost +
+		cloned.ImageOutputCost + cloned.CacheCreationCost + cloned.CacheReadCost
+	if baseTotal > 0 {
+		// Preserve the effective account/group multiplier already reflected in
+		// ActualCost while scaling only the provider token components above.
+		cloned.ActualCost = cost.ActualCost * cloned.TotalCost / baseTotal
+	}
+	return &cloned
 }
 
 // RecordUsage 记录使用量并扣费（或更新订阅用量）
@@ -1058,6 +1101,14 @@ func logResponseModelBillingApplied(component string, account *Account, requestI
 // recordUsageCore 是 RecordUsage 和 RecordUsageWithLongContext 的统一实现。
 // LongContextThreshold > 0 时 Token 计费回退走 CalculateCostWithLongContext。
 func (s *GatewayService) recordUsageCore(ctx context.Context, input *recordUsageCoreInput, opts *recordUsageOpts) error {
+	if opts == nil {
+		opts = &recordUsageOpts{}
+	} else {
+		// Keep caller-owned options immutable while carrying the request's
+		// frozen pricing instant through all nested billing helpers.
+		clonedOpts := *opts
+		opts = &clonedOpts
+	}
 	result := input.Result
 	apiKey := input.APIKey
 	user := input.User
@@ -1094,9 +1145,13 @@ func (s *GatewayService) recordUsageCore(ctx context.Context, input *recordUsage
 	// token 倍率叠加高峰因子（token 计费含图片 token，图片按次倍率不受影响）。高峰因子按请求时刻现算，
 	// 不并入上面的 getUserGroupRateMultiplier，以免污染 user:group 倍率缓存。
 	pricingAt := input.PricingAt
+	if pricingAt.IsZero() && !opts.PricingAt.IsZero() {
+		pricingAt = opts.PricingAt
+	}
 	if pricingAt.IsZero() {
 		pricingAt = timezone.Now()
 	}
+	opts.PricingAt = pricingAt
 	multiplier, imageMultiplier := computePeakAwareMultipliers(apiKey, multiplier, pricingAt)
 
 	// 确定计费模型
@@ -1180,7 +1235,7 @@ func (s *GatewayService) recordUsageCore(ctx context.Context, input *recordUsage
 				CacheReadTokens:     result.Usage.CacheReadInputTokens,
 				ImageOutputTokens:   result.Usage.ImageOutputTokens,
 			},
-			cost.TotalCost,
+			cost.TotalCost, recordUsagePricingAt(opts),
 		)
 	}
 
@@ -1281,7 +1336,7 @@ func (s *GatewayService) calculateRecordUsageCost(
 		if resolved := s.resolveChannelPricing(ctx, billingModel, apiKey); resolved != nil && resolved.Mode == BillingModeToken {
 			return s.calculateTokenCost(ctx, result, apiKey, billingModel, multiplier, opts)
 		}
-		return s.calculateImageCost(ctx, result, apiKey, billingModel, imageMultiplier)
+		return s.calculateImageCost(ctx, result, apiKey, billingModel, imageMultiplier, opts)
 	}
 
 	// Token 计费
@@ -1366,6 +1421,7 @@ func (s *GatewayService) calculateImageCost(
 	apiKey *APIKey,
 	billingModel string,
 	multiplier float64,
+	opts *recordUsageOpts,
 ) *CostBreakdown {
 	sizeTier := NormalizeImageBillingTierOrDefault(result.ImageSize)
 	groupConfig := imagePriceConfigFromAPIKey(apiKey)
@@ -1387,6 +1443,7 @@ func (s *GatewayService) calculateImageCost(
 			RequestCount:   result.ImageCount,
 			SizeTier:       sizeTier,
 			RateMultiplier: multiplier,
+			PricingAt:      recordUsagePricingAt(opts),
 			Resolver:       s.resolver,
 			Resolved:       resolved,
 		})
@@ -1421,7 +1478,13 @@ func (s *GatewayService) calculateTokenCost(
 
 	var cost *CostBreakdown
 	var err error
+	pricingAt := recordUsagePricingAt(opts)
+	var channelResolved *ResolvedPricing
+	if opts == nil {
+		opts = &recordUsageOpts{}
+	}
 	if resolved := s.resolveChannelPricing(ctx, billingModel, apiKey); resolved != nil {
+		channelResolved = resolved
 		gid := apiKey.Group.ID
 		cost, err = s.billingService.CalculateCostUnified(CostInput{
 			Ctx:            ctx,
@@ -1430,6 +1493,7 @@ func (s *GatewayService) calculateTokenCost(
 			Tokens:         tokens,
 			RequestCount:   1,
 			RateMultiplier: multiplier,
+			PricingAt:      pricingAt,
 			Resolver:       s.resolver,
 			Resolved:       resolved,
 		})
@@ -1439,6 +1503,12 @@ func (s *GatewayService) calculateTokenCost(
 		)
 	} else {
 		cost, err = s.billingService.CalculateCost(billingModel, tokens, multiplier)
+	}
+	if err == nil && channelResolved == nil {
+		// The legacy no-resolver/fallback paths do not enter BillingService's
+		// unified resolver. Apply the same official DeepSeek peak factor here;
+		// explicit channel pricing above remains authoritative and unscaled.
+		cost = applyDeepSeekPeakMultiplierToBreakdown(billingModel, cost, pricingAt)
 	}
 	if err != nil {
 		logger.LegacyPrintf("service.gateway", "Calculate cost failed: %v", err)
@@ -1459,6 +1529,10 @@ func (s *GatewayService) calculateTokenCostResolved(
 	opts *recordUsageOpts,
 ) responseBillingCostResolution {
 	resolution := responseBillingCostResolution{Model: strings.TrimSpace(billingModel)}
+	if opts == nil {
+		opts = &recordUsageOpts{}
+	}
+	pricingAt := recordUsagePricingAt(opts)
 	tokens := UsageTokens{
 		InputTokens:           result.Usage.InputTokens,
 		OutputTokens:          result.Usage.OutputTokens,
@@ -1481,9 +1555,19 @@ func (s *GatewayService) calculateTokenCostResolved(
 		resolution.PricingSource = resolved.Source
 		resolution.Identified = resolved.Identified
 		if opts.LongContextThreshold > 0 && resolved.Source != PricingSourceChannel {
+			// Long-context billing historically accepted BasePricing directly,
+			// which bypassed model-specific policy overlays.  Apply the same
+			// global/fallback policy used by CalculateCostUnified before splitting
+			// the context so DeepSeek's official card (and the existing GPT
+			// long-context defaults) remain consistent on both paths.
+			globalPricing := resolved.Source == PricingSourceLiteLLM || resolved.Source == PricingSourceFallback
+			pricing := s.billingService.applyModelSpecificPricingPolicyEx(billingModel, resolved.BasePricing, globalPricing)
 			resolution.Cost, resolution.Err = s.billingService.calculateCostWithLongContextPricing(
-				resolved.BasePricing, tokens, multiplier, opts.LongContextThreshold, opts.LongContextMultiplier,
+				pricing, tokens, multiplier, opts.LongContextThreshold, opts.LongContextMultiplier,
 			)
+			if resolution.Err == nil {
+				resolution.Cost = applyDeepSeekPeakMultiplierToBreakdown(billingModel, resolution.Cost, pricingAt)
+			}
 			return resolution
 		}
 		resolution.Cost, resolution.Err = s.billingService.CalculateCostUnified(CostInput{
@@ -1493,6 +1577,7 @@ func (s *GatewayService) calculateTokenCostResolved(
 			Tokens:         tokens,
 			RequestCount:   1,
 			RateMultiplier: multiplier,
+			PricingAt:      pricingAt,
 			Resolver:       s.resolver,
 			Resolved:       resolved,
 		})
@@ -1512,6 +1597,11 @@ func (s *GatewayService) calculateTokenCostResolved(
 		)
 	} else {
 		resolution.Cost = s.billingService.computeTokenBreakdown(pricing, tokens, multiplier, "", true)
+	}
+	if resolution.Err == nil {
+		// Without a resolver there is no channel source to protect; this is the
+		// built-in/LiteLLM fallback path and must still honor the frozen instant.
+		resolution.Cost = applyDeepSeekPeakMultiplierToBreakdown(billingModel, resolution.Cost, pricingAt)
 	}
 	return resolution
 }

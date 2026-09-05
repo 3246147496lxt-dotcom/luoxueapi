@@ -10,6 +10,8 @@ import {
 import { buildGeminiAccountPayload, type GeminiAccountDraft } from './platforms/gemini'
 import { buildGrokAccountPayload, type GrokAccountDraft } from './platforms/grok'
 import { buildOpenAIAccountPayload, type OpenAIAccountDraft } from './platforms/openai'
+import { buildDeepSeekAccountPayload, type DeepSeekAccountDraft } from './platforms/deepseek'
+import { buildZhipuAccountPayload, type ZhipuAccountDraft } from './platforms/zhipu'
 import type { AccountBaseDraft } from './platforms/shared'
 
 export type AccountCredentialDraft =
@@ -18,6 +20,8 @@ export type AccountCredentialDraft =
   | GeminiAccountDraft
   | AntigravityAccountDraft
   | GrokAccountDraft
+  | DeepSeekAccountDraft
+  | ZhipuAccountDraft
 
 interface PlatformPayloadAdapter<Draft extends AccountCredentialDraft> {
   build(base: AccountBaseDraft, draft: Draft): CreateAccountRequest
@@ -29,6 +33,8 @@ export const accountPayloadAdapters = {
   gemini: { build: buildGeminiAccountPayload },
   antigravity: { build: buildAntigravityAccountPayload },
   grok: { build: buildGrokAccountPayload },
+  deepseek: { build: buildDeepSeekAccountPayload },
+  zhipu: { build: buildZhipuAccountPayload },
 } satisfies {
   [Platform in AccountPlatform]: PlatformPayloadAdapter<
     Extract<AccountCredentialDraft, { platform: Platform }>
@@ -44,6 +50,10 @@ export function buildAccountCreatePayload(
       return accountPayloadAdapters.anthropic.build(base, draft)
     case 'openai':
       return accountPayloadAdapters.openai.build(base, draft)
+    case 'deepseek':
+      return accountPayloadAdapters.deepseek.build(base, draft)
+    case 'zhipu':
+      return accountPayloadAdapters.zhipu.build(base, draft)
     case 'gemini':
       return accountPayloadAdapters.gemini.build(base, draft)
     case 'antigravity':

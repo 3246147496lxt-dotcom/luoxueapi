@@ -1307,6 +1307,47 @@ func TestOpenAIGatewayServiceRecordUsage_ServiceTierFlexHalvesCost(t *testing.T)
 	require.InDelta(t, baseCost.TotalCost*0.5, usageRepo.lastLog.TotalCost, 1e-10)
 }
 
+func TestOpenAIGatewayServiceRecordUsage_DeepSeekIgnoresOpenAIServiceTierForBilling(t *testing.T) {
+	usageRepo := &openAIRecordUsageLogRepoStub{inserted: true}
+	userRepo := &openAIRecordUsageUserRepoStub{}
+	subRepo := &openAIRecordUsageSubRepoStub{}
+	svc := newOpenAIRecordUsageServiceForTest(usageRepo, userRepo, subRepo, nil)
+	serviceTier := "priority"
+	usage := OpenAIUsage{InputTokens: 100, OutputTokens: 50}
+	// Freeze the provider pricing instant so the assertion is independent of
+	// the wall clock.  This is a DeepSeek weekday peak window (03:00 UTC).
+	pricingAt := time.Date(2026, time.September, 4, 3, 0, 0, 0, time.UTC)
+
+	err := svc.RecordUsage(context.Background(), &OpenAIRecordUsageInput{
+		Result: &OpenAIForwardResult{
+			RequestID:   "resp_deepseek_service_tier",
+			ServiceTier: &serviceTier,
+			Usage:       usage,
+			Model:       "deepseek-v4-flash",
+			Duration:    time.Second,
+		},
+		APIKey:    &APIKey{ID: 1017},
+		User:      &User{ID: 2017},
+		Account:   &Account{ID: 3017, Platform: PlatformDeepseek, Type: AccountTypeAPIKey},
+		PricingAt: pricingAt,
+	})
+
+	require.NoError(t, err)
+	require.NotNil(t, usageRepo.lastLog)
+	// Preserve the client-declared tier for diagnostics, but do not apply the
+	// OpenAI-only priority multiplier to a DeepSeek bill.
+	require.NotNil(t, usageRepo.lastLog.ServiceTier)
+	require.Equal(t, serviceTier, *usageRepo.lastLog.ServiceTier)
+	baseCost, calcErr := svc.billingService.CalculateCostUnified(CostInput{
+		Model:          "deepseek-v4-flash",
+		Tokens:         UsageTokens{InputTokens: 100, OutputTokens: 50},
+		RateMultiplier: 1.0,
+		PricingAt:      pricingAt,
+	})
+	require.NoError(t, calcErr)
+	require.InDelta(t, baseCost.TotalCost, usageRepo.lastLog.TotalCost, 1e-15)
+}
+
 func TestNormalizeOpenAIServiceTier(t *testing.T) {
 	t.Run("fast maps to priority", func(t *testing.T) {
 		got := normalizeOpenAIServiceTier(" fast ")

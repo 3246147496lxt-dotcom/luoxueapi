@@ -3,14 +3,20 @@ import { flushPromises, mount } from '@vue/test-utils'
 import AccountUsageCell from '../AccountUsageCell.vue'
 import type { Account } from '@/types'
 
-const { getUsage } = vi.hoisted(() => ({
-  getUsage: vi.fn()
+const { getUsage, queryCNQuota, queryCNBalance } = vi.hoisted(() => ({
+  getUsage: vi.fn(),
+  queryCNQuota: vi.fn(),
+  queryCNBalance: vi.fn()
 }))
 
 vi.mock('@/api/admin', () => ({
   adminAPI: {
     accounts: {
       getUsage
+    },
+    cnProviders: {
+      queryQuota: queryCNQuota,
+      queryBalance: queryCNBalance
     }
   }
 }))
@@ -78,6 +84,8 @@ function makeAccount(overrides: Partial<Account>): Account {
 describe('AccountUsageCell', () => {
   beforeEach(() => {
     getUsage.mockReset()
+    queryCNQuota.mockReset()
+    queryCNBalance.mockReset()
     Object.defineProperty(window, 'matchMedia', {
       writable: true,
       value: vi.fn().mockImplementation(() => ({
@@ -1303,6 +1311,81 @@ describe('AccountUsageCell', () => {
     expect(wrapper.text()).not.toContain('4200')
     expect(wrapper.text()).not.toContain('1.25')
     expect(wrapper.find('button').exists()).toBe(false)
+  })
+
+  it('Zhipu Coding Plan summary 显示快照并提供按需 Query 入口', async () => {
+    const account = makeAccount({
+      id: 9931,
+      platform: 'zhipu',
+      type: 'apikey',
+      credentials: { account_mode: 'coding' },
+      extra: {
+        zhipu_5h_used_percent: 32,
+        zhipu_weekly_used_percent: 68,
+        zhipu_usage_updated_at: '2099-07-25T12:00:00Z'
+      }
+    })
+
+    const wrapper = mount(AccountUsageCell, {
+      props: { account, displayMode: 'summary' }
+    })
+    await flushPromises()
+
+    expect(wrapper.get('.account-usage-summary__label').text()).toBe('7d')
+    expect(wrapper.get('.account-usage-summary__track > span').attributes('style'))
+      .toContain('width: 68%')
+    expect(wrapper.find('button').exists()).toBe(true)
+    expect(queryCNQuota).not.toHaveBeenCalled()
+
+    queryCNQuota.mockResolvedValue({
+      provider: 'zhipu',
+      success: true,
+      credential_valid: true,
+      fetched_at: Date.now(),
+      persisted: true,
+      tiers: [
+        { window: '5h', used_percent: 44 },
+        { window: 'weekly', used_percent: 12 }
+      ]
+    })
+    await wrapper.get('button').trigger('click')
+    await flushPromises()
+
+    expect(queryCNQuota).toHaveBeenCalledWith(9931)
+    expect(wrapper.get('.account-usage-summary__label').text()).toBe('5h')
+    expect(wrapper.get('.account-usage-summary__track > span').attributes('style'))
+      .toContain('width: 44%')
+
+    wrapper.unmount()
+  })
+
+  it('Zhipu Coding Plan overview 显示快照进度和 Query 入口', async () => {
+    const account = makeAccount({
+      id: 9932,
+      platform: 'zhipu',
+      type: 'apikey',
+      credentials: { account_mode: 'coding' },
+      extra: {
+        zhipu_5h_used_percent: 32,
+        zhipu_weekly_used_percent: 68,
+        zhipu_5h_reset_at: '2099-07-25T17:00:00Z',
+        zhipu_weekly_reset_at: '2099-08-01T12:00:00Z',
+        zhipu_usage_updated_at: '2099-07-25T12:00:00Z'
+      }
+    })
+
+    const wrapper = mount(AccountUsageCell, {
+      props: { account, displayMode: 'overview' }
+    })
+    await flushPromises()
+
+    expect(wrapper.get('.account-usage-overview__cn-provider')).toBeTruthy()
+    expect(wrapper.findAll('.account-usage-overview__cn-provider button')).toHaveLength(1)
+    expect(wrapper.text()).toContain('32%')
+    expect(wrapper.text()).toContain('68%')
+    expect(queryCNQuota).not.toHaveBeenCalled()
+
+    wrapper.unmount()
   })
 
   it('summary 模式会纳入 Anthropic 模型级 7d 子额度', async () => {

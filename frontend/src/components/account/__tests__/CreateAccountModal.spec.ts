@@ -155,6 +155,64 @@ describe('CreateAccountModal OpenAI long-context billing', () => {
     expect(createAccountMock.mock.calls[0]?.[0]?.extra?.openai_long_context_billing_enabled).toBe(false)
   })
 
+  it('keeps GLM Coding Plan mode and endpoint aligned when creating an account', async () => {
+    const wrapper = mountModal()
+    await wrapper.get('[data-testid="account-platform-zhipu"]').trigger('click')
+
+    const baseUrlInput = wrapper.get<HTMLInputElement>(
+      'input[placeholder="https://open.bigmodel.cn/api/paas/v4"]',
+    )
+    expect(baseUrlInput.element.value).toBe(
+      'https://open.bigmodel.cn/api/paas/v4',
+    )
+
+    const codingButton = wrapper
+      .findAll('button')
+      .find((button) =>
+        button.text().includes('admin.accounts.cnProviders.accountMode.coding'),
+      )
+    expect(codingButton).toBeDefined()
+    await codingButton!.trigger('click')
+
+    expect(baseUrlInput.element.value).toBe(
+      'https://open.bigmodel.cn/api/coding/paas/v4',
+    )
+    await wrapper.get('[data-tour="account-form-name"]').setValue('GLM Coding')
+    await wrapper.get('input[type="password"]').setValue('sk-glm-test')
+    await wrapper.get('form#create-account-form').trigger('submit.prevent')
+    await flushPromises()
+
+    expect(createAccountMock).toHaveBeenCalledTimes(1)
+    expect(createAccountMock.mock.calls[0]?.[0]?.credentials).toMatchObject({
+      base_url: 'https://open.bigmodel.cn/api/coding/paas/v4',
+      api_key: 'sk-glm-test',
+      account_mode: 'coding',
+      api_protocol: 'chat_completions',
+    })
+  })
+
+  it('preserves the international GLM host when switching routing', async () => {
+    const wrapper = mountModal()
+    await wrapper.get('[data-testid="account-platform-zhipu"]').trigger('click')
+
+    const baseUrlInput = wrapper.get<HTMLInputElement>(
+      'input[placeholder="https://open.bigmodel.cn/api/paas/v4"]',
+    )
+    await baseUrlInput.setValue('https://api.z.ai/api/paas/v4')
+
+    const codingButton = wrapper
+      .findAll('button')
+      .find((button) =>
+        button.text().includes('admin.accounts.cnProviders.accountMode.coding'),
+      )
+    expect(codingButton).toBeDefined()
+    await codingButton!.trigger('click')
+
+    expect(baseUrlInput.element.value).toBe(
+      'https://api.z.ai/api/coding/paas/v4',
+    )
+  })
+
   it('exposes Agent Identity in the OpenAI authorization methods', async () => {
     const wrapper = mountModal()
     await selectButtonByText(wrapper, 'OpenAI')

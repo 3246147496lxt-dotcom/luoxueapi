@@ -773,6 +773,37 @@ func TestResolveAccountStatsCost_CustomRulePriorityOverApplyPricing(t *testing.T
 	require.InDelta(t, 5.0, *result, 1e-12)
 }
 
+func TestApplyAccountStatsCostWithServiceTier_UsesEffectiveTier(t *testing.T) {
+	// DeepSeek ignores OpenAI service_tier at the provider.  The usage row still
+	// keeps the raw client value, but account-statistics model-file pricing must
+	// receive the effective (empty) tier or stale priority fields can double the
+	// reported provider cost.
+	rawTier := "priority"
+	usageLog := &UsageLog{ServiceTier: &rawTier}
+	channel := &Channel{ID: 1, Status: StatusActive}
+	cs := newTestChannelServiceForStats(t, channel, 10, PlatformDeepseek)
+	bs := newTestBillingServiceWithPrices(map[string]*ModelPricing{
+		"deepseek-v4-flash": {
+			InputPricePerToken:          1,
+			InputPricePerTokenPriority:  100,
+			OutputPricePerToken:         2,
+			OutputPricePerTokenPriority: 200,
+		},
+	})
+
+	applyAccountStatsCostWithServiceTier(
+		context.Background(), usageLog, cs, bs, 1, 10,
+		"deepseek-v4-flash", "deepseek-v4-flash",
+		UsageTokens{InputTokens: 2, OutputTokens: 1}, 0, "",
+	)
+
+	require.NotNil(t, usageLog.AccountStatsCost)
+	want := 2*deepseekFlashOffPeakInputPrice + deepseekFlashOffPeakOutputPrice
+	require.InDelta(t, want, *usageLog.AccountStatsCost, 1e-15)
+	require.NotNil(t, usageLog.ServiceTier)
+	require.Equal(t, rawTier, *usageLog.ServiceTier)
+}
+
 // ---------------------------------------------------------------------------
 // helpers for resolveAccountStatsCost tests
 // ---------------------------------------------------------------------------

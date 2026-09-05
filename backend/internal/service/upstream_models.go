@@ -133,8 +133,10 @@ func (s *AccountTestService) buildUpstreamModelsRequest(ctx context.Context, acc
 		return s.buildAntigravityAPIKeyModelsRequest(ctx, account)
 	case account.IsGrok():
 		return s.buildGrokUpstreamModelsRequest(ctx, account)
-	case account.IsOpenAI():
+	case account.IsOpenAI() || account.IsZhipu():
 		return s.buildOpenAIUpstreamModelsRequest(ctx, account)
+	case account.IsDeepseek():
+		return s.buildDeepSeekUpstreamModelsRequest(ctx, account)
 	case account.IsGemini():
 		return s.buildGeminiUpstreamModelsRequest(ctx, account)
 	case account.IsAnthropic():
@@ -291,12 +293,15 @@ func (s *AccountTestService) buildOpenAIUpstreamModelsRequest(ctx context.Contex
 			fmt.Sprintf("Unsupported OpenAI account type for upstream model sync: %s", account.Type), nil,
 		)
 	}
-	apiKey := strings.TrimSpace(account.GetOpenAIApiKey())
+	apiKey := strings.TrimSpace(account.GetOpenAIProtocolAPIKey())
 	if apiKey == "" {
 		return nil, newUpstreamModelSyncConfigError("No OpenAI API key is available", nil)
 	}
 
-	baseURL := account.GetOpenAIBaseURL()
+	// Anthropic-protocol CN accounts store an Anthropic facade URL in
+	// credentials; model discovery still uses the provider's OpenAI-format
+	// data-plane URL.
+	baseURL := account.GetOpenAIFormatBaseURL()
 	if strings.TrimSpace(baseURL) == "" {
 		baseURL = "https://api.openai.com"
 	}
@@ -305,13 +310,47 @@ func (s *AccountTestService) buildOpenAIUpstreamModelsRequest(ctx context.Contex
 		return nil, newUpstreamModelSyncConfigError("Invalid OpenAI base URL", err)
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, buildOpenAIModelsURL(normalizedBaseURL), nil)
+	modelURL := buildOpenAIModelsURL(normalizedBaseURL)
+	if account.IsDeepseek() || account.IsZhipu() {
+		modelURL = buildOpenAIEndpointURLForPlatform(account.Platform, normalizedBaseURL, "/v1/models")
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, modelURL, nil)
 	if err != nil {
 		return nil, newUpstreamModelSyncConfigError("Invalid OpenAI model list URL", err)
 	}
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("Authorization", "Bearer "+apiKey)
 	// 账号级请求头覆写：模型列表探测与真实转发保持一致的最终头
+	account.ApplyHeaderOverrides(req.Header)
+	return req, nil
+}
+
+// buildDeepSeekUpstreamModelsRequest is kept separate from the OpenAI branch
+// so platform validation and error messages remain explicit while sharing the
+// same OpenAI-compatible /models response parser.
+func (s *AccountTestService) buildDeepSeekUpstreamModelsRequest(ctx context.Context, account *Account) (*http.Request, error) {
+	if account == nil || account.Type != AccountTypeAPIKey {
+		return nil, newUpstreamModelSyncUnsupportedError("Unsupported DeepSeek account type for upstream model sync", nil)
+	}
+	apiKey := strings.TrimSpace(account.GetOpenAIProtocolAPIKey())
+	if apiKey == "" {
+		return nil, newUpstreamModelSyncConfigError("No DeepSeek API key is available", nil)
+	}
+	baseURL := account.GetOpenAIFormatBaseURL()
+	if strings.TrimSpace(baseURL) == "" {
+		baseURL = DefaultDeepseekBaseURL
+	}
+	normalizedBaseURL, err := s.validateUpstreamBaseURL(baseURL)
+	if err != nil {
+		return nil, newUpstreamModelSyncConfigError("Invalid DeepSeek base URL", err)
+	}
+	modelURL := buildOpenAIEndpointURLForPlatform(account.Platform, normalizedBaseURL, "/v1/models")
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, modelURL, nil)
+	if err != nil {
+		return nil, newUpstreamModelSyncConfigError("Invalid DeepSeek model list URL", err)
+	}
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("Authorization", "Bearer "+apiKey)
 	account.ApplyHeaderOverrides(req.Header)
 	return req, nil
 }

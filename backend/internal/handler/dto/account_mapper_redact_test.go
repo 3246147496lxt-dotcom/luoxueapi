@@ -65,3 +65,32 @@ func TestAccountFromServiceShallow_NilCredentialsOmitsStatus(t *testing.T) {
 	require.Nil(t, got.Credentials)
 	require.Nil(t, got.CredentialsStatus)
 }
+
+func TestAccountFromServiceShallow_PreservesZhipuModeAndQuotaSnapshot(t *testing.T) {
+	src := &service.Account{
+		ID:       43,
+		Name:     "glm-coding",
+		Platform: service.PlatformZhipu,
+		Type:     service.AccountTypeAPIKey,
+		Credentials: map[string]any{
+			"api_key":      "sk-secret",
+			"account_mode": "coding",
+			"api_protocol": "chat_completions",
+			"base_url":     service.DefaultZhipuCodingBaseURL,
+		},
+		Extra: map[string]any{
+			"zhipu_5h_used_percent":      42.5,
+			"zhipu_weekly_used_percent":  77.25,
+			"zhipu_usage_updated_at":     "2099-07-25T12:00:00Z",
+		},
+	}
+
+	got := AccountFromServiceShallow(src)
+	require.NotNil(t, got)
+	require.Equal(t, "coding", got.Credentials["account_mode"])
+	require.Equal(t, "chat_completions", got.Credentials["api_protocol"])
+	require.Equal(t, service.DefaultZhipuCodingBaseURL, got.Credentials["base_url"])
+	require.NotContains(t, got.Credentials, "api_key")
+	require.Equal(t, 42.5, got.Extra["zhipu_5h_used_percent"])
+	require.Equal(t, 77.25, got.Extra["zhipu_weekly_used_percent"])
+}

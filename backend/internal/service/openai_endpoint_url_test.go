@@ -29,3 +29,67 @@ func TestBuildOpenAIEndpointURLPreservesURLComponents(t *testing.T) {
 		})
 	}
 }
+
+func TestBuildOpenAIEndpointURLForDeepSeekDoesNotAddSyntheticV1(t *testing.T) {
+	tests := []struct {
+		name     string
+		platform string
+		base     string
+		endpoint string
+		want     string
+	}{
+		{
+			name:     "deepseek root responses",
+			platform: "deepseek",
+			base:     "https://api.deepseek.com",
+			endpoint: "/v1/responses",
+			want:     "https://api.deepseek.com/responses",
+		},
+		{
+			name:     "deepseek root chat",
+			platform: "deepseek",
+			base:     "https://api.deepseek.com/",
+			endpoint: "/v1/chat/completions",
+			want:     "https://api.deepseek.com/chat/completions",
+		},
+		{
+			name:     "deepseek explicit version is preserved",
+			platform: "DEEPSEEK",
+			base:     "https://relay.example/v1",
+			endpoint: "/v1/responses",
+			want:     "https://relay.example/v1/responses",
+		},
+		{
+			name:     "other platforms retain openai convention",
+			platform: "openai",
+			base:     "https://api.openai.com",
+			endpoint: "/v1/responses",
+			want:     "https://api.openai.com/v1/responses",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			require.Equal(t, tt.want, buildOpenAIEndpointURLForPlatform(tt.platform, tt.base, tt.endpoint))
+		})
+	}
+}
+
+func TestBuildPlatformSpecificOpenAIEndpoints(t *testing.T) {
+	require.Equal(t,
+		"https://api.deepseek.com/chat/completions",
+		buildOpenAIChatCompletionsURLForPlatform("deepseek", "https://api.deepseek.com"),
+	)
+	require.Equal(t,
+		"https://api.deepseek.com/responses",
+		buildOpenAIResponsesURLForPlatform("deepseek", "https://api.deepseek.com"),
+	)
+	require.Equal(t,
+		"https://api.openai.com/v1/chat/completions",
+		buildOpenAIChatCompletionsURLForPlatform("openai", "https://api.openai.com"),
+	)
+	require.Equal(t,
+		"https://api.openai.com/v1/responses",
+		buildOpenAIResponsesURLForPlatform("openai", "https://api.openai.com"),
+	)
+}

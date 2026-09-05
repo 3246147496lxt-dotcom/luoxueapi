@@ -47,11 +47,16 @@ func (s *OpenAIGatewayService) ForwardEmbeddings(
 		zap.String("upstream_model", upstreamModel),
 	)
 
-	apiKey := account.GetOpenAIApiKey()
+	// OpenAI-compatible API-key providers (including GLM/DeepSeek) share the
+	// same wire authentication, while GetOpenAIApiKey intentionally remains
+	// OpenAI-platform-only for legacy scheduling semantics.
+	apiKey := strings.TrimSpace(account.GetOpenAIProtocolAPIKey())
 	if apiKey == "" {
 		return nil, fmt.Errorf("account %d missing api_key", account.ID)
 	}
-	baseURL := account.GetOpenAIBaseURL()
+	// An Anthropic-protocol CN account stores an Anthropic facade URL; use the
+	// provider's OpenAI-format base for embeddings and other OpenAI paths.
+	baseURL := account.GetOpenAIFormatBaseURL()
 	if baseURL == "" {
 		baseURL = "https://api.openai.com"
 	}

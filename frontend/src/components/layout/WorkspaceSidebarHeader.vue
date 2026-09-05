@@ -54,11 +54,13 @@
         <WorkspaceResponsiveSidebarIcon
           v-if="overlay"
           name="search"
+          :variant="searchGlyph"
           aria-hidden="true"
         />
         <WorkspaceDesktopSidebarHeaderIcon
           v-else
           name="search"
+          :variant="searchGlyph"
           aria-hidden="true"
         />
       </button>
@@ -77,6 +79,7 @@
       >
         <WorkspaceDesktopSidebarHeaderIcon
           name="collapse"
+          :variant="searchGlyph"
           :data-testid="toggleIconTestId"
           aria-hidden="true"
         />
@@ -119,7 +122,16 @@
           draggable="false"
         >
       </span>
+      <WorkspaceDesktopSidebarHeaderIcon
+        v-if="searchGlyph === 'chatgpt'"
+        name="collapse"
+        variant="chatgpt"
+        class="workspace-sidebar-header__toggle-icon"
+        :data-testid="toggleIconTestId"
+        aria-hidden="true"
+      />
       <SidebarCollapseIcon
+        v-else
         class="workspace-sidebar-header__toggle-icon"
         :collapsed="true"
         :data-testid="toggleIconTestId"
@@ -143,6 +155,7 @@ const props = withDefaults(defineProps<{
   mobile?: boolean
   overlay?: boolean
   showSearch?: boolean
+  searchGlyph?: 'default' | 'chatgpt'
   showClose?: boolean
   searchExpanded?: boolean
   searchControls?: string
@@ -158,6 +171,7 @@ const props = withDefaults(defineProps<{
   mobile: false,
   overlay: false,
   showSearch: false,
+  searchGlyph: 'default',
   showClose: true,
   searchExpanded: false,
   searchControls: '',
@@ -267,6 +281,15 @@ defineExpose({
 }
 
 .workspace-sidebar-header__action:hover {
+  color: var(--workspace-text);
+  background: var(--workspace-hover);
+}
+
+/* Keep the search affordance visibly active while its inline field is open.
+ * The chat rail uses the same neutral hover token for this persistent state,
+ * matching the target shell's #ececec search button without introducing a
+ * second accent color or changing the shared header contract. */
+.workspace-sidebar-header__search[aria-expanded='true'] {
   color: var(--workspace-text);
   background: var(--workspace-hover);
 }
