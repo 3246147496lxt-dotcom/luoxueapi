@@ -43,6 +43,7 @@ const (
 	PlatformGemini      = domain.PlatformGemini
 	PlatformAntigravity = domain.PlatformAntigravity
 	PlatformGrok        = domain.PlatformGrok
+	PlatformKimi        = domain.PlatformKimi
 	PlatformZhipu       = domain.PlatformZhipu
 	PlatformDeepseek    = domain.PlatformDeepseek
 	// PlatformDeepSeek is an alias retained for callers that use the provider's
@@ -62,11 +63,15 @@ const (
 	APIProtocolResponses       = domain.APIProtocolResponses
 	APIProtocolAdaptive        = domain.APIProtocolAdaptive
 
-	DefaultDeepseekBaseURL          = "https://api.deepseek.com"
-	DefaultDeepseekAnthropicBaseURL = "https://api.deepseek.com/anthropic"
-	DefaultZhipuPayGBaseURL         = "https://open.bigmodel.cn/api/paas/v4"
-	DefaultZhipuCodingBaseURL       = "https://open.bigmodel.cn/api/coding/paas/v4"
-	DefaultZhipuAnthropicBaseURL    = "https://open.bigmodel.cn/api/anthropic"
+	DefaultDeepseekBaseURL            = "https://api.deepseek.com"
+	DefaultDeepseekAnthropicBaseURL   = "https://api.deepseek.com/anthropic"
+	DefaultKimiPayGBaseURL            = "https://api.moonshot.cn/v1"
+	DefaultKimiCodingBaseURL          = "https://api.kimi.com/coding/v1"
+	DefaultKimiPayGAnthropicBaseURL   = "https://api.moonshot.cn/anthropic"
+	DefaultKimiCodingAnthropicBaseURL = "https://api.kimi.com/coding"
+	DefaultZhipuPayGBaseURL           = "https://open.bigmodel.cn/api/paas/v4"
+	DefaultZhipuCodingBaseURL         = "https://open.bigmodel.cn/api/coding/paas/v4"
+	DefaultZhipuAnthropicBaseURL      = "https://open.bigmodel.cn/api/anthropic"
 )
 
 // IsCNProvider reports whether a platform is one of the first-class Chinese
@@ -74,7 +79,7 @@ const (
 // providers are actually wired through the gateway.
 func IsCNProvider(platform string) bool {
 	switch platform {
-	case PlatformZhipu, PlatformDeepseek:
+	case PlatformKimi, PlatformZhipu, PlatformDeepseek:
 		return true
 	default:
 		return false
@@ -90,6 +95,7 @@ var AllowedQuotaPlatforms = []string{
 	PlatformGemini,
 	PlatformAntigravity,
 	PlatformGrok,
+	PlatformKimi,
 	PlatformZhipu,
 	PlatformDeepseek,
 }
@@ -102,6 +108,7 @@ var AllowedSchedulingThresholdPlatforms = []string{
 	PlatformOpenAI,
 	PlatformAnthropic,
 	PlatformGrok,
+	PlatformKimi,
 	PlatformZhipu,
 }
 

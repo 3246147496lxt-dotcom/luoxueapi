@@ -2,7 +2,7 @@
       <!-- API Key input (only for apikey type, excluding Antigravity which has its own fields) -->
       <div v-if="accountType === 'apikey' && platform !== 'antigravity'" class="space-y-4">
         <!-- 智谱 GLM account mode/protocol and optional team metadata. -->
-        <div v-if="platform === 'zhipu'" class="space-y-4 rounded-lg border border-indigo-200 bg-indigo-50/50 p-3 dark:border-indigo-900 dark:bg-indigo-950/20">
+        <div v-if="platform === 'zhipu' || platform === 'kimi'" class="space-y-4 rounded-lg border border-indigo-200 bg-indigo-50/50 p-3 dark:border-indigo-900 dark:bg-indigo-950/20">
           <div>
             <label class="input-label">{{ t('admin.accounts.cnProviders.accountMode.title') }}</label>
             <div class="mt-2 grid grid-cols-2 gap-2">
@@ -42,7 +42,7 @@
               </button>
             </div>
           </div>
-          <div v-if="accountMode === 'coding'" class="grid gap-3 sm:grid-cols-2">
+          <div v-if="accountMode === 'coding' && platform === 'zhipu'" class="grid gap-3 sm:grid-cols-2">
             <div>
               <label class="input-label">{{ t('admin.accounts.cnProviders.zhipuTeam.organization') }}</label>
               <input v-model="zhipuOrganization" type="text" class="input" :placeholder="t('admin.accounts.cnProviders.zhipuTeam.organizationPlaceholder')" />
@@ -69,19 +69,21 @@
                     ? 'https://api.x.ai/v1'
                     : platform === 'zhipu'
                       ? 'https://open.bigmodel.cn/api/paas/v4'
+                      : platform === 'kimi'
+                      ? 'https://api.moonshot.cn/v1'
                       : platform === 'deepseek'
                       ? 'https://api.deepseek.com'
                       : 'https://api.anthropic.com'
             "
           />
           <p v-if="baseUrlHint" class="input-hint">{{ baseUrlHint }}</p>
-          <div v-if="platform === 'deepseek' || platform === 'zhipu'" class="mt-2 flex flex-wrap gap-2">
+          <div v-if="platform === 'deepseek' || platform === 'zhipu' || platform === 'kimi'" class="mt-2 flex flex-wrap gap-2">
             <button
-              v-for="preset in platform === 'zhipu' ? zhipuBaseUrlPresets : deepseekBaseUrlPresets"
+              v-for="preset in platform === 'zhipu' ? zhipuBaseUrlPresets : platform === 'kimi' ? kimiBaseUrlPresets : deepseekBaseUrlPresets"
               :key="preset.url"
               type="button"
               class="rounded-md border border-sky-200 px-2.5 py-1 text-xs text-sky-700 transition-colors hover:bg-sky-50 dark:border-sky-800 dark:text-sky-300 dark:hover:bg-sky-900/30"
-              @click="platform === 'zhipu' ? selectZhipuPreset(preset.url) : (apiKeyBaseUrl = preset.url)"
+              @click="platform === 'zhipu' ? selectZhipuPreset(preset.url) : platform === 'kimi' ? selectKimiPreset(preset.url) : (apiKeyBaseUrl = preset.url)"
             >
               {{ preset.label }}
             </button>
@@ -562,6 +564,7 @@ import {
   MAX_POOL_MODE_RETRY_COUNT,
   DEEPSEEK_BASE_URL_PRESETS,
   ZHIPU_BASE_URL_PRESETS,
+  KIMI_BASE_URL_PRESETS,
   inferZhipuRoutingFromBaseURL,
 } from '../credentialDraftBuilders'
 import { apiKeyBaseURLHintKey, apiKeyValueHintKey } from '../platformFormPolicy'
@@ -621,6 +624,7 @@ const apiKeyHint = computed(() => {
 })
 const deepseekBaseUrlPresets = DEEPSEEK_BASE_URL_PRESETS
 const zhipuBaseUrlPresets = ZHIPU_BASE_URL_PRESETS
+const kimiBaseUrlPresets = KIMI_BASE_URL_PRESETS
 const zhipuProtocolOptions = [
   { value: 'chat_completions' as const, key: 'chatCompletions' },
   { value: 'anthropic' as const, key: 'anthropic' },
@@ -629,6 +633,12 @@ const zhipuProtocolOptions = [
 // A URL preset represents a complete routing choice, not just a text snippet.
 // Keep the mode/protocol models in sync so selecting "Coding" or "Anthropic"
 // cannot submit a mismatched account_mode/api_protocol pair.
+const selectKimiPreset = (url: string) => {
+  apiKeyBaseUrl.value = url
+  accountMode.value = url.includes('api.kimi.com/coding') ? 'coding' : 'payg'
+  apiProtocol.value = url.endsWith('/anthropic') || url.endsWith('/coding') ? 'anthropic' : 'chat_completions'
+}
+
 const selectZhipuPreset = (url: string) => {
   apiKeyBaseUrl.value = url
   const routing = inferZhipuRoutingFromBaseURL(url)
@@ -642,7 +652,7 @@ const syncPreviewCredentials = computed(() =>
         type: props.accountType,
         base_url: apiKeyBaseUrl.value || undefined,
         api_key: apiKeyValue.value,
-        ...(props.platform === 'zhipu'
+        ...((props.platform === 'zhipu' || props.platform === 'kimi')
           ? {
               account_mode: accountMode.value,
               api_protocol: apiProtocol.value,

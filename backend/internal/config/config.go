@@ -2030,6 +2030,7 @@ func setDefaults() {
 		"api.deepseek.com",
 		"api.anthropic.com",
 		"api.kimi.com",
+		"api.moonshot.cn",
 		"open.bigmodel.cn",
 		"api.z.ai",
 		"api.minimaxi.com",

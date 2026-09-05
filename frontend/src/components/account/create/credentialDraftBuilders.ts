@@ -52,12 +52,19 @@ const DEFAULT_API_KEY_BASE_URL: Record<AccountPlatform, string> = {
   gemini: 'https://generativelanguage.googleapis.com',
   antigravity: 'https://api.anthropic.com',
   grok: 'https://api.x.ai/v1',
+  kimi: 'https://api.moonshot.cn/v1',
   zhipu: 'https://open.bigmodel.cn/api/paas/v4',
   deepseek: 'https://api.deepseek.com',
 }
 
 /** Official 智谱 GLM endpoints.  The account mode/protocol selectors in the
  * account form choose among these presets; custom relay URLs remain allowed. */
+export const KIMI_BASE_URL_PRESETS = [
+  { label: 'Kimi API（按量）', url: 'https://api.moonshot.cn/v1' },
+  { label: 'Kimi Coding Plan', url: 'https://api.kimi.com/coding/v1' },
+  { label: 'Kimi Anthropic', url: 'https://api.moonshot.cn/anthropic' },
+] as const
+
 export const ZHIPU_BASE_URL_PRESETS = [
   { label: 'GLM API（按量）', url: 'https://open.bigmodel.cn/api/paas/v4' },
   { label: 'GLM Coding Plan', url: 'https://open.bigmodel.cn/api/coding/paas/v4' },
@@ -364,7 +371,7 @@ export function buildAPIKeyCredentials(
   if (input.platform === 'gemini') {
     credentials.tier_id = input.geminiTierId
   }
-  if (input.platform === 'zhipu' || input.platform === 'deepseek') {
+  if (input.platform === 'kimi' || input.platform === 'zhipu' || input.platform === 'deepseek') {
     if (input.accountMode) credentials.account_mode = input.accountMode
     if (input.apiProtocol) credentials.api_protocol = input.apiProtocol
   }

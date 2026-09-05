@@ -67,6 +67,7 @@ const (
 	MonitorProviderAnthropic = "anthropic"
 	MonitorProviderGemini    = "gemini"
 	MonitorProviderGrok      = "grok"
+	MonitorProviderKimi      = "kimi"
 	MonitorProviderZhipu     = "zhipu"
 	MonitorProviderDeepSeek  = "deepseek"
 
@@ -126,7 +127,7 @@ var (
 		"CHANNEL_MONITOR_NOT_FOUND", "channel monitor not found",
 	)
 	ErrChannelMonitorInvalidProvider = infraerrors.BadRequest(
-		"CHANNEL_MONITOR_INVALID_PROVIDER", "provider must be one of openai/anthropic/gemini/grok/zhipu/deepseek",
+		"CHANNEL_MONITOR_INVALID_PROVIDER", "provider must be one of openai/anthropic/gemini/grok/kimi/zhipu/deepseek",
 	)
 	ErrChannelMonitorInvalidAPIMode = infraerrors.BadRequest(
 		"CHANNEL_MONITOR_INVALID_API_MODE", "api_mode must be chat_completions or responses; responses is only supported for openai",

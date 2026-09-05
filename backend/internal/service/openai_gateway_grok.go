@@ -369,15 +369,23 @@ func sanitizeGrokResponsesTools(body []byte) ([]byte, error) {
 
 	rawTools := tools.Array()
 	filteredTools := make([]json.RawMessage, 0, len(rawTools))
+	toolsChanged := false
 	for _, tool := range rawTools {
 		toolType := strings.TrimSpace(tool.Get("type").String())
 		if _, ok := grokResponsesSupportedToolTypes[toolType]; ok {
-			filteredTools = append(filteredTools, json.RawMessage(tool.Raw))
+			normalized, err := normalizeGrokFunctionToolParameters(json.RawMessage(tool.Raw))
+			if err != nil {
+				return nil, err
+			}
+			if string(normalized) != tool.Raw {
+				toolsChanged = true
+			}
+			filteredTools = append(filteredTools, normalized)
 		}
 	}
 
 	var err error
-	if len(filteredTools) != len(rawTools) {
+	if len(filteredTools) != len(rawTools) || toolsChanged {
 		if len(filteredTools) == 0 {
 			body, err = sjson.DeleteBytes(body, "tools")
 		} else {
@@ -404,6 +412,181 @@ func sanitizeGrokResponsesTools(body []byte) ([]byte, error) {
 		}
 	}
 	return body, nil
+}
+
+// normalizeGrokFunctionToolParameters makes function parameter schemas
+// acceptable to xAI's Responses endpoint. xAI requires an object schema at
+// the root and rejects nullable unions such as
+// {"anyOf":[{"type":"object",...},{"type":"null"}]}. When a union has
+// one or more object branches, their properties are merged into one object
+// schema and non-object branches are discarded. Required fields are retained
+// only when they are required by every object branch.
+func normalizeGrokFunctionToolParameters(raw json.RawMessage) (json.RawMessage, error) {
+	var tool map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &tool); err != nil {
+		return raw, nil
+	}
+	if strings.TrimSpace(string(tool["type"])) != `"function"` {
+		return raw, nil
+	}
+
+	changedAny := false
+	for _, key := range []string{"parameters", "function"} {
+		if key == "function" {
+			var function map[string]json.RawMessage
+			if err := json.Unmarshal(tool[key], &function); err != nil {
+				continue
+			}
+			parameters, ok := function["parameters"]
+			if !ok {
+				continue
+			}
+			normalized, changed, err := normalizeGrokFunctionParameterSchema(parameters)
+			if err != nil {
+				return nil, err
+			}
+			if changed {
+				changedAny = true
+				function["parameters"] = normalized
+				encoded, err := json.Marshal(function)
+				if err != nil {
+					return nil, err
+				}
+				tool[key] = encoded
+			}
+			continue
+		}
+
+		parameters, ok := tool[key]
+		if !ok {
+			continue
+		}
+		normalized, changed, err := normalizeGrokFunctionParameterSchema(parameters)
+		if err != nil {
+			return nil, err
+		}
+		if changed {
+			changedAny = true
+			tool[key] = normalized
+		}
+	}
+	if !changedAny {
+		return raw, nil
+	}
+
+	encoded, err := json.Marshal(tool)
+	if err != nil {
+		return nil, err
+	}
+	return encoded, nil
+}
+
+func normalizeGrokFunctionParameterSchema(raw json.RawMessage) (json.RawMessage, bool, error) {
+	if len(raw) == 0 || string(raw) == "null" {
+		return json.RawMessage(`{"type":"object","properties":{}}`), true, nil
+	}
+
+	var schema map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &schema); err != nil {
+		return raw, false, nil
+	}
+	unionKey := ""
+	for _, candidate := range []string{"anyOf", "oneOf"} {
+		if _, ok := schema[candidate]; ok {
+			unionKey = candidate
+			break
+		}
+	}
+	if unionKey == "" {
+		return raw, false, nil
+	}
+
+	var branches []json.RawMessage
+	if err := json.Unmarshal(schema[unionKey], &branches); err != nil {
+		return raw, false, nil
+	}
+	objects := make([]map[string]json.RawMessage, 0, len(branches))
+	hasNonObject := false
+	for _, branch := range branches {
+		var object map[string]json.RawMessage
+		if err := json.Unmarshal(branch, &object); err != nil {
+			hasNonObject = true
+			continue
+		}
+		typeName := strings.TrimSpace(string(object["type"]))
+		if typeName == `"object"` || (typeName == "" && object["properties"] != nil) {
+			objects = append(objects, object)
+		} else {
+			hasNonObject = true
+		}
+	}
+	if !hasNonObject {
+		return raw, false, nil
+	}
+
+	// Start with root-level metadata, then merge object branches. This keeps
+	// descriptions and constraints supplied alongside the union.
+	merged := make(map[string]json.RawMessage, len(schema)+1)
+	for key, value := range schema {
+		if key != "anyOf" && key != "oneOf" && key != "type" && key != "properties" && key != "required" {
+			merged[key] = value
+		}
+	}
+	merged["type"] = json.RawMessage(`"object"`)
+	properties := make(map[string]json.RawMessage)
+	var requiredIntersection map[string]struct{}
+	for index, object := range objects {
+		var branchProperties map[string]json.RawMessage
+		if err := json.Unmarshal(object["properties"], &branchProperties); err == nil {
+			for name, value := range branchProperties {
+				if _, exists := properties[name]; !exists {
+					properties[name] = value
+				}
+			}
+		}
+		var required []string
+		if err := json.Unmarshal(object["required"], &required); err == nil {
+			if index == 0 {
+				requiredIntersection = make(map[string]struct{}, len(required))
+				for _, name := range required {
+					requiredIntersection[name] = struct{}{}
+				}
+			} else {
+				seen := make(map[string]struct{}, len(required))
+				for _, name := range required {
+					seen[name] = struct{}{}
+				}
+				for name := range requiredIntersection {
+					if _, ok := seen[name]; !ok {
+						delete(requiredIntersection, name)
+					}
+				}
+			}
+		} else if index == 0 {
+			requiredIntersection = nil
+		}
+	}
+	encodedProperties, err := json.Marshal(properties)
+	if err != nil {
+		return nil, false, err
+	}
+	merged["properties"] = encodedProperties
+	if len(requiredIntersection) > 0 {
+		required := make([]string, 0, len(requiredIntersection))
+		for name := range requiredIntersection {
+			required = append(required, name)
+		}
+		encodedRequired, err := json.Marshal(required)
+		if err != nil {
+			return nil, false, err
+		}
+		merged["required"] = encodedRequired
+	}
+	encoded, err := json.Marshal(merged)
+	if err != nil {
+		return nil, false, err
+	}
+	return encoded, true, nil
 }
 
 func shouldDropGrokToolChoice(toolChoice gjson.Result, tools []json.RawMessage) bool {

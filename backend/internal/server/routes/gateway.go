@@ -33,7 +33,7 @@ func RegisterGatewayRoutes(
 
 	isOpenAIResponsesCompatibleGatewayPlatform := func(c *gin.Context) bool {
 		switch getGroupPlatform(c) {
-		case service.PlatformOpenAI, service.PlatformGrok, service.PlatformZhipu, service.PlatformDeepseek:
+		case service.PlatformOpenAI, service.PlatformGrok, service.PlatformKimi, service.PlatformZhipu, service.PlatformDeepseek:
 			return true
 		default:
 			return false
@@ -49,7 +49,7 @@ func RegisterGatewayRoutes(
 	// platforms continue through the legacy Anthropic gateway.
 	countTokensHandler := func(c *gin.Context) {
 		switch getGroupPlatform(c) {
-		case service.PlatformOpenAI, service.PlatformZhipu, service.PlatformDeepseek:
+		case service.PlatformOpenAI, service.PlatformKimi, service.PlatformZhipu, service.PlatformDeepseek:
 			h.OpenAIGateway.CountTokens(c)
 		case service.PlatformGrok:
 			service.MarkOpsClientBusinessLimited(c, service.OpsClientBusinessLimitedReasonLocalFeatureGate)

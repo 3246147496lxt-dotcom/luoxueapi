@@ -1185,7 +1185,7 @@ const selectedTodayStats = computed(() => {
   return todayStatsByAccountId.value[String(accountId)] ?? null
 })
 
-const allowedAccountPlatforms = new Set(['anthropic', 'openai', 'gemini', 'antigravity', 'grok', 'zhipu', 'deepseek'])
+const allowedAccountPlatforms = new Set(['anthropic', 'openai', 'gemini', 'antigravity', 'grok', 'kimi', 'zhipu', 'deepseek'])
 const allowedAccountHealthFilters = new Set([
   'active',
   'inactive',

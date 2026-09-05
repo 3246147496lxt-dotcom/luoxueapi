@@ -2411,6 +2411,28 @@ func (h *AccountHandler) GetAvailableModels(c *gin.Context) {
 		return
 	}
 
+	// Handle Kimi/Moonshot accounts with the OpenAI-compatible model shape.
+	if account.IsKimi() {
+		defaultModels := []openai.Model{
+			{ID: "kimi-k2.6", Object: "model", Created: deepSeekAccountModelCreatedAt, OwnedBy: "moonshot", Type: "model", DisplayName: "Kimi K2.6"},
+			{ID: "kimi-k2.5", Object: "model", Created: deepSeekAccountModelCreatedAt, OwnedBy: "moonshot", Type: "model", DisplayName: "Kimi K2.5"},
+			{ID: "kimi-k2-thinking", Object: "model", Created: deepSeekAccountModelCreatedAt, OwnedBy: "moonshot", Type: "model", DisplayName: "Kimi K2 Thinking"},
+			{ID: "kimi-k2", Object: "model", Created: deepSeekAccountModelCreatedAt, OwnedBy: "moonshot", Type: "model", DisplayName: "Kimi K2"},
+			{ID: "kimi-latest", Object: "model", Created: deepSeekAccountModelCreatedAt, OwnedBy: "moonshot", Type: "model", DisplayName: "Kimi Latest"},
+		}
+		if len(account.GetModelMapping()) == 0 {
+			response.Success(c, defaultModels)
+			return
+		}
+		models := make([]openai.Model, 0, len(account.GetModelMapping()))
+		for model := range account.GetModelMapping() {
+			models = append(models, openai.Model{ID: model, Object: "model", Created: deepSeekAccountModelCreatedAt, OwnedBy: "moonshot", Type: "model", DisplayName: model})
+		}
+		sort.Slice(models, func(i, j int) bool { return models[i].ID < models[j].ID })
+		response.Success(c, models)
+		return
+	}
+
 	// Handle DeepSeek accounts.  DeepSeek exposes an OpenAI-compatible model
 	// shape, so keep the response consistent with the OpenAI branch above while
 	// using the current V4 catalog instead of falling through to Claude models.

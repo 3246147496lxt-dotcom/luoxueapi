@@ -145,7 +145,7 @@ func wrapUsageRecordTaskContext(parent context.Context, task service.UsageRecord
 func openAICompatibleRequestPlatform(apiKey *service.APIKey) string {
 	if apiKey != nil && apiKey.Group != nil {
 		switch apiKey.Group.Platform {
-		case service.PlatformGrok, service.PlatformZhipu, service.PlatformDeepseek:
+		case service.PlatformGrok, service.PlatformKimi, service.PlatformZhipu, service.PlatformDeepseek:
 			// Keep platform identity for scheduler/account matching. Other
 			// OpenAI-compatible groups retain the historical OpenAI target.
 			return apiKey.Group.Platform
@@ -159,7 +159,7 @@ func allowOpenAICompatibleMessagesDispatch(apiKey *service.APIKey) bool {
 		return true
 	}
 	if apiKey.Group.Platform == service.PlatformGrok || service.IsCNProvider(apiKey.Group.Platform) {
-			// CN providers are primarily exposed through the OpenAI-compatible gateway;
+		// CN providers are primarily exposed through the OpenAI-compatible gateway;
 		// its Anthropic-shaped endpoint is a compatibility surface and must not
 		// be disabled by the OpenAI-only allow_messages_dispatch flag (which is
 		// normally sanitized off for non-OpenAI groups).

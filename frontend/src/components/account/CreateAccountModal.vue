@@ -1006,6 +1006,7 @@ const {
     gemini: (code) => handleGeminiExchange(code),
     antigravity: (code) => handleAntigravityExchange(code),
     grok: (code) => handleGrokExchange(code),
+    kimi: async () => undefined,
     zhipu: async () => undefined,
     deepseek: async () => undefined,
   },
@@ -1377,7 +1378,7 @@ watch(
   () => form.platform,
   (newPlatform) => {
     apiKeyBaseUrl.value = defaultAPIKeyBaseURL(newPlatform)
-    if (newPlatform === 'deepseek' || newPlatform === 'zhipu') {
+    if (newPlatform === 'deepseek' || newPlatform === 'zhipu' || newPlatform === 'kimi') {
       accountCategory.value = 'apikey'
       apiProtocol.value = 'chat_completions'
       apiKeyBaseUrl.value = newPlatform === 'zhipu'
@@ -1673,6 +1674,9 @@ const selectZhipuPlatform = () => {
 }
 
 const handlePlatformSelect = (platform: AccountPlatform) => {
+  if (platform === 'kimi') {
+    form.platform = 'kimi'; accountCategory.value = 'apikey'; form.type = 'apikey'; accountMode.value = 'payg'; apiProtocol.value = 'chat_completions'; apiKeyBaseUrl.value = defaultAPIKeyBaseURL('kimi'); return
+  }
   if (platform === 'deepseek') {
     selectDeepSeekPlatform()
     return
@@ -1921,8 +1925,8 @@ const handleSubmit = async () => {
     platform: form.platform,
     baseUrl: apiKeyBaseUrl.value,
     apiKey: apiKeyValue.value,
-    accountMode: form.platform === 'zhipu' ? accountMode.value : undefined,
-    apiProtocol: form.platform === 'zhipu' ? apiProtocol.value : undefined,
+    accountMode: (form.platform === 'zhipu' || form.platform === 'kimi') ? accountMode.value : undefined,
+    apiProtocol: (form.platform === 'zhipu' || form.platform === 'kimi') ? apiProtocol.value : undefined,
     zhipuOrganization: form.platform === 'zhipu' ? zhipuOrganization.value : undefined,
     zhipuProject: form.platform === 'zhipu' ? zhipuProject.value : undefined,
     geminiTierId: geminiTierAIStudio.value,

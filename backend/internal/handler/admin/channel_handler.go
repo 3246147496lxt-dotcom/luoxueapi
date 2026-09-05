@@ -515,6 +515,7 @@ var platformToLiteLLMProvider = map[string]string{
 	service.PlatformGemini:      "google",
 	service.PlatformAntigravity: "anthropic",
 	service.PlatformGrok:        "xai",
+	service.PlatformKimi:        "moonshot",
 	service.PlatformZhipu:       "zhipu",
 	service.PlatformDeepseek:    "deepseek",
 }

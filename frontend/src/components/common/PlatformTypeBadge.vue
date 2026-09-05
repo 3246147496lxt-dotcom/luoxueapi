@@ -125,6 +125,7 @@ const platformLabel = computed(() => {
   if (props.platform === 'antigravity') return 'Antigravity'
   if (props.platform === 'grok') return 'Grok'
   if (props.platform === 'deepseek') return 'DeepSeek'
+  if (props.platform === 'kimi') return 'Kimi'
   if (props.platform === 'zhipu') return 'Zhipu GLM'
   return 'Gemini'
 })

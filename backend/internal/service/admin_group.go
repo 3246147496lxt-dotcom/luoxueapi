@@ -114,6 +114,8 @@ func defaultModelsListCandidateIDs(platform string) []string {
 		return ids
 	case PlatformGrok:
 		return xai.DefaultModelIDs()
+	case PlatformKimi:
+		return []string{"kimi-k2.6", "kimi-k2.5", "kimi-k2-thinking", "kimi-k2", "kimi-latest"}
 	case PlatformDeepseek:
 		// Keep the current V4 catalog visible even before an account has a
 		// synchronized model mapping.  Account-specific aliases are appended by

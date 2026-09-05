@@ -492,6 +492,9 @@ func (s *AccountService) TestCredentials(ctx context.Context, id int64) error {
 	case PlatformGrok:
 		// Grok OAuth credentials are validated via token exchange/refresh and request-path probes.
 		return nil
+	case PlatformKimi:
+		// Kimi/Moonshot credentials are API-key based.
+		return nil
 	case PlatformDeepseek:
 		// DeepSeek credentials are API-key based; availability is validated by
 		// the provider probe/forwarding path rather than this lightweight check.

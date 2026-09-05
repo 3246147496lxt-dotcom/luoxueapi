@@ -263,6 +263,9 @@ func (a *Account) IsDeepseek() bool {
 // conventional camel-case name.
 func (a *Account) IsDeepSeek() bool { return a.IsDeepseek() }
 
+// IsKimi reports whether this is a Moonshot/Kimi account.
+func (a *Account) IsKimi() bool { return a != nil && a.Platform == PlatformKimi }
+
 // IsCNProvider reports whether this account belongs to a first-class Chinese
 // OpenAI-compatible provider.
 func (a *Account) IsCNProvider() bool {
@@ -275,7 +278,7 @@ func (a *Account) IsGrokOAuth() bool {
 
 func (a *Account) IsOpenAICompatible() bool {
 	return a != nil && (a.Platform == PlatformOpenAI || a.Platform == PlatformGrok ||
-		a.Platform == PlatformZhipu || a.Platform == PlatformDeepseek)
+		a.Platform == PlatformKimi || a.Platform == PlatformZhipu || a.Platform == PlatformDeepseek)
 }
 
 func (a *Account) GeminiOAuthType() string {
@@ -1418,6 +1421,11 @@ func defaultCNOpenAIBaseURL(a *Account) string {
 		return ""
 	}
 	switch a.Platform {
+	case PlatformKimi:
+		if a.GetAccountMode() == AccountModeCoding {
+			return DefaultKimiCodingBaseURL
+		}
+		return DefaultKimiPayGBaseURL
 	case PlatformZhipu:
 		if a.GetAccountMode() == AccountModeCoding {
 			return DefaultZhipuCodingBaseURL
@@ -1435,6 +1443,11 @@ func defaultCNAnthropicBaseURL(a *Account) string {
 		return ""
 	}
 	switch a.Platform {
+	case PlatformKimi:
+		if a.GetAccountMode() == AccountModeCoding {
+			return DefaultKimiCodingAnthropicBaseURL
+		}
+		return DefaultKimiPayGAnthropicBaseURL
 	case PlatformZhipu:
 		return DefaultZhipuAnthropicBaseURL
 	case PlatformDeepseek:

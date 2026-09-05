@@ -55,6 +55,13 @@ export function useCreateAccountOAuthDrivers(
     reset: () => undefined,
   }
 
+  const kimiOAuth = {
+    authUrl: ref(''), sessionId: ref(''), loading: ref(false), error: ref(''),
+    generateAuthorization: async () => undefined,
+    exchangeAuthorizationCode: options.exchangeAuthorizationCode.kimi,
+    reset: () => undefined,
+  }
+
   const zhipuOAuth = {
     authUrl: ref(''),
     sessionId: ref(''),
@@ -136,6 +143,7 @@ export function useCreateAccountOAuthDrivers(
       validateRefreshToken: options.validateRefreshToken?.grok,
       reset: () => grokOAuth.resetState(),
     },
+    kimi: kimiOAuth,
     deepseek: deepseekOAuth,
     zhipu: zhipuOAuth,
   })

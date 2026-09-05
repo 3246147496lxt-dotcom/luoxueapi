@@ -23,6 +23,8 @@ const (
 	PlatformGemini      = "gemini"
 	PlatformAntigravity = "antigravity"
 	PlatformGrok        = "grok"
+	// Kimi (月之暗面 / Moonshot), OpenAI-compatible provider.
+	PlatformKimi = "kimi"
 	// Zhipu AI / GLM (智谱) OpenAI-compatible provider.
 	PlatformZhipu    = "zhipu"
 	PlatformDeepseek = "deepseek"

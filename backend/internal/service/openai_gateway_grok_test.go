@@ -247,6 +247,64 @@ func TestPatchGrokResponsesBodyDropsCodexAdditionalToolsInputItems(t *testing.T)
 	require.Equal(t, "hello", gjson.GetBytes(patched, "input.1.content.0.text").String())
 }
 
+func TestPatchGrokResponsesBodyNormalizesNullableFunctionParameterSchema(t *testing.T) {
+	t.Parallel()
+
+	body := []byte(`{
+		"model": "grok-4.5",
+		"input": "hello",
+		"tools": [{
+			"type": "function",
+			"name": "mcp__codex_app__automation_update",
+			"parameters": {
+				"anyOf": [
+					{"type": "object", "properties": {"id": {"type": "string"}}, "required": ["id"]},
+					{"type": "null"}
+				]
+			}
+		}]
+	}`)
+
+	patched, err := patchGrokResponsesBody(body, "grok-4.5")
+	require.NoError(t, err)
+
+	parameters := gjson.GetBytes(patched, "tools.0.parameters")
+	require.Equal(t, "object", parameters.Get("type").String())
+	require.True(t, parameters.Get("properties.id").Exists())
+	require.Equal(t, "id", parameters.Get("required.0").String())
+	require.False(t, parameters.Get("anyOf").Exists())
+}
+
+func TestPatchGrokResponsesBodyMergesObjectBranchesInFunctionParameterSchema(t *testing.T) {
+	t.Parallel()
+
+	body := []byte(`{
+		"model": "grok-4.5",
+		"input": "hello",
+		"tools": [{
+			"type": "function",
+			"name": "automation_update",
+			"parameters": {
+				"oneOf": [
+					{"type": "object", "properties": {"id": {"type": "string"}}, "required": ["id"]},
+					{"type": "object", "properties": {"mode": {"type": "string"}}, "required": ["mode"]},
+					{"type": "null"}
+				]
+			}
+		}]
+	}`)
+
+	patched, err := patchGrokResponsesBody(body, "grok-4.5")
+	require.NoError(t, err)
+
+	parameters := gjson.GetBytes(patched, "tools.0.parameters")
+	require.Equal(t, "object", parameters.Get("type").String())
+	require.True(t, parameters.Get("properties.id").Exists())
+	require.True(t, parameters.Get("properties.mode").Exists())
+	require.False(t, parameters.Get("oneOf").Exists())
+	require.False(t, parameters.Get("required").Exists(), "no field is required by every branch")
+}
+
 func TestBuildGrokResponsesRequestUsesAccountBaseURLAndBearerToken(t *testing.T) {
 	t.Setenv(xai.EnvAllowUnsafeURLOverrides, "true")
 

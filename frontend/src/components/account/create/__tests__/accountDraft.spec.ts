@@ -28,6 +28,7 @@ describe('account payload adapters', () => {
       'gemini',
       'antigravity',
       'grok',
+      'kimi',
       'deepseek',
       'zhipu',
     ])
@@ -43,6 +44,7 @@ describe('account payload adapters', () => {
     { platform: 'gemini', type: 'apikey', expectedType: 'apikey' },
     { platform: 'antigravity', type: 'apikey', expectedType: 'apikey' },
     { platform: 'grok', type: 'oauth', expectedType: 'oauth' },
+    { platform: 'kimi', type: 'apikey', expectedType: 'apikey' },
     { platform: 'deepseek', type: 'apikey', expectedType: 'apikey' },
     { platform: 'zhipu', type: 'apikey', expectedType: 'apikey' },
   ]

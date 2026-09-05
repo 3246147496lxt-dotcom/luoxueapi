@@ -60,7 +60,7 @@ export function apiKeyBaseURLHintKey(
   platform: AccountPlatform,
 ): string | null {
   if (platform === 'grok') return null
-  if (platform === 'openai' || platform === 'gemini' || platform === 'deepseek' || platform === 'zhipu') {
+  if (platform === 'openai' || platform === 'gemini' || platform === 'kimi' || platform === 'deepseek' || platform === 'zhipu') {
     return `admin.accounts.${platform}.baseUrlHint`
   }
   return 'admin.accounts.baseUrlHint'
@@ -70,7 +70,7 @@ export function apiKeyValueHintKey(
   platform: AccountPlatform,
 ): string | null {
   if (platform === 'grok') return null
-  if (platform === 'openai' || platform === 'gemini' || platform === 'deepseek' || platform === 'zhipu') {
+  if (platform === 'openai' || platform === 'gemini' || platform === 'kimi' || platform === 'deepseek' || platform === 'zhipu') {
     return `admin.accounts.${platform}.apiKeyHint`
   }
   return 'admin.accounts.apiKeyHint'

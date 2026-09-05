@@ -65,6 +65,11 @@ const platformOptions: ReadonlyArray<{
     activeClass: 'bg-white text-zinc-900 shadow-sm dark:bg-dark-600 dark:text-zinc-100',
   },
   {
+    platform: 'kimi',
+    label: 'Kimi',
+    activeClass: 'bg-white text-pink-600 shadow-sm dark:bg-dark-600 dark:text-pink-400',
+  },
+  {
     platform: 'deepseek',
     label: 'DeepSeek',
     activeClass: 'bg-white text-sky-600 shadow-sm dark:bg-dark-600 dark:text-sky-400',

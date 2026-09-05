@@ -121,6 +121,12 @@ const deepseekModels = [
   'deepseek-r1-distill-llama-70b', 'deepseek-r1-distill-llama-8b'
 ]
 
+const kimiPresetMappings = [
+  { label: 'Kimi K2.6', from: 'kimi-k2.6', to: 'kimi-k2.6', color: 'bg-pink-100 text-pink-700' },
+  { label: 'Kimi K2.5', from: 'kimi-k2.5', to: 'kimi-k2.5', color: 'bg-pink-100 text-pink-700' },
+  { label: 'Kimi Coding', from: 'kimi-for-coding', to: 'kimi-for-coding', color: 'bg-pink-100 text-pink-700' },
+]
+
 const zhipuPresetMappings = [
   { label: 'GLM-5', from: 'glm-5', to: 'glm-5', color: 'bg-indigo-100 text-indigo-700 hover:bg-indigo-200 dark:bg-indigo-900/30 dark:text-indigo-400' },
   { label: 'GLM-4.7', from: 'glm-4.7', to: 'glm-4.7', color: 'bg-indigo-100 text-indigo-700 hover:bg-indigo-200 dark:bg-indigo-900/30 dark:text-indigo-400' },
@@ -190,7 +196,9 @@ const yiModels = [
 
 // Moonshot/Kimi
 const moonshotModels = [
+
   'moonshot-v1-8k', 'moonshot-v1-32k', 'moonshot-v1-128k',
+  'kimi-k2.6', 'kimi-k2.5', 'kimi-k2-thinking', 'kimi-k2', 'kimi-for-coding',
   'kimi-latest'
 ]
 
@@ -434,6 +442,7 @@ export function getModelsByPlatform(platform: string): string[] {
     case 'claude': return claudeModels
     case 'gemini': return geminiModels
     case 'antigravity': return antigravityModels
+    case 'kimi': return moonshotModels
     case 'zhipu': return zhipuModels
     case 'qwen': return qwenModels
     case 'deepseek': return deepseekModels
@@ -457,6 +466,7 @@ export function getModelsByPlatform(platform: string): string[] {
 // 按平台获取预设映射
 export function getPresetMappingsByPlatform(platform: string) {
   if (platform === 'openai') return openaiPresetMappings
+  if (platform === 'kimi') return kimiPresetMappings
   if (platform === 'zhipu') return zhipuPresetMappings
   if (platform === 'deepseek') return deepseekPresetMappings
   if (platform === 'gemini') return geminiPresetMappings

@@ -17,6 +17,7 @@ export type { AntigravityAccountDraft } from './platforms/antigravity'
 export type { GeminiAccountDraft } from './platforms/gemini'
 export type { GrokAccountDraft } from './platforms/grok'
 export type { OpenAIAccountDraft } from './platforms/openai'
+export type { KimiAccountDraft } from './platforms/kimi'
 export type { DeepSeekAccountDraft } from './platforms/deepseek'
 export type { ZhipuAccountDraft } from './platforms/zhipu'
 export { buildGrokSSOImportRequest } from './platforms/grok'
@@ -139,6 +140,12 @@ export function toAccountCredentialDraft(
           }
         default:
           return unsupported(platform, type)
+      }
+    case 'kimi':
+      switch (type) {
+        case 'apikey':
+          return { platform, kind: 'apikey', baseUrl: stringCredential(credentials, 'base_url'), apiKey: stringCredential(credentials, 'api_key'), credentialOptions: credentialOptions(credentials, ['base_url', 'api_key']), extra }
+        default: return unsupported(platform, type)
       }
     case 'deepseek':
       switch (type) {

@@ -1102,7 +1102,7 @@ func (h *GatewayHandler) Models(c *gin.Context) {
 		return
 	}
 
-	if platform == service.PlatformZhipu || platform == service.PlatformDeepseek {
+	if platform == service.PlatformKimi || platform == service.PlatformZhipu || platform == service.PlatformDeepseek {
 		writeModelsList(c, platform, defaultModelIDsForPlatform(platform))
 		return
 	}
@@ -1122,7 +1122,7 @@ func writeModelsList(c *gin.Context, platform string, modelIDs []string) {
 		writeOpenAIModelsList(c, modelIDs)
 		return
 	}
-	if platform == service.PlatformZhipu || platform == service.PlatformDeepseek {
+	if platform == service.PlatformKimi || platform == service.PlatformZhipu || platform == service.PlatformDeepseek {
 		writeCNProviderModelsList(c, platform, modelIDs)
 		return
 	}
@@ -1259,6 +1259,8 @@ func defaultModelIDsForPlatform(platform string) []string {
 	switch platform {
 	case service.PlatformOpenAI:
 		return openai.DefaultModelIDs()
+	case service.PlatformKimi:
+		return []string{"kimi-k2.6", "kimi-k2.5", "kimi-k2-thinking", "kimi-k2", "kimi-latest"}
 	case service.PlatformDeepseek:
 		// Newly-created DeepSeek groups may not have a synchronized account
 		// model mapping yet. Keep the stable provider models visible until the
