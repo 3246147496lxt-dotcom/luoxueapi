@@ -6,7 +6,7 @@
     ]"
   >
     <!-- Platform logo -->
-    <PlatformIcon v-if="platform" :platform="platform" size="sm" />
+    <PlatformIcon v-if="displayPlatform" :platform="displayPlatform" size="sm" />
     <!-- Group name -->
     <span class="truncate">{{ name }}</span>
     <!-- Right side label -->
@@ -32,6 +32,7 @@ import { useI18n } from 'vue-i18n'
 import type { SubscriptionType, GroupPlatform } from '@/types'
 import { useAppStore } from '@/stores/app'
 import { formatPeakRateWindow, serverTimezoneLabel } from '@/utils/peak-rate'
+import { resolveGroupDisplayPlatform } from '@/utils/platformColors'
 import PlatformIcon from './PlatformIcon.vue'
 
 interface Props {
@@ -78,6 +79,12 @@ const hasCustomRate = computed(() => {
 })
 
 const appStore = useAppStore()
+
+// A legacy GLM group may still use the OpenAI-compatible routing platform.
+// Keep that routing value intact while showing the provider's visual identity.
+const displayPlatform = computed(() =>
+  props.platform ? resolveGroupDisplayPlatform(props.platform, props.name) : undefined,
+)
 
 const hasPeakRate = computed(() => {
   return Boolean(props.showRate && props.peakRateEnabled && props.peakStart && props.peakEnd)
@@ -147,25 +154,25 @@ const labelClass = computed(() => {
   }
 
   // 正常状态或无天数：根据平台显示主题色
-  if (props.platform === 'anthropic') {
+  if (displayPlatform.value === 'anthropic') {
     return `${base} bg-orange-200/60 text-orange-800 dark:bg-orange-800/40 dark:text-orange-300`
   }
-  if (props.platform === 'openai') {
+  if (displayPlatform.value === 'openai') {
     return `${base} bg-emerald-200/60 text-emerald-800 dark:bg-emerald-800/40 dark:text-emerald-300`
   }
-  if (props.platform === 'gemini') {
+  if (displayPlatform.value === 'gemini') {
     return `${base} bg-blue-200/60 text-blue-800 dark:bg-blue-800/40 dark:text-blue-300`
   }
-  if (props.platform === 'antigravity') {
+  if (displayPlatform.value === 'antigravity') {
     return `${base} bg-purple-200/60 text-purple-800 dark:bg-purple-800/40 dark:text-purple-300`
   }
-  if (props.platform === 'grok') {
+  if (displayPlatform.value === 'grok') {
     return `${base} bg-zinc-300/70 text-zinc-800 dark:bg-zinc-700/60 dark:text-zinc-200`
   }
-  if (props.platform === 'deepseek') {
+  if (displayPlatform.value === 'deepseek') {
     return `${base} bg-sky-200/60 text-sky-800 dark:bg-sky-800/40 dark:text-sky-300`
   }
-  if (props.platform === 'zhipu') {
+  if (displayPlatform.value === 'zhipu') {
     return `${base} bg-indigo-200/60 text-indigo-800 dark:bg-indigo-800/40 dark:text-indigo-300`
   }
   return `${base} bg-violet-200/60 text-violet-800 dark:bg-violet-800/40 dark:text-violet-300`
@@ -177,38 +184,38 @@ const peakRateClass = computed(() => {
 
 // Badge color based on platform and subscription type
 const badgeClass = computed(() => {
-  if (props.platform === 'anthropic') {
+  if (displayPlatform.value === 'anthropic') {
     // Claude: orange theme
     return isSubscription.value
       ? 'bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400'
       : 'bg-amber-50 text-amber-700 dark:bg-amber-900/20 dark:text-amber-400'
-  } else if (props.platform === 'openai') {
+  } else if (displayPlatform.value === 'openai') {
     // OpenAI: green theme
     return isSubscription.value
       ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400'
       : 'bg-green-50 text-green-700 dark:bg-green-900/20 dark:text-green-400'
   }
-  if (props.platform === 'gemini') {
+  if (displayPlatform.value === 'gemini') {
     return isSubscription.value
       ? 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400'
       : 'bg-sky-50 text-sky-700 dark:bg-sky-900/20 dark:text-sky-400'
   }
-  if (props.platform === 'antigravity') {
+  if (displayPlatform.value === 'antigravity') {
     return isSubscription.value
       ? 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400'
       : 'bg-fuchsia-50 text-fuchsia-700 dark:bg-fuchsia-900/20 dark:text-fuchsia-400'
   }
-  if (props.platform === 'grok') {
+  if (displayPlatform.value === 'grok') {
     return isSubscription.value
       ? 'bg-zinc-200 text-zinc-800 dark:bg-zinc-700 dark:text-zinc-100'
       : 'bg-zinc-100 text-zinc-700 dark:bg-zinc-800 dark:text-zinc-200'
   }
-  if (props.platform === 'deepseek') {
+  if (displayPlatform.value === 'deepseek') {
     return isSubscription.value
       ? 'bg-sky-100 text-sky-700 dark:bg-sky-900/30 dark:text-sky-400'
       : 'bg-sky-50 text-sky-700 dark:bg-sky-900/20 dark:text-sky-400'
   }
-  if (props.platform === 'zhipu') {
+  if (displayPlatform.value === 'zhipu') {
     return isSubscription.value
       ? 'bg-indigo-100 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-400'
       : 'bg-indigo-50 text-indigo-700 dark:bg-indigo-900/20 dark:text-indigo-400'

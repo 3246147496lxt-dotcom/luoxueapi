@@ -86,7 +86,7 @@
         :class="[
           'api-key-summary-card__group',
           apiKey.group ? 'api-key-summary-card__group--assigned' : 'api-key-summary-card__group--unassigned',
-          apiKey.group && `api-key-summary-card__group--${apiKey.group.platform}`
+          apiKey.group && `api-key-summary-card__group--${resolveGroupDisplayPlatform(apiKey.group.platform, apiKey.group.name)}`
         ]"
         :data-platform="apiKey.group?.platform"
         :title="t('keys.clickToChangeGroup')"
@@ -95,7 +95,7 @@
       >
         <PlatformIcon
           v-if="apiKey.group"
-          :platform="apiKey.group.platform"
+          :platform="resolveGroupDisplayPlatform(apiKey.group.platform, apiKey.group.name)"
           size="md"
           class="api-key-summary-card__group-icon"
           aria-hidden="true"
@@ -140,6 +140,7 @@ import PlatformIcon from '@/components/common/PlatformIcon.vue'
 import KeysLucideIcon from '@/components/keys/KeysLucideIcon.vue'
 import type { ApiKey } from '@/types'
 import { maskApiKey } from '@/utils/maskApiKey'
+import { resolveGroupDisplayPlatform } from '@/utils/platformColors'
 
 interface Props {
   apiKey: ApiKey
@@ -409,6 +410,12 @@ const formatKeyDate = (value: string | null | undefined): string => {
   --group-chip-surface: #f0f9ff;
 }
 
+.api-key-summary-card__group--zhipu {
+  --group-chip-border: #c7d2fe;
+  --group-chip-text: #4338ca;
+  --group-chip-surface: #eef2ff;
+}
+
 :global(html.dark .api-key-summary-card__group--openai) {
   --group-chip-border: rgb(74 222 128 / 0.34);
   --group-chip-text: #86efac;
@@ -443,6 +450,12 @@ const formatKeyDate = (value: string | null | undefined): string => {
   --group-chip-border: rgb(56 189 248 / 0.34);
   --group-chip-text: #7dd3fc;
   --group-chip-surface: rgb(8 47 73 / 0.38);
+}
+
+:global(html.dark .api-key-summary-card__group--zhipu) {
+  --group-chip-border: rgb(129 140 248 / 0.42);
+  --group-chip-text: #a5b4fc;
+  --group-chip-surface: rgb(49 46 129 / 0.38);
 }
 
 .api-key-summary-card__group--assigned:hover,
@@ -488,6 +501,12 @@ const formatKeyDate = (value: string | null | undefined): string => {
   --group-chip-surface: #e0f2fe;
 }
 
+.api-key-summary-card__group--zhipu:hover {
+  --group-chip-border: #a5b4fc;
+  --group-chip-text: #3730a3;
+  --group-chip-surface: #e0e7ff;
+}
+
 :global(html.dark .api-key-summary-card__group--openai:hover) {
   --group-chip-border: rgb(134 239 172 / 0.52);
   --group-chip-text: #bbf7d0;
@@ -522,6 +541,12 @@ const formatKeyDate = (value: string | null | undefined): string => {
   --group-chip-border: rgb(125 211 252 / 0.52);
   --group-chip-text: #bae6fd;
   --group-chip-surface: rgb(7 89 133 / 0.5);
+}
+
+:global(html.dark .api-key-summary-card__group--zhipu:hover) {
+  --group-chip-border: rgb(165 180 252 / 0.56);
+  --group-chip-text: #c7d2fe;
+  --group-chip-surface: rgb(55 48 163 / 0.5);
 }
 
 .api-key-summary-card__time-grid {

@@ -110,4 +110,32 @@ describe('API key group presentation', () => {
     expect(workspace.findComponent(PlatformIcon).exists()).toBe(false)
     expect(summary.findComponent(PlatformIcon).exists()).toBe(false)
   })
+
+  it('shows the Zhipu identity for legacy OpenAI-compatible GLM groups', () => {
+    const apiKey = createApiKey('openai')
+    apiKey.group!.name = '智谱GLM-5.3'
+
+    const workspace = mount(ApiKeyWorkspaceList, {
+      props: {
+        apiKeys: [apiKey],
+        usageStats: {},
+        userGroupRates: {},
+        selectedKeyId: 7,
+      },
+    })
+    const summary = mount(ApiKeySummaryCard, { props: { apiKey } })
+
+    const workspaceButton = workspace.get('.workspace-group-button--assigned')
+    expect(workspaceButton.classes()).toContain('workspace-group-button--zhipu')
+    expect(workspaceButton.attributes('data-platform')).toBe('openai')
+    expect(workspace.getComponent(PlatformIcon).props('platform')).toBe('zhipu')
+
+    const summaryButton = summary.get('.api-key-summary-card__group--assigned')
+    expect(summaryButton.classes()).toContain('api-key-summary-card__group--zhipu')
+    expect(summaryButton.attributes('data-platform')).toBe('openai')
+    expect(summary.getComponent(PlatformIcon).props('platform')).toBe('zhipu')
+
+    workspace.unmount()
+    summary.unmount()
+  })
 })

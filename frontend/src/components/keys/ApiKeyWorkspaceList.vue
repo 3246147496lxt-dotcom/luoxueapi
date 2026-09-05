@@ -74,7 +74,7 @@
               :class="[
                 'workspace-group-button workspace-group-chip',
                 row.group ? 'workspace-group-button--assigned' : 'workspace-group-button--unassigned',
-                row.group && `workspace-group-button--${row.group.platform}`
+                row.group && `workspace-group-button--${resolveGroupDisplayPlatform(row.group.platform, row.group.name)}`
               ]"
               :data-platform="row.group?.platform"
               :title="t('keys.clickToChangeGroup')"
@@ -83,7 +83,7 @@
             >
               <PlatformIcon
                 v-if="row.group"
-                :platform="row.group.platform"
+                :platform="resolveGroupDisplayPlatform(row.group.platform, row.group.name)"
                 size="xs"
                 class="workspace-group-icon"
                 aria-hidden="true"
@@ -168,6 +168,7 @@ import KeysLucideIcon from '@/components/keys/KeysLucideIcon.vue'
 import type { BatchApiKeyUsageStats } from '@/api/usage'
 import type { ApiKey } from '@/types'
 import { maskApiKey } from '@/utils/maskApiKey'
+import { resolveGroupDisplayPlatform } from '@/utils/platformColors'
 
 /**
  * The workspace list intentionally keeps the legacy data props optional. The
@@ -509,6 +510,12 @@ const formatTableDate = (value: string | null | undefined): string => {
   --group-chip-surface: #f0f9ff;
 }
 
+.workspace-group-button--zhipu {
+  --group-chip-border: #c7d2fe;
+  --group-chip-text: #4338ca;
+  --group-chip-surface: #eef2ff;
+}
+
 /* The provider tone remains legible in the dark workspace theme. */
 :global(html.dark .workspace-group-button--openai) {
   --group-chip-border: rgb(74 222 128 / 0.34);
@@ -544,6 +551,12 @@ const formatTableDate = (value: string | null | undefined): string => {
   --group-chip-border: rgb(56 189 248 / 0.34);
   --group-chip-text: #7dd3fc;
   --group-chip-surface: rgb(8 47 73 / 0.38);
+}
+
+:global(html.dark .workspace-group-button--zhipu) {
+  --group-chip-border: rgb(129 140 248 / 0.42);
+  --group-chip-text: #a5b4fc;
+  --group-chip-surface: rgb(49 46 129 / 0.38);
 }
 
 .workspace-group-button--assigned:hover,
@@ -589,6 +602,12 @@ const formatTableDate = (value: string | null | undefined): string => {
   --group-chip-surface: #e0f2fe;
 }
 
+.workspace-group-button--zhipu:hover {
+  --group-chip-border: #a5b4fc;
+  --group-chip-text: #3730a3;
+  --group-chip-surface: #e0e7ff;
+}
+
 :global(html.dark .workspace-group-button--openai:hover) {
   --group-chip-border: rgb(134 239 172 / 0.52);
   --group-chip-text: #bbf7d0;
@@ -623,6 +642,12 @@ const formatTableDate = (value: string | null | undefined): string => {
   --group-chip-border: rgb(125 211 252 / 0.52);
   --group-chip-text: #bae6fd;
   --group-chip-surface: rgb(7 89 133 / 0.5);
+}
+
+:global(html.dark .workspace-group-button--zhipu:hover) {
+  --group-chip-border: rgb(165 180 252 / 0.56);
+  --group-chip-text: #c7d2fe;
+  --group-chip-surface: rgb(55 48 163 / 0.5);
 }
 
 .workspace-group-label {

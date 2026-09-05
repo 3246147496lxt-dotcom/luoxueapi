@@ -7,6 +7,31 @@
 
 export type Platform = 'anthropic' | 'openai' | 'antigravity' | 'gemini' | 'grok' | 'zhipu' | 'deepseek'
 
+/**
+ * Keeps legacy OpenAI-compatible GLM groups branded as Zhipu in the UI while
+ * preserving their real platform for routing and scheduling.
+ */
+export function resolveGroupDisplayPlatform(
+  platform: Platform,
+  groupName?: string | null,
+): Platform {
+  if (platform !== 'openai') return platform
+
+  const normalizedName = (groupName || '').trim().toLowerCase()
+  if (
+    normalizedName.includes('glm') ||
+    normalizedName.includes('chatglm') ||
+    normalizedName.includes('zhipu') ||
+    normalizedName.includes('智谱') ||
+    normalizedName.includes('cogview') ||
+    normalizedName.includes('cogvideo')
+  ) {
+    return 'zhipu'
+  }
+
+  return platform
+}
+
 // ── Badge (bg + text + border, for inline badges with border) ───────
 const BADGE: Record<Platform, string> = {
   anthropic: 'bg-orange-500/10 text-orange-600 border-orange-500/30 dark:text-orange-400',
