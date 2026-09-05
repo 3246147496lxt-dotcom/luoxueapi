@@ -203,8 +203,6 @@
           class="chat-history__more-row"
           tabindex="0"
           role="button"
-          aria-haspopup="menu"
-          aria-expanded="false"
           @click="showUnavailableNavigation('chat.navigation.more')"
           @keydown.enter.prevent="showUnavailableNavigation('chat.navigation.more')"
           @keydown.space.prevent="showUnavailableNavigation('chat.navigation.more')"
@@ -255,6 +253,7 @@
             data-testid="chat-history-recent-toggle"
             :aria-expanded="recentExpanded"
             :aria-controls="conversations.length > 0 ? recentListId : undefined"
+            :class="{ 'chat-history__recent-heading--collapsed': !recentExpanded }"
             @click="recentExpanded = !recentExpanded"
           >
             <h2>{{ t('chat.history.recent') }}</h2>
@@ -409,6 +408,7 @@
             type="button"
             class="chat-history__recent-heading"
             :aria-expanded="recentExpanded"
+            :class="{ 'chat-history__recent-heading--collapsed': !recentExpanded }"
             @click="recentExpanded = !recentExpanded"
           >
             <h2>{{ t('chat.history.recent') }}</h2>
@@ -456,11 +456,13 @@
 
   <div
     v-if="searchOpen && !sidebarCollapsed && shell"
+    ref="searchDialogRef"
     class="chat-history chat-history--shell chat-history__search-layer"
     role="dialog"
     aria-modal="true"
     :aria-labelledby="`${searchPanelId}-title`"
     @pointerdown.self="closeSearch"
+    @keydown="handleSearchDialogKeydown"
   >
     <form
       :id="searchPanelId"
@@ -579,6 +581,7 @@ const renameDraft = ref('')
 const renameInputRef = ref<HTMLInputElement | null>(null)
 const searchInputRef = ref<HTMLInputElement | null>(null)
 const searchTriggerRef = ref<HTMLButtonElement | null>(null)
+const searchDialogRef = ref<HTMLElement | null>(null)
 const conversationMenuRef = ref<HTMLElement | null>(null)
 const menuConversationId = ref<string | null>(null)
 const conversationMenuStyle = ref({ left: '12px', top: '12px' })
@@ -757,6 +760,28 @@ async function closeSearch() {
   await nextTick()
   if (props.shell) sidebarHeaderRef.value?.focusSearch()
   else searchTriggerRef.value?.focus()
+}
+
+function handleSearchDialogKeydown(event: KeyboardEvent) {
+  if (event.key === 'Escape') {
+    event.preventDefault()
+    event.stopPropagation()
+    void closeSearch()
+    return
+  }
+  if (event.key !== 'Tab') return
+
+  const focusable = Array.from(searchDialogRef.value?.querySelectorAll<HTMLElement>(
+    'button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), a[href], [tabindex]:not([tabindex="-1"])',
+  ) ?? [])
+  if (focusable.length === 0) return
+
+  const currentIndex = focusable.indexOf(document.activeElement as HTMLElement)
+  const nextIndex = event.shiftKey
+    ? (currentIndex <= 0 ? focusable.length - 1 : currentIndex - 1)
+    : (currentIndex === focusable.length - 1 ? 0 : currentIndex + 1)
+  event.preventDefault()
+  focusable[nextIndex]?.focus({ preventScroll: true })
 }
 
 function setConversationSelectRef(id: string, element: unknown) {
@@ -1400,6 +1425,7 @@ onBeforeUnmount(() => {
   box-shadow: none;
   overflow: hidden;
   text-align: left;
+  cursor: pointer;
 }
 
 .chat-history__new {
@@ -1879,7 +1905,13 @@ onBeforeUnmount(() => {
   height: 12px;
   flex: 0 0 12px;
   visibility: hidden;
-  transition: visibility 150ms cubic-bezier(0.4, 0, 0.2, 1);
+  transform: rotate(0deg);
+  transition: visibility 150ms cubic-bezier(0.4, 0, 0.2, 1),
+    transform 150ms cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.chat-history__recent-heading--collapsed > svg {
+  transform: rotate(-90deg);
 }
 
 .chat-history__recent-header:hover .chat-history__recent-heading > svg,
@@ -2019,6 +2051,13 @@ onBeforeUnmount(() => {
   padding-right: 62px;
 }
 
+/* Embedded history panels still paint the three-button edit/pin/more cluster;
+ * reserve its full width without changing the tighter ChatGPT shell rows. */
+.chat-history:not(.chat-history--shell) .chat-history__item:hover .chat-history__select,
+.chat-history:not(.chat-history--shell) .chat-history__item:focus-within .chat-history__select {
+  padding-right: 96px;
+}
+
 .chat-history__actions button {
   display: flex;
   width: 34px;
@@ -2030,6 +2069,18 @@ onBeforeUnmount(() => {
   padding: 0;
   color: var(--chat-history-action-color);
   background: transparent;
+}
+
+.chat-history:not(.chat-history--shell) .chat-history__actions .chat-history__edit-action {
+  border-radius: 10px 0 0 10px;
+}
+
+.chat-history:not(.chat-history--shell) .chat-history__actions .chat-history__pin-action {
+  border-radius: 0;
+}
+
+.chat-history:not(.chat-history--shell) .chat-history__actions .chat-history__more-action {
+  border-radius: 0 10px 10px 0;
 }
 
 .chat-history__rename button {
@@ -2326,6 +2377,11 @@ onBeforeUnmount(() => {
   .chat-history__item:hover .chat-history__select,
   .chat-history__item:focus-within .chat-history__select {
     padding-right: 88px;
+  }
+
+  .chat-history:not(.chat-history--shell) .chat-history__item:hover .chat-history__select,
+  .chat-history:not(.chat-history--shell) .chat-history__item:focus-within .chat-history__select {
+    padding-right: 128px;
   }
 
   .chat-history__search-layer {
