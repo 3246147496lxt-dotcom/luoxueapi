@@ -23,6 +23,11 @@ ARG NPM_CONFIG_REGISTRY=
 FROM ${NODE_IMAGE} AS frontend-builder
 ARG NPM_CONFIG_REGISTRY
 
+# The production frontend bundle can exceed Node's default ~2 GiB heap limit
+# on constrained build hosts. Keep the limit explicit so Docker builds do not
+# fail with an opaque V8 out-of-memory error.
+ENV NODE_OPTIONS=--max-old-space-size=4096
+
 WORKDIR /app/frontend
 
 # Install pnpm (pinned to v9 to match CI and keep builds reproducible)
