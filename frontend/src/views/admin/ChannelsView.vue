@@ -582,11 +582,14 @@
                     {{ t('admin.channels.form.noPricingRules') }}
                   </div>
                   <div v-else class="space-y-2">
+                    <!-- Account-stat costs are provider USD; channel user
+                         pricing's fixed ×70 baseline does not apply here. -->
                     <PricingEntryCard
                       v-for="(entry, pIdx) in rule.pricing"
                       :key="pIdx"
                       :entry="entry"
                       :platform="section.platform"
+                      :apply-channel-pricing-multiplier="false"
                       @update="rule.pricing.splice(pIdx, 1, $event)"
                       @remove="removeRulePricingEntry(sIdx, ruleIndex, pIdx)"
                     />
@@ -642,7 +645,7 @@ import { extractApiErrorMessage } from '@/utils/apiError'
 import { adminAPI } from '@/api/admin'
 import type { Channel, ChannelModelPricing, CreateChannelRequest, UpdateChannelRequest, AccountStatsPricingRule } from '@/api/admin/channels'
 import type { PricingFormEntry } from '@/components/admin/channel/types'
-import { mTokToPerToken, perTokenToMTok, apiIntervalsToForm, formIntervalsToAPI, findModelConflict, validateIntervals } from '@/components/admin/channel/types'
+import { mTokToPerToken, perTokenToMTok, apiIntervalsToForm, formIntervalsToAPI, findModelConflict, validateIntervals, syncedModelsToPricingEntries } from '@/components/admin/channel/types'
 import type { AdminGroup, GroupPlatform } from '@/types'
 import type { Column } from '@/components/common/types'
 import { platformTextClass, platformBadgeLightClass } from '@/utils/platformColors'
@@ -896,19 +899,13 @@ async function syncLatestModels(sectionIdx: number) {
       appStore.showSuccess(t('admin.channels.form.syncModelsAlreadyUpToDate'))
       return
     }
-    // Add new models as a single new pricing entry (user fills in prices)
-    form.platforms[sectionIdx].model_pricing.push({
-      models: newModels,
-      billing_mode: 'token',
-      input_price: null,
-      output_price: null,
-      cache_write_price: null,
-      cache_read_price: null,
-      image_input_price: null,
-      image_output_price: null,
-      per_request_price: null,
-      intervals: []
-    })
+    // Keep models with different official quotes in separate rows.  The sync
+    // endpoint returns the unmodified provider quote per model; the helper
+    // applies the channel ×70 baseline and only groups genuinely equal rows.
+    // Models without a usable quote remain in an empty-price row for manual
+    // entry instead of accidentally inheriting another model's price.
+    const syncedEntries = syncedModelsToPricingEntries(newModels, result.pricing)
+    form.platforms[sectionIdx].model_pricing.push(...syncedEntries)
     appStore.showSuccess(t('admin.channels.form.syncModelsSuccess', { count: newModels.length }))
   } catch (error) {
     appStore.showError(extractApiErrorMessage(error, t('admin.channels.form.syncModelsError')))

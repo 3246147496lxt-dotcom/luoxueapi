@@ -6,9 +6,12 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
@@ -468,10 +471,92 @@ func TestSyncPricingModels_ValidPlatform_EmptyService(t *testing.T) {
 
 		var body struct {
 			Data struct {
-				Models []string `json:"models"`
+				Models  []string                               `json:"models"`
+				Pricing map[string]modelDefaultPricingResponse `json:"pricing"`
 			} `json:"data"`
 		}
 		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
 		require.NotNil(t, body.Data.Models, "models must not be null for platform=%s", platform)
+		require.NotNil(t, body.Data.Pricing, "pricing must not be null for platform=%s", platform)
+		require.Empty(t, body.Data.Pricing, "empty service has no model quotes for platform=%s", platform)
 	}
+}
+
+func TestSyncPricingModels_IncludesPerModelOfficialQuotes(t *testing.T) {
+	// Seed a local pricing snapshot so this test does not depend on a remote
+	// LiteLLM download.  The handler must return the two different quotes as-is
+	// and leave the ×70 conversion to the frontend channel editor.
+	cfg := &config.Config{}
+	cfg.Pricing.DataDir = t.TempDir()
+	cfg.Pricing.UpdateIntervalHours = 24
+	pricingPath := filepath.Join(cfg.Pricing.DataDir, "model_pricing.json")
+	require.NoError(t, os.WriteFile(pricingPath, []byte(`{
+		"model-a": {
+			"input_cost_per_token": 0.000001,
+			"output_cost_per_token": 0.000004,
+			"litellm_provider": "anthropic",
+			"mode": "chat"
+		},
+		"model-b": {
+			"input_cost_per_token": 0.000002,
+			"output_cost_per_token": 0.000008,
+			"litellm_provider": "anthropic",
+			"mode": "chat"
+		}
+	}`), 0644))
+
+	pricingSvc := service.NewPricingService(cfg, nil)
+	require.NoError(t, pricingSvc.Initialize())
+	t.Cleanup(pricingSvc.Stop)
+	billingSvc := service.NewBillingService(cfg, pricingSvc)
+
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	h := &ChannelHandler{pricingService: pricingSvc, billingService: billingSvc}
+	router.GET("/channels/pricing/sync-models", h.SyncPricingModels)
+
+	req := httptest.NewRequest(http.MethodGet, "/channels/pricing/sync-models?platform=anthropic", nil)
+	w := httptest.NewRecorder()
+	router.ServeHTTP(w, req)
+	require.Equal(t, http.StatusOK, w.Code)
+
+	var body struct {
+		Data struct {
+			Models  []string                               `json:"models"`
+			Pricing map[string]modelDefaultPricingResponse `json:"pricing"`
+		} `json:"data"`
+	}
+	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
+	require.Equal(t, []string{"model-a", "model-b"}, body.Data.Models)
+	require.Len(t, body.Data.Pricing, 2)
+	require.InDelta(t, 0.000001, body.Data.Pricing["model-a"].InputPrice, 1e-12)
+	require.InDelta(t, 0.000004, body.Data.Pricing["model-a"].OutputPrice, 1e-12)
+	require.InDelta(t, 0.000002, body.Data.Pricing["model-b"].InputPrice, 1e-12)
+	require.InDelta(t, 0.000008, body.Data.Pricing["model-b"].OutputPrice, 1e-12)
+}
+
+func TestModelDefaultPricingResponsePreservesOfficialQuote(t *testing.T) {
+	// Keep this fixture in the handler package so the wire contract is tested
+	// without requiring a remote pricing download.  No ×70 or /10 conversion
+	// belongs in this response; those are applied by the channel editor/public
+	// catalog respectively.
+	got := modelDefaultPricingResponseFrom(&service.ModelPricing{
+		InputPricePerToken:         5e-6,
+		OutputPricePerToken:        30e-6,
+		CacheCreationPricePerToken: 6.25e-6,
+		CacheReadPricePerToken:     0.5e-6,
+		ImageInputPricePerToken:    1e-6,
+		ImageOutputPricePerToken:   2e-6,
+	})
+
+	body, err := json.Marshal(got)
+	require.NoError(t, err)
+	var wire map[string]any
+	require.NoError(t, json.Unmarshal(body, &wire))
+	require.Equal(t, true, wire["found"])
+	require.InDelta(t, 5e-6, wire["input_price"], 1e-12)
+	require.InDelta(t, 30e-6, wire["output_price"], 1e-12)
+	require.InDelta(t, 6.25e-6, wire["cache_write_price"], 1e-12)
+	require.InDelta(t, 0.5e-6, wire["cache_read_price"], 1e-12)
+	require.InDelta(t, service.ChannelPricingBaselineMultiplier, wire["channel_pricing_multiplier"], 1e-12)
 }

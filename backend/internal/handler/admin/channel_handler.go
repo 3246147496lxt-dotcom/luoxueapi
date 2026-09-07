@@ -122,6 +122,36 @@ type channelModelPricingResponse struct {
 	Intervals        []pricingIntervalResponse `json:"intervals"`
 }
 
+// modelDefaultPricingResponse is the official provider quote returned by the
+// model-sync endpoint.  It deliberately stays in USD per token; the frontend
+// applies the channel baseline multiplier when seeding an editable row.
+type modelDefaultPricingResponse struct {
+	Found                    bool    `json:"found"`
+	InputPrice               float64 `json:"input_price"`
+	OutputPrice              float64 `json:"output_price"`
+	CacheWritePrice          float64 `json:"cache_write_price"`
+	CacheReadPrice           float64 `json:"cache_read_price"`
+	ImageInputPrice          float64 `json:"image_input_price"`
+	ImageOutputPrice         float64 `json:"image_output_price"`
+	ChannelPricingMultiplier float64 `json:"channel_pricing_multiplier"`
+}
+
+func modelDefaultPricingResponseFrom(pricing *service.ModelPricing) modelDefaultPricingResponse {
+	if pricing == nil {
+		return modelDefaultPricingResponse{}
+	}
+	return modelDefaultPricingResponse{
+		Found:                    true,
+		InputPrice:               pricing.InputPricePerToken,
+		OutputPrice:              pricing.OutputPricePerToken,
+		CacheWritePrice:          pricing.CacheCreationPricePerToken,
+		CacheReadPrice:           pricing.CacheReadPricePerToken,
+		ImageInputPrice:          pricing.ImageInputPricePerToken,
+		ImageOutputPrice:         pricing.ImageOutputPricePerToken,
+		ChannelPricingMultiplier: service.ChannelPricingBaselineMultiplier,
+	}
+}
+
 type pricingIntervalResponse struct {
 	ID              int64    `json:"id"`
 	MinTokens       int      `json:"min_tokens"`
@@ -489,6 +519,11 @@ func (h *ChannelHandler) GetModelDefaultPricing(c *gin.Context) {
 		return
 	}
 
+	if h.billingService == nil {
+		response.Success(c, gin.H{"found": false})
+		return
+	}
+
 	pricing, err := h.billingService.GetModelPricing(model)
 	if err != nil {
 		// 模型不在定价列表中
@@ -496,15 +531,7 @@ func (h *ChannelHandler) GetModelDefaultPricing(c *gin.Context) {
 		return
 	}
 
-	response.Success(c, gin.H{
-		"found":              true,
-		"input_price":        pricing.InputPricePerToken,
-		"output_price":       pricing.OutputPricePerToken,
-		"cache_write_price":  pricing.CacheCreationPricePerToken,
-		"cache_read_price":   pricing.CacheReadPricePerToken,
-		"image_input_price":  pricing.ImageInputPricePerToken,
-		"image_output_price": pricing.ImageOutputPricePerToken,
-	})
+	response.Success(c, modelDefaultPricingResponseFrom(pricing))
 }
 
 // platformToLiteLLMProvider maps a channel platform name to the corresponding
@@ -538,6 +565,28 @@ func (h *ChannelHandler) SyncPricingModels(c *gin.Context) {
 		return
 	}
 
-	models := h.pricingService.ListModelNamesByProvider(provider)
-	response.Success(c, gin.H{"models": models})
+	models := []string{}
+	if h.pricingService != nil {
+		models = h.pricingService.ListModelNamesByProvider(provider)
+	}
+
+	// Return the official quote for each model alongside the names.  The
+	// channel editor uses these per-model values to seed channel rows with its
+	// fixed ×70 baseline.  Keeping the quote unmodified here preserves the
+	// existing model-pricing endpoint semantics and avoids assigning the first
+	// model's price to every newly synced model.  Some catalog entries are
+	// image-only or otherwise lack token pricing; omit those entries so the UI
+	// leaves their prices empty for an explicit administrator decision.
+	pricing := make(map[string]modelDefaultPricingResponse)
+	if h.billingService != nil {
+		for _, model := range models {
+			modelPricing, err := h.billingService.GetModelPricing(model)
+			if err != nil || modelPricing == nil {
+				continue
+			}
+			pricing[model] = modelDefaultPricingResponseFrom(modelPricing)
+		}
+	}
+
+	response.Success(c, gin.H{"models": models, "pricing": pricing})
 }

@@ -19,11 +19,10 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import CreditAmount from '@/components/common/CreditAmount.vue'
+import { POINTS_PER_CNY } from '@/constants/channel'
 
 type PointsIconSize = 'xs' | 'sm' | 'md' | 'lg' | 'xl'
 type CreditDisplay = 'points' | 'cny'
-
-const POINTS_PER_CNY = 10
 
 const props = withDefaults(defineProps<{
   value: number | null | undefined

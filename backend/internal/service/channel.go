@@ -2,6 +2,7 @@ package service
 
 import (
 	"fmt"
+	"math"
 	"sort"
 	"strings"
 	"time"
@@ -16,6 +17,32 @@ const (
 	BillingModeImage      BillingMode = "image"       // 图片计费（当前按次，预留 token 计费）
 	BillingModeVideo      BillingMode = "video"       // 视频生成计费（按视频生成次数）
 )
+
+// ChannelPricingBaselineMultiplier is the default conversion from an
+// official provider quote (USD/token) to a regular channel pricing row.
+//
+// This is a seed/display convention only: callers such as channel auto-fill or
+// a pricing audit may opt in to the conversion. Runtime billing and model
+// catalog projection must continue to apply Group.RateMultiplier separately,
+// and account-stats pricing (which represents provider cost) must not call it.
+const ChannelPricingBaselineMultiplier = 70.0
+
+// OfficialPriceToChannel converts a finite, non-negative official provider
+// quote in USD/token to the regular channel baseline (official × 70).
+//
+// Invalid values are returned unchanged so a caller can fail closed instead of
+// silently turning NaN, infinity, or a negative price into a free price. This
+// helper intentionally does not apply any group or account multiplier.
+func OfficialPriceToChannel(officialPerToken float64) float64 {
+	if officialPerToken < 0 || math.IsNaN(officialPerToken) || math.IsInf(officialPerToken, 0) {
+		return officialPerToken
+	}
+	converted := officialPerToken * ChannelPricingBaselineMultiplier
+	if math.IsInf(converted, 0) || math.IsNaN(converted) {
+		return officialPerToken
+	}
+	return converted
+}
 
 // IsValid 检查 BillingMode 是否为合法值
 func (m BillingMode) IsValid() bool {

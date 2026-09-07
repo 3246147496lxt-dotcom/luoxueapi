@@ -151,12 +151,16 @@ export async function remove(id: number): Promise<void> {
 
 export interface ModelDefaultPricing {
   found: boolean
-  input_price?: number    // per-token price
+  // Official provider quote (USD per token). The channel editor applies the
+  // fixed CHANNEL_PRICING_MULTIPLIER when auto-filling a new pricing entry.
+  input_price?: number
   output_price?: number
   cache_write_price?: number
   cache_read_price?: number
   image_input_price?: number
   image_output_price?: number
+  /** Server-declared channel baseline; old servers may omit it. */
+  channel_pricing_multiplier?: number
 }
 
 export async function getModelDefaultPricing(model: string): Promise<ModelDefaultPricing> {
@@ -168,10 +172,18 @@ export async function getModelDefaultPricing(model: string): Promise<ModelDefaul
 
 export interface SyncPricingModelsResult {
   models: string[]
+  /**
+   * Official provider quotes keyed by model name.  The sync endpoint keeps
+   * these values in USD per token; the channel editor applies its fixed ×70
+   * baseline before writing a channel pricing row.  Models without a usable
+   * token quote are omitted and remain editable with empty prices.
+   */
+  pricing?: Record<string, ModelDefaultPricing>
 }
 
 /**
- * Fetch the latest model names from the LiteLLM pricing catalog for the given platform
+ * Fetch the latest model names and (when available) official quotes from the
+ * LiteLLM pricing catalog for the given platform.
  */
 export async function syncPricingModels(platform: string): Promise<SyncPricingModelsResult> {
   const { data } = await apiClient.get<SyncPricingModelsResult>('/admin/channels/pricing/sync-models', {

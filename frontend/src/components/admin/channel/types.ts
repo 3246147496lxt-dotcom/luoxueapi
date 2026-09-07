@@ -1,4 +1,5 @@
-import type { BillingMode, PricingInterval } from '@/api/admin/channels'
+import type { BillingMode, ModelDefaultPricing, PricingInterval } from '@/api/admin/channels'
+import { CHANNEL_PRICING_MULTIPLIER } from '@/constants/channel'
 
 type TranslateFn = (key: string, params?: Record<string, unknown>) => string
 
@@ -29,6 +30,7 @@ export interface PricingFormEntry {
 
 // 价格转换：后端存 per-token，前端显示 per-MTok ($/1M tokens)
 const MTOK = 1_000_000
+const MAX_MODELS_PER_PRICING_ENTRY = 100
 
 export function toNullableNumber(val: number | string | null | undefined): number | null {
   if (val === null || val === undefined || val === '') return null
@@ -47,6 +49,98 @@ export function perTokenToMTok(val: number | null | undefined): number | null {
   if (val === null || val === undefined) return null
   // toPrecision(10) 消除 IEEE 754 浮点乘法精度误差，如 5e-8 * 1e6 = 0.04999...96 → 0.05
   return parseFloat((val * MTOK).toPrecision(10))
+}
+
+/**
+ * Official provider quote (USD/token) → channel form value (USD/MTok × 70).
+ *
+ * The model-pricing endpoint intentionally returns the unmodified official
+ * quote.  Channel entries use the fixed baseline multiplier, while a group's
+ * own `rate_multiplier` is applied later by the billing/catalog projection.
+ */
+export function officialPerTokenToChannelMTok(
+  val: number | null | undefined,
+  multiplier = CHANNEL_PRICING_MULTIPLIER,
+): number | null {
+  if (val === null || val === undefined || !Number.isFinite(val) || val < 0) return null
+  // A zero/negative server multiplier is malformed for a channel baseline;
+  // leave the field empty rather than silently creating a free/negative row.
+  if (!Number.isFinite(multiplier) || multiplier <= 0) return null
+  const converted = val * MTOK * multiplier
+  return Number.isFinite(converted) ? parseFloat(converted.toPrecision(10)) : null
+}
+
+/**
+ * Build channel pricing rows for models returned by the admin sync endpoint.
+ *
+ * The endpoint returns one official quote per model.  Never copy one model's
+ * quote to the whole synced list: model families can have materially
+ * different prices.  Models with identical converted defaults are grouped to
+ * keep the editor compact; models without a quote are grouped into an empty
+ * row so an administrator can fill them manually.
+ */
+export function syncedModelsToPricingEntries(
+  models: string[],
+  pricingByModel: Record<string, ModelDefaultPricing | undefined> | null = {},
+): PricingFormEntry[] {
+  const grouped = new Map<string, PricingFormEntry>()
+  const seen = new Set<string>()
+
+  for (const model of models) {
+    if (!model || seen.has(model)) continue
+    seen.add(model)
+
+    const official = pricingByModel?.[model]
+    const hasQuote = official?.found === true
+    const requestedMultiplier = official?.channel_pricing_multiplier
+    const multiplier = requestedMultiplier == null ||
+      !Number.isFinite(requestedMultiplier) || requestedMultiplier <= 0
+      ? CHANNEL_PRICING_MULTIPLIER
+      : requestedMultiplier
+    const entry: PricingFormEntry = {
+      models: [model],
+      billing_mode: 'token',
+      input_price: hasQuote ? officialPerTokenToChannelMTok(official?.input_price, multiplier) : null,
+      output_price: hasQuote ? officialPerTokenToChannelMTok(official?.output_price, multiplier) : null,
+      cache_write_price: hasQuote ? officialPerTokenToChannelMTok(official?.cache_write_price, multiplier) : null,
+      cache_read_price: hasQuote ? officialPerTokenToChannelMTok(official?.cache_read_price, multiplier) : null,
+      image_input_price: hasQuote ? officialPerTokenToChannelMTok(official?.image_input_price, multiplier) : null,
+      image_output_price: hasQuote ? officialPerTokenToChannelMTok(official?.image_output_price, multiplier) : null,
+      per_request_price: null,
+      intervals: [],
+    }
+
+    // Include every field that can affect billing so only genuinely
+    // equivalent rows are merged.  JSON.stringify is deterministic for this
+    // fixed-order array and keeps numeric/null distinctions intact.
+    const key = JSON.stringify([
+      entry.input_price,
+      entry.output_price,
+      entry.cache_write_price,
+      entry.cache_read_price,
+      entry.image_input_price,
+      entry.image_output_price,
+    ])
+    const existing = grouped.get(key)
+    if (existing) {
+      existing.models.push(model)
+    } else {
+      grouped.set(key, entry)
+    }
+  }
+
+  // The API validates each row at most 100 model names.  Split a large group
+  // without changing its prices so a full provider sync remains saveable.
+  const entries: PricingFormEntry[] = []
+  for (const entry of grouped.values()) {
+    for (let start = 0; start < entry.models.length; start += MAX_MODELS_PER_PRICING_ENTRY) {
+      entries.push({
+        ...entry,
+        models: entry.models.slice(start, start + MAX_MODELS_PER_PRICING_ENTRY),
+      })
+    }
+  }
+  return entries
 }
 
 export function apiIntervalsToForm(intervals: PricingInterval[]): IntervalFormEntry[] {

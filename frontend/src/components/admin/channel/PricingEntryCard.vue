@@ -87,7 +87,7 @@
             </label>
             <Select
               :modelValue="entry.billing_mode"
-              @update:modelValue="emit('update', { ...entry, billing_mode: $event as BillingMode, intervals: [] })"
+              @update:modelValue="onBillingModeUpdate($event as BillingMode)"
               :options="billingModeOptions"
               class="mt-1"
             />
@@ -239,21 +239,33 @@ import Icon from '@/components/icons/Icon.vue'
 import IntervalRow from './IntervalRow.vue'
 import ModelTagInput from './ModelTagInput.vue'
 import type { PricingFormEntry, IntervalFormEntry } from './types'
-import { perTokenToMTok, getPlatformTagClass } from './types'
+import { officialPerTokenToChannelMTok, perTokenToMTok, getPlatformTagClass } from './types'
 import type { BillingMode } from '@/api/admin/channels'
 import channelsAPI from '@/api/admin/channels'
 
 const { t } = useI18n()
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   entry: PricingFormEntry
   platform?: string
-}>()
+  /**
+   * Apply the channel baseline (official quote × 70) when auto-filling a
+   * newly added model. Account-stats overrides use official prices directly.
+   */
+  applyChannelPricingMultiplier?: boolean
+}>(), {
+  applyChannelPricingMultiplier: true
+})
 
 const emit = defineEmits<{
   update: [entry: PricingFormEntry]
   remove: []
 }>()
+
+// Invalidate an in-flight quote lookup whenever the user changes the model
+// list or edits a price manually.  This prevents a stale async response from
+// overwriting newer input.
+let pricingRequestToken = 0
 
 // Collapse state: entries with existing models default to collapsed
 const collapsed = ref(props.entry.models.length > 0)
@@ -270,10 +282,17 @@ const billingModeLabel = computed(() => {
 })
 
 function emitField(field: keyof PricingFormEntry, value: string) {
+  pricingRequestToken++
   emit('update', { ...props.entry, [field]: value === '' ? null : value })
 }
 
+function onBillingModeUpdate(mode: BillingMode) {
+  pricingRequestToken++
+  emit('update', { ...props.entry, billing_mode: mode, intervals: [] })
+}
+
 function addInterval() {
+  pricingRequestToken++
   const intervals = [...(props.entry.intervals || [])]
   intervals.push({
     min_tokens: 0, max_tokens: null, tier_label: '',
@@ -285,6 +304,7 @@ function addInterval() {
 }
 
 function addImageTier() {
+  pricingRequestToken++
   const intervals = [...(props.entry.intervals || [])]
   const labels = ['1K', '2K', '4K', 'HD']
   intervals.push({
@@ -297,18 +317,30 @@ function addImageTier() {
 }
 
 function updateInterval(idx: number, updated: IntervalFormEntry) {
+  pricingRequestToken++
   const intervals = [...(props.entry.intervals || [])]
   intervals[idx] = updated
   emit('update', { ...props.entry, intervals })
 }
 
 function removeInterval(idx: number) {
+  pricingRequestToken++
   const intervals = [...(props.entry.intervals || [])]
   intervals.splice(idx, 1)
   emit('update', { ...props.entry, intervals })
 }
 
+function defaultPriceToMTokWithMultiplier(
+  value: number | null | undefined,
+  multiplier: number | undefined,
+): number | null {
+  return props.applyChannelPricingMultiplier === false
+    ? perTokenToMTok(value)
+    : officialPerTokenToChannelMTok(value, multiplier)
+}
+
 async function onModelsUpdate(newModels: string[]) {
+  const requestToken = ++pricingRequestToken
   const oldModels = props.entry.models
   emit('update', { ...props.entry, models: newModels })
 
@@ -316,25 +348,45 @@ async function onModelsUpdate(newModels: string[]) {
   const addedModels = newModels.filter(m => !oldModels.includes(m))
   if (addedModels.length === 0) return
 
+  // If this is an existing model row and another model is appended, the
+  // quote for the new model may differ from the retained models.  Leave the
+  // row untouched so the administrator can split it or enter an explicit
+  // shared price.
+  const retainedModels = newModels.filter(m => oldModels.includes(m))
+  if (retainedModels.length > 0) return
+
+  // A pricing entry can contain several models, but one quote cannot safely
+  // represent models with different official rates.  The sync action handles
+  // batch additions per model; manual paste/selection of several models stays
+  // empty so the administrator can split or price it explicitly.
+  if (addedModels.length !== 1) return
+
   // 检查是否所有价格字段都为空
   const e = props.entry
   const hasPrice = e.input_price != null || e.output_price != null ||
-                   e.cache_write_price != null || e.cache_read_price != null
+                   e.cache_write_price != null || e.cache_read_price != null ||
+                   e.image_input_price != null || e.image_output_price != null ||
+                   e.per_request_price != null ||
+                   (e.intervals || []).some(iv =>
+                     iv.input_price != null || iv.output_price != null ||
+                     iv.cache_write_price != null || iv.cache_read_price != null ||
+                     iv.per_request_price != null)
   if (hasPrice) return
 
   // 查询第一个新增模型的默认价格
   try {
     const result = await channelsAPI.getModelDefaultPricing(addedModels[0])
+    if (requestToken !== pricingRequestToken) return
     if (result.found) {
       emit('update', {
         ...props.entry,
         models: newModels,
-        input_price: perTokenToMTok(result.input_price ?? null),
-        output_price: perTokenToMTok(result.output_price ?? null),
-        cache_write_price: perTokenToMTok(result.cache_write_price ?? null),
-        cache_read_price: perTokenToMTok(result.cache_read_price ?? null),
-        image_input_price: perTokenToMTok(result.image_input_price ?? null),
-        image_output_price: perTokenToMTok(result.image_output_price ?? null),
+        input_price: defaultPriceToMTokWithMultiplier(result.input_price ?? null, result.channel_pricing_multiplier),
+        output_price: defaultPriceToMTokWithMultiplier(result.output_price ?? null, result.channel_pricing_multiplier),
+        cache_write_price: defaultPriceToMTokWithMultiplier(result.cache_write_price ?? null, result.channel_pricing_multiplier),
+        cache_read_price: defaultPriceToMTokWithMultiplier(result.cache_read_price ?? null, result.channel_pricing_multiplier),
+        image_input_price: defaultPriceToMTokWithMultiplier(result.image_input_price ?? null, result.channel_pricing_multiplier),
+        image_output_price: defaultPriceToMTokWithMultiplier(result.image_output_price ?? null, result.channel_pricing_multiplier),
       })
     }
   } catch {

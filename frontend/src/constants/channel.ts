@@ -22,3 +22,14 @@ export type BillingModelSource =
   | typeof BILLING_MODEL_SOURCE_UPSTREAM
   | typeof BILLING_MODEL_SOURCE_CHANNEL_MAPPED
   | typeof BILLING_MODEL_SOURCE_RESPONSE
+
+/**
+ * Baseline multiplier used when seeding a channel price from an official
+ * provider quote.  The configured channel price is the provider price × 70
+ * (7 CNY per USD × 10 points per CNY).  This is deliberately separate from a
+ * group's runtime `rate_multiplier`, which is applied later during billing.
+ */
+export const CHANNEL_PRICING_MULTIPLIER = 70
+
+/** Public catalog display conversion: one CNY is represented by ten points. */
+export const POINTS_PER_CNY = 10
