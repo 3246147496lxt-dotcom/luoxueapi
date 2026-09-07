@@ -535,7 +535,7 @@ func TestRecordCyberPolicyIfMarkedScrubsWebChatMarkBeforeAsyncEnqueue(t *testing
 	h := &OpenAIGatewayHandler{
 		opsService: service.NewOpsService(nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil),
 	}
-	h.recordCyberPolicyIfMarked(c, nil, nil, nil, "gpt-5", true, "", service.ChannelUsageFields{}, "")
+	h.recordCyberPolicyIfMarked(c, nil, nil, nil, "gpt-5", true, cyberSessionBlockWritePlan{}, service.ChannelUsageFields{}, "")
 
 	select {
 	case job := <-opsErrorLogQueue:

@@ -211,20 +211,147 @@ var _ service.TranscriptionAdmissionCache = (*gatewayCache)(nil)
 
 // Compile-time assertion: gatewayCache must implement CyberSessionBlockStore.
 var _ service.CyberSessionBlockStore = (*gatewayCache)(nil)
+var _ service.CyberSessionTranscriptBlockStore = (*gatewayCache)(nil)
 
-const cyberSessionBlockPrefix = "cyber_session_block:"
+const (
+	cyberSessionBlockPrefix         = "cyber_session_block:"
+	cyberSessionScopePrefix         = "cyber_session_scope:"
+	cyberSessionRedisCommandMaxKeys = 128
+)
+
+// A later hit must not shorten an existing block or scope when the runtime
+// TTL was reduced. Single-key scripts also repair legacy persistent markers.
+const setCyberSessionMarkerScript = `
+local requested = tonumber(ARGV[1])
+local remaining = redis.call('PTTL', KEYS[1])
+if remaining < requested then
+  redis.call('SET', KEYS[1], '1', 'PX', requested)
+  return requested
+end
+return remaining
+`
 
 // SetCyberSessionBlocked 把被 cyber_policy 命中的会话写入屏蔽表（TTL 自动过期）。
 // 存储值 "1" 作为存在标记（IsCyberSessionBlocked 只检查 key 是否存在，不读值）。
 func (c *gatewayCache) SetCyberSessionBlocked(ctx context.Context, key string, ttl time.Duration) error {
-	return c.rdb.Set(ctx, cyberSessionBlockPrefix+key, "1", ttl).Err()
+	return c.SetCyberSessionBlockedKeys(ctx, "", []string{key}, ttl)
 }
 
 // IsCyberSessionBlocked 查询会话是否在屏蔽表中。
 func (c *gatewayCache) IsCyberSessionBlocked(ctx context.Context, key string) (bool, error) {
-	n, err := c.rdb.Exists(ctx, cyberSessionBlockPrefix+key).Result()
+	matched, err := c.FindCyberSessionBlocked(ctx, []string{key})
+	return matched != "", err
+}
+
+// SetCyberSessionBlockedKeys writes exact blocks in bounded transactions.
+// Activate the coarse scope only after every exact block has been persisted,
+// and keep it alive at least as long as the corresponding exact blocks.
+func (c *gatewayCache) SetCyberSessionBlockedKeys(ctx context.Context, scopeKey string, keys []string, ttl time.Duration) error {
+	if len(keys) == 0 {
+		return nil
+	}
+	if c == nil || c.rdb == nil {
+		return errors.New("gateway cache unavailable")
+	}
+	if ttl.Milliseconds() <= 0 {
+		return errors.New("cyber session block TTL must be positive")
+	}
+	exactKeys := make([]string, 0, cyberSessionRedisCommandMaxKeys)
+	maxTTLMillis := ttl.Milliseconds()
+	wroteExactKey := false
+	flush := func() error {
+		if len(exactKeys) == 0 {
+			return nil
+		}
+		pipe := c.rdb.TxPipeline()
+		results := make([]*redis.Cmd, 0, len(exactKeys))
+		for _, key := range exactKeys {
+			results = append(results, pipe.Eval(ctx, setCyberSessionMarkerScript, []string{cyberSessionBlockPrefix + key}, ttl.Milliseconds()))
+		}
+		if _, err := pipe.Exec(ctx); err != nil {
+			return err
+		}
+		for _, result := range results {
+			remaining, err := result.Int64()
+			if err != nil {
+				return err
+			}
+			if remaining > maxTTLMillis {
+				maxTTLMillis = remaining
+			}
+		}
+		wroteExactKey = true
+		exactKeys = exactKeys[:0]
+		return nil
+	}
+	for _, key := range keys {
+		if key == "" {
+			continue
+		}
+		exactKeys = append(exactKeys, key)
+		if len(exactKeys) == cyberSessionRedisCommandMaxKeys {
+			if err := flush(); err != nil {
+				return err
+			}
+		}
+	}
+	if err := flush(); err != nil {
+		return err
+	}
+	if wroteExactKey && scopeKey != "" {
+		return c.rdb.Eval(ctx, setCyberSessionMarkerScript, []string{cyberSessionScopePrefix + scopeKey}, maxTTLMillis).Err()
+	}
+	return nil
+}
+
+func (c *gatewayCache) IsCyberSessionScopeActive(ctx context.Context, scopeKey string) (bool, error) {
+	if scopeKey == "" {
+		return false, nil
+	}
+	if c == nil || c.rdb == nil {
+		return false, errors.New("gateway cache unavailable")
+	}
+	n, err := c.rdb.Exists(ctx, cyberSessionScopePrefix+scopeKey).Result()
 	if err != nil {
 		return false, err
 	}
 	return n > 0, nil
+}
+
+// FindCyberSessionBlocked checks bounded batches in caller order and stops
+// at the first blocked key, preserving earliest-prefix matching.
+func (c *gatewayCache) FindCyberSessionBlocked(ctx context.Context, keys []string) (string, error) {
+	if len(keys) == 0 {
+		return "", nil
+	}
+	if c == nil || c.rdb == nil {
+		return "", errors.New("gateway cache unavailable")
+	}
+	for start := 0; start < len(keys); start += cyberSessionRedisCommandMaxKeys {
+		end := start + cyberSessionRedisCommandMaxKeys
+		if end > len(keys) {
+			end = len(keys)
+		}
+		redisKeys := make([]string, 0, end-start)
+		exactKeys := make([]string, 0, end-start)
+		for _, key := range keys[start:end] {
+			if key != "" {
+				redisKeys = append(redisKeys, cyberSessionBlockPrefix+key)
+				exactKeys = append(exactKeys, key)
+			}
+		}
+		if len(redisKeys) == 0 {
+			continue
+		}
+		values, err := c.rdb.MGet(ctx, redisKeys...).Result()
+		if err != nil {
+			return "", err
+		}
+		for i, value := range values {
+			if value != nil {
+				return exactKeys[i], nil
+			}
+		}
+	}
+	return "", nil
 }
