@@ -216,6 +216,7 @@ export default {
     },
     subscriptions: 'Subscriptions',
     accounts: 'Account Pool',
+    accountAssistant: 'Account Assistant',
     management: 'Admin',
     proxies: 'Proxies',
     redeemCodes: 'Redeem Codes',

@@ -887,6 +887,265 @@ export async function probeUpstreamBillingBatch(accountIds: number[]): Promise<U
   return data.results
 }
 
+
+export interface AccountHealthItem {
+  account_id: number
+  name: string
+  platform: string
+  type: string
+  status: string
+  reason: string
+  summary: string
+  cleanup: boolean
+  tested: boolean
+  test_status?: string
+}
+
+export interface AccountHealthScanRequest {
+  platform?: string
+  account_ids?: number[]
+  test?: boolean
+  limit?: number
+}
+
+export interface AccountHealthScanResult {
+  items: AccountHealthItem[]
+  total: number
+  tested: number
+  cleanup_count: number
+  truncated: boolean
+}
+
+export interface AccountHealthCleanupRequest {
+  account_ids: number[]
+  confirm: 'DELETE'
+  operation_id?: string
+}
+
+export interface AccountHealthCleanupResult {
+  deleted: number[]
+  failed: Array<{ account_id: number; message: string }>
+  operation_id?: string
+}
+
+export interface AccountHealthProposal {
+  account_ids: number[]
+  items?: AccountHealthItem[]
+}
+
+export interface AccountHealthAddItem {
+  index: number
+  name: string
+  platform: string
+  type: string
+  base_url?: string
+  key_hint: string
+  summary: string
+  auth_method?: 'api_key' | 'grok_sso' | string
+  source_file?: string
+  token_count?: number
+}
+
+export interface AccountHealthAddProposal {
+  items: AccountHealthAddItem[]
+}
+
+export interface AccountHealthAddRequest {
+  handoff: string
+  indexes: number[]
+  confirm: 'ADD'
+  platform?: string
+  proxy_id?: number | null
+  group_ids?: number[]
+  operation_id?: string
+}
+
+export interface AccountHealthAddResult {
+  created: AccountHealthAddItem[]
+  failed: Array<{ index: number; message: string }>
+  operation_id?: string
+}
+
+export interface AccountHealthAssistantRequest {
+  messages: Array<{ role: 'user' | 'assistant'; content: string }>
+  intent?: 'scan' | 'test' | 'cleanup' | 'help' | 'add'
+  pending_proposal?: AccountHealthProposal
+  account_ids?: number[]
+  confirm?: 'DELETE'
+  platform?: string
+  handoff?: string
+}
+
+export interface AccountHealthToolTrace {
+  name: string
+  status: string
+  summary: string
+}
+
+export interface AccountHealthAssistantResult {
+  intent: 'scan' | 'test' | 'cleanup' | 'help' | 'add'
+  reply: string
+  scan?: AccountHealthScanResult
+  cleanup?: AccountHealthCleanupResult
+  proposal?: AccountHealthProposal
+  add_proposal?: AccountHealthAddProposal
+  add?: AccountHealthAddResult
+  tool_traces?: AccountHealthToolTrace[]
+}
+
+export interface AccountHealthSettings {
+  enabled: boolean
+  scan_interval_minutes: number
+  auto_quarantine: boolean
+  require_delete_confirmation: boolean
+  routing_rules: Record<string, { proxy_id?: number | null; group_ids?: number[] }>
+  notifications: { in_app: boolean; email: boolean; webhook: boolean; webhook_url?: string }
+}
+
+/** Settings for discovering SSO files emitted by an external registration tool. */
+export interface AccountImportWatcherSettings {
+  enabled: boolean
+  output_dir: string
+  auto_discover: boolean
+  last_seen?: string
+}
+
+export interface AccountImportWatcherFile {
+  /** Basename (or server-side path identifier) used by the import endpoint. */
+  file?: string
+  name?: string
+  path?: string
+  platform?: string
+  token_count?: number
+  sso_count?: number
+  size_bytes?: number
+  size?: number
+  created_at?: string
+  modified_at?: string
+  already_imported?: boolean
+  new?: boolean
+}
+
+export interface AccountImportWatcherScanResult {
+  files?: AccountImportWatcherFile[]
+  discovered_files?: AccountImportWatcherFile[]
+  total?: number
+}
+
+export interface AccountImportWatcherImportResult {
+  created?: Array<{ index: number; name?: string }>
+  failed?: Array<{ index: number; error?: string; message?: string }>
+  imported?: number
+  operation_id?: string
+}
+
+export async function getHealthSettings(): Promise<AccountHealthSettings> {
+  const { data } = await apiClient.get<AccountHealthSettings>('/admin/accounts/health/settings')
+  return data
+}
+
+export async function updateHealthSettings(settings: AccountHealthSettings): Promise<AccountHealthSettings> {
+  const { data } = await apiClient.put<AccountHealthSettings>('/admin/accounts/health/settings', settings)
+  return data
+}
+
+export async function getImportWatcherSettings(): Promise<AccountImportWatcherSettings> {
+  const { data } = await apiClient.get<AccountImportWatcherSettings>('/admin/accounts/import-watcher/settings')
+  return data
+}
+
+export async function updateImportWatcherSettings(
+  settings: AccountImportWatcherSettings
+): Promise<AccountImportWatcherSettings> {
+  const { data } = await apiClient.put<AccountImportWatcherSettings>(
+    '/admin/accounts/import-watcher/settings',
+    settings
+  )
+  return data
+}
+
+export async function scanImportWatcher(): Promise<AccountImportWatcherScanResult> {
+  const { data } = await apiClient.post<AccountImportWatcherScanResult>(
+    '/admin/accounts/import-watcher/scan',
+    undefined,
+    { timeout: 30000 }
+  )
+  return data
+}
+
+export async function importWatcherFile(payload: {
+  file: string
+  indexes?: number[]
+  proxy_id?: number | null
+  group_ids?: number[]
+  confirm: 'ADD'
+  operation_id?: string
+}): Promise<AccountImportWatcherImportResult> {
+  const operation_id = payload.operation_id ?? `import-watcher-${Date.now()}-${Math.random().toString(36).slice(2)}`
+  const { data } = await apiClient.post<AccountImportWatcherImportResult>(
+    '/admin/accounts/import-watcher/import',
+    { ...payload, operation_id },
+    { timeout: 180000 }
+  )
+  return data
+}
+
+export async function scanHealth(
+  payload: AccountHealthScanRequest = {},
+  options?: { signal?: AbortSignal }
+): Promise<AccountHealthScanResult> {
+  const { data } = await apiClient.post<AccountHealthScanResult>(
+    '/admin/accounts/health/scan',
+    payload,
+    {
+      timeout: payload.test ? 180000 : 30000,
+      signal: options?.signal
+    }
+  )
+  return data
+}
+
+export async function cleanupHealth(
+  payload: AccountHealthCleanupRequest,
+  options?: { signal?: AbortSignal }
+): Promise<AccountHealthCleanupResult> {
+  const operation_id = payload.operation_id ?? `health-cleanup-${Date.now()}-${Math.random().toString(36).slice(2)}`
+  const { data } = await apiClient.post<AccountHealthCleanupResult>(
+    '/admin/accounts/health/cleanup',
+    { ...payload, operation_id },
+    { signal: options?.signal }
+  )
+  return data
+}
+
+export async function chatHealth(
+  payload: AccountHealthAssistantRequest,
+  options?: { signal?: AbortSignal }
+): Promise<AccountHealthAssistantResult> {
+  const { data } = await apiClient.post<AccountHealthAssistantResult>(
+    '/admin/accounts/health/assistant',
+    payload,
+    {
+      timeout: 180000,
+      signal: options?.signal
+    }
+  )
+  return data
+}
+
+export async function addHealth(
+  payload: AccountHealthAddRequest,
+  options?: { signal?: AbortSignal }
+): Promise<AccountHealthAddResult> {
+  const operation_id = payload.operation_id ?? `health-add-${Date.now()}-${Math.random().toString(36).slice(2)}`
+  const { data } = await apiClient.post<AccountHealthAddResult>(
+    '/admin/accounts/health/add',
+    { ...payload, operation_id },
+    { signal: options?.signal }
+  )
+  return data
+}
+
 export const accountsAPI = {
   list,
   listWithEtag,
@@ -938,7 +1197,15 @@ export const accountsAPI = {
   updateUpstreamBillingProbeSettings,
   setUpstreamBillingProbeEnabled,
   probeUpstreamBilling,
-  probeUpstreamBillingBatch
+  probeUpstreamBillingBatch,
+  scanHealth,
+  cleanupHealth,
+  chatHealth,
+  addHealth,
+  getImportWatcherSettings,
+  updateImportWatcherSettings,
+  scanImportWatcher,
+  importWatcherFile
 }
 
 export default accountsAPI

@@ -58,24 +58,38 @@ func NewOAuthHandler(oauthService *service.OAuthService) *OAuthHandler {
 
 // AccountHandler handles admin account management
 type AccountHandler struct {
-	adminService            AccountAdminUseCases
-	oauthService            *service.OAuthService
-	openaiOAuthService      *service.OpenAIOAuthService
-	geminiOAuthService      *service.GeminiOAuthService
-	antigravityOAuthService *service.AntigravityOAuthService
-	grokOAuthService        service.GrokOAuthTokenService
-	rateLimitService        *service.RateLimitService
-	accountUsageService     *service.AccountUsageService
-	accountTestService      *service.AccountTestService
-	concurrencyService      *service.ConcurrencyService
-	crsSyncService          *service.CRSSyncService
-	sessionLimitCache       service.SessionLimitCache
-	rpmCache                service.RPMCache
-	tokenCacheInvalidator   service.TokenCacheInvalidator
-	grokImportProber        grokUsageProber
-	upstreamBillingProbe    *service.UpstreamBillingProbeService
-	deepSeekBalanceService  *service.DeepSeekBalanceService
-	cnProviderQuotaService  *service.CNProviderQuotaService
+	adminService              AccountAdminUseCases
+	oauthService              *service.OAuthService
+	openaiOAuthService        *service.OpenAIOAuthService
+	geminiOAuthService        *service.GeminiOAuthService
+	antigravityOAuthService   *service.AntigravityOAuthService
+	grokOAuthService          service.GrokOAuthTokenService
+	rateLimitService          *service.RateLimitService
+	accountUsageService       *service.AccountUsageService
+	accountTestService        *service.AccountTestService
+	concurrencyService        *service.ConcurrencyService
+	crsSyncService            *service.CRSSyncService
+	sessionLimitCache         service.SessionLimitCache
+	rpmCache                  service.RPMCache
+	tokenCacheInvalidator     service.TokenCacheInvalidator
+	grokImportProber          grokUsageProber
+	upstreamBillingProbe      *service.UpstreamBillingProbeService
+	deepSeekBalanceService    *service.DeepSeekBalanceService
+	cnProviderQuotaService    *service.CNProviderQuotaService
+	accountHealthSvc          *service.AccountHealthService
+	accountHealthSettingsRepo service.SettingRepository
+}
+
+// SetAccountHealthSettingsRepository wires the shared settings store without
+// changing the long-standing AccountHandler constructor signature.
+func (h *AccountHandler) SetAccountHealthSettingsRepository(repo service.SettingRepository) {
+	if h == nil {
+		return
+	}
+	h.accountHealthSettingsRepo = repo
+	if h.accountHealthSvc != nil {
+		h.accountHealthSvc.SetSettingsRepository(repo)
+	}
 }
 
 // SetUpstreamBillingProbeService attaches the optional remote billing probe service.

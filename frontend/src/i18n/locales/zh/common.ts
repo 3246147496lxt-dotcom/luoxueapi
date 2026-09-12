@@ -216,6 +216,7 @@ export default {
     },
     subscriptions: '订阅管理',
     accounts: '账号池',
+    accountAssistant: '账号池助手',
     management: '管理',
     proxies: 'IP管理',
     redeemCodes: '兑换码',

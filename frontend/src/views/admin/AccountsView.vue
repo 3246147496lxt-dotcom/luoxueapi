@@ -6,6 +6,16 @@
           :title="t('admin.accounts.title')"
           :description="t('admin.accounts.description')"
         >
+          <template #secondary-actions>
+            <router-link
+              to="/admin/account-assistant"
+              class="btn btn-secondary min-h-11 gap-2 px-4"
+              data-test="account-pool-copilot-open"
+            >
+              <Icon name="lightbulb" size="sm" aria-hidden="true" />
+              <span>{{ t('admin.accounts.copilot.open') }}</span>
+            </router-link>
+          </template>
           <template #primary-actions>
             <button
               type="button"

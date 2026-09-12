@@ -828,6 +828,10 @@ const AdminSkillMarketIcon = {
   render: () => h(Icon, { name: 'cube', size: 'md', strokeWidth: 1.7 })
 }
 
+const AccountAssistantIcon = {
+  render: () => h(Icon, { name: 'lightbulb', size: 'md', strokeWidth: 1.7 })
+}
+
 const ModelIcon = {
   render: () => h(Icon, { name: 'destinationModels', size: 'md', strokeWidth: 1.7 })
 }
@@ -923,6 +927,7 @@ const adminNavigationIcons: AdminNavigationIcons = {
   priceTag: PriceTagIcon,
   signal: SignalIcon,
   skillMarket: AdminSkillMarketIcon,
+  accountAssistant: AccountAssistantIcon,
   creditCard: CreditCardIcon,
   order: OrderIcon,
   ticket: TicketIcon,

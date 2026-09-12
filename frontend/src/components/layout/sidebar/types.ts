@@ -73,6 +73,7 @@ export interface AdminNavigationIcons {
   priceTag: unknown
   signal: unknown
   skillMarket: unknown
+  accountAssistant: unknown
   creditCard: unknown
   order: unknown
   ticket: unknown

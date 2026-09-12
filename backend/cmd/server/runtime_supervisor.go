@@ -83,6 +83,7 @@ func buildApplicationSupervisor(
 	upstreamBillingProbe *service.UpstreamBillingProbeService,
 	deepSeekBalanceCheck *service.DeepSeekBalanceCheckService,
 	cnProviderBalanceCheck *service.CNProviderBalanceCheckService,
+	accountHealthRunner *service.AccountHealthRunner,
 	redisClient *redis.Client,
 	cfg *config.Config,
 ) *lifecycle.Supervisor {
@@ -293,6 +294,7 @@ func buildApplicationSupervisor(
 		applicationVoidLifecycleComponent("subscription-expiry", subscriptionExpiry.Start, subscriptionExpiry.Stop),
 		applicationVoidLifecycleComponent("proxy-health", proxyHealth.Start, proxyHealth.Stop),
 		applicationVoidLifecycleComponent("scheduled-tests", scheduledTestRunner.Start, scheduledTestRunner.Stop),
+		lifecycle.ComponentFuncs{ComponentName: "account-health", StartFunc: accountHealthRunner.Start, StopFunc: accountHealthRunner.Stop},
 		lifecycle.ComponentFuncs{
 			ComponentName: "backup-scheduler",
 			StartFunc: func(context.Context) error {

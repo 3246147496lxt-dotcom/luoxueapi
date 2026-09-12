@@ -239,6 +239,18 @@ export const adminRoutes: RouteRecordRaw[] = [
     }
   },
   {
+    path: '/admin/account-assistant',
+    name: 'AdminAccountAssistant',
+    component: () => import('@/views/admin/AccountAssistantView.vue'),
+    meta: {
+      requiresAuth: true,
+      requiresAdmin: true,
+      title: 'Account Pool Assistant',
+      titleKey: 'admin.accounts.copilot.pageTitle',
+      descriptionKey: 'admin.accounts.copilot.pageDescription'
+    }
+  },
+  {
     path: '/admin/announcements',
     name: 'AdminAnnouncements',
     component: () => import('@/views/admin/AnnouncementsView.vue'),

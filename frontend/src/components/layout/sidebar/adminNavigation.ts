@@ -22,6 +22,7 @@ const ADMIN_NAV_SECTION_BY_PATH: Record<string, AdminNavSectionId> = {
   '/admin/users': 'business',
   '/admin/groups': 'business',
   '/admin/accounts': 'business',
+  '/admin/account-assistant': 'business',
   '/admin/proxies': 'business',
   '/admin/channels': 'business',
   '/admin/model-catalog': 'business',
@@ -83,6 +84,7 @@ function buildItems(context: AdminNavigationContext): NavItem[] {
     { path: '/admin/users', label: t('nav.users'), icon: icons.users, hideInSimpleMode: true },
     { path: '/admin/groups', label: t('nav.groups'), icon: icons.folder, hideInSimpleMode: true },
     { path: '/admin/accounts', label: t('nav.accounts'), icon: null, iconSvg: accountPoolIconSvg },
+    { path: '/admin/account-assistant', label: t('nav.accountAssistant'), icon: icons.accountAssistant },
     { path: '/admin/proxies', label: t('nav.proxies'), icon: icons.server },
     {
       path: '/admin/channels',
