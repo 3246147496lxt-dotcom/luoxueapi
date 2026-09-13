@@ -1145,7 +1145,7 @@ describe('AppSidebar grouped admin navigation', () => {
     expect(docsLink.attributes('target')).toBe('_blank')
     expect(docsLink.attributes('rel')).toBe('noopener noreferrer')
     expect(contactLink.text()).toContain('联系我们')
-    expect(contactLink.attributes('href')).toBe('/docs/#recharge')
+    expect(contactLink.attributes('href')).toBe('/contact')
     expect(contactLink.attributes('target')).toBe('_blank')
     expect(contactLink.attributes('rel')).toBe('noopener noreferrer')
     expect(contactLink.get('[data-testid="sidebar-nav-trailing-icon"]').attributes('aria-hidden'))

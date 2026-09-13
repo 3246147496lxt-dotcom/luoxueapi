@@ -9,6 +9,7 @@ import desktop from './desktop'
 import quotaViewerLanding from './quotaViewerLanding'
 import skills from './skills'
 import library from './library'
+import contact from './contact'
 
 export default {
   ...landing,
@@ -22,4 +23,5 @@ export default {
   ...quotaViewerLanding,
   ...skills,
   ...library,
+  ...contact,
 }

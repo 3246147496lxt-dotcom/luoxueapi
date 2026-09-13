@@ -14,24 +14,24 @@ describe('support URL resolution', () => {
     })
   })
 
-  it('falls back to the recharge documentation section for free-form contact text', () => {
+  it('falls back to the first-party contact page for free-form contact text', () => {
     expect(resolveSupportContactUrl('QQ 123456', '/tutorial-docs/'))
-      .toBe('http://127.0.0.1:4179/tutorial-docs/#recharge')
+      .toBe('/contact')
     expect(resolveSupportContactUrl('help@example.com', '/tutorial-docs/'))
-      .toBe('http://127.0.0.1:4179/tutorial-docs/#recharge')
+      .toBe('/contact')
   })
 
   it('rejects unsafe protocols and replaces stale documentation hashes', () => {
     expect(resolveSupportContactUrl('javascript:alert(1)', '/tutorial-docs/#old'))
-      .toBe('http://127.0.0.1:4179/tutorial-docs/#recharge')
+      .toBe('/contact')
   })
 
-  it('uses the default documentation destination when both values are empty', () => {
+  it('uses the first-party contact page when both values are empty', () => {
     expect(resolveSupportContactUrl('', ''))
-      .toBe('http://127.0.0.1:4179/tutorial-docs/#recharge')
+      .toBe('/contact')
     expect(resolveSupportContactDestination('', '')).toEqual({
-      kind: 'documentation',
-      url: 'http://127.0.0.1:4179/tutorial-docs/#recharge',
+      kind: 'contact',
+      url: '/contact',
     })
   })
 })
