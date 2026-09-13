@@ -282,7 +282,12 @@ func isOpenAICompatibleAccountEligibleForRequest(ctx context.Context, account *A
 			return false
 		}
 	}
-	if requestedModel != "" && !account.IsModelSupported(requestedModel) {
+	// OpenAI passthrough accounts only replace authentication and intentionally
+	// allow newly released or custom upstream model IDs. Keep model mappings
+	// enforced for normal accounts so their allowlist behavior is unchanged.
+	if requestedModel != "" &&
+		!account.IsOpenAIPassthroughEnabled() &&
+		!account.IsModelSupported(requestedModel) {
 		return false
 	}
 	if !account.SupportsOpenAIEndpointCapability(requiredCapability) {

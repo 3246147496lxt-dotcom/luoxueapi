@@ -355,7 +355,7 @@ func buildOpenAIImagesResponsesRequest(parsed *OpenAIImagesRequest, toolModel st
 	}
 
 	req := []byte(`{"instructions":"","stream":true,"reasoning":{"effort":"medium","summary":"auto"},"parallel_tool_calls":true,"include":["reasoning.encrypted_content"],"model":"","store":false,"tool_choice":{"type":"image_generation"}}`)
-	req, _ = sjson.SetBytes(req, "model", openAIImagesResponsesMainModel)
+	req, _ = sjson.SetBytes(req, "model", openAIImagesResponsesMainModelValue())
 
 	input := []byte(`[{"type":"message","role":"user","content":[{"type":"input_text","text":""}]}]`)
 	input, _ = sjson.SetBytes(input, "0.content.0.text", prompt)
@@ -892,6 +892,17 @@ func (s *OpenAIGatewayService) handleOpenAIImagesErrorResponse(
 			Message:           "Upstream gateway error",
 			UpstreamRequestID: strings.TrimSpace(resp.Header.Get("x-request-id")),
 		}
+		writeOpenAIImagesUpstreamErrorResponse(c, upErr)
+		return nil, upErr
+	}
+
+	// A rejected Responses driver is a gateway configuration/upstream model
+	// compatibility problem, not an image-model quota failure. Do not mark
+	// every OAuth account's gpt-image-2 as unavailable for this error.
+	if account.IsOpenAIOAuth() &&
+		isOpenAICodexPlanGatedModelError(resp.StatusCode, body) &&
+		strings.Contains(extractUpstreamErrorMessage(body), "'"+openAIImagesResponsesMainModelValue()+"'") {
+		upErr := openAIImagesUpstreamErrorFromHTTP(resp.StatusCode, resp.Header, body)
 		writeOpenAIImagesUpstreamErrorResponse(c, upErr)
 		return nil, upErr
 	}
@@ -1883,11 +1894,18 @@ func (s *OpenAIGatewayService) handleOpenAIImagesOAuthResponseError(
 		Message:            upstreamErr.clientMessage(),
 	})
 
+	responseBody := openAIImagesUpstreamErrorResponseBody(upstreamErr)
+	if account.IsOpenAIOAuth() &&
+		isOpenAICodexPlanGatedModelError(upstreamErr.StatusCode, responseBody) &&
+		strings.Contains(upstreamErr.clientMessage(), "'"+openAIImagesResponsesMainModelValue()+"'") {
+		// The Responses driver itself is rejected. This is a configuration or
+		// upstream compatibility error, so do not cool down gpt-image-2.
+		return err
+	}
 	if !retryable || responseWritten {
 		return err
 	}
 
-	responseBody := openAIImagesUpstreamErrorResponseBody(upstreamErr)
 	s.handleOpenAIAccountUpstreamError(ctx, account, upstreamErr.StatusCode, headers, responseBody, requestedModel)
 	return &UpstreamFailoverError{
 		StatusCode:             upstreamErr.StatusCode,

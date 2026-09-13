@@ -22,6 +22,7 @@ type Model struct {
 
 // DefaultModels OpenAI models list
 var DefaultModels = []Model{
+	{ID: "gpt-6-astra", Object: "model", Created: 1788566400, OwnedBy: "openai", Type: "model", DisplayName: "GPT-6 Astra", SupportsResponses: true, SupportsReasoningSummary: true, SupportedReasoningEfforts: []string{"low", "medium", "high", "xhigh"}},
 	{ID: "gpt-5.6", Object: "model", Created: 1780876800, OwnedBy: "openai", Type: "model", DisplayName: "GPT-5.6 (Sol)", SupportsResponses: true, SupportsReasoningSummary: true, SupportsReasoningProMode: true, SupportedReasoningEfforts: []string{"low", "medium", "high", "xhigh"}},
 	{ID: "gpt-5.6-sol", Object: "model", Created: 1780876800, OwnedBy: "openai", Type: "model", DisplayName: "GPT-5.6 Sol", SupportsResponses: true, SupportsReasoningSummary: true, SupportsReasoningProMode: true, SupportedReasoningEfforts: []string{"low", "medium", "high", "xhigh"}},
 	{ID: "gpt-5.6-terra", Object: "model", Created: 1780876800, OwnedBy: "openai", Type: "model", DisplayName: "GPT-5.6 Terra", SupportsResponses: true, SupportsReasoningSummary: true, SupportsReasoningProMode: true, SupportedReasoningEfforts: []string{"low", "medium", "high", "xhigh", "max"}},
