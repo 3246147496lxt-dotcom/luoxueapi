@@ -889,10 +889,11 @@ const sidebarSupportLinks = computed<SidebarSupportLink[]>(() => {
 
   // Keep the low-frequency support area focused: the web-chat entry is the
   // primary cross-shell handoff when the user-facing shell is available, while
-  // documentation remains available in backend-only mode and stays the final
-  // link immediately above the account footer.
+  // documentation and contact remain available as the final links immediately
+  // above the account footer.
   return links.filter((link) => (
     link.id === 'documentation'
+    || link.id === 'contact'
     || (link.id === 'webChat' && !appStore.backendModeEnabled)
   ))
 })

@@ -1128,12 +1128,13 @@ describe('AppSidebar grouped admin navigation', () => {
     wrapper.unmount()
   })
 
-  it('keeps web chat and documentation as low-frequency external links below account navigation', () => {
+  it('keeps support links below account navigation with contact after documentation', () => {
     const wrapper = mountSidebar('user')
     const navigation = wrapper.get('nav.workspace-sidebar-navigation')
     const supportSection = navigation.get('[data-testid="sidebar-support-section"]')
     const webChatLink = navigation.get('[data-testid="sidebar-web-chat"]')
     const docsLink = navigation.get('[data-testid="sidebar-docs-tutorial"]')
+    const contactLink = navigation.get('[data-testid="sidebar-contact-us"]')
 
     expect(webChatLink.text()).toContain('网页版对话')
     expect(webChatLink.attributes('href')).toBe('/chat')
@@ -1143,10 +1144,16 @@ describe('AppSidebar grouped admin navigation', () => {
     expect(docsLink.attributes('href')).toBe('/docs/')
     expect(docsLink.attributes('target')).toBe('_blank')
     expect(docsLink.attributes('rel')).toBe('noopener noreferrer')
+    expect(contactLink.text()).toContain('联系我们')
+    expect(contactLink.attributes('href')).toBe('/docs/#recharge')
+    expect(contactLink.attributes('target')).toBe('_blank')
+    expect(contactLink.attributes('rel')).toBe('noopener noreferrer')
+    expect(contactLink.get('[data-testid="sidebar-nav-trailing-icon"]').attributes('aria-hidden'))
+      .toBe('true')
     expect(supportSection.find('.sidebar-section-title').exists()).toBe(false)
     expect(navigation.find('[data-testid="sidebar-announcements"]').exists()).toBe(false)
     expect(navigation.find('[data-testid="sidebar-settings"]').exists()).toBe(false)
-    expect(navigation.find('[data-testid="sidebar-contact-us"]').exists()).toBe(false)
+    expect(navigation.find('[data-testid="sidebar-contact-us"]').exists()).toBe(true)
     const jumpIcon = docsLink.get('[data-testid="sidebar-nav-trailing-icon"]')
     expect(jumpIcon.classes()).toContain('sidebar-nav-trailing-icon')
     expect(jumpIcon.attributes('aria-hidden')).toBe('true')
@@ -1155,6 +1162,9 @@ describe('AppSidebar grouped admin navigation', () => {
     expect(supportSection.find('a[href="/home"]').exists()).toBe(false)
     expect(wrapper.findAll('[data-testid="sidebar-docs-tutorial"]')).toHaveLength(1)
     expect(wrapper.findAll('[data-testid="sidebar-web-chat"]')).toHaveLength(1)
+    expect(wrapper.findAll('[data-testid="sidebar-contact-us"]')).toHaveLength(1)
+    expect(supportSection.findAll('.sidebar-support-link').map((link) => link.attributes('data-testid')))
+      .toEqual(['sidebar-web-chat', 'sidebar-docs-tutorial', 'sidebar-contact-us'])
     expect(wrapper.get('[data-testid="sidebar-account-dock-stub"]').element.contains(
       supportSection.element,
     )).toBe(false)
@@ -1171,7 +1181,7 @@ describe('AppSidebar grouped admin navigation', () => {
     expect(wrapper.find('a[href="/admin/documentation"]').exists()).toBe(true)
   })
 
-  it('keeps web chat and documentation in an administrator personal workspace', () => {
+  it('keeps support links in an administrator personal workspace', () => {
     routeState.path = '/dashboard'
     const wrapper = mountSidebar('admin')
 
@@ -1179,11 +1189,11 @@ describe('AppSidebar grouped admin navigation', () => {
     expect(wrapper.find('[data-testid="sidebar-announcements"]').exists()).toBe(false)
     expect(wrapper.find('[data-testid="sidebar-web-chat"]').exists()).toBe(true)
     expect(wrapper.find('[data-testid="sidebar-docs-tutorial"]').exists()).toBe(true)
-    expect(wrapper.find('[data-testid="sidebar-contact-us"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="sidebar-contact-us"]').exists()).toBe(true)
     expect(wrapper.find('[data-testid="sidebar-settings"]').exists()).toBe(false)
   })
 
-  it('keeps the configured model catalog in Workbench and web chat/documentation as auxiliary links', () => {
+  it('keeps the configured model catalog in Workbench and support links as auxiliary links', () => {
     const appStore = useAppStore()
     appStore.cachedPublicSettings = {
       public_model_catalog_enabled: true,
@@ -1197,7 +1207,7 @@ describe('AppSidebar grouped admin navigation', () => {
 
     expect(supportSection.findAll('.sidebar-support-link').map((link) => (
       link.attributes('href')
-    ))).toEqual(['/chat', '/docs/'])
+    ))).toEqual(['/chat', '/docs/', '/support'])
     expect(supportSection.findAll('.sidebar-support-link').every((link) => (
       link.attributes('target') === '_blank'
       && link.attributes('rel') === 'noopener noreferrer'
@@ -1206,7 +1216,7 @@ describe('AppSidebar grouped admin navigation', () => {
     expect(modelCenterLink.text()).toContain('模型中心')
     expect(modelCenterLink.attributes('target')).toBeUndefined()
     expect(modelCenterLink.attributes('rel')).toBeUndefined()
-    expect(wrapper.find('a[href="/support"]').exists()).toBe(false)
+    expect(wrapper.find('a[href="/support"]').exists()).toBe(true)
   })
 
   it('keeps personal Work on the shared collapsed width token when state is collapsed', () => {
