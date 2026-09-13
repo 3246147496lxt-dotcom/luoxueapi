@@ -67,3 +67,8 @@ func TestModelCapabilitiesUseSnakeCaseJSON(t *testing.T) {
 	require.NotEmpty(t, decoded["supported_reasoning_efforts"])
 	require.NotContains(t, decoded, "supportsResponses")
 }
+
+func TestDefaultModelsIncludeGPTImage25(t *testing.T) {
+	require.Contains(t, DefaultModelIDs(), "gpt-image-2.5-flare")
+	require.Contains(t, DefaultModelIDs(), "gpt-image-2.5-sunburst")
+}
