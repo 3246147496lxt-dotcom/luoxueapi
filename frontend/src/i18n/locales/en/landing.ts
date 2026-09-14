@@ -162,7 +162,7 @@ export default {
     description: 'Compare input, output, and cache prices for published models without signing in.',
     workspaceTitle: 'Model Center',
     workspaceDescription: 'Compare input, output, and cache prices for available models.',
-    publicPriceNote: 'Public standard rates are converted to CNY at ¥1 = 10 Points; actual charges follow Points usage records.',
+    publicPriceNote: 'Public standard rates are shown directly in USD; actual charges follow USD wallet usage records.',
     modelCount: '{count} models',
     pricingUpdatedAt: 'Pricing updated {time}',
     searchLabel: 'Search models',
@@ -274,7 +274,7 @@ export default {
       details: 'Pricing details',
       shortDetails: 'Details',
       dialogTitle: 'Public pricing details',
-      dialogDescription: 'Points prices are converted to CNY at ¥1 = 10 Points. Token-based models are shown per million tokens. 0 means free; “—” means that price is not available.',
+      dialogDescription: 'Prices are shown directly in USD. Token-based models are shown per million tokens. 0 means free; “—” means that price is not available.',
       billingMode: 'Billing mode',
       usageBased: 'Usage based',
       billingModes: {

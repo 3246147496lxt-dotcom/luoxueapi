@@ -44,7 +44,7 @@ vi.mock('vue-i18n', async () => {
   const messages: Record<string, string> = {
     'usage.accountBilled': 'Account billed',
     'usage.userBilled': 'User billed',
-    'dashboard.creditUnit': 'Points',
+    'dashboard.creditUnit': '$',
   }
   return {
     ...actual,
@@ -116,7 +116,7 @@ const CreditAmountStub = {
     value: [String, Number],
     iconSize: String,
   },
-  template: '<span data-testid="credit-amount" :data-value="value" :data-icon-size="iconSize">{{ value }}</span>',
+  template: '<span data-testid="credit-amount" :data-value="value" :data-icon-size="iconSize">${{ value }}</span>',
 }
 
 const ModelDistributionChartStub = {
@@ -172,7 +172,7 @@ describe.each([
     getStats.mockResolvedValue(stats)
   })
 
-  it('renders user charges as Points while account and standard costs remain USD', async () => {
+  it('renders user charges as USD while account and standard costs remain USD', async () => {
     const wrapper = await mountModal(component)
     const creditValues = wrapper.findAll('[data-testid="credit-amount"]')
       .map((node) => node.attributes('data-value'))
@@ -189,11 +189,11 @@ describe.each([
     expect(wrapper.findAll('[data-testid="endpoint-distribution"]')
       .every((node) => node.attributes('data-credit-mode') === 'false')).toBe(true)
     expectedCreditValues.forEach((value) => {
-      expect(wrapper.text()).not.toContain(`$${value}`)
+      expect(wrapper.text()).toContain(`$${value}`)
     })
   }, 30_000)
 
-  it('keeps account history in USD and user charges in Points', async () => {
+  it('keeps account history and user charges in USD', async () => {
     const wrapper = await mountModal(component)
     const line = wrapper.getComponent({ name: 'LineChartStub' })
     const data = line.props('data') as {
@@ -220,10 +220,10 @@ describe.each([
       billingUnit: 'USD',
     })
     expect(data.datasets[1]).toMatchObject({
-      label: 'User billed (Points)',
+      label: 'User billed (USD)',
       data: [9.99],
       yAxisID: 'yCredit',
-      billingUnit: 'CREDIT',
+      billingUnit: 'USD',
     })
     expect(options.plugins.tooltip.callbacks.label({
       dataset: data.datasets[0],
@@ -232,10 +232,10 @@ describe.each([
     expect(options.plugins.tooltip.callbacks.label({
       dataset: data.datasets[1],
       raw: 9.99,
-    })).toBe('User billed (Points): 9.99 Points')
+    })).toBe('User billed (USD): $9.99')
     expect(options.scales.yUsd.ticks.callback(8.88)).toBe('$8.88')
     expect(options.scales.yUsd.title.text).toBe('Account billed (USD)')
     expect(options.scales.yCredit.ticks.callback(9.99)).toBe('9.99')
-    expect(options.scales.yCredit.title.text).toBe('User billed (Points)')
+    expect(options.scales.yCredit.title.text).toBe('User billed (USD)')
   }, 30_000)
 })

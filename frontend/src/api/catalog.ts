@@ -1,9 +1,11 @@
 import { apiClient } from './client'
 import type { BillingMode } from '@/constants/channel'
 
-export const PUBLIC_CATALOG_CREDIT_CURRENCY = 'CREDIT' as const
+export const PUBLIC_CATALOG_USD_CURRENCY = 'USD' as const
+/** @deprecated Use PUBLIC_CATALOG_USD_CURRENCY. */
+export const PUBLIC_CATALOG_CREDIT_CURRENCY = PUBLIC_CATALOG_USD_CURRENCY
 export type PublicModelCatalogPricingCurrency =
-  | typeof PUBLIC_CATALOG_CREDIT_CURRENCY
+  | typeof PUBLIC_CATALOG_USD_CURRENCY
   | 'USD'
   | (string & {})
 
@@ -83,7 +85,7 @@ function normalizePricing(
     billing_mode: billingMode === 'per_request' || billingMode === 'image' ? billingMode : 'token',
     currency: typeof pricing?.currency === 'string' && pricing.currency.trim()
       ? pricing.currency
-      : PUBLIC_CATALOG_CREDIT_CURRENCY,
+      : PUBLIC_CATALOG_USD_CURRENCY,
     unit: typeof pricing?.unit === 'string' ? pricing.unit : 'per_token',
     input_price: nullableNumber(pricing?.input_price),
     output_price: nullableNumber(pricing?.output_price),

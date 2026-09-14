@@ -31,7 +31,7 @@ const (
 	maxBatchImageReferenceImageBytes    = 10 * 1024 * 1024
 	defaultBatchImageMaxReferenceImages = 1000
 	defaultBatchImageMaxReferenceBytes  = 128 * 1024 * 1024
-	batchImageSettlementCurrency        = "CREDIT"
+	batchImageSettlementCurrency        = "USD"
 )
 
 type BatchImageAccountSelectionRepository interface {

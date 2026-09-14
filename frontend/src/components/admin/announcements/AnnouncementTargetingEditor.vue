@@ -121,7 +121,7 @@
                 <div class="w-full sm:flex-1">
                   <label class="input-label">{{ t('admin.announcements.form.balanceValue') }}</label>
                   <div class="relative">
-                    <PointsIcon class="absolute left-3 top-1/2 -translate-y-1/2" size="sm" />
+                    <span class="absolute left-3 top-1/2 -translate-y-1/2 text-sm font-semibold text-gray-500" aria-hidden="true">$</span>
                     <input
                       :value="String(cond.value ?? '')"
                       type="number"
@@ -182,7 +182,6 @@ import type {
 import Select from '@/components/common/Select.vue'
 import GroupSelector from '@/components/common/GroupSelector.vue'
 import Icon from '@/components/icons/Icon.vue'
-import PointsIcon from '@/components/icons/PointsIcon.vue'
 
 const { t } = useI18n()
 

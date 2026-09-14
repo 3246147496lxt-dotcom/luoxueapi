@@ -29,7 +29,7 @@
             <span class="text-xs text-gray-400 ml-2">{{ t('profile.balanceNotify.thresholdHint') }}</span>
           </label>
           <div class="flex items-center gap-2">
-            <PointsIcon size="sm" />
+            <span class="text-sm font-semibold text-gray-500" aria-hidden="true">$</span>
             <input
               v-model.number="customThreshold"
               type="number"
@@ -162,7 +162,6 @@
 <script setup lang="ts">
 import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
-import PointsIcon from '@/components/icons/PointsIcon.vue'
 import { useAuthStore } from '@/stores/auth'
 import { useAppStore } from '@/stores/app'
 import { userAPI } from '@/api'

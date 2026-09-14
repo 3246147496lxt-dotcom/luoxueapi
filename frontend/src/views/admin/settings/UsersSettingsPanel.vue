@@ -22,10 +22,10 @@
                     {{ t("admin.settings.defaults.defaultBalance") }}
                   </label>
                   <div class="relative">
-                    <PointsIcon
-                      class="absolute left-3 top-1/2 -translate-y-1/2"
-                      size="sm"
-                    />
+                    <span
+                      class="absolute left-3 top-1/2 -translate-y-1/2 text-sm font-semibold text-gray-500"
+                      aria-hidden="true"
+                    >$</span>
                     <input
                       v-model.number="form.default_balance"
                       type="number"
@@ -347,10 +347,10 @@
                           {{ t("admin.settings.defaults.defaultBalance") }}
                         </label>
                         <div class="relative">
-                          <PointsIcon
-                            class="absolute left-3 top-1/2 -translate-y-1/2"
-                            size="sm"
-                          />
+                          <span
+                            class="absolute left-3 top-1/2 -translate-y-1/2 text-sm font-semibold text-gray-500"
+                            aria-hidden="true"
+                          >$</span>
                           <input
                             v-model.number="
                               authSourceDefaults[authSource.source].balance
@@ -634,7 +634,6 @@ import GroupBadge from "@/components/common/GroupBadge.vue";
 import GroupOptionItem from "@/components/common/GroupOptionItem.vue";
 import AppSelect from "@/components/common/Select.vue";
 import Toggle from "@/components/common/Toggle.vue";
-import PointsIcon from "@/components/icons/PointsIcon.vue";
 import { useSettingsPanelBindings } from "./settingsPanelContext";
 import type { DefaultSubscriptionGroupOption as _DefaultSubscriptionGroupOption } from "./settingsPanelContext";
 
@@ -645,7 +644,6 @@ export default defineComponent({
     GroupOptionItem,
     AppSelect,
     Toggle,
-    PointsIcon,
   },
   props: {
     active: {

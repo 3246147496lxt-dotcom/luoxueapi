@@ -572,7 +572,7 @@ func (h *ChannelHandler) SyncPricingModels(c *gin.Context) {
 
 	// Return the official quote for each model alongside the names.  The
 	// channel editor uses these per-model values to seed channel rows with its
-	// fixed ×70 baseline.  Keeping the quote unmodified here preserves the
+	// fixed ×1 baseline.  Keeping the quote unmodified here preserves the
 	// existing model-pricing endpoint semantics and avoids assigning the first
 	// model's price to every newly synced model.  Some catalog entries are
 	// image-only or otherwise lack token pricing; omit those entries so the UI

@@ -485,7 +485,7 @@ func TestSyncPricingModels_ValidPlatform_EmptyService(t *testing.T) {
 func TestSyncPricingModels_IncludesPerModelOfficialQuotes(t *testing.T) {
 	// Seed a local pricing snapshot so this test does not depend on a remote
 	// LiteLLM download.  The handler must return the two different quotes as-is
-	// and leave the ×70 conversion to the frontend channel editor.
+	// and leave the ×1 conversion to the frontend channel editor.
 	cfg := &config.Config{}
 	cfg.Pricing.DataDir = t.TempDir()
 	cfg.Pricing.UpdateIntervalHours = 24
@@ -537,7 +537,7 @@ func TestSyncPricingModels_IncludesPerModelOfficialQuotes(t *testing.T) {
 
 func TestModelDefaultPricingResponsePreservesOfficialQuote(t *testing.T) {
 	// Keep this fixture in the handler package so the wire contract is tested
-	// without requiring a remote pricing download.  No ×70 or /10 conversion
+	// without requiring a remote pricing download.  No ×1 or /10 conversion
 	// belongs in this response; those are applied by the channel editor/public
 	// catalog respectively.
 	got := modelDefaultPricingResponseFrom(&service.ModelPricing{

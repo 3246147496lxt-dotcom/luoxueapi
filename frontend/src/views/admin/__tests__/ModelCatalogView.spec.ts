@@ -249,15 +249,16 @@ describe('admin ModelCatalogView', () => {
     expect(getById).toHaveBeenCalledWith(2)
   })
 
-  it('previews effective catalog prices with Point amounts', async () => {
+  it('previews effective catalog prices with dollar amounts', async () => {
     const wrapper = mountView()
     await flushPromises()
 
     await wrapper.get('button[title="admin.modelCatalog.preview"]').trigger('click')
 
     expect(wrapper.findAllComponents(CreditAmount).map((amount) => amount.props('value'))).toEqual(['1', '5'])
-    expect(wrapper.findAll('[data-testid="points-icon"]')).toHaveLength(2)
-    expect(wrapper.text()).not.toMatch(/[$¥]/)
+    expect(wrapper.findAll('[data-testid="points-icon"]')).toHaveLength(0)
+    expect(wrapper.text()).toContain('$1 / 1M tokens')
+    expect(wrapper.text()).toContain('$5 / 1M tokens')
   })
 
   it('keeps an explicitly USD-denominated preview in dollars', async () => {
@@ -272,6 +273,6 @@ describe('admin ModelCatalogView', () => {
 
     expect(wrapper.text()).toContain('$1 / 1M tokens')
     expect(wrapper.text()).toContain('$5 / 1M tokens')
-    expect(wrapper.findComponent(CreditAmount).exists()).toBe(false)
+    expect(wrapper.findAllComponents(CreditAmount)).toHaveLength(2)
   })
 })

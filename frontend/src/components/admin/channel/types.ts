@@ -52,7 +52,7 @@ export function perTokenToMTok(val: number | null | undefined): number | null {
 }
 
 /**
- * Official provider quote (USD/token) → channel form value (USD/MTok × 70).
+ * Official provider quote (USD/token) → channel form value in USD.
  *
  * The model-pricing endpoint intentionally returns the unmodified official
  * quote.  Channel entries use the fixed baseline multiplier, while a group's

@@ -25,10 +25,10 @@ const (
 // a pricing audit may opt in to the conversion. Runtime billing and model
 // catalog projection must continue to apply Group.RateMultiplier separately,
 // and account-stats pricing (which represents provider cost) must not call it.
-const ChannelPricingBaselineMultiplier = 70.0
+const ChannelPricingBaselineMultiplier = 1.0
 
 // OfficialPriceToChannel converts a finite, non-negative official provider
-// quote in USD/token to the regular channel baseline (official × 70).
+// quote in USD/token to the regular channel baseline (official × 1).
 //
 // Invalid values are returned unchanged so a caller can fail closed instead of
 // silently turning NaN, infinity, or a negative price into a free price. This

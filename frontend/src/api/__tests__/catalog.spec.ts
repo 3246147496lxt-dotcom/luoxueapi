@@ -56,7 +56,7 @@ describe('normalizePublicModelCatalogResponse', () => {
     expect(response.items[0].tags).toEqual([])
   })
 
-  it('defaults missing effective-price currency to CREDIT without rewriting explicit USD', () => {
+  it('defaults missing effective-price currency to USD without rewriting explicit USD', () => {
     const basePricing = {
       label: '公开标准价',
       billing_mode: 'token' as const,
@@ -105,7 +105,7 @@ describe('normalizePublicModelCatalogResponse', () => {
       pricing_updated_at: ''
     })
 
-    expect(missingCurrency.items[0].pricing.currency).toBe('CREDIT')
+    expect(missingCurrency.items[0].pricing.currency).toBe('USD')
     expect(explicitUSD.items[0].pricing.currency).toBe('USD')
   })
 })

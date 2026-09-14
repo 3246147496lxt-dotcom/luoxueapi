@@ -256,7 +256,7 @@ export default {
     close: 'Close account menu',
     balanceShort: 'Balance',
     availableBalance: 'Available balance',
-    frozenBalance: 'Frozen points',
+    frozenBalance: 'Frozen balance',
     subscriptionStatus: 'Subscription',
     subscriptionLoading: 'Syncing',
     activeSubscriptions: '{count} active subscription | {count} active subscriptions',

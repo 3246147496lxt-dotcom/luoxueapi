@@ -13,15 +13,15 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestCandidateMigrationsUpgradeProduction246To269AndReplay(t *testing.T) {
+func TestCandidateMigrationsUpgradeProduction246To271AndReplay(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	defer cancel()
 
 	files, err := collectValidatedMigrationFiles(migrationfs.FS)
 	require.NoError(t, err)
 	const productionBaselineCount = 246
-	const candidateMigrationCount = 269
-	require.Len(t, files, candidateMigrationCount, "candidate binary must embed the reviewed 269-file manifest")
+	const candidateMigrationCount = 271
+	require.Len(t, files, candidateMigrationCount, "candidate binary must embed the reviewed 271-file manifest")
 
 	wantTail := []MigrationManifestEntry{
 		{Filename: "201_library_files.sql", SHA256: "03f6a53d92e93fbfee37b9e5dd78dc11cae49dd921812253d0425154f1a9c23e"},
@@ -46,7 +46,9 @@ func TestCandidateMigrationsUpgradeProduction246To269AndReplay(t *testing.T) {
 		{Filename: "246_skill_catalog_zh_batch_6.sql", SHA256: "26af86008459fffc6aca2a3d73224c74b930b074fd3519e8df211898a0c36d97"},
 		{Filename: "247_user_platform_quotas_add_deepseek.sql", SHA256: "6c6816fadf6ea30f2cfd0fabfc7852ddf2270c6da4dd49691f1764f16019d8c4"},
 		{Filename: "248_channel_monitor_deepseek_provider.sql", SHA256: "03f90a36eec0e53e524d32479bfe8a377302afd259900516a12aee93dbaa10b7"},
-		{Filename: "249_zhipu_provider.sql", SHA256: "3091d6c40ceaa24be39f94c81235d743e751727780f0cd4c8b0fb818860182e4"},
+		{Filename: "249_zhipu_provider.sql", SHA256: "9cde800b04d0786888b2733b55ea805f5e3d38ccbe86445d2dd731b9dad6ab7b"},
+		{Filename: "250_kimi_provider.sql", SHA256: "f941bb6981ad73a2a7b3c678ab9fda96e23ce57850018bdba2e5af8e84157c0c"},
+		{Filename: "251_usd_wallet_cutover.sql", SHA256: "79f0bd4b3c35c15b6d9e7f41f016ab0bd4fad4e333d65251e3b9db3be18a9b64"},
 	}
 	require.Len(t, files, productionBaselineCount+len(wantTail))
 	for index, want := range wantTail {
@@ -60,7 +62,7 @@ func TestCandidateMigrationsUpgradeProduction246To269AndReplay(t *testing.T) {
 		productionBaseline[file.name] = &fstest.MapFile{Data: []byte(file.content)}
 	}
 
-	db := openIsolatedMigrationIntegrationDB(t, "sub2api_candidate_246_to_269")
+	db := openIsolatedMigrationIntegrationDB(t, "sub2api_candidate_246_to_271")
 	require.NoError(t, applyMigrationsFSWithPolicy(
 		ctx,
 		db,

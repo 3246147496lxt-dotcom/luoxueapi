@@ -774,7 +774,7 @@ function emptyPricing() {
   return {
     label: '',
     billing_mode: 'token',
-    currency: 'CREDIT',
+    currency: 'USD',
     unit: '',
     input_price: null,
     output_price: null,

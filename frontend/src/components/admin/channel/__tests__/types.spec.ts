@@ -89,9 +89,9 @@ describe('validateIntervals', () => {
 })
 
 describe('officialPerTokenToChannelMTok', () => {
-  it('applies the fixed 70x channel multiplier to official token quotes', () => {
-    expect(officialPerTokenToChannelMTok(5e-6)).toBe(350)
-    expect(officialPerTokenToChannelMTok(30e-6)).toBe(2100)
+  it('applies the fixed 1x channel multiplier to official token quotes', () => {
+    expect(officialPerTokenToChannelMTok(5e-6)).toBe(5)
+    expect(officialPerTokenToChannelMTok(30e-6)).toBe(30)
     expect(officialPerTokenToChannelMTok(0)).toBe(0)
     expect(officialPerTokenToChannelMTok(5e-6, 80)).toBe(400)
     expect(officialPerTokenToChannelMTok(-1e-6)).toBeNull()
@@ -107,7 +107,7 @@ describe('officialPerTokenToChannelMTok', () => {
 })
 
 describe('syncedModelsToPricingEntries', () => {
-  it('keeps different model quotes in separate channel rows and applies ×70', () => {
+  it('keeps different model quotes in separate channel rows and applies ×1', () => {
     const pricing: Record<string, ModelDefaultPricing> = {
       'model-a': { found: true, input_price: 1e-6, output_price: 4e-6 },
       'model-b': { found: true, input_price: 2e-6, output_price: 8e-6 },
@@ -117,11 +117,11 @@ describe('syncedModelsToPricingEntries', () => {
 
     expect(entries).toHaveLength(2)
     expect(entries[0].models).toEqual(['model-a'])
-    expect(entries[0].input_price).toBe(70)
-    expect(entries[0].output_price).toBe(280)
+    expect(entries[0].input_price).toBe(1)
+    expect(entries[0].output_price).toBe(4)
     expect(entries[1].models).toEqual(['model-b'])
-    expect(entries[1].input_price).toBe(140)
-    expect(entries[1].output_price).toBe(560)
+    expect(entries[1].input_price).toBe(2)
+    expect(entries[1].output_price).toBe(8)
   })
 
   it('groups only models with identical converted defaults', () => {
@@ -134,7 +134,7 @@ describe('syncedModelsToPricingEntries', () => {
 
     expect(entries).toHaveLength(1)
     expect(entries[0].models).toEqual(['model-a', 'model-b'])
-    expect(entries[0].input_price).toBe(70)
+    expect(entries[0].input_price).toBe(1)
   })
 
   it('does not inherit a quote for models missing from the sync pricing map', () => {
@@ -145,7 +145,7 @@ describe('syncedModelsToPricingEntries', () => {
 
     expect(entries).toHaveLength(2)
     expect(entries[0].models).toEqual(['known'])
-    expect(entries[0].input_price).toBe(70)
+    expect(entries[0].input_price).toBe(1)
     expect(entries[1].models).toEqual(['unknown'])
     expect(entries[1].input_price).toBeNull()
     expect(entries[1].output_price).toBeNull()
@@ -171,6 +171,6 @@ describe('syncedModelsToPricingEntries', () => {
     })
 
     expect(entries.map(entry => entry.models.length)).toEqual([100, 100, 1])
-    expect(entries.every(entry => entry.input_price === 70)).toBe(true)
+    expect(entries.every(entry => entry.input_price === 1)).toBe(true)
   })
 })

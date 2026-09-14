@@ -249,7 +249,7 @@ const props = withDefaults(defineProps<{
   entry: PricingFormEntry
   platform?: string
   /**
-   * Apply the channel baseline (official quote × 70) when auto-filling a
+   * Apply the channel baseline (official quote × 1) when auto-filling a
    * newly added model. Account-stats overrides use official prices directly.
    */
   applyChannelPricingMultiplier?: boolean

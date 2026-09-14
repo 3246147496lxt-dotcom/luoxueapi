@@ -34,7 +34,7 @@ import (
 
 const (
 	gatewayCompatibilityMetricsLogInterval = 1024
-	gatewayUsageCreditUnit                 = "CREDIT"
+	gatewayUsageCreditUnit                 = "USD"
 )
 
 var gatewayCompatibilityMetricsLogCounter atomic.Uint64

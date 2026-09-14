@@ -99,10 +99,10 @@ describe('admin order currency display', () => {
     expect(wrapper.findAll('[data-testid="credit-amount"]')).toHaveLength(2)
     expect(wrapper.findAll('[data-testid="credit-amount"]')[0]?.text()).toContain('100.00')
     expect(wrapper.findAll('[data-testid="credit-amount"]')[1]?.text()).toContain('25.00')
-    expect(text).not.toContain('$100.00')
+    expect(text).toContain('$100.00')
   })
 
-  it('uses order currency for pay_amount, USD for subscription amounts, and Points for user balance', () => {
+  it('uses order currency for pay_amount and USD for user balance', () => {
     const wrapper = mount(AdminRefundDialog, {
       props: {
         show: true,
@@ -125,12 +125,12 @@ describe('admin order currency display', () => {
     expect(text).toContain('$100.00')
     expect(text).toContain('$20.00')
     expect(text).toContain('$80.00')
-    expect(text).not.toContain('$200.00')
+    expect(text).toContain('$200.00')
     expect(wrapper.findAll('[data-testid="credit-amount"]')).toHaveLength(1)
     expect(wrapper.find('[data-testid="credit-amount"]').text()).toContain('200.00')
   })
 
-  it('uses Points throughout the balance-order refund controls', () => {
+  it('uses USD throughout the balance-order refund controls', () => {
     const wrapper = mount(AdminRefundDialog, {
       props: {
         show: true,
@@ -153,8 +153,8 @@ describe('admin order currency display', () => {
 
     expect(wrapper.text()).toContain('¥10.80')
     expect(wrapper.findAll('[data-testid="credit-amount"]')).toHaveLength(5)
-    expect(wrapper.findAll('[data-testid="points-icon"]').length).toBeGreaterThanOrEqual(6)
-    expect(wrapper.text()).not.toContain('$100.00')
+    expect(wrapper.findAll('[data-testid="points-icon"]')).toHaveLength(0)
+    expect(wrapper.text()).toContain('$100.00')
   })
 
   it('renders payment currency consistently in the shared order table', () => {

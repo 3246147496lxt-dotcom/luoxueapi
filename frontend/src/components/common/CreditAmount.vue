@@ -5,7 +5,12 @@
     :aria-label="accessibleLabel"
     data-testid="credit-amount"
   >
-    <PointsIcon :size="iconSize" />
+    <span
+      class="inline-flex shrink-0 items-center justify-center font-semibold leading-none"
+      :class="symbolSizeClasses[iconSize]"
+      aria-hidden="true"
+      data-testid="credit-amount-symbol"
+    >$</span>
     <span
       class="min-w-0 truncate"
       aria-hidden="true"
@@ -16,8 +21,6 @@
 
 <script setup lang="ts">
 import { computed } from 'vue'
-import PointsIcon from '@/components/icons/PointsIcon.vue'
-import { getLocale, i18n } from '@/i18n'
 
 type PointsIconSize = 'xs' | 'sm' | 'md' | 'lg' | 'xl'
 
@@ -34,11 +37,14 @@ const accessibleLabel = computed(() => {
   const explicitLabel = props.label.trim()
   if (explicitLabel) return explicitLabel
 
-  const translationKey = 'dashboard.creditUnit'
-  const unit = i18n.global.te(translationKey)
-    ? i18n.global.t(translationKey)
-    : (getLocale() === 'zh' ? '积分' : 'Points')
-
-  return `${props.value} ${unit}`
+  return `$${props.value}`
 })
+
+const symbolSizeClasses: Record<PointsIconSize, string> = {
+  xs: 'text-[10px]',
+  sm: 'text-xs',
+  md: 'text-sm',
+  lg: 'text-base',
+  xl: 'text-lg',
+}
 </script>

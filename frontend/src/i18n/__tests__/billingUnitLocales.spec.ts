@@ -18,18 +18,18 @@ import zhDashboard from '../locales/zh/dashboard'
 import zhLanding from '../locales/zh/landing'
 import zhMisc from '../locales/zh/misc'
 
-const currencyMarkers = /\bUSD\b|美元|\$\d/
+const currencyMarkers = /\bCNY\b|人民币|积分|Points?/i
 
-function expectPointsCopy(values: string[], unit: RegExp) {
+function expectDollarCopy(values: string[]) {
   for (const value of values) {
-    expect(value).toMatch(unit)
+    expect(value).toMatch(/\$|USD|美元/)
     expect(value).not.toMatch(currencyMarkers)
   }
 }
 
 describe('billing unit locale contract', () => {
-  it('labels user balances and quota limits as Points', () => {
-    expectPointsCopy([
+  it('labels user balances and quota limits in dollars', () => {
+    expectDollarCopy([
       enDashboard.keys.workspaceRateHeading,
       enDashboard.keys.rateLimit5h,
       enDashboard.keys.rateLimit1d,
@@ -49,9 +49,9 @@ describe('billing unit locale contract', () => {
       enAdminResources.promo.bonusAmount,
       enMisc.payment.admin.insufficientBalance,
       enChat.chat.receipt.lowBalance,
-    ], /Points?/)
+    ])
 
-    expectPointsCopy([
+    expectDollarCopy([
       zhDashboard.keys.workspaceRateHeading,
       zhDashboard.keys.rateLimit5h,
       zhDashboard.keys.rateLimit1d,
@@ -71,24 +71,24 @@ describe('billing unit locale contract', () => {
       zhAdminResources.promo.bonusAmount,
       zhMisc.payment.admin.insufficientBalance,
       zhChat.chat.receipt.lowBalance,
-    ], /积分/)
+    ])
   })
 
-  it('describes CNY recharge as Points granted', () => {
+  it('describes CNY recharge as USD granted', () => {
     const enPayment = enAdminSettings.settings.payment
     const zhPayment = zhAdminSettings.settings.payment
 
-    expect(enPayment.balanceRechargeMultiplierHint).toContain('Points')
-    expect(enPayment.balanceRechargePreview).toBe('Preview: 1 CNY = {credit} Points')
-    expect(zhPayment.balanceRechargeMultiplierHint).toContain('积分')
-    expect(zhPayment.balanceRechargePreview).toBe('预览：1 CNY = {credit} 积分')
+    expect(enPayment.balanceRechargeMultiplierHint).toContain('USD')
+    expect(enPayment.balanceRechargePreview).toBe('Preview: ¥1 = ${credit}')
+    expect(zhPayment.balanceRechargeMultiplierHint).toContain('美元')
+    expect(zhPayment.balanceRechargePreview).toBe('预览：¥1 = ${credit}')
   })
 
-  it('describes group billing as USD source price converted to Points', () => {
-    expect(enAdminOverview.groups.form.rateMultiplierHint).toContain('5 USD/MTok × 70 = 350 Points/MTok')
-    expect(zhAdminOverview.groups.form.rateMultiplierHint).toContain('5 USD/MTok × 70 = 350 积分/MTok')
-    expect(enMisc.onboarding.admin.groupMultiplier.description).not.toContain('charged $')
-    expect(zhMisc.onboarding.admin.groupMultiplier.description).not.toContain('扣除 $')
+  it('describes group billing as direct USD pricing', () => {
+    expect(enAdminOverview.groups.form.rateMultiplierHint).toContain('5 USD/MTok × 1 = 5')
+    expect(zhAdminOverview.groups.form.rateMultiplierHint).toContain('5 USD/MTok × 1 = 5')
+    expect(enMisc.onboarding.admin.groupMultiplier.description).toContain('USD charged')
+    expect(zhMisc.onboarding.admin.groupMultiplier.description).toContain('用户实扣美元')
   })
 
   it('does not describe promotional balance as dollars', () => {
@@ -96,14 +96,11 @@ describe('billing unit locale contract', () => {
     expect(zhCommon.auth.promoCodeValid).not.toMatch(currencyMarkers)
   })
 
-  it('explains that public catalog prices are converted from Points to CNY', () => {
-    expect(enLanding.modelCatalog.publicPriceNote).toContain('¥1 = 10 Points')
-    expect(enLanding.modelCatalog.publicPriceNote).toContain('converted to CNY')
-    expect(enLanding.modelCatalog.pricing.dialogDescription).toContain('¥1 = 10 Points')
-
-    expect(zhLanding.modelCatalog.publicPriceNote).toContain('¥1 = 10 积分')
-    expect(zhLanding.modelCatalog.publicPriceNote).toContain('人民币')
-    expect(zhLanding.modelCatalog.pricing.dialogDescription).toContain('¥1 = 10 积分')
+  it('explains that public catalog prices are shown in USD', () => {
+    expect(enLanding.modelCatalog.publicPriceNote).toContain('shown directly in USD')
+    expect(enLanding.modelCatalog.pricing.dialogDescription).toContain('shown directly in USD')
+    expect(zhLanding.modelCatalog.publicPriceNote).toContain('直接按美元展示')
+    expect(zhLanding.modelCatalog.pricing.dialogDescription).toContain('直接按美元展示')
   })
 
   it('keeps USD where it is the source price, conversion input, or upstream limit', () => {

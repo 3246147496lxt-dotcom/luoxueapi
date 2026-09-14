@@ -74,9 +74,7 @@ func TestRejectPendingMaintenanceOnlyMigrationsBlocksPersistedFreshDatabase(t *t
 	defer func() { _ = db.Close() }()
 
 	expectSchemaMigrationsTable(t, mock, true)
-	mock.ExpectQuery(regexp.QuoteMeta(maintenanceMigrationAppliedQueryPattern)).
-		WithArgs(subscriptionAnchoredMonthlyQuotaMigration).
-		WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(false))
+	expectMaintenanceMigrationChecks(mock, false)
 
 	err = rejectPendingMaintenanceOnlyMigrations(context.Background(), db)
 	require.ErrorContains(t, err, subscriptionAnchoredMonthlyQuotaMigration)
@@ -90,9 +88,7 @@ func TestRejectPendingMaintenanceOnlyMigrationsBlocksLegacyDatabase(t *testing.T
 	defer func() { _ = db.Close() }()
 
 	expectSchemaMigrationsTable(t, mock, true)
-	mock.ExpectQuery(regexp.QuoteMeta(maintenanceMigrationAppliedQueryPattern)).
-		WithArgs(subscriptionAnchoredMonthlyQuotaMigration).
-		WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(false))
+	expectMaintenanceMigrationChecks(mock, false)
 
 	err = rejectPendingMaintenanceOnlyMigrations(context.Background(), db)
 	require.ErrorContains(t, err, subscriptionAnchoredMonthlyQuotaMigration)
@@ -106,9 +102,7 @@ func TestRejectPendingMaintenanceOnlyMigrationsAllowsAppliedLegacyDatabase(t *te
 	defer func() { _ = db.Close() }()
 
 	expectSchemaMigrationsTable(t, mock, true)
-	mock.ExpectQuery(regexp.QuoteMeta(maintenanceMigrationAppliedQueryPattern)).
-		WithArgs(subscriptionAnchoredMonthlyQuotaMigration).
-		WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(true))
+	expectMaintenanceMigrationChecks(mock, true)
 
 	require.NoError(t, rejectPendingMaintenanceOnlyMigrations(context.Background(), db))
 	require.NoError(t, mock.ExpectationsWereMet())
@@ -120,9 +114,12 @@ func TestRejectPendingMaintenanceOnlyMigrationsFailsClosedWhenAppliedStateIsUnav
 	defer func() { _ = db.Close() }()
 
 	expectSchemaMigrationsTable(t, mock, true)
-	mock.ExpectQuery(regexp.QuoteMeta(maintenanceMigrationAppliedQueryPattern)).
-		WithArgs(subscriptionAnchoredMonthlyQuotaMigration).
-		WillReturnError(context.DeadlineExceeded)
+	for _, name := range maintenanceOnlyMigrations {
+		mock.ExpectQuery(regexp.QuoteMeta(maintenanceMigrationAppliedQueryPattern)).
+			WithArgs(name).
+			WillReturnError(context.DeadlineExceeded)
+		break
+	}
 
 	err = rejectPendingMaintenanceOnlyMigrations(context.Background(), db)
 	require.ErrorContains(t, err, "check maintenance-only migration")
@@ -138,9 +135,7 @@ func TestOrdinaryStartupChecksMaintenanceGateOnLockedRunnerSessionBeforeSchemaWr
 		WithArgs(migrationsAdvisoryLockID).
 		WillReturnRows(sqlmock.NewRows([]string{"pg_try_advisory_lock"}).AddRow(true))
 	expectSchemaMigrationsTable(t, mock, true)
-	mock.ExpectQuery(regexp.QuoteMeta(maintenanceMigrationAppliedQueryPattern)).
-		WithArgs(subscriptionAnchoredMonthlyQuotaMigration).
-		WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(false))
+	expectMaintenanceMigrationChecks(mock, false)
 	expectMigrationsUnlock(mock, true)
 
 	err = applyMigrationsFSWithPolicy(
@@ -210,4 +205,16 @@ func expectSchemaMigrationsTable(t *testing.T, mock sqlmock.Sqlmock, exists bool
 	mock.ExpectQuery(regexp.QuoteMeta(tableExistsQueryPattern)).
 		WithArgs("schema_migrations").
 		WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(exists))
+}
+
+func expectMaintenanceMigrationChecks(mock sqlmock.Sqlmock, applied bool) {
+	for _, name := range maintenanceOnlyMigrations {
+		mock.ExpectQuery(regexp.QuoteMeta(maintenanceMigrationAppliedQueryPattern)).
+			WithArgs(name).
+			WillReturnRows(sqlmock.NewRows([]string{"exists"}).AddRow(applied))
+		if !applied {
+			// The runner stops at the first pending maintenance migration.
+			break
+		}
+	}
 }

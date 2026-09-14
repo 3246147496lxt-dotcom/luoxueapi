@@ -4,7 +4,7 @@ import CatalogPriceAmount from '../CatalogPriceAmount.vue'
 import CreditAmount from '../CreditAmount.vue'
 
 describe('CatalogPriceAmount', () => {
-  it('converts effective CREDIT prices to CNY at 10 Points per yuan when requested', () => {
+  it('renders effective wallet prices directly in USD', () => {
     const wrapper = mount(CatalogPriceAmount, {
       props: {
         value: 0.000021,
@@ -14,10 +14,9 @@ describe('CatalogPriceAmount', () => {
       },
     })
 
-    expect(wrapper.get('[data-testid="catalog-price-cny"]').text()).toBe('¥2.1')
-    expect(wrapper.get('[data-testid="catalog-price-cny"]').attributes('aria-label')).toBe('CNY 2.1')
-    expect(wrapper.findComponent(CreditAmount).exists()).toBe(false)
-    expect(wrapper.find('[data-testid="points-icon"]').exists()).toBe(false)
+    expect(wrapper.text()).toBe('$21')
+    expect(wrapper.findComponent(CreditAmount).exists()).toBe(true)
+    expect(wrapper.find('[data-testid="credit-amount-symbol"]').exists()).toBe(true)
   })
 
   it('preserves zero and fractional yuan values without padding or rounding them away', () => {
@@ -28,8 +27,8 @@ describe('CatalogPriceAmount', () => {
       props: { value: 0.005, currency: 'CREDIT', creditDisplay: 'cny' },
     })
 
-    expect(zero.text()).toBe('¥0')
-    expect(fractional.text()).toBe('¥0.0005')
+    expect(zero.text()).toBe('$0')
+    expect(fractional.text()).toBe('$0.005')
   })
 
   it.each([
@@ -48,17 +47,17 @@ describe('CatalogPriceAmount', () => {
     })
 
     expect(wrapper.text()).toBe(expected)
-    expect(wrapper.find('[data-testid="catalog-price-cny"]').exists()).toBe(false)
+    expect(wrapper.findComponent(CreditAmount).exists()).toBe(false)
   })
 
-  it('keeps CREDIT prices as Points by default for non-catalog consumers', () => {
+  it('keeps wallet prices as dollars by default for non-catalog consumers', () => {
     const wrapper = mount(CatalogPriceAmount, {
       props: { value: 350, currency: 'CREDIT' },
     })
 
     expect(wrapper.getComponent(CreditAmount).props('value')).toBe('350')
-    expect(wrapper.find('[data-testid="points-icon"]').exists()).toBe(true)
-    expect(wrapper.text()).not.toMatch(/[$¥]/)
+    expect(wrapper.find('[data-testid="credit-amount-symbol"]').exists()).toBe(true)
+    expect(wrapper.text()).toContain('$350')
   })
 
   it('keeps an explicitly monetary USD price in dollars even in CNY display mode', () => {
@@ -72,6 +71,6 @@ describe('CatalogPriceAmount', () => {
     })
 
     expect(wrapper.text()).toBe('$5')
-    expect(wrapper.findComponent(CreditAmount).exists()).toBe(false)
+    expect(wrapper.findComponent(CreditAmount).exists()).toBe(true)
   })
 })

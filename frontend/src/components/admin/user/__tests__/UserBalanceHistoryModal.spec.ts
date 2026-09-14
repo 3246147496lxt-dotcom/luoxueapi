@@ -97,7 +97,7 @@ describe('UserBalanceHistoryModal', () => {
     })
   })
 
-  it('renders balances as points while leaving concurrency as a count', async () => {
+  it('renders balances as USD while leaving concurrency as a count', async () => {
     const wrapper = mount(UserBalanceHistoryModal, {
       props: { show: false, user, hideActions: true },
       global: {
@@ -124,12 +124,12 @@ describe('UserBalanceHistoryModal', () => {
       '+12.50',
       '-2.00'
     ])
-    expect(wrapper.findAll('[data-testid="points-icon"]')).toHaveLength(6)
+    expect(wrapper.findAll('[data-testid="points-icon"]')).toHaveLength(0)
     expect(wrapper.text()).toContain('+3')
-    expect(wrapper.text()).not.toContain('$42.50')
-    expect(wrapper.text()).not.toContain('$100.00')
-    expect(wrapper.text()).not.toContain('$12.50')
-    expect(wrapper.text()).not.toContain('$2.00')
+    expect(wrapper.text()).toContain('$42.50')
+    expect(wrapper.text()).toContain('$100.00')
+    expect(wrapper.text()).toContain('$+12.50')
+    expect(wrapper.text()).toContain('$-2.00')
   })
 
   it('loads real user subscriptions instead of subscription redeem-code history', async () => {

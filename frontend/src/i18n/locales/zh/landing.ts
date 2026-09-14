@@ -156,7 +156,7 @@ export default {
     description: '无需登录即可快速比较已上架模型的输入、输出和缓存价格。',
     workspaceTitle: '模型中心',
     workspaceDescription: '快速比较当前可用模型的输入、输出和缓存价格。',
-    publicPriceNote: '公开标准价按 ¥1 = 10 积分换算为人民币展示；实际扣费以积分和调用记录为准。',
+    publicPriceNote: '公开标准价直接按美元展示；实际扣费以美元余额和调用记录为准。',
     modelCount: '{count} 个模型',
     pricingUpdatedAt: '价格更新于 {time}',
     searchLabel: '搜索模型',
@@ -268,7 +268,7 @@ export default {
       details: '价格详情',
       shortDetails: '详情',
       dialogTitle: '公开价格详情',
-      dialogDescription: '积分价格已按 ¥1 = 10 积分换算为人民币展示。Token 模型按每百万 Token 展示；0 表示免费，“—”表示暂未提供该项价格。',
+      dialogDescription: '价格直接按美元展示。Token 模型按每百万 Token 展示；0 表示免费，“—”表示暂未提供该项价格。',
       billingMode: '计费方式',
       usageBased: '按量计费',
       billingModes: {

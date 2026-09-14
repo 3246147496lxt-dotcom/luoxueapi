@@ -125,11 +125,11 @@
       <div>
         <label class="input-label">{{ t('payment.admin.refundAmount') }}</label>
         <div class="relative">
-          <PointsIcon
+          <span
             v-if="isBalanceOrder"
-            size="sm"
-            class="absolute left-3 top-1/2 -translate-y-1/2"
-          />
+            class="absolute left-3 top-1/2 -translate-y-1/2 text-sm font-semibold text-gray-500"
+            aria-hidden="true"
+          >$</span>
           <span v-else class="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500">{{ subscriptionAmountSymbol }}</span>
           <input
             v-model.number="form.amount"
@@ -211,7 +211,6 @@ import { reactive, computed, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import CreditAmount from '@/components/common/CreditAmount.vue'
-import PointsIcon from '@/components/icons/PointsIcon.vue'
 import type { PaymentOrder } from '@/types/payment'
 import { formatOrderDateTime } from '@/components/payment/orderUtils'
 import { currencySymbol } from '@/components/payment/currency'

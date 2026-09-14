@@ -755,12 +755,12 @@ export default {
       platformQuota: {
         menuItem: '平台限额',
         title: '平台限额',
-        subtitle: '为用户 {email} 配置各上游平台的日 / 周 / 月积分上限',
+        subtitle: '为用户 {email} 配置各上游平台的日 / 周 / 月美元上限',
         columns: {
           platform: '平台',
-          daily: '日（积分）',
-          weekly: '周（积分）',
-          monthly: '月（积分，30天滚动）',
+          daily: '日（美元）',
+          weekly: '周（美元）',
+          monthly: '月（美元，30天滚动）',
           usage: '当前用量',
         },
         placeholder: '不限制',
@@ -975,7 +975,7 @@ export default {
         descriptionLabel: '描述',
         descriptionPlaceholder: '请输入描述（可选）',
         rateMultiplierLabel: '费率倍数',
-        rateMultiplierHint: '用户实扣积分 = 渠道 USD 基础价 × 分组倍率；例如 5 USD/MTok × 70 = 350 积分/MTok',
+        rateMultiplierHint: '用户实扣美元 = 渠道 USD 基础价 × 分组倍率；例如 5 USD/MTok × 1 = 5 USD/MTok',
         rpmLimit: '每分钟请求数 (RPM)',
         rpmLimitPlaceholder: '0 表示不限制',
         rpmLimitHint: '每用户在本分组每分钟最大请求数，0 = 不限制；一旦设置即接管该用户的限流（覆盖用户级 rpm_limit）',
@@ -1001,9 +1001,9 @@ export default {
           '开启后，用户在创建 API Key 时将无法看到此分组。只有管理员手动将用户分配到此分组后，用户才能使用。',
         example: '使用场景：',
         exampleContent:
-          '公开分组倍率为 70 时，可以创建倍率为 63 的专属分组，手动分配给九折 VIP 用户。'
+          '公开分组倍率为 1 时，可以创建倍率为 0.9 的专属分组，手动分配给九折 VIP 用户。'
       },
-      rateMultiplierHint: '用户实扣积分 = 渠道 USD 基础价 × 分组倍率；例如 5 USD/MTok × 70 = 350 积分/MTok',
+      rateMultiplierHint: '用户实扣美元 = 渠道 USD 基础价 × 分组倍率；例如 5 USD/MTok × 1 = 5 USD/MTok',
       platforms: {
         all: '全部平台',
         anthropic: 'Anthropic',
@@ -1091,9 +1091,9 @@ export default {
         typeNotEditable: '分组创建后无法修改计费类型。',
         standard: '标准（余额）',
         subscription: '订阅（配额）',
-        dailyLimit: '每日限额（积分）',
-        weeklyLimit: '每周限额（积分）',
-        monthlyLimit: '每月限额（积分）',
+        dailyLimit: '每日限额（美元）',
+        weeklyLimit: '每周限额（美元）',
+        monthlyLimit: '每月限额（美元）',
         defaultValidityDays: '默认有效期（天）',
         validityHint: '分配给用户时订阅的有效天数',
         noLimit: '无限制'

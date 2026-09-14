@@ -374,7 +374,6 @@
                       :value="row.value"
                       :scale="row.scale"
                       :currency="model.pricing.currency"
-                      credit-display="cny"
                     />
                   </strong>
                 </div>
@@ -450,7 +449,6 @@
                 :value="row.value"
                 :scale="row.scale"
                 :currency="selectedModel.pricing.currency"
-                credit-display="cny"
               />
               <small>{{ row.unit }}</small>
             </dd>
@@ -483,7 +481,6 @@
                     :value="value"
                     :scale="part.scale"
                     :currency="selectedModel.pricing.currency"
-                    credit-display="cny"
                     icon-size="xs"
                   />
                 </template>

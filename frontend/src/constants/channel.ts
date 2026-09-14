@@ -25,11 +25,9 @@ export type BillingModelSource =
 
 /**
  * Baseline multiplier used when seeding a channel price from an official
- * provider quote.  The configured channel price is the provider price × 70
- * (7 CNY per USD × 10 points per CNY).  This is deliberately separate from a
- * group's runtime `rate_multiplier`, which is applied later during billing.
+ * provider quote. Channel prices and wallet balances use USD directly.
  */
-export const CHANNEL_PRICING_MULTIPLIER = 70
+export const CHANNEL_PRICING_MULTIPLIER = 1
 
-/** Public catalog display conversion: one CNY is represented by ten points. */
-export const POINTS_PER_CNY = 10
+/** Legacy export retained for API compatibility; USD wallet values need no CNY conversion. */
+export const POINTS_PER_CNY = 1

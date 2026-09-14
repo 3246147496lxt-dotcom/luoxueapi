@@ -264,7 +264,7 @@ describe('ModelCatalogView', () => {
     expect(document.head.querySelector('link[rel="canonical"]')).toBeNull()
   })
 
-  it('converts effective public prices to CNY at 10 Points per yuan and preserves zero', async () => {
+  it('renders effective public prices directly in USD and preserves zero', async () => {
     testState.getCatalog.mockResolvedValue(catalogResponse([
       model(),
       model({
@@ -289,15 +289,15 @@ describe('ModelCatalogView', () => {
     expect(wrapper.findAll('.catalog-card')).toHaveLength(2)
     expect(wrapper.text()).toContain('GPT-4o')
     expect(wrapper.findAllComponents(CatalogPriceAmount).map((amount) => amount.text())).toEqual([
-      '¥0',
-      '¥1',
-      '¥0.1',
-      '¥0.3',
-      '¥1.5',
-      '¥0.1'
+      '$0',
+      '$10',
+      '$1',
+      '$3',
+      '$15',
+      '$1'
     ])
-    expect(wrapper.findAllComponents(CreditAmount)).toHaveLength(0)
-    expect(wrapper.findAll('[data-testid="points-icon"]')).toHaveLength(0)
+    expect(wrapper.findAllComponents(CreditAmount)).toHaveLength(6)
+    expect(wrapper.findAll('[data-testid="credit-amount-symbol"]')).toHaveLength(6)
     expect(wrapper.findAll('.catalog-card .catalog-facts')).toHaveLength(0)
   })
 
@@ -315,7 +315,7 @@ describe('ModelCatalogView', () => {
 
     expect(wrapper.text()).toContain('$0')
     expect(wrapper.text()).toContain('$10')
-    expect(wrapper.findComponent(CreditAmount).exists()).toBe(false)
+    expect(wrapper.findComponent(CreditAmount).exists()).toBe(true)
   })
 
   it('uses featured only for ordering and keeps the card focused on prices', async () => {
@@ -348,7 +348,7 @@ describe('ModelCatalogView', () => {
     expect(wrapper.text()).toContain('按量计费')
   })
 
-  it('converts per-request and per-image CREDIT prices without changing their units', async () => {
+  it('renders per-request and per-image prices in USD', async () => {
     testState.getCatalog.mockResolvedValue(catalogResponse([
       model({
         slug: 'request-model',
@@ -381,13 +381,13 @@ describe('ModelCatalogView', () => {
     const { wrapper } = await mountCatalog()
     const cards = wrapper.findAll('.catalog-card')
 
-    expect(cards[0].get('[data-testid="catalog-price-cny"]').text()).toBe('¥2.5')
+    expect(cards[0].text()).toContain('$25')
     expect(cards[0].text()).toContain('单次请求')
     expect(cards[0].text()).not.toContain('/ 次')
-    expect(cards[1].get('[data-testid="catalog-price-cny"]').text()).toBe('¥1.25')
+    expect(cards[1].text()).toContain('$12.5')
     expect(cards[1].text()).toContain('单张图片')
     expect(cards[1].text()).not.toContain('/ 张')
-    expect(wrapper.find('[data-testid="points-icon"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="credit-amount-symbol"]').exists()).toBe(true)
   })
 
   it('filters by provider and writes filter state into the URL', async () => {
@@ -445,19 +445,19 @@ describe('ModelCatalogView', () => {
     const dialog = wrapper.get('dialog')
     expect(dialog.attributes('open')).toBeDefined()
     expect(dialog.text()).toContain('缓存读取')
-    expect(dialog.find('[data-testid="points-icon"]').exists()).toBe(false)
-    expect(dialog.findAll('[data-testid="catalog-price-cny"]').map((amount) => amount.text())).toEqual([
-      '¥0',
-      '¥1',
-      '¥0.4',
-      '¥0.1',
-      '¥0.8',
-      '¥2',
-      '¥1',
-      '¥3',
-      '¥1.2',
-      '¥1.6',
-      '¥0.2',
+    expect(dialog.find('[data-testid="credit-amount-symbol"]').exists()).toBe(true)
+    expect(dialog.findAll('[data-testid="credit-amount-value"]').map((amount) => `$${amount.text()}`)).toEqual([
+      '$0',
+      '$10',
+      '$4',
+      '$1',
+      '$8',
+      '$20',
+      '$10',
+      '$30',
+      '$12',
+      '$16',
+      '$2',
     ])
     expect(dialog.text()).toContain('缓存写入（1 小时）')
     expect(dialog.text()).toContain('Priority 输入')

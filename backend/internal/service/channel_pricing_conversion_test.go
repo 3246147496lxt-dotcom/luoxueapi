@@ -13,8 +13,8 @@ func TestOfficialPriceToChannelUsesBaselineMultiplier(t *testing.T) {
 		official float64
 		want     float64
 	}{
-		{name: "input quote", official: 5e-6, want: 0.00035},
-		{name: "output quote", official: 30e-6, want: 0.0021},
+		{name: "input quote", official: 5e-6, want: 5e-6},
+		{name: "output quote", official: 30e-6, want: 30e-6},
 		{name: "zero quote", official: 0, want: 0},
 	}
 
@@ -23,7 +23,7 @@ func TestOfficialPriceToChannelUsesBaselineMultiplier(t *testing.T) {
 			require.InDelta(t, tt.want, OfficialPriceToChannel(tt.official), 1e-15)
 		})
 	}
-	require.Equal(t, 70.0, ChannelPricingBaselineMultiplier)
+	require.Equal(t, 1.0, ChannelPricingBaselineMultiplier)
 }
 
 func TestOfficialPriceToChannelLeavesInvalidValuesUnchanged(t *testing.T) {

@@ -47,12 +47,12 @@ func TestUsageUnrestrictedIncludesWeeklyWindowStart(t *testing.T) {
 		} `json:"subscription"`
 	}
 	require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &response))
-	require.Equal(t, "CREDIT", response.Unit)
+	require.Equal(t, "USD", response.Unit)
 	require.NotNil(t, response.Subscription.WeeklyWindowStart)
 	require.True(t, weeklyWindowStart.Equal(*response.Subscription.WeeklyWindowStart))
 }
 
-func TestUsageQuotaLimitedReportsCreditUnit(t *testing.T) {
+func TestUsageQuotaLimitedReportsUSDUnit(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	recorder := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(recorder)
@@ -83,8 +83,8 @@ func TestUsageQuotaLimitedReportsCreditUnit(t *testing.T) {
 		} `json:"quota"`
 	}
 	require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &response))
-	require.Equal(t, "CREDIT", response.Unit)
-	require.Equal(t, "CREDIT", response.Quota.Unit)
+	require.Equal(t, "USD", response.Unit)
+	require.Equal(t, "USD", response.Quota.Unit)
 	require.Equal(t, 500.0, response.Quota.Limit)
 	require.Equal(t, 125.0, response.Quota.Used)
 	require.Equal(t, 375.0, response.Quota.Remaining)
@@ -104,7 +104,7 @@ func (s *gatewayUsageUserRepoStub) GetUserAvatar(context.Context, int64) (*servi
 	return nil, nil
 }
 
-func TestUsageUnrestrictedWalletReportsCreditUnit(t *testing.T) {
+func TestUsageUnrestrictedWalletReportsUSDUnit(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	recorder := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(recorder)
@@ -133,7 +133,7 @@ func TestUsageUnrestrictedWalletReportsCreditUnit(t *testing.T) {
 		Remaining float64 `json:"remaining"`
 	}
 	require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &response))
-	require.Equal(t, "CREDIT", response.Unit)
+	require.Equal(t, "USD", response.Unit)
 	require.Equal(t, 123.45, response.Balance)
 	require.Equal(t, 123.45, response.Remaining)
 }

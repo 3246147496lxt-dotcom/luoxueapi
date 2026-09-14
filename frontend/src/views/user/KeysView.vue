@@ -318,7 +318,7 @@
           <div class="space-y-4">
             <div>
               <div class="relative">
-                <PointsIcon class="absolute left-3 top-1/2 -translate-y-1/2" size="sm" />
+                <span class="absolute left-3 top-1/2 -translate-y-1/2 text-sm font-semibold text-gray-500" aria-hidden="true">$</span>
                 <input
                   v-model.number="formData.quota"
                   type="number"
@@ -388,7 +388,7 @@
             <div>
               <label class="input-label">{{ t('keys.rateLimit5h') }}</label>
               <div class="relative">
-                <PointsIcon class="absolute left-3 top-1/2 -translate-y-1/2" size="sm" />
+                <span class="absolute left-3 top-1/2 -translate-y-1/2 text-sm font-semibold text-gray-500" aria-hidden="true">$</span>
                 <input
                   v-model.number="formData.rate_limit_5h"
                   type="number"
@@ -438,7 +438,7 @@
             <div>
               <label class="input-label">{{ t('keys.rateLimit1d') }}</label>
               <div class="relative">
-                <PointsIcon class="absolute left-3 top-1/2 -translate-y-1/2" size="sm" />
+                <span class="absolute left-3 top-1/2 -translate-y-1/2 text-sm font-semibold text-gray-500" aria-hidden="true">$</span>
                 <input
                   v-model.number="formData.rate_limit_1d"
                   type="number"
@@ -488,7 +488,7 @@
             <div>
               <label class="input-label">{{ t('keys.rateLimit7d') }}</label>
               <div class="relative">
-                <PointsIcon class="absolute left-3 top-1/2 -translate-y-1/2" size="sm" />
+                <span class="absolute left-3 top-1/2 -translate-y-1/2 text-sm font-semibold text-gray-500" aria-hidden="true">$</span>
                 <input
                   v-model.number="formData.rate_limit_7d"
                   type="number"
@@ -848,7 +848,6 @@ import GroupOptionItem from '@/components/common/GroupOptionItem.vue'
 import Select from '@/components/common/Select.vue'
 import Icon from '@/components/icons/Icon.vue'
 import KeysLucideIcon from '@/components/keys/KeysLucideIcon.vue'
-import PointsIcon from '@/components/icons/PointsIcon.vue'
 import ApiKeySummaryCard from '@/components/keys/ApiKeySummaryCard.vue'
 import ApiKeyWorkspaceList from '@/components/keys/ApiKeyWorkspaceList.vue'
 import UseKeyModal from '@/components/keys/UseKeyModal.vue'

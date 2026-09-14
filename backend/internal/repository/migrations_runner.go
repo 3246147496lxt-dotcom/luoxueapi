@@ -92,10 +92,15 @@ const usersEmailNormalizedIndex = "idx_users_email_normalized"
 const upstreamModelMismatchIndexMigration = "235_add_usage_log_upstream_model_mismatch_index_notx.sql"
 const upstreamModelMismatchIndex = "idx_usage_logs_upstream_model_mismatch_created_at"
 const subscriptionAnchoredMonthlyQuotaMigration = "195_subscription_anchored_monthly_quota.sql"
+
+// usdWalletCutoverMigration changes persisted wallet units and must only run
+// during the explicitly verified maintenance window.
+const usdWalletCutoverMigration = "251_usd_wallet_cutover.sql"
 const schemaMigrationOriginStateKey = "schema_origin"
 
 var maintenanceOnlyMigrations = []string{
 	subscriptionAnchoredMonthlyQuotaMigration,
+	usdWalletCutoverMigration,
 }
 
 type schemaMigrationOrigin string

@@ -119,13 +119,13 @@ class CandidateDeliveryContractTest(unittest.TestCase):
         second = build_manifest(ROOT)
         self.assertEqual(first, second)
         self.assertEqual(first["contract"], "sub2api-migration-manifest/v1")
-        self.assertEqual(len(first["migrations"]), 269)
+        self.assertEqual(len(first["migrations"]), 271)
         self.assertEqual(
             first["set_sha256"],
-            "49acdb5ff514eb8729bf6d84dd4c3e7d9d03400521b2361413a6ff12e1597e6d",
+            "2af5d3ecd5ca87dad5e69c520d94f16a50a8057c568c9b309e7131be75e9414a",
         )
         self.assertEqual(
-            first["migrations"][-22:],
+            first["migrations"][-25:],
             [
                 {
                     "filename": "201_library_files.sql",
@@ -217,7 +217,15 @@ class CandidateDeliveryContractTest(unittest.TestCase):
                 },
                 {
                     "filename": "249_zhipu_provider.sql",
-                    "sha256": "3091d6c40ceaa24be39f94c81235d743e751727780f0cd4c8b0fb818860182e4",
+                    "sha256": "9cde800b04d0786888b2733b55ea805f5e3d38ccbe86445d2dd731b9dad6ab7b",
+                },
+                {
+                    "filename": "250_kimi_provider.sql",
+                    "sha256": "f941bb6981ad73a2a7b3c678ab9fda96e23ce57850018bdba2e5af8e84157c0c",
+                },
+                {
+                    "filename": "251_usd_wallet_cutover.sql",
+                    "sha256": "79f0bd4b3c35c15b6d9e7f41f016ab0bd4fad4e333d65251e3b9db3be18a9b64",
                 },
             ],
         )
@@ -259,7 +267,7 @@ class CandidateDeliveryContractTest(unittest.TestCase):
         compose = CANDIDATE_COMPOSE.read_text(encoding="utf-8")
         self.assertIn("@sha256:", script)
         self.assertIn("EXPECTED_OLD_MIGRATIONS:-246", script)
-        self.assertIn("EXPECTED_CANDIDATE_MIGRATIONS:-269", script)
+        self.assertIn("EXPECTED_CANDIDATE_MIGRATIONS:-271", script)
         self.assertIn("--migrate-only", script)
         self.assertIn("for replay in first second", script)
         self.assertIn("--volumes --remove-orphans", script)

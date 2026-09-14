@@ -142,7 +142,7 @@
                       @select="selectedMethod = $event"
                     />
 
-                    <p v-if="balanceRechargeMultiplier !== 1" class="text-xs text-gray-500 dark:text-gray-400">
+                    <p class="text-xs text-gray-500 dark:text-gray-400">
                       {{ t('payment.rechargeRatePreview', { credit: balanceRechargeMultiplier.toFixed(2) }) }}
                     </p>
 

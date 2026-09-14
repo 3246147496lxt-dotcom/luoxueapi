@@ -583,7 +583,7 @@
                   </div>
                   <div v-else class="space-y-2">
                     <!-- Account-stat costs are provider USD; channel user
-                         pricing's fixed ×70 baseline does not apply here. -->
+                         channel pricing baseline does not apply here. -->
                     <PricingEntryCard
                       v-for="(entry, pIdx) in rule.pricing"
                       :key="pIdx"
@@ -901,7 +901,7 @@ async function syncLatestModels(sectionIdx: number) {
     }
     // Keep models with different official quotes in separate rows.  The sync
     // endpoint returns the unmodified provider quote per model; the helper
-    // applies the channel ×70 baseline and only groups genuinely equal rows.
+                    // applies the channel ×1 baseline and only groups genuinely equal rows.
     // Models without a usable quote remain in an empty-price row for manual
     // entry instead of accidentally inheriting another model's price.
     const syncedEntries = syncedModelsToPricingEntries(newModels, result.pricing)

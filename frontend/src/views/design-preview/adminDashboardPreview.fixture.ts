@@ -71,13 +71,13 @@ export const previewPerformance = [
   {
     label: '今日 Token',
     value: '38.42M',
-    meta: '实际扣费 ¥1,286.40',
+    meta: '实际扣费 $1,286.40',
     icon: 'coins'
   },
   {
     label: '累计 Token',
     value: '6.81B',
-    meta: '标准计费 ¥326,840',
+    meta: '标准计费 $326,840',
     icon: 'database'
   },
   {
@@ -108,7 +108,7 @@ export const previewUsers = [
     initials: '北',
     model: 'Claude 4 Sonnet',
     tokens: '5.82M',
-    cost: '¥194.62',
+    cost: '$194.62',
     requests: '28,460',
     activity: [24, 35, 30, 48, 43, 64, 72]
   },
@@ -118,7 +118,7 @@ export const previewUsers = [
     initials: 'A',
     model: 'Gemini 2.5 Pro',
     tokens: '4.97M',
-    cost: '¥168.34',
+    cost: '$168.34',
     requests: '21,905',
     activity: [18, 28, 38, 34, 52, 58, 66]
   },
@@ -128,7 +128,7 @@ export const previewUsers = [
     initials: '林',
     model: 'GPT-5',
     tokens: '4.16M',
-    cost: '¥141.08',
+    cost: '$141.08',
     requests: '19,284',
     activity: [32, 27, 36, 49, 45, 56, 60]
   },
@@ -138,7 +138,7 @@ export const previewUsers = [
     initials: 'S',
     model: 'Claude 4 Sonnet',
     tokens: '3.62M',
-    cost: '¥122.70',
+    cost: '$122.70',
     requests: '16,872',
     activity: [20, 31, 26, 42, 40, 51, 54]
   }

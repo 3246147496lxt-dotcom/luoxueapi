@@ -24,8 +24,8 @@ const (
 	ModelCatalogStatusPublished = domain.ModelCatalogStatusPublished
 	ModelCatalogStatusArchived  = domain.ModelCatalogStatusArchived
 
-	modelCatalogSnapshotTTL      = 30 * time.Second
-	catalogPricingCurrencyCredit = "CREDIT"
+	modelCatalogSnapshotTTL   = 30 * time.Second
+	catalogPricingCurrencyUSD = "USD"
 )
 
 var (
@@ -1199,7 +1199,7 @@ func catalogPricingFromChannel(pricing *ChannelModelPricing, group *Group) *Cata
 		unit = "per_request"
 	}
 	result := &CatalogPricing{
-		Label: "公开标准价", BillingMode: string(mode), Currency: catalogPricingCurrencyCredit, Unit: unit,
+		Label: "公开标准价", BillingMode: string(mode), Currency: catalogPricingCurrencyUSD, Unit: unit,
 		InputPrice:       multipliedPrice(pricing.InputPrice, multiplier),
 		OutputPrice:      multipliedPrice(pricing.OutputPrice, multiplier),
 		CacheWritePrice:  multipliedPrice(pricing.CacheWritePrice, multiplier),

@@ -1,25 +1,15 @@
 <template>
   <CreditAmount
-    v-if="isCredit && hasValue && !displayCreditAsCny"
+    v-if="isUsdWallet && hasValue"
     :value="formattedValue"
     :icon-size="iconSize"
   />
-  <span
-    v-else-if="displayCreditAsCny && hasValue"
-    class="inline-flex min-w-0 items-center whitespace-nowrap tabular-nums"
-    role="group"
-    :aria-label="`CNY ${formattedValue}`"
-    data-testid="catalog-price-cny"
-  >
-    <span aria-hidden="true">¥{{ formattedValue }}</span>
-  </span>
   <span v-else>{{ displayValue }}</span>
 </template>
 
 <script setup lang="ts">
 import { computed } from 'vue'
 import CreditAmount from '@/components/common/CreditAmount.vue'
-import { POINTS_PER_CNY } from '@/constants/channel'
 
 type PointsIconSize = 'xs' | 'sm' | 'md' | 'lg' | 'xl'
 type CreditDisplay = 'points' | 'cny'
@@ -41,9 +31,7 @@ const props = withDefaults(defineProps<{
 
 const normalizedCurrency = computed(() => props.currency.trim().toUpperCase())
 const hasValue = computed(() => typeof props.value === 'number' && Number.isFinite(props.value))
-const isCredit = computed(() => normalizedCurrency.value === 'CREDIT')
-const displayCreditAsCny = computed(() => isCredit.value && props.creditDisplay === 'cny')
-
+const isUsdWallet = computed(() => normalizedCurrency.value === 'USD' || normalizedCurrency.value === 'CREDIT')
 function trimInsignificantZeros(value: number): string {
   const [coefficient, exponent] = value.toPrecision(10).split('e')
   const trimmedCoefficient = coefficient.includes('.')
@@ -55,15 +43,12 @@ function trimInsignificantZeros(value: number): string {
 const formattedValue = computed(() => {
   if (!hasValue.value) return props.emptyText
   const scaledValue = (props.value as number) * props.scale
-  const displayValue = displayCreditAsCny.value
-    ? scaledValue / POINTS_PER_CNY
-    : scaledValue
-  return trimInsignificantZeros(displayValue)
+  return trimInsignificantZeros(scaledValue)
 })
 
 const displayValue = computed(() => {
   if (!hasValue.value) return props.emptyText
-  if (normalizedCurrency.value === 'USD') return `$${formattedValue.value}`
+  if (isUsdWallet.value) return `$${formattedValue.value}`
   if (!normalizedCurrency.value) return formattedValue.value
   return `${normalizedCurrency.value} ${formattedValue.value}`
 })

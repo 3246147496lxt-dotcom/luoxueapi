@@ -70,7 +70,7 @@ describe('PricingEntryCard', () => {
     testState.getModelDefaultPricing.mockReset()
   })
 
-  it('multiplies official default token quotes by 70 when auto-filling a new model', async () => {
+  it('uses the 1x channel multiplier when auto-filling a new model', async () => {
     testState.getModelDefaultPricing.mockResolvedValue({
       found: true,
       input_price: 5e-6,
@@ -79,7 +79,7 @@ describe('PricingEntryCard', () => {
       cache_read_price: 0.5e-6,
       image_input_price: 2e-6,
       image_output_price: 4e-6,
-      channel_pricing_multiplier: 70
+      channel_pricing_multiplier: 1
     })
     const wrapper = mount(PricingEntryCard, {
       props: { entry: makeEntry(), platform: 'openai' },
@@ -101,12 +101,12 @@ describe('PricingEntryCard', () => {
     expect(updates).toHaveLength(2)
     expect(updates[1][0]).toMatchObject({
       models: ['gpt-5.5'],
-      input_price: 350,
-      output_price: 2100,
-      cache_write_price: 437.5,
-      cache_read_price: 35,
-      image_input_price: 140,
-      image_output_price: 280
+      input_price: 5,
+      output_price: 30,
+      cache_write_price: 6.25,
+      cache_read_price: 0.5,
+      image_input_price: 2,
+      image_output_price: 4
     })
   })
 

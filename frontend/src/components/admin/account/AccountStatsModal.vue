@@ -533,9 +533,9 @@ const trendChartData = computed(() => {
         yAxisID: 'yUsd'
       },
       {
-        label: `${t('usage.userBilled')} (${t('dashboard.creditUnit')})`,
+        label: `${t('usage.userBilled')} (USD)`,
         data: stats.value.history.map((h) => h.user_cost),
-        billingUnit: 'CREDIT',
+        billingUnit: 'USD',
         borderColor: '#10b981',
         backgroundColor: 'rgba(16, 185, 129, 0.08)',
         fill: false,
@@ -585,9 +585,6 @@ const lineChartOptions = computed(() => ({
           const value = context.raw
           if (context.dataset.billingUnit === 'USD') {
             return `${label}: $${formatCost(value)}`
-          }
-          if (context.dataset.billingUnit === 'CREDIT') {
-            return `${label}: ${formatCost(value)} ${t('dashboard.creditUnit')}`
           }
           return `${label}: ${formatNumber(value)}`
         }
@@ -647,7 +644,7 @@ const lineChartOptions = computed(() => ({
       },
       title: {
         display: true,
-        text: `${t('usage.userBilled')} (${t('dashboard.creditUnit')})`,
+        text: `${t('usage.userBilled')} (USD)`,
         color: '#10b981',
         font: {
           size: 11

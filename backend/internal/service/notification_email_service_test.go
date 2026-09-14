@@ -66,7 +66,7 @@ func TestNotificationEmailTemplateOverrideAndRestore(t *testing.T) {
 	require.ErrorIs(t, err, ErrSettingNotFound)
 }
 
-func TestNotificationEmailBalanceTemplatesUsePoints(t *testing.T) {
+func TestNotificationEmailBalanceTemplatesUseUSD(t *testing.T) {
 	ctx := context.Background()
 	svc := NewNotificationEmailService(newNotificationEmailMemorySettingRepo(), nil)
 
@@ -81,9 +81,9 @@ func TestNotificationEmailBalanceTemplatesUsePoints(t *testing.T) {
 			require.NotContains(t, template.HTML, "Snow credit")
 			require.NotContains(t, template.HTML, "雪花额度")
 			if locale == "en" {
-				require.Contains(t, template.HTML, "points")
+				require.Contains(t, template.HTML, "USD")
 			} else {
-				require.Contains(t, template.HTML, "积分")
+				require.Contains(t, template.HTML, "美元")
 			}
 			require.NotContains(t, template.HTML, "${{")
 		}

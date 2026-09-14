@@ -174,7 +174,7 @@ export interface SyncPricingModelsResult {
   models: string[]
   /**
    * Official provider quotes keyed by model name.  The sync endpoint keeps
-   * these values in USD per token; the channel editor applies its fixed ×70
+   * these values in USD per token; the channel editor applies its fixed ×1
    * baseline before writing a channel pricing row.  Models without a usable
    * token quote are omitted and remain editable with empty prices.
    */

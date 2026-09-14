@@ -308,10 +308,10 @@
                   >{{ t("admin.settings.balanceNotify.threshold") }}</label
                 >
                 <div class="relative">
-                  <PointsIcon
-                    size="sm"
-                    class="absolute left-3 top-1/2 -translate-y-1/2"
-                  />
+                  <span
+                    class="absolute left-3 top-1/2 -translate-y-1/2 text-sm font-semibold text-gray-500"
+                    aria-hidden="true"
+                  >$</span>
                   <input
                     v-model.number="form.balance_low_notify_threshold"
                     type="number"
@@ -425,7 +425,6 @@
 import { defineComponent } from "vue";
 import EmailTemplateEditor from "@/views/admin/settings/EmailTemplateEditor.vue";
 import Icon from "@/components/icons/Icon.vue";
-import PointsIcon from "@/components/icons/PointsIcon.vue";
 import Toggle from "@/components/common/Toggle.vue";
 import { useSettingsPanelBindings } from "./settingsPanelContext";
 
@@ -434,7 +433,6 @@ export default defineComponent({
   components: {
     EmailTemplateEditor,
     Icon,
-    PointsIcon,
     Toggle,
   },
   props: {
