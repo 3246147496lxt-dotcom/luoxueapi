@@ -152,6 +152,16 @@ export default {
   },
 
   modelCatalog: {
+    table: {
+      priorityBase: 'Priority base', imageTokenBase: 'Image base',
+      variantBaseNote: 'Base token quote; context tier charges apply separately.',
+      basePrice: 'Base price', defaultImage2K: 'Default 2K', officialImageBase: 'Base price (size unspecified)',
+      platform: 'Platform', group: 'Group', multiplier: 'Rate', model: 'Model',
+      paid: 'Price after discount', official: 'Official price', rate: 'Rate',
+      write: 'Write', read: 'Read', clear: 'Clear filters', searchPlaceholder: 'Search model names',
+      noResults: 'Try a different keyword or clear the filters.',
+      scrollLabel: 'Model price comparison, scroll horizontally', appliedRate: 'Group multiplier already applied to this model'
+    },
     navLabel: 'Models',
     nav: {
       pricing: 'Pricing',
@@ -219,6 +229,7 @@ export default {
       clear: 'Clear filters'
     },
     providers: {
+      domestic: 'Chinese models',
       openai: 'OpenAI',
       anthropic: 'Anthropic',
       google: 'Google',

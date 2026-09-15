@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"regexp"
 	"sort"
 	"strings"
@@ -195,20 +196,34 @@ type CatalogMetadata struct {
 	Capabilities    []string `json:"capabilities"`
 }
 
+// PublicCatalogGroup deliberately contains no routing, access, channel, or
+// account configuration. It is serialized only for an already published offer.
+type PublicCatalogGroup struct {
+	ID             int64   `json:"id"`
+	Name           string  `json:"name"`
+	Platform       string  `json:"platform"`
+	RateMultiplier float64 `json:"rate_multiplier"`
+}
+
 type PublicModelCatalogItem struct {
-	Slug            string          `json:"slug"`
-	Model           string          `json:"model"`
-	DisplayName     string          `json:"display_name"`
-	Summary         string          `json:"summary"`
-	Provider        string          `json:"provider"`
-	LogoKey         string          `json:"logo_key"`
-	Category        string          `json:"category"`
-	Tags            []string        `json:"tags"`
-	Capabilities    []string        `json:"capabilities"`
-	ContextWindow   *int64          `json:"context_window"`
-	MaxOutputTokens *int64          `json:"max_output_tokens"`
-	Featured        bool            `json:"featured"`
-	Pricing         *CatalogPricing `json:"pricing"`
+	Slug            string              `json:"slug"`
+	Model           string              `json:"model"`
+	DisplayName     string              `json:"display_name"`
+	Summary         string              `json:"summary"`
+	Provider        string              `json:"provider"`
+	LogoKey         string              `json:"logo_key"`
+	Category        string              `json:"category"`
+	Tags            []string            `json:"tags"`
+	Capabilities    []string            `json:"capabilities"`
+	ContextWindow   *int64              `json:"context_window"`
+	MaxOutputTokens *int64              `json:"max_output_tokens"`
+	Featured        bool                `json:"featured"`
+	Pricing         *CatalogPricing     `json:"pricing"`
+	PublicGroup     *PublicCatalogGroup `json:"public_group"`
+	// RateMultiplier is already applied to Pricing and can differ from the
+	// group's token rate when independent image billing is configured.
+	RateMultiplier  *float64        `json:"rate_multiplier"`
+	OfficialPricing *CatalogPricing `json:"official_pricing"`
 }
 
 type PublicModelCatalogResponse struct {
@@ -218,11 +233,12 @@ type PublicModelCatalogResponse struct {
 }
 
 type modelCatalogResolvedOffer struct {
-	group     *Group
-	channel   *Channel
-	pricing   *ChannelModelPricing
-	public    *CatalogPricing
-	updatedAt time.Time
+	group        *Group
+	channel      *Channel
+	pricing      *ChannelModelPricing
+	public       *CatalogPricing
+	billingModel string
+	updatedAt    time.Time
 }
 
 type modelCatalogSnapshot struct {
@@ -609,7 +625,7 @@ func (s *ModelCatalogService) resolveOfferingFromSources(model *ModelCatalogMode
 			}
 			selected = &modelCatalogResolvedOffer{
 				group: group, channel: channel, pricing: resolvedPricing,
-				public: publicPricing, updatedAt: updatedAt,
+				public: publicPricing, billingModel: billingModel, updatedAt: updatedAt,
 			}
 			break
 		}
@@ -1179,6 +1195,75 @@ func multipliedPrice(value *float64, multiplier float64) *float64 {
 	return &result
 }
 
+func catalogEffectiveRateMultiplier(mode BillingMode, group *Group) float64 {
+	multiplier := group.RateMultiplier
+	if mode == BillingModeImage && group.ImageRateIndependent {
+		multiplier = group.ImageRateMultiplier
+	}
+	if multiplier < 0 {
+		return 0
+	}
+	return multiplier
+}
+
+// catalogOfficialPricing never treats an editable channel quote or a group
+// override as an official price. An exact source miss remains unknown, including
+// when runtime billing can use a model-family or hardcoded fallback instead.
+func (s *ModelCatalogService) catalogOfficialPricing(billingModel string, mode BillingMode) *CatalogPricing {
+	if s.pricingService == nil {
+		return nil
+	}
+	_, exact := s.pricingService.GetExactModelPricing(billingModel)
+	if exact == nil {
+		return nil
+	}
+	if mode == "" {
+		mode = BillingModeToken
+	}
+	present := func(value float64, explicitlySet bool) *float64 {
+		if (!explicitlySet && value == 0) || value < 0 || math.IsNaN(value) || math.IsInf(value, 0) {
+			return nil
+		}
+		return &value
+	}
+	raw := &ChannelModelPricing{BillingMode: mode}
+	if mode == BillingModeToken {
+		raw.InputPrice = present(exact.InputCostPerToken, exact.InputCostPerTokenSet)
+		raw.OutputPrice = present(exact.OutputCostPerToken, exact.OutputCostPerTokenSet)
+		raw.CacheWritePrice = present(exact.CacheCreationInputTokenCost, exact.CacheCreationInputTokenCostSet)
+		raw.CacheReadPrice = present(exact.CacheReadInputTokenCost, exact.CacheReadInputTokenCostSet)
+		raw.ImageInputPrice = present(exact.InputCostPerImageToken, exact.InputCostPerImageTokenSet)
+		raw.ImageOutputPrice = present(exact.OutputCostPerImageToken, exact.OutputCostPerImageTokenSet)
+		if raw.InputPrice == nil && raw.OutputPrice == nil && raw.CacheWritePrice == nil &&
+			raw.CacheReadPrice == nil && raw.ImageInputPrice == nil && raw.ImageOutputPrice == nil {
+			return nil
+		}
+	} else if mode == BillingModeImage || mode == BillingModePerRequest {
+		raw.PerRequestPrice = present(exact.OutputCostPerImage, exact.OutputCostPerImageSet)
+		if raw.PerRequestPrice == nil {
+			return nil
+		}
+	} else {
+		return nil
+	}
+	unitGroup := &Group{RateMultiplier: 1, PeakRateMultiplier: 1}
+	official := catalogPricingFromChannel(raw, unitGroup)
+	official.Label = "官方价格"
+	s.applyCatalogComplexPricing(official, billingModel, raw, nil, unitGroup)
+	// Runtime priority billing may fall back to the regular price or 2x. Those
+	// fallbacks are not explicit official quotes; retain only source fields.
+	if mode == BillingModeToken {
+		official.PriorityInputPrice = present(exact.InputCostPerTokenPriority, false)
+		official.PriorityOutputPrice = present(exact.OutputCostPerTokenPriority, false)
+		official.PriorityCacheWritePrice = present(exact.CacheCreationInputTokenCostPriority, false)
+		official.PriorityCacheReadPrice = present(exact.CacheReadInputTokenCostPriority, false)
+	}
+	// output_cost_per_image is a single source quote. Runtime image-size
+	// multipliers and group tier overrides are not official source data, so do
+	// not synthesize 1K/2K/4K prices (or replace an explicit zero with a fallback).
+	return official
+}
+
 func catalogPricingFromChannel(pricing *ChannelModelPricing, group *Group) *CatalogPricing {
 	if pricing == nil || group == nil {
 		return nil
@@ -1187,13 +1272,7 @@ func catalogPricingFromChannel(pricing *ChannelModelPricing, group *Group) *Cata
 	if mode == "" {
 		mode = BillingModeToken
 	}
-	multiplier := group.RateMultiplier
-	if mode == BillingModeImage && group.ImageRateIndependent {
-		multiplier = group.ImageRateMultiplier
-	}
-	if multiplier < 0 {
-		multiplier = 0
-	}
+	multiplier := catalogEffectiveRateMultiplier(mode, group)
 	unit := "per_token"
 	if mode == BillingModePerRequest || mode == BillingModeImage {
 		unit = "per_request"
@@ -1539,12 +1618,19 @@ func (s *ModelCatalogService) buildPublicSnapshot(ctx context.Context, locale st
 			}
 		}
 		displayName, summary := localizedCatalogCopy(model, locale)
+		rateMultiplier := catalogEffectiveRateMultiplier(offer.pricing.BillingMode, group)
 		result.Items = append(result.Items, PublicModelCatalogItem{
 			Slug: model.Slug, Model: model.Model, DisplayName: displayName, Summary: summary,
 			Provider: provider, LogoKey: logoKey, Category: category,
 			Tags: append([]string(nil), model.Tags...), Capabilities: capabilities,
 			ContextWindow: contextWindow, MaxOutputTokens: maxOutputTokens,
 			Featured: model.Featured, Pricing: offer.public,
+			PublicGroup: &PublicCatalogGroup{
+				ID: group.ID, Name: group.Name, Platform: group.Platform,
+				RateMultiplier: catalogEffectiveRateMultiplier(BillingModeToken, group),
+			},
+			RateMultiplier:  &rateMultiplier,
+			OfficialPricing: s.catalogOfficialPricing(offer.billingModel, offer.pricing.BillingMode),
 		})
 		updatedAt := model.UpdatedAt
 		if offer.updatedAt.After(updatedAt) {

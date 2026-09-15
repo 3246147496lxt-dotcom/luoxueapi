@@ -49,6 +49,14 @@ export interface PublicModelCatalogPricing {
   peak_rate: PublicModelCatalogPeakRate
 }
 
+/** Only the published model's explicitly selected, publicly visible group. */
+export interface PublicModelCatalogGroup {
+  id: number
+  name: string
+  platform: string
+  rate_multiplier: number
+}
+
 export interface PublicModelCatalogItem {
   slug: string
   model: string
@@ -62,7 +70,12 @@ export interface PublicModelCatalogItem {
   context_window: number | null
   max_output_tokens: number | null
   featured: boolean
+  public_group: PublicModelCatalogGroup | null
+  /** Multiplier already applied to pricing; image pricing may use an independent rate. */
+  rate_multiplier: number | null
   pricing: PublicModelCatalogPricing
+  /** Exact official source, independent of channel/group overrides; null when unknown. */
+  official_pricing: PublicModelCatalogPricing | null
 }
 
 export interface PublicModelCatalogResponse {
@@ -73,6 +86,20 @@ export interface PublicModelCatalogResponse {
 
 function nullableNumber(value: unknown): number | null {
   return typeof value === 'number' && Number.isFinite(value) ? value : null
+}
+
+function nullableRate(value: unknown): number | null {
+  const rate = nullableNumber(value)
+  return rate !== null && rate >= 0 ? rate : null
+}
+
+function normalizePublicGroup(group: Partial<PublicModelCatalogGroup> | null | undefined): PublicModelCatalogGroup | null {
+  const id = nullableNumber(group?.id)
+  const rate = nullableRate(group?.rate_multiplier)
+  if (id === null || !Number.isSafeInteger(id) || id <= 0 || rate === null ||
+    typeof group?.name !== 'string' || !group.name.trim() ||
+    typeof group?.platform !== 'string' || !group.platform.trim()) return null
+  return { id, name: group.name, platform: group.platform, rate_multiplier: rate }
 }
 
 function normalizePricing(
@@ -127,11 +154,14 @@ function stringArray(value: unknown): string[] {
 }
 
 export function normalizePublicModelCatalogResponse(
-  response: Partial<PublicModelCatalogResponse> | null | undefined
+  response: (Partial<Omit<PublicModelCatalogResponse, 'items'>> & {
+    items?: Partial<PublicModelCatalogItem>[]
+  }) | null | undefined
 ): PublicModelCatalogResponse {
   const rawItems = Array.isArray(response?.items) ? response.items : []
   const items = rawItems
-    .filter((item) => item && typeof item.model === 'string' && item.model.trim().length > 0)
+    .filter((item): item is Partial<PublicModelCatalogItem> & { model: string } =>
+      Boolean(item && typeof item.model === 'string' && item.model.trim().length > 0))
     .map((item) => ({
       slug: typeof item.slug === 'string' && item.slug ? item.slug : item.model,
       model: item.model,
@@ -147,7 +177,12 @@ export function normalizePublicModelCatalogResponse(
       context_window: nullableNumber(item.context_window),
       max_output_tokens: nullableNumber(item.max_output_tokens),
       featured: item.featured === true,
-      pricing: normalizePricing(item.pricing)
+      public_group: normalizePublicGroup(item.public_group),
+      rate_multiplier: nullableRate(item.rate_multiplier),
+      pricing: normalizePricing(item.pricing),
+      official_pricing: item.official_pricing && typeof item.official_pricing === 'object' && !Array.isArray(item.official_pricing)
+        ? normalizePricing(item.official_pricing)
+        : null
     }))
 
   return {
