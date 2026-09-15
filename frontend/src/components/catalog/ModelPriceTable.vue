@@ -114,15 +114,17 @@ function requestContext(row: CatalogComparisonRow, item: PublicModelCatalogItem,
     .price-table .model-heading { text-align: left; padding-left: 14px; }
     .price-tier-heading { text-align: center; font-size: 12px; white-space: nowrap; }
     .price-label { font-weight: 600; }
-    .price-unit { font-size: 11px; font-weight: 400; opacity: .75; white-space: nowrap; }
+    .price-unit { font-family: var(--workspace-font-mono); font-size: 11px; font-weight: 400; opacity: .75; white-space: nowrap; }
     .price-table .input-heading { text-align: left; }
     .price-table .output-heading, .price-table .cache-heading, .price-table .rate-heading { text-align: center; }
     .price-table .rate-heading { white-space: nowrap; font-size: 12px; }
     .price-table thead .discount-heading,
     .price-table thead .discount-subhead,
-    .price-table .paid-cell { background: var(--group-soft); color: var(--group-accent); }
-    .price-table thead .discount-heading { box-shadow: inset 0 -1px 0 var(--group-border); }
-    .price-table thead .discount-subhead { border-bottom-color: var(--group-border); }
+    .price-table .paid-cell { background: var(--group-soft); }
+    .price-table thead .discount-heading { color: var(--group-accent); box-shadow: inset 0 -1px 0 var(--group-border); }
+    .price-table thead .discount-subhead { color: var(--workspace-text-muted); border-bottom-color: var(--group-border); }
+    .price-table .paid-cell { color: var(--workspace-text); }
+    .price-table .paid-cell.cache-cell { color: var(--workspace-text-secondary); font-weight: 400; }
     .paid-start { border-left: 1px solid var(--group-border); }
     .official-start, .rate-start { border-left: 1px solid var(--workspace-border); }
     .price-table tbody td { height: 36px; padding-block: 2px; border-bottom: 0; }
@@ -132,20 +134,19 @@ function requestContext(row: CatalogComparisonRow, item: PublicModelCatalogItem,
     .price-table .model-cell { padding: 10px 12px 10px 14px; }
     .model-cell-content { display: flex; min-width: 0; align-items: center; gap: 6px; }
     .model-id { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--workspace-text); font-size: 13px; font-weight: 500; line-height: 20px; }
-    .numeric-cell, .input-cell, .cache-cell { color: var(--workspace-text-secondary); font-variant-numeric: tabular-nums; white-space: nowrap; }
+    .numeric-cell, .input-cell, .cache-cell { color: var(--workspace-text-secondary); font-family: var(--workspace-font-mono); font-variant-numeric: tabular-nums; white-space: nowrap; }
     .numeric-cell { text-align: center; }
-    .paid-cell { font-weight: 600; }
+    .paid-cell.input-cell, .paid-cell.numeric-cell, .paid-cell.request-amount { font-weight: 700; }
     .input-price { display: flex; align-items: center; justify-content: space-between; gap: 6px; min-height: 24px; }
     .tier-context { white-space: normal; line-height: 1.35; color: var(--workspace-text-muted); font-weight: 400; font-size: 11px; }
     .input-price.without-context { justify-content: flex-end; }
     .cache-content { display: flex; align-items: center; justify-content: center; gap: 9px; min-height: 24px; }
     .cache-part { display: inline-flex; align-items: baseline; gap: 5px; }
-    .cache-key { color: var(--workspace-text-muted); font-size: 11px; font-weight: 400; }
-    .paid-cell .cache-key { color: var(--group-accent); opacity: .72; }
-    .rate-cell { background: var(--workspace-card-surface); color: var(--group-accent); text-align: center; font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; }
+    .cache-key { color: var(--workspace-text-muted); font-family: var(--workspace-font-ui); font-size: 11px; font-weight: 400; }
+    .rate-cell { background: var(--workspace-card-surface); color: var(--workspace-text); text-align: center; font-family: var(--workspace-font-mono); font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; }
     .per-request-table thead tr:first-child th { height: 56px; }
     .per-request-table tbody td { height: 56px; }
-    .request-amount { text-align: center; font-size: 13px; font-variant-numeric: tabular-nums; }
+    .request-amount { text-align: center; font-family: var(--workspace-font-mono); font-size: 13px; font-variant-numeric: tabular-nums; }
 
 
 .discount-start { border-left: 1px solid var(--group-border); }
