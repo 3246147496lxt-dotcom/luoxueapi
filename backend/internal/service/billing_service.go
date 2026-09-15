@@ -233,14 +233,15 @@ func (c *CostBreakdown) ValidateMonetaryFields() error {
 // sources can price the requested model.
 var ErrModelPricingUnavailable = errors.New("pricing not found")
 
-// DeepSeek's current V4 rates are quoted in USD per token at off-peak
+// DeepSeek's current V4.1 Flash / V4 Pro rates are quoted in USD per token at off-peak
 // pricing.  Official peak windows are applied at calculation time (2x on
 // weekdays during 01:00-04:00 and 06:00-10:00 UTC); weekends in Beijing are
 // always off-peak.
+// Source: https://api-docs.deepseek.com/quick_start/pricing/ (2026-09-15).
 const (
-	deepseekFlashOffPeakInputPrice  = 2.2e-7  // $0.22 / MTok
-	deepseekFlashOffPeakOutputPrice = 6.6e-7  // $0.66 / MTok
-	deepseekFlashOffPeakCacheRead   = 7e-9    // $0.007 / MTok
+	deepseekFlashOffPeakInputPrice  = 1.5e-7  // $0.15 / MTok
+	deepseekFlashOffPeakOutputPrice = 6e-7    // $0.60 / MTok
+	deepseekFlashOffPeakCacheRead   = 3e-9    // $0.003 / MTok
 	deepseekProOffPeakInputPrice    = 6.6e-7  // $0.66 / MTok
 	deepseekProOffPeakOutputPrice   = 1.98e-6 // $1.98 / MTok
 	deepseekProOffPeakCacheRead     = 2.2e-8  // $0.022 / MTok
@@ -261,7 +262,7 @@ func isDeepSeekModel(model string) bool {
 // official card or peak multiplier.
 func isOfficialDeepSeekModel(model string) bool {
 	switch strings.ToLower(strings.TrimSpace(model)) {
-	case "deepseek-v4-pro", "deepseek-v4-flash", "deepseek-v4-flash-vision-exp",
+	case "deepseek-flash", "deepseek-v4-pro", "deepseek-v4-flash", "deepseek-v4-flash-vision-exp",
 		"deepseek-chat", "deepseek-reasoner":
 		return true
 	default:
@@ -483,7 +484,7 @@ func (s *BillingService) initFallbackPricing() {
 	// 覆盖逻辑见同文件 getFallbackPricing()
 	// ============================================================
 
-	// ---- DeepSeek V4 系列 ----
+	// ---- DeepSeek V4.1 Flash / V4 Pro ----
 	// Source: https://api-docs.deepseek.com/quick_start/pricing
 	// 官方当前低谷价；生效时间以 DeepSeek 官方价格页为准。高峰价由
 	// deepseekPeakMultiplierAt 在统一计费入口按请求时刻叠加。旧 alias 与未知
@@ -494,12 +495,14 @@ func (s *BillingService) initFallbackPricing() {
 		CacheReadPricePerToken: deepseekProOffPeakCacheRead,
 		SupportsCacheBreakdown: false,
 	}
-	s.fallbackPrices["deepseek-v4-flash"] = &ModelPricing{
+	s.fallbackPrices["deepseek-flash"] = &ModelPricing{
 		InputPricePerToken:     deepseekFlashOffPeakInputPrice,
 		OutputPricePerToken:    deepseekFlashOffPeakOutputPrice,
 		CacheReadPricePerToken: deepseekFlashOffPeakCacheRead,
 		SupportsCacheBreakdown: false,
 	}
+	// The official API keeps this legacy ID as an alias of V4.1 Flash.
+	s.fallbackPrices["deepseek-v4-flash"] = s.fallbackPrices["deepseek-flash"]
 	s.fallbackPrices["deepseek-v4-flash-vision-exp"] = &ModelPricing{
 		InputPricePerToken:     deepseekFlashOffPeakInputPrice,
 		OutputPricePerToken:    deepseekFlashOffPeakOutputPrice,

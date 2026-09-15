@@ -239,7 +239,7 @@ import Icon from '@/components/icons/Icon.vue'
 import IntervalRow from './IntervalRow.vue'
 import ModelTagInput from './ModelTagInput.vue'
 import type { PricingFormEntry, IntervalFormEntry } from './types'
-import { officialPerTokenToChannelMTok, perTokenToMTok, getPlatformTagClass } from './types'
+import { officialIntervalsToForm, officialPerTokenToChannelMTok, perTokenToMTok, getPlatformTagClass } from './types'
 import type { BillingMode } from '@/api/admin/channels'
 import channelsAPI from '@/api/admin/channels'
 
@@ -387,6 +387,9 @@ async function onModelsUpdate(newModels: string[]) {
         cache_read_price: defaultPriceToMTokWithMultiplier(result.cache_read_price ?? null, result.channel_pricing_multiplier),
         image_input_price: defaultPriceToMTokWithMultiplier(result.image_input_price ?? null, result.channel_pricing_multiplier),
         image_output_price: defaultPriceToMTokWithMultiplier(result.image_output_price ?? null, result.channel_pricing_multiplier),
+        intervals: props.entry.billing_mode === 'token'
+          ? officialIntervalsToForm(result.intervals, props.applyChannelPricingMultiplier === false ? 1 : result.channel_pricing_multiplier)
+          : props.entry.intervals,
       })
     }
   } catch {

@@ -1,0 +1,329 @@
+{
+  "deepseek-flash": {
+    "input_cost_per_token": 3e-07,
+    "output_cost_per_token": 1.2e-06,
+    "cache_read_input_token_cost": 6e-09,
+    "litellm_provider": "deepseek",
+    "mode": "chat",
+    "supports_prompt_caching": true,
+    "source": {
+      "url": "https://api-docs.deepseek.com/quick_start/pricing/",
+      "verified_at": "2026-09-15",
+      "currency": "USD",
+      "unit": "1M tokens",
+      "region": "Official USD; peak list price",
+      "notes": "Current V4.1 Flash; official legacy alias deepseek-v4-flash routes to deepseek-flash. Peak Mon–Fri 09:00–12:00 and 14:00–18:00 Asia/Shanghai; off-peak input $0.15, output $0.60, cached input $0.003. Channel uses fixed peak list price before group multiplier; global runtime retains time-of-day pricing. Cache creation not separately listed."
+    }
+  },
+  "deepseek-v4-flash": {
+    "input_cost_per_token": 3e-07,
+    "output_cost_per_token": 1.2e-06,
+    "cache_read_input_token_cost": 6e-09,
+    "litellm_provider": "deepseek",
+    "mode": "chat",
+    "supports_prompt_caching": true,
+    "source": {
+      "url": "https://api-docs.deepseek.com/quick_start/pricing/",
+      "verified_at": "2026-09-15",
+      "currency": "USD",
+      "unit": "1M tokens",
+      "region": "Official USD; peak list price",
+      "notes": "Current V4.1 Flash; official legacy alias deepseek-v4-flash routes to deepseek-flash. Peak Mon–Fri 09:00–12:00 and 14:00–18:00 Asia/Shanghai; off-peak input $0.15, output $0.60, cached input $0.003. Channel uses fixed peak list price before group multiplier; global runtime retains time-of-day pricing. Cache creation not separately listed."
+    }
+  },
+  "deepseek-v4-pro": {
+    "input_cost_per_token": 1.32e-06,
+    "output_cost_per_token": 3.96e-06,
+    "cache_read_input_token_cost": 4.4e-08,
+    "litellm_provider": "deepseek",
+    "mode": "chat",
+    "supports_prompt_caching": true,
+    "source": {
+      "url": "https://api-docs.deepseek.com/quick_start/pricing/",
+      "verified_at": "2026-09-15",
+      "currency": "USD",
+      "unit": "1M tokens",
+      "region": "Official USD; peak list price",
+      "notes": "V4 Pro continues after 2026-09-14. Peak Mon–Fri 09:00–12:00 and 14:00–18:00 Asia/Shanghai; off-peak input $0.66, output $1.98, cached input $0.022. Channel uses fixed peak list price before group multiplier; global runtime retains time-of-day pricing. Cache creation not separately listed."
+    }
+  },
+  "glm-5.1": {
+    "input_cost_per_token": 1.4e-06,
+    "output_cost_per_token": 4.4e-06,
+    "cache_read_input_token_cost": 2.6e-07,
+    "litellm_provider": "zhipu",
+    "mode": "chat",
+    "supports_prompt_caching": true,
+    "source": {
+      "url": "https://docs.z.ai/guides/overview/pricing",
+      "verified_at": "2026-09-15",
+      "currency": "USD",
+      "unit": "1M tokens",
+      "region": "International",
+      "notes": "Z.AI international USD price, no context price tiers listed. Cached Input Storage being temporarily free is not a separate cache creation price."
+    }
+  },
+  "glm-5.2": {
+    "input_cost_per_token": 1.4e-06,
+    "output_cost_per_token": 4.4e-06,
+    "cache_read_input_token_cost": 2.6e-07,
+    "litellm_provider": "zhipu",
+    "mode": "chat",
+    "supports_prompt_caching": true,
+    "source": {
+      "url": "https://docs.z.ai/guides/overview/pricing",
+      "verified_at": "2026-09-15",
+      "currency": "USD",
+      "unit": "1M tokens",
+      "region": "International",
+      "notes": "Z.AI international USD price, no context price tiers listed. Cached Input Storage being temporarily free is not a separate cache creation price."
+    }
+  },
+  "glm-5.3": {
+    "input_cost_per_token": 1.4e-06,
+    "output_cost_per_token": 4.4e-06,
+    "cache_read_input_token_cost": 2.6e-07,
+    "litellm_provider": "zhipu",
+    "mode": "chat",
+    "supports_prompt_caching": true,
+    "source": {
+      "url": "https://docs.z.ai/guides/overview/pricing",
+      "verified_at": "2026-09-15",
+      "currency": "USD",
+      "unit": "1M tokens",
+      "region": "International",
+      "notes": "Z.AI international USD price, no context price tiers listed. Cached Input Storage being temporarily free is not a separate cache creation price."
+    }
+  },
+  "glm-5.3-flash": {
+    "input_cost_per_token": 1.5e-07,
+    "output_cost_per_token": 5e-07,
+    "cache_read_input_token_cost": 3e-08,
+    "litellm_provider": "zhipu",
+    "mode": "chat",
+    "supports_prompt_caching": true,
+    "source": {
+      "url": "https://docs.z.ai/guides/overview/pricing",
+      "verified_at": "2026-09-15",
+      "currency": "USD",
+      "unit": "1M tokens",
+      "region": "International",
+      "notes": "Z.AI international USD price. Cache creation not separately listed; cached-input storage is distinct."
+    }
+  },
+  "kimi-k2.6": {
+    "input_cost_per_token": 9.499999999999999e-07,
+    "output_cost_per_token": 4e-06,
+    "cache_read_input_token_cost": 1.6e-07,
+    "litellm_provider": "moonshot",
+    "mode": "chat",
+    "supports_prompt_caching": true,
+    "source": {
+      "url": "https://platform.kimi.ai/",
+      "verified_at": "2026-09-15",
+      "currency": "USD",
+      "unit": "1M tokens",
+      "region": "International",
+      "notes": "International API pricing; cache creation not separately listed."
+    }
+  },
+  "kimi-k2.7-code": {
+    "input_cost_per_token": 9.499999999999999e-07,
+    "output_cost_per_token": 4e-06,
+    "cache_read_input_token_cost": 1.9e-07,
+    "litellm_provider": "moonshot",
+    "mode": "chat",
+    "supports_prompt_caching": true,
+    "source": {
+      "url": "https://platform.kimi.ai/",
+      "verified_at": "2026-09-15",
+      "currency": "USD",
+      "unit": "1M tokens",
+      "region": "International",
+      "notes": "International API pricing; cache creation not separately listed."
+    }
+  },
+  "kimi-k3": {
+    "input_cost_per_token": 3e-06,
+    "output_cost_per_token": 1.5e-05,
+    "cache_read_input_token_cost": 3e-07,
+    "litellm_provider": "moonshot",
+    "mode": "chat",
+    "supports_prompt_caching": true,
+    "source": {
+      "url": "https://platform.kimi.ai/",
+      "verified_at": "2026-09-15",
+      "currency": "USD",
+      "unit": "1M tokens",
+      "region": "International",
+      "notes": "International API pricing; no context tiers. Cache creation not separately listed."
+    }
+  },
+  "minimax-m2.7": {
+    "input_cost_per_token": 3e-07,
+    "output_cost_per_token": 1.2e-06,
+    "cache_read_input_token_cost": 6e-08,
+    "litellm_provider": "minimax",
+    "mode": "chat",
+    "supports_prompt_caching": true,
+    "cache_creation_input_token_cost": 3.75e-07,
+    "source": {
+      "url": "https://platform.minimax.io/docs/guides/pricing-paygo",
+      "verified_at": "2026-09-15",
+      "currency": "USD",
+      "unit": "1M tokens",
+      "region": "International",
+      "notes": ""
+    }
+  },
+  "minimax-m2.7-highspeed": {
+    "input_cost_per_token": 6e-07,
+    "output_cost_per_token": 2.4e-06,
+    "cache_read_input_token_cost": 6e-08,
+    "litellm_provider": "minimax",
+    "mode": "chat",
+    "supports_prompt_caching": true,
+    "cache_creation_input_token_cost": 3.75e-07,
+    "source": {
+      "url": "https://platform.minimax.io/docs/guides/pricing-paygo",
+      "verified_at": "2026-09-15",
+      "currency": "USD",
+      "unit": "1M tokens",
+      "region": "International",
+      "notes": ""
+    }
+  },
+  "minimax-m3": {
+    "input_cost_per_token": 3e-07,
+    "output_cost_per_token": 1.2e-06,
+    "cache_read_input_token_cost": 6e-08,
+    "litellm_provider": "minimax",
+    "mode": "chat",
+    "supports_prompt_caching": true,
+    "long_context_input_token_threshold": 524288,
+    "long_context_input_cost_multiplier": 2,
+    "long_context_output_cost_multiplier": 2,
+    "source": {
+      "url": "https://platform.minimax.io/docs/guides/pricing-paygo",
+      "verified_at": "2026-09-15",
+      "currency": "USD",
+      "unit": "1M tokens",
+      "region": "International",
+      "notes": "Current effective official price (permanent 50% reduction displayed by vendor). Base <=512K; >512K input $0.60, output $2.40, cached input $0.12. Cache creation not separately listed. 512K=524288 follows vendor API token definition (https://platform.minimax.io/docs/api-reference/text-chat-openai); pricing page itself uses K."
+    }
+  },
+  "qwen3.7-max": {
+    "input_cost_per_token": 2.5e-06,
+    "output_cost_per_token": 7.5e-06,
+    "cache_read_input_token_cost": 5e-07,
+    "litellm_provider": "qwen",
+    "mode": "chat",
+    "supports_prompt_caching": true,
+    "source": {
+      "url": "https://www.alibabacloud.com/help/en/model-studio/qwen3-7-max",
+      "verified_at": "2026-09-15",
+      "currency": "USD",
+      "unit": "1M tokens",
+      "region": "Singapore / International",
+      "notes": "Implicit caching for this OpenAI-compatible channel. Separate explicit cache API has read $0.25/M and creation $3.125/M; these are not the implicit cache tariff and are not mixed into channel cache-write pricing."
+    }
+  },
+  "qwen3.8-max": {
+    "input_cost_per_token": 2e-06,
+    "output_cost_per_token": 6e-06,
+    "cache_read_input_token_cost": 2.5e-07,
+    "litellm_provider": "qwen",
+    "mode": "chat",
+    "supports_prompt_caching": true,
+    "source": {
+      "url": "https://www.alibabacloud.com/help/en/model-studio/qwen3-8-max",
+      "verified_at": "2026-09-15",
+      "currency": "USD",
+      "unit": "1M tokens",
+      "region": "Singapore / International",
+      "notes": "Implicit caching for this OpenAI-compatible channel. Separate explicit cache API has read $0.17/M and creation $2.5/M; these are not the implicit cache tariff and are not mixed into channel cache-write pricing."
+    }
+  },
+  "qwen3.8-flash": {
+    "input_cost_per_token": 1.5e-07,
+    "output_cost_per_token": 4.6999999999999995e-07,
+    "cache_read_input_token_cost": 1.6e-08,
+    "litellm_provider": "qwen",
+    "mode": "chat",
+    "supports_prompt_caching": true,
+    "source": {
+      "url": "https://www.alibabacloud.com/help/en/model-studio/qwen3-8-flash",
+      "verified_at": "2026-09-15",
+      "currency": "USD",
+      "unit": "1M tokens",
+      "region": "Singapore / International",
+      "notes": "Implicit caching for this OpenAI-compatible channel. Separate explicit cache API has read $0.016/M and creation $0.2/M; these are not the implicit cache tariff and are not mixed into channel cache-write pricing."
+    }
+  },
+  "mimo-v2.5": {
+    "input_cost_per_token": 1.4e-07,
+    "output_cost_per_token": 2.8e-07,
+    "cache_read_input_token_cost": 2.8e-09,
+    "litellm_provider": "xiaomi",
+    "mode": "chat",
+    "supports_prompt_caching": true,
+    "cache_creation_input_token_cost": 0.0,
+    "source": {
+      "url": "https://mimo.mi.com/docs/en-US/price/pay-as-you-go",
+      "verified_at": "2026-09-15",
+      "currency": "USD",
+      "unit": "1M tokens",
+      "region": "International",
+      "notes": "Overseas ordinary pay-as-you-go API, not Token Plan. Cache creation temporarily free; no end date published."
+    }
+  },
+  "mimo-v2.5-pro": {
+    "input_cost_per_token": 4.35e-07,
+    "output_cost_per_token": 8.7e-07,
+    "cache_read_input_token_cost": 3.6e-09,
+    "litellm_provider": "xiaomi",
+    "mode": "chat",
+    "supports_prompt_caching": true,
+    "cache_creation_input_token_cost": 0.0,
+    "source": {
+      "url": "https://mimo.mi.com/docs/en-US/price/pay-as-you-go",
+      "verified_at": "2026-09-15",
+      "currency": "USD",
+      "unit": "1M tokens",
+      "region": "International",
+      "notes": "Overseas ordinary pay-as-you-go API, not Token Plan. Cache creation temporarily free; no end date published."
+    }
+  },
+  "hy3": {
+    "input_cost_per_token": 1.3200000000000002e-07,
+    "output_cost_per_token": 5.280000000000001e-07,
+    "cache_read_input_token_cost": 3.3000000000000004e-08,
+    "litellm_provider": "hunyuan",
+    "mode": "chat",
+    "supports_prompt_caching": true,
+    "source": {
+      "url": "https://intl.cloud.tencent.com/zh/document/product/1300/78937",
+      "verified_at": "2026-09-15",
+      "currency": "USD",
+      "unit": "1M tokens",
+      "region": "International",
+      "notes": "Tencent international USD token pricing; cache creation not separately listed."
+    }
+  },
+  "hy4-preview": {
+    "input_cost_per_token": 8.34e-07,
+    "output_cost_per_token": 2.501e-06,
+    "cache_read_input_token_cost": 4.2000000000000006e-08,
+    "litellm_provider": "hunyuan",
+    "mode": "chat",
+    "supports_prompt_caching": true,
+    "source": {
+      "url": "https://intl.cloud.tencent.com/zh/document/product/1300/78937",
+      "verified_at": "2026-09-15",
+      "currency": "USD",
+      "unit": "1M tokens",
+      "region": "International",
+      "notes": "Tencent international USD token pricing; cache creation not separately listed."
+    }
+  }
+}

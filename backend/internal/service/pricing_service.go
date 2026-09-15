@@ -469,6 +469,10 @@ func (s *PricingService) downloadPricingData() error {
 		return fmt.Errorf("parse pricing data: %w", err)
 	}
 	data = s.mergeFallbackPricingData(data)
+	data, err = s.applyPricingOverrides(data)
+	if err != nil {
+		return fmt.Errorf("apply pricing overrides: %w", err)
+	}
 
 	// 保存到本地文件
 	pricingFile := s.getPricingFilePath()
@@ -637,6 +641,10 @@ func (s *PricingService) loadPricingData(filePath string) error {
 		return fmt.Errorf("parse pricing data: %w", err)
 	}
 	pricingData = s.mergeFallbackPricingData(pricingData)
+	pricingData, err = s.applyPricingOverrides(pricingData)
+	if err != nil {
+		return fmt.Errorf("apply pricing overrides: %w", err)
+	}
 
 	// 计算哈希
 	hash := sha256.Sum256(data)
@@ -704,13 +712,18 @@ func (s *PricingService) useFallbackPricing() error {
 	if err != nil {
 		return fmt.Errorf("read fallback failed: %w", err)
 	}
+	// Validate the fallback and the operator override before replacing the last
+	// usable raw cache. A broken override must not destroy that recovery file.
+	if err := s.loadPricingData(fallbackFile); err != nil {
+		return err
+	}
 
 	pricingFile := s.getPricingFilePath()
 	if err := os.WriteFile(pricingFile, data, 0644); err != nil {
 		logger.LegacyPrintf("service.pricing", "[Pricing] Failed to copy fallback: %v", err)
 	}
 
-	return s.loadPricingData(fallbackFile)
+	return nil
 }
 
 // fetchRemoteHash 从远程获取哈希值

@@ -529,10 +529,10 @@ func TestSyncPricingModels_IncludesPerModelOfficialQuotes(t *testing.T) {
 	require.NoError(t, json.Unmarshal(w.Body.Bytes(), &body))
 	require.Equal(t, []string{"model-a", "model-b"}, body.Data.Models)
 	require.Len(t, body.Data.Pricing, 2)
-	require.InDelta(t, 0.000001, body.Data.Pricing["model-a"].InputPrice, 1e-12)
-	require.InDelta(t, 0.000004, body.Data.Pricing["model-a"].OutputPrice, 1e-12)
-	require.InDelta(t, 0.000002, body.Data.Pricing["model-b"].InputPrice, 1e-12)
-	require.InDelta(t, 0.000008, body.Data.Pricing["model-b"].OutputPrice, 1e-12)
+	require.InDelta(t, 0.000001, *body.Data.Pricing["model-a"].InputPrice, 1e-12)
+	require.InDelta(t, 0.000004, *body.Data.Pricing["model-a"].OutputPrice, 1e-12)
+	require.InDelta(t, 0.000002, *body.Data.Pricing["model-b"].InputPrice, 1e-12)
+	require.InDelta(t, 0.000008, *body.Data.Pricing["model-b"].OutputPrice, 1e-12)
 }
 
 func TestModelDefaultPricingResponsePreservesOfficialQuote(t *testing.T) {
@@ -540,13 +540,13 @@ func TestModelDefaultPricingResponsePreservesOfficialQuote(t *testing.T) {
 	// without requiring a remote pricing download.  No ×1 or /10 conversion
 	// belongs in this response; those are applied by the channel editor/public
 	// catalog respectively.
-	got := modelDefaultPricingResponseFrom(&service.ModelPricing{
-		InputPricePerToken:         5e-6,
-		OutputPricePerToken:        30e-6,
-		CacheCreationPricePerToken: 6.25e-6,
-		CacheReadPricePerToken:     0.5e-6,
-		ImageInputPricePerToken:    1e-6,
-		ImageOutputPricePerToken:   2e-6,
+	got := modelDefaultPricingResponseFrom(&service.LiteLLMModelPricing{
+		InputCostPerToken:           5e-6,
+		OutputCostPerToken:          30e-6,
+		CacheCreationInputTokenCost: 6.25e-6,
+		CacheReadInputTokenCost:     0.5e-6,
+		InputCostPerImageToken:      1e-6,
+		OutputCostPerImageToken:     2e-6,
 	})
 
 	body, err := json.Marshal(got)
@@ -559,4 +559,38 @@ func TestModelDefaultPricingResponsePreservesOfficialQuote(t *testing.T) {
 	require.InDelta(t, 6.25e-6, wire["cache_write_price"], 1e-12)
 	require.InDelta(t, 0.5e-6, wire["cache_read_price"], 1e-12)
 	require.InDelta(t, service.ChannelPricingBaselineMultiplier, wire["channel_pricing_multiplier"], 1e-12)
+}
+
+func TestModelDefaultPricingExactReferenceAndUnknownCache(t *testing.T) {
+	cfg := &config.Config{}
+	cfg.Pricing.DataDir = t.TempDir()
+	cfg.Pricing.UpdateIntervalHours = 24
+	require.NoError(t, os.WriteFile(filepath.Join(cfg.Pricing.DataDir, "model_pricing.json"), []byte(`{
+  "deepseek-v4-flash":{"input_cost_per_token":0.00000030,"output_cost_per_token":0.0000012,"cache_read_input_token_cost":0.000000006},
+  "mimo-v2.5":{"input_cost_per_token":0.00000014,"output_cost_per_token":0.00000028,"cache_creation_input_token_cost":0}
+ }`), 0644))
+	prices := service.NewPricingService(cfg, nil)
+	require.NoError(t, prices.Initialize())
+	t.Cleanup(prices.Stop)
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	h := &ChannelHandler{pricingService: prices, billingService: service.NewBillingService(cfg, prices)}
+	router.GET("/pricing", h.GetModelDefaultPricing)
+	get := func(model string) map[string]any {
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/pricing?model="+model, nil))
+		require.Equal(t, http.StatusOK, w.Code)
+		var response struct {
+			Data map[string]any `json:"data"`
+		}
+		require.NoError(t, json.Unmarshal(w.Body.Bytes(), &response))
+		return response.Data
+	}
+	quote := get("deepseek-v4-flash")
+	require.Equal(t, true, quote["found"])
+	require.InDelta(t, 0.00000030, quote["input_price"], 1e-15)
+	require.Nil(t, quote["cache_write_price"])
+	require.Nil(t, quote["image_input_price"])
+	require.Equal(t, float64(0), get("mimo-v2.5")["cache_write_price"])
+	require.Equal(t, false, get("deepseek-v4-flash-unverified")["found"])
 }

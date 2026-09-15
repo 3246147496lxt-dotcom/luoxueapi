@@ -49,6 +49,7 @@ func TestDeepseekPeakMultiplierAt(t *testing.T) {
 
 func TestIsDeepSeekModel(t *testing.T) {
 	for _, model := range []string{
+		"deepseek-flash",
 		"deepseek-v4-pro",
 		"deepseek-v4-flash",
 		"deepseek-v4-flash-vision-exp",
@@ -68,6 +69,7 @@ func TestGetFallbackPricing_DeepSeekOfficialCards(t *testing.T) {
 		model                    string
 		input, output, cacheRead float64
 	}{
+		{"deepseek-flash", 0.15e-6, 0.60e-6, 0.003e-6},
 		{"deepseek-v4-pro", deepseekProOffPeakInputPrice, deepseekProOffPeakOutputPrice, deepseekProOffPeakCacheRead},
 		{"deepseek-v4-flash", deepseekFlashOffPeakInputPrice, deepseekFlashOffPeakOutputPrice, deepseekFlashOffPeakCacheRead},
 		{"deepseek-v4-flash-vision-exp", deepseekFlashOffPeakInputPrice, deepseekFlashOffPeakOutputPrice, deepseekFlashOffPeakCacheRead},
@@ -87,6 +89,11 @@ func TestGetFallbackPricing_DeepSeekOfficialCards(t *testing.T) {
 
 func TestGetModelPricing_DeepSeekForcesOfficialRatesOverLiteLLM(t *testing.T) {
 	pricingService := &PricingService{pricingData: map[string]*LiteLLMModelPricing{
+		"deepseek-flash": {
+			InputCostPerToken:       1e-6,
+			OutputCostPerToken:      2e-6,
+			CacheReadInputTokenCost: 3e-8,
+		},
 		"deepseek-v4-pro": {
 			InputCostPerToken:       1e-6,
 			OutputCostPerToken:      2e-6,
@@ -108,6 +115,7 @@ func TestGetModelPricing_DeepSeekForcesOfficialRatesOverLiteLLM(t *testing.T) {
 		model                    string
 		input, output, cacheRead float64
 	}{
+		{"deepseek-flash", 0.15e-6, 0.60e-6, 0.003e-6},
 		{"deepseek-v4-pro", deepseekProOffPeakInputPrice, deepseekProOffPeakOutputPrice, deepseekProOffPeakCacheRead},
 		{"deepseek-v4-flash", deepseekFlashOffPeakInputPrice, deepseekFlashOffPeakOutputPrice, deepseekFlashOffPeakCacheRead},
 		{"deepseek-v4-flash-vision-exp", deepseekFlashOffPeakInputPrice, deepseekFlashOffPeakOutputPrice, deepseekFlashOffPeakCacheRead},
@@ -119,6 +127,12 @@ func TestGetModelPricing_DeepSeekForcesOfficialRatesOverLiteLLM(t *testing.T) {
 			require.InDelta(t, tc.input, pricing.InputPricePerToken, 1e-15)
 			require.InDelta(t, tc.output, pricing.OutputPricePerToken, 1e-15)
 			require.InDelta(t, tc.cacheRead, pricing.CacheReadPricePerToken, 1e-15)
+			// Applying runtime policy must not mutate the exact reference card.
+			_, exact := pricingService.GetExactModelPricing(tc.model)
+			require.NotNil(t, exact)
+			require.InDelta(t, 1e-6, exact.InputCostPerToken, 1e-15)
+			require.InDelta(t, 2e-6, exact.OutputCostPerToken, 1e-15)
+			require.InDelta(t, 3e-8, exact.CacheReadInputTokenCost, 1e-15)
 		})
 	}
 }
@@ -174,29 +188,36 @@ func TestDeepSeekPricingFileIncludesV4MetadataAndLegacyAliases(t *testing.T) {
 	pricingService := &PricingService{}
 	pricingData, err := pricingService.parsePricingData(data)
 	require.NoError(t, err)
+	pricingService.pricingData = pricingData
+	billing := NewBillingService(&config.Config{}, pricingService)
 
 	for _, model := range []string{"deepseek-v4-flash", "deepseek-v4-flash-vision-exp", "deepseek-v4-pro"} {
 		require.Contains(t, pricingData, model)
 	}
-	flash := pricingData["deepseek-v4-flash"]
+	flash, err := billing.GetModelPricing("deepseek-v4-flash")
+	require.NoError(t, err)
 	vision := pricingData["deepseek-v4-flash-vision-exp"]
-	pro := pricingData["deepseek-v4-pro"]
-	require.InDelta(t, deepseekFlashOffPeakInputPrice, flash.InputCostPerToken, 1e-15)
-	require.InDelta(t, deepseekFlashOffPeakOutputPrice, flash.OutputCostPerToken, 1e-15)
-	require.InDelta(t, deepseekFlashOffPeakCacheRead, flash.CacheReadInputTokenCost, 1e-15)
+	pro, err := billing.GetModelPricing("deepseek-v4-pro")
+	require.NoError(t, err)
+	// Raw official-reference quotes may use the peak price. Runtime billing
+	// starts with the off-peak card and applies its time policy separately.
+	require.InDelta(t, 0.15e-6, flash.InputPricePerToken, 1e-15)
+	require.InDelta(t, 0.60e-6, flash.OutputPricePerToken, 1e-15)
+	require.InDelta(t, 0.003e-6, flash.CacheReadPricePerToken, 1e-15)
 	require.True(t, vision.SupportsVision)
-	require.InDelta(t, deepseekProOffPeakInputPrice, pro.InputCostPerToken, 1e-15)
-	require.InDelta(t, deepseekProOffPeakOutputPrice, pro.OutputCostPerToken, 1e-15)
-	require.InDelta(t, deepseekProOffPeakCacheRead, pro.CacheReadInputTokenCost, 1e-15)
+	require.InDelta(t, deepseekProOffPeakInputPrice, pro.InputPricePerToken, 1e-15)
+	require.InDelta(t, deepseekProOffPeakOutputPrice, pro.OutputPricePerToken, 1e-15)
+	require.InDelta(t, deepseekProOffPeakCacheRead, pro.CacheReadPricePerToken, 1e-15)
 
 	// Keep legacy aliases parseable for existing mappings while aligning their
 	// token card with the current V4 Flash fallback.
 	for _, alias := range []string{"deepseek-chat", "deepseek-reasoner"} {
-		legacy := pricingData[alias]
-		require.NotNil(t, legacy)
-		require.InDelta(t, deepseekFlashOffPeakInputPrice, legacy.InputCostPerToken, 1e-15)
-		require.InDelta(t, deepseekFlashOffPeakOutputPrice, legacy.OutputCostPerToken, 1e-15)
-		require.InDelta(t, deepseekFlashOffPeakCacheRead, legacy.CacheReadInputTokenCost, 1e-15)
+		require.Contains(t, pricingData, alias)
+		legacy, err := billing.GetModelPricing(alias)
+		require.NoError(t, err)
+		require.InDelta(t, 0.15e-6, legacy.InputPricePerToken, 1e-15)
+		require.InDelta(t, 0.60e-6, legacy.OutputPricePerToken, 1e-15)
+		require.InDelta(t, 0.003e-6, legacy.CacheReadPricePerToken, 1e-15)
 	}
 }
 
@@ -207,16 +228,17 @@ func TestCalculateCostUnified_DeepSeekPeakMultiplierAndChannelOverride(t *testin
 	offPeakAt := time.Date(2026, time.August, 24, 12, 0, 0, 0, time.UTC)
 	peakAt := time.Date(2026, time.August, 24, 2, 0, 0, 0, time.UTC)
 	offPeak, err := service.CalculateCostUnified(CostInput{
-		Ctx: context.Background(), Model: "deepseek-v4-flash", Tokens: tokens,
+		Ctx: context.Background(), Model: "deepseek-flash", Tokens: tokens,
 		RateMultiplier: 1, Resolver: resolver, PricingAt: offPeakAt,
 	})
 	require.NoError(t, err)
 	peak, err := service.CalculateCostUnified(CostInput{
-		Ctx: context.Background(), Model: "deepseek-v4-flash", Tokens: tokens,
+		Ctx: context.Background(), Model: "deepseek-flash", Tokens: tokens,
 		RateMultiplier: 1, Resolver: resolver, PricingAt: peakAt,
 	})
 	require.NoError(t, err)
-	require.InDelta(t, offPeak.TotalCost*2, peak.TotalCost, 1e-12)
+	require.InDelta(t, 0.000453, offPeak.TotalCost, 1e-12)
+	require.InDelta(t, 0.000906, peak.TotalCost, 1e-12)
 
 	// A channel card is authoritative: the same peak timestamp must not scale
 	// administrator-defined input/output/cache prices.
@@ -226,10 +248,10 @@ func TestCalculateCostUnified_DeepSeekPeakMultiplierAndChannelOverride(t *testin
 	cache.groupPlatform[1] = PlatformDeepseek
 	cache.channelByGroupID[1] = &Channel{ID: 1, Status: StatusActive}
 	cache.pricingByGroupModel[channelModelKey{
-		groupID: 1, platform: PlatformDeepseek, model: "deepseek-v4-flash",
+		groupID: 1, platform: PlatformDeepseek, model: "deepseek-flash",
 	}] = &ChannelModelPricing{
 		Platform:       PlatformDeepseek,
-		Models:         []string{"deepseek-v4-flash"},
+		Models:         []string{"deepseek-flash"},
 		BillingMode:    BillingModeToken,
 		InputPrice:     &inputPrice,
 		OutputPrice:    &outputPrice,
@@ -239,13 +261,14 @@ func TestCalculateCostUnified_DeepSeekPeakMultiplierAndChannelOverride(t *testin
 	channelService.cache.Store(cache)
 	channelResolver := NewModelPricingResolver(channelService, service)
 	groupID := int64(1)
-	resolved := channelResolver.Resolve(context.Background(), PricingInput{Model: "deepseek-v4-flash", GroupID: &groupID})
+	resolved := channelResolver.Resolve(context.Background(), PricingInput{Model: "deepseek-flash", GroupID: &groupID})
 	require.Equal(t, PricingSourceChannel, resolved.Source)
 	channelCost, err := service.CalculateCostUnified(CostInput{
-		Ctx: context.Background(), Model: "deepseek-v4-flash", GroupID: &groupID,
-		Tokens: tokens, RateMultiplier: 1, Resolver: channelResolver,
+		Ctx: context.Background(), Model: "deepseek-flash", GroupID: &groupID,
+		Tokens: tokens, RateMultiplier: 0.45, Resolver: channelResolver,
 		Resolved: resolved, PricingAt: peakAt,
 	})
 	require.NoError(t, err)
 	require.InDelta(t, 1000*inputPrice+500*outputPrice+1000*cacheReadPrice, channelCost.TotalCost, 1e-12)
+	require.InDelta(t, channelCost.TotalCost*0.45, channelCost.ActualCost, 1e-12)
 }

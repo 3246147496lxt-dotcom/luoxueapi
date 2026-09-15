@@ -49,6 +49,11 @@ const AppendModelTagInputStub = defineComponent({
   template: '<button data-testid="model-tag-input" type="button" @click="$emit(\'update:models\', [\'existing-model\', \'new-model\'])">append model</button>'
 })
 
+const MiniMaxModelTagInputStub = defineComponent({
+  emits: ['update:models'],
+  template: '<button data-testid="model-tag-input" type="button" @click="$emit(\'update:models\', [\'minimax-m3\'])">add model</button>'
+})
+
 function makeEntry(overrides: Partial<PricingFormEntry> = {}): PricingFormEntry {
   return {
     models: [],
@@ -108,6 +113,36 @@ describe('PricingEntryCard', () => {
       image_input_price: 2,
       image_output_price: 4
     })
+  })
+
+  it.each([true, false])('auto-fills MiniMax-M3 tiers and preserves unknown cache writes (channel multiplier: %s)', async (applyChannelPricingMultiplier) => {
+    testState.getModelDefaultPricing.mockResolvedValue({
+      found: true,
+      input_price: 0.3e-6,
+      output_price: 1.2e-6,
+      cache_write_price: null,
+      cache_read_price: 0.06e-6,
+      channel_pricing_multiplier: 2,
+      intervals: [
+        { min_tokens: 0, max_tokens: 524288, tier_label: '', input_price: 0.3e-6, output_price: 1.2e-6, cache_write_price: null, cache_read_price: 0.06e-6, per_request_price: null, sort_order: 0 },
+        { min_tokens: 524288, max_tokens: null, tier_label: 'long_context', input_price: 0.6e-6, output_price: 2.4e-6, cache_write_price: null, cache_read_price: 0.12e-6, per_request_price: null, sort_order: 1 },
+      ],
+    })
+    const wrapper = mount(PricingEntryCard, {
+      props: { entry: makeEntry(), platform: 'openai', applyChannelPricingMultiplier },
+      global: { stubs: { Icon: true, IntervalRow: true, Select: true, ModelTagInput: MiniMaxModelTagInputStub } },
+    })
+
+    await wrapper.get('[data-testid="model-tag-input"]').trigger('click')
+    await flushPromises()
+
+    expect(testState.getModelDefaultPricing).toHaveBeenCalledWith('minimax-m3')
+    const updated = wrapper.emitted('update')?.[1][0] as PricingFormEntry
+    const multiplier = applyChannelPricingMultiplier ? 2 : 1
+    expect(updated.cache_write_price).toBeNull()
+    expect(updated.intervals).toHaveLength(2)
+    expect(updated.intervals[0]).toMatchObject({ min_tokens: 0, max_tokens: 524288, input_price: 0.3 * multiplier, cache_write_price: null })
+    expect(updated.intervals[1]).toMatchObject({ min_tokens: 524288, max_tokens: null, input_price: 0.6 * multiplier, output_price: 2.4 * multiplier, cache_read_price: 0.12 * multiplier, cache_write_price: null })
   })
 
   it('does not overwrite manually entered channel prices', async () => {

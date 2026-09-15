@@ -70,6 +70,24 @@ export function officialPerTokenToChannelMTok(
   return Number.isFinite(converted) ? parseFloat(converted.toPrecision(10)) : null
 }
 
+/** Copy official token tiers into independently editable USD/MTok values. */
+export function officialIntervalsToForm(
+  intervals: PricingInterval[] | undefined,
+  multiplier = CHANNEL_PRICING_MULTIPLIER,
+): IntervalFormEntry[] {
+  return (intervals || []).map(interval => ({
+    min_tokens: interval.min_tokens,
+    max_tokens: interval.max_tokens,
+    tier_label: interval.tier_label || '',
+    input_price: officialPerTokenToChannelMTok(interval.input_price, multiplier),
+    output_price: officialPerTokenToChannelMTok(interval.output_price, multiplier),
+    cache_write_price: officialPerTokenToChannelMTok(interval.cache_write_price, multiplier),
+    cache_read_price: officialPerTokenToChannelMTok(interval.cache_read_price, multiplier),
+    per_request_price: interval.per_request_price,
+    sort_order: interval.sort_order,
+  }))
+}
+
 /**
  * Build channel pricing rows for models returned by the admin sync endpoint.
  *
@@ -107,7 +125,7 @@ export function syncedModelsToPricingEntries(
       image_input_price: hasQuote ? officialPerTokenToChannelMTok(official?.image_input_price, multiplier) : null,
       image_output_price: hasQuote ? officialPerTokenToChannelMTok(official?.image_output_price, multiplier) : null,
       per_request_price: null,
-      intervals: [],
+      intervals: hasQuote ? officialIntervalsToForm(official?.intervals, multiplier) : [],
     }
 
     // Include every field that can affect billing so only genuinely
@@ -120,6 +138,7 @@ export function syncedModelsToPricingEntries(
       entry.cache_read_price,
       entry.image_input_price,
       entry.image_output_price,
+      entry.intervals,
     ])
     const existing = grouped.get(key)
     if (existing) {
@@ -137,6 +156,7 @@ export function syncedModelsToPricingEntries(
       entries.push({
         ...entry,
         models: entry.models.slice(start, start + MAX_MODELS_PER_PRICING_ENTRY),
+        intervals: entry.intervals.map(interval => ({ ...interval })),
       })
     }
   }

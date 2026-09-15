@@ -29,10 +29,13 @@ func TestGatewayServiceDeepSeekPeakPricingResolverAndFallbackPaths(t *testing.T)
 
 	cases := []struct {
 		name         string
+		model        string
 		withResolver bool
 	}{
-		{name: "resolver", withResolver: true},
-		{name: "no resolver fallback", withResolver: false},
+		{name: "canonical resolver", model: "deepseek-flash", withResolver: true},
+		{name: "canonical no resolver fallback", model: "deepseek-flash", withResolver: false},
+		{name: "legacy resolver", model: "deepseek-v4-flash", withResolver: true},
+		{name: "legacy no resolver fallback", model: "deepseek-v4-flash", withResolver: false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -55,17 +58,19 @@ func TestGatewayServiceDeepSeekPeakPricingResolverAndFallbackPaths(t *testing.T)
 				}
 			}
 			svc := &GatewayService{billingService: billing, resolver: resolver}
+			forwardResult := deepSeekGatewayForwardResultForTest()
+			forwardResult.Model = tc.model
 
 			offPeak := svc.calculateTokenCostResolved(
-				context.Background(), deepSeekGatewayForwardResultForTest(), apiKey,
-				"deepseek-v4-flash", 1, &recordUsageOpts{PricingAt: offPeakAt},
+				context.Background(), forwardResult, apiKey,
+				tc.model, 1, &recordUsageOpts{PricingAt: offPeakAt},
 			)
 			require.NoError(t, offPeak.Err)
 			require.InDelta(t, offPeakTotal, offPeak.Cost.TotalCost, 1e-12)
 
 			peak := svc.calculateTokenCostResolved(
-				context.Background(), deepSeekGatewayForwardResultForTest(), apiKey,
-				"deepseek-v4-flash", 1, &recordUsageOpts{PricingAt: peakAt},
+				context.Background(), forwardResult, apiKey,
+				tc.model, 1, &recordUsageOpts{PricingAt: peakAt},
 			)
 			require.NoError(t, peak.Err)
 			require.InDelta(t, offPeakTotal*2, peak.Cost.TotalCost, 1e-12)

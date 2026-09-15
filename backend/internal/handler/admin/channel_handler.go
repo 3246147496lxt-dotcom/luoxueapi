@@ -2,6 +2,7 @@ package admin
 
 import (
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
 
@@ -126,30 +127,71 @@ type channelModelPricingResponse struct {
 // model-sync endpoint.  It deliberately stays in USD per token; the frontend
 // applies the channel baseline multiplier when seeding an editable row.
 type modelDefaultPricingResponse struct {
-	Found                    bool    `json:"found"`
-	InputPrice               float64 `json:"input_price"`
-	OutputPrice              float64 `json:"output_price"`
-	CacheWritePrice          float64 `json:"cache_write_price"`
-	CacheReadPrice           float64 `json:"cache_read_price"`
-	ImageInputPrice          float64 `json:"image_input_price"`
-	ImageOutputPrice         float64 `json:"image_output_price"`
-	ChannelPricingMultiplier float64 `json:"channel_pricing_multiplier"`
+	Found                    bool                      `json:"found"`
+	InputPrice               *float64                  `json:"input_price"`
+	OutputPrice              *float64                  `json:"output_price"`
+	CacheWritePrice          *float64                  `json:"cache_write_price"`
+	CacheReadPrice           *float64                  `json:"cache_read_price"`
+	ImageInputPrice          *float64                  `json:"image_input_price"`
+	ImageOutputPrice         *float64                  `json:"image_output_price"`
+	ChannelPricingMultiplier float64                   `json:"channel_pricing_multiplier"`
+	Intervals                []pricingIntervalResponse `json:"intervals,omitempty"`
 }
 
-func modelDefaultPricingResponseFrom(pricing *service.ModelPricing) modelDefaultPricingResponse {
-	if pricing == nil {
+func modelDefaultPricingResponseFrom(pricing *service.LiteLLMModelPricing) modelDefaultPricingResponse {
+	if pricing == nil || pricing.TokenPricingAbsent {
 		return modelDefaultPricingResponse{}
 	}
-	return modelDefaultPricingResponse{
+	// Missing fields stay unknown. In particular, cache storage being free is
+	// not a quote for cache creation, and must not seed a free channel price.
+	present := func(value float64, set bool) *float64 {
+		if (!set && value == 0) || value < 0 || math.IsNaN(value) || math.IsInf(value, 0) {
+			return nil
+		}
+		return &value
+	}
+	result := modelDefaultPricingResponse{
 		Found:                    true,
-		InputPrice:               pricing.InputPricePerToken,
-		OutputPrice:              pricing.OutputPricePerToken,
-		CacheWritePrice:          pricing.CacheCreationPricePerToken,
-		CacheReadPrice:           pricing.CacheReadPricePerToken,
-		ImageInputPrice:          pricing.ImageInputPricePerToken,
-		ImageOutputPrice:         pricing.ImageOutputPricePerToken,
+		InputPrice:               present(pricing.InputCostPerToken, pricing.InputCostPerTokenSet),
+		OutputPrice:              present(pricing.OutputCostPerToken, pricing.OutputCostPerTokenSet),
+		CacheWritePrice:          present(pricing.CacheCreationInputTokenCost, pricing.CacheCreationInputTokenCostSet),
+		CacheReadPrice:           present(pricing.CacheReadInputTokenCost, pricing.CacheReadInputTokenCostSet),
+		ImageInputPrice:          present(pricing.InputCostPerImageToken, pricing.InputCostPerImageTokenSet),
+		ImageOutputPrice:         present(pricing.OutputCostPerImageToken, pricing.OutputCostPerImageTokenSet),
 		ChannelPricingMultiplier: service.ChannelPricingBaselineMultiplier,
 	}
+	inputMultiplier := pricing.LongContextInputCostMultiplier
+	outputMultiplier := pricing.LongContextOutputCostMultiplier
+	if inputMultiplier <= 0 || math.IsNaN(inputMultiplier) || math.IsInf(inputMultiplier, 0) {
+		inputMultiplier = 1
+	}
+	if outputMultiplier <= 0 || math.IsNaN(outputMultiplier) || math.IsInf(outputMultiplier, 0) {
+		outputMultiplier = 1
+	}
+	threshold := pricing.LongContextInputTokenThreshold
+	if threshold > 0 && (inputMultiplier > 1 || outputMultiplier > 1) {
+		scale := func(value *float64, multiplier float64) *float64 {
+			if value == nil {
+				return nil
+			}
+			return present(*value*multiplier, true)
+		}
+		// Channel intervals use (min, max], so the threshold belongs to the
+		// base tier and its next token belongs to the long-context tier.
+		result.Intervals = []pricingIntervalResponse{
+			{
+				MinTokens: 0, MaxTokens: &threshold,
+				InputPrice: result.InputPrice, OutputPrice: result.OutputPrice,
+				CacheWritePrice: result.CacheWritePrice, CacheReadPrice: result.CacheReadPrice,
+			},
+			{
+				MinTokens: threshold, TierLabel: "long_context", SortOrder: 1,
+				InputPrice: scale(result.InputPrice, inputMultiplier), OutputPrice: scale(result.OutputPrice, outputMultiplier),
+				CacheWritePrice: scale(result.CacheWritePrice, inputMultiplier), CacheReadPrice: scale(result.CacheReadPrice, inputMultiplier),
+			},
+		}
+	}
+	return result
 }
 
 type pricingIntervalResponse struct {
@@ -519,13 +561,15 @@ func (h *ChannelHandler) GetModelDefaultPricing(c *gin.Context) {
 		return
 	}
 
-	if h.billingService == nil {
+	if h.pricingService == nil {
 		response.Success(c, gin.H{"found": false})
 		return
 	}
 
-	pricing, err := h.billingService.GetModelPricing(model)
-	if err != nil {
+	// Auto-fill copies a reference quote, not the runtime family fallback or
+	// the time-dependent DeepSeek billing rate.
+	_, pricing := h.pricingService.GetExactModelPricing(model)
+	if pricing == nil {
 		// 模型不在定价列表中
 		response.Success(c, gin.H{"found": false})
 		return
@@ -578,10 +622,10 @@ func (h *ChannelHandler) SyncPricingModels(c *gin.Context) {
 	// image-only or otherwise lack token pricing; omit those entries so the UI
 	// leaves their prices empty for an explicit administrator decision.
 	pricing := make(map[string]modelDefaultPricingResponse)
-	if h.billingService != nil {
+	if h.pricingService != nil {
 		for _, model := range models {
-			modelPricing, err := h.billingService.GetModelPricing(model)
-			if err != nil || modelPricing == nil {
+			_, modelPricing := h.pricingService.GetExactModelPricing(model)
+			if modelPricing == nil || modelPricing.TokenPricingAbsent {
 				continue
 			}
 			pricing[model] = modelDefaultPricingResponseFrom(modelPricing)

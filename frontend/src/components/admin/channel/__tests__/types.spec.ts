@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   officialPerTokenToChannelMTok,
+  formIntervalsToAPI,
   syncedModelsToPricingEntries,
   validateIntervals,
   type IntervalFormEntry,
@@ -107,6 +108,48 @@ describe('officialPerTokenToChannelMTok', () => {
 })
 
 describe('syncedModelsToPricingEntries', () => {
+  it('preserves MiniMax-M3 long-context tiers and unknown cache writes through sync and save', () => {
+    const quote: ModelDefaultPricing = {
+      found: true, input_price: 0.3e-6, output_price: 1.2e-6,
+      cache_write_price: null, cache_read_price: 0.06e-6,
+      channel_pricing_multiplier: 2,
+      intervals: [
+        { ...makeInterval({ min_tokens: 0, max_tokens: 524288 }), input_price: 0.3e-6, output_price: 1.2e-6, cache_read_price: 0.06e-6, cache_write_price: null, per_request_price: null },
+        { ...makeInterval({ min_tokens: 524288, tier_label: 'long_context', sort_order: 1 }), input_price: 0.6e-6, output_price: 2.4e-6, cache_read_price: 0.12e-6, cache_write_price: null, per_request_price: null },
+      ],
+    }
+    const [entry] = syncedModelsToPricingEntries(['minimax-m3'], { 'minimax-m3': quote })
+
+    expect(entry.cache_write_price).toBeNull()
+    expect(entry.intervals).toEqual([
+      makeInterval({ max_tokens: 524288, input_price: 0.6, output_price: 2.4, cache_read_price: 0.12 }),
+      makeInterval({ min_tokens: 524288, tier_label: 'long_context', sort_order: 1, input_price: 1.2, output_price: 4.8, cache_read_price: 0.24 }),
+    ])
+    const saved = formIntervalsToAPI(entry.intervals)
+    expect(saved[0]).toMatchObject({ max_tokens: 524288, input_price: 0.6e-6, cache_write_price: null })
+    expect(saved[1]).toMatchObject({ min_tokens: 524288, max_tokens: null, input_price: 1.2e-6, output_price: 4.8e-6, cache_read_price: 0.24e-6, cache_write_price: null })
+    expect(quote.intervals?.[1].input_price).toBe(0.6e-6)
+  })
+
+  it('groups equal base prices only when their context tiers also match', () => {
+    const base: ModelDefaultPricing = { found: true, input_price: 0.3e-6, output_price: 1.2e-6 }
+    const interval = {
+      min_tokens: 524288, max_tokens: null, tier_label: 'long_context', sort_order: 1,
+      input_price: 0.6e-6, output_price: 2.4e-6, cache_write_price: null, cache_read_price: null, per_request_price: null,
+    }
+    const entries = syncedModelsToPricingEntries(['flat', 'm3', 'm3-same', 'other-threshold', 'other-price'], {
+      flat: base,
+      m3: { ...base, intervals: [interval] },
+      'm3-same': { ...base, intervals: [{ ...interval }] },
+      'other-threshold': { ...base, intervals: [{ ...interval, min_tokens: 256000 }] },
+      'other-price': { ...base, intervals: [{ ...interval, output_price: 3e-6 }] },
+    })
+
+    expect(entries.map(entry => entry.models)).toEqual([
+      ['flat'], ['m3', 'm3-same'], ['other-threshold'], ['other-price'],
+    ])
+  })
+
   it('keeps different model quotes in separate channel rows and applies ×1', () => {
     const pricing: Record<string, ModelDefaultPricing> = {
       'model-a': { found: true, input_price: 1e-6, output_price: 4e-6 },

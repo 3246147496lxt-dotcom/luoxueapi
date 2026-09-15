@@ -153,12 +153,14 @@ export interface ModelDefaultPricing {
   found: boolean
   // Official provider quote (USD per token). The channel editor applies the
   // fixed CHANNEL_PRICING_MULTIPLIER when auto-filling a new pricing entry.
-  input_price?: number
-  output_price?: number
-  cache_write_price?: number
-  cache_read_price?: number
-  image_input_price?: number
-  image_output_price?: number
+  input_price?: number | null
+  output_price?: number | null
+  cache_write_price?: number | null
+  cache_read_price?: number | null
+  image_input_price?: number | null
+  image_output_price?: number | null
+  /** Official token tiers use (min_tokens, max_tokens], with USD/token prices. */
+  intervals?: PricingInterval[]
   /** Server-declared channel baseline; old servers may omit it. */
   channel_pricing_multiplier?: number
 }
