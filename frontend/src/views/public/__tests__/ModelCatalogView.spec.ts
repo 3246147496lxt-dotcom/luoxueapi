@@ -301,6 +301,26 @@ describe('ModelCatalogView grouped price comparison', () => {
     expect(filterButton(wrapper, 'rate', '全部').attributes('disabled')).toBeUndefined()
   })
 
+  it('keeps domestic models using the OpenAI protocol in their own group under the OpenAI filter', async () => {
+    testState.getCatalog.mockResolvedValue(catalogResponse([
+      ...comparisonModels(),
+      model({
+        slug: 'domestic-glm', model: 'glm-5', provider: 'zhipu', logo_key: 'zhipu',
+        public_group: { id: 129, name: '国模', platform: 'openai', rate_multiplier: 0.45 },
+        rate_multiplier: 0.45,
+      }),
+    ]))
+    const { wrapper } = await mountCatalog()
+    await filterButton(wrapper, 'platform', 'OpenAI').trigger('click')
+    await flushPromises()
+    expect(group(wrapper, 129).text()).toContain('glm-5')
+    expect(filterButton(wrapper, 'group', '国模').attributes('disabled')).toBeUndefined()
+    await filterButton(wrapper, 'group', '国模').trigger('click')
+    await flushPromises()
+    expect(wrapper.findAll('.group-card')).toHaveLength(1)
+    expect(group(wrapper, 129).text()).toContain('glm-5')
+  })
+
   it('combines group, rate and search filters and writes their selected values into the URL', async () => {
     testState.getCatalog.mockResolvedValue(catalogResponse(comparisonModels()))
     const { wrapper, router } = await mountCatalog()
@@ -416,19 +436,16 @@ describe('ModelCatalogView grouped price comparison', () => {
     expect(amounts(card, 'tbody tr:not(:first-child) .official-cell')).toEqual([])
   })
 
-  it('marks Priority and image token extras as base quotes with a separate context-tier note', async () => {
+  it('shows only standard token prices and compact cache read/write with populated special pricing fields', async () => {
     testState.getCatalog.mockResolvedValue(catalogResponse([model({
-      pricing: pricing({ priority_input_price: 0.000008, image_input_price: 0.000007 }),
+      pricing: pricing({ priority_input_price: 0.000008, image_input_price: 0.000007, cache_write_1h_price: 0.000009 }),
     })]))
     const { wrapper } = await mountCatalog()
     const card = group(wrapper, 101)
-    for (const label of ['Priority 基础', '图像基础']) {
-      const row = card.findAll('tbody tr').find(candidate => candidate.text().includes(label))
-      expect(row).toBeDefined()
-      const context = row!.get('.discount-cell .tier-context')
-      expect(context.text()).toBe(label)
-      expect(context.attributes('title')).toBe('此处为基础 Token 报价，上下文档位另计。')
-    }
+    expect(card.findAll('tbody tr')).toHaveLength(1)
+    expect(card.text()).not.toMatch(/Priority|图像基础|缓存写入（1 小时）/)
+    expect(amounts(card, 'tbody .discount-cell')).toEqual(expect.arrayContaining([0.2, 1.2, 0.02]))
+    expect(card.get('.rate-heading').text()).toBe('折扣倍率')
   })
 
   it('keeps a legacy model without group metadata visible', async () => {

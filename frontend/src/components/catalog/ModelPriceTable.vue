@@ -34,8 +34,8 @@
           <template v-for="side in sides" :key="side">
             <template v-if="perToken">
               <td class="input-cell" :class="[`${side}-cell`, `${side}-start`, { 'discount-cell': side === 'paid' }]">
-                <div class="input-price" :class="{ 'without-context': !rowLabel(row) }">
-                  <span v-if="rowLabel(row)" class="tier-context" :title="row.variant === 'standard' ? rowLabel(row) : t('modelCatalog.table.variantBaseNote')">{{ rowLabel(row) }}</span>
+                <div class="input-price" :class="{ 'without-context': !row.context }">
+                  <span v-if="row.context" class="tier-context" :title="row.context">{{ row.context }}</span>
                   <span>{{ amount(row[side]?.input_price, entry.item, side) }}</span>
                 </div>
               </td>
@@ -45,7 +45,6 @@
                   <span class="cache-part"><span class="cache-key">{{ t('modelCatalog.table.write') }}</span>{{ amount(row[side]?.cache_write_price, entry.item, side) }}</span>
                   <span class="cache-part"><span class="cache-key">{{ t('modelCatalog.table.read') }}</span>{{ amount(row[side]?.cache_read_price, entry.item, side) }}</span>
                 </div>
-                <div v-if="row[side]?.cache_write_1h_price != null" class="cache-content cache-extra"><span class="cache-key">{{ t('modelCatalog.pricing.cacheWrite1h') }}</span>{{ amount(row[side]?.cache_write_1h_price, entry.item, side) }}</div>
               </td>
             </template>
             <td v-else colspan="3" class="request-amount" :class="[`${side}-cell`, `${side}-start`, { 'discount-cell': side === 'paid' }]">
@@ -78,9 +77,6 @@ function unit(pricing?: PublicModelCatalogPricing | null) {
 }
 function amount(value: number | null | undefined, item: PublicModelCatalogItem, side: 'paid' | 'official') {
   return catalogAmount(value, (side === 'official' ? item.official_pricing?.currency : item.pricing.currency) || item.pricing.currency, perToken.value)
-}
-function rowLabel(row: CatalogComparisonRow) {
-  return row.variant === 'priority' ? t('modelCatalog.table.priorityBase') : row.variant === 'image' ? t('modelCatalog.table.imageTokenBase') : row.context
 }
 function requestContext(row: CatalogComparisonRow, item: PublicModelCatalogItem, side: 'paid' | 'official') {
   if (row.context) return row.context
@@ -159,7 +155,6 @@ function requestContext(row: CatalogComparisonRow, item: PublicModelCatalogItem,
 .official-cell { background: var(--workspace-card-surface); }
 .price-unit { margin-left: 5px; }
 .peak-note { margin: 5px 0 0; color: var(--workspace-text-muted); font-size: 10px; font-weight: 400; line-height: 1.5; }
-.cache-extra { font-size: 10px; gap: 5px; }
 .request-context { margin-right: 14px; }
 .table-scroll:focus-visible { outline: 2px solid var(--workspace-work-accent); outline-offset: -2px; }
 @media (max-width: 767px) {

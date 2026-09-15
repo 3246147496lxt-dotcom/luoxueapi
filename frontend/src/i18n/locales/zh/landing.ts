@@ -147,8 +147,6 @@ export default {
 
   modelCatalog: {
     table: {
-      priorityBase: 'Priority 基础', imageTokenBase: '图像基础',
-      variantBaseNote: '此处为基础 Token 报价，上下文档位另计。',
       basePrice: '基础价', defaultImage2K: '默认 2K', officialImageBase: '基础价（规格未提供）',
       platform: '平台', group: '分组', multiplier: '倍率', model: '模型',
       paid: '实付价格(折后)', official: '官方价格', rate: '折扣倍率',

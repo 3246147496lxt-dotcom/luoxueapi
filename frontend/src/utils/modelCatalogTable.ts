@@ -4,7 +4,6 @@ type Prices = Pick<PublicModelCatalogPricingInterval, 'input_price' | 'output_pr
 export interface CatalogComparisonRow {
   key: string
   context: string
-  variant: 'standard' | 'priority' | 'image'
   paid: Prices | null
   official: Prices | null
 }
@@ -59,29 +58,19 @@ function intervalAt(pricing: PublicModelCatalogPricing | null, min: number, max:
   return validIntervals(pricing).find(i => i.min_tokens <= min && (i.max_tokens == null || (max != null && i.max_tokens >= max))) || pricing
 }
 
-function variantPrices(pricing: PublicModelCatalogPricing | null, variant: 'priority' | 'image'): Prices | null {
-  if (!pricing) return null
-  const input = variant === 'priority' ? pricing.priority_input_price : pricing.image_input_price
-  const output = variant === 'priority' ? pricing.priority_output_price : pricing.image_output_price
-  const write = variant === 'priority' ? pricing.priority_cache_write_price : null
-  const read = variant === 'priority' ? pricing.priority_cache_read_price : null
-  if ([input, output, write, read].every(v => v == null)) return null
-  return { input_price: input, output_price: output, cache_write_price: write, cache_read_price: read, cache_write_1h_price: null, per_request_price: null }
-}
-
 export function catalogComparisonRows(item: PublicModelCatalogItem): CatalogComparisonRow[] {
   const paid = item.pricing
   // Never compare different billing units as if they were the same price.
   const official = item.official_pricing?.billing_mode === paid.billing_mode ? item.official_pricing : null
   if (paid.billing_mode !== 'token') {
-    const rows: CatalogComparisonRow[] = [{ key: 'base', context: '', variant: 'standard', paid, official }]
+    const rows: CatalogComparisonRow[] = [{ key: 'base', context: '', paid, official }]
     const tiers = new Map<string, PublicModelCatalogPricingInterval>()
     for (const interval of [...validIntervals(paid), ...validIntervals(official)]) {
       tiers.set(`${interval.tier_label || ''}:${interval.min_tokens}:${interval.max_tokens}`, interval)
     }
     for (const [key, interval] of tiers) {
       const match = (p: PublicModelCatalogPricing | null) => validIntervals(p).find(i => i.tier_label === interval.tier_label && i.min_tokens === interval.min_tokens && i.max_tokens === interval.max_tokens) || null
-      rows.push({ key, context: interval.tier_label || rangeLabel(interval.min_tokens, interval.max_tokens), variant: 'standard', paid: match(paid), official: match(official) })
+      rows.push({ key, context: interval.tier_label || rangeLabel(interval.min_tokens, interval.max_tokens), paid: match(paid), official: match(official) })
     }
     return rows
   }
@@ -92,12 +81,7 @@ export function catalogComparisonRows(item: PublicModelCatalogItem): CatalogComp
   const boundaries = Array.from(new Set([0, ...intervals.flatMap(i => [i.min_tokens, ...(i.max_tokens == null ? [] : [i.max_tokens])])])).sort((a, b) => a - b)
   const rows: CatalogComparisonRow[] = boundaries.map((min, index) => {
     const max = boundaries[index + 1] ?? null
-    return { key: `tokens-${min}`, context: intervals.length ? rangeLabel(min, max) : '', variant: 'standard', paid: intervalAt(paid, min, max), official: intervalAt(official, min, max) }
+    return { key: `tokens-${min}`, context: intervals.length ? rangeLabel(min, max) : '', paid: intervalAt(paid, min, max), official: intervalAt(official, min, max) }
   })
-  for (const variant of ['priority', 'image'] as const) {
-    const paidVariant = variantPrices(paid, variant)
-    const officialVariant = variantPrices(official, variant)
-    if (paidVariant || officialVariant) rows.push({ key: variant, context: '', variant, paid: paidVariant, official: officialVariant })
-  }
   return rows
 }

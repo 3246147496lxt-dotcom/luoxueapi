@@ -79,21 +79,15 @@ describe('catalogComparisonRows', () => {
     expect(catalogAmount(rows[0].official?.input_price, 'USD', paid === 'token')).toBe('—')
   })
 
-  it('keeps Priority and image extras distinct, including zero and one-sided quotes', () => {
+  it('keeps the comparison focused on standard prices even when special token fields are populated', () => {
     const rows = catalogComparisonRows(item(
       pricing({ priority_input_price: 0, priority_cache_write_price: 0.5, priority_cache_read_price: 0.1 }),
       pricing({ priority_input_price: 10, priority_output_price: 20, image_input_price: 40, image_output_price: 50 }),
     ))
-    expect(rows.map(row => row.variant)).toEqual(['standard', 'priority', 'image'])
-    const priority = rows.find(row => row.variant === 'priority')!
-    expect(priority.paid).toEqual({
-      input_price: 0, output_price: null, cache_write_price: 0.5, cache_read_price: 0.1,
-      cache_write_1h_price: null, per_request_price: null,
-    })
-    expect(priority.official).toEqual(expect.objectContaining({ input_price: 10, output_price: 20 }))
-    const image = rows.find(row => row.variant === 'image')!
-    expect(image.paid).toBeNull()
-    expect(image.official).toEqual(expect.objectContaining({ input_price: 40, output_price: 50, cache_write_price: null, cache_read_price: null }))
+    expect(rows).toHaveLength(1)
+    expect(rows[0].context).toBe('')
+    expect(rows[0].paid).toEqual(expect.objectContaining({ input_price: 1, output_price: 2 }))
+    expect(rows[0].official).toEqual(expect.objectContaining({ input_price: 1, output_price: 2 }))
   })
 
   it('matches fixed-price tiers by identity and leaves unavailable counterparts empty', () => {

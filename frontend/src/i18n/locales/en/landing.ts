@@ -153,8 +153,6 @@ export default {
 
   modelCatalog: {
     table: {
-      priorityBase: 'Priority base', imageTokenBase: 'Image base',
-      variantBaseNote: 'Base token quote; context tier charges apply separately.',
       basePrice: 'Base price', defaultImage2K: 'Default 2K', officialImageBase: 'Base price (size unspecified)',
       platform: 'Platform', group: 'Group', multiplier: 'Rate', model: 'Model',
       paid: 'Price after discount', official: 'Official price', rate: 'Rate',
