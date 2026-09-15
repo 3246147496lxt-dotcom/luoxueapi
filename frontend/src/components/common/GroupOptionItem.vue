@@ -1,13 +1,14 @@
 <template>
-  <div class="flex min-w-0 flex-1 items-start justify-between gap-3">
+  <div class="group-option-item grid min-w-0 flex-1 items-start gap-x-4 gap-y-1">
     <!-- Left: name + description -->
     <div
-      class="flex min-w-0 flex-1 flex-col items-start"
+      class="group-option-item__details flex min-w-0 flex-1 flex-col items-start"
       :title="description || undefined"
     >
       <!-- Row 1: platform badge (name bold) -->
       <GroupBadge
         :name="name"
+        :title="name"
         :platform="platform"
         :subscription-type="subscriptionType"
         :show-rate="false"
@@ -16,33 +17,24 @@
       <!-- Row 2: description with top spacing -->
       <span
         v-if="description"
-        class="mt-1.5 w-full text-left text-xs leading-relaxed text-gray-500 dark:text-gray-400 line-clamp-2"
+        class="group-option-item__description mt-1.5 w-full text-left text-xs leading-relaxed text-gray-500 dark:text-gray-400"
       >
         {{ description }}
       </span>
     </div>
 
-    <!-- Right: rate pill + checkmark (vertically centered to first row) -->
-    <div class="flex shrink-0 items-center gap-2 pt-0.5">
-      <div class="flex shrink-0 flex-col items-end gap-1">
-        <!-- Rate pill (platform color) -->
-        <span v-if="rateMultiplier !== undefined" :class="['inline-flex items-center whitespace-nowrap rounded-full px-3 py-1 text-xs font-semibold', ratePillClass]">
-          <template v-if="hasCustomRate">
-            <span class="mr-1 line-through opacity-50">{{ rateMultiplier }}x</span>
-            <span class="font-bold">{{ userRateMultiplier }}x</span>
-          </template>
-          <template v-else>
-            {{ rateMultiplier }}x {{ t('admin.groups.rateLabel') }}
-          </template>
-        </span>
-        <span
-          v-if="hasPeakRate"
-          class="inline-flex items-center whitespace-nowrap rounded-full bg-amber-50 px-3 py-1 text-xs font-semibold text-amber-700 dark:bg-amber-900/20 dark:text-amber-300"
-          :title="peakRateTitle"
-        >
-          {{ peakRateText }}
-        </span>
-      </div>
+    <!-- Right: rate pill + checkmark aligned with the name -->
+    <div class="group-option-item__meta flex shrink-0 items-start gap-2 pt-0.5">
+      <!-- Rate pill (platform color) -->
+      <span v-if="rateMultiplier !== undefined" :class="['inline-flex items-center whitespace-nowrap rounded-full px-3 py-1 text-xs font-semibold', ratePillClass]">
+        <template v-if="hasCustomRate">
+          <span class="mr-1 line-through opacity-50">{{ rateMultiplier }}x</span>
+          <span class="font-bold">{{ userRateMultiplier }}x</span>
+        </template>
+        <template v-else>
+          {{ rateMultiplier }}x {{ t('admin.groups.rateLabel') }}
+        </template>
+      </span>
       <!-- Checkmark -->
       <svg
         v-if="showCheckmark && selected"
@@ -55,6 +47,14 @@
         <path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7" />
       </svg>
     </div>
+    <!-- Keep long peak windows from taking space away from the group name. -->
+    <span
+      v-if="hasPeakRate"
+      class="col-span-2 inline-flex items-center justify-self-end whitespace-nowrap rounded-full bg-amber-50 px-3 py-1 text-xs font-semibold text-amber-700 dark:bg-amber-900/20 dark:text-amber-300"
+      :title="peakRateTitle"
+    >
+      {{ peakRateText }}
+    </span>
   </div>
 </template>
 
@@ -143,8 +143,42 @@ const ratePillClass = computed(() => {
 </script>
 
 <style scoped>
+.group-option-item {
+  width: 100%;
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.group-option-item__details {
+  min-width: 0;
+}
+
+.group-option-item__meta {
+  flex-shrink: 0;
+}
+
 /* Bold the group name inside GroupBadge when used in dropdown option */
+.groupOptionItemBadge {
+  display: inline-flex;
+  width: fit-content;
+  max-width: 100%;
+  min-width: 0;
+  align-items: flex-start;
+}
+
 .groupOptionItemBadge :deep(span.truncate) {
   font-weight: 600;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  display: block;
+  line-height: 1.35;
+}
+
+.group-option-item__description {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 </style>

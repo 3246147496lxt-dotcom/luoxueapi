@@ -163,6 +163,7 @@ interface Props {
   creatable?: boolean
   creatablePrefix?: string
   clearable?: boolean
+  dropdownWidth?: number
 }
 
 interface Emits {
@@ -214,6 +215,13 @@ const dropdownStyle = computed(() => {
     left: `${rect.left}px`,
     minWidth: `${rect.width}px`,
     zIndex: '100000020'
+  }
+
+  if (props.dropdownWidth !== undefined) {
+    const width = Math.min(Math.max(rect.width, props.dropdownWidth), window.innerWidth - 32)
+    style.width = `${width}px`
+    style.minWidth = `${width}px`
+    style.left = `${Math.max(16, Math.min(rect.left, window.innerWidth - width - 16))}px`
   }
 
   if (dropdownPosition.value === 'top') {
@@ -613,6 +621,12 @@ onUnmounted(() => {
   @apply cursor-pointer transition-colors duration-150;
   color: var(--lx-clay-text-secondary);
   pointer-events: auto !important;
+}
+
+/* Group options carry a title, optional description, and a rate pill. Give
+   those richer rows more breathing room and align their contents to the top. */
+.select-dropdown-portal:has(.group-option-item) .select-option {
+  @apply items-start gap-4 px-4 py-3.5;
 }
 
 .select-dropdown-portal .select-option:hover,

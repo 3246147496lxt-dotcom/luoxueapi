@@ -168,6 +168,7 @@
             :placeholder="t('keys.selectGroup')"
             :searchable="true"
             :search-placeholder="t('keys.searchGroup')"
+            :dropdown-width="GROUP_DROPDOWN_WIDTH"
             data-tour="key-form-group"
           >
             <template #selected="{ option }">
@@ -764,12 +765,13 @@
         ref="dropdownRef"
         role="dialog"
         :aria-label="t('keys.selectGroup')"
-        class="keys-group-selector animate-in fade-in slide-in-from-top-2 fixed z-[100000020] w-[min(380px,calc(100vw-2rem))] overflow-hidden rounded-xl shadow-lg duration-200"
+        class="keys-group-selector animate-in fade-in slide-in-from-top-2 fixed z-[100000020] overflow-hidden rounded-xl shadow-lg duration-200"
         style="pointer-events: auto !important;"
         :style="{
           top: dropdownPosition.top !== undefined ? dropdownPosition.top + 'px' : undefined,
           bottom: dropdownPosition.bottom !== undefined ? dropdownPosition.bottom + 'px' : undefined,
-          left: dropdownPosition.left + 'px'
+          left: dropdownPosition.left + 'px',
+          width: dropdownPosition.width + 'px'
         }"
       >
         <!-- Search box -->
@@ -940,7 +942,9 @@ const selectedKey = ref<ApiKey | null>(null)
 const copiedKeyId = ref<number | null>(null)
 const groupSelectorKeyId = ref<number | null>(null)
 const dropdownRef = ref<HTMLElement | null>(null)
-const dropdownPosition = ref<{ top?: number; bottom?: number; left: number } | null>(null)
+const GROUP_DROPDOWN_WIDTH = 560
+const dropdownPosition = ref<{ top?: number; bottom?: number; left: number; width: number } | null>(null)
+let groupSelectorViewportWidth = 0
 let abortController: AbortController | null = null
 
 // Get the currently selected key for group change
@@ -1226,8 +1230,9 @@ const openGroupSelector = (key: ApiKey, event: MouseEvent) => {
     const buttonEl = event.currentTarget as HTMLElement | null
     if (buttonEl) {
       const rect = buttonEl.getBoundingClientRect()
+      groupSelectorViewportWidth = window.innerWidth
       const dropdownEstHeight = 400 // estimated max dropdown height
-      const dropdownWidth = Math.min(380, window.innerWidth - 32)
+      const dropdownWidth = Math.min(GROUP_DROPDOWN_WIDTH, window.innerWidth - 32)
       const spaceBelow = window.innerHeight - rect.bottom
       const spaceAbove = rect.top
       const left = Math.min(
@@ -1239,13 +1244,15 @@ const openGroupSelector = (key: ApiKey, event: MouseEvent) => {
         // Not enough space below, pop upward
         dropdownPosition.value = {
           bottom: window.innerHeight - rect.top + 4,
-          left
+          left,
+          width: dropdownWidth
         }
       } else {
         // Default: pop downward
         dropdownPosition.value = {
           top: rect.bottom + 4,
-          left
+          left,
+          width: dropdownWidth
         }
       }
     }
@@ -1280,6 +1287,11 @@ const changeSelectedGroup = (newGroupId: number | null) => {
 const closeGroupSelectorMenu = () => {
   groupSelectorKeyId.value = null
   dropdownPosition.value = null
+}
+
+const handleGroupSelectorResize = () => {
+  // Width changes invalidate the anchor; mobile keyboard height changes do not.
+  if (window.innerWidth !== groupSelectorViewportWidth) closeGroupSelectorMenu()
 }
 
 const closeGroupSelector = (event: MouseEvent) => {
@@ -1589,6 +1601,7 @@ onMounted(() => {
   loadPublicSettings()
   document.addEventListener('click', closeGroupSelector)
   document.addEventListener('keydown', handleEscapeKey)
+  window.addEventListener('resize', handleGroupSelectorResize)
   resetTimer = setInterval(() => { now.value = new Date() }, 60000)
 })
 
@@ -1596,6 +1609,7 @@ onUnmounted(() => {
   abortController?.abort()
   document.removeEventListener('click', closeGroupSelector)
   document.removeEventListener('keydown', handleEscapeKey)
+  window.removeEventListener('resize', handleGroupSelectorResize)
   if (resetTimer) clearInterval(resetTimer)
 })
 </script>
@@ -2149,6 +2163,14 @@ onUnmounted(() => {
 .keys-group-selector-header,
 .keys-group-option {
   border-color: var(--workspace-border);
+}
+
+/* These rows contain both a flexible title/description column and a fixed
+   rate column. Extra vertical room keeps the richer cards easy to scan. */
+.keys-group-option {
+  align-items: flex-start;
+  gap: 1rem;
+  padding-block: 0.875rem;
 }
 
 .keys-group-search {
