@@ -222,8 +222,11 @@ const (
 )
 
 // CheckErrorPolicy 检查自定义错误码和临时不可调度规则。
-// 自定义错误码开启时覆盖后续所有逻辑（包括临时不可调度）。
+// 请求级权限错误不处罚账号；其余错误中，自定义错误码覆盖临时不可调度规则。
 func (s *RateLimitService) CheckErrorPolicy(ctx context.Context, account *Account, statusCode int, responseBody []byte) ErrorPolicyResult {
+	if isOpenAIRequestPermissionError(account, statusCode, responseBody) {
+		return ErrorPolicySkipped
+	}
 	if account.IsCustomErrorCodesEnabled() {
 		if account.ShouldHandleErrorCode(statusCode) {
 			return ErrorPolicyMatched
@@ -243,6 +246,10 @@ func (s *RateLimitService) CheckErrorPolicy(ctx context.Context, account *Accoun
 // HandleUpstreamError 处理上游错误响应，标记账号状态
 // 返回是否应该停止该账号的调度
 func (s *RateLimitService) HandleUpstreamError(ctx context.Context, account *Account, statusCode int, headers http.Header, responseBody []byte, requestedModel ...string) (shouldDisable bool) {
+	if isOpenAIRequestPermissionError(account, statusCode, responseBody) {
+		slog.Info("openai_request_permission_skips_account_penalty", "account_id", account.ID, "status_code", statusCode)
+		return false
+	}
 	customErrorCodesEnabled := account.IsCustomErrorCodesEnabled()
 
 	// 池模式默认不标记本地账号状态；仅当用户显式配置自定义错误码时按本地策略处理。
@@ -2163,7 +2170,7 @@ func modelRateLimitKeyForUpstreamModelNotFound(ctx context.Context, account *Acc
 }
 
 func (s *RateLimitService) tryTempUnschedulable(ctx context.Context, account *Account, statusCode int, responseBody []byte) bool {
-	if account == nil {
+	if account == nil || isOpenAIRequestPermissionError(account, statusCode, responseBody) {
 		return false
 	}
 	if !account.IsTempUnschedulableEnabled() {
