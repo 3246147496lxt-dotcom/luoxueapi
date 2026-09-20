@@ -433,6 +433,72 @@ func TestOpenAIGatewayService_OAuthPassthrough_StreamKeepsToolNameAndBodyNormali
 	require.NotContains(t, body, "\"name\":\"edit\"")
 }
 
+func TestOpenAIGatewayService_OAuthPassthrough_NormalizesReplayedCodexInputIDs(t *testing.T) {
+	setGinTestMode()
+
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", bytes.NewReader(nil))
+	c.Request.Header.Set("User-Agent", "codex_cli_rs/0.1.0")
+
+	originalBody := []byte(`{"model":"gpt-5.6-terra","stream":false,"store":true,"instructions":"local-test-instructions","input":[{"type":"reasoning","id":"item_replayed_reasoning","summary":[],"encrypted_content":"opaque"},{"type":"message","role":"user","id":"item_replayed_message","content":[{"type":"input_text","text":"continue"}]},{"type":"function_call","id":"item_replayed_call","call_id":"call_keep","name":"lookup","arguments":"{}"},{"type":"item_reference","id":"call_reference_keep"},{"type":"custom_unknown","id":"item_unknown_keep","call_id":"call_unknown_keep"}]}`)
+	upstream := &httpUpstreamRecorder{resp: &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"text/event-stream"}, "x-request-id": []string{"rid_input_ids"}},
+		Body:       io.NopCloser(strings.NewReader("data: [DONE]\n\n")),
+	}}
+
+	svc := &OpenAIGatewayService{
+		cfg:          &config.Config{Gateway: config.GatewayConfig{ForceCodexCLI: false}},
+		httpUpstream: upstream,
+	}
+	account := &Account{
+		ID:             123,
+		Name:           "acc",
+		Platform:       PlatformOpenAI,
+		Type:           AccountTypeOAuth,
+		Concurrency:    1,
+		Credentials:    map[string]any{"access_token": "oauth-token", "chatgpt_account_id": "chatgpt-acc"},
+		Extra:          map[string]any{"openai_passthrough": true},
+		Status:         StatusActive,
+		Schedulable:    true,
+		RateMultiplier: f64p(1),
+	}
+
+	result, err := svc.Forward(context.Background(), c, account, originalBody)
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.NotNil(t, upstream.lastReq)
+	require.True(t, gjson.GetBytes(upstream.lastBody, "input").IsArray())
+	require.False(t, gjson.GetBytes(upstream.lastBody, "input.0.id").Exists())
+	require.False(t, gjson.GetBytes(upstream.lastBody, "input.1.id").Exists())
+	require.Equal(t, "opaque", gjson.GetBytes(upstream.lastBody, "input.0.encrypted_content").String())
+	require.Equal(t, "continue", gjson.GetBytes(upstream.lastBody, "input.1.content.0.text").String())
+	require.False(t, gjson.GetBytes(upstream.lastBody, "input.2.id").Exists())
+	require.Equal(t, "call_keep", gjson.GetBytes(upstream.lastBody, "input.2.call_id").String())
+	require.Equal(t, "call_reference_keep", gjson.GetBytes(upstream.lastBody, "input.3.id").String())
+	require.Equal(t, "item_unknown_keep", gjson.GetBytes(upstream.lastBody, "input.4.id").String())
+	require.Equal(t, "call_unknown_keep", gjson.GetBytes(upstream.lastBody, "input.4.call_id").String())
+}
+
+func TestNormalizeOpenAIPassthroughCodexInput_HandlesEscapedJSONKeys(t *testing.T) {
+	body := []byte(`{"\u0069nput":[{"type":"reasoning","\u0069d":"item_replayed_reasoning","summary":[]}]}`)
+
+	normalized, changed, err := normalizeOpenAIPassthroughCodexInput(body)
+	require.NoError(t, err)
+	require.True(t, changed)
+	require.False(t, gjson.GetBytes(normalized, "input.0.id").Exists())
+}
+
+func TestNormalizeOpenAIPassthroughCodexInput_BackfillsReasoningSummary(t *testing.T) {
+	body := []byte(`{"input":[{"type":"reasoning","id":"item_replayed_reasoning"}]}`)
+
+	normalized, changed, err := normalizeOpenAIPassthroughCodexInput(body)
+	require.NoError(t, err)
+	require.True(t, changed)
+	require.True(t, gjson.GetBytes(normalized, "input.0.summary").IsArray())
+}
+
 func TestOpenAIGatewayService_OAuthPassthrough_NamespaceRequestAndStreamResponse(t *testing.T) {
 	setGinTestMode()
 

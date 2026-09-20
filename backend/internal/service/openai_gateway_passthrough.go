@@ -71,6 +71,17 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 		if normalized {
 			body = normalizedBody
 		}
+		// Passthrough still targets the OAuth Codex endpoint, which forces
+		// store=false. Reuse the managed-path input identity normalization so
+		// replayed item_* / provider-owned IDs cannot reach upstream unchanged.
+		normalizedBody, normalized, err = normalizeOpenAIPassthroughCodexInput(body)
+		if err != nil {
+			return nil, err
+		}
+		if normalized {
+			body = normalizedBody
+			logger.LegacyPrintf("service.openai_gateway", "[OpenAI passthrough] Normalized OAuth Codex input item IDs")
+		}
 		reqStream = gjson.GetBytes(body, "stream").Bool()
 	}
 
