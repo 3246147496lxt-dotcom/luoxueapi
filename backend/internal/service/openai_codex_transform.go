@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
+	"github.com/tidwall/gjson"
 )
 
 var codexModelMap = map[string]string{
@@ -1279,6 +1280,89 @@ func filterCodexInput(input []any, preserveReferences bool) []any {
 	return filterCodexInputWithOptions(input, codexInputFilterOptions{
 		PreserveReferences: preserveReferences,
 	})
+}
+
+// normalizeOpenAIPassthroughCodexInput applies the same input-item identity
+// rules used by the managed OAuth Codex path to the lighter passthrough path.
+// OAuth passthrough forces store=false, so replaying provider-owned item IDs
+// (especially reasoning rs_* IDs or legacy item_* IDs) can make the upstream
+// reject an otherwise valid continuation. Tool continuation references are
+// preserved according to the existing NeedsToolContinuation contract.
+func normalizeOpenAIPassthroughCodexInput(body []byte) ([]byte, bool, error) {
+	// Keep the passthrough hot path lightweight for ordinary text-only requests.
+	if len(body) == 0 || !gjson.GetBytes(body, "input").IsArray() {
+		return body, false, nil
+	}
+
+	var reqBody map[string]any
+	if err := decodeOpenAIJSONUseNumber(body, &reqBody); err != nil {
+		// Preserve the existing upstream validation behavior for malformed JSON;
+		// this helper is only an identity normalizer.
+		return body, false, nil
+	}
+	input, ok := reqBody["input"].([]any)
+	if !ok {
+		return body, false, nil
+	}
+
+	changed := false
+	filtered := make([]any, 0, len(input))
+	for _, rawItem := range input {
+		item, ok := rawItem.(map[string]any)
+		if !ok {
+			filtered = append(filtered, rawItem)
+			continue
+		}
+
+		typ, _ := item["type"].(string)
+		id, hasID := item["id"].(string)
+		stripID := false
+		backfillSummary := false
+		switch typ {
+		case "reasoning":
+			// OAuth passthrough forces store=false. A replayed reasoning id
+			// can be rejected as item_* (or 404 as rs_*), so follow the
+			// managed Codex path and remove it while keeping its content.
+			_, exists := item["id"]
+			stripID = exists
+			if summary, exists := item["summary"]; !exists || summary == nil {
+				backfillSummary = true
+			}
+		case "message":
+			// Message ids are only valid when they are provider message ids.
+			stripID = hasID && id != "" && !strings.HasPrefix(id, "msg")
+		case "function_call", "tool_call", "local_shell_call", "tool_search_call", "custom_tool_call", "mcp_tool_call":
+			// Keep call_id untouched. Only remove an invalid item id; the
+			// existing tool continuation identity remains intact.
+			stripID = hasID && id != "" && !strings.HasPrefix(id, "fc")
+		}
+
+		if !stripID && !backfillSummary {
+			filtered = append(filtered, item)
+			continue
+		}
+		cloned := make(map[string]any, len(item))
+		for key, value := range item {
+			cloned[key] = value
+		}
+		if stripID {
+			delete(cloned, "id")
+		}
+		if backfillSummary {
+			cloned["summary"] = []any{}
+		}
+		filtered = append(filtered, cloned)
+		changed = true
+	}
+	if !changed {
+		return body, false, nil
+	}
+	reqBody["input"] = filtered
+	normalized, err := marshalOpenAIUpstreamJSON(reqBody)
+	if err != nil {
+		return body, false, fmt.Errorf("marshal passthrough Codex input: %w", err)
+	}
+	return normalized, true, nil
 }
 
 func filterCodexInputWithOptions(input []any, opts codexInputFilterOptions) []any {
