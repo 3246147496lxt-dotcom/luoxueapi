@@ -1060,7 +1060,7 @@ describe('AppSidebar grouped admin navigation', () => {
     expect(workbenchSection.findAll('a').map((link) => link.attributes('href'))).toEqual([
       '/dashboard',
       '/models',
-      '/skills',
+      'https://www.skills.sh/',
     ])
     expect(apiSection.attributes('aria-label')).toBe('API')
     expect(apiSection.findAll('a').map((link) => link.attributes('href'))).toEqual([
@@ -1084,9 +1084,10 @@ describe('AppSidebar grouped admin navigation', () => {
       .attributes('d')
     expect(orderIconPath).toContain('M9 12h3.75')
     expect(orderIconPath).not.toBe(documentationIconPath)
-    const skillIcon = workbenchSection.get('a[href="/skills"] .sidebar-svg-icon svg')
-    expect(skillIcon.attributes('viewBox')).toBe('0 0 1024 1024')
-    expect(skillIcon.attributes('fill')).toBe('currentColor')
+    const skillLink = workbenchSection.get('a[href="https://www.skills.sh/"]')
+    expect(skillLink.attributes('target')).toBe('_blank')
+    expect(skillLink.attributes('rel')).toBe('noopener noreferrer')
+    expect(skillLink.find('.sidebar-nav-icon').exists()).toBe(true)
     expect(wrapper.find('[data-testid="sidebar-user-more-section"]').exists()).toBe(false)
     expect(wrapper.find('a[href="/monitor"]').exists()).toBe(false)
     expect(wrapper.find('a[href="/quota-viewer"]').exists()).toBe(false)
@@ -1106,9 +1107,8 @@ describe('AppSidebar grouped admin navigation', () => {
   })
 
   it.each([
-    ['/dashboard', '/dashboard'],
     ['/models', '/models'],
-    ['/skills/example', '/skills'],
+    ['/dashboard', '/dashboard'],
     ['/keys', '/keys'],
     ['/usage', '/usage'],
     ['/purchase', '/subscriptions'],
@@ -1246,7 +1246,7 @@ describe('AppSidebar grouped admin navigation', () => {
     for (const path of ['/monitor', '/quota-viewer', '/batch-image', '/available-channels']) {
       expect(wrapper.find(`a[href="${path}"]`).exists()).toBe(false)
     }
-    expect(wrapper.find('a[href="/skills"]').exists()).toBe(true)
+    expect(wrapper.find('a[href="https://www.skills.sh/"]').exists()).toBe(true)
   })
 
   it('keeps the documentation tutorial in navigation when backend mode hides user routes', () => {

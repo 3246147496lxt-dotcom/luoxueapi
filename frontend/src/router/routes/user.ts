@@ -1,6 +1,14 @@
 import type { RouteRecordRaw } from 'vue-router'
 import { useAuthStore } from '@/stores/auth'
 import { resolveLegacyPersonalSettingsRedirect } from '@/navigation/personalSettingsRoute'
+import { SKILLS_MARKET_URL } from '@/navigation/externalLinks'
+
+function redirectToSkillsMarket() {
+  if (typeof window !== 'undefined') {
+    window.location.assign(SKILLS_MARKET_URL)
+  }
+  return false
+}
 
 export const userRoutes: RouteRecordRaw[] = [
   // ==================== User Routes ====================
@@ -48,27 +56,25 @@ export const userRoutes: RouteRecordRaw[] = [
   {
     path: '/skills',
     name: 'SkillMarket',
-    component: () => import('@/views/public/SkillMarketplaceView.vue'),
+    component: { render: () => null },
+    beforeEnter: redirectToSkillsMarket,
     meta: {
-      requiresAuth: true,
+      requiresAuth: false,
       requiresAdmin: false,
-      requiresSkillMarketplace: true,
-      title: 'Skill 市场',
-      titleKey: 'skills.meta.title',
-      descriptionKey: 'skills.meta.description'
+      title: 'Skills',
+      titleKey: 'skills.navLabel'
     }
   },
   {
     path: '/skills/:slug',
     name: 'SkillDetail',
-    component: () => import('@/views/public/SkillDetailView.vue'),
+    component: { render: () => null },
+    beforeEnter: redirectToSkillsMarket,
     meta: {
-      requiresAuth: true,
+      requiresAuth: false,
       requiresAdmin: false,
-      requiresSkillMarketplace: true,
-      title: 'Skill 详情',
-      titleKey: 'skills.meta.title',
-      descriptionKey: 'skills.meta.description'
+      title: 'Skills',
+      titleKey: 'skills.navLabel'
     }
   },
   {

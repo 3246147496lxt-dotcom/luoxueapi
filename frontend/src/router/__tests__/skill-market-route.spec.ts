@@ -12,40 +12,29 @@ const publicLayoutSource = readFileSync(
   resolve(directory, '../../components/public/PublicSiteLayout.vue'),
   'utf8',
 )
-const marketplaceSource = readFileSync(
-  resolve(directory, '../../views/public/SkillMarketplaceView.vue'),
-  'utf8',
-)
-const detailSource = readFileSync(
-  resolve(directory, '../../views/public/SkillDetailView.vue'),
+const externalLinksSource = readFileSync(
+  resolve(directory, '../../navigation/externalLinks.ts'),
   'utf8',
 )
 
 describe('Skill marketplace navigation', () => {
-  it('registers the catalog and detail as authenticated Work routes', () => {
+  it('redirects the legacy catalog and detail routes to skills.sh', () => {
     expect(publicRouteSource).not.toContain("path: '/skills'")
     expect(userRouteSource).toContain("path: '/skills'")
     expect(userRouteSource).toContain("name: 'SkillMarket'")
-    expect(userRouteSource).toContain("component: () => import('@/views/public/SkillMarketplaceView.vue')")
     expect(userRouteSource).toContain("path: '/skills/:slug'")
-    expect(userRouteSource.match(/requiresSkillMarketplace: true/g)).toHaveLength(2)
-    expect(marketplaceSource).toContain('<AppLayout class="skill-market-page">')
-    expect(detailSource).toContain('<AppLayout class="skill-detail-page">')
-    expect(marketplaceSource).not.toContain('<PublicSiteLayout')
-    expect(detailSource).not.toContain('<PublicSiteLayout')
-    expect(guardSource).not.toContain("'/legal', '/skills'")
+    expect(userRouteSource.match(/beforeEnter: redirectToSkillsMarket/g)).toHaveLength(2)
+    expect(userRouteSource).not.toContain('requiresSkillMarketplace: true')
+    expect(externalLinksSource).toContain("https://www.skills.sh/")
   })
 
-  it('keeps public and admin entries behind their intended boundaries', () => {
-    expect(sidebarSource).toContain("FeatureFlags.skillMarketplace")
+  it('keeps the admin skill tooling while exposing the external user link', () => {
     expect(sidebarSource).toContain("path: '/admin/skills'")
-    expect(publicLayoutSource).toContain('skillMarketEntryVisible')
-    expect(publicLayoutSource).toContain('skill_marketplace_enabled === true')
+    expect(publicLayoutSource).toContain('SKILLS_MARKET_URL')
+    expect(publicLayoutSource).not.toContain('skillMarketEntryVisible')
   })
 
-  it('revalidates the flag instead of trusting embedded HTML forever', () => {
+  it('keeps the marketplace guard available for unrelated feature-gated routes', () => {
     expect(guardSource).toContain('fetchPublicSettings(true)')
-    expect(guardSource).toContain('refreshedSettings?.skill_marketplace_enabled !== true')
-    expect(guardSource).toContain("next('/dashboard')")
   })
 })
