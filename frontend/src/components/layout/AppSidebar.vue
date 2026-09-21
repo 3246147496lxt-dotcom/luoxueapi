@@ -413,7 +413,6 @@ const props = defineProps<{
 /**
  * Navigation route ownership moved to the workspace modules. These references
  * keep older source-level contract tests discoverable while they migrate:
- * FeatureFlags.skillMarketplace
  * path: '/admin/skills'
  * path: '/admin/documentation'
  * label: t('nav.documentationManagement')

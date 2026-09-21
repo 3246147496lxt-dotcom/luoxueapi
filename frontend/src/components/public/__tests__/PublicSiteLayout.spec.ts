@@ -216,7 +216,7 @@ describe('PublicSiteLayout', () => {
     expect(desktopItems).toEqual([
       { label: '快速开始', target: '/home#steps' },
       { label: '模型广场', target: '/models.html' },
-      { label: 'Skill 市场', target: '/skills' },
+      { label: 'Skill 市场', target: 'https://www.skills.sh/' },
       {
         label: '使用教程',
         target: 'http://127.0.0.1:4179/tutorial-docs/#quick-start'
@@ -243,21 +243,18 @@ describe('PublicSiteLayout', () => {
     expect(wrapper.get('[data-testid="mobile-menu-toggle"]').attributes('aria-expanded')).toBe('true')
   })
 
-  it('shows the Skill market entry only when its opt-in flag is enabled', async () => {
-    const hiddenWrapper = mountLayout()
-    expect(hiddenWrapper.find('[data-to="/skills"]').exists()).toBe(false)
-    hiddenWrapper.unmount()
-
-    testState.appStore.cachedPublicSettings.skill_marketplace_enabled = true
+  it('always exposes the Skill market as an external link', async () => {
     const wrapper = mountLayout('skills')
 
     expect(wrapper.classes()).toContain('public-site-page--skills')
-    expect(wrapper.findAll('[data-to="/skills"]')).toHaveLength(2)
-    expect(wrapper.findAll('[data-to="/skills"]')
-      .some((link) => link.attributes('aria-current') === 'page')).toBe(true)
+    expect(wrapper.findAll('a[href="https://www.skills.sh/"]')).toHaveLength(2)
+    expect(wrapper.findAll('a[href="https://www.skills.sh/"]')
+      .every((link) => link.attributes('target') === '_blank')).toBe(true)
+    expect(wrapper.findAll('a[href="https://www.skills.sh/"]')
+      .every((link) => link.attributes('rel') === 'noopener noreferrer')).toBe(true)
 
     await wrapper.get('[data-testid="mobile-menu-toggle"]').trigger('click')
-    expect(wrapper.findAll('[data-to="/skills"]')).toHaveLength(3)
+    expect(wrapper.findAll('a[href="https://www.skills.sh/"]')).toHaveLength(3)
   })
 
   it('provides a locale switcher in the compact home menu', async () => {
@@ -291,7 +288,7 @@ describe('PublicSiteLayout', () => {
     })
   })
 
-  it('hides every catalog entry in backend mode even when the feature is enabled', () => {
+  it('hides the internal catalog in backend mode while keeping the external Skill link', () => {
     testState.appStore.cachedPublicSettings.public_model_catalog_enabled = true
     testState.appStore.cachedPublicSettings.skill_marketplace_enabled = true
     testState.appStore.backendModeEnabled = true
@@ -299,7 +296,7 @@ describe('PublicSiteLayout', () => {
     const wrapper = mountLayout('models')
 
     expect(wrapper.find('[data-to="/models.html"]').exists()).toBe(false)
-    expect(wrapper.find('[data-to="/skills"]').exists()).toBe(false)
+    expect(wrapper.find('a[href="https://www.skills.sh/"]').exists()).toBe(true)
   })
 
   it('keeps the current models page visible and marks its primary navigation entry', () => {

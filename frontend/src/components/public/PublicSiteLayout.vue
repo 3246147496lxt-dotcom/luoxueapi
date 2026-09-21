@@ -52,13 +52,9 @@
             >
               {{ t('modelCatalog.navLabel') }}
             </router-link>
-            <router-link
-              v-if="skillMarketEntryVisible"
-              to="/skills"
-              :aria-current="page === 'skills' ? 'page' : undefined"
-            >
+            <a :href="SKILLS_MARKET_URL" target="_blank" rel="noopener noreferrer">
               {{ t('skills.navLabel') }}
-            </router-link>
+            </a>
             <a v-if="tutorialUrl" :href="tutorialUrl">{{ t('home.nav.tutorial') }}</a>
           </template>
         </div>
@@ -135,14 +131,14 @@
               >
                 {{ t('modelCatalog.navLabel') }}
               </router-link>
-              <router-link
-                v-if="skillMarketEntryVisible"
-                to="/skills"
-                :aria-current="page === 'skills' ? 'page' : undefined"
+              <a
+                :href="SKILLS_MARKET_URL"
+                target="_blank"
+                rel="noopener noreferrer"
                 @click="closeMobileMenu()"
               >
                 {{ t('skills.navLabel') }}
-              </router-link>
+              </a>
               <a v-if="tutorialUrl" :href="tutorialUrl" @click="closeMobileMenu()">
                 {{ t('home.nav.tutorial') }}
               </a>
@@ -176,9 +172,9 @@
           <router-link v-if="catalogEntryVisible" to="/models.html">
             {{ t('modelCatalog.navLabel') }}
           </router-link>
-          <router-link v-if="skillMarketEntryVisible" to="/skills">
+          <a :href="SKILLS_MARKET_URL" target="_blank" rel="noopener noreferrer">
             {{ t('skills.navLabel') }}
-          </router-link>
+          </a>
           <a v-if="tutorialUrl" :href="tutorialUrl">{{ t('home.footer.tutorial') }}</a>
           <a
             v-if="docUrl"
@@ -199,6 +195,7 @@ import { useAppStore, useAuthStore } from '@/stores'
 import LocaleSwitcher from '@/components/common/LocaleSwitcher.vue'
 import Icon from '@/components/icons/Icon.vue'
 import { useThemePreference } from '@/composables/useThemePreference'
+import { SKILLS_MARKET_URL } from '@/navigation/externalLinks'
 import { splitBrandApiSuffix } from '@/utils/brand'
 import { resolveDocumentationUrl, resolveTutorialUrl } from '@/utils/documentationUrl'
 import { sanitizeUrl } from '@/utils/url'
@@ -241,11 +238,6 @@ const catalogEntryVisible = computed(() => (
     || appStore.cachedPublicSettings?.public_model_catalog_enabled === true
   )
 ))
-const skillMarketEntryVisible = computed(() => (
-  !appStore.backendModeEnabled
-  && appStore.cachedPublicSettings?.skill_marketplace_enabled === true
-))
-
 const headerAccountPath = computed(() => (authStore.isAuthenticated ? '/dashboard' : '/login'))
 const headerAccountLabel = computed(() => (
   authStore.isAuthenticated ? t('home.dashboard') : t('home.login')
