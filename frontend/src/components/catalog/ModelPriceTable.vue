@@ -115,7 +115,7 @@ function requestContext(row: CatalogComparisonRow, item: PublicModelCatalogItem,
     .price-tier-heading { text-align: center; font-size: 12px; white-space: nowrap; }
     .price-label { font-weight: 600; }
     .price-unit { font-family: var(--workspace-font-mono); font-size: 11px; font-weight: 400; opacity: .75; white-space: nowrap; }
-    .price-table .input-heading { text-align: left; }
+    .price-table .input-heading { text-align: right; }
     .price-table .output-heading, .price-table .cache-heading, .price-table .rate-heading { text-align: center; }
     .price-table .rate-heading { white-space: nowrap; font-size: 12px; }
     .price-table thead .discount-heading,
@@ -158,6 +158,23 @@ function requestContext(row: CatalogComparisonRow, item: PublicModelCatalogItem,
 .peak-note { margin: 5px 0 0; color: var(--workspace-text-muted); font-size: 10px; font-weight: 400; line-height: 1.5; }
 .request-context { margin-right: 14px; }
 .table-scroll:focus-visible { outline: 2px solid var(--workspace-work-accent); outline-offset: -2px; }
+@media (hover: hover) {
+  .price-table tbody > tr > th,
+  .price-table tbody > tr > td { transition: background-color 160ms cubic-bezier(.2,.7,.2,1); }
+  .price-table tbody:hover > tr > th,
+  .price-table tbody:hover > tr > td {
+    background: color-mix(in srgb, var(--group-accent) 8%, var(--workspace-card-surface));
+  }
+  .price-table tbody:hover > tr > .paid-cell {
+    background: color-mix(in srgb, var(--group-accent) 12%, var(--group-soft));
+  }
+  .price-table tbody:hover .tier-context,
+  .price-table tbody:hover .cache-key { color: var(--workspace-text-secondary); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .price-table tbody > tr > th,
+  .price-table tbody > tr > td { transition: none; }
+}
 @media (max-width: 767px) {
   .price-table .model-heading, .price-table .model-cell { position: sticky; left: 0; z-index: 3; box-shadow: 1px 0 var(--workspace-border); }
   .price-table thead .model-heading { z-index: 4; background: var(--workspace-surface-subtle); }

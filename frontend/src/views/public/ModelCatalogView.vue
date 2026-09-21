@@ -79,7 +79,7 @@ import Icon from '@/components/icons/Icon.vue'
 import { useAppStore } from '@/stores'
 import { getPublicModelCatalog } from '@/api/catalog'
 import type { PublicModelCatalogItem } from '@/api/catalog'
-import { catalogGroupKey, catalogPlatform, catalogRate, catalogRateLabel } from '@/utils/modelCatalogTable'
+import { catalogComparisonRows, catalogGroupKey, catalogPlatform, catalogRate, catalogRateLabel } from '@/utils/modelCatalogTable'
 
 const props = withDefaults(defineProps<{ embedded?: boolean }>(), { embedded: false })
 const layoutComponent = computed(() => props.embedded ? AppLayout : PublicSiteLayout)
@@ -102,18 +102,22 @@ const loading = ref(true)
 const errorState = ref<'unavailable' | 'error' | null>(null)
 let requestController: AbortController | null = null
 const siteName = computed(() => appStore.cachedPublicSettings?.site_name || appStore.siteName || '落雪API')
-const providerOptions = computed(() => Array.from(new Set(items.value.map(catalogPlatform))))
+const providerOrder: Record<string, number> = { openai: 0, anthropic: 1, grok: 2, antigravity: 3 }
+const providerOptions = computed(() => Array.from(new Set(items.value.map(catalogPlatform)))
+  .sort((a, b) => (providerOrder[a] ?? 4) - (providerOrder[b] ?? 4)))
 const rateOptions = computed(() => Array.from(new Set(items.value.map(catalogRate).filter((r): r is number => r !== null))).sort((a, b) => a - b))
 function providerLabel(provider: string) {
   const key = `modelCatalog.providers.${provider.replace(/[^a-z0-9]+/g, '_')}`
   return te(key) ? t(key) : provider
 }
 function providerIcon(provider: string) {
+  if (provider === 'antigravity') return 'gemini'
   return provider === 'domestic' ? (items.value.find(item => catalogPlatform(item) === provider)?.logo_key || 'deepseek') : provider
 }
 function tone(provider: string) {
   if (['openai', 'gpt'].includes(provider)) return 'openai'
   if (['anthropic', 'claude'].includes(provider)) return 'anthropic'
+  if (['grok', 'xai'].includes(provider)) return 'grok'
   return 'domestic'
 }
 function matchesPlatform(item: PublicModelCatalogItem) {
@@ -135,6 +139,14 @@ function selectGroup(group: string) { groupFilter.value = group; normalizeFilter
 function clearFilters() { searchQuery.value = ''; providerFilter.value = ''; groupFilter.value = ''; rateFilter.value = '' }
 
 type Group = { id: string; name: string; platform: string; rate: number | null; items: PublicModelCatalogItem[]; tables: { key: string; items: PublicModelCatalogItem[] }[] }
+function comparePaidPricesDescending(a: PublicModelCatalogItem, b: PublicModelCatalogItem): number {
+  // Match the first displayed context tier and keep each model's tiers together.
+  const left = catalogComparisonRows(a)[0]?.paid
+  const right = catalogComparisonRows(b)[0]?.paid
+  if (a.pricing.billing_mode !== 'token') return (right?.per_request_price ?? -1) - (left?.per_request_price ?? -1)
+  return (right?.input_price ?? -1) - (left?.input_price ?? -1)
+    || (right?.output_price ?? -1) - (left?.output_price ?? -1)
+}
 function groupItems(source: PublicModelCatalogItem[]): Group[] {
   const groups = new Map<string, Group>()
   for (const item of source) {
@@ -151,6 +163,11 @@ function groupItems(source: PublicModelCatalogItem[]): Group[] {
     let table = group.tables.find(table => table.key === key)
     if (!table) { table = { key, items: [] }; group.tables.push(table) }
     table.items.push(item)
+  }
+  for (const group of groups.values()) {
+    if (['anthropic', 'claude'].includes(group.platform)) {
+      for (const table of group.tables) table.items.sort(comparePaidPricesDescending)
+    }
   }
   return [...groups.values()].sort((a, b) => Math.min(...a.items.map(i => catalogRate(i) ?? Infinity)) - Math.min(...b.items.map(i => catalogRate(i) ?? Infinity)))
 }
@@ -305,6 +322,15 @@ onBeforeUnmount(() => { requestController?.abort(); restoreDocumentMeta() })
       --group-selected: #f4d0b4;
       --group-selected-ink: #7c2d12;
       --group-selected-hover: #edbf9b;
+    }
+    [data-tone="grok"] {
+      --group-accent: #262626;
+      --group-border: #d4d4d4;
+      --group-soft: #fafafa;
+      --group-badge: #f0f0f0;
+      --group-selected: #d4d4d4;
+      --group-selected-ink: #171717;
+      --group-selected-hover: #c3c3c3;
     }
     [data-tone="domestic"] {
       --group-accent: #2563b8;
@@ -521,8 +547,11 @@ onBeforeUnmount(() => { requestController?.abort(); restoreDocumentMeta() })
 .group-chip { flex-wrap: wrap; }
 .provider-logo { flex-shrink: 0; }
 :where(button, input):focus-visible { outline: 2px solid var(--workspace-work-accent); outline-offset: 2px; }
+.filter-chip[data-tone="grok"]:focus-visible { outline-color: var(--group-accent); }
+[data-tone="grok"] :deep(.model-icon path) { fill: currentColor; }
 .dark .model-catalog-page [data-tone="openai"] { --group-accent:#75d79c; --group-border:#315842; --group-soft:#182c22; --group-badge:#203c2c; --group-selected:#315e43; --group-selected-ink:#d5f5df; --group-selected-hover:#3b7150; }
 .dark .model-catalog-page [data-tone="anthropic"] { --group-accent:#f0b58b; --group-border:#654938; --group-soft:#30251e; --group-badge:#443124; --group-selected:#765137; --group-selected-ink:#ffdfc7; --group-selected-hover:#895e40; }
+.dark .model-catalog-page [data-tone="grok"] { --group-accent:#e5e5e5; --group-border:#525252; --group-soft:#242424; --group-badge:#303030; --group-selected:#494949; --group-selected-ink:#fafafa; --group-selected-hover:#595959; }
 .dark .model-catalog-page [data-tone="domestic"] { --group-accent:#91b8f6; --group-border:#3e5376; --group-soft:#1d293c; --group-badge:#283b59; --group-selected:#3c5986; --group-selected-ink:#d9e8ff; --group-selected-hover:#486ca2; }
 .dark .filter-chip[data-value="all"].is-active { background:#502638; color:#f7c5da; border-color:#96536f; }
 .dark .filter-chip[data-value="all"].is-active:hover { background:#663349; }
