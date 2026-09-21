@@ -6,6 +6,7 @@
  * placement instead of repeating destination paths or feature fallback rules.
  */
 import type { PersonalSettingsSection } from './personalSettingsRoute'
+import { SKILLS_MARKET_URL } from './externalLinks'
 
 export const ACCOUNT_DESTINATION_PATHS = Object.freeze({
   pricing: '/pricing',
@@ -35,7 +36,7 @@ export type ShellCapabilityState = 'enabled' | 'disabled' | 'unknown'
 export type ShellUnknownCapabilityPolicy = 'allow' | 'deny'
 export type ShellCapabilityKey = 'payment' | 'public-model-catalog'
 export type ShellConfiguredHrefSource = 'contact' | 'documentation'
-export type ShellSupportDestinationId = 'webChat' | 'models' | 'contact' | 'documentation'
+export type ShellSupportDestinationId = 'webChat' | 'skills' | 'models' | 'contact' | 'documentation'
 export type ShellSettingsDestinationId = 'settings'
 export type ShellDestinationId =
   | AccountDestinationId
@@ -196,6 +197,16 @@ export const SUPPORT_DESTINATION_DEFINITIONS = [
     target: {
       kind: 'route',
       path: '/chat',
+    },
+    simpleMode: VISIBLE_IN_SIMPLE_MODE,
+  },
+  {
+    id: 'skills',
+    labelKey: 'skills.navLabel',
+    placement: 'support',
+    target: {
+      kind: 'href',
+      href: SKILLS_MARKET_URL,
     },
     simpleMode: VISIBLE_IN_SIMPLE_MODE,
   },
