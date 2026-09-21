@@ -1,7 +1,6 @@
 import keyOutlineIconSvg from '@/assets/icons/key-outline.svg?raw'
 import { FeatureFlags, makeSidebarFlag } from '@/utils/featureFlags'
 import { ACCOUNT_DESTINATION_PATHS } from '@/navigation/shellDestinations'
-import { SKILLS_MARKET_URL } from '@/navigation/externalLinks'
 import {
   applyFeatureFlags,
   type NavItem,
@@ -18,7 +17,6 @@ const flagPublicModelCatalog = makeSidebarFlag(FeatureFlags.publicModelCatalog)
 const USER_WORKBENCH_PATHS = new Set<string>([
   '/dashboard',
   '/models',
-  '/skills',
 ])
 const USER_API_PATHS = new Set<string>([
   '/keys',
@@ -44,13 +42,6 @@ function buildUserItems(context: UserNavigationContext): NavItem[] {
       label: t('nav.modelCenter'),
       icon: icons.model,
       featureFlag: flagPublicModelCatalog,
-    },
-    {
-      path: '/skills',
-      label: t('skills.navLabel'),
-      icon: icons.skillMarket,
-      href: SKILLS_MARKET_URL,
-      trailingIcon: 'destinationArrowUpRight',
     },
     { path: '/keys', label: t('nav.apiKeys'), icon: null, iconSvg: keyOutlineIconSvg },
     {

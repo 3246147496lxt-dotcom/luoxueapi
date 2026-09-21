@@ -45,6 +45,7 @@ vi.mock('vue-i18n', async () => {
     'nav.contactUs': '联系我们',
     'nav.docsTutorial': '文档教程',
     'nav.webChat': '网页版对话',
+    'skills.navLabel': 'Skill 市场',
     'nav.rechargeAndRedeem': '充值/兑换',
     'nav.modelCenter': '模型中心',
     'nav.balance': '余额',
@@ -1060,7 +1061,6 @@ describe('AppSidebar grouped admin navigation', () => {
     expect(workbenchSection.findAll('a').map((link) => link.attributes('href'))).toEqual([
       '/dashboard',
       '/models',
-      'https://www.skills.sh/',
     ])
     expect(apiSection.attributes('aria-label')).toBe('API')
     expect(apiSection.findAll('a').map((link) => link.attributes('href'))).toEqual([
@@ -1084,7 +1084,9 @@ describe('AppSidebar grouped admin navigation', () => {
       .attributes('d')
     expect(orderIconPath).toContain('M9 12h3.75')
     expect(orderIconPath).not.toBe(documentationIconPath)
-    const skillLink = workbenchSection.get('a[href="https://www.skills.sh/"]')
+    const skillLink = wrapper.get('[data-testid="sidebar-skill-market"]')
+    expect(skillLink.text()).toContain('Skill 市场')
+    expect(skillLink.attributes('href')).toBe('https://www.skills.sh/')
     expect(skillLink.attributes('target')).toBe('_blank')
     expect(skillLink.attributes('rel')).toBe('noopener noreferrer')
     expect(skillLink.find('.sidebar-nav-icon').exists()).toBe(true)
@@ -1133,6 +1135,7 @@ describe('AppSidebar grouped admin navigation', () => {
     const navigation = wrapper.get('nav.workspace-sidebar-navigation')
     const supportSection = navigation.get('[data-testid="sidebar-support-section"]')
     const webChatLink = navigation.get('[data-testid="sidebar-web-chat"]')
+    const skillLink = navigation.get('[data-testid="sidebar-skill-market"]')
     const docsLink = navigation.get('[data-testid="sidebar-docs-tutorial"]')
     const contactLink = navigation.get('[data-testid="sidebar-contact-us"]')
 
@@ -1140,6 +1143,12 @@ describe('AppSidebar grouped admin navigation', () => {
     expect(webChatLink.attributes('href')).toBe('/chat')
     expect(webChatLink.attributes('target')).toBe('_blank')
     expect(webChatLink.attributes('rel')).toBe('noopener noreferrer')
+    expect(skillLink.text()).toContain('Skill 市场')
+    expect(skillLink.attributes('href')).toBe('https://www.skills.sh/')
+    expect(skillLink.attributes('target')).toBe('_blank')
+    expect(skillLink.attributes('rel')).toBe('noopener noreferrer')
+    expect(skillLink.get('[data-testid="sidebar-nav-trailing-icon"]').attributes('aria-hidden'))
+      .toBe('true')
     expect(docsLink.text()).toContain('文档教程')
     expect(docsLink.attributes('href')).toBe('/docs/')
     expect(docsLink.attributes('target')).toBe('_blank')
@@ -1162,9 +1171,15 @@ describe('AppSidebar grouped admin navigation', () => {
     expect(supportSection.find('a[href="/home"]').exists()).toBe(false)
     expect(wrapper.findAll('[data-testid="sidebar-docs-tutorial"]')).toHaveLength(1)
     expect(wrapper.findAll('[data-testid="sidebar-web-chat"]')).toHaveLength(1)
+    expect(wrapper.findAll('[data-testid="sidebar-skill-market"]')).toHaveLength(1)
     expect(wrapper.findAll('[data-testid="sidebar-contact-us"]')).toHaveLength(1)
     expect(supportSection.findAll('.sidebar-support-link').map((link) => link.attributes('data-testid')))
-      .toEqual(['sidebar-web-chat', 'sidebar-docs-tutorial', 'sidebar-contact-us'])
+      .toEqual([
+        'sidebar-web-chat',
+        'sidebar-skill-market',
+        'sidebar-docs-tutorial',
+        'sidebar-contact-us',
+      ])
     expect(wrapper.get('[data-testid="sidebar-account-dock-stub"]').element.contains(
       supportSection.element,
     )).toBe(false)
@@ -1188,6 +1203,7 @@ describe('AppSidebar grouped admin navigation', () => {
     expect(wrapper.find('[data-testid="sidebar-support-section"]').exists()).toBe(true)
     expect(wrapper.find('[data-testid="sidebar-announcements"]').exists()).toBe(false)
     expect(wrapper.find('[data-testid="sidebar-web-chat"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="sidebar-skill-market"]').exists()).toBe(true)
     expect(wrapper.find('[data-testid="sidebar-docs-tutorial"]').exists()).toBe(true)
     expect(wrapper.find('[data-testid="sidebar-contact-us"]').exists()).toBe(true)
     expect(wrapper.find('[data-testid="sidebar-settings"]').exists()).toBe(false)
@@ -1207,7 +1223,7 @@ describe('AppSidebar grouped admin navigation', () => {
 
     expect(supportSection.findAll('.sidebar-support-link').map((link) => (
       link.attributes('href')
-    ))).toEqual(['/chat', '/docs/', '/support'])
+    ))).toEqual(['/chat', 'https://www.skills.sh/', '/docs/', '/support'])
     expect(supportSection.findAll('.sidebar-support-link').every((link) => (
       link.attributes('target') === '_blank'
       && link.attributes('rel') === 'noopener noreferrer'

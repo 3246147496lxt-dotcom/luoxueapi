@@ -37,6 +37,7 @@ export type SidebarSupportIcon =
   | 'destinationModels'
   | 'destinationContact'
   | 'destinationDocument'
+  | 'sparkles'
 
 export interface SidebarSupportLink {
   id: string
@@ -52,7 +53,6 @@ export interface UserNavigationIcons {
   chart: unknown
   channel: unknown
   signal: unknown
-  skillMarket: unknown
   quotaViewer: unknown
   rechargeSubscription: unknown
   creditCard: unknown

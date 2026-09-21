@@ -319,6 +319,8 @@
           :data-testid="
             item.id === 'webChat'
               ? 'sidebar-web-chat'
+              : item.id === 'skills'
+              ? 'sidebar-skill-market'
               : item.id === 'documentation'
               ? 'sidebar-docs-tutorial'
               : item.id === 'contact'
@@ -816,13 +818,6 @@ const QuotaViewerIcon = {
   render: () => h(Icon, { name: 'download', size: 'md', strokeWidth: 1.7 })
 }
 
-const SkillMarketIcon = {
-  render: () => h(Icon, { name: 'sparkles', size: 'md', strokeWidth: 1.7 })
-}
-
-// The user-facing Work entry supplies the uploaded Skill icon as `iconSvg` in
-// userNavigation.ts. Keep this fallback and the established admin icon
-// separate for consumers that still request an icon component directly.
 const AdminSkillMarketIcon = {
   render: () => h(Icon, { name: 'cube', size: 'md', strokeWidth: 1.7 })
 }
@@ -837,6 +832,7 @@ const ModelIcon = {
 
 const supportIconByDestination: Record<string, SidebarSupportIcon> = {
   webChat: 'chat',
+  skills: 'sparkles',
   models: 'destinationModels',
   contact: 'destinationContact',
   documentation: 'destinationDocument',
@@ -886,14 +882,14 @@ const sidebarSupportLinks = computed<SidebarSupportLink[]>(() => {
     }]
   })
 
-  // Keep the low-frequency support area focused: the web-chat entry is the
-  // primary cross-shell handoff when the user-facing shell is available, while
-  // documentation and contact remain available as the final links immediately
-  // above the account footer.
+  // Keep the low-frequency support area focused: web chat and the skills
+  // directory are the primary cross-shell handoffs, followed by documentation
+  // and contact immediately above the account footer.
   return links.filter((link) => (
     link.id === 'documentation'
     || link.id === 'contact'
     || (link.id === 'webChat' && !appStore.backendModeEnabled)
+    || link.id === 'skills'
   ))
 })
 
@@ -904,7 +900,6 @@ const userNavigationIcons: UserNavigationIcons = {
   chart: ChartIcon,
   channel: ChannelIcon,
   signal: SignalIcon,
-  skillMarket: SkillMarketIcon,
   quotaViewer: QuotaViewerIcon,
   rechargeSubscription: RechargeSubscriptionIcon,
   creditCard: CreditCardIcon,
