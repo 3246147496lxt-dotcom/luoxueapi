@@ -1070,12 +1070,13 @@ describe('AppSidebar grouped admin navigation', () => {
     expect(accountSection.attributes('aria-label')).toBe('账户')
     expect(accountSection.findAll('a').map((link) => link.attributes('href'))).toEqual([
       '/subscriptions',
-      '/pricing',
       '/orders',
       '/affiliate',
     ])
     expect(accountSection.get('a[href="/subscriptions"]').text()).toContain('余额与会员')
-    expect(accountSection.get('a[href="/pricing"]').text()).toContain('会员订阅')
+    expect(accountSection.get('a[href="/subscriptions"] .sidebar-nav-icon path').attributes('d'))
+      .toContain('M2.25 8.25h19.5')
+    expect(accountSection.find('a[href="/pricing"]').exists()).toBe(false)
     expect(accountSection.get('a[href="/affiliate"]').text()).toContain('邀请返利')
     const orderIconPath = accountSection.get('a[href="/orders"] .sidebar-nav-icon path')
       .attributes('d')
@@ -1115,8 +1116,6 @@ describe('AppSidebar grouped admin navigation', () => {
     ['/usage', '/usage'],
     ['/purchase', '/subscriptions'],
     ['/subscriptions', '/subscriptions'],
-    ['/pricing', '/pricing'],
-    ['/pricing?mode=renew&tier=high', '/pricing'],
     ['/orders', '/orders'],
     ['/affiliate', '/affiliate'],
   ] as const)('highlights only the matching Work entry for %s', (path, expectedHref) => {

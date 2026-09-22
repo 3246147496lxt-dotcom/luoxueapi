@@ -25,7 +25,6 @@ const USER_API_PATHS = new Set<string>([
 ])
 const USER_ACCOUNT_PATHS = new Set<string>([
   ACCOUNT_DESTINATION_PATHS.subscriptions,
-  ACCOUNT_DESTINATION_PATHS.pricing,
   ACCOUNT_DESTINATION_PATHS.orders,
   '/affiliate',
 ])
@@ -72,13 +71,7 @@ function buildUserItems(context: UserNavigationContext): NavItem[] {
       path: ACCOUNT_DESTINATION_PATHS.subscriptions,
       activePaths: [ACCOUNT_DESTINATION_PATHS.wallet],
       label: t('nav.balanceAndMembership'),
-      icon: icons.rechargeSubscription,
-    },
-    {
-      path: ACCOUNT_DESTINATION_PATHS.pricing,
-      label: t('nav.memberSubscription'),
       icon: icons.creditCard,
-      hideInSimpleMode: true,
     },
     {
       path: ACCOUNT_DESTINATION_PATHS.orders,
