@@ -1,4 +1,5 @@
 import keyOutlineIconSvg from '@/assets/icons/key-outline.svg?raw'
+import modelCenterPlanetIconSvg from '@/assets/icons/model-center-planet.svg?raw'
 import { FeatureFlags, makeSidebarFlag } from '@/utils/featureFlags'
 import { ACCOUNT_DESTINATION_PATHS } from '@/navigation/shellDestinations'
 import {
@@ -41,6 +42,7 @@ function buildUserItems(context: UserNavigationContext): NavItem[] {
       path: '/models',
       label: t('nav.modelCenter'),
       icon: icons.model,
+      iconSvg: modelCenterPlanetIconSvg,
       featureFlag: flagPublicModelCatalog,
     },
     { path: '/keys', label: t('nav.apiKeys'), icon: null, iconSvg: keyOutlineIconSvg },
